@@ -20,6 +20,7 @@ use MyInvoice\Action\Client\UpdateClientAction;
 use MyInvoice\Action\Codebook\CodebookAction;
 use MyInvoice\Action\Admin\ApprovalListAction;
 use MyInvoice\Action\Admin\BankRuleTemplateAdminAction;
+use MyInvoice\Action\Admin\DiagnosticsAction;
 use MyInvoice\Action\Admin\EmailTemplateAction;
 use MyInvoice\Action\Approval\PublicApprovalDecideAction;
 use MyInvoice\Action\Approval\PublicApprovalGetAction;
@@ -272,6 +273,7 @@ use MyInvoice\Action\License\DeactivateLicenseAction;
 use MyInvoice\Action\License\CancelRenewalLicenseAction;
 use MyInvoice\Action\License\UpgradeQuoteLicenseAction;
 use MyInvoice\Action\License\UpgradeLicenseAction;
+use MyInvoice\Action\License\SupportLinkAction;
 use MyInvoice\Action\System\HealthAction;
 use MyInvoice\Action\System\OpenApiAction;
 use MyInvoice\Action\System\VersionAction;
@@ -297,6 +299,14 @@ final class Routes
         $app->post ('/api/admin/update/refresh', [UpdateAction::class, 'refresh']);
         $app->post ('/api/admin/update/trigger', [UpdateAction::class, 'trigger']);
         $app->post ('/api/admin/update/cancel',  [UpdateAction::class, 'cancel']);
+
+        // Admin — Systém → Diagnostika: audit prostředí a podklad k incidentu podpory.
+        // Balíček se NIKAM neodesílá; zákazník si ho stáhne a k incidentu ho přiloží sám.
+        $app->get  ('/api/admin/diagnostics',                 [DiagnosticsAction::class, 'report']);
+        $app->get  ('/api/admin/diagnostics/logs',            [DiagnosticsAction::class, 'logPreview']);
+        $app->get  ('/api/admin/diagnostics/bundle/preview',  [DiagnosticsAction::class, 'preview']);
+        $app->get  ('/api/admin/diagnostics/bundle/download', [DiagnosticsAction::class, 'download']);
+        $app->post ('/api/admin/diagnostics/bundle',          [DiagnosticsAction::class, 'create']);
 
         $app->get   ('/api/admin/roles',                    [RoleAdminAction::class, 'list']);
         $app->get   ('/api/admin/roles/permissions',        [RoleAdminAction::class, 'permissions']);
@@ -373,6 +383,8 @@ final class Routes
         // In-place navýšení počtu uživatelů (poměrný doplatek z uložené karty).
         $app->post('/api/license/upgrade/quote', UpgradeQuoteLicenseAction::class);
         $app->post('/api/license/upgrade',       UpgradeLicenseAction::class);
+        // Přihlášený přechod na portál podpory (myucto.cz/support) — jednorázový token.
+        $app->post('/api/license/support-link',  SupportLinkAction::class);
 
         // ARES + VIES lookups (vyžadují auth)
         $app->post('/api/clients/lookup-ares', AresLookupAction::class);

@@ -477,6 +477,8 @@
         "smtp_logs": "SMTP log analysis",
         "approvals": "Approvals",
         "updates": "Updates",
+        "diagnostics": "Diagnostics",
+        "support": "Support",
         "api_tokens": "API tokens",
         "electronic_signatures": "Electronic signatures",
         "signing_profiles": "Signing profiles",
@@ -6064,7 +6066,10 @@
         "feature_text2": "Need a custom feature, report or integration with your system in MyÚčto? Drop us a line — we'll prepare an offer with a fixed price and a fixed deadline.",
         "feature_highlights": "20 years on the market · Senior team only · Fixed price & deadline",
         "feature_cta": "Send a request",
-        "close": "Close"
+        "close": "Close",
+        "help_link": "Support",
+        "help_title": "MyÚčto.cz support portal",
+        "help_paid": "Paid support"
     },
     "profile_signing": {
         "title": "Electronic signatures",
@@ -13624,5 +13629,218 @@
             "entitlement_created": "Entitlement posted to the ledger.",
             "entry_created": "Ledger entry added."
         }
+    },
+    "diagnostics": {
+        "title": "Diagnostics",
+        "subtitle": "Environment check and supporting material for a support incident",
+        "no_admin": "Diagnostics is available to administrators only.",
+        "load_failed": "Diagnostics could not be loaded.",
+        "refresh": "Run check again",
+        "refreshing": "Checking…",
+        "checks_title": "Environment check",
+        "checks_hint": "Problems and warnings come first. Each one lists its impact, the fix and a link to the manual.",
+        "actual": "Measured",
+        "expected": "Expected",
+        "fix": "Fix",
+        "manual_link": "Open manual",
+        "summary_counts": "{fail} problems, {warn} warnings, {ok} fine",
+        "verdict": {
+            "ok": "Environment is fine",
+            "warn": "Environment is usable with caveats",
+            "fail": "Environment does not meet requirements"
+        },
+        "status": {
+            "ok": "Fine",
+            "warn": "Warning",
+            "fail": "Problem",
+            "skip": "Not determined"
+        },
+        "checks": {
+            "php_version": {
+                "label": "PHP version",
+                "impact": "The application uses language features older PHP does not support — some pages will fail.",
+                "fix": "Upgrade PHP to 8.5 or newer."
+            },
+            "php_extensions": {
+                "label": "Required PHP extensions",
+                "impact": "Without a required extension whole areas stop working — backups, exports, PDFs or price calculations.",
+                "fix": "Install the missing extensions and restart PHP."
+            },
+            "php_extensions_optional": {
+                "label": "Optional PHP extensions",
+                "impact": "A missing optional extension will not stop the application, it only falls back to a slower or more limited path.",
+                "fix": "Install the extension if you want full performance and no fallbacks."
+            },
+            "memory_limit": {
+                "label": "PHP memory limit",
+                "impact": "PDF generation, exports and closing reports abort mid-way when the limit is too low.",
+                "fix": "Set memory_limit in php.ini to at least 256M."
+            },
+            "upload_limits": {
+                "label": "Upload limits",
+                "impact": "The application offers larger files than the server accepts — uploads fail without a clear message.",
+                "fix": "Align upload_max_filesize and post_max_size in php.ini with the document size limit."
+            },
+            "date_timezone": {
+                "label": "PHP time zone",
+                "impact": "Without a time zone document dates can shift by a day, which carries over into VAT periods.",
+                "fix": "Set date.timezone in php.ini to the same value the application uses."
+            },
+            "timezone_alignment": {
+                "label": "Time zone alignment",
+                "impact": "Different server and application zones push documents near midnight into another period.",
+                "fix": "Use the same time zone for the system, PHP and the application."
+            },
+            "opcache": {
+                "label": "OPcache",
+                "impact": "Without OPcache every request recompiles the code — the application is markedly slower.",
+                "fix": "Enable opcache.enable in php.ini and restart PHP."
+            },
+            "opcache_validate_timestamps": {
+                "label": "OPcache refresh after an update",
+                "impact": "With timestamp validation off the old code keeps running after an update until PHP is restarted.",
+                "fix": "Either enable opcache.validate_timestamps, or restart PHP-FPM or IIS after every update."
+            },
+            "db_version": {
+                "label": "Database version",
+                "impact": "Migrations use constructs an older server or MySQL does not support — the database update will fail.",
+                "fix": "Use MariaDB 11.8 or newer."
+            },
+            "db_charset": {
+                "label": "Database character set",
+                "impact": "Outside utf8mb4 accented characters and emoji in names and notes get corrupted.",
+                "fix": "Convert the database to utf8mb4."
+            },
+            "db_max_allowed_packet": {
+                "label": "max_allowed_packet",
+                "impact": "A low value breaks the database backup and the storage of larger attachments.",
+                "fix": "Raise max_allowed_packet in the MariaDB configuration and restart the server."
+            },
+            "db_sql_mode": {
+                "label": "Database strict mode",
+                "impact": "Without strict mode the database silently truncates oversized values instead of reporting an error.",
+                "fix": "The application sets strict mode per connection itself. Align the global value for backups and manual work."
+            },
+            "redis": {
+                "label": "Redis",
+                "impact": "Redis that is enabled but unreachable slows down every request while it waits for a connection.",
+                "fix": "Start Redis, or disable it in the configuration."
+            },
+            "disk_space": {
+                "label": "Free disk space",
+                "impact": "Once the disk fills up, backups, PDFs and uploaded documents silently stop being created.",
+                "fix": "Free up space, or grow the data volume."
+            },
+            "log_size": {
+                "label": "Log directory size",
+                "impact": "Oversized logs take up the space needed for backups and documents.",
+                "fix": "Clean up old logs; php-errors.log does not rotate and has to be trimmed manually."
+            },
+            "writable_paths": {
+                "label": "Write permissions",
+                "impact": "Without write access no documents, backups or caches are created — this usually shows up only as a save error.",
+                "fix": "Grant write access to the user the web server runs as."
+            },
+            "migrations_pending": {
+                "label": "Database migrations",
+                "impact": "A migration that never ran is the most common cause of missing table or column errors.",
+                "fix": "Run php api/bin/migrate.php."
+            },
+            "cron_health": {
+                "label": "Scheduled jobs",
+                "impact": "Without cron there are no backups, no reminders go out and exchange rates are not fetched.",
+                "fix": "Check the schedule and the last run on the Scheduled jobs page."
+            },
+            "app_debug": {
+                "label": "Debug mode",
+                "impact": "In production error details could end up in the server response.",
+                "fix": "Set app.debug to false."
+            },
+            "logging_level": {
+                "label": "Log level",
+                "impact": "At debug level the log also records SMTP traffic including the credentials.",
+                "fix": "Use info or higher in production."
+            },
+            "app_version": {
+                "label": "Application version",
+                "impact": "A newer version is available — the problem you are chasing may already be fixed.",
+                "fix": "Check the Updates section to see what the new version brings."
+            }
+        },
+        "bundle": {
+            "title": "Diagnostic bundle",
+            "subtitle": "A ZIP with material for the incident. It is created in your installation, you download it and attach it to the incident on the support portal yourself — the application sends nothing anywhere.",
+            "scope": "What the bundle should contain",
+            "item": {
+                "include_version": "Application version and availability of a newer one",
+                "include_environment": "Environment check and service availability",
+                "include_license": "Licence state (the key is masked)",
+                "include_migrations": "Database migration status",
+                "include_cron": "Last runs of scheduled jobs",
+                "include_config": "Configuration without passwords, keys and tokens"
+            },
+            "logs_enable": "Include application logs as well",
+            "logs_warning": "Logs may contain personal data of third parties — for example e-mail addresses of document recipients, names and addresses of clients, or values from database error messages.",
+            "logs_removed": "We remove bound database query parameters, stack traces and records of SMTP traffic. The rest is left unchanged — please review it below.",
+            "logs_days": "Range",
+            "logs_level": "From level",
+            "days_1": "1 day",
+            "days_3": "3 days",
+            "days_7": "7 days",
+            "days_14": "14 days",
+            "log_preview_show": "Show log contents",
+            "log_preview_hide": "Hide log contents",
+            "log_preview_empty": "There is no record in the selected range.",
+            "log_page": "Page {page} of {pages} ({total} records)",
+            "preview_title": "Content preview",
+            "preview_hint": "Exactly these files will be in the bundle.",
+            "sensitive": "May contain personal data",
+            "total": "Total",
+            "too_large": "The bundle exceeds the {max} limit. Please shorten the log range.",
+            "acknowledge": "I have reviewed the contents of the bundle and agree to hand it over to support.",
+            "create": "Create bundle",
+            "building": "Creating…",
+            "refresh_preview": "Recalculate preview",
+            "ready": "The bundle is ready",
+            "file": "File",
+            "size": "Size",
+            "download": "Download bundle",
+            "next_step": "Attach the downloaded file to the incident on the support portal as an ordinary attachment.",
+            "retention": "The bundle is deleted from the installation automatically after 24 hours.",
+            "failed": "The bundle could not be created."
+        }
+    },
+    "support_page": {
+        "title": "Support",
+        "subtitle": "Where to look for help and what to attach to a report",
+        "free_title": "Free of charge",
+        "free_items": [
+            "User manual covering every feature of the application.",
+            "Public bug report or suggestion in the GitHub repository.",
+            "Private security vulnerability report through the form on the support portal.",
+            "Questions about operating the application answered by e-mail."
+        ],
+        "paid_title": "Paid technical support",
+        "paid_hint": "A one-off expert intervention on your installation. Billed in started blocks, with the first block paid upfront by card.",
+        "paid_items": [
+            "Data analysis and root cause of an unwanted state.",
+            "Repair of data or of the installation settings.",
+            "Data migration and moving between versions or environments.",
+            "Any further amount is charged only after you explicitly approve the scope."
+        ],
+        "open_portal": "Open the support portal",
+        "opening": "Opening…",
+        "portal_hint": "Opens in a new window. The portal recognises a licensed installation on its own; you never type the licence key anywhere.",
+        "open_manual": "Open manual",
+        "open_issues": "Reports on GitHub",
+        "attach_title": "What to attach to an incident",
+        "attach_intro": "The more specific the material, the shorter the resolution. What helps most:",
+        "attach_items": [
+            "A description of what you did, what you expected and what happened instead.",
+            "A screenshot of the error message.",
+            "The diagnostic bundle from this application — version, environment, migration and scheduled job status."
+        ],
+        "attach_privacy": "The bundle is created in your installation and stays there until you attach it to an incident yourself. Logs are not included by default; if you add them, you see their contents beforehand.",
+        "open_diagnostics": "Go to Diagnostics"
     }
 }

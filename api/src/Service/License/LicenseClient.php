@@ -21,6 +21,7 @@ use Psr\Log\NullLogger;
  *   POST {server}/api/license/deactivate
  *   POST {server}/api/license/upgrade
  *   POST {server}/api/license/cancel-renewal
+ *   POST {server}/api/license/support-session
  */
 final class LicenseClient
 {
@@ -131,6 +132,32 @@ final class LicenseClient
             'license_key' => $licenseKey,
             'users'       => $users,
         ], 10);
+    }
+
+    /**
+     * Jednorázový přihlašovací odkaz na portál podpory (myucto.cz/support). Zákazník
+     * je na portálu rovnou identifikovaný jako firma, která licenci platí — token
+     * v odkazu je jednorázový a krátkodobý (~10 minut).
+     *
+     * @param array<string,string> $company Záložní předvyplnění fakturačních údajů na
+     *        portálu (name/ic/dic/street/city/zip/country/email). Server ho použije jen
+     *        tam, kde údaje sám nezná — evidovaný zákazník licence má vždy přednost.
+     *        Prázdné pole se do požadavku vůbec nepřikládá.
+     * @return array<string,mixed> {ok,url,token,expires_in} / {error}
+     * @throws LicenseNetworkException
+     */
+    public function supportSession(string $licenseKey, string $instanceId, string $appVersion, array $company = []): array
+    {
+        $body = [
+            'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
+            'app_version' => $appVersion,
+        ];
+        if ($company !== []) {
+            $body['company'] = $company;
+        }
+
+        return $this->post('/api/license/support-session', $body);
     }
 
     /**

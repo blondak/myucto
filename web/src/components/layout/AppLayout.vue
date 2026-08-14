@@ -7,6 +7,8 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useAutomationStore } from '@/stores/automation'
 import { updateApi, type PublicVersion } from '@/api/update'
 import { settingsApi } from '@/api/settings'
+import { licenseApi } from '@/api/license'
+import { CHROME_FILLED_PRIMARY } from '@/components/ui/buttonStyles'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useNavOrder } from '@/composables/useNavOrder'
 import SupplierSwitcher from './SupplierSwitcher.vue'
@@ -44,6 +46,48 @@ const logoutBusy = ref(false)
 const canLockSession = computed(() => sessionSecurity.state?.session_state === 'active'
   && sessionSecurity.state.unlock_methods.includes('passkey'))
 let signingSettingsRequest = 0
+
+/*
+ * Portál podpory. Tlačítko v patičce je plná primární akce, jen v kompaktní výšce
+ * lišty — proto se skládá z vlastní geometrie a barev z `CHROME_FILLED_PRIMARY`
+ * (varianta pro `.nav-inverted`), ne z celého `btnFilled()` s h-9.
+ */
+const SUPPORT_PORTAL_URL = 'https://myucto.cz/support'
+const supportLinkBusy = ref(false)
+const supportBtnClass =
+  'cursor-pointer inline-flex items-center gap-1 rounded-md px-2 h-6 text-[11px] font-medium ' +
+  'whitespace-nowrap transition-all duration-150 active:translate-y-px ' +
+  'disabled:opacity-60 disabled:cursor-not-allowed disabled:active:translate-y-0 ' + CHROME_FILLED_PRIMARY
+
+/**
+ * Přechod na portál podpory. Placené instalaci vymění licenční server klíč za
+ * jednorázový token, takže je zákazník na portálu rovnou identifikovaný.
+ *
+ * Okno se MUSÍ otevřít synchronně v handleru, jinak ho blokátor vyskakovacích
+ * oken zahodí — cíl se doplní až po odpovědi. `window.open(…, 'noopener')` vrací
+ * null, takže se vazba na otvírající okno ruší ručně přes `opener = null`.
+ * Když volání selže nebo uživatel nemá práva na licenci, jde se na veřejný odkaz.
+ */
+async function openSupportPortal() {
+  if (supportLinkBusy.value) return
+  const tab = window.open('', '_blank')
+  if (tab) tab.opener = null
+
+  let url = SUPPORT_PORTAL_URL
+  if (auth.isSuperadmin) {
+    supportLinkBusy.value = true
+    try {
+      url = (await licenseApi.supportLink()).url || SUPPORT_PORTAL_URL
+    } catch {
+      url = SUPPORT_PORTAL_URL
+    } finally {
+      supportLinkBusy.value = false
+    }
+  }
+
+  if (tab) tab.location.replace(url)
+  else window.open(url, '_blank', 'noopener')
+}
 
 async function logout() {
   if (logoutBusy.value) return
@@ -175,6 +219,7 @@ const ICONS = {
   api_tokens: 'M15 7a2 2 0 0 1 2 2m4 0a6 6 0 0 1-7.743 5.743L11 17H9v2H7v2H4a1 1 0 0 1-1-1v-2.586a1 1 0 0 1 .293-.707l5.964-5.964A6 6 0 1 1 21 9z',
   mcp:        'M9.75 3.104v5.714a2.25 2.25 0 0 1-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 0 1 4.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0 1 12 15a9.065 9.065 0 0 0-6.23-.693L5 14.5m14.8.8 1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0 1 12 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5',
   help:       'M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827V14m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+  diagnostics: 'M3 12h4l2-7 4 14 2-7h6',
   ai:         'M13 10V3L4 14h7v7l9-11h-7z',
   documents:  'M7 21h10a2 2 0 0 0 2-2V9.414a1 1 0 0 0-.293-.707l-5.414-5.414A1 1 0 0 0 12.586 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2zM9 13h6m-6 4h6',
   logbook:    'M5 13l1.4-4.2A2 2 0 0 1 8.3 7.5h7.4a2 2 0 0 1 1.9 1.3L19 13m-14 0h14m-14 0v4a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h8v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-4M7.5 16h.01M16.5 16h.01',
@@ -549,6 +594,9 @@ const navSections = computed<NavSection[]>(() => {
           { to: '/activation/license',  label: t('nav.license'),               icon: ICONS.approvals, dividerBefore: true },
           { to: '/activation/terms',    label: t('nav.terms'),                 icon: ICONS.documents },
           { to: '/activation/purchase', label: t('nav.purchase_subscription'), icon: ICONS.coin },
+          // Podklady k incidentu a rozcestník podpory — vlastní skupina na konci.
+          { to: '/admin/diagnostics',   label: t('nav.diagnostics'),           icon: ICONS.diagnostics, dividerBefore: true },
+          { to: '/admin/support',       label: t('nav.support'),               icon: ICONS.help },
         ] : []),
       ],
     })
@@ -1023,6 +1071,7 @@ const MANUAL_CHAPTERS: Array<[RegExp, string]> = [
   [/^\/admin\/tax-constants(?:\/|$)/, '75_Danove_konstanty'],
   [/^\/admin\/(?:users|roles|activity-log|cron-jobs)(?:\/|$)/, '76_Bezpecnost'],
   [/^\/admin\/update(?:\/|$)/, '77_Aktualizace'],
+  [/^\/admin\/(?:diagnostics|support)(?:\/|$)/, '99_Reseni_problemu'],
   [/^\/profile\/mcp-server(?:\/|$)/, '80_MCP_server'],
   [/^\/profile\/api-tokens(?:\/|$)/, '78_API'],
   [/^\/activation(?:\/|$)/, '79_Licence_a_aktivace'],
@@ -1673,7 +1722,18 @@ onBeforeUnmount(() => {
               <span aria-hidden="true">·</span>
               <a href="https://mywebdesign.cz" target="_blank" rel="noopener" class="hidden xl:inline whitespace-nowrap hover:text-neutral-700">© MyWebdesign.cz</a>
               <span class="hidden xl:inline" aria-hidden="true">·</span>
-              <a href="https://github.com/radekhulan/myucto" target="_blank" rel="noopener" class="whitespace-nowrap hover:text-neutral-700">GitHub</a>
+              <button
+                type="button"
+                :class="supportBtnClass"
+                :disabled="supportLinkBusy"
+                :title="t('support.help_title')"
+                @click="openSupportPortal"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
+                </svg>
+                {{ t('support.help_link') }}
+              </button>
             </div>
           </div>
 
@@ -1682,11 +1742,21 @@ onBeforeUnmount(() => {
               <LanguageToggle />
               <ThemeToggle />
             </div>
-            <div class="flex items-center gap-1.5">
+            <div class="flex flex-wrap items-center justify-end gap-1.5">
               <a href="https://myucto.cz/" target="_blank" rel="noopener" class="hover:text-primary-700">MyÚčto.cz</a>
               <span v-if="versionInfo" class="text-neutral-400">v{{ versionInfo.current }}</span>
-              <span aria-hidden="true">·</span>
-              <a href="https://github.com/radekhulan/myucto" target="_blank" rel="noopener" class="hover:text-neutral-700">GitHub</a>
+              <button
+                type="button"
+                :class="supportBtnClass"
+                :disabled="supportLinkBusy"
+                :title="t('support.help_title')"
+                @click="openSupportPortal"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
+                </svg>
+                {{ t('support.help_link') }}
+              </button>
             </div>
           </div>
         </footer>

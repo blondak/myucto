@@ -363,6 +363,9 @@ const routes: RouteRecordRaw[] = [
       { path: 'recurring/:id(\\d+)',    name: 'recurring-detail', component: () => import('@/pages/recurring/RecurringDetail.vue'), meta: {  } },
       { path: 'recurring/:id(\\d+)/edit', name: 'recurring-edit', component: () => import('@/pages/recurring/RecurringForm.vue'), meta: { requiresSupplier: true } },
       { path: 'admin/update',           name: 'admin-update',    component: () => import('@/pages/admin/Update.vue'),    meta: {  } },
+      // Diagnostika a podpora — audit prostředí, podklad k incidentu, rozcestník. Admin only.
+      { path: 'admin/diagnostics',      name: 'admin-diagnostics', component: () => import('@/pages/admin/Diagnostics.vue'), meta: {  } },
+      { path: 'admin/support',          name: 'admin-support',     component: () => import('@/pages/admin/Support.vue'),     meta: {  } },
       // Aktivace (E4) — licenční model, obchodní podmínky, zakoupení/aktivace. Admin only.
       { path: 'activation/license',  name: 'activation-license',  component: () => import('@/pages/activation/Licence.vue'),          meta: {  } },
       { path: 'activation/terms',    name: 'activation-terms',    component: () => import('@/pages/activation/ObchodniPodminky.vue'), meta: {  } },
@@ -476,6 +479,7 @@ const superadminRouteNames = new Set([
   'admin-codebooks', 'admin-tax-constants', 'admin-bank-rule-templates', 'admin-email-templates', 'admin-emails', 'admin-approvals', 'admin-update',
   'admin-price-list', 'admin-price-list-new', 'admin-price-list-edit',
   'activation-license', 'activation-terms', 'activation-purchase',
+  'admin-diagnostics', 'admin-support',
 ])
 
 // Routy, které projdou deny-by-default guardem (:361) bez permission meta jinak než

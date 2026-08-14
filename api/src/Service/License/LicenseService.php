@@ -27,6 +27,25 @@ final class LicenseService
 
     private const TRIAL_DAYS = 60;
 
+    /** Klíč v požadavku na podporu → sloupec dotazu nad `supplier`. */
+    private const SUPPORT_COMPANY_FIELDS = [
+        'name'    => 'company_name',
+        'ic'      => 'ic',
+        'dic'     => 'dic',
+        'street'  => 'street',
+        'city'    => 'city',
+        'zip'     => 'zip',
+        'country' => 'country',
+        'email'   => 'email',
+    ];
+
+    /**
+     * Limit délky hodnoty, který si drží licenční server. Schéma `supplier` je dnes
+     * na stejné šířce (varchar(190) a méně), takže je to jen pojistka do budoucna —
+     * ne aktivní ořez.
+     */
+    private const SUPPORT_COMPANY_MAX = 190;
+
     private readonly LoggerInterface $logger;
 
     /**
@@ -375,7 +394,126 @@ final class LicenseService
         return rtrim((string) $this->config->get('license.server_url', 'https://myucto.cz'), '/') . '/objednavka';
     }
 
+    public function supportUrl(): string
+    {
+        return rtrim((string) $this->config->get('license.server_url', 'https://myucto.cz'), '/') . '/support';
+    }
+
+    /**
+     * Odkaz na portál podpory. U placené licence vymění klíč za jednorázový
+     * přihlašovací token, aby byl zákazník na portálu rovnou identifikovaný jako
+     * firma, která licenci platí.
+     *
+     * Přechod na podporu nesmí selhat: trial, degradovaná licence, odmítnutí i
+     * nedostupný server končí prostým veřejným odkazem bez identity (stejná
+     * tolerance jako {@see renewIfDue()}).
+     *
+     * @param int|null $supplierId Aktuální firma (X-Supplier-Id) — jen záložní
+     *        předvyplnění fakturačních údajů na portálu, viz {@see supportCompany()}.
+     * @return array{url:string}
+     */
+    public function supportLink(?int $supplierId = null): array
+    {
+        $fallback = ['url' => $this->supportUrl()];
+        if (!$this->db->hasTable('license')) {
+            return $fallback;
+        }
+
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return $fallback;
+        }
+        // Identitu má smysl posílat jen u licence, která opravdu platí — degradovanou
+        // ani vypršelou by server stejně odmítl.
+        $state = $this->computeState($row)->state;
+        if ($state !== LicenseState::ACTIVE && $state !== LicenseState::OVERAGE) {
+            return $fallback;
+        }
+
+        try {
+            $resp = $this->client->supportSession(
+                $key,
+                (string) ($row['instance_id'] ?? ''),
+                $this->appVersion(),
+                $this->supportCompany($supplierId),
+            );
+        } catch (LicenseNetworkException $e) {
+            $this->logger->info('license.support_session.network_error', ['error' => $e->getMessage()]);
+            return $fallback;
+        }
+
+        if (($resp['ok'] ?? false) !== true) {
+            $this->logger->info('license.support_session.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
+            return $fallback;
+        }
+
+        // Odkaz otevírá prohlížeč, takže schéma ověřujeme i u vlastního serveru —
+        // jinak by kompromitovaná odpověď mohla podstrčit `javascript:`.
+        $url = is_string($resp['url'] ?? null) ? trim($resp['url']) : '';
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        if ($url === '' || ($scheme !== 'https' && $scheme !== 'http')) {
+            $this->logger->info('license.support_session.bad_url');
+            return $fallback;
+        }
+
+        return ['url' => $url];
+    }
+
     // ── interní ──────────────────────────────────────────────────────────────
+
+    /**
+     * Fakturační údaje aktuální firmy jako ZÁLOŽNÍ předvyplnění portálu podpory.
+     * Server je použije jen tam, kde údaje sám nezná (typicky ručně vydaná licence
+     * bez nákupu přes web) — evidovaný zákazník licence má vždy přednost.
+     *
+     * Prázdné hodnoty se vynechávají (klíč se vůbec neposílá), delší se ořezávají
+     * na limit serveru. Vědomě to NENÍ totéž co {@see \MyInvoice\Action\License\LicenseStatusAction}:
+     * tam jde o předvyplnění formuláře v UI, takže posílá i prázdné klíče a e-mail
+     * padá na přihlášeného admina. Sem patří jen to, co firma opravdu má.
+     *
+     * Selhání dotazu je nekritické — handoff na podporu nesmí spadnout kvůli
+     * doplňkovým údajům, prostě se `company` nepřiloží.
+     *
+     * @return array<string,string>
+     */
+    private function supportCompany(?int $supplierId): array
+    {
+        if ($supplierId === null || $supplierId <= 0 || !$this->db->hasTable('supplier')) {
+            return [];
+        }
+
+        // Kód země zná aplikace přes číselník, ne přímo na firmě — když číselník
+        // (nebo vazba) chybí, pošle se zbytek údajů bez `country`.
+        $hasCountry = $this->db->hasTable('countries') && $this->db->hasColumn('supplier', 'country_id');
+        $sql = $hasCountry
+            ? 'SELECT s.company_name, s.ic, s.dic, s.street, s.city, s.zip, s.email, co.iso2 AS country
+                 FROM supplier s LEFT JOIN countries co ON co.id = s.country_id
+                WHERE s.id = ?'
+            : 'SELECT company_name, ic, dic, street, city, zip, email FROM supplier WHERE id = ?';
+
+        try {
+            $stmt = $this->db->pdo()->prepare($sql);
+            $stmt->execute([$supplierId]);
+            $supplier = $stmt->fetch(\PDO::FETCH_ASSOC);
+        } catch (\Throwable $e) {
+            $this->logger->info('license.support_session.company_unavailable', ['error' => $e->getMessage()]);
+            return [];
+        }
+        if (!is_array($supplier)) {
+            return [];
+        }
+
+        $company = [];
+        foreach (self::SUPPORT_COMPANY_FIELDS as $key => $column) {
+            $value = trim((string) ($supplier[$column] ?? ''));
+            if ($value !== '') {
+                $company[$key] = mb_substr($value, 0, self::SUPPORT_COMPANY_MAX);
+            }
+        }
+
+        return $company;
+    }
 
     /** @return array<string,mixed> */
     private function loadRow(): array

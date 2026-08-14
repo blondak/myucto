@@ -22,6 +22,9 @@ const transfersRemaining = ref<number | null>(null)
 
 const isAdmin = computed(() => auth.isSuperadmin)
 
+/** Veřejný portál podpory — fallback, když identita přes licenční server nevyjde. */
+const SUPPORT_PORTAL_URL = 'https://myucto.cz/support'
+
 // In-place navýšení počtu uživatelů (poměrný doplatek z uložené karty).
 const upgradeUsers = ref<number>(1)
 const quoting = ref(false)
@@ -257,6 +260,31 @@ async function deactivate() {
   }
 }
 
+/**
+ * Přechod na portál podpory. Okno se otevírá synchronně (jinak ho blokátor
+ * vyskakovacích oken zahodí) a cíl se doplní až po odpovědi serveru, který
+ * u placené licence vrátí odkaz s jednorázovým přihlašovacím tokenem.
+ */
+const supportLinkBusy = ref(false)
+async function openSupportPortal() {
+  if (supportLinkBusy.value) return
+  const tab = window.open('', '_blank')
+  if (tab) tab.opener = null
+
+  supportLinkBusy.value = true
+  let url = SUPPORT_PORTAL_URL
+  try {
+    url = (await licenseApi.supportLink()).url || SUPPORT_PORTAL_URL
+  } catch {
+    url = SUPPORT_PORTAL_URL
+  } finally {
+    supportLinkBusy.value = false
+  }
+
+  if (tab) tab.location.replace(url)
+  else window.open(url, '_blank', 'noopener')
+}
+
 onMounted(load)
 </script>
 
@@ -345,6 +373,13 @@ onMounted(load)
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
             {{ deactivating ? '…' : t('license.deactivate') }}
+          </button>
+          <button
+            type="button" @click="openSupportPortal" :disabled="supportLinkBusy"
+            :class="btnOutline('primary')" :title="t('support.help_title')"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" /></svg>
+            {{ t('support.help_paid') }}
           </button>
         </div>
       </section>

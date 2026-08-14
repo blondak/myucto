@@ -5,9 +5,13 @@
 Pokud objevíš bezpečnostní zranitelnost v MyÚčto.cz, **prosíme nezveřejňuj
 ji v public GitHub Issues**. Místo toho ji nahlaš přímo:
 
-- **Web:** [https://mywebdesign.cz/](https://mywebdesign.cz/) — kontaktní formulář
-  s předmětem `[SECURITY] MyÚčto.cz`
+- **Web:** [https://myucto.cz/](https://myucto.cz/) — kontaktní formulář
+  [https://myucto.cz/#kontakt](https://myucto.cz/#kontakt) s předmětem
+  `[SECURITY] MyÚčto.cz`
 - **Předmět e-mailu:** `[SECURITY] <stručný popis>`
+
+Hlášení zranitelností je **vždy zdarma** a řeší se privátně, mimo veřejné
+GitHub Issues.
 
 ### Co nahlásit
 

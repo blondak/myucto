@@ -477,6 +477,8 @@
         "smtp_logs": "SMTP log analýza",
         "approvals": "Schvalování",
         "updates": "Aktualizace",
+        "diagnostics": "Diagnostika",
+        "support": "Podpora",
         "api_tokens": "API tokeny",
         "electronic_signatures": "Elektronické podpisy",
         "signing_profiles": "Podpisové profily",
@@ -6064,7 +6066,10 @@
         "feature_text2": "Potřebujete do MyÚčto vlastní funkci, report nebo napojení na váš systém? Napište nám — připravíme nabídku s fixní cenou a fixním termínem.",
         "feature_highlights": "20 let na trhu · Senior tým, žádní junioři · Fixní cena a termín",
         "feature_cta": "Odeslat poptávku",
-        "close": "Zavřít"
+        "close": "Zavřít",
+        "help_link": "Podpora",
+        "help_title": "Portál podpory MyÚčto.cz",
+        "help_paid": "Placená podpora"
     },
     "profile_signing": {
         "title": "Elektronické podpisy",
@@ -13624,5 +13629,218 @@
             "entitlement_created": "Nárok byl zapsán do ledgeru.",
             "entry_created": "Položka ledgeru byla přidána."
         }
+    },
+    "diagnostics": {
+        "title": "Diagnostika",
+        "subtitle": "Kontrola prostředí instalace a podklady pro incident podpory",
+        "no_admin": "Diagnostika je dostupná jen administrátorům.",
+        "load_failed": "Diagnostiku se nepodařilo načíst.",
+        "refresh": "Zkontrolovat znovu",
+        "refreshing": "Kontroluji…",
+        "checks_title": "Kontrola prostředí",
+        "checks_hint": "Problémy a varování jsou nahoře. U každého najdete dopad, nápravu i odkaz do manuálu.",
+        "actual": "Naměřeno",
+        "expected": "Očekáváno",
+        "fix": "Náprava",
+        "manual_link": "Otevřít manuál",
+        "summary_counts": "{fail} problémů, {warn} varování, {ok} v pořádku",
+        "verdict": {
+            "ok": "Prostředí vyhovuje",
+            "warn": "Prostředí vyhovuje s výhradami",
+            "fail": "Prostředí nevyhovuje"
+        },
+        "status": {
+            "ok": "V pořádku",
+            "warn": "Varování",
+            "fail": "Problém",
+            "skip": "Nezjištěno"
+        },
+        "checks": {
+            "php_version": {
+                "label": "Verze PHP",
+                "impact": "Aplikace používá jazykové prvky, které starší PHP neumí — část stránek skončí chybou.",
+                "fix": "Aktualizujte PHP na verzi 8.5 nebo novější."
+            },
+            "php_extensions": {
+                "label": "Povinná rozšíření PHP",
+                "impact": "Bez některého z povinných rozšíření přestanou fungovat celé oblasti — zálohy, exporty, PDF nebo výpočty cen.",
+                "fix": "Doinstalujte chybějící rozšíření a restartujte PHP."
+            },
+            "php_extensions_optional": {
+                "label": "Volitelná rozšíření PHP",
+                "impact": "Chybějící volitelné rozšíření aplikaci nezastaví, jen se použije pomalejší nebo omezená náhradní cesta.",
+                "fix": "Doinstalujte rozšíření, pokud chcete plný výkon a všechny náhradní cesty vypnout."
+            },
+            "memory_limit": {
+                "label": "Paměťový limit PHP",
+                "impact": "Generování PDF, exporty a uzávěrkové sestavy se při nízkém limitu ukončí uprostřed práce.",
+                "fix": "Nastavte v php.ini memory_limit alespoň na 256M."
+            },
+            "upload_limits": {
+                "label": "Limity nahrávání souborů",
+                "impact": "Aplikace nabízí větší soubory, než server přijme — nahrání skončí bez srozumitelné hlášky.",
+                "fix": "Srovnejte upload_max_filesize a post_max_size v php.ini s limitem dokumentů."
+            },
+            "date_timezone": {
+                "label": "Časové pásmo PHP",
+                "impact": "Bez nastaveného pásma se data dokladů můžou posunout o den, což se propíše do DPH období.",
+                "fix": "Nastavte v php.ini date.timezone na stejnou hodnotu jako má aplikace."
+            },
+            "timezone_alignment": {
+                "label": "Shoda časových pásem",
+                "impact": "Rozdílná pásma serveru a aplikace posouvají doklady na hranici dne do jiného období.",
+                "fix": "Sjednoťte časové pásmo systému, PHP i aplikace."
+            },
+            "opcache": {
+                "label": "OPcache",
+                "impact": "Bez OPcache se každý požadavek znovu kompiluje — aplikace je výrazně pomalejší.",
+                "fix": "Zapněte opcache.enable v php.ini a restartujte PHP."
+            },
+            "opcache_validate_timestamps": {
+                "label": "Obnova OPcache po aktualizaci",
+                "impact": "S vypnutou kontrolou časových značek běží po aktualizaci dál starý kód, dokud PHP nerestartujete.",
+                "fix": "Buď zapněte opcache.validate_timestamps, nebo po každé aktualizaci restartujte PHP-FPM či IIS."
+            },
+            "db_version": {
+                "label": "Verze databáze",
+                "impact": "Migrace používají konstrukce, které starší server nebo MySQL neumí — aktualizace databáze selže.",
+                "fix": "Použijte MariaDB 11.8 nebo novější."
+            },
+            "db_charset": {
+                "label": "Znaková sada databáze",
+                "impact": "Mimo utf8mb4 se poškodí diakritika i emoji v názvech a poznámkách.",
+                "fix": "Převeďte databázi na utf8mb4."
+            },
+            "db_max_allowed_packet": {
+                "label": "max_allowed_packet",
+                "impact": "Nízká hodnota shodí zálohu databáze i ukládání větších příloh.",
+                "fix": "Zvyšte max_allowed_packet v konfiguraci MariaDB a restartujte server."
+            },
+            "db_sql_mode": {
+                "label": "Striktní režim databáze",
+                "impact": "Bez striktního režimu databáze tiše zkracuje příliš dlouhé hodnoty místo ohlášení chyby.",
+                "fix": "Aplikace si striktní režim nastavuje sama pro každé spojení. Globální hodnotu srovnejte kvůli zálohám a ručním zásahům."
+            },
+            "redis": {
+                "label": "Redis",
+                "impact": "Zapnutý, ale nedostupný Redis zpomaluje každý požadavek čekáním na spojení.",
+                "fix": "Spusťte Redis, nebo ho v konfiguraci vypněte."
+            },
+            "disk_space": {
+                "label": "Volné místo na disku",
+                "impact": "Po zaplnění disku přestanou tiše vznikat zálohy, PDF i nahrané dokumenty.",
+                "fix": "Uvolněte místo, nebo zvětšete svazek s daty."
+            },
+            "log_size": {
+                "label": "Velikost adresáře s logy",
+                "impact": "Rozrostlé logy zabírají místo potřebné pro zálohy a dokumenty.",
+                "fix": "Ukliďte staré logy; php-errors.log se nerotuje a je potřeba ho ořezat ručně."
+            },
+            "writable_paths": {
+                "label": "Práva zápisu",
+                "impact": "Bez práva zápisu nevzniknou dokumenty, zálohy ani cache — často se to projeví až chybou při ukládání.",
+                "fix": "Nastavte zápis pro uživatele, pod kterým běží webový server."
+            },
+            "migrations_pending": {
+                "label": "Databázové migrace",
+                "impact": "Nedoběhlá migrace je nejčastější příčina hlášek o chybějící tabulce nebo sloupci.",
+                "fix": "Spusťte php api/bin/migrate.php."
+            },
+            "cron_health": {
+                "label": "Plánované úlohy",
+                "impact": "Bez cronu nevznikají zálohy, neodcházejí upomínky a nestahují se kurzy ČNB.",
+                "fix": "Zkontrolujte naplánování úloh a jejich poslední běh na stránce Plánované úlohy."
+            },
+            "app_debug": {
+                "label": "Ladicí režim",
+                "impact": "V produkci by se detaily chyb mohly dostat do odpovědi serveru.",
+                "fix": "Nastavte app.debug na false."
+            },
+            "logging_level": {
+                "label": "Úroveň logování",
+                "impact": "Na úrovni debug se do logu zapisuje i komunikace se SMTP serverem včetně přihlašovacích údajů.",
+                "fix": "V produkci používejte úroveň info nebo vyšší."
+            },
+            "app_version": {
+                "label": "Verze aplikace",
+                "impact": "Je k dispozici novější verze — problém, který řešíte, už může být opravený.",
+                "fix": "Podívejte se do sekce Aktualizace, co nová verze přináší."
+            }
+        },
+        "bundle": {
+            "title": "Diagnostický balíček",
+            "subtitle": "ZIP s podklady k incidentu. Vytvoří se u vás v instalaci, stáhnete si ho a na portálu podpory ho k incidentu přiložíte sami — aplikace nikam nic neodesílá.",
+            "scope": "Co má balíček obsahovat",
+            "item": {
+                "include_version": "Verze aplikace a dostupnost novější",
+                "include_environment": "Kontrola prostředí a dostupnost služeb",
+                "include_license": "Stav licence (klíč je maskovaný)",
+                "include_migrations": "Stav databázových migrací",
+                "include_cron": "Poslední běhy plánovaných úloh",
+                "include_config": "Konfigurace bez hesel, klíčů a tokenů"
+            },
+            "logs_enable": "Přiložit i logy aplikace",
+            "logs_warning": "Logy mohou obsahovat osobní údaje třetích osob — například e-mailové adresy příjemců dokladů, jména a adresy klientů nebo hodnoty z chybových hlášek databáze.",
+            "logs_removed": "Odstraňujeme navázané parametry databázových dotazů, stack trace a záznamy o komunikaci se SMTP serverem. Ostatní obsah zůstává beze změny — prohlédněte si ho prosím níže.",
+            "logs_days": "Rozsah",
+            "logs_level": "Od úrovně",
+            "days_1": "1 den",
+            "days_3": "3 dny",
+            "days_7": "7 dnů",
+            "days_14": "14 dnů",
+            "log_preview_show": "Zobrazit obsah logu",
+            "log_preview_hide": "Skrýt obsah logu",
+            "log_preview_empty": "Ve zvoleném rozsahu není žádný záznam.",
+            "log_page": "Strana {page} z {pages} ({total} záznamů)",
+            "preview_title": "Náhled obsahu",
+            "preview_hint": "Přesně tyto soubory budou v balíčku.",
+            "sensitive": "Může obsahovat osobní údaje",
+            "total": "Celkem",
+            "too_large": "Balíček přesahuje limit {max}. Zkraťte prosím rozsah logů.",
+            "acknowledge": "Prohlédl jsem si obsah balíčku a souhlasím s jeho předáním podpoře.",
+            "create": "Vytvořit balíček",
+            "building": "Vytvářím…",
+            "refresh_preview": "Přepočítat náhled",
+            "ready": "Balíček je připravený",
+            "file": "Soubor",
+            "size": "Velikost",
+            "download": "Stáhnout balíček",
+            "next_step": "Stažený soubor přiložte k incidentu na portálu podpory jako běžnou přílohu.",
+            "retention": "Z instalace se balíček automaticky smaže po 24 hodinách.",
+            "failed": "Balíček se nepodařilo vytvořit."
+        }
+    },
+    "support_page": {
+        "title": "Podpora",
+        "subtitle": "Kde hledat pomoc a co k hlášení přiložit",
+        "free_title": "Zdarma",
+        "free_items": [
+            "Uživatelský manuál ke všem funkcím aplikace.",
+            "Veřejné hlášení chyby nebo námětu v repozitáři na GitHubu.",
+            "Privátní hlášení bezpečnostní zranitelnosti přes formulář na portálu podpory.",
+            "Dotazy k ovládání aplikace zodpovězené e-mailem."
+        ],
+        "paid_title": "Placená technická podpora",
+        "paid_hint": "Jednorázový odborný zásah na vaší instalaci. Účtuje se po započatých blocích a úvodní blok se hradí předem kartou.",
+        "paid_items": [
+            "Analýza dat a zjištění příčiny nežádoucího stavu.",
+            "Oprava dat nebo nastavení instalace.",
+            "Migrace dat a převod mezi verzemi či prostředími.",
+            "Další částka se strhne až po vašem výslovném schválení rozsahu."
+        ],
+        "open_portal": "Otevřít portál podpory",
+        "opening": "Otevírám…",
+        "portal_hint": "Otevře se v novém okně. Placenou instalaci portál rozpozná sám, licenční klíč nikam nezadáváte.",
+        "open_manual": "Otevřít manuál",
+        "open_issues": "Hlášení na GitHubu",
+        "attach_title": "Co k incidentu přiložit",
+        "attach_intro": "Čím konkrétnější podklad, tím kratší řešení. Nejrychleji pomůže:",
+        "attach_items": [
+            "Popis toho, co jste dělali, co jste čekali a co se místo toho stalo.",
+            "Snímek obrazovky s chybovou hláškou.",
+            "Diagnostický balíček z této aplikace — verze, prostředí, stav migrací a plánovaných úloh."
+        ],
+        "attach_privacy": "Balíček se vytvoří u vás v instalaci a zůstane u vás, dokud ho sami nepřiložíte k incidentu. Logy v něm ve výchozím stavu nejsou; když je přidáte, uvidíte předtím jejich obsah.",
+        "open_diagnostics": "Přejít na Diagnostiku"
     }
 }

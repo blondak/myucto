@@ -98,6 +98,15 @@ export interface UpgradeResult {
   state: LicenseStatus
 }
 
+/**
+ * Odkaz na portál podpory na myucto.cz. U placené licence nese jednorázový
+ * token, kterým se zákazník na portálu rovnou identifikuje; jinak je to prostý
+ * veřejný odkaz.
+ */
+export interface SupportLink {
+  url: string
+}
+
 export const licenseApi = {
   /** Admin — kompletní stav licence + počty. */
   status: () => api.get<LicenseStatus>('/license/status').then((r) => r.data),
@@ -122,4 +131,7 @@ export const licenseApi = {
   /** Admin — in-place navýšení na `users` (strhne doplatek z uložené karty). */
   upgrade: (users: number) =>
     api.post<UpgradeResult>('/license/upgrade', { users }).then((r) => r.data),
+
+  /** Admin — přihlášený přechod na portál podpory (jednorázový token v URL). */
+  supportLink: () => api.post<SupportLink>('/license/support-link').then((r) => r.data),
 }

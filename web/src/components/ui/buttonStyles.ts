@@ -49,6 +49,32 @@ export const OUTLINE: Record<ActionVariant, string> = {
   accent:  'border border-accent-500/40 text-accent-700 hover:bg-accent-50 hover:border-accent-500/70',
 }
 
+/*
+ * Plné tlačítko uvnitř INVERTED CHROME — patička, topbar a postranní menu, tedy
+ * všechno, co nese `.nav-inverted` (viz main.css).
+ *
+ * Proč vlastní varianta a ne `FILLED.primary`: `.nav-inverted` nepřebarvuje prvky,
+ * ale přepisuje HODNOTY tokenů. `bg-primary-600` tam proto není sytá indigová, ale
+ * světlá levandule (#A493EA v light, #9585D8 v dark) — a `text-white` na ní vychází
+ * 2,6:1, tedy hluboko pod WCAG AA. V tmavém režimu navíc plná plocha na skoro černé
+ * liště září a přebije okolní decentní ikonky a šedý text.
+ *
+ * Řešení drží obojí:
+ *   light — plocha zůstává plná (vzhled beze změny), jen inkoust je `text-surface`
+ *           (deep indigo): 6,0:1 v klidu, 9,1:1 na hover.
+ *   dark  — plocha se tlumí na tint `primary-600/25` s prstýnkem; inkoust
+ *           `text-primary-900` dává 8,9:1. Tlačítko pořád jasně vede: jeho text má
+ *           proti liště 13,1:1, sousední odkazy jen 6,1:1.
+ *
+ * Zatím jen `primary`: ostatní sémantiky nemají v `.nav-inverted` dodefinované celé
+ * škály (`text-danger-900` by spadlo na root a na tmavé ploše zmizelo), takže by se
+ * jim kontrast musel ověřit zvlášť.
+ */
+export const CHROME_FILLED_PRIMARY =
+  'bg-primary-600 text-surface shadow-sm hover:bg-primary-700 hover:shadow-md ' +
+  'dark:bg-primary-600/25 dark:text-primary-900 dark:ring-1 dark:ring-primary-600/40 ' +
+  'dark:shadow-none dark:hover:bg-primary-600/40 dark:hover:shadow-none'
+
 export const MENU_ICON: Record<ActionVariant, string> = {
   primary: 'text-primary-600',
   success: 'text-success-600',
@@ -151,6 +177,8 @@ export const ICONS = {
   folderOpen:       'M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z M3 9h18',
   colorSwatch:      'M12 21a9 9 0 1 0-9-9c0 1.488 1.053 2.734 2.455 3.03l.22.047a2.122 2.122 0 0 1 1.705 1.705l.047.22A3.076 3.076 0 0 0 12 21zm-3.5-12a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0zm5-2a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0zm4 5a1.5 1.5 0 1 1 3 0 1.5 1.5 0 0 1-3 0z',
   lock:             'M12 15v2m-6 4h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2zM8 11V7a4 4 0 1 1 8 0v4',
+  // Podpora / nápověda — přechod na portál podpory.
+  help:             'M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
   // Prázdné stavy (EmptyState): `search` = filtr nic nenašel, `funnel` = filtr obecně.
   search:           'M21 21l-4.35-4.35M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16z',
   funnel:           'M4 4h16l-6.4 7.5v5.9l-3.2 1.9v-7.8L4 4z',

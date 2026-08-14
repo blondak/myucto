@@ -378,18 +378,81 @@ dodavateli — záměrně).
 Multi-supplier guard. Buď přepni na dodavatele klienta, nebo si v aktuálním
 vytvoř toho samého klienta (oddělená data).
 
-## 99.9 Hlášení chyb
+## 99.9 Diagnostika
+
+**Systém → Diagnostika** je první místo, kam se podívat, když se aplikace chová
+divně a není jasné proč. Nejde o výpis hodnot, ale o verdikt — **vyhovuje /
+vyhovuje s výhradami / nevyhovuje** — a u každého nálezu je dopad, náprava
+a odkaz do příslušné kapitoly manuálu.
+
+Kontroluje se verze PHP a povinná rozšíření, klíčové hodnoty `php.ini`
+(`memory_limit`, limity nahrávání, časové pásmo, OPcache), verze a nastavení
+MariaDB, dostupnost Redisu, volné místo a práva zápisu, shoda časových pásem,
+stav databázových migrací, poslední běhy plánovaných úloh, stav licence
+a dostupnost novější verze aplikace.
+
+Nálezy jsou seřazené od problémů k varováním, takže shora dolů odpovídají
+pořadí, v jakém má smysl je řešit.
+
+### Diagnostický balíček
+
+Tlačítkem na téže stránce vznikne ZIP s podklady pro **placenou technickou
+podporu**. Balíček se vytvoří u tebe v instalaci a zůstane u tebe — aplikace ho
+nikam neodesílá. Stáhneš si ho a na portálu podpory ho k incidentu přiložíš
+stejně jako kterýkoli jiný soubor.
+
+Ve výchozím stavu obsahuje:
+
+| Soubor | Obsah |
+|---|---|
+| `README.txt` | co balíček je a kdy vznikl |
+| `manifest.json` | seznam položek s kontrolním součtem SHA-256 |
+| `version.json` | verze aplikace a dostupnost novější |
+| `environment.json` | kompletní audit prostředí a jeho vyhodnocení |
+| `health.json` | dostupnost databáze a Redisu, provozní varování |
+| `license.json` | stav licence (klíč je maskovaný) |
+| `migrations.txt` | stav migrací včetně těch, které čekají |
+| `cron.json` | poslední běhy plánovaných úloh |
+| `config-sanitized.json` | výřez konfigurace pořízený allowlistem |
+
+**Konfigurace prochází allowlistem**, ne filtrem na podezřelé názvy: ven jde jen
+to, co je jmenovitě povolené. U hesel, klíčů a tokenů se přenáší pouze
+informace, jestli jsou nastavené (`<set>` / `<empty>`), nikdy hodnota.
+
+### Logy v balíčku
+
+Logy aplikace v balíčku **ve výchozím stavu nejsou** a přidávají se zaškrtnutím.
+Před vytvořením balíčku si jejich obsah můžeš přímo na stránce prohlédnout,
+den po dni a po stránkách.
+
+Z výřezu se odstraňují navázané parametry databázových dotazů, stack trace
+a záznamy o komunikaci se SMTP serverem. **Zbytek se neupravuje** — logy proto
+mohou obsahovat osobní údaje třetích osob, například e-mailové adresy příjemců
+dokladů, jména a adresy klientů nebo hodnoty z chybových hlášek databáze.
+Rozsah je ve výchozím stavu 7 dnů a úroveň `WARNING` a výš; obojí lze změnit.
+
+Balíček se z instalace automaticky smaže po 24 hodinách. Jeho vytvoření se
+zapisuje do auditní stopy včetně otisku SHA-256, takže je vždy dohledatelné,
+co a kdy bylo předáno.
+
+Velikost je omezená na 25 MB, což je limit přílohy na portálu podpory. Když ji
+rozsah logů přesáhne, stránka to ohlásí ještě před vytvořením balíčku.
+
+## 99.10 Hlášení chyb
 
 Pokud problém nevyřeší tato kapitola, kontaktuj:
 
 - **GitHub Issues** repo MyÚčto.cz
 - E-mail vývojáře — viz `cfg.php → smtp.from`
 - IT administrátor tvé organizace
+- **Systém → Podpora** — rozcestník: co je zdarma, co se platí, a odkaz na portál
+  podpory, na kterém se placená instalace přihlásí sama (licenční klíč nikam
+  nezadáváš)
 
 Užitečné pro hlášení:
 
-- Označení běžícího sestavení (zobrazí `/api/health`)
+- **Diagnostický balíček** ze Systém → Diagnostika (viz 99.9) — pokryje verzi,
+  prostředí, stav migrací i plánovaných úloh naráz
 - Browser / OS
 - Krok-po-kroku, jak chybu reprodukovat
 - Screenshot
-- Excerpt z `log/app-YYYY-MM-DD.log` v okolí chyby
