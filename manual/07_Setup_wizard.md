@@ -5,7 +5,32 @@ endpoint kromě setup endpointů a healthchecku neodpovídá. Wizard je jednorá
 — jakmile vznikne první admin účet, wizard zmizí a obnoví se až po `reset.php`.
 
 Wizard má **3 kroky** (admin → dodavatel → sample data) a po dokončení tě
-**automaticky přihlásí**.
+**automaticky přihlásí**. Předchází jim ještě **kontrola prostředí**, která se
+ale ukáže jen tehdy, když je co řešit.
+
+## 7.0 Kontrola prostředí
+
+Než tě wizard pustí k zakládání účtu, zkontroluje prostředí instalace: verzi
+PHP a rozšíření, verzi a znakovou sadu MariaDB, limity nahrávání, práva zápisu,
+volné místo a nespuštěné migrace. Plánované úlohy se v této fázi nekontrolují —
+na čerstvé instalaci ještě žádná neproběhla.
+
+- **Vyhovující prostředí** kontrolu vůbec nezobrazí a wizard začne krokem 1.
+- **Varování** (například chybějící volitelné rozšíření) tě nezastaví: setup jde
+  dokončit a připomínka zůstane v hlavičce wizardu.
+- **Problém** (stará verze PHP, chybějící povinné rozšíření, MySQL místo
+  MariaDB, nedostupná databáze, nespuštěné migrace) je potřeba opravit —
+  instalace by s ním nedoběhla nebo by se rozbila při prvním použití.
+
+U každého nálezu je vidět naměřená hodnota, očekávaná hodnota, dopad a náprava
+včetně odkazu do příslušné kapitoly manuálu. V Dockeru odkazy míří na
+[3. Instalace Docker](03_Instalace_Docker.md) — PHP i MariaDB se tam ladí
+v image a v `docker-compose.yml`, ne v `php.ini` na hostiteli. Po nápravě
+klikni na **Zkontrolovat znovu**.
+
+Stejná kontrola je i po instalaci v **Systém → Diagnostika**, kde navíc hlídá
+plánované úlohy, velikost logů a dostupnost novější verze — viz
+[99. Řešení problémů](99_Reseni_problemu.md).
 
 ## 7.1 Krok 1 — Administrátor
 

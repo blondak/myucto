@@ -216,6 +216,7 @@ use MyInvoice\Action\Auth\SetupAction;
 use MyInvoice\Action\Auth\SetupAresLookupAction;
 use MyInvoice\Action\Auth\SetupCrpDphLookupAction;
 use MyInvoice\Action\Auth\SetupSampleAction;
+use MyInvoice\Action\Auth\SetupPreflightAction;
 use MyInvoice\Action\Auth\SetupStatusAction;
 use MyInvoice\Action\Auth\Tokens\CreateTokenAction;
 use MyInvoice\Action\Auth\Tokens\ListTokensAction;
@@ -326,6 +327,7 @@ final class Routes
 
         $app->group('/api/auth', function ($g) {
             $g->get ('/setup-status',    SetupStatusAction::class);
+            $g->get ('/setup-preflight', SetupPreflightAction::class);        // audit prostředí před prvním setupem (jen dokud není admin)
             $g->post('/setup',           SetupAction::class);
             $g->post('/setup-ares-lookup', SetupAresLookupAction::class);  // public ARES proxy během setup wizardu
             $g->post('/setup-crpdph-lookup', SetupCrpDphLookupAction::class);  // public proxy do registru plátců DPH (účty z DIČ)

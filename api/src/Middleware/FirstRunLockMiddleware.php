@@ -26,6 +26,7 @@ final class FirstRunLockMiddleware implements MiddlewareInterface
     private const ALLOWED_PATHS = [
         'GET /api/health',
         'GET /api/auth/setup-status',
+        'GET /api/auth/setup-preflight',
         'POST /api/auth/setup',
         'POST /api/auth/setup-ares-lookup',
         'POST /api/auth/setup-crpdph-lookup',

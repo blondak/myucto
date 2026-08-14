@@ -53,6 +53,21 @@ final class EnvironmentCheckService
         'intl'    => 'formatting',
     ];
 
+    /**
+     * Kontroly, které dávají smysl ještě PŘED prvním setupem — tedy takové, na
+     * které má člověk vliv při instalaci prostředí. Cron sem nepatří (na čerstvé
+     * instalaci ještě nic neběželo), stejně jako stav vydání, velikost logů nebo
+     * provozní hygiena configu — ta se posuzuje až u běžící instalace.
+     *
+     * @var list<string>
+     */
+    public const PREFLIGHT_CHECKS = [
+        'php_version', 'php_extensions', 'php_extensions_optional',
+        'memory_limit', 'upload_limits', 'date_timezone', 'timezone_alignment', 'opcache',
+        'db_version', 'db_charset', 'db_max_allowed_packet', 'db_sql_mode',
+        'redis', 'disk_space', 'writable_paths', 'migrations_pending',
+    ];
+
     private const MIN_PHP           = '8.5.0';
     private const MIN_MARIADB       = '11.8';
     private const MIN_MEMORY_BYTES  = 256 * 1024 * 1024;
@@ -71,6 +86,7 @@ final class EnvironmentCheckService
     /**
      * Kompletní report: naměřená fakta + vyhodnocené kontroly + souhrn.
      *
+     * @param list<string>|null $onlyIds Omezení na vybrané kontroly; null = všechny.
      * @return array{
      *     generated_at:string,
      *     summary:array{status:string,ok:int,warn:int,fail:int,skip:int},
@@ -78,10 +94,10 @@ final class EnvironmentCheckService
      *     facts:array<string,mixed>
      * }
      */
-    public function report(): array
+    public function report(?array $onlyIds = null): array
     {
         $facts  = $this->facts();
-        $checks = $this->evaluate($facts);
+        $checks = $this->evaluate($facts, $onlyIds);
 
         $counts = [self::STATUS_OK => 0, self::STATUS_WARN => 0, self::STATUS_FAIL => 0, self::STATUS_SKIP => 0];
         foreach ($checks as $check) {
@@ -104,6 +120,38 @@ final class EnvironmentCheckService
             'checks' => $checks,
             'facts'  => $facts,
         ];
+    }
+
+    /**
+     * Preflight před prvním setupem — jen kontroly z {@see PREFLIGHT_CHECKS} a
+     * bez naměřených faktů: tenhle report čte i nepřihlášený návštěvník čerstvé
+     * instalace, takže ven jde verdikt a nic víc.
+     *
+     * @return array{
+     *     generated_at:string,
+     *     environment:string,
+     *     summary:array{status:string,ok:int,warn:int,fail:int,skip:int},
+     *     checks:list<array<string,mixed>>
+     * }
+     */
+    public function preflight(): array
+    {
+        $report = $this->report(self::PREFLIGHT_CHECKS);
+        unset($report['facts']);
+
+        $environment = $this->guard(fn () => $this->version->detectEnvironment(), 'native');
+
+        // V kontejneru se PHP ani MariaDB neladí přes php.ini na hostiteli —
+        // odkaz do manuálu proto míří na kapitolu o Dockeru.
+        if ($environment === 'docker') {
+            foreach ($report['checks'] as $i => $check) {
+                if ($check['manual'] === '04_Instalace_Nativni') {
+                    $report['checks'][$i]['manual'] = '03_Instalace_Docker';
+                }
+            }
+        }
+
+        return ['environment' => $environment] + $report;
     }
 
     // ── Sběr faktů ───────────────────────────────────────────────────────────
@@ -400,9 +448,10 @@ final class EnvironmentCheckService
 
     /**
      * @param array<string,mixed> $facts
+     * @param list<string>|null $onlyIds
      * @return list<array<string,mixed>>
      */
-    private function evaluate(array $facts): array
+    private function evaluate(array $facts, ?array $onlyIds = null): array
     {
         $php     = $facts['php'] ?? [];
         $ini     = $php['ini'] ?? [];
@@ -661,20 +710,31 @@ final class EnvironmentCheckService
         );
 
         // --- Verze aplikace ---
-        $status = $this->guard(fn () => $this->version->getStatus(), []);
-        $hasUpdate = !empty($status['has_update']);
-        $checks[] = $this->check(
-            'app_version',
-            $hasUpdate ? self::STATUS_WARN : self::STATUS_OK,
-            (string) ($status['current'] ?? '?'),
-            (string) ($status['latest'] ?? ($status['current'] ?? '?')),
-            '77_Aktualizace',
-            [
-                'current'     => $status['current'] ?? null,
-                'latest'      => $status['latest'] ?? null,
-                'release_url' => $status['release_url'] ?? null,
-            ]
-        );
+        // Sahá na cache aktualizací (a přes ni potenciálně po síti), takže se
+        // vůbec nepočítá, když o ni volající nestojí — třeba v preflightu.
+        if ($onlyIds === null || in_array('app_version', $onlyIds, true)) {
+            $status = $this->guard(fn () => $this->version->getStatus(), []);
+            $hasUpdate = !empty($status['has_update']);
+            $checks[] = $this->check(
+                'app_version',
+                $hasUpdate ? self::STATUS_WARN : self::STATUS_OK,
+                (string) ($status['current'] ?? '?'),
+                (string) ($status['latest'] ?? ($status['current'] ?? '?')),
+                '77_Aktualizace',
+                [
+                    'current'     => $status['current'] ?? null,
+                    'latest'      => $status['latest'] ?? null,
+                    'release_url' => $status['release_url'] ?? null,
+                ]
+            );
+        }
+
+        if ($onlyIds !== null) {
+            $checks = array_values(array_filter(
+                $checks,
+                static fn (array $check): bool => in_array($check['id'], $onlyIds, true),
+            ));
+        }
 
         return $checks;
     }

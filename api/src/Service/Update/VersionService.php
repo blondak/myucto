@@ -41,15 +41,21 @@ final class VersionService
     private const RELEASES_API = 'https://api.github.com/repos/radekhulan/myucto/releases/latest';
     private const HTTP_TIMEOUT = 10;
 
-    private readonly PDO $db;
     private readonly string $rootDir;
 
     public function __construct(
-        Connection $connection,
+        // Spojení se drží, ale NENAVAZUJE se v konstruktoru: službu si vyzvedne
+        // i diagnostika běžící právě proto, že je databáze nedostupná. Sáhnout
+        // po PDO už při sestavení by z „DB neodpovídá" udělalo pád celé odpovědi.
+        private readonly Connection $connection,
         private readonly NativeUpdateService $native,
     ) {
-        $this->db      = $connection->pdo();
         $this->rootDir = Bootstrap::rootDir();
+    }
+
+    private function db(): PDO
+    {
+        return $this->connection->pdo();
     }
 
     public function getCurrentVersion(): string
@@ -479,7 +485,7 @@ final class VersionService
 
     private function loadCache(): array
     {
-        $stmt = $this->db->prepare('SELECT k, v FROM app_meta WHERE k IN ('
+        $stmt = $this->db()->prepare('SELECT k, v FROM app_meta WHERE k IN ('
             . implode(',', array_fill(0, count(self::META_KEYS), '?'))
             . ')');
         $stmt->execute(self::META_KEYS);
@@ -493,7 +499,7 @@ final class VersionService
     /** @param array<string,string> $kv */
     private function saveCache(array $kv): void
     {
-        $stmt = $this->db->prepare(
+        $stmt = $this->db()->prepare(
             'INSERT INTO app_meta (k, v) VALUES (?, ?) '
             . 'ON DUPLICATE KEY UPDATE v = VALUES(v)'
         );

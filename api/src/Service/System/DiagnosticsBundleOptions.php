@@ -7,9 +7,11 @@ namespace MyInvoice\Service\System;
 /**
  * Rozsah diagnostického balíčku zvolený uživatelem.
  *
- * Logy jsou jediná položka, která je ve výchozím stavu VYPNUTÁ — jsou to
- * jediná část balíčku, která může nést osobní údaje třetích osob, takže musí
- * být vědomou volbou, ne něčím, co uživateli projde pod rukama.
+ * Logy jsou jediná část balíčku, která může nést osobní údaje třetích osob,
+ * takže tady zůstávají fail-closed: požadavek, který `include_logs` neposlal,
+ * je nikdy nezapne. Že je stránka Diagnostiky předškrtává, na tom nic nemění —
+ * uživatel je tam vidí zaškrtnuté, může je odškrtnout a jejich obsah navíc
+ * potvrzuje zvlášť.
  */
 final class DiagnosticsBundleOptions
 {

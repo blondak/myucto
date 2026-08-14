@@ -14,7 +14,7 @@ final class RoutePermissionMap
     /** @var list<string> */
     private const PUBLIC_PATHS = [
         '/api/health', '/api/version', '/api/openapi.yaml', '/api/docs', '/api/reference', '/api/scalar',
-        '/api/auth/setup-status', '/api/auth/setup', '/api/auth/setup-ares-lookup',
+        '/api/auth/setup-status', '/api/auth/setup-preflight', '/api/auth/setup', '/api/auth/setup-ares-lookup',
         '/api/auth/setup-crpdph-lookup', '/api/auth/login',
         '/api/auth/webauthn/login/options', '/api/auth/webauthn/login/verify',
         '/api/auth/forgot', '/api/auth/reset', '/api/csrf-token',

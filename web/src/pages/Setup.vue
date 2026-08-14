@@ -5,14 +5,22 @@ import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
 import AppShell from '@/components/layout/AppShell.vue'
+import EnvironmentCheckList from '@/components/system/EnvironmentCheckList.vue'
 import { useAuthStore } from '@/stores/auth'
 import { authApi, type SetupPayload, type SetupSampleResult } from '@/api/auth'
+import { diagnosticsApi, type PreflightReport } from '@/api/diagnostics'
 import { bankNameByCode, isKnownBankName } from '@/utils/czBankCodes'
 
 const router = useRouter()
 const auth = useAuthStore()
 
-const step = ref<1 | 2 | 3>(1)
+// Krok 0 = kontrola prostředí. Zobrazí se jako první obrazovka jen tehdy, když
+// je co řešit — na vyhovujícím prostředí wizard rovnou začíná adminem.
+const step = ref<0 | 1 | 2 | 3>(1)
+const preflight = ref<PreflightReport | null>(null)
+const preflightLoading = ref(false)
+const preflightFailed = ref(false)
+const preflightDismissed = ref(false)
 const submitting = ref(false)
 const error = ref('')
 const fieldErrors = ref<Record<string, string[]>>({})
@@ -177,10 +185,49 @@ const adminValid = computed(
 // stejnou podmínku ověřuje znovu (SetupAction), tohle je jen UI brána.
 const step1Valid = computed(() => adminValid.value && termsAccepted.value)
 
+/** Blokující nálezy — s nimi setup nemá smysl začínat. */
+const preflightBlocking = computed(() => (preflight.value?.summary.fail ?? 0) > 0)
+const preflightProblems = computed(
+  () => (preflight.value?.summary.fail ?? 0) + (preflight.value?.summary.warn ?? 0),
+)
+
+async function loadPreflight() {
+  preflightLoading.value = true
+  preflightFailed.value = false
+  try {
+    preflight.value = await diagnosticsApi.preflight()
+  } catch {
+    // Nedostupná kontrola prostředí nesmí zabránit instalaci — wizard jen ztratí
+    // varování dopředu. Uživatel se o stavu dozví v Systém → Diagnostika.
+    preflight.value = null
+    preflightFailed.value = true
+  } finally {
+    preflightLoading.value = false
+  }
+}
+
+/** Znovu po nápravě. Když je čisto, pustí rovnou na první krok wizardu. */
+async function recheckPreflight() {
+  await loadPreflight()
+  if (preflight.value && preflight.value.summary.status === 'ok') {
+    step.value = 1
+  }
+}
+
+function continueFromPreflight() {
+  preflightDismissed.value = true
+  step.value = 1
+}
+
 onMounted(async () => {
   await auth.fetchSetupStatus()
   if (!auth.needsSetup) {
     router.replace('/login')
+    return
+  }
+  await loadPreflight()
+  if (preflight.value && preflight.value.summary.status !== 'ok') {
+    step.value = 0
   }
 })
 
@@ -293,13 +340,76 @@ async function submit() {
   <AppShell :title="t('setup.title')">
     <div class="w-full max-w-xl">
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-6">
+        <!-- Krok 0: kontrola prostředí (jen když je co řešit) -->
+        <div v-if="step === 0">
+          <h2 class="text-xl font-semibold mb-1">{{ t('setup.preflight.title') }}</h2>
+          <p class="text-sm text-neutral-500 mb-4">
+            {{ preflightBlocking ? t('setup.preflight.subtitle_fail') : t('setup.preflight.subtitle_warn') }}
+          </p>
+
+          <div
+            v-if="preflightBlocking"
+            class="mb-4 rounded-md border border-danger-500/40 bg-danger-50 px-3 py-2 text-sm text-danger-600"
+          >
+            {{ t('setup.preflight.blocking_hint') }}
+          </div>
+
+          <div
+            v-if="preflight?.environment === 'docker'"
+            class="mb-4 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-600"
+          >
+            {{ t('setup.preflight.docker_hint') }}
+          </div>
+
+          <EnvironmentCheckList v-if="preflight" :checks="preflight.checks" problems-only />
+
+          <div class="flex flex-wrap items-center gap-3 mt-6">
+            <button
+              type="button"
+              :disabled="preflightLoading"
+              class="cursor-pointer h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md"
+              @click="recheckPreflight"
+            >
+              {{ preflightLoading ? t('diagnostics.refreshing') : t('setup.preflight.recheck') }}
+            </button>
+            <button
+              type="button"
+              class="cursor-pointer h-10 px-4 border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50"
+              @click="continueFromPreflight"
+            >
+              {{ preflightBlocking ? t('setup.preflight.continue_anyway') : t('setup.preflight.continue') }}
+            </button>
+          </div>
+        </div>
+
         <!-- Progress -->
-        <div class="flex items-center mb-6 text-sm">
+        <div v-if="step > 0" class="flex items-center mb-6 text-sm">
           <span :class="step >= 1 ? 'text-primary-600 font-medium' : 'text-neutral-400'">1. {{ t('setup.step_admin') }}</span>
           <div class="flex-1 h-px bg-neutral-200 mx-3"></div>
           <span :class="step >= 2 ? 'text-primary-600 font-medium' : 'text-neutral-400'">2. {{ t('settings.supplier') }}</span>
           <div class="flex-1 h-px bg-neutral-200 mx-3"></div>
           <span :class="step >= 3 ? 'text-primary-600 font-medium' : 'text-neutral-400'">3. {{ t('common.success') }}</span>
+        </div>
+
+        <!-- Nedořešené prostředí připomínáme po celý zbytek wizardu -->
+        <div
+          v-if="step > 0 && preflightDismissed && preflightProblems > 0"
+          class="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
+          :class="preflightBlocking
+            ? 'border-danger-500/40 bg-danger-50 text-danger-600'
+            : 'border-warning-300 bg-warning-50 text-warning-800'"
+        >
+          <span>{{ t('setup.preflight.reminder', { n: preflightProblems }) }}</span>
+          <button type="button" class="cursor-pointer underline shrink-0" @click="step = 0">
+            {{ t('setup.preflight.show') }}
+          </button>
+        </div>
+
+        <div
+          v-if="step === 1 && preflightFailed"
+          class="mb-5 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-600"
+        >
+          {{ t('setup.preflight.unavailable') }}
         </div>
 
         <!-- Step 1 -->
@@ -348,26 +458,38 @@ async function submit() {
               </p>
             </div>
 
-            <div class="pt-2 border-t border-neutral-200">
+            <!-- Souhlas je jediná povinnost kroku, která není pole formuláře —
+                 dokud chybí, drží si výrazný rám v barvě akce, ať je vidět, co
+                 blokuje tlačítko Další. Žlutá se sem nehodí: tu má o kus výš
+                 kontrola prostředí a znamenala by „něco je špatně“, ne „potvrď“.
+                 Po zaškrtnutí zezelená a přestane na sebe upozorňovat. -->
+            <div
+              class="rounded-md border-2 p-3 transition-colors"
+              :class="termsAccepted
+                ? 'border-success-300 bg-success-50/60'
+                : 'border-primary-500 bg-primary-50'"
+            >
               <label class="flex items-start gap-3 cursor-pointer">
                 <input
                   v-model="termsAccepted"
                   type="checkbox"
                   required
-                  class="mt-1 h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
+                  class="mt-0.5 h-5 w-5 rounded border-neutral-400 text-primary-600 focus:ring-primary-500"
                 />
                 <span class="text-sm">
-                  <span class="font-medium text-neutral-800">
-                    {{ t('setup.terms_label') }} <span class="text-danger-500">*</span>
+                  <!-- Bez hvězdičky: povinnost je zřejmá z rámu i z hlášky pod
+                       ním a na užším okně kvůli ní text padal na další řádek. -->
+                  <span class="font-semibold text-neutral-900">
+                    {{ t('setup.terms_label') }}
                   </span>
-                  <span class="block text-xs text-neutral-500 mt-0.5">
-                    <a href="https://myucto.cz/licence" target="_blank" rel="noopener" class="text-primary-600 hover:underline">{{ t('setup.terms_licence') }}</a>
-                    <span class="mx-1">·</span>
-                    <a href="https://myucto.cz/obchodni-podminky" target="_blank" rel="noopener" class="text-primary-600 hover:underline">{{ t('setup.terms_conditions') }}</a>
+                  <span class="block text-xs mt-0.5">
+                    <a href="https://myucto.cz/licence" target="_blank" rel="noopener" class="text-primary-700 underline hover:text-primary-800">{{ t('setup.terms_licence') }}</a>
+                    <span class="mx-1 text-neutral-500">·</span>
+                    <a href="https://myucto.cz/obchodni-podminky" target="_blank" rel="noopener" class="text-primary-700 underline hover:text-primary-800">{{ t('setup.terms_conditions') }}</a>
                   </span>
                 </span>
               </label>
-              <p v-if="!termsAccepted" class="mt-2 ml-7 text-xs text-neutral-500">
+              <p v-if="!termsAccepted" class="mt-2 ml-8 text-xs font-medium text-primary-800">
                 {{ t('setup.terms_required') }}
               </p>
             </div>

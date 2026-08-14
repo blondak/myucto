@@ -108,6 +108,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Service/Payroll/Posting/PayrollPostingLineBuilder.php',
     '*/api/src/Service/Pdf/InvoicePdfRenderer.php',
     '*/api/src/Service/Signing/Pdf/PdfSigningService.php',
+    '*/api/src/Service/System/EnvironmentCheckService.php',
     '*/api/src/Service/Tenant/SupplierAccessResolver.php',
     '*/api/src/Service/Update/VersionService.php',
 ]);

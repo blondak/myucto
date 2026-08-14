@@ -29,6 +29,18 @@ export interface DiagnosticsReport {
   facts: Record<string, any>
 }
 
+/**
+ * Audit prostředí před prvním setupem. Oproti `DiagnosticsReport` nenese
+ * naměřená fakta (endpoint je na neinicializované instalaci veřejný) a přidává
+ * druh instalace, aby šlo poradit nápravu pro Docker i nativní běh.
+ */
+export interface PreflightReport {
+  generated_at: string
+  environment: 'docker' | 'native' | string
+  summary: DiagnosticsSummary
+  checks: DiagnosticCheck[]
+}
+
 /** Rozsah balíčku. `include_logs` je vždy vědomá volba uživatele. */
 export interface BundleOptions {
   include_version?: boolean
@@ -79,6 +91,13 @@ export interface LogPreview {
 }
 
 export const diagnosticsApi = {
+  /**
+   * Kontrola prostředí před prvním setupem. Veřejná, ale jen dokud instalace
+   * nemá admina — po setupu vrací 409 a platí `report()`.
+   */
+  preflight: (signal?: AbortSignal) =>
+    api.get<PreflightReport>('/auth/setup-preflight', { signal }).then((r) => r.data),
+
   /** Systém → Diagnostika: audit prostředí s verdiktem. */
   report: (signal?: AbortSignal) =>
     api.get<DiagnosticsReport>('/admin/diagnostics', { signal }).then((r) => r.data),

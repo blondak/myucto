@@ -44,6 +44,7 @@ final class AuthMiddleware implements MiddlewareInterface
         '/api/reference',
         '/api/scalar',
         '/api/auth/setup-status',
+        '/api/auth/setup-preflight',
         '/api/auth/setup',
         '/api/auth/setup-ares-lookup',
         '/api/auth/setup-crpdph-lookup',

@@ -479,6 +479,7 @@
         "updates": "Aktualizace",
         "diagnostics": "Diagnostika",
         "support": "Podpora",
+        "manual": "Nápověda (manuál)",
         "api_tokens": "API tokeny",
         "electronic_signatures": "Elektronické podpisy",
         "signing_profiles": "Podpisové profily",
@@ -10199,13 +10200,13 @@
         "accounting_enabled": {
             "title": "Vést účetnictví",
             "label": "Vést účetnictví",
-            "hint": "Zpřístupní účetní deník, hlavní knihu, výkazy, majetek a uzávěrku. Vypnuté je z menu schová — fakturace, mzdy, DPH přiznání, kontrolní hlášení i sklad fungují dál. Na licenci to nemá vliv: licencují se všechny firmy i uživatelé bez ohledu na toto nastavení.",
+            "hint": "Zpřístupní účetní deník, hlavní knihu, výkazy, majetek a uzávěrku — a v režimu daňové evidence peněžní deník a přehled pohledávek a závazků. Vypnuté je z menu schová; fakturace, klienti, banka, DPH přiznání i kontrolní hlášení fungují dál. Počet licencovaných firem a uživatelů se tímto přepínačem nemění.",
             "off_note": "Účetní sekce zmizí z menu po uložení. Data se nemažou — po zapnutí se vrátí i s historií."
         },
         "payroll_enabled": {
             "title": "Vést mzdy",
             "label": "Vést mzdy",
-            "hint": "Zpřístupní samostatný mzdový modul pro tuto firmu v obou účetních režimech. Nastavení je ve výchozím stavu vypnuté a není vázané na licenci.",
+            "hint": "Zpřístupní samostatný mzdový modul pro tuto firmu v obou účetních režimech. Ve výchozím stavu je vypnutý.",
             "alpha_warning": "Mzdový modul je zatím TESTOVACÍ ALFA VERZE a v žádném případě se nehodí pro produkční použití. Nespoléhejte na výpočty mezd, odvodů ani na podání pro ČSSZ, zdravotní pojišťovny a finanční úřad — ověřujte je proti jinému zdroji.",
             "off_note": "Mzdy zmizí z menu po uložení. Mzdová data se nemažou a po opětovném zapnutí zůstanou dostupná."
         },
@@ -10291,7 +10292,13 @@
         "cz_nace_no_results": "Žádná činnost neodpovídá",
         "cz_nace_expired": "Kód {code} k {date} skončil platnost (číselník přešel na NACE rev. 2.1). Podání projde, ale portál na to upozorní — vyber prosím nástupce.",
         "cz_nace_unknown": "Kód {code} v aktuálním číselníku není. Podání projde, ale portál na to upozorní.",
-        "numbering_scope_revenue_category": "kategorie tržby"
+        "numbering_scope_revenue_category": "kategorie tržby",
+        "licensed_modules": {
+            "title": "Licenční moduly",
+            "hint": "Účetnictví, mzdy, sklad i OSS jsou placené moduly MyÚčto. Prvních 60 dní (dva měsíce) je máte zdarma, potom je bez platné licence aplikace nezpřístupní — fakturace, klienti, banka, dokumenty, DPH přiznání a kontrolní hlášení fungují dál zdarma.",
+            "trial_left": "Zkušební období končí za {days} dní.",
+            "expired": "Zkušební období skončilo — moduly jsou uzamčené, dokud licenci nezakoupíte."
+        }
     },
     "oss_rates": {
         "hint": "Sazby DPH členských států, proti kterým se ověřují OSS doklady. Je to kontrolní číselník, ne sazby pro doklad — ty se zakládají v Sazbách DPH.",
@@ -10709,7 +10716,10 @@
     "template_tools": {
         "journal": "Šablony zápisů",
         "expense": "Pravidla nákladů",
-        "posting": "Pravidla účtování"
+        "posting": "Pravidla účtování",
+        "requires_double_entry": "Šablony jsou k účtování do deníku",
+        "requires_double_entry_hint": "Předkontace, pravidla nákladů i zaúčtování banky se používají při účtování do deníku, takže v daňové evidenci nemají co nabídnout. Firma vede daňovou evidenci.",
+        "open_accounting_settings": "Otevřít Nastavení → Daně a účetnictví"
     },
     "bank_template_admin": {
         "title": "Šablony bankovních pravidel",
@@ -12394,7 +12404,20 @@
         "terms_label": "Přijímám licenční ujednání a obchodní podmínky produktu MyÚčto.cz",
         "terms_licence": "Licenční ujednání",
         "terms_conditions": "Obchodní podmínky",
-        "terms_required": "Bez přijetí licence a obchodních podmínek nelze v nastavení pokračovat."
+        "terms_required": "Bez přijetí licence a obchodních podmínek nelze v nastavení pokračovat.",
+        "preflight": {
+            "title": "Kontrola prostředí",
+            "subtitle_fail": "Než založíte účet, opravte prosím tohle. Bez nápravy instalace nedoběhne nebo se rozbije při prvním použití.",
+            "subtitle_warn": "Prostředí je použitelné, ale s výhradami. Setup můžete dokončit i tak.",
+            "blocking_hint": "Tohle je potřeba opravit před instalací — aplikace by s tím nefungovala správně.",
+            "docker_hint": "Instalace běží v Dockeru: PHP i MariaDB se ladí v image a v docker-compose.yml, ne v php.ini na hostiteli.",
+            "recheck": "Zkontrolovat znovu",
+            "continue": "Pokračovat na setup",
+            "continue_anyway": "Pokračovat i přesto",
+            "reminder": "Kontrola prostředí našla {n} věcí k opravě.",
+            "show": "Zobrazit",
+            "unavailable": "Kontrolu prostředí se nepodařilo spustit. Setup tím není blokovaný — stav prostředí najdete po přihlášení v Systém → Diagnostika."
+        }
     },
     "mfa_setup": {
         "title": "Nastavení vícefaktorového ověření",
@@ -13664,12 +13687,16 @@
             "php_extensions": {
                 "label": "Povinná rozšíření PHP",
                 "impact": "Bez některého z povinných rozšíření přestanou fungovat celé oblasti — zálohy, exporty, PDF nebo výpočty cen.",
-                "fix": "Doinstalujte chybějící rozšíření a restartujte PHP."
+                "fix": "Doinstalujte chybějící rozšíření a restartujte PHP.",
+                "actual_label": "Chybí",
+                "expected_label": "Kontrolováno"
             },
             "php_extensions_optional": {
                 "label": "Volitelná rozšíření PHP",
                 "impact": "Chybějící volitelné rozšíření aplikaci nezastaví, jen se použije pomalejší nebo omezená náhradní cesta.",
-                "fix": "Doinstalujte rozšíření, pokud chcete plný výkon a všechny náhradní cesty vypnout."
+                "fix": "Doinstalujte rozšíření, pokud chcete plný výkon a všechny náhradní cesty vypnout.",
+                "actual_label": "Chybí",
+                "expected_label": "Kontrolováno"
             },
             "memory_limit": {
                 "label": "Paměťový limit PHP",
@@ -13739,17 +13766,23 @@
             "writable_paths": {
                 "label": "Práva zápisu",
                 "impact": "Bez práva zápisu nevzniknou dokumenty, zálohy ani cache — často se to projeví až chybou při ukládání.",
-                "fix": "Nastavte zápis pro uživatele, pod kterým běží webový server."
+                "fix": "Nastavte zápis pro uživatele, pod kterým běží webový server.",
+                "actual_label": "Bez práva zápisu",
+                "expected_label": "Kontrolováno"
             },
             "migrations_pending": {
                 "label": "Databázové migrace",
                 "impact": "Nedoběhlá migrace je nejčastější příčina hlášek o chybějící tabulce nebo sloupci.",
-                "fix": "Spusťte php api/bin/migrate.php."
+                "fix": "Spusťte php api/bin/migrate.php.",
+                "actual_label": "Nespuštěných migrací",
+                "expected_label": "Očekáváno"
             },
             "cron_health": {
                 "label": "Plánované úlohy",
                 "impact": "Bez cronu nevznikají zálohy, neodcházejí upomínky a nestahují se kurzy ČNB.",
-                "fix": "Zkontrolujte naplánování úloh a jejich poslední běh na stránce Plánované úlohy."
+                "fix": "Zkontrolujte naplánování úloh a jejich poslední běh na stránce Plánované úlohy.",
+                "actual_label": "Zaseklé úlohy",
+                "expected_label": "Očekáváno"
             },
             "app_debug": {
                 "label": "Ladicí režim",

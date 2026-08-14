@@ -479,6 +479,7 @@
         "updates": "Updates",
         "diagnostics": "Diagnostics",
         "support": "Support",
+        "manual": "Help (manual)",
         "api_tokens": "API tokens",
         "electronic_signatures": "Electronic signatures",
         "signing_profiles": "Signing profiles",
@@ -10199,13 +10200,13 @@
         "accounting_enabled": {
             "title": "Keep accounting records",
             "label": "Keep accounting records",
-            "hint": "Enables the journal, general ledger, statements, assets and year-end closing. Turning it off hides them from the menu — invoicing, payroll, VAT returns, control statements and stock keep working. It has no effect on licensing: every company and user is licensed regardless of this setting.",
+            "hint": "Enables the journal, general ledger, statements, assets and year-end closing — and in tax evidence mode the cash journal and the receivables/payables overview. Turning it off hides them from the menu; invoicing, clients, bank, VAT returns and control statements keep working. The number of licensed companies and users does not change with this switch.",
             "off_note": "The accounting sections disappear from the menu once saved. Nothing is deleted — turning it back on restores everything including history."
         },
         "payroll_enabled": {
             "title": "Run payroll",
             "label": "Run payroll",
-            "hint": "Enables the standalone payroll module for this company in either accounting mode. It is disabled by default and is not tied to licensing.",
+            "hint": "Enables the standalone payroll module for this company in either accounting mode. It is disabled by default.",
             "alpha_warning": "The payroll module is still a TESTING ALPHA and is by no means suitable for production use. Do not rely on its pay, contribution or filing calculations for social security, health insurance or the tax office — verify them against another source.",
             "off_note": "Payroll disappears from the menu after saving. Payroll data is not deleted and remains available when enabled again."
         },
@@ -10291,7 +10292,13 @@
         "cz_nace_no_results": "No matching activity",
         "cz_nace_expired": "Code {code} expired on {date} (the codebook moved to NACE rev. 2.1). Filing still goes through, but the portal will flag it — please pick a successor.",
         "cz_nace_unknown": "Code {code} is not in the current codebook. Filing still goes through, but the portal will flag it.",
-        "numbering_scope_revenue_category": "revenue category"
+        "numbering_scope_revenue_category": "revenue category",
+        "licensed_modules": {
+            "title": "Licensed modules",
+            "hint": "Accounting, payroll, stock and OSS are paid MyÚčto modules. The first 60 days (two months) are free; after that a valid licence is required — invoicing, clients, bank, documents, VAT returns and control statements keep working for free.",
+            "trial_left": "The trial ends in {days} days.",
+            "expired": "The trial has ended — the modules stay locked until you buy a licence."
+        }
     },
     "oss_rates": {
         "hint": "VAT rates of EU member states used to verify OSS documents. This is a control codebook, not the rates used on documents — those live under VAT rates.",
@@ -10709,7 +10716,10 @@
     "template_tools": {
         "journal": "Entry templates",
         "expense": "Expense rules",
-        "posting": "Posting rules"
+        "posting": "Posting rules",
+        "requires_double_entry": "Templates belong to journal posting",
+        "requires_double_entry_hint": "Posting templates, expense rules and bank posting rules are used when posting to the journal, so they have nothing to offer in tax evidence. This company keeps tax evidence.",
+        "open_accounting_settings": "Open Settings → Taxes and accounting"
     },
     "bank_template_admin": {
         "title": "Bank rule templates",
@@ -12394,7 +12404,20 @@
         "terms_label": "I accept the licence agreement and the terms and conditions of MyÚčto.cz",
         "terms_licence": "Licence agreement",
         "terms_conditions": "Terms and conditions",
-        "terms_required": "You cannot continue with the setup without accepting the licence and the terms and conditions."
+        "terms_required": "You cannot continue with the setup without accepting the licence and the terms and conditions.",
+        "preflight": {
+            "title": "Environment check",
+            "subtitle_fail": "Please fix the following before you create the account. Without it the installation will not finish or will break on first use.",
+            "subtitle_warn": "The environment is usable, with reservations. You can finish the setup anyway.",
+            "blocking_hint": "This has to be fixed before installing — the application would not work correctly.",
+            "docker_hint": "This installation runs in Docker: PHP and MariaDB are tuned in the image and in docker-compose.yml, not in php.ini on the host.",
+            "recheck": "Check again",
+            "continue": "Continue to setup",
+            "continue_anyway": "Continue anyway",
+            "reminder": "The environment check found {n} things to fix.",
+            "show": "Show",
+            "unavailable": "The environment check could not be run. This does not block the setup — you will find the environment status under System → Diagnostics after signing in."
+        }
     },
     "mfa_setup": {
         "title": "Set up multi-factor authentication",
@@ -13664,12 +13687,16 @@
             "php_extensions": {
                 "label": "Required PHP extensions",
                 "impact": "Without a required extension whole areas stop working — backups, exports, PDFs or price calculations.",
-                "fix": "Install the missing extensions and restart PHP."
+                "fix": "Install the missing extensions and restart PHP.",
+                "actual_label": "Missing",
+                "expected_label": "Checked"
             },
             "php_extensions_optional": {
                 "label": "Optional PHP extensions",
                 "impact": "A missing optional extension will not stop the application, it only falls back to a slower or more limited path.",
-                "fix": "Install the extension if you want full performance and no fallbacks."
+                "fix": "Install the extension if you want full performance and no fallbacks.",
+                "actual_label": "Missing",
+                "expected_label": "Checked"
             },
             "memory_limit": {
                 "label": "PHP memory limit",
@@ -13739,17 +13766,23 @@
             "writable_paths": {
                 "label": "Write permissions",
                 "impact": "Without write access no documents, backups or caches are created — this usually shows up only as a save error.",
-                "fix": "Grant write access to the user the web server runs as."
+                "fix": "Grant write access to the user the web server runs as.",
+                "actual_label": "Not writable",
+                "expected_label": "Checked"
             },
             "migrations_pending": {
                 "label": "Database migrations",
                 "impact": "A migration that never ran is the most common cause of missing table or column errors.",
-                "fix": "Run php api/bin/migrate.php."
+                "fix": "Run php api/bin/migrate.php.",
+                "actual_label": "Pending migrations",
+                "expected_label": "Expected"
             },
             "cron_health": {
                 "label": "Scheduled jobs",
                 "impact": "Without cron there are no backups, no reminders go out and exchange rates are not fetched.",
-                "fix": "Check the schedule and the last run on the Scheduled jobs page."
+                "fix": "Check the schedule and the last run on the Scheduled jobs page.",
+                "actual_label": "Stale jobs",
+                "expected_label": "Expected"
             },
             "app_debug": {
                 "label": "Debug mode",
