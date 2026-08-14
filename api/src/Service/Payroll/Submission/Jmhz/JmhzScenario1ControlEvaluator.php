@@ -54,8 +54,9 @@ final class JmhzScenario1ControlEvaluator
         // kterou jsme se nikdy nemohli podívat.
         133 => 'Zaměstnání malého rozsahu (10243) nemá ve slovníku 1.4.1.6'
             . ' mapování na XSD, takže se z podání nedá přečíst.',
-        143 => 'Tvar variabilního symbolu vynucuje serializér; shodu s registrem'
-            . ' zaměstnavatelů ČSSZ lokálně ověřit nelze.',
+        143 => 'Katalog uvádí jen „standardní kontrola tvaru VS" bez algoritmu,'
+            . ' takže by se musel uhodnout; shodu s registrem zaměstnavatelů'
+            . ' ČSSZ navíc lokálně ověřit nelze.',
         164 => 'Lhůta splatnosti se odvozuje od data přijetí podání (10006),'
             . ' které přiděluje až ČSSZ.',
         217 => 'Odkaz na GUID jiného podání ověří jen evidence ČSSZ.',
@@ -74,8 +75,9 @@ final class JmhzScenario1ControlEvaluator
             . ' který první profil nevykazuje.',
         243 => 'Rozlišení rezidenta a nerezidenta stojí na atributu 10068,'
             . ' který první profil nevykazuje.',
-        245 => 'Prahy pro srážkovou daň se počítají přes druh činnosti (10239)'
-            . ' napříč všemi mzdovými účtárnami zaměstnavatele.',
+        245 => 'Kontrola platí jen pro zaměstnavatele s jedinou mzdovou účtárnou'
+            . ' a prahy se počítají podle druhu činnosti (10239); ani jedno'
+            . ' z jednoho podání zjistit nelze.',
         261 => 'Shodu ID PPV a variabilního symbolu drží evidence ČSSZ.',
         262 => 'Existenci ID PPV ověřuje pouze registr ČSSZ.',
         263 => 'Existenci IK MPSV ověřuje pouze registr ČSSZ.',
@@ -96,8 +98,8 @@ final class JmhzScenario1ControlEvaluator
         321 => 'Pozitivní výčet povinných atributů souhrnné vrstvy je v katalogu'
             . ' popsaný odkazem na oblast, ne výčtem; bez doloženého seznamu by'
             . ' šlo o odhad.',
-        325 => 'Prahy pro zálohovou daň se počítají přes druh činnosti (10239)'
-            . ' napříč všemi mzdovými účtárnami zaměstnavatele.',
+        325 => 'Prahy pro zálohovou daň se počítají podle druhu činnosti (10239),'
+            . ' který první profil nevykazuje.',
         326 => 'Jedinečnost řádného podání za období se rozhoduje nad evidencí'
             . ' podání, ne nad obsahem jednoho XML.',
         333 => 'Časové omezení slevy se odvozuje od data přijetí podání (10006),'
@@ -346,7 +348,7 @@ final class JmhzScenario1ControlEvaluator
             341, 342 => $this->schemaValidated($context),
             244 => $this->noCreditsWithoutDeclaration($projection),
             248 => $this->summaryDataOnlyOnPrimary($projection),
-            251 => $this->employmentIdentifierUnique($projection),
+            251 => $this->employmentIdentifierUniqueAcrossReport($projection),
             267 => $this->wageBreakdownEmptyWhenWageZero($projection),
             282 => $this->riskyHoursEmptyWhenNoWorkedHours($projection),
             283 => $this->incomeBreakdownEmptyWhenIncomeZero($projection),
@@ -652,7 +654,18 @@ final class JmhzScenario1ControlEvaluator
             }
         }
         if ($bases === []) {
-            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
+            // Katalog žádá, aby atributy BYLY vyplněny. Pojistná část bez
+            // jediného vyměřovacího základu tedy pravidlo porušuje; „nedopadá"
+            // by z povinnosti udělalo možnost.
+            if ($pvpoj->attributeIds() === []) {
+                return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
+            }
+
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_PVPOJ,
+                null,
+                'Pojistná část neuvádí ani jeden vyměřovací základ zaměstnavatele.',
+            )];
         }
         $positive = array_filter($bases, static fn (int $value): bool => $value > 0);
         $allZero = array_filter($bases, static fn (int $value): bool => $value !== 0) === [];
@@ -1283,6 +1296,28 @@ final class JmhzScenario1ControlEvaluator
         }
 
         return $verdicts;
+    }
+
+    /**
+     * Kontrola 253 měří jedinečnost v dílčím podání, kontrola 251 v celém
+     * měsíčním hlášení. Rozdíl je vidět až u děleného podání — nad více balíky
+     * jedno XML na odpověď nestačí a rozhodne až ČSSZ.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function employmentIdentifierUniqueAcrossReport(
+        JmhzAttributeProjection $projection,
+    ): array {
+        $packages = $projection->submission()->integer('10003');
+        if ($packages !== null && $packages > 1) {
+            return [JmhzControlVerdict::notEvaluable(
+                JmhzAttributeProjection::PART_FORM,
+                'Hlášení je dělené do více balíků; jedinečnost ID PPV napříč nimi'
+                    . ' vidí až ČSSZ.',
+            )];
+        }
+
+        return $this->employmentIdentifierUnique($projection);
     }
 
     /** @return list<JmhzControlVerdict> */
