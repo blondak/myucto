@@ -5631,31 +5631,89 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: year,   required: true, schema: { type: integer, minimum: 2020, maximum: 2050 } }
-        - { in: query, name: month,  schema: { type: integer, minimum: 1, maximum: 12 }, description: 'Pro měsíční periodu' }
-        - { in: query, name: quarter, schema: { type: integer, minimum: 1, maximum: 4 }, description: 'Pro kvartální periodu' }
+        - { in: query, name: month,  schema: { type: integer, minimum: 1, maximum: 12 }, description: 'Měsíc období; u kvartálu poslední měsíc čtvrtletí. Default = aktuální měsíc.' }
+        - in: query
+          name: period
+          schema: { type: string, enum: [monthly, quarterly] }
+          description: 'Zdaňovací období. Neuvedené (nebo neznámé) = odvodí se z nastavení plátce.'
+        - in: query
+          name: variant
+          schema: { type: string, enum: [radne, opravne, dodatecne, dodatecne_opravne], default: radne }
+          description: 'Typ přiznání. Neplatná hodnota → 400 `validation_failed`.'
+        - in: query
+          name: d_zjist
+          schema: { type: string, format: date }
+          description: 'Datum zjištění důvodů pro dodatečné přiznání (§ 141 DŘ).'
       responses:
         '200':
           description: JSON summary (lines 1-29 + 40+, totals, deadline)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DphPriznaniPreview' }
-        '403': { description: Pouze admin/accountant }
+        '400':
+          description: "Neplatný rok/měsíc nebo typ přiznání (`validation_failed`)"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403': { description: Nedostatečné oprávnění (`reports` ke čtení) }
+        '500':
+          description: "Sestavení přiznání selhalo (`build_failed`)"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/reports/dphdp3:
     get:
       tags: [Reports]
       summary: Stáhne XML DPH přiznání (DPHDP3 verzePis 03.01) pro EPO portál
+      description: |
+        Před stažením se řádné přiznání porovná s kontrolním a souhrnným hlášením
+        a s obratem účtu 343. **Blokující rozdíl vrátí `409 vat_cross_check_mismatch`** —
+        buď rozdíly srovnejte, nebo stáhněte znovu s `acknowledge_mismatch=1`
+        (potvrzení se zaloguje). Dodatečná přiznání (`dodatecne`, `dodatecne_opravne`)
+        vykazují jen rozdíly, takže se na ně smír neaplikuje.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: query, name: year, required: true, schema: { type: integer } }
-        - { in: query, name: month, schema: { type: integer } }
-        - { in: query, name: quarter, schema: { type: integer } }
+        - { in: query, name: year, required: true, schema: { type: integer, minimum: 2020, maximum: 2050 } }
+        - { in: query, name: month, schema: { type: integer, minimum: 1, maximum: 12 }, description: 'Měsíc období; u kvartálu poslední měsíc čtvrtletí. Default = aktuální měsíc.' }
+        - in: query
+          name: period
+          schema: { type: string, enum: [monthly, quarterly] }
+          description: 'Zdaňovací období. Neuvedené = odvodí se z nastavení plátce.'
+        - in: query
+          name: variant
+          schema: { type: string, enum: [radne, opravne, dodatecne, dodatecne_opravne], default: radne }
+        - in: query
+          name: d_zjist
+          schema: { type: string, format: date }
+          description: 'Datum zjištění důvodů pro dodatečné přiznání (§ 141 DŘ).'
+        - in: query
+          name: acknowledge_mismatch
+          schema: { type: string, enum: ['1', 'true'] }
+          description: 'Potvrzení, že rozdíly proti KH/SH/343 znáte — obejde blokující 409.'
       responses:
         '200':
           description: XML download
           content:
             application/xml: {}
-        '403': { description: Pouze admin/accountant }
+        '400':
+          description: "Neplatný rok/měsíc nebo typ přiznání (`validation_failed`)"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403': { description: Nedostatečné oprávnění (`reports` ke čtení) }
+        '409':
+          description: |
+            Přiznání se rozchází s kontrolním/souhrnným hlášením nebo obratem účtu 343
+            (`vat_cross_check_mismatch`). Opakujte s `acknowledge_mismatch=1`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: "Sestavení přiznání selhalo (`build_failed`)"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/reports/dphkh1/preview:
     get:
@@ -8184,10 +8242,26 @@ paths:
               type: object
               required: [status, row_version]
               properties:
-                status: { type: string, enum: [open, closing, closed, approved] }
+                status:
+                  type: string
+                  enum: [open, closed, reviewed, approved]
+                  description: |
+                    Cílový stav. Tímto endpointem vedou jen tyto přechody:
+                    `closed→reviewed` a `reviewed→closed` (interní kontrola, vratná),
+                    `closed→approved` a `reviewed→approved` (zákonné schválení, nevratné),
+                    `closed→open` (znovuotevření).
+
+                    **Ze stavu `approved` nevede žádný přechod ven** — schválená účetní
+                    závěrka je podle § 17 odst. 7 ZoÚ definitivní; opravy se dělají
+                    v období, kdy byla chyba zjištěna (§ 35 ZoÚ). Pokus skončí `422`
+                    s kódem `approval_is_final`.
+
+                    Přechody `open↔closing` a `closing→closed` sem nepatří — ty řídí
+                    uzávěrkový průvodce (`closing/start`, `closing/abort`, `POST /close`);
+                    jinak `422 use_closing_workflow`.
                 row_version: { type: integer, minimum: 1 }
-                reason: { type: string, minLength: 10, description: "Povinný u closed→open a approved→closed (§17/7 ZoÚ)" }
-                confirm: { type: boolean, description: "Povinný true u closed→approved a approved→closed" }
+                reason: { type: string, minLength: 10, description: "Povinný u closed→open a reviewed→closed" }
+                confirm: { type: boolean, description: "Povinný `true` u schválení (closed→approved, reviewed→approved)" }
       responses:
         '200':
           description: OK
@@ -17394,7 +17468,10 @@ components:
         fiscal_year: { type: integer }
         starts_on: { type: string, format: date }
         ends_on: { type: string, format: date }
-        status: { type: string, enum: [open, closing, closed, approved] }
+        status:
+          type: string
+          enum: [open, closing, closed, reviewed, approved]
+          description: "`reviewed` = prošlo interní kontrolou (vratné); `approved` = zákonné schválení, ze kterého už přechod ven nevede (§ 17/7 ZoÚ)."
         closed_at: { type: [string, "null"] }
         closed_by: { type: [integer, "null"] }
         approved_at: { type: [string, "null"] }
@@ -17889,6 +17966,10 @@ components:
     Error:
       type: object
       required: [error]
+      description: |
+        Chybová obálka. Vedle `code` a `message` může objekt `error` nést doplňující
+        klíče podle konkrétní chyby — nejčastěji `fields` u validace, dále například
+        `items`, `candidates` nebo `suggestion`. Klienti by neznámé klíče měli tolerovat.
       properties:
         error:
           type: object
@@ -17896,6 +17977,15 @@ components:
           properties:
             code: { type: string, example: validation_failed }
             message: { type: string, example: "Pole 'name' je povinné." }
+            fields:
+              type: object
+              description: |
+                Mapa pole → seznam chyb. Doprovází validační chyby (typicky `422`,
+                u některých endpointů `400`) a říká, které konkrétní pole selhalo.
+              additionalProperties:
+                type: array
+                items: { type: string }
+              example: { name: ["Název zakázky je povinný"], payment_due_days: ["Splatnost musí být 1–365 dní"] }
 
     ListMeta:
       type: object
@@ -18373,6 +18463,26 @@ components:
         cancelled_at: { type: [string, "null"], format: date-time }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        _warnings:
+          type: array
+          description: |
+            Neblokující upozornění k dokladu. Vrací je create/update, ne seznamy.
+            Pole nese **kódy**, ne věty — UI si je překládá (`invoice.warning.<kód>`).
+            Klíč chybí, když upozornění není žádné.
+          items:
+            type: string
+            example: exchange_rate_cnb_deviation
+        _warning_meta:
+          type: object
+          description: |
+            Detaily k jednotlivým kódům z `_warnings`, klíčované týmž kódem. Tvar se
+            liší podle upozornění — např. `exchange_rate_cnb_deviation` nese odchylku
+            od denního kurzu ČNB, `oss_derived_notes` seznam poznámek z derivace OSS.
+          additionalProperties: true
+        _meta:
+          type: object
+          description: "Metadata k právě provedené operaci (dnes `exchange_rate`). Nejde o stav dokladu."
+          additionalProperties: true
 
     InvoiceMonthGroup:
       type: object
@@ -18448,7 +18558,40 @@ components:
         prices_include_vat: { type: boolean, default: false, description: "Ceny položek zadané včetně DPH (DPH shora koeficientem)." }
         auto_send_reminders: { type: boolean, default: true, description: "Per-faktura přepínač automatických upomínek (migrace 0088). False = cron tuto fakturu přeskočí." }
         revenue_category_id: { type: [integer, "null"], description: "Kategorie tržby. Když chybí, na create se odvodí z defaultu projektu/klienta." }
+        revenue_category: { type: [string, "null"], description: "Legacy textová kategorie tržby vedle `revenue_category_id`; ukládá se, jen když je neprázdná." }
         vat_classification_code: { type: [string, "null"], description: "Hlavičkový default klasifikace plnění; auto-default podle sazby/RC/země, pokud prázdné." }
+        is_simplified:
+          type: boolean
+          default: false
+          description: |
+            Zjednodušený daňový doklad podle § 30 ZDPH (do 10 000 Kč včetně daně).
+            Ukládá se jen na instalacích s migrací 1170 — starší sloupec nemají a pole se ignoruje.
+        income_tax_exempt:
+          type: boolean
+          default: false
+          description: "Příjem osvobozený od daně z příjmů. Vyžaduje migraci 0087, jinak se ignoruje."
+        income_tax_exempt_reason:
+          type: [string, "null"]
+          description: "Důvod osvobození; ukládá se spolu s `income_tax_exempt`."
+        payment_schedule:
+          type: array
+          description: |
+            Rozpis splátek u platebního kalendáře (`invoice_type = payment_calendar`).
+            Bez něj vystavení skončí `422 payment_schedule_missing`; nesouhlasí-li
+            součet s dokladem, `422 payment_schedule_mismatch`.
+
+            **Vynechaný klíč rozpis nemění** — jinak by ho cesty, které o kalendáři
+            nevědí (import, opakovaná fakturace, hromadné reissue), tiše smazaly.
+            Prázdné pole ho smaže záměrně. Řádek bez `due_on` se přeskočí.
+          items:
+            type: object
+            required: [due_on]
+            properties:
+              due_on: { type: string, format: date, description: Datum splatnosti splátky. }
+              base_amount: { type: number, format: float, default: 0 }
+              vat_amount: { type: number, format: float, default: 0 }
+              total_amount: { type: number, format: float, default: 0 }
+              note: { type: [string, "null"], maxLength: 255 }
         varsymbol:
           type: [string, "null"]
           maxLength: 20
@@ -18579,7 +18722,7 @@ components:
 
     ProjectInput:
       type: object
-      required: [client_id, name]
+      required: [client_id, name, payment_due_days]
       properties:
         client_id:
           type: integer
@@ -18609,6 +18752,9 @@ components:
           minimum: 1
           maximum: 365
           example: 14
+          description: |
+            Povinné. Chybějící pole se čte jako `0`, což validace odmítne (rozsah 1–365),
+            takže payload bez něj skončí `400` — server tu žádný default nedoplňuje.
         payment_due_unit:
           type: [string, "null"]
           enum: [days, month, null]
@@ -19818,13 +19964,27 @@ components:
           type: integer
           minimum: 0
           maximum: 14
-          default: 0
-          description: "Připomenutí konceptu N dní před vystavením (jen draft_open_mode=period_start; 0 = vypnuto)."
+          default: 1
+          description: |
+            Připomenutí konceptu N dní před vystavením (jen `draft_open_mode=period_start`;
+            0 = vypnuto). Vynecháte-li pole, uloží se **1**, ne 0 — hodnota mimo rozsah
+            se ořízne do 0–14.
         note_above_items: { type: [string, "null"] }
         note_below_items: { type: [string, "null"] }
-        increment_month_in_descriptions: { type: boolean, default: true }
-        auto_issue: { type: boolean, default: true }
-        auto_send_email: { type: boolean, default: true }
+        increment_month_in_descriptions:
+          type: boolean
+          default: false
+          description: "Vynechané pole se ukládá jako `false`, ne `true`."
+        auto_issue:
+          type: boolean
+          default: false
+          description: |
+            Vynechané pole se ukládá jako `false` — šablona pak jen zakládá koncepty
+            a nic sama nevystaví. Chcete-li automatické vystavení, pošlete `true` výslovně.
+        auto_send_email:
+          type: boolean
+          default: false
+          description: "Vynechané pole se ukládá jako `false`. Vyžaduje `auto_issue=true`."
         items:
           type: array
           items:
