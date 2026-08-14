@@ -1775,12 +1775,15 @@ paths:
                 bcc:
                   type: array
                   items: { type: string, format: email }
-                subject:
+                subject_override:
                   type: string
-                  description: Override předmětu emailu
-                body:
+                  description: Override předmětu emailu (jinak předmět ze šablony `invoice_send`)
+                note:
                   type: string
-                  description: Override těla (HTML); proměnné z šablony se nesubstituují
+                  maxLength: 5000
+                  description: |
+                    Volitelná poznámka do těla e-mailu (NE do PDF). Plain text;
+                    neprázdné řádky se vyrenderují jako odstavce. Delší text se ořízne na 5000 znaků.
       responses:
         '200':
           description: OK — email odeslán
@@ -1789,8 +1792,14 @@ paths:
               schema:
                 type: object
                 properties:
-                  ok: { type: boolean }
-                  recipients:
+                  sent_to:
+                    type: array
+                    description: Adresy v poli To, na které se skutečně odesílalo.
+                    items: { type: string, format: email }
+                  cc:
+                    type: array
+                    items: { type: string, format: email }
+                  bcc:
                     type: array
                     items: { type: string, format: email }
                   resolved_recipients:
@@ -1801,12 +1810,39 @@ paths:
                       properties:
                         email: { type: string, format: email }
                         recipient: { type: string, enum: [to, cc, bcc] }
-                        source: { type: string, enum: [contact, project, main_email] }
+                        source: { type: string, enum: [contact, project, main_email, supplier] }
                         usage: { type: [string, "null"], enum: [communication, documents, reminders, approvals, null] }
                         label: { type: [string, "null"] }
-                  archived_pdf_id: { type: integer, format: int64 }
+                  sent_at:
+                    type: string
+                    description: "Čas odeslání ve formátu `YYYY-MM-DD HH:MM:SS` (čas serveru)."
+                  is_test:
+                    type: boolean
+                    description: Vždy `false` u tohoto endpointu (testovací odeslání má vlastní endpoint).
+        '400':
+          description: Žádný platný příjemce (`no_recipients`) nebo neplatná adresa (`invalid_email`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Faktura nenalezena
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Faktura není ve stavu pro odeslání (draft)
+          description: |
+            Fakturu nelze odeslat — není vystavená (`invalid_state`) nebo jde
+            o interní stornovací doklad (`cannot_send_cancellation`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: Nepodařilo se vygenerovat PDF (`pdf_failed`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '502':
+          description: SMTP odmítl zprávu (`send_failed`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -2089,28 +2125,93 @@ paths:
       tags: [InvoiceOps]
       summary: Storno vystavené faktury
       description: |
-        Vystavená faktura **nelze smazat** — storno vytvoří záporný protiklad
-        (`invoice_type = cancellation`) se stejnou částkou, který původní fakturu
-        účetně ruší. Číselná řada je zachovaná (číslo původní faktury nezmizí).
+        Vystavená faktura **nelze smazat**. Číselná řada je vždy zachovaná
+        (číslo původní faktury nezmizí). Povinný `mode` volí režim storna:
+
+        - `internal` — interní storno bez dokladu pro klienta. Vznikne protidoklad
+          `invoice_type = cancellation`, původní faktura dostane status `cancelled`.
+          Odpověď obsahuje `cancellation_id` a stornovanou původní fakturu.
+        - `credit_note` — vystaví se **draft** dobropisu (`invoice_type = credit_note`)
+          se zápornými položkami; uživatel ho musí zkontrolovat v editoru a zavolat
+          `/issue`. Původní faktura si status ponechá až do vystavení dobropisu.
+          Odpověď obsahuje `credit_note_id` a `edit_url`.
+
+        Dobropis lze stornovat pouze v režimu `internal`. Stornovací doklad
+        (`cancellation`) stornovat nelze. Storno je účetní akt — na zaúčtovaném
+        či uzamčeném dokladu ho blokuje zámek (Epic F6).
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [mode]
               properties:
+                mode:
+                  type: string
+                  enum: [internal, credit_note]
+                  description: Režim storna — interní storno vs. draft dobropisu.
                 reason:
                   type: string
-                  description: Důvod storna (audit + volitelně do PDF)
+                  description: Důvod storna (audit + poznámka nad položkami protidokladu)
       responses:
         '200':
-          description: OK
+          description: |
+            OK. Tvar odpovědi se liší podle `mode`: `internal` vrací
+            `cancellation_id` + `invoice`, `credit_note` vrací `credit_note_id` + `edit_url`.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  original:     { $ref: '#/components/schemas/Invoice' }
-                  cancellation: { $ref: '#/components/schemas/Invoice' }
+                oneOf:
+                  - type: object
+                    title: Interní storno
+                    properties:
+                      cancellation_id:
+                        type: integer
+                        format: int64
+                        description: ID vytvořeného stornovacího dokladu (`invoice_type = cancellation`).
+                      invoice:
+                        allOf:
+                          - $ref: '#/components/schemas/Invoice'
+                        description: Původní faktura po stornu (status `cancelled`).
+                  - type: object
+                    title: Draft dobropisu
+                    properties:
+                      credit_note_id: { type: integer, format: int64 }
+                      edit_url:
+                        type: string
+                        description: Relativní odkaz do editoru draftu dobropisu.
+        '400':
+          description: "Chybí nebo neplatný `mode` (`invalid_mode`)"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Doklad je uzamčený a role na jeho storno nedosáhne (Epic F6)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Faktura nenalezena
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: |
+            Fakturu nelze stornovat — není vystavená/odeslaná/zaplacená (`invalid_state`),
+            jde o stornovací doklad (`invalid_type`), je to dobropis a `mode` není
+            `internal` (`invalid_mode`), doklad byl mezitím zaúčtován (`document_locked`),
+            existuje navazující finální faktura k daňovému dokladu k přijaté platbě
+            (`advance_tax_document_settled`), nebo brání pokladní doklad (`cash_*`),
+            zápis v deníku (`journal_*`) či skladový pohyb (`stock.error.*`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: Storno selhalo (`cancel_failed`) nebo se nepodařilo vytvořit dobropis (`credit_note_failed`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/invoices/{id}/clone:
     parameters:
