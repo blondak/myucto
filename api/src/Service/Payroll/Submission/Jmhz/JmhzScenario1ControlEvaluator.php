@@ -1083,12 +1083,10 @@ final class JmhzScenario1ControlEvaluator
             if ($from === null || $to === null) {
                 return null;
             }
-            $start = \DateTimeImmutable::createFromFormat('!Y-m-d', $from, new \DateTimeZone('UTC'));
-            $end = \DateTimeImmutable::createFromFormat('!Y-m-d', $to, new \DateTimeZone('UTC'));
-            if (!$start instanceof \DateTimeImmutable || !$end instanceof \DateTimeImmutable) {
+            $span = self::intervalDays($from, $to);
+            if ($span === null) {
                 return null;
             }
-            $span = (int) $start->diff($end)->format('%r%a') + 1;
             foreach ($form->groupedBy(['10356'], self::ELDP_SECTION_DEPTH) as $section) {
                 $days = $section['10356'] ?? null;
                 if ($days === null) {
@@ -2421,16 +2419,34 @@ final class JmhzScenario1ControlEvaluator
     /** Počet dnů intervalu včetně krajních dnů. */
     private static function intervalDays(?string $from, ?string $to): ?int
     {
-        if ($from === null || $to === null) {
-            return null;
-        }
-        $start = \DateTimeImmutable::createFromFormat('!Y-m-d', $from, new \DateTimeZone('UTC'));
-        $end = \DateTimeImmutable::createFromFormat('!Y-m-d', $to, new \DateTimeZone('UTC'));
-        if (!$start instanceof \DateTimeImmutable || !$end instanceof \DateTimeImmutable) {
+        $start = self::calendarDay($from);
+        $end = self::calendarDay($to);
+        if ($start === null || $end === null) {
             return null;
         }
 
         return (int) $start->diff($end)->format('%r%a') + 1;
+    }
+
+    /**
+     * Kalendářní den z textu. `createFromFormat` přetečené datum nezamítne —
+     * `2026-02-30` tiše vrátí 2. březen, takže by kontrola počítala interval
+     * z data, které v podání není. Výsledek se proto porovnává zpět se vstupem.
+     */
+    private static function calendarDay(?string $value): ?\DateTimeImmutable
+    {
+        if ($value === null) {
+            return null;
+        }
+        $parsed = \DateTimeImmutable::createFromFormat(
+            '!Y-m-d',
+            $value,
+            new \DateTimeZone('UTC'),
+        );
+
+        return $parsed instanceof \DateTimeImmutable && $parsed->format('Y-m-d') === $value
+            ? $parsed
+            : null;
     }
 
     /** Datum vyplnění podání (10005) jako kalendářní den. */

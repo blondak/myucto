@@ -803,6 +803,38 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         self::assertNotSame([], $report->findings);
     }
 
+    /**
+     * Přetečené datum se nesmí tiše posunout. `createFromFormat` z „2026-02-30"
+     * udělá 2. březen, takže by se interval počítal z data, které v podání není.
+     */
+    public function testOverflowedDateDoesNotSilentlyShift(): void
+    {
+        $report = $this->validate(str_replace(
+            '<form:pojisteniDo>2026-07-31</form:pojisteniDo>',
+            '<form:pojisteniDo>2026-07-32</form:pojisteniDo>',
+            JmhzXmlSample::minimal(),
+        ));
+
+        // Tvar data hlídá XSD, sem se takové datum v ostrém běhu nedostane.
+        // Podstatné je, že se z něj nespočítá délka intervalu — kontrola 134
+        // by jinak porovnávala počet dnů proti smyšlenému rozsahu.
+        self::assertNotContains(134, $this->failedIds($report));
+    }
+
+    /**
+     * Den vyhodnocení se bere v českém čase. V UTC by mezi půlnocí a druhou
+     * hodinou letního času prvního dne měsíce vycházel ještě měsíc předchozí
+     * a hlášení za právě skončený měsíc by se odmítlo jako nedokončené.
+     */
+    public function testEvaluationDayFollowsTheCzechCalendar(): void
+    {
+        $context = JmhzControlContext::today();
+        $czechToday = (new \DateTimeImmutable('now', new \DateTimeZone('Europe/Prague')))
+            ->format('Y-m-d');
+
+        self::assertSame($czechToday, $context->evaluatedOn);
+    }
+
     /** @return list<int> */
     private function failedIds(JmhzControlEvaluationReport $report): array
     {

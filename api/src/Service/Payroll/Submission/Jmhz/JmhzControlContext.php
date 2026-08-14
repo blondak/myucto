@@ -29,10 +29,19 @@ final readonly class JmhzControlContext
         }
     }
 
+    /**
+     * Den vyhodnocení se bere v českém čase, ne v UTC. Hlášené období je
+     * kalendářní měsíc podle českého kalendáře, takže mezi půlnocí a druhou
+     * hodinou letního času prvního dne měsíce by UTC ukazovalo ještě na měsíc
+     * předchozí — a kontrola 90 by odmítla hlášení za právě skončený měsíc
+     * s tím, že ještě neskončil.
+     */
     public static function today(
         ?string $govTalkVariableSymbol = null,
         bool $schemaValidated = false,
     ): self {
-        return new self(gmdate('Y-m-d'), $govTalkVariableSymbol, $schemaValidated);
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('Europe/Prague'));
+
+        return new self($now->format('Y-m-d'), $govTalkVariableSymbol, $schemaValidated);
     }
 }
