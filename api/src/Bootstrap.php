@@ -192,6 +192,12 @@ final class Bootstrap
                         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog::class,
                     ),
                 ),
+            // Katalog kontrol se načítá z připnutého manifestu a ověřuje otisk
+            // zdrojového XLSX, což je na každý požadavek zbytečně drahé —
+            // kontejner ho proto drží jako singleton.
+            \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator::class =>
+                static fn (): \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator
+                    => \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator::create(),
             \MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline::class =>
                 fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline(
                     $c->get(\MyInvoice\Service\Payroll\Run\PayrollRunCalculator::class),

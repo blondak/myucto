@@ -14,6 +14,8 @@ final class JmhzControlSourceCatalog
     /** @var array<int, JmhzControlDefinition> */
     private array $definitions = [];
 
+    private ?JmhzControlParameterCatalog $parameterCatalog = null;
+
     /**
      * @param array{manifest_sha256:string,payload:array<string, mixed>} $manifest
      * @param array{manifest_sha256:string,payload:array<string, mixed>} $specManifest
@@ -40,8 +42,11 @@ final class JmhzControlSourceCatalog
                     self::rows($row, 'attribute_refs'),
                 ),
                 self::strings($row, 'symbolic_attribute_refs'),
+                self::nullableString($row, 'category'),
+                self::nullableString($row, 'area'),
             );
         }
+        ksort($this->definitions);
     }
 
     public static function load(?string $resourceRoot = null): self
@@ -77,6 +82,29 @@ final class JmhzControlSourceCatalog
     {
         return $this->definitions[$controlId]
             ?? throw new \OutOfBoundsException("Kontrola JMHZ {$controlId} není v katalogu.");
+    }
+
+    /**
+     * Celý katalog seřazený podle ID. ID jsou řídká (199 kontrol v rozsahu
+     * 1–355), takže se nikdy nesmí indexovat pořadím.
+     *
+     * @return array<int, JmhzControlDefinition>
+     */
+    public function definitions(): array
+    {
+        return $this->definitions;
+    }
+
+    /**
+     * Parametrické konstanty katalogu (sazby pojistného, prahy, meze). Jsou
+     * účinné k datu, takže sazba se nesmí zadrátovat do kódu — kontrola 10
+     * měla v roce 2025 sazbu 0,288 a v roce 2026 0,298.
+     */
+    public function parameters(): JmhzControlParameterCatalog
+    {
+        return $this->parameterCatalog ??= new JmhzControlParameterCatalog(
+            self::rows($this->manifest['payload'], 'parameters'),
+        );
     }
 
     /** @return array{manifest_sha256:string,payload:array<string, mixed>} */
@@ -293,6 +321,20 @@ final class JmhzControlSourceCatalog
         $value = $row[$field] ?? null;
         if (!is_int($value) || $value <= 0) {
             throw new \UnexpectedValueException("Pole {$field} katalogu JMHZ není kladné číslo.");
+        }
+
+        return $value;
+    }
+
+    /** @param array<string, mixed> $row */
+    private static function nullableString(array $row, string $field): ?string
+    {
+        $value = $row[$field] ?? null;
+        if ($value === null) {
+            return null;
+        }
+        if (!is_string($value) || $value === '') {
+            throw new \UnexpectedValueException("Pole {$field} katalogu JMHZ není text ani null.");
         }
 
         return $value;

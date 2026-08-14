@@ -23,6 +23,7 @@ final readonly class JmhzScenario1XmlDryRunService
         private JmhzScenario1DocumentService $documents,
         private JmhzScenario1XmlValidator $validator,
         private JmhzSubmissionGuidFactory $guids,
+        private JmhzScenario1ControlValidator $controls,
     ) {}
 
     /** @return array<string,mixed> */
@@ -61,10 +62,16 @@ final readonly class JmhzScenario1XmlDryRunService
             ),
         );
 
+        // XSD hlídá tvar, katalog kontrol obsah. Teprve oboje dohromady říká,
+        // jestli by ČSSZ podání přijala — a mezera v pokrytí katalogu se musí
+        // projevit jako nepřipravenost, ne jako zelený nácvik.
+        $controls = $this->controls->validate($result['xml'], JmhzControlContext::today());
+
         return [
-            'status' => 'dry_run_valid',
+            'status' => $controls->submittable() ? 'dry_run_valid' : 'dry_run_incomplete',
             'preparation_id' => $preparationId,
             'blockers' => [],
+            'controls' => $controls->toArray(),
             'xml' => $result['xml'],
             'xml_sha256' => $result['sha256'],
             'schema' => $result['schema'],
