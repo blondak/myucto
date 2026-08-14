@@ -2191,6 +2191,8 @@
                 "jmhz_controls_form": "součást {ordinal}",
 
                 "jmhz_deadline": "Lhůta pro podání: od {from} do {to} (posunuto na pracovní den).",
+
+                "jmhz_controls_deviations": "Odchylky od doslovného znění katalogu ({count}) — k ověření proti protokolu ČSSZ",
                 "jmhz_dry_run_failed": "Nácvik měsíčního hlášení se nepodařilo spustit.",
                 "jmhz_dry_run_blockers": {
                     "jmhz_preparation_not_ready": "Zdroje hlášení nejsou úplné.",

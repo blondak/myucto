@@ -1382,6 +1382,7 @@ export interface PayrollJmhzControlReport {
   catalog_manifest_sha256: string
   submittable: boolean
   counts: Record<PayrollJmhzControlOutcome, number>
+  deviations: { control_id: number, reason: string }[]
   blocking: PayrollJmhzControlFinding[]
   warnings: PayrollJmhzControlFinding[]
   coverage_gaps: PayrollJmhzControlFinding[]

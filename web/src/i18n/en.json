@@ -2191,6 +2191,8 @@
                 "jmhz_controls_form": "component {ordinal}",
 
                 "jmhz_deadline": "Submission window: {from} to {to} (shifted to a working day).",
+
+                "jmhz_controls_deviations": "Deviations from the literal catalogue wording ({count}) — verify against the CSSZ protocol",
                 "jmhz_dry_run_failed": "The monthly report dry run could not be started.",
                 "jmhz_dry_run_blockers": {
                     "jmhz_preparation_not_ready": "The report sources are incomplete.",

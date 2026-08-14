@@ -202,6 +202,33 @@ final class JmhzScenario1ControlEvaluator
         return self::NOT_EVALUABLE;
     }
 
+    /**
+     * Místa, kde se doslovné znění katalogu vědomě neuplatňuje, protože by
+     * neprošlo ani bezvadné podání. Patří do výstupu, ne jen do komentáře:
+     * až se podání zkusí ostře, tohle je seznam, který se má ověřit proti
+     * protokolu ČSSZ.
+     *
+     * @return array<int, string>
+     */
+    public function documentedDeviations(): array
+    {
+        return [
+            134 => 'Katalog píše „počet dnů <= datum do minus datum od", tedy'
+                . ' rozdíl dat. Celý měsíc má ale o den víc, než je rozdíl jeho'
+                . ' krajních dnů, takže by doslovné znění neprošlo ani bezvadné'
+                . ' hlášení za celý měsíc. Interval se počítá včetně krajních dnů.',
+            168 => 'Vedle tolerance žádá katalog i dolní mez 7,171 % z úhrnu'
+                . ' vyměřovacích základů. Na minimálním případě (základ 1 000 Kč,'
+                . ' pojistné 71 Kč) by ji neprošlo ani zcela správné podání,'
+                . ' protože pojistné se zaokrouhluje u každého zaměstnance zvlášť.'
+                . ' Vynucuje se jen tolerance; o skutečné mezi rozhodne protokol.',
+            244 => 'Katalog zakazuje, aby slevy „nabývaly hodnot" bez podepsaného'
+                . ' prohlášení. Vykázaná nula ale žádnou slevu neuplatňuje, takže'
+                . ' se za hodnotu nepovažuje — jinak by neprošel ani zaměstnanec'
+                . ' bez prohlášení, který má nulový bonus.',
+        ];
+    }
+
     public function handles(int $controlId): bool
     {
         return isset(self::NOT_EVALUABLE[$controlId])

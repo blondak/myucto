@@ -206,6 +206,26 @@ async function copyXml(payrollRun: PayrollRun) {
                   gaps: state(payrollRun)!.result!.controls!.coverage_gaps.length,
                 }) }}
               </p>
+              <details
+                v-if="state(payrollRun)!.result!.controls!.deviations?.length"
+                class="rounded-lg border border-neutral-300 bg-neutral-50 p-3 text-neutral-700"
+                data-test="jmhz-controls-deviations"
+              >
+                <summary class="cursor-pointer text-sm font-medium">
+                  {{ t('payroll.submissions.overview.jmhz_controls_deviations', {
+                    count: state(payrollRun)!.result!.controls!.deviations.length,
+                  }) }}
+                </summary>
+                <ul class="mt-2 space-y-1 text-sm">
+                  <li
+                    v-for="deviation in state(payrollRun)!.result!.controls!.deviations"
+                    :key="deviation.control_id"
+                  >
+                    <span class="font-mono text-xs opacity-75">{{ deviation.control_id }}</span>
+                    {{ deviation.reason }}
+                  </li>
+                </ul>
+              </details>
               <div
                 v-for="group in controlGroups(state(payrollRun)!.result!.controls!)"
                 :key="group.key"

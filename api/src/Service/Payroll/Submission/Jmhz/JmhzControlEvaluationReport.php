@@ -14,11 +14,16 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
  */
 final readonly class JmhzControlEvaluationReport
 {
-    /** @param list<JmhzControlFinding> $findings */
+    /**
+     * @param list<JmhzControlFinding> $findings
+     * @param array<int, string> $deviations kontroly, kde se doslovné znění
+     *        katalogu vědomě neuplatňuje, i se zdůvodněním
+     */
     public function __construct(
         public array $findings,
         public string $catalogKey,
         public string $catalogManifestSha256,
+        public array $deviations = [],
     ) {}
 
     /** @return list<JmhzControlFinding> */
@@ -92,6 +97,16 @@ final readonly class JmhzControlEvaluationReport
             'catalog_manifest_sha256' => $this->catalogManifestSha256,
             'submittable' => $this->submittable(),
             'counts' => $this->counts(),
+            // Odchylky se hlásí i u zeleného výsledku — jsou to místa
+            // k ověření proti protokolu ČSSZ, ne chyby podání.
+            'deviations' => array_map(
+                static fn (int $controlId, string $reason): array => [
+                    'control_id' => $controlId,
+                    'reason' => $reason,
+                ],
+                array_keys($this->deviations),
+                array_values($this->deviations),
+            ),
             'blocking' => array_map(
                 static fn (JmhzControlFinding $finding): array => $finding->toArray(),
                 $this->blocking(),

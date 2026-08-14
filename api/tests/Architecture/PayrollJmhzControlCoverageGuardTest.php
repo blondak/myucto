@@ -78,6 +78,31 @@ final class PayrollJmhzControlCoverageGuardTest extends TestCase
     }
 
     /**
+     * Odchylka od doslovného znění katalogu se smí týkat jen kontroly, kterou
+     * opravdu vyhodnocujeme. Odchylka u neimplementované kontroly by slibovala
+     * rozhodnutí, které nikdo nedělá.
+     */
+    public function testDeviationsOnlyDescribeImplementedControls(): void
+    {
+        $catalog = JmhzControlSourceCatalog::load();
+        $evaluator = new JmhzScenario1ControlEvaluator($catalog->parameters());
+        $implemented = $evaluator->implementedControlIds();
+
+        foreach ($evaluator->documentedDeviations() as $controlId => $reason) {
+            self::assertContains(
+                $controlId,
+                $implemented,
+                "Odchylka u kontroly {$controlId}, která se nevyhodnocuje.",
+            );
+            self::assertGreaterThan(
+                80,
+                mb_strlen($reason),
+                "Odchylka u kontroly {$controlId} není doložená.",
+            );
+        }
+    }
+
+    /**
      * Implementovaná kontrola musí mít v dispečeru větev. Chybějící větev by se
      * jinak projevila až za běhu výjimkou uprostřed nácviku podání.
      */

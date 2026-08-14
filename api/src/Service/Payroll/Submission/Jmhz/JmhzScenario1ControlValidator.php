@@ -62,6 +62,7 @@ final class JmhzScenario1ControlValidator
             $findings,
             JmhzControlSourceCatalog::CATALOG_KEY,
             JmhzControlSourceCatalog::MANIFEST_SHA256,
+            $this->evaluator->documentedDeviations(),
         );
     }
 
