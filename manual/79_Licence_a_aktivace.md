@@ -13,11 +13,21 @@ MyÚčto stojí na dvou vrstvách:
 - **Bezplatný základ MyInvoice.** Veškeré koncové funkce původního projektu
   [MyInvoice](https://github.com/radekhulan/myinvoice) lze používat navždy
   zdarma, včetně vytváření a úprav dat. Původní zdrojový kód zůstává pod MIT.
-- **Komerční nadstavba (source-available).** Podvojné účetnictví, účetní
-  nástroje a uzávěrky, sklad a napojení e-shopu, evidence majetku, EPO podání
-  a archív a rozšířené opravy DPH podle § 74b, § 43, § 46 a § 79 jsou
-  proprietární a vyžadují komerční licenci sjednanou **předplatným na
-  myucto.cz**.
+- **Komerční nadstavba (source-available).** Účetnictví (podvojné i daňová
+  evidence), mzdy, sklad s napojením e-shopu a režim OSS jsou proprietární
+  moduly a vyžadují komerční licenci sjednanou **předplatným na myucto.cz**.
+  Totéž platí pro věci, které se o ně opírají: účetní nástroje a uzávěrky,
+  evidence majetku, automatizace, přehled firem, EPO podání a archív
+  a rozšířené opravy DPH podle § 74b, § 43, § 46 a § 79.
+
+Čtyři modulové přepínače v **Nastavení → Daně a účetnictví** (Vést účetnictví,
+Vést mzdy, Vést skladovou evidenci, Režim OSS) jsou proto v jednom rámečku:
+mají společnou podmínku. Bez licence zůstávají zamčené a moduly se z menu
+schovají; jejich data se ale nemažou a po aktivaci se vrátí i s historií.
+
+Zdarma tedy zůstává celá fakturace: vydané i přijaté faktury, klienti, ceník,
+banka a pokladna, dokumenty, přiznání k DPH, kontrolní hlášení a souhrnné
+hlášení, a samozřejmě celé nastavení firmy.
 
 Zdrojový kód komerční části je sice viditelný, ale jeho zpřístupnění samo o sobě
 nezakládá právo produkt jako celek provozovat bez licence.

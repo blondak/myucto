@@ -47,8 +47,20 @@ function syncSupplierStore(s: Supplier) {
 const supplier = ref<Supplier | null>(null)
 const loading = ref(true)
 type SettingsTab = 'company' | 'documents' | 'accounting' | 'advanced'
-const tab = ref<SettingsTab>('company')
 const tabs: SettingsTab[] = ['company', 'documents', 'accounting', 'advanced']
+// Na záložku se dá odkázat zvenčí (?tab=accounting) — odjinud v aplikaci sem
+// vedou rady typu „zapněte účetnictví v Nastavení", a ty musí skončit u toho
+// přepínače, ne na první záložce.
+const requestedTab = String(router.currentRoute.value.query.tab ?? '') as SettingsTab
+const tab = ref<SettingsTab>(tabs.includes(requestedTab) ? requestedTab : 'company')
+
+// Kolik dní zbývá ze zkušebního období. Jen pro trial — u zaplacené licence
+// není co odpočítávat a po vypršení mluví jiná hláška.
+const licenseTrialDaysLeft = computed<number | null>(() => {
+  const endsAt = auth.license?.trial_ends_at
+  if (auth.license?.state !== 'trial' || !endsAt) return null
+  return Math.max(0, Math.ceil((endsAt * 1000 - Date.now()) / 86_400_000))
+})
 
 // Práh dní pro první upomínku — preset (3 / týden / měsíc) + „vlastní". Stejný „sticky custom"
 // idiom jako dueSelectValue níže: flag drží „vlastní" i když hodnota náhodou odpovídá presetu,
@@ -404,7 +416,13 @@ async function saveSupplier() {
       stock_auto_issue: supplier.value.stock_auto_issue ?? true,
       stock_in_transit_from: supplier.value.stock_in_transit_from ?? 'sent',
       // Tax settings (EPO výkazy DPH/KH)
-      accounting_mode: supplier.value.accounting_mode ?? 'tax_evidence',
+      // Účetní režim posíláme jen když ho uživatel opravdu přepnul. Server na
+      // něm má navěšenou historii režimu i kontrolu právní formy, takže
+      // nezměněná hodnota v každém uložení je zbytečný zápis a u převzaté firmy
+      // dokonce zámek celého nastavení (myinvoice#265).
+      ...(supplier.value.accounting_mode && supplier.value.accounting_mode !== originalAccountingMode.value
+        ? { accounting_mode: supplier.value.accounting_mode }
+        : {}),
       // „Vést účetnictví" (1179) — opt-out účetní nadstavby v menu; na licenci bez vlivu.
       accounting_enabled: supplier.value.accounting_enabled ?? true,
       // „Vést mzdy" (1187, opt-in od 1290) — výchozí vypnuto jako sklad; licence bez vlivu.
@@ -945,24 +963,76 @@ function vatCollisionLabel(c: VatStatusCollision): string {
       </section>
 
       <!--
+        Licenční moduly — účetnictví, mzdy, sklad a OSS mají společný rám, protože
+        mají společnou podmínku: po zkušebních dvou měsících je API všech čtyř
+        zavřené (CommercialFeatureAccess). Čtyři samostatné karty vedle sebe
+        vypadaly jako čtyři nezávislá nastavení a nikde nebylo vidět, že jde
+        o placenou nadstavbu.
+      -->
+      <div v-if="tab === 'accounting'" class="rounded-lg border-2 p-4 space-y-4"
+           :class="auth.hasCommercialFeatures ? 'border-primary-300 bg-primary-50/30' : 'border-warning-400 bg-warning-50/50'">
+        <header class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-700">{{ t('settings.licensed_modules.title') }}</h2>
+            <p class="text-xs text-neutral-600 mt-1 max-w-3xl">
+              {{ t('settings.licensed_modules.hint') }}
+              <span v-if="licenseTrialDaysLeft !== null" class="font-medium">
+                {{ t('settings.licensed_modules.trial_left', { days: licenseTrialDaysLeft }) }}
+              </span>
+              <span v-else-if="!auth.hasCommercialFeatures" class="font-medium text-warning-800">
+                {{ t('settings.licensed_modules.expired') }}
+              </span>
+            </p>
+          </div>
+          <RouterLink to="/activation/purchase" :class="btnOutline('primary')">
+            {{ t('license.banner_cta') }}
+          </RouterLink>
+        </header>
+
+      <!--
         Vést účetnictví (1179) — firemní opt-out účetní nadstavby. Box je první v záložce,
         protože rozhoduje o tom, jestli má zbytek účetních nastavení pod ním vůbec smysl.
       -->
-      <section v-if="tab === 'accounting'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.accounting_enabled.title') }}</h2>
-        <label class="flex items-start gap-2 cursor-pointer">
-          <input v-model="supplier.accounting_enabled" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+      <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">
+          {{ t('settings.accounting_enabled.title') }}
+        </h2>
+        <label class="flex items-start gap-2" :class="auth.hasCommercialFeatures ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'">
+          <input v-model="supplier.accounting_enabled" type="checkbox" :disabled="!auth.hasCommercialFeatures" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
           <span>
             <span class="font-medium">{{ t('settings.accounting_enabled.label') }}</span>
             <p class="text-xs text-neutral-500 mt-0.5">{{ t('settings.accounting_enabled.hint') }}</p>
           </span>
         </label>
-        <p v-if="supplier.accounting_enabled === false" class="text-xs text-warning-600 mt-2">
+        <p v-if="supplier.accounting_enabled === false && auth.hasCommercialFeatures" class="text-xs text-warning-600 mt-2">
           {{ t('settings.accounting_enabled.off_note') }}
         </p>
+
+        <!-- Režim účetnictví je podnastavení tohoto modulu, ne daňový údaj do EPO:
+             s vypnutou nadstavbou nemá co ovlivnit (a přepnutí na podvojné by jen
+             tiše naseedovalo osnovu). Ukazuje se proto až po zapnutí. -->
+        <div v-if="supplier.accounting_enabled !== false" class="mt-4 pt-4 border-t border-neutral-200 max-w-md">
+          <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.accounting_mode') }}</label>
+          <select v-model="supplier.accounting_mode" :disabled="!auth.hasCommercialFeatures"
+                  class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm disabled:opacity-60">
+            <option value="tax_evidence">{{ t('settings.accounting_mode_tax_evidence') }}</option>
+            <!-- Volba se bez licence nabízí zamčená, ne skrytá: právnická osoba
+                 jinak nemá jak zjistit, že účetnictví aplikace umí a co pro ně
+                 potřebuje (myinvoice#265). -->
+            <option
+              value="double_entry"
+              :disabled="!auth.hasCommercialFeatures && supplier.accounting_mode !== 'double_entry'"
+            >{{ t('settings.accounting_mode_double_entry') }}</option>
+          </select>
+          <p class="text-xs text-neutral-500 mt-1">{{ t('settings.accounting_mode_hint') }}</p>
+          <p v-if="originalAccountingMode === 'tax_evidence' && supplier.accounting_mode === 'double_entry'"
+             class="text-xs text-warning-600 mt-1">
+            {{ t('settings.accounting_mode_switch_backfill_hint') }}
+          </p>
+        </div>
       </section>
 
-      <section v-if="tab === 'accounting'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+      <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.payroll_enabled.title') }}</h2>
         <!-- Alfa upozornění stojí NAD přepínačem záměrně: mzdy počítají odvody
              a podání, kde chyba stojí penále, takže se o stavu modulu musí
@@ -970,24 +1040,28 @@ function vatCollisionLabel(c: VatStatusCollision): string {
         <p class="mb-4 rounded-md border border-warning-300 bg-warning-50 px-3 py-2 text-xs text-warning-800">
           {{ t('settings.payroll_enabled.alpha_warning') }}
         </p>
-        <label class="flex items-start gap-2 cursor-pointer">
-          <input v-model="supplier.payroll_enabled" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-payroll-600" />
+        <label class="flex items-start gap-2" :class="auth.hasCommercialFeatures ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'">
+          <input v-model="supplier.payroll_enabled" type="checkbox" :disabled="!auth.hasCommercialFeatures" class="mt-0.5 rounded border-neutral-300 text-payroll-600" />
           <span>
             <span class="font-medium">{{ t('settings.payroll_enabled.label') }}</span>
             <p class="text-xs text-neutral-500 mt-0.5">{{ t('settings.payroll_enabled.hint') }}</p>
           </span>
         </label>
-        <p v-if="supplier.payroll_enabled === false" class="text-xs text-warning-600 mt-2">
+        <p v-if="supplier.payroll_enabled === false && auth.hasCommercialFeatures" class="text-xs text-warning-600 mt-2">
           {{ t('settings.payroll_enabled.off_note') }}
         </p>
       </section>
 
-      <!-- Sklad (Epic SKLAD) — samostatný box, nezávislé na accounting_mode -->
-      <section v-if="tab === 'accounting' && auth.hasCommercialFeatures" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('stock.settings.enable_label') }}</h2>
-        <div class="space-y-3">
-          <label class="flex items-start gap-2 cursor-pointer">
-            <input v-model="supplier.stock_enabled" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+      <!-- Sklad (Epic SKLAD) — samostatný box, nezávislé na accounting_mode.
+           Bez licence se NESKRÝVÁ, jen zamkne: schovaný přepínač vypadá jako
+           chybějící funkce, ne jako funkce za licencí. -->
+      <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">
+          {{ t('stock.settings.enable_label') }}
+        </h2>
+        <div class="space-y-3" :class="auth.hasCommercialFeatures ? '' : 'opacity-60'">
+          <label class="flex items-start gap-2" :class="auth.hasCommercialFeatures ? 'cursor-pointer' : 'cursor-not-allowed'">
+            <input v-model="supplier.stock_enabled" type="checkbox" :disabled="!auth.hasCommercialFeatures" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
             <span>
               <span class="font-medium">{{ t('stock.settings.enable_label') }}</span>
               <p class="text-xs text-neutral-500 mt-0.5">{{ t('stock.settings.enable_hint') }}</p>
@@ -1014,11 +1088,11 @@ function vatCollisionLabel(c: VatStatusCollision): string {
       <!-- OSS (One Stop Shop) — čtvrtá modulová karta ve stejném vzoru jako účetnictví/mzdy/sklad.
            Údaje o identifikaci a platnosti mají smysl jen se zapnutým režimem, proto se
            odkrývají stejně jako vnořená „Automatická výdejka" u skladu. -->
-      <section v-if="tab === 'accounting'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+      <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.oss_section') }}</h2>
-        <div class="space-y-3">
-          <label class="flex items-start gap-2 cursor-pointer">
-            <input v-model="(supplier as any).oss_enabled" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+        <div class="space-y-3" :class="auth.hasCommercialFeatures ? '' : 'opacity-60'">
+          <label class="flex items-start gap-2" :class="auth.hasCommercialFeatures ? 'cursor-pointer' : 'cursor-not-allowed'">
+            <input v-model="(supplier as any).oss_enabled" type="checkbox" :disabled="!auth.hasCommercialFeatures" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
             <span>
               <span class="font-medium">{{ t('settings.oss_enabled') }}</span>
               <p class="text-xs text-neutral-500 mt-0.5">{{ t('settings.oss_hint') }}</p>
@@ -1048,6 +1122,8 @@ function vatCollisionLabel(c: VatStatusCollision): string {
           </div>
         </div>
       </section>
+      </div>
+      <!-- /licenční moduly -->
 
       <!-- Daňové nastavení (EPO výkazy DPH/KH/DPFO/DPPO) — samostatný box -->
       <section v-if="tab === 'accounting'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
@@ -1056,18 +1132,6 @@ function vatCollisionLabel(c: VatStatusCollision): string {
           <h3 class="sr-only">{{ t('settings.tax_section') }}</h3>
           <p class="text-xs text-neutral-500 mb-3">{{ t('settings.tax_hint') }}</p>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.accounting_mode') }}</label>
-              <select v-model="supplier.accounting_mode" class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
-                <option value="tax_evidence">{{ t('settings.accounting_mode_tax_evidence') }}</option>
-                <option v-if="auth.hasCommercialFeatures || supplier.accounting_mode === 'double_entry'" value="double_entry">{{ t('settings.accounting_mode_double_entry') }}</option>
-              </select>
-              <p class="text-xs text-neutral-500 mt-1">{{ t('settings.accounting_mode_hint') }}</p>
-              <p v-if="originalAccountingMode === 'tax_evidence' && supplier.accounting_mode === 'double_entry'"
-                 class="text-xs text-warning-600 mt-1">
-                {{ t('settings.accounting_mode_switch_backfill_hint') }}
-              </p>
-            </div>
             <!-- Auto-post hook (A2) — jen v podvojném účetnictví (jinak se doklady neúčtují) -->
             <div v-if="auth.hasCommercialFeatures && supplier.accounting_mode === 'double_entry'" class="md:col-span-2 space-y-2">
               <label class="flex items-start gap-2 cursor-pointer">

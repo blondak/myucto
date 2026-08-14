@@ -7,7 +7,6 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useAutomationStore } from '@/stores/automation'
 import { updateApi, type PublicVersion } from '@/api/update'
 import { settingsApi } from '@/api/settings'
-import { licenseApi } from '@/api/license'
 import { CHROME_FILLED_PRIMARY } from '@/components/ui/buttonStyles'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useNavOrder } from '@/composables/useNavOrder'
@@ -48,46 +47,15 @@ const canLockSession = computed(() => sessionSecurity.state?.session_state === '
 let signingSettingsRequest = 0
 
 /*
- * Portál podpory. Tlačítko v patičce je plná primární akce, jen v kompaktní výšce
- * lišty — proto se skládá z vlastní geometrie a barev z `CHROME_FILLED_PRIMARY`
- * (varianta pro `.nav-inverted`), ne z celého `btnFilled()` s h-9.
+ * Podpora v patičce vede na vnitřní rozcestník /admin/support — tam je popsané,
+ * co je zdarma a co placené, a teprve odtud se jde na portál (identifikovaně,
+ * přes licenční klíč). Tlačítko je plná primární akce, jen v kompaktní výšce
+ * lišty — proto vlastní geometrie a barvy z `CHROME_FILLED_PRIMARY`
+ * (varianta pro `.nav-inverted`), ne celé `btnFilled()` s h-9.
  */
-const SUPPORT_PORTAL_URL = 'https://myucto.cz/support'
-const supportLinkBusy = ref(false)
 const supportBtnClass =
   'cursor-pointer inline-flex items-center gap-1 rounded-md px-2 h-6 text-[11px] font-medium ' +
-  'whitespace-nowrap transition-all duration-150 active:translate-y-px ' +
-  'disabled:opacity-60 disabled:cursor-not-allowed disabled:active:translate-y-0 ' + CHROME_FILLED_PRIMARY
-
-/**
- * Přechod na portál podpory. Placené instalaci vymění licenční server klíč za
- * jednorázový token, takže je zákazník na portálu rovnou identifikovaný.
- *
- * Okno se MUSÍ otevřít synchronně v handleru, jinak ho blokátor vyskakovacích
- * oken zahodí — cíl se doplní až po odpovědi. `window.open(…, 'noopener')` vrací
- * null, takže se vazba na otvírající okno ruší ručně přes `opener = null`.
- * Když volání selže nebo uživatel nemá práva na licenci, jde se na veřejný odkaz.
- */
-async function openSupportPortal() {
-  if (supportLinkBusy.value) return
-  const tab = window.open('', '_blank')
-  if (tab) tab.opener = null
-
-  let url = SUPPORT_PORTAL_URL
-  if (auth.isSuperadmin) {
-    supportLinkBusy.value = true
-    try {
-      url = (await licenseApi.supportLink()).url || SUPPORT_PORTAL_URL
-    } catch {
-      url = SUPPORT_PORTAL_URL
-    } finally {
-      supportLinkBusy.value = false
-    }
-  }
-
-  if (tab) tab.location.replace(url)
-  else window.open(url, '_blank', 'noopener')
-}
+  'whitespace-nowrap transition-all duration-150 active:translate-y-px ' + CHROME_FILLED_PRIMARY
 
 async function logout() {
   if (logoutBusy.value) return
@@ -294,14 +262,19 @@ const navSections = computed<NavSection[]>(() => {
   const isAdmin = auth.isSuperadmin
   // Daňový optimalizátor (paušál vs standardní režim) je jen pro OSVČ (fyzická osoba).
   const isOsvc = supplierStore.currentSupplier?.taxpayer_type === 'fo'
-  const ossEnabled = supplierStore.currentSupplier?.oss_enabled === true
+  // Účetnictví, mzdy, sklad i OSS jsou komerční moduly: po vypršení trialu je
+  // jejich API zavřené (CommercialFeatureAccess), takže je nesmí nabízet ani
+  // menu — odkaz do sekce, kde každý požadavek skončí na 403, je horší než
+  // žádný odkaz. Kde se moduly zapínají, tam licenci komunikujeme (Nastavení →
+  // Daně a účetnictví).
+  const ossEnabled = auth.hasCommercialFeatures && supplierStore.currentSupplier?.oss_enabled === true
   // „Vést účetnictví" (migrace 1179) — firemní opt-out účetní nadstavby. Vypnuté schová
   // účetní sekce z menu úplně stejně, jako by nebyla licence; fakturace, DPH a sklad
   // zůstávají. Undefined = zapnuto (starší /auth/me bez pole), aby chybějící migrace
   // uživateli nesebrala účetnictví.
-  const accountingEnabled = supplierStore.currentSupplier?.accounting_enabled !== false
+  const accountingEnabled = auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_enabled !== false
   // Mzdy jsou opt-in (migrace 1290), takže undefined = vypnuto — opačně než účetnictví výš.
-  const payrollEnabled = supplierStore.currentSupplier?.payroll_enabled === true
+  const payrollEnabled = auth.hasCommercialFeatures && supplierStore.currentSupplier?.payroll_enabled === true
   // Účetnictví (Epic F1) — sekce se zobrazí jen firmám v režimu podvojného účetnictví.
   const isDoubleEntry = accountingEnabled && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
   // Daňová evidence (Epic DE) — zrcadlo isDoubleEntry; sekce jen pro režim daňové evidence.
@@ -540,7 +513,9 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/accounting/transition-report', label: t('nav.accounting_transition_report'), icon: ICONS.reports },
         // Pokladna (PPD/VPD) je v sekci Peníze hned za Bankovní účty (jako u podvojného).
         // Export/Import vydaných/přijaté faktury jsou nezávisle na účetním režimu pod Prodej/Nákup.
-        ...(auth.hasCommercialFeatures && isAdmin ? [{ to: '/templates', label: t('nav.section_templates'), icon: ICONS.documents, permission: 'accounting.templates' as PermissionKey }] : []),
+        // Šablony (předkontace, pravidla nákladů a zaúčtování banky) tu ZÁMĚRNĚ nejsou:
+        // všechny tři jsou k účtování do deníku, takže stránka v daňové evidenci nemá
+        // co zobrazit a odkaz vedl na prázdno.
       ],
     })
   }
@@ -598,6 +573,9 @@ const navSections = computed<NavSection[]>(() => {
           { to: '/admin/diagnostics',   label: t('nav.diagnostics'),           icon: ICONS.diagnostics, dividerBefore: true },
           { to: '/admin/support',       label: t('nav.support'),               icon: ICONS.help },
         ] : []),
+        // Manuál je poslední položka Systému — v novém tabu, ať člověk nepřijde
+        // o rozdělanou práci.
+        { to: '/manual', label: t('nav.manual'), icon: ICONS.documents, external: true },
       ],
     })
   }
@@ -606,12 +584,13 @@ const navSections = computed<NavSection[]>(() => {
     // Non-admin role (accountant/readonly) nemá žádnou jinou cestu k vlastním API
     // tokenům — route /profile/api-tokens nemá adminOnly, ale dřív byl jediný
     // sidebar link uvnitř isAdmin bloku výše, takže k němu vedla jen přímá URL.
-    const nonAdminSystemItems: { to: string; label: string; icon: string }[] = []
+    const nonAdminSystemItems: NavItem[] = []
     if (auth.canRead('settings.signing') && accountantSigningProfilesEnabled.value) {
       nonAdminSystemItems.push({ to: '/admin/electronic-signatures', label: t('nav.electronic_signatures'), icon: ICONS.approvals })
     }
     nonAdminSystemItems.push({ to: '/profile/api-tokens', label: t('nav.api_tokens'), icon: ICONS.api_tokens })
     nonAdminSystemItems.push({ to: '/profile/mcp-server', label: t('nav.mcp_server'), icon: ICONS.mcp })
+    nonAdminSystemItems.push({ to: '/manual', label: t('nav.manual'), icon: ICONS.documents, external: true })
     sections.push({
       key: 'system_signing',
       title: t('nav.system'),
@@ -1722,18 +1701,12 @@ onBeforeUnmount(() => {
               <span aria-hidden="true">·</span>
               <a href="https://mywebdesign.cz" target="_blank" rel="noopener" class="hidden xl:inline whitespace-nowrap hover:text-neutral-700">© MyWebdesign.cz</a>
               <span class="hidden xl:inline" aria-hidden="true">·</span>
-              <button
-                type="button"
-                :class="supportBtnClass"
-                :disabled="supportLinkBusy"
-                :title="t('support.help_title')"
-                @click="openSupportPortal"
-              >
+              <RouterLink to="/admin/support" :class="supportBtnClass" :title="t('support.help_title')">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
                 </svg>
                 {{ t('support.help_link') }}
-              </button>
+              </RouterLink>
             </div>
           </div>
 
@@ -1745,18 +1718,12 @@ onBeforeUnmount(() => {
             <div class="flex flex-wrap items-center justify-end gap-1.5">
               <a href="https://myucto.cz/" target="_blank" rel="noopener" class="hover:text-primary-700">MyÚčto.cz</a>
               <span v-if="versionInfo" class="text-neutral-400">v{{ versionInfo.current }}</span>
-              <button
-                type="button"
-                :class="supportBtnClass"
-                :disabled="supportLinkBusy"
-                :title="t('support.help_title')"
-                @click="openSupportPortal"
-              >
+              <RouterLink to="/admin/support" :class="supportBtnClass" :title="t('support.help_title')">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
                 </svg>
                 {{ t('support.help_link') }}
-              </button>
+              </RouterLink>
             </div>
           </div>
         </footer>

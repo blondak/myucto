@@ -62,6 +62,12 @@ final class LicenseMiddlewareTest extends TestCase
             'expired VAT section 79'        => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/reports/s79'],
             'degraded EPO archive'          => [LicenseState::DEGRADED, 'GET', '/api/reports/submissions'],
             'expired accounting activation' => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/settings/accounting-activation/status'],
+            // Čtyři licencované moduly: účetnictví (obě jeho tváře), mzdy, sklad, OSS.
+            'degraded tax evidence'         => [LicenseState::DEGRADED, 'POST', '/api/tax-evidence/cash-journal'],
+            'expired payroll run'           => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/payroll/runs'],
+            'degraded payroll capabilities' => [LicenseState::DEGRADED, 'GET', '/api/payroll/capabilities'],
+            'expired OSS return'            => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/reports/oss/preview'],
+            'degraded OSS bulk assign'      => [LicenseState::DEGRADED, 'POST', '/api/invoices/bulk-oss'],
         ];
     }
 
@@ -84,7 +90,9 @@ final class LicenseMiddlewareTest extends TestCase
             'bank import'         => ['POST', '/api/bank-statements/upload'],
             'VAT report'          => ['GET', '/api/reports/dphdp3/preview'],
             'income tax report'   => ['GET', '/api/tax-return/dppo/preview'],
-            'tax evidence'        => ['POST', '/api/tax-evidence/cash-journal'],
+            // Pokladna a bankovní účty zůstávají v bezplatném základu i po vypršení:
+            // jsou to evidence dokladů, ne účetní nadstavba (ta je o kus výš mezi
+            // omezenými cestami včetně daňové evidence).
             'cash register'       => ['GET', '/api/accounting/cash-registers'],
             'cash document'       => ['POST', '/api/accounting/cash-documents'],
             'bank accounts'       => ['GET', '/api/accounting/bank-accounts'],
