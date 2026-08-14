@@ -14,7 +14,8 @@ konkrétní položky v editoru skladové karty (záložky „Jazyky", „Kategor
 
 Kapitola má dvě části: **§ 34.1–34.7** popisují číselníky a import na stránce
 `/eshop`, **§ 34.8–34.10** pak cenotvorbu a dodavatele, které se zadávají přímo
-na kartě zboží. Pokud tě zajímá jen nacenění katalogu, začni
+na kartě zboží. Číselník jazyků je popsaný samostatně v
+[§ 34.13](#3413-jazyky). Pokud tě zajímá jen nacenění katalogu, začni
 [§ 34.8](#348-cenotvorba).
 
 > [!NOTE]
@@ -45,10 +46,11 @@ tabu se ukládá do URL, takže jde odkázat i naback/refresh):
 | **Atributy** | Typované parametry zboží (barva, rozměr, výkon…) vč. voleb pro výběrové atributy |
 | **Tagy** | Barevné štítky zboží |
 | **Poplatky** | Typy poplatků (autorský, recyklační/PHE…) s vlastní sazbou DPH |
+| **Jazyky** | Jazykové mutace, ve kterých vedeš názvy a popisy zboží a kategorií ([§ 34.13](#3413-jazyky)) |
 | **Sklady** | Stejná záložka jako `Zboží → Skladové karty → Sklady` — sklady patří oběma pohledům |
 | **Import zboží** | Hromadný import/aktualizace karet z XLSX/CSV |
 
-Každý číselník (Výrobci, Kategorie, Atributy, Tagy, Poplatky) má stejný tvar:
+Každý číselník (Výrobci, Kategorie, Atributy, Tagy, Poplatky, Jazyky) má stejný tvar:
 tabulka existujících záznamů, tlačítko **„Nový…"** vpravo nahoře a u každého
 řádku ikony **tužky** (upravit) a **koše** (smazat). Editace i mazání jsou
 dostupné jen uživatelům s právem zápisu — u readonly uživatele akční sloupec
@@ -745,3 +747,36 @@ Ať si nastavíš očekávání správně — tohle cenotvorba v MyÚčto **neum
 | **Automatický přepočet po příjemce / po importu kurzů** | Ruční „Přepočítat" ([§ 34.8.7](#3487-kdy-se-cena-prepocita)) |
 | **Výpočet a reporting marže** | Ručně z nákupní a prodejní ceny |
 | **XML feed pro Heureku / Zboží.cz** | Příznak „Exportovat do e-shopu" je jen označení pro externí systém |
+
+## 34.13 Jazyky
+
+**Cesta: `E-shop → Jazyky`**
+
+Číselník jazykových mutací, ve kterých vedeš názvy a popisy zboží a kategorií.
+Karta zboží na záložce „Jazyky" nabídne **právě jazyky z tohoto číselníku** —
+žádný pevný seznam, který by ti vnucoval jazyky, ve kterých neprodáváš.
+
+| Pole | Význam |
+|---|---|
+| **Kód** | Kód jazyka ve tvaru `cs`, nebo `pt-BR` pro regionální variantu. Používá se v datech překladů |
+| **Název** | Jak se jazyk zobrazí v nabídce (`Čeština`, `English`) |
+| **Pořadí** | Řadí jazyky v nabídce; při shodě rozhoduje kód |
+| **Výchozí jazyk** | Předvyplní se na nové kartě. Výchozí smí být jen jeden |
+| **Aktivní** | Neaktivní (archivovaný) jazyk se nenabízí pro nové překlady |
+
+Ve formuláři je nahoře **rychlá volba** nejčastějších jazyků — klepnutím
+předvyplní kód i název, oboje jde pak přepsat.
+
+> [!IMPORTANT]
+> **Kód jazyka, ke kterému už existují překlady, nelze změnit.** Překlady jsou
+> na jazyk navázané hodnotou kódu, ne odkazem — přejmenování by je od číselníku
+> odpojilo. Chceš-li jazyk opravdu vyměnit, založ nový a překlady přepiš.
+
+Jazyk s uloženými překlady **nejde smazat**, jen archivovat. Archivace ho
+stáhne z nabídky pro nové překlady, ale už uložené texty zůstávají a karta
+s takovým překladem jde dál uložit.
+
+> [!NOTE]
+> Při zapnutí modulu dostaneš do číselníku češtinu a všechny jazyky, ve kterých
+> už nějaký překlad existuje. Nová firma, která si sklad zapne později, začíná
+> s prázdným číselníkem — jazyky si přidá sama, než začne zboží překládat.
