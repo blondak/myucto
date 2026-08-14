@@ -27,6 +27,15 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 final class JmhzScenario1ControlEvaluator
 {
     /**
+     * Hloubka jedné ELDP sekce: `pojisteni` → `eldpSeznam` → `eldp`. Kód
+     * a počet dnů leží přímo v `eldp`, ale vyloučené a odečítané doby o úroveň
+     * hlouběji, takže bez explicitní hloubky by se jedna sekce rozpadla na
+     * několik skupin a kontroly, které tyhle hodnoty porovnávají, by nikdy
+     * neměly obě pohromadě.
+     */
+    private const ELDP_SECTION_DEPTH = 3;
+
+    /**
      * Kontroly, které ověřují stav v systémech ČSSZ nebo v naší evidenci
      * podání, a z vyrobeného XML je tedy vyhodnotit nelze. Nejsou to mezery
      * v pokrytí — rozhodne o nich až protokol o zpracování.
@@ -39,6 +48,12 @@ final class JmhzScenario1ControlEvaluator
             . ' pravidla tedy nelze ani potvrdit, ani vyvrátit.',
         118 => 'Sazba se počítá z vyměřovacího základu zaměstnance (10477),'
             . ' který první profil nevykazuje.',
+        // 10243 „Zaměstnání malého rozsahu" nemá ve slovníku 1.4.1.6 mapování
+        // na XSD, takže se z vyrobeného XML nedá přečíst vůbec. Vydávat
+        // kontrolu za splněnou by znamenalo tvrdit, že prošla podmínka, na
+        // kterou jsme se nikdy nemohli podívat.
+        133 => 'Zaměstnání malého rozsahu (10243) nemá ve slovníku 1.4.1.6'
+            . ' mapování na XSD, takže se z podání nedá přečíst.',
         143 => 'Tvar variabilního symbolu vynucuje serializér; shodu s registrem'
             . ' zaměstnavatelů ČSSZ lokálně ověřit nelze.',
         164 => 'Lhůta splatnosti se odvozuje od data přijetí podání (10006),'
@@ -68,6 +83,10 @@ final class JmhzScenario1ControlEvaluator
         290 => 'Porovnání se slevou z posledního včas podaného hlášení vyžaduje'
             . ' historii podání, kterou drží ČSSZ.',
         291 => 'Platnost oznámeného záměru uplatňovat slevu (OZUSPOJ) eviduje ČSSZ.',
+        323 => 'Detekce duplicitního přijetí se opírá o identifikátor zprávy'
+            . ' a čas přijetí, které přiděluje až ČSSZ.',
+        348 => 'Nekritická kontrola integrity se opírá o dotazy do registru'
+            . ' subjektů a pracovněprávních vztahů ČSSZ.',
         305 => 'Jedinečnost GUID podání vůči období a variabilnímu symbolu se'
             . ' rozhoduje nad evidencí podání, ne nad jedním XML.',
         311 => 'Jedinost ročního zúčtování v rámci roku se pozná až porovnáním'
@@ -99,20 +118,17 @@ final class JmhzScenario1ControlEvaluator
      * @var array<int, array{reason:string,absent:list<string>,not_type:list<string>}>
      */
     private const OUT_OF_PROFILE = [
-        103 => [
-            'reason' => 'Dočasné přidělení není v podání evidované.',
-            'absent' => ['10252', '10457', '10492', '10493', '10494'],
-            'not_type' => [],
-        ],
         190 => [
             'reason' => 'Lhůta pro storno celého podání se týká jen podání typu S.',
             'absent' => [],
             'not_type' => ['S'],
         ],
+        // Storno součásti se posílá v OPRAVNÉM podání s formulářem typu S,
+        // ne v podání typu S. Kontrola tedy dopadá na typ O.
         204 => [
-            'reason' => 'Lhůta pro storno součásti se týká jen podání typu S.',
+            'reason' => 'Lhůta pro storno součásti se týká jen opravného podání.',
             'absent' => [],
-            'not_type' => ['S'],
+            'not_type' => ['O'],
         ],
         233 => [
             'reason' => 'Struktura opravného hlášení se týká jen podání typu O.',
@@ -189,10 +205,10 @@ final class JmhzScenario1ControlEvaluator
         return [
             1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 31, 37, 43, 44, 50, 56, 57, 58,
             60, 61, 62, 72, 74, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
-            109, 129, 131, 132, 133, 134, 135, 144, 145, 152, 153, 154, 157,
+            103, 109, 129, 131, 132, 134, 135, 144, 145, 152, 153, 154, 157,
             159, 162, 167, 168, 211, 227, 232, 235, 236, 240, 244, 248, 251,
             253, 255, 260, 267, 282, 283, 286, 299, 300, 301, 303, 304, 306,
-            307, 309, 323, 330, 332, 335, 341, 342, 348, 355,
+            307, 309, 330, 332, 335, 341, 342, 355,
         ];
     }
 
@@ -298,10 +314,10 @@ final class JmhzScenario1ControlEvaluator
             88 => $this->filledAtNotInFuture($projection, $context),
             93 => $this->packageFormCountWithinTotal($projection),
             97 => $this->atMostIncome($projection, '10289'),
+            103 => $this->temporaryAssignmentIdentified($projection),
             98 => $this->dayCountsWithinMonth($projection),
             99 => $this->eldpValidityWithinPeriod($projection),
             109 => $this->atMostIncome($projection, '10416'),
-            133 => $this->eldpCodeAgainstSmallScale($projection),
             135 => $this->insuranceDaysAgainstEldpCode($projection),
             157 => $this->eldpCodeFromCodebook($projection),
             211 => $this->cancelledFormsLeaveAtLeastOne($projection),
@@ -322,7 +338,6 @@ final class JmhzScenario1ControlEvaluator
             306 => $this->formGuidUniqueWithinSubmission($projection),
             307 => $this->eldpDetailEmptyWithoutCode($projection),
             309 => $this->insuranceDaysAgainstDeductedTime($projection),
-            323, 348 => $this->structuralIntegrity($context),
             330 => $this->eldpCodeRequiredWithDays($projection),
             332 => $this->primaryFlagRequired($projection),
             31, 131 => $this->periodNotBeforeStart($projection),
@@ -775,6 +790,9 @@ final class JmhzScenario1ControlEvaluator
             return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUBMISSION)];
         }
         if ($context->govTalkVariableSymbol === null) {
+            // Ne mezera v našich schopnostech: obálka v téhle fázi ještě
+            // neexistuje, takže není co porovnávat. Kontrola se vyhodnotí až
+            // v okamžiku odeslání, kdy obálka vznikne.
             return [JmhzControlVerdict::notEvaluable(
                 JmhzAttributeProjection::PART_SUBMISSION,
                 'Obálka GovTalk vzniká až při odeslání přes VREP; bez ní není'
@@ -971,7 +989,7 @@ final class JmhzScenario1ControlEvaluator
     private function eldpValidityOrdering(JmhzAttributeProjection $projection): array
     {
         return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
-            foreach ($form->groupedBy(['10241', '10242']) as $section) {
+            foreach ($form->groupedBy(['10241', '10242'], self::ELDP_SECTION_DEPTH) as $section) {
                 $from = $section['10241'] ?? null;
                 $to = $section['10242'] ?? null;
                 if ($from === null || $to === null) {
@@ -1010,7 +1028,7 @@ final class JmhzScenario1ControlEvaluator
                 return null;
             }
             $span = (int) $start->diff($end)->format('%r%a') + 1;
-            foreach ($form->groupedBy(['10356']) as $section) {
+            foreach ($form->groupedBy(['10356'], self::ELDP_SECTION_DEPTH) as $section) {
                 $days = $section['10356'] ?? null;
                 if ($days === null) {
                     continue;
@@ -1055,7 +1073,7 @@ final class JmhzScenario1ControlEvaluator
     {
         $catalog = $this->externalCodebooks;
         if ($catalog === null) {
-            return [JmhzControlVerdict::notEvaluable(
+            return [JmhzControlVerdict::unverifiable(
                 JmhzAttributeProjection::PART_FORM,
                 'Číselník obcí CISOB je externí reference; bez připnutého overlay'
                     . ' jej ověřit nelze.',
@@ -1087,7 +1105,7 @@ final class JmhzScenario1ControlEvaluator
     {
         $catalog = $this->externalCodebooks;
         if ($catalog === null) {
-            return [JmhzControlVerdict::notEvaluable(
+            return [JmhzControlVerdict::unverifiable(
                 JmhzAttributeProjection::PART_FORM,
                 'Číselník států CZEMALFA je externí reference; bez připnutého'
                     . ' overlay jej ověřit nelze.',
@@ -1118,7 +1136,7 @@ final class JmhzScenario1ControlEvaluator
     {
         $catalog = $this->codebooks;
         if ($catalog === null) {
-            return [JmhzControlVerdict::notEvaluable(
+            return [JmhzControlVerdict::unverifiable(
                 JmhzAttributeProjection::PART_FORM,
                 'Číselník nástrojů APZ není k dispozici.',
             )];
@@ -1138,6 +1156,38 @@ final class JmhzScenario1ControlEvaluator
                 }
 
                 return null;
+            },
+        );
+    }
+
+    /**
+     * Evidované dočasné přidělení musí být identifikované právě jedním z tří
+     * způsobů. Brána stojí na HODNOTĚ 10251, ne na nepřítomnosti identifikace —
+     * ta nepřítomnost je totiž přesně to porušení, které má kontrola chytat.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function temporaryAssignmentIdentified(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                if ($form->boolean('10251') !== true) {
+                    return null;
+                }
+                $ways = 0;
+                $ways += $form->value('10252') !== null ? 1 : 0;
+                $ways += $form->value('10457') !== null ? 1 : 0;
+                $ways += ($form->value('10492') !== null
+                    && $form->value('10493') !== null
+                    && $form->value('10494') !== null) ? 1 : 0;
+                if ($ways === 1) {
+                    return null;
+                }
+
+                return $ways === 0
+                    ? 'Evidované dočasné přidělení nemá uvedenou identifikaci uživatele.'
+                    : 'Dočasné přidělení má uvedeno více způsobů identifikace najednou.';
             },
         );
     }
@@ -1257,7 +1307,7 @@ final class JmhzScenario1ControlEvaluator
     private function schemaValidated(JmhzControlContext $context): array
     {
         if (!$context->schemaValidated) {
-            return [JmhzControlVerdict::notEvaluable(
+            return [JmhzControlVerdict::unverifiable(
                 JmhzAttributeProjection::PART_SUBMISSION,
                 'Volající neprovedl validaci proti připnutému XSD, takže ji'
                     . ' nelze vykázat jako splněnou.',
@@ -1933,7 +1983,7 @@ final class JmhzScenario1ControlEvaluator
     {
         $catalog = $this->codebooks;
         if ($catalog === null) {
-            return [JmhzControlVerdict::notEvaluable(
+            return [JmhzControlVerdict::unverifiable(
                 JmhzAttributeProjection::PART_FORM,
                 'Číselník kódů ELDP není k dispozici.',
             )];
@@ -1978,7 +2028,7 @@ final class JmhzScenario1ControlEvaluator
     private function eldpCodeRequiredWithDays(JmhzAttributeProjection $projection): array
     {
         return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
-            foreach ($form->groupedBy(['10356', '10240']) as $section) {
+            foreach ($form->groupedBy(['10356', '10240'], self::ELDP_SECTION_DEPTH) as $section) {
                 $days = $section['10356'] ?? null;
                 if ($days === null || (int) $days <= 0) {
                     continue;
@@ -2004,7 +2054,7 @@ final class JmhzScenario1ControlEvaluator
         return $this->perForm(
             $projection,
             static function (JmhzAttributeScope $form) use ($detail): ?string {
-                foreach ($form->groupedBy([...$detail, '10240']) as $section) {
+                foreach ($form->groupedBy([...$detail, '10240'], self::ELDP_SECTION_DEPTH) as $section) {
                     if (($section['10240'] ?? null) !== null) {
                         continue;
                     }
@@ -2059,7 +2109,7 @@ final class JmhzScenario1ControlEvaluator
     {
         return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
             $span = self::intervalDays($form->value('10354'), $form->value('10355'));
-            foreach ($form->groupedBy(['10240', '10356']) as $section) {
+            foreach ($form->groupedBy(['10240', '10356'], self::ELDP_SECTION_DEPTH) as $section) {
                 $code = $section['10240'] ?? null;
                 $days = $section['10356'] ?? null;
                 if ($code === null || $days === null) {
@@ -2088,7 +2138,7 @@ final class JmhzScenario1ControlEvaluator
                 return null;
             }
             $smallScale = $form->value('10243') === 'A';
-            foreach ($form->groupedBy(['10240', '10356', '10375']) as $section) {
+            foreach ($form->groupedBy(['10240', '10356', '10375'], self::ELDP_SECTION_DEPTH) as $section) {
                 $code = $section['10240'] ?? null;
                 $days = $section['10356'] ?? null;
                 $deducted = $section['10375'] ?? null;
@@ -2256,6 +2306,12 @@ final class JmhzScenario1ControlEvaluator
      * splnění se hlásí jednou souhrnně — u patnácti set formulářů by jinak
      * protokol utopil skutečné vady v tisících zelených řádků.
      *
+     * Součást se počítá za vyhodnocenou jen tehdy, když kontrola opravdu
+     * přečetla aspoň jeden vykázaný atribut. Bez toho by se za splněnou vydala
+     * i kontrola, jejíž první podmínka se opírá o nevykázaný údaj a která proto
+     * skončí dřív, než se k čemukoli dostane — „prošlo" a „nebylo co číst" jsou
+     * dvě různé odpovědi a jen jedna z nich smí uklidnit uživatele.
+     *
      * @param callable(JmhzAttributeScope):?string $check
      * @return list<JmhzControlVerdict>
      */
@@ -2264,8 +2320,12 @@ final class JmhzScenario1ControlEvaluator
         $verdicts = [];
         $evaluated = 0;
         foreach ($projection->forms() as $form) {
-            ++$evaluated;
+            $form->resetReadCount();
             $message = $check($form);
+            if ($form->readCount() === 0) {
+                continue;
+            }
+            ++$evaluated;
             if ($message !== null) {
                 $verdicts[] = JmhzControlVerdict::failed(
                     JmhzAttributeProjection::PART_FORM,
@@ -2275,7 +2335,10 @@ final class JmhzScenario1ControlEvaluator
             }
         }
         if ($evaluated === 0) {
-            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_FORM)];
+            return [JmhzControlVerdict::notApplicable(
+                JmhzAttributeProjection::PART_FORM,
+                'Žádná součást nevykazuje údaje, na kterých kontrola stojí.',
+            )];
         }
 
         return $verdicts === []

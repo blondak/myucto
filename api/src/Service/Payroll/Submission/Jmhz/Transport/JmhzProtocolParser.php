@@ -41,7 +41,11 @@ final readonly class JmhzProtocolParser
      * @param int $packageCount počet dílčích balíků hlášení; mění doložený
      *   výklad situace „všechny formuláře zamítnuty"
      */
-    public function parse(string $xml, int $packageCount = 1): JmhzProtocolReport
+    public function parse(
+        string $xml,
+        int $packageCount = 1,
+        ?string $expectedCorrelation = null,
+    ): JmhzProtocolReport
     {
         if ($packageCount < 1) {
             throw new JmhzTransportException(
@@ -65,7 +69,7 @@ final readonly class JmhzProtocolParser
         if ($root->localName === 'DZMHOdpoved'
             && $root->namespaceURI === self::NS_DZMH
         ) {
-            return $this->parseCompleteness($dom);
+            return $this->parseCompleteness($dom, $expectedCorrelation);
         }
 
         throw new JmhzTransportException(
@@ -118,8 +122,15 @@ final readonly class JmhzProtocolParser
             $packageCount,
             $this->intAttribute($result, 'countWar'),
         );
+        // Obálka s příznakem zamítnutí smí doprovázet i částečné přijetí —
+        // z pohledu odesílatele je to pořád odmítnutá zpráva, jen ne celá.
+        // Rozpor je až tehdy, když obálka hlásí zamítnutí a uvnitř je čistý
+        // průchod.
         if ($qualifier === self::QUALIFIER_REJECTED
-            && $status !== JmhzSubmissionStatus::Rejected
+            && in_array($status, [
+                JmhzSubmissionStatus::ProcessedAndComplete,
+                JmhzSubmissionStatus::ContainsPassableErrors,
+            ], true)
         ) {
             throw new JmhzTransportException(
                 'jmhz_protocol_qualifier_conflict',
@@ -195,16 +206,36 @@ final readonly class JmhzProtocolParser
         int $packageCount,
         int $warnings,
     ): JmhzSubmissionStatus {
+        $rejectedParts = array_values(array_filter(
+            $parts,
+            static fn (JmhzProtocolPart $part): bool
+                => $part->status === JmhzSubmissionStatus::Rejected,
+        ));
         if ($outcome === 'OK') {
+            // Souhrnný výsledek „OK" a zamítnutá součást uvnitř si odporují.
+            // Vzít souhrn a zamítnutí zahodit by přeneslo přijetí na podání,
+            // které ČSSZ nepřijala celé.
+            if ($rejectedParts !== []) {
+                throw new JmhzTransportException(
+                    'jmhz_protocol_outcome_conflict',
+                    'Protokol hlásí souhrnný výsledek OK, ale některá jeho část'
+                        . ' je zamítnutá.',
+                );
+            }
+
             return $warnings > 0
                 ? JmhzSubmissionStatus::ContainsPassableErrors
                 : JmhzSubmissionStatus::ProcessedAndComplete;
         }
-        $general = $parts[0] ?? null;
-        if ($general !== null
-            && $general->kind === JmhzProtocolPartKind::General
-            && $general->status === JmhzSubmissionStatus::Rejected
-        ) {
+        // Obecná vada zamítá celé dílčí podání bez ohledu na pořadí, ve kterém
+        // ČSSZ položky vypsala. Hledat ji na prvním indexu znamenalo, že
+        // přeházené pořadí zamítnutí tiše změkčilo na částečné přijetí.
+        $general = array_values(array_filter(
+            $rejectedParts,
+            static fn (JmhzProtocolPart $part): bool
+                => $part->kind === JmhzProtocolPartKind::General,
+        ));
+        if ($general !== []) {
             return JmhzSubmissionStatus::Rejected;
         }
         $forms = array_values(array_filter(
@@ -227,7 +258,10 @@ final readonly class JmhzProtocolParser
         return JmhzSubmissionStatus::PartiallyAccepted;
     }
 
-    private function parseCompleteness(DOMDocument $dom): JmhzProtocolReport
+    private function parseCompleteness(
+        DOMDocument $dom,
+        ?string $expectedCorrelation = null,
+    ): JmhzProtocolReport
     {
         $xpath = $this->xpath($dom);
         $code = trim($this->text($xpath, '//d:stavMH/d:kod'));
@@ -246,11 +280,26 @@ final readonly class JmhzProtocolParser
             );
         }
 
+        // Odpověď DZMH nese protokoly VŠECH podání za období. Vybrat první
+        // znamenalo přenést stav cizího podání na naše; vybírá se proto podle
+        // očekávaného CorrelationID, a když ho volající nedodal, je jednoznačná
+        // jen odpověď s jediným protokolem.
+        $protocols = [];
+        foreach ($xpath->query('//d:protokoly/d:protokol') as $protocol) {
+            if ($protocol instanceof DOMElement) {
+                $protocols[] = $protocol;
+            }
+        }
+        $selected = $this->selectProtocol($xpath, $protocols, $expectedCorrelation);
+
         $correlation = null;
         $parts = [];
         $errors = [];
-        foreach ($xpath->query('//d:protokoly/d:protokol') as $protocol) {
-            if (!$protocol instanceof DOMElement) {
+        $status = $selected === null ? $status : JmhzSubmissionStatus::fromCode(
+            (int) trim($this->childText($xpath, $selected, 'kod')),
+        );
+        foreach ($protocols as $protocol) {
+            if ($selected !== null && $protocol !== $selected) {
                 continue;
             }
             $protocolStatus = JmhzSubmissionStatus::fromCode(
@@ -300,6 +349,43 @@ final readonly class JmhzProtocolParser
             $parts,
             $errors,
             [],
+        );
+    }
+
+    /**
+     * Vybere z odpovědi DZMH protokol, který patří očekávanému podání.
+     *
+     * @param list<DOMElement> $protocols
+     */
+    private function selectProtocol(
+        \DOMXPath $xpath,
+        array $protocols,
+        ?string $expectedCorrelation,
+    ): ?DOMElement {
+        if ($protocols === []) {
+            return null;
+        }
+        if ($expectedCorrelation === null) {
+            if (count($protocols) > 1) {
+                throw new JmhzTransportException(
+                    'jmhz_protocol_ambiguous',
+                    'Odpověď DZMH nese protokoly více podání; bez očekávaného'
+                        . ' CorrelationID nelze určit, který z nich patří tomuhle podání.',
+                );
+            }
+
+            return $protocols[0];
+        }
+        foreach ($protocols as $protocol) {
+            $reference = trim($this->childText($xpath, $protocol, 'idKonkretnihoPodani'));
+            if ($reference !== '' && hash_equals($expectedCorrelation, $reference)) {
+                return $protocol;
+            }
+        }
+
+        throw new JmhzTransportException(
+            'jmhz_protocol_correlation_mismatch',
+            'Odpověď DZMH neobsahuje protokol očekávaného podání.',
         );
     }
 

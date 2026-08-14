@@ -33,6 +33,16 @@ final readonly class JmhzControlVerdict
         return new self(JmhzControlOutcome::NotEvaluable, $part, null, $message);
     }
 
+    /**
+     * Kontrolu bychom vyhodnotit uměli, ale chybí předpoklad — připnutý
+     * číselník, doložená validace proti schématu, obálka. Provozní mezera,
+     * ne rozhodnutí ČSSZ.
+     */
+    public static function unverifiable(string $part, string $message): self
+    {
+        return new self(JmhzControlOutcome::Unverifiable, $part, null, $message);
+    }
+
     public static function unimplemented(string $part, string $message): self
     {
         return new self(JmhzControlOutcome::Unimplemented, $part, null, $message);

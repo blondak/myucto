@@ -30,10 +30,16 @@ final class JmhzAttributeProjection
     public const PART_FORM = 'form';
 
     /**
-     * `VENDOR` nese identifikaci odesílajícího software, ne vykazovaný údaj —
-     * datový slovník ho proto nezná a projekce ho vědomě přeskakuje.
+     * Dva technické elementy kořene, které nenesou vykazovaný údaj, a datový
+     * slovník je proto nezná: `VENDOR` identifikuje odesílající software,
+     * `SENDER` nese e-mail pro notifikaci, příznak protokolu do datové schránky
+     * a verzi protokolu. Oba jsou v XSD čistě atributové, bez textového obsahu.
+     *
+     * Seznam je vědomě krátký a jmenný. Přeskakovat každý neznámý element by
+     * z fail-closed promítnutí udělalo fail-open: překlep v názvu by kontrolu
+     * nad tím atributem tiše vypnul.
      */
-    private const IGNORED_ROOT_LEAVES = ['VENDOR'];
+    private const IGNORED_ROOT_LEAVES = ['VENDOR', 'SENDER'];
 
     private JmhzAttributeScope $submission;
 

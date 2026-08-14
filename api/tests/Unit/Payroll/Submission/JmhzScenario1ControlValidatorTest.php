@@ -45,7 +45,10 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         }
         self::assertFalse($report->submittable());
         foreach ($report->coverageGaps() as $gap) {
-            self::assertSame(JmhzControlOutcome::Unimplemented, $gap->outcome);
+            self::assertContains(
+                $gap->outcome,
+                [JmhzControlOutcome::Unimplemented, JmhzControlOutcome::Unverifiable],
+            );
             self::assertSame(JmhzControlPassability::Blocking, $gap->passability);
         }
     }
@@ -509,11 +512,15 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
      */
     public function testSchemaControlsNeedProofThatSchemaValidationRan(): void
     {
+        // Chybějící důkaz o validaci není rozhodnutí ČSSZ, ale mezera na naší
+        // straně — musí proto blokovat odeslání, ne se jen tiše zaznamenat.
         $without = $this->validate(JmhzXmlSample::minimal());
         self::assertSame(
-            JmhzControlOutcome::NotEvaluable,
+            JmhzControlOutcome::Unverifiable,
             $this->finding($without, 61)->outcome,
         );
+        self::assertNotSame([], $without->coverageGaps());
+        self::assertFalse($without->submittable());
 
         $with = $this->validate(
             JmhzXmlSample::minimal(),
@@ -532,6 +539,90 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         self::assertSame([], $report->blocking());
         self::assertSame([], $report->coverageGaps());
         self::assertTrue($report->submittable());
+    }
+
+    /**
+     * ELDP sekce se skládá ze dvou úrovní: kód a počet dnů leží přímo v `eldp`,
+     * odečítané doby o úroveň hlouběji. Seskupení podle přímého rodiče proto
+     * jednu sekci rozpadlo na dvě skupiny — kontrola 309 pak nikdy neměla obě
+     * hodnoty pohromadě a tiše procházela i tam, kde počet dnů neseděl.
+     */
+    public function testInsuranceDaysAgainstDeductedTimeSeesTheWholeEldpSection(): void
+    {
+        $report = $this->validate(str_replace(
+            '<form:vymerovaciZaklad>1000</form:vymerovaciZaklad>',
+            '<form:vymerovaciZaklad>1000</form:vymerovaciZaklad>'
+                . "\n<form:odecitaneDny><form:odecitaneDobyCelkem>5</form:odecitaneDobyCelkem>"
+                . '</form:odecitaneDny>',
+            str_replace('<form:kod>1++</form:kod>', '<form:kod>TZ+</form:kod>', JmhzXmlSample::minimal()),
+        ));
+
+        self::assertContains(309, $this->failedIds($report));
+    }
+
+    /**
+     * Druhá strana téhož rozpadu: kontrola 307 naopak falešně selhávala,
+     * protože skupina s odečítanými dobami nikdy neobsahovala kód ELDP,
+     * který přitom v téže sekci byl.
+     */
+    public function testEldpDetailIsNotReportedAsOrphanedWhenTheCodeIsPresent(): void
+    {
+        $report = $this->validate(str_replace(
+            '<form:vymerovaciZaklad>1000</form:vymerovaciZaklad>',
+            '<form:vymerovaciZaklad>1000</form:vymerovaciZaklad>'
+                . "\n<form:vylouceneDny><form:vylouceneDobyCelkem>3</form:vylouceneDobyCelkem>"
+                . '</form:vylouceneDny>',
+            JmhzXmlSample::minimal(),
+        ));
+
+        self::assertNotContains(307, $this->failedIds($report));
+    }
+
+    /**
+     * Brána u kontroly 103 stála na nepřítomnosti identifikace, tedy přesně na
+     * tom porušení, které měla chytat. Evidované dočasné přidělení bez
+     * identifikace uživatele tak procházelo jako „kontrola nedopadá".
+     */
+    public function testTemporaryAssignmentWithoutIdentificationIsRefused(): void
+    {
+        $report = $this->validate(str_replace(
+            '<form:docasnePrideleniEvidovano>false</form:docasnePrideleniEvidovano>',
+            '<form:docasnePrideleniEvidovano>true</form:docasnePrideleniEvidovano>',
+            JmhzXmlSample::minimal(),
+        ));
+
+        self::assertContains(103, $this->failedIds($report));
+    }
+
+    /**
+     * Kontrola, jejíž vstupy v podání nejsou, se nesmí hlásit jako splněná.
+     * „Prošlo" a „nebylo co číst" jsou dvě různé odpovědi.
+     */
+    public function testControlThatReadsNothingIsNotReportedAsPassed(): void
+    {
+        $report = $this->validate(JmhzXmlSample::minimal());
+
+        // 23 porovnává neodpracované hodiny s dovolenou; první profil ani
+        // jedno nevykazuje, takže kontrola nemá co číst.
+        self::assertSame(
+            JmhzControlOutcome::NotApplicable,
+            $this->finding($report, 23)->outcome,
+        );
+    }
+
+    /**
+     * Zaměstnání malého rozsahu nemá ve slovníku 1.4.1.6 mapování na XSD,
+     * takže se z podání nedá přečíst. Kontrola 133 se proto nesmí tvářit,
+     * že něco ověřila.
+     */
+    public function testControlStandingOnAnUnmappedAttributeIsNotEvaluable(): void
+    {
+        $report = $this->validate(JmhzXmlSample::minimal());
+
+        self::assertSame(
+            JmhzControlOutcome::NotEvaluable,
+            $this->finding($report, 133)->outcome,
+        );
     }
 
     /** @return list<int> */

@@ -82,11 +82,31 @@ final class JmhzReceiptVerifierTest extends TestCase
             $this->protocol(),
             'vrep_apep',
             'test',
-            null,
+            'CID0000000001',
         );
 
         self::assertSame('accepted', $receipt->remoteStatus);
         self::assertSame([], $receipt->partStatuses);
+    }
+
+    /**
+     * Protokol bez očekávaného CorrelationID nemá na podání žádnou vazbu —
+     * parser variabilní symbol nikde nečte, takže by stačil platně podepsaný
+     * protokol jiného zaměstnavatele, aby se z něj přenesl stav „přijato".
+     */
+    public function testProtocolCannotBePairedWhenTheSubmissionHasNoCorrelation(): void
+    {
+        try {
+            (new JmhzReceiptVerifier($this->signatures()))->verify(
+                $this->protocol(),
+                'vrep_apep',
+                'test',
+                null,
+            );
+            self::fail('Bez uloženého CorrelationID nesmí verifier nic vrátit.');
+        } catch (JmhzTransportException $e) {
+            self::assertSame('jmhz_protocol_correlation_unknown', $e->errorCode);
+        }
     }
 
     public function testProtocolForAnotherSubmissionIsRefused(): void
@@ -131,7 +151,7 @@ final class JmhzReceiptVerifierTest extends TestCase
         ]);
 
         try {
-            $verifier->verify($this->protocol(), 'vrep_apep', 'test', null);
+            $verifier->verify($this->protocol(), 'vrep_apep', 'test', 'CID0000000001');
             self::fail('Neznámý GUID formuláře musí padnout.');
         } catch (JmhzTransportException $e) {
             self::assertSame('jmhz_protocol_form_unmapped', $e->errorCode);

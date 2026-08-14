@@ -17,6 +17,8 @@ final class JmhzAttributeScope
     /** @var list<string> */
     private array $bodies = [];
 
+    private int $reads = 0;
+
     public function __construct(
         public readonly string $part,
         public readonly int $ordinal = 0,
@@ -47,10 +49,33 @@ final class JmhzAttributeScope
         return isset($this->occurrences[$attributeId]);
     }
 
+    /**
+     * Kolikrát si volající vyžádal atribut, který v podání OPRAVDU je.
+     *
+     * Slouží k rozlišení „kontrola proběhla a prošla" od „kontrola neměla co
+     * číst". Bez toho by se za splněnou vydala i kontrola, jejíž první podmínka
+     * se opírá o nevykázaný atribut a která proto skončí dřív, než se k něčemu
+     * dostane. Dotaz na nepřítomný atribut se nepočítá — právě ten je rozdíl.
+     */
+    public function readCount(): int
+    {
+        return $this->reads;
+    }
+
+    public function resetReadCount(): void
+    {
+        $this->reads = 0;
+    }
+
     /** @return list<JmhzAttributeOccurrence> */
     public function all(string $attributeId): array
     {
-        return $this->occurrences[$attributeId] ?? [];
+        $found = $this->occurrences[$attributeId] ?? [];
+        if ($found !== []) {
+            ++$this->reads;
+        }
+
+        return $found;
     }
 
     /**
@@ -59,7 +84,7 @@ final class JmhzAttributeScope
      */
     public function value(string $attributeId): ?string
     {
-        $found = $this->occurrences[$attributeId] ?? [];
+        $found = $this->all($attributeId);
         if ($found === []) {
             return null;
         }
@@ -127,24 +152,50 @@ final class JmhzAttributeScope
     }
 
     /**
-     * Hodnoty seskupené podle opakovaného rodiče — klíčem je `groupKey`,
-     * hodnotou mapa atribut → hodnota. Používá se u ELDP sekcí, kde se
-     * jeden blok opakuje N× za měsíc.
+     * Hodnoty seskupené podle opakovaného bloku — hodnotou je mapa
+     * atribut → hodnota. Používá se u ELDP sekcí, kde se jeden blok opakuje
+     * N× za měsíc.
+     *
+     * `$ancestorDepth` říká, na jaké úrovni blok začíná. Bez něj by se
+     * seskupovalo podle PŘÍMÉHO rodiče, což u ELDP rozpadne jednu sekci na
+     * několik skupin: kód a počet dnů leží přímo v `eldp`, kdežto vyloučené
+     * a odečítané doby o úroveň hlouběji. Kontrola porovnávající počet dnů
+     * s odečítanými dobami by pak nikdy neměla obě hodnoty pohromadě
+     * a tiše by prošla.
      *
      * @param list<string> $attributeIds
      * @return list<array<string, string>>
      */
-    public function groupedBy(array $attributeIds): array
+    public function groupedBy(array $attributeIds, ?int $ancestorDepth = null): array
     {
         $groups = [];
         foreach ($attributeIds as $attributeId) {
             foreach ($this->all($attributeId) as $occurrence) {
-                $groups[$occurrence->groupKey][$attributeId] = $occurrence->value;
+                $key = self::truncateGroupKey($occurrence->groupKey, $ancestorDepth);
+                $groups[$key][$attributeId] = $occurrence->value;
             }
         }
         ksort($groups);
 
         return array_values($groups);
+    }
+
+    /**
+     * Ořízne klíč skupiny na zadaný počet úrovní. Výskyt mělčí, než je zadaná
+     * úroveň, patří do vlastní skupiny — sloučit ho s bloky by spojilo hodnotu
+     * platnou pro celý formulář s hodnotou platnou pro jednu sekci.
+     */
+    private static function truncateGroupKey(string $groupKey, ?int $depth): string
+    {
+        if ($depth === null || $groupKey === '') {
+            return $groupKey;
+        }
+        $segments = explode('.', $groupKey);
+        if (count($segments) <= $depth) {
+            return $groupKey;
+        }
+
+        return implode('.', array_slice($segments, 0, $depth));
     }
 
     /** @return list<string> */

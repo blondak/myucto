@@ -69,26 +69,41 @@ final readonly class JmhzReceiptVerifier implements PayrollReceiptVerifierInterf
                 'Protokol ČSSZ nelze prohlásit za důvěryhodný bez ověření podpisu.',
             );
         }
+        // Bez očekávaného CorrelationID nemá protokol na tohle podání žádnou
+        // vazbu: parser variabilní symbol nikde nečte, takže by stačil platně
+        // podepsaný protokol JAKÉHOKOLI zaměstnavatele, aby se z něj přenesl
+        // stav „přijato". Podání odeslané přes VREP dostane CorrelationID už
+        // při odeslání; jeho chybějící uložení je chyba, ne důvod protokol
+        // přijmout.
+        if ($expectedCorrelationReference === null) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_correlation_unknown',
+                'Podání nemá uložené CorrelationID, takže k němu nelze protokol'
+                    . ' bezpečně přiřadit.',
+            );
+        }
         $xml = $this->signatures->verifiedProtocolXml($bytes, $environment);
-        $report = $this->parser->parse($xml, $this->packageCount);
-        if ($expectedCorrelationReference !== null) {
-            // Protokol bez CorrelationID nelze k podání přiřadit. Propustit ho
-            // by znamenalo vzít stav z dokumentu, o kterém nevíme, že k tomuhle
-            // podání patří — a `remote_status` je jediný údaj, který v platformě
-            // rozhoduje o přijetí.
-            if ($report->correlationReference === null) {
-                throw new JmhzTransportException(
-                    'jmhz_protocol_correlation_missing',
-                    'Ověřený protokol neuvádí CorrelationID, takže ho k podání'
-                        . ' nelze přiřadit.',
-                );
-            }
-            if (!hash_equals($expectedCorrelationReference, $report->correlationReference)) {
-                throw new JmhzTransportException(
-                    'jmhz_protocol_correlation_mismatch',
-                    'Ověřený protokol patří jinému podání.',
-                );
-            }
+        $report = $this->parser->parse(
+            $xml,
+            $this->packageCount,
+            $expectedCorrelationReference,
+        );
+        // Protokol bez CorrelationID nelze k podání přiřadit. Propustit ho by
+        // znamenalo vzít stav z dokumentu, o kterém nevíme, že k tomuhle podání
+        // patří — a `remote_status` je jediný údaj, který v platformě rozhoduje
+        // o přijetí.
+        if ($report->correlationReference === null) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_correlation_missing',
+                'Ověřený protokol neuvádí CorrelationID, takže ho k podání'
+                    . ' nelze přiřadit.',
+            );
+        }
+        if (!hash_equals($expectedCorrelationReference, $report->correlationReference)) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_correlation_mismatch',
+                'Ověřený protokol patří jinému podání.',
+            );
         }
 
         return new PayrollVerifiedReceipt(

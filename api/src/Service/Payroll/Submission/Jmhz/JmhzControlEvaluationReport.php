@@ -45,8 +45,11 @@ final readonly class JmhzControlEvaluationReport
     }
 
     /**
-     * Nepropustné kontroly, které na podání dopadají, ale nemáme pro ně
-     * vykonávací implementaci. Dokud jsou, nesmí se odesílat.
+     * Nepropustné kontroly, které na podání dopadají a které jsme nevykonali —
+     * ať proto, že pro ně nemáme implementaci, nebo proto, že chyběl
+     * předpoklad (nepřipnutý číselník, nedoložená validace schématu, obálka).
+     * Obojí je mezera na naší straně, ne rozhodnutí ČSSZ, a dokud trvá,
+     * nesmí se odesílat.
      *
      * @return list<JmhzControlFinding>
      */
@@ -55,7 +58,11 @@ final readonly class JmhzControlEvaluationReport
         return array_values(array_filter(
             $this->findings,
             static fn (JmhzControlFinding $finding): bool
-                => $finding->outcome === JmhzControlOutcome::Unimplemented
+                => in_array(
+                    $finding->outcome,
+                    [JmhzControlOutcome::Unimplemented, JmhzControlOutcome::Unverifiable],
+                    true,
+                )
                 && $finding->passability === JmhzControlPassability::Blocking,
         ));
     }

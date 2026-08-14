@@ -99,6 +99,17 @@ final class PayrollJmhzTransportAttemptsMigrationTest extends TestCase
             'transport attempt channel must match its submission',
             $sql,
         );
+        // Ledger, který smí zapomenout odeslání, není ledger, ale stavová
+        // proměnná: bez těchhle dvou strážců šlo pokus vrátit z 'sent' zpět
+        // na 'prepared' a vynulovat sent_at.
+        self::assertStringContainsString(
+            'transport attempt sent_at is single-assignment',
+            $sql,
+        );
+        self::assertStringContainsString(
+            'transport attempt cannot return to prepared',
+            $sql,
+        );
     }
 
     public function testFailureAndTrackingInvariantsAreEnforcedInSchema(): void

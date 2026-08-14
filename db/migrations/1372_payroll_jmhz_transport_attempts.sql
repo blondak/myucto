@@ -169,6 +169,20 @@ BEGIN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'terminal transport attempt cannot be reopened';
   END IF;
+
+  -- Jednou odeslaný pokus zůstává odeslaný. Bez tohohle šlo pokus vrátit
+  -- z 'sent' na 'prepared' a vynulovat sent_at, čímž zmizel důkaz o tom,
+  -- že zpráva u ČSSZ byla — a ledger, který smí zapomenout odeslání, není
+  -- ledger, ale stavová proměnná.
+  IF OLD.sent_at IS NOT NULL AND NOT (NEW.sent_at <=> OLD.sent_at) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'transport attempt sent_at is single-assignment';
+  END IF;
+
+  IF OLD.status <> 'prepared' AND NEW.status = 'prepared' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'transport attempt cannot return to prepared';
+  END IF;
 END//
 
 DROP TRIGGER IF EXISTS trg_payroll_transport_attempts_no_delete//

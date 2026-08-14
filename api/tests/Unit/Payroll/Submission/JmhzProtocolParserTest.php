@@ -151,6 +151,130 @@ final class JmhzProtocolParserTest extends TestCase
         self::assertCount(1, $report->errorsForForm(JmhzTransportSample::FORM_GUID));
     }
 
+    /**
+     * Obecná vada zamítá celé dílčí podání bez ohledu na to, kolikátou položku
+     * ČSSZ vypsala. Hledat ji na prvním indexu znamenalo, že přeházené pořadí
+     * změkčilo zamítnutí na částečné přijetí.
+     */
+    public function testGeneralRejectionIsFoundRegardlessOfItsPosition(): void
+    {
+        $report = $this->parser()->parse(JmhzTransportSample::partialProtocol(
+            'ERROR',
+            [['guid' => JmhzTransportSample::FORM_GUID, 'result' => 'OK']],
+            qualifier: 'error',
+            errMsg: 'JMHZ25_LT: 20118 - Chybná hodnota',
+            errNumber: '20118',
+            generalResult: 'ERROR',
+        ));
+
+        self::assertSame(JmhzSubmissionStatus::Rejected, $report->status);
+    }
+
+    /**
+     * Souhrnný výsledek OK a zamítnutá součást uvnitř si odporují. Vzít souhrn
+     * a zamítnutí zahodit by přeneslo přijetí na podání, které ČSSZ nepřijala
+     * celé.
+     */
+    public function testOverallOkWithARejectedItemIsRefused(): void
+    {
+        $this->expectException(JmhzTransportException::class);
+        $this->parser()->parse(JmhzTransportSample::partialProtocol(
+            'OK',
+            [
+                [
+                    'guid' => JmhzTransportSample::FORM_GUID,
+                    'result' => 'ERROR',
+                    'errMsg' => 'JMHZ25_LT: 20118 - Chybná hodnota',
+                    'errNum' => '20118',
+                ],
+            ],
+        ));
+    }
+
+    /**
+     * Obálka s příznakem zamítnutí smí doprovázet částečné přijetí — z pohledu
+     * odesílatele je to pořád odmítnutá zpráva, jen ne celá.
+     */
+    public function testRejectedQualifierMayAccompanyPartialAcceptance(): void
+    {
+        $report = $this->parser()->parse(JmhzTransportSample::partialProtocol(
+            'ERROR',
+            [
+                ['guid' => JmhzTransportSample::FORM_GUID, 'result' => 'OK'],
+                [
+                    'guid' => JmhzTransportSample::OTHER_FORM_GUID,
+                    'result' => 'ERROR',
+                    'errMsg' => 'JMHZ25_LT: 20118 - Chybná hodnota',
+                    'errNum' => '20118',
+                ],
+            ],
+            qualifier: 'error',
+            errMsg: 'JMHZ25_LT: 20118 - Chybná hodnota',
+            errNumber: '20118',
+        ));
+
+        self::assertSame(JmhzSubmissionStatus::PartiallyAccepted, $report->status);
+    }
+
+    /**
+     * Odpověď DZMH nese protokoly všech podání za období. Brát první znamenalo
+     * přenést stav cizího podání na naše.
+     */
+    public function testCompletenessAnswerPicksTheProtocolOfTheExpectedSubmission(): void
+    {
+        $xml = str_replace(
+            '<protokoly><protokol>',
+            '<protokoly><protokol>'
+                . '<idKonkretnihoPodani>CID0000000009</idKonkretnihoPodani>'
+                . '<kod>3</kod><nazev>Podání bylo zamítnuto</nazev>'
+                . '<chybySeznam></chybySeznam></protokol><protokol>',
+            JmhzTransportSample::completenessProtocol('4', 'Hlášení je částečně přijato', '1'),
+        );
+
+        $report = $this->parser()->parse($xml, 1, 'CID0000000001');
+
+        self::assertSame('CID0000000001', $report->correlationReference);
+        self::assertSame(JmhzSubmissionStatus::ProcessedAndComplete, $report->status);
+    }
+
+    public function testCompletenessAnswerWithSeveralProtocolsIsAmbiguousWithoutExpectation(): void
+    {
+        $xml = str_replace(
+            '<protokoly><protokol>',
+            '<protokoly><protokol>'
+                . '<idKonkretnihoPodani>CID0000000009</idKonkretnihoPodani>'
+                . '<kod>3</kod><nazev>Podání bylo zamítnuto</nazev>'
+                . '<chybySeznam></chybySeznam></protokol><protokol>',
+            JmhzTransportSample::completenessProtocol('4', 'Hlášení je částečně přijato', '1'),
+        );
+
+        try {
+            $this->parser()->parse($xml);
+            self::fail('Víc protokolů bez očekávaného CorrelationID musí padnout.');
+        } catch (JmhzTransportException $e) {
+            self::assertSame('jmhz_protocol_ambiguous', $e->errorCode);
+        }
+    }
+
+    /**
+     * Stav NAŠEHO podání je stav jeho protokolu, ne souhrnný stav celého
+     * hlášení. Úplné hlášení může obsahovat zamítnuté podání.
+     */
+    public function testSubmissionStatusComesFromItsOwnProtocolNotFromTheOverallReport(): void
+    {
+        $report = $this->parser()->parse(
+            JmhzTransportSample::completenessProtocol(
+                '1',
+                'Hlášení je zpracováno a je úplné',
+                '3',
+            ),
+            1,
+            'CID0000000001',
+        );
+
+        self::assertSame(JmhzSubmissionStatus::Rejected, $report->status);
+    }
+
     public function testAllSixDocumentedStatusesAreRecognisedByCodeAndLabel(): void
     {
         $documented = [
@@ -164,8 +288,14 @@ final class JmhzProtocolParserTest extends TestCase
 
         $parsed = [];
         foreach ($documented as $code => $label) {
+            // Stav NAŠEHO podání je stav jeho protokolu, ne souhrnný stav
+            // celého hlášení — proto se mění obojí zároveň.
             $report = $this->parser()->parse(
-                JmhzTransportSample::completenessProtocol((string) $code, $label, '1'),
+                JmhzTransportSample::completenessProtocol(
+                    (string) $code,
+                    $label,
+                    (string) $code,
+                ),
             );
             self::assertSame(
                 JmhzSubmissionStatus::fromCode($code),
