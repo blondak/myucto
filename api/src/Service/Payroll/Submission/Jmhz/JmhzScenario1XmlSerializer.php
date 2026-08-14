@@ -121,6 +121,16 @@ final class JmhzScenario1XmlSerializer
                 'Dělené podání zatím serializér nestaví.',
             );
         }
+        // Serializér staví souhrnnou i pojistnou část vždy, takže kontrola dnes
+        // projde pokaždé. Je tu proto, že opravné hlášení bude části vynechávat
+        // a povolené kombinace se musí posuzovat proti připnuté tabulce ČSSZ,
+        // ne proti tomu, co zrovna umí kód.
+        JmhzSubmissionFlagMatrix::assertAllowed(
+            JmhzSubmissionFlagMatrix::TYPE_REGULAR,
+            true,
+            true,
+            array_fill(0, count($people), JmhzSubmissionFlagMatrix::TYPE_REGULAR),
+        );
     }
 
     /**
