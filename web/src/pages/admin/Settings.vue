@@ -359,14 +359,16 @@ async function saveSupplier() {
     return
   }
   // E2: firma s historií musí přejít řízeným průvodcem, který režim přepne až
-  // po úspěšném dry-runu a doúčtování.
+  // po úspěšném dry-runu a doúčtování. Zbytek formuláře se ale MUSÍ uložit ještě
+  // před odchodem — jinak uživateli po návratu z průvodce zmizí i to, co
+  // s režimem nesouvisí (typicky zaškrtnuté „Vést účetnictví"), a nechápe proč.
+  let handOffToActivation = false
   if (originalAccountingMode.value === 'tax_evidence' && supplier.value.accounting_mode === 'double_entry') {
     try {
       const preview = await settingsApi.getModeSwitchPreview()
       if (preview.total > 0) {
-        toast.info(t('activation.error.backfill_required'))
-        await router.push({ name: 'accounting-activation' })
-        return
+        handOffToActivation = true
+        supplier.value.accounting_mode = originalAccountingMode.value
       }
     } catch (e: any) {
       toast.error(e?.response?.data?.error?.message || t('common.error'))
@@ -460,6 +462,12 @@ async function saveSupplier() {
     })
     syncSupplierStore(supplier.value)
     originalAccountingMode.value = supplier.value.accounting_mode ?? 'tax_evidence'
+    if (handOffToActivation) {
+      // Uloženo je vše kromě režimu; ten přepne až průvodce po doúčtování.
+      toast.info(t('activation.error.backfill_required'))
+      await router.push({ name: 'accounting-activation' })
+      return
+    }
     toast.success(t('common.saved'))
   } catch (e: any) {
     if (e?.response?.status === 409 && e?.response?.data?.error?.code === 'backfill_required') {

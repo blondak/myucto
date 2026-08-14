@@ -219,9 +219,15 @@ final class BackfillService
             $ownTx = !$pdo->inTransaction();
             if ($ownTx) $pdo->beginTransaction();
             try {
+                // `accounting_enabled` se zapíná spolu s režimem: kdo doběhl
+                // aktivací a nechal si doúčtovat historii, ten účetnictví vede.
+                // S vypnutou nadstavbou by po dokončení průvodce nebylo v menu
+                // nic z toho, co právě vzniklo — a uživatel by ji musel dohledat
+                // v nastavení (u převodu z MyInvoice je vypnutá záměrně).
                 $pdo->prepare(
                     "UPDATE supplier
-                        SET accounting_mode = 'double_entry', accounting_activation_status = 'completed'
+                        SET accounting_mode = 'double_entry', accounting_enabled = 1,
+                            accounting_activation_status = 'completed'
                       WHERE id = ?"
                 )->execute([$supplierId]);
                 $this->accountingModes->record($supplierId, $startsOn, 'double_entry');
