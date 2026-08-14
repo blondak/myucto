@@ -879,9 +879,45 @@ if ($rc !== 0) {
     exit(5);
 }
 
+// ------------------------------------------------------------------------------
+// Fáze 6 — účetní nadstavba zůstává po převodu vypnutá
+// ------------------------------------------------------------------------------
+//
+// MyInvoice je fakturační aplikace: firma, která se z něj převádí, žádné
+// účetnictví ani daňovou evidenci v MyÚčtu nezapínala. Kdyby se nadstavba
+// zapnula sama, uživatel by hned po převodu dostal do menu celé Účetnictví
+// (resp. Daňovou evidenci) postavené nad prázdnými tabulkami — spoustu stránek,
+// které nemají co ukázat. `accounting_enabled` (migrace 1179) je proto po
+// převodu vypnuté; zapíná se jedním přepínačem v Nastavení → Daně a účetnictví.
+//
+// Firmy, které už podvojné účetnictví vedou (opakovaný import z jiného MyÚčta),
+// se nechávají být — u nich nadstavba není domněnka, ale stav.
+
+$accountingDisabled = 0;
+try {
+    $hasFlag = (int) $pdo->query(
+        "SELECT COUNT(*) FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'supplier'
+            AND COLUMN_NAME = 'accounting_enabled'"
+    )->fetchColumn();
+    if ($hasFlag > 0) {
+        $accountingDisabled = (int) $pdo->exec(
+            "UPDATE supplier SET accounting_enabled = 0
+              WHERE accounting_enabled = 1 AND accounting_mode = 'tax_evidence'"
+        );
+    }
+} catch (\PDOException $e) {
+    fwrite(STDERR, "[migrate] Účetní nadstavbu se nepodařilo vypnout: " . $e->getMessage() . "\n");
+}
+
 echo "\n================================================\n";
 echo "  HOTOVO — data přenesena a schéma MyÚčta dokončeno.\n";
 echo "================================================\n";
+if ($accountingDisabled > 0) {
+    echo "\n[migrate] Účetní nadstavba je po převodu VYPNUTÁ u {$accountingDisabled} firem — aplikace se\n";
+    echo "          chová jako MyInvoice, na který jsi zvyklý. Účetnictví (nebo daňovou\n";
+    echo "          evidenci) zapneš v Nastavení → Daně a účetnictví přepínačem „Vést účetnictví\".\n";
+}
 echo "\n[migrate] Zkontroluj:\n";
 echo "  • přihlášení původním administrátorským účtem,\n";
 echo "  • seznam firem a přístup uživatelů k nim (user_suppliers),\n";

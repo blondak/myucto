@@ -69,5 +69,16 @@ const tabClass = (value: Tab) =>
     <ExpenseRules v-if="journalEnabled && effectiveTab === 'expense'" embedded />
     <BankPostingRules v-else-if="journalEnabled && effectiveTab === 'posting'" />
     <JournalTemplates v-else-if="journalEnabled" embedded />
+
+    <!-- Bez podvojného účetnictví není co zobrazit — všechny tři záložky jsou
+         šablony k účtování do deníku. Prázdná stránka by ale vypadala jako
+         rozbitá aplikace, tak je tu aspoň důvod a cesta dál. -->
+    <div v-else class="rounded-lg border border-neutral-200 bg-surface p-5 text-sm">
+      <p class="font-medium text-neutral-900">{{ t('template_tools.requires_double_entry') }}</p>
+      <p class="mt-1 text-neutral-600">{{ t('template_tools.requires_double_entry_hint') }}</p>
+      <RouterLink to="/admin/settings?tab=accounting" class="mt-3 inline-block text-primary-700 underline hover:text-primary-800">
+        {{ t('template_tools.open_accounting_settings') }}
+      </RouterLink>
+    </div>
   </div>
 </template>

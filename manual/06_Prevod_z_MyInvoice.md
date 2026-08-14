@@ -246,9 +246,22 @@ deduplikují párování plateb a doplňují číselníky i členství uživatel
 
 U více firem prováděj následující účetní kroky samostatně pro každé ID firmy.
 
+> 🛈 **Po převodu je účetní nadstavba vypnutá.** MyInvoice je fakturační
+> aplikace, takže se převedená firma chová stejně jako předtím: fakturace,
+> klienti, banka, dokumenty a DPH. Účetnictví (ani daňová evidence) se samo
+> nezapíná — jinak bys hned po převodu měl v menu desítky stránek nad prázdnými
+> tabulkami. Zapíná se přepínačem **Vést účetnictví** v Nastavení → Daně
+> a účetnictví; je to licencovaný modul (viz [79. Licence a aktivace](79_Licence_a_aktivace.md)),
+> na nové instalaci ale prvních 60 dní zdarma.
+
+Právnická osoba (s.r.o., a.s.) zůstává po převodu v daňové evidenci, dokud
+účetnictví nezapneš. Aplikace tě u toho neblokuje: e-mail, číselné řady ani
+cokoli dalšího v nastavení uložíš i s nepřepnutým režimem.
+
 ## 6.7 Zapnutí podvojného účetnictví
 
-V nastavení firmy zapni **Podvojné účetnictví** a zvol správné datum účinnosti.
+V nastavení firmy zapni **Vést účetnictví** a v Daňovém nastavení přepni
+**Režim účetnictví** na *Podvojné účetnictví* se správným datem účinnosti.
 Změna může být účinná pouze k 1. lednu. Datum musí odpovídat skutečnému začátku
 vedení účetnictví, nikoli automaticky dni převodu.
 

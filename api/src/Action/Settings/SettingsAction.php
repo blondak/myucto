@@ -501,34 +501,53 @@ final class SettingsAction
             return Json::error($response, 'validation_failed', "stock_in_transit_from musí být 'sent' nebo 'confirmed'.", 400);
         }
         $modeEffectiveFrom = null;
+        $current = [];
         if (array_key_exists('accounting_mode', $body)) {
             $currentStmt = $this->db->pdo()->prepare('SELECT accounting_mode, taxpayer_type FROM supplier WHERE id = ?');
             $currentStmt->execute([$id]);
             $current = $currentStmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+            $currentMode = (string) ($current['accounting_mode'] ?? 'tax_evidence');
+            $currentTaxpayerType = (string) ($current['taxpayer_type'] ?? '');
             $effectiveTaxpayerType = (string) ($body['taxpayer_type'] ?? $current['taxpayer_type'] ?? 'fo');
-            if ($body['accounting_mode'] === 'tax_evidence' && $effectiveTaxpayerType === 'po') {
+            // Formulář nastavení posílá celý objekt, tedy i režim, který uživatel
+            // nesahal. Kontroly proto platí jen na SKUTEČNOU změnu: jinak by firma
+            // převzatá z MyInvoice (právnická osoba, kterou migrace nechala
+            // v daňové evidenci) nemohla uložit ani e-mail — každé uložení by
+            // spadlo na pravidlo o vedení účetnictví, které vůbec neporušuje
+            // (issue myinvoice#265). Zakázaná kombinace se hlídá tam, kde vzniká:
+            // při přepnutí režimu nebo právní formy.
+            $modeChanged = (string) $body['accounting_mode'] !== $currentMode;
+            $taxpayerTypeChanged = array_key_exists('taxpayer_type', $body)
+                && (string) ($body['taxpayer_type'] ?? '') !== $currentTaxpayerType;
+            if ($body['accounting_mode'] === 'tax_evidence' && $effectiveTaxpayerType === 'po'
+                && ($modeChanged || $taxpayerTypeChanged)
+            ) {
                 return Json::error($response, 'legal_form_requires_accounting', 'Právnická osoba musí vést účetnictví.', 422);
             }
-            $modeEffectiveFrom = trim((string) ($body['accounting_mode_effective_from'] ?? date('Y-01-01')));
-            $effectiveDate = \DateTimeImmutable::createFromFormat('!Y-m-d', $modeEffectiveFrom);
-            if ($effectiveDate === false || $effectiveDate->format('Y-m-d') !== $modeEffectiveFrom
-                || substr($modeEffectiveFrom, 5) !== '01-01') {
-                return Json::error($response, 'accounting_mode_effective_date', 'Změna účetního režimu musí být účinná k 1. lednu.', 422);
-            }
-            if (($current['accounting_mode'] ?? null) === 'double_entry' && $body['accounting_mode'] === 'tax_evidence') {
-                $doubleEntrySince = $this->accountingModes->continuousDoubleEntrySince($id, $modeEffectiveFrom);
-                if ($doubleEntrySince === null) {
-                    return Json::error($response, 'accounting_mode_history_missing', 'Nelze ověřit zákonnou dobu vedení účetnictví; zkontrolujte historii účetního režimu.', 422);
+            // Datum účinnosti se řeší jen u změny režimu — nebo když ho volající
+            // pošle sám, protože opravuje historii.
+            if ($modeChanged || array_key_exists('accounting_mode_effective_from', $body)) {
+                $modeEffectiveFrom = trim((string) ($body['accounting_mode_effective_from'] ?? date('Y-01-01')));
+                $effectiveDate = \DateTimeImmutable::createFromFormat('!Y-m-d', $modeEffectiveFrom);
+                if ($effectiveDate === false || $effectiveDate->format('Y-m-d') !== $modeEffectiveFrom
+                    || substr($modeEffectiveFrom, 5) !== '01-01') {
+                    return Json::error($response, 'accounting_mode_effective_date', 'Změna účetního režimu musí být účinná k 1. lednu.', 422);
                 }
-                $completedPeriods = (int) substr($modeEffectiveFrom, 0, 4) - (int) substr($doubleEntrySince, 0, 4);
-                if ($completedPeriods < 5) {
-                    $earliestYear = (int) substr($doubleEntrySince, 0, 4) + 5;
-                    return Json::error(
-                        $response,
-                        'accounting_minimum_periods',
-                        sprintf('Vedení účetnictví lze podle § 4 odst. 7 ZoÚ ukončit nejdříve po 5 po sobě jdoucích účetních obdobích, tedy k 1. 1. %d.', $earliestYear),
-                        422,
-                    );
+                if ($currentMode === 'double_entry' && $body['accounting_mode'] === 'tax_evidence') {
+                    $doubleEntrySince = $this->accountingModes->continuousDoubleEntrySince($id, $modeEffectiveFrom);
+                    if ($doubleEntrySince === null) {
+                        return Json::error($response, 'accounting_mode_history_missing', 'Nelze ověřit zákonnou dobu vedení účetnictví; zkontrolujte historii účetního režimu.', 422);
+                    }
+                    $completedPeriods = (int) substr($modeEffectiveFrom, 0, 4) - (int) substr($doubleEntrySince, 0, 4);
+                    if ($completedPeriods < 5) {
+                        $earliestYear = (int) substr($doubleEntrySince, 0, 4) + 5;
+                        return Json::error(
+                            $response,
+                            'accounting_minimum_periods',
+                            sprintf('Vedení účetnictví lze podle § 4 odst. 7 ZoÚ ukončit nejdříve po 5 po sobě jdoucích účetních obdobích, tedy k 1. 1. %d.', $earliestYear),
+                            422,
+                        );
+                    }
                 }
             }
         }
