@@ -2715,25 +2715,120 @@ paths:
         Použij když automatický matching nezachytil platbu (variabilní symbol
         chybí nebo neodpovídá). Označí transakci jako `matched`, fakturu jako
         `paid` s `paid_at = transaction.posted_at`.
+
+        Doklad se vybírá právě jedním ze čtyř způsobů (v tomto pořadí priority):
+
+        - `invoice_ids` (2 a více) — sloučená úhrada: jedna příchozí platba proti
+          více vystavaným fakturám. Součet musí sedět na částku transakce.
+          Jediné ID v poli degraduje na běžné 1:1 párování.
+        - `purchase_invoice_id` — **přijatá** faktura (odchozí platba dodavateli).
+          Bez tohoto pole nelze přijatou fakturu spárovat vůbec.
+        - `invoice_id` — vystavená faktura, 1:1.
+        - `varsymbol` — dohledá doklad podle variabilního symbolu; nejdřív mezi
+          vystavenými fakturami, pak mezi přijatými (i podle `vendor_invoice_number`).
+
+        Odpověď má tři tvary podle toho, co se párovalo — vždy obsahuje `matched`,
+        `paid_at` a `posting` (souhrn automatického zaúčtování, `null` když se
+        neúčtovalo).
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [invoice_id]
+              description: "Vyplň právě jedno z: `invoice_ids`, `purchase_invoice_id`, `invoice_id`, `varsymbol`."
               properties:
-                invoice_id: { type: integer, format: int64 }
+                invoice_id:
+                  type: integer
+                  format: int64
+                  description: Vystavená faktura (1:1 párování).
+                purchase_invoice_id:
+                  type: integer
+                  format: int64
+                  description: Přijatá faktura — odchozí platba dodavateli (N:N přes `payment_matches`).
+                invoice_ids:
+                  type: array
+                  description: Sloučená úhrada jedné platby proti více vystaveným fakturám (2 a více ID).
+                  items: { type: integer, format: int64 }
+                varsymbol:
+                  type: string
+                  description: Variabilní symbol — alternativa k ID, dohledá vystavenou i přijatou fakturu.
       responses:
         '200':
-          description: OK
+          description: OK — spárováno
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  transaction: { $ref: '#/components/schemas/BankTransaction' }
-                  invoice: { $ref: '#/components/schemas/Invoice' }
+                oneOf:
+                  - type: object
+                    title: Vystavená faktura (1:1)
+                    properties:
+                      matched: { type: boolean }
+                      paid_at: { type: [string, "null"], description: "Datum úhrady (`posted_at` transakce)." }
+                      posting: { $ref: '#/components/schemas/BankPostingSummary' }
+                      final_draft_id:
+                        type: integer
+                        format: int64
+                        description: Jen u zálohové faktury — ID vzniklého draftu finální faktury.
+                      partial_payment:
+                        type: boolean
+                        description: Přítomné (a `true`) jen když platba fakturu neuhradila celou.
+                      tax_document_id:
+                        type: integer
+                        format: int64
+                        description: Jen když vznikl daňový doklad k přijaté platbě (§28).
+                      payment_thanks_sent:
+                        type: boolean
+                        description: Přítomné (a `true`) jen když se odeslal děkovný e-mail za úhradu.
+                  - type: object
+                    title: Sloučená úhrada (split)
+                    properties:
+                      matched: { type: boolean }
+                      split: { type: boolean, description: Vždy `true` u tohoto tvaru. }
+                      paid_at: { type: [string, "null"] }
+                      invoice_ids:
+                        type: array
+                        items: { type: integer, format: int64 }
+                      posting: { $ref: '#/components/schemas/BankPostingSummary' }
+                      final_draft_ids:
+                        type: array
+                        description: ID draftů finálních faktur ke zálohovým, pokud nějaké vznikly.
+                        items: { type: integer, format: int64 }
+                  - type: object
+                    title: Přijatá faktura
+                    properties:
+                      matched: { type: boolean }
+                      paid_at: { type: [string, "null"] }
+                      purchase_invoice_id: { type: integer, format: int64 }
+                      posting: { $ref: '#/components/schemas/BankPostingSummary' }
+        '400':
+          description: "Chybí `invoice_id` i `varsymbol` (`validation_failed`)"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: |
+            Transakce nenalezena (`not_found`), faktura nenalezena nebo patří jiné
+            firmě (`invoice_not_found`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: |
+            Párování odmítnuto — transakce už je spárovaná (`tx_already_paired`),
+            není příchozí (`not_incoming`), stav dokladu se mezitím změnil
+            (`state_changed`, `invalid_status`), nesedí měna (`currency_mismatch`),
+            typ dokladu (`invalid_type`), klient (`client_mismatch`, `no_client`),
+            součet u sloučené úhrady (`sum_mismatch`), nebo doklad nemá co uhradit
+            (`nothing_to_pay`, `cannot_reconcile`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          description: "Párování selhalo (`match_failed`)"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/bank-transactions/{id}/unmatch:
     parameters:
@@ -4117,13 +4212,15 @@ paths:
                     Cílový měnový účet (`currencies.id`). Povinné jen u víceměnového účtu
                     se sdíleným číslem účtu (jinak server vrátí 409 `ambiguous_account_currency`).
       responses:
-        '201':
-          description: Naparsováno
+        '200':
+          description: Naparsováno — souhrn importu (ne entita výpisu)
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/BankStatement' }
+              schema: { $ref: '#/components/schemas/BankStatementImportResult' }
         '400':
-          description: Neznámý formát / poškozený soubor
+          description: |
+            Neznámý formát / poškozený soubor (`parse_failed`), soubor není textový
+            (`invalid_mime`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -17845,9 +17942,12 @@ components:
           description: "Odvozený platební stav (#89) z paid_total vs. amount_to_pay (tolerance 0,05). Null pro draft/cancelled."
         payment_method:
           type: string
-          enum: [bank_transfer, card, cash, other]
+          enum: [bank_transfer, direct_debit, card, cash, cash_on_delivery, offset, other]
           default: bank_transfer
-          description: "Způsob úhrady. U card/cash se v PDF/emailu nezobrazuje QR ani bankovní spojení a místo výzvy k platbě se uvede odpovídající poznámka."
+          description: |
+            Způsob úhrady (doména `Support\PaymentMethods::ALL`, migrace 1128 — společná
+            pro vystavené i přijaté faktury). U card/cash se v PDF/emailu nezobrazuje QR
+            ani bankovní spojení a místo výzvy k platbě se uvede odpovídající poznámka.
         cash_register_id:
           type: [integer, "null"]
           description: |
@@ -18035,9 +18135,11 @@ components:
             NEposílej ručně v `items` — generuje se z tohoto pole.
         payment_method:
           type: string
-          enum: [bank_transfer, card, cash, other]
+          enum: [bank_transfer, direct_debit, card, cash, cash_on_delivery, offset, other]
           default: bank_transfer
-          description: "Způsob úhrady. Pro card/cash se v PDF/emailu nevygeneruje QR ani bankovní spojení."
+          description: |
+            Způsob úhrady (doména `Support\PaymentMethods::ALL`, migrace 1128).
+            Pro card/cash se v PDF/emailu nevygeneruje QR ani bankovní spojení.
         cash_register_id:
           type: [integer, "null"]
           description: |
@@ -18830,6 +18932,40 @@ components:
           items: { $ref: '#/components/schemas/BankMatchSuggestionCandidate' }
         created_at: { type: string, format: date-time }
 
+    BankStatementImportResult:
+      type: object
+      description: |
+        Souhrn importu výpisu (odpověď `/bank-statements/upload`). Není to entita
+        výpisu — detail se načítá přes `GET /bank-statements/{id}`.
+      properties:
+        statement_id: { type: integer, format: int64 }
+        transactions: { type: integer, description: Počet skutečně založených pohybů. }
+        matched: { type: integer, description: Kolik z nich se rovnou spárovalo s fakturou. }
+        duplicate:
+          type: boolean
+          description: |
+            `true` = soubor se stejným SHA-256 už je v evidenci; nic se nezakládalo
+            a `statement_id` míří na původní výpis.
+        parsed_transactions: { type: integer, description: Počet pohybů nalezených v souboru. }
+        skipped_duplicates: { type: integer, description: Pohyby přeskočené jako již evidované. }
+        warnings:
+          type: array
+          description: "Např. `transactions_skipped_as_duplicate` při překryvu výpisů."
+          items: { type: string }
+
+    BankPostingSummary:
+      type: [object, "null"]
+      description: |
+        Souhrn automatického zaúčtování bankovního pohybu. `null` znamená, že se
+        neúčtovalo vůbec (např. vypnutá automatizace nebo firma bez podvojného účetnictví).
+      properties:
+        action:
+          type: string
+          description: "Co automatika udělala. `skipped` je výchozí, když služba akci nevrátila."
+        reason:
+          type: string
+          description: Doplňující důvod — přítomný jen když ho služba uvedla.
+
     BankStatement:
       type: object
       description: "Položka seznamu výpisů (GET /bank-statements). Bankovní spojení dodavatele je per-měna na /settings/currencies, ne tady."
@@ -19244,7 +19380,7 @@ components:
         language: { type: string, enum: [cs, en] }
         payment_method:
           type: string
-          enum: [bank_transfer, card, cash, other]
+          enum: [bank_transfer, direct_debit, card, cash, cash_on_delivery, offset, other]
         reverse_charge: { type: boolean }
         payment_due_days: { type: integer }
         discount_percent: { type: number, format: float, description: "Procentuální sleva (0–100) zděděná na každou vygenerovanou fakturu." }
@@ -19322,7 +19458,7 @@ components:
         language: { type: string, enum: [cs, en], default: cs }
         payment_method:
           type: string
-          enum: [bank_transfer, card, cash, other]
+          enum: [bank_transfer, direct_debit, card, cash, cash_on_delivery, offset, other]
           default: bank_transfer
         reverse_charge: { type: boolean, default: false }
         payment_due_days: { type: integer, default: 14 }
@@ -19655,6 +19791,24 @@ components:
         exchange_diff_base:
           type: [number, "null"]
           description: "FX gain/loss v base ccy (CZK)"
+        payment_method:
+          type: string
+          enum: [bank_transfer, direct_debit, card, cash, cash_on_delivery, offset, other]
+          default: bank_transfer
+          description: |
+            Forma úhrady (migrace 1128). **Pozor na `direct_debit` (inkaso/SIPO):**
+            peníze si strhne dodavatel sám, takže se na takovou fakturu NESMÍ vystavit
+            platební příkaz — jinak zaplatíte dvakrát. Z dokladu to poznat nejde
+            (inkasní faktura má číslo účtu, VS i KS stejně jako převodní), proto je to
+            samostatný atribut. Výběr do platebních příkazů bere jen `bank_transfer`.
+        payment_method_source:
+          type: string
+          enum: [default, vendor, ai, manual]
+          default: default
+          description: |
+            Kdo hodnotu nastavil — řídí, kdo ji smí přepsat:
+            `manual` > `ai` > `vendor` > `default`. Automatika (AI extrakce, předvolba
+            dodavatele) tedy nikdy nepřepíše rozhodnutí účetní; stejná úroveň přepsat smí.
         status: { type: string, enum: [draft, received, booked, paid, cancelled] }
         booked_at: { type: [string, "null"], format: date-time }
         paid_at: { type: [string, "null"], format: date }
@@ -19777,6 +19931,23 @@ components:
         tax_date: { type: [string, "null"], format: date }
         due_date: { type: string, format: date }
         received_at: { type: string, format: date }
+        payment_method:
+          type: string
+          enum: [bank_transfer, direct_debit, card, cash, cash_on_delivery, offset, other]
+          description: |
+            Forma úhrady — viz `PurchaseInvoice.payment_method`. Když pole nepošlete,
+            server hodnotu odvodí z předvolby dodavatele (`clients.default_payment_method`),
+            jinak `bank_transfer`. Neplatná hodnota se ignoruje (pole se nezapíše).
+            **Nastavte `direct_debit` u inkasa/SIPO**, jinak doklad spadne do platebního
+            příkazu a zaplatí se podruhé.
+        payment_method_source:
+          type: string
+          enum: [default, vendor, ai, manual]
+          default: manual
+          description: |
+            Kdo hodnotu nastavuje. Nepošlete-li ho spolu s `payment_method`, zapíše se
+            `manual` — tedy nejsilnější zdroj, který už automatika nepřepíše. Slabší
+            zdroj (`ai`, `vendor`) hodnotu nastavenou ručně nepřepíše.
         currency_id: { type: integer }
         exchange_rate: { type: [number, "null"] }
         exchange_rate_date: { type: [string, "null"], format: date }
