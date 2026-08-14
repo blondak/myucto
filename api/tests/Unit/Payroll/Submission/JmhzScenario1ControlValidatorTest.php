@@ -321,15 +321,51 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         $evaluator = new JmhzScenario1ControlEvaluator($parameters);
         $declared = $evaluator->declaredParameterKeys();
 
+        $unenforced = $evaluator->unenforcedParameterKeys();
+
         foreach ($evaluator->implementedControlIds() as $controlId) {
             $assigned = $parameters->keysForControl($controlId);
             foreach ($assigned as $key) {
                 self::assertContains(
                     $key,
-                    $declared[$controlId] ?? [],
+                    array_merge($declared[$controlId] ?? [], $unenforced[$controlId] ?? []),
                     "Kontrola {$controlId} neuvádí parametr {$key} z katalogu.",
                 );
             }
+        }
+    }
+
+    /**
+     * Deklarovat sazbu a nepoužít ji je horší než ji nedeklarovat: guard nad
+     * katalogem je pak spokojený, přestože kontrola z parametru nic nečte.
+     * Vědomé neuplatnění proto musí být přiznané zvlášť a doložené odchylkou.
+     */
+    public function testDeclaredParametersAreActuallyReadByTheEvaluator(): void
+    {
+        $source = (string) file_get_contents(
+            dirname(__DIR__, 4)
+                . '/src/Service/Payroll/Submission/Jmhz/JmhzScenario1ControlEvaluator.php',
+        );
+        $evaluator = new JmhzScenario1ControlEvaluator(
+            JmhzControlSourceCatalog::load()->parameters(),
+        );
+
+        foreach ($evaluator->declaredParameterKeys() as $controlId => $keys) {
+            foreach ($keys as $key) {
+                self::assertStringContainsString(
+                    "'{$key}'",
+                    $source,
+                    "Kontrola {$controlId} deklaruje parametr {$key}, ale nikde ho nečte.",
+                );
+            }
+        }
+        foreach ($evaluator->unenforcedParameterKeys() as $controlId => $keys) {
+            self::assertArrayHasKey(
+                $controlId,
+                $evaluator->documentedDeviations(),
+                "Neuplatněný parametr u kontroly {$controlId} musí být přiznaný jako odchylka.",
+            );
+            self::assertNotSame([], $keys);
         }
     }
 
@@ -623,6 +659,59 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
             JmhzControlOutcome::NotEvaluable,
             $this->finding($report, 133)->outcome,
         );
+    }
+
+    /**
+     * Chybějící protějšek není nula. Vykázané pojistné k úhradě bez pojistného
+     * celkem se nesmí odbýt jako „kontrola nedopadá" — je to přesně ten rozpor,
+     * kvůli kterému kontrola existuje.
+     */
+    public function testHalfOfAPairIsAFindingNotAnExcuse(): void
+    {
+        $report = $this->validate(JmhzXmlSample::withPvpoj(<<<'XML'
+                <pvpoj:pojistne>
+                  <pvpoj:zakladZamestnavateleA>1000</pvpoj:zakladZamestnavateleA>
+                  <pvpoj:pojistneZamestnavateleA>248</pvpoj:pojistneZamestnavateleA>
+                  <pvpoj:pojistneZamestnavateleCelkem>248</pvpoj:pojistneZamestnavateleCelkem>
+                  <pvpoj:pojistneZamestnance>71</pvpoj:pojistneZamestnance>
+                </pvpoj:pojistne>
+                <pvpoj:pojistneUhrada>319</pvpoj:pojistneUhrada>
+            XML));
+
+        self::assertContains(4, $this->failedIds($report));
+        self::assertContains(13, $this->failedIds($report));
+    }
+
+    /**
+     * Odvod, který nedokládá žádná součást, je rozpor mezi pojistnou částí
+     * a individualizovanou — a to je jediná kontrola, která je spojuje.
+     */
+    public function testEmployeeInsuranceWithoutAnySupportingFormFails(): void
+    {
+        $xml = (string) preg_replace(
+            '~\s*<form:pojisteniZamestnanec>.*?</form:pojisteniZamestnanec>~s',
+            '',
+            JmhzXmlSample::minimal(),
+        );
+
+        self::assertContains(12, $this->failedIds($this->validate($xml)));
+    }
+
+    /**
+     * Třetí pravidlo kontroly 135: mimo pozice P a V, s třetí pozicí „T"
+     * a uvedenými odečtenými dobami je počet započtených dnů dán přesně.
+     */
+    public function testInsuranceDaysMustMatchTheIntervalReducedByDeductedTime(): void
+    {
+        $report = $this->validate(str_replace(
+            '<form:vymerovaciZaklad>1000</form:vymerovaciZaklad>',
+            '<form:vymerovaciZaklad>1000</form:vymerovaciZaklad>'
+                . "\n<form:odecitaneDny><form:odecitaneDobyCelkem>5</form:odecitaneDobyCelkem>"
+                . '</form:odecitaneDny>',
+            str_replace('<form:kod>1++</form:kod>', '<form:kod>1DT</form:kod>', JmhzXmlSample::minimal()),
+        ));
+
+        self::assertContains(135, $this->failedIds($report));
     }
 
     /** @return list<int> */

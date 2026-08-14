@@ -103,7 +103,6 @@ final class JmhzScenario1ControlEvaluator
         333 => 'Časové omezení slevy se odvozuje od data přijetí podání (10006),'
             . ' které přiděluje až ČSSZ.',
         334 => 'Ztotožnění osoby provádí kmenová evidence ČSSZ.',
-        354 => 'Jedinečnost GUID formuláře napříč podáními drží evidence DIS.',
     ];
 
     /**
@@ -208,7 +207,7 @@ final class JmhzScenario1ControlEvaluator
             103, 109, 129, 131, 132, 134, 135, 144, 145, 152, 153, 154, 157,
             159, 162, 167, 168, 211, 227, 232, 235, 236, 240, 244, 248, 251,
             253, 255, 260, 267, 282, 283, 286, 299, 300, 301, 303, 304, 306,
-            307, 309, 330, 332, 335, 341, 342, 355,
+            307, 309, 330, 332, 335, 341, 342, 354, 355,
         ];
     }
 
@@ -267,10 +266,28 @@ final class JmhzScenario1ControlEvaluator
             10 => ['source_row_4'],
             74 => ['source_row_15'],
             167 => ['source_row_5'],
-            // Katalog váže na 168 jen sazbu 0,07171. Tolerance 7,1 % je
-            // v textu kontroly a katalog ji vede pod parametrem svázaným
-            // s kontrolami 118 a 270, proto se uvádí navíc.
-            168 => ['source_row_7', 'source_row_8'],
+            // Tolerance 7,1 % je v textu kontroly 168, ale katalog ji vede pod
+            // parametrem svázaným s kontrolami 118 a 270, proto se uvádí navíc.
+            168 => ['source_row_7'],
+        ];
+    }
+
+    /**
+     * Parametry, které katalog kontrole přiřazuje, ale my je VĚDOMĚ neuplatňujeme.
+     *
+     * Bez tohohle seznamu by stačilo sazbu uvést mezi deklarovanými a guard by
+     * byl spokojený, i kdyby ji kód nikdy nepřečetl — přesně tak se dolní mez
+     * u kontroly 168 dokázala tvářit jako pokrytá.
+     *
+     * @return array<int, list<string>>
+     */
+    public function unenforcedParameterKeys(): array
+    {
+        return [
+            // Dolní mez 7,171 % z úhrnu základů. Na doloženém minimálním
+            // případě by jí neprošlo ani zcela správné podání, viz
+            // `documentedDeviations()`.
+            168 => ['source_row_8'],
         ];
     }
 
@@ -335,7 +352,7 @@ final class JmhzScenario1ControlEvaluator
             283 => $this->incomeBreakdownEmptyWhenIncomeZero($projection),
             300, 301 => $this->packageFormLimit($projection),
             303 => $this->formHasExactlyOneBody($projection),
-            306 => $this->formGuidUniqueWithinSubmission($projection),
+            306, 354 => $this->formGuidUniqueWithinSubmission($projection),
             307 => $this->eldpDetailEmptyWithoutCode($projection),
             309 => $this->insuranceDaysAgainstDeductedTime($projection),
             330 => $this->eldpCodeRequiredWithDays($projection),
@@ -457,8 +474,16 @@ final class JmhzScenario1ControlEvaluator
         $total = $pvpoj->integer('10029');
         $employer = $pvpoj->integer('10027');
         $employee = $pvpoj->integer('10028');
-        if ($total === null || $employer === null || $employee === null) {
+        if ($total === null && $employer === null && $employee === null) {
             return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
+        }
+        if ($total === null || $employer === null || $employee === null) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_PVPOJ,
+                null,
+                'Pojistná část vykazuje jen část trojice celkem/zaměstnavatel/zaměstnanec;'
+                    . ' chybějící sčítanec není nula.',
+            )];
         }
         if ($total !== $employer + $employee) {
             return [JmhzControlVerdict::failed(
@@ -493,6 +518,16 @@ final class JmhzScenario1ControlEvaluator
             }
             $seen = true;
             $sum += $value;
+        }
+        if (!$seen && $total !== 0) {
+            // Vykázaný odvod bez jediné součásti, která by ho doložila, je
+            // právě ten rozpor, kvůli kterému kontrola existuje.
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_PVPOJ,
+                null,
+                "Pojistné za zaměstnance {$total} Kč nedokládá žádná součást"
+                    . ' individualizované části.',
+            )];
         }
         if (!$seen) {
             return [JmhzControlVerdict::notApplicable(
@@ -576,8 +611,16 @@ final class JmhzScenario1ControlEvaluator
         $pvpoj = $projection->pvpoj();
         $payable = $pvpoj->integer('10033');
         $total = $pvpoj->integer('10029');
-        if ($payable === null || $total === null) {
+        if ($payable === null && $total === null) {
             return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
+        }
+        if ($payable === null || $total === null) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_PVPOJ,
+                null,
+                'Vykázáno jen jedno z pojistného celkem a pojistného k úhradě;'
+                    . ' dopočítat druhé nelze.',
+            )];
         }
         // Neuvedená sleva je doloženě nula — blok slevy se do pojistné části
         // dává jen tehdy, když ji zaměstnavatel uplatňuje.
@@ -2109,19 +2152,35 @@ final class JmhzScenario1ControlEvaluator
     {
         return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
             $span = self::intervalDays($form->value('10354'), $form->value('10355'));
-            foreach ($form->groupedBy(['10240', '10356'], self::ELDP_SECTION_DEPTH) as $section) {
+            foreach (
+                $form->groupedBy(['10240', '10356', '10375'], self::ELDP_SECTION_DEPTH)
+                as $section
+            ) {
                 $code = $section['10240'] ?? null;
                 $days = $section['10356'] ?? null;
                 if ($code === null || $days === null) {
                     continue;
                 }
                 $second = self::eldpPosition($code, 2);
+                $third = self::eldpPosition($code, 3);
                 if ($second === 'P' && (int) $days !== 0) {
                     return "Kód ELDP {$code} vyžaduje nulové započtené dny, uvedeno {$days}.";
                 }
                 if ($second === 'V' && $span !== null && (int) $days > $span) {
                     return "Kód ELDP {$code} připouští nejvýš {$span} započtených dnů,"
                         . " uvedeno {$days}.";
+                }
+                // Třetí pravidlo katalogu: mimo P a V, s třetí pozicí „T"
+                // a uvedenými odečtenými dobami je počet dnů dán přesně.
+                $deducted = $section['10375'] ?? null;
+                if ($second !== 'P' && $second !== 'V' && $third === 'T'
+                    && $deducted !== null && $span !== null
+                ) {
+                    $expected = $span - (int) $deducted;
+                    if ((int) $days !== $expected) {
+                        return "Kód ELDP {$code} vyžaduje započtené dny rovné intervalu"
+                            . " zmenšenému o odečtené doby ({$expected}), uvedeno {$days}.";
+                    }
                 }
             }
 

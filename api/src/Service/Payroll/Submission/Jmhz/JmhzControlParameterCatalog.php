@@ -111,6 +111,13 @@ final class JmhzControlParameterCatalog
         [$numerator, $scale] = self::decompose($this->value($parameterKey, $onDate));
         $product = $amount * $numerator;
         $divisor = 10 ** $scale;
+        // `intdiv` ořezává k nule, takže u záporného součinu by „nahoru"
+        // znamenalo směrem k nule, tedy dolů v absolutní hodnotě. Záporný
+        // vyměřovací základ je sice nepřípustný, ale kontrola, která ho má
+        // odhalit, se o něj nesmí sama utnout.
+        if ($product < 0) {
+            return -intdiv(-$product, $divisor);
+        }
 
         return intdiv($product + $divisor - 1, $divisor);
     }
