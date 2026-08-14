@@ -32,13 +32,28 @@ info:
     ## Účetnictví a daně jen ke čtení
 
     Nad rámec scopů platí, že **účetní a daňová vrstva je přes token jednosměrná**.
-    Cesty `/api/v1/accounting/**`, `/api/v1/reports/**`, `/api/v1/tax/**`
-    a `/api/v1/tax-evidence/**` odpovídají na `GET`, ale jakýkoli zápis odmítnou
-    chybou `403 token_write_forbidden` — i tokenu se scope `read_write`.
+    Cesty `/api/v1/accounting/**`, `/api/v1/reports/**`, `/api/v1/tax/**`,
+    `/api/v1/tax-evidence/**`, `/api/v1/tax-return/**` a `/api/v1/automation/**`
+    odpovídají na `GET`, ale jakýkoli zápis odmítnou chybou
+    `403 token_write_forbidden` — i tokenu se scope `read_write`.
 
     Zaúčtování dokladu, storno zápisu, uzavření období, zaevidování opravy podle
-    § 46 / § 74b i odeslání podání na EPO jsou úkony s daňovou odpovědností, kde
-    chyba znamená opravné podání. Provádějí se výhradně z webového rozhraní.
+    § 46 / § 74b, podání přiznání i odeslání podání na EPO jsou úkony s daňovou
+    odpovědností, kde chyba znamená opravné podání. Provádějí se výhradně
+    z webového rozhraní.
+
+    ## Endpointy dostupné jen z webového rozhraní
+
+    Několik zdokumentovaných cest token nezavolá vůbec — odpoví
+    `403 token_endpoint_forbidden` bez ohledu na scope. Jsou v této dokumentaci
+    proto, aby integrátor věděl, že existují a proč je nemá k dispozici:
+
+    - `/api/v1/admin/**` a `/api/v1/settings/{ai-assist,accounting-activation,mode-switch-preview}`
+      — konfigurace systému, ne data firmy.
+    - `/api/v1/portal/**` a `/api/v1/user/{filters,preferences}` — plocha webového
+      rozhraní (klientský portál, uložené filtry a předvolby uživatele).
+    - `/api/v1/ai/suggestions/{id}/accept` a `/reject` — přijetí návrhu je
+      zaúčtování, viz předchozí odstavec.
 
     ## Logování volání
 
@@ -3018,6 +3033,14 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/BankPostingRuleWrite' }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '201':
           description: Created
           content:
@@ -3042,6 +3065,14 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/BankPostingRuleWrite' }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: OK
           content:
@@ -3085,6 +3116,14 @@ paths:
                 amount_max: { type: [number, "null"], minimum: 0 }
                 auto_amount_cap: { type: [number, "null"], minimum: 0 }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '201':
           description: Created
           content:
@@ -3119,6 +3158,14 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/AutoPostingPolicyWrite' }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: OK
           content:
@@ -3142,6 +3189,14 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/BankPostingRuleWrite' }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: OK
           content:
@@ -3153,6 +3208,14 @@ paths:
       tags: [Accounting]
       summary: Smazání pravidla (suggestions FK SET NULL)
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: OK
           content:
@@ -3176,6 +3239,14 @@ paths:
       tags: [Accounting]
       summary: Povýší prověřené návrhové pravidlo na plnou automatiku
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: OK
           content:
@@ -3195,6 +3266,14 @@ paths:
       tags: [Accounting]
       summary: Vrátí automatické pravidlo do režimu návrhů
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: OK
           content:
@@ -3213,6 +3292,14 @@ paths:
       tags: [Accounting]
       summary: Použije konkrétní aktivní pravidlo na historii a vytvoří pouze návrhy
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: OK
           content:
@@ -3353,6 +3440,14 @@ paths:
               properties:
                 ids: { type: array, maxItems: 200, items: { type: integer, format: int64 } }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: Výsledek včetně batch_id pro hromadné storno.
           content:
@@ -3375,6 +3470,14 @@ paths:
               properties:
                 ids: { type: array, maxItems: 200, items: { type: integer, format: int64 } }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: Položky, agregované obraty účtů a per-item chyby.
           content:
@@ -3398,6 +3501,14 @@ paths:
                 ids: { type: array, maxItems: 200, items: { type: integer, format: int64 } }
                 reason: { type: string, enum: [wrong_account, not_ours, duplicate, other] }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: Počet odmítnutých položek a per-item chyby. }
 
   /api/v1/accounting/bank-posting-suggestions/batches/{batchId}/undo:
@@ -3408,6 +3519,14 @@ paths:
       tags: [Accounting]
       summary: Atomické storno všech aktivních zápisů jedné schválené dávky
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: Počet vytvořených storen a jejich ID. }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: Některé původní období je uzavřené nebo zamčené; dávka se nezmění. }
@@ -3432,6 +3551,14 @@ paths:
                 credit_account_code: { type: string }
                 selected_rule_id: { type: integer, minimum: 1, description: Aktivní odpovídající pravidlo pro vyřešení rule_conflict. }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: OK }
         '409': { description: suggestion_not_pending / already_posted / period_closed }
         '422': { description: Neplatný override nebo selected_rule_id. }
@@ -3454,6 +3581,14 @@ paths:
               properties:
                 note: { type: string, enum: [wrong_account, not_ours, duplicate, other] }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: OK }
 
   /api/v1/accounting/bank-posting-suggestions/{id}/snooze:
@@ -3473,6 +3608,14 @@ paths:
                 until: { type: [string, "null"], format: date }
                 reason: { type: [string, "null"], enum: [later, waiting_document, needs_review, null] }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: Aktuální odložení položky. }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
@@ -3618,6 +3761,14 @@ paths:
                 rules: { type: array, maxItems: 50, items: { $ref: '#/components/schemas/BankPostingRuleWrite' } }
                 backfill: { type: boolean, default: true }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: OK }
 
   /api/v1/settings/mode-switch-preview:
@@ -3664,6 +3815,14 @@ paths:
         - { in: query, name: page, schema: { type: integer, minimum: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 100 } }
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: OK
           content:
@@ -3690,6 +3849,14 @@ paths:
       summary: Stav volitelné AI asistence účtování
       description: Session-only. Vrací opt-in, rozsah, DPA potvrzení, stav kNN a kill-switchů aktuální firmy.
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: OK
           content:
@@ -3715,6 +3882,14 @@ paths:
                 dpa_revoke: { type: string, enum: [anthropic, azure_openai, openai, gemini] }
                 unmute_source: { type: string, enum: [knn, llm] }
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: Aktualizovaný stav
           content:
@@ -3747,6 +3922,14 @@ paths:
                     credit_account_code: { type: string }
                     expense_category_id: { type: [integer, "null"] }
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: Návrh přijat }
         '404': { description: Návrh neexistuje v aktuální firmě }
         '409': { description: Návrh už není pending }
@@ -3764,6 +3947,14 @@ paths:
       summary: Odmítnutí AI návrhu kontace
       description: Session-only.
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: Návrh odmítnut }
         '404': { description: Návrh neexistuje v aktuální firmě }
         '409': { description: Návrh už není pending }
@@ -4089,6 +4280,14 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/AdminBankRuleTemplateWrite' }
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '201':
           description: Created
           content:
@@ -4113,6 +4312,14 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/AdminBankRuleTemplateWrite' }
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: OK
           content:
@@ -4126,6 +4333,14 @@ paths:
       summary: Smaže nepoužitou globální šablonu bankovního pravidla
       description: "Session-only, superadmin. Použitou šablonu je nutné místo smazání deaktivovat."
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: Deleted }
         '404': { description: template_not_found }
         '409': { description: template_in_use }
@@ -7158,6 +7373,14 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/TaxProfileInput' }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: 'OK ({ profile: {...} })' }
         '400': { description: Žádný supplier scope }
         '422': { description: Neplatný rok }
@@ -9983,6 +10206,14 @@ paths:
               properties:
                 content: { type: string, nullable: true }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
@@ -10478,6 +10709,14 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: page_key, required: false, schema: { type: string } }
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: Pole filtrů, content: { application/json: { schema: { type: array, items: { type: object } } } } }
         '422': { $ref: '#/components/responses/ValidationFailed' }
     post:
@@ -10499,6 +10738,14 @@ paths:
                 is_default: { type: boolean }
                 sort_order: { type: integer }
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '201': { description: Vytvořený filtr, content: { application/json: { schema: { type: object } } } }
         '409': { description: Filtr s tímto názvem už existuje (filter_name_exists) }
         '422': { $ref: '#/components/responses/ValidationFailed' }
@@ -10522,6 +10769,14 @@ paths:
                 sort_order: { type: integer }
                 is_default: { type: boolean }
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: Aktualizovaný filtr, content: { application/json: { schema: { type: object } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: Filtr s tímto názvem už existuje (filter_name_exists) }
@@ -10533,6 +10788,14 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: OK, content: { application/json: { schema: { type: object, properties: { deleted: { type: boolean } } } } } }
         '404': { $ref: '#/components/responses/NotFound' }
 
@@ -10544,6 +10807,14 @@ paths:
       parameters:
         - { in: query, name: keys, required: false, schema: { type: string }, description: 'CSV výčet pref_key (např. table.invoices,nav.order,keyboard.shortcuts)' }
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: Mapa pref_key → payload, content: { application/json: { schema: { type: object } } } }
 
   /api/v1/user/preferences/{key}:
@@ -10557,6 +10828,14 @@ paths:
         required: true
         content: { application/json: { schema: { type: object } } }
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: Uložený payload, content: { application/json: { schema: { type: object } } } }
         '422': { $ref: '#/components/responses/ValidationFailed' }
     delete:
@@ -10565,6 +10844,14 @@ paths:
       parameters:
         - { in: path, name: key, required: true, schema: { type: string, pattern: '^[a-z0-9_.]+$' } }
       responses:
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`) — tento endpoint je
+            dostupný jen z webového rozhraní. Viz „Endpointy dostupné jen z webového
+            rozhraní" v úvodu dokumentace.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: OK, content: { application/json: { schema: { type: object, properties: { deleted: { type: boolean } } } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
@@ -14009,6 +14296,14 @@ paths:
                   type: integer
                   description: Fallback k If-Match, pokud klient neumí posílat hlavičku.
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: OK
           headers:
@@ -14072,6 +14367,14 @@ paths:
                   format: binary
                   description: Jeden soubor, nebo pole souborů (file[]).
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200':
           description: OK
           content:
@@ -14121,6 +14424,14 @@ paths:
         Odstraní DB řádek; bajt na disku se smaže jen pokud je orphan (dedup-aware,
         počítá se jen v rámci journal_entry_attachments, nekříží se s DMS). requireWrite.
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: OK }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/accounting/journal/{id}/attachments/{attId}/description:
@@ -14148,6 +14459,14 @@ paths:
               properties:
                 description: { type: [string, "null"], maxLength: 255 }
       responses:
+        '403':
+          description: |
+            Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
+            je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
+            a to i tokenu se scope `read_write`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '200': { description: OK }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
