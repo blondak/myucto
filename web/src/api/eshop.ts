@@ -23,6 +23,23 @@ export interface ManufacturerPayload {
   archived: boolean
 }
 
+export interface EshopLocale {
+  id: number
+  code: string
+  name: string
+  display_order: number
+  is_default: boolean
+  archived: boolean
+}
+
+export interface EshopLocalePayload {
+  code: string
+  name: string
+  display_order?: number
+  is_default?: boolean
+  archived: boolean
+}
+
 export interface Tag {
   id: number
   code: string
@@ -381,6 +398,14 @@ export const eshopApi = {
   createManufacturer: (payload: ManufacturerPayload) => api.post<Manufacturer>('/eshop/manufacturers', payload).then(r => r.data),
   updateManufacturer: (id: number, payload: ManufacturerPayload) => api.put<Manufacturer>(`/eshop/manufacturers/${id}`, payload).then(r => r.data),
   deleteManufacturer: (id: number) => api.delete<{ deleted: true }>(`/eshop/manufacturers/${id}`).then(r => r.data),
+
+  // ── Jazyky (Locales) ─────────────────────────────────────────────────────
+  listLocales: (filters?: any) =>
+    api.get<EshopLocale[]>('/eshop/locales', { params: toParams(filters) }).then(r => r.data),
+  getLocale: (id: number) => api.get<EshopLocale>(`/eshop/locales/${id}`).then(r => r.data),
+  createLocale: (payload: EshopLocalePayload) => api.post<EshopLocale>('/eshop/locales', payload).then(r => r.data),
+  updateLocale: (id: number, payload: EshopLocalePayload) => api.put<EshopLocale>(`/eshop/locales/${id}`, payload).then(r => r.data),
+  deleteLocale: (id: number) => api.delete<{ deleted: true }>(`/eshop/locales/${id}`).then(r => r.data),
 
   // ── Tagy (Tags) ─────────────────────────────────────────────────────────
   listTags: (filters?: any) =>

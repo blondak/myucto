@@ -579,7 +579,8 @@
         "quick_stock_item": "Nová skladová karta",
         "reports_oss": "OSS přiznání",
         "section_finance": "Finance",
-        "mcp_server": "MCP server"
+        "mcp_server": "MCP server",
+        "eshop_locales": "Jazyky"
     },
     "payroll": {
         "rulesets": {
@@ -3880,7 +3881,11 @@
             "field_description": "Popis",
             "field_seo_title": "SEO titulek",
             "field_seo_description": "SEO popis",
-            "field_seo_slug": "SEO slug"
+            "field_seo_slug": "SEO slug",
+            "select_locale": "Vyberte jazyk",
+            "manage_locales": "Spravovat jazyky",
+            "no_codebook": "Číselník jazyků je prázdný",
+            "no_codebook_hint": "Nejprve si v e-shopu nadefinujte jazyky, ve kterých chcete zboží popisovat."
         },
         "product_categories": {
             "categories_title": "Kategorie",
@@ -3914,7 +3919,9 @@
             "rounding_0_10": "Na desetihaléře (0,10)",
             "rounding_0_50": "Na půlkoruny (0,50)",
             "rounding_1": "Na koruny (1)",
-            "rounding_9_ending": "Na 9 na konci"
+            "rounding_9_ending": "Na 9 na konci",
+            "select_currency": "Vyberte měnu",
+            "currency_required": "U každé ceny vyberte měnu."
         },
         "promo": {
             "title": "Akční ceny",
@@ -3956,7 +3963,8 @@
             "field_delivery_days": "Dodání (dny)",
             "field_stock_qty": "Skladem (ks)",
             "field_preferred": "Preferovaný",
-            "field_note": "Poznámka"
+            "field_note": "Poznámka",
+            "client_required": "U každého dodavatele vyberte kontakt."
         },
         "attachments": {
             "title": "Přílohy",
@@ -4022,7 +4030,35 @@
             "category_has_children": "Kategorie má podkategorie — nejprve je přesuňte nebo smažte.",
             "validation_failed": "Zkontrolujte zadané ceny — některé hodnoty jsou neplatné.",
             "vendor_invalid": "Neplatný dodavatel — klient musí mít roli dodavatele.",
-            "multiple_preferred_vendors": "Preferovaný může být jen jeden dodavatel."
+            "multiple_preferred_vendors": "Preferovaný může být jen jeden dodavatel.",
+            "unknown_locale": "Tento jazyk není v číselníku jazyků.",
+            "locale_in_use": "Jazyk má uložené překlady a nelze ho smazat.",
+            "locale_code_taken": "Jazyk s tímto kódem už existuje.",
+            "locale_code_locked": "Kód jazyka nelze změnit — už jsou na něj navázané překlady."
+        },
+        "locales": {
+            "title": "Jazyky",
+            "subtitle": "Jazykové mutace, ve kterých vedete popisy zboží a kategorií",
+            "empty_title": "Zatím žádný jazyk",
+            "empty_hint": "Přidejte jazyky, ve kterých chcete vést názvy a popisy zboží. Karta zboží pak nabídne právě je — nic víc, nic míň.",
+            "new": "Nový jazyk",
+            "edit": "Upravit jazyk",
+            "delete_confirm": "Opravdu smazat jazyk '{name}'?",
+            "in_use_hint": "Jazyk má uložené překlady, smazat ho nelze. Archivujte jej.",
+            "field_suggestion": "Rychlá volba",
+            "field_code": "Kód",
+            "field_name": "Název",
+            "field_display_order": "Pořadí",
+            "field_active": "Aktivní",
+            "field_default": "Výchozí jazyk",
+            "code_hint": "Kód ve tvaru „cs“ nebo „pt-BR“. U jazyka s uloženými překlady už ho nelze změnit.",
+            "code_invalid": "Kód jazyka musí být ve tvaru „cs“ nebo „pt-BR“.",
+            "name_required": "Vyplňte název jazyka.",
+            "default_badge": "Výchozí",
+            "col_code": "Kód",
+            "col_name": "Název",
+            "col_default": "Výchozí",
+            "col_active": "Aktivní"
         }
     },
     "accounting": {
