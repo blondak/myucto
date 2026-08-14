@@ -10738,6 +10738,86 @@ paths:
         '200': { description: Smazáno }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: Výrobce je použit u zboží — archivujte jej místo mazání }
+  /api/v1/eshop/locales:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Eshop]
+      summary: Seznam jazyků e-shopu
+      description: >-
+        Číselník jazykových mutací firmy. Kódy odpovídají poli `locale`
+        u překladů zboží i kategorií — jiný jazyk zápisové cesty nepřijmou.
+      parameters:
+        - in: query
+          name: active
+          schema: { type: boolean }
+          description: Jen aktivní (nearchivované) jazyky.
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Eshop]
+      summary: Přidá jazyk
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name]
+              properties:
+                code: { type: string, maxLength: 5, pattern: '^[a-z]{2}(-[A-Z]{2})?$', description: 'Např. cs nebo pt-BR.' }
+                name: { type: string, maxLength: 100 }
+                display_order: { type: integer, default: 0 }
+                is_default: { type: boolean, default: false, description: 'Předvyplněný jazyk na kartě; nejvýš jeden na firmu.' }
+                archived: { type: boolean, default: false }
+      responses:
+        '201': { description: Vytvořeno }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '409': { description: Jazyk s tímto kódem už existuje }
+  /api/v1/eshop/locales/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Eshop]
+      summary: Detail jazyka
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Eshop]
+      summary: Upraví jazyk
+      description: >-
+        Kód jazyka, ke kterému už existují překlady, změnit nelze — vazba
+        `stock_item_i18n.locale` je hodnota, ne FK (409 `locale_code_locked`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code: { type: string, maxLength: 5, pattern: '^[a-z]{2}(-[A-Z]{2})?$' }
+                name: { type: string, maxLength: 100 }
+                display_order: { type: integer }
+                is_default: { type: boolean }
+                archived: { type: boolean }
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Kód už existuje, nebo na jazyk navazují překlady }
+    delete:
+      tags: [Eshop]
+      summary: Smaže jazyk
+      description: Jazyk s uloženými překlady smazat nelze (409 `locale_in_use`) — archivujte jej.
+      responses:
+        '200': { description: Smazáno }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Jazyk má uložené překlady }
   /api/v1/eshop/tags:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'

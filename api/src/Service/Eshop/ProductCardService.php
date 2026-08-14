@@ -10,6 +10,7 @@ use MyInvoice\Repository\StockItemFeeRepository;
 use MyInvoice\Repository\StockItemI18nRepository;
 use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockItemTagRepository;
+use MyInvoice\Repository\StockLocaleRepository;
 use MyInvoice\Repository\StockMediaRepository;
 use MyInvoice\Repository\StockAttributeValueRepository;
 use MyInvoice\Service\Eshop\Pricing\PriceRecomputeDispatcher;
@@ -28,6 +29,7 @@ final class ProductCardService
         private readonly Connection $db,
         private readonly StockItemRepository $items,
         private readonly StockItemI18nRepository $i18n,
+        private readonly StockLocaleRepository $locales,
         private readonly StockItemCategoryRepository $itemCategories,
         private readonly StockItemTagRepository $itemTags,
         private readonly StockItemFeeRepository $itemFees,
@@ -263,6 +265,7 @@ final class ProductCardService
     {
         // Zjistíme existující locale a smažeme ty, které v payloadu nejsou.
         $existing = $this->i18n->listForItem($supplierId, $id);
+        $known = $this->locales->codes($supplierId);
         $keep = [];
         foreach ($rows as $r) {
             $locale = trim((string) ($r['locale'] ?? ''));
@@ -272,6 +275,11 @@ final class ProductCardService
             }
             if (mb_strlen($locale) > 5) {
                 throw new EshopException('validation_failed', "Neplatný kód jazyka „{$locale}\".", 400);
+            }
+            // Jazyky vede číselník stock_locales (1370) — mimo něj se překlad
+            // nezaloží, jinak by na kartě vznikla mutace, kterou UI nenabízí.
+            if (!in_array($locale, $known, true)) {
+                throw new EshopException('unknown_locale', "Jazyk „{$locale}\" není v číselníku jazyků.", 400);
             }
             $keep[$locale] = true;
             $this->i18n->upsert($supplierId, $id, $locale, [

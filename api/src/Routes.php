@@ -1878,6 +1878,13 @@ final class Routes
             $g->put   ('/manufacturers/{id:[0-9]+}',     [\MyInvoice\Action\Eshop\ManufacturerAction::class, 'update']);
             $g->delete('/manufacturers/{id:[0-9]+}',     [\MyInvoice\Action\Eshop\ManufacturerAction::class, 'delete']);
 
+            // Jazyky (číselník jazykových mutací karty a kategorií)
+            $g->get   ('/locales',                       [\MyInvoice\Action\Eshop\LocaleAction::class, 'list']);
+            $g->post  ('/locales',                       [\MyInvoice\Action\Eshop\LocaleAction::class, 'create']);
+            $g->get   ('/locales/{id:[0-9]+}',           [\MyInvoice\Action\Eshop\LocaleAction::class, 'get']);
+            $g->put   ('/locales/{id:[0-9]+}',           [\MyInvoice\Action\Eshop\LocaleAction::class, 'update']);
+            $g->delete('/locales/{id:[0-9]+}',           [\MyInvoice\Action\Eshop\LocaleAction::class, 'delete']);
+
             // Štítky
             $g->get   ('/tags',                          [\MyInvoice\Action\Eshop\StockTagAction::class, 'list']);
             $g->post  ('/tags',                          [\MyInvoice\Action\Eshop\StockTagAction::class, 'create']);

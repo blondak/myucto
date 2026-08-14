@@ -10,6 +10,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockCategoryI18nRepository;
 use MyInvoice\Repository\StockCategoryRepository;
+use MyInvoice\Repository\StockLocaleRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\CategoryTreeService;
 use MyInvoice\Service\Eshop\EshopException;
@@ -32,6 +33,7 @@ final class CategoryAction
         private readonly Connection $db,
         private readonly StockCategoryRepository $categories,
         private readonly StockCategoryI18nRepository $i18n,
+        private readonly StockLocaleRepository $locales,
         private readonly CategoryTreeService $tree,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
@@ -166,6 +168,7 @@ final class CategoryAction
         }
         $body = (array) ($request->getParsedBody() ?? []);
         $rows = is_array($body['translations'] ?? null) ? $body['translations'] : $body;
+        $known = $this->locales->codes($supplierId);
         foreach ($rows as $r) {
             if (!is_array($r)) {
                 continue;
@@ -174,6 +177,10 @@ final class CategoryAction
             $name = trim((string) ($r['name'] ?? ''));
             if ($locale === '' || $name === '' || mb_strlen($locale) > 5) {
                 continue;
+            }
+            // Stejné pravidlo jako u karty zboží — jazyky vede číselník (1370).
+            if (!in_array($locale, $known, true)) {
+                return Json::error($response, 'unknown_locale', "Jazyk „{$locale}\" není v číselníku jazyků.", 400);
             }
             $this->i18n->upsert($supplierId, $id, $locale, [
                 'name'        => $name,
