@@ -38,10 +38,9 @@ RUN composer dump-autoload --optimize --classmap-authoritative \
 # ---------- Stage 3: runtime ----------
 FROM php:8.5-apache AS runtime
 
-# librsvg2-bin (~30–50 MB i s cairo/pango/gdk-pixbuf deps) je jen FALLBACK pro
-# konverzi SVG loga dodavatele, když v image není Imagick. Pro menší image lze
-# vypnout `--build-arg INSTALL_RSVG=0` (SVG loga pak vyžadují Imagick na hostu).
-# Default 1 = beze změny chování.
+# librsvg2-bin (~30–50 MB i s cairo/pango/gdk-pixbuf deps) je FALLBACK pro konverzi
+# SVG loga dodavatele, když Imagick nemá SVG delegate. Pro menší image lze vypnout
+# `--build-arg INSTALL_RSVG=0`. Default 1 = beze změny chování.
 ARG INSTALL_RSVG=1
 
 # Use mlocati/docker-php-extension-installer — the de-facto installer for PHP-Docker
@@ -49,8 +48,13 @@ ARG INSTALL_RSVG=1
 # install-modules race condition that bites raw `docker-php-ext-install` on PHP 8.5.
 COPY --from=mlocati/php-extension-installer:latest /usr/bin/install-php-extensions /usr/local/bin/
 
+# Imagick (+~34 MiB i s ImageMagick delegáty, měřeno) není kosmetika: je to jediná
+# cesta k náhledům PDF dokumentů (ThumbnailGenerator — GD umí jen rastr) a jediná
+# cesta k importu HEIC/HEIF, což je výchozí formát fotek z iPhonu
+# (ImageToPdfConverter). Bez něj obě cesty tiše odpadnou a kontrola prostředí
+# hlásí varování. Ověřené delegáty v tomto image: PDF, HEIC, SVG.
 RUN install-php-extensions \
-        pdo_mysql gd mbstring intl zip opcache exif bcmath redis sodium soap \
+        pdo_mysql gd mbstring intl zip opcache exif bcmath redis sodium soap imagick \
  && apt-get update \
  && apt-get install -y --no-install-recommends tini cron mariadb-client \
  && if [ "$INSTALL_RSVG" = "1" ]; then \

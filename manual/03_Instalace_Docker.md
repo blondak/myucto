@@ -530,9 +530,12 @@ jen výrazně štíhlejší:
 
 | Metrika                         | Debian/Apache (fallback) | **Alpine/nginx (default)** |
 |---------------------------------|---------------|--------------|
-| Velikost image (`docker image inspect .Size`) | ~293 MB | **~92 MB** (−69 %) |
+| Velikost image (`docker image inspect .Size`) | ~328 MB | **~132 MB** (−60 %) |
 | RAM aplikace (idle)             | desítky MB (Apache prefork) | **~26 MB** (php-fpm ondemand) |
 | Web server                      | Apache + `.htaccess` | nginx |
+
+Obě varianty obsahují PHP rozšíření **imagick** (+~35–40 MB), bez kterého by
+nefungovaly náhledy PDF dokumentů a import fotek ve formátu HEIC/HEIF z iPhonu.
 
 GHCR `:latest` (i `:X.Y.Z`, `:X.Y`) používá **Alpine Linux**. Lokální build
 (`docker compose build`) staví taky alpine z `Dockerfile.alpine`.
