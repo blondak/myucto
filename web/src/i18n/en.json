@@ -2177,6 +2177,18 @@
                 "jmhz_dry_run_show_xml": "Show XML",
                 "jmhz_dry_run_hide_xml": "Hide XML",
                 "jmhz_dry_run_copy_xml": "Copy XML",
+
+                "jmhz_dry_run_incomplete": "The XML passed the schema, but the control catalogue is not fully executed yet — the submission is not ready to send.",
+
+                "jmhz_controls_summary": "CSSZ controls: {passed} passed · {failed} failed · {remote} decided by CSSZ · {gaps} not implemented",
+
+                "jmhz_controls_blocking": "Blocking defects ({count}) — the submission would be ineffective",
+
+                "jmhz_controls_gaps": "Blocking controls not executed ({count})",
+
+                "jmhz_controls_warnings": "Passable defects ({count}) — the submission goes through with wrong data",
+
+                "jmhz_controls_form": "component {ordinal}",
                 "jmhz_dry_run_failed": "The monthly report dry run could not be started.",
                 "jmhz_dry_run_blockers": {
                     "jmhz_preparation_not_ready": "The report sources are incomplete.",

@@ -1355,10 +1355,44 @@ export interface PayrollJmhzXmlDryRunBlocker {
   attribute_ids: string[]
 }
 
+export type PayrollJmhzControlOutcome =
+  | 'passed'
+  | 'failed'
+  | 'not_applicable'
+  | 'not_evaluable'
+  | 'unimplemented'
+
+export interface PayrollJmhzControlFinding {
+  control_id: number
+  name: string
+  outcome: PayrollJmhzControlOutcome
+  scope: string
+  passability: 'blocking' | 'passable' | 'unavailable'
+  technical: boolean
+  part: string
+  form_ordinal: number | null
+  message: string
+  attribute_ids: string[]
+  error_code: number | null
+}
+
+export interface PayrollJmhzControlReport {
+  schema_reference: string
+  catalog_key: string
+  catalog_manifest_sha256: string
+  submittable: boolean
+  counts: Record<PayrollJmhzControlOutcome, number>
+  blocking: PayrollJmhzControlFinding[]
+  warnings: PayrollJmhzControlFinding[]
+  coverage_gaps: PayrollJmhzControlFinding[]
+  evaluated: PayrollJmhzControlFinding[]
+}
+
 export interface PayrollJmhzXmlDryRun {
-  status: 'blocked' | 'dry_run_valid'
+  status: 'blocked' | 'dry_run_valid' | 'dry_run_incomplete'
   preparation_id: number
   blockers: PayrollJmhzXmlDryRunBlocker[]
+  controls?: PayrollJmhzControlReport
   xml?: string
   xml_sha256?: string
   schema?: {

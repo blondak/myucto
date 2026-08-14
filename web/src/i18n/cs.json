@@ -2177,6 +2177,18 @@
                 "jmhz_dry_run_show_xml": "Zobrazit XML",
                 "jmhz_dry_run_hide_xml": "Skrýt XML",
                 "jmhz_dry_run_copy_xml": "Kopírovat XML",
+
+                "jmhz_dry_run_incomplete": "XML prošlo schématem, ale katalog kontrol ještě není celý vykonaný — podání zatím není připravené k odeslání.",
+
+                "jmhz_controls_summary": "Kontroly ČSSZ: {passed} splněno · {failed} nesplněno · {remote} rozhodne až ČSSZ · {gaps} bez implementace",
+
+                "jmhz_controls_blocking": "Nepropustné vady ({count}) — podání by bylo neúčinné",
+
+                "jmhz_controls_gaps": "Nevykonané nepropustné kontroly ({count})",
+
+                "jmhz_controls_warnings": "Propustné vady ({count}) — podání projde, data budou chybná",
+
+                "jmhz_controls_form": "součást {ordinal}",
                 "jmhz_dry_run_failed": "Nácvik měsíčního hlášení se nepodařilo spustit.",
                 "jmhz_dry_run_blockers": {
                     "jmhz_preparation_not_ready": "Zdroje hlášení nejsou úplné.",
