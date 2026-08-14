@@ -2139,6 +2139,9 @@ paths:
         Dobropis lze stornovat pouze v režimu `internal`. Stornovací doklad
         (`cancellation`) stornovat nelze. Storno je účetní akt — na zaúčtovaném
         či uzamčeném dokladu ho blokuje zámek (Epic F6).
+
+        Úspěšný status se liší podle režimu: `internal` vrací `200`,
+        `credit_note` vrací `201` (vznikl nový doklad).
       requestBody:
         required: true
         content:
@@ -2156,31 +2159,31 @@ paths:
                   description: Důvod storna (audit + poznámka nad položkami protidokladu)
       responses:
         '200':
-          description: |
-            OK. Tvar odpovědi se liší podle `mode`: `internal` vrací
-            `cancellation_id` + `invoice`, `credit_note` vrací `credit_note_id` + `edit_url`.
+          description: "Interní storno (`mode: internal`)"
           content:
             application/json:
               schema:
-                oneOf:
-                  - type: object
-                    title: Interní storno
-                    properties:
-                      cancellation_id:
-                        type: integer
-                        format: int64
-                        description: ID vytvořeného stornovacího dokladu (`invoice_type = cancellation`).
-                      invoice:
-                        allOf:
-                          - $ref: '#/components/schemas/Invoice'
-                        description: Původní faktura po stornu (status `cancelled`).
-                  - type: object
-                    title: Draft dobropisu
-                    properties:
-                      credit_note_id: { type: integer, format: int64 }
-                      edit_url:
-                        type: string
-                        description: Relativní odkaz do editoru draftu dobropisu.
+                type: object
+                properties:
+                  cancellation_id:
+                    type: integer
+                    format: int64
+                    description: ID vytvořeného stornovacího dokladu (`invoice_type = cancellation`).
+                  invoice:
+                    allOf:
+                      - $ref: '#/components/schemas/Invoice'
+                    description: Původní faktura po stornu (status `cancelled`).
+        '201':
+          description: "Vytvořen draft dobropisu (`mode: credit_note`)"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credit_note_id: { type: integer, format: int64 }
+                  edit_url:
+                    type: string
+                    description: Relativní odkaz do editoru draftu dobropisu.
         '400':
           description: "Chybí nebo neplatný `mode` (`invalid_mode`)"
           content:
