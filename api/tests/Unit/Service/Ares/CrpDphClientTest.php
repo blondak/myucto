@@ -15,7 +15,7 @@ final class CrpDphClientTest extends TestCase
     /** Plná odpověď: spolehlivý plátce + 3 zveřejněné účty (atributová forma). */
     public function testParsesStandardAndIbanAccountsAttributeForm(): void
     {
-        $xml = $this->envelope('21370362', 'NE', <<<ACC
+        $xml = $this->envelope('12345679', 'NE', <<<ACC
             <zverejneneUcty>
               <ucet datumZverejneni="2013-04-01">
                 <standardniUcet cislo="2000145399" kodBanky="0800"/>
@@ -29,7 +29,7 @@ final class CrpDphClientTest extends TestCase
             </zverejneneUcty>
             ACC);
 
-        $r = CrpDphClient::parseResponse($xml, '21370362');
+        $r = CrpDphClient::parseResponse($xml, '12345679');
 
         self::assertTrue($r['found']);
         self::assertFalse($r['unreliable']);

@@ -82,7 +82,7 @@ final class DppoReconciliationServiceTest extends TestCase
         return [
             'company_name' => 'DPPO reconcile test s.r.o.', 'street' => 'Testovací 1',
             'city' => 'Praha', 'zip' => '110 00', 'country_iso2' => 'CZ',
-            'ic' => '21370362', 'dic' => 'CZ21370362', 'taxpayer_type' => 'po',
+            'ic' => '12345679', 'dic' => 'CZ12345679', 'taxpayer_type' => 'po',
             'financial_office_code' => '451', 'cz_nace_code' => '62020',
         ];
     }

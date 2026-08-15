@@ -259,7 +259,7 @@ final class AiPdfExtractor
                 // očividně mis-přečetla hlavičku PDF (typicky autoservisy / poskytovatelé
                 // s vlastní hlavičkou kde vlastní firma je nahoře a odběratel níže).
                 // Bez customer s jiným IČ nemáme jak swap-back udělat → abortujeme,
-                // aby se faktura nezačala jako "MyWebdesign fakturuje sám sobě".
+                // aby se faktura nezačala jako "vlastní firma fakturuje sama sobě".
                 $this->logger->warning('AI extractor: vendor IC matches tenant IC and no usable customer to swap — rejecting', [
                     'vendor_ic'   => $vendorIc,
                     'customer_ic' => $customerIc,

@@ -40,7 +40,7 @@ final class IsdocParserTest extends TestCase
   <AccountingSupplierParty>
     <Party>
       <PartyIdentification>
-        <ID>21370362</ID>
+        <ID>12345679</ID>
       </PartyIdentification>
     </Party>
   </AccountingSupplierParty>
@@ -73,7 +73,7 @@ XML;
     public function testHappyPathExtractsBasicFields(): void
     {
         $result = $this->parser->parse($this->minimalIsdoc());
-        self::assertSame('21370362', $result['supplier_ic']);
+        self::assertSame('12345679', $result['supplier_ic']);
         self::assertCount(1, $result['invoices']);
 
         $inv = $result['invoices'][0];
@@ -101,7 +101,7 @@ XML;
         $xml = str_replace(self::NS, 'http://isdoc.cz/namespace/invoice', $this->minimalIsdoc());
         $result = $this->parser->parse($xml);
 
-        self::assertSame('21370362', $result['supplier_ic']);
+        self::assertSame('12345679', $result['supplier_ic']);
         $inv = $result['invoices'][0];
         self::assertArrayNotHasKey('__error', $inv);
         self::assertSame('2605001', $inv['varsymbol']);
@@ -180,7 +180,7 @@ XML;
   </PaymentMeans>
   <LocalCurrencyCode>CZK</LocalCurrencyCode>
   <AccountingSupplierParty>
-    <Party><PartyIdentification><ID>21370362</ID></PartyIdentification></Party>
+    <Party><PartyIdentification><ID>12345679</ID></PartyIdentification></Party>
   </AccountingSupplierParty>
   <AccountingCustomerParty>
     <Party><PartyIdentification><ID>12345678</ID></PartyIdentification></Party>
@@ -570,7 +570,7 @@ XML;
   <IssueDate>2026-05-01</IssueDate>
   <LocalCurrencyCode>CZK</LocalCurrencyCode>
   <CurrencyCode>CZK</CurrencyCode>
-  <AccountingSupplierParty><Party><PartyIdentification><ID>21370362</ID></PartyIdentification></Party></AccountingSupplierParty>
+  <AccountingSupplierParty><Party><PartyIdentification><ID>12345679</ID></PartyIdentification></Party></AccountingSupplierParty>
   <AccountingCustomerParty><Party><PartyIdentification><ID>12345678</ID></PartyIdentification></Party></AccountingCustomerParty>
   <InvoiceLines>
     <InvoiceLine>

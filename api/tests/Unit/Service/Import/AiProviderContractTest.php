@@ -44,7 +44,7 @@ final class AiProviderContractTest extends TestCase
     {
         return (array) json_decode((string) json_encode([
             'vendor'   => ['company_name' => 'ACME s.r.o.', 'ic' => '12345678', 'dic' => 'CZ12345678', 'is_vat_payer' => true],
-            'customer' => ['company_name' => 'MyWebdesign.cz s.r.o.', 'ic' => '21370362', 'dic' => 'CZ21370362'],
+            'customer' => ['company_name' => 'Vzorová firma s.r.o.', 'ic' => '12345679', 'dic' => 'CZ12345679'],
             'payment'  => ['bank_account' => '2900123456/2010', 'iban' => null, 'variable_symbol' => '2026001'],
             'vendor_invoice_number' => '2026001',
             'document_kind' => 'invoice',

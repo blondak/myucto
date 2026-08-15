@@ -284,7 +284,7 @@ function __normalizeTestTenant(array $cfg, string $chosenDb): void
         // `supplier_bank_accounts` řádkem zakládaným o pár řádků níž.
         $pdo->prepare(
             "UPDATE currencies
-                SET account_number = COALESCE(account_number, '112866706'),
+                SET account_number = COALESCE(account_number, '1700000006'),
                     bank_code      = COALESCE(bank_code, '2250')
               WHERE supplier_id = ? AND code = 'CZK'"
         )->execute([$supplierId]);
@@ -304,12 +304,28 @@ function __normalizeTestTenant(array $cfg, string $chosenDb): void
         // Detekce vlastních převodů porovnává protistranu proti supplier_bank_accounts.
         // Testy si registrují jen DRUHÝ účet a u prvního spoléhají, že tenant svůj hlavní
         // účet má (v klonu ostré DB měl). Bez něj vrací detektor no_rule místo own_transfer.
+        //
+        // Nejdřív UPDATE, teprve pak INSERT IGNORE: unique klíč je
+        // (supplier_id, account_canonical, bank_code_norm), takže samotný INSERT by na
+        // starším klonu jen přidal DRUHÝ řádek a ten původní (s jiným číslem) by tam
+        // zůstal. Řádek se proto adresuje přes `label` a číslo se přepíše VŽDY —
+        // existující testovací DB se tím sama srovná na aktuální syntetickou hodnotu.
+        $pdo->prepare(
+            "UPDATE supplier_bank_accounts
+                SET account_number    = '1700000006',
+                    account_canonical = '1700000006',
+                    bank_code         = '2250',
+                    bank_code_norm    = '2250',
+                    currency          = 'CZK',
+                    is_active         = 1
+              WHERE supplier_id = ? AND label = 'Hlavní testovací účet'"
+        )->execute([$supplierId]);
         $pdo->prepare(
             "INSERT IGNORE INTO supplier_bank_accounts
                 (supplier_id, label, account_number, bank_code, bank_code_norm, currency,
                  account_canonical, kind, source, is_active)
-             VALUES (?, 'Hlavní testovací účet', '112866706', '2250', '2250', 'CZK',
-                     '112866706', 'current', 'manual', 1)"
+             VALUES (?, 'Hlavní testovací účet', '1700000006', '2250', '2250', 'CZK',
+                     '1700000006', 'current', 'manual', 1)"
         )->execute([$supplierId]);
 
         // Od tohoto bodu izolovaně po krocích: jedna chybějící tabulka/sloupec nesmí

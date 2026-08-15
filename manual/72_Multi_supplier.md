@@ -478,7 +478,7 @@ přepne na firmu a otevře filtrovaný seznam faktur).
 - **Při založení dodavatele použij ARES** — ušetří 5 minut opisování.
 - **Nevynechej Pohoda kódy** pokud plánuješ používat Pohoda XML export.
 - **Per-dodavatel `From:` jméno** je důležitý pro deliverabilitu — klient
-  vidí v inboxu „Faktury MyWebdesign" místo „myucto@server-3.hosting.cz".
+  vidí v inboxu „Faktury Vzorové firmy" místo „myucto@server-3.hosting.cz".
 - **Ukázková data se generují jen pro první firmu v instalaci.** Příkaz
   `php api/bin/sample.php` neumí vybrat jinou firmu; pro další firmy založ
   syntetická testovací data ručně.

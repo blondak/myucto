@@ -19127,7 +19127,7 @@ components:
           type: string
           enum: [fresh, cache]
           description: Zda data přišla z ARES API nebo z 24h cache
-        company_name: { type: string, example: "MyWebdesign.cz s.r.o." }
+        company_name: { type: string, example: "Vzorová firma s.r.o." }
         ic:  { type: string, example: "27082440" }
         dic: { type: string, example: "CZ27082440" }
         street: { type: string }

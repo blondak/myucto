@@ -173,25 +173,25 @@ final class AiPdfExtractorUnitTest extends TestCase
     {
         $data = [
             'vendor'   => ['ic' => '10000010'],
-            'customer' => ['ic' => '21370362'],
+            'customer' => ['ic' => '12345679'],
             'total_without_vat' => 4113.29,
             'items' => [
                 ['quantity' => 1, 'unit_price_without_vat' => 4113.29],
             ],
         ];
-        $this->assertNull($this->invokeDetectWeak($data, '21370362'));
+        $this->assertNull($this->invokeDetectWeak($data, '12345679'));
     }
 
     public function testDetectWeak_vendor_equals_tenant_no_customer_triggers(): void
     {
         $data = [
-            'vendor'   => ['ic' => '21370362'], // = tenant
+            'vendor'   => ['ic' => '12345679'], // = tenant
             'customer' => ['ic' => null],
             'total_without_vat' => 5000,
             'items' => [['quantity' => 1, 'unit_price_without_vat' => 5000]],
         ];
         $this->assertSame('vendor_is_tenant_no_swap_target',
-            $this->invokeDetectWeak($data, '21370362'));
+            $this->invokeDetectWeak($data, '12345679'));
     }
 
     public function testDetectWeak_vendor_equals_tenant_with_customer_handles_swap(): void
@@ -199,12 +199,12 @@ final class AiPdfExtractorUnitTest extends TestCase
         // Když customer má jiné IČ než tenant, swap-back proběhne normální cestou
         // → není to weakness, nereaguj.
         $data = [
-            'vendor'   => ['ic' => '21370362'], // = tenant
+            'vendor'   => ['ic' => '12345679'], // = tenant
             'customer' => ['ic' => '10000010'], // jiný IČ → swap-back funguje
             'total_without_vat' => 5000,
             'items' => [['quantity' => 1, 'unit_price_without_vat' => 5000]],
         ];
-        $this->assertNull($this->invokeDetectWeak($data, '21370362'));
+        $this->assertNull($this->invokeDetectWeak($data, '12345679'));
     }
 
     public function testDetectWeak_catastrophic_mismatch_triggers(): void
@@ -212,7 +212,7 @@ final class AiPdfExtractorUnitTest extends TestCase
         // NC Auto pattern: AI total 5317, items sum 31057 (6x víc)
         $data = [
             'vendor'   => ['ic' => '10000010'],
-            'customer' => ['ic' => '21370362'],
+            'customer' => ['ic' => '12345679'],
             'total_without_vat' => 5317.34,
             'items' => [
                 ['quantity' => 1, 'unit_price_without_vat' => 239],
@@ -221,7 +221,7 @@ final class AiPdfExtractorUnitTest extends TestCase
             ],
         ];
         $this->assertSame('catastrophic_items_mismatch',
-            $this->invokeDetectWeak($data, '21370362'));
+            $this->invokeDetectWeak($data, '12345679'));
     }
 
     public function testDetectWeak_discount_sign_under_threshold_does_not_trigger(): void
@@ -230,7 +230,7 @@ final class AiPdfExtractorUnitTest extends TestCase
         // Pod 50 % prahem → není to weakness, jen warning.
         $data = [
             'vendor'   => ['ic' => '49437381'],
-            'customer' => ['ic' => '21370362'],
+            'customer' => ['ic' => '12345679'],
             'total_without_vat' => 69498.35,
             'items' => [
                 ['quantity' => 12, 'unit_price_without_vat' => 5709],
@@ -238,7 +238,7 @@ final class AiPdfExtractorUnitTest extends TestCase
                 ['quantity' => 12, 'unit_price_without_vat' => 643.50], // chybí mínus
             ],
         ];
-        $this->assertNull($this->invokeDetectWeak($data, '21370362'));
+        $this->assertNull($this->invokeDetectWeak($data, '12345679'));
     }
 
     public function testDetectWeak_skips_check2_when_ai_total_without_vat_missing(): void
@@ -247,13 +247,13 @@ final class AiPdfExtractorUnitTest extends TestCase
         // by jinak vyžadoval `total_with_vat / 1.21`, což u 21/12/0 % mixu nesedí).
         $data = [
             'vendor'   => ['ic' => '10000010'],
-            'customer' => ['ic' => '21370362'],
+            'customer' => ['ic' => '12345679'],
             'total_with_vat' => 6433.98, // jen s DPH, bez DPH chybí
             'items' => [
                 ['quantity' => 14, 'unit_price_without_vat' => 1980], // halucinace
             ],
         ];
-        $this->assertNull($this->invokeDetectWeak($data, '21370362'));
+        $this->assertNull($this->invokeDetectWeak($data, '12345679'));
     }
 
     public function testDetectWeak_no_tenant_ic_skips_vendor_check(): void
@@ -964,7 +964,7 @@ final class AiPdfExtractorUnitTest extends TestCase
     public function testNormalizeIc_regularEightDigitIcUnchanged(): void
     {
         $ref = new \ReflectionMethod($this->extractor, 'normalizeIc');
-        self::assertSame('21370362', $ref->invoke($this->extractor, '21370362'));
+        self::assertSame('12345679', $ref->invoke($this->extractor, '12345679'));
     }
 
     public function testNormalizeIc_emptyReturnsNull(): void

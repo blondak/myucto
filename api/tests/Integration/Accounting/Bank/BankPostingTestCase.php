@@ -32,7 +32,7 @@ use Slim\Psr7\Response as Psr7Response;
 abstract class BankPostingTestCase extends TestCase
 {
     protected const YEAR = 2099;
-    protected const ACCOUNT = '112866706'; // currencies řádek supplieru 1 (tenant resolution)
+    protected const ACCOUNT = '1700000006'; // currencies řádek supplieru 1 (tenant resolution)
     protected const BANK_CODE = '2250';
 
     protected Connection $db;

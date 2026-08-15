@@ -65,8 +65,8 @@ final class ApprovalEmailVarsBuilderBrandingTest extends TestCase
             'varsymbol' => '2607038',
             'supplier_snapshot' => json_encode([
                 'id' => 7,
-                'company_name' => 'MyWebdesign.cz s.r.o.',
-                'display_name' => 'MyWebdesign.cz',
+                'company_name' => 'Vzorová firma s.r.o.',
+                'display_name' => 'Vzorová firma',
                 'street' => 'Testovací 1',
                 'city' => 'Praha',
                 'zip' => '100 00',
@@ -81,7 +81,7 @@ final class ApprovalEmailVarsBuilderBrandingTest extends TestCase
         $vars = $this->builderWithSupplier()->build($this->invoice(), 'tok3n', false, 'cs');
 
         $supplier = $vars['supplier'];
-        self::assertSame('MyWebdesign.cz', $supplier['display_name']);
+        self::assertSame('Vzorová firma', $supplier['display_name']);
         // `id` je to, podle čeho Mailer připojuje logo jako CID a vybírá SMTP profil.
         self::assertSame(7, (int) $supplier['id']);
         self::assertTrue($supplier['email_branding_enabled']);
@@ -101,6 +101,6 @@ final class ApprovalEmailVarsBuilderBrandingTest extends TestCase
         // rozhodnutí „nebrandovat", ne prázdno, které by shodilo i patičku.
         self::assertFalse($supplier['email_branding_enabled']);
         self::assertSame(7, (int) $supplier['id']);
-        self::assertSame('MyWebdesign.cz s.r.o.', $supplier['company_name']);
+        self::assertSame('Vzorová firma s.r.o.', $supplier['company_name']);
     }
 }
