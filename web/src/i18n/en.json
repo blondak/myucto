@@ -13747,6 +13747,7 @@
         "checks_hint": "Problems and warnings come first. Each one lists its impact, the fix and a link to the manual.",
         "actual": "Measured",
         "expected": "Expected",
+        "info": "Note",
         "fix": "Fix",
         "manual_link": "Open manual",
         "summary_counts": "{fail} problems, {warn} warnings, {ok} fine",
@@ -13865,7 +13866,8 @@
                 "impact": "Without cron there are no backups, no reminders go out and exchange rates are not fetched.",
                 "fix": "Check the schedule and the last run on the Scheduled jobs page.",
                 "actual_label": "Stale jobs",
-                "expected_label": "Expected"
+                "expected_label": "Expected",
+                "info_label": "Inactive jobs (not configured or turned off)"
             },
             "app_debug": {
                 "label": "Debug mode",

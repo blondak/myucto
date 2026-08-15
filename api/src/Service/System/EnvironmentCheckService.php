@@ -9,6 +9,11 @@ use MyInvoice\Infrastructure\Cache\RedisProbe;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Cron\CronCatalog;
+use MyInvoice\Service\Cron\CronDispatcher;
+use MyInvoice\Service\Cron\CronHealth;
+use MyInvoice\Service\Cron\CronJobGate;
+use MyInvoice\Service\Cron\CronScheduleMode;
 use MyInvoice\Service\Update\VersionService;
 use PDO;
 
@@ -400,29 +405,105 @@ final class EnvironmentCheckService
     }
 
     /**
-     * Nejstarší „poslední úspěšný běh" napříč kritickými úlohami. Detailní
-     * rozpad má `/api/admin/cron-jobs`; tady stačí zjistit, jestli cron vůbec žije.
+     * Stav plánovaných úloh. Detailní rozpad má `/api/admin/cron-jobs`; tady jde
+     * jen o to, jestli něco relevantního přestalo běžet.
+     *
+     * Relevanci ani zdraví tahle třída nedefinuje — ptá se {@see CronJobGate}
+     * a {@see CronHealth}, tedy přesně těch zdrojů, ze kterých čte i stránka
+     * Plánované úlohy. Druhá definice by se s tou první nutně rozešla.
      *
      * @return array<string,mixed>
      */
     private function cronStatus(): array
     {
+        $unavailable = [
+            'available'         => false,
+            'oldest_ok_age_sec' => null,
+            'jobs'              => 0,
+            'stale'             => [],
+            'inactive'          => [],
+            'idle'              => [],
+        ];
+
         if (!$this->db->hasTable('cron_heartbeat')) {
-            return ['available' => false, 'oldest_ok_age_sec' => null, 'jobs' => 0, 'stale' => []];
+            return $unavailable;
         }
 
         try {
-            $rows = $this->db->pdo()->query(
+            $pdo  = $this->db->pdo();
+            $rows = $pdo->query(
                 'SELECT script, last_ok_at, last_tick_at, last_status FROM cron_heartbeat'
             )->fetchAll(PDO::FETCH_ASSOC) ?: [];
         } catch (\Throwable) {
-            return ['available' => false, 'oldest_ok_age_sec' => null, 'jobs' => 0, 'stale' => []];
+            return $unavailable;
         }
 
-        $now    = time();
+        $now  = time();
+        $mode = CronScheduleMode::current($pdo);
+        $gate = new CronJobGate($this->config, $pdo);
+
+        $inactive = [];
+        foreach (CronCatalog::all() as $job) {
+            $reason = $this->guard(fn () => $gate->inactiveReason($job, $mode), null);
+            if ($reason !== null) {
+                $inactive[(string) $job['script']] = $reason;
+            }
+        }
+
+        // V režimu dispatcheru je jeho vlastní heartbeat důkazem, že se plánuje —
+        // a tím pádem že ticho gatované úlohy znamená „není práce", ne výpadek.
+        $dispatcherAlive = false;
+        $gatedScripts    = [];
+        if ($mode === CronScheduleMode::DISPATCHER) {
+            $heartbeats = [];
+            foreach ($rows as $row) {
+                $heartbeats[(string) $row['script']] = $row;
+            }
+            $dispatcherAlive = CronHealth::isDispatcherAlive(
+                $heartbeats[CronCatalog::DISPATCHER_SCRIPT] ?? null,
+                CronCatalog::maxAgeHours(CronCatalog::DISPATCHER_SCRIPT) * 3600,
+                $now,
+            );
+            $gatedScripts = CronDispatcher::gatedScripts();
+        }
+
+        return ['available' => true, 'jobs' => count($rows), 'inactive' => $inactive]
+            + self::classifyCronHeartbeats($rows, $inactive, $gatedScripts, $dispatcherAlive, $now);
+    }
+
+    /**
+     * Roztřídí heartbeaty na zaseklé, nečinné a v pořádku.
+     *
+     * Vytaženo z {@see cronStatus()}, aby šlo otestovat bez databáze — právě
+     * tady se rozhoduje, co uživatel uvidí červeně.
+     *
+     * @param list<array<string,mixed>> $rows řádky `cron_heartbeat`
+     * @param array<string,string> $inactive skript => důvod nečinnosti
+     * @param list<string> $gatedScripts skripty, které dispatcher spouští jen když mají práci
+     * @return array{oldest_ok_age_sec:?int,stale:list<string>,idle:list<string>}
+     */
+    public static function classifyCronHeartbeats(
+        array $rows,
+        array $inactive,
+        array $gatedScripts,
+        bool $dispatcherAlive,
+        int $now,
+    ): array {
+        $catalog = [];
+        foreach (CronCatalog::all() as $job) {
+            $catalog[(string) $job['script']] = $job;
+        }
+
         $oldest = null;
         $stale  = [];
+        $idle   = [];
+
         foreach ($rows as $row) {
+            $script = (string) ($row['script'] ?? '');
+            if ($script === '' || isset($inactive[$script])) {
+                continue;
+            }
+
             $lastOk = $row['last_ok_at'] ?? $row['last_tick_at'] ?? null;
             if ($lastOk === null) {
                 continue;
@@ -431,17 +512,33 @@ final class EnvironmentCheckService
             if ($oldest === null || $age > $oldest) {
                 $oldest = $age;
             }
-            if ($age > self::CRON_MAX_AGE_SEC) {
-                $stale[] = (string) $row['script'];
+
+            $job = $catalog[$script] ?? null;
+            if ($job === null) {
+                // Skript mimo katalog (pozůstatek po odstraněné úloze, ruční zápis):
+                // nevíme, jak často má běžet, takže platí původní plochý limit.
+                if ($age > self::CRON_MAX_AGE_SEC) {
+                    $stale[] = $script;
+                }
+                continue;
+            }
+
+            [$health] = CronHealth::evaluate(
+                $age,
+                isset($row['last_status']) ? (string) $row['last_status'] : null,
+                (int) $job['max_age_hours'] * 3600,
+                in_array($script, $gatedScripts, true),
+                $dispatcherAlive,
+            );
+
+            if ($health === CronHealth::IDLE) {
+                $idle[] = $script;
+            } elseif ($health === CronHealth::OVERDUE || $health === CronHealth::OVERDUE_AND_FAILING) {
+                $stale[] = $script;
             }
         }
 
-        return [
-            'available'         => true,
-            'jobs'              => count($rows),
-            'oldest_ok_age_sec' => $oldest,
-            'stale'             => $stale,
-        ];
+        return ['oldest_ok_age_sec' => $oldest, 'stale' => $stale, 'idle' => $idle];
     }
 
     // ── Vyhodnocení pravidel ─────────────────────────────────────────────────
@@ -679,15 +776,20 @@ final class EnvironmentCheckService
             ['pending' => array_slice((array) ($mig['pending'] ?? []), 0, 20)]
         );
 
-        $cron = $runtime['cron'] ?? [];
-        $stale = (array) ($cron['stale'] ?? []);
+        $cron     = $runtime['cron'] ?? [];
+        $stale    = (array) ($cron['stale'] ?? []);
+        $inactive = (array) ($cron['inactive'] ?? []);
+        $idle     = (array) ($cron['idle'] ?? []);
         $checks[] = $this->check(
             'cron_health',
             empty($cron['available']) ? self::STATUS_SKIP : ($stale === [] ? self::STATUS_OK : self::STATUS_FAIL),
             $stale === [] ? '' : implode(', ', array_slice($stale, 0, 8)),
-            'každá úloha proběhla v posledních 26 hodinách',
+            // Ne plochých 26 hodin: měsíční úloha se za dvanáct dní nezasekla.
+            // Interval si nese každá úloha v katalogu sama.
+            'každá aktivní úloha proběhla ve svém intervalu',
             '76_Bezpecnost',
-            ['stale' => array_values($stale)]
+            ['stale' => array_values($stale), 'inactive' => $inactive, 'idle' => array_values($idle)],
+            implode(', ', array_slice(array_keys($inactive), 0, 8))
         );
 
         // --- Provozní hygiena ---
@@ -743,15 +845,18 @@ final class EnvironmentCheckService
 
     /**
      * @param array<string,mixed> $meta
+     * @param string $info Zjištění, které není nález — ukazuje se v každém stavu
+     *                     a nikdy nezvedá závažnost.
      * @return array<string,mixed>
      */
-    private function check(string $id, string $status, string $actual, string $expected, string $manual, array $meta = []): array
+    private function check(string $id, string $status, string $actual, string $expected, string $manual, array $meta = [], string $info = ''): array
     {
         return [
             'id'       => $id,
             'status'   => $status,
             'actual'   => $actual,
             'expected' => $expected,
+            'info'     => $info,
             'manual'   => $manual,
             'meta'     => $meta,
         ];

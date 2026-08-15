@@ -9,6 +9,8 @@ export interface DiagnosticCheck {
   actual: string
   /** Co se očekává. */
   expected: string
+  /** Zjištění, které není nález — ukazuje se i u kontroly, která dopadla dobře. */
+  info?: string
   /** Kapitola manuálu s nápravou (`/manual?ch=…`). */
   manual: string
   meta?: Record<string, unknown>

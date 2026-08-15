@@ -60,6 +60,19 @@ describe('EnvironmentCheckList', () => {
     expect(passing[0].classes()).not.toContain('text-danger-600')
   })
 
+  it('informaci ukáže i u kontroly s nálezem, ale nezvýrazní ji jako problém', () => {
+    const wrapper = mount(EnvironmentCheckList, {
+      props: {
+        checks: [check({ id: 'cron_health', status: 'fail', actual: 'cron-backup', info: 'cron-bank-scan' })],
+      },
+    })
+
+    const info = wrapper.findAll('dd').filter((dd) => dd.text() === 'cron-bank-scan')
+    expect(info).toHaveLength(1)
+    expect(info[0].classes()).not.toContain('text-danger-600')
+    expect(wrapper.findAll('dt').map((dt) => dt.text())).toContain('diagnostics.info:')
+  })
+
   it('u seznamových kontrol použije vlastní popisek místo „Naměřeno“', () => {
     const wrapper = mount(EnvironmentCheckList, {
       props: { checks: [check({ id: 'php_extensions', status: 'fail', actual: 'gd', expected: 'gd, zip' })] },

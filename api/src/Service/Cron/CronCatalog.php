@@ -27,11 +27,16 @@ final class CronCatalog
      *   critical:bool,
      *   requires_config?:string,
      *   requires_ai_opt_in?:bool,
+     *   requires_feature?:string,
      *   dispatcher_only?:bool
      * }>
      *
      * `requires_config` (volitelné) = cfg klíč adresáře, bez kterého úloha nemá
      * co dělat (scan vypnutý). UI ji pak skryje, dokud není nastaven (CronJobsAction).
+     *
+     * `requires_feature` (volitelné) = název funkce, kterou úloha obsluhuje;
+     * podmínku k němu drží {@see CronJobGate}. Bez zapnuté funkce úloha nemá co
+     * dělat a hlásit ji jako zaseklou je falešný poplach.
      *
      * `dispatcher_only` (volitelné) = položka existuje jen v režimu
      * {@see CronScheduleMode::DISPATCHER}. V režimu INDIVIDUAL se neplánuje
@@ -162,6 +167,7 @@ final class CronCatalog
                 'max_age_hours' => 792,
                 'weekdays_only' => false,
                 'critical' => false,
+                'requires_feature' => CronJobGate::FEATURE_DOUBLE_ENTRY,
             ],
             [
                 // Interní doklad zúčtování DPH — převod daně období z 343.100/343.200
@@ -176,6 +182,7 @@ final class CronCatalog
                 'max_age_hours' => 792,
                 'weekdays_only' => false,
                 'critical' => false,
+                'requires_feature' => CronJobGate::FEATURE_VAT_DOUBLE_ENTRY,
             ],
             [
                 // VH-01: propíše plánované změny plátcovství DPH (budoucí účinnost)

@@ -13747,6 +13747,7 @@
         "checks_hint": "Problémy a varování jsou nahoře. U každého najdete dopad, nápravu i odkaz do manuálu.",
         "actual": "Naměřeno",
         "expected": "Očekáváno",
+        "info": "Poznámka",
         "fix": "Náprava",
         "manual_link": "Otevřít manuál",
         "summary_counts": "{fail} problémů, {warn} varování, {ok} v pořádku",
@@ -13865,7 +13866,8 @@
                 "impact": "Bez cronu nevznikají zálohy, neodcházejí upomínky a nestahují se kurzy ČNB.",
                 "fix": "Zkontrolujte naplánování úloh a jejich poslední běh na stránce Plánované úlohy.",
                 "actual_label": "Zaseklé úlohy",
-                "expected_label": "Očekáváno"
+                "expected_label": "Očekáváno",
+                "info_label": "Neaktivní úlohy (nenastavené nebo vypnuté)"
             },
             "app_debug": {
                 "label": "Ladicí režim",
