@@ -14,6 +14,11 @@ const m = vi.hoisted(() => ({
   createLeaveEntry: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  routeQuery: {} as Record<string, string>,
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: m.routeQuery }),
 }))
 
 vi.mock('@/api/payrollAbsences', () => ({
@@ -52,6 +57,7 @@ import AbsenceManagement from '@/pages/payroll/AbsenceManagement.vue'
 describe('AbsenceManagement', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    for (const key of Object.keys(m.routeQuery)) delete m.routeQuery[key]
     m.context.mockResolvedValue([{
       id: 12,
       employee_id: 5,
@@ -59,6 +65,13 @@ describe('AbsenceManagement', () => {
       relation_type: 'employment',
       status: 'active',
       full_name: 'Syntetická osoba',
+    }, {
+      id: 13,
+      employee_id: 6,
+      code: 'SYNTH-DPC',
+      relation_type: 'dpc',
+      status: 'active',
+      full_name: 'Druhá syntetická osoba',
     }])
     m.absences.mockResolvedValue([{
       id: 44,
@@ -275,6 +288,31 @@ describe('AbsenceManagement', () => {
     const leaveYearInput = wrapper.find('[data-test="leave-year"]')
     expect(Number(leaveYearInput.attributes('min'))).toBeLessThanOrEqual(currentYear - 5)
     expect(Number(leaveYearInput.attributes('max'))).toBeGreaterThanOrEqual(currentYear + 1)
+    wrapper.unmount()
+  })
+
+  it('preselects the employment and absence type coming from the card link', async () => {
+    m.routeQuery.employment = '13'
+    m.routeQuery.type = 'dpn'
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    expect(m.absences.mock.calls[0][2]).toBe(13)
+    const selectors = wrapper.findAllComponents({ name: 'SearchableSelect' })
+    expect(selectors[0].props('modelValue')).toBe(13)
+    expect(selectors[1].props('modelValue')).toBe('dpn')
+    wrapper.unmount()
+  })
+
+  it('ignores an unknown employment in the query instead of breaking the page', async () => {
+    m.routeQuery.employment = '999'
+    m.routeQuery.type = 'not-an-absence-type'
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    expect(m.absences.mock.calls[0][2]).toBe(12)
+    const selectors = wrapper.findAllComponents({ name: 'SearchableSelect' })
+    expect(selectors[1].props('modelValue')).toBe('vacation')
     wrapper.unmount()
   })
 })

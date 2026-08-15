@@ -10,6 +10,11 @@ const m = vi.hoisted(() => ({
   createEmployment: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  routeQuery: {} as Record<string, string>,
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: m.routeQuery }),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -85,6 +90,7 @@ function mountPage() {
 describe('PeopleList toolbar and shared employee creation', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    for (const key of Object.keys(m.routeQuery)) delete m.routeQuery[key]
     m.people.mockResolvedValue([
       person(1, 'Alfa Aktivní', true, false),
       person(2, 'Beta Neaktivní', false, false),
@@ -263,5 +269,30 @@ describe('PeopleList toolbar and shared employee creation', () => {
     )
     expect(wrapper.get('[data-test="new-employee-error"]').text())
       .toContain('Použijte existujícího zaměstnance.')
+  })
+
+  it('opens the person from ?person= so the card link lands on a detail', async () => {
+    m.routeQuery.person = '2'
+    m.person.mockResolvedValue({
+      ...person(2, 'Beta Neaktivní', false, false),
+      employments: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.person).toHaveBeenCalledWith(2)
+    // Neaktivní člověk se ve výchozím filtru nezobrazuje — deep-link proto
+    // musí filtr přepnout, jinak by odkaz skončil na prázdném seznamu.
+    expect(wrapper.text()).toContain('Beta Neaktivní')
+    expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(true)
+  })
+
+  it('ignores an unknown person id in the query', async () => {
+    m.routeQuery.person = '999'
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.person).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(false)
   })
 })

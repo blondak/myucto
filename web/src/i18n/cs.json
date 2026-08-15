@@ -2693,9 +2693,17 @@
             "supported_years": "Podporované roky",
             "available_features": "Dostupné funkce",
             "matrix_version": "Verze support matrix",
+            "settings": "Nastavení mezd",
+            "setup": {
+                "title": "Nastavení není hotové",
+                "description": "Než půjde spočítat mzdový běh, doplňte tyhle údaje zaměstnavatele.",
+                "action": "Otevřít nastavení"
+            },
             "month": {
                 "title": "Tento měsíc",
                 "description": "Nejčastější kroky pro mzdové období {period}.",
+                "run_status": "Běh: {status}",
+                "run_missing": "Běh zatím nezaložen",
                 "quick_inputs": "Doplnit mzdy a odměny",
                 "quick_inputs_hint": "Základní mzdy, přesčasy, bonusy a měsíční částky na jednom místě.",
                 "runs": "Spočítat a schválit mzdy",
@@ -2706,6 +2714,78 @@
                 "payments_hint": "Připravit čisté mzdy, daň a pojistné k úhradě.",
                 "documents": "Dokumenty a podání",
                 "documents_hint": "Stáhnout pásky, měsíční balíček a zkontrolovat výstupy."
+            }
+        },
+        "guide": {
+            "title": "Jak to funguje",
+            "intro": "Mzdový měsíc má pevné pořadí — každý krok potřebuje výsledek toho předchozího. Klikněte na krok a dostanete se rovnou na jeho stránku.",
+            "dismiss": "Skrýt návod",
+            "reopen": "Zobrazit návod „Jak to funguje“",
+            "setup_note": "Poprvé? Nejdřív vyplňte údaje zaměstnavatele (ČSSZ, finanční úřad, zdravotní pojišťovny, účty institucí) a založte lidi.",
+            "setup_link": "Nastavení mezd",
+            "manual_note": "Podrobný postup včetně příkladů je v manuálu.",
+            "manual_link": "Kapitola Mzdy",
+            "steps": {
+                "absences": {
+                    "title": "Zapsat nepřítomnosti",
+                    "hint": "Dovolená, nemoc, ošetřovné, překážky. Musí být v systému dřív než výpočet."
+                },
+                "time": {
+                    "title": "Uzavřít docházku",
+                    "hint": "Zkontrolovat odpracované hodiny a měsíc schválit."
+                },
+                "quick_inputs": {
+                    "title": "Doplnit mzdy a odměny",
+                    "hint": "Základní mzda, přesčasy, bonusy — jeden řádek na zaměstnance."
+                },
+                "runs": {
+                    "title": "Spočítat mzdový běh",
+                    "hint": "Uzamknout vstupy → přepočítat → zkontrolovat → schválit."
+                },
+                "payments": {
+                    "title": "Zaúčtovat a zaplatit",
+                    "hint": "Čisté mzdy, záloha na daň a pojistné k úhradě."
+                },
+                "documents": {
+                    "title": "Vydat pásky a dokumenty",
+                    "hint": "Výplatní pásky a měsíční balíček ke stažení."
+                },
+                "submissions": {
+                    "title": "Odeslat podání a uzavřít",
+                    "hint": "Přehledy ČSSZ a pojišťoven, hlášení pro finanční úřad, pak běh uzavřít."
+                }
+            }
+        },
+        "employee_cards": {
+            "title": "Zaměstnanci",
+            "subtitle": "Kdo je na výplatní listině za období {period} a kolik má dostat.",
+            "manage": "Spravovat zaměstnance",
+            "load_failed": "Karty zaměstnanců se nepodařilo načíst. Zkuste to znovu nebo otevřete seznam zaměstnanců.",
+            "empty_title": "Zatím žádný zaměstnanec",
+            "empty_hint": "Založte prvního člověka a jeho pracovní vztah — pak se tady objeví jeho karta.",
+            "empty_action": "Přidat zaměstnance",
+            "search": "Hledat",
+            "search_placeholder": "Jméno nebo kód vztahu",
+            "no_results": "Filtru neodpovídá žádný zaměstnanec.",
+            "base": "Hrubá mzda za období",
+            "base_missing": "Nezadáno",
+            "gross_preview": "Včetně přesčasů a odměn: {amount}",
+            "summary": {
+                "people": "Zaměstnanců",
+                "gross": "Hrubé mzdy celkem",
+                "away": "Nepřítomných",
+                "attention": "K doplnění"
+            },
+            "filters": {
+                "active": "Aktivní",
+                "away": "Nepřítomní",
+                "attention": "K doplnění",
+                "all": "Všichni"
+            },
+            "actions": {
+                "vacation": "Dovolená",
+                "absence": "Absence",
+                "detail": "Karta"
             }
         },
         "capabilities": {

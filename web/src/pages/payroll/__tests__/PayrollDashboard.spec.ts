@@ -3,11 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const m = vi.hoisted(() => ({
   capabilities: vi.fn(),
+  runs: vi.fn(),
+  payrollSetupCheck: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     capabilities: m.capabilities,
+    runs: m.runs,
+    payrollSetupCheck: m.payrollSetupCheck,
   },
 }))
 
@@ -32,6 +36,29 @@ vi.mock('vue-i18n', () => ({
 }))
 
 import PayrollDashboard from '@/pages/payroll/PayrollDashboard.vue'
+
+const routerLinkStub = {
+  props: ['to'],
+  template: '<a :data-to="JSON.stringify(to)"><slot /></a>',
+}
+
+const actionBarStub = {
+  props: ['actions'],
+  template: '<div data-test="action-bar"><span v-for="a in actions" :key="a.key" :data-action="a.key" v-show="a.show === undefined || a.show">{{ a.label }}</span></div>',
+}
+
+function mountDashboard() {
+  return mount(PayrollDashboard, {
+    global: {
+      stubs: {
+        RouterLink: routerLinkStub,
+        ActionBar: actionBarStub,
+        PayrollEmployeeCards: { props: ['period'], template: '<div data-test="employee-cards-stub" :data-period="period" />' },
+        PayrollGuide: { template: '<div data-test="guide-stub" />' },
+      },
+    },
+  })
+}
 
 describe('PayrollDashboard monthly workspace', () => {
   beforeEach(() => {
@@ -58,19 +85,18 @@ describe('PayrollDashboard monthly workspace', () => {
         }],
       },
     })
+    m.runs.mockResolvedValue([])
+    m.payrollSetupCheck.mockResolvedValue({
+      ready: true,
+      effective_on: '2026-08-01',
+      policy_id: 1,
+      checks: [],
+      blockers: [],
+    })
   })
 
   it('puts frequent monthly tasks before collapsible diagnostics', async () => {
-    const wrapper = mount(PayrollDashboard, {
-      global: {
-        stubs: {
-          RouterLink: {
-            props: ['to'],
-            template: '<a :data-to="JSON.stringify(to)"><slot /></a>',
-          },
-        },
-      },
-    })
+    const wrapper = mountDashboard()
     await flushPromises()
 
     const workspace = wrapper.get('[data-test="monthly-workspace"]')
@@ -83,5 +109,65 @@ describe('PayrollDashboard monthly workspace', () => {
     expect(destinations).toContain('{"name":"payroll-documents"}')
     expect(wrapper.get('[data-test="support-diagnostics"]').element.tagName).toBe('DETAILS')
     expect(wrapper.get('[data-test="support-diagnostics"]').attributes('open')).toBeUndefined()
+  })
+
+  it('shows the guide and employee cards for the current period', async () => {
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="guide-stub"]').exists()).toBe(true)
+    const cards = wrapper.get('[data-test="employee-cards-stub"]')
+    expect(cards.attributes('data-period')).toMatch(/^\d{4}-\d{2}$/)
+  })
+
+  it('reports the payroll run state of the current month', async () => {
+    m.runs.mockResolvedValue([
+      { id: 1, status: 'draft' },
+      { id: 2, status: 'calculated' },
+    ])
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    // Poslední běh období je ten aktuální — starší revize nesmí přebít stav.
+    expect(wrapper.get('[data-test="run-status"]').text())
+      .toBe('payroll.dashboard.month.run_status')
+  })
+
+  it('falls back to "no run" when the period has none', async () => {
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="run-status"]').text())
+      .toBe('payroll.dashboard.month.run_missing')
+  })
+
+  it('surfaces setup blockers with a link to settings', async () => {
+    m.payrollSetupCheck.mockResolvedValue({
+      ready: false,
+      effective_on: '2026-08-01',
+      policy_id: null,
+      checks: [
+        { code: 'health_insurer_account', status: 'blocked', message: 'Chybí účet pojišťovny.' },
+        { code: 'policy', status: 'ok', message: 'Politika je nastavena.' },
+      ],
+      blockers: ['health_insurer_account'],
+    })
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    const panel = wrapper.get('[data-test="setup-blockers"]')
+    expect(panel.text()).toContain('Chybí účet pojišťovny.')
+    expect(panel.text()).not.toContain('Politika je nastavena.')
+    expect(panel.get('a').attributes('data-to')).toBe('{"name":"payroll-settings"}')
+  })
+
+  it('keeps the overview usable when the optional month calls fail', async () => {
+    m.runs.mockRejectedValue(new Error('403'))
+    m.payrollSetupCheck.mockRejectedValue(new Error('403'))
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="monthly-workspace"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="setup-blockers"]').exists()).toBe(false)
   })
 })

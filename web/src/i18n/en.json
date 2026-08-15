@@ -2693,9 +2693,17 @@
             "supported_years": "Supported years",
             "available_features": "Available features",
             "matrix_version": "Support matrix version",
+            "settings": "Payroll settings",
+            "setup": {
+                "title": "Setup is not complete",
+                "description": "Complete these employer details before a payroll run can be calculated.",
+                "action": "Open settings"
+            },
             "month": {
                 "title": "This month",
                 "description": "Frequent tasks for payroll period {period}.",
+                "run_status": "Run: {status}",
+                "run_missing": "No run created yet",
                 "quick_inputs": "Enter pay and bonuses",
                 "quick_inputs_hint": "Base pay, overtime, bonuses and monthly amounts in one place.",
                 "runs": "Calculate and approve payroll",
@@ -2706,6 +2714,78 @@
                 "payments_hint": "Prepare net pay, tax and insurance payments.",
                 "documents": "Documents and filings",
                 "documents_hint": "Download payslips, the monthly package and review outputs."
+            }
+        },
+        "guide": {
+            "title": "How it works",
+            "intro": "The payroll month has a fixed order — every step needs the result of the previous one. Click a step to jump straight to its page.",
+            "dismiss": "Hide the guide",
+            "reopen": "Show the “How it works” guide",
+            "setup_note": "First time? Start by filling in employer details (social security, tax office, health insurers, institution accounts) and adding people.",
+            "setup_link": "Payroll settings",
+            "manual_note": "The manual covers the full procedure with examples.",
+            "manual_link": "Payroll chapter",
+            "steps": {
+                "absences": {
+                    "title": "Record absences",
+                    "hint": "Vacation, sickness, care leave, obstacles. Must be entered before the calculation."
+                },
+                "time": {
+                    "title": "Close attendance",
+                    "hint": "Review hours worked and approve the month."
+                },
+                "quick_inputs": {
+                    "title": "Enter pay and bonuses",
+                    "hint": "Base pay, overtime, bonuses — one row per employee."
+                },
+                "runs": {
+                    "title": "Calculate the payroll run",
+                    "hint": "Lock inputs → calculate → review → approve."
+                },
+                "payments": {
+                    "title": "Post and pay",
+                    "hint": "Net pay, tax advance and insurance ready for payment."
+                },
+                "documents": {
+                    "title": "Issue payslips and documents",
+                    "hint": "Payslips and the monthly package to download."
+                },
+                "submissions": {
+                    "title": "File and close",
+                    "hint": "Social security and insurer statements, tax office filings, then close the run."
+                }
+            }
+        },
+        "employee_cards": {
+            "title": "Employees",
+            "subtitle": "Who is on the payroll for period {period} and how much they are due.",
+            "manage": "Manage employees",
+            "load_failed": "Employee cards could not be loaded. Try again or open the employee list.",
+            "empty_title": "No employees yet",
+            "empty_hint": "Add the first person and their employment — their card will show up here.",
+            "empty_action": "Add employee",
+            "search": "Search",
+            "search_placeholder": "Name or employment code",
+            "no_results": "No employee matches the filter.",
+            "base": "Gross pay for the period",
+            "base_missing": "Not entered",
+            "gross_preview": "Including overtime and bonuses: {amount}",
+            "summary": {
+                "people": "Employees",
+                "gross": "Total gross pay",
+                "away": "Absent",
+                "attention": "Needs attention"
+            },
+            "filters": {
+                "active": "Active",
+                "away": "Absent",
+                "attention": "Needs attention",
+                "all": "All"
+            },
+            "actions": {
+                "vacation": "Vacation",
+                "absence": "Absence",
+                "detail": "Card"
             }
         },
         "capabilities": {

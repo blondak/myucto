@@ -1,11 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { payrollApi, type PayrollCapabilitiesResponse } from '@/api/payroll'
+import {
+  payrollApi,
+  type PayrollCapabilitiesResponse,
+  type PayrollRun,
+  type PayrollSetupCheck,
+} from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
+import PayrollEmployeeCards from '@/pages/payroll/PayrollEmployeeCards.vue'
+import PayrollGuide from '@/pages/payroll/PayrollGuide.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -15,6 +23,9 @@ const saving = ref(false)
 const capabilities = ref<PayrollCapabilitiesResponse | null>(null)
 const currentPeriod = localPayrollPeriod()
 const startPeriod = ref(currentPeriod)
+const currentRun = ref<PayrollRun | null>(null)
+const setupCheck = ref<PayrollSetupCheck | null>(null)
+const guide = ref<InstanceType<typeof PayrollGuide> | null>(null)
 
 const state = computed(() => capabilities.value?.state ?? null)
 const canConfigure = computed(() => auth.canWrite('payroll.settings'))
@@ -25,6 +36,67 @@ const availableFeatures = computed(() =>
 const plannedFeatures = computed(() =>
   capabilities.value?.support_matrix.features.filter(feature => !feature.available) ?? [],
 )
+const setupBlockers = computed(() =>
+  setupCheck.value !== null && !setupCheck.value.ready
+    ? setupCheck.value.checks.filter(item => item.status === 'blocked')
+    : [],
+)
+
+/**
+ * Hlavička sekce používá sdílený `ActionBar` (AGENTS.md §Frontend): jedna plná
+ * primární akce = další logický krok měsíce, zbytek outline / v „…".
+ */
+const actions = computed<ActionItem[]>(() => [
+  {
+    key: 'quick-inputs',
+    label: t('payroll.dashboard.month.quick_inputs'),
+    icon: 'coin',
+    tier: 'primary',
+    variant: 'primary',
+    to: { name: 'payroll-quick-inputs' },
+  },
+  {
+    key: 'runs',
+    label: t('payroll.dashboard.month.runs'),
+    icon: 'cycle',
+    tier: 'secondary',
+    variant: 'primary',
+    to: { name: 'payroll-runs' },
+  },
+  {
+    key: 'people',
+    label: t('payroll.dashboard.month.people'),
+    icon: 'user',
+    tier: 'secondary',
+    variant: 'neutral',
+    to: { name: 'payroll-people' },
+  },
+  {
+    key: 'guide',
+    label: t('payroll.guide.reopen'),
+    icon: 'help',
+    tier: 'overflow',
+    variant: 'neutral',
+    run: () => guide.value?.reopen(),
+  },
+  {
+    key: 'settings',
+    label: t('payroll.dashboard.settings'),
+    icon: 'lock',
+    tier: 'overflow',
+    variant: 'neutral',
+    show: canConfigure.value,
+    to: { name: 'payroll-settings' },
+  },
+])
+
+const runStatusClass = computed(() => {
+  const status = currentRun.value?.status
+  if (status === undefined) return 'bg-neutral-100 text-neutral-600'
+  if (status === 'closed' || status === 'paid') return 'bg-success-50 text-success-700'
+  if (status === 'cancelled' || status === 'correction_pending') return 'bg-warning-50 text-warning-700'
+  return 'bg-payroll-50 text-payroll-700'
+})
 
 async function load() {
   loading.value = true
@@ -39,6 +111,19 @@ async function load() {
   } finally {
     loading.value = false
   }
+  if (!isEnabled.value) return
+  // Stav měsíce a blokátory nastavení jsou doplňkové — jejich výpadek
+  // (typicky chybějící oprávnění) nesmí shodit celý přehled.
+  void loadMonthStatus()
+}
+
+async function loadMonthStatus() {
+  const [runs, setup] = await Promise.all([
+    payrollApi.runs(currentPeriod).catch(() => [] as PayrollRun[]),
+    payrollApi.payrollSetupCheck(`${currentPeriod}-01`).catch(() => null),
+  ])
+  currentRun.value = runs.length > 0 ? runs[runs.length - 1] : null
+  setupCheck.value = setup
 }
 
 async function enable() {
@@ -52,6 +137,7 @@ async function enable() {
     })
     if (capabilities.value) capabilities.value.state = updated
     toast.success(t('payroll.activation.enabled'))
+    void loadMonthStatus()
   } catch (error: any) {
     if (error?.response?.data?.error?.code === 'row_version_conflict') {
       toast.warning(t('payroll.activation.conflict'))
@@ -99,13 +185,16 @@ onMounted(load)
           <h1 class="text-2xl font-semibold text-neutral-900">{{ t('payroll.title') }}</h1>
           <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.subtitle') }}</p>
         </div>
-        <span
-          v-if="state"
-          class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium"
-          :class="isEnabled ? 'bg-payroll-50 text-payroll-600' : 'bg-neutral-100 text-neutral-600'"
-        >
-          {{ t(`payroll.status.${state.status}`) }}
-        </span>
+        <div class="flex flex-wrap items-center gap-3">
+          <span
+            v-if="state"
+            class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium"
+            :class="isEnabled ? 'bg-payroll-50 text-payroll-600' : 'bg-neutral-100 text-neutral-600'"
+          >
+            {{ t(`payroll.status.${state.status}`) }}
+          </span>
+          <ActionBar v-if="state && isEnabled" :actions="actions" />
+        </div>
       </div>
     </header>
 
@@ -145,7 +234,7 @@ onMounted(load)
         </div>
       </section>
 
-      <div v-else class="space-y-3">
+      <div v-else class="space-y-6">
         <div v-if="state.status === 'setup' && canConfigure" class="flex flex-wrap justify-end gap-2">
           <button :class="btnOutline('warning')" :disabled="saving" @click="disableSetup">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -154,6 +243,32 @@ onMounted(load)
             {{ t('payroll.activation.disable') }}
           </button>
         </div>
+
+        <section
+          v-if="setupBlockers.length > 0"
+          class="rounded-xl border border-warning-500/40 bg-warning-50 p-4 sm:p-6"
+          data-test="setup-blockers"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="max-w-3xl">
+              <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.dashboard.setup.title') }}</h2>
+              <p class="mt-1 text-sm text-neutral-700">{{ t('payroll.dashboard.setup.description') }}</p>
+            </div>
+            <RouterLink :to="{ name: 'payroll-settings' }" :class="btnOutline('warning')">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+              {{ t('payroll.dashboard.setup.action') }}
+            </RouterLink>
+          </div>
+          <ul class="mt-3 space-y-1.5 text-sm text-warning-800">
+            <li v-for="item in setupBlockers" :key="item.code" class="flex gap-2">
+              <span aria-hidden="true">•</span>
+              <span>{{ item.message }}</span>
+            </li>
+          </ul>
+        </section>
+
+        <PayrollGuide ref="guide" />
+
         <section
           class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
           data-test="monthly-workspace"
@@ -165,9 +280,20 @@ onMounted(load)
                 {{ t('payroll.dashboard.month.description', { period: currentPeriod }) }}
               </p>
             </div>
-            <span class="rounded-full bg-payroll-50 px-2.5 py-1 text-xs font-medium text-payroll-700">
-              {{ currentPeriod }}
-            </span>
+            <div class="flex flex-wrap items-center gap-2">
+              <span
+                class="rounded-full px-2.5 py-1 text-xs font-medium"
+                :class="runStatusClass"
+                data-test="run-status"
+              >
+                {{ currentRun
+                  ? t('payroll.dashboard.month.run_status', { status: t(`payroll.runs.status.${currentRun.status}`) })
+                  : t('payroll.dashboard.month.run_missing') }}
+              </span>
+              <span class="rounded-full bg-payroll-50 px-2.5 py-1 text-xs font-medium text-payroll-700">
+                {{ currentPeriod }}
+              </span>
+            </div>
           </div>
           <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <RouterLink
@@ -212,6 +338,8 @@ onMounted(load)
             </RouterLink>
           </div>
         </section>
+
+        <PayrollEmployeeCards :period="currentPeriod" />
       </div>
 
       <details

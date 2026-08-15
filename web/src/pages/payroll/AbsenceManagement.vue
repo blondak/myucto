@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
@@ -17,6 +18,7 @@ import {
 } from '@/api/payrollAbsences'
 
 const { t, locale } = useI18n()
+const route = useRoute()
 const toast = useToast()
 const auth = useAuthStore()
 const today = new Date()
@@ -186,10 +188,42 @@ function wholeNumber(value: unknown, positive = false): number {
   return number
 }
 
+/**
+ * Předvýběr z odkazu (`/payroll/absences?employment=12&type=vacation`).
+ *
+ * Why: na kartu zaměstnance patří tlačítko „Dovolená", ale druhá evidence
+ * nepřítomností by byla chyba — odkaz proto míří sem a jen předvyplní vztah
+ * a typ. Neplatná / cizí hodnota se tiše ignoruje, ať odkaz z bookmarku
+ * stránku nerozbije.
+ */
+function queryParam(name: string): string | null {
+  const value = route.query[name]
+  const raw = Array.isArray(value) ? value[0] : value
+  return typeof raw === 'string' && raw !== '' ? raw : null
+}
+
+function preselectedEmploymentId(): number | null {
+  const raw = queryParam('employment')
+  if (raw === null) return null
+  const id = Number(raw)
+  return employments.value.some(item => item.id === id) ? id : null
+}
+
+function preselectedAbsenceType(): AbsenceType | null {
+  const raw = queryParam('type')
+  return raw !== null && (absenceTypes as string[]).includes(raw)
+    ? raw as AbsenceType
+    : null
+}
+
 async function loadContext() {
   employments.value = await payrollAbsenceApi.context()
-  if (employments.value.length > 0 && selectedEmploymentId.value === null) {
-    selectedEmploymentId.value = employments.value[0].id
+  if (employments.value.length === 0 || selectedEmploymentId.value !== null) return
+  selectedEmploymentId.value = preselectedEmploymentId() ?? employments.value[0].id
+  const type = preselectedAbsenceType()
+  if (type !== null) {
+    absenceForm.absence_type = type
+    tab.value = 'absences'
   }
 }
 
