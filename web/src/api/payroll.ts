@@ -614,6 +614,49 @@ export interface PayrollJmhzWorkSummaryApproval {
   confirmation_note: string
 }
 
+/**
+ * Stav limitů přesčasové práce podle § 93 zákoníku práce. Minuty, ne millihodiny —
+ * shodně se zbytkem docházky.
+ */
+export interface PayrollOvertimeLimitFinding {
+  code: string
+  severity: 'warning' | 'info'
+  message: string
+  actual_minutes: number
+  limit_minutes: number
+  scope_from: string
+  scope_to: string
+  consent_evidenced: boolean
+}
+
+export interface PayrollOvertimeLimits {
+  employment_id: number
+  findings: PayrollOvertimeLimitFinding[]
+  weeks: Array<{ week_start: string; week_end: string; minutes: number }>
+  ordered_year_minutes: number
+  ordered_year_limit_minutes: number
+  agreed_year_minutes: number
+  averaging_from: string | null
+  averaging_to: string | null
+  averaging_weeks: number
+  averaging_minutes: number
+  averaging_limit_minutes: number
+  consent_evidenced: boolean
+  limits_from_ruleset: boolean
+}
+
+/** Dohoda o práci přesčas nad nařízený rozsah (§ 93 odst. 3). */
+export interface PayrollOvertimeConsent {
+  id: number
+  employment_id: number
+  valid_from: string
+  valid_to: string | null
+  document_reference: string | null
+  note: string | null
+  row_version: number
+  created_at: string
+}
+
 export interface PayrollTimeOverviewItem {
   employment: {
     id: number
@@ -639,6 +682,8 @@ export interface PayrollTimeOverviewItem {
     preview: PayrollJmhzWorkSummaryPreview | null
     current_revision: PayrollJmhzWorkSummaryRevision | null
   }
+  overtime_limits: PayrollOvertimeLimits | null
+  overtime_consents: PayrollOvertimeConsent[]
   shifts: PayrollShift[]
   entries: PayrollTimeEntry[]
 }
@@ -3074,6 +3119,17 @@ export const payrollApi = {
   saveTimeEntry: (payload: Record<string, unknown>) =>
     api.post<{ entry: PayrollTimeEntry; month: PayrollTimeMonthState }>('/payroll/time/entries', payload)
       .then(response => response.data),
+  saveOvertimeConsent: (payload: {
+    employment_id: number
+    id?: number | null
+    valid_from: string
+    valid_to: string | null
+    document_reference: string | null
+    note: string | null
+    row_version: number
+  }) =>
+    api.post<{ consent: PayrollOvertimeConsent }>('/payroll/time/overtime-consents', payload)
+      .then(response => response.data.consent),
   previewTimeImport: (payload: { period: string; format: 'csv' | 'xlsx'; original_name: string; content: string }) =>
     api.post<{ preview: PayrollTimeImportPreview }>('/payroll/time/imports/preview', payload)
       .then(response => response.data.preview),

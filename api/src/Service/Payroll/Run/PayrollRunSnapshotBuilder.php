@@ -20,6 +20,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookValueException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
+use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
 use PDO;
 
 final class PayrollRunSnapshotBuilder
@@ -41,6 +42,7 @@ final class PayrollRunSnapshotBuilder
         private readonly ?PayrollEmployerSettingsRepository $employerSettings = null,
         private readonly ?PayrollEmployerPolicyRepository $employerPolicies = null,
         private readonly ?JmhzExternalCodebookCatalog $jmhzExternalCodebooks = null,
+        private readonly ?PayrollOvertimeLimitService $overtimeLimits = null,
     ) {
         // Loader je čistý SQL pomocník nad týmž spojením — vědomě se nedává do
         // konstruktoru, aby nepřibyl další volitelný parametr, který by PHP-DI
@@ -117,6 +119,19 @@ final class PayrollRunSnapshotBuilder
             $employeeIds[(int) $row['employee_id']] = true;
         }
         $employeeIds = array_keys($employeeIds);
+
+        // Limity přesčasové práce podle § 93 zákoníku práce. Nálezy se přidávají
+        // k VALIDACÍM, ne do `$data` — kanonický snapshot a tím i `input_hash`
+        // proto zůstávají beze změny a přepočet starší revize dá bit po bitu
+        // tentýž vstup jako předtím.
+        foreach ($this->overtimeValidations(
+            $supplierId,
+            $employments,
+            $periodStart,
+            $periodEnd,
+        ) as $validation) {
+            $validations[] = $validation;
+        }
 
         $timeMonthRows = $this->batch->timeMonths(
             $supplierId,
@@ -355,6 +370,47 @@ final class PayrollRunSnapshotBuilder
             hash('sha256', $manifestJson),
             $validations,
         );
+    }
+
+    /**
+     * Varování k § 93. Bez nakonfigurované služby se nic nepřidává — kontrola je
+     * tím pádem přídavek, který nemůže rozbít běh, který ji nemá zapnutou.
+     *
+     * @param list<array<string,mixed>> $employments
+     * @return list<PayrollRunValidation>
+     */
+    private function overtimeValidations(
+        int $supplierId,
+        array $employments,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        if ($this->overtimeLimits === null || $employments === []) {
+            return [];
+        }
+        $employmentIds = [];
+        $starts = [];
+        foreach ($employments as $row) {
+            $employmentId = (int) $row['employment_id'];
+            $employmentIds[] = $employmentId;
+            $start = $row['actual_start_date'] ?? $row['start_date'] ?? null;
+            $starts[$employmentId] = is_string($start) ? $start : null;
+        }
+
+        $validations = [];
+        foreach ($this->overtimeLimits->assessMany(
+            $supplierId,
+            $employmentIds,
+            $periodStart,
+            $periodEnd,
+            $starts,
+        ) as $assessment) {
+            foreach ($this->overtimeLimits->validations($assessment) as $validation) {
+                $validations[] = $validation;
+            }
+        }
+
+        return $validations;
     }
 
     /** @param array<string,mixed> $row */

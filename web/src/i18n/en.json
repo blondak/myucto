@@ -1602,7 +1602,24 @@
                 "failed": "The time import could not be processed.",
                 "blocked_unsupported": "We cannot import this file format yet. Use a supported format, or enter the records by hand."
             },
-            "load_failed_hint": "Attendance for this period did not load. Until it does, do not read the empty overview as \"nobody reported anything\"."
+            "load_failed_hint": "Attendance for this period did not load. Until it does, do not read the empty overview as \"nobody reported anything\".",
+            "overtime": {
+                "title": "Overtime — Section 93 Labour Code limits",
+                "year_summary": "Ordered overtime this year: {used} of {limit}.",
+                "consent_missing": "No consent to overtime beyond the ordered limit is on record.",
+                "consent_open": "Overtime consent on record from {from}, open-ended.",
+                "consent_until": "Overtime consent on record from {from} to {to}.",
+                "consent_action": "Overtime consent",
+                "consent_title": "Employee consent to overtime work",
+                "consent_hint": "Beyond the ordered limit (8 hours per week and 150 hours per year) overtime may only be required by agreement with the employee — Section 93(3) of the Labour Code. Record the date the agreement takes effect; without it all recorded overtime is measured against the ordered-overtime limits.",
+                "consent_valid_from": "Valid from",
+                "consent_valid_to": "Valid until (empty = open-ended)",
+                "consent_reference": "Document reference",
+                "consent_note": "Note",
+                "consent_saved": "Overtime consent saved.",
+                "consent_failed": "Overtime consent could not be saved.",
+                "consent_blocked_no_date": "Fill in the date the agreement takes effect."
+            }
         },
         "people": {
             "title": "Employees",

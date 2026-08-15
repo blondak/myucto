@@ -194,7 +194,25 @@ final class Bootstrap
                     $c->get(
                         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog::class,
                     ),
+                    // Volitelné class-parametry PHP-DI neautowiruje — bez tohohle
+                    // bindu by se limity § 93 tiše nehlídaly vůbec.
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService::class,
+                    ),
                 ),
+            \MyInvoice\Service\Payroll\Time\Overtime\OvertimeLimitRules::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Service\Payroll\Time\Overtime\OvertimeLimitRules(
+                        $c->get(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class),
+                    ),
+            \MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService(
+                        $c->get(\MyInvoice\Repository\Payroll\PayrollOvertimeRepository::class),
+                        $c->get(
+                            \MyInvoice\Service\Payroll\Time\Overtime\OvertimeLimitRules::class,
+                        ),
+                    ),
             // Katalog kontrol se načítá z připnutého manifestu a ověřuje otisk
             // zdrojového XLSX, což je na každý požadavek zbytečně drahé —
             // kontejner ho proto drží jako singleton.

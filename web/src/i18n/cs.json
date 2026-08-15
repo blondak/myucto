@@ -1602,7 +1602,24 @@
                 "failed": "Import docházky se nepodařilo zpracovat.",
                 "blocked_unsupported": "Tenhle formát souboru zatím neumíme naimportovat. Použijte podporovaný formát, nebo záznamy zadejte ručně."
             },
-            "load_failed_hint": "Docházka za toto období se nenačetla. Než se to povede, neberte prázdný přehled jako doklad, že nikdo nic nevykázal."
+            "load_failed_hint": "Docházka za toto období se nenačetla. Než se to povede, neberte prázdný přehled jako doklad, že nikdo nic nevykázal.",
+            "overtime": {
+                "title": "Přesčas — limity § 93 zákoníku práce",
+                "year_summary": "Nařízený přesčas letos: {used} z {limit}.",
+                "consent_missing": "Souhlas s prací přesčas nad nařízený rozsah není evidován.",
+                "consent_open": "Souhlas s prací přesčas evidován od {from} na dobu neurčitou.",
+                "consent_until": "Souhlas s prací přesčas evidován od {from} do {to}.",
+                "consent_action": "Souhlas s přesčasem",
+                "consent_title": "Souhlas zaměstnance s prací přesčas",
+                "consent_hint": "Nad nařízený rozsah (8 hodin týdně a 150 hodin ročně) lze práci přesčas požadovat jen na základě dohody se zaměstnancem — § 93 odst. 3 zákoníku práce. Zapište, od kdy dohoda platí; bez ní se všechen evidovaný přesčas poměřuje s limity nařízeného přesčasu.",
+                "consent_valid_from": "Platí od",
+                "consent_valid_to": "Platí do (prázdné = na dobu neurčitou)",
+                "consent_reference": "Označení dokumentu",
+                "consent_note": "Poznámka",
+                "consent_saved": "Souhlas s prací přesčas byl uložen.",
+                "consent_failed": "Souhlas s prací přesčas se nepodařilo uložit.",
+                "consent_blocked_no_date": "Vyplňte datum, od kterého dohoda platí."
+            }
         },
         "people": {
             "title": "Zaměstnanci",

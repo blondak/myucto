@@ -217,6 +217,51 @@ final class PayrollTimeAction
         }
     }
 
+    /**
+     * Zápis souhlasu zaměstnance s prací přesčas nad nařízený rozsah
+     * (§ 93 odst. 3 zákoníku práce).
+     */
+    public function overtimeConsent(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.time.write',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $consent = $this->time->saveOvertimeConsent(
+                $this->currentSupplierId($request),
+                $this->input($request),
+                $this->userId($request),
+            );
+            $this->audit(
+                $request,
+                'payroll.time.overtime_consent_saved',
+                'payroll_overtime_consent',
+                PayrollTimeValue::int($consent['id'] ?? null, 'id'),
+                [
+                    'employment_id' => PayrollTimeValue::int(
+                        $consent['employment_id'] ?? null,
+                        'employment_id',
+                    ),
+                    'valid_from' => PayrollTimeValue::string(
+                        $consent['valid_from'] ?? null,
+                        'valid_from',
+                    ),
+                    'valid_to' => $consent['valid_to'],
+                ],
+            );
+            return Json::ok($response, ['consent' => $consent], 201);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'payroll_time_conflict', $e->getMessage(), 409);
+        } catch (\InvalidArgumentException $e) {
+            return $this->validation($response, $e);
+        }
+    }
+
     public function previewImport(Request $request, Response $response): Response
     {
         if (($error = $this->authorize(
