@@ -18,7 +18,11 @@ use MyInvoice\Service\Submission\Channel\ChannelCredentials;
 use MyInvoice\Service\Submission\Channel\Epo\EpoAttemptStatusReader;
 use MyInvoice\Service\Submission\Channel\Epo\EpoChannel;
 use MyInvoice\Service\Submission\Channel\Isds\IsdsChannel;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
+use MyInvoice\Service\Submission\DeliveryFictionCalculator;
+use MyInvoice\Service\Submission\DeliveryResolutionService;
+use MyInvoice\Service\Submission\SubmissionLegalRules;
 use MyInvoice\Service\Submission\InboxMessageClassifier;
 use MyInvoice\Service\Submission\SubmissionArtifactResolver;
 use MyInvoice\Service\Submission\SubmissionArtifactValidator;
@@ -31,6 +35,7 @@ use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
+use Symfony\Component\Clock\NativeClock;
 
 /**
  * Příchozí cesta: souhlas podle § 17 odst. 3, rozlišení prázdna od poruchy
@@ -100,6 +105,14 @@ final class SubmissionInboxServiceTest extends TestCase
             $registry,
             new InboxMessageClassifier($outboxRepo),
             $documents,
+            new DeliveryResolutionService(
+                $this->inbox,
+                $recipients,
+                new DeliveryFictionCalculator(),
+                new SubmissionLegalRules(CzechPayrollRulesets2026::provider()),
+                $activity,
+                new NativeClock(),
+            ),
             $activity,
             new NullLogger(),
         );

@@ -62,9 +62,21 @@ final readonly class SubmissionInboxService
         private SubmissionChannelRegistry $channels,
         private InboxMessageClassifier $classifier,
         private DocumentIngestService $documents,
+        private DeliveryResolutionService $delivery,
         private ActivityLogger $activity,
         private LoggerInterface $logger,
     ) {}
+
+    /**
+     * Přepočítá rozhodný den doručení u zpráv, kde se závěr může změnit pouhým
+     * během času (běžící lhůta fikce). Volá to cron po vybrání schránky.
+     *
+     * @return array{checked:int,changed:int,delivered_by_fiction:int}
+     */
+    public function refreshDelivery(int $supplierId, string $environment, ?int $actorUserId = null): array
+    {
+        return $this->delivery->refresh($supplierId, $environment, $actorUserId);
+    }
 
     /**
      * Vyzvedne a zpracuje nové zprávy jedné firmy.
@@ -265,7 +277,7 @@ final readonly class SubmissionInboxService
 
         $verdict = $this->classifier->classify($context->supplierId, $context->environment, $header, $boxKinds);
 
-        $this->inbox->record([
+        $message = $this->inbox->record([
             'supplier_id' => $context->supplierId,
             'environment' => $context->environment,
             'channel' => $channelCode,
@@ -281,6 +293,11 @@ final readonly class SubmissionInboxService
             'accepted_at' => $header->acceptedAt?->format('Y-m-d H:i:s'),
             'raw_sha256' => hash('sha256', $bytes),
         ]);
+
+        // Rozhodný den doručení se určuje hned při uložení. Kdyby se počítal až
+        // při čtení, měnil by se podle toho, kdy se kdo podívá — a od něj běží
+        // lhůty, takže musí být uložený a dohledatelný.
+        $this->resolveDelivery($message);
 
         $this->applyDeliveryReceipt($context, $verdict, $header);
 
@@ -323,6 +340,27 @@ final readonly class SubmissionInboxService
             $this->logger->warning('Delivery receipt could not be applied to submission', [
                 'supplier_id' => $context->supplierId,
                 'outbox_id' => $outboxId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Selhání výpočtu doručení nesmí položit stažení zprávy — zpráva uložená
+     * bez závěru zůstane v `unknown` a přepočet ji zase najde. Opačné pořadí
+     * priorit (radši zprávu nestáhnout) by znamenalo, že chyba ve výpočtu
+     * zablokuje celou schránku.
+     *
+     * @param array<string,mixed> $message
+     */
+    private function resolveDelivery(array $message): void
+    {
+        try {
+            $this->delivery->resolveMessage($message);
+        } catch (\Throwable $e) {
+            $this->logger->warning('Delivery resolution failed for inbox message', [
+                'supplier_id' => $message['supplier_id'] ?? null,
+                'message_id' => $message['id'] ?? null,
                 'error' => $e->getMessage(),
             ]);
         }

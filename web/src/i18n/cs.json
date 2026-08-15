@@ -14621,7 +14621,8 @@
             "access": "Přístup",
             "outbox": "Odchozí podání",
             "inbox": "Příchozí zprávy",
-            "recipients": "Příjemci"
+            "recipients": "Příjemci",
+            "notices": "Výzvy k odstranění vad"
         },
         "access": {
             "title": "Systémový certifikát",
@@ -14767,6 +14768,61 @@
         "errors": {
             "certificateRequired": "Nahrajte prosím soubor systémového certifikátu (PFX nebo P12).",
             "sourceRequired": "K vyplněnému ID datové schránky uveďte odkaz na zdroj, odkud je doložené."
+        },
+        "delivery": {
+            "column": "Rozhodné doručení",
+            "refresh": "Přepočítat doručení",
+            "refreshed": "Přepočítáno zpráv: {checked}, z toho doručeno fikcí: {fiction}.",
+            "explain": "Přepočet nesahá na datovou schránku — jen znovu posoudí už stažené zprávy. Nepřihlásí-li se nikdo do deseti dnů od dodání, považuje se zpráva za doručenou posledním dnem té lhůty (§ 17 odst. 4 zák. 300/2008 Sb.), a to nastane pouhým během času.",
+            "deliveredOn": "Doručeno {date}",
+            "fictionDueOn": "Fikce doručení nastane {date}",
+            "basis": {
+                "login": "Doručeno přihlášením",
+                "fiction": "Doručeno fikcí",
+                "login_or_fiction": "Doručeno — přihlášením, nebo fikcí",
+                "pending": "Lhůta běží, doručeno není",
+                "unknown": "Doručení neznáme"
+            },
+            "notApplicable": "Doručenka k našemu podání — fikce doručení se na ni nevztahuje."
+        },
+        "notices": {
+            "title": "Výzvy k odstranění vad podání",
+            "intro": "Vadné podání vyřizuje správce daně výzvou podle § 74 daňového řádu. Odstraníte-li vadu ve stanovené lhůtě, hledí se na podání, jako by bylo učiněno řádně a včas. Neodstraníte-li vadu podle § 74 odst. 1 písm. a) nebo b), stává se podání uplynutím lhůty neúčinným.",
+            "addTitle": "Zaevidovat výzvu",
+            "recordFromMessage": "Zaevidovat jako výzvu",
+            "reference": "Číslo jednací",
+            "ground": "Jaká vada (§ 74 odst. 1)",
+            "deliveredOn": "Den doručení výzvy",
+            "respondBy": "Do kdy reagovat (datum z výzvy)",
+            "periodDays": "Nebo počet dnů uvedený ve výzvě",
+            "note": "Poznámka",
+            "save": "Uložit výzvu",
+            "saved": "Výzva je zaevidovaná.",
+            "duplicate": "K téhle zprávě už výzva zaevidovaná je, nic se nezměnilo.",
+            "empty": "Žádná zaevidovaná výzva.",
+            "deadlineHint": "Lhůtu si aplikace nedomýšlí — zákon žádnou délku nestanoví, určuje ji správce daně ve výzvě. Opište proto buď datum, nebo počet dnů. Bez toho zůstane výzva ve stavu „nevíme, do kdy\" a nebude se tvářit jako vyřízená.",
+            "shifted": "Konec lhůty připadl na sobotu, neděli nebo svátek, posunul se proto na nejblíže následující pracovní den (§ 33 odst. 4 daňového řádu).",
+            "shortPeriod": "Lhůta je kratší než osm dnů. Zákon to připouští jen zcela výjimečně (§ 32 odst. 2 daňového řádu) — zkontrolujte, jestli je opsaná správně.",
+            "answer": "Zaznamenat odstranění vady",
+            "answerSave": "Uložit",
+            "answerSaved": "Odstranění vady je zaznamenané.",
+            "answeredOn": "Kdy vada odstraněna",
+            "answerDateRequired": "Doplňte den, kdy jste vadu odstranili — na dodržení lhůty se to počítá na dny.",
+            "grounds": {
+                "unknown": "Nevíme, které písmeno výzva uvádí",
+                "a_not_processable": "a) podání není způsobilé k projednání",
+                "b_no_effects": "b) podání nemůže mít předpokládané účinky",
+                "c_wrong_way": "c) podání nebylo učiněno stanoveným způsobem",
+                "d_wrong_format": "d) podání nebylo ve stanoveném formátu či struktuře"
+            },
+            "statuses": {
+                "unknown": "Neznáme lhůtu",
+                "open": "Lhůta běží",
+                "answered_in_time": "Odstraněno ve lhůtě",
+                "answered_late": "Odstraněno po lhůtě",
+                "missed": "Lhůta zmeškána",
+                "withdrawn": "Výzva vzata zpět"
+            }
         }
     }
 }
