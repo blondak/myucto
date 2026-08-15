@@ -71,8 +71,13 @@ final class PayrollPayoutRuleValidator
         // by šlo pravidlo namířit na účet KOLEGY ze stejné firmy a mzda by odešla
         // jinam. Materializer by to nezachytil — účet by ve zmrazených účtech
         // osoby nebyl a spadl by až s obecnou hláškou o chybějícím cíli.
+        //
+        // Stav OVĚŘENÍ se tu záměrně nečte: neověřený účet zápis pravidla
+        // NEBLOKUJE (pravidlo musí jít připravit dřív, než ověření proběhne).
+        // Uživateli se to říká varováním, které skládá PayrollPayoutRuleWarnings
+        // nad příznakem `destination_verified` z repozitáře.
         $stmt = $this->db->pdo()->prepare(
-            'SELECT is_active, verification_source, verified_on, verified_by
+            'SELECT is_active
                FROM payroll_person_accounts
               WHERE supplier_id = ? AND employee_id = ? AND id = ?'
         );

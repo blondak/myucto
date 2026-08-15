@@ -1851,6 +1851,8 @@
                     "deactivate": "Deaktivovat",
                     "reactivate": "Znovu aktivovat",
                     "pending_deactivation": "Po uložení karty se pravidlo deaktivuje a zmizí ze seznamu aktivních. Zůstane u historických výplat, které podle něj proběhly.",
+                    "unverified_account": "Účet zatím není ověřený — mzdu na něj nepůjde připravit k výplatě, dokud ověření neproběhne.",
+                    "verify_account": "Ověřit účet",
                     "save_hint": "Změny výplatních pravidel se uloží společně s kartou tlačítkem Uložit nahoře.",
                     "summary": {
                         "remainder": "Zbytek čisté mzdy",

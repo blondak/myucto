@@ -14,6 +14,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Net\PayrollPayoutRuleDefaultsService;
 use MyInvoice\Service\Payroll\Net\PayrollPayoutRuleInput;
 use MyInvoice\Service\Payroll\Net\PayrollPayoutRuleService;
+use MyInvoice\Service\Payroll\Net\PayrollPayoutRuleWarnings;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -48,9 +49,11 @@ final class PayrollPayoutRulesAction
         $supplierId = $this->currentSupplierId($request);
         $employeeId = (int) $args['employeeId'];
         try {
+            $rules = $this->rules->listForEmployee($supplierId, $employeeId);
             $payload = [
-                'rules' => $this->rules->listForEmployee($supplierId, $employeeId),
+                'rules' => $rules,
                 'proposal' => $this->defaults->proposeFor($supplierId, $employeeId),
+                'warnings' => PayrollPayoutRuleWarnings::forRules($rules),
             ];
         } catch (\OutOfBoundsException $e) {
             return Json::error($response, 'not_found', $e->getMessage(), 404);
@@ -82,7 +85,10 @@ final class PayrollPayoutRulesAction
             return Json::error($response, 'invalid_payout_rule', $e->getMessage(), 409);
         }
 
-        return Json::ok($response, ['rule' => $rule], 201);
+        return Json::ok($response, [
+            'rule' => $rule,
+            'warnings' => PayrollPayoutRuleWarnings::forRules([$rule]),
+        ], 201);
     }
 
     /** @param array{employeeId:string,ruleId:string} $args */
@@ -115,7 +121,10 @@ final class PayrollPayoutRulesAction
             return Json::error($response, 'invalid_payout_rule', $e->getMessage(), 409);
         }
 
-        return Json::ok($response, ['rule' => $rule]);
+        return Json::ok($response, [
+            'rule' => $rule,
+            'warnings' => PayrollPayoutRuleWarnings::forRules([$rule]),
+        ]);
     }
 
     /**
@@ -156,7 +165,10 @@ final class PayrollPayoutRulesAction
             return Json::error($response, 'invalid_payout_rule', $e->getMessage(), 409);
         }
 
-        return Json::ok($response, ['rule' => $rule]);
+        return Json::ok($response, [
+            'rule' => $rule,
+            'warnings' => PayrollPayoutRuleWarnings::forRules([$rule]),
+        ]);
     }
 
     /** @param array{employeeId:string} $args */
@@ -192,6 +204,7 @@ final class PayrollPayoutRulesAction
         return Json::ok($response, [
             'rules' => $rules,
             'proposal' => $this->defaults->proposeFor($supplierId, $employeeId),
+            'warnings' => PayrollPayoutRuleWarnings::forRules($rules),
         ], 201);
     }
 

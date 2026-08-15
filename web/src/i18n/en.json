@@ -1851,6 +1851,8 @@
                     "deactivate": "Deactivate",
                     "reactivate": "Reactivate",
                     "pending_deactivation": "Once the profile is saved the rule is deactivated and disappears from the active list. It stays with the historical payouts made under it.",
+                    "unverified_account": "The account is not verified yet — the wage cannot be prepared for payment until verification is done.",
+                    "verify_account": "Verify account",
                     "save_hint": "Payout rule changes are saved together with the profile using the Save button above.",
                     "summary": {
                         "remainder": "Remainder of the net pay",

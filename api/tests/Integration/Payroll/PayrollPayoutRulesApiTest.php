@@ -326,6 +326,148 @@ final class PayrollPayoutRulesApiTest extends TestCase
         self::assertSame(0, $this->activeRuleCount($this->supplierId));
     }
 
+    /**
+     * Neověřený účet zápis pravidla NEBLOKUJE — pravidlo musí jít připravit
+     * dřív, než účetní ověření stihne. Uživatel se o tom ale musí dozvědět
+     * hned, ne až při přípravě plateb nad zmrazenou revizí, kde už z toho vede
+     * jen opravná revize.
+     */
+    public function testBankRuleOnUnverifiedAccountIsSavedButCarriesAWarning(): void
+    {
+        $accountId = $this->createAccount($this->employeeId, verified: false);
+
+        $created = $this->action->create(
+            $this->request('POST', [
+                'destination_kind' => 'bank',
+                'destination_reference' => "account:{$accountId}",
+                'allocation_kind' => 'remainder',
+            ]),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId],
+        );
+
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $body = $this->json($created);
+        self::assertFalse($body['rule']['destination_verified']);
+        self::assertCount(1, $body['warnings']);
+        self::assertSame('unverified_destination', $body['warnings'][0]['code']);
+        self::assertSame($body['rule']['id'], $body['warnings'][0]['rule_id']);
+        self::assertSame($accountId, $body['warnings'][0]['account_id']);
+        self::assertStringContainsString(
+            'není ověřený',
+            (string) $body['warnings'][0]['message'],
+        );
+
+        // Varování je funkce stavu, ne události zápisu — musí ho vidět i prosté
+        // načtení karty, ne jen ten, kdo pravidlo právě uložil.
+        $listed = $this->json($this->action->list(
+            $this->request('GET'),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId],
+        ));
+        self::assertCount(1, $listed['warnings']);
+        self::assertFalse($listed['rules'][0]['destination_verified']);
+    }
+
+    public function testWarningDisappearsOnceTheAccountIsVerified(): void
+    {
+        $accountId = $this->createAccount($this->employeeId, verified: false);
+        $this->action->create(
+            $this->request('POST', [
+                'destination_kind' => 'bank',
+                'destination_reference' => "account:{$accountId}",
+                'allocation_kind' => 'remainder',
+            ]),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId],
+        );
+
+        $this->verifyAccount($accountId);
+
+        $listed = $this->json($this->action->list(
+            $this->request('GET'),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId],
+        ));
+        self::assertSame([], $listed['warnings']);
+        self::assertTrue($listed['rules'][0]['destination_verified']);
+    }
+
+    /**
+     * U hotovosti a zápočtu na účet společníka ověření nedává smysl, proto NULL
+     * a nikdy varování — `false` by se četlo jako vada, kterou nelze odstranit.
+     */
+    public function testCashAndPartnerSettlementRulesNeverCarryVerificationState(): void
+    {
+        $this->createEmployment($this->employeeId, 'partner_dependent');
+        $cash = $this->json($this->action->create(
+            $this->request('POST', [
+                'destination_kind' => 'cash',
+                'allocation_kind' => 'remainder',
+                'priority_no' => 10,
+            ]),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId],
+        ));
+        $settlement = $this->json($this->action->create(
+            $this->request('POST', [
+                'destination_kind' => 'partner_settlement',
+                'destination_reference' => '365.100',
+                'allocation_kind' => 'percentage',
+                'basis_points' => 2500,
+                'priority_no' => 20,
+            ]),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId],
+        ));
+
+        self::assertNull($cash['rule']['destination_verified']);
+        self::assertNull($settlement['rule']['destination_verified']);
+        self::assertSame([], $cash['warnings']);
+        self::assertSame([], $settlement['warnings']);
+
+        $listed = $this->json($this->action->list(
+            $this->request('GET'),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId],
+        ));
+        self::assertSame([], $listed['warnings']);
+        self::assertSame(
+            [null, null],
+            array_column($listed['rules'], 'destination_verified'),
+        );
+    }
+
+    /** Vypnuté pravidlo do výplaty nevstupuje, takže se na neověřený účet nestěžuje. */
+    public function testDeactivatedRuleStopsWarningAboutItsUnverifiedAccount(): void
+    {
+        $accountId = $this->createAccount($this->employeeId, verified: false);
+        $ruleId = (int) $this->json($this->action->create(
+            $this->request('POST', [
+                'destination_kind' => 'bank',
+                'destination_reference' => "account:{$accountId}",
+                'allocation_kind' => 'remainder',
+            ]),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId],
+        ))['rule']['id'];
+
+        $deactivated = $this->json($this->action->deactivate(
+            $this->request('DELETE', ['row_version' => 1]),
+            new Response(),
+            [
+                'employeeId' => (string) $this->employeeId,
+                'ruleId' => (string) $ruleId,
+            ],
+        ));
+
+        self::assertFalse($deactivated['rule']['is_active']);
+        self::assertSame([], $deactivated['warnings']);
+        // Příznak cíle zůstává vypovídající i u vypnutého pravidla — jen se
+        // z něj nedělá varování.
+        self::assertFalse($deactivated['rule']['destination_verified']);
+    }
+
     public function testProposalForCashProfileIsApplicableAndCreatesRealRow(): void
     {
         $this->setProfile('cash');
@@ -606,6 +748,24 @@ final class PayrollPayoutRulesApiTest extends TestCase
         ]);
 
         return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /** Doplní účtu kompletní ověření — tak, jak to dělá „Ověřit účet" na kartě. */
+    private function verifyAccount(int $accountId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_accounts
+                SET verification_source = "user_verified",
+                    verified_on = "2026-01-05",
+                    verified_by = ?,
+                    row_version = row_version + 1
+              WHERE supplier_id = ? AND employee_id = ? AND id = ?'
+        )->execute([
+            $this->userId,
+            $this->supplierId,
+            $this->employeeId,
+            $accountId,
+        ]);
     }
 
     private function setProfile(string $payoutMethod, ?string $accountCode = null): void

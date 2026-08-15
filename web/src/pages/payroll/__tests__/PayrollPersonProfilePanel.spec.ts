@@ -116,7 +116,7 @@ function profile(): PayrollPersonProfile {
   }
 }
 
-function payoutRule(): PayrollPayoutRule {
+function payoutRule(overrides: Partial<PayrollPayoutRule> = {}): PayrollPayoutRule {
   return {
     id: 11,
     supplier_id: 1,
@@ -129,9 +129,11 @@ function payoutRule(): PayrollPayoutRule {
     basis_points: null,
     priority_no: 100,
     is_active: true,
+    destination_verified: true,
     row_version: 2,
     created_at: '2026-08-01 10:00:00',
     updated_at: '2026-08-01 10:00:00',
+    ...overrides,
   }
 }
 
@@ -140,6 +142,14 @@ function payoutRulesResponse(rules: PayrollPayoutRule[] = [payoutRule()]): Payro
 
   return {
     rules,
+    warnings: rules
+      .filter(rule => rule.is_active && rule.destination_verified === false)
+      .map(rule => ({
+        code: 'unverified_destination' as const,
+        rule_id: rule.id,
+        account_id: 5,
+        message: 'Výplatní účet zatím není ověřený.',
+      })),
     proposal: {
       payout_method: 'bank',
       available: true,
@@ -354,6 +364,64 @@ describe('PayrollPersonProfilePanel', () => {
 
     expect(mocks.deactivatePersonPayoutRule).toHaveBeenCalledWith(17, 11, 2)
     expect(mocks.updatePersonPayoutRule).not.toHaveBeenCalled()
+  })
+
+  it('u pravidla na neověřený účet vysvětlí důsledek a nabídne ověření', async () => {
+    mocks.personPayoutRules.mockResolvedValue(
+      payoutRulesResponse([payoutRule({ destination_verified: false })]),
+    )
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+
+    const warning = wrapper.get('[data-test="payout-rule-unverified"]')
+    expect(warning.text()).toContain('payroll.people.profile.payout_rules.unverified_account')
+    expect(wrapper.find('[data-test="payout-rule-verify-account"]').exists()).toBe(true)
+  })
+
+  it('ověřený i nebankovní cíl varování neukazuje', async () => {
+    for (const rule of [
+      payoutRule({ destination_verified: true }),
+      payoutRule({
+        destination_kind: 'cash',
+        destination_reference: null,
+        destination_verified: null,
+      }),
+      payoutRule({
+        destination_kind: 'partner_settlement',
+        destination_reference: '365.100',
+        destination_verified: null,
+      }),
+      // Vypnuté pravidlo do výplaty nevstupuje, takže ho neověřený účet nepálí.
+      payoutRule({ destination_verified: false, is_active: false }),
+    ]) {
+      mocks.personPayoutRules.mockResolvedValue(payoutRulesResponse([rule]))
+      const wrapper = await mountedPanel()
+      await openPayout(wrapper)
+
+      expect(wrapper.find('[data-test="payout-rule-unverified"]').exists()).toBe(false)
+    }
+  })
+
+  it('proklik z varování zaostří na ověření příslušného účtu', async () => {
+    mocks.personPayoutRules.mockResolvedValue(
+      payoutRulesResponse([payoutRule({ destination_verified: false })]),
+    )
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+
+    const card = document.createElement('div')
+    card.id = 'payout-account-5'
+    const verifyButton = document.createElement('button')
+    verifyButton.dataset.test = 'verify-account'
+    card.appendChild(verifyButton)
+    document.body.appendChild(card)
+    card.scrollIntoView = vi.fn()
+
+    await wrapper.get('[data-test="payout-rule-verify-account"]').trigger('click')
+
+    expect(card.scrollIntoView).toHaveBeenCalled()
+    expect(document.activeElement).toBe(verifyButton)
+    card.remove()
   })
 
   it('nové pravidlo pošle až po uložení karty a v haléřích', async () => {

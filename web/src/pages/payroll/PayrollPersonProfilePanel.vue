@@ -132,6 +132,8 @@ interface PayoutRuleFormRow {
   percentage: number | null
   priority_no: number
   is_active: boolean
+  /** `null` u hotovosti a zápočtu — ověření tam nedává smysl. */
+  destination_verified: boolean | null
   row_version: number
 }
 
@@ -274,8 +276,36 @@ function toPayoutRuleRow(rule: PayrollPayoutRule): PayoutRuleFormRow {
     percentage: rule.basis_points === null ? null : rule.basis_points / 100,
     priority_no: rule.priority_no,
     is_active: rule.is_active,
+    destination_verified: rule.destination_verified,
     row_version: rule.row_version,
   }
+}
+
+/**
+ * Varuje se jen u aktivního bankovního pravidla na neověřený účet.
+ *
+ * Server tentýž stav vrací i strojově v `warnings`, ale ta zpráva je česky;
+ * panel je dvojjazyčný, takže si větu skládá sám z i18n nad `destination_verified`.
+ * Zdroj pravdy je jeden — příznak z API.
+ */
+function payoutRuleNeedsVerification(row: PayoutRuleFormRow): boolean {
+  return row.is_active && row.destination_verified === false
+}
+
+/**
+ * Proklik na existující akci „Ověřit účet".
+ *
+ * Účty i pravidla jsou ve stejné záložce, takže stačí doscrollovat ke kartě
+ * účtu a zaostřit na jeho tlačítko ověření — uživatel nemusí hledat, kde se
+ * to dělá.
+ */
+function focusAccountVerification(accountId: number | null) {
+  if (accountId === null) return
+  const card = document.getElementById(`payout-account-${accountId}`)
+  if (card === null) return
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const verify = card.querySelector<HTMLButtonElement>('[data-test="verify-account"]')
+  verify?.focus({ preventScroll: true })
 }
 
 function proposalRuleRow(rule: PayrollPayoutRuleProposalRule): PayoutRuleFormRow {
@@ -286,6 +316,9 @@ function proposalRuleRow(rule: PayrollPayoutRuleProposalRule): PayoutRuleFormRow
     employee_id: props.personId,
     allocation_reference: '',
     is_active: true,
+    // Návrh se odvozuje jen z OVĚŘENÉHO účtu (server jinak vrátí blokující
+    // důvod), takže varování u náhledu nikdy nedává smysl.
+    destination_verified: null,
     row_version: 0,
     created_at: null,
     updated_at: null,
@@ -421,6 +454,8 @@ function addPayoutRule() {
     percentage: null,
     priority_no: highestPriority === 0 ? 100 : highestPriority + 10,
     is_active: true,
+    // Ověření zná jen server; nový řádek ho dostane po uložení a přenačtení.
+    destination_verified: null,
     row_version: 0,
   })
 }
@@ -456,7 +491,7 @@ async function syncPayoutRules() {
         rowVersion = (await payrollApi.updatePersonPayoutRule(props.personId, row.id, {
           ...payoutRulePayload(row, true),
           row_version: rowVersion,
-        })).row_version
+        })).rule.row_version
         changed = true
       }
       if (!row.is_active && stored.is_active) {
@@ -993,7 +1028,12 @@ onMounted(load)
             <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="addAccount"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.people.profile.add_account') }}</button>
           </div>
           <div class="space-y-3">
-            <article v-for="(row, index) in form.accounts" :key="row.id ?? `new-account-${index}`" :class="cardClass">
+            <article
+              v-for="(row, index) in form.accounts"
+              :id="row.id ? `payout-account-${row.id}` : undefined"
+              :key="row.id ?? `new-account-${index}`"
+              :class="cardClass"
+            >
               <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
                 <label :class="labelClass">{{ t('payroll.people.profile.account_label') }}<input v-model="row.label" required :disabled="!canWrite" :class="inputClass"></label>
                 <label :class="labelClass">{{ t('payroll.people.profile.account_allocation') }}<input v-model.number="row.allocation_basis_points" required type="number" min="0" max="10000" :disabled="!canWrite" :class="inputClass"></label>
@@ -1177,6 +1217,23 @@ onMounted(load)
               <p v-if="row.destination_kind === 'bank' && payoutAccountOptions.length === 0" class="mt-2 text-xs text-warning-700">
                 {{ t('payroll.people.profile.payout_rules.account_required') }}
               </p>
+              <div
+                v-if="payoutRuleNeedsVerification(row)"
+                class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 dark:bg-warning-500/[0.06]"
+                data-test="payout-rule-unverified"
+              >
+                <p class="text-xs text-warning-700">{{ t('payroll.people.profile.payout_rules.unverified_account') }}</p>
+                <button
+                  v-if="canWrite && row.bank_account_id !== null"
+                  type="button"
+                  :class="btnOutlineSm('warning')"
+                  data-test="payout-rule-verify-account"
+                  @click="focusAccountVerification(row.bank_account_id)"
+                >
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+                  {{ t('payroll.people.profile.payout_rules.verify_account') }}
+                </button>
+              </div>
             </article>
           </div>
           <p v-if="canWrite" class="mt-3 text-xs text-neutral-500">{{ t('payroll.people.profile.payout_rules.save_hint') }}</p>

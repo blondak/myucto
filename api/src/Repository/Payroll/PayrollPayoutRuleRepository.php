@@ -59,10 +59,14 @@ final class PayrollPayoutRuleRepository
         );
         $stmt->execute([$supplierId, $employeeId]);
 
-        return array_values(array_map(
-            self::present(...),
-            $stmt->fetchAll(PDO::FETCH_ASSOC),
-        ));
+        return $this->decorate(
+            $supplierId,
+            $employeeId,
+            array_values(array_map(
+                self::present(...),
+                $stmt->fetchAll(PDO::FETCH_ASSOC),
+            )),
+        );
     }
 
     /**
@@ -72,6 +76,11 @@ final class PayrollPayoutRuleRepository
      * jeden aktivní zbytek" je vlastnost celé sady, takže bez zámku nad ní by
      * dva souběžné zápisy prošly kontrolou v aplikaci a rozdíl by odchytil až
      * unikátní index chybou 1062 bez srozumitelné hlášky.
+     *
+     * Výsledek je INTERNÍ podklad pro validaci a ven z repozitáře nejde — proto
+     * se ZÁMĚRNĚ neobohacuje o `destination_verified`. Ověření účtu není součástí
+     * invariantu, který zámek chrání, a dotaz na `payroll_person_accounts` uvnitř
+     * `FOR UPDATE` by rozšířil zámek na tabulku, kterou zápis pravidla nemění.
      *
      * @return list<array<string,mixed>>
      */
@@ -102,8 +111,100 @@ final class PayrollPayoutRuleRepository
         );
         $stmt->execute([$supplierId, $employeeId, $ruleId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
 
-        return is_array($row) ? self::present($row) : null;
+        return $this->decorate(
+            $supplierId,
+            $employeeId,
+            [self::present($row)],
+        )[0];
+    }
+
+    /**
+     * Doplní k pravidlům stav ověření jejich platebního cíle.
+     *
+     * PROČ TO PATŘÍ K PRAVIDLU: zápis pravidla na NEOVĚŘENÝ účet je povolený
+     * schválně — pravidlo musí jít připravit dřív, než účetní ověření stihne.
+     * Jenže PayrollNetWageLiabilityMaterializer takový účet odmítne („Zmrazený
+     * účet nemá úplné ověření"), a to až nad zmrazenou revizí, kde se s tím dá
+     * dělat jen opravná revize. Bez tohohle příznaku se uživatel o problému
+     * dozví právě až tam. Tady ho vidí hned u pravidla.
+     *
+     * `null` u hotovosti a zápočtu na účet společníka je významové: ověření tam
+     * nedává smysl a `false` by se četlo jako vada.
+     *
+     * Dotaz je jeden pro celou sadu (WHERE id IN …), ne per pravidlo.
+     *
+     * @param list<array<string,mixed>> $rules
+     * @return list<array<string,mixed>>
+     */
+    private function decorate(int $supplierId, int $employeeId, array $rules): array
+    {
+        $accountIds = [];
+        foreach ($rules as $rule) {
+            $accountId = self::bankAccountId($rule);
+            if ($accountId !== null) {
+                $accountIds[$accountId] = true;
+            }
+        }
+        if ($accountIds === []) {
+            return $rules;
+        }
+
+        $ids = array_keys($accountIds);
+        $placeholders = implode(', ', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id
+               FROM payroll_person_accounts
+              WHERE supplier_id = ? AND employee_id = ?
+                AND id IN (' . $placeholders . ')
+                AND is_active = 1
+                AND verification_source IS NOT NULL
+                AND verified_on IS NOT NULL
+                AND verified_by IS NOT NULL'
+        );
+        $stmt->execute([$supplierId, $employeeId, ...$ids]);
+        $verified = array_flip(array_map(
+            static fn (mixed $id): int => (int) $id,
+            $stmt->fetchAll(PDO::FETCH_COLUMN),
+        ));
+
+        foreach ($rules as $index => $rule) {
+            $accountId = self::bankAccountId($rule);
+            if ($accountId !== null) {
+                $rules[$index]['destination_verified'] =
+                    isset($verified[$accountId]);
+            }
+        }
+
+        return $rules;
+    }
+
+    /**
+     * Id výplatního účtu z reference `account:<id>`, nebo NULL.
+     *
+     * Vzor je sdílený s PayrollPayoutRuleInput — je to týž tvar, který jediný
+     * umí zpracovat PayrollNetWageLiabilityMaterializer::paymentTarget().
+     *
+     * @param array<string,mixed> $rule
+     */
+    private static function bankAccountId(array $rule): ?int
+    {
+        $reference = $rule['destination_reference'] ?? null;
+        if (($rule['destination_kind'] ?? null) !== 'bank'
+            || !is_string($reference)
+            || preg_match(
+                PayrollPayoutRuleInput::BANK_REFERENCE_PATTERN,
+                $reference,
+                $match,
+            ) !== 1
+        ) {
+            return null;
+        }
+
+        return (int) $match[1];
     }
 
     /** @return array<string,mixed> */
@@ -385,6 +486,9 @@ final class PayrollPayoutRuleRepository
             $row[$field] = $row[$field] === null ? null : (int) $row[$field];
         }
         $row['is_active'] = (int) $row['is_active'] === 1;
+        // NULL = ověření u tohohle cíle nedává smysl (hotovost, zápočet na účet
+        // společníka). U banky ho na true/false přepíše decorate().
+        $row['destination_verified'] = null;
         // Sloupec je jen klíčem unikátního indexu (migrace 1378); do API nepatří.
         unset($row['remainder_guard']);
 
