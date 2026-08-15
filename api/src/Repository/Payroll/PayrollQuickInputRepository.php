@@ -761,7 +761,17 @@ final class PayrollQuickInputRepository
         return $result;
     }
 
-    /** @param array<string,mixed>|null $sourceSnapshot */
+    /**
+     * Uloží jedno pole rychlého zadání.
+     *
+     * Formulář má tři pole a ukládají se všechna najednou, i když uživatel vyplnil
+     * jen jedno. Prázdné pole proto NESMÍ zakládat řádek: nulový koncept by
+     * vyrobil blokátor `draft_inputs_present` a mzdový běh by nešlo spustit.
+     * Vyprázdnění už existujícího pole znamená zrušení jeho vstupu — ne uložení
+     * nuly, která by po schválení skončila jako nulový řádek na výplatní pásce.
+     *
+     * @param array<string,mixed>|null $sourceSnapshot
+     */
     private function upsert(
         int $supplierId,
         int $employeeId,
@@ -787,9 +797,14 @@ final class PayrollQuickInputRepository
         );
         $find->execute([$supplierId, $employmentId, $periodStart, $externalId]);
         $row = $find->fetch(PDO::FETCH_ASSOC);
+        $isEmpty = $amountMinor === 0
+            && ($quantityMilliunits === null || $quantityMilliunits === 0);
         if ($row === false) {
             if ($expectedVersion !== null) {
                 throw new PayrollInputConflictException($expectedVersion);
+            }
+            if ($isEmpty) {
+                return;
             }
             $this->inputs->create($supplierId, [
                 'employee_id' => $employeeId,
@@ -814,6 +829,18 @@ final class PayrollQuickInputRepository
         $currentAmount = (int) $row['amount_minor'];
         $currentQuantity = $row['quantity_milliunits'] === null ? null : (int) $row['quantity_milliunits'];
         $currentVersion = (int) $row['row_version'];
+        if ($isEmpty) {
+            if ((string) $row['status'] !== 'draft') {
+                throw new \DomainException(
+                    'Schválený nebo uzamčený mzdový vstup nelze rychlým formulářem přepsat.'
+                );
+            }
+            if ($expectedVersion === null || $expectedVersion !== $currentVersion) {
+                throw new PayrollInputConflictException($currentVersion);
+            }
+            $this->inputs->cancel($supplierId, (int) $row['id'], $currentVersion);
+            return;
+        }
         if ($currentAmount === $amountMinor && $currentQuantity === $quantityMilliunits) {
             return;
         }

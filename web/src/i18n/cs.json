@@ -1229,6 +1229,10 @@
                 "approve": "Schválit",
                 "approved": "Měsíční vstup byl schválen a získal neměnný snapshot složky.",
                 "approve_failed": "Měsíční vstup se nepodařilo schválit.",
+                "cancel": "Zrušit",
+                "cancel_confirm": "Opravdu zrušit tento rozpracovaný mzdový vstup? Ze seznamu zmizí a přestane blokovat mzdový běh.",
+                "cancelled": "Měsíční vstup byl zrušen.",
+                "cancel_failed": "Měsíční vstup se nepodařilo zrušit.",
                 "empty": "V tomto období nejsou mzdové vstupy",
                 "empty_hint": "Přidejte jednorázový vstup, importujte soubor nebo materializujte pravidelné předpisy."
             },

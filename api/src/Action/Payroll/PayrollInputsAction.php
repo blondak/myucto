@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollInputApprovalException;
+use MyInvoice\Repository\Payroll\PayrollInputCancellationException;
 use MyInvoice\Repository\Payroll\PayrollInputConflictException;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
@@ -122,6 +123,50 @@ final class PayrollInputsAction
             return Json::error($response, 'not_found', 'Mzdový vstup nebyl nalezen.', 404);
         }
         $this->audit($request, 'payroll.input.updated', $input);
+        return Json::ok($response, ['input' => $input]);
+    }
+
+    /**
+     * Zrušení vlastního konceptu mzdového vstupu.
+     *
+     * Nulový nebo omylem založený koncept jinak zablokuje mzdový běh a jediným
+     * východiskem by bylo ho schválit — čímž by se dostal na výplatní pásku.
+     *
+     * @param array<string,string> $args
+     */
+    public function cancel(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        $version = $this->rowVersion(
+            $this->input($request)['row_version'] ?? null,
+        );
+        if ($version === null) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'row_version musí být kladné celé číslo.',
+                422,
+            );
+        }
+        try {
+            $input = $this->inputs->cancel(
+                $this->currentSupplierId($request),
+                (int) ($args['id'] ?? 0),
+                $version,
+            );
+        } catch (PayrollInputCancellationException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), 409);
+        } catch (PayrollInputConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
+                'current_row_version' => $e->currentVersion,
+            ]);
+        }
+        if ($input === null) {
+            return Json::error($response, 'not_found', 'Mzdový vstup nebyl nalezen.', 404);
+        }
+        $this->audit($request, 'payroll.input.cancelled', $input);
         return Json::ok($response, ['input' => $input]);
     }
 

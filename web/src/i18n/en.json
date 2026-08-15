@@ -1229,6 +1229,10 @@
                 "approve": "Approve",
                 "approved": "The monthly input was approved and received an immutable component snapshot.",
                 "approve_failed": "The monthly input could not be approved.",
+                "cancel": "Cancel",
+                "cancel_confirm": "Really cancel this draft payroll input? It disappears from the list and stops blocking the payroll run.",
+                "cancelled": "The monthly input was cancelled.",
+                "cancel_failed": "The monthly input could not be cancelled.",
                 "empty": "There are no payroll inputs in this period",
                 "empty_hint": "Add a one-off input, import a file or materialize recurring assignments."
             },

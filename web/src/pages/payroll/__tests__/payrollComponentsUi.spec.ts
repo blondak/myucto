@@ -87,6 +87,21 @@ describe('payrollComponentsUi', () => {
     }])
   })
 
+  it('never offers an archived or never-started relation for a payroll input', () => {
+    const people = [{
+      id: 8,
+      full_name: 'Syntetická osoba',
+      employments: [
+        { id: 12, code: 'SYN-HPP', relation_type: 'employment', status: 'active' },
+        { id: 13, code: 'SYN-ARCH', relation_type: 'employment', status: 'archived' },
+        { id: 14, code: 'SYN-NOSHOW', relation_type: 'employment', status: 'no_show' },
+      ],
+    }] as PayrollPerson[]
+
+    expect(payrollEmploymentOptions(people).map(option => option.employment_id))
+      .toEqual([12])
+  })
+
   it('converts user amounts without floating-point rounding', () => {
     expect(parsePayrollAmountToMinor('1 234,56')).toBe(123456)
     expect(parsePayrollAmountToMinor('-0,05')).toBe(-5)
