@@ -162,6 +162,15 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/submissions/jmhz-ordinary-evidence/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/submissions/jmhz-preparation/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/jmhz-xml-dry-run/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/jmhz-freeze/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::READ],
+        ['*', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/jmhz-transport$#', 'payroll.submissions', AccessLevel::READ],
+        ['GET', '#^/api/payroll/submissions/jmhz-transport/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/jmhz-transport/[0-9]+/close$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/submissions/[0-9]+/jmhz-transport$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/jmhz-protocol-import$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/jmhz-protocol-import$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/[0-9]+/artifacts/[0-9]+/download-grant$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/[0-9]+/artifacts/[0-9]+/download$#', 'payroll.submissions', AccessLevel::READ],
@@ -327,6 +336,12 @@ final class RoutePermissionMap
         ['*', '#^/api/settings/(email-branding|supplier/logo)(/|$)#', 'settings.branding', AccessLevel::WRITE],
         ['GET', '#^/api/settings/ai-assist$#', 'settings.ai_provider', AccessLevel::READ],
         ['*', '#^/api/settings/.*/ai|^/api/settings/ai#', 'settings.ai_provider', AccessLevel::WRITE],
+        // Trezor certifikátů se řídí oprávněním k podpisům, ne k firmě. Bez
+        // tohohle pravidla propadne na obecný fallback `/api/settings` a hlídá
+        // ho jiné oprávnění, než jaké kontroluje sama akce — dvě různá pravidla
+        // na tentýž endpoint se dřív nebo později rozejdou.
+        ['GET', '#^/api/settings/certificates(/|$)#', 'settings.signing', AccessLevel::READ],
+        ['*', '#^/api/settings/certificates(/|$)#', 'settings.signing', AccessLevel::WRITE],
         ['GET', '#^/api/settings/(signing|pdf-signing)(/|$)#', 'settings.signing', AccessLevel::READ],
         ['*', '#^/api/settings/(signing|pdf-signing)(/|$)#', 'settings.signing', AccessLevel::WRITE],
         ['GET', '#^/api/settings/accounting-activation/status$#', 'settings.company', AccessLevel::READ],

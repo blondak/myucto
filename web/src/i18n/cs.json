@@ -1743,7 +1743,8 @@
                 "payout": {
                     "cash": "Hotově",
                     "bank": "Na účet",
-                    "mixed": "Kombinovaně"
+                    "mixed": "Kombinovaně",
+                    "partner_settlement": "Zápočtem na účet společníka"
                 },
                 "identity_title": "Historie jména",
                 "addresses_title": "Historie adres",
@@ -1790,6 +1791,11 @@
                 "primary_contact": "Primární kontakt",
                 "active": "Aktivní",
                 "payout_method": "Způsob výplaty",
+                "partner_settlement_hint": "Čistá mzda se nevyplácí — měsíčně se přeúčtuje jako zápočet proti účtu společníka (331/366 MD / 365 D). Nevzniká platba ani pokladní doklad.",
+                "partner_settlement_account": "Účet zápočtu",
+                "partner_settlement_account_placeholder": "např. 365.100",
+                "partner_settlement_account_hint": "Analytika účtu Ostatní dluhy ke společníkům obchodní korporace z osnovy firmy.",
+                "partner_settlement_unavailable": "Zápočet na účet společníka lze zvolit jen u příjmu společníka nebo odměny za výkon funkce.",
                 "cash_allocation": "Podíl hotovosti (setiny %)",
                 "payout_effective_on": "Rozdělení platí od",
                 "account_hint": "Součet aktivních bankovních podílů a hotovosti musí být 10 000.",
@@ -2081,16 +2087,207 @@
             "subtitle": "Příprava, kontrola a stažení zákonných hlášení odděleně pro testovací a produkční prostředí.",
             "tabs_label": "Druhy mzdových podání",
             "tabs": {
+                "transport": "Stav odeslání",
                 "regzel": "Registrace zaměstnavatele",
                 "jmhz": "JMHZ",
                 "health": "Zdravotní pojišťovny",
-                "inbox": "Inbox"
+                "inbox": "Inbox",
+                "certificate": "Certifikát"
             },
             "unsupported": "Zatím nepodporováno",
             "jmhz_title": "Jednotné měsíční hlášení zaměstnavatele",
             "jmhz_fail_closed": "Přímá příprava a odeslání JMHZ zatím nejsou zpřístupněné. Dokud nebude dokončené mapování, ověření dodejek a korekcí, systém žádné podání nepředstírá.",
             "health_title": "Hlášení zdravotním pojišťovnám",
             "health_fail_closed": "Přímá podání zdravotním pojišťovnám zatím nejsou zpřístupněná. Systém je nebude označovat jako odeslaná ani přijatá bez ověřeného kanálu a dodejky.",
+            "transport": {
+                "title": "Odeslaná podání a jejich stav",
+                "description": "Přehled všech pokusů o odeslání na ČSSZ, od nejnovějšího. Odesílá se při zmrazení podání — tady se stav sleduje a dotahuje výsledek.",
+                "load_failed": "Historii odeslání se nepodařilo načíst.",
+                "state_unknown": "Dokud se načtení nepovede, systém neví, co bylo odesláno — neberte prosím prázdnou obrazovku jako důkaz, že podání neodešlo.",
+                "environment": {
+                    "label": "Prostředí",
+                    "production": "Produkce",
+                    "test": "Testovací",
+                    "production_note": "Ostrá podání na ČSSZ. Co je v tomhle seznamu, platí vůči úřadu.",
+                    "test_note": "Testovací prostředí ČSSZ. Podání odsud se za splnění povinnosti nepovažuje."
+                },
+                "vs": {
+                    "label": "Variabilní symbol zaměstnavatele",
+                    "hint": "Brána VREP se na výsledek podání ptá pod variabilním symbolem zaměstnavatele — bez něj nelze zjistit stav ani uzavřít transakci. Najdete ho na rozhodnutí o registraci u ČSSZ.",
+                    "pick": "Převzít z pracoviště:",
+                    "missing": "V nastavení zaměstnavatele nemá variabilní symbol pro sociální zabezpečení vyplněný žádné aktivní pracoviště. Doplňte ho v nastavení, nebo ho zadejte tady ručně.",
+                    "required": "Zadejte variabilní symbol (nejvýše deset číslic), aby šlo zjistit stav nebo uzavřít transakci."
+                },
+                "empty": {
+                    "title": "Zatím nebylo nic odesláno",
+                    "description": "V tomhle prostředí zatím neproběhl žádný pokus o odeslání. Podání se odesílá po zmrazení v záložce JMHZ.",
+                    "import_hint": "Pokud jste za tohle prostředí podávali jiným softwarem, načtěte protokol o zpracování z datové schránky — přehled ho pak ukáže vedle podání odeslaných odsud."
+                },
+                "source": {
+                    "app": "Odesláno aplikací",
+                    "imported": "Načtený protokol"
+                },
+                "imported": {
+                    "action": "Načíst protokol z datové schránky",
+                    "importing": "Načítám protokol…",
+                    "hint": "Podání odeslaná jiným softwarem tenhle přehled nezná. Protokol o zpracování, který ČSSZ doručí do datové schránky, sem jde načíst jako XML — do přehledu se tím dostane i to, co odešlo mimo aplikaci. Protokol vystavený na cizí variabilní symbol systém odmítne.",
+                    "added": "Protokol byl načten. Stav hlášení: {status}.",
+                    "replaced": "Tenhle protokol už načtený byl — záznam se aktualizoval, druhý se nezaložil.",
+                    "failed": "Protokol se nepodařilo načíst.",
+                    "note": "Tenhle doklad přišel z datové schránky, neodeslala ho aplikace. Datovou větu podání proto nezná — na stav se nelze doptat ani uzavřít transakci, výsledek říká samotný protokol.",
+                    "period": "Období {month}/{year}",
+                    "period_unknown": "Období protokol neuvádí",
+                    "guid": "ID podání (idPodani)",
+                    "guid_missing": "Protokol ID podání neuvádí",
+                    "status_code": "Kód stavu",
+                    "protocol_dated_at": "Datum protokolu",
+                    "submitted_at": "Datum podání",
+                    "detail_unavailable": "Uložený originál se nepodařilo znovu přečíst, takže detail chyb tu není. Protokol hlásí chyb: {total}.",
+                    "kind": {
+                        "processing": "Protokol o zpracování",
+                        "completeness": "Protokol o kompletnosti",
+                        "partial_submission": "Protokol z dílčího podání"
+                    }
+                },
+                "group": {
+                    "period": "Období {start} – {end}",
+                    "period_unknown": "Období se nepodařilo dohledat",
+                    "submission": "Podání č. {id}",
+                    "attempts": "Pokusů: {total}"
+                },
+                "status": {
+                    "prepared": "Připraveno k odeslání",
+                    "sent": "Odesláno",
+                    "awaiting_protocol": "Převzato, čeká na protokol",
+                    "completed": "Protokol dotažen",
+                    "failed": "Odeslání selhalo",
+                    "expired": "Propadlo"
+                },
+                "attempt_no": "Pokus č. {no}",
+                "sent_at": "Odesláno {at}",
+                "not_sent_yet": "Zatím neodesláno",
+                "awaiting_note": "ČSSZ potvrdila převzetí zprávy, ne přijetí podání — o výsledku rozhoduje až protokol o zpracování. Zjistěte stav; do té doby transakci neuzavírejte, výsledek by se ztratil.",
+                "poll": "Zjistit stav",
+                "polling": "Zjišťuji stav…",
+                "poll_failed": "Stav podání se nepodařilo zjistit.",
+                "poll_inconclusive": "ČSSZ zatím nevrátila ani potvrzení o převzetí, ani protokol. Zkuste to prosím za chvíli znovu.",
+                "close": "Uzavřít",
+                "closing": "Uzavírám…",
+                "close_failed": "Transakci se nepodařilo uzavřít.",
+                "closed": "Transakce pokusu č. {id} byla uzavřena.",
+                "close_note": "Protokol je dotažený, transakci je proto možné uzavřít. Podací protokol ČSSZ uzavření vyžaduje.",
+                "correlation": "CorrelationID",
+                "correlation_missing": "Nepřiděleno",
+                "copy": "Kopírovat",
+                "copied": "Zkopírováno",
+                "http_status": "HTTP odpověď",
+                "completed_at": "Dokončeno",
+                "acknowledged": "ČSSZ potvrdila převzetí, zpracování běží. Doporučený odstup dalšího dotazu: {seconds} s.",
+                "protocol_status": {
+                    "ProcessedAndComplete": "Zpracováno a je úplné",
+                    "NotAccepted": "Nebylo přijato",
+                    "Rejected": "Zamítnuto",
+                    "PartiallyAccepted": "Částečně přijato",
+                    "Processing": "Ve zpracování",
+                    "ContainsPassableErrors": "Obsahuje propustné chyby"
+                },
+                "origin": {
+                    "dis": "DIS",
+                    "cjmhz": "cJMHZ",
+                    "platform": "Platforma"
+                },
+                "report": {
+                    "no_errors": "Protokol neobsahuje žádnou chybu.",
+                    "area": "Oblast: {area}",
+                    "attributes": "Dotčené atributy:",
+                    "control_unknown": "Tuhle kontrolu náš katalog nezná — hláška je proto zobrazená tak, jak přišla z ČSSZ.",
+                    "ik_mpsv": "IK MPSV {value}",
+                    "id_ppv": "ID PPV {value}",
+                    "form_guid": "Formulář {value}"
+                }
+            },
+            "signing": {
+                "title": "Podpisový certifikát ČSSZ",
+                "description": "Vyberte, kterým z uložených certifikátů se podepisují mzdová podání této firmy. Certifikáty se sem nenahrávají — trezor je v aplikaci jeden, v Systém → Elektronické podpisy.",
+                "load_failed": "Nastavení podpisového certifikátu se nepodařilo načíst.",
+                "state_unknown": "Dokud se načtení nepovede, systém neví, jestli je certifikát zvolený — neberte prosím prázdnou obrazovku jako důkaz, že nastavený není.",
+                "storage_unavailable": "Úložiště volby certifikátu zatím není k dispozici — neproběhla migrace databáze. Volbu teď uložit nelze.",
+                "environment": {
+                    "label": "Prostředí",
+                    "production": "Produkce",
+                    "test": "Test",
+                    "production_note": "Ostré prostředí. Tímhle certifikátem se podepisují skutečná podání na ČSSZ.",
+                    "test_note": "Testovací prostředí ČSSZ. Testovací certifikát bývá jiný než produkční — záměna se pozná až z protokolu ČSSZ, tedy typicky po termínu."
+                },
+                "current": {
+                    "title": "Co podepisuje teď",
+                    "none": "Pro tohle prostředí není zvolený žádný certifikát. Mzdová podání se zatím nepodepíšou.",
+                    "selected": "Podepisuje se certifikátem „{label}“.",
+                    "unknown_label": "neznámý certifikát",
+                    "foreign": "Volbu uložil jiný uživatel svým certifikátem — ve vašem trezoru není, takže s ním podepsat nemůžete.",
+                    "registered_serial": "Sériové číslo registrované u ČSSZ: {serial}",
+                    "registered_serial_missing": "nevyplněno",
+                    "updated_at": "Naposledy změněno {at}"
+                },
+                "picker": {
+                    "title": "Volba certifikátu",
+                    "description": "Nabídka obsahuje certifikáty z trezoru, které máte k dispozici. Nový certifikát se nahrává v Systém → Elektronické podpisy a tam se také povoluje pro tuhle firmu.",
+                    "label": "Certifikát z trezoru",
+                    "placeholder": "Vyberte certifikát",
+                    "no_results": "Žádný odpovídající certifikát",
+                    "option_valid_until": "Platí do {date}",
+                    "option_expired": "Vypršel {date}",
+                    "option_not_yet_valid": "Začne platit {date}",
+                    "option_not_enabled": "Pro tuhle firmu není povolený"
+                },
+                "vault": {
+                    "empty": "V trezoru nemáte žádný certifikát. Nahrává se na jednom místě pro celou aplikaci — v Systém → Elektronické podpisy.",
+                    "open": "Otevřít elektronické podpisy"
+                },
+                "certificate": {
+                    "subject": "Vydán pro",
+                    "issuer": "Vydavatel",
+                    "validity": "Platnost",
+                    "serial_hex": "Sériové číslo (hexadecimálně, jako v certifikátu)",
+                    "serial_decimal": "Sériové číslo (decimálně, jako na formuláři ČSSZ)",
+                    "serial_unknown": "neznámé"
+                },
+                "badge": {
+                    "usable": "Použitelný",
+                    "expired": "Vypršel {date}",
+                    "not_yet_valid": "Začne platit {date}",
+                    "expires_soon": "Vyprší za {days} dnů",
+                    "not_enabled": "Nepovolený pro tuhle firmu"
+                },
+                "serial": {
+                    "label": "Sériové číslo registrované u ČSSZ",
+                    "placeholder": "Číslo z oznámení o pověření",
+                    "hint": "Číslo najdete na formuláři „Oznámení o pověření“. ČSSZ ho tiskne decimálně, certifikát ho nese hexadecimálně — porovnejte ho s oběma tvary vypsanými výše. Oddělovače (dvojtečky, mezery) nevadí.",
+                    "hint_optional": "Když se čísla neshodují, uložení se odmítne: podání podepsané takovým certifikátem by ČSSZ zamítla. Pole lze nechat prázdné, pak ale shodu s registrací nikdo neověří."
+                },
+                "step_up": {
+                    "title": "Potvrzení totožnosti",
+                    "hint": "Volba rozhoduje, čím se podepisují úřední podání jménem firmy, proto se ověřuje stejně jako správa samotného klíče.",
+                    "password": "Aktuální heslo",
+                    "totp": "Kód z autentikátoru",
+                    "password_missing": "Zadejte aktuální heslo, nebo se ověřte přístupovým klíčem.",
+                    "totp_missing": "Zadejte šestimístný kód z autentikátoru.",
+                    "passkey_verify": "Ověřit přístupovým klíčem",
+                    "passkey_verified": "Ověřeno přístupovým klíčem",
+                    "passkey_failed": "Ověření přístupovým klíčem se nepovedlo.",
+                    "passkey_unsupported": "Tento prohlížeč přístupové klíče nepodporuje — použijte heslo.",
+                    "or_password": "nebo použijte heslo"
+                },
+                "save": "Uložit volbu",
+                "saving": "Ukládám…",
+                "saved": "Volba certifikátu je uložená.",
+                "save_failed": "Volbu certifikátu se nepodařilo uložit.",
+                "remove": "Zrušit volbu",
+                "removing": "Ruším…",
+                "removed": "Volba certifikátu byla zrušená.",
+                "remove_failed": "Volbu certifikátu se nepodařilo zrušit.",
+                "read_only": "Na změnu podpisového certifikátu nemáte oprávnění."
+            },
             "inbox": {
                 "title": "Inbox mzdových podání",
                 "subtitle": "Odvozený přehled blížících se a prošlých lhůt, odmítnutých podání a čekání na ztotožnění. Potvrzení ani odložení nemění stav povinnosti ani podání — jen připomínku.",
@@ -2177,6 +2374,22 @@
                 "jmhz_dry_run_show_xml": "Zobrazit XML",
                 "jmhz_dry_run_hide_xml": "Skrýt XML",
                 "jmhz_dry_run_copy_xml": "Kopírovat XML",
+
+                "jmhz_dry_run_incomplete": "XML prošlo schématem, ale katalog kontrol ještě není celý vykonaný — podání zatím není připravené k odeslání.",
+
+                "jmhz_controls_summary": "Kontroly ČSSZ: {passed} splněno · {failed} nesplněno · {remote} rozhodne až ČSSZ · {gaps} bez implementace",
+
+                "jmhz_controls_blocking": "Nepropustné vady ({count}) — podání by bylo neúčinné",
+
+                "jmhz_controls_gaps": "Nevykonané nepropustné kontroly ({count})",
+
+                "jmhz_controls_warnings": "Propustné vady ({count}) — podání projde, data budou chybná",
+
+                "jmhz_controls_form": "součást {ordinal}",
+
+                "jmhz_deadline": "Lhůta pro podání: od {from} do {to} (posunuto na pracovní den).",
+
+                "jmhz_controls_deviations": "Odchylky od doslovného znění katalogu ({count}) — k ověření proti protokolu ČSSZ",
                 "jmhz_dry_run_failed": "Nácvik měsíčního hlášení se nepodařilo spustit.",
                 "jmhz_dry_run_blockers": {
                     "jmhz_preparation_not_ready": "Zdroje hlášení nejsou úplné.",
@@ -2581,7 +2794,8 @@
                 "social_insurance": "Závazek sociálního pojištění",
                 "health_insurance": "Závazek zdravotního pojištění",
                 "income_tax": "Záloha nebo srážka daně",
-                "other_deductions": "Ostatní srážky ze mzdy"
+                "other_deductions": "Ostatní srážky ze mzdy",
+                "partner_settlement": "Zápočet na účet společníka"
             },
             "validation": {
                 "title": "Před uložením opravte označená pole.",
@@ -2677,9 +2891,17 @@
             "supported_years": "Podporované roky",
             "available_features": "Dostupné funkce",
             "matrix_version": "Verze support matrix",
+            "settings": "Nastavení mezd",
+            "setup": {
+                "title": "Nastavení není hotové",
+                "description": "Než půjde spočítat mzdový běh, doplňte tyhle údaje zaměstnavatele.",
+                "action": "Otevřít nastavení"
+            },
             "month": {
                 "title": "Tento měsíc",
                 "description": "Nejčastější kroky pro mzdové období {period}.",
+                "run_status": "Běh: {status}",
+                "run_missing": "Běh zatím nezaložen",
                 "quick_inputs": "Doplnit mzdy a odměny",
                 "quick_inputs_hint": "Základní mzdy, přesčasy, bonusy a měsíční částky na jednom místě.",
                 "runs": "Spočítat a schválit mzdy",
@@ -2690,6 +2912,78 @@
                 "payments_hint": "Připravit čisté mzdy, daň a pojistné k úhradě.",
                 "documents": "Dokumenty a podání",
                 "documents_hint": "Stáhnout pásky, měsíční balíček a zkontrolovat výstupy."
+            }
+        },
+        "guide": {
+            "title": "Jak to funguje",
+            "intro": "Mzdový měsíc má pevné pořadí — každý krok potřebuje výsledek toho předchozího. Klikněte na krok a dostanete se rovnou na jeho stránku.",
+            "dismiss": "Skrýt návod",
+            "reopen": "Zobrazit návod „Jak to funguje“",
+            "setup_note": "Poprvé? Nejdřív vyplňte údaje zaměstnavatele (ČSSZ, finanční úřad, zdravotní pojišťovny, účty institucí) a založte lidi.",
+            "setup_link": "Nastavení mezd",
+            "manual_note": "Podrobný postup včetně příkladů je v manuálu.",
+            "manual_link": "Kapitola Mzdy",
+            "steps": {
+                "absences": {
+                    "title": "Zapsat nepřítomnosti",
+                    "hint": "Dovolená, nemoc, ošetřovné, překážky. Musí být v systému dřív než výpočet."
+                },
+                "time": {
+                    "title": "Uzavřít docházku",
+                    "hint": "Zkontrolovat odpracované hodiny a měsíc schválit."
+                },
+                "quick_inputs": {
+                    "title": "Doplnit mzdy a odměny",
+                    "hint": "Základní mzda, přesčasy, bonusy — jeden řádek na zaměstnance."
+                },
+                "runs": {
+                    "title": "Spočítat mzdový běh",
+                    "hint": "Uzamknout vstupy → přepočítat → zkontrolovat → schválit."
+                },
+                "payments": {
+                    "title": "Zaúčtovat a zaplatit",
+                    "hint": "Čisté mzdy, záloha na daň a pojistné k úhradě."
+                },
+                "documents": {
+                    "title": "Vydat pásky a dokumenty",
+                    "hint": "Výplatní pásky a měsíční balíček ke stažení."
+                },
+                "submissions": {
+                    "title": "Odeslat podání a uzavřít",
+                    "hint": "Přehledy ČSSZ a pojišťoven, hlášení pro finanční úřad, pak běh uzavřít."
+                }
+            }
+        },
+        "employee_cards": {
+            "title": "Zaměstnanci",
+            "subtitle": "Kdo je na výplatní listině za období {period} a kolik má dostat.",
+            "manage": "Spravovat zaměstnance",
+            "load_failed": "Karty zaměstnanců se nepodařilo načíst. Zkuste to znovu nebo otevřete seznam zaměstnanců.",
+            "empty_title": "Zatím žádný zaměstnanec",
+            "empty_hint": "Založte prvního člověka a jeho pracovní vztah — pak se tady objeví jeho karta.",
+            "empty_action": "Přidat zaměstnance",
+            "search": "Hledat",
+            "search_placeholder": "Jméno nebo kód vztahu",
+            "no_results": "Filtru neodpovídá žádný zaměstnanec.",
+            "base": "Hrubá mzda za období",
+            "base_missing": "Nezadáno",
+            "gross_preview": "Včetně přesčasů a odměn: {amount}",
+            "summary": {
+                "people": "Zaměstnanců",
+                "gross": "Hrubé mzdy celkem",
+                "away": "Nepřítomných",
+                "attention": "K doplnění"
+            },
+            "filters": {
+                "active": "Aktivní",
+                "away": "Nepřítomní",
+                "attention": "K doplnění",
+                "all": "Všichni"
+            },
+            "actions": {
+                "vacation": "Dovolená",
+                "absence": "Absence",
+                "detail": "Karta"
             }
         },
         "capabilities": {
@@ -6148,7 +6442,7 @@
         "active_profiles": "Aktivní",
         "form_hint": "Profil bude svázaný s tvým uživatelským účtem.",
         "credential_title": "Certifikát profilu",
-        "credential_hint": "Certifikát je společný pro všechna povolená použití profilu.",
+        "credential_hint": "Certifikát je společný pro všechna povolená použití profilu. Primárně ho vyberte ze sekce Certifikáty — tam se nahrává jednou pro celou aplikaci.",
         "credential_save_first": "Certifikát půjde nahrát po prvním uložení profilu.",
         "default_profiles_title": "Mapování podpisových profilů",
         "default_profiles_hint": "Při strategii přihlášeného uživatele aplikace použije zvolený profil pro daný typ výstupu.",
@@ -9999,14 +10293,50 @@
         "signing_profile_cert_uploaded": "Certifikát profilu nahrán.",
         "signing_profile_cert_deleted": "Certifikát profilu odebrán.",
         "signing_profile_cert_delete_confirm": "Opravdu odebrat certifikát z tohoto profilu?",
+        "certificate_vault_title": "Certifikáty",
+        "certificate_vault_hint": "Jediné místo, kam se certifikát nahrává. Odsud si ho berou podpisy PDF, šifrované e-maily S/MIME, podání na EPO i mzdová podání na ČSSZ — nahrávat ho na několika místech už není potřeba.",
+        "certificate_vault_security": "Soubor PFX/P12 i jeho heslo se ukládají pouze šifrovaně samostatným aplikačním klíčem. Soukromý klíč se nikdy nevrací do prohlížeče ani do logu, takže každá operace s ním vyžaduje čerstvé ověření.",
+        "certificate_vault_list_title": "Uložené certifikáty",
+        "certificate_vault_empty": "Zatím tu žádný certifikát není.",
+        "certificate_vault_subject": "Vlastník",
+        "certificate_vault_issuer": "Vydavatel",
+        "certificate_vault_serial": "Sériové číslo",
+        "certificate_vault_validity": "Platnost",
+        "certificate_vault_enabled_for_company": "Povoleno pro tuto firmu",
+        "certificate_vault_disabled_for_company": "Nepovoleno pro tuto firmu",
+        "certificate_vault_linked_profiles": "Napojeno na podpisové profily: {count}",
+        "certificate_vault_grant_hint": "Který certifikát smí konkrétní firma použít, se povoluje u daňových podání.",
+        "certificate_vault_grant_link": "Přejít na Daňová podání",
+        "certificate_vault_upload_title": "Nahrát certifikát",
+        "certificate_vault_upload_hint": "Soubor PFX/P12 se soukromým klíčem. Heslo k souboru není heslo do MyÚčta — je to heslo, kterým je chráněný samotný certifikát.",
+        "certificate_vault_choose_file": "Vybrat soubor",
+        "certificate_vault_no_file": "Není vybrán žádný soubor",
+        "certificate_vault_label": "Označení",
+        "certificate_vault_password": "Heslo k certifikátu",
+        "certificate_vault_store": "Uložit certifikát",
+        "certificate_vault_uploaded": "Certifikát byl uložen.",
+        "certificate_vault_load_failed": "Certifikáty se nepodařilo načíst.",
+        "certificate_vault_step_up_password": "Heslo do MyÚčta",
+        "certificate_vault_step_up_totp": "Kód z autentikátoru",
+        "certificate_vault_step_up_hint": "Ověření platí jen pro tohle jedno nahrání a nikam se neukládá.",
+        "certificate_vault_step_up_password_missing": "Pro uložení certifikátu zadejte své heslo do MyÚčta.",
+        "certificate_vault_step_up_totp_missing": "Pro uložení certifikátu zadejte šestimístný kód z autentikátoru.",
+        "certificate_vault_step_up_or_password": "nebo se ověřte heslem",
+        "certificate_vault_verify_passkey": "Ověřit passkey",
+        "certificate_vault_passkey_verified": "Passkey ověřeno",
+        "certificate_vault_passkey_unsupported": "Tenhle prohlížeč passkey nepodporuje, ověřte se heslem.",
+        "certificate_vault_passkey_failed": "Ověření passkey selhalo.",
         "signing_vault_source": "Zdroj certifikátu",
-        "signing_use_personal_vault": "Použít osobní certifikát EPO",
+        "signing_use_personal_vault": "Vybrat z Certifikátů",
         "signing_uploaded_source": "Nahrát samostatný certifikát",
-        "signing_upload_separate": "Nahrát samostatný certifikát",
-        "signing_vault_certificate": "Osobní certifikát",
+        "signing_upload_separate": "Nahrát soubor jen do profilu",
+        "signing_upload_legacy_badge": "starší postup",
+        "signing_upload_legacy_hint": "Starší postup: soubor se uloží na disk serveru mimo sdílené Certifikáty a bude platit jen pro tenhle profil. Použijte ho jen tam, kde certifikát ze sekce Certifikáty použít nejde.",
+        "signing_vault_certificate": "Certifikát",
         "signing_vault_choose": "Vyberte certifikát",
-        "signing_vault_hint": "Soukromý klíč zůstává v šifrovaném osobním trezoru. Stejný certifikát lze bezpečně použít pro EPO, PDF i S/MIME bez opakovaného nahrávání.",
-        "signing_vault_manage": "Spravovat osobní certifikáty EPO",
+        "signing_vault_empty_hint": "Pro tuhle firmu zatím není povolený žádný platný certifikát. Nahrajte ho v sekci Certifikáty a povolte ho u daňových podání.",
+        "signing_vault_hint": "Soukromý klíč zůstává v šifrovaném trezoru. Stejný certifikát tak jde použít pro PDF, S/MIME i EPO bez opakovaného nahrávání.",
+        "signing_vault_manage": "Přejít na sekci Certifikáty",
         "signing_vault_personal_profile_required": "Osobní certifikát lze připojit pouze k vašemu vlastnímu podpisovému profilu.",
         "signing_vault_certificate_required": "Vyberte osobní certifikát.",
         "signing_vault_password_required": "Pro připojení osobního certifikátu zadejte aktuální heslo do MyÚčta.",
@@ -11263,6 +11593,9 @@
             "ik_mpsv_warning": "V certifikátu se nepodařilo rozpoznat IK MPSV. Podpis může fungovat, ale EPO nemusí automaticky propojit podepisující osobu; ověřte údaje certifikátu.",
             "upload_certificate": "Uložit nový P12/PFX",
             "upload_certificate_hint": "Použijte osobní kvalifikovaný certifikát pro elektronický podpis, nikoli běžný SSL nebo komerční certifikát.",
+            "upload_moved_title": "Nahrání certifikátu",
+            "upload_moved_hint": "Certifikáty se nahrávají na jednom místě — Systém → Elektronické podpisy → Certifikáty. Odtud si je bere EPO, podpis PDF, S/MIME i mzdová podání. Tady se jen vybírá, který z nich smí tahle firma použít.",
+            "upload_moved_link": "Přejít na Certifikáty",
             "certificate_file": "Soubor P12/PFX",
             "choose_certificate_file": "Vybrat P12/PFX",
             "no_certificate_file": "Nebyl vybrán žádný soubor",
@@ -13731,6 +14064,7 @@
         "checks_hint": "Problémy a varování jsou nahoře. U každého najdete dopad, nápravu i odkaz do manuálu.",
         "actual": "Naměřeno",
         "expected": "Očekáváno",
+        "info": "Poznámka",
         "fix": "Náprava",
         "manual_link": "Otevřít manuál",
         "summary_counts": "{fail} problémů, {warn} varování, {ok} v pořádku",
@@ -13849,7 +14183,8 @@
                 "impact": "Bez cronu nevznikají zálohy, neodcházejí upomínky a nestahují se kurzy ČNB.",
                 "fix": "Zkontrolujte naplánování úloh a jejich poslední běh na stránce Plánované úlohy.",
                 "actual_label": "Zaseklé úlohy",
-                "expected_label": "Očekáváno"
+                "expected_label": "Očekáváno",
+                "info_label": "Neaktivní úlohy (nenastavené nebo vypnuté)"
             },
             "app_debug": {
                 "label": "Ladicí režim",

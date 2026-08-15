@@ -57,6 +57,7 @@ const accountRows: Array<{
   { key: 'health_insurance', debit: null, credit: 'health_insurance_credit' },
   { key: 'income_tax', debit: null, credit: 'income_tax_credit' },
   { key: 'other_deductions', debit: null, credit: 'other_deductions_credit' },
+  { key: 'partner_settlement', debit: null, credit: 'partner_settlement_credit' },
 ]
 
 const defaultAccounts: PayrollEmployerAccounts = {
@@ -71,6 +72,7 @@ const defaultAccounts: PayrollEmployerAccounts = {
   health_insurance_credit: '336',
   income_tax_credit: '342',
   other_deductions_credit: '379',
+  partner_settlement_credit: '365',
 }
 
 const form = reactive<EmployerSettingsForm>({

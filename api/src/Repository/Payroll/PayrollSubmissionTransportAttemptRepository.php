@@ -1,0 +1,598 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Repository\Payroll;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use PDO;
+use PDOException;
+
+/**
+ * Append-only ledger pokusů o odeslání mzdového podání (migrace 1372).
+ *
+ * Řádek je důkaz o jednom pokusu, ne stavová proměnná. Identita pokusu — podání,
+ * kanál, pořadí, idempotenční klíč a otisk požadavku — je v databázi neměnná,
+ * `correlation_reference` i `sent_at` jsou jednorázové přiřazení, stavy
+ * `completed`/`expired` jsou terminální a mazat nelze nic. Triggery to vynucují
+ * bez ohledu na to, co udělá aplikace; tenhle repozitář s nimi proto nebojuje,
+ * jen je respektuje a chyby, které jdou poznat dopředu, hlásí jako doménové
+ * (`DomainException`) s čitelnou zprávou místo neprůhledného pádu MariaDB.
+ */
+final class PayrollSubmissionTransportAttemptRepository
+{
+    private const TABLE = 'payroll_submission_transport_attempts';
+
+    /**
+     * Projekce záměrně vynechává `idempotency_key_hash`.
+     *
+     * Je to BINARY(32), takže by se volajícímu vracel binární balast, který se
+     * nedá serializovat do JSON, a hlavně: hash je jediná stopa po klíči, který
+     * se v čitelné podobě nikam neukládá. Kdo potřebuje řádek podle klíče, má
+     * findByIdempotencyKey(); ven se hash nedostane.
+     */
+    private const COLUMNS = 'id, supplier_id, environment, submission_id, channel,
+                    attempt_no, status, correlation_reference, request_sha256,
+                    response_http_status, error_code, error_message,
+                    next_retry_at, sent_at, completed_at, row_version,
+                    created_by, created_at, updated_at';
+
+    /** VARCHAR(500) v utf8mb4 — limit je ve ZNACÍCH, ne v bajtech. */
+    public const ERROR_MESSAGE_MAX_LENGTH = 500;
+
+    /** @var list<string> */
+    private const ENVIRONMENTS = ['production', 'test'];
+
+    /** @var list<string> */
+    private const CHANNELS = [
+        'manual_upload',
+        'isds',
+        'vrep_apep',
+        'pikr',
+        'health_portal',
+        'other',
+    ];
+
+    /** MariaDB kód duplicitního unikátního klíče. */
+    private const DUPLICATE_KEY = 1062;
+
+    public function __construct(private readonly Connection $db) {}
+
+    public function isAvailable(): bool
+    {
+        return $this->db->hasTable(self::TABLE);
+    }
+
+    /** @return array<string,mixed>|null */
+    public function find(
+        int $supplierId,
+        string $environment,
+        int $attemptId,
+    ): ?array {
+        if (!$this->isAvailable()) {
+            return null;
+        }
+
+        return $this->findOne(
+            'WHERE supplier_id = ? AND environment = ? AND id = ?',
+            [$supplierId, $environment, $attemptId],
+        );
+    }
+
+    /**
+     * Vyhledání podle idempotenčního klíče.
+     *
+     * Klíč se nikdy neukládá v čitelné podobě — v tabulce je jen jeho SHA-256
+     * v BINARY(32). Unikát je globální (napříč firmami i prostředími), protože
+     * klíč sám tenanta i prostředí obsahuje; scope řádku proto musí ověřit
+     * volající, ne tenhle dotaz. Uvnitř open() se to děje.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function findByIdempotencyKey(string $idempotencyKey): ?array
+    {
+        if (!$this->isAvailable()) {
+            return null;
+        }
+
+        return $this->findOne(
+            'WHERE idempotency_key_hash = ?',
+            [self::idempotencyHash($idempotencyKey)],
+        );
+    }
+
+    /** @return array<string,mixed>|null */
+    public function findByCorrelation(
+        int $supplierId,
+        string $environment,
+        string $channel,
+        string $correlationReference,
+    ): ?array {
+        if (!$this->isAvailable()) {
+            return null;
+        }
+
+        return $this->findOne(
+            'WHERE supplier_id = ? AND environment = ? AND channel = ?
+                AND correlation_reference = ?
+              ORDER BY attempt_no DESC
+              LIMIT 1',
+            [$supplierId, $environment, $channel, $correlationReference],
+        );
+    }
+
+    /**
+     * Poslední pokusy napříč podáními, od nejnovějšího.
+     *
+     * Uživatel se ptá „co jsem odeslal a v jakém je to stavu", ne „jak dopadlo
+     * podání číslo 14". Bez tohohle pohledu by odpověď existovala jen v
+     * databázi a nedala by se v aplikaci najít.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listRecent(
+        int $supplierId,
+        string $environment,
+        int $limit = 50,
+    ): array {
+        if (!$this->isAvailable()) {
+            return [];
+        }
+        self::assertEnvironment($environment);
+        // Limit se vkládá do SQL jako celé číslo, ne parametrem: MariaDB
+        // v LIMIT vázané parametry nepřijímá. Rozsah je proto omezený tady.
+        $limit = max(1, min($limit, 200));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . '
+               FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ?
+              ORDER BY id DESC
+              LIMIT ' . $limit,
+        );
+        $statement->execute([$supplierId, $environment]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (is_array($row)) {
+                $rows[] = self::normalize($row);
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Celá historie pokusů jednoho podání v pořadí, v jakém vznikly.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listForSubmission(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): array {
+        if (!$this->isAvailable()) {
+            return [];
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . '
+               FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ? AND submission_id = ?
+              ORDER BY attempt_no',
+        );
+        $statement->execute([$supplierId, $environment, $submissionId]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (is_array($row)) {
+                $rows[] = self::normalize($row);
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Další volné pořadové číslo pokusu.
+     *
+     * Je to jen návrh, ne rezervace — unikát (firma, prostředí, podání, pořadí)
+     * rozhodne až při zápisu, takže souběžný pokus se stejným číslem skončí
+     * v open() doménovou chybou a volající to zkusí znovu.
+     */
+    public function nextAttemptNo(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): int {
+        if (!$this->isAvailable()) {
+            return 1;
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COALESCE(MAX(attempt_no), 0) + 1
+               FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ? AND submission_id = ?',
+        );
+        $statement->execute([$supplierId, $environment, $submissionId]);
+
+        return (int) $statement->fetchColumn();
+    }
+
+    /**
+     * Založí pokus ve stavu `prepared`.
+     *
+     * Souběh na idempotenčním klíči NENÍ chyba — přesně kvůli němu klíč existuje:
+     * když unikát spadne, vrátí se existující řádek. Vrátit ho ale smíme jen
+     * tehdy, když je to opravdu TÝŽ požadavek. Proto se porovná otisk obsahu
+     * (`request_sha256`) i scope (firma, prostředí, podání, kanál): stejný klíč
+     * s jiným obsahem není opakování, ale chyba volajícího, a stejný klíč v jiné
+     * firmě by byl únik dat mezi tenanty.
+     *
+     * @return array<string,mixed>
+     */
+    public function open(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        string $channel,
+        int $attemptNo,
+        string $idempotencyKey,
+        string $requestSha256,
+        ?int $createdBy,
+    ): array {
+        self::assertEnvironment($environment);
+        self::assertChannel($channel);
+        if ($attemptNo < 1) {
+            throw new \DomainException(
+                'Pořadové číslo pokusu o odeslání musí být kladné.',
+            );
+        }
+        if (preg_match('/^[0-9a-f]{64}$/D', $requestSha256) !== 1) {
+            throw new \DomainException(
+                'Otisk požadavku musí být SHA-256 v malých hexadecimálních znacích.',
+            );
+        }
+        $hash = self::idempotencyHash($idempotencyKey);
+
+        try {
+            $statement = $this->db->pdo()->prepare(
+                'INSERT INTO ' . self::TABLE . '
+                    (supplier_id, environment, submission_id, channel,
+                     attempt_no, status, idempotency_key_hash, request_sha256,
+                     created_by)
+                 VALUES (?, ?, ?, ?, ?, "prepared", ?, ?, ?)',
+            );
+            $statement->execute([
+                $supplierId,
+                $environment,
+                $submissionId,
+                $channel,
+                $attemptNo,
+                $hash,
+                $requestSha256,
+                $createdBy,
+            ]);
+        } catch (PDOException $exception) {
+            if ((int) ($exception->errorInfo[1] ?? 0) !== self::DUPLICATE_KEY) {
+                throw $exception;
+            }
+
+            return $this->resolveDuplicate(
+                $hash,
+                $supplierId,
+                $environment,
+                $submissionId,
+                $channel,
+                $attemptNo,
+                $requestSha256,
+            );
+        }
+
+        return $this->requireById((int) $this->db->pdo()->lastInsertId());
+    }
+
+    /**
+     * Zaznamená odeslání: pokus přechází do `awaiting_protocol` a dostává
+     * correlation reference, bez které by se protokol nedal spárovat zpět.
+     *
+     * `sent_at` se plní časem databáze (UTC), ne časem PHP — ledger má jednu
+     * osu času, a to tu, na které běží ostatní důkazní tabulky.
+     *
+     * @return array<string,mixed>
+     */
+    public function markSent(
+        int $attemptId,
+        string $correlationReference,
+        int $httpStatus,
+        int $expectedVersion,
+    ): array {
+        if (
+            preg_match(
+                '/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/D',
+                $correlationReference,
+            ) !== 1
+        ) {
+            throw new \DomainException(
+                'Correlation reference pokusu o odeslání má nepovolený tvar.',
+            );
+        }
+        self::assertHttpStatus($httpStatus);
+
+        return $this->mutate(
+            'SET status = "awaiting_protocol", correlation_reference = ?,
+                 response_http_status = ?, sent_at = UTC_TIMESTAMP(),
+                 row_version = row_version + 1',
+            [$correlationReference, $httpStatus],
+            $attemptId,
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Uzavře pokus jako doručený. `completed` je terminální stav, takže tenhle
+     * krok je jednosměrný — a smí se udělat jen nad odeslaným pokusem, jinak by
+     * v ledgeru vznikl „dokončený" pokus bez důkazu o odeslání.
+     *
+     * @return array<string,mixed>
+     */
+    public function markCompleted(int $attemptId, int $expectedVersion): array
+    {
+        $current = $this->requireById($attemptId);
+        if (
+            $current['sent_at'] === null
+            || $current['correlation_reference'] === null
+        ) {
+            throw new \DomainException(
+                'Dokončit lze jen pokus, který byl odeslán a má correlation reference.',
+            );
+        }
+
+        return $this->mutate(
+            'SET status = "completed", completed_at = UTC_TIMESTAMP(),
+                 row_version = row_version + 1',
+            [],
+            $attemptId,
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Zaznamená neúspěch. Kód chyby i zpráva jsou povinné — neúspěch bez kódu
+     * by z ledgeru udělal nečitelný záznam a znemožnil rozhodnout, jestli se
+     * pokus smí opakovat. Tvar kódu i délku zprávy kontrolujeme tady, aby
+     * volající dostal větu, a ne SQLSTATE.
+     *
+     * @return array<string,mixed>
+     */
+    public function markFailed(
+        int $attemptId,
+        string $errorCode,
+        string $errorMessage,
+        ?int $httpStatus,
+        ?string $nextRetryAt,
+        int $expectedVersion,
+    ): array {
+        if (preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $errorCode) !== 1) {
+            throw new \DomainException(
+                'Kód chyby pokusu o odeslání musí odpovídat ^[a-z][a-z0-9_]{0,63}$, dostali jsme "'
+                . $errorCode . '".',
+            );
+        }
+        $message = trim($errorMessage);
+        if ($message === '') {
+            throw new \DomainException(
+                'Neúspěšný pokus o odeslání musí nést i text chyby, nejen kód.',
+            );
+        }
+        // Ořezáváme radši, než abychom kvůli ukecané chybě protistrany přišli
+        // o celý záznam o neúspěchu.
+        if (mb_strlen($message) > self::ERROR_MESSAGE_MAX_LENGTH) {
+            $message = mb_substr($message, 0, self::ERROR_MESSAGE_MAX_LENGTH);
+        }
+        if ($httpStatus !== null) {
+            self::assertHttpStatus($httpStatus);
+        }
+        if ($nextRetryAt !== null) {
+            $nextRetryAt = self::assertDateTime($nextRetryAt);
+        }
+
+        return $this->mutate(
+            'SET status = "failed", error_code = ?, error_message = ?,
+                 response_http_status = ?, next_retry_at = ?,
+                 row_version = row_version + 1',
+            [$errorCode, $message, $httpStatus, $nextRetryAt],
+            $attemptId,
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Jediná zapisovací cesta: každý UPDATE posouvá `row_version` právě o jedna
+     * a zároveň si ho hlídá v podmínce. Když neprojde ani jeden řádek, není to
+     * „nic se nezměnilo", ale prohraný souboj o zámek nebo neexistující pokus —
+     * a to se musí ozvat, ne tiše projít.
+     *
+     * @param list<int|string|null> $parameters
+     * @return array<string,mixed>
+     */
+    private function mutate(
+        string $assignments,
+        array $parameters,
+        int $attemptId,
+        int $expectedVersion,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'UPDATE ' . self::TABLE . ' ' . $assignments . '
+              WHERE id = ? AND row_version = ?',
+        );
+        $statement->execute([...$parameters, $attemptId, $expectedVersion]);
+        if ($statement->rowCount() !== 1) {
+            $current = $this->findOne('WHERE id = ?', [$attemptId]);
+            if ($current === null) {
+                throw new \DomainException(
+                    'Pokus o odeslání #' . $attemptId . ' neexistuje.',
+                );
+            }
+            throw new \DomainException(
+                'Pokus o odeslání #' . $attemptId
+                . ' byl mezitím změněn (očekávána verze ' . $expectedVersion
+                . ', aktuální ' . (int) $current['row_version'] . ').',
+            );
+        }
+
+        return $this->requireById($attemptId);
+    }
+
+    /**
+     * Rozhodne, co znamená spadlý unikát v open().
+     *
+     * @return array<string,mixed>
+     */
+    private function resolveDuplicate(
+        string $hash,
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        string $channel,
+        int $attemptNo,
+        string $requestSha256,
+    ): array {
+        $existing = $this->findOne(
+            'WHERE idempotency_key_hash = ?',
+            [$hash],
+        );
+        if ($existing === null) {
+            // Klíč je volný, takže kolidovalo pořadí — někdo si číslo vzal dřív.
+            throw new \DomainException(
+                'Pokus č. ' . $attemptNo . ' u podání #' . $submissionId
+                . ' už existuje; načtěte nové pořadové číslo a opakujte.',
+            );
+        }
+        if (
+            (int) $existing['supplier_id'] !== $supplierId
+            || $existing['environment'] !== $environment
+            || (int) $existing['submission_id'] !== $submissionId
+            || $existing['channel'] !== $channel
+        ) {
+            throw new \DomainException(
+                'Idempotenční klíč pokusu o odeslání už patří jinému podání.',
+            );
+        }
+        if ($existing['request_sha256'] !== $requestSha256) {
+            throw new \DomainException(
+                'Stejný idempotenční klíč nesmí nést jiný obsah požadavku.',
+            );
+        }
+
+        return $existing;
+    }
+
+    /** @return array<string,mixed> */
+    private function requireById(int $attemptId): array
+    {
+        $row = $this->findOne('WHERE id = ?', [$attemptId]);
+        if ($row === null) {
+            throw new \DomainException(
+                'Pokus o odeslání #' . $attemptId . ' neexistuje.',
+            );
+        }
+
+        return $row;
+    }
+
+    /**
+     * @param list<int|string> $parameters
+     * @return array<string,mixed>|null
+     */
+    private function findOne(string $where, array $parameters): ?array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . ' ' . $where,
+        );
+        $statement->execute($parameters);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return self::normalize($row);
+    }
+
+    /**
+     * @param array<array-key,mixed> $row
+     * @return array<string,mixed>
+     */
+    private static function normalize(array $row): array
+    {
+        /** @var array<string,mixed> $normalized */
+        $normalized = [];
+        foreach ($row as $key => $value) {
+            $normalized[(string) $key] = $value;
+        }
+        foreach (
+            ['id', 'supplier_id', 'submission_id', 'attempt_no', 'row_version']
+            as $field
+        ) {
+            if (array_key_exists($field, $normalized)) {
+                $normalized[$field] = (int) $normalized[$field];
+            }
+        }
+        foreach (['response_http_status', 'created_by'] as $field) {
+            if (array_key_exists($field, $normalized)) {
+                $normalized[$field] = $normalized[$field] === null
+                    ? null
+                    : (int) $normalized[$field];
+            }
+        }
+
+        return $normalized;
+    }
+
+    private static function idempotencyHash(string $idempotencyKey): string
+    {
+        if (trim($idempotencyKey) === '') {
+            throw new \DomainException(
+                'Idempotenční klíč pokusu o odeslání nesmí být prázdný.',
+            );
+        }
+
+        return hash('sha256', $idempotencyKey, true);
+    }
+
+    private static function assertEnvironment(string $environment): void
+    {
+        if (!in_array($environment, self::ENVIRONMENTS, true)) {
+            throw new \DomainException(
+                'Neznámé prostředí podání: "' . $environment . '".',
+            );
+        }
+    }
+
+    private static function assertChannel(string $channel): void
+    {
+        if (!in_array($channel, self::CHANNELS, true)) {
+            throw new \DomainException(
+                'Neznámý kanál podání: "' . $channel . '".',
+            );
+        }
+    }
+
+    private static function assertHttpStatus(int $httpStatus): void
+    {
+        if ($httpStatus < 100 || $httpStatus > 599) {
+            throw new \DomainException(
+                'HTTP status odpovědi je mimo rozsah 100–599: ' . $httpStatus . '.',
+            );
+        }
+    }
+
+    private static function assertDateTime(string $value): string
+    {
+        $parsed = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $value);
+        if ($parsed === false || $parsed->format('Y-m-d H:i:s') !== $value) {
+            throw new \DomainException(
+                'Termín dalšího pokusu musí být ve tvaru Y-m-d H:i:s, dostali jsme "'
+                . $value . '".',
+            );
+        }
+
+        return $value;
+    }
+}

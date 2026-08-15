@@ -1,4 +1,8 @@
 import { api } from './client'
+// Step-up (heslo / TOTP / passkey proof) je sdílený s EPO — volba podpisového
+// certifikátu je rozhodnutí stejné třídy jako správa klíče samotného, takže
+// kódování důkazu se nesmí rozejít se zbytkem aplikace.
+import { stepUpProofBody, type EpoStepUpProof } from './epoSubmissions'
 
 export type PayrollModuleStatus = 'disabled' | 'setup' | 'active' | 'suspended'
 export type PayrollSupportStatus = 'supported' | 'manual_review' | 'not_supported'
@@ -179,7 +183,7 @@ export interface PayrollPersonCreatePayload {
 
 export type PayrollPersonProfileStatus = 'missing' | 'legacy' | 'setup' | 'ready'
 export type PayrollPersonEditableProfileStatus = Exclude<PayrollPersonProfileStatus, 'missing'>
-export type PayrollPayoutMethod = 'cash' | 'bank' | 'mixed'
+export type PayrollPayoutMethod = 'cash' | 'bank' | 'mixed' | 'partner_settlement'
 export type PayrollSecureDeliveryChannel = 'portal' | 'paper'
 export type PayrollPersonAddressType = 'residence' | 'mailing'
 export type PayrollPersonContactType = 'email' | 'phone'
@@ -253,6 +257,7 @@ export interface PayrollPersonProfile {
   full_name: string
   profile_status: PayrollPersonProfileStatus
   payout_method: PayrollPayoutMethod
+  partner_settlement_account_code: string | null
   cash_allocation_basis_points: number
   payout_effective_on: string | null
   secure_delivery_channel: PayrollSecureDeliveryChannel
@@ -316,6 +321,7 @@ export interface PayrollPersonProfilePayload {
   row_version: number
   profile_status: PayrollPersonEditableProfileStatus
   payout_method: PayrollPayoutMethod
+  partner_settlement_account_code: string | null
   cash_allocation_basis_points: number
   payout_effective_on: string
   secure_delivery_channel: PayrollSecureDeliveryChannel
@@ -951,6 +957,7 @@ export interface PayrollEmployerAccounts {
   health_insurance_credit: string
   income_tax_credit: string
   other_deductions_credit: string
+  partner_settlement_credit: string
 }
 
 export interface PayrollAccountOption {
@@ -1355,10 +1362,52 @@ export interface PayrollJmhzXmlDryRunBlocker {
   attribute_ids: string[]
 }
 
+export type PayrollJmhzControlOutcome =
+  | 'passed'
+  | 'failed'
+  | 'not_applicable'
+  | 'not_evaluable'
+  | 'unimplemented'
+
+export interface PayrollJmhzControlFinding {
+  control_id: number
+  name: string
+  outcome: PayrollJmhzControlOutcome
+  scope: string
+  passability: 'blocking' | 'passable' | 'unavailable'
+  technical: boolean
+  part: string
+  form_ordinal: number | null
+  message: string
+  attribute_ids: string[]
+  error_code: number | null
+}
+
+export interface PayrollJmhzControlReport {
+  schema_reference: string
+  catalog_key: string
+  catalog_manifest_sha256: string
+  submittable: boolean
+  counts: Record<PayrollJmhzControlOutcome, number>
+  deviations: { control_id: number, reason: string }[]
+  blocking: PayrollJmhzControlFinding[]
+  warnings: PayrollJmhzControlFinding[]
+  coverage_gaps: PayrollJmhzControlFinding[]
+  evaluated: PayrollJmhzControlFinding[]
+}
+
 export interface PayrollJmhzXmlDryRun {
-  status: 'blocked' | 'dry_run_valid'
+  status: 'blocked' | 'dry_run_valid' | 'dry_run_incomplete'
   preparation_id: number
   blockers: PayrollJmhzXmlDryRunBlocker[]
+  controls?: PayrollJmhzControlReport
+  deadline?: {
+    period_start: string
+    earliest_submission_on: string
+    due_on: string
+    calendar_basis: string
+    ruleset_id: string
+  } | null
   xml?: string
   xml_sha256?: string
   schema?: {
@@ -1945,6 +1994,239 @@ export interface PayrollDependantClaimPayload {
   row_version?: number
 }
 
+/**
+ * Volba podpisového certifikátu pro mzdová podání na ČSSZ.
+ *
+ * Certifikáty se nahrávají v jednom trezoru (Systém → Elektronické podpisy);
+ * tady se jen vybírá, KTERÝ z nich podepisuje podání téhle firmy — a odděleně
+ * pro testovací a produkční prostředí, protože testovací certifikát bývá jiný
+ * a záměna se pozná až z protokolu ČSSZ, typicky po termínu.
+ */
+export type PayrollSigningEnvironment = 'production' | 'test'
+
+export interface PayrollSigningCertificate {
+  id: number
+  label: string
+  subject: string
+  issuer: string
+  /** Kanonický hex (bez oddělovačů a vedoucích nul); `null`, když ho neznáme. */
+  serial_hex: string | null
+  /** Totéž decimálně — ČSSZ tiskne sériové číslo na papíře v tomhle zápisu. */
+  serial_decimal: string | null
+  valid_from: string | null
+  valid_to: string | null
+  expired: boolean
+  not_yet_valid: boolean
+  usable_now: boolean
+  expires_in_days: number | null
+  enabled_for_supplier: boolean
+  ik_mpsv_present: boolean
+}
+
+export interface PayrollSigningWarning {
+  code: string
+  message: string
+}
+
+export interface PayrollSigningProfile {
+  environment: string
+  credential_id: number
+  owner_user_id: number
+  cssz_registered_serial: string | null
+  row_version: number
+  created_at: string | null
+  updated_at: string | null
+  /** `false`, když volbu uložil jiný uživatel svým certifikátem. */
+  certificate_accessible: boolean
+  certificate: PayrollSigningCertificate | null
+  expired: boolean
+}
+
+export interface PayrollSigningProfileView {
+  environment: PayrollSigningEnvironment
+  environments: PayrollSigningEnvironment[]
+  storage_available: boolean
+  profile: PayrollSigningProfile | null
+  certificates: PayrollSigningCertificate[]
+  warnings: PayrollSigningWarning[]
+}
+
+export interface PayrollSigningProfileResult {
+  environment: PayrollSigningEnvironment
+  profile: PayrollSigningProfile
+  warnings: PayrollSigningWarning[]
+}
+
+export interface PayrollSigningProfilePayload {
+  environment: PayrollSigningEnvironment
+  credential_id: number
+  /** Prázdné = uložit bez ověření proti oznámení o pověření. */
+  cssz_registered_serial?: string | null
+  /** Posílá se jen při ZMĚNĚ existující volby — u prvního uložení ho backend odmítne. */
+  row_version?: number | null
+}
+
+/**
+ * Ledger odeslaných měsíčních hlášení na ČSSZ.
+ *
+ * Přírůstkový a nikdy se nepřepisuje: každý pokus o odeslání zakládá vlastní
+ * řádek, takže několik pokusů k jednomu podání je normální stav a zároveň
+ * doklad o tom, co se dělo — ne nepořádek, který by se měl schovat.
+ */
+export type PayrollJmhzTransportEnvironment = 'test' | 'production'
+
+/**
+ * Šest stavů pokusu. `awaiting_protocol` NENÍ přijaté podání: ČSSZ potvrzuje
+ * převzetí okamžitě a o výsledku rozhoduje až později. Hotovo znamená teprve
+ * `completed`, tedy „dotáhli jsme protokol o zpracování".
+ */
+export type PayrollJmhzTransportStatus =
+  | 'prepared'
+  | 'sent'
+  | 'awaiting_protocol'
+  | 'completed'
+  | 'failed'
+  | 'expired'
+
+export interface PayrollJmhzTransportAttempt {
+  id: number
+  supplier_id: number
+  environment: string
+  submission_id: number
+  channel: string
+  attempt_no: number
+  status: PayrollJmhzTransportStatus
+  /** CorrelationID přidělené branou VREP; bez něj se na výsledek nelze zeptat. */
+  correlation_reference: string | null
+  request_sha256: string | null
+  response_http_status: number | null
+  error_code: string | null
+  error_message: string | null
+  next_retry_at: string | null
+  sent_at: string | null
+  completed_at: string | null
+  row_version: number
+  created_by: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PayrollJmhzTransportHistory {
+  environment: PayrollJmhzTransportEnvironment
+  attempts: PayrollJmhzTransportAttempt[]
+}
+
+/** Potvrzení o PŘEVZETÍ zprávy, ne o přijetí podání. */
+export interface PayrollJmhzTransportAcknowledgement {
+  correlation_id: string
+  poll_interval_seconds: number | null
+  gateway_timestamp: string | null
+}
+
+/** Kontrola z katalogu ČSSZ dohledaná ke kódu chyby. */
+export interface PayrollJmhzProtocolControl {
+  name: string
+  detail: string | null
+  area: string | null
+  category: string | null
+  /** Atributy, kterých se kontrola týká — bez nich se hláška nedá dohledat v datech. */
+  attribute_ids: string[]
+}
+
+export interface PayrollJmhzProtocolError {
+  /** Číselný kód z protokolu (DIS = ID kontroly + 20000, cJMHZ = + 40000). */
+  code: number
+  message: string
+  origin: 'dis' | 'cjmhz' | 'platform'
+  control_id: number | null
+  form_guid: string | null
+  ik_mpsv: string | null
+  id_ppv: string | null
+  /**
+   * `null` u chyby, kterou náš katalog nezná — prostor kódů ČSSZ je širší.
+   * Taková chyba se ukazuje syrová, nikdy se neskrývá.
+   */
+  control: PayrollJmhzProtocolControl | null
+}
+
+/** `status` je jméno případu výčtu na backendu, tedy PascalCase. */
+export type PayrollJmhzProtocolStatus =
+  | 'ProcessedAndComplete'
+  | 'NotAccepted'
+  | 'Rejected'
+  | 'PartiallyAccepted'
+  | 'Processing'
+  | 'ContainsPassableErrors'
+
+export interface PayrollJmhzProtocolReport {
+  status: PayrollJmhzProtocolStatus
+  errors: PayrollJmhzProtocolError[]
+}
+
+export interface PayrollJmhzTransportPoll {
+  attempt: PayrollJmhzTransportAttempt
+  acknowledgement: PayrollJmhzTransportAcknowledgement | null
+  /** `true` teprve tehdy, když ČSSZ vrátila protokol o zpracování. */
+  settled: boolean
+  report: PayrollJmhzProtocolReport | null
+}
+
+/**
+ * Protokol ČSSZ načtený ze souboru z datové schránky.
+ *
+ * Podání odeslané cizím softwarem naše aplikace nezná, takže přehled stavu
+ * odeslání by u takové firmy zůstal prázdný, i když podala. Načtený protokol
+ * je doklad o podání — ale NENÍ to náš pokus o odeslání, a v přehledu se tak
+ * ani nesmí tvářit.
+ */
+export type PayrollJmhzImportedProtocolKind =
+  | 'processing'
+  | 'completeness'
+  | 'partial_submission'
+
+export interface PayrollJmhzImportedProtocol {
+  id: number
+  supplier_id: number
+  environment: string
+  protocol_kind: PayrollJmhzImportedProtocolKind
+  /** Ověřený variabilní symbol; cizí protokol se neuloží. */
+  variable_symbol: string
+  period_month: number | null
+  period_year: number | null
+  /** `idPodani` — GUID, kterým se protokol páruje k podání. */
+  submission_guid: string | null
+  correlation_reference: string | null
+  /** Kód stavu hlášení 1–6 podle číselníku ČSSZ. */
+  status_code: number
+  status_name: PayrollJmhzProtocolStatus
+  error_count: number
+  protocol_dated_at: string | null
+  submitted_at: string | null
+  source_filename: string | null
+  payload_sha256: string
+  row_version: number
+  imported_by: number | null
+  created_at: string
+  updated_at: string
+  /** Vysvětlené chyby; počítají se z uloženého originálu při každém čtení. */
+  errors?: PayrollJmhzProtocolError[]
+  /** `false`, když se uložený originál nepodařilo znovu přečíst. */
+  detail_available?: boolean
+}
+
+export interface PayrollJmhzImportedProtocolHistory {
+  environment: PayrollJmhzTransportEnvironment
+  protocols: PayrollJmhzImportedProtocol[]
+}
+
+export interface PayrollJmhzImportedProtocolResult {
+  environment: PayrollJmhzTransportEnvironment
+  protocol: PayrollJmhzImportedProtocol
+  /** `false` u opakovaného načtení téhož protokolu — řádek se přepsal. */
+  created: boolean
+  errors: PayrollJmhzProtocolError[]
+}
+
 export const payrollApi = {
   capabilities: () =>
     api.get<PayrollCapabilitiesResponse>('/payroll/capabilities').then(response => response.data),
@@ -2515,4 +2797,84 @@ export const payrollApi = {
   applyInputImport: (payload: PayrollInputImportPayload) =>
     api.post<{ import: PayrollInputImportResult }>('/payroll/input-imports/apply', payload)
       .then(response => response.data.import),
+  signingProfile: (environment: PayrollSigningEnvironment) =>
+    api.get<PayrollSigningProfileView>('/payroll/submissions/signing-profile', {
+      params: { environment },
+    }).then(response => response.data),
+  saveSigningProfile: (
+    payload: PayrollSigningProfilePayload,
+    proof: EpoStepUpProof,
+  ) => api.put<PayrollSigningProfileResult>('/payroll/submissions/signing-profile', {
+    environment: payload.environment,
+    credential_id: payload.credential_id,
+    cssz_registered_serial: payload.cssz_registered_serial ?? '',
+    // Klíč se vynechá úplně, když volba ještě neexistuje: backend bere i `null`
+    // jako „neposláno", ale posílat pole, které nemá význam, jen svádí k tomu
+    // začít ho posílat i s nesmyslnou hodnotou.
+    ...(payload.row_version ? { row_version: payload.row_version } : {}),
+    ...stepUpProofBody(proof),
+  }).then(response => response.data),
+  deleteSigningProfile: (
+    environment: PayrollSigningEnvironment,
+    proof: EpoStepUpProof,
+  ) => api.delete<{ environment: PayrollSigningEnvironment; deleted: boolean }>(
+    '/payroll/submissions/signing-profile',
+    { data: { environment, ...stepUpProofBody(proof) } },
+  ).then(response => response.data),
+  /** Posledních 50 pokusů o odeslání, od nejnovějšího. */
+  jmhzTransportHistory: (environment: PayrollJmhzTransportEnvironment) =>
+    api.get<PayrollJmhzTransportHistory>('/payroll/submissions/jmhz-transport', {
+      params: { environment },
+    }).then(response => response.data),
+  /**
+   * Dotaz na výsledek. Variabilní symbol zaměstnavatele je povinný — brána VREP
+   * si jím ověřuje, že se ptá ten, kdo podával.
+   */
+  pollJmhzTransportAttempt: (
+    attemptId: number,
+    variableSymbol: string,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.get<PayrollJmhzTransportPoll>(
+    `/payroll/submissions/jmhz-transport/${attemptId}`,
+    { params: { variable_symbol: variableSymbol, environment } },
+  ).then(response => response.data),
+  /**
+   * Uzavření transakce. Podací protokol ho vyžaduje, ale až po dotažení
+   * protokolu — uzavřít dřív znamená přijít o výsledek.
+   */
+  closeJmhzTransportAttempt: (
+    attemptId: number,
+    variableSymbol: string,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.post<{ closed: boolean }>(
+    `/payroll/submissions/jmhz-transport/${attemptId}/close`,
+    { environment },
+    { params: { variable_symbol: variableSymbol, environment } },
+  ).then(response => response.data),
+  /** Protokoly načtené ze souboru, od nejnovějšího období. */
+  jmhzImportedProtocols: (environment: PayrollJmhzTransportEnvironment) =>
+    api.get<PayrollJmhzImportedProtocolHistory>(
+      '/payroll/submissions/jmhz-protocol-import',
+      { params: { environment } },
+    ).then(response => response.data),
+  /**
+   * Načte XML protokol z datové schránky. Server ho odmítne, pokud jeho
+   * variabilní symbol nepatří téhle firmě — cizí doklad se neuloží.
+   */
+  importJmhzProtocol: (
+    file: File,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('environment', environment)
+    return api.post<PayrollJmhzImportedProtocolResult>(
+      '/payroll/submissions/jmhz-protocol-import',
+      fd,
+      {
+        params: { environment },
+        headers: { 'Content-Type': 'multipart/form-data' },
+      },
+    ).then(response => response.data)
+  },
 }

@@ -39,7 +39,7 @@ function checkText(id: string, part: 'label' | 'impact' | 'fix'): string {
 }
 
 /** Popisek hodnoty — kontrola si ho smí přebít vlastním klíčem. */
-function valueLabel(id: string, part: 'actual' | 'expected'): string {
+function valueLabel(id: string, part: 'actual' | 'expected' | 'info'): string {
   const key = `diagnostics.checks.${id}.${part}_label`
   return te(key) ? t(key) : t(`diagnostics.${part}`)
 }
@@ -98,6 +98,12 @@ function statusPill(status: string): string {
         <div v-if="check.expected" class="flex gap-1.5">
           <dt class="text-neutral-500 shrink-0">{{ valueLabel(check.id, 'expected') }}:</dt>
           <dd class="font-mono break-all">{{ check.expected }}</dd>
+        </div>
+        <!-- `info` je informace, ne nález — zůstává šedá i u kontroly ve stavu fail,
+             ať se nepřičte k tomu, co má uživatel opravovat. -->
+        <div v-if="check.info" class="flex gap-1.5 sm:col-span-2">
+          <dt class="text-neutral-500 shrink-0">{{ valueLabel(check.id, 'info') }}:</dt>
+          <dd class="font-mono break-all">{{ check.info }}</dd>
         </div>
       </dl>
 

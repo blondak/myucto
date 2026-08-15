@@ -192,6 +192,12 @@ final class Bootstrap
                         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog::class,
                     ),
                 ),
+            // Katalog kontrol se načítá z připnutého manifestu a ověřuje otisk
+            // zdrojového XLSX, což je na každý požadavek zbytečně drahé —
+            // kontejner ho proto drží jako singleton.
+            \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator::class =>
+                static fn (): \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator
+                    => \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator::create(),
             \MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline::class =>
                 fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline(
                     $c->get(\MyInvoice\Service\Payroll\Run\PayrollRunCalculator::class),
@@ -224,6 +230,22 @@ final class Bootstrap
                         \MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService::class,
                     ),
                 ),
+            // Identifikace software jde do datové věty JMHZ a ČSSZ ji porovnává
+            // s obálkou. Verze se čte ze souboru VERSION, aby v protokolu
+            // seděla se skutečně nasazeným buildem — natvrdo zapsaná verze
+            // znemožní dohledat, která zpráva odkud pochází.
+            \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification::class
+                => function () use ($rootDir): \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification {
+                    $versionFile = $rootDir . DIRECTORY_SEPARATOR . 'VERSION';
+                    $version = is_file($versionFile)
+                        ? trim((string) @file_get_contents($versionFile))
+                        : '';
+
+                    return new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification(
+                        'MyÚčto.cz',
+                        $version === '' ? '0.0.0' : $version,
+                    );
+                },
             \MyInvoice\Service\Epo\EpoDirectResponseParser::class => function () use ($config, $rootDir): \MyInvoice\Service\Epo\EpoDirectResponseParser {
                 $caBundle = trim((string) $config->get('epo.ca_bundle_path', ''));
                 if (

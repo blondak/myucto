@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   settingsApi,
+  type CertificateVaultItem,
   type PdfSignatureOutputSetting,
   type PdfSignatureTestResult,
   type PdfSignatureUserDefault,
@@ -14,6 +15,9 @@ import {
   type SigningSettings,
 } from '@/api/settings'
 import type { EpoSigningCredential } from '@/api/epoSubmissions'
+import { apiErrorMessage } from '@/api/errors'
+import { authApi } from '@/api/auth'
+import { getCredential, isWebAuthnAvailable } from '@/security/webauthn'
 import { useToast } from '@/composables/useToast'
 import { useAutoSlug } from '@/composables/useAutoSlug'
 import { useAuthStore } from '@/stores/auth'
@@ -94,11 +98,62 @@ const currentUserPersonalProfile = computed(() =>
 const usablePersonalCertificates = computed(() =>
   personalCertificates.value.filter(item => item.enabled_for_supplier && item.valid_now),
 )
+/**
+ * Trezor umí backend napojit jen na vlastní osobní profil. U firemního profilu
+ * proto platí starší cesta se souborem, ať uživatel nevyplní formulář, který se
+ * pak tiše neuloží.
+ */
+const effectiveCredentialSource = computed<'personal_vault' | 'uploaded_file'>(() =>
+  currentUserPersonalProfile.value ? signingProfileCredentialSource.value : 'uploaded_file',
+)
+
+/**
+ * Trezor certifikátů — jediné místo v aplikaci, kam se PFX/P12 nahrává.
+ * Podpisové profily (PDF, S/MIME), EPO i mzdová podání si odsud certifikát jen
+ * půjčují; nahrávat ho na třech místech byla historická daň za to, že se každý
+ * konzument narodil zvlášť.
+ */
+const certificates = ref<CertificateVaultItem[]>([])
+const certificatesLoading = ref(false)
+const certificatesError = ref('')
+const certificateBusy = ref(false)
+const certificateFileInput = ref<HTMLInputElement | null>(null)
+const certificateFile = ref<File | null>(null)
+const certificateLabel = ref('')
+const certificatePassword = ref('')
+const certificateStepPassword = ref('')
+const certificateStepTotp = ref('')
+const certificateStepPasskeyToken = ref('')
+const certificatePasskeyBusy = ref(false)
+const passkeySupported = isWebAuthnAvailable()
+
+const hasPasskey = computed(() =>
+  auth.user?.mfa_methods?.includes('passkey') === true
+  || (auth.user?.passkey_count ?? 0) > 0,
+)
+const hasTotp = computed(() => auth.user?.totp_enabled === true)
+
+/** Prázdný řetězec = ověření je kompletní; jinak text, co ještě chybí. */
+const certificateStepUpMissing = computed(() => {
+  if (certificateStepPasskeyToken.value) return ''
+  if (!certificateStepPassword.value) return t('settings.certificate_vault_step_up_password_missing')
+  if (hasTotp.value && !/^\d{6}$/.test(certificateStepTotp.value.trim())) {
+    return t('settings.certificate_vault_step_up_totp_missing')
+  }
+  return ''
+})
+
+const canUploadCertificate = computed(() =>
+  !certificateBusy.value
+  && certificateFile.value !== null
+  && certificatePassword.value !== ''
+  && certificateStepUpMissing.value === '',
+)
 
 async function load() {
   loading.value = true
   try {
-    await loadSigningProfiles(true)
+    await Promise.all([loadSigningProfiles(true), loadCertificates()])
   } finally {
     loading.value = false
   }
@@ -271,7 +326,7 @@ function resetSigningProfileDraft() {
   signingProfileCertPassword.value = ''
   signingProfileCertPolicy.value = 'encrypted_store'
   signingProfileCertPassphraseProfileId.value = ''
-  signingProfileCredentialSource.value = 'uploaded_file'
+  signingProfileCredentialSource.value = 'personal_vault'
   signingProfileVaultCredentialId.value = null
   signingProfileVaultPassword.value = ''
   signingProfileVaultTotp.value = ''
@@ -297,7 +352,8 @@ async function loadSigningProfileCredential(profileId: number, silent = true) {
     const meta = await settingsApi.getSigningProfileCredential(profileId)
     await loadPersonalCertificates()
     signingProfileCredential.value = meta
-    signingProfileCredentialSource.value = meta.certificate_source || 'uploaded_file'
+    signingProfileCredentialSource.value = meta.certificate_source
+      || (meta.has_certificate ? 'uploaded_file' : 'personal_vault')
     signingProfileVaultCredentialId.value = meta.vault_credential_id || null
     signingProfileCertPolicy.value = meta.passphrase_policy === 'prompt_on_use'
       ? 'encrypted_store'
@@ -317,6 +373,104 @@ async function loadPersonalCertificates() {
   } catch {
     personalCertificates.value = []
   }
+}
+
+/**
+ * Selhání načtení se NESMÍ tvářit jako prázdný trezor.
+ *
+ * Přesně tohle se stalo: endpoint vracel 500, tenhle blok chybu spolkl a
+ * uživatel četl „zatím tu žádný certifikát není" — tedy tvrzení o datech,
+ * které jsme nikdy neviděli. Chyba se proto drží ve stavu a šablona ji
+ * ukazuje místo prázdného stavu.
+ */
+async function loadCertificates(silent = true) {
+  certificatesLoading.value = true
+  certificatesError.value = ''
+  try {
+    certificates.value = await settingsApi.listCertificates()
+  } catch (e: any) {
+    certificates.value = []
+    certificatesError.value = apiErrorMessage(e, t('settings.certificate_vault_load_failed'))
+    if (!silent) toast.error(certificatesError.value)
+  } finally {
+    certificatesLoading.value = false
+  }
+}
+
+/**
+ * Passkey proof nahradí heslo i TOTP naráz; bez něj platí původní cesta
+ * heslo (+ TOTP, má-li ho účet zapnutý). Proof je jednorázový, po odeslání
+ * se zahazuje.
+ */
+async function verifyCertificatePasskey() {
+  if (!passkeySupported) return
+  certificatePasskeyBusy.value = true
+  try {
+    const flow = await authApi.passkeyStepUpOptions('epo.certificate')
+    const credential = await getCredential(flow.public_key)
+    certificateStepPasskeyToken.value = await authApi.passkeyStepUpVerify(
+      flow.flow_token,
+      'epo.certificate',
+      credential,
+    )
+  } catch (e: any) {
+    toast.error(apiErrorMessage(e, t('settings.certificate_vault_passkey_failed')))
+  } finally {
+    certificatePasskeyBusy.value = false
+  }
+}
+
+function resetCertificateStepUp() {
+  certificateStepPassword.value = ''
+  certificateStepTotp.value = ''
+  certificateStepPasskeyToken.value = ''
+}
+
+function pickCertificateFile() {
+  certificateFileInput.value?.click()
+}
+
+function onCertificateFileSelected(event: Event) {
+  certificateFile.value = (event.target as HTMLInputElement).files?.[0] ?? null
+  if (certificateFile.value && certificateLabel.value === '') {
+    certificateLabel.value = certificateFile.value.name.replace(/\.(p12|pfx)$/i, '')
+  }
+}
+
+async function uploadCertificate() {
+  if (certificateFile.value === null || certificateBusy.value) return
+  if (certificateStepUpMissing.value !== '') {
+    toast.error(certificateStepUpMissing.value)
+    return
+  }
+  certificateBusy.value = true
+  try {
+    await settingsApi.uploadCertificate({
+      file: certificateFile.value,
+      label: certificateLabel.value.trim(),
+      password: certificatePassword.value,
+      proof: {
+        password: certificateStepPassword.value || undefined,
+        totp_code: certificateStepTotp.value.trim() || undefined,
+        step_up_token: certificateStepPasskeyToken.value || undefined,
+      },
+    })
+    certificateFile.value = null
+    certificateLabel.value = ''
+    certificatePassword.value = ''
+    if (certificateFileInput.value) certificateFileInput.value.value = ''
+    resetCertificateStepUp()
+    await Promise.all([loadCertificates(), loadPersonalCertificates()])
+    toast.success(t('settings.certificate_vault_uploaded'))
+  } catch (e: any) {
+    toast.error(apiErrorMessage(e, t('common.error')))
+  } finally {
+    certificateBusy.value = false
+  }
+}
+
+function certificateDate(value: string | null | undefined): string {
+  return (value || '').slice(0, 10) || '—'
 }
 
 function startCreateSigningProfile() {
@@ -462,7 +616,7 @@ function onSigningProfileCertSelected(ev: Event) {
 }
 
 function hasPendingSigningProfileCredentialSave(): boolean {
-  if (signingProfileCredentialSource.value === 'personal_vault') {
+  if (effectiveCredentialSource.value === 'personal_vault') {
     return signingProfileVaultCredentialId.value !== null
       && signingProfileVaultCredentialId.value !== (signingProfileCredential.value?.vault_credential_id || null)
   }
@@ -490,7 +644,7 @@ function hasSigningProfileCredentialSettingsChange(): boolean {
 }
 
 function validateSigningProfileCredentialSave(): boolean {
-  if (signingProfileCredentialSource.value === 'personal_vault') {
+  if (effectiveCredentialSource.value === 'personal_vault') {
     if (!currentUserPersonalProfile.value) {
       toast.error(t('settings.signing_vault_personal_profile_required'))
       return false
@@ -536,7 +690,7 @@ function validateSigningProfileCredentialSave(): boolean {
 }
 
 async function saveSigningProfileCertFor(profileId: number) {
-  if (signingProfileCredentialSource.value === 'personal_vault') {
+  if (effectiveCredentialSource.value === 'personal_vault') {
     signingProfileCredential.value = await settingsApi.linkPersonalSigningCertificate(
       profileId,
       signingProfileVaultCredentialId.value as number,
@@ -767,7 +921,140 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
       {{ t('common.loading') }}
     </div>
 
-    <div v-else-if="contentVisible" class="space-y-5">
+    <div v-else class="space-y-5">
+      <section id="certificate-vault" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <div class="mb-3">
+          <h3 class="text-sm font-medium text-neutral-800">{{ t('settings.certificate_vault_title') }}</h3>
+          <p class="text-xs text-neutral-500 mt-1">{{ t('settings.certificate_vault_hint') }}</p>
+        </div>
+
+        <div class="rounded-md border border-warning-500/30 bg-warning-50 p-3 text-xs text-warning-800">
+          {{ t('settings.certificate_vault_security') }}
+        </div>
+
+        <div class="mt-4 grid gap-3 sm:grid-cols-2 rounded-lg border border-neutral-200 p-4">
+          <div v-if="hasPasskey" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+            <div v-if="certificateStepPasskeyToken" class="text-sm font-medium text-success-600">
+              ✓ {{ t('settings.certificate_vault_passkey_verified') }}
+            </div>
+            <template v-else-if="passkeySupported">
+              <button type="button" :class="btnOutline('primary')"
+                :disabled="certificatePasskeyBusy || certificateBusy" @click="verifyCertificatePasskey">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
+                {{ certificatePasskeyBusy ? t('common.loading') : t('settings.certificate_vault_verify_passkey') }}
+              </button>
+              <span class="text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_or_password') }}</span>
+            </template>
+            <p v-else class="text-xs text-warning-700">{{ t('settings.certificate_vault_passkey_unsupported') }}</p>
+          </div>
+          <template v-if="!certificateStepPasskeyToken">
+            <label class="text-xs text-neutral-600">
+              {{ t('settings.certificate_vault_step_up_password') }}
+              <input v-model="certificateStepPassword" type="password" autocomplete="current-password"
+                class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
+            </label>
+            <label class="text-xs text-neutral-600">
+              {{ t('settings.certificate_vault_step_up_totp') }}
+              <input v-model="certificateStepTotp" type="text" inputmode="numeric" maxlength="6"
+                autocomplete="one-time-code"
+                class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
+            </label>
+          </template>
+          <p class="sm:col-span-2 text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_hint') }}</p>
+        </div>
+
+        <h4 class="mt-5 mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
+          {{ t('settings.certificate_vault_list_title') }}
+        </h4>
+        <div v-if="certificatesLoading" class="text-xs text-neutral-500 py-2">{{ t('common.loading') }}</div>
+        <div v-else-if="certificatesError" class="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+          {{ certificatesError }}
+        </div>
+        <EmptyState v-else-if="certificates.length === 0" dense icon="lock" :title="t('settings.certificate_vault_empty')" />
+        <div v-else class="space-y-3">
+          <div v-for="certificate in certificates" :key="certificate.id" class="rounded-lg border border-neutral-200 p-4">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-sm font-medium text-neutral-800">{{ certificate.label }}</div>
+                <div class="mt-1 text-xs text-neutral-600 break-words">
+                  <span class="text-neutral-500">{{ t('settings.certificate_vault_subject') }}:</span> {{ certificate.subject_dn }}
+                </div>
+                <div class="mt-1 text-xs text-neutral-600 break-words">
+                  <span class="text-neutral-500">{{ t('settings.certificate_vault_issuer') }}:</span> {{ certificate.issuer_dn }}
+                </div>
+                <div class="mt-1 text-xs text-neutral-600">
+                  <span class="text-neutral-500">{{ t('settings.certificate_vault_serial') }}:</span>
+                  <span class="font-mono">{{ certificate.serial_hex || '—' }}</span>
+                </div>
+                <div class="mt-1 text-xs">
+                  <span class="text-neutral-500">{{ t('settings.certificate_vault_validity') }}:</span>
+                  <span :class="certificate.valid_now ? 'text-success-600' : 'text-danger-600 font-semibold'">
+                    {{ certificateDate(certificate.valid_from) }} – {{ certificateDate(certificate.valid_to) }}
+                  </span>
+                </div>
+                <code class="mt-1 block text-[10px] text-neutral-400 break-all">SHA-256: {{ certificate.fingerprint_sha256 }}</code>
+              </div>
+              <div class="flex flex-col items-end gap-2">
+                <span class="rounded-full border px-2 py-0.5 text-[11px]"
+                  :class="certificate.enabled_for_supplier ? 'border-success-500/30 bg-success-50 text-success-700' : 'border-neutral-200 bg-neutral-100 text-neutral-600'">
+                  {{ certificate.enabled_for_supplier ? t('settings.certificate_vault_enabled_for_company') : t('settings.certificate_vault_disabled_for_company') }}
+                </span>
+                <span v-if="!certificate.valid_now" class="rounded-full border border-danger-500/30 bg-danger-50 px-2 py-0.5 text-[11px] text-danger-700">
+                  {{ t('settings.signing_cert_expired') }}
+                </span>
+                <span v-if="certificate.linked_profiles_count > 0" class="rounded-full border border-primary-500/30 bg-primary-50 px-2 py-0.5 text-[11px] text-primary-700">
+                  {{ t('settings.certificate_vault_linked_profiles', { count: certificate.linked_profiles_count }) }}
+                </span>
+              </div>
+            </div>
+          </div>
+          <p class="text-xs text-neutral-500">
+            {{ t('settings.certificate_vault_grant_hint') }}
+            <RouterLink to="/reports/submissions" class="font-medium text-primary-700 hover:underline">
+              {{ t('settings.certificate_vault_grant_link') }}
+            </RouterLink>
+          </p>
+        </div>
+
+        <div class="mt-5 border-t border-neutral-100 pt-4">
+          <h4 class="text-xs font-medium uppercase tracking-wide text-neutral-500">{{ t('settings.certificate_vault_upload_title') }}</h4>
+          <p class="mt-1 text-xs text-neutral-500">{{ t('settings.certificate_vault_upload_hint') }}</p>
+          <div class="mt-3 grid gap-3 sm:grid-cols-2">
+            <div class="sm:col-span-2 flex flex-wrap items-center gap-3">
+              <button type="button" :class="btnOutline('primary')" :disabled="certificateBusy" @click="pickCertificateFile">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.folderOpen" /></svg>
+                {{ t('settings.certificate_vault_choose_file') }}
+              </button>
+              <span class="min-w-0 break-all text-sm"
+                :class="certificateFile ? 'text-neutral-700 font-medium' : 'text-neutral-400'">
+                {{ certificateFile ? certificateFile.name : t('settings.certificate_vault_no_file') }}
+              </span>
+              <input ref="certificateFileInput" type="file" accept=".p12,.pfx,application/x-pkcs12"
+                class="hidden" @change="onCertificateFileSelected" />
+            </div>
+            <label class="text-xs text-neutral-600">
+              {{ t('settings.certificate_vault_label') }}
+              <input v-model="certificateLabel" type="text" maxlength="120"
+                class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
+            </label>
+            <label class="text-xs text-neutral-600">
+              {{ t('settings.certificate_vault_password') }}
+              <input v-model="certificatePassword" type="password" autocomplete="new-password"
+                class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
+            </label>
+          </div>
+          <p v-if="certificateStepUpMissing" class="mt-2 text-xs text-warning-700">{{ certificateStepUpMissing }}</p>
+        </div>
+
+        <div class="mt-4 flex flex-wrap justify-end">
+          <button type="button" :class="btnFilled('primary')" :disabled="!canUploadCertificate" @click="uploadCertificate">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+            {{ certificateBusy ? t('common.saving') : t('settings.certificate_vault_store') }}
+          </button>
+        </div>
+      </section>
+
+      <template v-if="contentVisible">
       <section v-if="canManageSigningProfiles" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
           <div>
@@ -947,7 +1234,7 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                 <div v-if="signingProfileCredential.certificate_source !== 'personal_vault'"><span class="text-neutral-500">{{ t('settings.signing_profile_cert_passphrase_policy') }}:</span> <span class="font-mono">{{ signingProfileCredential.passphrase_policy }}</span></div>
                 <div class="font-mono text-[10px] text-neutral-400 mt-1 break-all">SHA-256: {{ signingProfileCredential.certificate_fingerprint }}</div>
               </div>
-              <div v-if="currentUserPersonalProfile" class="mb-3 flex flex-wrap gap-2">
+              <div v-if="currentUserPersonalProfile" class="mb-3 flex flex-wrap items-center gap-2">
                 <button type="button"
                   :class="signingProfileCredentialSource === 'personal_vault' ? btnFilled('primary') : btnOutline('primary')"
                   @click="signingProfileCredentialSource = 'personal_vault'">
@@ -960,8 +1247,11 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
                   {{ t('settings.signing_upload_separate') }}
                 </button>
+                <span class="rounded-full border border-neutral-300 bg-neutral-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                  {{ t('settings.signing_upload_legacy_badge') }}
+                </span>
               </div>
-              <div v-if="signingProfileCredentialSource === 'personal_vault' && currentUserPersonalProfile"
+              <div v-if="effectiveCredentialSource === 'personal_vault'"
                 class="rounded-lg border border-primary-500/25 bg-primary-50/40 p-3">
                 <div class="grid gap-3 md:grid-cols-2">
                   <label class="text-xs text-neutral-700">
@@ -988,12 +1278,19 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                     </label>
                   </div>
                 </div>
+                <p v-if="usablePersonalCertificates.length === 0" class="mt-2 text-xs text-warning-700">
+                  {{ t('settings.signing_vault_empty_hint') }}
+                </p>
                 <p class="mt-2 text-xs text-neutral-600">{{ t('settings.signing_vault_hint') }}</p>
-                <RouterLink to="/reports/submissions" class="mt-2 inline-flex text-xs font-medium text-primary-700 hover:underline">
+                <a href="#certificate-vault" class="mt-2 inline-flex text-xs font-medium text-primary-700 hover:underline">
                   {{ t('settings.signing_vault_manage') }}
-                </RouterLink>
+                </a>
               </div>
-              <div v-else class="grid gap-2 lg:grid-cols-[auto_minmax(10rem,1fr)_minmax(10rem,12rem)_minmax(10rem,13rem)] lg:items-center">
+              <template v-else>
+              <p class="mb-2 rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs text-warning-800">
+                {{ t('settings.signing_upload_legacy_hint') }}
+              </p>
+              <div class="grid gap-2 lg:grid-cols-[auto_minmax(10rem,1fr)_minmax(10rem,12rem)_minmax(10rem,13rem)] lg:items-center">
                 <button @click="pickSigningProfileCert" type="button"
                   :class="btnOutline('primary')">
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
@@ -1010,12 +1307,13 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                   <option value="passphrase_file">{{ t('settings.signing_profile_cert_policy_passphrase_file') }}</option>
                 </select>
               </div>
-              <p v-if="signingProfileCredentialSource === 'uploaded_file' && signingProfileCredentialUsesUnsupportedPrompt" class="mt-2 text-xs text-warning-700">
+              <p v-if="signingProfileCredentialUsesUnsupportedPrompt" class="mt-2 text-xs text-warning-700">
                 {{ t('settings.signing_profile_cert_prompt_on_use_hint') }}
               </p>
-              <input v-if="signingProfileCredentialSource === 'uploaded_file' && signingProfileCertPolicy === 'passphrase_file'" v-model="signingProfileCertPassphraseProfileId"
+              <input v-if="signingProfileCertPolicy === 'passphrase_file'" v-model="signingProfileCertPassphraseProfileId"
                 type="text" :placeholder="t('settings.signing_profile_cert_passphrase_profile_id')"
                 class="mt-2 h-9 w-full max-w-sm px-3 border border-neutral-300 rounded-md bg-surface text-sm font-mono" />
+              </template>
               <input ref="signingProfileCertFileInput" @change="onSigningProfileCertSelected" type="file" accept=".p12,.pfx,application/x-pkcs12" class="hidden" />
             </div>
           </div>
@@ -1197,12 +1495,12 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
             </button>
           </div>
       </section>
+      </template>
 
-    </div>
-
-    <div v-else class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('profile_signing.disabled_title') }}</h2>
-      <p class="text-sm text-neutral-600 mt-2">{{ t('profile_signing.disabled_text') }}</p>
+      <div v-else class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('profile_signing.disabled_title') }}</h2>
+        <p class="text-sm text-neutral-600 mt-2">{{ t('profile_signing.disabled_text') }}</p>
+      </div>
     </div>
   </div>
 </template>

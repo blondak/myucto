@@ -11,6 +11,7 @@ import {
   type PayrollPersonIdentifierType,
   type PayrollPersonProfile,
   type PayrollPersonProfilePayload,
+  type PayrollRelationType,
   type PayrollSecureDeliveryChannel,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
@@ -23,6 +24,7 @@ import { todayIso } from './employmentLifecycleUi'
 const props = defineProps<{
   personId: number
   canWrite: boolean
+  relationTypes?: PayrollRelationType[]
 }>()
 
 const emit = defineEmits<{
@@ -89,6 +91,7 @@ interface AccountFormRow {
 interface ProfileForm {
   profile_status: PayrollPersonEditableProfileStatus
   payout_method: PayrollPayoutMethod
+  partner_settlement_account_code: string
   cash_allocation_basis_points: number
   payout_effective_on: string
   secure_delivery_channel: PayrollSecureDeliveryChannel
@@ -116,6 +119,7 @@ const verificationForms = reactive<Record<number, VerificationForm>>({})
 const form = reactive<ProfileForm>({
   profile_status: 'setup',
   payout_method: 'cash',
+  partner_settlement_account_code: '',
   cash_allocation_basis_points: 10000,
   payout_effective_on: todayIso(),
   secure_delivery_channel: 'portal',
@@ -141,10 +145,26 @@ const deliveryOptions = computed<SelectOption<PayrollSecureDeliveryChannel>[]>((
   { value: 'portal', label: t('payroll.people.profile.delivery.portal') },
   { value: 'paper', label: t('payroll.people.profile.delivery.paper') },
 ])
+// Zápočet na účet společníka dává smysl jen u příjmu společníka a odměny za
+// výkon funkce; běžnému zaměstnanci ho vůbec nenabízíme. Backend si to hlídá sám
+// (PayrollPartnerSettlement), tohle je jen UI, aby volba nesvítila naprázdno.
+const PARTNER_SETTLEMENT_RELATIONS: PayrollRelationType[] = ['partner_dependent', 'statutory_body']
+const partnerSettlementAvailable = computed(() =>
+  (props.relationTypes ?? []).some(type => PARTNER_SETTLEMENT_RELATIONS.includes(type)),
+)
+const isPartnerSettlement = computed(() => form.payout_method === 'partner_settlement')
 const payoutOptions = computed<SelectOption<PayrollPayoutMethod>[]>(() => [
   { value: 'cash', label: t('payroll.people.profile.payout.cash') },
   { value: 'bank', label: t('payroll.people.profile.payout.bank') },
   { value: 'mixed', label: t('payroll.people.profile.payout.mixed') },
+  // Už uloženou volbu necháme viditelnou i kdyby se vztahy mezitím změnily,
+  // jinak by se karta nedala uložit bez tichého přepnutí způsobu výplaty.
+  ...(partnerSettlementAvailable.value || form.payout_method === 'partner_settlement'
+    ? [{
+        value: 'partner_settlement' as const,
+        label: t('payroll.people.profile.payout.partner_settlement'),
+      }]
+    : []),
 ])
 const addressTypeOptions = computed<SelectOption<PayrollPersonAddressType>[]>(() => [
   { value: 'residence', label: t('payroll.people.profile.address_type.residence') },
@@ -170,6 +190,7 @@ function hydrate(value: PayrollPersonProfile) {
   profile.value = value
   form.profile_status = value.profile_status === 'missing' ? 'setup' : value.profile_status
   form.payout_method = value.payout_method
+  form.partner_settlement_account_code = value.partner_settlement_account_code ?? ''
   form.cash_allocation_basis_points = value.cash_allocation_basis_points
   form.payout_effective_on = value.payout_effective_on ?? todayIso()
   form.secure_delivery_channel = value.secure_delivery_channel
@@ -268,6 +289,9 @@ function payload(): PayrollPersonProfilePayload {
     row_version: form.row_version,
     profile_status: form.profile_status,
     payout_method: form.payout_method,
+    partner_settlement_account_code: isPartnerSettlement.value
+      ? form.partner_settlement_account_code.trim().toUpperCase()
+      : null,
     cash_allocation_basis_points: Number(form.cash_allocation_basis_points),
     payout_effective_on: form.payout_effective_on,
     secure_delivery_channel: form.secure_delivery_channel,
@@ -644,6 +668,13 @@ onMounted(load)
           <label :class="labelClass">{{ t('payroll.people.profile.cash_allocation') }}<input v-model.number="form.cash_allocation_basis_points" required type="number" min="0" max="10000" :disabled="!canWrite" :class="inputClass"></label>
           <label :class="labelClass">{{ t('payroll.people.profile.payout_effective_on') }}<input v-model="form.payout_effective_on" required type="date" :disabled="!canWrite" :class="inputClass"></label>
         </section>
+
+        <section v-if="isPartnerSettlement" class="rounded-lg border border-payroll-200 bg-payroll-50/40 p-3 sm:p-4">
+          <p class="text-xs text-neutral-600">{{ t('payroll.people.profile.partner_settlement_hint') }}</p>
+          <label :class="[labelClass, 'mt-3 block max-w-xs']">{{ t('payroll.people.profile.partner_settlement_account') }}<input v-model="form.partner_settlement_account_code" required type="text" maxlength="10" :placeholder="t('payroll.people.profile.partner_settlement_account_placeholder')" :disabled="!canWrite" :class="[inputClass, 'font-mono uppercase']"></label>
+          <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.people.profile.partner_settlement_account_hint') }}</p>
+        </section>
+        <p v-else-if="!partnerSettlementAvailable" class="text-xs text-neutral-500">{{ t('payroll.people.profile.partner_settlement_unavailable') }}</p>
 
         <section>
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">

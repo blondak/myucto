@@ -472,6 +472,7 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
                         'social_insurance' => [
                             'status' => 'calculated',
                             'issues' => [],
+                            'capped_assessment_base_minor_units' => 100_000,
                             'employee_contribution_minor_units' => 7_100,
                             'employer_contribution_minor_units' => 24_800,
                         ],
@@ -528,7 +529,11 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
                         '10330' => 0,
                         '10331' => 0,
                     ],
-                    'insurance' => ['relationship_id' => 'employment:101'],
+                    'insurance' => [
+                        'relationship_id' => 'employment:101',
+                        'capped_assessment_base_minor_units' => 100_000,
+                        'employer_rate_category' => 'ordinary',
+                    ],
                 ]],
             ]],
             'source_versions' => ['office_id' => 9, 'employments' => []],

@@ -165,8 +165,10 @@ final class PayrollSetupCheckService
                 'jmhz_registry',
                 $features->jmhzRegistryReady,
                 $features->jmhzRegistryReady
-                    ? 'Registry zaměstnavatele pro JMHZ jsou připravené.'
-                    : 'JMHZ vyžaduje dokončené registry zaměstnavatele.',
+                    ? 'Registrační číslo zaměstnavatele u ČSSZ je vyplněné.'
+                    : 'Vyplňte registrační číslo zaměstnavatele přidělené ČSSZ'
+                        . ' (Mzdy → Podání → Registrace zaměstnavatele). Bez něj'
+                        . ' se hlášení nespáruje se zaměstnavatelem.',
             );
             $this->addCheck(
                 $checks,
@@ -174,8 +176,15 @@ final class PayrollSetupCheckService
                 'jmhz_certificate',
                 $features->jmhzCertificateReady,
                 $features->jmhzCertificateReady
-                    ? 'Přihlašovací prostředek pro JMHZ je připravený.'
-                    : 'JMHZ vyžaduje platný přihlašovací prostředek.',
+                    ? 'Podpisový certifikát pro produkční podání je zvolený a platný.'
+                    : 'Zvolte podpisový certifikát pro produkční prostředí'
+                        . ' (Mzdy → Podání → Certifikát). Testovací volba ani prošlý'
+                        . ' certifikát se nepočítají — hlášení by ČSSZ odmítla.',
+                // Nezablokuje nastavení: produkční endpoint VREP zatím není
+                // doložený, takže se z aplikace ostře stejně podat nedá.
+                // Vynucovat certifikát dřív, než k něčemu bude, znamená držet
+                // firmu v nepřipraveném stavu za něco, co jí teď nic nepřinese.
+                blocking: false,
             );
         }
 
@@ -240,19 +249,26 @@ final class PayrollSetupCheckService
      * @param list<array{code:string,status:string,message:string}> $checks
      * @param list<string> $blockers
      */
+    /**
+     * @param bool $blocking false u kontroly, která má být VIDĚT, ale nesmí
+     *     zastavit nastavení. Blokovat se smí jen to, co uživatel může splnit
+     *     a co mu splnění k něčemu bude — jinak se z panelu stane trvale
+     *     červená cedule, kterou přestane číst.
+     */
     private function addCheck(
         array &$checks,
         array &$blockers,
         string $code,
         bool $ready,
         string $message,
+        bool $blocking = true,
     ): void {
         $checks[] = [
             'code' => $code,
-            'status' => $ready ? 'ok' : 'blocked',
+            'status' => $ready ? 'ok' : ($blocking ? 'blocked' : 'pending'),
             'message' => $message,
         ];
-        if (!$ready) {
+        if (!$ready && $blocking) {
             $blockers[] = $code;
         }
     }

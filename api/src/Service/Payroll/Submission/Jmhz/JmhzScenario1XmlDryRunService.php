@@ -23,6 +23,8 @@ final readonly class JmhzScenario1XmlDryRunService
         private JmhzScenario1DocumentService $documents,
         private JmhzScenario1XmlValidator $validator,
         private JmhzSubmissionGuidFactory $guids,
+        private JmhzScenario1ControlValidator $controls,
+        private JmhzDeadlinePolicy $deadlines = new JmhzDeadlinePolicy(),
     ) {}
 
     /** @return array<string,mixed> */
@@ -61,10 +63,20 @@ final readonly class JmhzScenario1XmlDryRunService
             ),
         );
 
+        // XSD hlídá tvar, katalog kontrol obsah. Teprve oboje dohromady říká,
+        // jestli by ČSSZ podání přijala — a mezera v pokrytí katalogu se musí
+        // projevit jako nepřipravenost, ne jako zelený nácvik.
+        $controls = $this->controls->validate(
+            $result['xml'],
+            JmhzControlContext::today(schemaValidated: true),
+        );
+
         return [
-            'status' => 'dry_run_valid',
+            'status' => $controls->submittable() ? 'dry_run_valid' : 'dry_run_incomplete',
             'preparation_id' => $preparationId,
             'blockers' => [],
+            'controls' => $controls->toArray(),
+            'deadline' => $this->deadline($document),
             'xml' => $result['xml'],
             'xml_sha256' => $result['sha256'],
             'schema' => $result['schema'],
@@ -73,6 +85,32 @@ final readonly class JmhzScenario1XmlDryRunService
                 'note' => 'GUIDy náhledu se pro ostré podání nepoužijí; to si vyžádá vlastní a zmrazí je.',
             ],
             'official_submission' => $this->officialSubmission(),
+        ];
+    }
+
+    /**
+     * Lhůta pro podání za vykazované období. Do nácviku patří proto, že „XML je
+     * v pořádku" a „ještě to stihnu" jsou dvě různé otázky a uživatel se ptá na
+     * obě naráz. Termín se posouvá na nejbližší pracovní den, takže odhadnout
+     * ho od dvacátého v měsíci nejde.
+     *
+     * @return array<string,string>|null
+     */
+    private function deadline(JmhzScenario1NormalizedDocument $document): ?array
+    {
+        $scope = $document->payload['scope'] ?? null;
+        $periodStart = is_array($scope) ? ($scope['period_start'] ?? null) : null;
+        if (!is_string($periodStart)) {
+            return null;
+        }
+        $window = $this->deadlines->forPeriod($periodStart);
+
+        return [
+            'period_start' => $periodStart,
+            'earliest_submission_on' => $window->earliestSubmissionOn,
+            'due_on' => $window->dueOn,
+            'calendar_basis' => $window->calendarBasis,
+            'ruleset_id' => $window->rulesetId,
         ];
     }
 
@@ -102,13 +140,26 @@ final readonly class JmhzScenario1XmlDryRunService
         return $guids;
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * Proč tenhle výsledek NENÍ podání.
+     *
+     * Důvod se změnil a mlčet o tom by bylo zavádějící: kanál VREP je zapojený
+     * a ověřený odesláním do testovacího prostředí ČSSZ. Nácvik ale zůstává
+     * nácvikem ze dvou důvodů, které s dopravou nesouvisejí — GUIDy tu vznikají
+     * při každém běhu nové, kdežto ostré podání si je musí zmrazit (duplicitu
+     * u ČSSZ nelze vzít zpět), a nezakládá se žádný záznam podání, takže není
+     * co odeslat ani k čemu přiřadit protokol.
+     *
+     * @return array<string,mixed>
+     */
     private function officialSubmission(): array
     {
         return [
             'supported' => false,
-            'reason_code' => 'jmhz_transport_not_implemented',
-            'reason' => 'Kanál VREP/APEP ani ISDS zatím není zapojený; jde o lokální nácvik, ne o podání.',
+            'reason_code' => 'jmhz_dry_run_is_not_a_submission',
+            'reason' => 'Jde o lokální nácvik: GUIDy vznikají při každém běhu nové'
+                . ' a nezakládá se žádné podání. Odeslání na ČSSZ se spouští'
+                . ' zvlášť nad zmrazeným podáním.',
         ];
     }
 }

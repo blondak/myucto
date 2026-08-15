@@ -246,9 +246,19 @@ final class PayrollEmployerPolicyApiTest extends TestCase
             $this->rows($setup['checks'] ?? null),
             'code',
         );
-        self::assertNotContains('jmhz_registry', $codes);
-        self::assertNotContains('jmhz_certificate', $codes);
+        // JMHZ se týká každého zaměstnavatele ze zákona, takže obě kontroly
+        // v seznamu JSOU — dřív se nezobrazovaly vůbec, protože připravenost
+        // byla natvrdo `false`. Vývojářská poznámka `jmhz_feature_source` se
+        // objeví jen tehdy, když se nedá přečíst matice funkcí.
+        self::assertContains('jmhz_registry', $codes);
+        self::assertContains('jmhz_certificate', $codes);
         self::assertNotContains('jmhz_feature_source', $codes);
+
+        // Chybějící certifikát nesmí zastavit nastavení: produkční endpoint
+        // VREP není doložený, takže se ostře stejně podat nedá.
+        $blockers = $this->stringList($setup['blockers'] ?? null);
+        self::assertContains('jmhz_registry', $blockers);
+        self::assertNotContains('jmhz_certificate', $blockers);
     }
 
     public function testValidationSessionPermissionAndDisabledModuleErrors(): void

@@ -20,6 +20,10 @@ const m = vi.hoisted(() => ({
   submissionInbox: vi.fn(),
   acknowledgeInboxItem: vi.fn(),
   snoozeInboxItem: vi.fn(),
+  signingProfile: vi.fn(),
+  jmhzTransportHistory: vi.fn(),
+  pollJmhzTransportAttempt: vi.fn(),
+  closeJmhzTransportAttempt: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -42,6 +46,10 @@ vi.mock('@/api/payroll', () => ({
     submissionInbox: m.submissionInbox,
     acknowledgeSubmissionInboxItem: m.acknowledgeInboxItem,
     snoozeSubmissionInboxItem: m.snoozeInboxItem,
+    signingProfile: m.signingProfile,
+    jmhzTransportHistory: m.jmhzTransportHistory,
+    pollJmhzTransportAttempt: m.pollJmhzTransportAttempt,
+    closeJmhzTransportAttempt: m.closeJmhzTransportAttempt,
   },
 }))
 
@@ -82,6 +90,8 @@ function setup() {
     updated_at: '2026-08-04 12:00:00',
   })
   m.snapshots.mockResolvedValue([])
+  // Stav odeslání je výchozí záložka, takže se ledger načítá při každém mountu.
+  m.jmhzTransportHistory.mockResolvedValue({ environment: 'production', attempts: [] })
   m.submissionInbox.mockResolvedValue({
     environment: 'production',
     summary: { total: 0, open: 0, acknowledged: 0, snoozed: 0 },
@@ -326,7 +336,9 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(4)
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(6)
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await flushPromises()
     expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(2)
     expect(wrapper.text()).toContain('payroll.regzel.environment.production_warning')
 
@@ -340,7 +352,7 @@ describe('PayrollSubmissions', () => {
     expect(wrapper.text()).toContain('payroll.regzel.environment.test_warning')
 
     const tabs = wrapper.findAll('[role="tab"]')
-    await tabs[1]!.trigger('click')
+    await tabs[2]!.trigger('click')
     await flushPromises()
     expect(m.overview).toHaveBeenCalledWith(
       'production',
@@ -350,8 +362,31 @@ describe('PayrollSubmissions', () => {
     expect(wrapper.text()).toContain('payroll.submissions.jmhz_fail_closed')
   })
 
+  it('nabídne volbu podpisového certifikátu jako vlastní záložku', async () => {
+    m.signingProfile.mockResolvedValue({
+      environment: 'production',
+      environments: ['production', 'test'],
+      storage_available: true,
+      profile: null,
+      certificates: [],
+      warnings: [],
+    })
+
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+
+    await wrapper.findAll('[role="tab"]')[5]!.trigger('click')
+    await flushPromises()
+
+    expect(m.signingProfile).toHaveBeenCalledWith('production')
+    expect(wrapper.get('[data-test="payroll-signing-certificate"]').text())
+      .toContain('payroll.submissions.signing.title')
+  })
+
   it('bez potvrzení XML nevytvoří a API chybu zobrazí trvale inline', async () => {
     const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
     await flushPromises()
 
     await wrapper.get('[data-test="regzel-prepare"]').trigger('click')
@@ -387,7 +422,7 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
+    await wrapper.findAll('[role="tab"]')[3]!.trigger('click')
     await flushPromises()
 
     expect(m.runs).toHaveBeenCalledWith(expect.stringMatching(/^[0-9]{4}-[0-9]{2}$/))
@@ -411,7 +446,7 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
     await flushPromises()
 
     expect(m.jmhzPreview).toHaveBeenCalledWith(18)
@@ -444,7 +479,7 @@ describe('PayrollSubmissions', () => {
 
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
-    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
     await flushPromises()
 
     await wrapper.get('[data-test="submission-detail-open"]').trigger('click')
@@ -486,7 +521,7 @@ describe('PayrollSubmissions', () => {
 
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
-    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
     await flushPromises()
     await wrapper.get('[data-test="submission-detail-open"]').trigger('click')
     await flushPromises()
@@ -504,7 +539,7 @@ describe('PayrollSubmissions', () => {
   it('zobrazuje účinný stav lhůty odděleně od stavu podání', async () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
-    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
     await flushPromises()
 
     expect(wrapper.get('[data-test="submission-deadline-phase"]').text())
@@ -551,7 +586,7 @@ describe('PayrollSubmissions', () => {
 
     expect(wrapper.get('[data-test="submissions-inbox-badge"]').text()).toBe('1')
 
-    await wrapper.findAll('[role="tab"]')[3]!.trigger('click')
+    await wrapper.findAll('[role="tab"]')[4]!.trigger('click')
     await flushPromises()
 
     expect(m.submissionInbox).toHaveBeenCalledWith('production')

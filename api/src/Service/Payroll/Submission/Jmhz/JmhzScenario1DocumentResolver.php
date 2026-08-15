@@ -194,6 +194,11 @@ final class JmhzScenario1DocumentResolver
                 $average = $this->object($employment['average_earning'] ?? null);
                 $normalizedEmployments[] = [
                     'employment_id' => $employmentId,
+                    'social_base' => $this->socialBase(
+                        $employment['insurance'] ?? null,
+                        $employmentId,
+                        $blockers,
+                    ),
                     'primary' => $employmentSource['is_primary'] ?? null,
                     'identity' => [
                         'person_external_identifier' => $personIdentifier['value'] ?? null,
@@ -418,6 +423,63 @@ final class JmhzScenario1DocumentResolver
             );
         }
         return $result;
+    }
+
+    /**
+     * Vyměřovací základ zaměstnance (10477) a jeho rozpad podle § 5a odst. 1
+     * ZPSZ (10478 písm. a, 10479 písm. b, 10480 písm. c) — obojí za JEDEN
+     * pracovní vztah, ne za osobu.
+     *
+     * Za osobu by to bylo špatně: součást hlášení se podává za pracovní vztah
+     * a člověk jich může mít víc. Osobní úhrn by se pak vykázal u každé
+     * součásti znovu.
+     *
+     * Rozpad určuje sazbová kategorie zaměstnavatele, protože § 5a rozlišuje
+     * právě podle ní: písmeno a) je běžná sazba, b) zdravotnická záchranná
+     * služba a hasičský záchranný sbor podniku, c) rizikové zaměstnání.
+     * Neověřená kategorie je blokátor, ne důvod k vynechání — hádat písmeno
+     * znamená hádat sazbu, a kontrola 315 to spočítá jinak než my.
+     *
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @return array<string,mixed>|null
+     */
+    private function socialBase(
+        mixed $insurance,
+        ?int $employmentId,
+        array &$blockers,
+    ): ?array {
+        $relationship = $this->object($insurance);
+        if ($relationship === []) {
+            return null;
+        }
+        $base = $this->wholeCzk(
+            is_int($relationship['capped_assessment_base_minor_units'] ?? null)
+                ? $relationship['capped_assessment_base_minor_units']
+                : null,
+            '10477',
+            'employment',
+            $employmentId,
+            $blockers,
+        );
+        $letter = match ($relationship['employer_rate_category'] ?? null) {
+            'ordinary' => 'a',
+            'rescue_and_company_fire_service' => 'b',
+            'risk_employment' => 'c',
+            default => null,
+        };
+        if ($letter === null) {
+            $blockers[] = $this->blocker(
+                'jmhz_employer_rate_category_unverified',
+                'employment',
+                $employmentId,
+                ['10478', '10479', '10480'],
+            );
+        }
+
+        return [
+            'assessment_base_czk' => $base,
+            'paragraph5_letter' => $letter,
+        ];
     }
 
     /**

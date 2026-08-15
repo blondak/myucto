@@ -182,6 +182,8 @@ export const ICONS = {
   // Prázdné stavy (EmptyState): `search` = filtr nic nenašel, `funnel` = filtr obecně.
   search:           'M21 21l-4.35-4.35M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16z',
   funnel:           'M4 4h16l-6.4 7.5v5.9l-3.2 1.9v-7.8L4 4z',
+  // Mzdy — dovolená / nepřítomnost se plánuje v kalendáři.
+  calendar:         'M8 7V3m8 4V3M4 11h16M5 21h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z',
 } as const
 
 export type ActionIcon = keyof typeof ICONS

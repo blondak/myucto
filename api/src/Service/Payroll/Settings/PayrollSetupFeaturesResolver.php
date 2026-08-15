@@ -27,11 +27,10 @@ final class PayrollSetupFeaturesResolver
         $sourceBlockers = [];
         $jmhzAvailable = $this->featureAvailability('jmhz_export');
         if ($jmhzAvailable === null) {
+            // Tohle je jediný legitimní blokátor zdroje: matice funkcí se
+            // nedá přečíst, takže o dostupnosti JMHZ nevíme nic.
             $sourceBlockers['jmhz_feature_source'] =
                 'Support matrix neobsahuje ověřitelnou dostupnost JMHZ.';
-        } elseif ($jmhzAvailable) {
-            $sourceBlockers['jmhz_feature_source'] =
-                'JMHZ je globálně dostupné, ale chybí tenantový zdroj jeho aktivace.';
         }
 
         return new PayrollSetupFeatures(
@@ -57,12 +56,72 @@ final class PayrollSetupFeaturesResolver
             ),
             secureDelivery: $policy !== null
                 && $this->string($policy, 'delivery_channel') !== 'disabled',
-            jmhz: false,
+            // Měsíční hlášení se týká každého zaměstnavatele ze zákona, ne až
+            // po zapnutí přepínače. Per-firemní „aktivace" proto neexistuje
+            // a nikdy neexistovala — dřívější blokátor o chybějícím tenantovém
+            // zdroji byl vývojářská poznámka, která se omylem dostala před
+            // uživatele a četla se jako chyba konfigurace.
+            jmhz: $jmhzAvailable === true,
             activeApproverCount: $this->activeApproverCount($supplierId),
-            jmhzRegistryReady: false,
-            jmhzCertificateReady: false,
+            jmhzRegistryReady: $this->hasEmployerRegistrationNumber($supplierId),
+            jmhzCertificateReady: $this->hasUsableSigningCertificate(
+                $supplierId,
+                $effectiveOn,
+            ),
             sourceBlockers: $sourceBlockers,
         );
+    }
+
+    /**
+     * Registrační číslo přidělené ČSSZ. Bez něj se hlášení nespáruje se
+     * zaměstnavatelem, takže je to skutečná podmínka, ne formalita.
+     */
+    private function hasEmployerRegistrationNumber(int $supplierId): bool
+    {
+        if (!$this->db->hasTable('payroll_employer_settings')) {
+            return false;
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT employer_registration_number
+               FROM payroll_employer_settings
+              WHERE supplier_id = ?',
+        );
+        $statement->execute([$supplierId]);
+        $value = $statement->fetchColumn();
+
+        return is_string($value) && trim($value) !== '';
+    }
+
+    /**
+     * Zvolený podpisový certifikát pro PRODUKČNÍ podání, a ještě platný.
+     *
+     * Testovací volba se sem záměrně nepočítá: hlášení se podává do ostrého
+     * prostředí a tvrdit „připraveno" kvůli testovacímu certifikátu by byla
+     * přesně ta lež, kterou má tahle kontrola odhalovat. Stejně tak prošlý
+     * certifikát — ten přestane fungovat v den vypršení, ne až si toho někdo
+     * všimne.
+     */
+    private function hasUsableSigningCertificate(
+        int $supplierId,
+        string $effectiveOn,
+    ): bool {
+        if (!$this->db->hasTable('payroll_submission_signing_profiles')) {
+            return false;
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*)
+               FROM payroll_submission_signing_profiles profile
+               JOIN epo_signing_credentials credential
+                 ON credential.id = profile.credential_id
+                AND credential.deleted_at IS NULL
+              WHERE profile.supplier_id = ?
+                AND profile.environment = "production"
+                AND (credential.valid_from IS NULL OR credential.valid_from <= ?)
+                AND (credential.valid_to IS NULL OR credential.valid_to >= ?)',
+        );
+        $statement->execute([$supplierId, $effectiveOn, $effectiveOn]);
+
+        return (int) $statement->fetchColumn() > 0;
     }
 
     private function featureAvailability(string $key): ?bool

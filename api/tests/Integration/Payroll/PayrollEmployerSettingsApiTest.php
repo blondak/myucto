@@ -110,6 +110,7 @@ final class PayrollEmployerSettingsApiTest extends TestCase
             'health_insurance_credit' => '336',
             'income_tax_credit' => '342',
             'other_deductions_credit' => '379',
+            'partner_settlement_credit' => '365',
         ], $settings['accounts']);
     }
 

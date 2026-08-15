@@ -17,9 +17,11 @@ use Throwable;
  *
  * ⚠️ Ty dvě otázky NEJSOU stejné, proto má třída dvě metody:
  *
- *   isVisibleInUi()  — smí se ptát i na podmínky, které se mění za běhu
- *                      (opt-in AI u dodavatele). UI se čte na každý request,
- *                      takže vidí aktuální stav.
+ *   inactiveReason() — jediná definice „tahle úloha u téhle instalace nemá co
+ *                      dělat" a zároveň proč. Smí se ptát i na podmínky, které
+ *                      se mění za běhu (opt-in AI, typ účetnictví, plátcovství
+ *                      DPH). Čte ji UI přehledu i kontrola prostředí, aby se
+ *                      obě nerozešly. `isVisibleInUi()` je jen její predikát.
  *
  *   isSchedulable()  — smí se ptát JEN na podmínky stabilní přes restart
  *                      kontejneru, protože crontab se generuje jednou při startu.
@@ -34,7 +36,42 @@ use Throwable;
  */
 final class CronJobGate
 {
+    /** Chybí adresář/schránka, se kterou úloha pracuje. */
+    public const INACTIVE_NOT_CONFIGURED = 'not_configured';
+    /** Funkce, kterou úloha obsluhuje, není u téhle instalace zapnutá. */
+    public const INACTIVE_FEATURE_OFF = 'feature_off';
+    /** Položka patří do jiného režimu plánování, než v jakém instalace běží. */
+    public const INACTIVE_OTHER_MODE = 'other_mode';
+
+    /** Aspoň jeden dodavatel vede podvojné účetnictví. */
+    public const FEATURE_DOUBLE_ENTRY = 'double_entry';
+    /** Aspoň jeden dodavatel vede podvojné účetnictví a je plátce/identifikovaná osoba. */
+    public const FEATURE_VAT_DOUBLE_ENTRY = 'vat_double_entry';
+
+    /**
+     * Sondy k `requires_feature` z {@see CronCatalog}. Jeden indexovaný dotaz
+     * na funkci — brána běží na každý request přehledu i diagnostiky.
+     *
+     * Dotazy jsou ZÁMĚRNĚ shodné s výběrem kandidátů v samotných úlohách
+     * ({@see \MyInvoice\Service\Accounting\Payroll\PayrollAutoPostService::doubleEntrySupplierIds()},
+     * {@see \MyInvoice\Service\Accounting\Vat\VatClearingService::candidateSupplierIds()}),
+     * jen zkrácené na existenci. Kdyby se rozešly, hlásili bychom „neaktivní"
+     * o úloze, která práci má — a to je horší než falešný poplach.
+     *
+     * @var array<string,string>
+     */
+    private const FEATURE_PROBES = [
+        self::FEATURE_DOUBLE_ENTRY => "SELECT 1 FROM supplier WHERE accounting_mode = 'double_entry' LIMIT 1",
+        self::FEATURE_VAT_DOUBLE_ENTRY => "SELECT 1 FROM supplier
+              WHERE accounting_mode = 'double_entry'
+                AND (is_vat_payer = 1 OR is_identified = 1)
+              LIMIT 1",
+    ];
+
     private ?bool $aiOptInCache = null;
+
+    /** @var array<string,bool> */
+    private array $featureCache = [];
 
     public function __construct(
         private readonly Config $config,
@@ -42,27 +79,46 @@ final class CronJobGate
     ) {}
 
     /**
-     * Má se úloha objevit v UI přehledu? Zahrnuje i dynamické podmínky.
+     * Proč u téhle instalace úloha nemá co dělat? `null` = má.
      *
-     * Položka dispatcheru se ukazuje jen v režimu DISPATCHER — v default režimu
-     * neběží, takže by v přehledu navždy visela jako „nikdy neběželo".
-     * Jednotlivé úlohy se naopak ukazují v obou režimech: i pod dispatcherem
-     * pořád běží (jen je spouští on) a jejich zdraví je stejně důležité.
+     * Jediné místo, kde se relevance rozhoduje. Vrácený důvod je strojový klíč,
+     * text si doplní UI podle něj.
+     *
+     * Fail-open (viz docblock třídy): cokoli, co se nepodaří přečíst, nechává
+     * úlohu aktivní. Falešné „neaktivní" totiž schová skutečný výpadek.
+     *
+     * @param array<string,mixed> $job
+     */
+    public function inactiveReason(array $job, string $mode = CronScheduleMode::INDIVIDUAL): ?string
+    {
+        // Položka dispatcheru dává smysl jen v režimu DISPATCHER — v tom druhém
+        // se neplánuje, takže by navždy visela jako „nikdy neběželo".
+        if (($job['dispatcher_only'] ?? false) === true) {
+            return $mode === CronScheduleMode::DISPATCHER ? null : self::INACTIVE_OTHER_MODE;
+        }
+        if (!$this->isSchedulable($job)) {
+            return self::INACTIVE_NOT_CONFIGURED;
+        }
+        if (($job['requires_ai_opt_in'] ?? false) === true && !$this->anySupplierHasAiOptIn()) {
+            return self::INACTIVE_FEATURE_OFF;
+        }
+        $feature = $job['requires_feature'] ?? null;
+        if (is_string($feature) && $feature !== '' && !$this->hasFeature($feature)) {
+            return self::INACTIVE_FEATURE_OFF;
+        }
+        return null;
+    }
+
+    /**
+     * Má se úloha objevit v UI přehledu? Jednotlivé úlohy se ukazují v obou
+     * režimech: i pod dispatcherem pořád běží (jen je spouští on) a jejich
+     * zdraví je stejně důležité.
      *
      * @param array<string,mixed> $job
      */
     public function isVisibleInUi(array $job, string $mode = CronScheduleMode::INDIVIDUAL): bool
     {
-        if (($job['dispatcher_only'] ?? false) === true) {
-            return $mode === CronScheduleMode::DISPATCHER;
-        }
-        if (!$this->isSchedulable($job)) {
-            return false;
-        }
-        if (($job['requires_ai_opt_in'] ?? false) === true) {
-            return $this->anySupplierHasAiOptIn();
-        }
-        return true;
+        return $this->inactiveReason($job, $mode) === null;
     }
 
     /**
@@ -109,6 +165,27 @@ final class CronJobGate
                 return $isDispatcher || $this->isSchedulable($job);
             },
         ));
+    }
+
+    /**
+     * Neznámý název funkce = překlep v katalogu, ne vypnutá funkce. Vrací proto
+     * true — jinak by úlohu tiše umlčel a nikdo by si toho nevšiml.
+     */
+    private function hasFeature(string $feature): bool
+    {
+        if (array_key_exists($feature, $this->featureCache)) {
+            return $this->featureCache[$feature];
+        }
+        $sql = self::FEATURE_PROBES[$feature] ?? null;
+        if ($sql === null || $this->pdo === null) {
+            return $this->featureCache[$feature] = true;
+        }
+        try {
+            $stmt = $this->pdo->query($sql);
+            return $this->featureCache[$feature] = ($stmt === false || $stmt->fetchColumn() !== false);
+        } catch (Throwable) {
+            return $this->featureCache[$feature] = true; // fail-open
+        }
     }
 
     private function anySupplierHasAiOptIn(): bool

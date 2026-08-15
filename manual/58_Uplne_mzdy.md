@@ -821,6 +821,25 @@ sociální pojištění, vztahové i osobní součty a odpovídající závazek 
 Viditelné označení **Pouze kontrolní náhled** znamená, že nejde o úplné XML
 JMHZ, připravené podání ani důkaz odeslání nebo přijetí.
 
+Panel **Nácvik měsíčního hlášení** postaví z ověřené přípravy úplné XML
+běžného měsíčního hlášení a projde s ním trojí kontrolu: sestavitelnost
+dokumentu, shodu s připnutým schématem a katalog kontrol ČSSZ. Nic se
+neodesílá ani neukládá jako podání.
+
+Nálezy z katalogu se dělí podle dopadu, ne podle závažnosti textu.
+**Nepropustná vada** by způsobila neúčinnost podání a vyvolala výzvu
+k opravnému hlášení. **Propustná vada** podání nezneplatní, ale úřady dostanou
+chybná data. **Nevykonaná nepropustná kontrola** znamená mezeru na naší straně,
+ne chybu v datech. U každého nálezu je kód chyby v podobě, v jaké ho vrátí ČSSZ,
+a u nálezu vázaného na konkrétního zaměstnance i pořadí jeho součásti.
+
+Výsledek proto rozlišuje tři stavy: dokument nejde postavit, XML vzniklo
+a prošlo schématem, ale katalog kontrol není celý vykonaný, a konečně podání
+připravené k odeslání. Prostřední stav je varovný, ne zelený. Část kontrol
+rozhoduje až ČSSZ proti svému registru — ty se nikdy nevykazují jako splněné,
+jen se počítají zvlášť. Panel zároveň ukazuje lhůtu pro podání za vykazované
+období, včetně posunu na nejbližší pracovní den.
+
 Pro běžný profil JMHZ lze u každé schválené revize samostatně potvrdit pět
 právních skutečností: evidované srážky ze mzdy, slevu zaměstnance pro sezónní
 práci, specifickou právní skutečnost, podporu zaměstnávání osob se zdravotním

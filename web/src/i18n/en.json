@@ -1743,7 +1743,8 @@
                 "payout": {
                     "cash": "Cash",
                     "bank": "Bank account",
-                    "mixed": "Mixed"
+                    "mixed": "Mixed",
+                    "partner_settlement": "Set off against shareholder account"
                 },
                 "identity_title": "Name history",
                 "addresses_title": "Address history",
@@ -1790,6 +1791,11 @@
                 "primary_contact": "Primary contact",
                 "active": "Active",
                 "payout_method": "Payout method",
+                "partner_settlement_hint": "The net wage is not paid out — it is reclassified monthly as a set-off against the shareholder account (331/366 Dr / 365 Cr). No payment and no cash document is created.",
+                "partner_settlement_account": "Set-off account",
+                "partner_settlement_account_placeholder": "e.g. 365.100",
+                "partner_settlement_account_hint": "Analytic code of Other liabilities to shareholders from the company chart of accounts.",
+                "partner_settlement_unavailable": "Set-off against the shareholder account is available only for partner income or statutory-office remuneration.",
                 "cash_allocation": "Cash allocation (hundredths of %)",
                 "payout_effective_on": "Allocation valid from",
                 "account_hint": "Active bank allocations and cash must add up to 10,000.",
@@ -2081,16 +2087,207 @@
             "subtitle": "Prepare, verify and download statutory reports with clearly separated test and production environments.",
             "tabs_label": "Payroll submission types",
             "tabs": {
+                "transport": "Submission status",
                 "regzel": "Employer registration",
                 "jmhz": "JMHZ",
                 "health": "Health insurers",
-                "inbox": "Inbox"
+                "inbox": "Inbox",
+                "certificate": "Certificate"
             },
             "unsupported": "Not supported yet",
             "jmhz_title": "Unified monthly employer report",
             "jmhz_fail_closed": "Direct JMHZ preparation and submission are not available yet. Until mapping, receipt verification and corrections are complete, the system will not pretend that a submission occurred.",
             "health_title": "Health-insurer reports",
             "health_fail_closed": "Direct health-insurer submissions are not available yet. The system will not mark them as sent or accepted without a verified channel and receipt.",
+            "transport": {
+                "title": "Sent submissions and their status",
+                "description": "Every dispatch attempt to ČSSZ, newest first. Sending happens when a submission is frozen — this screen tracks the status and fetches the result.",
+                "load_failed": "The dispatch history could not be loaded.",
+                "state_unknown": "Until the request succeeds the system does not know what was sent — please do not read this empty screen as proof that nothing went out.",
+                "environment": {
+                    "label": "Environment",
+                    "production": "Production",
+                    "test": "Test",
+                    "production_note": "Live submissions to ČSSZ. What is in this list counts towards the authority.",
+                    "test_note": "ČSSZ test environment. A submission made here does not discharge the obligation."
+                },
+                "vs": {
+                    "label": "Employer variable symbol",
+                    "hint": "The VREP gateway identifies the submission by the employer's variable symbol — without it the status cannot be fetched and the transaction cannot be closed. You will find it on the ČSSZ registration decision.",
+                    "pick": "Take from workplace:",
+                    "missing": "No active workplace in the employer settings has a social-security variable symbol filled in. Add it in the settings, or type it here manually.",
+                    "required": "Enter the variable symbol (at most ten digits) so the status can be fetched or the transaction closed."
+                },
+                "empty": {
+                    "title": "Nothing has been sent yet",
+                    "description": "No dispatch attempt has been made in this environment yet. Submissions are sent after freezing on the JMHZ tab.",
+                    "import_hint": "If you filed in this environment using other software, import the processing protocol from your data box — the overview will then show it next to submissions sent from here."
+                },
+                "source": {
+                    "app": "Sent by this app",
+                    "imported": "Imported protocol"
+                },
+                "imported": {
+                    "action": "Import protocol from the data box",
+                    "importing": "Importing protocol…",
+                    "hint": "This overview does not know about submissions filed by other software. The processing protocol delivered by ČSSZ to your data box can be imported here as XML, so filings made outside the app show up as well. A protocol issued to another variable symbol is refused.",
+                    "added": "The protocol was imported. Submission status: {status}.",
+                    "replaced": "This protocol had already been imported — the record was updated, no duplicate was created.",
+                    "failed": "The protocol could not be imported.",
+                    "note": "This document arrived through the data box; the app did not send it. It therefore holds no submission payload — the status cannot be polled and no transaction can be closed. The protocol itself is the result.",
+                    "period": "Period {month}/{year}",
+                    "period_unknown": "The protocol states no period",
+                    "guid": "Submission ID (idPodani)",
+                    "guid_missing": "The protocol states no submission ID",
+                    "status_code": "Status code",
+                    "protocol_dated_at": "Protocol date",
+                    "submitted_at": "Filing date",
+                    "detail_unavailable": "The stored original could not be re-read, so error detail is unavailable here. The protocol reports {total} error(s).",
+                    "kind": {
+                        "processing": "Processing protocol",
+                        "completeness": "Completeness protocol",
+                        "partial_submission": "Partial submission protocol"
+                    }
+                },
+                "group": {
+                    "period": "Period {start} – {end}",
+                    "period_unknown": "Period could not be resolved",
+                    "submission": "Submission no. {id}",
+                    "attempts": "Attempts: {total}"
+                },
+                "status": {
+                    "prepared": "Ready to send",
+                    "sent": "Sent",
+                    "awaiting_protocol": "Received, awaiting protocol",
+                    "completed": "Protocol retrieved",
+                    "failed": "Dispatch failed",
+                    "expired": "Expired"
+                },
+                "attempt_no": "Attempt no. {no}",
+                "sent_at": "Sent {at}",
+                "not_sent_yet": "Not sent yet",
+                "awaiting_note": "ČSSZ confirmed receipt of the message, not acceptance of the submission — only the processing protocol decides the result. Fetch the status; until then do not close the transaction or the result would be lost.",
+                "poll": "Fetch status",
+                "polling": "Fetching status…",
+                "poll_failed": "The submission status could not be fetched.",
+                "poll_inconclusive": "ČSSZ has returned neither a receipt confirmation nor a protocol yet. Please try again in a moment.",
+                "close": "Close",
+                "closing": "Closing…",
+                "close_failed": "The transaction could not be closed.",
+                "closed": "The transaction of attempt no. {id} has been closed.",
+                "close_note": "The protocol has been retrieved, so the transaction can be closed. The ČSSZ submission protocol requires closing it.",
+                "correlation": "CorrelationID",
+                "correlation_missing": "Not assigned",
+                "copy": "Copy",
+                "copied": "Copied",
+                "http_status": "HTTP response",
+                "completed_at": "Completed",
+                "acknowledged": "ČSSZ confirmed receipt, processing is running. Recommended delay before the next query: {seconds} s.",
+                "protocol_status": {
+                    "ProcessedAndComplete": "Processed and complete",
+                    "NotAccepted": "Not accepted",
+                    "Rejected": "Rejected",
+                    "PartiallyAccepted": "Partially accepted",
+                    "Processing": "Processing",
+                    "ContainsPassableErrors": "Contains passable errors"
+                },
+                "origin": {
+                    "dis": "DIS",
+                    "cjmhz": "cJMHZ",
+                    "platform": "Platform"
+                },
+                "report": {
+                    "no_errors": "The protocol contains no errors.",
+                    "area": "Area: {area}",
+                    "attributes": "Affected attributes:",
+                    "control_unknown": "Our catalog does not know this control — the message is therefore shown exactly as it arrived from ČSSZ.",
+                    "ik_mpsv": "IK MPSV {value}",
+                    "id_ppv": "ID PPV {value}",
+                    "form_guid": "Form {value}"
+                }
+            },
+            "signing": {
+                "title": "ČSSZ signing certificate",
+                "description": "Choose which stored certificate signs this company's payroll submissions. Certificates are not uploaded here — the application has a single vault, under System → Electronic signatures.",
+                "load_failed": "The signing certificate settings could not be loaded.",
+                "state_unknown": "Until the request succeeds the system does not know whether a certificate is selected — please do not read this empty screen as proof that none is configured.",
+                "storage_unavailable": "The storage for the certificate choice is not available yet — the database migration has not run. The choice cannot be saved right now.",
+                "environment": {
+                    "label": "Environment",
+                    "production": "Production",
+                    "test": "Test",
+                    "production_note": "Live environment. This certificate signs real submissions to ČSSZ.",
+                    "test_note": "ČSSZ test environment. The test certificate is usually a different one — mixing them up only shows up in the ČSSZ protocol, typically after the deadline."
+                },
+                "current": {
+                    "title": "What signs right now",
+                    "none": "No certificate is selected for this environment. Payroll submissions will not be signed.",
+                    "selected": "Signed with the certificate “{label}”.",
+                    "unknown_label": "unknown certificate",
+                    "foreign": "Another user saved this choice with their own certificate — it is not in your vault, so you cannot sign with it.",
+                    "registered_serial": "Serial number registered with ČSSZ: {serial}",
+                    "registered_serial_missing": "not filled in",
+                    "updated_at": "Last changed {at}"
+                },
+                "picker": {
+                    "title": "Certificate choice",
+                    "description": "The list contains the vault certificates available to you. A new certificate is uploaded under System → Electronic signatures, and enabled for this company there as well.",
+                    "label": "Certificate from the vault",
+                    "placeholder": "Select a certificate",
+                    "no_results": "No matching certificate",
+                    "option_valid_until": "Valid until {date}",
+                    "option_expired": "Expired on {date}",
+                    "option_not_yet_valid": "Becomes valid on {date}",
+                    "option_not_enabled": "Not enabled for this company"
+                },
+                "vault": {
+                    "empty": "Your vault contains no certificate. Certificates are uploaded in one place for the whole application — System → Electronic signatures.",
+                    "open": "Open electronic signatures"
+                },
+                "certificate": {
+                    "subject": "Issued to",
+                    "issuer": "Issuer",
+                    "validity": "Validity",
+                    "serial_hex": "Serial number (hexadecimal, as in the certificate)",
+                    "serial_decimal": "Serial number (decimal, as on the ČSSZ form)",
+                    "serial_unknown": "unknown"
+                },
+                "badge": {
+                    "usable": "Usable",
+                    "expired": "Expired on {date}",
+                    "not_yet_valid": "Becomes valid on {date}",
+                    "expires_soon": "Expires in {days} days",
+                    "not_enabled": "Not enabled for this company"
+                },
+                "serial": {
+                    "label": "Serial number registered with ČSSZ",
+                    "placeholder": "Number from the authorisation notice",
+                    "hint": "You will find the number on the “Oznámení o pověření” form. ČSSZ prints it in decimal while the certificate carries it in hexadecimal — compare it against both forms shown above. Separators (colons, spaces) do not matter.",
+                    "hint_optional": "If the numbers do not match, the save is rejected: ČSSZ would reject a submission signed with such a certificate. The field may be left empty, but then nobody verifies the match against the registration."
+                },
+                "step_up": {
+                    "title": "Identity confirmation",
+                    "hint": "This choice decides what signs official filings on behalf of the company, so it is verified the same way as managing the key itself.",
+                    "password": "Current password",
+                    "totp": "Authenticator code",
+                    "password_missing": "Enter your current password, or verify with a passkey.",
+                    "totp_missing": "Enter the six-digit authenticator code.",
+                    "passkey_verify": "Verify with a passkey",
+                    "passkey_verified": "Verified with a passkey",
+                    "passkey_failed": "Passkey verification failed.",
+                    "passkey_unsupported": "This browser does not support passkeys — use your password.",
+                    "or_password": "or use your password"
+                },
+                "save": "Save choice",
+                "saving": "Saving…",
+                "saved": "The certificate choice has been saved.",
+                "save_failed": "The certificate choice could not be saved.",
+                "remove": "Clear choice",
+                "removing": "Clearing…",
+                "removed": "The certificate choice has been cleared.",
+                "remove_failed": "The certificate choice could not be cleared.",
+                "read_only": "You are not allowed to change the signing certificate."
+            },
             "inbox": {
                 "title": "Payroll submission inbox",
                 "subtitle": "A derived overview of approaching and missed deadlines, rejected submissions and pending identity checks. Acknowledging or snoozing never changes the obligation or submission state — it only manages the reminder.",
@@ -2177,6 +2374,22 @@
                 "jmhz_dry_run_show_xml": "Show XML",
                 "jmhz_dry_run_hide_xml": "Hide XML",
                 "jmhz_dry_run_copy_xml": "Copy XML",
+
+                "jmhz_dry_run_incomplete": "The XML passed the schema, but the control catalogue is not fully executed yet — the submission is not ready to send.",
+
+                "jmhz_controls_summary": "CSSZ controls: {passed} passed · {failed} failed · {remote} decided by CSSZ · {gaps} not implemented",
+
+                "jmhz_controls_blocking": "Blocking defects ({count}) — the submission would be ineffective",
+
+                "jmhz_controls_gaps": "Blocking controls not executed ({count})",
+
+                "jmhz_controls_warnings": "Passable defects ({count}) — the submission goes through with wrong data",
+
+                "jmhz_controls_form": "component {ordinal}",
+
+                "jmhz_deadline": "Submission window: {from} to {to} (shifted to a working day).",
+
+                "jmhz_controls_deviations": "Deviations from the literal catalogue wording ({count}) — verify against the CSSZ protocol",
                 "jmhz_dry_run_failed": "The monthly report dry run could not be started.",
                 "jmhz_dry_run_blockers": {
                     "jmhz_preparation_not_ready": "The report sources are incomplete.",
@@ -2581,7 +2794,8 @@
                 "social_insurance": "Social insurance liability",
                 "health_insurance": "Health insurance liability",
                 "income_tax": "Income tax advance or withholding",
-                "other_deductions": "Other payroll deductions"
+                "other_deductions": "Other payroll deductions",
+                "partner_settlement": "Set-off against shareholder account"
             },
             "validation": {
                 "title": "Correct the highlighted fields before saving.",
@@ -2677,9 +2891,17 @@
             "supported_years": "Supported years",
             "available_features": "Available features",
             "matrix_version": "Support matrix version",
+            "settings": "Payroll settings",
+            "setup": {
+                "title": "Setup is not complete",
+                "description": "Complete these employer details before a payroll run can be calculated.",
+                "action": "Open settings"
+            },
             "month": {
                 "title": "This month",
                 "description": "Frequent tasks for payroll period {period}.",
+                "run_status": "Run: {status}",
+                "run_missing": "No run created yet",
                 "quick_inputs": "Enter pay and bonuses",
                 "quick_inputs_hint": "Base pay, overtime, bonuses and monthly amounts in one place.",
                 "runs": "Calculate and approve payroll",
@@ -2690,6 +2912,78 @@
                 "payments_hint": "Prepare net pay, tax and insurance payments.",
                 "documents": "Documents and filings",
                 "documents_hint": "Download payslips, the monthly package and review outputs."
+            }
+        },
+        "guide": {
+            "title": "How it works",
+            "intro": "The payroll month has a fixed order — every step needs the result of the previous one. Click a step to jump straight to its page.",
+            "dismiss": "Hide the guide",
+            "reopen": "Show the “How it works” guide",
+            "setup_note": "First time? Start by filling in employer details (social security, tax office, health insurers, institution accounts) and adding people.",
+            "setup_link": "Payroll settings",
+            "manual_note": "The manual covers the full procedure with examples.",
+            "manual_link": "Payroll chapter",
+            "steps": {
+                "absences": {
+                    "title": "Record absences",
+                    "hint": "Vacation, sickness, care leave, obstacles. Must be entered before the calculation."
+                },
+                "time": {
+                    "title": "Close attendance",
+                    "hint": "Review hours worked and approve the month."
+                },
+                "quick_inputs": {
+                    "title": "Enter pay and bonuses",
+                    "hint": "Base pay, overtime, bonuses — one row per employee."
+                },
+                "runs": {
+                    "title": "Calculate the payroll run",
+                    "hint": "Lock inputs → calculate → review → approve."
+                },
+                "payments": {
+                    "title": "Post and pay",
+                    "hint": "Net pay, tax advance and insurance ready for payment."
+                },
+                "documents": {
+                    "title": "Issue payslips and documents",
+                    "hint": "Payslips and the monthly package to download."
+                },
+                "submissions": {
+                    "title": "File and close",
+                    "hint": "Social security and insurer statements, tax office filings, then close the run."
+                }
+            }
+        },
+        "employee_cards": {
+            "title": "Employees",
+            "subtitle": "Who is on the payroll for period {period} and how much they are due.",
+            "manage": "Manage employees",
+            "load_failed": "Employee cards could not be loaded. Try again or open the employee list.",
+            "empty_title": "No employees yet",
+            "empty_hint": "Add the first person and their employment — their card will show up here.",
+            "empty_action": "Add employee",
+            "search": "Search",
+            "search_placeholder": "Name or employment code",
+            "no_results": "No employee matches the filter.",
+            "base": "Gross pay for the period",
+            "base_missing": "Not entered",
+            "gross_preview": "Including overtime and bonuses: {amount}",
+            "summary": {
+                "people": "Employees",
+                "gross": "Total gross pay",
+                "away": "Absent",
+                "attention": "Needs attention"
+            },
+            "filters": {
+                "active": "Active",
+                "away": "Absent",
+                "attention": "Needs attention",
+                "all": "All"
+            },
+            "actions": {
+                "vacation": "Vacation",
+                "absence": "Absence",
+                "detail": "Card"
             }
         },
         "capabilities": {
@@ -6148,7 +6442,7 @@
         "active_profiles": "Active",
         "form_hint": "The profile will be tied to your user account.",
         "credential_title": "Profile certificate",
-        "credential_hint": "The certificate is shared by all enabled profile usages.",
+        "credential_hint": "The certificate is shared by all enabled profile usages. Prefer picking one from the Certificates section — that is where it is uploaded once for the whole app.",
         "credential_save_first": "The certificate can be uploaded after the profile is saved for the first time.",
         "default_profiles_title": "Signing profile mapping",
         "default_profiles_hint": "When signed-in user selection is active, the app uses the selected profile for the output type.",
@@ -9999,14 +10293,50 @@
         "signing_profile_cert_uploaded": "Profile certificate uploaded.",
         "signing_profile_cert_deleted": "Profile certificate removed.",
         "signing_profile_cert_delete_confirm": "Really remove the certificate from this profile?",
+        "certificate_vault_title": "Certificates",
+        "certificate_vault_hint": "The single place where a certificate is uploaded. PDF signatures, encrypted S/MIME e-mail, EPO tax submissions and payroll submissions all read it from here — no need to upload it in several places.",
+        "certificate_vault_security": "The PFX/P12 file and its password are stored encrypted with a dedicated application key. The private key never returns to the browser or to the log, so every operation with it requires fresh verification.",
+        "certificate_vault_list_title": "Stored certificates",
+        "certificate_vault_empty": "No certificate here yet.",
+        "certificate_vault_subject": "Subject",
+        "certificate_vault_issuer": "Issuer",
+        "certificate_vault_serial": "Serial number",
+        "certificate_vault_validity": "Validity",
+        "certificate_vault_enabled_for_company": "Enabled for this company",
+        "certificate_vault_disabled_for_company": "Not enabled for this company",
+        "certificate_vault_linked_profiles": "Linked signing profiles: {count}",
+        "certificate_vault_grant_hint": "Which certificate a given company may use is granted in tax submissions.",
+        "certificate_vault_grant_link": "Go to tax submissions",
+        "certificate_vault_upload_title": "Upload a certificate",
+        "certificate_vault_upload_hint": "A PFX/P12 file with the private key. The file password is not your MyÚčto password — it is the password protecting the certificate itself.",
+        "certificate_vault_choose_file": "Choose file",
+        "certificate_vault_no_file": "No file selected",
+        "certificate_vault_label": "Label",
+        "certificate_vault_password": "Certificate password",
+        "certificate_vault_store": "Store certificate",
+        "certificate_vault_uploaded": "The certificate was stored.",
+        "certificate_vault_load_failed": "Certificates could not be loaded.",
+        "certificate_vault_step_up_password": "MyÚčto password",
+        "certificate_vault_step_up_totp": "Authenticator code",
+        "certificate_vault_step_up_hint": "The verification covers this single upload and is never stored.",
+        "certificate_vault_step_up_password_missing": "Enter your MyÚčto password to store the certificate.",
+        "certificate_vault_step_up_totp_missing": "Enter the six-digit authenticator code to store the certificate.",
+        "certificate_vault_step_up_or_password": "or verify with your password",
+        "certificate_vault_verify_passkey": "Verify passkey",
+        "certificate_vault_passkey_verified": "Passkey verified",
+        "certificate_vault_passkey_unsupported": "This browser does not support passkeys, verify with your password.",
+        "certificate_vault_passkey_failed": "Passkey verification failed.",
         "signing_vault_source": "Certificate source",
-        "signing_use_personal_vault": "Use a personal EPO certificate",
+        "signing_use_personal_vault": "Pick from Certificates",
         "signing_uploaded_source": "Upload a separate certificate",
-        "signing_upload_separate": "Upload a separate certificate",
-        "signing_vault_certificate": "Personal certificate",
+        "signing_upload_separate": "Upload a file into this profile only",
+        "signing_upload_legacy_badge": "legacy",
+        "signing_upload_legacy_hint": "Legacy path: the file is stored on the server disk outside the shared Certificates and applies to this profile only. Use it only where a certificate from the Certificates section cannot be used.",
+        "signing_vault_certificate": "Certificate",
         "signing_vault_choose": "Choose a certificate",
-        "signing_vault_hint": "The private key remains in the encrypted personal vault. The same certificate can be used safely for EPO, PDF and S/MIME without uploading it again.",
-        "signing_vault_manage": "Manage personal EPO certificates",
+        "signing_vault_empty_hint": "No valid certificate is enabled for this company yet. Upload it in the Certificates section and enable it in tax submissions.",
+        "signing_vault_hint": "The private key remains in the encrypted vault, so the same certificate can be used for PDF, S/MIME and EPO without uploading it again.",
+        "signing_vault_manage": "Go to the Certificates section",
         "signing_vault_personal_profile_required": "A personal certificate can only be linked to your own signing profile.",
         "signing_vault_certificate_required": "Choose a personal certificate.",
         "signing_vault_password_required": "Enter your current MyÚčto password to link the personal certificate.",
@@ -11263,6 +11593,9 @@
             "ik_mpsv_warning": "IK MPSV could not be recognized in this certificate. Signing may work, but EPO may not automatically link the signer; verify the certificate details.",
             "upload_certificate": "Store a new P12/PFX",
             "upload_certificate_hint": "Use a personal qualified electronic-signature certificate, not an ordinary SSL or commercial certificate.",
+            "upload_moved_title": "Uploading a certificate",
+            "upload_moved_hint": "Certificates are uploaded in one place — System → Electronic signatures → Certificates. EPO, PDF signing, S/MIME and payroll submissions all read them from there. Here you only pick which of them this company may use.",
+            "upload_moved_link": "Go to Certificates",
             "certificate_file": "P12/PFX file",
             "choose_certificate_file": "Choose P12/PFX",
             "no_certificate_file": "No file selected",
@@ -13731,6 +14064,7 @@
         "checks_hint": "Problems and warnings come first. Each one lists its impact, the fix and a link to the manual.",
         "actual": "Measured",
         "expected": "Expected",
+        "info": "Note",
         "fix": "Fix",
         "manual_link": "Open manual",
         "summary_counts": "{fail} problems, {warn} warnings, {ok} fine",
@@ -13849,7 +14183,8 @@
                 "impact": "Without cron there are no backups, no reminders go out and exchange rates are not fetched.",
                 "fix": "Check the schedule and the last run on the Scheduled jobs page.",
                 "actual_label": "Stale jobs",
-                "expected_label": "Expected"
+                "expected_label": "Expected",
+                "info_label": "Inactive jobs (not configured or turned off)"
             },
             "app_debug": {
                 "label": "Debug mode",

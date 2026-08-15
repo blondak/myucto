@@ -264,7 +264,8 @@
       "document_requests"
     ],
     "payroll-dashboard": [
-      "payroll"
+      "payroll",
+      "payroll_absence"
     ],
     "payroll-runs": [
       "payroll"

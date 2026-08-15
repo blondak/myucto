@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
+  type PayrollJmhzControlFinding,
+  type PayrollJmhzControlReport,
   type PayrollJmhzXmlDryRun,
   type PayrollRun,
 } from '@/api/payroll'
@@ -65,6 +67,41 @@ function blockerLabel(code: string): string {
   return translated === key ? code : translated
 }
 
+interface ControlGroup {
+  key: string
+  title: string
+  tone: string
+  findings: PayrollJmhzControlFinding[]
+}
+
+/**
+ * Tři skupiny nálezů se liší dopadem, ne závažností textu: nepropustná vada
+ * podání zneplatní, propustná ho nechá projít s chybnými daty a mezera
+ * v pokrytí znamená, že jsme kontrolu vůbec nevykonali.
+ */
+function controlGroups(report: PayrollJmhzControlReport): ControlGroup[] {
+  return ([
+    {
+      key: 'blocking',
+      title: 'payroll.submissions.overview.jmhz_controls_blocking',
+      tone: 'border-danger-500/30 bg-danger-50 text-danger-700',
+      findings: report.blocking,
+    },
+    {
+      key: 'gaps',
+      title: 'payroll.submissions.overview.jmhz_controls_gaps',
+      tone: 'border-warning-500/30 bg-warning-50 text-warning-700',
+      findings: report.coverage_gaps,
+    },
+    {
+      key: 'warnings',
+      title: 'payroll.submissions.overview.jmhz_controls_warnings',
+      tone: 'border-neutral-300 bg-neutral-50 text-neutral-700',
+      findings: report.warnings,
+    },
+  ] satisfies ControlGroup[]).filter(group => group.findings.length > 0)
+}
+
 async function copyXml(payrollRun: PayrollRun) {
   const xml = state(payrollRun)?.result?.xml
   if (xml) await navigator.clipboard.writeText(xml)
@@ -118,17 +155,106 @@ async function copyXml(payrollRun: PayrollRun) {
 
         <template v-if="state(payrollRun)?.result">
           <div
-            v-if="state(payrollRun)!.result!.status === 'dry_run_valid'"
-            class="mt-3 rounded-lg border border-success-500/30 bg-success-50 p-3"
+            v-if="state(payrollRun)!.result!.status !== 'blocked'"
+            class="mt-3 rounded-lg p-3"
+            :class="state(payrollRun)!.result!.status === 'dry_run_valid'
+              ? 'border border-success-500/30 bg-success-50'
+              : 'border border-warning-500/30 bg-warning-50'"
           >
-            <p class="text-sm font-medium text-success-700">
-              {{ t('payroll.submissions.overview.jmhz_dry_run_valid', {
-                version: state(payrollRun)!.result!.schema?.data_version ?? '',
-              }) }}
+            <p
+              class="text-sm font-medium"
+              :class="state(payrollRun)!.result!.status === 'dry_run_valid'
+                ? 'text-success-700'
+                : 'text-warning-700'"
+            >
+              {{ state(payrollRun)!.result!.status === 'dry_run_valid'
+                ? t('payroll.submissions.overview.jmhz_dry_run_valid', {
+                  version: state(payrollRun)!.result!.schema?.data_version ?? '',
+                })
+                : t('payroll.submissions.overview.jmhz_dry_run_incomplete') }}
             </p>
-            <p class="mt-1 break-all text-xs text-success-700">
+            <p
+              class="mt-1 break-all text-xs"
+              :class="state(payrollRun)!.result!.status === 'dry_run_valid'
+                ? 'text-success-700'
+                : 'text-warning-700'"
+            >
               {{ state(payrollRun)!.result!.xml_sha256?.slice(0, 16) }}…
             </p>
+
+            <p
+              v-if="state(payrollRun)!.result!.deadline"
+              class="mt-2 text-xs text-neutral-600"
+              data-test="jmhz-dry-run-deadline"
+            >
+              {{ t('payroll.submissions.overview.jmhz_deadline', {
+                from: state(payrollRun)!.result!.deadline!.earliest_submission_on,
+                to: state(payrollRun)!.result!.deadline!.due_on,
+              }) }}
+            </p>
+
+            <div
+              v-if="state(payrollRun)!.result!.controls"
+              class="mt-3 space-y-3"
+              data-test="jmhz-dry-run-controls"
+            >
+              <p class="text-xs text-neutral-600">
+                {{ t('payroll.submissions.overview.jmhz_controls_summary', {
+                  passed: state(payrollRun)!.result!.controls!.counts.passed,
+                  failed: state(payrollRun)!.result!.controls!.counts.failed,
+                  remote: state(payrollRun)!.result!.controls!.counts.not_evaluable,
+                  gaps: state(payrollRun)!.result!.controls!.coverage_gaps.length,
+                }) }}
+              </p>
+              <details
+                v-if="state(payrollRun)!.result!.controls!.deviations?.length"
+                class="rounded-lg border border-neutral-300 bg-neutral-50 p-3 text-neutral-700"
+                data-test="jmhz-controls-deviations"
+              >
+                <summary class="cursor-pointer text-sm font-medium">
+                  {{ t('payroll.submissions.overview.jmhz_controls_deviations', {
+                    count: state(payrollRun)!.result!.controls!.deviations.length,
+                  }) }}
+                </summary>
+                <ul class="mt-2 space-y-1 text-sm">
+                  <li
+                    v-for="deviation in state(payrollRun)!.result!.controls!.deviations"
+                    :key="deviation.control_id"
+                  >
+                    <span class="font-mono text-xs opacity-75">{{ deviation.control_id }}</span>
+                    {{ deviation.reason }}
+                  </li>
+                </ul>
+              </details>
+              <div
+                v-for="group in controlGroups(state(payrollRun)!.result!.controls!)"
+                :key="group.key"
+                class="rounded-lg border p-3"
+                :class="group.tone"
+                :data-test="`jmhz-controls-${group.key}`"
+              >
+                <p class="text-sm font-medium">
+                  {{ t(group.title, { count: group.findings.length }) }}
+                </p>
+                <ul class="mt-2 space-y-1 text-sm">
+                  <li v-for="finding in group.findings" :key="`${group.key}-${finding.control_id}-${finding.form_ordinal ?? ''}`">
+                    <span class="font-mono text-xs opacity-75">
+                      {{ finding.error_code ?? finding.control_id }}
+                    </span>
+                    {{ finding.message }}
+                    <span
+                      v-if="finding.form_ordinal !== null"
+                      class="text-xs opacity-75"
+                    >
+                      ({{ t('payroll.submissions.overview.jmhz_controls_form', {
+                        ordinal: finding.form_ordinal + 1,
+                      }) }})
+                    </span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
             <div class="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"

@@ -1,5 +1,6 @@
 import { api } from './client'
-import type { EpoSigningCredential } from './epoSubmissions'
+import { appendStepUpProof } from './epoSubmissions'
+import type { EpoSigningCredential, EpoStepUpProof } from './epoSubmissions'
 
 /** Typy zpráv pro kopii dodavateli — zrcadlí RecipientResolver::TYPE_*. */
 export type SelfCopyType = 'documents' | 'reminders' | 'approvals'
@@ -665,6 +666,24 @@ export interface EmailProfileTestResult {
   is_draft?: boolean
 }
 
+/**
+ * Trezor certifikátů pod neutrálním jménem — `/settings/certificates` míří do
+ * téhož úložiště jako `/reports/submissions/epo-credentials`, jen bez EPO
+ * nálepky, protože „EPO certifikát" je jméno prvního konzumenta, ne účelu.
+ * Soukromý klíč se nikdy nedotkne bez čerstvého ověření, takže se posílá stejný
+ * step-up proof jako u EPO (passkey token / TOTP / heslo).
+ */
+export type CertificateVaultItem = EpoSigningCredential
+
+export interface CertificateVaultUploadPayload {
+  file: File
+  /** Prázdný label backend nahradí jménem souboru. */
+  label: string
+  /** Heslo k PFX/P12, ne heslo do aplikace. */
+  password: string
+  proof: EpoStepUpProof
+}
+
 export type SigningCredentialPassphrasePolicy = 'encrypted_store' | 'passphrase_file' | 'prompt_on_use'
 
 export interface SigningProfileCredentialMeta {
@@ -902,6 +921,18 @@ export const settingsApi = {
 
   getPdfSigningDiagnostics: () =>
     api.get<PdfSigningDiagnostics>('/settings/pdf-signing/diagnostics').then(r => r.data),
+  listCertificates: () =>
+    api.get<{ items: CertificateVaultItem[] }>('/settings/certificates').then(r => r.data.items),
+  uploadCertificate: (payload: CertificateVaultUploadPayload) => {
+    const data = new FormData()
+    data.append('file', payload.file, payload.file.name)
+    data.append('label', payload.label)
+    data.append('password', payload.password)
+    appendStepUpProof(data, payload.proof)
+    return api.post<CertificateVaultItem>('/settings/certificates', data, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
   getSigningSettings: () =>
     api.get<SigningSettings>('/settings/signing').then(r => r.data),
   updateSigningSettings: (payload: Pick<SigningSettings, 'accountant_profiles_enabled'>) =>

@@ -240,6 +240,7 @@ function profilePayload(): PayrollPersonProfilePayload {
     row_version: value.row_version,
     profile_status: value.profile_status === 'missing' ? 'setup' : value.profile_status,
     payout_method: value.payout_method,
+    partner_settlement_account_code: value.partner_settlement_account_code,
     cash_allocation_basis_points: value.cash_allocation_basis_points,
     payout_effective_on: value.payout_effective_on ?? todayIso(),
     secure_delivery_channel: value.secure_delivery_channel,

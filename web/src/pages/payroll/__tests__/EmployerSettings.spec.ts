@@ -69,6 +69,7 @@ const defaultAccounts: PayrollEmployerAccounts = {
   health_insurance_credit: '336',
   income_tax_credit: '342',
   other_deductions_credit: '379',
+  partner_settlement_credit: '365',
 }
 
 function chartAccount(
@@ -91,7 +92,7 @@ function chartAccount(
 function chartAccounts(): PayrollAccountOption[] {
   return [
     ...['521', '522', '523', '524'].map(code => chartAccount(code, 'expense')),
-    ...['331', '336', '342', '366', '379'].map(code => chartAccount(code, 'liability')),
+    ...['331', '336', '342', '365', '366', '379'].map(code => chartAccount(code, 'liability')),
     chartAccount('521001', 'expense', true, 'Analytická mzda'),
     chartAccount('521999', 'expense', false, 'Neaktivní mzda'),
   ]

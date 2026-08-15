@@ -243,8 +243,10 @@ final class PayrollEmployerPolicySetupCheckTest extends TestCase
             'automatic_posting',
             'automatic_payments',
             'secure_delivery',
+            // `jmhz_certificate` mezi blokátory NENÍ schválně: produkční
+            // endpoint VREP není doložený, takže se z aplikace ostře stejně
+            // podat nedá. Kontrola je vidět, ale nastavení nezastaví.
             'jmhz_registry',
-            'jmhz_certificate',
         ], $result['blockers']);
     }
 

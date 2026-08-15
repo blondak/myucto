@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Service\Payroll\Net\PayoutAllocation;
 use MyInvoice\Service\Payroll\Net\PayoutAllocationRequest;
 use MyInvoice\Service\Payroll\Net\PayoutAllocationService;
+use MyInvoice\Service\Payroll\Net\PayrollPartnerSettlement;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class PayrollNetWageLiabilityMaterializer
@@ -498,6 +499,21 @@ final class PayrollNetWageLiabilityMaterializer
             if ($allocation->amountMinorUnits === 0) {
                 continue;
             }
+            if ($allocation->destinationKind === PayrollPartnerSettlement::KIND) {
+                // Zápočet na účet společníka NENÍ výplata: jde o čistě účetní
+                // překlasifikaci závazku (331/366 MD / 365 D, viz
+                // PayrollPostingLineBuilder). Nevzniká platba, platební příkaz
+                // ani pokladní doklad, takže tahle částka nesmí vytvořit závazek
+                // čisté mzdy — jinak by ji PayrollPaymentBatchBuilder poslal do
+                // platební dávky a firma by vyplatila peníze, které už jsou
+                // vypořádané. Napřed ale ověříme, že si zápočet daná osoba vůbec
+                // smí nastavit; fail-closed i pro pravidlo vzniklé mimo aplikaci.
+                PayrollPartnerSettlement::assertEligible(
+                    $this->relationTypes($personSnapshot),
+                    $employeeId,
+                );
+                continue;
+            }
             [$recipientReference, $target] = $this->paymentTarget(
                 $allocation,
                 $accounts,
@@ -531,6 +547,33 @@ final class PayrollNetWageLiabilityMaterializer
         }
 
         return $targets;
+    }
+
+    /**
+     * Typy pracovních vztahů osoby ze zmrazené revize — podklad pro kontrolu,
+     * kdo si smí nastavit zápočet na účet společníka.
+     *
+     * @param array<string,mixed> $personSnapshot
+     * @return list<string>
+     */
+    private function relationTypes(array $personSnapshot): array
+    {
+        $result = [];
+        foreach ($this->rows(
+            $personSnapshot['employments'] ?? null,
+            'snapshot.employments',
+        ) as $employment) {
+            $identity = $this->object(
+                $employment['employment'] ?? null,
+                'snapshot.employment',
+            );
+            $result[] = $this->requiredString(
+                $identity['relation_type'] ?? null,
+                'employment.relation_type',
+            );
+        }
+
+        return $result;
     }
 
     /**

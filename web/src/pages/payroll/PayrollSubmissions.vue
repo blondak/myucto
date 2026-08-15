@@ -14,13 +14,22 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import PayrollSubmissionInboxPanel from './PayrollSubmissionInboxPanel.vue'
 import PayrollSubmissionOverviewPanel from './PayrollSubmissionOverviewPanel.vue'
+import PayrollSigningCertificatePanel from './PayrollSigningCertificatePanel.vue'
+import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
 
-type SubmissionTab = 'regzel' | 'jmhz' | 'health' | 'inbox'
+type SubmissionTab = 'transport' | 'regzel' | 'jmhz' | 'health' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
 const auth = useAuthStore()
-const activeTab = ref<SubmissionTab>('regzel')
-const tabs: SubmissionTab[] = ['regzel', 'jmhz', 'health', 'inbox']
+// „Co jsem odeslal a jak to dopadlo" je nejčastější důvod, proč se sem někdo
+// podívá — proto je stav odeslání první záložka a zároveň ta výchozí. Připravit
+// registraci nebo hlášení je jednorázový úkon, sledovat výsledek úkon opakovaný.
+const activeTab = ref<SubmissionTab>('transport')
+// Certifikát je poslední záložka, ale vlastní: podepisuje se jím REGZEL i JMHZ,
+// takže nepatří pod žádné jednotlivé hlášení.
+const tabs: SubmissionTab[] = [
+  'transport', 'regzel', 'jmhz', 'health', 'inbox', 'certificate',
+]
 const inboxOpenCount = ref(0)
 const loading = ref(true)
 const preparing = ref(false)
@@ -232,7 +241,14 @@ onMounted(loadInboxBadge)
       </button>
     </nav>
 
-    <div v-if="loading" class="space-y-4">
+    <!--
+      Stav odeslání se nečeká na načtení téhle stránky: panel si svá data
+      obstarává sám a schovat ho za skeleton registrace by znamenalo, že se
+      odpověď na „co jsem odeslal" objeví později, než by musela.
+    -->
+    <PayrollTransportHistoryPanel v-if="activeTab === 'transport'" />
+
+    <div v-else-if="loading" class="space-y-4">
       <div class="h-28 animate-pulse rounded-xl bg-neutral-100" />
       <div class="h-64 animate-pulse rounded-xl bg-neutral-100" />
     </div>
@@ -484,6 +500,8 @@ onMounted(loadInboxBadge)
       v-else-if="activeTab === 'inbox'"
       @update:open-count="inboxOpenCount = $event"
     />
+
+    <PayrollSigningCertificatePanel v-else-if="activeTab === 'certificate'" />
 
     <PayrollSubmissionOverviewPanel
       v-else

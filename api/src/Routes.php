@@ -86,9 +86,13 @@ use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
+use MyInvoice\Action\Payroll\PayrollJmhzProtocolImportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
 use MyInvoice\Action\Payroll\PayrollJmhzOrdinaryEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPreparationAction;
+use MyInvoice\Action\Payroll\PayrollJmhzSigningProfileAction;
+use MyInvoice\Action\Payroll\PayrollJmhzSubmissionFreezeAction;
+use MyInvoice\Action\Payroll\PayrollJmhzTransportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
 use MyInvoice\Action\Payroll\PayrollNetResultAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
@@ -911,6 +915,46 @@ final class Routes
                 '/submissions/jmhz-xml-dry-run/{preparationId:[0-9]+}',
                 PayrollJmhzXmlDryRunAction::class,
             );
+            $g->post(
+                '/submissions/jmhz-freeze/{preparationId:[0-9]+}',
+                PayrollJmhzSubmissionFreezeAction::class,
+            );
+            $g->get(
+                '/submissions/signing-profile',
+                [PayrollJmhzSigningProfileAction::class, 'show'],
+            );
+            $g->put(
+                '/submissions/signing-profile',
+                [PayrollJmhzSigningProfileAction::class, 'save'],
+            );
+            $g->delete(
+                '/submissions/signing-profile',
+                [PayrollJmhzSigningProfileAction::class, 'delete'],
+            );
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/jmhz-transport',
+                [PayrollJmhzTransportAction::class, 'send'],
+            );
+            $g->get(
+                '/submissions/jmhz-transport',
+                [PayrollJmhzTransportAction::class, 'history'],
+            );
+            $g->get(
+                '/submissions/jmhz-transport/{attemptId:[0-9]+}',
+                [PayrollJmhzTransportAction::class, 'poll'],
+            );
+            $g->post(
+                '/submissions/jmhz-transport/{attemptId:[0-9]+}/close',
+                [PayrollJmhzTransportAction::class, 'close'],
+            );
+            $g->get(
+                '/submissions/jmhz-protocol-import',
+                [PayrollJmhzProtocolImportAction::class, 'history'],
+            );
+            $g->post(
+                '/submissions/jmhz-protocol-import',
+                [PayrollJmhzProtocolImportAction::class, 'import'],
+            );
             $g->get(
                 '/submissions/{submissionId:[0-9]+}',
                 PayrollSubmissionDetailAction::class,
@@ -1578,6 +1622,10 @@ final class Routes
         $app->put    ('/api/settings/pdf-signing/output-settings/{output_type:[a-z_]+}', [SigningProfilesAction::class, 'updatePdfOutputSetting']);
         $app->get    ('/api/settings/pdf-signing/user-defaults', [SigningProfilesAction::class, 'userDefaults']);
         $app->put    ('/api/settings/pdf-signing/user-defaults/{output_type:[a-z_]+}', [SigningProfilesAction::class, 'updateUserDefault']);
+        // Certifikáty centrálně: jedno úložiště pro podpisy e-mailů, PDF, EPO
+        // i mzdová podání. EPO endpointy zůstávají a míří do téhož trezoru.
+        $app->get    ('/api/settings/certificates',        [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'list']);
+        $app->post   ('/api/settings/certificates',        [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'upload']);
         $app->get    ('/api/settings/signing',              [SigningProfilesAction::class, 'settings']);
         $app->put    ('/api/settings/signing',              [SigningProfilesAction::class, 'updateSettings']);
         $app->get    ('/api/settings/signing/profiles',              [SigningProfilesAction::class, 'listProfiles']);

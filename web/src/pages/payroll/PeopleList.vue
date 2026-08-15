@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
@@ -24,6 +25,7 @@ import PayrollPersonDependantsPanel from './PayrollPersonDependantsPanel.vue'
 import { todayIso } from './employmentLifecycleUi'
 
 const { t } = useI18n()
+const route = useRoute()
 const toast = useToast()
 const auth = useAuthStore()
 const loading = ref(true)
@@ -318,7 +320,24 @@ function toggleAdvancedProfile(event: Event) {
   advancedProfileOpen.value = (event.currentTarget as HTMLDetailsElement).open
 }
 
-onMounted(load)
+/**
+ * Deep-link na člověka (`/payroll/people?person=12`) — z karty zaměstnance
+ * na přehledu mezd. Bez toho vede „karta zaměstnance" jen na seznam a uživatel
+ * v něm musí jméno znovu najít. Neznámé id se ignoruje.
+ */
+async function openFromQuery() {
+  const raw = Array.isArray(route.query.person) ? route.query.person[0] : route.query.person
+  if (typeof raw !== 'string' || raw === '') return
+  const person = people.value.find(item => item.id === Number(raw))
+  if (!person) return
+  peopleFilter.value = 'all'
+  await toggleDetail(person)
+}
+
+onMounted(async () => {
+  await load()
+  await openFromQuery()
+})
 </script>
 
 <template>
@@ -498,6 +517,7 @@ onMounted(load)
           <PayrollPersonProfilePanel
             :person-id="expandedId"
             :can-write="auth.canWrite('payroll.person.write')"
+            :relation-types="details[expandedId].relation_types"
             @saved="updatePersonProfile"
           />
           <PayrollPersonDependantsPanel
