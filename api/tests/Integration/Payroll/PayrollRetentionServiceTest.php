@@ -78,13 +78,13 @@ final class PayrollRetentionServiceTest extends TestCase
 
     public function testRecordWithinRetentionIsNotProposed(): void
     {
-        // Mzda za loňský rok: mzdový list se drží 30 let, takže lhůta zdaleka běží.
+        // Mzda za loňský rok: mzdový list se drží 45 let, takže lhůta zdaleka běží.
         $this->ageEmployee($this->employeeId, 2025);
         $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 2025);
 
         $assessment = $this->assessmentFor($this->employeeId);
 
-        self::assertSame('2055-12-31', $assessment->retainedUntil);
+        self::assertSame('2070-12-31', $assessment->retainedUntil);
         self::assertFalse($assessment->expired);
         self::assertFalse($assessment->isProposable());
         self::assertSame(
@@ -101,8 +101,8 @@ final class PayrollRetentionServiceTest extends TestCase
 
     public function testExpiredRecordIsProposedButNotExecutedWithoutApproval(): void
     {
-        $this->ageEmployee($this->employeeId, 1990);
-        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1990);
+        $this->ageEmployee($this->employeeId, 1975);
+        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1975);
 
         $assessment = $this->assessmentFor($this->employeeId);
         self::assertSame('2020-12-31', $assessment->retainedUntil);
@@ -151,8 +151,8 @@ final class PayrollRetentionServiceTest extends TestCase
 
     public function testLegalHoldOverridesElapsedRetention(): void
     {
-        $this->ageEmployee($this->employeeId, 1990);
-        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1990);
+        $this->ageEmployee($this->employeeId, 1975);
+        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1975);
         self::assertTrue($this->assessmentFor($this->employeeId)->isProposable());
 
         $this->holds->place(
@@ -175,8 +175,8 @@ final class PayrollRetentionServiceTest extends TestCase
 
     public function testCompanyWideHoldAlsoBlocksPayrollErasure(): void
     {
-        $this->ageEmployee($this->employeeId, 1990);
-        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1990);
+        $this->ageEmployee($this->employeeId, 1975);
+        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1975);
 
         // Hold zadaný na účetní straně (bez rozsahu = celá firma) musí zastavit
         // i mzdový výmaz. Bez toho by kontrola běžela a mzdové listy mizely.
@@ -227,8 +227,8 @@ final class PayrollRetentionServiceTest extends TestCase
 
     public function testAnonymizationKeepsAccountingRecord(): void
     {
-        $this->ageEmployee($this->employeeId, 1990);
-        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1990);
+        $this->ageEmployee($this->employeeId, 1975);
+        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1975);
         $this->insertAddress($this->supplierId, $this->employeeId);
         $this->setBirthNumber($this->employeeId, '9001011234');
 
@@ -281,7 +281,7 @@ final class PayrollRetentionServiceTest extends TestCase
         // Osoba s evidencí pro důchodové pojištění, ale BEZ zaúčtované mzdy:
         // `canDelete()` ji pustí, takže jde o úplný výmaz, ne anonymizaci.
         $employeeId = $this->insertEmployee($this->supplierId, 'Syntetická Osoba');
-        $this->ageEmployee($employeeId, 1990);
+        $this->ageEmployee($employeeId, 1975);
         $this->insertSocialJurisdiction($this->supplierId, $employeeId);
 
         $assessment = $this->assessmentFor($employeeId);
@@ -306,16 +306,16 @@ final class PayrollRetentionServiceTest extends TestCase
 
     public function testClosedYearStaysConsistentAfterAnonymization(): void
     {
-        $this->ageEmployee($this->employeeId, 1990);
-        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1990, 1);
-        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1990, 2);
-        $before = $this->yearTotals(1990);
+        $this->ageEmployee($this->employeeId, 1975);
+        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1975, 1);
+        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1975, 2);
+        $before = $this->yearTotals(1975);
 
         $this->anonymization->anonymize($this->supplierId, $this->employeeId, $this->userId, null, null);
 
         self::assertSame(
             $before,
-            $this->yearTotals(1990),
+            $this->yearTotals(1975),
             'Anonymizace nesmí změnit počet ani součet mezd uzavřeného roku.',
         );
     }
@@ -324,8 +324,8 @@ final class PayrollRetentionServiceTest extends TestCase
 
     public function testAuditTrailSurvivesErasureAndIsComplete(): void
     {
-        $this->ageEmployee($this->employeeId, 1990);
-        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1990);
+        $this->ageEmployee($this->employeeId, 1975);
+        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1975);
 
         $proposalId = $this->expiredProposal();
         $this->proposals->approve($this->supplierId, $proposalId, $this->userId);
@@ -368,8 +368,8 @@ final class PayrollRetentionServiceTest extends TestCase
 
     public function testAuditPayloadCarriesNoPersonalData(): void
     {
-        $this->ageEmployee($this->employeeId, 1990);
-        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1990);
+        $this->ageEmployee($this->employeeId, 1975);
+        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1975);
         $this->setBirthNumber($this->employeeId, '9001011234');
 
         $this->anonymization->anonymize($this->supplierId, $this->employeeId, $this->userId, null, null);
@@ -387,8 +387,8 @@ final class PayrollRetentionServiceTest extends TestCase
 
     public function testForeignTenantNeitherSeesNorProposes(): void
     {
-        $this->ageEmployee($this->employeeId, 1990);
-        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1990);
+        $this->ageEmployee($this->employeeId, 1975);
+        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1975);
 
         $foreign = $this->retention->assess($this->otherSupplierId, self::AS_OF);
         foreach ($foreign as $assessment) {
@@ -415,7 +415,7 @@ final class PayrollRetentionServiceTest extends TestCase
             'Vnitřní předpis',
             $this->userId,
         );
-        self::assertSame(35, $this->policies->effectiveYears($this->supplierId)[PayrollRetentionCatalog::PAYROLL_SHEET]);
+        self::assertSame(50, $this->policies->effectiveYears($this->supplierId)[PayrollRetentionCatalog::PAYROLL_SHEET]);
 
         $this->expectException(PayrollRetentionPolicyException::class);
         $this->policies->upsert(
@@ -428,13 +428,85 @@ final class PayrollRetentionServiceTest extends TestCase
         );
     }
 
-    public function testUndeterminedCategoryBlocksUntilTenantSuppliesPeriod(): void
+    /**
+     * Lhůtu dodanou aplikací (zdravotní pojištění) nesmí tabulka přebít vlastním
+     * číslem — a hláška musí přiznat, že za lhůtou nestojí paragraf. Kdyby tvrdila
+     * „zákonná lhůta", odkazovala by uživatele na předpis, ve kterém žádná není.
+     */
+    public function testHousePolicyPeriodCanBeExtendedButNotReplaced(): void
     {
-        $this->ageEmployee($this->employeeId, 1990);
-        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1990);
+        $this->policies->upsert(
+            $this->supplierId,
+            PayrollRetentionCatalog::HEALTH_INSURANCE,
+            2,
+            null,
+            'Vnitřní předpis',
+            $this->userId,
+        );
+        self::assertSame(
+            12,
+            $this->policies->effectiveYears($this->supplierId)[PayrollRetentionCatalog::HEALTH_INSURANCE],
+        );
+
+        try {
+            $this->policies->upsert(
+                $this->supplierId,
+                PayrollRetentionCatalog::HEALTH_INSURANCE,
+                0,
+                5,
+                'Zkrátit na 5 let',
+                $this->userId,
+            );
+            self::fail('Dodanou lhůtu nejde nahradit vlastní — jen prodloužit.');
+        } catch (PayrollRetentionPolicyException $e) {
+            self::assertStringContainsString('dodanou aplikací', $e->getMessage());
+            self::assertStringNotContainsString('zákonnou lhůtu', $e->getMessage());
+        }
+    }
+
+    /**
+     * Evidence pracovní doby MÁ zákonnou lhůtu (§ 96 věta druhá zákona
+     * č. 187/2006 Sb., 10 kalendářních roků). Do 15. 8. 2026 ji katalog vedl jako
+     * neurčenou, takže osoba s docházkou se k výmazu nenavrhla NIKDY — ani po
+     * půl století. Bez opravy tenhle test padá na `BLOCK_UNDETERMINED`.
+     */
+    public function testAttendanceNoLongerBlocksErasureForever(): void
+    {
+        $this->ageEmployee($this->employeeId, 1975);
+        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1975);
         $this->insertTimeEntry($this->supplierId, $this->employmentId);
 
-        // Evidence pracovní doby nemá zákonnou lhůtu → osoba se nenavrhne vůbec.
+        $assessment = $this->assessmentFor($this->employeeId);
+        self::assertNull($assessment->blockedBy, 'Docházka už není důvod nenavrhnout nic.');
+        self::assertTrue($assessment->isProposable());
+        self::assertTrue($assessment->expired);
+
+        // Rozhoduje mzdový list (45 let), ne docházka (10) — bere se nejdelší lhůta.
+        self::assertSame(PayrollRetentionCatalog::PAYROLL_SHEET, $assessment->governingCategory);
+        self::assertSame('2020-12-31', $assessment->retainedUntil);
+
+        $working = $this->categoryOf($assessment, PayrollRetentionCatalog::WORKING_TIME);
+        self::assertSame(10, $working['years']);
+        self::assertStringContainsString('187/2006', (string) $working['source']);
+        self::assertSame('1985-12-31', $working['retained_until']);
+
+        // A návrh z toho skutečně vznikne — dřív byl vždycky prázdný.
+        self::assertNotNull(
+            $this->proposals->create($this->supplierId, $this->userId, self::AS_OF, null),
+        );
+    }
+
+    /**
+     * Neurčená kategorie pořád existuje — spis k exekučním srážkám. Zákon pro něj
+     * lhůtu nemá (ověřeno negativně v OSŘ i v exekučním řádu), takže osobu drží,
+     * dokud lhůtu nedodá tenant vlastní politikou.
+     */
+    public function testUndeterminedCategoryBlocksUntilTenantSuppliesPeriod(): void
+    {
+        $this->ageEmployee($this->employeeId, 1975);
+        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1975);
+        $this->insertEnforcementCase($this->supplierId, $this->employeeId);
+
         $assessment = $this->assessmentFor($this->employeeId);
         self::assertFalse($assessment->isProposable());
         self::assertSame(
@@ -445,10 +517,10 @@ final class PayrollRetentionServiceTest extends TestCase
         // Firma lhůtu dodá — teprve pak se dá posoudit.
         $this->policies->upsert(
             $this->supplierId,
-            PayrollRetentionCatalog::WORKING_TIME,
+            PayrollRetentionCatalog::GARNISHMENT,
             0,
             3,
-            'Vnitřní předpis: docházka 3 roky',
+            'Vnitřní předpis: spis k exekuci 3 roky',
             $this->userId,
         );
         self::assertTrue($this->assessmentFor($this->employeeId)->isProposable());
@@ -470,13 +542,13 @@ final class PayrollRetentionServiceTest extends TestCase
     private function expiredProposal(): int
     {
         if ($this->rowCount('payroll_monthly_records', 'employee_id', $this->employeeId) === 0) {
-            $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1990);
+            $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1975);
         }
         // Zestárnutí se dělá VŽDY a až tady: `payroll_employees.updated_at` má
         // ON UPDATE CURRENT_TIMESTAMP, takže jakýkoli dřívější UPDATE osoby (třeba
         // doplnění rodného čísla) posune poslední rok stopy na letošek a lhůta by
         // pak nikdy neuplynula.
-        $this->ageEmployee($this->employeeId, 1990);
+        $this->ageEmployee($this->employeeId, 1975);
 
         $id = $this->proposals->create($this->supplierId, $this->userId, self::AS_OF, null);
         self::assertNotNull($id);
@@ -521,7 +593,7 @@ final class PayrollRetentionServiceTest extends TestCase
             "INSERT INTO payroll_person_addresses
                 (supplier_id, employee_id, address_type, street_line, city,
                  postal_code, country_code, effective_from)
-             VALUES (?, ?, 'residence', 'Zkušební 1', 'Testov', '10000', 'CZ', '1990-01-01')"
+             VALUES (?, ?, 'residence', 'Zkušební 1', 'Testov', '10000', 'CZ', '1975-01-01')"
         )->execute([$supplierId, $employeeId]);
     }
 
@@ -530,8 +602,33 @@ final class PayrollRetentionServiceTest extends TestCase
         $this->db->pdo()->prepare(
             "INSERT INTO payroll_person_social_jurisdictions
                 (supplier_id, employee_id, jurisdiction, a1_status, effective_from)
-             VALUES (?, ?, 'czech_regime_verified', 'not_applicable', '1990-01-01')"
+             VALUES (?, ?, 'czech_regime_verified', 'not_applicable', '1975-01-01')"
         )->execute([$supplierId, $employeeId]);
+    }
+
+    /**
+     * Rozpis lhůt jedné kategorie z posudku.
+     *
+     * @return array<string,mixed>
+     */
+    private function categoryOf(PayrollRetentionAssessment $assessment, string $category): array
+    {
+        foreach ($assessment->categories as $row) {
+            if (($row['category'] ?? null) === $category) {
+                return $row;
+            }
+        }
+
+        self::fail("Posudek neuvádí kategorii {$category}.");
+    }
+
+    private function insertEnforcementCase(int $supplierId, int $employeeId): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_enforcement_cases
+                (supplier_id, employee_id, case_key, case_kind, status, effective_from)
+             VALUES (?, ?, ?, 'enforcement', 'received', '1975-01-01')"
+        )->execute([$supplierId, $employeeId, 'EX-' . $employeeId]);
     }
 
     private function insertTimeEntry(int $supplierId, int $employmentId): void
@@ -541,9 +638,9 @@ final class PayrollRetentionServiceTest extends TestCase
                 (supplier_id, employment_id, series_key, revision_no, category,
                  starts_at_utc, ends_at_utc, timezone_name, break_minutes,
                  source_kind, source_hash, status, approved_at)
-             VALUES (?, ?, ?, 1, 'regular', '1990-01-02 07:00:00', '1990-01-02 15:00:00',
+             VALUES (?, ?, ?, 1, 'regular', '1975-01-02 07:00:00', '1975-01-02 15:00:00',
                      'Europe/Prague', 0, 'manual', UNHEX(SHA2(?, 256)), 'approved',
-                     '1990-01-31 00:00:00')"
+                     '1975-01-31 00:00:00')"
         )->execute([
             $supplierId,
             $employmentId,
