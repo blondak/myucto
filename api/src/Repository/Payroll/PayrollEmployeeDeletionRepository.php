@@ -150,6 +150,16 @@ final class PayrollEmployeeDeletionRepository
     private const RESTRICT_SCAFFOLD = ['payroll_payout_rules'];
 
     /**
+     * Tabulky STARŠÍ agendy (Účetnictví → Mzdová rekapitulace) sdílené přes
+     * `payroll_employees`. Do sondy na data NOVÉHO modulu nepatří: osoba, která má
+     * jen zaúčtované mzdy ve staré agendě, by jinak dostala hlášku, že její data
+     * leží v novém modulu — a to není pravda.
+     *
+     * @var list<string>
+     */
+    private const LEGACY_AGENDA_TABLES = ['payroll_monthly_records'];
+
+    /**
      * Pohyby vázané na konkrétní VZTAH. Rozhodnutí je hlásí rekurzí (aby hláška
      * jmenovala vztah), atomická podmínka mazání je ale musí obsahovat taky —
      * jinak by souběh skončil syrovou FK chybou místo srozumitelné věty.
@@ -214,6 +224,97 @@ final class PayrollEmployeeDeletionRepository
         }
 
         return PayrollDeletionDecision::allowed($cascade);
+    }
+
+    /**
+     * Kolik záznamů NOVÉHO mzdového modulu na osobě visí — po tabulkách, jen nenulové.
+     *
+     * Sonda pro STARŠÍ agendu (Účetnictví → Mzdová rekapitulace). Ta smí
+     * `payroll_employees` mazat, jenže tabulka je SPOLEČNÁ a databáze pod ní kaskáduje
+     * celý mzdový profil. Dokud modul není `active`, blokátory nad ním se neuplatní —
+     * a data v něm přesto existovat můžou (stav `setup`: osoba se založí, vztah se
+     * rozepíše, modul se ještě nepřeklopil). Volající je pak musí odmítnout,
+     * ne je nechat tiše smést kaskádou.
+     *
+     * Vrací `[]` i pro neexistující osobu — „nemá data nového modulu" je pro cizí
+     * tenant táž odpověď jako „neexistuje", takže se z ní nedá nic vyčíst.
+     *
+     * @return array<string,int> tabulka => počet
+     */
+    public function moduleDataCounts(int $supplierId, int $employeeId): array
+    {
+        $tables = self::moduleTables();
+        $columns = [];
+        foreach ($tables as $index => $table) {
+            $columns[] = self::countExpression([$table]) . " AS probe{$index}";
+        }
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . implode(",\n       ", $columns)
+            . "\n  FROM payroll_employees employee"
+            . "\n WHERE employee.supplier_id = ? AND employee.id = ?"
+        );
+        $stmt->execute([$supplierId, $employeeId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return [];
+        }
+
+        $counts = [];
+        foreach ($tables as $index => $table) {
+            $count = (int) $row["probe{$index}"];
+            if ($count > 0) {
+                $counts[$table] = $count;
+            }
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Registr tabulek nového modulu vázaných na osobu — jediný zdroj pravdy je
+     * seznam, podle kterého se rozhoduje a maže. Kdyby si sonda vedla vlastní
+     * kopii, nová tabulka by v ní chyběla a stará agenda by ji zase tiše smazala.
+     *
+     * Veřejný a statický záměrně: schématový test proti němu ověřuje, že žádná
+     * tabulka s cizím klíčem na `payroll_employees` nezůstala mimo registr —
+     * a to jde jen tehdy, když se dá SEZNAM ZAVOLAT (viz AGENTS.md).
+     *
+     * @return list<string>
+     */
+    public static function moduleTables(): array
+    {
+        $tables = [];
+        foreach (self::BLOCKERS as $blocker) {
+            foreach ($blocker['tables'] as $table) {
+                $tables[] = $table;
+            }
+        }
+        foreach (self::CASCADE as $group) {
+            foreach ($group as $table) {
+                $tables[] = $table;
+            }
+        }
+        foreach (self::GUARD_ONLY as $table) {
+            $tables[] = $table;
+        }
+        foreach (self::RESTRICT_SCAFFOLD as $table) {
+            $tables[] = $table;
+        }
+
+        return array_values(array_diff(array_unique($tables), self::LEGACY_AGENDA_TABLES));
+    }
+
+    /**
+     * Tabulky STARŠÍ agendy — protějšek {@see self::moduleTables()}. Schématový test
+     * proti nim ověřuje, že každá tabulka s cizím klíčem na `payroll_employees`
+     * patří buď novému modulu, nebo sem; jinak by ji stará agenda smazala naslepo.
+     *
+     * @return list<string>
+     */
+    public static function legacyAgendaTables(): array
+    {
+        return self::LEGACY_AGENDA_TABLES;
     }
 
     /**
