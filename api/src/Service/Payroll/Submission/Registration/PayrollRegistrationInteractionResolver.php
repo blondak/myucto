@@ -54,10 +54,7 @@ final class PayrollRegistrationInteractionResolver
                 10,
             );
         }
-        if ($context['work_started']
-            || $context['full_registration_data']
-            || $citizenship !== 'CZ'
-        ) {
+        if ($this->agendaFor($citizenship, $context) === 'REGZEC25') {
             if (!$context['full_registration_data']) {
                 $this->invalid(
                     'registration_interaction_full_data_missing',
@@ -87,6 +84,37 @@ final class PayrollRegistrationInteractionResolver
             'limited_pre_registration',
             9,
         );
+    }
+
+    /**
+     * Do které agendy interakce spadne.
+     *
+     * Volá to resolver při rozhodování i most, který podle toho musí zmrazit
+     * snapshot DŘÍV, než interakci vůbec zná: snapshot nese agendu ve svém
+     * rozsahu a `assertBoundToSnapshot()` pak trvá na shodě. Bez společné
+     * implementace by předvýběr agendy v mostu a rozhodnutí resolveru byly
+     * dva zdroje pravdy, které se rozejdou při první změně pravidel.
+     *
+     * @param array{
+     *   work_started:bool,full_registration_data:bool,
+     *   pre_registration_accepted:bool,did_not_start:bool
+     * } $context
+     */
+    public function agendaFor(
+        ?string $citizenshipCountryCode,
+        array $context,
+    ): string {
+        if ($context['did_not_start']) {
+            return 'PREZEC26';
+        }
+        if ($context['work_started']
+            || $context['full_registration_data']
+            || $citizenshipCountryCode !== 'CZ'
+        ) {
+            return 'REGZEC25';
+        }
+
+        return 'PREZEC26';
     }
 
     private function forSnapshot(

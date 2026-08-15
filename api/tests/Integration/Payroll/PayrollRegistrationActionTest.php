@@ -1,0 +1,748 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Integration\Payroll;
+
+use MyInvoice\Action\Payroll\PayrollRegistrationAction;
+use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\Payroll\PayrollRegistrationSubmissionRepository;
+use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory;
+use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Registration\EmployerRegistrationDeadlinePolicy;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollEmployeeRegistrationDeadlinePolicy;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotBuilder;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationInteractionResolver;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSchemaCatalog;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationXmlSerializer;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationXmlValidator;
+use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use PDO;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+use Psr\Clock\ClockInterface;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response;
+
+/**
+ * Registrace pracovního vztahu PRODUKČNÍ CESTOU: přes Action, ne přímým
+ * voláním serializéru. Přesně tahle mezera způsobila, že jádro PREZEC/REGZEC
+ * mělo zelené testy a přitom se nikdy nespustilo.
+ *
+ * Žádný test tu nesahá na síť — připravuje se jen XML a záznam podání.
+ */
+#[Group('integration')]
+final class PayrollRegistrationActionTest extends TestCase
+{
+    use IsolatedSupplierTrait;
+
+    /** Nástup pět dnů po „dnešku" testu — uvnitř okna PREZEC P1 (0–8 dnů). */
+    private const TODAY = '2026-08-17';
+    private const START_ON = '2026-08-22';
+
+    private Connection $db;
+    private PayrollSensitiveData $sensitive;
+    private PayrollRegistrationIdentityService $identities;
+    private PayrollRegistrationAction $action;
+    private int $supplierId;
+    private int $otherSupplierId;
+    private int $userId;
+    private int $employeeId;
+    private int $employmentId;
+    private int $identityId;
+    private int $officeId;
+
+    protected function setUp(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $db = $container->get(Connection::class);
+        self::assertInstanceOf(Connection::class, $db);
+        $this->db = $db;
+        if (!$db->hasTable('payroll_obligations')
+            || !$db->hasTable('payroll_identity_resolution_tasks')
+        ) {
+            $this->markTestSkipped('Migrace podání/identit neproběhly.');
+        }
+        $sensitive = $container->get(PayrollSensitiveData::class);
+        self::assertInstanceOf(PayrollSensitiveData::class, $sensitive);
+        $this->sensitive = $sensitive;
+        $identities = $container->get(PayrollRegistrationIdentityService::class);
+        self::assertInstanceOf(
+            PayrollRegistrationIdentityService::class,
+            $identities,
+        );
+        $this->identities = $identities;
+
+        $pdo = $db->pdo();
+        $sourceSupplierId = (int) ($pdo->query(
+            'SELECT id FROM supplier ORDER BY id LIMIT 1',
+        )->fetchColumn() ?: 0);
+        $this->userId = (int) ($pdo->query(
+            'SELECT id FROM users ORDER BY id LIMIT 1',
+        )->fetchColumn() ?: 0);
+        if ($sourceSupplierId <= 0 || $this->userId <= 0) {
+            $this->markTestSkipped('Chybí výchozí firma nebo uživatel.');
+        }
+        $pdo->beginTransaction();
+        $this->supplierId = $this->createIsolatedSupplier(
+            $pdo,
+            $sourceSupplierId,
+        );
+        $this->otherSupplierId = $this->createIsolatedSupplier(
+            $pdo,
+            $sourceSupplierId,
+        );
+        $pdo->prepare(
+            'UPDATE supplier SET payroll_enabled = 1, company_name = ?
+              WHERE id IN (?, ?)',
+        )->execute([
+            'Syntetický zaměstnavatel s.r.o.',
+            $this->supplierId,
+            $this->otherSupplierId,
+        ]);
+
+        $this->seedEmployer($pdo);
+        $this->seedPerson($pdo);
+        $this->action = $this->buildAction($container);
+    }
+
+    protected function tearDown(): void
+    {
+        if (isset($this->db)) {
+            if ($this->db->pdo()->inTransaction()) {
+                $this->db->pdo()->rollBack();
+            }
+            $this->db->close();
+        }
+    }
+
+    /**
+     * Nástup: český občan před zahájením práce se přihlašuje částečně
+     * (PREZEC P1). Serializér i validátor se volají uvnitř Action.
+     */
+    public function testHireBeforeStartPreparesPrezecP1ThroughTheAction(): void
+    {
+        $response = $this->post();
+
+        self::assertSame(201, $response->getStatusCode());
+        self::assertSame(
+            'private, no-store',
+            $response->getHeaderLine('Cache-Control'),
+        );
+        $body = $this->json($response);
+        self::assertSame('PREZEC26', $body['agenda_code']);
+        self::assertSame('limited_pre_registration', $body['interaction']);
+        // Podání smí skončit nejvýš ve stavu `ready`. Cokoli dál by tvrdilo,
+        // že ČSSZ přihlášku převzala.
+        self::assertSame('ready', $body['status']);
+        self::assertTrue($body['created']);
+        self::assertSame(
+            self::START_ON,
+            $body['deadline']['due_on'],
+        );
+        self::assertSame(
+            '2026-08-14',
+            $body['deadline']['earliest_registration_on'],
+        );
+
+        $stored = $this->storedArtifactXml((int) $body['submission_id']);
+        self::assertStringContainsString('<PREZEC', $stored);
+        self::assertStringContainsString('act="9"', $stored);
+        self::assertSame(
+            $body['artifact_sha256'],
+            hash('sha256', $stored),
+        );
+
+        // Registrační povinnost musí být v registru MZ-19, jinak by lhůtu
+        // nikdo nehlídal.
+        self::assertSame(1, $this->countObligations('PREZEC26'));
+        // A protože jde o první pracovní vztah, musí vzniknout i povinnost
+        // přihlásit zaměstnavatele do evidence.
+        self::assertSame(1, $this->countObligations('REGZEL26'));
+        self::assertSame(
+            self::START_ON,
+            $this->checklistDueDate(),
+        );
+    }
+
+    /**
+     * Po skutečném nástupu se podává plná registrace REGZEC A1 — částečné
+     * přihlášení už nemá co doplňovat.
+     */
+    public function testRegistrationAfterActualStartPreparesRegzecA1(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+
+        $response = $this->post();
+        $body = $this->json($response);
+
+        self::assertSame(201, $response->getStatusCode(), (string) json_encode($body));
+        self::assertSame('REGZEC25', $body['agenda_code']);
+        self::assertSame('direct_full_registration', $body['interaction']);
+        $stored = $this->storedArtifactXml((int) $body['submission_id']);
+        self::assertStringContainsString('<REGZEC', $stored);
+        self::assertStringContainsString('act="1"', $stored);
+        self::assertStringContainsString('fro="' . self::START_ON . '"', $stored);
+    }
+
+    /**
+     * Skončení pracovního vztahu není registrační podání této agendy —
+     * odhláška (REGZEC A2) v allowlistu vědomě není. Nesmí se tvářit, že
+     * přihláška po skončení něco vyřeší.
+     */
+    public function testTerminatedEmploymentDoesNotSilentlyProduceAnAmendment(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-31",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+
+        $body = $this->json($this->post());
+
+        // Skončení vede na plnou registraci, ne na odhlášku: A2 core neumí
+        // a nesmí ji zaměnit za něco jiného.
+        self::assertSame('REGZEC25', $body['agenda_code']);
+        self::assertNotSame('cancellation', $body['interaction']);
+    }
+
+    /**
+     * Navazující podání: po přijaté částečné přihlášce a skutečném nástupu
+     * se podává plná registrace, a to jako DOPLNĚNÍ po P1, ne jako nová
+     * přímá registrace — jinak by se u ČSSZ rozpadla vazba na předregistraci.
+     */
+    public function testAcceptedPreRegistrationLeadsToTheFollowUpRegistration(): void
+    {
+        $this->seedAcceptedPreRegistration();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+
+        $body = $this->json($this->post());
+
+        self::assertSame('REGZEC25', $body['agenda_code']);
+        self::assertSame('full_registration_after_p1', $body['interaction']);
+    }
+
+    /**
+     * Přijatou předregistraci nelze zopakovat. Duplicitní podání u ČSSZ nejde
+     * vzít zpět, takže se raději nepodá nic.
+     */
+    public function testAcceptedPreRegistrationCannotBeRepeated(): void
+    {
+        $this->seedAcceptedPreRegistration();
+
+        $response = $this->post();
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'registration_interaction_duplicate_p1',
+            $this->json($response)['error']['code'],
+        );
+    }
+
+    /**
+     * Opakované zmrazení nesmí vyrobit druhý dokument: nové GUIDy pod stejným
+     * podáním by u ČSSZ znamenaly duplicitu.
+     */
+    public function testRepeatedPrepareReplaysTheFrozenFilingInstead(): void
+    {
+        $first = $this->json($this->post());
+        $second = $this->json($this->post());
+
+        self::assertTrue($first['created']);
+        self::assertFalse($second['created']);
+        self::assertSame(
+            $first['submission_id'],
+            $second['submission_id'],
+        );
+        self::assertSame(
+            $first['artifact_sha256'],
+            $second['artifact_sha256'],
+        );
+        self::assertSame(1, $this->countSubmissions());
+    }
+
+    /**
+     * Podání po lhůtě se připraví — zmeškaný termín se řeší podáním, ne jeho
+     * odepřením — ale povinnost v registru musí termín nést pravdivě, aby
+     * bylo zpoždění vidět.
+     */
+    public function testLateRegistrationIsPreparedAndKeepsTheRealDueDate(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2026-07-06", actual_start_date = "2026-07-06",
+                    status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $body = $this->json($this->post());
+
+        self::assertSame('REGZEC25', $body['agenda_code']);
+        // Lhůta zůstává dnem nástupu, tedy v minulosti vůči „dnešku" testu.
+        self::assertSame('2026-07-06', $body['deadline']['due_on']);
+        self::assertLessThan(self::TODAY, $body['deadline']['due_on']);
+        self::assertSame('2026-06-28', $this->obligationEarliest('REGZEC25'));
+    }
+
+    /**
+     * Nenastoupení (PREZEC P2) bez PROKÁZANÉ přijaté předregistrace se
+     * nepodává. Prázdný ledger neznamená „P1 neexistuje", ale „o jejím
+     * přijetí nic nevíme" — a na tom se stavět nedá.
+     */
+    public function testNoShowWithoutAcceptedPreRegistrationStaysClosed(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET status = "no_show"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $response = $this->post();
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'registration_interaction_no_show_without_p1',
+            $this->json($response)['error']['code'],
+        );
+        self::assertSame(0, $this->countObligations('PREZEC26'));
+    }
+
+    /**
+     * Chybějící povinný údaj musí podání zablokovat VĚTOU, PODLE KTERÉ SE DÁ
+     * JEDNAT — ne technickou hláškou o neplatném payloadu.
+     */
+    public function testMissingVariableSymbolBlocksWithAnActionableMessage(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_offices SET social_security_variable_symbol = NULL
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->officeId]);
+
+        $response = $this->post();
+
+        self::assertSame(422, $response->getStatusCode());
+        $error = $this->json($response)['error'];
+        self::assertSame(
+            'registration_employer_variable_symbol_missing',
+            $error['code'],
+        );
+        self::assertStringContainsString('variabilní symbol', $error['message']);
+        self::assertStringContainsString('Nastavení mezd', $error['message']);
+        self::assertSame(0, $this->countSubmissions());
+    }
+
+    /** Bez data nástupu nelze určit lhůtu ani podat přihlášku. */
+    public function testMissingStartDateBlocksWithAnActionableMessage(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET start_date = NULL
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $response = $this->post();
+
+        self::assertSame(422, $response->getStatusCode());
+        $error = $this->json($response)['error'];
+        self::assertSame('registration_start_date_missing', $error['code']);
+        self::assertStringContainsString(
+            'datum nástupu',
+            $error['message'],
+        );
+    }
+
+    /** Nácvik ukáže XML, ale nesmí po sobě nechat podání ani povinnost. */
+    public function testPreviewShowsTheDocumentWithoutCreatingAnything(): void
+    {
+        $response = ($this->action)->preview(
+            $this->request('GET'),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $body = $this->json($response);
+        self::assertSame('PREZEC26', $body['agenda_code']);
+        self::assertStringContainsString('<PREZEC', $body['xml']);
+        self::assertFalse($body['official_submission']['supported']);
+        self::assertSame(0, $this->countSubmissions());
+        self::assertSame(0, $this->countObligations('PREZEC26'));
+    }
+
+    /** Úřední podání se z tokenu neposílá. */
+    public function testBearerTokenIsRejected(): void
+    {
+        $response = ($this->action)->prepare(
+            $this->request('POST', 'bearer'),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame(
+            'session_required',
+            $this->json($response)['error']['code'],
+        );
+    }
+
+    /** Cizí firma nesmí vidět ani připravit registraci. */
+    public function testOtherTenantCannotReachTheEmployment(): void
+    {
+        $response = ($this->action)->preview(
+            $this->request('GET', 'session', $this->otherSupplierId),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(404, $response->getStatusCode());
+        self::assertSame(
+            'not_found',
+            $this->json($response)['error']['code'],
+        );
+    }
+
+    private function post(): \Psr\Http\Message\ResponseInterface
+    {
+        return ($this->action)->prepare(
+            $this->request('POST'),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+    }
+
+    private function buildAction(
+        \Psr\Container\ContainerInterface $container,
+    ): PayrollRegistrationAction {
+        // Hodiny se zmrazí, aby okno PREZEC P1 neputovalo s reálným datem
+        // běhu testu. Všechno ostatní je produkční instance.
+        $clock = new class () implements ClockInterface {
+            public function now(): \DateTimeImmutable
+            {
+                return new \DateTimeImmutable(
+                    PayrollRegistrationActionTest::todayAtNoon(),
+                    new \DateTimeZone('Europe/Prague'),
+                );
+            }
+        };
+        $submissions = $container->get(PayrollSubmissionService::class);
+        $submissionRepository = $container->get(
+            PayrollSubmissionRepository::class,
+        );
+        $obligations = $container->get(PayrollObligationService::class);
+        $access = $container->get(PayrollModuleAccess::class);
+        self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
+        self::assertInstanceOf(
+            PayrollSubmissionRepository::class,
+            $submissionRepository,
+        );
+        self::assertInstanceOf(PayrollObligationService::class, $obligations);
+        self::assertInstanceOf(PayrollModuleAccess::class, $access);
+
+        $service = new PayrollRegistrationSubmissionService(
+            new PayrollRegistrationSubmissionRepository($this->db),
+            $this->identities,
+            new PayrollRegistrationIdentitySnapshotBuilder(),
+            new PayrollRegistrationInteractionResolver(),
+            new PayrollRegistrationXmlSerializer(),
+            new PayrollRegistrationXmlValidator(
+                new PayrollRegistrationSchemaCatalog(),
+            ),
+            new PayrollEmployeeRegistrationDeadlinePolicy(),
+            new EmployerRegistrationDeadlinePolicy(),
+            $obligations,
+            $submissions,
+            $submissionRepository,
+            new JmhzSubmissionGuidFactory(),
+            $clock,
+        );
+
+        return new PayrollRegistrationAction($service, $access);
+    }
+
+    public static function todayAtNoon(): string
+    {
+        return self::TODAY . ' 12:00:00';
+    }
+
+    private function seedEmployer(PDO $pdo): void
+    {
+        $pdo->prepare(
+            'INSERT INTO payroll_offices
+                (supplier_id, code, name,
+                 social_security_variable_symbol, is_active)
+             VALUES (?, "REG", "Synteticka uctarna", "9990001234", 1)',
+        )->execute([$this->supplierId]);
+        $this->officeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_employer_settings
+                (supplier_id, default_office_id, social_security_office_code)
+             VALUES (?, ?, "110")
+             ON DUPLICATE KEY UPDATE
+                default_office_id = VALUES(default_office_id),
+                social_security_office_code =
+                    VALUES(social_security_office_code)',
+        )->execute([$this->supplierId, $this->officeId]);
+    }
+
+    private function seedPerson(PDO $pdo): void
+    {
+        $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, employment_type,
+                 tax_declaration_signed, tax_credit_taxpayer, child_count,
+                 monthly_gross, auto_post, is_active)
+             VALUES (?, "Zobrazene jmeno bez parsovani", "employee", "hpp",
+                     1, 1, 0, 10000, 0, 1)',
+        )->execute([$this->supplierId]);
+        $this->employeeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_person_identity_history
+                (supplier_id, employee_id, full_name, first_name, last_name,
+                 birth_surname, effective_from)
+             VALUES (?, ?, "Zobrazene jmeno bez parsovani",
+                     "Jana", "Novotná", "Nováková", "2026-01-01")',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $this->identityId = (int) $pdo->lastInsertId();
+        $this->identities->saveIdentityFacts(
+            $this->supplierId,
+            $this->employeeId,
+            $this->identityId,
+            1,
+            [
+                'title_prefix' => 'Ing.',
+                'birth_date' => '1991-02-03',
+                'birth_place' => 'Testov',
+                'birth_country_code' => 'CZ',
+                'citizenship_country_code' => 'CZ',
+                'sex' => 'female',
+            ],
+        );
+        $this->insertBirthNumber('9152031234');
+        $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, office_id, code, relation_type,
+                 status, start_date, is_legacy_projection)
+             VALUES (?, ?, ?, "reg-synthetic", "employment", "planned", ?, 0)',
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $this->officeId,
+            self::START_ON,
+        ]);
+        $this->employmentId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_employment_checklist_items
+                (supplier_id, employment_id, phase, item_key, due_date)
+             VALUES (?, ?, "onboarding", "social_jmhz_registration", ?)',
+        )->execute([$this->supplierId, $this->employmentId, '2026-01-01']);
+    }
+
+    private function insertBirthNumber(string $value): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO payroll_person_identifiers
+                (supplier_id, employee_id, identifier_type,
+                 value_ciphertext, value_hash, value_masked)
+             VALUES (?, ?, 'birth_number', 'enc:v2:pending', ?, '')",
+        )->execute([$this->supplierId, $this->employeeId, random_bytes(32)]);
+        $id = (int) $pdo->lastInsertId();
+        $sealed = $this->sensitive->seal(
+            $value,
+            PayrollSensitiveField::PERSONAL_IDENTIFIER,
+            $this->supplierId,
+            $id,
+        );
+        $pdo->prepare(
+            'UPDATE payroll_person_identifiers
+                SET value_ciphertext = ?, value_hash = ?, value_masked = ?
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([
+            $sealed->ciphertext,
+            $sealed->lookupHash,
+            $sealed->masked,
+            $this->supplierId,
+            $id,
+        ]);
+    }
+
+    private function storedArtifactXml(int $submissionId): string
+    {
+        $pdo = $this->db->pdo();
+        $statement = $pdo->prepare(
+            'SELECT id FROM payroll_submission_artifacts
+              WHERE supplier_id = ? AND submission_id = ?
+                AND artifact_kind = "outbound_xml"
+              ORDER BY id DESC LIMIT 1',
+        );
+        $statement->execute([$this->supplierId, $submissionId]);
+        $artifactId = (int) $statement->fetchColumn();
+        self::assertGreaterThan(0, $artifactId);
+        $submissions = Bootstrap::buildContainer()
+            ->get(PayrollSubmissionService::class);
+        self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
+
+        return $submissions->artifactBytes($this->supplierId, $artifactId);
+    }
+
+    /**
+     * Přijatá PREZEC P1 v ledgeru. Zapisuje se přímo SQL: stav `accepted`
+     * smí v běhu nastavit jedině protokol od ČSSZ, a ten tenhle test
+     * simulovat nemá — jde o vstupní podmínku, ne o testovanou cestu.
+     */
+    private function seedAcceptedPreRegistration(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_obligations
+                (supplier_id, environment, agenda_code, subject_type,
+                 subject_reference, period_start, period_end, obligation_kind,
+                 preferred_channel, status, source_event_type,
+                 source_event_reference, source_event_hash, request_fingerprint,
+                 idempotency_key_hash)
+             VALUES (?, "test", "PREZEC26", "employment", ?, ?, ?, "regular",
+                     "vrep_apep", "submitted", "seed", "seed:1", ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            'payroll_employment:' . $this->employmentId,
+            '2026-08-14',
+            self::START_ON,
+            str_repeat('a', 64),
+            str_repeat('b', 64),
+            random_bytes(32),
+        ]);
+        $obligationId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_submissions
+                (supplier_id, environment, obligation_id, submission_kind,
+                 channel, status, source_snapshot_hash, request_fingerprint,
+                 idempotency_key_hash, submitted_at, decided_at)
+             VALUES (?, "test", ?, "regular", "vrep_apep", "accepted", ?, ?, ?,
+                     "2026-08-15 08:00:00", "2026-08-15 09:00:00")',
+        )->execute([
+            $this->supplierId,
+            $obligationId,
+            str_repeat('c', 64),
+            str_repeat('d', 64),
+            random_bytes(32),
+        ]);
+        $submissionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_submission_parts
+                (supplier_id, environment, submission_id, part_reference,
+                 agenda_code, subject_reference, status, source_entity_type,
+                 source_entity_reference, source_snapshot_hash)
+             VALUES (?, "test", ?, ?, "PREZEC26", ?, "accepted",
+                     "payroll_employment", ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $submissionId,
+            'prezec26:seed:' . $this->employmentId,
+            'payroll_employment:' . $this->employmentId,
+            'payroll_employment_registration:' . $this->employmentId,
+            str_repeat('e', 64),
+        ]);
+    }
+
+    private function obligationEarliest(string $agendaCode): string
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT deadline.earliest_submission_on
+               FROM payroll_submission_deadlines deadline
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = deadline.supplier_id
+                AND obligation.id = deadline.obligation_id
+              WHERE obligation.supplier_id = ?
+                AND obligation.agenda_code = ?
+              ORDER BY deadline.id DESC LIMIT 1',
+        );
+        $statement->execute([$this->supplierId, $agendaCode]);
+
+        return (string) $statement->fetchColumn();
+    }
+
+    private function countObligations(string $agendaCode): int
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_obligations
+              WHERE supplier_id = ? AND agenda_code = ?',
+        );
+        $statement->execute([$this->supplierId, $agendaCode]);
+
+        return (int) $statement->fetchColumn();
+    }
+
+    private function countSubmissions(): int
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_submissions WHERE supplier_id = ?',
+        );
+        $statement->execute([$this->supplierId]);
+
+        return (int) $statement->fetchColumn();
+    }
+
+    private function checklistDueDate(): string
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT due_date FROM payroll_employment_checklist_items
+              WHERE supplier_id = ? AND employment_id = ?
+                AND phase = "onboarding"
+                AND item_key = "social_jmhz_registration"',
+        );
+        $statement->execute([$this->supplierId, $this->employmentId]);
+
+        return (string) $statement->fetchColumn();
+    }
+
+    private function request(
+        string $method,
+        string $authMethod = 'session',
+        ?int $supplierId = null,
+    ): \Psr\Http\Message\ServerRequestInterface {
+        return (new ServerRequestFactory())
+            ->createServerRequest(
+                $method,
+                '/api/payroll/submissions/registration/'
+                    . $this->employmentId,
+            )
+            ->withAttribute(
+                SupplierScopeMiddleware::ATTR_CURRENT_ID,
+                $supplierId ?? $this->supplierId,
+            )
+            ->withAttribute(
+                AuthMiddleware::ATTR_USER,
+                ['id' => $this->userId, 'role' => 'accountant'],
+            )
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, $authMethod)
+            ->withParsedBody(['environment' => 'test']);
+    }
+
+    /** @return array<string,mixed> */
+    private function json(
+        \Psr\Http\Message\ResponseInterface $response,
+    ): array {
+        $response->getBody()->rewind();
+        $decoded = json_decode((string) $response->getBody(), true);
+        self::assertIsArray($decoded);
+
+        return $decoded;
+    }
+}

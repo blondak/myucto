@@ -16,6 +16,7 @@ import { btnOutlineSm } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
 import EmploymentDimensionsPanel from './EmploymentDimensionsPanel.vue'
 import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
+import EmploymentRegistrationPanel from './EmploymentRegistrationPanel.vue'
 import { todayIso, transitionPresentation } from './employmentLifecycleUi'
 
 const props = defineProps<{
@@ -356,6 +357,18 @@ const actions = computed<ActionItem[]>(() => [
         </ol>
       </section>
     </div>
+
+    <!--
+      Registrace patří ke KONKRÉTNÍMU pracovnímu vztahu, ne k osobě: jedna
+      osoba může mít víc souběžných vztahů a každý se u ČSSZ přihlašuje zvlášť.
+      Proto je panel tady, vedle checklistu, jehož položku „Přihláška na ČSSZ"
+      obsluhuje.
+    -->
+    <EmploymentRegistrationPanel
+      v-if="!employment.is_legacy_projection"
+      :employment-id="employment.id"
+      :can-write="canWrite"
+    />
 
     <EmploymentDimensionsPanel
       :employment-id="employment.id"

@@ -12,7 +12,7 @@ final readonly class PayrollRegistrationIdentitySnapshot
 
     /**
      * @param array{
-     *   supplier_id:int,submission_id:int,source_revision_id:int,
+     *   supplier_id:int,submission_id:int,source_revision_id:?int,
      *   employee_id:int,employment_id:int,environment:string,
      *   agenda_code:string,effective_on:string
      * } $scope

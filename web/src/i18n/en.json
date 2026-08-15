@@ -2121,6 +2121,32 @@
                 "partner_dependent": "Partner's income",
                 "statutory_body": "Statutory-office remuneration"
             },
+            "registration": {
+                "title": "Social security registration",
+                "description": "Registers this employment relation with the Czech social security administration. The system picks the form from the start date and the employee's details.",
+                "action_preview": "See what will be filed",
+                "action_prepare": "Prepare the filing",
+                "action_done": "Filing is ready",
+                "preview": "Show again",
+                "window": "Can be filed from {from}, no later than {to}.",
+                "employer_window": "Note: this is the first employee. File the employer's own registration no later than {to} — after that date the employer status is presumed by law.",
+                "prepared": "{agenda} is ready to be sent.",
+                "not_sent_yet": "Not sent yet. The employee is registered only once the social security administration confirms it.",
+                "show_xml": "Show XML",
+                "hide_xml": "Hide XML",
+                "copy_xml": "Copy XML",
+                "failed": "The registration could not be prepared.",
+                "agenda": {
+                    "PREZEC26": "Partial pre-start registration",
+                    "REGZEC25": "Full employee registration"
+                },
+                "interaction": {
+                    "limited_pre_registration": "before work starts",
+                    "pre_registration_no_show": "notice of non-appearance",
+                    "direct_full_registration": "full registration",
+                    "full_registration_after_p1": "completion after pre-registration"
+                }
+            },
             "dimensions": {
                 "title": "Payroll dimensions of this relation",
                 "hint": "Assignment of cost centers, projects and activities to this employment relation over time.",

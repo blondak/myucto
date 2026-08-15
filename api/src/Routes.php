@@ -103,6 +103,7 @@ use MyInvoice\Action\Payroll\PayrollPersonQuickEditAction;
 use MyInvoice\Action\Payroll\PayrollPersonSensitiveRevealAction;
 use MyInvoice\Action\Payroll\PayrollPostingReconciliationAction;
 use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
+use MyInvoice\Action\Payroll\PayrollRegistrationAction;
 use MyInvoice\Action\Payroll\PayrollRegzelAction;
 use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
 use MyInvoice\Action\Payroll\PayrollRulesetAction;
@@ -939,6 +940,16 @@ final class Routes
             $g->post(
                 '/submissions/jmhz-freeze/{preparationId:[0-9]+}',
                 PayrollJmhzSubmissionFreezeAction::class,
+            );
+            // Přihlášení pracovního vztahu u ČSSZ. Cesta nenese kód formuláře:
+            // PREZEC vs. REGZEC rozhoduje resolver z faktů, ne volající.
+            $g->get(
+                '/submissions/registration/{employmentId:[0-9]+}',
+                [PayrollRegistrationAction::class, 'preview'],
+            );
+            $g->post(
+                '/submissions/registration/{employmentId:[0-9]+}',
+                [PayrollRegistrationAction::class, 'prepare'],
             );
             $g->get(
                 '/submissions/signing-profile',
