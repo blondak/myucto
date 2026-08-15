@@ -1816,6 +1816,55 @@
                     "employee_confirmation": "Employee confirmation",
                     "bank_document": "Bank document",
                     "user_verified": "User check"
+                },
+                "payout_rules": {
+                    "title": "Payout rules",
+                    "hint": "A rule says where the net pay goes and in what order. The payout method above is only a declaration — payments follow these rules.",
+                    "missing_title": "Without a payout rule the employee cannot be paid.",
+                    "missing_hint": "The rule decides where the net pay goes — to a specific payout account, to the cash desk, or as a set-off against the partner's account. Until an active rule exists here, the payout cannot be processed.",
+                    "add": "Add rule",
+                    "empty": "There is no payout rule yet.",
+                    "destination": "Payout destination",
+                    "destination_kind": {
+                        "bank": "To account",
+                        "cash": "In cash",
+                        "partner_settlement": "Set-off against partner's account"
+                    },
+                    "account": "Payout account",
+                    "account_placeholder": "Select a payout account",
+                    "account_missing": "no account selected",
+                    "account_unknown": "Account #{id} (not among the payout accounts)",
+                    "account_required": "The employee has no active payout account. Add one above and save the profile first.",
+                    "settlement_account": "Set-off account",
+                    "allocation": "Allocation",
+                    "allocation_kind": {
+                        "fixed": "Fixed amount",
+                        "percentage": "Percentage of net pay",
+                        "remainder": "Remainder of the payout"
+                    },
+                    "amount": "Amount (CZK)",
+                    "percentage": "Share (%)",
+                    "priority": "Order",
+                    "priority_summary": "Order {priority}",
+                    "state_active": "Active",
+                    "state_inactive": "Inactive",
+                    "deactivate": "Deactivate",
+                    "reactivate": "Reactivate",
+                    "pending_deactivation": "Once the profile is saved the rule is deactivated and disappears from the active list. It stays with the historical payouts made under it.",
+                    "save_hint": "Payout rule changes are saved together with the profile using the Save button above.",
+                    "summary": {
+                        "remainder": "Remainder of the net pay",
+                        "percentage": "{percent} % of the net pay",
+                        "fixed": "Fixed {amount}"
+                    },
+                    "defaults_title": "Default rule from the payout method",
+                    "defaults_preview": "This will create: {summary}",
+                    "apply_defaults": "Create default rule",
+                    "defaults_applied": "The default payout rule has been created.",
+                    "defaults_failed": "The default payout rule could not be created.",
+                    "load_failed": "The payout rules could not be loaded.",
+                    "saved": "The payout rules have been saved.",
+                    "save_failed": "The payout rules could not be saved."
                 }
             },
             "legacy_projection": "Imported from the legacy agenda",

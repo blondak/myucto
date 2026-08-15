@@ -1,11 +1,20 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PayrollPersonProfile } from '@/api/payroll'
+import type {
+  PayrollPayoutRule,
+  PayrollPayoutRulesResponse,
+  PayrollPersonProfile,
+} from '@/api/payroll'
 
 const mocks = vi.hoisted(() => ({
   personProfile: vi.fn(),
   savePersonProfile: vi.fn(),
   verifyPersonAccount: vi.fn(),
+  personPayoutRules: vi.fn(),
+  createPersonPayoutRule: vi.fn(),
+  updatePersonPayoutRule: vi.fn(),
+  deactivatePersonPayoutRule: vi.fn(),
+  applyPersonPayoutRuleDefaults: vi.fn(),
   countries: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
@@ -16,6 +25,11 @@ vi.mock('@/api/payroll', () => ({
     personProfile: mocks.personProfile,
     savePersonProfile: mocks.savePersonProfile,
     verifyPersonAccount: mocks.verifyPersonAccount,
+    personPayoutRules: mocks.personPayoutRules,
+    createPersonPayoutRule: mocks.createPersonPayoutRule,
+    updatePersonPayoutRule: mocks.updatePersonPayoutRule,
+    deactivatePersonPayoutRule: mocks.deactivatePersonPayoutRule,
+    applyPersonPayoutRuleDefaults: mocks.applyPersonPayoutRuleDefaults,
   },
 }))
 
@@ -102,6 +116,50 @@ function profile(): PayrollPersonProfile {
   }
 }
 
+function payoutRule(): PayrollPayoutRule {
+  return {
+    id: 11,
+    supplier_id: 1,
+    employee_id: 17,
+    allocation_reference: 'payout-bank-a1b2c3d4e5f6',
+    destination_kind: 'bank',
+    destination_reference: 'account:5',
+    allocation_kind: 'remainder',
+    amount_minor: null,
+    basis_points: null,
+    priority_no: 100,
+    is_active: true,
+    row_version: 2,
+    created_at: '2026-08-01 10:00:00',
+    updated_at: '2026-08-01 10:00:00',
+  }
+}
+
+function payoutRulesResponse(rules: PayrollPayoutRule[] = [payoutRule()]): PayrollPayoutRulesResponse {
+  const hasActive = rules.some(rule => rule.is_active)
+
+  return {
+    rules,
+    proposal: {
+      payout_method: 'bank',
+      available: true,
+      applicable: !hasActive,
+      has_active_rules: hasActive,
+      blocked_reason: hasActive
+        ? 'Zaměstnanec už má vlastní výplatní pravidla — výchozí sada je nepřepisuje.'
+        : null,
+      rules: [{
+        destination_kind: 'bank',
+        destination_reference: 'account:5',
+        allocation_kind: 'remainder',
+        amount_minor: null,
+        basis_points: null,
+        priority_no: 100,
+      }],
+    },
+  }
+}
+
 async function mountedPanel() {
   const wrapper = mount(PayrollPersonProfilePanel, {
     props: {
@@ -140,6 +198,15 @@ describe('PayrollPersonProfilePanel', () => {
       verified_on: '2026-08-04',
       row_version: 5,
     })
+    mocks.personPayoutRules.mockResolvedValue(payoutRulesResponse())
+    mocks.createPersonPayoutRule.mockResolvedValue(payoutRule())
+    mocks.updatePersonPayoutRule.mockResolvedValue({ ...payoutRule(), row_version: 3 })
+    mocks.deactivatePersonPayoutRule.mockResolvedValue({
+      ...payoutRule(),
+      is_active: false,
+      row_version: 3,
+    })
+    mocks.applyPersonPayoutRuleDefaults.mockResolvedValue(payoutRulesResponse())
   })
 
   it('zobrazuje pouze maskované citlivé hodnoty', async () => {
@@ -231,6 +298,84 @@ describe('PayrollPersonProfilePanel', () => {
     expect(wrapper.text()).toContain(
       'payroll.people.profile.save_before_verify',
     )
+  })
+
+  it('varuje, že bez výplatního pravidla nejde vyplatit mzdu', async () => {
+    mocks.personPayoutRules.mockResolvedValue(payoutRulesResponse([]))
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+
+    expect(wrapper.find('[data-test="payout-rules-missing"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('payroll.people.profile.payout_rules.missing_title')
+  })
+
+  it('s aktivním pravidlem varování neukazuje a nabídku výchozího pravidla schová', async () => {
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+
+    expect(wrapper.find('[data-test="payout-rules-missing"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="apply-payout-defaults"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="payout-defaults-blocked"]').text()).toContain(
+      'výchozí sada je nepřepisuje',
+    )
+  })
+
+  it('nabídne výchozí pravidlo jen když je použitelné', async () => {
+    mocks.personPayoutRules.mockResolvedValue(payoutRulesResponse([]))
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+
+    await wrapper.get('[data-test="apply-payout-defaults"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.applyPersonPayoutRuleDefaults).toHaveBeenCalledWith(17)
+  })
+
+  it('nedává pravidlům vlastní Uložit — ukládá se jedním tlačítkem panelu', async () => {
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+
+    const ruleButtons = wrapper.findAll('[data-test="payout-rules"] button')
+    expect(ruleButtons.length).toBeGreaterThan(0)
+    expect(ruleButtons.some(button => button.text().includes('common.save'))).toBe(false)
+    expect(wrapper.findAll('[data-test="save-profile"]')).toHaveLength(1)
+  })
+
+  it('deaktivaci pravidla odešle až společné Uložit', async () => {
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+
+    await wrapper.get('[data-test="deactivate-payout-rule"]').trigger('click')
+    expect(mocks.deactivatePersonPayoutRule).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="payout-rule-pending-deactivation"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="save-profile"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.deactivatePersonPayoutRule).toHaveBeenCalledWith(17, 11, 2)
+    expect(mocks.updatePersonPayoutRule).not.toHaveBeenCalled()
+  })
+
+  it('nové pravidlo pošle až po uložení karty a v haléřích', async () => {
+    const wrapper = await mountedPanel()
+    await openPayout(wrapper)
+
+    await wrapper.get('[data-test="add-payout-rule"]').trigger('click')
+    const rows = wrapper.findAll('[data-test="payout-rule"]')
+    expect(rows).toHaveLength(2)
+
+    await wrapper.get('[data-test="save-profile"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.createPersonPayoutRule).toHaveBeenCalledWith(17, expect.objectContaining({
+      destination_kind: 'bank',
+      destination_reference: 'account:5',
+      allocation_kind: 'remainder',
+      amount_minor: null,
+      basis_points: null,
+      priority_no: 110,
+      is_active: true,
+    }))
   })
 
   it.each([

@@ -1816,6 +1816,55 @@
                     "employee_confirmation": "Potvrzení zaměstnance",
                     "bank_document": "Doklad banky",
                     "user_verified": "Kontrola uživatelem"
+                },
+                "payout_rules": {
+                    "title": "Výplatní pravidla",
+                    "hint": "Pravidlo říká, kam a v jakém pořadí odejde čistá mzda. Způsob výplaty výše je jen deklarace, vyplácí se podle pravidel.",
+                    "missing_title": "Bez výplatního pravidla nelze zaměstnanci vyplatit mzdu.",
+                    "missing_hint": "Pravidlo určuje, kam čistá mzda půjde — na konkrétní výplatní účet, do pokladny, nebo zápočtem na účet společníka. Dokud tu žádné aktivní pravidlo není, výplata se nedá zpracovat.",
+                    "add": "Přidat pravidlo",
+                    "empty": "Zatím tu není žádné výplatní pravidlo.",
+                    "destination": "Cíl výplaty",
+                    "destination_kind": {
+                        "bank": "Na účet",
+                        "cash": "Hotově",
+                        "partner_settlement": "Zápočtem na účet společníka"
+                    },
+                    "account": "Výplatní účet",
+                    "account_placeholder": "Vyberte výplatní účet",
+                    "account_missing": "účet nevybrán",
+                    "account_unknown": "Účet #{id} (není mezi výplatními účty)",
+                    "account_required": "Zaměstnanec nemá žádný aktivní výplatní účet. Nejdřív ho přidejte výše a uložte kartu.",
+                    "settlement_account": "Účet zápočtu",
+                    "allocation": "Rozdělení",
+                    "allocation_kind": {
+                        "fixed": "Pevná částka",
+                        "percentage": "Procenta z čisté mzdy",
+                        "remainder": "Zbytek výplaty"
+                    },
+                    "amount": "Částka (Kč)",
+                    "percentage": "Podíl (%)",
+                    "priority": "Pořadí",
+                    "priority_summary": "Pořadí {priority}",
+                    "state_active": "Aktivní",
+                    "state_inactive": "Neaktivní",
+                    "deactivate": "Deaktivovat",
+                    "reactivate": "Znovu aktivovat",
+                    "pending_deactivation": "Po uložení karty se pravidlo deaktivuje a zmizí ze seznamu aktivních. Zůstane u historických výplat, které podle něj proběhly.",
+                    "save_hint": "Změny výplatních pravidel se uloží společně s kartou tlačítkem Uložit nahoře.",
+                    "summary": {
+                        "remainder": "Zbytek čisté mzdy",
+                        "percentage": "{percent} % čisté mzdy",
+                        "fixed": "Pevně {amount}"
+                    },
+                    "defaults_title": "Výchozí pravidlo ze způsobu výplaty",
+                    "defaults_preview": "Vytvoří se: {summary}",
+                    "apply_defaults": "Vytvořit výchozí pravidlo",
+                    "defaults_applied": "Výchozí výplatní pravidlo bylo vytvořeno.",
+                    "defaults_failed": "Výchozí výplatní pravidlo se nepodařilo vytvořit.",
+                    "load_failed": "Výplatní pravidla se nepodařilo načíst.",
+                    "saved": "Výplatní pravidla byla uložena.",
+                    "save_failed": "Výplatní pravidla se nepodařilo uložit."
                 }
             },
             "legacy_projection": "Převzato z původní agendy",
