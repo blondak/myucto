@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Accounting\Payroll;
 
 use MyInvoice\Service\Accounting\Payroll\WithholdingTaxCalculator as W;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Tax\TaxConstants;
 use PHPUnit\Framework\TestCase;
 
@@ -22,10 +24,29 @@ use PHPUnit\Framework\TestCase;
  */
 final class WithholdingTaxCalculatorTest extends TestCase
 {
-    /** @var array<string,mixed> */
+    /**
+     * Sada roku 2024: § 6 odst. 4 písm. a) ZDP tehdy zněl „NEPŘESÁHNE … 10 000 Kč",
+     * hranice je tedy VČETNĚ. Od 1. 1. 2025 (zák. č. 470/2024 Sb.) zní „nedosáhne
+     * rozhodné částky" a hranice je ostrá — pro ni je fixtura {@see self::EXCLUSIVE}.
+     *
+     * @var array<string,mixed>
+     */
     private array $c = [
         'withholding_rate' => 0.15,
         'dpp_withholding_limit' => 10000,
+        'dpp_withholding_limit_inclusive' => true,
+        'author_fee_withholding_limit' => 10000,
+    ];
+
+    /**
+     * Sada podle znění účinného od 1. 1. 2025 — táž čísla, ostrá hranice.
+     *
+     * @var array<string,mixed>
+     */
+    private const EXCLUSIVE = [
+        'withholding_rate' => 0.15,
+        'dpp_withholding_limit' => 10000,
+        'dpp_withholding_limit_inclusive' => false,
         'author_fee_withholding_limit' => 10000,
     ];
 
@@ -42,10 +63,51 @@ final class WithholdingTaxCalculatorTest extends TestCase
         self::assertFalse($r['insurance_applies'], 'Z DPP do limitu se pojistné neodvádí.');
     }
 
-    /** Přesně na limitu se ještě sráží — hranice je „do", ne „pod". */
-    public function testExactlyAtLimitStillWithheld(): void
+    /**
+     * Do 31. 12. 2024 byla hranice „do" — odměna přesně na ní se ještě srazila.
+     * § 6 odst. 4 písm. a) ZDP tehdy zněl „nepřesáhne … 10 000 Kč".
+     */
+    public function testExactlyAtLimitStillWithheldUnderThe2024Wording(): void
     {
         self::assertTrue(W::applies(W::REASON_DPP, 10000.0, $this->c));
+    }
+
+    /**
+     * Od 1. 1. 2025 je hranice OSTRÁ: zák. č. 470/2024 Sb. změnil § 6 odst. 4
+     * písm. a) ZDP na „NEDOSÁHNE částky rozhodné pro účast … na nemocenském
+     * pojištění". Odměna přesně na rozhodné částce už podle § 7a z. č. 187/2006 Sb.
+     * („aspoň ve výši rozhodné částky") zakládá účast na nemocenském pojištění,
+     * daní se tedy zálohou a odvádí se z ní SP i ZP.
+     *
+     * Tohle je celý rozdíl mezi 12 000 a 11 999 — jiná daň, jiné odvody.
+     */
+    public function testExactlyAtThresholdIsNotWithheldFrom2025(): void
+    {
+        self::assertFalse(W::applies(W::REASON_DPP, 10000.0, self::EXCLUSIVE));
+        self::assertTrue(W::applies(W::REASON_DPP, 9999.99, self::EXCLUSIVE));
+
+        $msg = W::overLimitReason(W::REASON_DPP, 10000.0, self::EXCLUSIVE);
+        self::assertNotNull($msg, 'Odměna na rozhodné částce musí dostat vysvětlení, ne mlčení.');
+        self::assertStringContainsString('dosahuje rozhodné částky', $msg);
+    }
+
+    /**
+     * Haléře jsou přesně to místo, kde se stará zkratka „limit je o korunu níž"
+     * rozcházela se zákonem: 9 999,50 Kč rozhodné částky NEDOSÁHNE, takže srážkou
+     * jde — se zápisem `<= 9 999` by šla zálohou.
+     */
+    public function testAmountWithHellersBelowThresholdIsStillWithheld(): void
+    {
+        self::assertTrue(W::applies(W::REASON_DPP, 9999.50, self::EXCLUSIVE));
+        self::assertNull(W::overLimitReason(W::REASON_DPP, 9999.50, self::EXCLUSIVE));
+    }
+
+    /** Chybějící příznak = přísnější (novější) výklad, ne tichý návrat ke starému. */
+    public function testMissingInclusivityFlagDefaultsToTheStrictWording(): void
+    {
+        $c = ['withholding_rate' => 0.15, 'dpp_withholding_limit' => 10000];
+
+        self::assertFalse(W::applies(W::REASON_DPP, 10000.0, $c));
     }
 
     /**
@@ -188,13 +250,32 @@ final class WithholdingTaxCalculatorTest extends TestCase
      */
     public function testDppLimitFollowsSicknessParticipationThreshold(): void
     {
-        $expected = [2024 => 10_000, 2025 => 11_500, 2026 => 12_000];
+        // `inclusive` = znění § 6 odst. 4 písm. a) ZDP platné pro daný rok:
+        // 2024 „nepřesáhne 10 000 Kč" (hranice včetně), od 2025 „nedosáhne
+        // rozhodné částky" (hranice ostrá, zák. č. 470/2024 Sb.).
+        $expected = [
+            2024 => ['limit' => 10_000, 'inclusive' => true],
+            2025 => ['limit' => 11_500, 'inclusive' => false],
+            2026 => ['limit' => 12_000, 'inclusive' => false],
+        ];
 
-        foreach ($expected as $year => $limit) {
+        foreach ($expected as $year => $case) {
+            $limit = $case['limit'];
             $c = TaxConstants::forYear($year);
-            self::assertSame($limit, (int) $c['dpp_withholding_limit'], "Limit DPP pro rok {$year}.");
-            self::assertTrue(W::applies(W::REASON_DPP, (float) $limit, $c), "Částka na limitu je ještě srážková ({$year}).");
-            self::assertFalse(W::applies(W::REASON_DPP, $limit + 1.0, $c), "Nad limitem srážková není ({$year}).");
+            self::assertSame($limit, (int) $c['dpp_withholding_limit'], "Rozhodná částka DPP pro rok {$year}.");
+            self::assertSame(
+                $case['inclusive'],
+                W::applies(W::REASON_DPP, (float) $limit, $c),
+                "Částka přesně na hranici — režim podle znění platného v roce {$year}.",
+            );
+            self::assertTrue(
+                W::applies(W::REASON_DPP, $limit - 1.0, $c),
+                "Koruna pod hranicí je srážková vždy ({$year}).",
+            );
+            self::assertFalse(
+                W::applies(W::REASON_DPP, $limit + 1.0, $c),
+                "Nad hranicí srážková není ({$year}).",
+            );
         }
     }
 
@@ -204,5 +285,23 @@ final class WithholdingTaxCalculatorTest extends TestCase
         self::assertFalse(W::applies(W::REASON_DPP, 11_000.0, TaxConstants::forYear(2024)));
         self::assertTrue(W::applies(W::REASON_DPP, 11_000.0, TaxConstants::forYear(2025)));
         self::assertTrue(W::applies(W::REASON_DPP, 11_000.0, TaxConstants::forYear(2026)));
+    }
+
+    /**
+     * Roční konstanty si hranici pro rok 2026 už NEDRŽÍ — zrcadlí mzdový ruleset.
+     * Kdyby se sem někdo vrátil s literálem, rozejdou se zase obě cesty výpočtu.
+     */
+    public function testTaxConstantsMirrorTheRulesetInsteadOfCopyingIt(): void
+    {
+        $threshold = CzechPayrollRulesets2026::provider()
+            ->forDate(PayrollRulesetDomain::IncomeTax, '2026-01-01')
+            ->parameters['dpp.withholding.threshold'];
+
+        self::assertSame(
+            $threshold->value,
+            (int) round(((float) TaxConstants::forYear(2026)['dpp_withholding_limit']) * 100),
+            'Roční konstanta musí být tatáž hodnota jako parametr rulesetu, v haléřích.',
+        );
+        self::assertFalse(TaxConstants::forYear(2026)['dpp_withholding_limit_inclusive']);
     }
 }

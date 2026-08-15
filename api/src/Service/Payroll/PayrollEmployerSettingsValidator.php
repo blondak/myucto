@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll;
 
 use MyInvoice\Repository\ChartOfAccountsRepository;
+use MyInvoice\Service\Codebook\HealthInsurers;
 
 final class PayrollEmployerSettingsValidator
 {
@@ -52,6 +53,15 @@ final class PayrollEmployerSettingsValidator
         if ($normalized['payroll_contact_email'] !== null
             && filter_var($normalized['payroll_contact_email'], FILTER_VALIDATE_EMAIL) === false) {
             throw new \InvalidArgumentException('E-mailový kontakt mzdové účtárny není platný.');
+        }
+        // Výchozí pojišťovna zůstává nepovinná (prázdné = nenastaveno), ale
+        // je-li zadaná, musí být z číselníku — délkový limit sám o sobě
+        // propustil libovolný osmiznakový nesmysl.
+        if ($normalized['default_health_insurer_code'] !== null
+            && !HealthInsurers::isValid($normalized['default_health_insurer_code'])) {
+            throw new \InvalidArgumentException(
+                HealthInsurers::invalidCodeMessage($normalized['default_health_insurer_code']),
+            );
         }
 
         $offices = $this->offices($input['offices'] ?? null);

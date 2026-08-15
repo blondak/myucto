@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Tax;
 
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+
 /**
  * Roční daňové konstanty (CZ) — referenční DEFAULTY / fallback.
  *
@@ -41,15 +44,16 @@ final class TaxConstants
     }
 
     /**
-     * Doplní odvozené klíče (dnes jen `pausal_annual` z `pausal_monthly`).
-     * Voláno i repository po sloučení s DB override, aby uložená roční částka
-     * nemohla přebít měsíční rozvrh.
+     * Doplní odvozené klíče (`pausal_annual` z `pausal_monthly` a hranici srážkové
+     * daně z DPP z mzdového rulesetu). Voláno i repository po sloučení s DB
+     * override, aby uložená roční částka nemohla přebít měsíční rozvrh.
      *
      * @param array<string, mixed> $constants
      * @return array<string, mixed>
      */
     public static function withDerived(array $constants, int $year): array
     {
+        $constants = self::withDppWithholdingThreshold($constants, $year);
         $segments = PausalSchedule::normalize($constants['pausal_monthly'] ?? []);
         if ($segments === []) {
             // Legacy override bez rozvrhu: roční částku ber doslova, měsíční
@@ -71,6 +75,81 @@ final class TaxConstants
         $constants['pausal_monthly'] = $segments;
         $constants['pausal_annual']  = PausalSchedule::annual($year, $segments);
         return $constants;
+    }
+
+    /**
+     * Hranice srážkové daně z DPP (§ 6 odst. 4 ZDP) pro roky, které pokrývá mzdový
+     * ruleset — JEDINÝ zdroj pravdy pro tuhle hodnotu.
+     *
+     * ── Proč to tady vůbec je ──────────────────────────────────────────────────
+     * Hranice žila v systému dvakrát: `dpp_withholding_limit` v téhle tabulce
+     * (12 000 Kč, porovnávané `<=`) a `dpp.withholding.maximum` v rulesetu
+     * (11 999 Kč, také `<=`). Odměna PŘESNĚ 12 000 Kč tak dostala jiný daňový
+     * režim podle toho, kterou cestou firma jela — moderní mzdový běh ji zdanil
+     * zálohou, legacy zaúčtování srážkou. Nešlo o kosmetiku: jsou to jiné peníze,
+     * jiné odvody a jiný řádek v podání.
+     *
+     * Ruleset je administrovatelný (MZ-02-W08), takže vyhrává on. Tahle metoda
+     * jeho hodnotu ZRCADLÍ, nekopíruje — v `self::TABLE` pro pokryté roky žádné
+     * číslo není, takže se nemá co rozejít.
+     *
+     * Vědomé omezení: čte se VÝCHOZÍ sada z kódu, ne override z tabulky
+     * `payroll_rulesets`. Legacy účetní cesta ({@see \MyInvoice\Service\Accounting\Payroll\PayrollPostingService})
+     * běží bez DI na ruleset registry; admin override se proto projeví ve mzdovém
+     * běhu, ne tady. Rozdíl mezi 12 000 a 11 999 to neřeší jen zdánlivě — ten je
+     * pryč nadobro; zbývá jen scénář „admin si hranici přepsal ručně".
+     *
+     * Případný override z tabulky `tax_constants` se pro pokryté roky ignoruje
+     * ZÁMĚRNĚ: dvě administrátorské cesty k téže hranici by vrátily přesně ten
+     * rozpor, který tahle změna odstraňuje.
+     *
+     * @param array<string, mixed> $constants
+     * @return array<string, mixed>
+     */
+    private static function withDppWithholdingThreshold(array $constants, int $year): array
+    {
+        $thresholdMinor = self::rulesetDppWithholdingThresholdMinor($year);
+        if ($thresholdMinor === null) {
+            return $constants;
+        }
+        $constants['dpp_withholding_limit'] = $thresholdMinor / 100;
+        // Ruleset existuje až od roku 2026, tedy výhradně pro znění § 6 odst. 4
+        // písm. a) ZDP po novele č. 470/2024 Sb. („nedosáhne") — hranice je ostrá.
+        $constants['dpp_withholding_limit_inclusive'] = false;
+
+        return $constants;
+    }
+
+    /**
+     * Rozhodná částka v haléřích, nebo `null` pro roky bez mzdového rulesetu
+     * (2024 a 2025 — registry začíná rokem 2026, ty roky si hodnotu drží samy).
+     */
+    private static function rulesetDppWithholdingThresholdMinor(int $year): ?int
+    {
+        /** @var array<int, int|null> $cache */
+        static $cache = [];
+        if (array_key_exists($year, $cache)) {
+            return $cache[$year];
+        }
+
+        $cache[$year] = null;
+        if ($year === 2026) {
+            $ruleset = CzechPayrollRulesets2026::provider()->forDate(
+                PayrollRulesetDomain::IncomeTax,
+                sprintf('%04d-01-01', $year),
+            );
+            $value = $ruleset->parameters['dpp.withholding.threshold'] ?? null;
+            if ($value === null || $value->type !== 'money_minor' || !is_int($value->value)) {
+                throw new \DomainException(
+                    'Mzdový ruleset pro rok ' . $year . ' nenese peněžní parametr '
+                    . '`dpp.withholding.threshold`. Bez něj nelze určit hranici srážkové '
+                    . 'daně z DPP — doplňte parametr v Mzdy → Legislativní pravidla.',
+                );
+            }
+            $cache[$year] = $value->value;
+        }
+
+        return $cache[$year];
     }
 
     public static function availableYears(): array
@@ -185,6 +264,12 @@ final class TaxConstants
             // samostatný základ daně zdaněný srážkou. Od 1. 1. 2024 je to současně
             // hranice, do které se z DPP neodvádí sociální ani zdravotní pojištění.
             'dpp_withholding_limit' => 10000,
+            // Do 31. 12. 2024 zněl § 6 odst. 4 ZDP „NEPŘESÁHNE … 10 000 Kč“, tedy
+            // hranice VČETNĚ: odměna přesně 10 000 Kč se ještě daní srážkou. Od
+            // 1. 1. 2025 je znění „nedosáhne rozhodné částky“ a hranice je ostrá.
+            // Ten rozdíl je tady jako data, ne jako podmínka na rok v kalkulátoru —
+            // historické měsíce se přepočtem nesmí překlopit do jiného režimu.
+            'dpp_withholding_limit_inclusive' => true,
             // § 7 odst. 6 ZDP — autorský honorář do tohoto měsíčního limitu od jednoho
             // plátce se rovněž zdaňuje srážkou a do přiznání se neuvádí.
             'author_fee_withholding_limit' => 10000,
@@ -325,7 +410,13 @@ final class TaxConstants
             // účast na nemocenském pojištění, a ta je podle § 7a z. 187/2006 (novela
             // 163/2024 Sb.) 25 % průměrné mzdy zaokrouhlených DOLŮ na celých 500 Kč.
             // 2025: 46 557 × 0,25 = 11 639,25 → 11 500.
+            // Mzdový ruleset pro rok 2025 neexistuje (registry začíná 2026), takže
+            // tenhle rok si hodnotu drží sám; pro 2026 ji dodá ruleset.
             'dpp_withholding_limit' => 11500,
+            // Zák. č. 470/2024 Sb. změnil od 1. 1. 2025 znění § 6 odst. 4 písm. a) ZDP
+            // z „nepřesáhne" na „NEDOSÁHNE" — odměna přesně na rozhodné částce už
+            // srážkou nejde. Viz komentář u roku 2024.
+            'dpp_withholding_limit_inclusive' => false,
             // § 7 odst. 6 ZDP — autorský honorář do tohoto měsíčního limitu od jednoho
             // plátce se rovněž zdaňuje srážkou a do přiznání se neuvádí. Na rozhodnou
             // částku NAVÁZANÝ NENÍ — zůstává 10 000 Kč.
@@ -456,12 +547,11 @@ final class TaxConstants
             // ── Daň z příjmů PO (DPPO) + odvody OSVČ — Epic DP (issue #18) ──────
             'corporate_tax_rate' => 0.21,
             'withholding_rate'   => 0.15,
-            // § 6 odst. 4 ZDP — dohoda o provedení práce do tohoto měsíčního limitu
-            // u JEDNOHO zaměstnavatele a BEZ podepsaného prohlášení k dani tvoří
-            // samostatný základ daně zdaněný srážkou. Od 1. 1. 2024 je to současně
-            // hranice, do které se z DPP neodvádí sociální ani zdravotní pojištění.
-            // 2026: 48 967 × 0,25 = 12 241,75 → zaokrouhleno dolů na celých 500 = 12 000.
-            'dpp_withholding_limit' => 12000,
+            // `dpp_withholding_limit` tu ZÁMĚRNĚ NENÍ. Pro rok 2026 už legislativní
+            // hodnotu drží mzdový ruleset (`dpp.withholding.threshold`) a doplní ji
+            // {@see self::withDerived()}. Druhá kopie tady vedla k tomu, že tatáž
+            // odměna dostala podle použité cesty jiný daňový režim.
+            // Hranice je od 1. 1. 2025 OSTRÁ — viz `dpp_withholding_limit_inclusive`.
             // § 7 odst. 6 ZDP — autorský honorář; na rozhodnou částku navázaný není.
             'author_fee_withholding_limit' => 10000,
             'sickness_rate'             => 0.027,

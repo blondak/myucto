@@ -11,6 +11,7 @@ use MyInvoice\Repository\TaxReturnRepository;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\Reports\EntityCategoryService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
+use MyInvoice\Service\Codebook\HealthInsurers;
 use MyInvoice\Service\Report\EpoEnvelope;
 use MyInvoice\Service\Report\TaxSubmissionArchiver;
 use MyInvoice\Service\Validation\XmlSchemaValidator;
@@ -1013,22 +1014,17 @@ final class TaxReturnService
         return ['pdf' => $pdf, 'filename' => sprintf('prehled-osvc-zp-%04d.pdf', $year)];
     }
 
-    /** Číselník zdravotních pojišťoven (kód → název) pro Přehled OSVČ pro ZP. */
-    private const HEALTH_INSURERS = [
-        '111' => 'Všeobecná zdravotní pojišťovna ČR (VZP)',
-        '201' => 'Vojenská zdravotní pojišťovna ČR (VoZP)',
-        '205' => 'Česká průmyslová zdravotní pojišťovna (ČPZP)',
-        '207' => 'Oborová zdravotní pojišťovna (OZP)',
-        '209' => 'Zaměstnanecká pojišťovna Škoda (ZPŠ)',
-        '211' => 'Zdravotní pojišťovna ministerstva vnitra ČR (ZPMV)',
-        '213' => 'Revírní bratrská pokladna (RBP)',
-    ];
-
-    /** @return array{code:string,name:string} */
+    /**
+     * Číselník je sdílený s mzdovou agendou ({@see HealthInsurers}).
+     * Tady zůstává tolerantní: neznámý kód se do PDF vytiskne bez názvu,
+     * aby se Přehled OSVČ pro ZP dal vygenerovat i s rozpracovaným nastavením.
+     *
+     * @return array{code:string,name:string}
+     */
     private function healthInsurer(string $code): array
     {
         $code = preg_replace('/\D/', '', $code) ?? '';
-        return ['code' => $code, 'name' => self::HEALTH_INSURERS[$code] ?? ''];
+        return ['code' => $code, 'name' => HealthInsurers::name($code) ?? ''];
     }
 
     /** @return array<string,mixed> */

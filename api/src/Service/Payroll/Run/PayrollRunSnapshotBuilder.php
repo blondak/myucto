@@ -127,6 +127,11 @@ final class PayrollRunSnapshotBuilder
             $periodStart,
         );
         $inputRows = $this->batch->inputs($supplierId, $employmentIds, $periodStart);
+        $dimensionRows = $this->batch->employmentDimensions(
+            $supplierId,
+            $employmentIds,
+            $periodStart,
+        );
         $absenceRows = $this->batch->absences(
             $supplierId,
             $employmentIds,
@@ -312,6 +317,7 @@ final class PayrollRunSnapshotBuilder
                 'time_month' => $timeMonth,
                 'absences' => $absences,
                 'inputs' => $inputs,
+                'dimensions' => $this->dimensions($dimensionRows[$employmentId] ?? []),
             ];
         }
         ksort($people, SORT_NUMERIC);
@@ -904,6 +910,38 @@ final class PayrollRunSnapshotBuilder
                 'component_snapshot_hash' =>
                     strtolower((string) $row['component_snapshot_hash']),
                 'component' => $component,
+            ];
+        }
+        return $result;
+    }
+
+    /**
+     * Dimenze pracovního vztahu zmrazené do snapshotu.
+     *
+     * Nesou `default_account_code`, tedy nákladový účet hrubé mzdy pro dané
+     * středisko/zakázku/činnost. Uživatel ho v číselníku dimenzí nastavoval už od
+     * migrace 1307, ale zaúčtování ho nikdy nečetlo — nastavení bylo tiše k ničemu.
+     *
+     * Do snapshotu patří proto, že zaúčtování běží nad zmrazenými daty: kdyby se
+     * dimenze dohledávaly až při účtování, přeúčtování starší revize by použilo
+     * dnešní přiřazení střediska a vyrobilo jiné zaúčtování než původní. Starší
+     * revize klíč `dimensions` nemají vůbec a
+     * {@see \MyInvoice\Service\Payroll\Posting\PayrollPostingLineBuilder} to čte jako
+     * „žádná dimenze“ — účtují se tedy dál přesně tak, jak se účtovaly.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function dimensions(array $rows): array
+    {
+        $result = [];
+        foreach ($rows as $row) {
+            $account = $row['default_account_code'];
+            $result[] = [
+                'type' => (string) $row['dimension_type'],
+                'code' => (string) $row['code'],
+                'name' => (string) $row['name'],
+                'default_account_code' => $account === null ? null : (string) $account,
             ];
         }
         return $result;

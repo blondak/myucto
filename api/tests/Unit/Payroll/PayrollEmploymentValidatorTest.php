@@ -142,6 +142,30 @@ final class PayrollEmploymentValidatorTest extends TestCase
         $this->validator()->terms($no);
     }
 
+    public function testCzIscoAcceptsFourAndFiveDigitCodes(): void
+    {
+        foreach (['2512', '43110', null] as $code) {
+            $terms = $this->terms();
+            $terms['cz_isco_code'] = $code;
+            self::assertSame($code, $this->validator()->terms($terms)['cz_isco_code']);
+        }
+    }
+
+    public function testCzIscoRejectsNonNumericAndWrongLength(): void
+    {
+        foreach (['ISCO-4311', '431', '431101'] as $code) {
+            $terms = $this->terms();
+            $terms['cz_isco_code'] = $code;
+            try {
+                $this->validator()->terms($terms);
+                self::fail("Kód {$code} měl být odmítnut.");
+            } catch (\InvalidArgumentException $e) {
+                self::assertStringContainsString('CZ-ISCO', $e->getMessage());
+                self::assertStringContainsString('25120', $e->getMessage());
+            }
+        }
+    }
+
     /** @return array<string,mixed> */
     private function terms(): array
     {

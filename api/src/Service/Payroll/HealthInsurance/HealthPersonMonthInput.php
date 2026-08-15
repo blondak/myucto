@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\HealthInsurance;
 
 use InvalidArgumentException;
+use MyInvoice\Service\Codebook\HealthInsurers;
 
 final readonly class HealthPersonMonthInput
 {
@@ -173,10 +174,14 @@ final readonly class HealthPersonMonthInput
         ?string $reference,
     ): void {
         if ($status === HealthInsurerSnapshotStatus::Verified) {
-            if ($code === null || preg_match('/^\d{3}$/D', $code) !== 1) {
-                throw new InvalidArgumentException(
-                    'A verified health insurer snapshot requires a three-digit code.',
-                );
+            // Ověřený snapshot musí nést kód z číselníku, ne jen trojici číslic —
+            // dřív tudy prošla i neexistující pojišťovna (např. 999).
+            // Hlášky tohoto DTO jsou historicky anglické, výčet bereme z číselníku.
+            if ($code === null || !HealthInsurers::isValid($code)) {
+                throw new InvalidArgumentException(sprintf(
+                    'A verified health insurer snapshot requires a code from the codebook: %s.',
+                    HealthInsurers::listForMessage(),
+                ));
             }
             if (!self::isEvidenceReference($reference)) {
                 throw new InvalidArgumentException(

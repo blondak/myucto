@@ -261,6 +261,65 @@ describe('EmployerSettings — účtová osnova', () => {
     wrapper.unmount()
   })
 
+  it('nabízí zdravotní pojišťovny z číselníku místo volného textu', async () => {
+    const wrapper = await mountPage()
+    const picker = wrapper.get('[data-test="default-health-insurer"]')
+    const input = picker.get('input[role="combobox"]')
+    expect((input.element as HTMLInputElement).value).toContain('111')
+
+    await input.trigger('focus')
+    const optionTexts = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]'))
+      .map(option => option.textContent ?? '')
+    expect(optionTexts).toHaveLength(7)
+    expect(optionTexts.some(text => text.includes('213'))).toBe(true)
+    expect(optionTexts.some(text => text.includes('999'))).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('pošle kód pojišťovny vybraný ze seznamu', async () => {
+    const wrapper = await mountPage()
+    const input = wrapper.get('[data-test="default-health-insurer"]').get('input[role="combobox"]')
+
+    await input.trigger('focus')
+    await input.setValue('205')
+    await input.trigger('keydown', { key: 'Enter' })
+
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
+    expect(m.saveEmployerSettings.mock.calls[0][0].default_health_insurer_code).toBe('205')
+
+    wrapper.unmount()
+  })
+
+  it('neuloží pojišťovnu mimo číselník', async () => {
+    const wrapper = await mountPage({ ...settings(), default_health_insurer_code: '999' })
+
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+
+    expect(m.saveEmployerSettings).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('payroll.employer.validation.default_health_insurer_code')
+
+    wrapper.unmount()
+  })
+
+  it('prázdná pojišťovna je platná a odejde jako null', async () => {
+    const wrapper = await mountPage({ ...settings(), default_health_insurer_code: null })
+
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
+    expect(m.saveEmployerSettings.mock.calls[0][0].default_health_insurer_code).toBeNull()
+
+    wrapper.unmount()
+  })
+
   it('používá standardní záložky a neukazuje globální uložení u vlastních formulářů', async () => {
     const wrapper = await mountPage()
     const tabs = wrapper.findAll('[role="tab"]')

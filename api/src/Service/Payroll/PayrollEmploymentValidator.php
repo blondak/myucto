@@ -236,7 +236,7 @@ final class PayrollEmploymentValidator
             'jmhz_apz_instrument_code' => $apzCode,
             'jmhz_functional_benefits_status' => $functionalBenefits,
             'jmhz_temporary_assignment_status' => $temporaryAssignment,
-            'cz_isco_code' => $this->optionalCode($input, 'cz_isco_code', 16),
+            'cz_isco_code' => $this->optionalCzIscoCode($input, 'cz_isco_code'),
             'activity_code' => $activityCode,
             'jmhz_relationship_detail_code' => $relationshipDetailCode,
             'social_insurance_participation' => $social,
@@ -333,6 +333,25 @@ final class PayrollEmploymentValidator
         $value = $this->optionalText($input, $key, $maxLength);
         if ($value !== null && !preg_match('/^[A-Za-z0-9._\/-]+$/', $value)) {
             throw new \InvalidArgumentException("Pole {$key} není platný kód.");
+        }
+        return $value;
+    }
+
+    /**
+     * CZ-ISCO je čistě číselný kód o čtyřech nebo pěti číslicích (skupina /
+     * podskupina zaměstnání). Kontroluje se POUZE tvar — úplný číselník ČSÚ
+     * v projektu není a nestahujeme ho, takže špatný, ale správně tvarovaný
+     * kód (třeba 99999) touhle validací projde.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function optionalCzIscoCode(array $input, string $key): ?string
+    {
+        $value = $this->optionalText($input, $key, 16);
+        if ($value !== null && preg_match('/^[0-9]{4,5}$/D', $value) !== 1) {
+            throw new \InvalidArgumentException(
+                "Kód CZ-ISCO {$value} nemá platný tvar. Zadejte čtyř- nebo pětimístné číslo, například 25120.",
+            );
         }
         return $value;
     }

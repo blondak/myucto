@@ -5,17 +5,29 @@ import type { PayrollRun } from '@/api/payroll'
 
 const m = vi.hoisted(() => ({
   runs: vi.fn(),
+  runDetail: vi.fn(),
   people: vi.fn(),
   deleteRun: vi.fn(),
   commandRun: vi.fn(),
   canWrite: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
+  total: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
-    runs: m.runs,
+    // Seznam je nově stránkovaný a `result_snapshot` v něm nese jen `totals`.
+    // Adaptér drží stávající testy beze změny: scénáře pořád nastavují prosté
+    // pole běhů a obálku dopočítá tenhle wrapper.
+    runsPage: (period?: string, page?: { limit?: number, offset?: number }) =>
+      m.runs(period, page).then((runs: unknown[]) => ({
+        runs,
+        total: m.total() ?? runs.length,
+        limit: page?.limit ?? 12,
+        offset: page?.offset ?? 0,
+      })),
+    run: m.runDetail,
     people: m.people,
     deleteRun: m.deleteRun,
     commandRun: m.commandRun,
@@ -60,6 +72,8 @@ describe('PayrollRuns', () => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)
     m.runs.mockResolvedValue([run()])
+    m.total.mockReturnValue(undefined)
+    m.runDetail.mockResolvedValue(run())
     m.people.mockResolvedValue([])
     m.deleteRun.mockResolvedValue(undefined)
     m.commandRun.mockResolvedValue({ outcome: null })
@@ -162,5 +176,40 @@ describe('PayrollRuns', () => {
 
     expect(wrapper.find('[data-testid="delete-payroll-run-15"]').exists()).toBe(false)
     expect(m.deleteRun).not.toHaveBeenCalled()
+  })
+
+  // Seznam běhů posílal celý výsledkový snapshot každého běhu včetně osobního
+  // rozpadu — u firmy se stovkou zaměstnanců to server nedokázal ani načíst.
+  // Rozpad se proto dotahuje až na vyžádání, pro jeden konkrétní běh.
+  it('loads the per-employee breakdown only when the user asks for it', async () => {
+    m.runs.mockResolvedValue([run({
+      revision_id: 9,
+      revision_status: 'approved',
+      result_snapshot: { totals: { cash_payable_minor: 100_000 } },
+    })])
+    m.runDetail.mockResolvedValue(run({
+      result_snapshot: { totals: { cash_payable_minor: 100_000 }, people: [] },
+    }))
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(m.runDetail).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-testid="payroll-run-15-breakdown-toggle"]').trigger('click')
+    await flushPromises()
+
+    expect(m.runDetail).toHaveBeenCalledWith(15)
+  })
+
+  it('paginates instead of loading every run the company ever had', async () => {
+    m.total.mockReturnValue(40)
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    // Období je aktuální měsíc — na jeho hodnotě testu nezáleží, jde o strop.
+    expect(m.runs).toHaveBeenCalledWith(expect.any(String), { limit: 12, offset: 0 })
+    expect(wrapper.find('[data-testid="payroll-runs-pagination"]').exists()).toBe(true)
   })
 })

@@ -140,6 +140,30 @@ final class HealthPaymentOverviewBuilderTest extends TestCase
         }
     }
 
+    public function testRejectsInsurerOutsideTheCodebook(): void
+    {
+        $source = $this->source();
+        $root = $source['statutory_result']['result_snapshot'];
+        $root['insurer_liabilities'][0]['insurer_code'] = '999';
+        $source['statutory_result']['result_snapshot'] = $root;
+        $source['statutory_result']['result_snapshot_hash'] = hash(
+            'sha256',
+            CanonicalJson::encode($root),
+        );
+
+        try {
+            $this->builder->build(41, $source);
+            self::fail('Neexistující pojišťovna musí přehled zablokovat.');
+        } catch (HealthInsuranceOverviewException $exception) {
+            self::assertSame(
+                'health_insurance_insurer_invalid',
+                $exception->validationCode,
+            );
+            self::assertStringContainsString('999', $exception->getMessage());
+            self::assertStringContainsString('111 VZP', $exception->getMessage());
+        }
+    }
+
     /**
      * @return array{
      *   revision:array<string,mixed>,

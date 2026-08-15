@@ -69,7 +69,7 @@ final class EmploymentIncomeTaxRulesetOverrideTest extends TestCase
     public function testAdministratorOverrideMovesTheWithholdingBoundaryAndRate(): void
     {
         $calculator = $this->calculator([
-            'dpp.withholding.maximum' => ['type' => 'money_minor', 'value' => 2_000_000],
+            'dpp.withholding.threshold' => ['type' => 'money_minor', 'value' => 2_000_000],
             'withholding.rate' => ['type' => 'decimal_rate', 'value' => '0.2'],
         ]);
 

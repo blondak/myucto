@@ -48,8 +48,8 @@ final readonly class EmploymentIncomeTaxPolicy2026
         'credit.disability.extended.monthly',
         'credit.taxpayer.monthly',
         'credit.ztp_p.monthly',
-        'dpp.withholding.maximum',
-        'other.withholding.maximum',
+        'dpp.withholding.threshold',
+        'other.withholding.threshold',
     ];
 
     /** @var list<string> */

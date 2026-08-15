@@ -29,7 +29,7 @@ final class PayrollRulesetProviderTest extends TestCase
         self::assertSame($january->id, $december->id);
         self::assertSame(14_690_100, $january->parameter('advance.high_threshold.monthly')->value);
         self::assertSame('0.15', $january->parameter('advance.low_rate')->value);
-        self::assertSame(1_199_900, $january->parameter('dpp.withholding.maximum')->value);
+        self::assertSame(1_200_000, $january->parameter('dpp.withholding.threshold')->value);
     }
 
     public function testSelectionFailsClosedOutsideSupportedPeriod(): void

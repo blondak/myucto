@@ -83,6 +83,7 @@ final class PayrollPostingLineBuilder
                     $relationType,
                     $accounts,
                 );
+                $dimensionDebit = $this->dimensionCostAccount($employmentSnapshot);
                 $inputResults = $this->resultInputs($employmentResult);
                 if (array_keys($employmentSnapshot['inputs'])
                     !== array_keys($inputResults)
@@ -164,7 +165,10 @@ final class PayrollPostingLineBuilder
                                 . 'bez explicitní účetní předkontace.',
                             );
                         }
-                        $debit = $relationAccounts['gross_debit'];
+                        // Výchozí účet dimenze přebíjí VÝCHOZÍ předkontaci
+                        // zaměstnavatele, ne explicitní předkontaci složky —
+                        // ta je řešená větví výš a sem se nedostane.
+                        $debit = $dimensionDebit ?? $relationAccounts['gross_debit'];
                         $credit = $relationAccounts['gross_credit'];
                         $this->addPair(
                             $allocations,
@@ -1031,6 +1035,9 @@ final class PayrollPostingLineBuilder
                 $employments[$employmentId] = [
                     'employment' => $identity,
                     'inputs' => $inputs,
+                    // Starší revize klíč nemají; prázdný seznam znamená totéž co
+                    // dřív — účtuje se výchozí předkontací zaměstnavatele.
+                    'dimensions' => $employment['dimensions'] ?? [],
                 ];
             }
             ksort($employments, SORT_NUMERIC);
@@ -1208,6 +1215,81 @@ final class PayrollPostingLineBuilder
                 "Neznámý typ pracovního vztahu: {$relationType}.",
             ),
         };
+    }
+
+    /**
+     * Pořadí dimenzí při hledání nákladového účtu.
+     *
+     * Vztah může mít současně středisko, zakázku i činnost a `default_account_code`
+     * smí nést každá z nich. Pořadí je proto PEVNÉ a dokumentované, ne odvozené
+     * z pořadí v databázi — jinak by tytéž vstupy zaúčtovaly různě podle toho,
+     * v jakém pořadí se dimenze zadaly. Středisko je klasický nositel nákladové
+     * analytiky, zakázka a činnost jsou druhotné.
+     *
+     * @var list<string>
+     */
+    private const DIMENSION_ACCOUNT_PRIORITY = ['cost_center', 'project', 'activity'];
+
+    /**
+     * Nákladový účet hrubé mzdy podle dimenze vztahu, nebo `null`.
+     *
+     * ── Co se opravovalo ────────────────────────────────────────────────────────
+     * `payroll_dimensions.default_account_code` se od migrace 1307 dal nastavit,
+     * validoval se na třech místech i v DB — a zaúčtování ho nečetlo nikde. Uživatel
+     * nastavil středisku účet a mzda se zaúčtovala na výchozí předkontaci
+     * zaměstnavatele, bez jakéhokoli hlášení.
+     *
+     * ── Co přebíjí co ───────────────────────────────────────────────────────────
+     * Od nejkonkrétnějšího:
+     *   1. PŘEDKONTACE MZDOVÉ SLOŽKY (`component.accounting_debit_code`) — uživatel
+     *      u konkrétní složky výslovně řekl, kam se má účtovat. Dimenze ji NEPŘEBÍJÍ:
+     *      `default_account_code` je podle svého jména i podle komentáře migrace 1307
+     *      „analytika k VÝCHOZÍM kontacím", tedy default, a explicitní volba vyhrává
+     *      nad defaultem vždycky.
+     *   2. VÝCHOZÍ ÚČET DIMENZE — tahle metoda.
+     *   3. PŘEDKONTACE ZAMĚSTNAVATELE / {@see PayrollAccountingDefaults} podle druhu
+     *      vztahu.
+     *
+     * Mění se jen NÁKLADOVÁ (debetní) strana hrubé mzdy. Závazek vůči zaměstnanci
+     * (331/366) ani zákonné odvody (524/336, 342, …) dimenze nepřebíjí: středisko
+     * říká, kam patří NÁKLAD, ne komu se dluží, a jediný kód by na dvě různé
+     * nákladové skupiny (521 a 524) stejně nešlo použít smysluplně.
+     *
+     * @param array<string,mixed> $employmentSnapshot zmrazený pracovní vztah
+     */
+    private function dimensionCostAccount(array $employmentSnapshot): ?string
+    {
+        // Revize zmrazené dřív, než dimenze začaly do snapshotu vstupovat, klíč
+        // nemají. Nesmí se přeúčtovat jinak než původně, takže absence = žádná
+        // dimenze, ne dohledání dnešního stavu.
+        $dimensions = $employmentSnapshot['dimensions'] ?? null;
+        if (!is_array($dimensions) || !array_is_list($dimensions)) {
+            return null;
+        }
+
+        $byType = [];
+        foreach ($dimensions as $index => $dimension) {
+            $dimension = $this->object($dimension, "employment.dimensions.{$index}");
+            $account = $this->nullableAccount(
+                $dimension['default_account_code'] ?? null,
+                "employment.dimensions.{$index}.default_account_code",
+            );
+            if ($account === null) {
+                continue;
+            }
+            $type = $dimension['type'] ?? null;
+            if (is_string($type)) {
+                $byType[$type] ??= $account;
+            }
+        }
+
+        foreach (self::DIMENSION_ACCOUNT_PRIORITY as $type) {
+            if (isset($byType[$type])) {
+                return $byType[$type];
+            }
+        }
+
+        return null;
     }
 
     private function nullableAccount(mixed $value, string $field): ?string

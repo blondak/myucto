@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
 
+use MyInvoice\Service\Codebook\HealthInsurers;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class HealthPaymentOverviewBuilder
@@ -475,10 +476,16 @@ final class HealthPaymentOverviewBuilder
 
     private function insurerCode(mixed $value, string $field): string
     {
-        if (!is_string($value) || preg_match('/^[0-9]{3}$/D', $value) !== 1) {
+        // Přehled o platbě pojistného míří na konkrétní pojišťovnu, takže se
+        // kód ověřuje proti číselníku, ne jen na tvar tří číslic.
+        if (!is_string($value) || !HealthInsurers::isValid($value)) {
             throw new HealthInsuranceOverviewException(
                 'health_insurance_insurer_invalid',
-                "{$field} není platný kód zdravotní pojišťovny.",
+                sprintf(
+                    '%s: %s',
+                    $field,
+                    HealthInsurers::invalidCodeMessage(is_string($value) ? $value : ''),
+                ),
             );
         }
 

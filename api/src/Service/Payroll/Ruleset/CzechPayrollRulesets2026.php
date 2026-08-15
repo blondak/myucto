@@ -70,8 +70,30 @@ final class CzechPayrollRulesets2026
                 'credit.disability.extended.monthly' => PayrollRuleValue::moneyMinor(42_000),
                 'credit.taxpayer.monthly' => PayrollRuleValue::moneyMinor(257_000),
                 'credit.ztp_p.monthly' => PayrollRuleValue::moneyMinor(134_500),
-                'dpp.withholding.maximum' => PayrollRuleValue::moneyMinor(1_199_900),
-                'other.withholding.maximum' => PayrollRuleValue::moneyMinor(449_900),
+                // ROZHODNÁ ČÁSTKA, ne „nejvyšší ještě sražená odměna“. § 6 odst. 4
+                // ZDP ve znění zák. č. 470/2024 Sb. (od 1. 1. 2025) říká „NEDOSÁHNE
+                // částky rozhodné pro účast … na nemocenském pojištění“ — test je
+                // tedy OSTRÝ (`<`) a hodnota je sama rozhodná částka, ne o korunu
+                // nižší číslo. Do 31. 12. 2024 stálo v zákoně „nepřesáhne 10 000 Kč“,
+                // tedy hranice včetně; proto se ta stará mez nedá vyjádřit týmž
+                // klíčem a v tomhle rulesetu ani není.
+                //
+                // Klíče se jmenovaly `*.maximum` a nesly 11 999 / 4 499 Kč, což byl
+                // přepis populárního výkladu „limit je 11 999" do `<=`. Pro celé
+                // koruny to vychází stejně, pro odměnu s haléři ne: 11 999,50 Kč
+                // rozhodné částky NEDOSÁHNE, a měla by tedy jít srážkou — se starým
+                // zápisem šla zálohou. Přejmenování je záměrné: uložený override na
+                // starý klíč se po obratu operátoru NESMÍ tiše použít dál, jinak by
+                // posunul hranici o korunu níž.
+                //
+                // 2026: 25 % průměrné mzdy 48 967 = 12 241,75 → dolů na celých 500
+                // (§ 7a odst. 2 z. č. 187/2006 Sb.) = 12 000 Kč.
+                'dpp.withholding.threshold' => PayrollRuleValue::moneyMinor(1_200_000),
+                // § 6 odst. 4 písm. b) ZDP — ostatní příjmy ze závislé činnosti;
+                // rozhodná částka pro účast na nemocenském pojištění podle § 6 odst. 1
+                // písm. a) z. č. 187/2006 Sb. je 1/10 průměrné mzdy zaokrouhlená dolů
+                // na celých 500 Kč: 48 967 / 10 = 4 896,7 → 4 500 Kč.
+                'other.withholding.threshold' => PayrollRuleValue::moneyMinor(450_000),
                 'withholding.rate' => PayrollRuleValue::rate('0.15'),
             ],
             $technicalReview,

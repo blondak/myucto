@@ -75,6 +75,21 @@ const defaultAccounts: PayrollEmployerAccounts = {
   partner_settlement_credit: '365',
 }
 
+/**
+ * Číselník českých zdravotních pojišťoven — zrcadlí backendový
+ * MyInvoice\Service\Codebook\HealthInsurers. Volný text tu dřív pustil
+ * neexistující kód až do zákonného podání, proto výběr ze seznamu.
+ */
+const HEALTH_INSURERS: Array<{ code: string; name: string }> = [
+  { code: '111', name: 'Všeobecná zdravotní pojišťovna ČR (VZP)' },
+  { code: '201', name: 'Vojenská zdravotní pojišťovna ČR (VoZP)' },
+  { code: '205', name: 'Česká průmyslová zdravotní pojišťovna (ČPZP)' },
+  { code: '207', name: 'Oborová zdravotní pojišťovna (OZP)' },
+  { code: '209', name: 'Zaměstnanecká pojišťovna Škoda (ZPŠ)' },
+  { code: '211', name: 'Zdravotní pojišťovna ministerstva vnitra ČR (ZPMV)' },
+  { code: '213', name: 'Revírní bratrská pokladna (RBP)' },
+]
+
 const form = reactive<EmployerSettingsForm>({
   row_version: 0,
   default_office_code: '',
@@ -109,6 +124,14 @@ const hasInvalidOffice = computed(() => formOffices.value.some((_office, index) 
 const defaultOfficeValid = computed(() =>
   activeOffices.value.some(office => office.code.trim().toUpperCase() === form.default_office_code),
 )
+const healthInsurerOptions = computed(() => HEALTH_INSURERS.map(insurer => ({
+  value: insurer.code,
+  label: `${insurer.code} — ${insurer.name}`,
+})))
+const healthInsurerValid = computed(() => {
+  const code = form.default_health_insurer_code?.trim() ?? ''
+  return code === '' || HEALTH_INSURERS.some(insurer => insurer.code === code)
+})
 const emailValid = computed(() => {
   const email = form.payroll_contact_email?.trim() ?? ''
   return email === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
@@ -124,7 +147,8 @@ const officesValid = computed(() =>
   && duplicateOfficeCodes.value.size === 0
   && defaultOfficeValid.value,
 )
-const isValid = computed(() => emailValid.value && accountsValid.value && officesValid.value)
+const isValid = computed(() =>
+  emailValid.value && healthInsurerValid.value && accountsValid.value && officesValid.value)
 const showValidation = ref(false)
 
 function nullable(value: string | null): string | null {
@@ -441,7 +465,18 @@ onMounted(load)
 
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.default_health_insurer_code') }}</span>
-            <input v-model="form.default_health_insurer_code" type="text" maxlength="8" autocomplete="off" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
+            <SearchableSelect
+              :model-value="form.default_health_insurer_code || null"
+              :options="healthInsurerOptions"
+              :placeholder="t('payroll.employer.select_default_health_insurer')"
+              :no-results-label="t('payroll.employer.account_no_results')"
+              :disabled="!canWrite"
+              :invalid="showValidation && !healthInsurerValid"
+              accent="payroll"
+              data-test="default-health-insurer"
+              @update:model-value="form.default_health_insurer_code = $event"
+            />
+            <span v-if="showValidation && !healthInsurerValid" class="mt-1 block text-xs text-danger-600">{{ t('payroll.employer.validation.default_health_insurer_code') }}</span>
           </label>
 
           <label class="block">
