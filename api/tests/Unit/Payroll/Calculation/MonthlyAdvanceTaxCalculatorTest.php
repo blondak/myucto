@@ -96,42 +96,31 @@ final class MonthlyAdvanceTaxCalculatorTest extends TestCase
         self::assertSame(0, $belowBonus->taxBonusMinorUnits);
     }
 
-    public function testProductionFixtureRemainsFailClosedUntilProfessionalApproval(): void
+    /**
+     * Dřív se tady tvrdilo, že dodaná sada počítat NESMÍ, dokud ji někdo neschválí.
+     * To je právě to, co majitel zrušil: za dodané hodnoty ručí dodavatel a zákazník
+     * je neodklikává. Fail-closed zůstává tam, kam patří — u ručního posouzení
+     * a u chybějícího pokrytí obdobím.
+     */
+    public function testProductionFixtureCalculatesWithoutCustomerApproval(): void
     {
         $calculator = new MonthlyAdvanceTaxCalculator(CzechPayrollRulesets2026::provider());
 
-        $this->expectException(PayrollRulesetException::class);
-        $this->expectExceptionMessage('not active');
-        $calculator->calculate(
+        $result = $calculator->calculate(
             '2026-08-03',
             new MonthlyAdvanceTaxInput(4_581_000, false, false),
         );
+
+        self::assertSame('cz-payroll-2026.income-tax.v1', $result->rulesetId);
     }
 
     private function calculator(): MonthlyAdvanceTaxCalculator
     {
-        $reviewed = CzechPayrollRulesets2026::provider()
-            ->forDate(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain::IncomeTax, '2026-08-03');
-        $approval = new RulesetApproval(
-            'synthetic-independent-reviewer',
-            '2026-08-02',
-            'synthetic-independent-approver',
-            '2026-08-03',
-            'Synthetic approval used only by this deterministic unit test.',
-        );
-        $approved = $reviewed->transition(
-            PayrollRulesetLifecycle::Approved,
-            'test.cz-payroll-2026.income-tax.approved',
-            '2026.1.1-test',
-            $approval,
-        );
-        $active = $approved->transition(
-            PayrollRulesetLifecycle::Active,
-            'test.cz-payroll-2026.income-tax.active',
-            '2026.1.2-test',
-            $approval,
-        );
-
-        return new MonthlyAdvanceTaxCalculator(new PayrollRulesetProvider([$active]));
+        return new MonthlyAdvanceTaxCalculator(new PayrollRulesetProvider([
+            CzechPayrollRulesets2026::provider()->forDate(
+                \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain::IncomeTax,
+                '2026-08-03',
+            ),
+        ]));
     }
 }

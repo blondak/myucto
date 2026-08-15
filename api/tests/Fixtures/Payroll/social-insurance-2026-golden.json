@@ -1,5 +1,5 @@
 {
-    "ruleset_id": "test.cz-payroll-2026.social-insurance.v1.active",
+    "ruleset_id": "cz-payroll-2026.social-insurance.v1",
     "status": "calculated",
     "participating_base": 5990000,
     "capped_base": 5990000,

@@ -14,6 +14,7 @@ import {
   type PayrollRulesetDomainGroup,
   type PayrollRulesetDomainStatus,
   type PayrollRulesetOverview,
+  type PayrollRulesetSource,
   type PayrollRulesetSummary,
 } from '@/api/payrollRulesets'
 import { useAuthStore } from '@/stores/auth'
@@ -30,7 +31,7 @@ const saving = ref(false)
 const overview = ref<PayrollRulesetOverview | null>(null)
 const detail = ref<PayrollRulesetDetail | null>(null)
 const diff = ref<PayrollRulesetDiff | null>(null)
-const TABS = ['parameters', 'diff', 'audit'] as const
+const TABS = ['parameters', 'sources', 'diff', 'audit'] as const
 type RulesetTab = (typeof TABS)[number]
 const tab = ref<RulesetTab>('parameters')
 const reason = ref('')
@@ -76,6 +77,39 @@ function manualReviewShare(group: PayrollRulesetDomainGroup): string | null {
 
 function isManualReview(parameter: PayrollRuleParameter): boolean {
   return parameter.capability === 'manual_review' || parameter.type === 'manual_review'
+}
+
+/**
+ * Doložení místo odklikávání.
+ *
+ * Zákazník už legislativní sazby neschvaluje — dodáváme je jako účinné a ručíme
+ * za ně my. Aby to nebylo tvrzení bez opory, musí být u každé domény vidět,
+ * ODKUD hodnota je: název předpisu nebo úřadu, odkaz a datum stažení. To je
+ * věcně silnější než potvrzení, které stejně nikdo nečte.
+ */
+function domainSources(group: PayrollRulesetDomainGroup): PayrollRulesetSource[] {
+  const byId = new Map<string, PayrollRulesetSource>()
+  for (const version of group.versions) {
+    for (const source of version.sources ?? []) {
+      if (source.id && !byId.has(source.id)) byId.set(source.id, source)
+    }
+  }
+  return [...byId.values()]
+}
+
+/**
+ * Přiřazení zdroje k JEDNOTLIVÉMU parametru je poctivé jen tam, kde má verze
+ * právě jeden zdroj — pak není co domýšlet. U vícezdrojových domén se zdroje
+ * ukazují za celou verzi; vymýšlet, který paragraf stojí za kterým číslem, by
+ * vyrobilo doložení, které vypadá přesně a přesné není.
+ */
+const singleParameterSource = computed<PayrollRulesetSource | null>(() => {
+  const sources = detail.value?.sources ?? []
+  return sources.length === 1 ? sources[0] : null
+})
+
+function sourceLabel(source: PayrollRulesetSource): string {
+  return source.title ?? source.id ?? ''
 }
 
 /** Český název parametru; klíč zůstává vidět jako drobný doplněk pod ním. */
@@ -404,6 +438,39 @@ onMounted(load)
       </ul>
 
       <!--
+        Odkud hodnoty jsou. Ne skryté v detailu: je to náhrada za zrušené
+        schvalovací klikání, takže to musí být vidět rovnou u domény.
+      -->
+      <section
+        v-if="domainSources(group).length"
+        class="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2"
+        :data-test="`ruleset-provenance-${group.domain}`"
+      >
+        <h3 class="text-xs font-medium text-neutral-600">
+          {{ t('payroll.rulesets.provenance.title') }}
+        </h3>
+        <ul class="mt-1 space-y-1">
+          <li
+            v-for="source in domainSources(group)"
+            :key="`${group.domain}-${source.id}`"
+            class="text-xs text-neutral-500"
+          >
+            <a
+              v-if="source.url"
+              :href="source.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-primary-700 underline decoration-dotted underline-offset-2"
+            >{{ sourceLabel(source) }}</a>
+            <span v-else>{{ sourceLabel(source) }}</span>
+            <span v-if="source.retrieved_on" class="ml-1 whitespace-nowrap text-neutral-400">
+              ({{ t('payroll.rulesets.provenance.retrieved', { date: source.retrieved_on }) }})
+            </span>
+          </li>
+        </ul>
+      </section>
+
+      <!--
         Každá doména má vlastní tabulku, takže by si šířky sloupců počítala
         zvlášť a mezi kartami by se rozjely. `table-fixed` + shodný `colgroup`
         je srovná; `min-w` drží čitelnost a užší obrazovku řeší vodorovné
@@ -453,7 +520,7 @@ onMounted(load)
                 </div>
               </td>
               <td class="px-3 py-3 text-neutral-600">
-                {{ t(version.is_override
+                {{ t(version.origin === 'customer_override'
                   ? 'payroll.rulesets.source.override'
                   : 'payroll.rulesets.source.builtin') }}
               </td>
@@ -498,7 +565,7 @@ onMounted(load)
             <div>
               <dt class="text-neutral-500">{{ t('payroll.rulesets.column.source') }}</dt>
               <dd class="mt-0.5 text-neutral-800">
-                {{ t(version.is_override
+                {{ t(version.origin === 'customer_override'
                   ? 'payroll.rulesets.source.override'
                   : 'payroll.rulesets.source.builtin') }}
               </dd>
@@ -572,17 +639,19 @@ onMounted(load)
 
         <div v-if="tab === 'parameters'" class="space-y-3">
           <div class="hidden overflow-x-auto md:block">
-            <table class="w-full min-w-[44rem] table-fixed divide-y divide-neutral-200 text-sm">
+            <table class="w-full min-w-[52rem] table-fixed divide-y divide-neutral-200 text-sm">
               <colgroup>
-                <col class="w-[38%]">
-                <col class="w-[26%]">
-                <col class="w-[36%]">
+                <col class="w-[30%]">
+                <col class="w-[20%]">
+                <col class="w-[28%]">
+                <col class="w-[22%]">
               </colgroup>
               <thead>
                 <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
                   <th class="px-3 py-2">{{ t('payroll.rulesets.column.parameter') }}</th>
                   <th class="px-3 py-2">{{ t('payroll.rulesets.column.value') }}</th>
                   <th class="px-3 py-2">{{ t('payroll.rulesets.column.note') }}</th>
+                  <th class="px-3 py-2">{{ t('payroll.rulesets.column.provenance') }}</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
@@ -630,6 +699,33 @@ onMounted(load)
                     </template>
                     <template v-else>{{ parameter.note ?? '' }}</template>
                   </td>
+                  <td class="px-3 py-2 align-top text-xs text-neutral-500">
+                    <template v-if="singleParameterSource">
+                      <a
+                        v-if="singleParameterSource.url"
+                        :href="singleParameterSource.url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-primary-700 underline decoration-dotted underline-offset-2"
+                      >{{ sourceLabel(singleParameterSource) }}</a>
+                      <span v-else>{{ sourceLabel(singleParameterSource) }}</span>
+                      <span v-if="singleParameterSource.retrieved_on" class="block text-neutral-400">
+                        {{ t('payroll.rulesets.provenance.retrieved', {
+                          date: singleParameterSource.retrieved_on,
+                        }) }}
+                      </span>
+                    </template>
+                    <button
+                      v-else
+                      type="button"
+                      class="cursor-pointer text-primary-700 underline decoration-dotted underline-offset-2"
+                      @click="tab = 'sources'"
+                    >
+                      {{ t('payroll.rulesets.provenance.multiple', {
+                        count: detail.sources.length,
+                      }) }}
+                    </button>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -670,7 +766,86 @@ onMounted(load)
               </p>
             </template>
             <p v-else-if="parameter.note" class="mt-1 text-xs text-neutral-500">{{ parameter.note }}</p>
+            <p v-if="singleParameterSource" class="mt-1 text-xs text-neutral-500">
+              <strong class="font-medium text-neutral-600">
+                {{ t('payroll.rulesets.column.provenance') }}
+              </strong>
+              <a
+                v-if="singleParameterSource.url"
+                :href="singleParameterSource.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-primary-700 underline decoration-dotted underline-offset-2"
+              >{{ sourceLabel(singleParameterSource) }}</a>
+              <span v-else>{{ sourceLabel(singleParameterSource) }}</span>
+            </p>
           </article>
+        </div>
+
+        <!--
+          Doložení, ne razítko. Zákazník sazby neschvaluje — tady vidí, o co se
+          dodaná hodnota opírá a kdy jsme to naposledy ověřovali.
+        -->
+        <div v-else-if="tab === 'sources'" class="space-y-4" data-test="ruleset-sources-tab">
+          <p class="text-sm text-neutral-600">
+            {{ t(detail.origin === 'customer_override'
+              ? 'payroll.rulesets.provenance.override_note'
+              : 'payroll.rulesets.provenance.vendor_note') }}
+          </p>
+
+          <ul class="space-y-2">
+            <li
+              v-for="source in detail.sources"
+              :key="source.id ?? source.url ?? ''"
+              class="rounded-lg border border-neutral-200 p-3"
+            >
+              <a
+                v-if="source.url"
+                :href="source.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-sm font-medium text-primary-700 underline decoration-dotted underline-offset-2 break-words"
+              >{{ sourceLabel(source) }}</a>
+              <span v-else class="text-sm font-medium text-neutral-900">{{ sourceLabel(source) }}</span>
+              <p v-if="source.url" class="mt-0.5 text-xs break-all text-neutral-400">{{ source.url }}</p>
+              <p v-if="source.retrieved_on" class="mt-1 text-xs text-neutral-500">
+                {{ t('payroll.rulesets.provenance.retrieved', { date: source.retrieved_on }) }}
+              </p>
+            </li>
+          </ul>
+
+          <div v-if="detail.technical_review" class="rounded-lg border border-neutral-200 p-3">
+            <h4 class="text-sm font-medium text-neutral-900">
+              {{ t('payroll.rulesets.provenance.technical_review') }}
+            </h4>
+            <p v-if="detail.technical_review.evidence" class="mt-1 text-xs text-neutral-600">
+              {{ detail.technical_review.evidence }}
+            </p>
+            <p class="mt-1 text-xs text-neutral-400">
+              {{ t('payroll.rulesets.provenance.checked', {
+                by: detail.technical_review.checked_by ?? '—',
+                on: detail.technical_review.checked_on ?? '—',
+              }) }}
+            </p>
+          </div>
+
+          <div v-if="detail.approval" class="rounded-lg border border-neutral-200 p-3">
+            <h4 class="text-sm font-medium text-neutral-900">
+              {{ t('payroll.rulesets.provenance.approval') }}
+            </h4>
+            <p v-if="detail.approval.evidence" class="mt-1 text-xs text-neutral-600">
+              {{ detail.approval.evidence }}
+            </p>
+            <p class="mt-1 text-xs text-neutral-400">
+              {{ t('payroll.rulesets.provenance.approved', {
+                by: detail.approval.approved_by ?? '—',
+                on: detail.approval.approved_on ?? '—',
+              }) }}
+            </p>
+          </div>
+          <p v-else class="text-xs text-neutral-500">
+            {{ t('payroll.rulesets.provenance.no_approval') }}
+          </p>
         </div>
 
         <div v-else-if="tab === 'diff'" class="space-y-3">
