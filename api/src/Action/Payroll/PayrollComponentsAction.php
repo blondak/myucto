@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollComponentConflictException;
+use MyInvoice\Repository\Payroll\PayrollComponentDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
@@ -20,9 +21,11 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class PayrollComponentsAction
 {
     use PayrollActionSupport;
+    use PayrollDeletionResponse;
 
     public function __construct(
         private readonly PayrollComponentRepository $components,
+        private readonly PayrollComponentDeletionRepository $deletion,
         private readonly PayrollComponentValidator $validator,
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
@@ -108,6 +111,36 @@ final class PayrollComponentsAction
         }
         $this->audit($request, 'payroll.component.updated', $component);
         return Json::ok($response, ['component' => $component]);
+    }
+
+    /**
+     * Smaže nikdy nepoužitou verzi mzdové složky.
+     *
+     * Právo je `payroll.inputs.write`, tedy TOTÉŽ, kterým se složka zakládá.
+     * Před použitou složkou chrání blokátory v repozitáři; pro ni zůstává
+     * deaktivace a ukončení platnosti přes `update()`.
+     *
+     * @param array<string,string> $args
+     */
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $cascade = $this->deletion->delete(
+                $this->currentSupplierId($request),
+                (int) ($args['id'] ?? 0),
+                $this->optionalRowVersion($this->input($request)['row_version'] ?? null),
+                $this->userId($request),
+                $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->deletionError($response, $e);
+        }
+
+        return Json::ok($response, ['deleted' => true, 'cascade' => $cascade]);
     }
 
     private function authorize(

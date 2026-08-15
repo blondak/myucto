@@ -11,8 +11,10 @@ use PDOException;
 
 final class PayrollRecurringComponentRepository
 {
-    public function __construct(private readonly Connection $db)
-    {
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollRecurringComponentDeletionRepository $deletion,
+    ) {
     }
 
     /** @return list<array<string,mixed>> */
@@ -46,11 +48,14 @@ final class PayrollRecurringComponentRepository
                        recurring.valid_from DESC, recurring.id DESC'
         );
         $stmt->execute($params);
-        return array_map(
-            self::cast(...),
-            PayrollTimeValue::rows(
-                $stmt->fetchAll(PDO::FETCH_ASSOC),
-                'payroll_recurring_components',
+        return $this->deletion->decorate(
+            $supplierId,
+            array_map(
+                self::cast(...),
+                PayrollTimeValue::rows(
+                    $stmt->fetchAll(PDO::FETCH_ASSOC),
+                    'payroll_recurring_components',
+                ),
             ),
         );
     }
@@ -80,7 +85,10 @@ final class PayrollRecurringComponentRepository
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false
             ? null
-            : self::cast(PayrollTimeValue::row($row, 'payroll_recurring_component'));
+            : $this->deletion->decorateOne(
+                $supplierId,
+                self::cast(PayrollTimeValue::row($row, 'payroll_recurring_component')),
+            );
     }
 
     /**

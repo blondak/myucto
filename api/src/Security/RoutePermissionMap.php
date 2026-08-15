@@ -210,6 +210,9 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/settings/policies(?:/[0-9]+)?$#', 'payroll.settings', AccessLevel::READ],
         ['POST', '#^/api/payroll/settings/policies$#', 'payroll.settings', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/settings/policies/[0-9]+$#', 'payroll.settings', AccessLevel::WRITE],
+        // Totéž právo jako založení verze — smazání omylem založené budoucí verze
+        // je opak jejího založení, ne přísnější úkon.
+        ['DELETE', '#^/api/payroll/settings/policies/[0-9]+$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/setup-check$#', 'payroll.settings', AccessLevel::READ],
         ['GET', '#^/api/payroll/documents$#', 'payroll.documents', AccessLevel::READ],
         ['GET', '#^/api/payroll/documents/annual$#', 'payroll.documents', AccessLevel::READ],
@@ -230,7 +233,10 @@ final class RoutePermissionMap
         ['*', '#^/api/payroll/components/[0-9]+/jmhz-mapping$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['*', '#^/api/payroll/components(?:/[0-9]+)?$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/travel/trips(?:/[0-9]+/calculation)?$#', 'payroll', AccessLevel::READ],
-        ['POST', '#^/api/payroll/travel/trips/[0-9]+/(approve|materialize)$#', 'payroll.approve', AccessLevel::WRITE],
+        // Zrušení schválené cesty bere zpět schválení — proto stejné právo jako
+        // schválit a vyúčtovat. Smazání KONCEPTU spadá pod `payroll.inputs.write`
+        // v catch-all pravidle níž: kdo cestu založil, musí umět svůj překlep uklidit.
+        ['POST', '#^/api/payroll/travel/trips/[0-9]+/(approve|materialize|cancel)$#', 'payroll.approve', AccessLevel::WRITE],
         ['*', '#^/api/payroll/travel(?:/.*)?$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/deduction-agreements(?:/|$)#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/deduction-agreements(?:/|$)#', 'payroll.inputs.write', AccessLevel::WRITE],

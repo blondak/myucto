@@ -6,9 +6,11 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollInstitutionAccountDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
@@ -93,6 +95,10 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
         (new PayrollInstitutionAccountRepository(
             $connection,
             $sensitiveData,
+            new PayrollInstitutionAccountDeletionRepository(
+                $connection,
+                new ActivityLogger($connection),
+            ),
         ))->create($this->supplierId, [
             'institution_type' => 'social_security',
             'institution_code' => 'P',
@@ -276,6 +282,10 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
         (new PayrollInstitutionAccountRepository(
             $this->db,
             $this->sensitiveData,
+            new PayrollInstitutionAccountDeletionRepository(
+                $this->db,
+                new ActivityLogger($this->db),
+            ),
         ))->create($otherSupplierId, [
             'institution_type' => 'social_security',
             'institution_code' => 'P',
@@ -345,6 +355,10 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
             new PayrollInstitutionAccountRepository(
                 $this->db,
                 $this->sensitiveData,
+                new PayrollInstitutionAccountDeletionRepository(
+                    $this->db,
+                    new ActivityLogger($this->db),
+                ),
             ),
             $this->sensitiveData,
             $this->db,

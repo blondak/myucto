@@ -14,6 +14,7 @@ final class PayrollInstitutionAccountRepository
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollSensitiveData $sensitiveData,
+        private readonly PayrollInstitutionAccountDeletionRepository $deletion,
     ) {}
 
     /** @return list<array<string,mixed>> */
@@ -40,7 +41,7 @@ final class PayrollInstitutionAccountRepository
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $result[] = self::cast(self::databaseRow($row));
         }
-        return $result;
+        return $this->deletion->decorate($supplierId, $result);
     }
 
     /** @return array<string,mixed>|null */
@@ -51,7 +52,9 @@ final class PayrollInstitutionAccountRepository
         );
         $stmt->execute([$supplierId, $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $row === false ? null : self::cast(self::databaseRow($row));
+        return $row === false
+            ? null
+            : $this->deletion->decorateOne($supplierId, self::cast(self::databaseRow($row)));
     }
 
     /**

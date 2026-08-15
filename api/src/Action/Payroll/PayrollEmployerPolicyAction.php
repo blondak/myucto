@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyConflictException;
+use MyInvoice\Repository\Payroll\PayrollEmployerPolicyDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyOverlapException;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Security\AccessLevel;
@@ -23,9 +24,11 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class PayrollEmployerPolicyAction
 {
     use PayrollActionSupport;
+    use PayrollDeletionResponse;
 
     public function __construct(
         private readonly PayrollEmployerPolicyRepository $policies,
+        private readonly PayrollEmployerPolicyDeletionRepository $deletion,
         private readonly PayrollEmployerPolicyService $service,
         private readonly PayrollSetupFeaturesResolver $featureResolver,
         private readonly PayrollSetupCheckService $setupCheckService,
@@ -60,12 +63,11 @@ final class PayrollEmployerPolicyAction
 
         $supplierId = $this->currentSupplierId($request);
         if ($effectiveOn !== null) {
-            $effective = $this->policies->findEffective(
-                $supplierId,
-                $effectiveOn,
-            );
             return Json::ok($response, [
-                'policies' => $effective === null ? [] : [$effective],
+                'policies' => $this->policies->listEffective(
+                    $supplierId,
+                    $effectiveOn,
+                ),
             ]);
         }
 
@@ -243,6 +245,44 @@ final class PayrollEmployerPolicyAction
         );
 
         return Json::ok($response, ['policy' => $policy]);
+    }
+
+    /**
+     * Smaže verzi pravidla, podle které se ještě nic nespočítalo.
+     *
+     * Právo je `payroll.settings`, tedy TOTÉŽ, kterým se verze zakládá a upravuje:
+     * smazání omylem založené budoucí verze je opak jejího založení. Před verzí,
+     * podle které už běžela mzda, chrání blokátor v repozitáři i trigger
+     * v databázi (migrace 1388).
+     *
+     * @param array<string,string> $args
+     */
+    public function delete(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $cascade = $this->deletion->delete(
+                $this->currentSupplierId($request),
+                (int) ($args['id'] ?? 0),
+                $this->optionalRowVersion($this->input($request)['row_version'] ?? null),
+                $this->userId($request),
+                $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->deletionError($response, $e);
+        }
+
+        return Json::ok($response, ['deleted' => true, 'cascade' => $cascade]);
     }
 
     public function setupCheck(

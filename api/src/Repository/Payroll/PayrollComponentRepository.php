@@ -40,7 +40,27 @@ final class PayrollComponentRepository
         ['CESTOVNI_NAHRADA_NADLIMIT', 'Nadlimitní cestovní náhrada', 'travel_reimbursement', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included'],
     ];
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollComponentDeletionRepository $deletion,
+    ) {}
+
+    /**
+     * Kódy složek, které si aplikace zakládá sama (`ensureDefaults()`). Mazání je
+     * potřebuje znát: smazaná systémová složka by se při dalším výpisu vrátila,
+     * takže tam mazání nedává smysl a nabízí se místo něj deaktivace.
+     *
+     * @return list<string>
+     */
+    public static function defaultCodes(): array
+    {
+        $codes = [];
+        foreach (self::DEFAULTS as $row) {
+            $codes[] = $row[0];
+        }
+
+        return $codes;
+    }
 
     /** @return list<array<string,mixed>> */
     public function list(int $supplierId, ?string $effectiveOn = null): array
@@ -62,11 +82,14 @@ final class PayrollComponentRepository
         );
         $stmt->execute($params);
 
-        return array_map(
-            self::cast(...),
-            PayrollTimeValue::rows(
-                $stmt->fetchAll(PDO::FETCH_ASSOC),
-                'payroll_component_definitions',
+        return $this->deletion->decorate(
+            $supplierId,
+            array_map(
+                self::cast(...),
+                PayrollTimeValue::rows(
+                    $stmt->fetchAll(PDO::FETCH_ASSOC),
+                    'payroll_component_definitions',
+                ),
             ),
         );
     }
@@ -84,7 +107,10 @@ final class PayrollComponentRepository
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false
             ? null
-            : self::cast(PayrollTimeValue::row($row, 'payroll_component_definition'));
+            : $this->deletion->decorateOne(
+                $supplierId,
+                self::cast(PayrollTimeValue::row($row, 'payroll_component_definition')),
+            );
     }
 
     /**

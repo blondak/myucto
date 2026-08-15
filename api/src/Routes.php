@@ -664,6 +664,9 @@ final class Routes
             $g->put('/components/{id:[0-9]+}/jmhz-mapping', [PayrollComponentJmhzMappingsAction::class, 'put']);
             $g->delete('/components/{id:[0-9]+}/jmhz-mapping', [PayrollComponentJmhzMappingsAction::class, 'remove']);
             $g->put('/components/{id:[0-9]+}', [PayrollComponentsAction::class, 'update']);
+            // Smazat jde jen NIKDY NEPOUŽITÁ verze složky; u použité zůstává
+            // deaktivace a ukončení platnosti přes PUT výše.
+            $g->delete('/components/{id:[0-9]+}', [PayrollComponentsAction::class, 'delete']);
             $g->get('/deduction-agreements', [PayrollDeductionAgreementAction::class, 'list']);
             $g->post('/deduction-agreements', [PayrollDeductionAgreementAction::class, 'create']);
             $g->get(
@@ -715,6 +718,8 @@ final class Routes
             $g->post('/recurring-components', [PayrollRecurringComponentsAction::class, 'create']);
             $g->post('/recurring-components/materialize', [PayrollRecurringComponentsAction::class, 'materialize']);
             $g->put('/recurring-components/{id:[0-9]+}', [PayrollRecurringComponentsAction::class, 'update']);
+            // Smazat jde jen předpis, ze kterého ještě nevznikl mzdový vstup.
+            $g->delete('/recurring-components/{id:[0-9]+}', [PayrollRecurringComponentsAction::class, 'delete']);
             $g->get('/travel/trips', [PayrollTravelAction::class, 'list']);
             $g->post('/travel/trips', [PayrollTravelAction::class, 'create']);
             $g->post('/travel/preview', [PayrollTravelAction::class, 'preview']);
@@ -722,6 +727,10 @@ final class Routes
             $g->get('/travel/trips/{id:[0-9]+}/calculation', [PayrollTravelAction::class, 'recalculate']);
             $g->post('/travel/trips/{id:[0-9]+}/approve', [PayrollTravelAction::class, 'approve']);
             $g->post('/travel/trips/{id:[0-9]+}/materialize', [PayrollTravelAction::class, 'materialize']);
+            // Dvě různé akce: `cancel` nechá stopu po cestě, která se nekonala,
+            // `delete` odklidí koncept, který vůbec neměl vzniknout.
+            $g->post('/travel/trips/{id:[0-9]+}/cancel', [PayrollTravelAction::class, 'cancel']);
+            $g->delete('/travel/trips/{id:[0-9]+}', [PayrollTravelAction::class, 'delete']);
             $g->post('/input-imports/preview', [PayrollInputImportsAction::class, 'preview']);
             $g->post('/input-imports/apply', [PayrollInputImportsAction::class, 'apply']);
             $g->get('/payments/liabilities', [PayrollPaymentAction::class, 'listLiabilities']);
@@ -1045,11 +1054,15 @@ final class Routes
             $g->post('/settings/policies', [PayrollEmployerPolicyAction::class, 'create']);
             $g->get('/settings/policies/{id:[0-9]+}', [PayrollEmployerPolicyAction::class, 'detail']);
             $g->put('/settings/policies/{id:[0-9]+}', [PayrollEmployerPolicyAction::class, 'update']);
+            // Smazat jde jen verze, podle které se ještě nic nespočítalo.
+            $g->delete('/settings/policies/{id:[0-9]+}', [PayrollEmployerPolicyAction::class, 'delete']);
             $g->get('/setup-check', [PayrollEmployerPolicyAction::class, 'setupCheck']);
             $g->get('/settings/institution-accounts', [PayrollInstitutionAccountsAction::class, 'list']);
             $g->post('/settings/institution-accounts', [PayrollInstitutionAccountsAction::class, 'create']);
             $g->get('/settings/institution-accounts/{id:[0-9]+}', [PayrollInstitutionAccountsAction::class, 'detail']);
             $g->put('/settings/institution-accounts/{id:[0-9]+}', [PayrollInstitutionAccountsAction::class, 'update']);
+            // Duplicitní nebo omylem založený účet, ze kterého se nikdy neplatilo.
+            $g->delete('/settings/institution-accounts/{id:[0-9]+}', [PayrollInstitutionAccountsAction::class, 'delete']);
             $g->get('/settings/dimensions', [PayrollDimensionAction::class, 'list']);
             $g->post('/settings/dimensions', [PayrollDimensionAction::class, 'create']);
             $g->get('/settings/dimensions/{id:[0-9]+}', [PayrollDimensionAction::class, 'detail']);
@@ -1069,9 +1082,12 @@ final class Routes
             $g->get('/time/averages', [PayrollAbsenceAction::class, 'averages']);
             $g->post('/time/averages', [PayrollAbsenceAction::class, 'createAverage']);
             $g->post('/time/averages/{id:[0-9]+}/approve', [PayrollAbsenceAction::class, 'approveAverage']);
+            $g->delete('/time/averages/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteAverage']);
             $g->get('/time/leave-ledger', [PayrollAbsenceAction::class, 'leaveLedger']);
             $g->post('/time/leave-ledger', [PayrollAbsenceAction::class, 'createLeaveEntry']);
+            $g->delete('/time/leave-ledger/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteLeaveEntry']);
             $g->post('/time/leave-entitlements', [PayrollAbsenceAction::class, 'createEntitlement']);
+            $g->delete('/time/leave-entitlements/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteEntitlement']);
         });
 
         // Podvojné účetnictví (Epic F1) — účtová osnova, období, deník, kontace.
