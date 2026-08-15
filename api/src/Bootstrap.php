@@ -296,6 +296,24 @@ final class Bootstrap
                 // navždy prázdný a nikdo by se to nedozvěděl.
                 $c->get(\MyInvoice\Service\Tax\RelatedPartyService::class),
             ),
+            // JMHZ transport — poslední dva argumenty jsou volitelné kvůli
+            // testovacím dvojníkům (falešný VREP, mockovaný ledger), ale
+            // PHP-DI optional class-param neautowiruje. Bez tohohle bindu by
+            // v produkci odeslané podání zůstalo navždy ve stavu `ready`
+            // a nešlo by odeslat storno ani opravu bez ručně předaného XML.
+            \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService::class
+                => fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService(
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository::class),
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollSigningProfileRepository::class),
+                    $c->get(\MyInvoice\Service\Signing\PersonalCertificateVaultService::class),
+                    $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification::class),
+                    null,
+                    new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzAcknowledgementParser(),
+                    new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolParser(),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader::class),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\PayrollSubmissionService::class),
+                ),
             // § 33a — zřetězení auditní stopy hashem. Druhý argument loggeru je volitelný
             // kvůli testovacím dvojníkům; bez explicitního bindu by se v produkci nic
             // nepečetilo a řetěz by neexistoval, aniž by to cokoli ohlásilo.

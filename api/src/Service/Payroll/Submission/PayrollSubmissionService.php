@@ -232,14 +232,19 @@ final class PayrollSubmissionService
                         $obligation,
                         $correctedObligation,
                     )
+                    // Způsobilé stavy rozhoduje AGENDA, ne tahle služba: u agend
+                    // s okamžitým protokolem se čeká na rozhodnutí, u agend
+                    // s asynchronním protokolem a pevnou lhůtou stačí doložené
+                    // odeslání. Výchozí sada je přísná, rozšíření jmenovité
+                    // a s důvodem — viz PayrollAgendaCorrectionPolicy. Stavy
+                    // `draft`…`ready` nejsou způsobilé nikdy: u nich úřad nemá
+                    // co rušit a oprava by se vázala na dokument, který nikdy
+                    // neopustil aplikaci.
                     || !in_array(
                         $corrected['status'],
-                        [
-                            'accepted',
-                            'partially_accepted',
-                            'rejected',
-                            'correction_required',
-                        ],
+                        PayrollAgendaCorrectionPolicy::correctableStatuses(
+                            (string) $obligation['agenda_code'],
+                        ),
                         true,
                     )
                 ) {

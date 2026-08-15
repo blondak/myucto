@@ -757,6 +757,85 @@ final class PayrollSubmissionRepository
     }
 
     /**
+     * ID zmrazené datové věty podání.
+     *
+     * Běh na pozadí nemá od uživatele nic — ani variabilní symbol, kterým se
+     * VREP ptá na výsledek. Jediný zdroj, který ho nese v podobě, jakou ČSSZ
+     * skutečně dostala, je artefakt odeslaného XML; dohledávat symbol jinde
+     * (nastavení pracovišť) by mohlo tiše sáhnout po jiném.
+     *
+     * Bere se NEJSTARŠÍ odchozí XML, protože to je ten dokument, který se
+     * zmrazil a odeslal.
+     */
+    public function findOutboundXmlArtifactId(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): ?int {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id
+               FROM payroll_submission_artifacts
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND submission_id = ?
+                AND artifact_kind = "outbound_xml"
+                AND direction = "outbound"
+              ORDER BY id
+              LIMIT 1',
+        );
+        $statement->execute([$supplierId, $environment, $submissionId]);
+        $id = $statement->fetchColumn();
+
+        return $id === false ? null : (int) $id;
+    }
+
+    /**
+     * Povinnost a její stav podle podání — bez zámku, pro čtení na pozadí.
+     *
+     * @return array{
+     *   id:int,status:string,row_version:int,agenda_code:string,
+     *   subject_type:string,subject_reference:string,
+     *   period_start:string,period_end:string
+     * }|null
+     */
+    public function findObligationOfSubmission(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT obligation.id, obligation.status, obligation.row_version,
+                    obligation.agenda_code, obligation.subject_type,
+                    obligation.subject_reference, obligation.period_start,
+                    obligation.period_end
+               FROM payroll_submissions submission
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = submission.supplier_id
+                AND obligation.environment = submission.environment
+                AND obligation.id = submission.obligation_id
+              WHERE submission.supplier_id = ?
+                AND submission.environment = ?
+                AND submission.id = ?',
+        );
+        $statement->execute([$supplierId, $environment, $submissionId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || !is_array($row)) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $row['id'],
+            'status' => (string) $row['status'],
+            'row_version' => (int) $row['row_version'],
+            'agenda_code' => (string) $row['agenda_code'],
+            'subject_type' => (string) $row['subject_type'],
+            'subject_reference' => (string) $row['subject_reference'],
+            'period_start' => (string) $row['period_start'],
+            'period_end' => (string) $row['period_end'],
+        ];
+    }
+
+    /**
      * @return array{
      *   id:int,submission_id:int,part_id:?int,content_ciphertext:string,
      *   byte_size:int,artifact_sha256:string,environment:string,

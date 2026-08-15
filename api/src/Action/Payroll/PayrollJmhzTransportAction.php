@@ -55,10 +55,14 @@ final class PayrollJmhzTransportAction
         if ($idempotencyKey === '') {
             return $this->invalid($response, 'Hlavička Idempotency-Key je povinná.');
         }
+        // Datová věta je nepovinná: bez ní se vezme ta ZMRAZENÁ z archivu
+        // artefaktů. Storno ani opravné podání totiž klient v ruce nemá — vzniká
+        // na serveru — a nutit ho stahovat si vlastní XML jen proto, aby ho
+        // poslal zpátky, by byla zbytečná cesta, na které se dá dokument zaměnit.
         $payload = $body['payload_xml'] ?? null;
         $variableSymbol = $body['variable_symbol'] ?? null;
-        if (!is_string($payload) || trim($payload) === '') {
-            return $this->invalid($response, 'Chybí datová věta zmrazeného podání.');
+        if ($payload !== null && (!is_string($payload) || trim($payload) === '')) {
+            return $this->invalid($response, 'Datová věta podání je prázdná.');
         }
         if (!is_string($variableSymbol) || preg_match('/^[0-9]{1,10}$/D', $variableSymbol) !== 1) {
             return $this->invalid(
@@ -78,7 +82,7 @@ final class PayrollJmhzTransportAction
                 $this->currentSupplierId($request),
                 $environment,
                 $this->id($args, 'submissionId'),
-                $payload,
+                is_string($payload) ? $payload : null,
                 $variableSymbol,
                 $idempotencyKey,
                 $this->userId($request),
@@ -159,7 +163,7 @@ final class PayrollJmhzTransportAction
             return $this->invalid($response, 'Prostředí musí být test nebo production.');
         }
         try {
-            $this->dispatch->close(
+            $result = $this->dispatch->close(
                 $this->currentSupplierId($request),
                 $environment,
                 $this->id($args, 'attemptId'),
@@ -169,9 +173,15 @@ final class PayrollJmhzTransportAction
             return $this->transportError($response, $exception);
         } catch (\InvalidArgumentException $exception) {
             return $this->invalid($response, $exception->getMessage());
+        } catch (\DomainException $exception) {
+            return Json::error($response, 'conflict', $exception->getMessage(), 409);
         }
 
-        return $this->noStore(Json::ok($response, ['closed' => true]));
+        return $this->noStore(Json::ok($response, [
+            'closed' => $result['closed'],
+            'already_closed' => $result['already_closed'],
+            'attempt' => $result['attempt'],
+        ]));
     }
 
     /** @param callable(string):JmhzDispatchOutcome $operation */

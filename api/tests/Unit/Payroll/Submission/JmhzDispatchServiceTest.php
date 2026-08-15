@@ -353,8 +353,17 @@ final class JmhzDispatchServiceTest extends TestCase
     public function testCloseSendsDeleteAsFunctionAndKeepsPollAsQualifier(): void
     {
         $attempts = $this->attempts();
-        $attempts->method('find')->willReturn(self::sentRow());
+        $attempts->method('find')->willReturn(self::completedRow());
         $attempts->expects(self::never())->method('markCompleted');
+        // Uzavření se musí zapsat do ledgeru: neuzavřená transakce je porušení
+        // pravidel provozu a bez záznamu by se nedalo poznat, které ještě visí.
+        $attempts->expects(self::once())->method('markClosed')
+            ->with(self::ATTEMPT, 2)
+            ->willReturn(self::completedRow([
+                'closed_at' => '2026-04-11 08:31:00',
+                'close_attempts' => 1,
+                'row_version' => 3,
+            ]));
 
         $this->service($attempts, [
             new Response(200, ['Content-Type' => 'text/xml'], '<GovTalkMessage/>'),
@@ -582,8 +591,14 @@ final class JmhzDispatchServiceTest extends TestCase
             'error_code' => null,
             'error_message' => null,
             'next_retry_at' => null,
+            'poll_count' => 0,
+            'last_polled_at' => null,
+            'last_poll_error' => null,
             'sent_at' => null,
             'completed_at' => null,
+            'closed_at' => null,
+            'close_attempts' => 0,
+            'close_error' => null,
             'row_version' => 0,
             'created_by' => 3,
         ], $overrides);
@@ -601,6 +616,21 @@ final class JmhzDispatchServiceTest extends TestCase
             'response_http_status' => 200,
             'sent_at' => '2026-04-11 08:00:00',
             'row_version' => 1,
+        ], $overrides));
+    }
+
+    /**
+     * @param array<string,mixed> $overrides
+     * @return array<string,mixed>
+     */
+    private static function completedRow(array $overrides = []): array
+    {
+        return self::sentRow(array_merge([
+            'status' => 'completed',
+            'completed_at' => '2026-04-11 08:30:00',
+            'poll_count' => 1,
+            'last_polled_at' => '2026-04-11 08:30:00',
+            'row_version' => 2,
         ], $overrides));
     }
 

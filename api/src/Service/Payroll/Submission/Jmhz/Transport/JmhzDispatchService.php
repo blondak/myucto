@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
 use MyInvoice\Repository\Payroll\PayrollSigningProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Signing\PersonalCertificateVaultService;
 
 /**
@@ -49,6 +51,11 @@ final readonly class JmhzDispatchService
         private ?JmhzVrepClient $client = null,
         private JmhzAcknowledgementParser $acknowledgements = new JmhzAcknowledgementParser(),
         private JmhzProtocolParser $protocols = new JmhzProtocolParser(),
+        // Platforma podání je volitelná jen kvůli testovacím dvojníkům; v
+        // produkci je navázaná v Bootstrap. Bez ní se odesílá dál, jen podání
+        // nezmění stav a datová věta se musí předat ručně.
+        private ?JmhzFrozenPayloadReader $frozen = null,
+        private ?PayrollSubmissionService $submissions = null,
     ) {}
 
     /**
@@ -60,11 +67,23 @@ final readonly class JmhzDispatchService
         int $supplierId,
         string $environment,
         int $submissionId,
-        string $payloadXml,
+        ?string $payloadXml,
         string $variableSymbol,
         string $idempotencyKey,
         ?int $actorUserId,
     ): JmhzDispatchOutcome {
+        // Bez předané datové věty se bere ta ZMRAZENÁ. Je to jediný dokument,
+        // který se pod tímhle podáním smí odeslat — postavit XML znovu by
+        // znamenalo nové GUIDy a tedy jiný dokument pod týmž podáním.
+        if ($payloadXml === null || trim($payloadXml) === '') {
+            if ($this->frozen === null) {
+                throw new JmhzTransportException(
+                    'jmhz_dispatch_payload_missing',
+                    'Chybí datová věta zmrazeného podání.',
+                );
+            }
+            $payloadXml = $this->frozen->bytes($supplierId, $environment, $submissionId);
+        }
         $signer = $this->signer($supplierId, $environment);
         $material = $signer->unlock();
 
@@ -134,6 +153,14 @@ final readonly class JmhzDispatchService
                 $acknowledgement->correlationId,
                 $response->httpStatus,
                 (int) $attempt['row_version'],
+                // Termín prvního dotazu se zapisuje rovnou při odeslání: bez něj
+                // by se běh na pozadí neměl čeho chytit a podání by čekalo na
+                // to, až si na ně někdo vzpomene.
+                JmhzPollSchedule::nextRetryAt(
+                    $this->now(),
+                    0,
+                    $acknowledgement->pollIntervalSeconds,
+                ),
             );
         } catch (\Throwable $exception) {
             $this->recordFailure(
@@ -148,7 +175,38 @@ final readonly class JmhzDispatchService
             throw $exception;
         }
 
+        // Podání teď leží u ČSSZ, a platforma to musí vědět: dokud zůstane
+        // `ready`, hlásí ho inbox jako nepodané a nedá se na něj navázat storno
+        // ani oprava. Selhání téhle změny NESMÍ přebít úspěšné odeslání —
+        // důkaz o něm je v ledgeru a ten je závaznější.
+        $this->markSubmitted($supplierId, $submissionId, $acknowledgement->correlationId);
+
         return new JmhzDispatchOutcome($attempt, $acknowledgement);
+    }
+
+    private function markSubmitted(
+        int $supplierId,
+        int $submissionId,
+        string $correlationReference,
+    ): void {
+        if ($this->submissions === null) {
+            return;
+        }
+        try {
+            $submission = $this->submissions->get($supplierId, $submissionId);
+            if ($submission['status'] !== 'ready') {
+                return;
+            }
+            $this->submissions->transition(
+                $supplierId,
+                $submissionId,
+                $submission['row_version'],
+                'submitted',
+                $correlationReference,
+            );
+        } catch (\Throwable) {
+            return;
+        }
     }
 
     /**
@@ -211,20 +269,48 @@ final readonly class JmhzDispatchService
             );
         }
 
-        $response = $this->pollOnce($environment, $correlation, $variableSymbol, false);
-        $acknowledgement = $this->acknowledgements->parse(
-            $response->body,
-            self::SUBMISSION_CLASS,
-        );
+        // Každý dotaz se zapíše, ať dopadne jakkoli. Kdyby se počítaly jen ty
+        // úspěšné, mlčící protistrana by automatiku nechala běžet donekonečna
+        // a strop pokusů by nikdy nesepnul.
+        try {
+            $response = $this->pollOnce($environment, $correlation, $variableSymbol, false);
+            $acknowledgement = $this->acknowledgements->parse(
+                $response->body,
+                self::SUBMISSION_CLASS,
+            );
+        } catch (\Throwable $exception) {
+            $this->recordPoll($attempt, null, $exception->getMessage());
+
+            throw $exception;
+        }
         if ($acknowledgement !== null) {
-            return new JmhzDispatchOutcome($attempt, $acknowledgement);
+            // Zpracování běží dál. Brána sama říká, za jak dlouho se ozvat.
+            return new JmhzDispatchOutcome(
+                $this->recordPoll($attempt, $acknowledgement->pollIntervalSeconds, null),
+                $acknowledgement,
+            );
         }
 
-        $report = $this->protocols->parse($response->body, $packageCount, $correlation);
+        try {
+            $report = $this->protocols->parse($response->body, $packageCount, $correlation);
+        } catch (\Throwable $exception) {
+            // Odpověď, která není ani potvrzením, ani čitelným protokolem,
+            // NENÍ výsledek. Pokus zůstává otevřený a důvod je v ledgeru —
+            // vydávat nesrozumitelnou odpověď za vyřízené podání je přesně ta
+            // záměna, po které uživatel přestane sledovat výsledek.
+            $this->recordPoll($attempt, null, $exception->getMessage());
+
+            throw $exception;
+        }
         if ($report->status === JmhzSubmissionStatus::Processing) {
-            return new JmhzDispatchOutcome($attempt, null, $report);
+            return new JmhzDispatchOutcome(
+                $this->recordPoll($attempt, null, null),
+                null,
+                $report,
+            );
         }
 
+        $attempt = $this->recordPoll($attempt, null, null);
         $attempt = $this->attempts->markCompleted(
             (int) $attempt['id'],
             (int) $attempt['row_version'],
@@ -234,21 +320,120 @@ final readonly class JmhzDispatchService
     }
 
     /**
+     * Zápis jednoho dotazu do ledgeru. Selhání zápisu nesmí přebít výsledek
+     * dotazu ani původní chybu — ledger se tím zkrátí, ale nic se neztratí.
+     *
+     * @param array<string,mixed> $attempt
+     * @return array<string,mixed>
+     */
+    private function recordPoll(
+        array $attempt,
+        ?int $gatewayIntervalSeconds,
+        ?string $error,
+    ): array {
+        try {
+            $updated = $this->attempts->recordPoll(
+                (int) $attempt['id'],
+                JmhzPollSchedule::nextRetryAt(
+                    $this->now(),
+                    (int) ($attempt['poll_count'] ?? 0),
+                    $gatewayIntervalSeconds,
+                ),
+                $error,
+                (int) $attempt['row_version'],
+            );
+        } catch (\Throwable) {
+            return $attempt;
+        }
+
+        // Ledger je nadstavba nad výsledkem dotazu, ne jeho podmínka: kdyby
+        // zápis vrátil něco, co není řádkem pokusu, pokračuje se s tím, co
+        // o pokusu víme — jinak by se ztratil samotný výsledek.
+        return isset($updated['id'], $updated['row_version']) ? $updated : $attempt;
+    }
+
+    /**
      * Uzavření transakce u VREP. Volá se až po dotažení protokolu — uzavřít ji
      * dřív znamená přijít o výsledek, který se pak už nedá vyzvednout.
+     *
+     * Je to idempotentní: druhé volání nad už uzavřenou transakcí neposílá nic
+     * a vrací `already_closed`. Automatika i tlačítko běží po téže cestě, takže
+     * kdyby se to nedrželo, uzavřelo by se dvakrát — a druhé uzavření by ČSSZ
+     * odmítla jako dotaz na neexistující transakci.
+     *
+     * @return array{closed:bool,already_closed:bool,attempt:array<string,mixed>}
      */
     public function close(
         int $supplierId,
         string $environment,
         int $attemptId,
         string $variableSymbol,
-    ): void {
+    ): array {
         $attempt = $this->requireAttempt($supplierId, $environment, $attemptId);
+        if (($attempt['closed_at'] ?? null) !== null) {
+            return ['closed' => true, 'already_closed' => true, 'attempt' => $attempt];
+        }
         $correlation = (string) ($attempt['correlation_reference'] ?? '');
-        if ($correlation === '') {
+        if ($correlation === '' || ($attempt['status'] ?? null) !== 'completed') {
+            throw new JmhzTransportException(
+                'jmhz_dispatch_close_premature',
+                'Transakci lze uzavřít až po dotažení protokolu. Nejdřív se'
+                    . ' zeptejte ČSSZ na výsledek zpracování.',
+            );
+        }
+
+        try {
+            $this->pollOnce($environment, $correlation, $variableSymbol, true);
+        } catch (\Throwable $exception) {
+            $this->recordCloseFailure($attempt, $exception->getMessage());
+
+            throw $exception;
+        }
+
+        return [
+            'closed' => true,
+            'already_closed' => false,
+            'attempt' => $this->attempts->markClosed(
+                (int) $attempt['id'],
+                (int) $attempt['row_version'],
+            ),
+        ];
+    }
+
+    /** @param array<string,mixed> $attempt */
+    private function recordCloseFailure(array $attempt, string $message): void
+    {
+        try {
+            $this->attempts->recordCloseFailure(
+                (int) $attempt['id'],
+                $message,
+                JmhzPollSchedule::nextCloseAt(
+                    $this->now(),
+                    (int) ($attempt['close_attempts'] ?? 0),
+                ),
+                (int) $attempt['row_version'],
+            );
+        } catch (\Throwable) {
             return;
         }
-        $this->pollOnce($environment, $correlation, $variableSymbol, true);
+    }
+
+    /**
+     * ⚠️ DVOJE HODINY. Termíny (`next_retry_at`) se počítají TADY, tedy z času
+     * PHP, kdežto `sent_at`, `completed_at` i `closed_at` plní databáze přes
+     * `UTC_TIMESTAMP()`. Na jednom stroji je to totéž; s odděleným DB serverem
+     * s rozjetými hodinami se rozvrh posune o ten rozdíl — dotazy budou chodit
+     * dřív nebo později, než mají, a strop stáří (počítaný ze `sent_at` z DB
+     * proti `now()` z PHP) může sepnout předčasně, případně vůbec.
+     *
+     * Nechává se tak vědomě: injektovat `ClockInterface` by znamenalo změnit
+     * konstruktor, který staví testovací dvojníci pozičně. Kdyby se rozvrh
+     * začal chovat nevysvětlitelně, hledej PRVNÍ tady — porovnej
+     * `SELECT UTC_TIMESTAMP()` s `gmdate('Y-m-d H:i:s')` na aplikačním stroji.
+     */
+    private function now(): \DateTimeImmutable
+    {
+        return new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
     }
 
     private function pollOnce(

@@ -27,6 +27,7 @@ samotného skriptu, takže jsou přenositelné mezi `C:\inetpub\wwwroot\…`,
 | `cron-send-approval-reminders.{cmd,sh}` | Upomínky zákazníkům, kteří neschválili výkaz víceprací (`--days=N`, `--dry-run`) |
 | `cron-document-request-reminders.{cmd,sh}` | Upomínky na nevyřízené požadavky na dodání dokladů |
 | `cron-epo-status.{cmd,sh}` | Bezpečné vyzvedávání dodejek a stavů přímých EPO podání s řízeným odstupem; původní podání nikdy neopakuje |
+| `cron-jmhz-poll.{cmd,sh}` | Dotažení protokolu ČSSZ k měsíčnímu hlášení a uzavření transakce u VREP; neúspěšný dotaz nikdy neuzavře podání (`--limit=N`) |
 | `cron-generate-recurring-invoices.{cmd,sh}` | Generování faktur ze šablon pravidelné fakturace; volitelné rovnou vystavení a odeslání klientovi (`--dry-run`) |
 | `cron-automation-digest.{cmd,sh}` | Ranní souhrn kokpitu Automat podle nastavené hodiny (`--dry-run`, `--hour=N`) |
 | `cron-ai-worker.{cmd,sh}` | Zpracování fronty AI návrhů účtování (`--supplier=N`, `--limit=N`, `--dry-run`) |
@@ -81,6 +82,7 @@ se záměrně nevytvoří a úloha skončí chybou (vidět v **Systém → Plán
 | `cron-send-approval-reminders` | 1× denně (pracovní dny) | 09:15, Po–Pá |
 | `cron-document-request-reminders` | 1× denně (pracovní dny) | 09:30, Po–Pá |
 | `cron-epo-status` | každou minutu; jednotlivé pokusy mají vlastní backoff | `* * * * *` |
+| `cron-jmhz-poll` | každých 10 minut; odstup dotazů si řídí sám ledger pokusů | `*/10 * * * *` |
 | `cron-generate-recurring-invoices` | 1× denně | 06:30 |
 | `cron-automation-digest` | každou hodinu v ranním okně | 06:00–08:00 |
 | `cron-ai-worker` | každých 10 minut | `*/10 * * * *` |
@@ -110,6 +112,7 @@ schtasks /create /tn "MyUcto Reminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cr
 schtasks /create /tn "MyUcto ApprovalReminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-send-approval-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:15 /ru SYSTEM
 schtasks /create /tn "MyUcto DocumentRequestReminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-document-request-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:30 /ru SYSTEM
 schtasks /create /tn "MyUcto EpoStatus" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-epo-status.cmd" /sc minute /mo 1 /ru SYSTEM
+schtasks /create /tn "MyUcto JmhzPoll"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-jmhz-poll.cmd" /sc minute /mo 10 /ru SYSTEM
 schtasks /create /tn "MyUcto Recurring"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-generate-recurring-invoices.cmd" /sc daily /st 06:30 /ru SYSTEM
 schtasks /create /tn "MyUcto AutomationDigest"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-automation-digest.cmd" /sc hourly /mo 1 /st 06:00 /et 08:59 /ru SYSTEM
 schtasks /create /tn "MyUcto AI Worker"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-ai-worker.cmd" /sc minute /mo 10 /ru SYSTEM
@@ -164,6 +167,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
  15  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-send-approval-reminders.sh
  30  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-document-request-reminders.sh
   *  *  *   *   *    /var/www/myucto.cz/cmd/cron-epo-status.sh
+*/10 *  *   *   *    /var/www/myucto.cz/cmd/cron-jmhz-poll.sh
  30  6  *   *   *    /var/www/myucto.cz/cmd/cron-generate-recurring-invoices.sh
   0  6-8 *   *   *    /var/www/myucto.cz/cmd/cron-automation-digest.sh
 */10 *  *   *   *    /var/www/myucto.cz/cmd/cron-ai-worker.sh

@@ -86,6 +86,7 @@ use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
+use MyInvoice\Action\Payroll\PayrollJmhzCorrectionAction;
 use MyInvoice\Action\Payroll\PayrollJmhzProtocolImportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
 use MyInvoice\Action\Payroll\PayrollJmhzOrdinaryEvidenceAction;
@@ -970,6 +971,16 @@ final class Routes
             $g->post(
                 '/submissions/jmhz-transport/{attemptId:[0-9]+}/close',
                 [PayrollJmhzTransportAction::class, 'close'],
+            );
+            // Storno ruší za období všechno, oprava jen vyjmenované vztahy —
+            // rozdíl musí být vidět i v adrese, ne až v těle požadavku.
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/jmhz-cancel',
+                [PayrollJmhzCorrectionAction::class, 'cancel'],
+            );
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/jmhz-cancel-components',
+                [PayrollJmhzCorrectionAction::class, 'cancelComponents'],
             );
             $g->get(
                 '/submissions/jmhz-protocol-import',
