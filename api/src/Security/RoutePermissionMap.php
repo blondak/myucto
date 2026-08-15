@@ -241,6 +241,7 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/deduction-agreements(?:/|$)#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/deduction-agreements(?:/|$)#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/revisions/[0-9]+/net-results/[0-9]+$#', 'payroll', AccessLevel::READ],
+        ['GET', '#^/api/payroll/revisions/[0-9]+/insurance-breakdowns/[0-9]+$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/enforcement(?:/|$)#', 'payroll.enforcement', AccessLevel::READ],
         ['*', '#^/api/payroll/enforcement(?:/|$)#', 'payroll.enforcement', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/inputs$#', 'payroll', AccessLevel::READ],

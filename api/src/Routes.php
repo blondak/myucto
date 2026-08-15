@@ -87,6 +87,7 @@ use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
+use MyInvoice\Action\Payroll\PayrollInsuranceBreakdownAction;
 use MyInvoice\Action\Payroll\PayrollJmhzCorrectionAction;
 use MyInvoice\Action\Payroll\PayrollJmhzProtocolImportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
@@ -771,6 +772,13 @@ final class Routes
             $g->get(
                 '/revisions/{revisionId:[0-9]+}/net-results/{employeeId:[0-9]+}',
                 [PayrollNetResultAction::class, 'detail'],
+            );
+            // MZ-10-W07 / MZ-11-W07 — jak vzniklo sociální a zdravotní pojistné.
+            // Rozklad se nedotahuje se seznamem běhů: je objemný a potřebný jen
+            // tehdy, když si ho účetní vyžádá u konkrétní osoby.
+            $g->get(
+                '/revisions/{revisionId:[0-9]+}/insurance-breakdowns/{employeeId:[0-9]+}',
+                [PayrollInsuranceBreakdownAction::class, 'detail'],
             );
             // MZ-18-W07 — read-only reconciliation účetního můstku mezd.
             $g->get(

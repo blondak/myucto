@@ -5,7 +5,19 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\HealthInsurance;
 
 use JsonSerializable;
+use MyInvoice\Service\Payroll\Calculation\CalculationStep;
 
+/**
+ * Mezikroky (`standardContributionStep`, `minimumTopUpStep`) tu nejsou pro ozdobu:
+ * bez nich zůstane po výpočtu jen výsledná částka a sazba ani způsob zaokrouhlení
+ * se z uloženého výsledku už nedají doložit. Účetní pak nemá čím obhájit, proč
+ * systém spočítal zrovna tolik. Kroky vznikají v `MonthlyHealthInsuranceCalculator`
+ * a jen se sem propíšou — nic se nepočítá podruhé.
+ *
+ * U revizí spočtených dřív, než se kroky začaly ukládat, zůstanou `null`. To se
+ * NESMÍ dopočítat z aktuální sady pravidel: vysvětlení by pak popisovalo jiný
+ * výpočet, než jaký dal uloženou částku.
+ */
 final readonly class HealthPersonMonthResult implements JsonSerializable
 {
     /**
@@ -48,6 +60,8 @@ final readonly class HealthPersonMonthResult implements JsonSerializable
         public HealthMinimumTopUpEmployerSelection $topUpEmployerSelection =
             HealthMinimumTopUpEmployerSelection::Unverified,
         public bool $ppzCounted = false,
+        public ?CalculationStep $standardContributionStep = null,
+        public ?CalculationStep $minimumTopUpStep = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -91,6 +105,8 @@ final readonly class HealthPersonMonthResult implements JsonSerializable
             'employee_contribution_minor_units' => $this->employeeContributionMinorUnits,
             'employer_contribution_minor_units' => $this->employerContributionMinorUnits,
             'total_contribution_minor_units' => $this->totalContributionMinorUnits,
+            'standard_contribution_step' => $this->standardContributionStep?->jsonSerialize(),
+            'minimum_top_up_step' => $this->minimumTopUpStep?->jsonSerialize(),
             'relationships' => array_map(
                 static fn (HealthRelationshipResult $relationship): array =>
                     $relationship->jsonSerialize(),
