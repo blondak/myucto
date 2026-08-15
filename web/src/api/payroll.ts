@@ -1964,6 +1964,7 @@ export type PayrollDocumentKind =
   | 'taxable_income_withholding_certificate'
   | 'employment_certificate'
   | 'average_earnings_certificate'
+  | 'annual_settlement_result'
   | 'monthly_bundle'
 
 export type PayrollTaxCertificateKind = Extract<
@@ -2029,6 +2030,198 @@ export interface PayrollAnnualDocumentList {
   total: number
   limit: number
   offset: number
+}
+
+/* ── Roční zúčtování záloh a daňového zvýhodnění (§ 38ch ZDP) ─────────────── */
+
+/** Požádal poplatník o roční zúčtování? `unknown` NENÍ „nepožádal". */
+export type PayrollAnnualSettlementRequestStatus =
+  | 'unknown'
+  | 'requested'
+  | 'not_requested'
+  | 'withdrawn'
+
+/** Doklady od předchozích plátců daně (§ 38ch odst. 3). */
+export type PayrollAnnualSettlementPriorEmployers =
+  | 'unknown'
+  | 'none'
+  | 'all_documented'
+  | 'missing'
+
+/** Podá nebo je povinen podat přiznání? (§ 38g, § 38ch odst. 1 věta druhá) */
+export type PayrollAnnualSettlementFilingObligation =
+  | 'unknown'
+  | 'none'
+  | 'required'
+
+/** Položky uplatňované až ročně (§ 38h odst. 6) — modul je neumí spočítat. */
+export type PayrollAnnualSettlementAnnualClaims =
+  | 'unknown'
+  | 'none'
+  | 'present_unsupported'
+
+/** Jak zúčtování dopadlo. */
+export type PayrollAnnualSettlementOutcome =
+  | 'overpayment'
+  | 'overpayment_below_threshold'
+  | 'no_difference'
+  | 'underpayment_not_withheld'
+
+/**
+ * Proč zúčtování provést nelze. Kód je klíč do slovníku
+ * (`payroll.annual_settlement.blocker.*`), nikdy se nezobrazuje syrový.
+ */
+export type PayrollAnnualSettlementBlocker =
+  | 'not_requested'
+  | 'requested_after_deadline'
+  | 'declaration_not_signed'
+  | 'declaration_unverified'
+  | 'prior_employer_documents_missing'
+  | 'prior_employer_documents_late'
+  | 'must_file_tax_return'
+  | 'filing_obligation_unknown'
+  | 'annual_only_claims_unsupported'
+  | 'annual_only_claims_unknown'
+  | 'external_certificate_unverified'
+  | 'external_certificate_incomplete'
+  | 'accumulator_missing'
+  | 'no_approved_months'
+  | 'settlement_deadline_passed'
+  | 'non_resident'
+  | 'credit_evidence_unverified'
+  | 'child_evidence_unverified'
+  | 'child_claim_conflict'
+  | 'already_settled'
+  | 'ruleset_year_not_covered'
+
+export interface PayrollAnnualSettlementRequest {
+  id?: number
+  employee_id?: number
+  tax_year: number
+  request_status: PayrollAnnualSettlementRequestStatus
+  requested_on: string | null
+  request_evidence_reference: string | null
+  prior_employers: PayrollAnnualSettlementPriorEmployers
+  prior_documents_received_on: string | null
+  filing_obligation: PayrollAnnualSettlementFilingObligation
+  filing_obligation_reason: string | null
+  annual_claims: PayrollAnnualSettlementAnnualClaims
+  annual_claims_note: string | null
+  note: string | null
+  row_version: number
+}
+
+export interface PayrollAnnualSettlementResult {
+  schema_version: string
+  tax_year: number
+  performed: boolean
+  blockers: PayrollAnnualSettlementBlocker[]
+  outcome: PayrollAnnualSettlementOutcome | null
+  rounded_tax_base_minor_units: number
+  tax_before_credits_minor_units: number
+  annual_credits_minor_units: number
+  applied_credits_minor_units: number
+  child_entitlement_minor_units: number
+  child_credit_minor_units: number
+  annual_tax_bonus_minor_units: number
+  tax_after_all_credits_minor_units: number
+  tax_difference_minor_units: number
+  bonus_difference_minor_units: number
+  settlement_difference_minor_units: number
+  payable_minor_units: number
+  annual_bonus_threshold_met: boolean
+}
+
+export interface PayrollAnnualSettlementStoredOutcome {
+  id: number
+  employee_id: number
+  tax_year: number
+  annual_revision_id: number
+  outcome: PayrollAnnualSettlementOutcome
+  tax_difference_minor: number
+  bonus_difference_minor: number
+  settlement_difference_minor: number
+  payable_minor: number
+  settled_on: string
+  payroll_input_id: number | null
+}
+
+export interface PayrollAnnualSettlementListItem {
+  employee_id: number
+  employee_name: string
+  request_status: PayrollAnnualSettlementRequestStatus | null
+  requested_on: string | null
+  prior_employers: PayrollAnnualSettlementPriorEmployers | null
+  filing_obligation: PayrollAnnualSettlementFilingObligation | null
+  annual_claims: PayrollAnnualSettlementAnnualClaims | null
+  row_version: number | null
+  outcome_id: number | null
+  outcome: PayrollAnnualSettlementOutcome | null
+  tax_difference_minor: number | null
+  bonus_difference_minor: number | null
+  settlement_difference_minor: number | null
+  payable_minor: number | null
+  settled_on: string | null
+  payroll_input_id: number | null
+  annual_revision_id: number | null
+}
+
+export interface PayrollAnnualSettlementList {
+  tax_year: number
+  /** § 38ch odst. 1 a 3 — poslední den pro žádost i pro doklady. */
+  request_deadline: string
+  /** § 38ch odst. 4 — poslední den pro provedení. */
+  settlement_deadline: string
+  /** Období mzdy, v němž se přeplatek nejpozději vrací (§ 38ch odst. 5). */
+  payout_period: string
+  payout_threshold_minor: number
+  items: PayrollAnnualSettlementListItem[]
+}
+
+export interface PayrollAnnualSettlementCreditRow {
+  label: string
+  amount_minor_units: number
+}
+
+export interface PayrollAnnualSettlementChildRow {
+  label: string
+  months: number
+  amount_minor_units: number
+}
+
+export interface PayrollAnnualSettlementPreview {
+  tax_year: number
+  employee_id: number
+  request: PayrollAnnualSettlementRequest
+  result: PayrollAnnualSettlementResult
+  credit_rows: PayrollAnnualSettlementCreditRow[]
+  child_rows: PayrollAnnualSettlementChildRow[]
+  already_settled: PayrollAnnualSettlementStoredOutcome | null
+}
+
+export interface PayrollAnnualSettlementRun {
+  tax_year: number
+  employee_id: number
+  performed: boolean
+  created?: boolean
+  result: PayrollAnnualSettlementResult
+  outcome?: PayrollAnnualSettlementStoredOutcome | null
+  already_settled?: PayrollAnnualSettlementStoredOutcome | null
+  document?: PayrollDocument
+}
+
+export interface PayrollAnnualSettlementRequestPayload {
+  request_status: PayrollAnnualSettlementRequestStatus
+  requested_on: string | null
+  request_evidence_reference: string | null
+  prior_employers: PayrollAnnualSettlementPriorEmployers
+  prior_documents_received_on: string | null
+  filing_obligation: PayrollAnnualSettlementFilingObligation
+  filing_obligation_reason: string | null
+  annual_claims: PayrollAnnualSettlementAnnualClaims
+  annual_claims_note: string | null
+  note: string | null
+  row_version?: number
 }
 
 export interface PayrollEmploymentExitReadinessItem {
@@ -3172,6 +3365,31 @@ export const payrollApi = {
     api.get<PayrollAnnualDocumentList>('/payroll/documents/annual', {
       params: { year, ...pageParams(page) },
     }).then(response => response.data),
+  listAnnualSettlements: (year: number) =>
+    api.get<PayrollAnnualSettlementList>(`/payroll/annual-settlements/${year}`)
+      .then(response => response.data),
+  previewAnnualSettlement: (year: number, employeeId: number) =>
+    api.get<PayrollAnnualSettlementPreview>(
+      `/payroll/annual-settlements/${year}/people/${employeeId}`,
+    ).then(response => response.data),
+  saveAnnualSettlementRequest: (
+    year: number,
+    employeeId: number,
+    payload: PayrollAnnualSettlementRequestPayload,
+  ) =>
+    api.put<{ request: PayrollAnnualSettlementRequest }>(
+      `/payroll/annual-settlements/${year}/people/${employeeId}/request`,
+      payload,
+    ).then(response => response.data.request),
+  /**
+   * Provede roční zúčtování. Nesplněné podmínky NEJSOU chyba — vrátí se
+   * `performed: false` a seznam překážek, které má obrazovka vypsat.
+   */
+  settleAnnualSettlement: (year: number, employeeId: number) =>
+    api.post<PayrollAnnualSettlementRun>(
+      `/payroll/annual-settlements/${year}/people/${employeeId}/settle`,
+      {},
+    ).then(response => response.data),
   generatePayrollSheet: (employeeId: number, year: number) =>
     api.post<PayrollDocument>(
       `/payroll/people/${employeeId}/documents/payroll-sheet/${year}`,

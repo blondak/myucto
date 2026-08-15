@@ -358,6 +358,37 @@ final class PayrollStatutoryAccumulatorRepository
     }
 
     /**
+     * Kumulace za CELÝ rok — podklad ročního zúčtování (§ 38ch ZDP).
+     *
+     * Liší se od stateBeforePeriod() jen dvěma věcmi, a obě jsou nutné:
+     *   - bere i prosincový přírůstek, ne jen měsíce PŘED zadaným obdobím,
+     *   - připouští dvanáct uzavřených měsíců, kdežto vstup do dalšího běhu
+     *     jich smí mít nejvýš jedenáct (dvanáctý je právě ten počítaný).
+     *
+     * Sečtení a zapečetění dělá totéž assembleState() jako obě ostatní cesty —
+     * kdyby to bylo vedle, mohly by se otisky rozejít a přehrání běhu by
+     * neselhalo, jen by tiše porovnávalo něco jiného.
+     *
+     * @return array<string,mixed>
+     */
+    public function stateForYear(
+        int $supplierId,
+        int $employeeId,
+        int $year,
+        string $calculationKind,
+    ): array {
+        return $this->buildState(
+            $supplierId,
+            $employeeId,
+            $year,
+            sprintf('%04d-01-01', $year),
+            $calculationKind,
+            null,
+            true,
+        );
+    }
+
+    /**
      * Dávkový protějšek stateBeforePeriod(): pět dotazů na CELOU množinu osob
      * místo tří na každou z nich.
      *
@@ -476,6 +507,7 @@ final class PayrollStatutoryAccumulatorRepository
         string $periodStart,
         string $calculationKind,
         ?int $beforeRevisionId,
+        bool $wholeYear = false,
     ): array {
         $this->validateIdentity($supplierId, $employeeId, $year);
         $this->normalizeValues(
@@ -498,29 +530,29 @@ final class PayrollStatutoryAccumulatorRepository
             );
         }
 
-        $stmt = $this->db->pdo()->prepare(
+        // Roční čtení bere celý rok včetně prosince, běhové čtení jen měsíce
+        // před zadaným obdobím. Je to jediný rozdíl v dotazu; zbytek cesty
+        // sdílejí, aby se otisky nemohly rozejít.
+        $stmt = $this->db->pdo()->prepare(sprintf(
             'SELECT entry.*
                FROM payroll_statutory_accumulator_entries entry
               WHERE entry.supplier_id = ?
                 AND entry.employee_id = ?
                 AND entry.tax_year = ?
                 AND entry.calculation_kind = ?
-                AND entry.period_start < ?
+                %s
                 AND NOT EXISTS (
                   SELECT 1
                     FROM payroll_statutory_accumulator_entries successor
                    WHERE successor.supplier_id = entry.supplier_id
                      AND successor.replaces_entry_id = entry.id
                 )
-              ORDER BY entry.period_start, entry.id'
-        );
-        $stmt->execute([
-            $supplierId,
-            $employeeId,
-            $year,
-            $calculationKind,
-            $periodStart,
-        ]);
+              ORDER BY entry.period_start, entry.id',
+            $wholeYear ? '' : 'AND entry.period_start < ?',
+        ));
+        $stmt->execute($wholeYear
+            ? [$supplierId, $employeeId, $year, $calculationKind]
+            : [$supplierId, $employeeId, $year, $calculationKind, $periodStart]);
         $entries = array_values(array_map(
             fn (array $row): array => $this->castEntry($row),
             $stmt->fetchAll(PDO::FETCH_ASSOC),
@@ -535,6 +567,7 @@ final class PayrollStatutoryAccumulatorRepository
             $beforeRevisionId,
             $opening,
             $entries,
+            $wholeYear,
         );
     }
 
@@ -557,6 +590,7 @@ final class PayrollStatutoryAccumulatorRepository
         ?int $beforeRevisionId,
         array $opening,
         array $entries,
+        bool $wholeYear = false,
     ): array {
         $totals = $opening['values'];
         foreach ($entries as $entry) {
@@ -568,11 +602,17 @@ final class PayrollStatutoryAccumulatorRepository
                 );
             }
         }
+        // Vstup do dalšího běhu smí mít nejvýš jedenáct uzavřených měsíců —
+        // dvanáctý je právě ten počítaný. Roční čtení naopak dvanáct mít MÁ,
+        // jinak by v prosinci nešlo roční zúčtování vůbec sestavit.
+        $monthLimit = $wholeYear ? 12 : 11;
         if ($calculationKind === 'income_tax'
-            && $totals['completed_months'] > 11
+            && $totals['completed_months'] > $monthLimit
         ) {
             throw new PayrollStatutoryAccumulatorUnavailableException(
-                'Daňová kumulace před obdobím obsahuje více než jedenáct uzavřených měsíců.',
+                $wholeYear
+                    ? 'Daňová kumulace roku obsahuje více než dvanáct uzavřených měsíců.'
+                    : 'Daňová kumulace před obdobím obsahuje více než jedenáct uzavřených měsíců.',
             );
         }
 
@@ -587,6 +627,12 @@ final class PayrollStatutoryAccumulatorRepository
             'approved_results' => $entries,
             'totals' => $totals,
         ];
+        if ($wholeYear) {
+            // Roční stav není „stav před obdobím". Kdyby nesl jen
+            // `before_period_start`, byl by k nerozeznání od lednového čtení
+            // a jeho otisk by se s ním dokonce shodoval.
+            $state['scope'] = 'whole_year';
+        }
         if ($beforeRevisionId !== null) {
             $state['before_revision_id'] = $beforeRevisionId;
         }

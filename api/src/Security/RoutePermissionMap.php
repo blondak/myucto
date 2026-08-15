@@ -240,6 +240,14 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/people/[0-9]+/documents/payroll-sheet/[0-9]{4}$#', 'payroll.documents', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/people/[0-9]+/documents/tax-certificate/(advance|withholding)/[0-9]{4}$#', 'payroll.documents', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/revisions/[0-9]+/documents/monthly-bundle$#', 'payroll.documents', AccessLevel::WRITE],
+        // Roční zúčtování (§ 38ch ZDP). Čtení a evidence žádosti pod
+        // `payroll.documents`, ale samotné PROVEDENÍ pod `payroll.approve`:
+        // je to právní úkon plátce daně, po kterém se zaměstnanci vyplácí
+        // přeplatek — stejná váha jako schválení mzdového běhu.
+        ['GET', '#^/api/payroll/annual-settlements/[0-9]{4}$#', 'payroll.documents', AccessLevel::READ],
+        ['GET', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+$#', 'payroll.documents', AccessLevel::READ],
+        ['PUT', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+/request$#', 'payroll.documents', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+/settle$#', 'payroll.approve', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/employments/[0-9]+/documents/exit$#', 'payroll.documents', AccessLevel::READ],
         ['POST', '#^/api/payroll/employments/[0-9]+/documents/exit/(employment-certificate|average-earnings-certificate)$#', 'payroll.documents', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/documents/[0-9]+/download-grant$#', 'payroll.documents', AccessLevel::READ],

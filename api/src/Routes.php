@@ -66,6 +66,7 @@ use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\AccountingActivationAction;
 use MyInvoice\Action\Payroll\AnnualTaxCertificateAction;
+use MyInvoice\Action\Payroll\PayrollAnnualSettlementAction;
 use MyInvoice\Action\Payroll\PayrollActivationAction;
 use MyInvoice\Action\Payroll\PayrollAccountOptionsAction;
 use MyInvoice\Action\Payroll\PayrollAbsenceAction;
@@ -817,6 +818,25 @@ final class Routes
             $g->post(
                 '/people/{employeeId:[0-9]+}/documents/tax-certificate/{kind:advance|withholding}/{year:[0-9]{4}}',
                 [AnnualTaxCertificateAction::class, 'generate'],
+            );
+            // MZ-25 — roční zúčtování záloh a daňového zvýhodnění (§ 38ch ZDP).
+            // Náhled a provedení jsou dvě routy schválně: provedení je právní
+            // úkon plátce daně a nesmí se stát tím, že se někdo podívá.
+            $g->get(
+                '/annual-settlements/{year:[0-9]{4}}',
+                [PayrollAnnualSettlementAction::class, 'list'],
+            );
+            $g->get(
+                '/annual-settlements/{year:[0-9]{4}}/people/{employeeId:[0-9]+}',
+                [PayrollAnnualSettlementAction::class, 'preview'],
+            );
+            $g->put(
+                '/annual-settlements/{year:[0-9]{4}}/people/{employeeId:[0-9]+}/request',
+                [PayrollAnnualSettlementAction::class, 'saveRequest'],
+            );
+            $g->post(
+                '/annual-settlements/{year:[0-9]{4}}/people/{employeeId:[0-9]+}/settle',
+                [PayrollAnnualSettlementAction::class, 'settle'],
             );
             $g->post(
                 '/runs/{runId:[0-9]+}/revisions/{revisionId:[0-9]+}/documents/monthly-bundle',

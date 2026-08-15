@@ -305,6 +305,9 @@
     "payroll-documents": [
       "payroll"
     ],
+    "payroll-annual-settlement": [
+      "payroll"
+    ],
     "payroll-submissions": [
       "payroll"
     ],

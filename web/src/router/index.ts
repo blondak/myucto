@@ -114,6 +114,10 @@ const routes: RouteRecordRaw[] = [
       { path: 'payroll/deduction-agreements', name: 'payroll-deduction-agreements', component: () => import('@/pages/payroll/DeductionAgreements.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/enforcement', name: 'payroll-enforcement', component: () => import('@/pages/payroll/EnforcementCases.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/documents', name: 'payroll-documents', component: () => import('@/pages/payroll/PayrollDocuments.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      // Roční zúčtování (§ 38ch ZDP) je vlastní agenda, ne záložka dokumentů:
+      // z devadesáti procent je to evidence podkladů a rozhodnutí, jestli
+      // zúčtování vůbec provést lze. Doklad je až výsledek.
+      { path: 'payroll/annual-settlement', name: 'payroll-annual-settlement', component: () => import('@/pages/payroll/PayrollAnnualSettlement.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/submissions', name: 'payroll-submissions', component: () => import('@/pages/payroll/PayrollSubmissions.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/settings', name: 'payroll-settings', component: () => import('@/pages/payroll/EmployerSettings.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Legislativní rulesety jsou GLOBÁLNÍ číselník (národní sazby a lhůty), ne
@@ -438,6 +442,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'payroll-deduction-agreements': ['payroll'],
   'payroll-enforcement': ['payroll.enforcement'],
   'payroll-documents': ['payroll.documents'],
+  'payroll-annual-settlement': ['payroll.documents'],
   'payroll-submissions': ['payroll.submissions'],
   'payroll-settings': ['payroll.settings'],
   'payroll-rulesets': ['payroll.rulesets'],
