@@ -227,6 +227,13 @@ final class PayrollRunSnapshotBuilder
             }
             $inputs = $this->inputs($inputRows[$employmentId] ?? []);
             if ($inputs === []) {
+                // JEDINÉ místo v modulu, které si žádá ruční override. Vztah bez
+                // složky je většinou chyba zadání, ale legitimní důvody existují
+                // (celý měsíc neplaceného volna, spící dohoda), takže se to nedá
+                // rozhodnout automaticky — musí to odklepnout člověk. Do MZ-01-W07
+                // to ale byla past: workflow na nevyřešeném overridu zastavilo
+                // `approve` a cesta, jak override udělit, neexistovala. Vede k němu
+                // {@see \MyInvoice\Service\Payroll\Run\PayrollRunValidationOverrideService}.
                 $validations[] = new PayrollRunValidation(
                     'warning',
                     'employment_without_inputs',

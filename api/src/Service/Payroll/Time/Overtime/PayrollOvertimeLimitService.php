@@ -24,11 +24,18 @@ use MyInvoice\Service\Payroll\Run\PayrollRunValidation;
  *
  *   • `blocker` je vyloučený — {@see \MyInvoice\Service\Payroll\Run\PayrollRunWorkflow}
  *     na něm zastaví příkaz `approve`, tedy přesně výplatu.
- *   • `requires_override = true` je vyloučené TAKÉ, a to z praktického důvodu:
- *     workflow na nevyřešeném overridu schválení rovněž zastaví, ale sloupce
- *     `override_reason` / `overridden_by` / `overridden_at` v tabulce od migrace
- *     1210 nikdo nenastavuje — není pro ně route ani obrazovka. Varování
- *     vyžadující override by tak bylo blokerem, který nejde odblokovat.
+ *   • `requires_override = true` je vyloučené TAKÉ. Původně z ryze praktického
+ *     důvodu (sloupce `override_reason` / `overridden_by` / `overridden_at`
+ *     nikdo nenastavoval, protože k nim nevedla route ani obrazovka — varování
+ *     vyžadující override bylo blokerem, který nešel odblokovat). Tahle past
+ *     je od MZ-01-W07 pryč, cestu ven má
+ *     {@see \MyInvoice\Service\Payroll\Run\PayrollRunValidationOverrideService}.
+ *     Nastavení přesto zůstává na `false`, a to už z důvodu VĚCNÉHO: workflow
+ *     na nevyřešeném overridu zastaví `approve`, tedy zase výplatu. Ta je podle
+ *     § 114 splatná bez ohledu na to, jestli někdo výjimku stihl odklepnout —
+ *     vázat proplacení odpracovaného přesčasu na podpis mzdové účetní by
+ *     znamenalo, že administrativní zdržení zadrží mzdu. Varování bez override
+ *     doloží nález stejně dobře a nedrží u toho peníze zaměstnance jako rukojmí.
  *
  * Doloženost se tím neztrácí: validace se ukládá k REVIZI běhu, takže u každé
  * schválené revize navždy zůstane, že se na překročení v ten okamžik

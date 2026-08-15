@@ -169,6 +169,10 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/post$#', 'payroll.post', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/(prepare_payments|mark_paid)$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/[a-z_]+$#', 'payroll.inputs.write', AccessLevel::WRITE],
+        // Schválení a odvolání výjimky u validace běhu je věcně část schválení
+        // mzdy („vím o vadě a přesto se vyplácí"), proto `payroll.approve`.
+        ['POST', '#^/api/payroll/runs/[0-9]+/validations/[0-9]+/override$#', 'payroll.approve', AccessLevel::WRITE],
+        ['DELETE', '#^/api/payroll/runs/[0-9]+/validations/[0-9]+/override$#', 'payroll.approve', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/payments/liabilities$#', 'payroll.payments', AccessLevel::READ],
         ['GET', '#^/api/payroll/payments/(payer-options|batches|reconciliation)$#', 'payroll.payments', AccessLevel::READ],
         ['POST', '#^/api/payroll/payments/batches$#', 'payroll.payments', AccessLevel::WRITE],

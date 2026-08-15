@@ -2043,6 +2043,24 @@ export interface PayrollRunValidation {
   message: string
   remediation_path: string | null
   requires_override: boolean
+  /*
+   * Varování s `requires_override` zastaví schválení běhu, dokud za něj někdo
+   * nepřevezme odpovědnost. Tyhle tři sloupce nesou, kdo to byl, kdy a proč —
+   * bez nich karta běhu jen mlčky ukáže nálepku a uživatel neví, co má udělat.
+   */
+  override_reason: string | null
+  overridden_by: number | null
+  overridden_by_name: string | null
+  overridden_at: string | null
+}
+
+export interface PayrollRunValidationOverrideResponse {
+  granted: boolean
+  /** false = výjimku odklepl tentýž člověk, který běh počítal (politika, ne blokace) */
+  four_eyes_met: boolean
+  idempotent_replay: boolean
+  run: PayrollRun
+  validation: PayrollRunValidation
 }
 
 export interface PayrollIncomeTaxRate {
@@ -3083,6 +3101,36 @@ export const payrollApi = {
       `/payroll/runs/${runId}/commands/${command}`,
       payload,
       { headers: { 'Idempotency-Key': idempotencyKey } },
+    ).then(response => response.data),
+  /**
+   * Schválení výjimky u varování, které blokuje schválení běhu. Odůvodnění je
+   * povinné a server na něj má minimum — prázdná nebo jednoslovná odpověď
+   * neprojde.
+   */
+  overrideRunValidation: (
+    runId: number,
+    validationId: number,
+    payload: { row_version: number; reason: string },
+    idempotencyKey: string,
+  ) =>
+    api.post<PayrollRunValidationOverrideResponse>(
+      `/payroll/runs/${runId}/validations/${validationId}/override`,
+      payload,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    ).then(response => response.data),
+  /** Odvolání výjimky — jen dokud běh není schválený. */
+  revokeRunValidationOverride: (
+    runId: number,
+    validationId: number,
+    payload: { row_version: number },
+    idempotencyKey: string,
+  ) =>
+    api.delete<PayrollRunValidationOverrideResponse>(
+      `/payroll/runs/${runId}/validations/${validationId}/override`,
+      {
+        data: payload,
+        headers: { 'Idempotency-Key': idempotencyKey },
+      },
     ).then(response => response.data),
   downloadDocument: async (payrollDocument: PayrollDocument): Promise<void> => {
     const grant = await api.post<{ token: string; expires_at: string }>(

@@ -1087,28 +1087,133 @@ final class PayrollRunRepository
         ));
     }
 
+    /**
+     * Sloupce validace i s tím, kdo k ní schválil výjimku.
+     *
+     * Jméno schvalovatele se dotahuje JOINem: samotné `overridden_by` je číslo,
+     * které na kartě běhu nikomu nic neřekne — a věta „schválil Jan Novák" je
+     * celý smysl toho, že se schvalovatel eviduje.
+     */
+    private const VALIDATION_SELECT =
+        'SELECT validation.*, actor.name AS overridden_by_name
+           FROM payroll_run_validations validation
+      LEFT JOIN users actor ON actor.id = validation.overridden_by';
+
     /** @return list<array<string,mixed>> */
     public function validations(int $supplierId, int $revisionId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM payroll_run_validations
-              WHERE supplier_id = ? AND revision_id = ?
-              ORDER BY FIELD(severity, "blocker", "warning", "info"), id'
+            self::VALIDATION_SELECT
+            . ' WHERE validation.supplier_id = ? AND validation.revision_id = ?
+                ORDER BY FIELD(validation.severity, "blocker", "warning", "info"),
+                         validation.id'
         );
         $stmt->execute([$supplierId, $revisionId]);
         return array_values(array_map(
-            static function (array $row): array {
-                foreach (['id', 'revision_id'] as $field) {
-                    $row[$field] = (int) $row[$field];
-                }
-                $row['entity_id'] = $row['entity_id'] === null
-                    ? null
-                    : (int) $row['entity_id'];
-                $row['requires_override'] = (bool) $row['requires_override'];
-                return $row;
-            },
+            self::castValidation(...),
             $stmt->fetchAll(PDO::FETCH_ASSOC),
         ));
+    }
+
+    /** @return array<string,mixed>|null */
+    public function validation(int $supplierId, int $validationId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            self::VALIDATION_SELECT
+            . ' WHERE validation.supplier_id = ? AND validation.id = ?'
+        );
+        $stmt->execute([$supplierId, $validationId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : self::castValidation($row);
+    }
+
+    /**
+     * Validace i s během, ke kterému patří, pod zámkem.
+     *
+     * `payroll_run_validations` nese jen `revision_id`, takže příslušnost k běhu
+     * z URL se musí ověřit přes revizi — jinak by šlo cizí validací hýbat přes
+     * vlastní běh. `FOR UPDATE` drží řádek do konce transakce, aby dva souběžné
+     * zápisy výjimky nepřepsaly jeden druhého.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function lockValidation(int $supplierId, int $validationId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT validation.*, revision.run_id, revision.status AS revision_status
+               FROM payroll_run_validations validation
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = validation.supplier_id
+                AND revision.id = validation.revision_id
+              WHERE validation.supplier_id = ? AND validation.id = ?
+              FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $validationId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $row['run_id'] = (int) $row['run_id'];
+        return self::castValidation($row);
+    }
+
+    /**
+     * Zapíše schválení výjimky.
+     *
+     * Podmínky v `WHERE` nejsou ozdoba: `requires_override = 1` zabrání tomu, aby
+     * někdo „odklidil" blokující nález, a `overridden_at IS NULL` udělá ze zápisu
+     * jednorázovou akci — druhý souběžný pokus ovlivní nula řádků a volající se
+     * o tom dozví, místo aby tiše přepsal cizí odůvodnění.
+     */
+    public function applyValidationOverride(
+        int $supplierId,
+        int $validationId,
+        string $reason,
+        int $actorUserId,
+    ): bool {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_run_validations
+                SET override_reason = ?, overridden_by = ?, overridden_at = NOW()
+              WHERE supplier_id = ? AND id = ?
+                AND requires_override = 1
+                AND overridden_at IS NULL'
+        );
+        $stmt->execute([$reason, $actorUserId, $supplierId, $validationId]);
+        return $stmt->rowCount() === 1;
+    }
+
+    /** Odvolá schválenou výjimku; historii nese `payroll_run_events`. */
+    public function clearValidationOverride(
+        int $supplierId,
+        int $validationId,
+    ): bool {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_run_validations
+                SET override_reason = NULL, overridden_by = NULL, overridden_at = NULL
+              WHERE supplier_id = ? AND id = ?
+                AND requires_override = 1
+                AND overridden_at IS NOT NULL'
+        );
+        $stmt->execute([$supplierId, $validationId]);
+        return $stmt->rowCount() === 1;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private static function castValidation(array $row): array
+    {
+        foreach (['id', 'revision_id'] as $field) {
+            $row[$field] = (int) $row[$field];
+        }
+        foreach (['entity_id', 'overridden_by'] as $field) {
+            $row[$field] = ($row[$field] ?? null) === null
+                ? null
+                : (int) $row[$field];
+        }
+        $row['requires_override'] = (bool) $row['requires_override'];
+        return $row;
     }
 
     /** @return array{blockers:int,unresolved_overrides:int} */
