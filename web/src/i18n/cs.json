@@ -14390,5 +14390,122 @@
         ],
         "attach_privacy": "Balíček se vytvoří u vás v instalaci a zůstane u vás, dokud ho sami nepřiložíte k incidentu. Logy v něm ve výchozím stavu nejsou; když je přidáte, uvidíte předtím jejich obsah.",
         "open_diagnostics": "Přejít na Diagnostiku"
+    },
+    "databox": {
+        "title": "Datová schránka",
+        "subtitle": "Odesílání podání datovou schránkou — přiznání k DPH, kontrolní a souhrnné hlášení, DPPO i přehledy zdravotním pojišťovnám.",
+        "saved": "Uloženo.",
+        "env": {
+            "production": "Ostrý provoz",
+            "test": "Testovací prostředí"
+        },
+        "tabs": {
+            "access": "Přístup",
+            "outbox": "Odchozí podání",
+            "inbox": "Příchozí zprávy",
+            "recipients": "Příjemci"
+        },
+        "access": {
+            "title": "Systémový certifikát",
+            "certificateOnly": "Do datové schránky se aplikace přihlašuje výhradně systémovým certifikátem. Přihlašovací jméno a heslo sem nezadávejte — podle zákona o elektronických úkonech nesmí opustit vaše zařízení a Správce datových schránek je může zneplatnit.",
+            "label": "Označení",
+            "boxId": "ID naší datové schránky",
+            "validTo": "Certifikát platí do",
+            "certificate": "Soubor certifikátu (PFX nebo P12)",
+            "certificatePassword": "Heslo k certifikátu"
+        },
+        "polling": {
+            "title": "Automatické vybírání schránky",
+            "explanation": "Vyzvednutím zprávy z datové schránky se zpráva považuje za doručenou a začínají běžet zákonné lhůty. Pokud vybírání zapnete, bude schránku vybírat aplikace za vás — včetně chvil, kdy se do ní sami nedíváte. Nechte vypnuté, pokud si schránku vybíráte jinde.",
+            "acknowledge": "Rozumím tomu, že vyzvednutí zprávy aplikací se počítá jako doručení a rozjíždí zákonné lhůty.",
+            "ackRequired": "Nejdřív prosím potvrďte, že vyzvednutí zprávy se počítá jako doručení.",
+            "turnOn": "Zapnout vybírání schránky",
+            "turnOff": "Vypnout vybírání schránky",
+            "isOn": "Vybírání schránky je zapnuté.",
+            "enabled": "Vybírání schránky je zapnuté.",
+            "disabled": "Vybírání schránky je vypnuté."
+        },
+        "dispatch": {
+            "ready": "Připraveno k odeslání",
+            "sending": "Odesílá se",
+            "send_uncertain": "Nevíme, jestli odešlo",
+            "sent": "Odesláno, čeká na doručenku",
+            "delivered": "Doručeno",
+            "failed": "Neodesláno",
+            "cancelled": "Zrušeno"
+        },
+        "acceptance": {
+            "unknown": "Vyřízení úřadem: zatím nevíme",
+            "accepted": "Zpracováno úřadem",
+            "rejected": "Odmítnuto úřadem"
+        },
+        "attempt": {
+            "in_flight": "Probíhá",
+            "sent": "Odesláno",
+            "uncertain": "Nejisté",
+            "rejected": "Odmítnuto",
+            "failed": "Selhalo"
+        },
+        "classification": {
+            "delivery_receipt": "Doručenka",
+            "cssz_protocol": "Protokol ČSSZ",
+            "health_insurer_response": "Odpověď pojišťovny",
+            "tax_office_response": "Odpověď finančního úřadu",
+            "unclassified": "Nezařazeno"
+        },
+        "recipientKind": {
+            "tax_office": "Finanční úřad",
+            "cssz": "ČSSZ",
+            "health_insurer": "Zdravotní pojišťovna",
+            "other": "Jiná instituce"
+        },
+        "outbox": {
+            "empty": "Ve frontě není žádné podání.",
+            "reference": "Spisová značka",
+            "confirmSend": "Potvrdit a odeslat",
+            "resolve": "Dohledat, jestli odešlo",
+            "attempts": "Historie pokusů",
+            "cancel": "Zrušit",
+            "attemptOutcome": "Výsledek",
+            "messageId": "ID zprávy",
+            "startedAt": "Zahájeno",
+            "sent": "Podání odešlo do datové schránky příjemce.",
+            "notSent": "Podání se nepodařilo odeslat.",
+            "uncertain": "Spojení se přerušilo a není jisté, jestli zpráva odešla. Neodesílejte ji znovu — použijte „Dohledat, jestli odešlo“.",
+            "uncertainHint": "Není jisté, jestli zpráva odešla. Neodesílejte ji ručně znovu, mohlo by vzniknout dvojí podání — nechte to dohledat tlačítkem níž.",
+            "resolvedSent": "Zpráva se v odeslaných našla — podání je odeslané.",
+            "resolvedNotSent": "Zpráva v odeslaných není — podání neodešlo a můžete ho bezpečně zařadit znovu.",
+            "resolveInconclusive": "Na datovou schránku se nepodařilo dovolat, takže dál nevíme, jestli zpráva odešla. Zkuste to prosím znovu později.",
+            "deliveredNotProcessed": "Doručenka potvrzuje, že zpráva dorazila do schránky úřadu. Neznamená to, že úřad podání zpracoval a přijal — případné vady vám úřad oznámí samostatnou zprávou."
+        },
+        "inbox": {
+            "empty": "Žádné stažené zprávy.",
+            "poll": "Vyzvednout nové zprávy",
+            "polled": "Staženo nových zpráv: {count}",
+            "pollingOff": "Vybírání schránky je vypnuté. Zapnete ho na kartě Přístup — vyzvednutí zprávy se počítá jako doručení.",
+            "subject": "Předmět",
+            "sender": "Odesílatel",
+            "classification": "Zařazení",
+            "deliveredAt": "Doručeno",
+            "lastOkAt": "Naposledy úspěšně vybráno: {at}",
+            "unreachable": "Na datovou schránku se nedaří dovolat (neúspěšných pokusů: {count}). Nevíme tedy, jestli tam nové zprávy jsou — prázdný seznam níž to neznamená."
+        },
+        "recipients": {
+            "addTitle": "Přidat příjemce",
+            "name": "Název",
+            "kind": "Druh",
+            "boxId": "ID datové schránky",
+            "code": "Kód",
+            "source": "Odkaz na zdroj",
+            "sourceLink": "Zdroj",
+            "noBoxId": "ID není vyplněné",
+            "sourceHint": "K ID datové schránky vždy uveďte, odkud je doložené. Bez dokladu ho neukládejte — podání odeslané na špatnou schránku je z pohledu lhůty nepodané.",
+            "missingBoxIds": "Záznamů bez ID datové schránky: {count}. Dokud ID nedoplníte, nejde na ně odeslat podání.",
+            "taxOfficeHint": "Finanční úřady nejsou předvyplněné — jejich ID datových schránek nemáme doložená a neodhadujeme je. Doplňte je ze seznamu Finanční správy a vždy uveďte odkaz. Podání se činí u místně příslušného správce daně, tedy do schránky krajského finančního úřadu, ne územního pracoviště."
+        },
+        "errors": {
+            "certificateRequired": "Nahrajte prosím soubor systémového certifikátu (PFX nebo P12).",
+            "sourceRequired": "K vyplněnému ID datové schránky uveďte odkaz na zdroj, odkud je doložené."
+        }
     }
 }

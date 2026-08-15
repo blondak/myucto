@@ -86,6 +86,30 @@ final class CronPreflight
         ");
     }
 
+    /**
+     * Má cron sahat na nějakou datovou schránku?
+     *
+     * Odpověď je „ano" jen tehdy, když si vybírání schránky někdo VÝSLOVNĚ
+     * zapnul. Není to jen úspora — vyzvednutí seznamu je doručení podle
+     * § 17 odst. 3 zák. 300/2008 Sb. a rozjíždí lhůty, takže brána tady je
+     * poslední místo, kde se dá zabránit tomu, aby aplikace doručovala
+     * zprávy někomu, kdo o to nepožádal.
+     *
+     * `probe()` je fail-open (při chybě vrací true), ale to je tu bezpečné:
+     * skutečnou bránu drží
+     * {@see \MyInvoice\Service\Submission\SubmissionInboxService::poll()},
+     * která bez souhlasu na síť nesáhne. Tohle jen šetří stavbu kontejneru.
+     */
+    public static function hasDataBoxInboxWork(PDO $pdo): bool
+    {
+        return self::probe($pdo, "
+            SELECT 1 FROM submission_channel_credentials
+             WHERE channel = 'isds'
+               AND inbox_polling_enabled = 1
+             LIMIT 1
+        ");
+    }
+
     private static function probe(PDO $pdo, string $sql): bool
     {
         try {

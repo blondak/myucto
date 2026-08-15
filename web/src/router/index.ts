@@ -269,6 +269,7 @@ const routes: RouteRecordRaw[] = [
       },
       { path: 'admin/tax-constants',    name: 'admin-tax-constants', component: () => import('@/pages/admin/TaxConstants.vue'), meta: {  } },
       { path: 'admin/electronic-signatures', name: 'admin-electronic-signatures', component: () => import('@/pages/admin/ElectronicSignatures.vue'), meta: {  } },
+      { path: 'admin/databox', name: 'admin-databox', component: () => import('@/pages/admin/DataBox.vue'), meta: {  } },
       // Globální katalog šablon bankovních pravidel — systémová (ne per-firma) agenda,
       // proto vlastní routa pod Systém místo záložky v per-firma /templates.
       { path: 'admin/bank-rule-templates', name: 'admin-bank-rule-templates', component: () => import('@/pages/admin/BankRuleTemplates.vue'), meta: {  } },
@@ -464,7 +465,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'stock-warehouses': ['stock'], 'stock-vendor-offers': ['stock'],
   'stock-takes': ['stock'], 'stock-take-detail': ['stock'], 'stock-reports': ['stock'], eshop: ['eshop'],
   logbook: ['logbook'], stats: ['dashboard'], 'purchase-stats': ['dashboard'], 'bank-statements': ['bank'], 'bank-detail': ['bank'],
-  'admin-electronic-signatures': ['settings.signing', 'write'], templates: ['accounting.templates'], tools: ['utilities'], 'crm-dashboard': ['dashboard.portfolio'], 'portfolio-overview': ['dashboard.portfolio'],
+  'admin-electronic-signatures': ['settings.signing', 'write'], 'admin-databox': ['settings.signing', 'write'], templates: ['accounting.templates'], tools: ['utilities'], 'crm-dashboard': ['dashboard.portfolio'], 'portfolio-overview': ['dashboard.portfolio'],
   'automation-cockpit': ['accounting'],
   'admin-settings': ['settings.company.write', 'write'], 'admin-branding': ['settings.branding', 'write'], 'admin-integrations': ['settings.company.write', 'write'],
   'admin-price-list': ['settings.company.write', 'write'], 'admin-price-list-new': ['settings.company.write', 'write'], 'admin-price-list-edit': ['settings.company.write', 'write'],

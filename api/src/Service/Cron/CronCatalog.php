@@ -162,6 +162,21 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // Datová schránka — vyzvednutí nových zpráv (výzvy podle § 74 DŘ
+                // chodí jen tudy). Každou hodinu, ne každou minutu: vyzvednutí
+                // je právní úkon (doručení podle § 17 odst. 3 zák. 300/2008 Sb.),
+                // takže častější dotazování by lhůty jen rozjíždělo dřív, aniž by
+                // to komukoli pomohlo. Úloha běží výhradně nad firmami, které si
+                // vybírání schránky výslovně zapnuly — viz `CronPreflight`.
+                'script' => 'cron-databox-inbox',
+                'recommended' => 'hourly',
+                'linux_cron' => '15 * * * *',
+                'windows_schtasks' => '/sc hourly /mo 1',
+                'max_age_hours' => 6,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 'script' => 'cron-generate-recurring-invoices',
                 'recommended' => 'daily_0630',
                 'linux_cron' => '30 6 * * *',
