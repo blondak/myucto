@@ -477,6 +477,36 @@ klasifikace. Nevyřízená absence nebo čekající oprava schválení měsíce 
 > selže; systém chybějící údaj neodhaduje. Výpočty náhrad a dovolené jsou
 > aktuálně dostupné pouze pro legislativní ruleset roku 2026.
 
+### 58.10.1 Limity práce přesčas
+
+V **Mzdy → Docházka a směny** aplikace u každého pracovního vztahu hlídá limity
+práce přesčas podle § 93 zákoníku práce a stav ukazuje přímo u zaměstnance:
+
+- **8 hodin v jednotlivých týdnech** a **150 hodin v kalendářním roce** — meze
+  přesčasu, který smí zaměstnavatel nařídit (§ 93 odst. 2). Týden se posuzuje
+  jako pondělí až neděle bez ohledu na hranici měsíce.
+- **Průměr 8 hodin týdně ve vyrovnávacím období** nejvýše 26 týdnů po sobě
+  jdoucích (§ 93 odst. 4). Poměřuje se celkový přesčas, tedy i ten dohodnutý.
+  Na začátku pracovního poměru je okno kratší a strop s ním klesá.
+
+Podkladem je evidence odpracovaného přesčasu v docházce, ne vyplacená částka.
+Kromě překročení se hlásí i blížící se vyčerpání ročního limitu, aby se dalo
+zasáhnout včas.
+
+Nad nařízený rozsah lze práci přesčas požadovat jen na základě dohody se
+zaměstnancem (§ 93 odst. 3). Tu zaznamenáš tlačítkem **Souhlas s přesčasem**
+včetně doby platnosti a označení dokumentu. Přesčas ve dnech krytých dohodou se
+posuzuje jako dohodnutý a limity nařízeného přesčasu se na něj nevztahují; bez
+evidované dohody se proti nim poměřuje všechen přesčas.
+
+> [!NOTE]
+> Překročení limitu je vada na straně zaměstnavatele, ne chyba výpočtu.
+> Odpracovaný přesčas se podle § 114 platí i tehdy, když byl nařízen nad
+> zákonný rozsah, proto se nález eviduje jako **upozornění** u revize mzdového
+> běhu a schválení ani výplatu nezastaví. Přesčas kompenzovaný náhradním volnem
+> se z vyrovnávacího období zatím neodečítá (§ 93 odst. 5) — kontrola je tedy na
+> bezpečné straně a může upozornit i tam, kde volno poskytnuto bylo.
+
 ## 58.11 Mzdové běhy
 
 V **Mzdy → Mzdové běhy** založíš zpracování konkrétního měsíce. K období se
