@@ -2084,13 +2084,96 @@
                 "regzel": "Registrace zaměstnavatele",
                 "jmhz": "JMHZ",
                 "health": "Zdravotní pojišťovny",
-                "inbox": "Inbox"
+                "inbox": "Inbox",
+                "certificate": "Certifikát"
             },
             "unsupported": "Zatím nepodporováno",
             "jmhz_title": "Jednotné měsíční hlášení zaměstnavatele",
             "jmhz_fail_closed": "Přímá příprava a odeslání JMHZ zatím nejsou zpřístupněné. Dokud nebude dokončené mapování, ověření dodejek a korekcí, systém žádné podání nepředstírá.",
             "health_title": "Hlášení zdravotním pojišťovnám",
             "health_fail_closed": "Přímá podání zdravotním pojišťovnám zatím nejsou zpřístupněná. Systém je nebude označovat jako odeslaná ani přijatá bez ověřeného kanálu a dodejky.",
+            "signing": {
+                "title": "Podpisový certifikát ČSSZ",
+                "description": "Vyberte, kterým z uložených certifikátů se podepisují mzdová podání této firmy. Certifikáty se sem nenahrávají — trezor je v aplikaci jeden, v Systém → Elektronické podpisy.",
+                "load_failed": "Nastavení podpisového certifikátu se nepodařilo načíst.",
+                "state_unknown": "Dokud se načtení nepovede, systém neví, jestli je certifikát zvolený — neberte prosím prázdnou obrazovku jako důkaz, že nastavený není.",
+                "storage_unavailable": "Úložiště volby certifikátu zatím není k dispozici — neproběhla migrace databáze. Volbu teď uložit nelze.",
+                "environment": {
+                    "label": "Prostředí",
+                    "production": "Produkce",
+                    "test": "Test",
+                    "production_note": "Ostré prostředí. Tímhle certifikátem se podepisují skutečná podání na ČSSZ.",
+                    "test_note": "Testovací prostředí ČSSZ. Testovací certifikát bývá jiný než produkční — záměna se pozná až z protokolu ČSSZ, tedy typicky po termínu."
+                },
+                "current": {
+                    "title": "Co podepisuje teď",
+                    "none": "Pro tohle prostředí není zvolený žádný certifikát. Mzdová podání se zatím nepodepíšou.",
+                    "selected": "Podepisuje se certifikátem „{label}“.",
+                    "unknown_label": "neznámý certifikát",
+                    "foreign": "Volbu uložil jiný uživatel svým certifikátem — ve vašem trezoru není, takže s ním podepsat nemůžete.",
+                    "registered_serial": "Sériové číslo registrované u ČSSZ: {serial}",
+                    "registered_serial_missing": "nevyplněno",
+                    "updated_at": "Naposledy změněno {at}"
+                },
+                "picker": {
+                    "title": "Volba certifikátu",
+                    "description": "Nabídka obsahuje certifikáty z trezoru, které máte k dispozici. Nový certifikát se nahrává v Systém → Elektronické podpisy a tam se také povoluje pro tuhle firmu.",
+                    "label": "Certifikát z trezoru",
+                    "placeholder": "Vyberte certifikát",
+                    "no_results": "Žádný odpovídající certifikát",
+                    "option_valid_until": "Platí do {date}",
+                    "option_expired": "Vypršel {date}",
+                    "option_not_yet_valid": "Začne platit {date}",
+                    "option_not_enabled": "Pro tuhle firmu není povolený"
+                },
+                "vault": {
+                    "empty": "V trezoru nemáte žádný certifikát. Nahrává se na jednom místě pro celou aplikaci — v Systém → Elektronické podpisy.",
+                    "open": "Otevřít elektronické podpisy"
+                },
+                "certificate": {
+                    "subject": "Vydán pro",
+                    "issuer": "Vydavatel",
+                    "validity": "Platnost",
+                    "serial_hex": "Sériové číslo (hexadecimálně, jako v certifikátu)",
+                    "serial_decimal": "Sériové číslo (decimálně, jako na formuláři ČSSZ)",
+                    "serial_unknown": "neznámé"
+                },
+                "badge": {
+                    "usable": "Použitelný",
+                    "expired": "Vypršel {date}",
+                    "not_yet_valid": "Začne platit {date}",
+                    "expires_soon": "Vyprší za {days} dnů",
+                    "not_enabled": "Nepovolený pro tuhle firmu"
+                },
+                "serial": {
+                    "label": "Sériové číslo registrované u ČSSZ",
+                    "placeholder": "Číslo z oznámení o pověření",
+                    "hint": "Číslo najdete na formuláři „Oznámení o pověření“. ČSSZ ho tiskne decimálně, certifikát ho nese hexadecimálně — porovnejte ho s oběma tvary vypsanými výše. Oddělovače (dvojtečky, mezery) nevadí.",
+                    "hint_optional": "Když se čísla neshodují, uložení se odmítne: podání podepsané takovým certifikátem by ČSSZ zamítla. Pole lze nechat prázdné, pak ale shodu s registrací nikdo neověří."
+                },
+                "step_up": {
+                    "title": "Potvrzení totožnosti",
+                    "hint": "Volba rozhoduje, čím se podepisují úřední podání jménem firmy, proto se ověřuje stejně jako správa samotného klíče.",
+                    "password": "Aktuální heslo",
+                    "totp": "Kód z autentikátoru",
+                    "password_missing": "Zadejte aktuální heslo, nebo se ověřte přístupovým klíčem.",
+                    "totp_missing": "Zadejte šestimístný kód z autentikátoru.",
+                    "passkey_verify": "Ověřit přístupovým klíčem",
+                    "passkey_verified": "Ověřeno přístupovým klíčem",
+                    "passkey_failed": "Ověření přístupovým klíčem se nepovedlo.",
+                    "passkey_unsupported": "Tento prohlížeč přístupové klíče nepodporuje — použijte heslo.",
+                    "or_password": "nebo použijte heslo"
+                },
+                "save": "Uložit volbu",
+                "saving": "Ukládám…",
+                "saved": "Volba certifikátu je uložená.",
+                "save_failed": "Volbu certifikátu se nepodařilo uložit.",
+                "remove": "Zrušit volbu",
+                "removing": "Ruším…",
+                "removed": "Volba certifikátu byla zrušená.",
+                "remove_failed": "Volbu certifikátu se nepodařilo zrušit.",
+                "read_only": "Na změnu podpisového certifikátu nemáte oprávnění."
+            },
             "inbox": {
                 "title": "Inbox mzdových podání",
                 "subtitle": "Odvozený přehled blížících se a prošlých lhůt, odmítnutých podání a čekání na ztotožnění. Potvrzení ani odložení nemění stav povinnosti ani podání — jen připomínku.",

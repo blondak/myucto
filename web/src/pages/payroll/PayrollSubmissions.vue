@@ -14,13 +14,16 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import PayrollSubmissionInboxPanel from './PayrollSubmissionInboxPanel.vue'
 import PayrollSubmissionOverviewPanel from './PayrollSubmissionOverviewPanel.vue'
+import PayrollSigningCertificatePanel from './PayrollSigningCertificatePanel.vue'
 
-type SubmissionTab = 'regzel' | 'jmhz' | 'health' | 'inbox'
+type SubmissionTab = 'regzel' | 'jmhz' | 'health' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const activeTab = ref<SubmissionTab>('regzel')
-const tabs: SubmissionTab[] = ['regzel', 'jmhz', 'health', 'inbox']
+// Certifikát je poslední záložka, ale vlastní: podepisuje se jím REGZEL i JMHZ,
+// takže nepatří pod žádné jednotlivé hlášení.
+const tabs: SubmissionTab[] = ['regzel', 'jmhz', 'health', 'inbox', 'certificate']
 const inboxOpenCount = ref(0)
 const loading = ref(true)
 const preparing = ref(false)
@@ -484,6 +487,8 @@ onMounted(loadInboxBadge)
       v-else-if="activeTab === 'inbox'"
       @update:open-count="inboxOpenCount = $event"
     />
+
+    <PayrollSigningCertificatePanel v-else-if="activeTab === 'certificate'" />
 
     <PayrollSubmissionOverviewPanel
       v-else

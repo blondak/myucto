@@ -20,6 +20,7 @@ const m = vi.hoisted(() => ({
   submissionInbox: vi.fn(),
   acknowledgeInboxItem: vi.fn(),
   snoozeInboxItem: vi.fn(),
+  signingProfile: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -42,6 +43,7 @@ vi.mock('@/api/payroll', () => ({
     submissionInbox: m.submissionInbox,
     acknowledgeSubmissionInboxItem: m.acknowledgeInboxItem,
     snoozeSubmissionInboxItem: m.snoozeInboxItem,
+    signingProfile: m.signingProfile,
   },
 }))
 
@@ -326,7 +328,7 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(4)
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(5)
     expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(2)
     expect(wrapper.text()).toContain('payroll.regzel.environment.production_warning')
 
@@ -348,6 +350,27 @@ describe('PayrollSubmissions', () => {
     )
     expect(wrapper.text()).toContain('JMHZ')
     expect(wrapper.text()).toContain('payroll.submissions.jmhz_fail_closed')
+  })
+
+  it('nabídne volbu podpisového certifikátu jako vlastní záložku', async () => {
+    m.signingProfile.mockResolvedValue({
+      environment: 'production',
+      environments: ['production', 'test'],
+      storage_available: true,
+      profile: null,
+      certificates: [],
+      warnings: [],
+    })
+
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+
+    await wrapper.findAll('[role="tab"]')[4]!.trigger('click')
+    await flushPromises()
+
+    expect(m.signingProfile).toHaveBeenCalledWith('production')
+    expect(wrapper.get('[data-test="payroll-signing-certificate"]').text())
+      .toContain('payroll.submissions.signing.title')
   })
 
   it('bez potvrzení XML nevytvoří a API chybu zobrazí trvale inline', async () => {

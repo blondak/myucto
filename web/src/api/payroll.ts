@@ -1,4 +1,8 @@
 import { api } from './client'
+// Step-up (heslo / TOTP / passkey proof) je sdílený s EPO — volba podpisového
+// certifikátu je rozhodnutí stejné třídy jako správa klíče samotného, takže
+// kódování důkazu se nesmí rozejít se zbytkem aplikace.
+import { stepUpProofBody, type EpoStepUpProof } from './epoSubmissions'
 
 export type PayrollModuleStatus = 'disabled' | 'setup' | 'active' | 'suspended'
 export type PayrollSupportStatus = 'supported' | 'manual_review' | 'not_supported'
@@ -1987,6 +1991,78 @@ export interface PayrollDependantClaimPayload {
   row_version?: number
 }
 
+/**
+ * Volba podpisového certifikátu pro mzdová podání na ČSSZ.
+ *
+ * Certifikáty se nahrávají v jednom trezoru (Systém → Elektronické podpisy);
+ * tady se jen vybírá, KTERÝ z nich podepisuje podání téhle firmy — a odděleně
+ * pro testovací a produkční prostředí, protože testovací certifikát bývá jiný
+ * a záměna se pozná až z protokolu ČSSZ, typicky po termínu.
+ */
+export type PayrollSigningEnvironment = 'production' | 'test'
+
+export interface PayrollSigningCertificate {
+  id: number
+  label: string
+  subject: string
+  issuer: string
+  /** Kanonický hex (bez oddělovačů a vedoucích nul); `null`, když ho neznáme. */
+  serial_hex: string | null
+  /** Totéž decimálně — ČSSZ tiskne sériové číslo na papíře v tomhle zápisu. */
+  serial_decimal: string | null
+  valid_from: string | null
+  valid_to: string | null
+  expired: boolean
+  not_yet_valid: boolean
+  usable_now: boolean
+  expires_in_days: number | null
+  enabled_for_supplier: boolean
+  ik_mpsv_present: boolean
+}
+
+export interface PayrollSigningWarning {
+  code: string
+  message: string
+}
+
+export interface PayrollSigningProfile {
+  environment: string
+  credential_id: number
+  owner_user_id: number
+  cssz_registered_serial: string | null
+  row_version: number
+  created_at: string | null
+  updated_at: string | null
+  /** `false`, když volbu uložil jiný uživatel svým certifikátem. */
+  certificate_accessible: boolean
+  certificate: PayrollSigningCertificate | null
+  expired: boolean
+}
+
+export interface PayrollSigningProfileView {
+  environment: PayrollSigningEnvironment
+  environments: PayrollSigningEnvironment[]
+  storage_available: boolean
+  profile: PayrollSigningProfile | null
+  certificates: PayrollSigningCertificate[]
+  warnings: PayrollSigningWarning[]
+}
+
+export interface PayrollSigningProfileResult {
+  environment: PayrollSigningEnvironment
+  profile: PayrollSigningProfile
+  warnings: PayrollSigningWarning[]
+}
+
+export interface PayrollSigningProfilePayload {
+  environment: PayrollSigningEnvironment
+  credential_id: number
+  /** Prázdné = uložit bez ověření proti oznámení o pověření. */
+  cssz_registered_serial?: string | null
+  /** Posílá se jen při ZMĚNĚ existující volby — u prvního uložení ho backend odmítne. */
+  row_version?: number | null
+}
+
 export const payrollApi = {
   capabilities: () =>
     api.get<PayrollCapabilitiesResponse>('/payroll/capabilities').then(response => response.data),
@@ -2557,4 +2633,28 @@ export const payrollApi = {
   applyInputImport: (payload: PayrollInputImportPayload) =>
     api.post<{ import: PayrollInputImportResult }>('/payroll/input-imports/apply', payload)
       .then(response => response.data.import),
+  signingProfile: (environment: PayrollSigningEnvironment) =>
+    api.get<PayrollSigningProfileView>('/payroll/submissions/signing-profile', {
+      params: { environment },
+    }).then(response => response.data),
+  saveSigningProfile: (
+    payload: PayrollSigningProfilePayload,
+    proof: EpoStepUpProof,
+  ) => api.put<PayrollSigningProfileResult>('/payroll/submissions/signing-profile', {
+    environment: payload.environment,
+    credential_id: payload.credential_id,
+    cssz_registered_serial: payload.cssz_registered_serial ?? '',
+    // Klíč se vynechá úplně, když volba ještě neexistuje: backend bere i `null`
+    // jako „neposláno", ale posílat pole, které nemá význam, jen svádí k tomu
+    // začít ho posílat i s nesmyslnou hodnotou.
+    ...(payload.row_version ? { row_version: payload.row_version } : {}),
+    ...stepUpProofBody(proof),
+  }).then(response => response.data),
+  deleteSigningProfile: (
+    environment: PayrollSigningEnvironment,
+    proof: EpoStepUpProof,
+  ) => api.delete<{ environment: PayrollSigningEnvironment; deleted: boolean }>(
+    '/payroll/submissions/signing-profile',
+    { data: { environment, ...stepUpProofBody(proof) } },
+  ).then(response => response.data),
 }
