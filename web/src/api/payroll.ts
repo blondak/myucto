@@ -918,7 +918,8 @@ export interface PayrollQuickInputSavePayload {
   rows: Array<{
     employment_id: number
     employment_row_version: number
-    base_amount_minor: number
+    /** null = pole zůstalo prázdné; 0 = uživatel zadal nulový základ. */
+    base_amount_minor: number | null
     overtime_mode: 'hours' | 'amount'
     overtime_hours_milli: number | null
     overtime_amount_minor: number | null

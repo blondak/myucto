@@ -160,10 +160,18 @@ function hoursError(value: string): ValidationCode | null {
   return null
 }
 
+// U základní mzdy je prázdné pole legitimní stav, ne chyba: znamená „základ
+// v tomto měsíci neřeším". Zadaná nula je něco jiného — ta se uloží jako nulový
+// základ a v částečném nebo přerušeném měsíci je to plnohodnotný údaj. Kdyby
+// prázdné pole zůstalo chybou, uživatel by nulu neměl jak od nevyplnění odlišit.
 function baseError(row: UiRow): ValidationCode | null {
-  return row.base_managed_elsewhere || !editable(row.inputs.base)
-    ? null
-    : amountError(row.baseAmount)
+  if (row.base_managed_elsewhere || !editable(row.inputs.base)) return null
+  if (baseIsBlank(row)) return null
+  return amountError(row.baseAmount)
+}
+
+function baseIsBlank(row: UiRow): boolean {
+  return row.baseAmount.trim() === ''
 }
 
 function bonusError(row: UiRow): ValidationCode | null {
@@ -271,7 +279,7 @@ function payload(): PayrollQuickInputSavePayload {
     rows: rows.value.map(row => ({
       employment_id: row.employment_id,
       employment_row_version: row.employment_row_version,
-      base_amount_minor: parsedAmount(row.baseAmount) as number,
+      base_amount_minor: baseIsBlank(row) ? null : parsedAmount(row.baseAmount),
       overtime_mode: row.overtime_mode,
       overtime_hours_milli: row.overtime_mode === 'hours' ? parsedHoursMilli(row) : null,
       overtime_amount_minor: row.overtime_mode === 'amount'
@@ -566,6 +574,7 @@ onMounted(load)
                     type="text"
                     inputmode="decimal"
                     autocomplete="off"
+                    :data-testid="`quick-bonus-${row.employment_id}`"
                     :aria-label="t('payroll.quick_inputs.bonus_amount')"
                     :aria-invalid="bonusError(row) !== null"
                     :aria-describedby="bonusError(row) ? `quick-bonus-error-${row.employment_id}` : undefined"

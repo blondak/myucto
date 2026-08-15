@@ -88,7 +88,7 @@ final class PayrollQuickInputZeroDraftTest extends TestCase
     public function testSavingEmptyFieldsCreatesNoDraftAtAll(): void
     {
         $this->save([
-            'base_amount_minor' => 0,
+            'base_amount_minor' => null,
             'overtime_mode' => 'amount',
             'overtime_hours_milli' => null,
             'overtime_amount_minor' => 0,
@@ -111,7 +111,7 @@ final class PayrollQuickInputZeroDraftTest extends TestCase
     public function testSavingASingleAmountCreatesExactlyOneDraft(): void
     {
         $this->save([
-            'base_amount_minor' => 0,
+            'base_amount_minor' => null,
             'overtime_mode' => 'amount',
             'overtime_hours_milli' => null,
             'overtime_amount_minor' => 0,
@@ -130,7 +130,7 @@ final class PayrollQuickInputZeroDraftTest extends TestCase
     public function testClearingAnExistingAmountCancelsItsDraft(): void
     {
         $this->save([
-            'base_amount_minor' => 0,
+            'base_amount_minor' => null,
             'overtime_mode' => 'amount',
             'overtime_hours_milli' => null,
             'overtime_amount_minor' => 0,
@@ -140,7 +140,7 @@ final class PayrollQuickInputZeroDraftTest extends TestCase
         self::assertSame(['ODMENA'], $this->inputCodes());
 
         $this->save([
-            'base_amount_minor' => 0,
+            'base_amount_minor' => null,
             'overtime_mode' => 'amount',
             'overtime_hours_milli' => null,
             'overtime_amount_minor' => 0,
@@ -163,6 +163,186 @@ final class PayrollQuickInputZeroDraftTest extends TestCase
             $this->draftBlockerCount(),
             'Zrušený vstup se do blokátoru mzdového běhu nepočítá.',
         );
+    }
+
+    /**
+     * Zadaná nula na základní mzdě je údaj, ne prázdné pole.
+     *
+     * V částečném nebo přerušeném měsíci nese informaci „nic se nevydělalo".
+     * Bez rozlišení `null` (nevyplněno) od `0` (zadáno) to nešlo říct a blokátor
+     * `partial_month_base_required` neměl východisko.
+     */
+    public function testEnteredZeroOnTheBaseWageCreatesARowUnlikeAnEmptyField(): void
+    {
+        $this->save([
+            'base_amount_minor' => 0,
+            'overtime_mode' => 'amount',
+            'overtime_hours_milli' => null,
+            'overtime_amount_minor' => 0,
+            'bonus_amount_minor' => 0,
+            'versions' => ['base' => null, 'overtime' => null, 'bonus' => null],
+        ]);
+
+        self::assertSame(
+            ['MZDA_MESICNI'],
+            $this->inputCodes(),
+            'Zadaná nula na základu má založit řádek — a jen ten jeden.',
+        );
+        self::assertSame(0, $this->amountOf('MZDA_MESICNI'));
+        self::assertSame(
+            1,
+            $this->draftBlockerCount(),
+            'Že takový koncept drží běh do schválení, je správné: uživatel ho zadal vědomě.',
+        );
+    }
+
+    /** Zadaná nula blokátor zhasne, protože vstup na základ existovat bude. */
+    public function testEnteredZeroOnTheBaseWageClearsThePartialMonthBlocker(): void
+    {
+        $this->partialMonthEmployment();
+        self::assertContains(
+            'partial_month_base_required',
+            $this->blockers(),
+            'Bez vstupu na základ musí blokátor svítit.',
+        );
+
+        $this->save([
+            'base_amount_minor' => 0,
+            'overtime_mode' => 'amount',
+            'overtime_hours_milli' => null,
+            'overtime_amount_minor' => 0,
+            'bonus_amount_minor' => 0,
+            'versions' => ['base' => null, 'overtime' => null, 'bonus' => null],
+        ]);
+
+        self::assertNotContains(
+            'partial_month_base_required',
+            $this->blockers(),
+            'Zadaná nula je vstup na základ, blokátor tedy nemá důvod svítit dál.',
+        );
+    }
+
+    /**
+     * Vyprázdnění a zadání nuly jsou dvě různé operace nad týmž polem.
+     *
+     * Prázdné pole existující vstup ruší, zadaná nula ho zachová s nulovou
+     * částkou. Kdyby se to slilo zpátky do jedné větve, spadne tenhle test.
+     */
+    public function testBlankAndEnteredZeroAreTwoDifferentOperationsOnTheBaseWage(): void
+    {
+        $this->save([
+            'base_amount_minor' => 4_200_000,
+            'overtime_mode' => 'amount',
+            'overtime_hours_milli' => null,
+            'overtime_amount_minor' => 0,
+            'bonus_amount_minor' => 0,
+            'versions' => ['base' => null, 'overtime' => null, 'bonus' => null],
+        ]);
+        self::assertSame(['MZDA_MESICNI'], $this->inputCodes());
+
+        // Zadaná nula: řádek zůstává, jen s nulovou částkou.
+        $this->save([
+            'base_amount_minor' => 0,
+            'overtime_mode' => 'amount',
+            'overtime_hours_milli' => null,
+            'overtime_amount_minor' => 0,
+            'bonus_amount_minor' => 0,
+            'versions' => ['base' => 1, 'overtime' => null, 'bonus' => null],
+        ]);
+        self::assertSame(
+            ['MZDA_MESICNI'],
+            $this->inputCodes(),
+            'Zadaná nula vstup nesmí zrušit.',
+        );
+        self::assertSame(0, $this->amountOf('MZDA_MESICNI'));
+        self::assertSame('draft', $this->statusOf('MZDA_MESICNI'));
+
+        // Vyprázdnění: tentýž řádek se ruší.
+        $this->save([
+            'base_amount_minor' => null,
+            'overtime_mode' => 'amount',
+            'overtime_hours_milli' => null,
+            'overtime_amount_minor' => 0,
+            'bonus_amount_minor' => 0,
+            'versions' => ['base' => 2, 'overtime' => null, 'bonus' => null],
+        ]);
+        self::assertSame(
+            [],
+            $this->inputCodes(),
+            'Prázdné pole existující vstup ruší.',
+        );
+        self::assertSame('cancelled', $this->statusOf('MZDA_MESICNI'));
+    }
+
+    /** Chybějící klíč není totéž co výslovné null — musí zůstat chybou. */
+    public function testMissingBaseAmountKeyIsRejected(): void
+    {
+        $response = $this->action->save(
+            $this->request('PUT')->withParsedBody([
+                'period' => self::PERIOD,
+                'rows' => [[
+                    'employment_id' => $this->employmentId,
+                    'employment_row_version' => 1,
+                    'overtime_mode' => 'amount',
+                    'overtime_hours_milli' => null,
+                    'overtime_amount_minor' => 0,
+                    'bonus_amount_minor' => 0,
+                    'versions' => ['base' => null, 'overtime' => null, 'bonus' => null],
+                ]],
+            ]),
+            new Response(),
+        );
+        self::assertSame(422, $response->getStatusCode());
+    }
+
+    /** Zkrátí vztah tak, aby měsíc byl částečný a základ se musel zadat. */
+    private function partialMonthEmployment(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2026-06-10", actual_start_date = "2026-06-10"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+    }
+
+    /** @return list<string> */
+    private function blockers(): array
+    {
+        $response = $this->action->list(
+            $this->request('GET')->withQueryParams(['period' => self::PERIOD]),
+            new Response(),
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $month = PayrollTimeValue::row($this->json($response)['month'] ?? null, 'month');
+        $items = $month['items'] ?? null;
+        self::assertIsArray($items);
+        self::assertCount(1, $items);
+        $item = PayrollTimeValue::rows($items, 'items')[0];
+        $blockers = $item['blockers'] ?? [];
+        self::assertIsArray($blockers);
+
+        return array_map(strval(...), $blockers);
+    }
+
+    private function amountOf(string $componentCode): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT input.amount_minor
+               FROM payroll_inputs input
+               JOIN payroll_component_definitions component
+                 ON component.supplier_id = input.supplier_id
+                AND component.id = input.component_id
+              WHERE input.supplier_id = ? AND input.employment_id = ?
+                AND input.period_start = ? AND component.code = ?'
+        );
+        $stmt->execute([
+            $this->supplierId,
+            $this->employmentId,
+            self::PERIOD_START,
+            $componentCode,
+        ]);
+
+        return (int) $stmt->fetchColumn();
     }
 
     /** @param array<string,mixed> $row */

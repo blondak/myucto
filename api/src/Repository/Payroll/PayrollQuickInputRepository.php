@@ -224,7 +224,7 @@ final class PayrollQuickInputRepository
 
     /**
      * @param list<array{
-     *   employment_id:int,employment_row_version:int,base_amount_minor:int,overtime_mode:string,
+     *   employment_id:int,employment_row_version:int,base_amount_minor:?int,overtime_mode:string,
      *   overtime_hours_milli:?int,overtime_amount_minor:?int,bonus_amount_minor:int,
      *   overtime_average_snapshot_id:?int,overtime_average_snapshot_version:?int,
      *   versions:array{base:?int,overtime:?int,bonus:?int}
@@ -275,7 +275,11 @@ final class PayrollQuickInputRepository
                     );
                 }
                 if ((bool) $item['base_managed_elsewhere']) {
-                    if ($row['base_amount_minor'] !== (int) $item['base_amount_minor']) {
+                    // Nevyplněné pole (null) si na spravovaný základ nedělá nárok;
+                    // jiná částka ano, a to je konflikt.
+                    if ($row['base_amount_minor'] !== null
+                        && $row['base_amount_minor'] !== (int) $item['base_amount_minor']
+                    ) {
                         throw new \DomainException(
                             'Základní mzdu v tomto měsíci spravuje jiný schválený nebo pravidelný vstup.'
                         );
@@ -293,6 +297,7 @@ final class PayrollQuickInputRepository
                         $row['versions']['base'],
                         $userId,
                         null,
+                        true,
                     );
                 }
 
@@ -770,6 +775,17 @@ final class PayrollQuickInputRepository
      * Vyprázdnění už existujícího pole znamená zrušení jeho vstupu — ne uložení
      * nuly, která by po schválení skončila jako nulový řádek na výplatní pásce.
      *
+     * Prázdné pole a zadaná nula jsou ale dvě různé věci a `$amountMinor` je
+     * rozlišuje: `null` = nevyplněno, `0` = uživatel zadal nulu.
+     *
+     * @param ?int $amountMinor null = pole zůstalo prázdné
+     * @param bool $zeroIsAnEntry nese zadaná nula informaci?
+     *        U základní mzdy ano — v částečném nebo přerušeném měsíci znamená
+     *        „nic se nevydělalo" a řádek musí vzniknout. Že takový koncept pak
+     *        drží mzdový běh, dokud ho někdo neschválí, je správné: uživatel ho
+     *        zadal vědomě. U přesčasu a odměny ne — nula hodin za nula korun
+     *        nenese žádnou informaci a řádek by byl jen ten nulový koncept,
+     *        kvůli kterému se to celé řešilo.
      * @param array<string,mixed>|null $sourceSnapshot
      */
     private function upsert(
@@ -779,11 +795,12 @@ final class PayrollQuickInputRepository
         int $componentId,
         string $period,
         string $componentCode,
-        int $amountMinor,
+        ?int $amountMinor,
         ?int $quantityMilliunits,
         ?int $expectedVersion,
         ?int $userId,
         ?array $sourceSnapshot,
+        bool $zeroIsAnEntry = false,
     ): void {
         $periodStart = $period . '-01';
         $externalId = self::EXTERNAL_PREFIX . $componentCode;
@@ -797,8 +814,10 @@ final class PayrollQuickInputRepository
         );
         $find->execute([$supplierId, $employmentId, $periodStart, $externalId]);
         $row = $find->fetch(PDO::FETCH_ASSOC);
-        $isEmpty = $amountMinor === 0
-            && ($quantityMilliunits === null || $quantityMilliunits === 0);
+        $isEmpty = $amountMinor === null
+            || (!$zeroIsAnEntry
+                && $amountMinor === 0
+                && ($quantityMilliunits === null || $quantityMilliunits === 0));
         if ($row === false) {
             if ($expectedVersion !== null) {
                 throw new PayrollInputConflictException($expectedVersion);
@@ -812,7 +831,7 @@ final class PayrollQuickInputRepository
                 'component_id' => $componentId,
                 'period_start' => $periodStart,
                 'source_period_start' => null,
-                'amount_minor' => $amountMinor,
+                'amount_minor' => (int) $amountMinor,
                 'quantity_milliunits' => $quantityMilliunits,
                 'source_kind' => 'manual',
                 'external_id' => $externalId,
@@ -858,7 +877,7 @@ final class PayrollQuickInputRepository
             'component_id' => $componentId,
             'period_start' => $periodStart,
             'source_period_start' => null,
-            'amount_minor' => $amountMinor,
+            'amount_minor' => (int) $amountMinor,
             'quantity_milliunits' => $quantityMilliunits,
             'source_kind' => 'manual',
             'external_id' => $externalId,
