@@ -355,6 +355,90 @@ export interface PayrollPersonAccountVerificationPayload {
   row_version: number
 }
 
+export type PayrollPayoutDestinationKind = 'bank' | 'cash' | 'partner_settlement'
+export type PayrollPayoutAllocationKind = 'fixed' | 'percentage' | 'remainder'
+
+/**
+ * Výplatní pravidlo osoby — teprve ono říká, kam čistá mzda skutečně odejde.
+ * `payout_method` na kartě je jen deklarace; bez pravidla se výplata nedá
+ * zpracovat.
+ *
+ * `allocation_reference` generuje server (drží identitu vůči zmrazeným
+ * alokacím), klient ji nikdy neposílá ani nemění.
+ */
+export interface PayrollPayoutRule {
+  id: number
+  supplier_id: number
+  employee_id: number
+  allocation_reference: string
+  destination_kind: PayrollPayoutDestinationKind
+  /** `account:<id>` u banky, kód účtu z osnovy u zápočtu, NULL u hotovosti. */
+  destination_reference: string | null
+  allocation_kind: PayrollPayoutAllocationKind
+  amount_minor: number | null
+  basis_points: number | null
+  priority_no: number
+  is_active: boolean
+  /**
+   * Je cíl pravidla ověřený? `null` u hotovosti a zápočtu na účet společníka —
+   * tam ověření nedává smysl a `false` by se četlo jako vada.
+   *
+   * `false` neblokuje uložení pravidla (musí jít připravit dřív, než ověření
+   * proběhne), ale mzdu na takový účet nepůjde připravit k výplatě.
+   */
+  destination_verified: boolean | null
+  row_version: number
+  created_at: string | null
+  updated_at: string | null
+}
+
+/**
+ * Nefatální nález nad pravidlem — zápis prošel, ale příprava plateb by na tom
+ * spadla. Zpráva ze serveru je česky; panel si vykresluje vlastní i18n větu,
+ * `warnings` je strojově čitelný kontrakt pro ostatní konzumenty API.
+ */
+export interface PayrollPayoutRuleWarning {
+  code: 'unverified_destination'
+  rule_id: number
+  account_id: number | null
+  message: string
+}
+
+export interface PayrollPayoutRuleProposalRule {
+  destination_kind: PayrollPayoutDestinationKind
+  destination_reference: string | null
+  allocation_kind: PayrollPayoutAllocationKind
+  amount_minor: number | null
+  basis_points: number | null
+  priority_no: number
+}
+
+export interface PayrollPayoutRuleProposal {
+  payout_method: PayrollPayoutMethod | null
+  available: boolean
+  applicable: boolean
+  has_active_rules: boolean
+  /** Česká věta ze serveru — zobrazuje se uživateli tak, jak přijde. */
+  blocked_reason: string | null
+  rules: PayrollPayoutRuleProposalRule[]
+}
+
+export interface PayrollPayoutRulesResponse {
+  rules: PayrollPayoutRule[]
+  proposal: PayrollPayoutRuleProposal
+  warnings: PayrollPayoutRuleWarning[]
+}
+
+export interface PayrollPayoutRulePayload {
+  destination_kind: PayrollPayoutDestinationKind
+  destination_reference: string | null
+  allocation_kind: PayrollPayoutAllocationKind
+  amount_minor?: number | null
+  basis_points?: number | null
+  priority_no: number
+  is_active: boolean
+}
+
 export type PayrollTimeCategory =
   | 'regular'
   | 'overtime'
@@ -2312,6 +2396,36 @@ export const payrollApi = {
       `/payroll/people/${personId}/accounts/${accountId}/verify`,
       payload,
     ).then(response => response.data.account),
+  personPayoutRules: (personId: number) =>
+    api.get<PayrollPayoutRulesResponse>(
+      `/payroll/people/${personId}/payout-rules`,
+    ).then(response => response.data),
+  createPersonPayoutRule: (personId: number, payload: PayrollPayoutRulePayload) =>
+    api.post<{ rule: PayrollPayoutRule; warnings: PayrollPayoutRuleWarning[] }>(
+      `/payroll/people/${personId}/payout-rules`,
+      payload,
+    ).then(response => response.data),
+  updatePersonPayoutRule: (
+    personId: number,
+    ruleId: number,
+    payload: PayrollPayoutRulePayload & { row_version: number },
+  ) =>
+    api.put<{ rule: PayrollPayoutRule; warnings: PayrollPayoutRuleWarning[] }>(
+      `/payroll/people/${personId}/payout-rules/${ruleId}`,
+      payload,
+    ).then(response => response.data),
+  // Server pravidlo jen deaktivuje (zmrazené alokace na něj odkazují), proto
+  // DELETE vrací celý řádek. `row_version` jde v těle — axios ho u DELETE
+  // posílá přes `data`.
+  deactivatePersonPayoutRule: (personId: number, ruleId: number, rowVersion: number) =>
+    api.delete<{ rule: PayrollPayoutRule; warnings: PayrollPayoutRuleWarning[] }>(
+      `/payroll/people/${personId}/payout-rules/${ruleId}`,
+      { data: { row_version: rowVersion } },
+    ).then(response => response.data),
+  applyPersonPayoutRuleDefaults: (personId: number) =>
+    api.post<PayrollPayoutRulesResponse>(
+      `/payroll/people/${personId}/payout-rules/apply-defaults`,
+    ).then(response => response.data),
   createEmployment: (personId: number, payload: PayrollEmploymentCreatePayload) =>
     api.post<{ employment: PayrollEmployment }>(`/payroll/people/${personId}/employments`, payload)
       .then(response => response.data.employment),

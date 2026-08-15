@@ -96,6 +96,7 @@ use MyInvoice\Action\Payroll\PayrollJmhzTransportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
 use MyInvoice\Action\Payroll\PayrollNetResultAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
+use MyInvoice\Action\Payroll\PayrollPayoutRulesAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
 use MyInvoice\Action\Payroll\PayrollPersonQuickEditAction;
@@ -854,6 +855,26 @@ final class Routes
             $g->post(
                 '/people/{employeeId:[0-9]+}/accounts/{accountId:[0-9]+}/verify',
                 [PayrollPaymentAction::class, 'verifyPersonAccount'],
+            );
+            $g->get(
+                '/people/{employeeId:[0-9]+}/payout-rules',
+                [PayrollPayoutRulesAction::class, 'list'],
+            );
+            $g->post(
+                '/people/{employeeId:[0-9]+}/payout-rules',
+                [PayrollPayoutRulesAction::class, 'create'],
+            );
+            $g->post(
+                '/people/{employeeId:[0-9]+}/payout-rules/apply-defaults',
+                [PayrollPayoutRulesAction::class, 'applyDefaults'],
+            );
+            $g->put(
+                '/people/{employeeId:[0-9]+}/payout-rules/{ruleId:[0-9]+}',
+                [PayrollPayoutRulesAction::class, 'update'],
+            );
+            $g->delete(
+                '/people/{employeeId:[0-9]+}/payout-rules/{ruleId:[0-9]+}',
+                [PayrollPayoutRulesAction::class, 'deactivate'],
             );
             $g->get(
                 '/submissions/regzel/profile',

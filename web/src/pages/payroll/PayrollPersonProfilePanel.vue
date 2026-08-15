@@ -3,7 +3,14 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   payrollApi,
+  type PayrollPayoutAllocationKind,
+  type PayrollPayoutDestinationKind,
   type PayrollPayoutMethod,
+  type PayrollPayoutRule,
+  type PayrollPayoutRuleProposal,
+  type PayrollPayoutRuleProposalRule,
+  type PayrollPayoutRulePayload,
+  type PayrollPayoutRulesResponse,
   type PayrollPersonAccountVerificationSource,
   type PayrollPersonAddressType,
   type PayrollPersonContactType,
@@ -108,7 +115,29 @@ interface VerificationForm {
   verified_on: string
 }
 
-const { t } = useI18n()
+/**
+ * Editovatelný řádek výplatního pravidla.
+ *
+ * Částka i procenta se drží v uživatelských jednotkách (Kč, %), do haléřů a
+ * basis points se převádějí až v `payoutRulePayload()` — jinak by uživatel
+ * v poli viděl 250000 místo 2 500 Kč.
+ */
+interface PayoutRuleFormRow {
+  id?: number
+  destination_kind: PayrollPayoutDestinationKind
+  bank_account_id: number | null
+  settlement_account_code: string
+  allocation_kind: PayrollPayoutAllocationKind
+  amount_czk: number | null
+  percentage: number | null
+  priority_no: number
+  is_active: boolean
+  /** `null` u hotovosti a zápočtu — ověření tam nedává smysl. */
+  destination_verified: boolean | null
+  row_version: number
+}
+
+const { t, locale } = useI18n()
 const toast = useToast()
 const loading = ref(true)
 const saving = ref(false)
@@ -130,6 +159,13 @@ const form = reactive<ProfileForm>({
   identifiers: [],
   accounts: [],
 })
+// Pravidla nejsou součástí `form`: karta se ukládá jedním PUT, kdežto pravidla
+// mají vlastní endpointy i vlastní row_version, a `hydrate()` po uložení karty
+// celý `form` přepíše. Server verze slouží jako referenční stav pro diff.
+const payoutRules = ref<PayrollPayoutRule[]>([])
+const payoutProposal = ref<PayrollPayoutRuleProposal | null>(null)
+const payoutRuleRows = ref<PayoutRuleFormRow[]>([])
+const applyingPayoutDefaults = ref(false)
 
 const inputClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 focus:border-payroll-500 focus:outline-none focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-100 disabled:text-neutral-500'
 const labelClass = 'block text-xs font-medium text-neutral-600'
@@ -185,6 +221,306 @@ const verificationSourceOptions = computed<SelectOption<PayrollPersonAccountVeri
   { value: 'bank_document', label: t('payroll.people.profile.verification_source.bank_document') },
   { value: 'user_verified', label: t('payroll.people.profile.verification_source.user_verified') },
 ])
+
+const payoutDestinationOptions = computed<SelectOption<PayrollPayoutDestinationKind>[]>(() => [
+  { value: 'bank', label: t('payroll.people.profile.payout_rules.destination_kind.bank') },
+  { value: 'cash', label: t('payroll.people.profile.payout_rules.destination_kind.cash') },
+  // Zápočet nabízíme za stejné podmínky jako u způsobu výplaty; už uložené
+  // pravidlo necháme viditelné, aby nešlo tiše přepnout jinam.
+  ...(partnerSettlementAvailable.value
+    || payoutRuleRows.value.some(row => row.destination_kind === 'partner_settlement')
+    ? [{
+        value: 'partner_settlement' as const,
+        label: t('payroll.people.profile.payout_rules.destination_kind.partner_settlement'),
+      }]
+    : []),
+])
+const payoutAllocationOptions = computed<SelectOption<PayrollPayoutAllocationKind>[]>(() => [
+  { value: 'remainder', label: t('payroll.people.profile.payout_rules.allocation_kind.remainder') },
+  { value: 'percentage', label: t('payroll.people.profile.payout_rules.allocation_kind.percentage') },
+  { value: 'fixed', label: t('payroll.people.profile.payout_rules.allocation_kind.fixed') },
+])
+// Cílem smí být jen už uložený účet — `account:<id>` musí existovat v době
+// zápisu pravidla, nový řádek účtu id dostane teprve uložením karty.
+const payoutAccountOptions = computed<{ value: number; label: string; secondary?: string }[]>(() =>
+  form.accounts
+    .filter(account => account.id !== undefined && account.is_active)
+    .map(account => ({
+      value: account.id as number,
+      label: account.label || account.bank_account_masked,
+      secondary: account.bank_account_masked,
+    })),
+)
+const hasActivePayoutRule = computed(() => payoutRuleRows.value.some(row => row.is_active))
+const payoutProposalSummary = computed(() => {
+  const proposed = payoutProposal.value?.rules[0]
+  return proposed === undefined ? '' : payoutRuleSummary(proposalRuleRow(proposed))
+})
+
+function bankAccountIdFromReference(reference: string | null): number | null {
+  const match = /^account:([1-9][0-9]*)$/.exec(reference ?? '')
+
+  return match === null ? null : Number(match[1])
+}
+
+function toPayoutRuleRow(rule: PayrollPayoutRule): PayoutRuleFormRow {
+  return {
+    id: rule.id,
+    destination_kind: rule.destination_kind,
+    bank_account_id: bankAccountIdFromReference(rule.destination_reference),
+    settlement_account_code: rule.destination_kind === 'partner_settlement'
+      ? rule.destination_reference ?? ''
+      : '',
+    allocation_kind: rule.allocation_kind,
+    amount_czk: rule.amount_minor === null ? null : rule.amount_minor / 100,
+    percentage: rule.basis_points === null ? null : rule.basis_points / 100,
+    priority_no: rule.priority_no,
+    is_active: rule.is_active,
+    destination_verified: rule.destination_verified,
+    row_version: rule.row_version,
+  }
+}
+
+/**
+ * Varuje se jen u aktivního bankovního pravidla na neověřený účet.
+ *
+ * Server tentýž stav vrací i strojově v `warnings`, ale ta zpráva je česky;
+ * panel je dvojjazyčný, takže si větu skládá sám z i18n nad `destination_verified`.
+ * Zdroj pravdy je jeden — příznak z API.
+ */
+function payoutRuleNeedsVerification(row: PayoutRuleFormRow): boolean {
+  return row.is_active && row.destination_verified === false
+}
+
+/**
+ * Proklik na existující akci „Ověřit účet".
+ *
+ * Účty i pravidla jsou ve stejné záložce, takže stačí doscrollovat ke kartě
+ * účtu a zaostřit na jeho tlačítko ověření — uživatel nemusí hledat, kde se
+ * to dělá.
+ */
+function focusAccountVerification(accountId: number | null) {
+  if (accountId === null) return
+  const card = document.getElementById(`payout-account-${accountId}`)
+  if (card === null) return
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const verify = card.querySelector<HTMLButtonElement>('[data-test="verify-account"]')
+  verify?.focus({ preventScroll: true })
+}
+
+function proposalRuleRow(rule: PayrollPayoutRuleProposalRule): PayoutRuleFormRow {
+  return toPayoutRuleRow({
+    ...rule,
+    id: 0,
+    supplier_id: 0,
+    employee_id: props.personId,
+    allocation_reference: '',
+    is_active: true,
+    // Návrh se odvozuje jen z OVĚŘENÉHO účtu (server jinak vrátí blokující
+    // důvod), takže varování u náhledu nikdy nedává smysl.
+    destination_verified: null,
+    row_version: 0,
+    created_at: null,
+    updated_at: null,
+  })
+}
+
+function hydratePayoutRules(response: PayrollPayoutRulesResponse) {
+  payoutRules.value = response.rules
+  payoutProposal.value = response.proposal
+  payoutRuleRows.value = response.rules.map(toPayoutRuleRow)
+}
+
+async function loadPayoutRules() {
+  try {
+    hydratePayoutRules(await payrollApi.personPayoutRules(props.personId))
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.profile.payout_rules.load_failed')))
+  }
+}
+
+function formatCzk(value: number): string {
+  return new Intl.NumberFormat(locale.value === 'en' ? 'en-US' : 'cs-CZ', {
+    style: 'currency',
+    currency: 'CZK',
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
+function formatPercent(value: number): string {
+  return new Intl.NumberFormat(locale.value === 'en' ? 'en-US' : 'cs-CZ', {
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
+function payoutAccountLabel(row: PayoutRuleFormRow): string {
+  if (row.bank_account_id === null) {
+    return t('payroll.people.profile.payout_rules.account_missing')
+  }
+  const account = form.accounts.find(item => item.id === row.bank_account_id)
+
+  return account === undefined
+    ? t('payroll.people.profile.payout_rules.account_unknown', { id: row.bank_account_id })
+    : `${account.label} · ${account.bank_account_masked}`
+}
+
+function payoutDestinationSummary(row: PayoutRuleFormRow): string {
+  if (row.destination_kind === 'cash') {
+    return t('payroll.people.profile.payout_rules.destination_kind.cash')
+  }
+  if (row.destination_kind === 'partner_settlement') {
+    const code = row.settlement_account_code.trim()
+
+    return `${t('payroll.people.profile.payout_rules.destination_kind.partner_settlement')} · `
+      + (code === '' ? t('payroll.people.profile.payout_rules.account_missing') : code)
+  }
+
+  return `${t('payroll.people.profile.payout_rules.destination_kind.bank')} · ${payoutAccountLabel(row)}`
+}
+
+function payoutAllocationSummary(row: PayoutRuleFormRow): string {
+  if (row.allocation_kind === 'percentage') {
+    return t('payroll.people.profile.payout_rules.summary.percentage', {
+      percent: formatPercent(row.percentage ?? 0),
+    })
+  }
+  if (row.allocation_kind === 'fixed') {
+    return t('payroll.people.profile.payout_rules.summary.fixed', {
+      amount: formatCzk(row.amount_czk ?? 0),
+    })
+  }
+
+  return t('payroll.people.profile.payout_rules.summary.remainder')
+}
+
+function payoutRuleSummary(row: PayoutRuleFormRow): string {
+  return `${payoutAllocationSummary(row)} → ${payoutDestinationSummary(row)}`
+}
+
+function payoutRuleDestinationReference(row: PayoutRuleFormRow): string | null {
+  if (row.destination_kind === 'cash') return null
+  if (row.destination_kind === 'partner_settlement') {
+    return row.settlement_account_code.trim().toUpperCase() || null
+  }
+
+  return row.bank_account_id === null ? null : `account:${row.bank_account_id}`
+}
+
+function payoutRulePayload(row: PayoutRuleFormRow, isActive: boolean): PayrollPayoutRulePayload {
+  return {
+    destination_kind: row.destination_kind,
+    destination_reference: payoutRuleDestinationReference(row),
+    allocation_kind: row.allocation_kind,
+    // Server odmítne částku u procent i procenta u pevné částky, proto se
+    // posílá vždycky jen ta hodnota, která k druhu alokace patří.
+    amount_minor: row.allocation_kind === 'fixed'
+      ? Math.round(Number(row.amount_czk ?? 0) * 100)
+      : null,
+    basis_points: row.allocation_kind === 'percentage'
+      ? Math.round(Number(row.percentage ?? 0) * 100)
+      : null,
+    priority_no: Number(row.priority_no),
+    is_active: isActive,
+  }
+}
+
+function payoutRuleFieldsChanged(row: PayoutRuleFormRow, stored: PayrollPayoutRule): boolean {
+  const next = payoutRulePayload(row, true)
+
+  return next.destination_kind !== stored.destination_kind
+    || next.destination_reference !== stored.destination_reference
+    || next.allocation_kind !== stored.allocation_kind
+    || (next.amount_minor ?? null) !== stored.amount_minor
+    || (next.basis_points ?? null) !== stored.basis_points
+    || next.priority_no !== stored.priority_no
+}
+
+function payoutRuleIsPendingDeactivation(row: PayoutRuleFormRow): boolean {
+  return !row.is_active
+    && payoutRules.value.some(rule => rule.id === row.id && rule.is_active)
+}
+
+function addPayoutRule() {
+  const highestPriority = payoutRuleRows.value.reduce(
+    (maximum, row) => Math.max(maximum, Number(row.priority_no)),
+    0,
+  )
+  payoutRuleRows.value.push({
+    destination_kind: payoutAccountOptions.value.length > 0 ? 'bank' : 'cash',
+    bank_account_id: payoutAccountOptions.value[0]?.value ?? null,
+    settlement_account_code: form.partner_settlement_account_code,
+    allocation_kind: 'remainder',
+    amount_czk: null,
+    percentage: null,
+    priority_no: highestPriority === 0 ? 100 : highestPriority + 10,
+    is_active: true,
+    // Ověření zná jen server; nový řádek ho dostane po uložení a přenačtení.
+    destination_verified: null,
+    row_version: 0,
+  })
+}
+
+function removeUnsavedPayoutRule(index: number) {
+  if (payoutRuleRows.value[index]?.id === undefined) payoutRuleRows.value.splice(index, 1)
+}
+
+/**
+ * Odeslání změn pravidel — volá se z `save()`, ne z vlastního tlačítka.
+ *
+ * Pravidla mají vlastní endpointy a vlastní row_version, ale panel drží
+ * konvenci jednoho společného „Uložit" (viz hlavička), takže se řádky editují
+ * lokálně a odešlou se až tady. Deaktivace jde přes DELETE (server pravidlo
+ * jen zneaktivní), případná souběžná změna ostatních polí přes PUT před ním.
+ */
+async function syncPayoutRules() {
+  let changed = false
+  try {
+    for (const row of payoutRuleRows.value) {
+      if (row.id === undefined) {
+        await payrollApi.createPersonPayoutRule(
+          props.personId,
+          payoutRulePayload(row, row.is_active),
+        )
+        changed = true
+        continue
+      }
+      const stored = payoutRules.value.find(rule => rule.id === row.id)
+      if (stored === undefined) continue
+      let rowVersion = stored.row_version
+      if (payoutRuleFieldsChanged(row, stored) || (row.is_active && !stored.is_active)) {
+        rowVersion = (await payrollApi.updatePersonPayoutRule(props.personId, row.id, {
+          ...payoutRulePayload(row, true),
+          row_version: rowVersion,
+        })).rule.row_version
+        changed = true
+      }
+      if (!row.is_active && stored.is_active) {
+        await payrollApi.deactivatePersonPayoutRule(props.personId, row.id, rowVersion)
+        changed = true
+      }
+    }
+    if (changed) toast.success(t('payroll.people.profile.payout_rules.saved'))
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.profile.payout_rules.save_failed')))
+  } finally {
+    // Vždycky přenačíst: po částečně odeslané sadě by lokální row_version
+    // neodpovídaly serveru a další uložení by spadlo na konflikt verzí.
+    await loadPayoutRules()
+  }
+}
+
+async function applyPayoutDefaults() {
+  if (applyingPayoutDefaults.value || !props.canWrite) return
+  applyingPayoutDefaults.value = true
+  try {
+    hydratePayoutRules(await payrollApi.applyPersonPayoutRuleDefaults(props.personId))
+    toast.success(t('payroll.people.profile.payout_rules.defaults_applied'))
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.profile.payout_rules.defaults_failed')))
+  } finally {
+    applyingPayoutDefaults.value = false
+  }
+}
 
 function hydrate(value: PayrollPersonProfile) {
   profile.value = value
@@ -271,7 +607,11 @@ function clearPlaintextInputs() {
 async function load() {
   loading.value = true
   try {
-    hydrate(await payrollApi.personProfile(props.personId))
+    const [loaded] = await Promise.all([
+      payrollApi.personProfile(props.personId),
+      loadPayoutRules(),
+    ])
+    hydrate(loaded)
   } catch (error) {
     toast.error(apiErrorMessage(error, t('payroll.people.profile.load_failed')))
   } finally {
@@ -362,6 +702,12 @@ async function save() {
     hydrate(saved)
     emit('saved', saved)
     toast.success(t('payroll.people.profile.saved'))
+    // Výplatní pravidla se odesílají AŽ TEĎ, jedním společným „Uložit" v hlavičce
+    // panelu — vlastní tlačítko u každého řádku by rozbilo konvenci vícesekčního
+    // editoru. Pořadí je navíc věcné: nově přidaný výplatní účet dostane id
+    // teprve uložením karty a teprve pak na něj může pravidlo `account:<id>`
+    // ukázat.
+    await syncPayoutRules()
   } catch (error) {
     toast.error(apiErrorMessage(error, t('payroll.people.profile.save_failed')))
   } finally {
@@ -682,7 +1028,12 @@ onMounted(load)
             <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="addAccount"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.people.profile.add_account') }}</button>
           </div>
           <div class="space-y-3">
-            <article v-for="(row, index) in form.accounts" :key="row.id ?? `new-account-${index}`" :class="cardClass">
+            <article
+              v-for="(row, index) in form.accounts"
+              :id="row.id ? `payout-account-${row.id}` : undefined"
+              :key="row.id ?? `new-account-${index}`"
+              :class="cardClass"
+            >
               <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
                 <label :class="labelClass">{{ t('payroll.people.profile.account_label') }}<input v-model="row.label" required :disabled="!canWrite" :class="inputClass"></label>
                 <label :class="labelClass">{{ t('payroll.people.profile.account_allocation') }}<input v-model.number="row.allocation_basis_points" required type="number" min="0" max="10000" :disabled="!canWrite" :class="inputClass"></label>
@@ -721,6 +1072,171 @@ onMounted(load)
               <div v-if="canWrite && !row.id" class="mt-3 flex justify-end"><button type="button" :class="btnOutlineSm('danger')" @click="removeUnsaved(form.accounts, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button></div>
             </article>
           </div>
+        </section>
+
+        <section data-test="payout-rules">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="font-semibold text-neutral-900">{{ t('payroll.people.profile.payout_rules.title') }}</h3>
+              <p class="text-xs text-neutral-500">{{ t('payroll.people.profile.payout_rules.hint') }}</p>
+            </div>
+            <button v-if="canWrite" type="button" :class="btnFilled('primary')" data-test="add-payout-rule" @click="addPayoutRule">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+              {{ t('payroll.people.profile.payout_rules.add') }}
+            </button>
+          </div>
+
+          <div
+            v-if="!hasActivePayoutRule"
+            class="mb-3 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-700 dark:bg-warning-500/[0.06]"
+            data-test="payout-rules-missing"
+          >
+            <p class="font-semibold">{{ t('payroll.people.profile.payout_rules.missing_title') }}</p>
+            <p class="mt-1">{{ t('payroll.people.profile.payout_rules.missing_hint') }}</p>
+          </div>
+
+          <div v-if="payoutProposal" class="mb-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p class="text-sm font-medium text-neutral-800">{{ t('payroll.people.profile.payout_rules.defaults_title') }}</p>
+                <p v-if="payoutProposal.applicable" class="mt-1 text-xs text-neutral-600" data-test="payout-defaults-preview">
+                  {{ t('payroll.people.profile.payout_rules.defaults_preview', { summary: payoutProposalSummary }) }}
+                </p>
+                <p v-else-if="payoutProposal.blocked_reason" class="mt-1 text-xs text-neutral-600" data-test="payout-defaults-blocked">
+                  {{ payoutProposal.blocked_reason }}
+                </p>
+              </div>
+              <button
+                v-if="canWrite && payoutProposal.applicable"
+                type="button"
+                :class="btnOutline('primary')"
+                :disabled="applyingPayoutDefaults || saving"
+                data-test="apply-payout-defaults"
+                @click="applyPayoutDefaults"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.checkCircle" /></svg>
+                {{ t('payroll.people.profile.payout_rules.apply_defaults') }}
+              </button>
+            </div>
+          </div>
+
+          <p v-if="payoutRuleRows.length === 0" class="text-sm text-neutral-500">{{ t('payroll.people.profile.payout_rules.empty') }}</p>
+          <div v-else class="space-y-3">
+            <article
+              v-for="(row, index) in payoutRuleRows"
+              :key="row.id ?? `new-payout-rule-${index}`"
+              :class="[cardClass, row.is_active ? '' : 'border-dashed bg-neutral-50']"
+              data-test="payout-rule"
+            >
+              <div class="mb-3 flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p class="text-sm font-medium text-neutral-800" data-test="payout-rule-summary">{{ payoutRuleSummary(row) }}</p>
+                  <p class="mt-0.5 text-xs text-neutral-500">{{ t('payroll.people.profile.payout_rules.priority_summary', { priority: row.priority_no }) }}</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <span
+                    class="rounded px-1.5 py-0.5 text-xs font-medium"
+                    :class="row.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-500'"
+                  >
+                    {{ row.is_active ? t('payroll.people.profile.payout_rules.state_active') : t('payroll.people.profile.payout_rules.state_inactive') }}
+                  </span>
+                  <button
+                    v-if="canWrite && row.id !== undefined && row.is_active"
+                    type="button"
+                    :class="btnOutlineSm('danger')"
+                    data-test="deactivate-payout-rule"
+                    @click="row.is_active = false"
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+                    {{ t('payroll.people.profile.payout_rules.deactivate') }}
+                  </button>
+                  <button
+                    v-else-if="canWrite && row.id !== undefined"
+                    type="button"
+                    :class="btnOutlineSm('neutral')"
+                    data-test="reactivate-payout-rule"
+                    @click="row.is_active = true"
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+                    {{ t('payroll.people.profile.payout_rules.reactivate') }}
+                  </button>
+                  <button
+                    v-else-if="canWrite"
+                    type="button"
+                    :class="btnOutlineSm('danger')"
+                    @click="removeUnsavedPayoutRule(index)"
+                  >
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+                    {{ t('common.remove') }}
+                  </button>
+                </div>
+              </div>
+              <p v-if="payoutRuleIsPendingDeactivation(row)" class="mb-3 text-xs text-warning-700" data-test="payout-rule-pending-deactivation">
+                {{ t('payroll.people.profile.payout_rules.pending_deactivation') }}
+              </p>
+
+              <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+                <label :class="labelClass">
+                  {{ t('payroll.people.profile.payout_rules.destination') }}
+                  <SearchableSelect v-model="row.destination_kind" class="mt-1" :options="payoutDestinationOptions" :clearable="false" :disabled="!canWrite" accent="payroll" />
+                </label>
+                <label v-if="row.destination_kind === 'bank'" :class="[labelClass, 'lg:col-span-2']">
+                  {{ t('payroll.people.profile.payout_rules.account') }}
+                  <SearchableSelect
+                    v-model="row.bank_account_id"
+                    class="mt-1"
+                    :options="payoutAccountOptions"
+                    :clearable="false"
+                    :disabled="!canWrite"
+                    :placeholder="t('payroll.people.profile.payout_rules.account_placeholder')"
+                    accent="payroll"
+                    data-test="payout-rule-account"
+                  />
+                </label>
+                <label v-else-if="row.destination_kind === 'partner_settlement'" :class="[labelClass, 'lg:col-span-2']">
+                  {{ t('payroll.people.profile.payout_rules.settlement_account') }}
+                  <input v-model="row.settlement_account_code" required type="text" maxlength="10" :disabled="!canWrite" :class="[inputClass, 'font-mono uppercase']">
+                </label>
+                <label :class="labelClass">
+                  {{ t('payroll.people.profile.payout_rules.allocation') }}
+                  <SearchableSelect v-model="row.allocation_kind" class="mt-1" :options="payoutAllocationOptions" :clearable="false" :disabled="!canWrite" accent="payroll" />
+                </label>
+                <label v-if="row.allocation_kind === 'fixed'" :class="labelClass">
+                  {{ t('payroll.people.profile.payout_rules.amount') }}
+                  <input v-model.number="row.amount_czk" required type="number" min="0" step="0.01" :disabled="!canWrite" :class="inputClass" data-test="payout-rule-amount">
+                </label>
+                <label v-else-if="row.allocation_kind === 'percentage'" :class="labelClass">
+                  {{ t('payroll.people.profile.payout_rules.percentage') }}
+                  <input v-model.number="row.percentage" required type="number" min="0" max="100" step="0.01" :disabled="!canWrite" :class="inputClass" data-test="payout-rule-percentage">
+                </label>
+                <label :class="labelClass">
+                  {{ t('payroll.people.profile.payout_rules.priority') }}
+                  <input v-model.number="row.priority_no" required type="number" min="0" :disabled="!canWrite" :class="inputClass">
+                </label>
+              </div>
+              <p v-if="row.destination_kind === 'bank' && payoutAccountOptions.length === 0" class="mt-2 text-xs text-warning-700">
+                {{ t('payroll.people.profile.payout_rules.account_required') }}
+              </p>
+              <div
+                v-if="payoutRuleNeedsVerification(row)"
+                class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 dark:bg-warning-500/[0.06]"
+                data-test="payout-rule-unverified"
+              >
+                <p class="text-xs text-warning-700">{{ t('payroll.people.profile.payout_rules.unverified_account') }}</p>
+                <button
+                  v-if="canWrite && row.bank_account_id !== null"
+                  type="button"
+                  :class="btnOutlineSm('warning')"
+                  data-test="payout-rule-verify-account"
+                  @click="focusAccountVerification(row.bank_account_id)"
+                >
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+                  {{ t('payroll.people.profile.payout_rules.verify_account') }}
+                </button>
+              </div>
+            </article>
+          </div>
+          <p v-if="canWrite" class="mt-3 text-xs text-neutral-500">{{ t('payroll.people.profile.payout_rules.save_hint') }}</p>
         </section>
       </div>
     </form>
