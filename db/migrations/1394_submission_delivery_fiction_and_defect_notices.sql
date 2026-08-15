@@ -92,25 +92,38 @@ ALTER TABLE submission_inbox_messages
 -- Rozhodný den smí existovat JEN tam, kde je čím podložený. A naopak: základ,
 -- který doručení tvrdí, bez data nesmí zůstat. Tím je vyloučené jak tiché
 -- „doručeno neznámo kdy", tak „máme datum, ale nevíme odkud".
+-- Každé omezení zvlášť a vždy nejdřív zahodit: MariaDB neumí u CHECK
+-- `IF NOT EXISTS` a migrace se pouští opakovaně (testy i čerstvý klon).
+-- Vzor je z migrací 1027, 1056, 1122 a 1384.
+ALTER TABLE submission_inbox_messages DROP CONSTRAINT IF EXISTS chk_submission_inbox_delivery_basis;
 ALTER TABLE submission_inbox_messages
   ADD CONSTRAINT chk_submission_inbox_delivery_basis
     CHECK (
       (delivery_basis IN ('login','fiction','login_or_fiction') AND delivered_on IS NOT NULL)
       OR (delivery_basis IN ('pending','unknown') AND delivered_on IS NULL)
-    ),
+    );
+
+ALTER TABLE submission_inbox_messages DROP CONSTRAINT IF EXISTS chk_submission_inbox_fiction_days;
+ALTER TABLE submission_inbox_messages
   ADD CONSTRAINT chk_submission_inbox_fiction_days
-    CHECK ((fiction_days IS NULL) = (fiction_days_source IS NULL)),
+    CHECK ((fiction_days IS NULL) = (fiction_days_source IS NULL));
+
+ALTER TABLE submission_inbox_messages DROP CONSTRAINT IF EXISTS chk_submission_inbox_fiction_shift;
+ALTER TABLE submission_inbox_messages
   ADD CONSTRAINT chk_submission_inbox_fiction_shift
     CHECK (
       fiction_due_on IS NULL
       OR (fiction_statutory_on IS NOT NULL AND fiction_due_on >= fiction_statutory_on)
-    ),
+    );
+
+ALTER TABLE submission_inbox_messages DROP CONSTRAINT IF EXISTS chk_submission_inbox_delivery_resolved;
+ALTER TABLE submission_inbox_messages
   ADD CONSTRAINT chk_submission_inbox_delivery_resolved
     CHECK (delivery_basis = 'unknown' OR delivery_resolved_at IS NOT NULL);
 
 -- Fronta „komu dnes uplynula fikce" — jediný dotaz, který sweep potřebuje.
 ALTER TABLE submission_inbox_messages
-  ADD INDEX idx_submission_inbox_delivery (supplier_id, environment, delivery_basis, fiction_due_on);
+  ADD INDEX IF NOT EXISTS idx_submission_inbox_delivery (supplier_id, environment, delivery_basis, fiction_due_on);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 2. Výzva k odstranění vad podání (§ 74 daňového řádu)
