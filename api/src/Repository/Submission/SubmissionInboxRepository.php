@@ -129,6 +129,62 @@ final class SubmissionInboxRepository
         return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
+    /** @return array<string,mixed>|null */
+    public function findById(int $supplierId, int $id): ?array
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . ' WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false ? self::normalize($row) : null;
+    }
+
+    /**
+     * Doručenky, které se k žádnému podání nepřiřadily.
+     *
+     * Nespárovaná doručenka nesmí tiše zmizet: uživatel ji nahrál, aplikace ji
+     * uložila, a když ji neumí přiřadit, musí ji aspoň umět ukázat. Prázdný
+     * seznam tady znamená „všechno je spárované", ne „nic jsme nedostali".
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listUnmatchedReceipts(int $supplierId, string $environment, int $limit = 100): array
+    {
+        $this->assertAvailable();
+        $limit = max(1, min(500, $limit));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ?
+                AND classification = \'delivery_receipt\' AND matched_outbox_id IS NULL
+              ORDER BY id DESC LIMIT ' . $limit
+        );
+        $stmt->execute([$supplierId, $environment]);
+
+        return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Naváže zprávu na podání — jen pokud ještě navázaná není.
+     *
+     * Podmínka `matched_outbox_id IS NULL` je zámek idempotence: druhé
+     * (i souběžné) potvrzení téže doručenky nezmění nic a volající se to dozví
+     * z návratové hodnoty, místo aby přepsal existující vazbu.
+     */
+    public function linkToOutbox(int $supplierId, int $id, int $outboxId): bool
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE ' . self::TABLE . ' SET matched_outbox_id = ?, processed_at = UTC_TIMESTAMP()
+              WHERE id = ? AND supplier_id = ? AND matched_outbox_id IS NULL'
+        );
+        $stmt->execute([$outboxId, $id, $supplierId]);
+
+        return $stmt->rowCount() > 0;
+    }
+
     /** Ruční zařazení zprávy, kterou automat nepoznal. */
     public function reclassify(int $supplierId, int $id, string $classification, ?int $matchedOutboxId): bool
     {

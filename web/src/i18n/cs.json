@@ -14476,7 +14476,50 @@
             "resolvedSent": "Zpráva se v odeslaných našla — podání je odeslané.",
             "resolvedNotSent": "Zpráva v odeslaných není — podání neodešlo a můžete ho bezpečně zařadit znovu.",
             "resolveInconclusive": "Na datovou schránku se nepodařilo dovolat, takže dál nevíme, jestli zpráva odešla. Zkuste to prosím znovu později.",
-            "deliveredNotProcessed": "Doručenka potvrzuje, že zpráva dorazila do schránky úřadu. Neznamená to, že úřad podání zpracoval a přijal — případné vady vám úřad oznámí samostatnou zprávou."
+            "deliveredNotProcessed": "Doručenka potvrzuje, že zpráva dorazila do schránky úřadu. Neznamená to, že úřad podání zpracoval a přijal — případné vady vám úřad oznámí samostatnou zprávou.",
+            "markSent": "Označit jako odesláno ručně",
+            "markSentConfirm": "Zapsat odeslání",
+            "messageIdLabel": "ID zprávy z datové schránky",
+            "messageIdHint": "Najdete ho v detailu odeslané zprávy ve své datové schránce jako „ID zprávy“. Podle něj se pak doručenka spáruje s tímhle podáním sama.",
+            "messageIdRequired": "Vyplňte prosím ID zprávy z datové schránky.",
+            "markedSent": "Odeslání je zapsané. Až dorazí doručenka, nahrajte ji sem.",
+            "validationFailed": "Odeslaný podklad neprošel kontrolou proti XSD schématu. Úřad ho může vrátit jako vadné podání podle § 74 daňového řádu — opravte ho a podejte znovu.",
+            "uploadReceipt": "Nahrát doručenku",
+            "receiptAttached": "Doručenka je připojená ({at}).",
+            "receiptUnverified": "podpis doručenky zatím neověřujeme",
+            "manualDispatch": "Odesláno ručně z vaší datové schránky. Doručenku zatím nemáme."
+        },
+        "manual": {
+            "title": "Co udělat teď",
+            "step1": "Stáhněte si podklad {file}.",
+            "step2": "Ve své datové schránce založte novou zprávu pro schránku {box}, přiložte soubor a do pole „Naše číslo jednací“ vložte značku:",
+            "step3": "Zprávu odešlete, vraťte se sem a klepněte na „Označit jako odesláno ručně“ — vyžádáme si ID odeslané zprávy.",
+            "step4": "Až dorazí doručenka, stáhněte si ji z datové schránky (soubor .zfo) a nahraďte tlačítkem „Nahrát doručenku“.",
+            "why": "Číslo jednací je jediná stopa, podle které doručenku spárujeme s tímhle podáním automaticky. Bez něj vám nabídneme podání, ke kterým by mohla patřit, a vyberete ručně — nic neuhádneme za vás."
+        },
+        "receipts": {
+            "title": "Nezařazené doručenky ({count})",
+            "intro": "Tyhle doručenky jsou uložené, ale k žádnému podání se nepřiřadily. Nezmizely — vyberte podání, ke kterému patří.",
+            "uploadAny": "Nahrát doručenku",
+            "showCandidates": "Nabídnout podání",
+            "noCandidates": "K téhle doručence nemáme co nabídnout. Zkontrolujte, jestli je nahraná ve správné firmě a ve správném prostředí.",
+            "candidatesHint": "Doručenku jsme nespárovali automaticky. Vyberte podání, ke kterému patří:",
+            "assign": "Přiřadit k tomuhle podání",
+            "messageId": "ID zprávy",
+            "deliveredAt": "Doručeno",
+            "noSubject": "Bez věci",
+            "reasons": {
+                "recipient_box": "sedí schránka příjemce",
+                "subject": "sedí věc",
+                "period": "sedí období",
+                "recipient_box_mismatch": "schránka příjemce nesedí — zkontrolujte to",
+                "environment_mismatch": "podání je z jiného prostředí"
+            },
+            "matchedBy": {
+                "correlation_reference": "spárováno podle naší spisové značky",
+                "external_message_id": "spárováno podle ID zprávy",
+                "manual": "přiřadili jste ručně"
+            }
         },
         "inbox": {
             "empty": "Žádné stažené zprávy.",

@@ -24,6 +24,8 @@ import {
   type InboxPollState,
   type OutboxAttempt,
   type OutboxSubmission,
+  type ReceiptCandidate,
+  type ReceiptUploadResult,
   type RecipientKind,
   type SubmissionRecipient,
 } from '@/api/dataBox'
@@ -49,6 +51,17 @@ const inbox = ref<InboxMessage[]>([])
 const pollState = ref<InboxPollState | null>(null)
 const attempts = ref<Record<number, OutboxAttempt[]>>({})
 const expanded = ref<number | null>(null)
+
+// ── Ruční cesta: člověk odešle, člověk přinese doručenku ─────────────────────
+// Strojový transport do ISDS nasazený není, takže tohle není nouzový režim,
+// ale běžný provoz. UI proto nesmí jen konstatovat stav — musí říct, co udělat.
+const unmatchedReceipts = ref<InboxMessage[]>([])
+const receiptCandidates = ref<Record<number, ReceiptCandidate[]>>({})
+const lastUpload = ref<ReceiptUploadResult | null>(null)
+const receiptInput = ref<HTMLInputElement | null>(null)
+const uploadTargetId = ref<number | null>(null)
+const markSentFor = ref<number | null>(null)
+const markSentMessageId = ref('')
 
 // ── Přístup: pouze systémový certifikát ──────────────────────────────────────
 // Přihlašovací jméno a heslo tu vědomě nejsou: přístupové údaje ke schránce
@@ -101,31 +114,142 @@ function acceptanceTone(state: AcceptanceState): string {
   }
 }
 
-/** Právě jedna plná primární akce podle stavu — zbytek outline. */
-function primaryAction(row: OutboxSubmission): 'confirm' | 'resolve' | null {
-  if (row.dispatch_state === 'ready') return 'confirm'
+/**
+ * Právě jedna plná primární akce podle stavu — zbytek outline.
+ *
+ * U datovky je pro připravené podání primární akcí „označit jako odesláno",
+ * ne „odeslat datovkou": strojový transport nasazený není, takže zprávu
+ * doopravdy odesílá člověk ve své schránce. Nabízet jako hlavní krok tlačítko,
+ * které dnes vždycky skončí překážkou, by uživatele posílalo do zdi.
+ */
+function primaryAction(row: OutboxSubmission): 'confirm' | 'resolve' | 'markSent' | 'uploadReceipt' | null {
   if (row.dispatch_state === 'send_uncertain' || row.dispatch_state === 'sending') return 'resolve'
+  if (row.dispatch_state === 'ready') return row.channel === 'isds' ? 'markSent' : 'confirm'
+  if (row.dispatch_state === 'sent' && row.channel === 'isds' && !row.receipt_document_id) return 'uploadReceipt'
   return null
+}
+
+/** Ukazuje se u připraveného ISDS podání: konkrétní postup, ne obecná nápověda. */
+function needsManualSteps(row: OutboxSubmission): boolean {
+  return row.channel === 'isds' && row.dispatch_state === 'ready'
 }
 
 async function loadAll() {
   loading.value = true
   try {
-    const [creds, recips, out, inb] = await Promise.all([
+    const [creds, recips, out, inb, unmatched] = await Promise.all([
       dataBoxApi.credentials(),
       dataBoxApi.recipients(),
       dataBoxApi.outbox(environment.value),
       dataBoxApi.inbox(environment.value),
+      // Nespárovaná doručenka nesmí zmizet z očí — načítá se vždycky, ne až
+      // na vyžádání.
+      dataBoxApi.unmatchedReceipts(environment.value).catch(() => [] as InboxMessage[]),
     ])
     credentials.value = creds
     recipients.value = recips
     outbox.value = out
     inbox.value = inb.items
     pollState.value = inb.state
+    unmatchedReceipts.value = unmatched
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
     loading.value = false
+  }
+}
+
+// ── Ruční odeslání ───────────────────────────────────────────────────────────
+
+function startMarkSent(row: OutboxSubmission) {
+  markSentFor.value = markSentFor.value === row.id ? null : row.id
+  markSentMessageId.value = ''
+}
+
+async function submitMarkSent(row: OutboxSubmission) {
+  const messageId = markSentMessageId.value.trim()
+  if (messageId === '') {
+    toast.error(t('databox.outbox.messageIdRequired'))
+    return
+  }
+  busyId.value = row.id
+  try {
+    const result = await dataBoxApi.markSentManually(row.id, messageId)
+    if (result.validation?.status === 'failed') {
+      toast.error(t('databox.outbox.validationFailed'))
+    } else {
+      toast.success(t('databox.outbox.markedSent'))
+    }
+    markSentFor.value = null
+    markSentMessageId.value = ''
+    await loadAll()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    busyId.value = null
+  }
+}
+
+// ── Doručenka ────────────────────────────────────────────────────────────────
+
+/** `null` = doručenka bez určeného podání; párování hledá aplikace. */
+function openReceiptPicker(outboxId: number | null) {
+  uploadTargetId.value = outboxId
+  receiptInput.value?.click()
+}
+
+async function onReceiptChosen(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  input.value = ''
+  if (!file) return
+
+  const target = uploadTargetId.value
+  saving.value = true
+  lastUpload.value = null
+  try {
+    const result = target !== null
+      ? await dataBoxApi.uploadReceiptFor(target, environment.value, file)
+      : await dataBoxApi.uploadReceipt(environment.value, file)
+    lastUpload.value = result
+    if (result.status === 'matched') {
+      toast.success(result.message)
+    } else {
+      // Nespárováno není chyba uživatele ani selhání — je to stav, ve kterém
+      // se čeká na jeho rozhodnutí. Proto informace, ne červená hláška.
+      toast.success(result.message)
+    }
+    await loadAll()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    saving.value = false
+    uploadTargetId.value = null
+  }
+}
+
+async function showCandidates(message: InboxMessage) {
+  try {
+    receiptCandidates.value = {
+      ...receiptCandidates.value,
+      [message.id]: await dataBoxApi.receiptCandidates(message.id),
+    }
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  }
+}
+
+async function assignReceipt(inboxMessageId: number, outboxId: number) {
+  busyId.value = outboxId
+  try {
+    const result = await dataBoxApi.matchReceipt(inboxMessageId, outboxId)
+    toast.success(result.message)
+    lastUpload.value = null
+    await loadAll()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    busyId.value = null
   }
 }
 
@@ -409,6 +533,111 @@ onMounted(loadAll)
 
     <!-- ─────────────── Odchozí ─────────────── -->
     <section v-else-if="tab === 'outbox'" class="space-y-3">
+      <!-- Jediný skrytý file input pro celou sekci; cíl určuje uploadTargetId. -->
+      <input ref="receiptInput" type="file" accept=".zfo" class="hidden" @change="onReceiptChosen" />
+
+      <!-- Výsledek posledního nahrání, které se nespárovalo samo.
+           Prázdno by tady bylo nejhorší možná odpověď: uživatel soubor nahrál
+           a musí vidět, co s ním je a co má udělat dál. -->
+      <div
+        v-if="lastUpload && lastUpload.status !== 'matched'"
+        class="rounded-lg border border-warning-300 bg-warning-50 p-4 text-sm dark:border-warning-700 dark:bg-warning-900/20"
+      >
+        <div class="font-medium">{{ lastUpload.message }}</div>
+        <div class="mt-1 text-xs text-neutral-600 dark:text-neutral-300">
+          {{ t('databox.receipts.messageId') }}: <code>{{ lastUpload.receipt.message_id }}</code>
+          <span v-if="lastUpload.receipt.delivered_at">
+            · {{ t('databox.receipts.deliveredAt') }}: {{ lastUpload.receipt.delivered_at }}
+          </span>
+        </div>
+        <div v-if="lastUpload.candidates.length" class="mt-3 space-y-2">
+          <div class="text-xs font-medium uppercase text-neutral-500">{{ t('databox.receipts.candidatesHint') }}</div>
+          <div
+            v-for="c in lastUpload.candidates"
+            :key="c.id"
+            class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-white p-2 dark:bg-neutral-900"
+          >
+            <div class="min-w-0">
+              <div class="font-medium">{{ c.subject }}</div>
+              <div class="text-xs text-neutral-500 dark:text-neutral-400">
+                {{ c.agenda_code }} · <code>{{ c.correlation_reference }}</code> · {{ c.created_at }}
+              </div>
+              <div v-if="c.reasons.length" class="text-xs text-neutral-500 dark:text-neutral-400">
+                {{ c.reasons.map(r => t(`databox.receipts.reasons.${r}`)).join(' · ') }}
+              </div>
+            </div>
+            <button
+              type="button"
+              :class="btnOutlineSm('primary')"
+              :disabled="busyId === c.id"
+              @click="assignReceipt(lastUpload.inbox_message_id, c.id)"
+            >
+              {{ t('databox.receipts.assign') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Nespárované doručenky. Nezmizely, jen čekají na člověka. -->
+      <div
+        v-if="unmatchedReceipts.length"
+        class="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-700 dark:bg-neutral-900"
+      >
+        <h2 class="font-medium">{{ t('databox.receipts.title', { count: unmatchedReceipts.length }) }}</h2>
+        <p class="mb-3 text-sm text-neutral-500 dark:text-neutral-400">{{ t('databox.receipts.intro') }}</p>
+        <div v-for="m in unmatchedReceipts" :key="m.id" class="border-t border-neutral-100 py-2 dark:border-neutral-800">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="min-w-0">
+              <div class="text-sm font-medium">{{ m.subject ?? t('databox.receipts.noSubject') }}</div>
+              <div class="text-xs text-neutral-500 dark:text-neutral-400">
+                {{ t('databox.receipts.messageId') }}: <code>{{ m.external_message_id }}</code>
+                <span v-if="m.delivered_at"> · {{ m.delivered_at }}</span>
+              </div>
+            </div>
+            <button type="button" :class="btnOutlineSm('primary')" @click="showCandidates(m)">
+              {{ t('databox.receipts.showCandidates') }}
+            </button>
+          </div>
+          <div v-if="receiptCandidates[m.id]" class="mt-2 space-y-2">
+            <p v-if="!receiptCandidates[m.id].length" class="text-sm text-neutral-500 dark:text-neutral-400">
+              {{ t('databox.receipts.noCandidates') }}
+            </p>
+            <div
+              v-for="c in receiptCandidates[m.id]"
+              :key="c.id"
+              class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-neutral-50 p-2 dark:bg-neutral-800"
+            >
+              <div class="min-w-0 text-sm">
+                <div class="font-medium">{{ c.subject }}</div>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400">
+                  {{ c.agenda_code }} · <code>{{ c.correlation_reference }}</code>
+                  <span v-if="c.reasons.length">
+                    · {{ c.reasons.map(r => t(`databox.receipts.reasons.${r}`)).join(' · ') }}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                :class="btnOutlineSm('primary')"
+                :disabled="busyId === c.id"
+                @click="assignReceipt(m.id, c.id)"
+              >
+                {{ t('databox.receipts.assign') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap gap-2">
+        <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="openReceiptPicker(null)">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" />
+          </svg>
+          {{ t('databox.receipts.uploadAny') }}
+        </button>
+      </div>
+
       <EmptyState v-if="!loading && outbox.length === 0" icon="send" :title="t('databox.outbox.empty')" />
 
       <div
@@ -459,11 +688,133 @@ onMounted(loadAll)
           {{ row.last_error_message }}
         </p>
 
+        <!-- ── Co udělat teď ──
+             Ne nápověda někde stranou: konkrétní postup u konkrétního podání,
+             včetně čísla jednacího, díky kterému se doručenka spáruje sama. -->
+        <div
+          v-if="needsManualSteps(row)"
+          class="mt-3 rounded-md border border-primary-200 bg-primary-50 p-3 text-sm dark:border-primary-800 dark:bg-primary-900/20"
+        >
+          <div class="font-medium">{{ t('databox.manual.title') }}</div>
+          <ol class="mt-2 list-decimal space-y-1 pl-5">
+            <li>{{ t('databox.manual.step1', { file: row.artifact_filename }) }}</li>
+            <li>
+              {{ t('databox.manual.step2', { box: row.recipient_box_id ?? '—' }) }}
+              <code class="rounded bg-white px-1 dark:bg-neutral-900">{{ row.correlation_reference }}</code>
+            </li>
+            <li>{{ t('databox.manual.step3') }}</li>
+            <li>{{ t('databox.manual.step4') }}</li>
+          </ol>
+          <p class="mt-2 text-xs text-neutral-600 dark:text-neutral-300">{{ t('databox.manual.why') }}</p>
+        </div>
+
+        <!-- Doručenka jako důkaz — a hned vedle poctivé „podpis neověřujeme". -->
+        <p
+          v-if="row.receipt_document_id"
+          class="mt-3 rounded-md bg-neutral-50 p-2 text-sm text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
+        >
+          {{ t('databox.outbox.receiptAttached', { at: row.receipt_attached_at ?? '' }) }}
+          <span v-if="row.receipt_matched_by">
+            ({{ t(`databox.receipts.matchedBy.${row.receipt_matched_by}`) }})
+          </span>
+          — {{ t('databox.outbox.receiptUnverified') }}
+        </p>
+        <p v-else-if="row.dispatch_mode === 'manual'" class="mt-3 text-sm text-neutral-500 dark:text-neutral-400">
+          {{ t('databox.outbox.manualDispatch') }}
+        </p>
+
+        <p
+          v-if="row.artifact_validation_status === 'failed'"
+          class="mt-3 rounded-md bg-danger-50 p-2 text-sm text-danger-700 dark:bg-danger-900/20 dark:text-danger-200"
+        >
+          {{ t('databox.outbox.validationFailed') }}
+        </p>
+
+        <!-- „Odeslal jsem to" — ID zprávy je přesný identifikátor, ne formalita. -->
+        <div
+          v-if="markSentFor === row.id"
+          class="mt-3 rounded-md border border-neutral-200 p-3 dark:border-neutral-700"
+        >
+          <label class="block">
+            <span class="text-sm font-medium">{{ t('databox.outbox.messageIdLabel') }}</span>
+            <input v-model="markSentMessageId" type="text" maxlength="64" class="form-input mt-1 w-full sm:w-72" />
+            <span class="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+              {{ t('databox.outbox.messageIdHint') }}
+            </span>
+          </label>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              :class="btnFilled('primary')"
+              :disabled="busyId === row.id"
+              @click="submitMarkSent(row)"
+            >
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
+              </svg>
+              {{ t('databox.outbox.markSentConfirm') }}
+            </button>
+            <button type="button" :class="btnOutline('neutral')" @click="markSentFor = null">
+              {{ t('common.cancel') }}
+            </button>
+          </div>
+        </div>
+
         <div class="mt-3 flex flex-wrap gap-2">
+          <button
+            v-if="primaryAction(row) === 'markSent' && markSentFor !== row.id"
+            type="button"
+            :class="btnFilled('primary')"
+            :disabled="busyId === row.id"
+            @click="startMarkSent(row)"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
+            </svg>
+            {{ t('databox.outbox.markSent') }}
+          </button>
+          <button
+            v-if="primaryAction(row) === 'uploadReceipt'"
+            type="button"
+            :class="btnFilled('success')"
+            :disabled="saving"
+            @click="openReceiptPicker(row.id)"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" />
+            </svg>
+            {{ t('databox.outbox.uploadReceipt') }}
+          </button>
+          <button
+            v-else-if="row.channel === 'isds' && !row.receipt_document_id && row.dispatch_state !== 'cancelled'"
+            type="button"
+            :class="btnOutline('neutral')"
+            :disabled="saving"
+            @click="openReceiptPicker(row.id)"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" />
+            </svg>
+            {{ t('databox.outbox.uploadReceipt') }}
+          </button>
           <button
             v-if="primaryAction(row) === 'confirm'"
             type="button"
             :class="btnFilled('success')"
+            :disabled="busyId === row.id"
+            @click="confirmSend(row)"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send" />
+            </svg>
+            {{ t('databox.outbox.confirmSend') }}
+          </button>
+          <!-- Strojové odeslání zůstává dostupné, ale ne jako hlavní krok:
+               dokud transport není nasazený, skončí srozumitelnou překážkou. -->
+          <button
+            v-if="row.dispatch_state === 'ready' && row.channel === 'isds'"
+            type="button"
+            :class="btnOutline('primary')"
             :disabled="busyId === row.id"
             @click="confirmSend(row)"
           >

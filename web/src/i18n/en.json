@@ -14476,7 +14476,50 @@
             "resolvedSent": "The message was found among sent messages — the filing did go out.",
             "resolvedNotSent": "The message is not among sent messages — nothing was sent and you can safely queue it again.",
             "resolveInconclusive": "The data box could not be reached, so we still do not know whether the message was sent. Please try again later.",
-            "deliveredNotProcessed": "The delivery receipt confirms the message reached the authority’s mailbox. It does not mean the authority has processed and accepted the filing — any defects will be notified in a separate message."
+            "deliveredNotProcessed": "The delivery receipt confirms the message reached the authority’s mailbox. It does not mean the authority has processed and accepted the filing — any defects will be notified in a separate message.",
+            "markSent": "Mark as sent manually",
+            "markSentConfirm": "Record the dispatch",
+            "messageIdLabel": "Data box message ID",
+            "messageIdHint": "You will find it in the sent message detail in your data box as “Message ID”. The delivery receipt is then matched to this filing automatically.",
+            "messageIdRequired": "Please fill in the data box message ID.",
+            "markedSent": "The dispatch is recorded. Upload the delivery receipt here once it arrives.",
+            "validationFailed": "The submitted file failed validation against the XSD schema. The authority may return it as a defective filing under § 74 of the Tax Code — fix it and file again.",
+            "uploadReceipt": "Upload delivery receipt",
+            "receiptAttached": "Delivery receipt attached ({at}).",
+            "receiptUnverified": "we do not verify the receipt signature yet",
+            "manualDispatch": "Sent manually from your data box. No delivery receipt yet."
+        },
+        "manual": {
+            "title": "What to do now",
+            "step1": "Download the file {file}.",
+            "step2": "In your data box create a new message to mailbox {box}, attach the file and put this reference into the “Our reference number” field:",
+            "step3": "Send the message, come back here and click “Mark as sent manually” — we will ask for the message ID.",
+            "step4": "Once the delivery receipt arrives, download it from your data box (a .zfo file) and upload it here with “Upload delivery receipt”.",
+            "why": "The reference number is the only trace that lets us match the delivery receipt to this filing automatically. Without it we will offer the filings it might belong to and you pick one — we never guess for you."
+        },
+        "receipts": {
+            "title": "Unassigned delivery receipts ({count})",
+            "intro": "These receipts are stored but not linked to any filing. They are not lost — pick the filing they belong to.",
+            "uploadAny": "Upload delivery receipt",
+            "showCandidates": "Offer filings",
+            "noCandidates": "We have nothing to offer for this receipt. Check that it was uploaded under the right company and environment.",
+            "candidatesHint": "We did not match this receipt automatically. Pick the filing it belongs to:",
+            "assign": "Assign to this filing",
+            "messageId": "Message ID",
+            "deliveredAt": "Delivered",
+            "noSubject": "No subject",
+            "reasons": {
+                "recipient_box": "recipient mailbox matches",
+                "subject": "subject matches",
+                "period": "period matches",
+                "recipient_box_mismatch": "recipient mailbox does not match — please check",
+                "environment_mismatch": "the filing is from a different environment"
+            },
+            "matchedBy": {
+                "correlation_reference": "matched by our reference number",
+                "external_message_id": "matched by message ID",
+                "manual": "you assigned it manually"
+            }
         },
         "inbox": {
             "empty": "No downloaded messages.",

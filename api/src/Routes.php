@@ -1687,6 +1687,15 @@ final class Routes
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/confirm',  [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'confirm']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/resolve',  [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'resolve']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/cancel',   [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'cancel']);
+        // Ruční cesta: uživatel odešle zprávu ze své datové schránky a přinese
+        // zpátky doručenku. Bez těchhle dvou kroků by podání odeslané ručně
+        // zůstalo navždy v „připraveno".
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/mark-sent', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'markSent']);
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/receipt',   [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'upload']);
+        $app->post   ('/api/submissions/receipts',                     [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'upload']);
+        $app->get    ('/api/submissions/receipts/unmatched',           [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'unmatched']);
+        $app->get    ('/api/submissions/receipts/{id:[0-9]+}/candidates', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'candidates']);
+        $app->post   ('/api/submissions/receipts/{id:[0-9]+}/match',   [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'match']);
         $app->get    ('/api/submissions/inbox',            [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'list']);
         $app->post   ('/api/submissions/inbox/poll',       [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'poll']);
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/classify', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'reclassify']);
