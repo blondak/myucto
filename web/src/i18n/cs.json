@@ -1603,8 +1603,43 @@
                 "inactive": "Neaktivní"
             },
             "needs_setup": "Vyžaduje doplnění",
-            "show_detail": "Upravit zaměstnance",
-            "hide_detail": "Skrýt detail",
+            "edit_person": "Upravit zaměstnance",
+            "back_to_list": "Zpět na přehled",
+            "employments_title": "Pracovní vztahy",
+            "header_employments": "Bez pracovního vztahu | 1 pracovní vztah | {count} pracovní vztahy | {count} pracovních vztahů",
+            "breadcrumbs": {
+                "payroll": "Mzdy",
+                "people": "Zaměstnanci"
+            },
+            "registration_legacy_warning": "Tento vztah byl převzat ze starší evidence. Než podáte přihlášku, ověřte, jestli zaměstnanec u ČSSZ přihlášený už není.",
+            "delete": {
+                "action": "Smazat pracovní vztah",
+                "person_action": "Smazat zaměstnance",
+                "confirm": "Smaže se pracovní vztah včetně {summary}. Tuhle akci nelze vzít zpět.",
+                "confirm_empty": "Smaže se pracovní vztah. Tuhle akci nelze vzít zpět.",
+                "person_confirm": "Smaže se zaměstnanec {name} včetně {summary}. Tuhle akci nelze vzít zpět.",
+                "person_confirm_empty": "Smaže se zaměstnanec {name}. Tuhle akci nelze vzít zpět.",
+                "done": "Pracovní vztah byl smazán.",
+                "person_done": "Zaměstnanec byl smazán.",
+                "blocked_title": "Smazat nejde:",
+                "cascade": {
+                    "terms": "žádná verze podmínek | 1 verze podmínek | {count} verze podmínek | {count} verzí podmínek",
+                    "checklist": "žádná položka checklistu | 1 položka checklistu | {count} položky checklistu | {count} položek checklistu",
+                    "events": "žádný záznam historie | 1 záznam historie | {count} záznamy historie | {count} záznamů historie",
+                    "dimensions": "žádná dimenze | 1 přiřazená dimenze | {count} přiřazené dimenze | {count} přiřazených dimenzí",
+                    "components": "žádná pravidelná složka | 1 pravidelná složka mzdy | {count} pravidelné složky mzdy | {count} pravidelných složek mzdy",
+                    "time": "žádný záznam docházky | 1 záznam docházky a kalendáře | {count} záznamy docházky a kalendáře | {count} záznamů docházky a kalendáře",
+                    "absences": "žádná absence | 1 záznam absence a dovolené | {count} záznamy absencí a dovolené | {count} záznamů absencí a dovolené"
+                },
+                "person_cascade": {
+                    "employments": "žádný pracovní vztah | 1 pracovní vztah | {count} pracovní vztahy | {count} pracovních vztahů",
+                    "profile": "žádný údaj profilu | 1 údaj profilu a osobních dat | {count} údaje profilu a osobních dat | {count} údajů profilu a osobních dat",
+                    "dependants": "žádná vyživovaná osoba | 1 vyživovaná osoba | {count} vyživované osoby | {count} vyživovaných osob",
+                    "tax": "žádné daňové prohlášení | 1 daňové prohlášení a sleva | {count} daňová prohlášení a slevy | {count} daňových prohlášení a slev",
+                    "insurance": "žádný záznam pojištění | 1 záznam evidence pojištění | {count} záznamy evidence pojištění | {count} záznamů evidence pojištění",
+                    "payout_rules": "žádné výplatní pravidlo | 1 výplatní pravidlo | {count} výplatní pravidla | {count} výplatních pravidel"
+                }
+            },
             "detail_hint": "Každý vztah má vlastní historii podmínek, stav, checklist a auditní časovou osu.",
             "dependants": {
                 "title": "Vyživované osoby a daňové zvýhodnění",
@@ -1888,7 +1923,6 @@
                     "save_failed": "Výplatní pravidla se nepodařilo uložit."
                 }
             },
-            "legacy_projection": "Převzato z původní agendy",
             "primary": "Primární vztah",
             "add_employment": "Přidat pracovní vztah",
             "employment_created": "Pracovní vztah byl založen.",
@@ -2004,6 +2038,7 @@
             },
             "checklist": {
                 "employment_contract": "Pracovní smlouva / dohoda",
+                "legacy_start_date": "Doplnit datum nástupu",
                 "health_insurance_registration": "Registrace zdravotní pojišťovny",
                 "social_jmhz_registration": "Registrace ČSSZ / JMHZ",
                 "tax_declaration": "Prohlášení k dani",

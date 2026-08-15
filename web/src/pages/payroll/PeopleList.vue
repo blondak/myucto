@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
@@ -14,6 +14,7 @@ import {
   type PayrollPersonQuickEditResponse,
   type PayrollRelationType,
 } from '@/api/payroll'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
@@ -26,6 +27,7 @@ import { todayIso } from './employmentLifecycleUi'
 
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const toast = useToast()
 const auth = useAuthStore()
 const loading = ref(true)
@@ -45,6 +47,7 @@ const newEmployment = ref<PayrollEmploymentCreatePayload | null>(null)
 const newEmploymentMonthlyGross = ref<number | null>(null)
 const newEmploymentError = ref('')
 const advancedProfileOpen = ref(false)
+const deletingPerson = ref(false)
 const canCreatePerson = computed(() => auth.canWrite('payroll.person.write'))
 const canQuickEditPerson = computed(() =>
   auth.canWrite('payroll.person.write')
@@ -85,6 +88,123 @@ const filteredPeople = computed(() => {
       && (!query || normalizeSearch(person.full_name).includes(query))
   })
 })
+
+/**
+ * Editace osoby je vlastní POHLED, ne panel nad seznamem.
+ *
+ * Dřív zůstal seznam pod formulářem viditelný, takže vedle upravované osoby
+ * svítily i ostatní a nebylo poznat, koho se editace týká. Seznam se proto během
+ * editace schová a nahoře je vidět, koho upravuji.
+ *
+ * Zůstáváme u jedné komponenty a jen přepínáme pohled (místo vlastní routy
+ * `/payroll/people/:id`): detail osoby je poskládaný ze čtyř panelů, které si
+ * navzájem předávají stav (`updateQuickEdit`, `updateEmployment`, `startCreate`),
+ * a jejich rozpojení do samostatné routy by znamenalo přepsat půlku komponenty.
+ * Adresa přesto zůstává sdílitelná: výběr se zrcadlí do `?person=<id>`, takže
+ * odkaz i tlačítko Zpět v prohlížeči fungují.
+ */
+const selectedPerson = computed<PayrollPersonListItem | null>(
+  () => people.value.find(item => item.id === expandedId.value) ?? null,
+)
+const selectedDetail = computed<PayrollPerson | null>(
+  () => (expandedId.value === null ? null : details.value[expandedId.value] ?? null),
+)
+const editing = computed(() => expandedId.value !== null)
+
+/**
+ * Hlavička bere přednostně načtený detail — je čerstvější než řádek seznamu.
+ * Jméno je ZOBRAZOVANÉ (`full_name`), ne strukturované: osoba může mít vyplněné
+ * jen celé jméno a pole Jméno/Příjmení prázdná, a hlavička by pak byla anonymní.
+ */
+const selectedSummary = computed<PayrollPersonListItem | null>(
+  () => selectedDetail.value ?? selectedPerson.value,
+)
+const selectedName = computed(() => selectedSummary.value?.full_name ?? '')
+const selectedEmploymentCount = computed(
+  () => selectedDetail.value?.employments.length
+    ?? selectedPerson.value?.employment_count
+    ?? 0,
+)
+
+function backToList() {
+  expandedId.value = null
+  advancedProfileOpen.value = false
+  creatingForId.value = null
+  newEmployment.value = null
+}
+
+// Výběr se zrcadlí do adresy, aby šel poslat a uložit do záložek. Hledání ani
+// filtr se přitom nikde neresetují — návrat zpět je proto zachová.
+watch(expandedId, (value) => {
+  const person = value === null ? undefined : String(value)
+  if ((route.query.person ?? undefined) === person) return
+  void router.replace({ query: { ...route.query, person } })
+})
+
+const personDeleteCascade = computed<string>(() => {
+  const cascade = selectedPerson.value?.delete_cascade ?? {}
+  return Object.entries(cascade)
+    .filter(([, count]) => count > 0)
+    .map(([key, count]) => t(`payroll.people.delete.person_cascade.${key}`, { count }, count))
+    .join(', ')
+})
+
+const personDeleteBlocker = computed(() => selectedPerson.value?.delete_blocker ?? null)
+
+async function removePerson() {
+  const person = selectedPerson.value
+  if (!person || deletingPerson.value || !person.can_delete) return
+  const summary = personDeleteCascade.value
+  const question = summary === ''
+    ? t('payroll.people.delete.person_confirm_empty', { name: selectedName.value })
+    : t('payroll.people.delete.person_confirm', { name: selectedName.value, summary })
+  if (!window.confirm(question)) return
+
+  deletingPerson.value = true
+  try {
+    await payrollApi.deletePerson(person.id)
+    backToList()
+    delete details.value[person.id]
+    people.value = people.value.filter(item => item.id !== person.id)
+    toast.success(t('payroll.people.delete.person_done'))
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.mutation_failed')))
+  } finally {
+    deletingPerson.value = false
+  }
+}
+
+const personActions = computed<ActionItem[]>(() => [
+  {
+    key: 'add-employment',
+    label: t('payroll.people.add_employment'),
+    icon: 'plus',
+    tier: 'primary',
+    variant: 'primary',
+    show: auth.canWrite('payroll.employment.write') && expandedId.value !== null,
+    run: () => { if (expandedId.value !== null) startCreate(expandedId.value) },
+  },
+  {
+    // Nevratná akce patří do „…", ne mezi hlavní tlačítka.
+    key: 'delete-person',
+    label: t('payroll.people.delete.person_action'),
+    icon: 'trash',
+    tier: 'advanced',
+    variant: 'danger',
+    disabled: deletingPerson.value,
+    show: canCreatePerson.value && selectedPerson.value?.can_delete === true,
+    run: () => void removePerson(),
+  },
+])
+
+function removeEmploymentFromDetail(personId: number, employmentId: number) {
+  const detail = details.value[personId]
+  if (detail) {
+    detail.employments = detail.employments.filter(item => item.id !== employmentId)
+  }
+  const listItem = people.value.find(item => item.id === personId)
+  if (listItem && listItem.employment_count > 0) listItem.employment_count -= 1
+}
 
 function normalizeSearch(value: string): string {
   return value
@@ -342,7 +462,7 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-6">
-    <header class="flex flex-wrap items-start justify-between gap-3">
+    <header v-if="!editing" class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h1 class="text-2xl font-semibold text-neutral-900">{{ t('payroll.people.title') }}</h1>
         <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.people.subtitle') }}</p>
@@ -360,12 +480,12 @@ onMounted(async () => {
       </button>
     </header>
 
-    <section class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
+    <section v-if="!editing" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
       {{ t('payroll.people.shared_recap_hint') }}
     </section>
 
     <form
-      v-if="showEmployeeForm"
+      v-if="showEmployeeForm && !editing"
       class="rounded-xl border border-payroll-500/30 bg-surface p-4 shadow-sm sm:p-5"
       data-test="new-employee-form"
       @submit.prevent="createEmployee"
@@ -449,7 +569,7 @@ onMounted(async () => {
       <p class="mt-1 text-xs">{{ t('payroll.people.create.next_steps_hint') }}</p>
     </section>
 
-    <section class="rounded-xl border border-neutral-200 bg-surface p-3 shadow-sm sm:p-4">
+    <section v-if="!editing" class="rounded-xl border border-neutral-200 bg-surface p-3 shadow-sm sm:p-4">
       <div class="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div class="grid min-w-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
           <label class="min-w-0 text-xs font-medium text-neutral-600">
@@ -482,11 +602,73 @@ onMounted(async () => {
       </div>
     </section>
 
+    <div v-if="editing && loadingDetailId !== null" class="h-24 animate-pulse rounded-lg bg-neutral-100" />
+
     <div
-      v-if="expandedId !== null && details[expandedId]"
+      v-else-if="expandedId !== null && details[expandedId]"
       class="space-y-4"
       data-test="selected-person-editor"
     >
+      <!--
+        Nahoře musí být vidět, KOHO upravuji. Jméno bere zobrazovanou podobu —
+        u osoby, která má vyplněné jen celé jméno, jsou pole Jméno a Příjmení
+        prázdná a formulář by jinak vypadal anonymně.
+      -->
+      <div class="sticky top-0 z-10 -mx-3 border-b border-neutral-200 bg-surface/95 px-3 py-3 backdrop-blur sm:-mx-4 sm:px-4">
+        <nav class="text-xs text-neutral-500" aria-label="breadcrumb" data-test="person-breadcrumbs">
+          <ol class="flex flex-wrap items-center gap-1">
+            <li>
+              <RouterLink :to="{ name: 'payroll' }" class="hover:text-neutral-700 hover:underline">
+                {{ t('payroll.people.breadcrumbs.payroll') }}
+              </RouterLink>
+            </li>
+            <li aria-hidden="true">›</li>
+            <li>
+              <button type="button" class="hover:text-neutral-700 hover:underline" data-test="breadcrumb-people" @click="backToList">
+                {{ t('payroll.people.breadcrumbs.people') }}
+              </button>
+            </li>
+            <li aria-hidden="true">›</li>
+            <li class="font-medium text-neutral-800" aria-current="page">{{ selectedName }}</li>
+          </ol>
+        </nav>
+        <div class="mt-2 flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0">
+            <h1 class="truncate text-xl font-semibold text-neutral-900" data-test="person-header-name">
+              {{ selectedName }}
+            </h1>
+            <div class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+              <span
+                v-if="selectedSummary"
+                class="rounded-full px-2 py-1 font-medium"
+                :class="selectedSummary.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'"
+              >{{ statusLabel(selectedSummary.is_active) }}</span>
+              <span v-if="selectedSummary?.needs_setup" class="rounded-full bg-warning-50 px-2 py-1 font-medium text-warning-700">
+                {{ t('payroll.people.needs_setup') }}
+              </span>
+              <span class="text-neutral-500" data-test="person-header-employments">
+                {{ t('payroll.people.header_employments', { count: selectedEmploymentCount }, selectedEmploymentCount) }}
+              </span>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" :class="btnOutline('neutral')" data-test="back-to-people" @click="backToList">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.uturn" /></svg>
+              {{ t('payroll.people.back_to_list') }}
+            </button>
+            <ActionBar v-if="personActions.some(action => action.show)" :actions="personActions" />
+          </div>
+        </div>
+        <p
+          v-if="canCreatePerson && selectedPerson && !selectedPerson.can_delete && personDeleteBlocker"
+          class="mt-2 rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-600"
+          data-test="person-delete-blocker"
+        >
+          <span class="font-medium text-neutral-800">{{ t('payroll.people.delete.blocked_title') }}</span>
+          {{ personDeleteBlocker.message }}
+        </p>
+      </div>
+
       <PayrollPersonQuickEdit
         :person-id="expandedId"
         :can-write="canQuickEditPerson"
@@ -526,9 +708,43 @@ onMounted(async () => {
           />
         </div>
       </details>
+
+      <section class="space-y-3 rounded-xl border border-neutral-200 bg-surface p-3 shadow-sm sm:p-4" data-test="person-employments">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h2 class="text-sm font-semibold text-neutral-900">{{ t('payroll.people.employments_title') }}</h2>
+          <p class="text-xs text-neutral-500">{{ t('payroll.people.detail_hint') }}</p>
+        </div>
+        <form v-if="creatingForId === expandedId && newEmployment" class="grid grid-cols-1 gap-3 rounded-lg border border-payroll-500/30 bg-payroll-50 p-4 sm:grid-cols-2 lg:grid-cols-4" data-test="new-employment-form" @submit.prevent="saveNew(expandedId)">
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.code') }}<input v-model="newEmployment.code" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <label class="text-xs text-neutral-600">
+            {{ t('payroll.people.relation_type') }}
+            <SearchableSelect v-model="newEmployment.relation_type" class="mt-1" :options="relationOptions" :clearable="false" accent="payroll" />
+          </label>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.planned_start') }}<input v-model="newEmployment.terms.planned_start_on" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.weekly_hours') }}<input v-model="newEmployment.terms.weekly_hours" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.create.monthly_gross') }}<input v-model.number="newEmploymentMonthlyGross" type="number" min="0" step="1" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="newEmployment.terms.is_primary" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.primary') }}</label>
+          <p v-if="newEmploymentError" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700 sm:col-span-2 lg:col-span-4" role="alert">{{ newEmploymentError }}</p>
+          <div class="flex flex-wrap items-end justify-end gap-2 sm:col-span-2 lg:col-span-4">
+            <button type="button" :class="btnOutline('neutral')" @click="creatingForId = null"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button>
+            <button type="submit" :class="btnFilled('primary')" :disabled="savingNew"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button>
+          </div>
+        </form>
+        <EmploymentCard
+          v-for="employment in details[expandedId].employments"
+          :key="employment.id"
+          :employment="employment"
+          :can-write="auth.canWrite('payroll.employment.write')"
+          :can-read-documents="auth.canRead('payroll.documents')"
+          :can-write-documents="auth.canWrite('payroll.documents')"
+          @updated="updateEmployment(expandedId, $event)"
+          @deleted="removeEmploymentFromDetail(expandedId, $event)"
+        />
+      </section>
     </div>
 
-    <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">
+    <!-- Během editace se seznam schová — jinak by u upravované osoby svítily i ostatní. -->
+    <section v-if="!editing" class="rounded-xl border border-neutral-200 bg-surface shadow-sm" data-test="people-list">
       <div v-if="loading" class="space-y-3 p-4 sm:p-6">
         <div v-for="index in 5" :key="index" class="h-16 animate-pulse rounded-lg bg-neutral-100" />
       </div>
@@ -583,39 +799,8 @@ onMounted(async () => {
                       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path :d="ICONS.user" />
                       </svg>
-                      {{ t(expandedId === person.id ? 'payroll.people.hide_detail' : 'payroll.people.show_detail') }}
+                      {{ t('payroll.people.edit_person') }}
                     </button>
-                  </td>
-                </tr>
-                <tr v-if="expandedId === person.id">
-                  <td colspan="5" class="bg-neutral-50 px-4 py-4">
-                    <div v-if="loadingDetailId === person.id" class="h-24 animate-pulse rounded-lg bg-neutral-100" />
-                    <div v-else-if="details[person.id]" class="space-y-3">
-                      <div class="flex flex-wrap items-center justify-between gap-2">
-                        <p class="text-xs text-neutral-500">{{ t('payroll.people.detail_hint') }}</p>
-                        <button v-if="auth.canWrite('payroll.employment.write')" :class="btnFilled('primary')" @click="startCreate(person.id)">
-                          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
-                          {{ t('payroll.people.add_employment') }}
-                        </button>
-                      </div>
-                      <form v-if="creatingForId === person.id && newEmployment" class="grid grid-cols-1 gap-3 rounded-lg border border-payroll-500/30 bg-payroll-50 p-4 sm:grid-cols-2 lg:grid-cols-4" data-test="new-employment-form" @submit.prevent="saveNew(person.id)">
-                        <label class="text-xs text-neutral-600">{{ t('payroll.people.code') }}<input v-model="newEmployment.code" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-                        <label class="text-xs text-neutral-600">
-                          {{ t('payroll.people.relation_type') }}
-                          <SearchableSelect v-model="newEmployment.relation_type" class="mt-1" :options="relationOptions" :clearable="false" accent="payroll" />
-                        </label>
-                        <label class="text-xs text-neutral-600">{{ t('payroll.people.planned_start') }}<input v-model="newEmployment.terms.planned_start_on" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-                         <label class="text-xs text-neutral-600">{{ t('payroll.people.weekly_hours') }}<input v-model="newEmployment.terms.weekly_hours" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-                         <label class="text-xs text-neutral-600">{{ t('payroll.people.create.monthly_gross') }}<input v-model.number="newEmploymentMonthlyGross" type="number" min="0" step="1" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-                         <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="newEmployment.terms.is_primary" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.primary') }}</label>
-                        <p v-if="newEmploymentError" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700 sm:col-span-2 lg:col-span-4" role="alert">{{ newEmploymentError }}</p>
-                        <div class="flex flex-wrap items-end justify-end gap-2 sm:col-span-2 lg:col-span-4">
-                          <button type="button" :class="btnOutline('neutral')" @click="creatingForId = null"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button>
-                          <button type="submit" :class="btnFilled('primary')" :disabled="savingNew"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button>
-                        </div>
-                      </form>
-                      <EmploymentCard v-for="employment in details[person.id].employments" :key="employment.id" :employment="employment" :can-write="auth.canWrite('payroll.employment.write')" :can-read-documents="auth.canRead('payroll.documents')" :can-write-documents="auth.canWrite('payroll.documents')" @updated="updateEmployment(person.id, $event)" />
-                    </div>
                   </td>
                 </tr>
               </template>
@@ -640,31 +825,8 @@ onMounted(async () => {
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path :d="ICONS.user" />
               </svg>
-              {{ t(expandedId === person.id ? 'payroll.people.hide_detail' : 'payroll.people.show_detail') }}
+              {{ t('payroll.people.edit_person') }}
             </button>
-            <div v-if="expandedId === person.id" class="mt-4 border-t border-neutral-200 pt-4">
-              <div v-if="loadingDetailId === person.id" class="h-24 animate-pulse rounded-lg bg-neutral-100" />
-              <div v-else-if="details[person.id]" class="space-y-3">
-                <p class="text-xs text-neutral-500">{{ t('payroll.people.detail_hint') }}</p>
-                <button v-if="auth.canWrite('payroll.employment.write')" :class="btnFilled('primary')" @click="startCreate(person.id)">
-                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
-                  {{ t('payroll.people.add_employment') }}
-                </button>
-                <form v-if="creatingForId === person.id && newEmployment" class="space-y-3 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3" data-test="new-employment-form" @submit.prevent="saveNew(person.id)">
-                  <label class="block text-xs text-neutral-600">{{ t('payroll.people.code') }}<input v-model="newEmployment.code" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-                  <label class="block text-xs text-neutral-600">
-                    {{ t('payroll.people.relation_type') }}
-                    <SearchableSelect v-model="newEmployment.relation_type" class="mt-1" :options="relationOptions" :clearable="false" accent="payroll" />
-                  </label>
-                  <label class="block text-xs text-neutral-600">{{ t('payroll.people.planned_start') }}<input v-model="newEmployment.terms.planned_start_on" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-                  <label class="block text-xs text-neutral-600">{{ t('payroll.people.create.monthly_gross') }}<input v-model.number="newEmploymentMonthlyGross" type="number" min="0" step="1" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-                  <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="newEmployment.terms.is_primary" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.primary') }}</label>
-                  <p v-if="newEmploymentError" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert">{{ newEmploymentError }}</p>
-                  <div class="flex flex-wrap justify-end gap-2"><button type="button" :class="btnOutline('neutral')" @click="creatingForId = null"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button><button type="submit" :class="btnFilled('primary')" :disabled="savingNew"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
-                </form>
-                <EmploymentCard v-for="employment in details[person.id].employments" :key="employment.id" :employment="employment" :can-write="auth.canWrite('payroll.employment.write')" :can-read-documents="auth.canRead('payroll.documents')" :can-write-documents="auth.canWrite('payroll.documents')" @updated="updateEmployment(person.id, $event)" />
-              </div>
-            </div>
           </article>
         </div>
       </template>

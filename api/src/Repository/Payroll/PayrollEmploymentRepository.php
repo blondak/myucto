@@ -43,6 +43,7 @@ final class PayrollEmploymentRepository
         private readonly PayrollEmploymentLifecycle $lifecycle,
         private readonly PayrollEmploymentAccountingClassifier $accounting,
         private readonly ActivityLogger $activityLogger,
+        private readonly PayrollEmploymentDeletionRepository $deletion,
     ) {}
 
     /** @return list<array<string,mixed>> */
@@ -73,6 +74,9 @@ final class PayrollEmploymentRepository
             $row = $this->row($fetched);
             $employmentId = (int) $row['id'];
             $relationType = (string) $row['relation_type'];
+            // Rozhodnutí o mazání patří i do seznamu — jinak by frontend musel
+            // nabízet akci naslepo a důvod blokace by se dozvěděl až po kliknutí.
+            $deletion = $this->deletion->canDelete($supplierId, $employmentId);
             $result[] = [
                 'id' => $employmentId,
                 'employee_id' => (int) $row['employee_id'],
@@ -95,6 +99,9 @@ final class PayrollEmploymentRepository
                     : (int) $row['monthly_gross_minor'],
                 'row_version' => (int) $row['row_version'],
                 'allowed_transitions' => $this->lifecycle->allowedTargets((string) $row['status']),
+                'can_delete' => $deletion !== null && $deletion->canDelete,
+                'delete_blocker' => $deletion?->blockerPayload(),
+                'delete_cascade' => $deletion === null ? [] : $deletion->cascade,
                 'accounting' => ($this->accounting)($relationType),
                 'terms' => $this->terms($supplierId, $employmentId),
                 'checklist' => $this->checklist($supplierId, $employmentId),
@@ -468,6 +475,7 @@ final class PayrollEmploymentRepository
             if ((int) $current['row_version'] !== $expectedVersion) {
                 throw new PayrollEmploymentConflictException((int) $current['row_version']);
             }
+            $this->assertChecklistPrerequisite($itemKey, $status, $employment);
             $update = $this->db->pdo()->prepare(
                 "UPDATE payroll_employment_checklist_items
                     SET status = ?, note = ?,
@@ -847,6 +855,31 @@ final class PayrollEmploymentRepository
         $stmt->execute([$supplierId, $employeeId, $exceptEmploymentId, $exceptEmploymentId]);
         if ($stmt->fetchColumn() !== false) {
             throw new \DomainException('Osoba už má jiný primární pracovní vztah.');
+        }
+    }
+
+    /**
+     * Položku „Doplnit datum nástupu" jde odškrtnout až tehdy, když datum
+     * skutečně je. Jinak by to bylo prázdné gesto: checklist by hlásil hotovo
+     * a na kartě by dál svítily tři pomlčky.
+     *
+     * @param array<string,string|int|bool|null> $employment
+     */
+    private function assertChecklistPrerequisite(
+        string $itemKey,
+        string $status,
+        array $employment,
+    ): void {
+        if ($itemKey !== 'legacy_start_date' || $status !== 'completed') {
+            return;
+        }
+        if (($employment['start_date'] ?? null) === null
+            && ($employment['actual_start_date'] ?? null) === null
+        ) {
+            throw new \DomainException(
+                'Nejdřív doplňte datum nástupu v podmínkách vztahu, teprve pak jde '
+                . 'položku odškrtnout.',
+            );
         }
     }
 

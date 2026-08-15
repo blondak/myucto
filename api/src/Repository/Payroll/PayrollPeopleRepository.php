@@ -12,6 +12,7 @@ final class PayrollPeopleRepository
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollEmploymentRepository $employments,
+        private readonly PayrollEmployeeDeletionRepository $deletion,
     ) {}
 
     /** @return list<array<string,mixed>> */
@@ -21,7 +22,8 @@ final class PayrollPeopleRepository
         $stmt->execute([$supplierId, $supplierId]);
         $people = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $people[] = $this->castPerson($this->normalizeRow($row));
+            $person = $this->castPerson($this->normalizeRow($row));
+            $people[] = $this->withDeletion($supplierId, $person);
         }
 
         return $people;
@@ -37,8 +39,32 @@ final class PayrollPeopleRepository
             return null;
         }
 
-        $person = $this->castPerson($this->normalizeRow($row));
+        $person = $this->withDeletion(
+            $supplierId,
+            $this->castPerson($this->normalizeRow($row)),
+        );
         $person['employments'] = $this->employments->listForEmployee($supplierId, $employeeId);
+
+        return $person;
+    }
+
+    /**
+     * `can_delete` musí být v seznamu i v detailu — jinak by frontend nabízel akci
+     * naslepo a důvod blokace by se dozvěděl až po kliknutí. Cizí tenant sem
+     * nedosáhne: rozhodnutí se počítá jen pro osoby vrácené tenantovým dotazem.
+     *
+     * @param array<string,mixed> $person
+     * @return array<string,mixed>
+     */
+    private function withDeletion(int $supplierId, array $person): array
+    {
+        $employeeId = $person['id'];
+        $decision = is_int($employeeId)
+            ? $this->deletion->canDelete($supplierId, $employeeId)
+            : null;
+        $person['can_delete'] = $decision !== null && $decision->canDelete;
+        $person['delete_blocker'] = $decision?->blockerPayload();
+        $person['delete_cascade'] = $decision === null ? [] : $decision->cascade;
 
         return $person;
     }

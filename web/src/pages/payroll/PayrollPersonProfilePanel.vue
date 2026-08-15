@@ -172,8 +172,14 @@ const labelClass = 'block text-xs font-medium text-neutral-600'
 const cardClass = 'rounded-lg border border-neutral-200 bg-surface p-3 sm:p-4'
 
 const tabs: Tab[] = ['identity', 'contacts', 'payout']
+// „Převzatá evidence" (`legacy`) si uživatel vybrat nemůže: je to značka
+// jednorázového převodu ze starší agendy, ne stav, do kterého se dá přepnout.
+// U profilů, které tu hodnotu v databázi mají, ji ale ukázat musíme — jinak by
+// se v nabídce nic nevybralo a uložením by se ztratila.
 const statusOptions = computed<SelectOption<PayrollPersonEditableProfileStatus>[]>(() => [
-  { value: 'legacy', label: t('payroll.people.profile.status.legacy') },
+  ...(form.profile_status === 'legacy'
+    ? [{ value: 'legacy' as const, label: t('payroll.people.profile.status.legacy') }]
+    : []),
   { value: 'setup', label: t('payroll.people.profile.status.setup') },
   { value: 'ready', label: t('payroll.people.profile.status.ready') },
 ])

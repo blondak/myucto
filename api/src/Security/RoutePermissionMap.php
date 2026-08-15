@@ -124,6 +124,10 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/people$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/people$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+$#', 'payroll', AccessLevel::READ],
+        // Smazání omylem založené osoby je opak jejího založení, ne přísnější úkon —
+        // stejné právo jako POST /people. Před skutečnými pohyby chrání blokátory
+        // v `PayrollEmployeeDeletionRepository`, ne zvláštní oprávnění.
+        ['DELETE', '#^/api/payroll/people/[0-9]+$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+/profile$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/people/[0-9]+/profile$#', 'payroll.person.write', AccessLevel::WRITE],
         // Výplatní pravidlo je součást osobní karty (stejná rodina jako výplatní
@@ -142,6 +146,8 @@ final class RoutePermissionMap
         // stejná úroveň jako sousední našeptávač obcí.
         ['GET', '#^/api/payroll/cz-isco$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/employments/[0-9]+/(terms|transitions/[a-z_]+|checklist/[a-z0-9_]+)$#', 'payroll.employment.write', AccessLevel::WRITE],
+        // Totéž právo jako založení vztahu (POST /people/{id}/employments výše).
+        ['DELETE', '#^/api/payroll/employments/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/time/month$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/time/calendars/[0-9]+$#', 'payroll.time.write', AccessLevel::WRITE],
         ['*', '#^/api/payroll/time/(shifts|entries|imports(?:/preview)?)$#', 'payroll.time.write', AccessLevel::WRITE],

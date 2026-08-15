@@ -6,7 +6,9 @@ namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollDeletionException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentConflictException;
+use MyInvoice\Repository\Payroll\PayrollEmploymentDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Security\AccessLevel;
@@ -27,6 +29,7 @@ final class PayrollEmploymentAction
         private readonly PayrollEmploymentJmhzEvidenceCatalog $jmhzEvidence,
         private readonly PayrollModuleAccess $access,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollEmploymentDeletionRepository $deletion,
     ) {}
 
     public function jmhzEvidenceOptions(Request $request, Response $response): Response
@@ -133,6 +136,41 @@ final class PayrollEmploymentAction
             return $this->domainError($response, $e);
         }
         return Json::ok($response, ['employment' => $employment]);
+    }
+
+    /**
+     * Smazání vztahu, který vůbec neměl vzniknout.
+     *
+     * Nenahrazuje `no_show` — „nenástup" je záznam o tom, že něco nastalo (člověk
+     * byl přijat a nenastoupil). Tohle je pro případ, kdy se to nemělo stát vůbec,
+     * a nemá po sobě nechat fiktivní nenástup v evidenci.
+     *
+     * Právo je `payroll.employment.write`, tedy TOTÉŽ, kterým se vztah zakládá:
+     * mazání omylem založeného vztahu je opak jeho založení, ne přísnější úkon.
+     * Před skutečnými záznamy chrání blokátory v repozitáři, ne zvláštní právo.
+     *
+     * @param array{id:string} $args
+     */
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $cascade = $this->deletion->delete(
+                $this->currentSupplierId($request),
+                (int) $args['id'],
+                $this->validator->rowVersion($body),
+                $this->userId($request),
+                $this->ip($request),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+
+        return Json::ok($response, ['deleted' => true, 'cascade' => $cascade]);
     }
 
     /** @param array{id:string,item_key:string} $args */
@@ -248,6 +286,18 @@ final class PayrollEmploymentAction
                 'not_found',
                 $e->getMessage(),
                 404,
+            ),
+            // Blokace mazání není chyba uživatele — nese kód a větu, podle které
+            // se dá jednat, takže je frontend ukazuje místo zašedlého tlačítka.
+            $e instanceof PayrollDeletionException => Json::error(
+                $response,
+                $e->errorCode,
+                $e->getMessage(),
+                409,
+                array_filter([
+                    'employment_id' => $e->employmentId,
+                    'employment_code' => $e->employmentCode,
+                ], static fn ($value): bool => $value !== null),
             ),
             $e instanceof PayrollEmploymentConflictException => Json::error(
                 $response,

@@ -17,7 +17,12 @@ import { useToast } from '@/composables/useToast'
 import EmploymentDimensionsPanel from './EmploymentDimensionsPanel.vue'
 import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
 import EmploymentRegistrationPanel from './EmploymentRegistrationPanel.vue'
-import { todayIso, transitionPresentation } from './employmentLifecycleUi'
+import {
+  employmentCodeLabel,
+  employmentEventNote,
+  todayIso,
+  transitionPresentation,
+} from './employmentLifecycleUi'
 
 const props = defineProps<{
   employment: PayrollEmployment
@@ -27,6 +32,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   updated: [employment: PayrollEmployment]
+  deleted: [employmentId: number]
 }>()
 
 const { t } = useI18n()
@@ -205,6 +211,44 @@ async function setChecklist(itemKey: string, rowVersion: number, status: Payroll
   }
 }
 
+/**
+ * Věta „Smaže se … Tuhle akci nelze vzít zpět." musí JMENOVAT, co přesně zmizí —
+ * jinak uživatel potvrzuje naslepo. Vypisují se jen nenulové položky.
+ */
+const cascadeSummary = computed<string>(() => {
+  const parts = Object.entries(props.employment.delete_cascade ?? {})
+    .filter(([, count]) => count > 0)
+    .map(([key, count]) => t(`payroll.people.delete.cascade.${key}`, { count }, count))
+  return parts.join(', ')
+})
+
+const deleteBlockerMessage = computed<string>(
+  () => props.employment.delete_blocker?.message ?? '',
+)
+
+async function removeEmployment() {
+  if (busy.value || !props.employment.can_delete) return
+  const summary = cascadeSummary.value
+  const question = summary === ''
+    ? t('payroll.people.delete.confirm_empty')
+    : t('payroll.people.delete.confirm', { summary })
+  if (!window.confirm(question)) return
+
+  busy.value = true
+  try {
+    await payrollApi.deleteEmployment(props.employment.id, props.employment.row_version)
+    emit('deleted', props.employment.id)
+    toast.success(t('payroll.people.delete.done'))
+  } catch (error) {
+    // Blokace nese větu, podle které se dá jednat — ukaž ji, ne obecné „nepovedlo se".
+    const message = (error as { response?: { data?: { error?: { message?: string } } } })
+      ?.response?.data?.error?.message
+    toast.error(message ?? t('payroll.people.mutation_failed'))
+  } finally {
+    busy.value = false
+  }
+}
+
 const actions = computed<ActionItem[]>(() => [
   ...transitionPresentation(props.employment.allowed_transitions).map(presentation => ({
     key: `transition-${presentation.target}`,
@@ -227,6 +271,19 @@ const actions = computed<ActionItem[]>(() => [
       && ['planned', 'preregistered', 'active', 'suspended'].includes(props.employment.status),
     run: () => void startTermsEdit(),
   },
+  {
+    // Patří do „…", ne mezi hlavní tlačítka: je to výjimečná a nevratná akce.
+    // Vedle „Označit nenástup" (tier 'advanced'), protože řeší jiný případ —
+    // nenástup je záznam o tom, že něco nastalo, tohle je oprava omylu.
+    key: 'delete-employment',
+    label: t('payroll.people.delete.action'),
+    icon: 'trash',
+    tier: 'advanced',
+    variant: 'danger',
+    disabled: busy.value,
+    show: props.canWrite && props.employment.can_delete,
+    run: () => void removeEmployment(),
+  },
 ])
 </script>
 
@@ -242,11 +299,8 @@ const actions = computed<ActionItem[]>(() => [
           <span v-if="employment.is_primary" class="rounded-full bg-success-50 px-2 py-1 text-xs font-medium text-success-700">
             {{ t('payroll.people.primary') }}
           </span>
-          <span v-if="employment.is_legacy_projection" class="rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">
-            {{ t('payroll.people.legacy_projection') }}
-          </span>
         </div>
-        <p class="mt-1 text-xs text-neutral-500">{{ employment.code }}<template v-if="employment.office_name"> · {{ employment.office_name }}</template></p>
+        <p v-if="employmentCodeLabel(employment.code) || employment.office_name" data-test="employment-code" class="mt-1 text-xs text-neutral-500">{{ employmentCodeLabel(employment.code) }}<template v-if="employment.office_name"><template v-if="employmentCodeLabel(employment.code)"> · </template>{{ employment.office_name }}</template></p>
       </div>
       <div v-if="canWrite && employment.allowed_transitions.length" class="flex items-center gap-2">
         <label class="text-xs text-neutral-500">
@@ -264,6 +318,19 @@ const actions = computed<ActionItem[]>(() => [
     </dl>
 
     <ActionBar v-if="actions.some(action => action.show)" :actions="actions" class="mt-4" />
+
+    <!--
+      Když smazat nejde, ukaž DŮVOD. Zašedlé tlačítko bez vysvětlení uživateli
+      neřekne nic a nedá mu vodítko, co s tím.
+    -->
+    <p
+      v-if="canWrite && !employment.can_delete && deleteBlockerMessage"
+      data-test="employment-delete-blocker"
+      class="mt-3 rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-600"
+    >
+      <span class="font-medium text-neutral-800">{{ t('payroll.people.delete.blocked_title') }}</span>
+      {{ deleteBlockerMessage }}
+    </p>
 
     <form v-if="editingTerms && termsForm" class="mt-4 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3 sm:p-4" @submit.prevent="saveTerms">
       <h4 class="text-sm font-semibold text-neutral-900">{{ t('payroll.people.new_terms') }}</h4>
@@ -352,7 +419,7 @@ const actions = computed<ActionItem[]>(() => [
             <ul v-if="event.diff" class="mt-1 space-y-0.5 text-neutral-600">
               <li v-for="(change, key) in event.diff" :key="key">{{ t(`payroll.people.term_field.${key}`) }}: {{ String(change.from ?? '—') }} → {{ String(change.to ?? '—') }}</li>
             </ul>
-            <p v-if="event.note" class="mt-1 text-neutral-600">{{ event.note }}</p>
+            <p v-if="employmentEventNote(event.note)" class="mt-1 text-neutral-600">{{ employmentEventNote(event.note) }}</p>
           </li>
         </ol>
       </section>
@@ -364,8 +431,20 @@ const actions = computed<ActionItem[]>(() => [
       Proto je panel tady, vedle checklistu, jehož položku „Přihláška na ČSSZ"
       obsluhuje.
     -->
+    <!--
+      Převzatý vztah registraci NESKRÝVÁ. Skrývat zákonnou povinnost bez
+      vysvětlení je horší než ji nabídnout s varováním — API ji nikdy neblokovalo,
+      bylo to jen `v-if` bez zdůvodnění. Kdyby pro blokaci existoval skutečný
+      důvod, patří do API jako stav s větou, ne do šablony.
+    -->
+    <p
+      v-if="employment.is_legacy_projection"
+      data-test="legacy-registration-warning"
+      class="mt-4 rounded-md bg-warning-50 px-3 py-2 text-xs text-warning-800"
+    >
+      {{ t('payroll.people.registration_legacy_warning') }}
+    </p>
     <EmploymentRegistrationPanel
-      v-if="!employment.is_legacy_projection"
       :employment-id="employment.id"
       :can-write="canWrite"
     />

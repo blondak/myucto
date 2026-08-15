@@ -7,6 +7,7 @@ vi.mock('@/api/payroll', () => ({
     transitionEmployment: vi.fn(),
     addEmploymentTerms: vi.fn(),
     updateEmploymentChecklist: vi.fn(),
+    deleteEmployment: vi.fn(),
     employmentJmhzEvidenceOptions: vi.fn().mockResolvedValue({
       package_key: 'synthetic',
       manifest_sha256: 'a'.repeat(64),
@@ -45,6 +46,14 @@ vi.mock('vue-i18n', () => ({
 
 import EmploymentCard from '@/pages/payroll/EmploymentCard.vue'
 
+const actionBarStub = {
+  ActionBar: {
+    props: ['actions'],
+    template: '<div data-test="actions"><button v-for="action in actions" v-show="action.show" :key="action.key" type="button" :data-test="`action-${action.key}`" @click="action.run && action.run()">{{ action.label }}</button></div>',
+  },
+}
+
+
 function employment(): PayrollEmployment {
   return {
     id: 10,
@@ -64,6 +73,9 @@ function employment(): PayrollEmployment {
     monthly_gross_minor: 4000000,
     row_version: 1,
     allowed_transitions: ['preregistered', 'no_show'],
+    can_delete: true,
+    delete_blocker: null,
+    delete_cascade: { terms: 1, checklist: 4, events: 1 },
     accounting: {
       gross_debit: '521',
       gross_credit: '331',
@@ -239,5 +251,80 @@ describe('EmploymentCard', () => {
     expect(cleared?.jmhz_workplace_municipality_code).toBeNull()
     expect(cleared?.work_place).toBeNull()
     expect(cleared?.jmhz_workplace_country_code).toBeNull()
+  })
+
+  it('nabídne smazání vztahu v „…" a v potvrzení jmenuje, co přesně zmizí', async () => {
+    vi.mocked(payrollApi.deleteEmployment).mockResolvedValue({})
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    await wrapper.get('[data-test="action-delete-employment"]').trigger('click')
+    await flushPromises()
+
+    expect(confirm.mock.calls[0]![0]).toContain('payroll.people.delete.confirm')
+    expect(confirm.mock.calls[0]![0]).toContain('cascade.checklist')
+    expect(confirm.mock.calls[0]![0]).toContain('cascade.terms')
+    expect(payrollApi.deleteEmployment).toHaveBeenCalledWith(10, 1)
+    expect(wrapper.emitted('deleted')).toEqual([[10]])
+    confirm.mockRestore()
+  })
+
+  it('místo zašedlého tlačítka ukáže důvod, proč smazat nejde', () => {
+    const blocked: PayrollEmployment = {
+      ...employment(),
+      can_delete: false,
+      delete_blocker: {
+        code: 'payroll_employment_in_run',
+        message: 'Pracovní vztah je zahrnutý v revizi mzdového běhu.',
+        employment_id: 10,
+        employment_code: 'HPP-1',
+      },
+      delete_cascade: {},
+    }
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: blocked, canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    expect(wrapper.get('[data-test="employment-delete-blocker"]').text())
+      .toContain('Pracovní vztah je zahrnutý v revizi mzdového běhu.')
+    expect(wrapper.get('[data-test="action-delete-employment"]').isVisible()).toBe(false)
+    // `no_show` zůstává — je to jiný případ, ne náhrada za mazání.
+    expect(wrapper.get('[data-test="actions"]').text())
+      .toContain('payroll.people.transition.no_show')
+  })
+
+  it('u převzatého vztahu skryje interní značky a registraci nabídne s varováním', () => {
+    const legacy: PayrollEmployment = {
+      ...employment(),
+      code: 'legacy',
+      is_legacy_projection: true,
+      timeline: [{
+        id: 1,
+        event_type: 'created',
+        from_status: null,
+        to_status: 'planned',
+        effective_on: '2026-01-01',
+        note: 'Legacy projekce',
+        diff: null,
+        created_at: '2026-01-01T00:00:00Z',
+      }],
+    }
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: legacy, canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    // Kód `legacy` je interní značka převodu, ne údaj zaměstnavatele.
+    expect(wrapper.find('[data-test="employment-code"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Legacy projekce')
+    expect(wrapper.text()).not.toContain('payroll.people.legacy_projection')
+    // Zákonná povinnost se neskrývá, jen se k ní přidá varování.
+    expect(wrapper.get('[data-test="legacy-registration-warning"]').text())
+      .toContain('payroll.people.registration_legacy_warning')
+    expect(wrapper.findComponent({ name: 'EmploymentRegistrationPanel' }).exists()).toBe(true)
   })
 })

@@ -6,6 +6,9 @@ namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollDeletionException;
+use MyInvoice\Repository\Payroll\PayrollEmployeeDeletionRepository;
+use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\IpMatcher;
@@ -23,6 +26,7 @@ final class PayrollPeopleAction
         private readonly PayrollModuleAccess $access,
         private readonly PayrollPersonCreateService $createService,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollEmployeeDeletionRepository $deletion,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -124,6 +128,88 @@ final class PayrollPeopleAction
         }
 
         return Json::ok($response, ['person' => $person], 201);
+    }
+
+    /**
+     * Smazání zaměstnance, kterého uživatel založil omylem.
+     *
+     * Právo je `payroll.person.write`, tedy TOTÉŽ, kterým se osoba zakládá — mazání
+     * omylem založené osoby je opak jejího založení. Před skutečnými pohyby chrání
+     * blokátory v repozitáři, ne zvláštní právo.
+     *
+     * Kaskáda odklidí i pracovní vztahy osoby, ale jen ty, které jdou samy smazat;
+     * jinak rozhodnutí JMENUJE vztah, který to blokuje.
+     *
+     * @param array{id:string} $args
+     */
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireSession($request, $response, $error)) {
+            return $this->guardFailure($error);
+        }
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.person.write',
+            AccessLevel::WRITE,
+            $error,
+        )) {
+            return $this->guardFailure($error);
+        }
+        if (!$this->requirePayrollEnabled($request, $response, $this->access, $error)) {
+            return $this->guardFailure($error);
+        }
+
+        $supplierId = $this->currentSupplierId($request);
+        $employeeId = (int) $args['id'];
+        // 404 dřív, než se cokoli dozví o stavu — cizí tenant nesmí poznat ani to,
+        // jestli id existuje.
+        if ($this->people->findForTenant($supplierId, $employeeId) === null) {
+            return Json::error($response, 'not_found', 'Zaměstnanec nenalezen.', 404);
+        }
+
+        $serverParams = [];
+        foreach ($request->getServerParams() as $key => $value) {
+            if (is_string($key)) {
+                $serverParams[$key] = $value;
+            }
+        }
+
+        try {
+            $cascade = $this->deletion->delete(
+                $supplierId,
+                $employeeId,
+                $this->userId($request),
+                $this->ipMatcher->clientIpFromRequest($serverParams),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (PayrollDeletionException $e) {
+            return Json::error(
+                $response,
+                $e->errorCode,
+                $e->getMessage(),
+                409,
+                array_filter([
+                    'employment_id' => $e->employmentId,
+                    'employment_code' => $e->employmentCode,
+                ], static fn ($value): bool => $value !== null),
+            );
+        } catch (PayrollEmploymentNotFoundException $e) {
+            return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (\PDOException $e) {
+            if ($e->getCode() !== '23000') {
+                throw $e;
+            }
+            return Json::error(
+                $response,
+                'payroll_employee_delete_conflict',
+                'Na zaměstnance mezitím vznikla vazba, takže ho už smazat nejde. '
+                . 'Načtěte seznam znovu.',
+                409,
+            );
+        }
+
+        return Json::ok($response, ['deleted' => true, 'cascade' => $cascade]);
     }
 
     private function requireSession(

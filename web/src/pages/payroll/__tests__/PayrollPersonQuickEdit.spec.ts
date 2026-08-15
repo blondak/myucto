@@ -65,6 +65,9 @@ function employment(overrides: Partial<PayrollEmployment> = {}): PayrollEmployme
     monthly_gross_minor: 4_200_000,
     row_version: 8,
     allowed_transitions: ['suspended', 'ended'],
+    can_delete: false,
+    delete_blocker: null,
+    delete_cascade: {},
     accounting: {
       gross_debit: '521',
       gross_credit: '331',
@@ -122,6 +125,9 @@ function person(primary = employment()): PayrollPerson {
     legacy_employment_type: 'hpp',
     employment_count: 1,
     relation_types: ['employment'],
+    can_delete: false,
+    delete_blocker: null,
+    delete_cascade: {},
     needs_setup: false,
     employments: [primary],
   }
