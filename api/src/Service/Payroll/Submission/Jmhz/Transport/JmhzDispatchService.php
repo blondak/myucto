@@ -179,6 +179,17 @@ final readonly class JmhzDispatchService
     }
 
     /**
+     * Poslední pokusy o odeslání, od nejnovějšího. Čte se rovnou z ledgeru:
+     * jiný zdroj pravdy o tom, co odešlo, neexistuje.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function history(int $supplierId, string $environment, int $limit = 50): array
+    {
+        return $this->attempts->listRecent($supplierId, $environment, $limit);
+    }
+
+    /**
      * Dotaz na výsledek zpracování. Dokud VREP odpovídá potvrzením, zpracování
      * běží a pokus zůstává otevřený — vydávat to za výsledek by znamenalo
      * uzavřít podání, o kterém nic nevíme.

@@ -86,6 +86,33 @@ final class PayrollJmhzTransportAction
         });
     }
 
+    /**
+     * Přehled odeslaných podání a jejich stavu.
+     *
+     * Bez něj odpověď na otázku „co jsem odeslal a jak to dopadlo" existuje
+     * jen v databázi. Ledger je append-only, takže se tu ukazuje i to, co
+     * selhalo — právě neúspěšné pokusy jsou to, kvůli čemu se sem uživatel
+     * podívá.
+     */
+    public function history(Request $request, Response $response): Response
+    {
+        if (($denied = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $denied;
+        }
+        $environment = $this->environment($request);
+        if ($environment === null) {
+            return $this->invalid($response, 'Prostředí musí být test nebo production.');
+        }
+
+        return $this->noStore(Json::ok($response, [
+            'environment' => $environment,
+            'attempts' => $this->dispatch->history(
+                $this->currentSupplierId($request),
+                $environment,
+            ),
+        ]));
+    }
+
     /** @param array{attemptId:string} $args */
     public function poll(Request $request, Response $response, array $args): Response
     {

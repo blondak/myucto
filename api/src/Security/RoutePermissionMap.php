@@ -165,6 +165,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/submissions/jmhz-freeze/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::READ],
         ['*', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/jmhz-transport$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/jmhz-transport/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/jmhz-transport/[0-9]+/close$#', 'payroll.submissions', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/submissions/[0-9]+/jmhz-transport$#', 'payroll.submissions', AccessLevel::WRITE],

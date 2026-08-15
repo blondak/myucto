@@ -935,6 +935,10 @@ final class Routes
                 [PayrollJmhzTransportAction::class, 'send'],
             );
             $g->get(
+                '/submissions/jmhz-transport',
+                [PayrollJmhzTransportAction::class, 'history'],
+            );
+            $g->get(
                 '/submissions/jmhz-transport/{attemptId:[0-9]+}',
                 [PayrollJmhzTransportAction::class, 'poll'],
             );
