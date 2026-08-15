@@ -736,7 +736,7 @@ final class PayrollDeletionApiTest extends TestCase
             'jmhz_apz_instrument_code' => null,
             'jmhz_functional_benefits_status' => 'unverified',
             'jmhz_temporary_assignment_status' => 'unverified',
-            'cz_isco_code' => '43110',
+            'cz_isco_code' => '43111',
             'activity_code' => '1',
             'jmhz_relationship_detail_code' => '1',
             'social_insurance_participation' => 'automatic',

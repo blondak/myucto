@@ -10,6 +10,7 @@ import {
   type PayrollJmhzMunicipalityOption,
   type PayrollEmploymentTermsPayload,
 } from '@/api/payroll'
+import CzIscoPicker from '@/components/payroll/CzIscoPicker.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnOutlineSm } from '@/components/ui/buttonStyles'
@@ -370,7 +371,10 @@ const actions = computed<ActionItem[]>(() => [
           <p v-if="jmhzOptionsFailed" class="text-xs text-danger-700 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_evidence.options_failed') }}</p>
           <p v-if="termsForm.jmhz_temporary_assignment_status === 'yes'" class="text-xs text-warning-700 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_evidence.temporary_assignment_blocker') }}</p>
         </fieldset>
-        <label class="text-xs text-neutral-600">{{ t('payroll.people.cz_isco_code') }}<input v-model="termsForm.cz_isco_code" maxlength="16" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+        <div class="text-xs text-neutral-600">
+          <label class="block">{{ t('payroll.people.cz_isco_code') }}</label>
+          <CzIscoPicker v-model="termsForm.cz_isco_code" class="mt-1" />
+        </div>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.activity_code') }}<select v-model="termsForm.activity_code" data-test="jmhz-activity-code" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" @change="onActivityCodeChange"><option :value="null">—</option><option v-for="option in jmhzOptions?.activity_codes ?? []" :key="option.code" :value="option.code">{{ option.code }} · {{ option.label }}</option></select></label>
         <label v-if="/^[1-9]$/.test(termsForm.activity_code ?? '')" class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.relationship_detail') }}<select v-model="termsForm.jmhz_relationship_detail_code" data-test="jmhz-relationship-detail" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option :value="null">—</option><option v-for="option in jmhzOptions?.relationship_detail_codes ?? []" :key="option.code" :value="option.code">{{ option.code }} · {{ option.label }}</option></select></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.social_mode') }}<select v-model="termsForm.social_insurance_participation" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option></select></label>

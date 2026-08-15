@@ -250,7 +250,7 @@ onMounted(() => void load())
         v-for="tab in (['employment', 'average'] as const)"
         :key="tab"
         type="button"
-        class="relative -mb-px whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition"
+        class="whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition"
         :class="activeTab === tab
           ? 'border-payroll-500 text-payroll-700'
           : 'border-transparent text-neutral-600 hover:text-neutral-900'"
