@@ -2397,6 +2397,7 @@
                 "transport": "Stav odeslání",
                 "regzel": "Registrace zaměstnavatele",
                 "jmhz": "JMHZ",
+                "eldp": "Evidenční list DP",
                 "health": "Zdravotní pojišťovny",
                 "inbox": "Inbox",
                 "certificate": "Certifikát"
@@ -2812,6 +2813,38 @@
                     "health_portal": "Portál pojišťovny",
                     "other": "Jiný kanál"
                 }
+            }
+        },
+        "eldp": {
+            "title": "Evidenční list důchodového pojištění",
+            "intro": "Sestaví evidenční list za kalendářní rok nebo za jeho část při skončení účasti na důchodovém pojištění. Podklad se bere výhradně ze zmrazených schválených mzdových revizí; chybějící měsíc nebo absence, kterou modul neumí zapsat, přípravu zablokují a řeknou proč.",
+            "legalBasis": "Zákon č. 582/1991 Sb., § 38 a § 39. Za roky od 2026 sestavuje evidenční list ČSSZ z údajů měsíčního hlášení; samostatný list se vede za roky před 2026, při skončení účasti před 1. 4. 2026 a na výzvu ČSSZ/ÚSSZ.",
+            "person": "Osoba",
+            "employment": "Pracovní vztah",
+            "year": "Rok",
+            "note": "Poznámka k potvrzení",
+            "prepare": "Připravit evidenční list",
+            "confirmExcluded": "Potvrzuji vyloučené doby odvozené z evidovaných absencí.",
+            "confirmDeducted": "Potvrzuji, že za vykazované období nejsou žádné odečítané doby po dosažení důchodového věku.",
+            "requestedByAuthority": "Evidenční list se sestavuje na výzvu ČSSZ/ÚSSZ.",
+            "noSendNotice": "Příprava končí ve stavu připraveno. Odeslání spouští člověk ve Stavu odeslání; datová věta odesílaného ELDP zatím není v připnuté oficiální sadě.",
+            "preparedCreated": "Evidenční list byl sestaven a podání je připravené k odeslání.",
+            "preparedReplayed": "Evidenční list už byl sestaven dřív; opakování nevytvořilo druhé podání.",
+            "kind": {
+                "annual": "Řádný roční",
+                "termination": "Při skončení účasti"
+            },
+            "summary": {
+                "period": "Období",
+                "insuranceDays": "Dny pojištění",
+                "excludedDays": "Vyloučené dny",
+                "kind": "Druh",
+                "dueOn": "Termín",
+                "sections": "Počet sekcí"
+            },
+            "errors": {
+                "loadFailed": "Podklady evidenčního listu se nepodařilo načíst.",
+                "prepareFailed": "Evidenční list se nepodařilo sestavit."
             }
         },
         "regzel": {

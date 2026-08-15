@@ -171,6 +171,7 @@ final class PayrollEmployeeDeletionRepository
         'payroll_inputs',
         'payroll_business_trips',
         'payroll_jmhz_eldp_evidence_snapshots',
+        'payroll_eldp_statements',
         'payroll_jmhz_ordinary_evidence_snapshots',
         'payroll_jmhz_ordinary_evidence_idempotency_claims',
         'payroll_employment_exit_revisions',
