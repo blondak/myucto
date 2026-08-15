@@ -108,8 +108,10 @@ describe('HealthInsurerAccounts', () => {
     const add = wrapper.findAll('button')
       .find(button => button.text() === 'payroll.employer.health_accounts.add')
     await add!.trigger('click')
+    // Typ instituce + pojišťovna z číselníku + zdroj údaje. Po přepnutí na ČSSZ
+    // číselník mizí (mimo zdravotní pojišťovny žádný nemáme) a zbydou dva.
     const selects = wrapper.findAllComponents(SearchableSelect)
-    expect(selects).toHaveLength(2)
+    expect(selects).toHaveLength(3)
     await wrapper
       .get('[aria-label="payroll.employer.health_accounts.institution_type"]')
       .trigger('focus')
@@ -139,6 +141,102 @@ describe('HealthInsurerAccounts', () => {
     })
     expect(m.createInstitutionAccount.mock.calls[0][0]).not.toHaveProperty('bank_account_masked')
     expect(wrapper.text()).toContain('••••0005/0300')
+
+    wrapper.unmount()
+  })
+
+  it('výběr zdravotní pojišťovny z číselníku doplní kód i název naráz', async () => {
+    m.createInstitutionAccount.mockResolvedValue(account({
+      id: 9,
+      institution_code: '205',
+      institution_name: 'Česká průmyslová zdravotní pojišťovna (ČPZP)',
+    }))
+    const wrapper = await mountComponent([])
+
+    const add = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.employer.health_accounts.add')
+    await add!.trigger('click')
+
+    // Volný text pro kód a název u zdravotní pojišťovny vůbec není — jen výběr.
+    expect(wrapper.find('[data-testid="health-create-code"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="health-create-name"]').exists()).toBe(false)
+
+    await wrapper
+      .get('[aria-label="payroll.employer.health_accounts.insurer"]')
+      .trigger('focus')
+    const cpzp = wrapper.findAll('[role="option"]')
+      .find(option => option.text().startsWith('205'))
+    await cpzp!.trigger('click')
+
+    await wrapper.get('[data-testid="health-create-account"]').setValue('1000000005/0100')
+    await wrapper.get('[data-testid="health-create-source-reference"]').setValue('SYNTHETIC-NOTICE-205')
+    const create = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.employer.health_accounts.create')
+    await create!.trigger('click')
+    await flushPromises()
+
+    expect(m.createInstitutionAccount).toHaveBeenCalledTimes(1)
+    expect(m.createInstitutionAccount.mock.calls[0][0]).toMatchObject({
+      institution_type: 'health_insurer',
+      institution_code: '205',
+      institution_name: 'Česká průmyslová zdravotní pojišťovna (ČPZP)',
+    })
+
+    wrapper.unmount()
+  })
+
+  it('umožní zadat kód pojišťovny mimo číselník ručně', async () => {
+    m.createInstitutionAccount.mockResolvedValue(account({ id: 10, institution_code: '299' }))
+    const wrapper = await mountComponent([])
+
+    const add = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.employer.health_accounts.add')
+    await add!.trigger('click')
+    await wrapper.get('[data-testid="health-create-manual-code"]').trigger('click')
+
+    await wrapper.get('[data-testid="health-create-code"]').setValue('299')
+    await wrapper.get('[data-testid="health-create-name"]').setValue('Nová zdravotní pojišťovna')
+    await wrapper.get('[data-testid="health-create-account"]').setValue('1000000005/0100')
+    await wrapper.get('[data-testid="health-create-source-reference"]').setValue('SYNTHETIC-NOTICE-299')
+    const create = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.employer.health_accounts.create')
+    await create!.trigger('click')
+    await flushPromises()
+
+    expect(m.createInstitutionAccount.mock.calls[0][0]).toMatchObject({
+      institution_type: 'health_insurer',
+      institution_code: '299',
+      institution_name: 'Nová zdravotní pojišťovna',
+    })
+
+    wrapper.unmount()
+  })
+
+  it('existující účet s kódem mimo číselník zůstane čitelný i editovatelný', async () => {
+    m.updateInstitutionAccount.mockResolvedValue(account({
+      institution_name: 'Přejmenovaná pojišťovna',
+      row_version: 4,
+    }))
+    // `SYNTH-111` v číselníku není — takový záznam nesmí zůstat zamčený.
+    const wrapper = await mountComponent()
+    expect(wrapper.text()).toContain('SYNTH-111')
+
+    const edit = wrapper.findAll('button').find(button => button.text() === 'common.edit')
+    await edit!.trigger('click')
+    const name = wrapper.get('[data-testid="health-edit-name"]')
+    expect((name.element as HTMLInputElement).value).toBe('Syntetická zdravotní pojišťovna')
+
+    await name.setValue('Přejmenovaná pojišťovna')
+    const save = wrapper.get('[data-testid="health-account-edit"]').findAll('button')
+      .find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.updateInstitutionAccount).toHaveBeenCalledTimes(1)
+    expect(m.updateInstitutionAccount.mock.calls[0][1]).toMatchObject({
+      institution_name: 'Přejmenovaná pojišťovna',
+    })
+    expect(m.updateInstitutionAccount.mock.calls[0][1]).not.toHaveProperty('institution_code')
 
     wrapper.unmount()
   })

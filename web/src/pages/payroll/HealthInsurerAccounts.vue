@@ -13,6 +13,7 @@ import {
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import { healthInsurerName, healthInsurerOptions } from '@/utils/healthInsurers'
 
 defineProps<{ canWrite: boolean }>()
 
@@ -41,6 +42,15 @@ const institutionTypes: PayrollInstitutionType[] = [
   'statutory_insurance',
   'other_recipient',
 ]
+const insurerOptions = healthInsurerOptions()
+/**
+ * Escape hatch pro kód mimo číselník. Seznam pojišťoven je v kódu, backend
+ * u účtů institucí kód proti číselníku nevaliduje — kdyby byl výběr jediná
+ * cesta, zanikla by možnost založit účet nově vzniklé (nebo přejmenované)
+ * pojišťovny až do dalšího releasu. Výchozí stav je vypnutý, takže běžná cesta
+ * je pořád výběr ze seznamu.
+ */
+const manualInsurerCode = ref(false)
 const sourceOptions = computed(() => sources.map(source => ({
   value: source,
   label: sourceLabel(source),
@@ -87,6 +97,24 @@ const editForm = reactive<PayrollInstitutionAccountUpdatePayload>({
   source_kind: 'official_document',
   source_reference: '',
   verified_on: localToday(),
+})
+
+const insurerPickerActive = computed(() =>
+  createForm.institution_type === 'health_insurer' && !manualInsurerCode.value)
+/**
+ * Vybraná pojišťovna pro `SearchableSelect`. `null` znamená „ještě nevybráno";
+ * `selectedOption` níže drží popisek i pro kód, který v číselníku není, aby se
+ * hodnota nikdy tiše neztratila.
+ */
+const selectedInsurerCode = computed(() => {
+  const code = createForm.institution_code.trim()
+  return code === '' ? null : code
+})
+const selectedInsurerOption = computed(() => {
+  const code = selectedInsurerCode.value
+  if (code === null) return null
+  const known = healthInsurerName(code)
+  return { value: code, label: known === null ? code : `${code} — ${known}` }
 })
 
 const institutionAccounts = computed(() =>
@@ -191,6 +219,7 @@ async function loadAccounts() {
 
 function openCreate() {
   Object.assign(createForm, emptyCreate())
+  manualInsurerCode.value = false
   showValidation.value = false
   showCreate.value = true
   editingId.value = null
@@ -245,6 +274,7 @@ async function createAccount() {
     showCreate.value = false
     showValidation.value = false
     Object.assign(createForm, emptyCreate())
+    manualInsurerCode.value = false
     toast.success(t('payroll.employer.health_accounts.created'))
   } catch (error: unknown) {
     showSaveError(error, 'payroll.employer.health_accounts.create_failed')
@@ -293,8 +323,27 @@ function institutionTypeLabel(type: PayrollInstitutionType): string {
   return t(`payroll.employer.health_accounts.types.${type}`)
 }
 
+/**
+ * Změna typu instituce mění i způsob zadání kódu, takže starý pár kód+název už
+ * nedává smysl — u zdravotní pojišťovny by v poli zůstal kód finančního úřadu
+ * a naopak. Proto se pár vyprázdní a ruční režim vrátí na výchozí výběr.
+ */
 function setCreateInstitutionType(value: PayrollInstitutionType | null) {
-  if (value !== null) createForm.institution_type = value
+  if (value === null || value === createForm.institution_type) return
+  createForm.institution_type = value
+  createForm.institution_code = ''
+  createForm.institution_name = ''
+  manualInsurerCode.value = false
+}
+
+/** Výběr z číselníku doplní kód i název naráz — o to tady jde. */
+function setCreateInsurer(value: string | null) {
+  createForm.institution_code = value ?? ''
+  createForm.institution_name = value === null ? '' : healthInsurerName(value) ?? ''
+}
+
+function enableManualInsurerCode() {
+  manualInsurerCode.value = true
 }
 
 function setCreateSource(value: PayrollInstitutionAccountSource | null) {
@@ -436,14 +485,39 @@ onMounted(async () => {
               @update:model-value="setCreateInstitutionType"
             />
           </label>
-          <label class="block">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_code') }}</span>
-            <input v-model="createForm.institution_code" data-testid="health-create-code" type="text" maxlength="32" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
-          </label>
-          <label class="block">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_name') }}</span>
-            <input v-model="createForm.institution_name" data-testid="health-create-name" type="text" maxlength="190" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
-          </label>
+          <!-- Ne <label>: nese vlastní tlačítko a klik na něj by přes label
+               zároveň otevřel nabídku výběru. Přístupný název dává aria-label. -->
+          <div v-if="insurerPickerActive" class="block md:col-span-2 xl:col-span-2">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.insurer') }}</span>
+            <SearchableSelect
+              data-testid="health-create-insurer"
+              :model-value="selectedInsurerCode"
+              :options="insurerOptions"
+              :selected-option="selectedInsurerOption"
+              :placeholder="t('payroll.employer.health_accounts.select_insurer')"
+              :no-results-label="t('payroll.employer.account_no_results')"
+              :invalid="showValidation && selectedInsurerCode === null"
+              :aria-label="t('payroll.employer.health_accounts.insurer')"
+              accent="payroll"
+              @update:model-value="setCreateInsurer"
+            />
+            <span class="mt-1 block text-xs text-neutral-500">
+              {{ t('payroll.employer.health_accounts.insurer_hint') }}
+              <button type="button" class="cursor-pointer font-medium text-payroll-700 underline" data-testid="health-create-manual-code" @click="enableManualInsurerCode">
+                {{ t('payroll.employer.health_accounts.insurer_manual') }}
+              </button>
+            </span>
+          </div>
+          <template v-else>
+            <label class="block">
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_code') }}</span>
+              <input v-model="createForm.institution_code" data-testid="health-create-code" type="text" maxlength="32" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_name') }}</span>
+              <input v-model="createForm.institution_name" data-testid="health-create-name" type="text" maxlength="190" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+            </label>
+          </template>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.bank_account') }}</span>
             <input v-model="createForm.bank_account" data-testid="health-create-account" type="text" maxlength="191" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">

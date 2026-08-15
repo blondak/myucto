@@ -103,7 +103,7 @@ function settings(accounts: PayrollEmployerAccounts = defaultAccounts): PayrollE
     supplier_id: 1,
     row_version: 3,
     employer_registration_number: '12345678',
-    social_security_office_code: 'P',
+    social_security_office_code: '110',
     default_health_insurer_code: '111',
     payroll_contact_name: 'Testovací účetní',
     payroll_contact_email: 'payroll@example.test',
@@ -316,6 +316,53 @@ describe('EmployerSettings — účtová osnova', () => {
 
     expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
     expect(m.saveEmployerSettings.mock.calls[0][0].default_health_insurer_code).toBeNull()
+
+    wrapper.unmount()
+  })
+
+  it('pustí trojmístný kód OSSZ a nabízí jen tři znaky', async () => {
+    const wrapper = await mountPage()
+    const field = wrapper.get('[data-test="social-security-office-code"]')
+    expect(field.attributes('maxlength')).toBe('3')
+    expect(field.attributes('inputmode')).toBe('numeric')
+
+    await field.setValue('115')
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
+    expect(m.saveEmployerSettings.mock.calls[0][0].social_security_office_code).toBe('115')
+
+    wrapper.unmount()
+  })
+
+  it('neuloží kód OSSZ jiného tvaru než tří číslic a řekne, jak má vypadat', async () => {
+    const wrapper = await mountPage()
+
+    for (const invalid of ['1', '1105', 'PSSZ', '11a']) {
+      m.saveEmployerSettings.mockClear()
+      await wrapper.get('[data-test="social-security-office-code"]').setValue(invalid)
+      const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+      await save!.trigger('click')
+      await flushPromises()
+
+      expect(m.saveEmployerSettings).not.toHaveBeenCalled()
+      expect(wrapper.text()).toContain('payroll.employer.validation.social_security_office_code')
+    }
+
+    wrapper.unmount()
+  })
+
+  it('prázdný kód OSSZ zůstává platný a odejde jako null', async () => {
+    const wrapper = await mountPage({ ...settings(), social_security_office_code: null })
+
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
+    expect(m.saveEmployerSettings.mock.calls[0][0].social_security_office_code).toBeNull()
 
     wrapper.unmount()
   })

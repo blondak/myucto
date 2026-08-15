@@ -41,6 +41,7 @@
     "costs",
     "cron_jobs",
     "dashboard",
+    "databox",
     "diagnostics",
     "documentCompleteness",
     "document_requests",
@@ -590,6 +591,9 @@
       "reports",
       "settings"
     ],
+    "admin-databox": [
+      "databox"
+    ],
     "admin-bank-rule-templates": [
       "bank",
       "bank_template_admin"
@@ -747,6 +751,7 @@
       "costs",
       "cron_jobs",
       "dashboard",
+      "databox",
       "diagnostics",
       "documentCompleteness",
       "document_requests",
