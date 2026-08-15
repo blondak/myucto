@@ -14525,7 +14525,8 @@
             "access": "Access",
             "outbox": "Outgoing filings",
             "inbox": "Incoming messages",
-            "recipients": "Recipients"
+            "recipients": "Recipients",
+            "notices": "Defect notices"
         },
         "access": {
             "title": "System certificate",
@@ -14671,6 +14672,61 @@
         "errors": {
             "certificateRequired": "Please upload the system certificate file (PFX or P12).",
             "sourceRequired": "Add a source link for the data box ID you filled in."
+        },
+        "delivery": {
+            "column": "Effective delivery",
+            "refresh": "Recalculate delivery",
+            "refreshed": "Messages checked: {checked}, delivered by legal fiction: {fiction}.",
+            "explain": "The recalculation does not touch the data box — it only re-evaluates messages already downloaded. If nobody logs in within ten days of arrival, the message counts as delivered on the last day of that period (Section 17(4) of Act 300/2008 Coll.), and that happens purely with the passage of time.",
+            "deliveredOn": "Delivered on {date}",
+            "fictionDueOn": "Delivery by legal fiction falls on {date}",
+            "basis": {
+                "login": "Delivered on log-in",
+                "fiction": "Delivered by legal fiction",
+                "login_or_fiction": "Delivered — on log-in, or by fiction",
+                "pending": "Period running, not delivered yet",
+                "unknown": "Delivery unknown"
+            },
+            "notApplicable": "Receipt for our own filing — the delivery fiction does not apply to it."
+        },
+        "notices": {
+            "title": "Notices to remedy defects in a filing",
+            "intro": "A defective filing is handled by the tax authority through a notice under Section 74 of the Tax Procedure Code. Remedy the defect within the stated period and the filing is treated as if it had been made properly and on time. Fail to remedy a defect under Section 74(1)(a) or (b) and the filing becomes ineffective once the period expires.",
+            "addTitle": "Record a notice",
+            "recordFromMessage": "Record as a notice",
+            "reference": "Reference number",
+            "ground": "Which defect (Section 74(1))",
+            "deliveredOn": "Date the notice was delivered",
+            "respondBy": "Respond by (date stated in the notice)",
+            "periodDays": "Or the number of days stated in the notice",
+            "note": "Note",
+            "save": "Save notice",
+            "saved": "The notice has been recorded.",
+            "duplicate": "A notice for this message already exists; nothing changed.",
+            "empty": "No notice recorded.",
+            "deadlineHint": "The application does not invent the period — the law sets no length, the tax authority states it in the notice. Copy either the date or the number of days. Without it the notice stays in the \"deadline unknown\" state and will never look settled.",
+            "shifted": "The last day fell on a Saturday, Sunday or public holiday, so it moved to the next working day (Section 33(4) of the Tax Procedure Code).",
+            "shortPeriod": "The period is shorter than eight days. The law allows that only quite exceptionally (Section 32(2) of the Tax Procedure Code) — check that it is copied correctly.",
+            "answer": "Record the remedy",
+            "answerSave": "Save",
+            "answerSaved": "The remedy has been recorded.",
+            "answeredOn": "Date the defect was remedied",
+            "answerDateRequired": "Fill in the day you remedied the defect — meeting the deadline is counted in days.",
+            "grounds": {
+                "unknown": "We do not know which letter the notice cites",
+                "a_not_processable": "(a) the filing cannot be dealt with",
+                "b_no_effects": "(b) the filing cannot have its intended effects",
+                "c_wrong_way": "(c) the filing was not made in the prescribed manner",
+                "d_wrong_format": "(d) the filing was not in the prescribed format or structure"
+            },
+            "statuses": {
+                "unknown": "Deadline unknown",
+                "open": "Period running",
+                "answered_in_time": "Remedied within the period",
+                "answered_late": "Remedied after the period",
+                "missed": "Deadline missed",
+                "withdrawn": "Notice withdrawn"
+            }
         }
     }
 }

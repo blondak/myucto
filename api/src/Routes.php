@@ -1722,6 +1722,14 @@ final class Routes
         $app->get    ('/api/submissions/inbox',            [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'list']);
         $app->post   ('/api/submissions/inbox/poll',       [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'poll']);
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/classify', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'reclassify']);
+        // Doručení a jeho následky. `delivery/refresh` nesahá na síť — jen znovu
+        // posoudí už stažené zprávy, protože běžící lhůta fikce (§ 17 odst. 4
+        // zák. 300/2008 Sb.) se mění pouhým během času.
+        $app->post   ('/api/submissions/inbox/delivery/refresh', [\MyInvoice\Action\Submission\SubmissionDefectNoticeAction::class, 'refreshDelivery']);
+        $app->get    ('/api/submissions/defect-notices',   [\MyInvoice\Action\Submission\SubmissionDefectNoticeAction::class, 'list']);
+        $app->post   ('/api/submissions/defect-notices',   [\MyInvoice\Action\Submission\SubmissionDefectNoticeAction::class, 'create']);
+        $app->patch  ('/api/submissions/defect-notices/{id:[0-9]+}', [\MyInvoice\Action\Submission\SubmissionDefectNoticeAction::class, 'amend']);
+        $app->post   ('/api/submissions/defect-notices/{id:[0-9]+}/response', [\MyInvoice\Action\Submission\SubmissionDefectNoticeAction::class, 'respond']);
         $app->get    ('/api/settings/signing',              [SigningProfilesAction::class, 'settings']);
         $app->put    ('/api/settings/signing',              [SigningProfilesAction::class, 'updateSettings']);
         $app->get    ('/api/settings/signing/profiles',              [SigningProfilesAction::class, 'listProfiles']);

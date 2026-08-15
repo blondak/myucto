@@ -156,6 +156,102 @@ export interface InboxMessage {
   delivered_at: string | null
   accepted_at: string | null
   fetched_at: string
+  /** Rozhodný den doručení a čím je podložený — viz {@link DeliveryBasis}. */
+  delivery_basis?: DeliveryBasis
+  delivered_on?: string | null
+  fiction_statutory_on?: string | null
+  fiction_due_on?: string | null
+  fiction_days?: number | null
+  fiction_days_source?: 'ruleset' | 'statute' | null
+  sender_is_public_authority?: boolean | null
+  delivery_resolved_at?: string | null
+  delivery_note?: string | null
+}
+
+/**
+ * Čím je doručení podložené (§ 17 odst. 3 a 4 zák. 300/2008 Sb.).
+ *
+ * `pending` a `unknown` doručení NETVRDÍ — a nejsou totéž: `pending` znamená
+ * „lhůta fikce běží", `unknown` znamená „nevíme". Ani jedno není „v pořádku".
+ */
+export type DeliveryBasis = 'login' | 'fiction' | 'login_or_fiction' | 'pending' | 'unknown'
+
+/** Které písmeno § 74 odst. 1 daňového řádu výzva uvádí. */
+export type DefectGround =
+  | 'a_not_processable'
+  | 'b_no_effects'
+  | 'c_wrong_way'
+  | 'd_wrong_format'
+  | 'unknown'
+
+/**
+ * Následek neodstranění vady. Neúčinnost hrozí JEN u písmen a) a b)
+ * (§ 74 odst. 4 DŘ) — u c) a d) podání nezaniká, ale hrozí pokuta podle
+ * § 247a DŘ. `unknown` znamená, že to z evidence nejde určit.
+ */
+export type DefectConsequence = 'ineffective' | 'no_ineffectiveness' | 'unknown'
+
+export type DefectNoticeStatus =
+  | 'unknown'
+  | 'open'
+  | 'answered_in_time'
+  | 'answered_late'
+  | 'missed'
+  | 'withdrawn'
+
+export type DefectNoticeOutcome = 'unknown' | 'cured' | 'ineffective' | 'penalty_risk'
+
+/** Vyhodnocení výzvy — co z ní právě teď plyne. */
+export interface DefectNoticeAssessment {
+  status: DefectNoticeStatus
+  consequence: DefectConsequence
+  outcome: DefectNoticeOutcome
+  respond_by_on: string | null
+  respond_by_source: 'stated_in_notice' | 'derived_from_days' | 'unknown'
+  respond_by_shifted: boolean
+  days_left: number | null
+  sentence: string
+  suspiciously_short_period: boolean
+  needs_attention: boolean
+}
+
+/** Výzva k odstranění vad podání podle § 74 daňového řádu. */
+export interface DefectNotice {
+  id: number
+  environment: 'production' | 'test'
+  outbox_id: number | null
+  inbox_message_id: number | null
+  notice_reference: string | null
+  authority_kind: RecipientKind
+  defect_ground: DefectGround
+  consequence: DefectConsequence
+  delivered_on: string | null
+  respond_by_on: string | null
+  respond_by_source: 'stated_in_notice' | 'derived_from_days' | 'unknown'
+  stated_period_days: number | null
+  respond_by_shifted: boolean
+  status: DefectNoticeStatus
+  responded_on: string | null
+  response_outbox_id: number | null
+  outcome: DefectNoticeOutcome
+  note: string | null
+  row_version: number
+  created_at: string
+  assessment: DefectNoticeAssessment
+}
+
+/** Vstup pro založení výzvy. Lhůtu aplikace nedopočítává — musí přijít odsud. */
+export interface DefectNoticeInput {
+  environment: string
+  outbox_id?: number | null
+  inbox_message_id?: number | null
+  notice_reference?: string | null
+  authority_kind?: RecipientKind
+  defect_ground?: DefectGround
+  delivered_on?: string | null
+  respond_by_on?: string | null
+  stated_period_days?: number | null
+  note?: string | null
 }
 
 /**
@@ -325,6 +421,41 @@ export const dataBoxApi = {
   matchReceipt: (inboxMessageId: number, outboxId: number) =>
     api.post<ReceiptUploadResult>(`/submissions/receipts/${inboxMessageId}/match`, { outbox_id: outboxId })
       .then(r => r.data),
+
+  /**
+   * Přepočet rozhodného dne doručení. Nesahá na síť ani na schránku — jen
+   * znovu posoudí už stažené zprávy. Běžící lhůta fikce se totiž mění pouhým
+   * během času a bez přepočtu by zpráva zůstala navěky v „lhůta běží".
+   */
+  refreshDelivery: (environment: string) =>
+    api.post<{ checked: number; changed: number; delivered_by_fiction: number }>(
+      '/submissions/inbox/delivery/refresh',
+      { environment },
+    ).then(r => r.data),
+
+  /**
+   * Výzvy k odstranění vad. `notice` v odpovědi je důležité: prázdný seznam
+   * znamená „žádná zaevidovaná", ne „žádná nepřišla" — aplikace výzvy
+   * z datové schránky sama nerozpoznává.
+   */
+  defectNotices: (environment: string, openOnly = false) =>
+    api.get<{ supported: boolean; items: DefectNotice[]; notice: string }>('/submissions/defect-notices', {
+      params: { environment, open: openOnly ? '1' : undefined },
+    }).then(r => r.data),
+
+  createDefectNotice: (data: DefectNoticeInput) =>
+    api.post<DefectNotice & { created: boolean }>('/submissions/defect-notices', data).then(r => r.data),
+
+  amendDefectNotice: (id: number, rowVersion: number, data: Partial<DefectNoticeInput> & { withdrawn?: boolean }) =>
+    api.patch<DefectNotice>(`/submissions/defect-notices/${id}`, { ...data, row_version: rowVersion })
+      .then(r => r.data),
+
+  answerDefectNotice: (id: number, rowVersion: number, respondedOn: string, responseOutboxId?: number | null) =>
+    api.post<DefectNotice>(`/submissions/defect-notices/${id}/response`, {
+      row_version: rowVersion,
+      responded_on: respondedOn,
+      response_outbox_id: responseOutboxId ?? null,
+    }).then(r => r.data),
 }
 
 function receiptForm(environment: string, file: File): FormData {

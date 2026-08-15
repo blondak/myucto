@@ -24,11 +24,32 @@ final class SubmissionInboxRepository
         sender_box_id, sender_name, subject, sender_ident, signature_status, classification, matched_outbox_id,
         document_id, delivered_at, accepted_at, raw_sha256, fetched_at, processed_at';
 
+    /** Závěr o doručení (migrace 1394) — čte se jen tam, kde už migrace proběhla. */
+    private const DELIVERY_COLUMNS = 'delivery_basis, delivered_on, fiction_statutory_on, fiction_due_on,
+        fiction_days, fiction_days_source, sender_is_public_authority, delivery_resolved_at, delivery_note';
+
     public function __construct(private readonly Connection $db) {}
 
     public function isAvailable(): bool
     {
         return $this->db->hasTable(self::TABLE);
+    }
+
+    /**
+     * Umí databáze uložit závěr o doručení? Bez migrace 1394 se čtení i zápis
+     * mlčky přeskočí — ale volající to musí vědět, aby uživateli neukázal
+     * prázdno jako „nevíme" tam, kde je to ve skutečnosti „neumíme".
+     */
+    public function supportsDeliveryResolution(): bool
+    {
+        return $this->isAvailable() && $this->db->hasColumn(self::TABLE, 'delivery_basis');
+    }
+
+    private function columns(): string
+    {
+        return $this->supportsDeliveryResolution()
+            ? self::COLUMNS . ', ' . self::DELIVERY_COLUMNS
+            : self::COLUMNS;
     }
 
     public function exists(int $supplierId, string $channel, string $environment, string $messageId): bool
@@ -102,7 +123,7 @@ final class SubmissionInboxRepository
     {
         $this->assertAvailable();
         $stmt = $this->db->pdo()->prepare(
-            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
+            'SELECT ' . $this->columns() . ' FROM ' . self::TABLE . '
               WHERE supplier_id = ? AND channel = ? AND environment = ? AND external_message_id = ?'
         );
         $stmt->execute([$supplierId, $channel, $environment, $messageId]);
@@ -115,7 +136,7 @@ final class SubmissionInboxRepository
     {
         $this->assertAvailable();
         $limit = max(1, min(500, $limit));
-        $sql = 'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
+        $sql = 'SELECT ' . $this->columns() . ' FROM ' . self::TABLE . '
                  WHERE supplier_id = ? AND environment = ?';
         $params = [$supplierId, $environment];
         if ($classification !== null) {
@@ -134,7 +155,7 @@ final class SubmissionInboxRepository
     {
         $this->assertAvailable();
         $stmt = $this->db->pdo()->prepare(
-            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . ' WHERE supplier_id = ? AND id = ?'
+            'SELECT ' . $this->columns() . ' FROM ' . self::TABLE . ' WHERE supplier_id = ? AND id = ?'
         );
         $stmt->execute([$supplierId, $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -156,7 +177,7 @@ final class SubmissionInboxRepository
         $this->assertAvailable();
         $limit = max(1, min(500, $limit));
         $stmt = $this->db->pdo()->prepare(
-            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
+            'SELECT ' . $this->columns() . ' FROM ' . self::TABLE . '
               WHERE supplier_id = ? AND environment = ?
                 AND classification = \'delivery_receipt\' AND matched_outbox_id IS NULL
               ORDER BY id DESC LIMIT ' . $limit
@@ -195,6 +216,79 @@ final class SubmissionInboxRepository
         );
         $stmt->execute([$classification, $matchedOutboxId, $id, $supplierId]);
         return $stmt->rowCount() > 0;
+    }
+
+    // ───────────────────────── rozhodný den doručení ─────────────────────────
+
+    /**
+     * Zapíše závěr o doručení (migrace 1394).
+     *
+     * Přepis je záměrně dovolený: závěr se mění, jak přibývají fakta — dodaná
+     * zpráva nejdřív čeká (`pending`), po uplynutí lhůty se z ní stane `fiction`,
+     * a když ISDS dodatečně vrátí čas přihlášení, přepíše to obojí na `login`.
+     * Zamykat tenhle sloupec by znamenalo zakonzervovat první, nejméně
+     * informovaný odhad. Auditní stopu drží `delivery_resolved_at` a
+     * `activity_log`, ne nemožnost zápisu.
+     *
+     * @param array{
+     *   delivery_basis:string, delivered_on:?string, fiction_statutory_on:?string,
+     *   fiction_due_on:?string, fiction_days:?int, fiction_days_source:?string,
+     *   sender_is_public_authority:?int, delivery_note:string
+     * } $delivery
+     */
+    public function saveDeliveryResolution(int $supplierId, int $id, array $delivery): bool
+    {
+        if (!$this->supportsDeliveryResolution()) {
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE ' . self::TABLE . '
+                SET delivery_basis = ?, delivered_on = ?, fiction_statutory_on = ?, fiction_due_on = ?,
+                    fiction_days = ?, fiction_days_source = ?, sender_is_public_authority = ?,
+                    delivery_resolved_at = UTC_TIMESTAMP(), delivery_note = ?
+              WHERE id = ? AND supplier_id = ?'
+        );
+        $stmt->execute([
+            $delivery['delivery_basis'],
+            $delivery['delivered_on'],
+            $delivery['fiction_statutory_on'],
+            $delivery['fiction_due_on'],
+            $delivery['fiction_days'],
+            $delivery['fiction_days_source'],
+            $delivery['sender_is_public_authority'],
+            $delivery['delivery_note'],
+            $id,
+            $supplierId,
+        ]);
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Zprávy, u kterých lhůta fikce běží nebo se nikdy nevyhodnotila.
+     *
+     * `unknown` je ve výběru schválně: zpráva, kterou aplikace neuměla posoudit,
+     * se má znovu zkusit, až se doplní odesílatel do číselníku nebo se dorovná
+     * migrace. Bez toho by „nevíme" bylo doživotní.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listDeliveryPending(int $supplierId, string $environment, int $limit = 200): array
+    {
+        if (!$this->supportsDeliveryResolution()) {
+            return [];
+        }
+        $limit = max(1, min(1000, $limit));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . $this->columns() . ' FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ?
+                AND delivery_basis IN (\'pending\', \'unknown\')
+                AND classification <> \'delivery_receipt\'
+              ORDER BY id ASC LIMIT ' . $limit
+        );
+        $stmt->execute([$supplierId, $environment]);
+
+        return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
     // ───────────────────────── stav dotazování ─────────────────────────
@@ -277,8 +371,15 @@ final class SubmissionInboxRepository
     {
         $row['id'] = (int) $row['id'];
         $row['supplier_id'] = (int) $row['supplier_id'];
-        foreach (['matched_outbox_id', 'document_id'] as $key) {
-            $row[$key] = $row[$key] !== null ? (int) $row[$key] : null;
+        foreach (['matched_outbox_id', 'document_id', 'fiction_days'] as $key) {
+            if (array_key_exists($key, $row)) {
+                $row[$key] = $row[$key] !== null ? (int) $row[$key] : null;
+            }
+        }
+        if (array_key_exists('sender_is_public_authority', $row)) {
+            $row['sender_is_public_authority'] = $row['sender_is_public_authority'] !== null
+                ? (bool) $row['sender_is_public_authority']
+                : null;
         }
         return $row;
     }

@@ -67,9 +67,25 @@ try {
     $failed = 0;
     $unclassified = 0;
 
+    $fiction = 0;
+
     foreach ($inbox->suppliersWithPollingEnabled('isds') as $credential) {
         $supplierId = (int) $credential['supplier_id'];
         $environment = (string) $credential['environment'];
+
+        // Přepočet doručení běží PŘED vyzvednutím a bez ohledu na to, jestli se
+        // na schránku vůbec dovoláme. Fikce doručení podle § 17 odst. 4
+        // zák. 300/2008 Sb. nastane pouhým uplynutím lhůty — nefunkční spojení
+        // ji nezastaví, a kdyby ji zastavil tenhle cron, aplikace by o zmeškané
+        // lhůtě mlčela právě v okamžiku, kdy je to nejdražší.
+        try {
+            $refreshed = $inbox->refreshDelivery($supplierId, $environment);
+            $fiction += $refreshed['delivered_by_fiction'];
+        } catch (\Throwable $e) {
+            $failed++;
+            fwrite(STDERR, sprintf("supplier %d delivery refresh: %s\n", $supplierId, $e->getMessage()));
+        }
+
         try {
             $context = $credentials->unlock($supplierId, $environment);
             $result = $inbox->poll($context, 'isds', null, $limit);
@@ -90,6 +106,7 @@ try {
         'stored' => $stored,
         'failed' => $failed,
         'unclassified' => $unclassified,
+        'delivered_by_fiction' => $fiction,
     ];
     // Selhání se NIKDY nehlásí jako úspěšný běh s nulou zpráv — právě tahle
     // záměna by tiše zastavila vyzvedávání výzev podle § 74 DŘ.

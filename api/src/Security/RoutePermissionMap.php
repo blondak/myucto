@@ -118,8 +118,10 @@ final class RoutePermissionMap
         // Průřezová fronta podání (datová schránka i EPO). Oprávnění je stejné
         // jako u trezoru certifikátů: kdo smí spravovat podpisové prostředky,
         // smí i odesílat podání — a naopak nikdo jiný.
-        ['GET', '#^/api/submissions/(outbox|inbox|recipients|receipts)(/|$)#', 'settings.signing', AccessLevel::READ],
-        ['*', '#^/api/submissions/(outbox|inbox|recipients|receipts)(/|$)#', 'settings.signing', AccessLevel::WRITE],
+        // `defect-notices` = výzvy k odstranění vad podle § 74 daňového řádu.
+        // Patří sem, protože se týkají osudu odeslaného podání, ne mzdové agendy.
+        ['GET', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices)(/|$)#', 'settings.signing', AccessLevel::READ],
+        ['*', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices)(/|$)#', 'settings.signing', AccessLevel::WRITE],
 
         ['GET', '#^/api/payroll/people$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/people$#', 'payroll.person.write', AccessLevel::WRITE],

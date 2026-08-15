@@ -19,6 +19,9 @@ import {
   dataBoxApi,
   type AcceptanceState,
   type DataBoxCredential,
+  type DefectGround,
+  type DefectNotice,
+  type DeliveryBasis,
   type DispatchState,
   type InboxMessage,
   type InboxPollState,
@@ -37,7 +40,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 const { t } = useI18n()
 const toast = useToast()
 
-type Tab = 'access' | 'outbox' | 'inbox' | 'recipients'
+type Tab = 'access' | 'outbox' | 'inbox' | 'notices' | 'recipients'
 const tab = ref<Tab>('access')
 const environment = ref<'production' | 'test'>('production')
 const loading = ref(true)
@@ -85,6 +88,58 @@ const recipientBoxId = ref('')
 const recipientSource = ref('')
 
 const recipientsWithoutBox = computed(() => recipients.value.filter(r => !r.has_box_id))
+
+// ── Výzvy k odstranění vad (§ 74 daňového řádu) ──────────────────────────────
+// Aplikace výzvy z došlých zpráv sama nerozpoznává — úřad naši spisovou značku
+// opakovat nemusí a výzva přijde jako běžná zpráva pro člověka. Eviduje je
+// proto uživatel, a UI o tom musí mluvit nahlas: prázdný seznam tady znamená
+// „žádná zaevidovaná", ne „žádná nepřišla".
+const notices = ref<DefectNotice[]>([])
+const noticesSupported = ref(true)
+const noticesHint = ref('')
+const noticeForm = ref({
+  inbox_message_id: null as number | null,
+  outbox_id: null as number | null,
+  notice_reference: '',
+  defect_ground: 'unknown' as DefectGround,
+  delivered_on: '',
+  respond_by_on: '',
+  stated_period_days: null as number | null,
+  note: '',
+})
+const answerFor = ref<number | null>(null)
+const answerDate = ref('')
+
+const noticesNeedingAttention = computed(
+  () => notices.value.filter(n => n.assessment.needs_attention).length,
+)
+
+/**
+ * Barva podle toho, co uživateli hrozí — ne podle toho, jak stav zní.
+ * „Nevíme" dostává varovnou, ne neutrální: neznalost lhůty je problém,
+ * který někdo musí dořešit, ne klidový stav.
+ */
+function noticeTone(notice: DefectNotice): string {
+  switch (notice.assessment.outcome) {
+    case 'ineffective': return 'bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-200'
+    case 'penalty_risk': return 'bg-warning-50 text-warning-700 dark:bg-warning-900/30 dark:text-warning-200'
+    case 'cured': return 'bg-success-50 text-success-700 dark:bg-success-900/30 dark:text-success-200'
+    default: return notice.assessment.needs_attention
+      ? 'bg-warning-50 text-warning-700 dark:bg-warning-900/30 dark:text-warning-200'
+      : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+  }
+}
+
+/** Doručení: běžící lhůta je jiný stav než „nevíme" a nesmí splynout. */
+function deliveryTone(basis: DeliveryBasis | undefined): string {
+  switch (basis) {
+    case 'login':
+    case 'login_or_fiction': return 'bg-success-50 text-success-700 dark:bg-success-900/30 dark:text-success-200'
+    case 'fiction': return 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200'
+    case 'pending': return 'bg-warning-50 text-warning-700 dark:bg-warning-900/30 dark:text-warning-200'
+    default: return 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+  }
+}
 
 /**
  * Doprava a vyřízení jako dva NEZÁVISLÉ odznaky.
@@ -152,10 +207,108 @@ async function loadAll() {
     inbox.value = inb.items
     pollState.value = inb.state
     unmatchedReceipts.value = unmatched
+    await loadNotices()
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
     loading.value = false
+  }
+}
+
+// ── Doručení a jeho následky ─────────────────────────────────────────────────
+
+async function loadNotices() {
+  try {
+    const result = await dataBoxApi.defectNotices(environment.value)
+    notices.value = result.items
+    noticesSupported.value = result.supported
+    noticesHint.value = result.notice
+  } catch (e) {
+    // Selhání načtení NESMÍ vypadat jako „žádné výzvy". Seznam se vyprázdní,
+    // ale hláška řekne, že o výzvách nic nevíme.
+    notices.value = []
+    noticesSupported.value = false
+    noticesHint.value = apiErrorMessage(e)
+  }
+}
+
+/**
+ * Přepočet rozhodného dne doručení. Nesahá na schránku — jen znovu posoudí
+ * už stažené zprávy, protože běžící lhůta fikce se mění pouhým během času.
+ */
+async function refreshDelivery() {
+  saving.value = true
+  try {
+    const result = await dataBoxApi.refreshDelivery(environment.value)
+    toast.success(t('databox.delivery.refreshed', {
+      checked: result.checked,
+      fiction: result.delivered_by_fiction,
+    }))
+    await loadAll()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    saving.value = false
+  }
+}
+
+/** Předvyplní výzvu ze zprávy, kterou má uživatel před sebou. */
+function startNoticeFromMessage(message: InboxMessage) {
+  tab.value = 'notices'
+  noticeForm.value.inbox_message_id = message.id
+  noticeForm.value.delivered_on = message.delivered_on ?? ''
+  noticeForm.value.notice_reference = ''
+}
+
+async function submitNotice() {
+  saving.value = true
+  try {
+    const created = await dataBoxApi.createDefectNotice({
+      environment: environment.value,
+      inbox_message_id: noticeForm.value.inbox_message_id,
+      outbox_id: noticeForm.value.outbox_id,
+      notice_reference: noticeForm.value.notice_reference || null,
+      defect_ground: noticeForm.value.defect_ground,
+      delivered_on: noticeForm.value.delivered_on || null,
+      respond_by_on: noticeForm.value.respond_by_on || null,
+      stated_period_days: noticeForm.value.stated_period_days,
+      note: noticeForm.value.note || null,
+    })
+    toast.success(created.created ? t('databox.notices.saved') : t('databox.notices.duplicate'))
+    noticeForm.value = {
+      inbox_message_id: null,
+      outbox_id: null,
+      notice_reference: '',
+      defect_ground: 'unknown',
+      delivered_on: '',
+      respond_by_on: '',
+      stated_period_days: null,
+      note: '',
+    }
+    await loadNotices()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    saving.value = false
+  }
+}
+
+async function submitAnswer(notice: DefectNotice) {
+  if (answerDate.value === '') {
+    toast.error(t('databox.notices.answerDateRequired'))
+    return
+  }
+  busyId.value = notice.id
+  try {
+    await dataBoxApi.answerDefectNotice(notice.id, notice.row_version, answerDate.value)
+    answerFor.value = null
+    answerDate.value = ''
+    await loadNotices()
+    toast.success(t('databox.notices.answerSaved'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    busyId.value = null
   }
 }
 
@@ -432,7 +585,7 @@ onMounted(loadAll)
 
     <nav class="flex flex-wrap gap-2 border-b border-neutral-200 dark:border-neutral-700">
       <button
-        v-for="key in (['access', 'outbox', 'inbox', 'recipients'] as Tab[])"
+        v-for="key in (['access', 'outbox', 'inbox', 'notices', 'recipients'] as Tab[])"
         :key="key"
         type="button"
         class="cursor-pointer whitespace-nowrap px-3 py-2 text-sm font-medium border-b-2 -mb-px"
@@ -442,6 +595,10 @@ onMounted(loadAll)
         @click="tab = key"
       >
         {{ t(`databox.tabs.${key}`) }}
+        <span
+          v-if="key === 'notices' && noticesNeedingAttention > 0"
+          class="ml-1 rounded-full bg-warning-100 px-1.5 py-0.5 text-xs text-warning-800 dark:bg-warning-900/40 dark:text-warning-200"
+        >{{ noticesNeedingAttention }}</span>
       </button>
     </nav>
 
@@ -906,7 +1063,11 @@ onMounted(loadAll)
           </svg>
           {{ t('databox.inbox.poll') }}
         </button>
+        <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="refreshDelivery">
+          {{ t('databox.delivery.refresh') }}
+        </button>
       </div>
+      <p class="text-sm text-neutral-500 dark:text-neutral-400">{{ t('databox.delivery.explain') }}</p>
       <p v-if="!currentCredential?.inbox_polling_enabled" class="text-sm text-neutral-500 dark:text-neutral-400">
         {{ t('databox.inbox.pollingOff') }}
       </p>
@@ -921,10 +1082,12 @@ onMounted(loadAll)
               <th class="py-2 pr-3">{{ t('databox.inbox.sender') }}</th>
               <th class="py-2 pr-3">{{ t('databox.inbox.classification') }}</th>
               <th class="py-2 pr-3">{{ t('databox.inbox.deliveredAt') }}</th>
+              <th class="py-2 pr-3">{{ t('databox.delivery.column') }}</th>
+              <th class="py-2 pr-3"></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="m in inbox" :key="m.id" class="border-t border-neutral-100 dark:border-neutral-800">
+            <tr v-for="m in inbox" :key="m.id" class="border-t border-neutral-100 dark:border-neutral-800 align-top">
               <td class="py-2 pr-3">{{ m.subject ?? '—' }}</td>
               <td class="py-2 pr-3">{{ m.sender_name ?? m.sender_box_id ?? '—' }}</td>
               <td class="py-2 pr-3">
@@ -938,9 +1101,147 @@ onMounted(loadAll)
                 </span>
               </td>
               <td class="py-2 pr-3">{{ m.delivered_at ?? '—' }}</td>
+              <!--
+                Rozhodný den doručení. Odznak nikdy neříká jen „doručeno" —
+                u fikce i u běžící lhůty musí být poznat, čím je to podložené,
+                protože od toho dne běží navazující lhůty.
+              -->
+              <td v-if="m.classification === 'delivery_receipt'" class="py-2 pr-3 text-xs text-neutral-500 dark:text-neutral-400">
+                <!--
+                  Doručenka popisuje NAŠE odeslané podání, ne zprávu doručovanou
+                  nám. Fikce doručení se na ni nevztahuje, takže tu odznak
+                  „doručení neznáme" nemá co dělat — nebylo by co znát.
+                -->
+                {{ t('databox.delivery.notApplicable') }}
+              </td>
+              <td v-else class="py-2 pr-3">
+                <span class="rounded-full px-2 py-0.5 text-xs" :class="deliveryTone(m.delivery_basis)">
+                  {{ t(`databox.delivery.basis.${m.delivery_basis ?? 'unknown'}`) }}
+                </span>
+                <div v-if="m.delivered_on" class="mt-1 text-xs text-neutral-600 dark:text-neutral-300">
+                  {{ t('databox.delivery.deliveredOn', { date: m.delivered_on }) }}
+                </div>
+                <div v-else-if="m.fiction_due_on" class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                  {{ t('databox.delivery.fictionDueOn', { date: m.fiction_due_on }) }}
+                </div>
+                <div v-if="m.delivery_note" class="mt-1 max-w-md text-xs text-neutral-500 dark:text-neutral-400">
+                  {{ m.delivery_note }}
+                </div>
+              </td>
+              <td class="py-2 pr-3">
+                <button type="button" :class="btnOutlineSm('neutral')" @click="startNoticeFromMessage(m)">
+                  {{ t('databox.notices.recordFromMessage') }}
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>
+      </div>
+    </section>
+
+    <!-- ─────────────── Výzvy k odstranění vad (§ 74 DŘ) ─────────────── -->
+    <section v-else-if="tab === 'notices'" class="space-y-4">
+      <div class="rounded-lg border border-neutral-200 bg-white p-4 text-sm dark:border-neutral-700 dark:bg-neutral-900">
+        <h2 class="mb-1 font-medium">{{ t('databox.notices.title') }}</h2>
+        <p class="text-neutral-500 dark:text-neutral-400">{{ t('databox.notices.intro') }}</p>
+      </div>
+
+      <!-- Prázdno není „nic nepřišlo" a tahle věta to musí říct nahlas. -->
+      <div
+        v-if="noticesHint"
+        class="rounded-lg border p-3 text-sm"
+        :class="noticesSupported
+          ? 'border-neutral-200 bg-neutral-50 text-neutral-600 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
+          : 'border-warning-300 bg-warning-50 text-warning-800 dark:border-warning-700 dark:bg-warning-900/20 dark:text-warning-200'"
+      >
+        {{ noticesHint }}
+      </div>
+
+      <div class="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-700 dark:bg-neutral-900">
+        <h3 class="mb-3 font-medium">{{ t('databox.notices.addTitle') }}</h3>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <label class="block">
+            <span class="mb-1 block text-sm">{{ t('databox.notices.reference') }}</span>
+            <input v-model="noticeForm.notice_reference" type="text" class="form-input w-full" />
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm">{{ t('databox.notices.ground') }}</span>
+            <select v-model="noticeForm.defect_ground" class="form-select w-full">
+              <option value="unknown">{{ t('databox.notices.grounds.unknown') }}</option>
+              <option value="a_not_processable">{{ t('databox.notices.grounds.a_not_processable') }}</option>
+              <option value="b_no_effects">{{ t('databox.notices.grounds.b_no_effects') }}</option>
+              <option value="c_wrong_way">{{ t('databox.notices.grounds.c_wrong_way') }}</option>
+              <option value="d_wrong_format">{{ t('databox.notices.grounds.d_wrong_format') }}</option>
+            </select>
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm">{{ t('databox.notices.deliveredOn') }}</span>
+            <input v-model="noticeForm.delivered_on" type="date" class="form-input w-full" />
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm">{{ t('databox.notices.respondBy') }}</span>
+            <input v-model="noticeForm.respond_by_on" type="date" class="form-input w-full" />
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm">{{ t('databox.notices.periodDays') }}</span>
+            <input v-model.number="noticeForm.stated_period_days" type="number" min="1" max="366" class="form-input w-full" />
+          </label>
+          <label class="block sm:col-span-2">
+            <span class="mb-1 block text-sm">{{ t('databox.notices.note') }}</span>
+            <input v-model="noticeForm.note" type="text" class="form-input w-full" />
+          </label>
+        </div>
+        <p class="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{{ t('databox.notices.deadlineHint') }}</p>
+        <div class="mt-4 flex justify-end">
+          <button type="button" :class="btnFilled('primary')" :disabled="saving" @click="submitNotice">
+            {{ t('databox.notices.save') }}
+          </button>
+        </div>
+      </div>
+
+      <EmptyState v-if="!loading && notices.length === 0" icon="inbox" :title="t('databox.notices.empty')" />
+
+      <div v-for="n in notices" :key="n.id" class="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-700 dark:bg-neutral-900">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="rounded-full px-2 py-0.5 text-xs" :class="noticeTone(n)">
+            {{ t(`databox.notices.statuses.${n.assessment.status}`) }}
+          </span>
+          <span class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+            {{ t(`databox.notices.grounds.${n.defect_ground}`) }}
+          </span>
+          <span v-if="n.notice_reference" class="text-sm font-medium">{{ n.notice_reference }}</span>
+        </div>
+
+        <!-- Věta, podle které se dá jednat — ne technický kód stavu. -->
+        <p class="mt-2 text-sm">{{ n.assessment.sentence }}</p>
+
+        <div v-if="n.assessment.respond_by_shifted" class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+          {{ t('databox.notices.shifted') }}
+        </div>
+        <div v-if="n.assessment.suspiciously_short_period" class="mt-1 text-xs text-warning-700 dark:text-warning-300">
+          {{ t('databox.notices.shortPeriod') }}
+        </div>
+
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button
+            v-if="!n.responded_on && n.status !== 'withdrawn'"
+            type="button"
+            :class="btnOutlineSm('primary')"
+            @click="answerFor = answerFor === n.id ? null : n.id; answerDate = ''"
+          >
+            {{ t('databox.notices.answer') }}
+          </button>
+        </div>
+
+        <div v-if="answerFor === n.id" class="mt-3 flex flex-wrap items-end gap-2">
+          <label class="block">
+            <span class="mb-1 block text-sm">{{ t('databox.notices.answeredOn') }}</span>
+            <input v-model="answerDate" type="date" class="form-input" />
+          </label>
+          <button type="button" :class="btnFilled('primary')" :disabled="busyId === n.id" @click="submitAnswer(n)">
+            {{ t('databox.notices.answerSave') }}
+          </button>
+        </div>
       </div>
     </section>
 
