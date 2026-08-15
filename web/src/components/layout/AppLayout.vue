@@ -432,6 +432,9 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/payroll/posting-reconciliation', label: t('nav.payroll_posting_reconciliation'), icon: ICONS.accounting, permission: 'payroll.post' as PermissionKey },
         { to: '/payroll/payments', label: t('nav.payroll_payments'), icon: ICONS.payment_orders, permission: 'payroll.payments' as PermissionKey },
         { to: '/payroll/documents', label: t('nav.payroll_documents'), icon: ICONS.documents, permission: 'payroll.documents' as PermissionKey },
+        // Roční zúčtování stojí hned za dokumenty, protože je to jejich roční
+        // protějšek — nepatří do měsíčního sledu, běží jen v lednu až březnu.
+        { to: '/payroll/annual-settlement', label: t('nav.payroll_annual_settlement'), icon: ICONS.accounting, permission: 'payroll.documents' as PermissionKey },
         { to: '/payroll/submissions', label: t('nav.payroll_submissions'), icon: ICONS.exports, permission: 'payroll.submissions' as PermissionKey },
         // 2) Kmenová evidence zaměstnance — nemá měsíční takt, udržuje se průběžně.
         { to: '/payroll/people', label: t('nav.payroll_people'), icon: ICONS.clients, permission: 'payroll' as PermissionKey, dividerBefore: true },

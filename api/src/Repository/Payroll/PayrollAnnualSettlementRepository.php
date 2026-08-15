@@ -1,0 +1,440 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Repository\Payroll;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use PDO;
+use PDOException;
+
+/**
+ * Evidence žádostí o roční zúčtování a rejstřík jeho výsledků.
+ *
+ * Snapshot výsledku tu NENÍ — ten žije v `payroll_annual_document_revisions`
+ * (purpose `annual_settlement_result`), stejně jako mzdový list. Tady je jen
+ * to, co se musí dát dotazovat: kdo požádal, co doložil, a co komu vyšlo.
+ */
+final class PayrollAnnualSettlementRepository
+{
+    public function __construct(private readonly Connection $db) {}
+
+    /** @return array<string,mixed>|null */
+    public function findRequest(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_annual_settlement_requests
+              WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?'
+        );
+        $statement->execute([$supplierId, $employeeId, $taxYear]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : self::castRequest($row);
+    }
+
+    /**
+     * Založí nebo přepíše žádost. Optimistický zámek přes `row_version` —
+     * dvě otevřené karty téhož zaměstnance si nesmí tiše přepsat odpovědi
+     * o tom, co poplatník doložil.
+     *
+     * @param array<string,mixed> $values
+     * @return array<string,mixed>
+     */
+    public function saveRequest(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+        array $values,
+        ?int $expectedRowVersion,
+        ?int $actorUserId,
+    ): array {
+        $existing = $this->findRequest($supplierId, $employeeId, $taxYear);
+        if ($existing === null) {
+            if ($expectedRowVersion !== null) {
+                throw new PayrollAnnualSettlementConflictException(
+                    'Žádost o roční zúčtování mezitím zanikla.',
+                );
+            }
+            $statement = $this->db->pdo()->prepare(
+                'INSERT INTO payroll_annual_settlement_requests
+                    (supplier_id, employee_id, tax_year, request_status,
+                     requested_on, request_evidence_reference, prior_employers,
+                     prior_documents_received_on, filing_obligation,
+                     filing_obligation_reason, annual_claims, annual_claims_note,
+                     note, created_by, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            try {
+                $statement->execute([
+                    $supplierId,
+                    $employeeId,
+                    $taxYear,
+                    $values['request_status'],
+                    $values['requested_on'],
+                    $values['request_evidence_reference'],
+                    $values['prior_employers'],
+                    $values['prior_documents_received_on'],
+                    $values['filing_obligation'],
+                    $values['filing_obligation_reason'],
+                    $values['annual_claims'],
+                    $values['annual_claims_note'],
+                    $values['note'],
+                    $actorUserId,
+                    $actorUserId,
+                ]);
+            } catch (PDOException $exception) {
+                if ((int) ($exception->errorInfo[1] ?? 0) === 1062) {
+                    throw new PayrollAnnualSettlementConflictException(
+                        'Žádost o roční zúčtování mezitím založil někdo jiný.',
+                        previous: $exception,
+                    );
+                }
+                throw $exception;
+            }
+
+            return $this->findRequest($supplierId, $employeeId, $taxYear)
+                ?? throw new \RuntimeException('Žádost nelze načíst.');
+        }
+
+        $statement = $this->db->pdo()->prepare(
+            'UPDATE payroll_annual_settlement_requests
+                SET request_status = ?,
+                    requested_on = ?,
+                    request_evidence_reference = ?,
+                    prior_employers = ?,
+                    prior_documents_received_on = ?,
+                    filing_obligation = ?,
+                    filing_obligation_reason = ?,
+                    annual_claims = ?,
+                    annual_claims_note = ?,
+                    note = ?,
+                    updated_by = ?,
+                    row_version = row_version + 1
+              WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?
+                AND row_version = ?'
+        );
+        $statement->execute([
+            $values['request_status'],
+            $values['requested_on'],
+            $values['request_evidence_reference'],
+            $values['prior_employers'],
+            $values['prior_documents_received_on'],
+            $values['filing_obligation'],
+            $values['filing_obligation_reason'],
+            $values['annual_claims'],
+            $values['annual_claims_note'],
+            $values['note'],
+            $actorUserId,
+            $supplierId,
+            $employeeId,
+            $taxYear,
+            $expectedRowVersion ?? $existing['row_version'],
+        ]);
+        if ($statement->rowCount() === 0) {
+            throw new PayrollAnnualSettlementConflictException(
+                'Žádost o roční zúčtování mezitím změnil někdo jiný.',
+            );
+        }
+
+        return $this->findRequest($supplierId, $employeeId, $taxYear)
+            ?? throw new \RuntimeException('Žádost nelze načíst.');
+    }
+
+    /** @return array<string,mixed>|null */
+    public function findOutcome(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+        bool $forUpdate = false,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_annual_settlement_outcomes
+              WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?'
+            . ($forUpdate ? ' FOR UPDATE' : '')
+        );
+        $statement->execute([$supplierId, $employeeId, $taxYear]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : self::castOutcome($row);
+    }
+
+    /**
+     * Zapíše výsledek. Kolize na unikátním klíči NENÍ chyba k opravě — je to
+     * druhé spuštění téhož zúčtování a musí vrátit ten původní výsledek,
+     * ne založit další (§ 38ch odst. 4: jednou za zdaňovací období).
+     *
+     * @param array<string,mixed> $values
+     * @return array{outcome:array<string,mixed>,created:bool}
+     */
+    public function insertOutcome(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+        array $values,
+        ?int $actorUserId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_annual_settlement_outcomes
+                (supplier_id, employee_id, tax_year, annual_revision_id, outcome,
+                 tax_difference_minor, bonus_difference_minor,
+                 settlement_difference_minor, payable_minor,
+                 payout_threshold_minor, settled_on, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        try {
+            $statement->execute([
+                $supplierId,
+                $employeeId,
+                $taxYear,
+                $values['annual_revision_id'],
+                $values['outcome'],
+                $values['tax_difference_minor'],
+                $values['bonus_difference_minor'],
+                $values['settlement_difference_minor'],
+                $values['payable_minor'],
+                $values['payout_threshold_minor'],
+                $values['settled_on'],
+                $actorUserId,
+            ]);
+        } catch (PDOException $exception) {
+            if ((int) ($exception->errorInfo[1] ?? 0) !== 1062) {
+                throw $exception;
+            }
+            $existing = $this->findOutcome($supplierId, $employeeId, $taxYear);
+            if ($existing === null) {
+                throw $exception;
+            }
+
+            return ['outcome' => $existing, 'created' => false];
+        }
+
+        $outcome = $this->findOutcome($supplierId, $employeeId, $taxYear)
+            ?? throw new \RuntimeException('Výsledek ročního zúčtování nelze načíst.');
+
+        return ['outcome' => $outcome, 'created' => true];
+    }
+
+    /** Naváže mzdový vstup, kterým se přeplatek vrací (§ 38ch odst. 5). */
+    public function linkPayrollInput(
+        int $supplierId,
+        int $outcomeId,
+        int $payrollInputId,
+    ): void {
+        $statement = $this->db->pdo()->prepare(
+            'UPDATE payroll_annual_settlement_outcomes
+                SET payroll_input_id = ?
+              WHERE supplier_id = ? AND id = ? AND payroll_input_id IS NULL'
+        );
+        $statement->execute([$payrollInputId, $supplierId, $outcomeId]);
+        if ($statement->rowCount() === 0) {
+            throw new PayrollAnnualSettlementConflictException(
+                'Výplata přeplatku už je navázaná na jiný mzdový vstup.',
+            );
+        }
+    }
+
+    /**
+     * Přehled za rok: zaměstnanci s jejich žádostí a výsledkem.
+     *
+     * Zaměstnanec BEZ žádosti v seznamu zůstává — prázdný stav je informace
+     * („nikdo nepožádal"), ne důvod ho schovat.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listForYear(int $supplierId, int $taxYear): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT employee.id AS employee_id,
+                    employee.full_name AS employee_name,
+                    request.request_status,
+                    request.requested_on,
+                    request.prior_employers,
+                    request.filing_obligation,
+                    request.annual_claims,
+                    request.row_version,
+                    outcome.id AS outcome_id,
+                    outcome.outcome,
+                    outcome.tax_difference_minor,
+                    outcome.bonus_difference_minor,
+                    outcome.settlement_difference_minor,
+                    outcome.payable_minor,
+                    outcome.settled_on,
+                    outcome.payroll_input_id,
+                    outcome.annual_revision_id
+               FROM payroll_employees employee
+               LEFT JOIN payroll_annual_settlement_requests request
+                 ON request.supplier_id = employee.supplier_id
+                AND request.employee_id = employee.id
+                AND request.tax_year = ?
+               LEFT JOIN payroll_annual_settlement_outcomes outcome
+                 ON outcome.supplier_id = employee.supplier_id
+                AND outcome.employee_id = employee.id
+                AND outcome.tax_year = ?
+              WHERE employee.supplier_id = ?
+              ORDER BY employee.full_name, employee.id'
+        );
+        $statement->execute([$taxYear, $taxYear, $supplierId]);
+
+        return array_values(array_map(
+            self::castListRow(...),
+            $statement->fetchAll(PDO::FETCH_ASSOC),
+        ));
+    }
+
+    /**
+     * Nároky na slevy podle § 35ba účinné kdykoli během roku.
+     *
+     * Vrací syrové intervaly; měsíce se počítají v doméně, protože podmínka
+     * „na jehož počátku byly splněny podmínky" (§ 35ba odst. 3) je pravidlo,
+     * ne dotaz — a v SQL by se nedala otestovat bez databáze.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function creditClaimsForYear(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT credit_kind, evidence_status, effective_from, effective_to
+               FROM payroll_person_tax_credit_claims
+              WHERE supplier_id = ? AND employee_id = ?
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY credit_kind, effective_from, id'
+        );
+        $statement->execute([
+            $supplierId,
+            $employeeId,
+            sprintf('%04d-12-31', $taxYear),
+            sprintf('%04d-01-01', $taxYear),
+        ]);
+
+        return array_values($statement->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Nároky na daňové zvýhodnění účinné kdykoli během roku.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function childClaimsForYear(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT child_reference, child_order, ztp_p, evidence_status,
+                    shared_household_confirmed, other_claimant_excluded,
+                    effective_from, effective_to
+               FROM payroll_person_tax_child_claims
+              WHERE supplier_id = ? AND employee_id = ?
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY child_reference, effective_from, id'
+        );
+        $statement->execute([
+            $supplierId,
+            $employeeId,
+            sprintf('%04d-12-31', $taxYear),
+            sprintf('%04d-01-01', $taxYear),
+        ]);
+
+        return array_values($statement->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Prohlášení k dani a rezidentství účinné k danému dni.
+     *
+     * @return array{declaration:?string,residence:?string}
+     */
+    public function statutoryEvidenceOn(
+        int $supplierId,
+        int $employeeId,
+        string $effectiveOn,
+    ): array {
+        $declaration = $this->db->pdo()->prepare(
+            'SELECT status FROM payroll_person_tax_declarations
+              WHERE supplier_id = ? AND employee_id = ?
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $declaration->execute([$supplierId, $employeeId, $effectiveOn, $effectiveOn]);
+        $declarationStatus = $declaration->fetchColumn();
+
+        $residence = $this->db->pdo()->prepare(
+            'SELECT residence FROM payroll_person_tax_residences
+              WHERE supplier_id = ? AND employee_id = ?
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $residence->execute([$supplierId, $employeeId, $effectiveOn, $effectiveOn]);
+        $residenceValue = $residence->fetchColumn();
+
+        return [
+            'declaration' => is_string($declarationStatus) ? $declarationStatus : null,
+            'residence' => is_string($residenceValue) ? $residenceValue : null,
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private static function castRequest(array $row): array
+    {
+        foreach (['id', 'supplier_id', 'employee_id', 'tax_year', 'row_version'] as $key) {
+            if (isset($row[$key])) {
+                $row[$key] = (int) $row[$key];
+            }
+        }
+
+        return $row;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private static function castOutcome(array $row): array
+    {
+        foreach ([
+            'id', 'supplier_id', 'employee_id', 'tax_year', 'annual_revision_id',
+            'tax_difference_minor', 'bonus_difference_minor',
+            'settlement_difference_minor', 'payable_minor',
+            'payout_threshold_minor', 'payroll_input_id',
+        ] as $key) {
+            if (array_key_exists($key, $row) && $row[$key] !== null) {
+                $row[$key] = (int) $row[$key];
+            }
+        }
+
+        return $row;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private static function castListRow(array $row): array
+    {
+        foreach ([
+            'employee_id', 'row_version', 'outcome_id', 'annual_revision_id',
+            'tax_difference_minor', 'bonus_difference_minor',
+            'settlement_difference_minor', 'payable_minor', 'payroll_input_id',
+        ] as $key) {
+            if (array_key_exists($key, $row) && $row[$key] !== null) {
+                $row[$key] = (int) $row[$key];
+            }
+        }
+
+        return $row;
+    }
+}

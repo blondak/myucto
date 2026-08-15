@@ -19,7 +19,7 @@ nemění dosavadní Mzdovou rekapitulaci.
 > jinému důvěryhodnému zdroji** a nepoužívej modul jako jediný podklad pro
 > výplatu nebo zákonné podání. Neúplný či nepodporovaný scénář systém zastaví
 > v ruční kontrole a **zákonná podání se zatím jen připravují a stahují, aplikace
-> je neodesílá** ([§ 58.15](#5815-podani-a-hlaseni)). Pro zaúčtování zůstává
+> je neodesílá** ([§ 58.16](#5816-podani-a-hlaseni)). Pro zaúčtování zůstává
 > k dispozici [Mzdová rekapitulace](57_Mzdy.md).
 
 ## 58.1 Zapnutí pro firmu
@@ -794,7 +794,71 @@ revize balíčku; opakované vytvoření nad stejnou sadou vrátí stejný výsl
 > v detailu konkrétního vztahu a podací protokoly se evidují samostatně. Neúplný
 > měsíční balíček proto neznamená, že jsou všechny povinné výstupy hotové.
 
-## 58.15 Podání a hlášení
+## 58.15 Roční zúčtování záloh
+
+V **Mzdy → Roční zúčtování** zvol zdaňovací období. Vlevo je seznam zaměstnanců
+se stavem žádosti a výsledkem, vpravo evidence podkladů a výpočet vybrané osoby.
+Rok, který ještě neskončil, se nezúčtovává — stránka proto po otevření nabízí
+uplynulé období.
+
+Zúčtování je právní úkon zaměstnavatele podle § 38ch zákona o daních z příjmů,
+ne dopočet. Aplikace ho proto provede jen tehdy, když je zodpovězené všechno
+následující. Nezodpovězená otázka má stejný účinek jako záporná odpověď: dokud
+platí „nevíme", zúčtování se neprovádí.
+
+- **Zaměstnanec o zúčtování požádal**, a to nejpozději 15. února po skončení
+  zdaňovacího období. K podané žádosti se ukládá datum i doložení.
+- **Prohlášení poplatníka je u vás na daný rok podepsané.** Bere se stav
+  z karty zaměstnance k 31. prosinci zúčtovávaného roku.
+- **Doklady od předchozích zaměstnavatelů** za tentýž rok jsou doložené,
+  nebo zaměstnanec jiného zaměstnavatele neměl. Pozdější doručení než
+  15. února zúčtování zastaví.
+- **Zaměstnanec nepodává daňové přiznání.** Kdo přiznání podá nebo je povinen
+  ho podat, tomu zaměstnavatel roční zúčtování provést nesmí. Aplikace tuhle
+  povinnost neodvozuje — o většině rozhodných skutečností nic neví, a odpověď
+  proto zadává mzdová účetní.
+- **Zaměstnanec neuplatňuje položky, které jdou jen ročně.** Dary, úroky
+  z úvěru na bytovou potřebu, penzijní a životní pojištění, dlouhodobý investiční
+  produkt, pojištění dlouhodobé péče, sleva na manžela a sleva za zastavenou
+  exekuci se podle § 38h odst. 6 uplatňují až v ročním zúčtování. Aplikace pro ně
+  zatím nemá evidenci nároku ani doložení, takže je neumí spočítat — a raději
+  zúčtování odmítne, než aby vydala nižší přeplatek, než na jaký má zaměstnanec
+  nárok. Takové zúčtování je potřeba provést mimo aplikaci, nebo si zaměstnanec
+  podá přiznání sám.
+
+Nesplněné podmínky se vypisují všechny najednou jako věty, ne jako kódy, a
+tlačítko **Provést roční zúčtování** zůstává vidět zašedlé i s vysvětlením.
+
+Výpočet nic nepřepočítává znovu. Roční úhrny daně a záloh vznikají průběžně při
+schválení každého mzdového běhu; roční zúčtování je jen sečte, porovná s roční
+daní a rozdíl vyčíslí zvlášť na dani a zvlášť na daňovém bonusu. Historické
+měsíce zůstávají nedotčené.
+
+Základní sleva na poplatníka náleží za celé zdaňovací období v plné výši i tomu,
+kdo pracoval jediný měsíc. Slevy na invaliditu, sleva na držitele průkazu ZTP/P
+a daňové zvýhodnění na dítě se naopak krátí po dvanáctinách za měsíce, na
+jejichž počátku byly podmínky splněné. Měsíce se berou z evidence nároků, ne
+z toho, kolik se skutečně měsíčně uplatnilo — měsíční sleva je omezená výší
+zálohy, takže z ní nárok zpětně vyčíst nejde.
+
+Přeplatek se vrací mzdou, nejpozději při zúčtování mzdy za březen, a jen když
+je vyšší než 50 Kč. Přeplatek do padesátikoruny je jiný stav než žádný
+přeplatek: zúčtování proběhlo, jen se nevyplácí. **Případný nedoplatek se
+zaměstnanci nesráží.** Samotnou výplatu založ jako mzdový vstup ve složkách
+mzdy — aplikace ji nevytváří sama.
+
+Zúčtování se provádí jednou za rok. Opakované spuštění nevytvoří druhý výsledek;
+vrátí ten původní. Výsledkem je neměnný doklad **Roční zúčtování záloh**, který
+najdeš i mezi ročními dokumenty a který se váže na konkrétní schválené mzdové
+revize, ze kterých vznikl.
+
+> [!WARNING]
+> Vyúčtování daně z příjmů ze závislé činnosti vůči finančnímu úřadu
+> (§ 38j odst. 4 a 5) aplikace nepodává. Roční zúčtování je vztah mezi
+> zaměstnavatelem a zaměstnancem; vyúčtování je samostatné podání a je potřeba
+> ho odevzdat mimo aplikaci.
+
+## 58.16 Podání a hlášení
 
 V **Mzdy → Nastavení mezd → Podání** nejprve potvrď evidenční profil pro
 REGZEL. Samostatně se eviduje, zda je zaměstnavatel sociálním podnikem,
@@ -901,7 +965,7 @@ zvolený termín s povinně vyplněným důvodem; po uplynutí termínu se znovu
 vrátí mezi otevřené. Jakmile podání skutečně dojde k výsledku (přijato,
 zrušeno v termínu), položka automaticky zmizí jako vyřešená.
 
-## 58.16 Oprávnění a citlivé údaje
+## 58.17 Oprávnění a citlivé údaje
 
 Sekci mohou číst pouze interní role s oprávněním `payroll`. Nastavení aktivace
 a zaměstnavatele vyžaduje `payroll.settings`. API nového modulu je dostupné
@@ -926,7 +990,7 @@ Citlivé mzdové identifikátory se ukládají kontextově šifrované pro konkr
 firmu a osobu; vyhledávací otisk nelze použít ke spojování stejné hodnoty mezi
 firmami. Citlivé hodnoty a mzdové částky se redigují z provozních logů.
 
-## 58.17 Legislativní pravidla mezd
+## 58.18 Legislativní pravidla mezd
 
 Sazby, hranice, lhůty a číselníky, ze kterých mzdový výpočet čerpá, jsou
 rozdělené do samostatných oblastí (daň z příjmů, sociální a zdravotní pojištění,
@@ -955,7 +1019,7 @@ se změnila hodnota) a historie změn: kdo, kdy, co a proč změnil. Historii ne
 mazat ani přepisovat. Pokud verzi schválí tentýž člověk, který ji upravil,
 změna projde, ale obrazovka na to upozorní.
 
-## 58.18 Vztah k Mzdové rekapitulaci
+## 58.19 Vztah k Mzdové rekapitulaci
 
 Mzdová rekapitulace zůstává součástí základní agendy na adrese
 **Účetnictví → Mzdová rekapitulace**. Její formulář, automatické měsíční

@@ -77,6 +77,17 @@ final class PayrollEmployeeDeletionRepository
             'message' => 'Zaměstnanec má schválený mzdový výpočet nebo počáteční stavy '
                 . 'zákonných úhrnů. Smazat ho nelze.',
         ],
+        // Provedené roční zúčtování je právní úkon plátce daně vůči poplatníkovi
+        // (§ 38ch ZDP) a váže se na neměnný doklad. Smazat osobu, které se
+        // zúčtování provedlo, by znamenalo ztratit vazbu na ten doklad.
+        // ŽÁDOST samotná blokující není — je to jen evidence podkladů a mizí
+        // s osobou (viz CASCADE níž).
+        'annual_settlement' => [
+            'tables' => ['payroll_annual_settlement_outcomes'],
+            'code' => 'payroll_employee_has_annual_settlement',
+            'message' => 'Zaměstnanci bylo provedeno roční zúčtování záloh. '
+                . 'Ten doklad je neměnný, takže osobu smazat nelze.',
+        ],
         'money' => [
             'tables' => [
                 'payroll_payment_liabilities',
@@ -129,6 +140,10 @@ final class PayrollEmployeeDeletionRepository
             'payroll_person_tax_residences',
             'payroll_person_tax_credit_claims',
             'payroll_person_tax_child_claims',
+            // Žádost o roční zúčtování a její podklady (§ 38ch odst. 1 a 3).
+            // Bez osoby nemají smysl a nic navenek neprokazují — na rozdíl od
+            // PROVEDENÉHO zúčtování, které mazání blokuje.
+            'payroll_annual_settlement_requests',
         ],
         'insurance' => [
             'payroll_person_health_coverage_history',

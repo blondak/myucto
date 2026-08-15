@@ -134,6 +134,7 @@ class PayrollDocumentService
             PayrollDocumentKind::PayrollSheet,
             PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
             PayrollDocumentKind::TaxableIncomeWithholdingCertificate,
+            PayrollDocumentKind::AnnualSettlementResult,
         ], true)) {
             throw new \InvalidArgumentException(
                 'Tento roční archiv nepodporuje zadaný druh dokumentu.',

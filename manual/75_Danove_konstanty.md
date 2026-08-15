@@ -24,7 +24,7 @@ Konstanty zahrnují zejména:
 Mzdové hodnoty na této stránce používá především základní **Mzdová
 rekapitulace**. Testovací alfa modul **Úplné mzdy** má oddělené,
 auditovatelné legislativní rulesety v **Mzdy → Legislativní pravidla**; jejich
-stav a schvalování popisuje [§ 58.17](58_Uplne_mzdy.md#5817-legislativni-pravidla-mezd).
+stav a schvalování popisuje [§ 58.18](58_Uplne_mzdy.md#5818-legislativni-pravidla-mezd).
 
 ## 75.2 Vlastní přepis
 

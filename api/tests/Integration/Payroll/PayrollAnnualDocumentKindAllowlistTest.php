@@ -105,6 +105,11 @@ final class PayrollAnnualDocumentKindAllowlistTest extends TestCase
         yield 'srážkové potvrzení' => [
             PayrollDocumentKind::TaxableIncomeWithholdingCertificate,
         ];
+        // MZ-25: výsledek ročního zúčtování je taky roční doklad vázaný na
+        // `payroll_annual_document_revisions`, ne na jeden mzdový běh.
+        yield 'roční zúčtování' => [
+            PayrollDocumentKind::AnnualSettlementResult,
+        ];
     }
 
     /** @return iterable<string,array{PayrollDocumentKind}> */

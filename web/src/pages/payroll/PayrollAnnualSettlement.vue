@@ -1,0 +1,670 @@
+<script setup lang="ts">
+/**
+ * Roční zúčtování záloh a daňového zvýhodnění (§ 38ch ZDP).
+ *
+ * Obrazovka má jeden úkol: ukázat, co u koho chybí, a teprve když nechybí nic,
+ * nechat zúčtování provést. Proto je rozdělená na dvě části — vlevo seznam lidí
+ * se stavem, vpravo evidence podkladů a výpočet vybraného zaměstnance.
+ *
+ * Dvě věci, které se tu záměrně nedělají:
+ *  - Tlačítko „Provést" NEZMIZÍ, když něco chybí. Zůstane zašedlé i s větou,
+ *    proč. Zmizelé tlačítko vypadá jako chyba aplikace, ne jako chybějící
+ *    podklad.
+ *  - Odmítnuté zúčtování se nezobrazuje jako selhání. Vrací se z API jako
+ *    normální odpověď a vypíše se seznam vět „co k tomu chybí".
+ */
+import { computed, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import {
+  payrollApi,
+  type PayrollAnnualSettlementAnnualClaims,
+  type PayrollAnnualSettlementFilingObligation,
+  type PayrollAnnualSettlementList,
+  type PayrollAnnualSettlementListItem,
+  type PayrollAnnualSettlementPreview,
+  type PayrollAnnualSettlementPriorEmployers,
+  type PayrollAnnualSettlementRequestStatus,
+  type PayrollDocument,
+} from '@/api/payroll'
+import { apiErrorMessage } from '@/api/errors'
+import { useAuthStore } from '@/stores/auth'
+import { useToast } from '@/composables/useToast'
+import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+
+const { t, locale } = useI18n()
+const auth = useAuthStore()
+const toast = useToast()
+
+/**
+ * Zúčtování se provádí ZA UPLYNULÉ zdaňovací období, takže výchozí rok je
+ * loňský — ne letošní, který ještě neskončil.
+ */
+const year = ref(new Date().getFullYear() - 1)
+const data = ref<PayrollAnnualSettlementList | null>(null)
+const selectedEmployeeId = ref<number | null>(null)
+const preview = ref<PayrollAnnualSettlementPreview | null>(null)
+const document = ref<PayrollDocument | null>(null)
+const loading = ref(true)
+const loadFailed = ref(false)
+const previewLoading = ref(false)
+const saving = ref(false)
+const settling = ref(false)
+let loadSequence = 0
+
+const form = ref({
+  request_status: 'unknown' as PayrollAnnualSettlementRequestStatus,
+  requested_on: '',
+  request_evidence_reference: '',
+  prior_employers: 'unknown' as PayrollAnnualSettlementPriorEmployers,
+  prior_documents_received_on: '',
+  filing_obligation: 'unknown' as PayrollAnnualSettlementFilingObligation,
+  filing_obligation_reason: '',
+  annual_claims: 'unknown' as PayrollAnnualSettlementAnnualClaims,
+  annual_claims_note: '',
+  note: '',
+  row_version: 0,
+})
+
+const canWrite = computed(() => auth.canWrite('payroll.documents'))
+const canSettle = computed(() => auth.canWrite('payroll.approve'))
+const items = computed<PayrollAnnualSettlementListItem[]>(() => data.value?.items ?? [])
+const result = computed(() => preview.value?.result ?? null)
+const blockers = computed(() => result.value?.blockers ?? [])
+const performed = computed(() => result.value?.performed === true)
+
+const settleDisabledReason = computed(() => {
+  if (!canSettle.value) return t('payroll.annual_settlement.blocker.not_requested')
+  if (preview.value === null) return t('payroll.annual_settlement.select_employee')
+  if (blockers.value.length > 0) {
+    return t(`payroll.annual_settlement.blocker.${blockers.value[0]}`)
+  }
+  return undefined
+})
+
+const actions = computed<ActionItem[]>(() => [
+  {
+    key: 'settle',
+    label: t(settling.value
+      ? 'payroll.annual_settlement.settling'
+      : 'payroll.annual_settlement.settle'),
+    icon: 'checkCircle',
+    tier: 'primary',
+    variant: 'primary',
+    disabled: !canSettle.value
+      || preview.value === null
+      || !performed.value
+      || settling.value,
+    disabledReason: settleDisabledReason.value,
+    loading: settling.value,
+    run: settle,
+  },
+  {
+    key: 'reload',
+    label: t('payroll.annual_settlement.reload'),
+    icon: 'cycle',
+    tier: 'secondary',
+    variant: 'neutral',
+    disabled: loading.value,
+    run: () => void load(),
+  },
+])
+
+function money(minorUnits: number | null | undefined): string {
+  const value = (minorUnits ?? 0) / 100
+  return new Intl.NumberFormat(locale.value, {
+    style: 'currency',
+    currency: 'CZK',
+    minimumFractionDigits: 2,
+  }).format(value)
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return '—'
+  const date = new Date(`${value}T00:00:00`)
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }).format(date)
+}
+
+function formatMonth(value: string | undefined): string {
+  if (!value) return '—'
+  const date = new Date(`${value}-01T00:00:00`)
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat(locale.value, { month: 'long', year: 'numeric' }).format(date)
+}
+
+function stateLabel(item: PayrollAnnualSettlementListItem): string {
+  return t(
+    `payroll.annual_settlement.request_status_options.${item.request_status ?? 'unknown'}`,
+  )
+}
+
+async function load(): Promise<void> {
+  const sequence = ++loadSequence
+  loading.value = true
+  try {
+    const response = await payrollApi.listAnnualSettlements(year.value)
+    if (sequence !== loadSequence) return
+    data.value = response
+    loadFailed.value = false
+    if (selectedEmployeeId.value !== null
+      && !response.items.some(item => item.employee_id === selectedEmployeeId.value)
+    ) {
+      selectedEmployeeId.value = null
+      preview.value = null
+    }
+  } catch (error) {
+    if (sequence !== loadSequence) return
+    // Poslední úspěšně načtená data zůstávají — prázdno by tvrdilo,
+    // že za rok nikdo nepožádal, což o selhaném načtení nevíme.
+    loadFailed.value = true
+    toast.error(apiErrorMessage(error, t('payroll.annual_settlement.load_failed')))
+  } finally {
+    if (sequence === loadSequence) loading.value = false
+  }
+}
+
+async function select(employeeId: number): Promise<void> {
+  selectedEmployeeId.value = employeeId
+  document.value = null
+  previewLoading.value = true
+  try {
+    const response = await payrollApi.previewAnnualSettlement(year.value, employeeId)
+    preview.value = response
+    form.value = {
+      request_status: response.request.request_status,
+      requested_on: response.request.requested_on ?? '',
+      request_evidence_reference: response.request.request_evidence_reference ?? '',
+      prior_employers: response.request.prior_employers,
+      prior_documents_received_on: response.request.prior_documents_received_on ?? '',
+      filing_obligation: response.request.filing_obligation,
+      filing_obligation_reason: response.request.filing_obligation_reason ?? '',
+      annual_claims: response.request.annual_claims,
+      annual_claims_note: response.request.annual_claims_note ?? '',
+      note: response.request.note ?? '',
+      row_version: response.request.row_version,
+    }
+  } catch (error) {
+    preview.value = null
+    toast.error(apiErrorMessage(error, t('payroll.annual_settlement.preview_failed')))
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+async function saveRequest(): Promise<void> {
+  if (selectedEmployeeId.value === null || saving.value) return
+  saving.value = true
+  try {
+    await payrollApi.saveAnnualSettlementRequest(year.value, selectedEmployeeId.value, {
+      request_status: form.value.request_status,
+      requested_on: form.value.requested_on || null,
+      request_evidence_reference: form.value.request_evidence_reference || null,
+      prior_employers: form.value.prior_employers,
+      prior_documents_received_on: form.value.prior_documents_received_on || null,
+      filing_obligation: form.value.filing_obligation,
+      filing_obligation_reason: form.value.filing_obligation_reason || null,
+      annual_claims: form.value.annual_claims,
+      annual_claims_note: form.value.annual_claims_note || null,
+      note: form.value.note || null,
+      ...(form.value.row_version > 0 ? { row_version: form.value.row_version } : {}),
+    })
+    toast.success(t('payroll.annual_settlement.request_saved'))
+    await load()
+    await select(selectedEmployeeId.value)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.annual_settlement.request_save_failed')))
+  } finally {
+    saving.value = false
+  }
+}
+
+async function settle(): Promise<void> {
+  if (selectedEmployeeId.value === null || settling.value) return
+  settling.value = true
+  try {
+    const response = await payrollApi.settleAnnualSettlement(
+      year.value,
+      selectedEmployeeId.value,
+    )
+    if (!response.performed) {
+      // Není to chyba serveru — jsou to nesplněné podmínky § 38ch.
+      preview.value = preview.value === null
+        ? preview.value
+        : { ...preview.value, result: response.result }
+      toast.warning(t('payroll.annual_settlement.settle_refused'))
+      return
+    }
+    toast.success(t('payroll.annual_settlement.settled'))
+    await load()
+    await select(selectedEmployeeId.value)
+    // Až po znovunačtení: `select()` doklad schválně nuluje (jiný člověk =
+    // jiný doklad), takže přiřazení před ním by odkaz na stažení zase smazalo.
+    document.value = response.document ?? null
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.annual_settlement.settle_failed')))
+  } finally {
+    settling.value = false
+  }
+}
+
+async function download(): Promise<void> {
+  if (document.value === null) return
+  try {
+    await payrollApi.downloadDocument(document.value)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.documents.download_failed')))
+  }
+}
+
+watch(year, () => {
+  selectedEmployeeId.value = null
+  preview.value = null
+  document.value = null
+  void load()
+})
+onMounted(load)
+</script>
+
+<template>
+  <div class="space-y-6">
+    <header class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-semibold text-neutral-900">
+          {{ t('payroll.annual_settlement.title') }}
+        </h1>
+        <p class="mt-1 max-w-3xl text-sm text-neutral-500">
+          {{ t('payroll.annual_settlement.subtitle') }}
+        </p>
+      </div>
+      <div class="flex flex-wrap items-end gap-2">
+        <label class="block">
+          <span class="mb-1 block text-xs font-medium text-neutral-600">
+            {{ t('payroll.annual_settlement.year') }}
+          </span>
+          <input
+            v-model.number="year"
+            type="number"
+            min="2000"
+            max="2199"
+            data-test="annual-settlement-year"
+            class="h-9 w-28 rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 focus:border-payroll-500 focus:ring-payroll-500/20"
+          >
+        </label>
+      </div>
+    </header>
+
+    <ActionBar :actions="actions" />
+
+    <p v-if="data" class="rounded-md bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
+      {{
+        t('payroll.annual_settlement.deadlines', {
+          request: formatDate(data.request_deadline),
+          settlement: formatDate(data.settlement_deadline),
+          payout: formatMonth(data.payout_period),
+        })
+      }}
+    </p>
+
+    <div class="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+      <section class="rounded-lg border border-neutral-200 bg-surface">
+        <div v-if="loading" class="p-6 text-sm text-neutral-500">…</div>
+        <EmptyState
+          v-else-if="loadFailed && items.length === 0"
+          variant="failed"
+          accent="primary"
+          :cta="t('payroll.annual_settlement.reload')"
+          @action="load"
+        />
+        <EmptyState
+          v-else-if="items.length === 0"
+          variant="empty"
+          icon="user"
+          accent="primary"
+          :title="t('payroll.annual_settlement.no_employees_title')"
+          :message="t('payroll.annual_settlement.no_employees_description')"
+        />
+        <ul v-else class="divide-y divide-neutral-200">
+          <li v-for="item in items" :key="item.employee_id">
+            <button
+              type="button"
+              data-test="annual-settlement-person"
+              class="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-neutral-50"
+              :class="item.employee_id === selectedEmployeeId ? 'bg-primary-50' : ''"
+              @click="select(item.employee_id)"
+            >
+              <span class="min-w-0">
+                <span class="block truncate text-sm font-medium text-neutral-900">
+                  {{ item.employee_name }}
+                </span>
+                <span class="block text-xs text-neutral-500">{{ stateLabel(item) }}</span>
+              </span>
+              <span class="shrink-0 text-right">
+                <span v-if="item.outcome" class="block text-xs font-medium text-neutral-700">
+                  {{ t(`payroll.annual_settlement.outcome.${item.outcome}`) }}
+                </span>
+                <span v-if="item.outcome" class="block text-xs text-neutral-500">
+                  {{ money(item.payable_minor) }}
+                </span>
+                <span v-else class="block text-xs text-neutral-400">
+                  {{ t('payroll.annual_settlement.not_settled') }}
+                </span>
+              </span>
+            </button>
+          </li>
+        </ul>
+      </section>
+
+      <section class="space-y-6">
+        <div
+          v-if="selectedEmployeeId === null"
+          class="rounded-lg border border-dashed border-neutral-300 bg-surface p-6 text-sm text-neutral-500"
+        >
+          {{ t('payroll.annual_settlement.select_employee') }}
+        </div>
+
+        <template v-else>
+          <div class="rounded-lg border border-neutral-200 bg-surface p-4">
+            <h2 class="text-base font-semibold text-neutral-900">
+              {{ t('payroll.annual_settlement.request_section') }}
+            </h2>
+            <div class="mt-4 grid gap-4 sm:grid-cols-2">
+              <label class="block">
+                <span class="mb-1 block text-xs font-medium text-neutral-600">
+                  {{ t('payroll.annual_settlement.request_status') }}
+                </span>
+                <select
+                  v-model="form.request_status"
+                  data-test="annual-settlement-request-status"
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                >
+                  <option
+                    v-for="option in ['unknown', 'requested', 'not_requested', 'withdrawn']"
+                    :key="option"
+                    :value="option"
+                  >
+                    {{ t(`payroll.annual_settlement.request_status_options.${option}`) }}
+                  </option>
+                </select>
+              </label>
+
+              <label v-if="form.request_status === 'requested'" class="block">
+                <span class="mb-1 block text-xs font-medium text-neutral-600">
+                  {{ t('payroll.annual_settlement.requested_on') }}
+                </span>
+                <input
+                  v-model="form.requested_on"
+                  type="date"
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                >
+              </label>
+
+              <label v-if="form.request_status === 'requested'" class="block sm:col-span-2">
+                <span class="mb-1 block text-xs font-medium text-neutral-600">
+                  {{ t('payroll.annual_settlement.request_evidence') }}
+                </span>
+                <input
+                  v-model="form.request_evidence_reference"
+                  type="text"
+                  maxlength="500"
+                  :placeholder="t('payroll.annual_settlement.request_evidence_placeholder')"
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                >
+              </label>
+
+              <label class="block">
+                <span class="mb-1 block text-xs font-medium text-neutral-600">
+                  {{ t('payroll.annual_settlement.prior_employers') }}
+                </span>
+                <select
+                  v-model="form.prior_employers"
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                >
+                  <option
+                    v-for="option in ['unknown', 'none', 'all_documented', 'missing']"
+                    :key="option"
+                    :value="option"
+                  >
+                    {{ t(`payroll.annual_settlement.prior_employers_options.${option}`) }}
+                  </option>
+                </select>
+              </label>
+
+              <label v-if="form.prior_employers === 'all_documented'" class="block">
+                <span class="mb-1 block text-xs font-medium text-neutral-600">
+                  {{ t('payroll.annual_settlement.prior_documents_received_on') }}
+                </span>
+                <input
+                  v-model="form.prior_documents_received_on"
+                  type="date"
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                >
+              </label>
+
+              <label class="block">
+                <span class="mb-1 block text-xs font-medium text-neutral-600">
+                  {{ t('payroll.annual_settlement.filing_obligation') }}
+                </span>
+                <select
+                  v-model="form.filing_obligation"
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                >
+                  <option
+                    v-for="option in ['unknown', 'none', 'required']"
+                    :key="option"
+                    :value="option"
+                  >
+                    {{ t(`payroll.annual_settlement.filing_obligation_options.${option}`) }}
+                  </option>
+                </select>
+              </label>
+
+              <label v-if="form.filing_obligation === 'required'" class="block">
+                <span class="mb-1 block text-xs font-medium text-neutral-600">
+                  {{ t('payroll.annual_settlement.filing_obligation_reason') }}
+                </span>
+                <input
+                  v-model="form.filing_obligation_reason"
+                  type="text"
+                  maxlength="500"
+                  :placeholder="t('payroll.annual_settlement.filing_obligation_reason_placeholder')"
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                >
+              </label>
+
+              <label class="block sm:col-span-2">
+                <span class="mb-1 block text-xs font-medium text-neutral-600">
+                  {{ t('payroll.annual_settlement.annual_claims') }}
+                </span>
+                <select
+                  v-model="form.annual_claims"
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                >
+                  <option
+                    v-for="option in ['unknown', 'none', 'present_unsupported']"
+                    :key="option"
+                    :value="option"
+                  >
+                    {{ t(`payroll.annual_settlement.annual_claims_options.${option}`) }}
+                  </option>
+                </select>
+                <span class="mt-1 block text-xs text-neutral-500">
+                  {{ t('payroll.annual_settlement.annual_claims_hint') }}
+                </span>
+              </label>
+
+              <label v-if="form.annual_claims === 'present_unsupported'" class="block sm:col-span-2">
+                <span class="mb-1 block text-xs font-medium text-neutral-600">
+                  {{ t('payroll.annual_settlement.annual_claims_note') }}
+                </span>
+                <input
+                  v-model="form.annual_claims_note"
+                  type="text"
+                  maxlength="500"
+                  :placeholder="t('payroll.annual_settlement.annual_claims_note_placeholder')"
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                >
+              </label>
+
+              <label class="block sm:col-span-2">
+                <span class="mb-1 block text-xs font-medium text-neutral-600">
+                  {{ t('payroll.annual_settlement.note') }}
+                </span>
+                <input
+                  v-model="form.note"
+                  type="text"
+                  maxlength="1000"
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                >
+              </label>
+            </div>
+
+            <div class="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                data-test="annual-settlement-save-request"
+                :class="btnOutline('primary')"
+                :disabled="!canWrite || saving"
+                @click="saveRequest"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path :d="ICONS.check" />
+                </svg>
+                {{ t('payroll.annual_settlement.save_request') }}
+              </button>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-neutral-200 bg-surface p-4">
+            <h2 class="text-base font-semibold text-neutral-900">
+              {{ t('payroll.annual_settlement.preview_section') }}
+            </h2>
+
+            <p v-if="previewLoading" class="mt-3 text-sm text-neutral-500">…</p>
+
+            <template v-else-if="result">
+              <div
+                v-if="blockers.length > 0"
+                class="mt-4 rounded-md border border-warning-500/40 bg-warning-50 p-4"
+                data-test="annual-settlement-blockers"
+              >
+                <p class="text-sm font-medium text-neutral-900">
+                  {{ t('payroll.annual_settlement.blockers_title') }}
+                </p>
+                <ul class="mt-2 space-y-1.5 text-sm text-neutral-700">
+                  <li v-for="code in blockers" :key="code" class="flex gap-2">
+                    <span aria-hidden="true">•</span>
+                    <span>{{ t(`payroll.annual_settlement.blocker.${code}`) }}</span>
+                  </li>
+                </ul>
+              </div>
+
+              <table v-else class="mt-4 w-full text-sm" data-test="annual-settlement-result">
+                <tbody class="divide-y divide-neutral-100">
+                  <tr>
+                    <td class="py-2 text-neutral-600">{{ t('payroll.annual_settlement.row_rounded_base') }}</td>
+                    <td class="py-2 text-right tabular-nums text-neutral-900">
+                      {{ money(result.rounded_tax_base_minor_units) }}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="py-2 text-neutral-600">{{ t('payroll.annual_settlement.row_tax') }}</td>
+                    <td class="py-2 text-right tabular-nums text-neutral-900">
+                      {{ money(result.tax_before_credits_minor_units) }}
+                    </td>
+                  </tr>
+                  <tr v-for="row in preview?.credit_rows ?? []" :key="row.label">
+                    <td class="py-2 pl-4 text-neutral-500">{{ row.label }}</td>
+                    <td class="py-2 text-right tabular-nums text-neutral-700">
+                      −{{ money(row.amount_minor_units) }}
+                    </td>
+                  </tr>
+                  <tr v-for="row in preview?.child_rows ?? []" :key="row.label">
+                    <td class="py-2 pl-4 text-neutral-500">
+                      {{ row.label }} · {{ t('payroll.annual_settlement.months', { count: row.months }) }}
+                    </td>
+                    <td class="py-2 text-right tabular-nums text-neutral-700">
+                      −{{ money(row.amount_minor_units) }}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="py-2 text-neutral-600">{{ t('payroll.annual_settlement.row_tax_after') }}</td>
+                    <td class="py-2 text-right tabular-nums text-neutral-900">
+                      {{ money(result.tax_after_all_credits_minor_units) }}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="py-2 text-neutral-600">{{ t('payroll.annual_settlement.row_tax_difference') }}</td>
+                    <td class="py-2 text-right tabular-nums text-neutral-900">
+                      {{ money(result.tax_difference_minor_units) }}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="py-2 text-neutral-600">{{ t('payroll.annual_settlement.row_bonus_difference') }}</td>
+                    <td class="py-2 text-right tabular-nums text-neutral-900">
+                      {{ money(result.bonus_difference_minor_units) }}
+                    </td>
+                  </tr>
+                  <tr class="font-semibold">
+                    <td class="py-2 text-neutral-900">{{ t('payroll.annual_settlement.row_payable') }}</td>
+                    <td class="py-2 text-right tabular-nums text-neutral-900">
+                      {{ money(result.payable_minor_units) }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <p
+                v-if="result.outcome === 'overpayment'"
+                class="mt-3 text-sm text-neutral-600"
+              >
+                {{ t('payroll.annual_settlement.payout_note', { payout: formatMonth(data?.payout_period) }) }}
+              </p>
+              <p
+                v-else-if="result.outcome === 'overpayment_below_threshold'"
+                class="mt-3 text-sm text-neutral-600"
+              >
+                {{ t('payroll.annual_settlement.below_threshold_note', {
+                  threshold: money(data?.payout_threshold_minor),
+                }) }}
+              </p>
+              <p
+                v-else-if="result.outcome === 'underpayment_not_withheld'"
+                class="mt-3 text-sm text-neutral-600"
+              >
+                {{ t('payroll.annual_settlement.no_payout_note') }}
+              </p>
+
+              <p
+                v-if="preview?.already_settled"
+                class="mt-3 text-sm text-neutral-600"
+                data-test="annual-settlement-already"
+              >
+                {{ t('payroll.annual_settlement.already_settled', {
+                  year: preview.already_settled.tax_year,
+                  date: formatDate(preview.already_settled.settled_on),
+                }) }}
+              </p>
+
+              <button
+                v-if="document"
+                type="button"
+                :class="`mt-4 ${btnOutline('primary')}`"
+                data-test="annual-settlement-download"
+                @click="download"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path :d="ICONS.download" />
+                </svg>
+                {{ t('payroll.annual_settlement.document') }}
+              </button>
+            </template>
+          </div>
+        </template>
+      </section>
+    </div>
+  </div>
+</template>

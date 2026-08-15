@@ -117,6 +117,21 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollInstitutionType'          => 'enum:MyInvoice\Service\Payroll\InstitutionAccountType',
         'payroll.ts::PayrollInstitutionAccountSource' => 'enum:MyInvoice\Service\Payroll\InstitutionAccountSourceKind',
         'payroll.ts::PayrollDocumentKind'             => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
+
+        // Roční zúčtování (§ 38ch ZDP). Všech šest hodnot chodí po drátě —
+        // stav evidence i důvod odmítnutí musí obrazovka umět vypsat větou.
+        'payroll.ts::PayrollAnnualSettlementRequestStatus'
+            => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementRequestStatus',
+        'payroll.ts::PayrollAnnualSettlementPriorEmployers'
+            => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementPriorEmployers',
+        'payroll.ts::PayrollAnnualSettlementFilingObligation'
+            => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementFilingObligation',
+        'payroll.ts::PayrollAnnualSettlementAnnualClaims'
+            => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementAnnualClaims',
+        'payroll.ts::PayrollAnnualSettlementOutcome'
+            => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementOutcome',
+        'payroll.ts::PayrollAnnualSettlementBlocker'
+            => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementBlocker',
         'payroll.ts::PayrollDimensionType'            => 'db:payroll_dimensions.dimension_type',
         'payroll.ts::PayrollModuleStatus'             => 'db:payroll_module_state.status',
 
@@ -254,6 +269,22 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.components.calculation'  => 'db:payroll_recurring_components.calculation_kind',
 
         'payroll.documents.kind' => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
+
+        // Roční zúčtování skládá klíče dynamicky z kódu překážky i stavu
+        // evidence, takže statická i18n brána na ně nedosáhne. Chybějící věta
+        // by se projevila tím, že uživateli místo důvodu svítí `not_requested`.
+        'payroll.annual_settlement.blocker'
+            => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementBlocker',
+        'payroll.annual_settlement.outcome'
+            => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementOutcome',
+        'payroll.annual_settlement.request_status_options'
+            => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementRequestStatus',
+        'payroll.annual_settlement.prior_employers_options'
+            => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementPriorEmployers',
+        'payroll.annual_settlement.filing_obligation_options'
+            => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementFilingObligation',
+        'payroll.annual_settlement.annual_claims_options'
+            => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementAnnualClaims',
 
         'payroll.deductions.status'      => 'enum:MyInvoice\Service\Payroll\Net\DeductionAgreementStatus',
         'payroll.deductions.commands'    => 'enum:MyInvoice\Service\Payroll\Net\DeductionAgreementCommand',
