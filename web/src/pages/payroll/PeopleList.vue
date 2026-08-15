@@ -517,6 +517,7 @@ onMounted(async () => {
           <PayrollPersonProfilePanel
             :person-id="expandedId"
             :can-write="auth.canWrite('payroll.person.write')"
+            :relation-types="details[expandedId].relation_types"
             @saved="updatePersonProfile"
           />
           <PayrollPersonDependantsPanel

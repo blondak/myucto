@@ -6,6 +6,7 @@ namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\Net\PayrollPartnerSettlement;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use PDO;
@@ -22,6 +23,7 @@ use PDO;
  *   full_name:string,
  *   profile_status:string,
  *   payout_method:string,
+ *   partner_settlement_account_code:?string,
  *   cash_allocation_basis_points:int,
  *   payout_effective_on:?string,
  *   secure_delivery_channel:string,
@@ -49,6 +51,7 @@ final class PayrollPersonProfileRepository
         $stmt = $this->db->pdo()->prepare(
             "SELECT employee.id AS employee_id, employee.full_name AS legacy_full_name,
                     profile.profile_status, profile.payout_method,
+                    profile.partner_settlement_account_code,
                     profile.cash_allocation_basis_points,
                     profile.payout_effective_on, profile.secure_delivery_channel,
                     profile.row_version,
@@ -172,6 +175,10 @@ final class PayrollPersonProfileRepository
             'full_name' => $this->effectiveName($identity, (string) $row['legacy_full_name']),
             'profile_status' => $row['profile_status'] === null ? 'missing' : (string) $row['profile_status'],
             'payout_method' => $row['payout_method'] === null ? 'cash' : (string) $row['payout_method'],
+            'partner_settlement_account_code' =>
+                $row['partner_settlement_account_code'] === null
+                    ? null
+                    : (string) $row['partner_settlement_account_code'],
             'cash_allocation_basis_points' => $row['cash_allocation_basis_points'] === null
                 ? 10000
                 : (int) $row['cash_allocation_basis_points'],
@@ -225,14 +232,16 @@ final class PayrollPersonProfileRepository
                 $pdo->prepare(
                     'INSERT INTO payroll_employee_profiles
                         (supplier_id, employee_id, profile_status, payout_method,
+                         partner_settlement_account_code,
                          cash_allocation_basis_points, payout_effective_on,
                          secure_delivery_channel, row_version)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, 1)'
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)'
                 )->execute([
                     $supplierId,
                     $employeeId,
                     $data['profile_status'],
                     $data['payout_method'],
+                    $data['partner_settlement_account_code'],
                     $data['cash_allocation_basis_points'],
                     $data['payout_effective_on'],
                     $data['secure_delivery_channel'],
@@ -261,6 +270,7 @@ final class PayrollPersonProfileRepository
                 $update = $pdo->prepare(
                     'UPDATE payroll_employee_profiles
                         SET profile_status = ?, payout_method = ?,
+                            partner_settlement_account_code = ?,
                             cash_allocation_basis_points = ?,
                             payout_effective_on = ?,
                             secure_delivery_channel = ?,
@@ -270,6 +280,7 @@ final class PayrollPersonProfileRepository
                 $update->execute([
                     $data['profile_status'],
                     $data['payout_method'],
+                    $data['partner_settlement_account_code'],
                     $data['cash_allocation_basis_points'],
                     $data['payout_effective_on'],
                     $data['secure_delivery_channel'],
@@ -812,6 +823,10 @@ final class PayrollPersonProfileRepository
                 'mixed' => $cashBasisPoints > 0
                     && $cashBasisPoints < 10000
                     && $cashBasisPoints + $accountBasisPoints === 10000,
+                // Zápočet na účet společníka není výplata — nesmí odejít ani
+                // hotovost, ani platba na účet. Celá čistá mzda se přeúčtuje.
+                PayrollPartnerSettlement::KIND =>
+                    $cashBasisPoints === 0 && $accountBasisPoints === 0,
                 default => false,
             };
             if (!$valid) {
@@ -819,6 +834,37 @@ final class PayrollPersonProfileRepository
                     "Rozdělení výplaty není k {$boundary} přesně 100 %."
                 );
             }
+        }
+
+        if ($method === PayrollPartnerSettlement::KIND) {
+            $this->assertPartnerSettlementEligible($supplierId, $employeeId);
+        }
+    }
+
+    /**
+     * Zápočet proti účtu společníka smí mít jen osoba s příjmem společníka nebo
+     * odměnou za výkon funkce. Kontrola sedí tady, protože save() je jediný
+     * zapisovací trychtýř payout_method (volá ho i PayrollPersonQuickEditService),
+     * zatímco PayrollPersonProfileValidator vidí jen tělo požadavku a o vztazích
+     * osoby neví.
+     */
+    private function assertPartnerSettlementEligible(int $supplierId, int $employeeId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT relation_type
+               FROM payroll_employments
+              WHERE supplier_id = ? AND employee_id = ?'
+        );
+        $stmt->execute([$supplierId, $employeeId]);
+        $relationTypes = [];
+        foreach ($this->databaseRows($stmt) as $row) {
+            $relationTypes[] = $this->stringValue($row, 'relation_type');
+        }
+
+        try {
+            PayrollPartnerSettlement::assertEligible($relationTypes, $employeeId);
+        } catch (\DomainException $e) {
+            throw new \InvalidArgumentException($e->getMessage(), previous: $e);
         }
     }
 

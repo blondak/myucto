@@ -22,6 +22,7 @@ final class PayrollEmployerSettingsRepository
         'health_insurance_credit' => 'health_insurance_credit_account',
         'income_tax_credit' => 'income_tax_credit_account',
         'other_deductions_credit' => 'other_deductions_credit_account',
+        'partner_settlement_credit' => 'partner_settlement_credit_account',
     ];
 
     private const STRING_COLUMNS = [

@@ -18,6 +18,7 @@ export const PAYROLL_ACCOUNT_TYPES: Record<PayrollAccountKey, PayrollAccountOpti
   health_insurance_credit: 'liability',
   income_tax_credit: 'liability',
   other_deductions_credit: 'liability',
+  partner_settlement_credit: 'liability',
 }
 
 export function normalizedPayrollAccountCode(value: string): string {

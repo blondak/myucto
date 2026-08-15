@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll;
 
 use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
+use MyInvoice\Service\Payroll\Net\PayrollPartnerSettlement;
 
 /**
  * @phpstan-type IdentityInput array{id:?int,full_name:string,first_name:string,last_name:string,birth_surname_present:bool,birth_surname:?string,birth_surname_source_id:?int,effective_from:string,effective_to:?string}
@@ -16,6 +17,7 @@ use MyInvoice\Service\Payment\IbanValidator;
  * @phpstan-type ProfileInput array{
  *   profile_status:string,
  *   payout_method:string,
+ *   partner_settlement_account_code:?string,
  *   cash_allocation_basis_points:int,
  *   payout_effective_on:string,
  *   secure_delivery_channel:string,
@@ -29,7 +31,14 @@ use MyInvoice\Service\Payment\IbanValidator;
 final class PayrollPersonProfileValidator
 {
     private const PROFILE_STATUSES = ['legacy', 'setup', 'ready'];
-    private const PAYOUT_METHODS = ['cash', 'bank', 'mixed'];
+    private const PAYOUT_METHODS = [
+        'cash',
+        'bank',
+        'mixed',
+        // Zápočet na účet společníka — čistá mzda se nevyplácí, ale přeúčtuje.
+        // Není to platba, takže nevyžaduje ani platební účet, ani podíl hotovosti.
+        PayrollPartnerSettlement::KIND,
+    ];
     private const DELIVERY_CHANNELS = ['portal', 'paper'];
     private const ADDRESS_TYPES = ['residence', 'mailing'];
     private const CONTACT_TYPES = ['email', 'phone'];
@@ -71,16 +80,22 @@ final class PayrollPersonProfileValidator
         $this->assertNoIntervalOverlap($identityIntervals);
         $this->assertNoIntervalOverlap($addressIntervals);
 
+        $payoutMethod = $this->enum(
+            $input['payout_method'] ?? null,
+            self::PAYOUT_METHODS,
+            'payout_method',
+        );
+
         return [
             'profile_status' => $this->enum(
                 $input['profile_status'] ?? null,
                 self::PROFILE_STATUSES,
                 'profile_status',
             ),
-            'payout_method' => $this->enum(
-                $input['payout_method'] ?? null,
-                self::PAYOUT_METHODS,
-                'payout_method',
+            'payout_method' => $payoutMethod,
+            'partner_settlement_account_code' => $this->partnerSettlementAccountCode(
+                $input['partner_settlement_account_code'] ?? null,
+                $payoutMethod,
             ),
             'cash_allocation_basis_points' => $this->integer(
                 $input['cash_allocation_basis_points'] ?? null,
@@ -103,6 +118,31 @@ final class PayrollPersonProfileValidator
             'identifiers' => $identifiers,
             'accounts' => $accounts,
         ];
+    }
+
+    /**
+     * Účet zápočtu je povinný právě u payout_method = partner_settlement a u
+     * ostatních způsobů výplaty nesmí být vyplněný — jinak by karta nesla mrtvý
+     * účet, který by při přepnutí zpět na zápočet tiše ožil.
+     */
+    private function partnerSettlementAccountCode(
+        mixed $value,
+        string $payoutMethod,
+    ): ?string {
+        if ($payoutMethod !== PayrollPartnerSettlement::KIND) {
+            if ($value !== null && $value !== '') {
+                throw new \InvalidArgumentException(
+                    'partner_settlement_account_code smí být vyplněný jen u zápočtu na účet společníka.'
+                );
+            }
+
+            return null;
+        }
+
+        return PayrollPartnerSettlement::accountCode(
+            $value,
+            'partner_settlement_account_code',
+        );
     }
 
     /** @return list<IdentityInput> */

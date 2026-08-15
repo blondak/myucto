@@ -19,6 +19,10 @@ final class PayrollAccountingDefaults
         'health_insurance_credit' => ['code' => '336', 'type' => 'liability'],
         'income_tax_credit' => ['code' => '342', 'type' => 'liability'],
         'other_deductions_credit' => ['code' => '379', 'type' => 'liability'],
+        // Protiúčet zápočtu čisté mzdy na účet společníka (331/366 MD / 365 D).
+        // Firemní default; konkrétní analytiku (365.100…) drží výplatní pravidlo
+        // osoby, viz PayrollPartnerSettlement.
+        'partner_settlement_credit' => ['code' => '365', 'type' => 'liability'],
     ];
 
     /** @return array<string,string> */

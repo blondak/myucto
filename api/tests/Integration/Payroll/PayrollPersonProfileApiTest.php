@@ -462,6 +462,42 @@ final class PayrollPersonProfileApiTest extends TestCase
         self::assertSame(0, $this->profileRowCount($this->employeeId));
     }
 
+    public function testPartnerSettlementIsRefusedForOrdinaryEmployee(): void
+    {
+        $this->createEmployment($this->employeeId, 'employment');
+        $payload = $this->completePayload();
+        $payload['payout_method'] = 'partner_settlement';
+        $payload['partner_settlement_account_code'] = '365.100';
+        $payload['cash_allocation_basis_points'] = 0;
+        $payload['accounts'] = [];
+
+        $response = $this->put($this->supplierId, $this->employeeId, $payload);
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString(
+            'Zápočtem na účet společníka',
+            (string) $this->json($response)['error']['message'],
+        );
+        self::assertSame(0, $this->profileRowCount($this->employeeId));
+    }
+
+    public function testPartnerSettlementIsAcceptedForPartnerIncome(): void
+    {
+        $this->createEmployment($this->employeeId, 'partner_dependent');
+        $payload = $this->completePayload();
+        $payload['payout_method'] = 'partner_settlement';
+        $payload['partner_settlement_account_code'] = '365.100';
+        $payload['cash_allocation_basis_points'] = 0;
+        $payload['accounts'] = [];
+
+        $response = $this->put($this->supplierId, $this->employeeId, $payload);
+
+        self::assertSame(200, $response->getStatusCode());
+        $profile = $this->json($response)['profile'];
+        self::assertSame('partner_settlement', $profile['payout_method']);
+        self::assertSame('365.100', $profile['partner_settlement_account_code']);
+    }
+
     public function testAuditFailureRollsBackWholeProfileMutation(): void
     {
         $employeeId = $this->createEmployee($this->supplierId, 'Audit Testovací');
@@ -672,6 +708,24 @@ final class PayrollPersonProfileApiTest extends TestCase
              VALUES (?, ?, ?, ?, 1, 1, 0, ?, 0, 1)'
         );
         $stmt->execute([$supplierId, $fullName, 'employee', 'hpp', 32_000]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function createEmployment(int $employeeId, string $relationType): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 is_primary, start_date)
+             VALUES (?, ?, ?, ?, "active", 0, "2026-01-01")'
+        );
+        $stmt->execute([
+            $this->supplierId,
+            $employeeId,
+            'SYN-' . bin2hex(random_bytes(4)),
+            $relationType,
+        ]);
 
         return (int) $this->db->pdo()->lastInsertId();
     }

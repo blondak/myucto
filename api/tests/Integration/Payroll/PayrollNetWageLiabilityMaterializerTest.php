@@ -336,6 +336,63 @@ final class PayrollNetWageLiabilityMaterializerTest extends TestCase
         self::assertSame([], $this->liabilities($revisionId));
     }
 
+    public function testPartnerSettlementCreatesNoPayableLiabilityForSettledPart(): void
+    {
+        [, $revisionId] = $this->createRevision(
+            revisionNo: 1,
+            revisionKind: 'regular',
+            payableMinor: 100_000,
+            bankMinor: 0,
+            settlementMinor: 40_000,
+        );
+
+        $result = $this->service->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+
+        // Započtených 40 000 se nesmí objevit nikde v platbách — je to účetní
+        // překlasifikace (331/366 MD / 365.100 D), ne výplata. Vyplácí se jen
+        // zbytek, jinak by firma poslala peníze, které už jsou vypořádané.
+        self::assertSame(1, $result['created_count']);
+        $rows = $this->liabilities($revisionId);
+        self::assertCount(1, $rows);
+        self::assertSame([60_000], array_column($rows, 'amount_minor'));
+        self::assertSame(
+            ["employee-cash:{$this->employeeId}"],
+            array_column($rows, 'recipient_reference'),
+        );
+    }
+
+    public function testPartnerSettlementRefusesOrdinaryEmployeeWithoutWritingAnything(): void
+    {
+        [, $revisionId] = $this->createRevision(
+            revisionNo: 1,
+            revisionKind: 'regular',
+            payableMinor: 100_000,
+            bankMinor: 0,
+            settlementMinor: 40_000,
+            relationType: 'employment',
+        );
+
+        try {
+            $this->service->materialize(
+                $this->supplierId,
+                $revisionId,
+                $this->actorId,
+            );
+            self::fail('Zápočet u běžného zaměstnance musí být odmítnut.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString(
+                'Zápočtem na účet společníka',
+                $exception->getMessage(),
+            );
+        }
+
+        self::assertSame([], $this->liabilities($revisionId));
+    }
+
     public function testRejectsBankDestinationWithoutFrozenAccountIdReference(): void
     {
         [, $revisionId] = $this->createRevision(
@@ -411,6 +468,9 @@ final class PayrollNetWageLiabilityMaterializerTest extends TestCase
         array $accountOverrides = [],
         ?string $bankDestinationReference = null,
         bool $includePayoutAccounts = true,
+        int $settlementMinor = 0,
+        string $settlementAccountCode = '365.100',
+        string $relationType = 'partner_dependent',
     ): array {
         $pdo = $this->db->pdo();
         if ($runId === null) {
@@ -454,6 +514,19 @@ final class PayrollNetWageLiabilityMaterializerTest extends TestCase
                 'row_version' => 1,
             ];
         }
+        if ($settlementMinor > 0) {
+            $rules[] = [
+                'id' => 13,
+                'allocation_reference' => 'synthetic-partner-settlement',
+                'destination_kind' => 'partner_settlement',
+                'destination_reference' => $settlementAccountCode,
+                'allocation_kind' => 'fixed',
+                'amount_minor' => $settlementMinor,
+                'basis_points' => null,
+                'priority_no' => 5,
+                'row_version' => 1,
+            ];
+        }
         $rules[] = [
             'id' => 12,
             'allocation_reference' => 'synthetic-cash',
@@ -468,7 +541,16 @@ final class PayrollNetWageLiabilityMaterializerTest extends TestCase
         $personInput = [
             'employee' => ['id' => $this->employeeId],
             'payout_rules' => $rules,
-            'employments' => [],
+            'employments' => $settlementMinor > 0
+                ? [[
+                    'employment' => [
+                        'id' => 901,
+                        'employee_id' => $this->employeeId,
+                        'relation_type' => $relationType,
+                    ],
+                    'inputs' => [],
+                ]]
+                : [],
         ];
         if ($includePayoutAccounts) {
             $personInput['payout_accounts'] = [$account];

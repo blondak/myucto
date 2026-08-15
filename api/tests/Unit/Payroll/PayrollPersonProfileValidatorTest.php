@@ -340,6 +340,45 @@ final class PayrollPersonProfileValidatorTest extends TestCase
         self::fail('Neplatný profil musí být odmítnut.');
     }
 
+    public function testPartnerSettlementRequiresSettlementAccountCode(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('kód účtu zápočtu');
+        $this->validator->validate($this->payload([
+            'payout_method' => 'partner_settlement',
+            'cash_allocation_basis_points' => 0,
+        ]));
+    }
+
+    public function testPartnerSettlementAcceptsAnalyticAccountCode(): void
+    {
+        $data = $this->validator->validate($this->payload([
+            'payout_method' => 'partner_settlement',
+            'partner_settlement_account_code' => ' 365.100 ',
+            'cash_allocation_basis_points' => 0,
+        ]));
+
+        self::assertSame('partner_settlement', $data['payout_method']);
+        self::assertSame('365.100', $data['partner_settlement_account_code']);
+    }
+
+    public function testSettlementAccountCodeIsRefusedForOtherPayoutMethods(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('jen u zápočtu na účet společníka');
+        $this->validator->validate($this->payload([
+            'payout_method' => 'cash',
+            'partner_settlement_account_code' => '365.100',
+        ]));
+    }
+
+    public function testOtherPayoutMethodsKeepSettlementAccountNull(): void
+    {
+        $data = $this->validator->validate($this->payload([]));
+
+        self::assertNull($data['partner_settlement_account_code']);
+    }
+
     /**
      * @param array<string,mixed> $overrides
      * @return array<string,mixed>

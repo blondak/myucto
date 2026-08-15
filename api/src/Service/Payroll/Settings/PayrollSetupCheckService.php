@@ -180,6 +180,11 @@ final class PayrollSetupCheckService
                     : 'Zvolte podpisový certifikát pro produkční prostředí'
                         . ' (Mzdy → Podání → Certifikát). Testovací volba ani prošlý'
                         . ' certifikát se nepočítají — hlášení by ČSSZ odmítla.',
+                // Nezablokuje nastavení: produkční endpoint VREP zatím není
+                // doložený, takže se z aplikace ostře stejně podat nedá.
+                // Vynucovat certifikát dřív, než k něčemu bude, znamená držet
+                // firmu v nepřipraveném stavu za něco, co jí teď nic nepřinese.
+                blocking: false,
             );
         }
 
@@ -244,19 +249,26 @@ final class PayrollSetupCheckService
      * @param list<array{code:string,status:string,message:string}> $checks
      * @param list<string> $blockers
      */
+    /**
+     * @param bool $blocking false u kontroly, která má být VIDĚT, ale nesmí
+     *     zastavit nastavení. Blokovat se smí jen to, co uživatel může splnit
+     *     a co mu splnění k něčemu bude — jinak se z panelu stane trvale
+     *     červená cedule, kterou přestane číst.
+     */
     private function addCheck(
         array &$checks,
         array &$blockers,
         string $code,
         bool $ready,
         string $message,
+        bool $blocking = true,
     ): void {
         $checks[] = [
             'code' => $code,
-            'status' => $ready ? 'ok' : 'blocked',
+            'status' => $ready ? 'ok' : ($blocking ? 'blocked' : 'pending'),
             'message' => $message,
         ];
-        if (!$ready) {
+        if (!$ready && $blocking) {
             $blockers[] = $code;
         }
     }

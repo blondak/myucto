@@ -201,6 +201,136 @@ final class PayrollPostingLineBuilderTest extends TestCase
         );
     }
 
+    public function testPartnerSettlementClearsWagePayableAgainstShareholderAccount(): void
+    {
+        $snapshot = $this->snapshotWithSettlementRule();
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        // Celá čistá výplata po exekucích (466 000) se přeúčtuje z mzdových
+        // závazků na účet společníka. 331 i 366 tak jdou na nulu — přesně to,
+        // proč se to dělá měsíčně místo ročního ručního zápočtu.
+        self::assertSame([
+            '331|credit' => 100_000,
+            '331|debit' => 100_000,
+            '336|credit' => 271_800,
+            '342|credit' => 50_000,
+            '365.100|credit' => 466_000,
+            '366|credit' => 500_000,
+            '366|debit' => 500_000,
+            '379|credit' => 15_000,
+            '521|debit' => 100_000,
+            '522|debit' => 200_000,
+            '523|debit' => 300_000,
+            '524|debit' => 202_800,
+        ], $this->lineMap($preview->lines));
+        self::assertSame(1_402_800, $preview->debitTotalMinor);
+        self::assertSame(1_402_800, $preview->creditTotalMinor);
+
+        $settlement = array_values(array_filter(
+            $preview->targetAllocations,
+            static fn (array $allocation): bool => str_contains(
+                $allocation['allocation_key'],
+                ':partner-settlement:',
+            ),
+        ));
+        self::assertSame(
+            [['331', 77_667], ['366', 155_333], ['366', 233_000], ['365.100', -466_000]],
+            array_map(
+                static fn (array $allocation): array => [
+                    $allocation['account_code'],
+                    $allocation['signed_minor'],
+                ],
+                $settlement,
+            ),
+        );
+        self::assertSame(0, array_sum(array_column($settlement, 'signed_minor')));
+    }
+
+    public function testPartnerSettlementRefusesOrdinaryEmployee(): void
+    {
+        $snapshot = $this->snapshotWithSettlementRule();
+        foreach (array_keys($snapshot['people'][0]['employments']) as $index) {
+            $snapshot['people'][0]['employments'][$index]['employment'][
+                'relation_type'
+            ] = 'employment';
+        }
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('Zápočtem na účet společníka');
+        $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+    }
+
+    public function testPayoutRulesWithoutSettlementLeavePostingUnchanged(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['people'][0]['payout_rules'] = [[
+            'id' => 21,
+            'allocation_reference' => 'cash',
+            'destination_kind' => 'cash',
+            'destination_reference' => null,
+            'allocation_kind' => 'remainder',
+            'amount_minor' => null,
+            'basis_points' => null,
+            'priority_no' => 10,
+            'row_version' => 1,
+        ]];
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+        $baseline = $this->builder->build(
+            $this->snapshot(),
+            $this->calculatedResult(),
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        self::assertSame(
+            $this->lineMap($baseline->lines),
+            $this->lineMap($preview->lines),
+        );
+        self::assertSame($baseline->targetHash, $preview->targetHash);
+    }
+
+    /** @return array<string,mixed> */
+    private function snapshotWithSettlementRule(): array
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['people'][0]['payout_rules'] = [[
+            'id' => 31,
+            'allocation_reference' => 'partner-settlement',
+            'destination_kind' => 'partner_settlement',
+            'destination_reference' => '365.100',
+            'allocation_kind' => 'remainder',
+            'amount_minor' => null,
+            'basis_points' => null,
+            'priority_no' => 10,
+            'row_version' => 1,
+        ]];
+
+        return $snapshot;
+    }
+
     /**
      * @param list<array{
      *   account_code:string,
