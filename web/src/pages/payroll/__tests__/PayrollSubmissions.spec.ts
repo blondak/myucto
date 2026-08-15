@@ -329,6 +329,24 @@ function setup() {
   })
 }
 
+/*
+ * Záložky se vybírají podle popisku, ne podle pořadí. Indexy tady dřív byly a
+ * rozsypala je každá nová agenda — přidání evidenčního listu shodilo čtyři
+ * testy, které se samotného evidenčního listu vůbec netýkaly.
+ */
+async function clickTab(
+  wrapper: ReturnType<typeof mount>,
+  key: string,
+): Promise<void> {
+  const tab = wrapper.findAll('[role="tab"]')
+    .find(candidate => candidate.text().includes(`payroll.submissions.tabs.${key}`))
+  if (!tab) {
+    throw new Error(`Záložka ${key} na stránce podání chybí.`)
+  }
+  await tab.trigger('click')
+  await flushPromises()
+}
+
 describe('PayrollSubmissions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -339,8 +357,8 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(6)
-    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(7)
+    await clickTab(wrapper, 'regzel')
     await flushPromises()
     expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(2)
     expect(wrapper.text()).toContain('payroll.regzel.environment.production_warning')
@@ -354,9 +372,7 @@ describe('PayrollSubmissions', () => {
     expect(m.snapshots).toHaveBeenLastCalledWith('test')
     expect(wrapper.text()).toContain('payroll.regzel.environment.test_warning')
 
-    const tabs = wrapper.findAll('[role="tab"]')
-    await tabs[2]!.trigger('click')
-    await flushPromises()
+    await clickTab(wrapper, 'jmhz')
     expect(m.overview).toHaveBeenCalledWith(
       'production',
       expect.stringMatching(/^[0-9]{4}-[0-9]{2}$/),
@@ -378,7 +394,7 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    await wrapper.findAll('[role="tab"]')[5]!.trigger('click')
+    await clickTab(wrapper, 'certificate')
     await flushPromises()
 
     expect(m.signingProfile).toHaveBeenCalledWith('production')
@@ -389,7 +405,7 @@ describe('PayrollSubmissions', () => {
   it('bez potvrzení XML nevytvoří a API chybu zobrazí trvale inline', async () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
-    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await clickTab(wrapper, 'regzel')
     await flushPromises()
 
     await wrapper.get('[data-test="regzel-prepare"]').trigger('click')
@@ -425,7 +441,7 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    await wrapper.findAll('[role="tab"]')[3]!.trigger('click')
+    await clickTab(wrapper, 'health')
     await flushPromises()
 
     expect(m.runs).toHaveBeenCalledWith(expect.stringMatching(/^[0-9]{4}-[0-9]{2}$/))
@@ -449,7 +465,7 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
+    await clickTab(wrapper, 'jmhz')
     await flushPromises()
 
     expect(m.jmhzPreview).toHaveBeenCalledWith(18)
@@ -482,7 +498,7 @@ describe('PayrollSubmissions', () => {
 
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
-    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
+    await clickTab(wrapper, 'jmhz')
     await flushPromises()
 
     await wrapper.get('[data-test="submission-detail-open"]').trigger('click')
@@ -524,7 +540,7 @@ describe('PayrollSubmissions', () => {
 
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
-    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
+    await clickTab(wrapper, 'jmhz')
     await flushPromises()
     await wrapper.get('[data-test="submission-detail-open"]').trigger('click')
     await flushPromises()
@@ -542,7 +558,7 @@ describe('PayrollSubmissions', () => {
   it('zobrazuje účinný stav lhůty odděleně od stavu podání', async () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
-    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
+    await clickTab(wrapper, 'jmhz')
     await flushPromises()
 
     expect(wrapper.get('[data-test="submission-deadline-phase"]').text())
@@ -589,7 +605,7 @@ describe('PayrollSubmissions', () => {
 
     expect(wrapper.get('[data-test="submissions-inbox-badge"]').text()).toBe('1')
 
-    await wrapper.findAll('[role="tab"]')[4]!.trigger('click')
+    await clickTab(wrapper, 'inbox')
     await flushPromises()
 
     expect(m.submissionInbox).toHaveBeenCalledWith('production')

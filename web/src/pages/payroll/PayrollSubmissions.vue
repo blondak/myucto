@@ -12,12 +12,14 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import PayrollEldpPanel from './PayrollEldpPanel.vue'
 import PayrollSubmissionInboxPanel from './PayrollSubmissionInboxPanel.vue'
 import PayrollSubmissionOverviewPanel from './PayrollSubmissionOverviewPanel.vue'
 import PayrollSigningCertificatePanel from './PayrollSigningCertificatePanel.vue'
 import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
 
-type SubmissionTab = 'transport' | 'regzel' | 'jmhz' | 'health' | 'inbox' | 'certificate'
+type SubmissionTab =
+  'transport' | 'regzel' | 'jmhz' | 'eldp' | 'health' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -27,8 +29,11 @@ const auth = useAuthStore()
 const activeTab = ref<SubmissionTab>('transport')
 // Certifikát je poslední záložka, ale vlastní: podepisuje se jím REGZEL i JMHZ,
 // takže nepatří pod žádné jednotlivé hlášení.
+// ELDP stojí hned za JMHZ: od roku 2026 ho ČSSZ sestavuje z měsíčního
+// hlášení sama, takže samostatný evidenční list je navazující a přechodná
+// agenda, ne konkurenční hlášení.
 const tabs: SubmissionTab[] = [
-  'transport', 'regzel', 'jmhz', 'health', 'inbox', 'certificate',
+  'transport', 'regzel', 'jmhz', 'eldp', 'health', 'inbox', 'certificate',
 ]
 /*
  * `null` = počet neznáme (načtení odznaku selhalo), ne „nula nevyřízených".
@@ -254,6 +259,12 @@ onMounted(loadInboxBadge)
       odpověď na „co jsem odeslal" objeví později, než by musela.
     -->
     <PayrollTransportHistoryPanel v-if="activeTab === 'transport'" />
+
+    <!--
+      Evidenční list si data obstarává sám a nepotřebuje načtení REGZEL
+      profilu, proto stojí mimo společný skeleton.
+    -->
+    <PayrollEldpPanel v-else-if="activeTab === 'eldp'" />
 
     <div v-else-if="loading" class="space-y-4">
       <div class="h-28 animate-pulse rounded-xl bg-neutral-100" />

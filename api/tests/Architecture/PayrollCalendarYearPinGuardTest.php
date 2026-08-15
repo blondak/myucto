@@ -36,6 +36,14 @@ final class PayrollCalendarYearPinGuardTest extends TestCase
         // dává za Q1/2026 jediný termín 1. 4. – 30. 6. 2026. Jsou to konkrétní
         // data z přechodného ustanovení, ne rok podpory modulu.
         'Service/Payroll/Submission/Jmhz/JmhzDeadlinePolicy.php' => ['forPeriod'],
+        // Totéž přechodné ustanovení z druhé strany: od 1. 1. 2026 sestavuje
+        // evidenční list ČSSZ z měsíčního hlášení a samostatný list zůstává
+        // zaměstnavateli jen za starší roky, při skončení účasti před
+        // 1. 4. 2026 a na výzvu. Jsou to data z přechodného ustanovení, ne rok
+        // podpory modulu — rozsah podporovaných let evidenčního listu se
+        // neptá na letopočet, ale na existenci zmrazené revize.
+        'Service/Payroll/Submission/Eldp/EldpDeadlinePolicy.php' =>
+            ['standaloneStatementAllowed'],
     ];
 
     public function testNoCalendarYearLiteralGatesPayrollCalculations(): void

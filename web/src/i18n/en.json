@@ -2397,6 +2397,7 @@
                 "transport": "Submission status",
                 "regzel": "Employer registration",
                 "jmhz": "JMHZ",
+                "eldp": "Pension record sheet",
                 "health": "Health insurers",
                 "inbox": "Inbox",
                 "certificate": "Certificate"
@@ -2807,6 +2808,38 @@
                     "health_portal": "Insurer portal",
                     "other": "Other channel"
                 }
+            }
+        },
+        "eldp": {
+            "title": "Pension insurance record sheet",
+            "intro": "Builds the record sheet for a calendar year, or for the part of it that ends when the employee leaves pension insurance. The source is always a frozen approved payroll revision; a missing month or an absence the module cannot record blocks preparation and says why.",
+            "legalBasis": "Act No. 582/1991 Coll., Sections 38 and 39. From 2026 the Czech Social Security Administration assembles the record sheet from the monthly employer report; a standalone sheet remains for years before 2026, for participation ending before 1 April 2026, and on request from the authority.",
+            "person": "Person",
+            "employment": "Employment",
+            "year": "Year",
+            "note": "Confirmation note",
+            "prepare": "Prepare record sheet",
+            "confirmExcluded": "I confirm the excluded periods derived from the recorded absences.",
+            "confirmDeducted": "I confirm there are no deductible periods after retirement age in the reported period.",
+            "requestedByAuthority": "The record sheet is being prepared at the request of the authority.",
+            "noSendNotice": "Preparation stops at the prepared state. A person triggers sending from Submission status; the outgoing ELDP data message is not part of the pinned official schema set yet.",
+            "preparedCreated": "The record sheet was built and the submission is ready to be sent.",
+            "preparedReplayed": "The record sheet already existed; repeating did not create a second submission.",
+            "kind": {
+                "annual": "Regular annual",
+                "termination": "On leaving insurance"
+            },
+            "summary": {
+                "period": "Period",
+                "insuranceDays": "Insured days",
+                "excludedDays": "Excluded days",
+                "kind": "Kind",
+                "dueOn": "Due",
+                "sections": "Sections"
+            },
+            "errors": {
+                "loadFailed": "The record sheet source data could not be loaded.",
+                "prepareFailed": "The record sheet could not be built."
             }
         },
         "regzel": {

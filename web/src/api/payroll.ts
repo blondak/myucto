@@ -1695,6 +1695,52 @@ export interface PayrollRegzelProfilePayload {
   evidence_confirmed: boolean
 }
 
+/**
+ * Evidenční list důchodového pojištění. `submission_status` je vždy
+ * `prepared` — odeslání spouští člověk mimo tuhle obrazovku.
+ */
+export interface PayrollEldpPrepared {
+  statement_id: number
+  created: boolean
+  statement_kind: 'annual' | 'termination'
+  section_count: number
+  insurance_days: number
+  excluded_days_total: number
+  due_on: string
+  earliest_submission_on: string
+  obligation_id: number
+  submission_id: number
+  part_id: number
+  artifact_id: number
+  submission_status: string
+  xml_sha256: string
+  environment: PayrollRegzelEnvironment
+}
+
+export interface PayrollEldpStatement {
+  id: number
+  statement_kind: 'annual' | 'termination'
+  period_from: string
+  period_to: string
+  section_count: number
+  insurance_days: number
+  excluded_days_total: number
+  deducted_days_total: number
+  due_on: string
+  earliest_submission_on: string
+  xml_sha256: string
+  payload: Record<string, unknown>
+}
+
+export interface PayrollEldpSupport {
+  agenda_code: string
+  evidence_schema: string
+  submission_schema_available: boolean
+  stops_at_status: string
+  legal_basis: string
+  deadline_rulesets: string[]
+}
+
 export interface PayrollRegzelSnapshot {
   id: number
   environment: PayrollRegzelEnvironment
@@ -2922,6 +2968,28 @@ export const payrollApi = {
       URL.revokeObjectURL(objectUrl)
     }
   },
+  eldpStatement: (params: {
+    employment_id: number
+    year: number
+    environment: PayrollRegzelEnvironment
+  }) =>
+    api.get<{
+      statement: PayrollEldpStatement | null
+      supported: PayrollEldpSupport
+    }>('/payroll/submissions/eldp', { params })
+      .then(response => response.data),
+  prepareEldp: (payload: {
+    employment_id: number
+    year: number
+    environment: PayrollRegzelEnvironment
+    excluded_days_confirmed: boolean
+    deducted_days_none: boolean
+    requested_by_authority: boolean
+    note: string
+    idempotency_key: string
+  }) =>
+    api.post<{ statement: PayrollEldpPrepared }>('/payroll/submissions/eldp', payload)
+      .then(response => response.data.statement),
   regzelProfile: () =>
     api.get<{ profile: PayrollRegzelProfile | null }>('/payroll/submissions/regzel/profile')
       .then(response => response.data.profile),

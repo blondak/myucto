@@ -76,6 +76,7 @@ use MyInvoice\Action\Payroll\PayrollCzIscoAction;
 use MyInvoice\Action\Payroll\PayrollDeductionAgreementAction;
 use MyInvoice\Action\Payroll\PayrollDimensionAction;
 use MyInvoice\Action\Payroll\PayrollDocumentAction;
+use MyInvoice\Action\Payroll\PayrollEldpAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentExitDocumentAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementAction;
 use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
@@ -979,6 +980,17 @@ final class Routes
             $g->post(
                 '/submissions/jmhz-freeze/{preparationId:[0-9]+}',
                 PayrollJmhzSubmissionFreezeAction::class,
+            );
+            // Evidenční list důchodového pojištění. Vlastní zákonná povinnost
+            // s vlastní lhůtou; `prepare` končí ve stavu `prepared`, odeslání
+            // spouští člověk.
+            $g->get(
+                '/submissions/eldp',
+                [PayrollEldpAction::class, 'get'],
+            );
+            $g->post(
+                '/submissions/eldp',
+                [PayrollEldpAction::class, 'prepare'],
             );
             // Přihlášení pracovního vztahu u ČSSZ. Cesta nenese kód formuláře:
             // PREZEC vs. REGZEC rozhoduje resolver z faktů, ne volající.

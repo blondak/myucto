@@ -66,6 +66,16 @@ final class PayrollEmploymentDeletionRepository
             'message' => 'Za tento pracovní vztah už bylo připraveno nebo odesláno hlášení JMHZ. '
                 . 'Podání nejde vzít zpět smazáním vztahu — použijte Označit nenástup nebo Ukončit.',
         ],
+        'eldp' => [
+            'tables' => [
+                'payroll_eldp_statements',
+                'payroll_eldp_statement_claims',
+            ],
+            'code' => 'payroll_employment_has_eldp_statement',
+            'message' => 'Za tento pracovní vztah je sestavený evidenční list důchodového '
+                . 'pojištění. Z něj se člověku jednou počítá důchod, takže je neměnný a vztah '
+                . 'smazat nelze — použijte Označit nenástup nebo Ukončit.',
+        ],
         'run' => [
             'tables' => ['payroll_run_employments'],
             'code' => 'payroll_employment_in_run',
