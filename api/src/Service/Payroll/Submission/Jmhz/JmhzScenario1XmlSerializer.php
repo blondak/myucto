@@ -534,6 +534,21 @@ final class JmhzScenario1XmlSerializer
         );
         $node->appendChild($duration);
 
+        // 10477 je v XSD volitelný, ale kontroly 118 a 315 ho vyžadují: obě
+        // porovnávají odvedené pojistné se základem a chybějící základ berou
+        // jako nulu, takže podání bez něj ČSSZ odmítne. Pořadí je dané
+        // sekvencí `pojisteniBezPriznakuType` — základ patří mezi `trvani`
+        // a `eldpSeznam`.
+        $base = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vymerovaciZaklad');
+        $this->text(
+            $dom,
+            $base,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:castkaOdvodPojistneho',
+            (string) $this->int($summary['social_assessment_base_czk'] ?? null, '10477'),
+        );
+        $node->appendChild($base);
+
         $sections = $this->rows($eldp['eldp_sections'] ?? null);
         if ($sections === []) {
             $this->invalid(

@@ -46,8 +46,6 @@ final class JmhzScenario1ControlEvaluator
         59 => 'Podmínky vyměřovacího základu se opírají o vyloučené a odečtené'
             . ' doby (10357, 10375), které první profil nevykazuje; předpoklad'
             . ' pravidla tedy nelze ani potvrdit, ani vyvrátit.',
-        118 => 'Sazba se počítá z vyměřovacího základu zaměstnance (10477),'
-            . ' který první profil nevykazuje.',
         // 10243 „Zaměstnání malého rozsahu" nemá ve slovníku 1.4.1.6 mapování
         // na XSD, takže se z vyrobeného XML nedá přečíst vůbec. Vydávat
         // kontrolu za splněnou by znamenalo tvrdit, že prošla podmínka, na
@@ -93,8 +91,6 @@ final class JmhzScenario1ControlEvaluator
             . ' rozhoduje nad evidencí podání, ne nad jedním XML.',
         311 => 'Jedinost ročního zúčtování v rámci roku se pozná až porovnáním'
             . ' více měsíčních hlášení.',
-        315 => 'Sazby se počítají z vyměřovacích základů zaměstnance'
-            . ' (10477–10480), které první profil nevykazuje.',
         321 => 'Pozitivní výčet povinných atributů souhrnné vrstvy je v katalogu'
             . ' popsaný odkazem na oblast, ne výčtem; bez doloženého seznamu by'
             . ' šlo o odhad.',
@@ -196,11 +192,11 @@ final class JmhzScenario1ControlEvaluator
         return [
             1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 31, 37, 43, 44, 50, 56, 57, 58,
             60, 61, 62, 72, 74, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
-            103, 109, 121, 129, 131, 132, 134, 135, 144, 145, 152, 153, 154,
+            103, 109, 118, 121, 129, 131, 132, 134, 135, 144, 145, 152, 153, 154,
             157, 159, 162, 165, 167, 168, 170, 208, 211, 216, 227, 232, 235,
             236, 240, 244, 248, 251,
             253, 255, 260, 267, 270, 271, 272, 273, 275, 282, 283, 284, 286,
-            296, 299, 300, 301, 303, 304, 306, 307, 309, 328, 329, 330, 332,
+            296, 299, 300, 301, 303, 304, 306, 307, 309, 315, 328, 329, 330, 332,
             335, 341, 342, 354, 355,
         ];
     }
@@ -266,6 +262,7 @@ final class JmhzScenario1ControlEvaluator
             3 => ['source_row_6'],
             8 => ['source_row_3'],
             10 => ['source_row_4'],
+            118 => ['source_row_7'],
             74 => ['source_row_15'],
             167 => ['source_row_5'],
             // Tolerance 7,1 % je v textu kontroly 168, ale katalog ji vede pod
@@ -274,6 +271,7 @@ final class JmhzScenario1ControlEvaluator
             170 => ['source_row_9'],
             270 => ['source_row_7'],
             271 => ['source_row_16'],
+            315 => ['source_row_3', 'source_row_4', 'source_row_5'],
         ];
     }
 
@@ -341,6 +339,8 @@ final class JmhzScenario1ControlEvaluator
             98 => $this->dayCountsWithinMonth($projection),
             99 => $this->eldpValidityWithinPeriod($projection),
             109 => $this->atMostIncome($projection, '10416'),
+            118 => $this->employeeSocialInsuranceRate($projection),
+            315 => $this->employerSocialInsuranceRate($projection),
             121 => $this->sumMatchesWhenPositive(
                 $projection,
                 '10357',
@@ -491,6 +491,111 @@ final class JmhzScenario1ControlEvaluator
         }
 
         return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_PVPOJ)];
+    }
+
+    /**
+     * Kontrola 118: pojistné zaměstnance (10370) = sazba z jeho vyměřovacího
+     * základu (10477), zaokrouhleno nahoru na celé koruny.
+     *
+     * Chybějící základ tu není „neaplikovatelné". ČSSZ ho bere jako nulu, takže
+     * podání s vykázaným pojistným a bez základu odmítne — ověřeno odmítnutím
+     * v testovacím prostředí. Kontrola proto musí padnout stejně jako tam,
+     * jinak by lokální brána pustila dál něco, co ČSSZ vrátí.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function employeeSocialInsuranceRate(JmhzAttributeProjection $projection): array
+    {
+        return $this->socialInsuranceRate($projection, '10370', ['source_row_7']);
+    }
+
+    /**
+     * Kontrola 315: pojistné zaměstnavatele (10481) = součet sazeb z dílčích
+     * vyměřovacích základů podle § 5a odst. 1 ZPSZ (10478 písm. a, 10479
+     * písm. b, 10480 písm. c). Nejsou-li dílčí základy vykázané, počítá se
+     * jediná sazba ze základu zaměstnance (10477).
+     *
+     * Každý mezivýpočet se zaokrouhluje nahoru samostatně — zaokrouhlení až
+     * ze součtu by u tří složek dalo jiný haléřový výsledek než ČSSZ.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function employerSocialInsuranceRate(JmhzAttributeProjection $projection): array
+    {
+        return $this->socialInsuranceRate(
+            $projection,
+            '10481',
+            ['source_row_3', 'source_row_4', 'source_row_5'],
+            ['10478', '10479', '10480'],
+        );
+    }
+
+    /**
+     * @param list<string> $rateKeys sazby v pořadí odpovídajícím `$partIds`;
+     *     první z nich platí i pro výpočet ze základu 10477
+     * @param list<string> $partIds dílčí základy podle § 5a; prázdné u sazby,
+     *     která žádný rozpad nezná
+     * @return list<JmhzControlVerdict>
+     */
+    private function socialInsuranceRate(
+        JmhzAttributeProjection $projection,
+        string $insuranceId,
+        array $rateKeys,
+        array $partIds = [],
+    ): array {
+        $onDate = $this->periodStart($projection);
+
+        return $this->perForm(
+            $projection,
+            function (JmhzAttributeScope $form) use (
+                $insuranceId,
+                $rateKeys,
+                $partIds,
+                $onDate,
+            ): ?string {
+                $insurance = $form->integer($insuranceId);
+                $parts = [];
+                foreach ($partIds as $index => $partId) {
+                    $value = $form->integer($partId);
+                    if ($value !== null) {
+                        $parts[$index] = $value;
+                    }
+                }
+                $base = $form->integer('10477');
+                if ($insurance === null && $parts === [] && $base === null) {
+                    return null;
+                }
+                if ($parts !== []) {
+                    $expected = 0;
+                    foreach ($parts as $index => $value) {
+                        $expected += $this->parameters->multiplyCeil(
+                            $value,
+                            $rateKeys[$index] ?? $rateKeys[0],
+                            $onDate,
+                        );
+                    }
+                } else {
+                    // Vykázané pojistné bez základu je právě ten případ, na
+                    // kterém ČSSZ podání zamítla: základ se dopočítat nedá
+                    // a nula z něj dá nulové očekávané pojistné.
+                    $expected = $this->parameters->multiplyCeil(
+                        $base ?? 0,
+                        $rateKeys[0],
+                        $onDate,
+                    );
+                }
+                $reported = $insurance ?? 0;
+                if ($reported === $expected) {
+                    return null;
+                }
+                $from = $parts === []
+                    ? 'vyměřovacího základu 10477 = ' . ($base ?? 0) . ' Kč'
+                    : 'dílčích vyměřovacích základů podle § 5a';
+
+                return "Pojistné {$insuranceId} = {$reported} Kč neodpovídá sazbě z "
+                    . "{$from}; očekáváno {$expected} Kč.";
+            },
+        );
     }
 
     /** @return list<JmhzControlVerdict> */

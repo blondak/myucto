@@ -272,6 +272,19 @@ final class JmhzScenario1DocumentResolver
                         $employeeId,
                         $blockers,
                     ),
+                    // Vyměřovací základ, ze kterého se pojistné odvádí. Bez něj
+                    // ČSSZ podání odmítne kontrolami 118 a 315 — obě porovnávají
+                    // pojistné se základem a chybějící základ berou jako nulu.
+                    // Ověřeno odmítnutím v testovacím prostředí (chyba 20315).
+                    'social_assessment_base_czk' => $this->wholeCzk(
+                        is_int($social['capped_assessment_base_minor_units'] ?? null)
+                            ? $social['capped_assessment_base_minor_units']
+                            : null,
+                        '10477',
+                        'person',
+                        $employeeId,
+                        $blockers,
+                    ),
                     'deductions_recorded' => $ordinaryEvidence === []
                         ? null
                         : ($ordinaryEvidence['attribute_values']['10116'] ?? null),

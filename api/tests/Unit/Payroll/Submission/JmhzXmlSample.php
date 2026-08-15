@@ -171,6 +171,9 @@ final class JmhzXmlSample
                         <form:pojisteniOd>2026-07-01</form:pojisteniOd>
                         <form:pojisteniDo>2026-07-31</form:pojisteniDo>
                       </form:trvani>
+                      <form:vymerovaciZaklad>
+                        <form:castkaOdvodPojistneho>1000</form:castkaOdvodPojistneho>
+                      </form:vymerovaciZaklad>
                       <form:eldpSeznam>
             {$eldp}
                       </form:eldpSeznam>

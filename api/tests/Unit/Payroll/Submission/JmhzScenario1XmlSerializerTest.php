@@ -389,6 +389,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                         'social_insurance' => [
                             'status' => 'calculated',
                             'issues' => [],
+                            'capped_assessment_base_minor_units' => 100_000,
                             'employee_contribution_minor_units' => 7_100,
                             'employer_contribution_minor_units' => 24_800,
                         ],
@@ -570,6 +571,9 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                         <form:pojisteniOd>2026-07-01</form:pojisteniOd>
                         <form:pojisteniDo>2026-07-31</form:pojisteniDo>
                       </form:trvani>
+                      <form:vymerovaciZaklad>
+                        <form:castkaOdvodPojistneho>1000</form:castkaOdvodPojistneho>
+                      </form:vymerovaciZaklad>
                       <form:eldpSeznam>
                         <form:eldp>
                           <form:kod>1++</form:kod>
