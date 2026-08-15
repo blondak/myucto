@@ -89,6 +89,7 @@ use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
 use MyInvoice\Action\Payroll\PayrollJmhzOrdinaryEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPreparationAction;
+use MyInvoice\Action\Payroll\PayrollJmhzSigningProfileAction;
 use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
 use MyInvoice\Action\Payroll\PayrollNetResultAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
@@ -910,6 +911,18 @@ final class Routes
             $g->get(
                 '/submissions/jmhz-xml-dry-run/{preparationId:[0-9]+}',
                 PayrollJmhzXmlDryRunAction::class,
+            );
+            $g->get(
+                '/submissions/signing-profile',
+                [PayrollJmhzSigningProfileAction::class, 'show'],
+            );
+            $g->put(
+                '/submissions/signing-profile',
+                [PayrollJmhzSigningProfileAction::class, 'save'],
+            );
+            $g->delete(
+                '/submissions/signing-profile',
+                [PayrollJmhzSigningProfileAction::class, 'delete'],
             );
             $g->get(
                 '/submissions/{submissionId:[0-9]+}',

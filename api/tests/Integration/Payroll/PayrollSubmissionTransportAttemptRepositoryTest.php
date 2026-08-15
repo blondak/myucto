@@ -1,0 +1,328 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Integration\Payroll;
+
+use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
+use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use PDO;
+use PDOException;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+
+#[Group('integration')]
+final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
+{
+    use IsolatedSupplierTrait;
+
+    private const CHANNEL = 'vrep_apep';
+    private const ENVIRONMENT = 'test';
+
+    private Connection $db;
+    private PayrollSubmissionTransportAttemptRepository $repository;
+    private int $supplierId;
+    private int $submissionId;
+
+    protected function setUp(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $db = $container->get(Connection::class);
+        self::assertInstanceOf(Connection::class, $db);
+        $this->db = $db;
+        $this->repository = new PayrollSubmissionTransportAttemptRepository($db);
+        if (!$this->repository->isAvailable()) {
+            $this->markTestSkipped('Migrace 1372 neproběhla.');
+        }
+        $pdo = $db->pdo();
+        $pdo->beginTransaction();
+        $sourceSupplierId = (int) $pdo->query('SELECT MIN(id) FROM supplier')
+            ->fetchColumn();
+        $this->supplierId = $this->createIsolatedSupplier(
+            $pdo,
+            $sourceSupplierId,
+        );
+        $this->submissionId = $this->createSubmission($pdo);
+    }
+
+    protected function tearDown(): void
+    {
+        if (isset($this->db) && $this->db->pdo()->inTransaction()) {
+            $this->db->pdo()->rollBack();
+        }
+    }
+
+    public function testAttemptIsOpenedSentAndCompletedInOneOrderedLedger(): void
+    {
+        self::assertSame(1, $this->nextAttemptNo());
+        $opened = $this->open('transport-happy-path');
+
+        self::assertSame('prepared', $opened['status']);
+        self::assertSame(1, $opened['attempt_no']);
+        self::assertSame(1, $opened['row_version']);
+        self::assertNull($opened['sent_at']);
+        self::assertNull($opened['correlation_reference']);
+
+        $sent = $this->repository->markSent(
+            (int) $opened['id'],
+            'VREP-2026-07-0001',
+            202,
+            (int) $opened['row_version'],
+        );
+        self::assertSame('awaiting_protocol', $sent['status']);
+        self::assertSame(2, $sent['row_version']);
+        self::assertSame(202, $sent['response_http_status']);
+        self::assertNotNull($sent['sent_at']);
+
+        $correlated = $this->repository->findByCorrelation(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            self::CHANNEL,
+            'VREP-2026-07-0001',
+        );
+        self::assertIsArray($correlated);
+        self::assertSame($opened['id'], $correlated['id']);
+
+        $completed = $this->repository->markCompleted(
+            (int) $opened['id'],
+            (int) $sent['row_version'],
+        );
+        self::assertSame('completed', $completed['status']);
+        self::assertSame(3, $completed['row_version']);
+        self::assertNotNull($completed['completed_at']);
+
+        $ledger = $this->repository->listForSubmission(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $this->submissionId,
+        );
+        self::assertCount(1, $ledger);
+        self::assertSame($opened['id'], $ledger[0]['id']);
+        self::assertSame(2, $this->nextAttemptNo());
+    }
+
+    public function testRepeatedOpenWithSameKeyReturnsExistingAttempt(): void
+    {
+        $first = $this->open('transport-idempotent');
+        $second = $this->open('transport-idempotent');
+
+        self::assertSame($first['id'], $second['id']);
+        self::assertSame($first['row_version'], $second['row_version']);
+        self::assertCount(
+            1,
+            $this->repository->listForSubmission(
+                $this->supplierId,
+                self::ENVIRONMENT,
+                $this->submissionId,
+            ),
+        );
+
+        $byKey = $this->repository->findByIdempotencyKey('transport-idempotent');
+        self::assertIsArray($byKey);
+        self::assertSame($first['id'], $byKey['id']);
+        // Klíč se nikam neukládá v čitelné podobě a hash se ven nevrací.
+        self::assertArrayNotHasKey('idempotency_key_hash', $byKey);
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_submission_transport_attempts
+              WHERE id = ? AND idempotency_key_hash = ?',
+        );
+        $statement->execute([
+            $first['id'],
+            hash('sha256', 'transport-idempotent', true),
+        ]);
+        self::assertSame(1, (int) $statement->fetchColumn());
+    }
+
+    public function testSameKeyWithDifferentRequestContentIsRejected(): void
+    {
+        $this->open('transport-content-drift');
+
+        $this->expectException(\DomainException::class);
+        $this->repository->open(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $this->submissionId,
+            self::CHANNEL,
+            1,
+            'transport-content-drift',
+            str_repeat('b', 64),
+            null,
+        );
+    }
+
+    public function testStaleRowVersionCannotMutateTheAttempt(): void
+    {
+        $opened = $this->open('transport-stale-version');
+        $sent = $this->repository->markSent(
+            (int) $opened['id'],
+            'VREP-2026-07-0002',
+            200,
+            (int) $opened['row_version'],
+        );
+        self::assertSame(2, $sent['row_version']);
+
+        $this->expectException(\DomainException::class);
+        $this->repository->markCompleted(
+            (int) $opened['id'],
+            (int) $opened['row_version'],
+        );
+    }
+
+    public function testFailedAttemptNeedsMachineReadableCodeAndText(): void
+    {
+        $opened = $this->open('transport-failure');
+        $attemptId = (int) $opened['id'];
+
+        try {
+            $this->repository->markFailed(
+                $attemptId,
+                'HTTP_500',
+                'Server odpověděl chybou.',
+                500,
+                null,
+                (int) $opened['row_version'],
+            );
+            self::fail('Kód chyby mimo ^[a-z][a-z0-9_]{0,63}$ nesmí projít.');
+        } catch (\DomainException) {
+            $this->addToAssertionCount(1);
+        }
+
+        try {
+            $this->repository->markFailed(
+                $attemptId,
+                'transport_rejected',
+                '   ',
+                500,
+                null,
+                (int) $opened['row_version'],
+            );
+            self::fail('Neúspěch bez textu chyby nesmí projít.');
+        } catch (\DomainException) {
+            $this->addToAssertionCount(1);
+        }
+
+        $failed = $this->repository->markFailed(
+            $attemptId,
+            'transport_rejected',
+            str_repeat('ě', 900),
+            503,
+            '2026-08-15 06:30:00',
+            (int) $opened['row_version'],
+        );
+
+        self::assertSame('failed', $failed['status']);
+        self::assertSame('transport_rejected', $failed['error_code']);
+        self::assertSame(503, $failed['response_http_status']);
+        self::assertSame('2026-08-15 06:30:00', $failed['next_retry_at']);
+        self::assertSame(2, $failed['row_version']);
+        self::assertSame(
+            PayrollSubmissionTransportAttemptRepository::ERROR_MESSAGE_MAX_LENGTH,
+            mb_strlen((string) $failed['error_message']),
+        );
+    }
+
+    public function testAttemptRowsCannotBeDeleted(): void
+    {
+        $opened = $this->open('transport-append-only');
+
+        try {
+            $this->db->pdo()->prepare(
+                'DELETE FROM payroll_submission_transport_attempts WHERE id = ?',
+            )->execute([$opened['id']]);
+            self::fail('Ledger pokusů o odeslání nesmí jít mazat.');
+        } catch (PDOException $exception) {
+            self::assertStringContainsString(
+                'append-only',
+                $exception->getMessage(),
+            );
+        }
+
+        self::assertIsArray($this->repository->find(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            (int) $opened['id'],
+        ));
+    }
+
+    public function testAttemptStaysInvisibleOutsideItsEnvironment(): void
+    {
+        $opened = $this->open('transport-environment-scope');
+
+        self::assertNull($this->repository->find(
+            $this->supplierId,
+            'production',
+            (int) $opened['id'],
+        ));
+        self::assertSame([], $this->repository->listForSubmission(
+            $this->supplierId,
+            'production',
+            $this->submissionId,
+        ));
+    }
+
+    /** @return array<string,mixed> */
+    private function open(string $idempotencyKey): array
+    {
+        return $this->repository->open(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $this->submissionId,
+            self::CHANNEL,
+            $this->nextAttemptNo(),
+            $idempotencyKey,
+            str_repeat('a', 64),
+            null,
+        );
+    }
+
+    private function nextAttemptNo(): int
+    {
+        return $this->repository->nextAttemptNo(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $this->submissionId,
+        );
+    }
+
+    private function createSubmission(PDO $pdo): int
+    {
+        $pdo->prepare(
+            'INSERT INTO payroll_obligations
+                (supplier_id, environment, agenda_code, subject_type,
+                 subject_reference, period_start, period_end, obligation_kind,
+                 preferred_channel, source_event_type, source_event_reference,
+                 source_event_hash, request_fingerprint, idempotency_key_hash)
+             VALUES (?, ?, "JMHZ", "office", "office:transport", "2026-07-01",
+                     "2026-07-31", "regular", ?, "payroll_run_approved",
+                     "run:transport:2026-07", ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            self::ENVIRONMENT,
+            self::CHANNEL,
+            str_repeat('1', 64),
+            str_repeat('2', 64),
+            hash('sha256', "transport-obligation:{$this->supplierId}", true),
+        ]);
+        $obligationId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare(
+            'INSERT INTO payroll_submissions
+                (supplier_id, environment, obligation_id, submission_kind,
+                 channel, status, source_snapshot_hash, request_fingerprint,
+                 idempotency_key_hash)
+             VALUES (?, ?, ?, "regular", ?, "prepared", ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $obligationId,
+            self::CHANNEL,
+            str_repeat('3', 64),
+            str_repeat('4', 64),
+            hash('sha256', "transport-submission:{$this->supplierId}", true),
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+}
