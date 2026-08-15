@@ -418,6 +418,19 @@ final readonly class JmhzDispatchService
         }
     }
 
+    /**
+     * ⚠️ DVOJE HODINY. Termíny (`next_retry_at`) se počítají TADY, tedy z času
+     * PHP, kdežto `sent_at`, `completed_at` i `closed_at` plní databáze přes
+     * `UTC_TIMESTAMP()`. Na jednom stroji je to totéž; s odděleným DB serverem
+     * s rozjetými hodinami se rozvrh posune o ten rozdíl — dotazy budou chodit
+     * dřív nebo později, než mají, a strop stáří (počítaný ze `sent_at` z DB
+     * proti `now()` z PHP) může sepnout předčasně, případně vůbec.
+     *
+     * Nechává se tak vědomě: injektovat `ClockInterface` by znamenalo změnit
+     * konstruktor, který staví testovací dvojníci pozičně. Kdyby se rozvrh
+     * začal chovat nevysvětlitelně, hledej PRVNÍ tady — porovnej
+     * `SELECT UTC_TIMESTAMP()` s `gmdate('Y-m-d H:i:s')` na aplikačním stroji.
+     */
     private function now(): \DateTimeImmutable
     {
         return new \DateTimeImmutable('now', new \DateTimeZone('UTC'));

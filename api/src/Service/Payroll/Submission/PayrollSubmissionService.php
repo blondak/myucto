@@ -43,29 +43,6 @@ final class PayrollSubmissionService
         'waiting_for_identity',
         'correction_required',
     ];
-    /**
-     * Na co se smí navázat oprava nebo storno.
-     *
-     * Podmínkou NENÍ rozhodnutí protistrany, ale to, že podání DOLOŽITELNĚ
-     * doputovalo k úřadu (`submitted_at` je vyplněné, což platforma vynucuje
-     * checkem u obou průběžných stavů). Storno měsíčního hlášení má lhůtu do
-     * 20. dne následujícího měsíce, kdežto protokol ČSSZ může přijít později —
-     * kdyby se čekalo na rozhodnutí, propadla by lhůta na opravu chyby, o které
-     * zaměstnavatel ví hned. Naopak `draft`…`ready` zůstávají nezpůsobilé:
-     * u nich úřad nemá co rušit a storno by se vázalo na GUID, který nikdy
-     * neopustil aplikaci.
-     *
-     * @var list<string>
-     */
-    private const CORRECTABLE_STATUSES = [
-        'submitted',
-        'processing',
-        'accepted',
-        'partially_accepted',
-        'rejected',
-        'correction_required',
-    ];
-
     private const VERIFIED_REMOTE_STATUSES = [
         'processing',
         'accepted',
@@ -255,9 +232,19 @@ final class PayrollSubmissionService
                         $obligation,
                         $correctedObligation,
                     )
+                    // Způsobilé stavy rozhoduje AGENDA, ne tahle služba: u agend
+                    // s okamžitým protokolem se čeká na rozhodnutí, u agend
+                    // s asynchronním protokolem a pevnou lhůtou stačí doložené
+                    // odeslání. Výchozí sada je přísná, rozšíření jmenovité
+                    // a s důvodem — viz PayrollAgendaCorrectionPolicy. Stavy
+                    // `draft`…`ready` nejsou způsobilé nikdy: u nich úřad nemá
+                    // co rušit a oprava by se vázala na dokument, který nikdy
+                    // neopustil aplikaci.
                     || !in_array(
                         $corrected['status'],
-                        self::CORRECTABLE_STATUSES,
+                        PayrollAgendaCorrectionPolicy::correctableStatuses(
+                            (string) $obligation['agenda_code'],
+                        ),
                         true,
                     )
                 ) {

@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionConflictException;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Submission\PayrollAgendaCorrectionPolicy;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
@@ -565,6 +566,59 @@ final class PayrollSubmissionPlatformTest extends TestCase
 
         self::assertTrue($correction['created']);
         self::assertSame('correction', $correction['submission_kind']);
+    }
+
+    /**
+     * INVARIANTA: agenda, která si rozšíření nedeklarovala, nesmí navázat
+     * opravu na podání, o kterém úřad ještě nerozhodl.
+     *
+     * Kdyby to šlo plošně, agendy s okamžitým protokolem (EPO) by dovolily
+     * podat opravu dřív, než se ví, jestli originál prošel — a duplicitní
+     * podání se pozná až u správce daně, kdy se s tím nedá nic dělat.
+     * JMHZ výjimku má a je vypsaná i s důvodem v
+     * {@see \MyInvoice\Service\Payroll\Submission\PayrollAgendaCorrectionPolicy};
+     * tenhle test drží druhou stranu, aby to nikdo nerozvolnil zpátky omylem.
+     */
+    public function testCorrectionCannotFollowPendingSubmissionOfUndeclaredAgenda(): void
+    {
+        // Agenda „JMHZ" (bez ročníku) v katalogu výjimek NENÍ — na rozdíl od
+        // „JMHZ25", pod kterou běží měsíční hlášení.
+        self::assertFalse(
+            PayrollAgendaCorrectionPolicy::allowsPendingPredecessor('JMHZ'),
+        );
+        $submitted = $this->submittedSubmission('pending-predecessor');
+        self::assertSame('submitted', $submitted['status']);
+        $correctionObligation = $this->obligations->register(
+            $this->supplierId,
+            'JMHZ',
+            'office',
+            'office:synthetic',
+            '2026-07-01',
+            '2026-07-31',
+            'correction',
+            'manual_upload',
+            'correction_requested',
+            'correction:pending:2026-07',
+            str_repeat('e', 64),
+            '2026-08-01',
+            '2026-08-28',
+            'calendar_days',
+            'jmhz-correction-test',
+            str_repeat('f', 64),
+            'obligation-jmhz-2026-07-pending-correction',
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->submissions->prepare(
+            $this->supplierId,
+            $correctionObligation['id'],
+            'correction',
+            'manual_upload',
+            str_repeat('a', 64),
+            'correction-pending-predecessor',
+            null,
+            $submitted['id'],
+        );
     }
 
     public function testSubmissionCannotStartBeforeEarliestLegalDate(): void
