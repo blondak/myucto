@@ -5,7 +5,7 @@ import { RouterLink } from 'vue-router'
 import { payrollApi, type PayrollQuickInputRow } from '@/api/payroll'
 import { payrollAbsenceApi, type PayrollAbsence } from '@/api/payrollAbsences'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
-import { formatPayrollMinor } from '@/pages/payroll/payrollComponentsUi'
+import { formatMoneyMinor } from '@/composables/useFormat'
 import { employmentCodeLabel } from './employmentLifecycleUi'
 
 /**
@@ -31,7 +31,7 @@ const props = defineProps<{
 
 type StatusFilter = 'all' | 'active' | 'away' | 'attention'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const loading = ref(true)
 const failed = ref(false)
 const rows = ref<PayrollQuickInputRow[]>([])
@@ -108,7 +108,7 @@ const awayCount = computed(() =>
   rows.value.filter(row => absencesOf(row).length > 0).length)
 
 function money(minor: number): string {
-  return formatPayrollMinor(minor, locale.value)
+  return formatMoneyMinor(minor)
 }
 
 function relationLabel(row: PayrollQuickInputRow): string {

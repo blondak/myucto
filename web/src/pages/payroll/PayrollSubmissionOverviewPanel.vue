@@ -15,6 +15,9 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import PayrollJmhzOrdinaryEvidencePanel from './PayrollJmhzOrdinaryEvidencePanel.vue'
 import PayrollJmhzXmlDryRunPanel from './PayrollJmhzXmlDryRunPanel.vue'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatDate } from '@/composables/useFormat'
+import { localPayrollPeriod } from './payrollComponentsUi'
 
 const props = defineProps<{
   mode: 'jmhz' | 'health'
@@ -24,7 +27,7 @@ const { locale, t } = useI18n()
 const loading = ref(true)
 const error = ref('')
 const healthError = ref('')
-const period = ref(new Date().toISOString().slice(0, 7))
+const period = ref(localPayrollPeriod())
 const environment = ref<PayrollRegzelEnvironment>('production')
 const allItems = ref<PayrollSubmissionOverviewItem[]>([])
 const healthOverviews = ref<PayrollHealthPaymentOverview[]>([])
@@ -99,12 +102,6 @@ function channelLabel(channel: string): string {
   const key = `payroll.submissions.overview.channel.${channel}`
   const translated = t(key)
   return translated === key ? channel : translated
-}
-
-function formatDate(value: string): string {
-  const date = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat(locale.value === 'en' ? 'en-GB' : 'cs-CZ').format(date)
 }
 
 function deadlineClass(item: PayrollSubmissionOverviewItem): string {

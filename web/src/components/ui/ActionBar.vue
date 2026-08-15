@@ -35,6 +35,19 @@ export interface ActionItem {
   variant?: ActionVariant    // default 'neutral'
   show?: unknown             // default true; truthy = zobrazit, falsy (false/null/0/'') = skrýt
   disabled?: boolean
+  /**
+   * Věta, PROČ je akce zašedlá — např. „Závazky vzniknou až ze zaúčtované
+   * revize. Nejdřív zaúčtujte mzdovou revizi za toto období."
+   *
+   * Zobrazuje se dvakrát a to schválně: jako `title` (tooltip pro myš) a jako
+   * viditelný řádek pod lištou. Samotný tooltip nestačí — na dotykovém displeji
+   * se nedá vyvolat vůbec a čtečka obrazovky ho u `disabled` prvku přeskočí,
+   * takže by uživatel mačkal mrtvé tlačítko bez jediné nápovědy.
+   *
+   * Uplatní se jen když `disabled === true`. Formulovat jako větu, podle které
+   * se dá jednat („Nejdřív …"), ne jako „Akce není dostupná".
+   */
+  disabledReason?: string
   loading?: boolean          // nahradí popisek „…"
   title?: string             // tooltip
   to?: RouteLocationRaw      // RouterLink cíl
@@ -86,6 +99,25 @@ const showTrigger = computed(() => hasOverflow.value || hasAdvanced.value || has
 // na desktopu má „…" smysl pro overflow/advanced/secondaryOverflow (secondaryDesktop jsou inline)
 const triggerDesktop = computed(() => hasOverflow.value || hasAdvanced.value || hasSecondaryOverflow.value)
 const advancedOpen = ref(false)
+
+/** Důvod se uplatní jen u skutečně zašedlé akce — u aktivní by mátl. */
+function reasonOf(a: ActionItem): string | undefined {
+  return a.disabled && a.disabledReason ? a.disabledReason : undefined
+}
+/** Explicitní `title` má přednost; jinak tooltip nese důvod blokace. */
+function titleOf(a: ActionItem): string | undefined {
+  return a.title || reasonOf(a) || undefined
+}
+
+/*
+ * Viditelné vysvětlení pod lištou. Jen za akce, které jsou na obrazovce vidět
+ * jako tlačítko (primary + secondary) — u položek schovaných v „…" by uživatel
+ * četl důvod k něčemu, co nevidí. Duplicitní texty se slučují, protože dvě
+ * akce blokované touž podmínkou by jinak napsaly totéž dvakrát.
+ */
+const blockedNotes = computed(() => [...new Set(
+  [...primary.value, ...secondary.value].map(reasonOf).filter((r): r is string => !!r),
+)])
 
 function tagOf(a: ActionItem) {
   if (a.to) return RouterLink
@@ -141,11 +173,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <div class="flex flex-col gap-1.5 md:shrink-0 md:items-end">
   <div class="flex flex-wrap md:flex-nowrap md:shrink-0 gap-2 md:justify-end items-center">
     <!-- PRIMARY: vždy inline, plné -->
     <component :is="tagOf(a)" v-for="a in primary" :key="a.key" v-bind="attrsOf(a)"
       :class="[inlineBase, FILLED[a.variant ?? 'primary']]"
-      :disabled="a.disabled" :title="a.title || undefined"
+      :disabled="a.disabled" :title="titleOf(a)"
       @click="a.run && a.run()">
       <svg v-if="a.icon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
@@ -156,7 +189,7 @@ onBeforeUnmount(() => {
     <!-- SECONDARY (mezi prvními 2): inline i na mobilu -->
     <component :is="tagOf(a)" v-for="a in secondaryMobile" :key="a.key" v-bind="attrsOf(a)"
       :class="[inlineBase, OUTLINE[a.variant ?? 'neutral']]"
-      :disabled="a.disabled" :title="a.title || undefined"
+      :disabled="a.disabled" :title="titleOf(a)"
       @click="a.run && a.run()">
       <svg v-if="a.icon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
@@ -167,7 +200,7 @@ onBeforeUnmount(() => {
     <!-- SECONDARY (zbytek): inline jen na sm+; na mobilu jsou v menu -->
     <component :is="tagOf(a)" v-for="a in secondaryDesktop" :key="a.key" v-bind="attrsOf(a)"
       :class="['hidden sm:inline-flex', inlineBase, OUTLINE[a.variant ?? 'neutral']]"
-      :disabled="a.disabled" :title="a.title || undefined"
+      :disabled="a.disabled" :title="titleOf(a)"
       @click="a.run && a.run()">
       <svg v-if="a.icon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
@@ -200,24 +233,24 @@ onBeforeUnmount(() => {
               :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
                        a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
                        a.disabled ? 'opacity-50 pointer-events-none' : '']"
-              :title="a.title || undefined" @click="runItem(a)">
+              :title="titleOf(a)" @click="runItem(a)">
               <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
                 fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
               </svg>
-              <span>{{ a.loading ? '…' : a.label }}</span>
+              <span class="min-w-0"><span class="block">{{ a.loading ? '…' : a.label }}</span><span v-if="reasonOf(a)" class="mt-0.5 block text-xs leading-snug text-warning-700">{{ reasonOf(a) }}</span></span>
             </component>
             <div v-if="hasSecondaryDesktop" class="sm:hidden">
               <component :is="tagOf(a)" v-for="a in secondaryDesktop" :key="a.key" v-bind="attrsOf(a)"
                 :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
                          a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
                          a.disabled ? 'opacity-50 pointer-events-none' : '']"
-                :title="a.title || undefined" @click="runItem(a)">
+                :title="titleOf(a)" @click="runItem(a)">
                 <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
                   fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
                 </svg>
-                <span>{{ a.loading ? '…' : a.label }}</span>
+                <span class="min-w-0"><span class="block">{{ a.loading ? '…' : a.label }}</span><span v-if="reasonOf(a)" class="mt-0.5 block text-xs leading-snug text-warning-700">{{ reasonOf(a) }}</span></span>
               </component>
             </div>
             <div v-if="hasOverflow" :class="['my-1 border-t border-neutral-100', hasSecondaryOverflow ? '' : 'sm:hidden']"></div>
@@ -228,12 +261,12 @@ onBeforeUnmount(() => {
             :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
                      a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
                      a.disabled ? 'opacity-50 pointer-events-none' : '']"
-            :title="a.title || undefined" @click="runItem(a)">
+            :title="titleOf(a)" @click="runItem(a)">
             <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
               fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
               <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
             </svg>
-            <span>{{ a.loading ? '…' : a.label }}</span>
+            <span class="min-w-0"><span class="block">{{ a.loading ? '…' : a.label }}</span><span v-if="reasonOf(a)" class="mt-0.5 block text-xs leading-snug text-warning-700">{{ reasonOf(a) }}</span></span>
           </component>
 
           <!-- advanced → rozbalovací „Pokročilé" (méně časté / admin / destruktivní akce) -->
@@ -259,17 +292,28 @@ onBeforeUnmount(() => {
                 :class="['w-full flex items-center gap-2.5 pl-6 pr-3 py-2 cursor-pointer text-left',
                          a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
                          a.disabled ? 'opacity-50 pointer-events-none' : '']"
-                :title="a.title || undefined" @click="runItem(a)">
+                :title="titleOf(a)" @click="runItem(a)">
                 <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
                   fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
                 </svg>
-                <span>{{ a.loading ? '…' : a.label }}</span>
+                <span class="min-w-0"><span class="block">{{ a.loading ? '…' : a.label }}</span><span v-if="reasonOf(a)" class="mt-0.5 block text-xs leading-snug text-warning-700">{{ reasonOf(a) }}</span></span>
               </component>
             </template>
           </template>
         </div>
       </template>
     </Teleport>
+  </div>
+
+    <!--
+      Proč je hlavní akce zašedlá. Bez téhle věty uživatel jen mačká mrtvé
+      tlačítko — tooltip na dotyku neexistuje a u `disabled` prvku ho přeskočí
+      i čtečka obrazovky.
+    -->
+    <p v-for="note in blockedNotes" :key="note" data-test="action-disabled-reason"
+      class="max-w-prose text-xs leading-snug text-warning-700 md:text-right">
+      {{ note }}
+    </p>
   </div>
 </template>

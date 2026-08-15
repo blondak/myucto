@@ -15,6 +15,8 @@ import {
 } from '@/api/payrollDeductions'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
 
 const { t, locale } = useI18n()
@@ -79,14 +81,6 @@ function emptyForm(): AgreementForm {
   }
 }
 const form = ref<AgreementForm>(emptyForm())
-
-function money(minorUnits: number | null | undefined): string {
-  return new Intl.NumberFormat(locale.value, {
-    style: 'currency',
-    currency: 'CZK',
-    minimumFractionDigits: 2,
-  }).format((minorUnits ?? 0) / 100)
-}
 
 function percent(basisPoints: number | null): string {
   if (basisPoints === null) return '—'

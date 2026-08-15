@@ -39,7 +39,10 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.success, error: m.error }),
 }))
-vi.mock('vue-i18n', () => ({
+// `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
+// `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({ t: (key: string) => key, locale: ref('cs-CZ') }),
 }))
 
@@ -77,6 +80,52 @@ describe('PayrollRuns', () => {
     m.people.mockResolvedValue([])
     m.deleteRun.mockResolvedValue(undefined)
     m.commandRun.mockResolvedValue({ outcome: null })
+  })
+
+  /*
+   * Prázdný seznam běhů a nenačtený seznam běhů vedou uživatele k opačnému
+   * jednání (založ běh vs. zkus to znovu), takže je nesmí kreslit stejně.
+   */
+  it('offers a retry instead of an empty state when the runs fail to load', async () => {
+    m.runs.mockRejectedValue(new Error('network'))
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('payroll.runs.load_failed_hint')
+    expect(wrapper.text()).not.toContain('payroll.runs.empty_hint')
+
+    m.runs.mockResolvedValue([])
+    await wrapper.get('[data-test="load-failed"] [data-test="empty-state-cta"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
+  })
+
+  it('shows the empty state when the period genuinely has no run', async () => {
+    m.runs.mockResolvedValue([])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('payroll.runs.empty_hint')
+    expect(wrapper.text()).not.toContain('payroll.runs.load_failed_hint')
+  })
+
+  it('names the missing field when a run cannot be created', async () => {
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    // Uživatel datum výplaty vymaže — tlačítko zšedne a musí říct proč.
+    await wrapper.get('input[type="date"]').setValue('')
+
+    const button = wrapper.get('[data-test="run-create"]')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(button.attributes('title')).toBe('payroll.runs.create_blocked_payment_date')
+    expect(wrapper.get('[data-test="run-create-blocked"]').text())
+      .toBe('payroll.runs.create_blocked_payment_date')
   })
 
   it.each([

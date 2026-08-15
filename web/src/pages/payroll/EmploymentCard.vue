@@ -14,6 +14,8 @@ import CzIscoPicker from '@/components/payroll/CzIscoPicker.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnOutlineSm } from '@/components/ui/buttonStyles'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import EmploymentDimensionsPanel from './EmploymentDimensionsPanel.vue'
 import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
@@ -51,12 +53,6 @@ const currentTerms = computed(() => props.employment.terms[0] ?? null)
 const openChecklist = computed(() =>
   props.employment.checklist.filter(item => item.status === 'pending'),
 )
-
-function formatDate(value: string | null): string {
-  if (!value) return '—'
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
-    .format(new Date(`${value}T00:00:00`))
-}
 
 function relationLabel(): string {
   return t(`payroll.people.relations.${props.employment.relation_type}`)

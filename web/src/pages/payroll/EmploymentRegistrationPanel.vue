@@ -8,6 +8,8 @@ import {
   type PayrollRegistrationSubmission,
 } from '@/api/payroll'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatDate } from '@/composables/useFormat'
 
 const props = defineProps<{
   employmentId: number
@@ -44,12 +46,6 @@ const interactionLabel = computed(() => {
 const deadline = computed(
   () => submission.value?.deadline ?? preview.value?.deadline ?? null,
 )
-
-function formatDate(value: string | null | undefined): string {
-  if (!value) return '—'
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
-    .format(new Date(`${value}T00:00:00`))
-}
 
 async function run(action: 'preview' | 'prepare'): Promise<void> {
   busy.value = true

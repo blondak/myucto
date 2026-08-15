@@ -9,16 +9,25 @@ import {
 } from '@/api/payroll'
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
 import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const loading = ref(false)
+/*
+ * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
+ * není". Toast s chybou za pár vteřin zmizí a bez tohohle příznaku by na
+ * obrazovce zůstal prázdný stav, který lže.
+ */
+const loadFailed = ref(false)
 const saving = ref(false)
 const period = ref(localPayrollPeriod())
 const paymentDate = ref(defaultPaymentDate(period.value))
@@ -46,13 +55,6 @@ function defaultPaymentDate(value: string): string {
   const [year, month] = value.split('-').map(Number)
   const date = new Date(Date.UTC(year, month, 15))
   return date.toISOString().slice(0, 10)
-}
-
-function money(value: number | undefined): string {
-  return new Intl.NumberFormat(locale.value, {
-    style: 'currency',
-    currency: 'CZK',
-  }).format((value ?? 0) / 100)
 }
 
 function statusClass(status: PayrollRun['status']): string {
@@ -144,8 +146,19 @@ function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
   })
 }
 
+/*
+ * Proč nejde založit běh. Období i datum výplaty jsou povinné vstupy formuláře
+ * hned vedle tlačítka — bez věty ale nebylo poznat, které z nich chybí.
+ */
+const createBlockedReason = computed<string | null>(() => {
+  if (!period.value) return t('payroll.runs.create_blocked_period')
+  if (!paymentDate.value) return t('payroll.runs.create_blocked_payment_date')
+  return null
+})
+
 async function load() {
   loading.value = true
+  loadFailed.value = false
   try {
     const [page, people] = await Promise.all([
       payrollApi.runsPage(period.value, { limit: pageSize, offset: offset.value }),
@@ -161,6 +174,9 @@ async function load() {
       )
     }
   } catch {
+    // Seznam běhů se nechává být: „za období nebyl spuštěn žádný běh" je
+    // závěr, na který po výpadku sítě nemáme právo.
+    loadFailed.value = true
     toast.error(t('payroll.runs.load_failed'))
   } finally {
     loading.value = false
@@ -350,23 +366,38 @@ onMounted(load)
           </svg>
           {{ t('payroll.runs.quick_inputs') }}
         </RouterLink>
-        <button
-          v-if="canWrite"
-          :class="btnFilled('primary')"
-          :disabled="saving || !period || !paymentDate"
-          @click="createRun"
-        >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path :d="ICONS.plus" />
-          </svg>
-          {{ t('payroll.runs.create') }}
-        </button>
+        <div v-if="canWrite" class="flex flex-col items-start gap-1.5">
+          <button
+            :class="btnFilled('primary')"
+            :disabled="saving || !period || !paymentDate"
+            :title="disabledTitle(createBlockedReason !== null, createBlockedReason)"
+            data-test="run-create"
+            @click="createRun"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path :d="ICONS.plus" />
+            </svg>
+            {{ t('payroll.runs.create') }}
+          </button>
+          <p v-if="createBlockedReason" :class="BTN_DISABLED_NOTE" data-test="run-create-blocked">
+            {{ createBlockedReason }}
+          </p>
+        </div>
       </div>
     </header>
 
     <div v-if="loading" class="space-y-3">
       <div v-for="index in 2" :key="index" class="h-40 animate-pulse rounded-xl bg-neutral-100" />
     </div>
+
+    <EmptyState
+      v-else-if="loadFailed"
+      variant="failed"
+      boxed
+      data-test="load-failed"
+      :message="t('payroll.runs.load_failed_hint')"
+      @action="load"
+    />
 
     <section
       v-else-if="runs.length === 0"
@@ -395,7 +426,7 @@ onMounted(load)
           <div>
             <div class="flex flex-wrap items-center gap-2">
               <h2 class="text-lg font-semibold text-neutral-900">
-                {{ t('payroll.runs.run_label', { period: run.period_start.slice(0, 7) }) }}
+                {{ t('payroll.runs.run_label', { period: formatPeriod(run.period_start.slice(0, 7)) }) }}
               </h2>
               <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(run.status)">
                 {{ t(`payroll.runs.status.${run.status}`) }}

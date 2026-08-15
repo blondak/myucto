@@ -45,7 +45,10 @@ vi.mock('@/composables/useToast', () => ({
   }),
 }))
 
-vi.mock('vue-i18n', () => ({
+// `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
+// `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
@@ -126,6 +129,38 @@ describe('PeopleList toolbar and shared employee creation', () => {
       employee_id: 4,
       relation_type: 'employment',
     })
+  })
+
+  /*
+   * Selhání načtení a prázdná agenda jsou dva různé stavy, které tahle
+   * obrazovka dřív kreslila stejně — „Zatím tu nikdo není" po výpadku sítě.
+   */
+  it('offers a retry instead of an empty state when the people fail to load', async () => {
+    m.people.mockRejectedValue(new Error('network'))
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('payroll.people.load_failed_hint')
+    expect(wrapper.text()).not.toContain('payroll.people.empty_title')
+
+    m.people.mockResolvedValue([])
+    await wrapper.get('[data-test="load-failed"] [data-test="empty-state-cta"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
+  })
+
+  it('shows the empty state when the company genuinely has nobody', async () => {
+    m.people.mockResolvedValue([])
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('payroll.people.empty_title')
+    expect(wrapper.text()).not.toContain('payroll.people.load_failed_hint')
   })
 
   it('searches the visible list and switches between active, all and setup filters', async () => {

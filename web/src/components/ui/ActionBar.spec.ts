@@ -1,0 +1,103 @@
+import { afterEach, describe, expect, it } from 'vitest'
+import { mount } from '@vue/test-utils'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import { i18n } from '@/i18n'
+
+afterEach(() => {
+  document.body.innerHTML = ''
+})
+
+function mountBar(actions: ActionItem[]) {
+  return mount(ActionBar, {
+    props: { actions },
+    global: { plugins: [i18n] },
+  })
+}
+
+/*
+ * Zašedlé tlačítko bez věty „proč" je slepá ulička: uživatel vidí akci, ale
+ * nemá jak zjistit, co pro ni musí udělat. Tooltip sám nestačí — na dotykovém
+ * displeji se nedá vyvolat a u `disabled` prvku ho přeskočí i čtečka.
+ */
+describe('ActionBar — důvod u zašedlé akce', () => {
+  it('ukáže důvod tooltipem i viditelnou větou', () => {
+    const wrapper = mountBar([{
+      key: 'post',
+      label: 'Zaúčtovat',
+      tier: 'primary',
+      disabled: true,
+      disabledReason: 'Nejdřív schvalte revizi za toto období.',
+      run: () => {},
+    }])
+
+    expect(wrapper.get('button').attributes('title'))
+      .toBe('Nejdřív schvalte revizi za toto období.')
+    expect(wrapper.get('[data-test="action-disabled-reason"]').text())
+      .toBe('Nejdřív schvalte revizi za toto období.')
+  })
+
+  it('mlčí, dokud je akce použitelná', () => {
+    const wrapper = mountBar([{
+      key: 'post',
+      label: 'Zaúčtovat',
+      tier: 'primary',
+      disabled: false,
+      disabledReason: 'Nejdřív schvalte revizi za toto období.',
+      run: () => {},
+    }])
+
+    expect(wrapper.get('button').attributes('title')).toBeUndefined()
+    expect(wrapper.find('[data-test="action-disabled-reason"]').exists()).toBe(false)
+  })
+
+  it('nechá přednost výslovnému title a stejný důvod nepíše dvakrát', () => {
+    const wrapper = mountBar([
+      {
+        key: 'a',
+        label: 'A',
+        tier: 'primary',
+        disabled: true,
+        title: 'Vlastní tooltip',
+        disabledReason: 'Chybí revize.',
+        run: () => {},
+      },
+      { key: 'b', label: 'B', disabled: true, disabledReason: 'Chybí revize.', run: () => {} },
+    ])
+
+    expect(wrapper.get('button').attributes('title')).toBe('Vlastní tooltip')
+    expect(wrapper.findAll('[data-test="action-disabled-reason"]')).toHaveLength(1)
+  })
+})
+
+/*
+ * Prázdný stav a selhání načtení jsou dva různé stavy. Prázdno smí tvrdit
+ * „nic tu není"; selhání o obsahu neví nic a smí jen nabídnout opakování.
+ */
+describe('EmptyState — varianta failed', () => {
+  it('nabídne opakování a nevydává se za prázdnou agendu', async () => {
+    const wrapper = mount(EmptyState, {
+      props: { variant: 'failed' },
+      global: { plugins: [i18n] },
+    })
+
+    expect(wrapper.get('[data-empty-state]').attributes('data-empty-state')).toBe('failed')
+    const cta = wrapper.get('[data-test="empty-state-cta"]')
+    expect(cta.text()).toBe(i18n.global.t('common.empty_state.retry'))
+    expect(wrapper.text()).not.toContain(i18n.global.t('common.empty_state.title'))
+
+    await cta.trigger('click')
+    expect(wrapper.emitted('action')).toHaveLength(1)
+  })
+
+  it('u prázdné agendy žádné opakování nenabízí', () => {
+    const wrapper = mount(EmptyState, {
+      props: { variant: 'empty' },
+      global: { plugins: [i18n] },
+    })
+
+    expect(wrapper.get('[data-empty-state]').attributes('data-empty-state')).toBe('empty')
+    expect(wrapper.find('[data-test="empty-state-cta"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain(i18n.global.t('common.empty_state.title'))
+  })
+})

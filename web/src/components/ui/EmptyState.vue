@@ -11,14 +11,26 @@ import { ICONS, btnFilled, btnOutline, type ActionIcon, type ActionVariant } fro
  * filtr, nebo jestli je to chyba. Komponenta proto vždy odpovídá na tři věci:
  * CO tu chybí (nadpis), PROČ (vysvětlení) a KAM DÁL (akce).
  *
- * Rozlišení `variant` je jádro celého API: prázdný modul a prázdný VÝSLEDEK
- * FILTRU jsou dva úplně jiné stavy. V prvním případě je správná nabídka
- * „založ první záznam", ve druhém je to past — záznamy existují, jen je
- * schoval filtr, a jediná užitečná akce je filtr zrušit.
+ * Rozlišení `variant` je jádro celého API: prázdný modul, prázdný VÝSLEDEK
+ * FILTRU a SELHANÉ NAČTENÍ jsou tři úplně jiné stavy. U prázdného modulu je
+ * správná nabídka „založ první záznam", u filtru je to past — záznamy existují,
+ * jen je schoval filtr, a jediná užitečná akce je filtr zrušit.
+ *
+ * `failed` je třetí a nejzrádnější: seznam se nenačetl, takže o obsahu nevíme
+ * NIC. Zobrazit tu „Zatím tu nic není" je lež — toast s chybou za pár vteřin
+ * zmizí a uživateli zůstane obrazovka, která tvrdí, že je agenda prázdná.
+ * Proto má vlastní variantu s jedinou smysluplnou akcí: zkusit znovu.
+ * Stránka k tomu drží `failed` ref a v `catch` už kolekce NEVYNULUJE — poslední
+ * úspěšně načtená data jsou pořád lepší informace než prázdno.
+ *
+ * Pořadí stavů v šabloně je vždy: načítá se → selhalo → prázdno → data.
  */
 const props = withDefaults(defineProps<{
-  /** `empty` = agenda je opravdu prázdná · `filtered` = filtr/hledání nic nenašlo. */
-  variant?: 'empty' | 'filtered'
+  /**
+   * `empty` = agenda je opravdu prázdná · `filtered` = filtr/hledání nic nenašlo
+   * · `failed` = načtení selhalo, o obsahu nic nevíme.
+   */
+  variant?: 'empty' | 'filtered' | 'failed'
   /** Ikona z `ICONS`; bez zadání se odvodí od varianty. */
   icon?: ActionIcon
   /** Barevný tint ikony (a rámečku v `boxed`). Držet se accentu modulu. */
@@ -73,14 +85,41 @@ const TINT: Record<ActionVariant, { outer: string; inner: string; icon: string; 
 }
 
 const isFiltered = computed(() => props.variant === 'filtered')
+const isFailed = computed(() => props.variant === 'failed')
 
 // U filtru je barevný tint zavádějící — nic se nestalo, jen se zúžil výběr.
-const tint = computed(() => TINT[isFiltered.value && props.accent === 'primary' ? 'neutral' : props.accent])
+// U selhání naopak barvu chceme: je to stav, který po uživateli něco chce.
+const tint = computed(() => {
+  if (isFailed.value) return TINT.danger
+  return TINT[isFiltered.value && props.accent === 'primary' ? 'neutral' : props.accent]
+})
 
-const resolvedIcon = computed<ActionIcon>(() => props.icon ?? (isFiltered.value ? 'search' : 'inbox'))
-const resolvedTitle = computed(() => props.title ?? t(isFiltered.value ? 'common.empty_state.filtered_title' : 'common.empty_state.title'))
-const resolvedMessage = computed(() => props.message ?? (isFiltered.value ? t('common.empty_state.filtered_message') : undefined))
-const resolvedCtaIcon = computed<ActionIcon>(() => props.ctaIcon ?? (isFiltered.value ? 'x' : 'plus'))
+const resolvedIcon = computed<ActionIcon>(() => {
+  if (props.icon) return props.icon
+  if (isFailed.value) return 'bell'
+  return isFiltered.value ? 'search' : 'inbox'
+})
+const resolvedTitle = computed(() => {
+  if (props.title) return props.title
+  if (isFailed.value) return t('common.empty_state.failed_title')
+  return t(isFiltered.value ? 'common.empty_state.filtered_title' : 'common.empty_state.title')
+})
+const resolvedMessage = computed(() => {
+  if (props.message) return props.message
+  if (isFailed.value) return t('common.empty_state.failed_message')
+  return isFiltered.value ? t('common.empty_state.filtered_message') : undefined
+})
+/*
+ * U `failed` je „zkusit znovu" jediná akce, která dává smysl, takže si ji
+ * komponenta doplní sama — stránka nemusí opakovat týž popisek podeváté.
+ * Stačí, že poslouchá `@action`.
+ */
+const resolvedCta = computed(() => props.cta ?? (isFailed.value ? t('common.empty_state.retry') : undefined))
+const resolvedCtaIcon = computed<ActionIcon>(() => {
+  if (props.ctaIcon) return props.ctaIcon
+  if (isFailed.value) return 'cycle'
+  return isFiltered.value ? 'x' : 'plus'
+})
 
 /*
  * Ve filtrovaném stavu je „zrušit filtr" jen návrat o krok zpět, ne hlavní krok
@@ -92,10 +131,12 @@ const resolvedCtaIcon = computed<ActionIcon>(() => props.ctaIcon ?? (isFiltered.
  */
 const ctaClass = computed(() => {
   if (isFiltered.value) return btnOutline(props.ctaVariant ?? 'neutral')
+  // Po selhání je opakování jediná cesta vpřed → plné tlačítko.
+  if (isFailed.value) return btnFilled(props.ctaVariant ?? 'primary')
   return btnFilled(props.ctaVariant ?? (props.accent === 'neutral' ? 'primary' : props.accent))
 })
 
-const hasActions = computed(() => !!props.cta || !!props.secondary || !!slots.actions)
+const hasActions = computed(() => !!resolvedCta.value || !!props.secondary || !!slots.actions)
 
 const wrapperClass = computed(() => [
   'rise-in text-center',
@@ -111,7 +152,7 @@ const wrapperClass = computed(() => [
   -->
   <component :is="colspan ? 'tr' : 'div'" :class="colspan ? '' : wrapperClass">
     <component :is="colspan ? 'td' : 'div'" :colspan="colspan" :class="colspan ? wrapperClass : ''">
-      <div class="mx-auto flex max-w-md flex-col items-center gap-3">
+      <div class="mx-auto flex max-w-md flex-col items-center gap-3" :data-empty-state="variant">
         <span class="relative grid shrink-0 place-content-center" :class="dense ? 'h-11 w-11' : 'h-14 w-14'">
           <span class="absolute inset-0 rounded-full" :class="tint.outer" aria-hidden="true"></span>
           <span class="absolute inset-[18%] rounded-full" :class="tint.inner" aria-hidden="true"></span>
@@ -127,17 +168,17 @@ const wrapperClass = computed(() => [
         </div>
 
         <div v-if="hasActions" class="mt-1 flex flex-wrap items-center justify-center gap-2">
-          <RouterLink v-if="cta && to" :to="to" :class="ctaClass">
+          <RouterLink v-if="resolvedCta && to" :to="to" :class="ctaClass">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[resolvedCtaIcon]" />
             </svg>
-            {{ cta }}
+            {{ resolvedCta }}
           </RouterLink>
-          <button v-else-if="cta" type="button" :class="ctaClass" @click="emit('action')">
+          <button v-else-if="resolvedCta" type="button" :class="ctaClass" data-test="empty-state-cta" @click="emit('action')">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[resolvedCtaIcon]" />
             </svg>
-            {{ cta }}
+            {{ resolvedCta }}
           </button>
 
           <RouterLink v-if="secondary && secondaryTo" :to="secondaryTo" :class="btnOutline('neutral')">

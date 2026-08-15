@@ -19,6 +19,8 @@ import {
   btnOutlineSm,
   ICONS,
 } from '@/components/ui/buttonStyles'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 
 const props = defineProps<{
@@ -99,11 +101,6 @@ function blockerLabel(
   return te(key)
     ? t(key, params ?? {})
     : t('payroll.people.exit_documents.blockers.unknown', { code })
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
-    .format(new Date(value.replace(' ', 'T')))
 }
 
 function formatSize(bytes: number): string {

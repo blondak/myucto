@@ -14,7 +14,8 @@ import PayrollFileDropzone, {
   type PayrollFileRejectReason,
 } from '@/components/payroll/PayrollFileDropzone.vue'
 import Modal from '@/components/ui/Modal.vue'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import {
   formatPayrollMinutes,
   payrollWallTimeToIso,
@@ -27,6 +28,12 @@ const toast = useToast()
 const period = ref(localPayrollPeriod())
 const incompleteOnly = ref(false)
 const loading = ref(false)
+/*
+ * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
+ * není". Toast s chybou za pár vteřin zmizí a bez tohohle příznaku by na
+ * obrazovce zůstal prázdný stav, který lže.
+ */
+const loadFailed = ref(false)
 const saving = ref(false)
 const overview = ref<PayrollTimeOverview | null>(null)
 const editorOpen = ref(false)
@@ -34,6 +41,20 @@ const importOpen = ref(false)
 const recordType = ref<'entry' | 'shift'>('entry')
 const employmentId = ref<number | null>(null)
 const category = ref<PayrollTimeCategory>('regular')
+/*
+ * Proč nejde uložit záznam docházky, resp. použít import. Obojí vrací `null`,
+ * když akce jde spustit — zašedlé tlačítko bez věty je slepá ulička.
+ */
+const recordBlockedReason = computed<string | null>(() => {
+  if (!selected.value) return t('payroll.time.editor.blocked_no_employment')
+  if (!startsAt.value || !endsAt.value) return t('payroll.time.editor.blocked_no_range')
+  return null
+})
+const importBlockedReason = computed<string | null>(() =>
+  importPreview.value && !importPreview.value.supported
+    ? t('payroll.time.import.blocked_unsupported')
+    : null)
+
 const startsAt = ref('')
 const endsAt = ref('')
 const breakMinutes = ref(0)
@@ -108,6 +129,7 @@ function relationLabel(type: string): string {
 
 async function load() {
   loading.value = true
+  loadFailed.value = false
   try {
     overview.value = await payrollApi.timeMonth(period.value, incompleteOnly.value)
     selectedEmploymentIds.value = []
@@ -115,6 +137,9 @@ async function load() {
       employmentId.value = overview.value.items[0].employment.id
     }
   } catch (error: any) {
+    // `overview` zůstává, jak bylo — prázdná docházka a nenačtená docházka
+    // vypadaly na obrazovce stejně.
+    loadFailed.value = true
     toast.error(error?.response?.data?.error?.message || t('payroll.time.load_failed'))
   } finally {
     loading.value = false
@@ -540,10 +565,21 @@ onMounted(load)
         <label class="inline-flex items-center gap-2 text-sm"><input v-model="publish" type="checkbox"> {{ t('payroll.time.editor.publish') }}</label>
       </div>
       <div class="mt-5 flex flex-wrap justify-end gap-2">
-        <button :class="btnFilled('primary')" :disabled="saving || !selected || !startsAt || !endsAt" @click="saveRecord">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
-          {{ t('common.save') }}
-        </button>
+        <div class="flex flex-col items-end gap-1.5">
+          <button
+            :class="btnFilled('primary')"
+            :disabled="saving || !selected || !startsAt || !endsAt"
+            :title="disabledTitle(recordBlockedReason !== null, recordBlockedReason)"
+            data-test="time-record-save"
+            @click="saveRecord"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+            {{ t('common.save') }}
+          </button>
+          <p v-if="recordBlockedReason" :class="BTN_DISABLED_NOTE" data-test="time-record-save-blocked">
+            {{ recordBlockedReason }}
+          </p>
+        </div>
       </div>
     </section>
 
@@ -571,10 +607,21 @@ onMounted(load)
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>
             {{ t('payroll.time.import.preview') }}
           </button>
-          <button v-if="importPreview" :class="btnFilled('primary')" :disabled="saving || !importPreview.supported" @click="applyImport">
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.upload" /></svg>
-            {{ t('payroll.time.import.apply') }}
-          </button>
+          <div v-if="importPreview" class="flex flex-col gap-1.5">
+            <button
+              :class="btnFilled('primary')"
+              :disabled="saving || !importPreview.supported"
+              :title="disabledTitle(importBlockedReason !== null, importBlockedReason)"
+              data-test="time-import-apply"
+              @click="applyImport"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.upload" /></svg>
+              {{ t('payroll.time.import.apply') }}
+            </button>
+            <p v-if="importBlockedReason" :class="BTN_DISABLED_NOTE" data-test="time-import-apply-blocked">
+              {{ importBlockedReason }}
+            </p>
+          </div>
         </div>
       </div>
       <div v-if="importPreview" class="mt-4 rounded-lg bg-neutral-50 p-4 text-sm">
@@ -591,6 +638,14 @@ onMounted(load)
     <div v-if="loading" class="space-y-3">
       <div v-for="index in 4" :key="index" class="h-28 animate-pulse rounded-xl bg-neutral-100" />
     </div>
+    <EmptyState
+      v-else-if="loadFailed"
+      variant="failed"
+      boxed
+      data-test="load-failed"
+      :message="t('payroll.time.load_failed_hint')"
+      @action="load"
+    />
     <section v-else-if="!overview?.items.length" class="rounded-xl border border-neutral-200 bg-surface p-8 text-center">
       <h2 class="font-semibold text-neutral-900">{{ t('payroll.time.empty') }}</h2>
       <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.time.empty_hint') }}</p>

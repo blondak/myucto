@@ -18,6 +18,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import EmploymentCard from './EmploymentCard.vue'
 import PayrollPersonQuickEdit from './PayrollPersonQuickEdit.vue'
@@ -31,6 +32,12 @@ const router = useRouter()
 const toast = useToast()
 const auth = useAuthStore()
 const loading = ref(true)
+/*
+ * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
+ * není". Toast s chybou za pár vteřin zmizí a bez tohohle příznaku by na
+ * obrazovce zůstal prázdný stav, který lže.
+ */
+const loadFailed = ref(false)
 const people = ref<PayrollPersonListItem[]>([])
 const expandedId = ref<number | null>(null)
 const details = ref<Record<number, PayrollPerson>>({})
@@ -246,9 +253,13 @@ function statusLabel(isActive: boolean): string {
 
 async function load() {
   loading.value = true
+  loadFailed.value = false
   try {
     people.value = await payrollApi.people()
   } catch {
+    // `people` se schválně nevynuluje — poslední známý seznam je pořád lepší
+    // informace než prázdno, které by vypadalo jako „firma nemá zaměstnance".
+    loadFailed.value = true
     toast.error(t('payroll.people.load_failed'))
   } finally {
     loading.value = false
@@ -748,6 +759,15 @@ onMounted(async () => {
       <div v-if="loading" class="space-y-3 p-4 sm:p-6">
         <div v-for="index in 5" :key="index" class="h-16 animate-pulse rounded-lg bg-neutral-100" />
       </div>
+
+      <EmptyState
+        v-else-if="loadFailed"
+        variant="failed"
+        dense
+        data-test="load-failed"
+        :message="t('payroll.people.load_failed_hint')"
+        @action="load"
+      />
 
       <div v-else-if="people.length === 0" class="p-8 text-center">
         <h2 class="text-base font-semibold text-neutral-900">{{ t('payroll.people.empty_title') }}</h2>

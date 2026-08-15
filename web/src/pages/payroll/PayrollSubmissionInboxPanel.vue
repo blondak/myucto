@@ -11,12 +11,15 @@ import { useAuthStore } from '@/stores/auth'
 import Modal from '@/components/ui/Modal.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatDate, formatDateTime } from '@/composables/useFormat'
 
 const emit = defineEmits<{
-  (e: 'update:open-count', count: number): void
+  /** `null` = počet se nepodařilo zjistit; rodič pak odznak nevykreslí vůbec. */
+  (e: 'update:open-count', count: number | null): void
 }>()
 
-const { locale, t } = useI18n()
+const { t } = useI18n()
 const auth = useAuthStore()
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 const loading = ref(true)
@@ -64,21 +67,6 @@ function statusLabel(status: string): string {
   return t(`payroll.submissions.inbox.status.${status}`)
 }
 
-function formatDate(value: string): string {
-  const date = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat(locale.value === 'en' ? 'en-GB' : 'cs-CZ').format(date)
-}
-
-function formatDateTime(value: string): string {
-  const date = new Date(value.includes('T') || value.includes(' ') ? `${value.replace(' ', 'T')}Z` : value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat(locale.value === 'en' ? 'en-GB' : 'cs-CZ', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(date)
-}
-
 async function load() {
   loading.value = true
   error.value = ''
@@ -91,6 +79,8 @@ async function load() {
   } catch (exception) {
     allItems.value = []
     summary.value = { total: 0, open: 0, acknowledged: 0, snoozed: 0 }
+    // Ať rodič odznak schová — zastaralý počet je horší než žádný.
+    emit('update:open-count', null)
     error.value = apiErrorMessage(exception, t('payroll.submissions.inbox.load_failed'))
   } finally {
     loading.value = false

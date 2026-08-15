@@ -11,6 +11,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { formatPeriod } from '@/composables/useFormat'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 import PayrollEmployeeCards from '@/pages/payroll/PayrollEmployeeCards.vue'
 import PayrollGuide from '@/pages/payroll/PayrollGuide.vue'
@@ -295,7 +296,7 @@ onMounted(load)
                   : t('payroll.dashboard.month.run_missing') }}
               </span>
               <span class="rounded-full bg-payroll-50 px-2.5 py-1 text-xs font-medium text-payroll-700">
-                {{ currentPeriod }}
+                {{ formatPeriod(currentPeriod) }}
               </span>
             </div>
           </div>
