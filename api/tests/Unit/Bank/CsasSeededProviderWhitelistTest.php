@@ -23,7 +23,7 @@ use PHPUnit\Framework\TestCase;
  */
 final class CsasSeededProviderWhitelistTest extends TestCase
 {
-    private const MIGRATION = __DIR__ . '/../../../../db/migrations/1373_bank_email_notice_csas_sender_whitelist.sql';
+    private const MIGRATION = __DIR__ . '/../../../../db/migrations/1377_bank_email_notice_csas_sender_whitelist.sql';
 
     /** Tělo avíza ČS podle seedovaných patternů z `0098`. */
     private const NOTICE_BODY = <<<TEXT

@@ -168,7 +168,7 @@ export interface Supplier {
   pohoda_centre_code: string | null
   pohoda_activity_code: string | null
   pohoda_contract_code: string | null
-  /** Předkontace (migrace 1372) — prázdno = Pohoda si po importu dosadí vlastní default. */
+  /** Předkontace (migrace 1376) — prázdno = Pohoda si po importu dosadí vlastní default. */
   pohoda_accounting_code: string | null
   // Per-supplier konfigurace číslování faktur (migrace 0014).
   // *_format — template typu 'JD{YYYY}-{CC}', null = fallback na cfg.varsymbol.templates.{type}.
