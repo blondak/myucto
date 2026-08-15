@@ -71,10 +71,30 @@ export interface SubmissionRecipient {
   verified_in_isds_at: string | null
 }
 
+/**
+ * Jak podání opustilo aplikaci.
+ *
+ * `manual` = odeslal ho člověk ze své vlastní datové schránky. Není to nouzový
+ * režim: strojové napojení na ISDS nasazené není, takže tohle je dnes běžná
+ * cesta a UI podle ní musí uživateli říct, co má udělat.
+ */
+export type DispatchMode = 'channel' | 'manual'
+
+/**
+ * Čím se doručenka spárovala s podáním.
+ *
+ * `correlation_reference` a `external_message_id` jsou PŘESNÉ identifikátory —
+ * podle nich se páruje automaticky. `manual` znamená, že vazbu potvrdil člověk;
+ * nic slabšího automat nepoužije, protože špatně přiřazená doručenka tvrdí něco
+ * o podání, o kterém nic neví.
+ */
+export type ReceiptMatchedBy = 'correlation_reference' | 'external_message_id' | 'manual'
+
 export interface OutboxSubmission {
   id: number
   environment: 'production' | 'test'
   channel: 'epo' | 'isds'
+  dispatch_mode: DispatchMode
   agenda_code: string
   recipient_id: number | null
   recipient_box_id: string | null
@@ -91,7 +111,14 @@ export interface OutboxSubmission {
   artifact_validation_status: 'passed' | 'failed' | 'skipped' | null
   recipient_box_verified_at: string | null
   receipt_document_id: number | null
+  /**
+   * ⚠️ Vždycky `unverified`, dokud CMS podpis doručenky sami neověříme.
+   * UI to musí říct nahlas — poctivé „nevíme" je lepší než falešná jistota.
+   */
   receipt_signature_status: 'unverified' | 'trusted'
+  receipt_matched_by: ReceiptMatchedBy | null
+  receipt_inbox_message_id: number | null
+  receipt_attached_at: string | null
   confirmed_by: number | null
   confirmed_at: string | null
   sent_at: string | null
@@ -144,6 +171,54 @@ export interface InboxPollState {
   consecutive_failures: number
   last_error_code: string | null
   last_error_message: string | null
+}
+
+/** Jedno podání, ke kterému by nahraná doručenka mohla patřit. */
+export interface ReceiptCandidate {
+  id: number
+  subject: string
+  agenda_code: string
+  recipient_box_id: string | null
+  dispatch_state: DispatchState
+  correlation_reference: string
+  created_at: string
+  /** Které signály sedí: `recipient_box`, `subject`, `period`. Ne důkaz, nápověda. */
+  reasons: string[]
+}
+
+/**
+ * Výsledek nahrání doručenky.
+ *
+ * `status` je celý smysl téhle odpovědi:
+ *   - `matched`            — spárováno přes přesný identifikátor, stav se posunul,
+ *   - `candidates`         — nabízíme podání, ale ROZHODUJE ČLOVĚK; nic se nezměnilo,
+ *   - `unmatched`          — nemáme co nabídnout, doručenka leží v nezařazených,
+ *   - `already_processed`  — tuhle doručenku už máme, druhý průchod nic nedělá.
+ */
+export interface ReceiptUploadResult {
+  status: 'matched' | 'candidates' | 'unmatched' | 'already_processed'
+  message: string
+  reason: string
+  inbox_message_id: number
+  document_id: number | null
+  outbox_id: number | null
+  matched_by: ReceiptMatchedBy | null
+  candidates: ReceiptCandidate[]
+  submission: OutboxSubmission | null
+  delivery_recorded?: boolean
+  validation?: { status: string; checked: boolean; errors: string[] } | null
+  receipt: {
+    message_id: string
+    sender_box_id: string | null
+    sender_name: string | null
+    recipient_box_id: string | null
+    recipient_name: string | null
+    sender_ident: string | null
+    subject: string | null
+    sent_at: string | null
+    delivered_at: string | null
+    signature_status: 'unverified' | 'trusted'
+  }
 }
 
 export const dataBoxApi = {
@@ -214,4 +289,47 @@ export const dataBoxApi = {
 
   classify: (id: number, classification: InboxClassification, outboxId: number | null) =>
     api.post(`/submissions/inbox/${id}/classify`, { classification, outbox_id: outboxId }).then(r => r.data),
+
+  /**
+   * „Odeslal jsem to ručně." ID zprávy není formalita — je to přesný
+   * identifikátor, podle kterého se doručenka spáruje sama, i kdyby v ní naše
+   * spisová značka nebyla.
+   */
+  markSentManually: (id: number, externalMessageId: string, sentAt?: string) =>
+    api.post<{ row: OutboxSubmission; recorded: boolean; validation: { status: string; checked: boolean; errors: string[] } }>(
+      `/submissions/outbox/${id}/mark-sent`,
+      { external_message_id: externalMessageId, sent_at: sentAt },
+    ).then(r => r.data),
+
+  /** Nahrání doručenky přímo u podání — vazbu určuje uživatel. */
+  uploadReceiptFor: (id: number, environment: string, file: File) =>
+    api.post<ReceiptUploadResult>(`/submissions/outbox/${id}/receipt`, receiptForm(environment, file), {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data),
+
+  /** Nahrání doručenky bez určeného podání — párování hledá aplikace. */
+  uploadReceipt: (environment: string, file: File) =>
+    api.post<ReceiptUploadResult>('/submissions/receipts', receiptForm(environment, file), {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data),
+
+  unmatchedReceipts: (environment: string) =>
+    api.get<{ items: InboxMessage[] }>('/submissions/receipts/unmatched', {
+      params: { environment },
+    }).then(r => r.data.items),
+
+  receiptCandidates: (inboxMessageId: number) =>
+    api.get<{ items: ReceiptCandidate[] }>(`/submissions/receipts/${inboxMessageId}/candidates`)
+      .then(r => r.data.items),
+
+  matchReceipt: (inboxMessageId: number, outboxId: number) =>
+    api.post<ReceiptUploadResult>(`/submissions/receipts/${inboxMessageId}/match`, { outbox_id: outboxId })
+      .then(r => r.data),
+}
+
+function receiptForm(environment: string, file: File): FormData {
+  const form = new FormData()
+  form.append('environment', environment)
+  form.append('receipt', file)
+  return form
 }

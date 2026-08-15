@@ -22,14 +22,24 @@ final class SubmissionOutboxRepository
 {
     private const TABLE = 'submission_outbox';
 
-    private const COLUMNS = 'id, supplier_id, environment, channel, agenda_code, recipient_id,
+    private const COLUMNS = 'id, supplier_id, environment, channel, dispatch_mode, agenda_code, recipient_id,
         recipient_box_id, subject, artifact_kind, artifact_id, artifact_filename, artifact_sha256,
         dispatch_state, acceptance_state, acceptance_evidence_kind, acceptance_note,
         correlation_reference, external_message_id, artifact_validation_status, artifact_validated_at,
         recipient_box_verified_at, receipt_document_id, receipt_signature_status,
+        receipt_matched_by, receipt_inbox_message_id, receipt_attached_at,
         confirmed_by, confirmed_at, sent_at,
         delivered_at, accepted_at, rejected_at, failed_at, last_error_code, last_error_message,
         row_version, created_by, created_at, updated_at';
+
+    /**
+     * Stavy, ve kterých má smysl k podání připojovat doručenku.
+     *
+     * `ready` je ve výčtu schválně: u ručního odeslání aplikace o odchodu
+     * zprávy neví, dokud uživatel nepřinese doručenku. Ta je tedy zároveň
+     * důkazem, že podání odešlo.
+     */
+    private const RECEIPT_OPEN_STATES = ['ready', 'sending', 'send_uncertain', 'sent'];
 
     public function __construct(private readonly Connection $db) {}
 
@@ -324,17 +334,141 @@ final class SubmissionOutboxRepository
     /**
      * Připojí archivovanou doručenku k podání (důkaz o dni podání dle § 73 odst. 1 DŘ).
      *
+     * `$matchedBy` je auditní stopa, ne dekorace: podle ní se pozná, jestli
+     * vazbu našel automat přes přesný identifikátor, nebo ji potvrdil člověk.
+     * Přiřazení je jednorázové — hlídá to i DB trigger, takže druhá doručenka
+     * první nepřepíše.
+     *
+     * `receipt_signature_status` tu ZÁMĚRNĚ zůstává `unverified`: CMS podpis
+     * ani časové razítko doručenky neověřujeme.
+     *
+     * @param 'correlation_reference'|'external_message_id'|'manual' $matchedBy
      * @return array<string,mixed>
      */
-    public function attachReceipt(int $supplierId, int $id, int $documentId, int $expectedVersion): array
-    {
+    public function attachReceipt(
+        int $supplierId,
+        int $id,
+        int $documentId,
+        ?int $inboxMessageId,
+        string $matchedBy,
+        int $expectedVersion,
+    ): array {
         return $this->mutate(
             $supplierId,
             $id,
-            'receipt_document_id = ?',
-            [$documentId],
+            'receipt_document_id = ?, receipt_inbox_message_id = ?, receipt_matched_by = ?,
+             receipt_attached_at = UTC_TIMESTAMP()',
+            [$documentId, $inboxMessageId, $matchedBy],
             $expectedVersion,
         );
+    }
+
+    /**
+     * Přechod `ready` → `sending` pro RUČNÍ odeslání.
+     *
+     * Liší se od {@see claimForSending()} jedinou věcí, která je ale zásadní:
+     * zároveň přepíná `dispatch_mode` na `manual`, a tím vypíná bránu ověření
+     * schránky v ISDS. Ta se u ručního odeslání nemá čím naplnit — adresáta
+     * vybírá člověk ve své datové schránce. Trigger dovolí `dispatch_mode`
+     * změnit jen dokud je řádek `ready`, takže se to musí stát právě tady.
+     *
+     * @return array<string,mixed>|null null, když už řádek `ready` není
+     */
+    public function claimForManualSending(int $supplierId, int $id, int $confirmedBy): ?array
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE ' . self::TABLE . '
+                SET dispatch_state = \'sending\', dispatch_mode = \'manual\',
+                    confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(),
+                    row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ? AND dispatch_state = \'ready\''
+        );
+        $stmt->execute([$confirmedBy, $supplierId, $id]);
+        if ($stmt->rowCount() !== 1) {
+            return null;
+        }
+
+        return $this->find($supplierId, $id);
+    }
+
+    /**
+     * Zapíše odeslání, které proběhlo mimo aplikaci.
+     *
+     * Čas odeslání se NEBERE z hodin serveru: u ručního odeslání se zpráva
+     * podala dřív, než jsme se o tom dozvěděli, a `sent_at` z „teď" by se
+     * dostalo za `delivered_at` z doručenky — což CHECK `chk_submission_outbox_timeline`
+     * správně odmítne.
+     *
+     * @return array<string,mixed>
+     */
+    public function markSentManually(
+        int $supplierId,
+        int $id,
+        string $externalMessageId,
+        \DateTimeImmutable $sentAt,
+        int $expectedVersion,
+    ): array {
+        return $this->mutate(
+            $supplierId,
+            $id,
+            'dispatch_state = \'sent\', external_message_id = ?, sent_at = ?,
+             last_error_code = NULL, last_error_message = NULL',
+            [$externalMessageId, $sentAt->format('Y-m-d H:i:s')],
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Podání, ke kterým může nahraná doručenka patřit.
+     *
+     * ⚠️ Tohle je NABÍDKA ČLOVĚKU, ne párovací pravidlo. Shoda schránky
+     * příjemce a časového okna je domněnka; automatická vazba vzniká jedině
+     * přes přesný identifikátor (naši spisovou značku nebo dmID). Kdyby se
+     * podle téhle nabídky párovalo samo, stačily by dvě podání stejné agendy
+     * do stejné schránky k tomu, aby se doručenka přilepila k tomu špatnému.
+     *
+     * @param ?string $recipientBoxId schránka, do které doručenka míří (z doručenky)
+     * @param ?\DateTimeImmutable $around čas dodání z doručenky
+     * @return list<array<string,mixed>>
+     */
+    public function listReceiptCandidates(
+        int $supplierId,
+        string $environment,
+        ?string $recipientBoxId,
+        ?\DateTimeImmutable $around,
+        int $limit = 20,
+    ): array {
+        $this->assertAvailable();
+        $limit = max(1, min(50, $limit));
+
+        $states = "'" . implode("','", self::RECEIPT_OPEN_STATES) . "'";
+        $sql = 'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
+                 WHERE supplier_id = ? AND environment = ? AND channel = \'isds\'
+                   AND dispatch_state IN (' . $states . ')
+                   AND receipt_document_id IS NULL';
+        $params = [$supplierId, $environment];
+
+        if ($recipientBoxId !== null && $recipientBoxId !== '') {
+            $sql .= ' AND recipient_box_id = ?';
+            $params[] = $recipientBoxId;
+        }
+        if ($around !== null) {
+            // Podání se do fronty zařadí před odesláním, doručenka přijde po něm.
+            // Okno je široké schválně — raději nabídnout víc a nechat rozhodnout
+            // člověka, než tichým zúžením zatajit ten správný řádek.
+            // Dopředná tolerance kryje i to, že `created_at` je serverový čas,
+            // kdežto čas v doručence nese vlastní posun.
+            $sql .= ' AND created_at BETWEEN DATE_SUB(?, INTERVAL 400 DAY) AND DATE_ADD(?, INTERVAL 7 DAY)';
+            $params[] = $around->format('Y-m-d H:i:s');
+            $params[] = $around->format('Y-m-d H:i:s');
+        }
+        $sql .= ' ORDER BY created_at DESC, id DESC LIMIT ' . $limit;
+
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+
+        return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
     /** @return array<string,mixed> */
@@ -403,7 +537,7 @@ final class SubmissionOutboxRepository
         foreach (['id', 'supplier_id', 'artifact_id', 'row_version'] as $key) {
             $row[$key] = (int) $row[$key];
         }
-        foreach (['recipient_id', 'confirmed_by', 'created_by', 'receipt_document_id'] as $key) {
+        foreach (['recipient_id', 'confirmed_by', 'created_by', 'receipt_document_id', 'receipt_inbox_message_id'] as $key) {
             $row[$key] = $row[$key] !== null ? (int) $row[$key] : null;
         }
         return $row;

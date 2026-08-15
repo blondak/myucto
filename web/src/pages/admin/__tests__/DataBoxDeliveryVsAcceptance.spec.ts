@@ -20,6 +20,7 @@ const m = vi.hoisted(() => ({
   recipients: vi.fn(),
   outbox: vi.fn(),
   inbox: vi.fn(),
+  unmatchedReceipts: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }))
@@ -30,6 +31,7 @@ vi.mock('@/api/dataBox', () => ({
     recipients: m.recipients,
     outbox: m.outbox,
     inbox: m.inbox,
+    unmatchedReceipts: m.unmatchedReceipts,
   },
 }))
 
@@ -62,6 +64,7 @@ function submission(overrides: Partial<OutboxSubmission> = {}): OutboxSubmission
     id: 10,
     environment: 'production',
     channel: 'isds',
+    dispatch_mode: 'channel',
     agenda_code: 'DPHDP3',
     recipient_id: 1,
     recipient_box_id: 'zzzzzzz',
@@ -79,6 +82,9 @@ function submission(overrides: Partial<OutboxSubmission> = {}): OutboxSubmission
     recipient_box_verified_at: '2026-08-15 09:00:00',
     receipt_document_id: null,
     receipt_signature_status: 'unverified',
+    receipt_matched_by: null,
+    receipt_inbox_message_id: null,
+    receipt_attached_at: null,
     confirmed_by: 1,
     confirmed_at: '2026-08-15 09:00:00',
     sent_at: '2026-08-15 09:00:00',
@@ -98,6 +104,7 @@ async function mountWith(rows: OutboxSubmission[]) {
   m.recipients.mockResolvedValue([])
   m.outbox.mockResolvedValue(rows)
   m.inbox.mockResolvedValue({ items: [], state: null })
+  m.unmatchedReceipts.mockResolvedValue([])
 
   const wrapper = mount(DataBox, {
     global: {

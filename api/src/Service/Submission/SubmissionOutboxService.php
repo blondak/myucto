@@ -312,6 +312,172 @@ final readonly class SubmissionOutboxService
     }
 
     /**
+     * Zaznamená odeslání, které člověk provedl ve své vlastní datové schránce.
+     *
+     * ── Proč to tu vůbec je ─────────────────────────────────────────────────
+     * Strojový transport nasazený není, takže {@see confirmAndSend()} u datovky
+     * skončí srozumitelnou překážkou a zpráva odejde ručně. Kdyby aplikace
+     * neměla jak si to zapsat, zůstalo by odeslané podání navždy
+     * v „připraveno" — a to je horší lež než nic: uživatel by si myslel,
+     * že podat ještě musí, nebo by podal podruhé.
+     *
+     * ── Co se tady liší od strojového odeslání ──────────────────────────────
+     * 1. `dispatch_mode` se přepne na `manual`, čímž odpadá brána ověření
+     *    schránky v ISDS. Nemá se čím naplnit a není potřeba: adresáta vybírá
+     *    člověk ve své datové schránce, která neexistující schránku odmítne
+     *    na místě.
+     * 2. XSD kontrola PROBĚHNE, ale nemá právo veta. Zpráva už odešla; odmítnout
+     *    zápis by neznamenalo, že se to nestalo. Výsledek `failed` se uloží
+     *    a uživatel se o vadě dozví teď, ne až z výzvy podle § 74 DŘ.
+     * 3. `sent_at` se bere z předané hodnoty, ne z hodin serveru — podání se
+     *    stalo dřív, než jsme se o něm dozvěděli.
+     *
+     * Idempotence: opakované volání s TÝMŽ ID zprávy vrátí aktuální stav
+     * a `recorded: false`. Jiné ID se odmítne — ID zprávy je jednorázové
+     * přiřazení a hlídá ho i DB trigger.
+     *
+     * @return array{row:array<string,mixed>,recorded:bool,validation:array{status:string,checked:bool,errors:list<string>}}
+     */
+    public function markSentManually(
+        int $supplierId,
+        int $id,
+        int $userId,
+        string $externalMessageId,
+        ?\DateTimeImmutable $sentAt = null,
+    ): array {
+        $externalMessageId = trim($externalMessageId);
+        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/', $externalMessageId) !== 1) {
+            throw new SubmissionChannelException(
+                'invalid_message_id',
+                'ID datové zprávy nemá platný tvar. Najdete ho v detailu odeslané zprávy '
+                . 've své datové schránce jako „ID zprávy".',
+                400,
+            );
+        }
+
+        $row = $this->outbox->find($supplierId, $id);
+        if ($row === null) {
+            throw new SubmissionChannelException('submission_not_found', 'Podání ve frontě není.', 404);
+        }
+        if ((string) $row['channel'] !== 'isds') {
+            throw new SubmissionChannelException(
+                'manual_dispatch_not_applicable',
+                'Ručně odeslat jde jen podání datovou schránkou.',
+                409,
+            );
+        }
+
+        $state = (string) $row['dispatch_state'];
+
+        // Už odeslané: buď je to tentýž zápis podruhé (a pak se nic neděje),
+        // nebo někdo tvrdí jiné ID zprávy — a to by přepsalo jediný důkaz,
+        // že zpráva u příjemce je.
+        if (in_array($state, [DispatchState::Sent->value, DispatchState::Delivered->value], true)) {
+            if ((string) $row['external_message_id'] === $externalMessageId) {
+                return ['row' => $row, 'recorded' => false, 'validation' => $this->validationSnapshot($row)];
+            }
+            throw new SubmissionChannelException(
+                'submission_already_sent',
+                'Podání už má přiřazené ID zprávy ' . (string) $row['external_message_id']
+                . '. Jiné ID k němu zapsat nejde — zkontrolujte, jestli nejde o jiné podání.',
+                409,
+            );
+        }
+        if (in_array($state, [DispatchState::Failed->value, DispatchState::Cancelled->value], true)) {
+            throw new SubmissionChannelException(
+                'submission_closed',
+                'Tohle podání je uzavřené (' . $state . '). Zařaďte ho do fronty znovu a odešlete jako nové.',
+                409,
+            );
+        }
+
+        if ($state === DispatchState::Ready->value) {
+            // `dispatch_mode` smí trigger změnit jen dokud je řádek `ready`,
+            // takže přepnutí a zabrání musí být jeden UPDATE.
+            $claimed = $this->outbox->claimForManualSending($supplierId, $id, $userId);
+            if ($claimed === null) {
+                $current = $this->outbox->find($supplierId, $id);
+                if ($current === null) {
+                    throw new SubmissionChannelException('submission_not_found', 'Podání ve frontě není.', 404);
+                }
+                return ['row' => $current, 'recorded' => false, 'validation' => $this->validationSnapshot($current)];
+            }
+            $row = $claimed;
+        }
+
+        $validation = $this->runValidationWithoutVeto($supplierId, $id, $row);
+        $row = $validation['row'];
+
+        $updated = $this->outbox->markSentManually(
+            $supplierId,
+            $id,
+            $externalMessageId,
+            $sentAt ?? new \DateTimeImmutable('now'),
+            (int) $row['row_version'],
+        );
+
+        return [
+            'row' => $updated,
+            'recorded' => true,
+            'validation' => [
+                'status' => $validation['status'],
+                'checked' => $validation['checked'],
+                'errors' => $validation['errors'],
+            ],
+        ];
+    }
+
+    /**
+     * Připojí doručenku k podání jako důkaz o dni podání (§ 73 odst. 1 DŘ).
+     *
+     * ⚠️ Osy vyřízení se nedotýká a dotknout se jí nemůže: pro doručenku
+     * neexistuje hodnota v `acceptance_evidence_kind` a DB trigger zápis, který
+     * by při připojení doručenky hnul vyřízením, odmítne.
+     *
+     * @param 'correlation_reference'|'external_message_id'|'manual' $matchedBy
+     * @return array{row:array<string,mixed>,attached:bool}
+     */
+    public function attachReceipt(
+        int $supplierId,
+        int $id,
+        int $documentId,
+        ?int $inboxMessageId,
+        string $matchedBy,
+    ): array {
+        $row = $this->outbox->find($supplierId, $id);
+        if ($row === null) {
+            throw new SubmissionChannelException('submission_not_found', 'Podání ve frontě není.', 404);
+        }
+
+        $existing = $row['receipt_document_id'] !== null ? (int) $row['receipt_document_id'] : null;
+        if ($existing !== null) {
+            // Tatáž doručenka podruhé = nic. Jiná doručenka = odmítnutí; první
+            // důkaz se nepřepisuje.
+            if ($existing === $documentId) {
+                return ['row' => $row, 'attached' => false];
+            }
+            throw new SubmissionChannelException(
+                'receipt_already_attached',
+                'K tomuhle podání už je připojená jiná doručenka. Nahraná doručenka zůstala '
+                . 'v nezařazených — zkontrolujte, ke kterému podání patří.',
+                409,
+            );
+        }
+
+        return [
+            'row' => $this->outbox->attachReceipt(
+                $supplierId,
+                $id,
+                $documentId,
+                $inboxMessageId,
+                $matchedBy,
+                (int) $row['row_version'],
+            ),
+            'attached' => true,
+        ];
+    }
+
+    /**
      * Dořeší podání, u kterého se odeslání přerušilo.
      *
      * Odpovědi jsou tři a všechny tři jsou legitimní:
@@ -513,6 +679,72 @@ final readonly class SubmissionOutboxService
         }
 
         return $this->outbox->recordRecipientVerified($supplierId, $id, (int) $row['row_version']);
+    }
+
+    /**
+     * XSD kontrola u podání, které už odešlo mimo aplikaci.
+     *
+     * Kontrola proběhne vždy, ale nic nezastaví — zpráva je pryč. Když už
+     * výsledek zapsaný je (u podání, které prošlo bránami strojového odeslání),
+     * nepřepisuje se; jinak by se `passed` z okamžiku odeslání ztratilo.
+     *
+     * `checked = false` znamená, že se zkontrolovat NEDALO (podklad už
+     * v aplikaci není). To je jiná informace než `skipped` (schéma pro agendu
+     * nemáme) a UI ji musí umět rozlišit — jinak se „nezkontrolováno" tváří
+     * jako „zkontrolováno a v pořádku".
+     *
+     * @param array<string,mixed> $row
+     * @return array{row:array<string,mixed>,status:string,checked:bool,errors:list<string>}
+     */
+    private function runValidationWithoutVeto(int $supplierId, int $id, array $row): array
+    {
+        if ($row['artifact_validation_status'] !== null) {
+            return [
+                'row' => $row,
+                'status' => (string) $row['artifact_validation_status'],
+                'checked' => true,
+                'errors' => [],
+            ];
+        }
+
+        $artifact = $this->artifacts->resolve($supplierId, (string) $row['artifact_kind'], (int) $row['artifact_id']);
+        if ($artifact === null) {
+            $this->logger->warning('Manually dispatched submission has no artifact to validate', [
+                'supplier_id' => $supplierId,
+                'outbox_id' => $id,
+            ]);
+
+            return [
+                'row' => $this->outbox->recordValidation($supplierId, $id, 'skipped', (int) $row['row_version']),
+                'status' => 'skipped',
+                'checked' => false,
+                'errors' => [],
+            ];
+        }
+
+        $validation = $this->validator->validateArtifact((string) $row['agenda_code'], $artifact);
+
+        return [
+            'row' => $this->outbox->recordValidation($supplierId, $id, $validation['status'], (int) $row['row_version']),
+            'status' => $validation['status'],
+            'checked' => true,
+            'errors' => array_slice($validation['errors'], 0, 5),
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array{status:string,checked:bool,errors:list<string>}
+     */
+    private function validationSnapshot(array $row): array
+    {
+        return [
+            'status' => $row['artifact_validation_status'] !== null
+                ? (string) $row['artifact_validation_status']
+                : 'skipped',
+            'checked' => $row['artifact_validation_status'] !== null,
+            'errors' => [],
+        ];
     }
 
     /**
