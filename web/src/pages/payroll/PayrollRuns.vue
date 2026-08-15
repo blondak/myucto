@@ -6,13 +6,14 @@ import {
   type PayrollRun,
   type PayrollRunCommand,
   type PayrollRunResultPerson,
+  type PayrollRunValidation,
 } from '@/api/payroll'
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
 import PayrollInsuranceBreakdown from '@/components/payroll/PayrollInsuranceBreakdown.vue'
 import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
-import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
+import { formatDateTime, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -51,8 +52,51 @@ const pendingDelete = ref<PayrollRun | null>(null)
 const commandReason = ref('')
 const commandError = ref('')
 const commandBlockers = ref<Record<number, string>>({})
+const pendingOverride = ref<{ run: PayrollRun, validation: PayrollRunValidation } | null>(null)
+const overrideReason = ref('')
+const overrideError = ref('')
 
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
+/*
+ * Schválení výjimky je věcně část schválení mzdy („vím o vadě a přesto se
+ * vyplácí"), proto stejné právo jako u příkazu `approve` — server to vynucuje
+ * stejně, tohle je jen to, aby se nenabízelo tlačítko, které skončí 403.
+ */
+const canOverride = computed(() => auth.canWrite('payroll.approve'))
+
+/** Stavy, ve kterých se s výjimkou ještě smí hýbat — po schválení běhu už ne. */
+const OVERRIDE_EDITABLE_STATUSES: PayrollRun['status'][] = [
+  'inputs_locked',
+  'calculated',
+  'reviewed',
+  'reopened',
+]
+
+function overrideEditable(run: PayrollRun): boolean {
+  return OVERRIDE_EDITABLE_STATUSES.includes(run.status)
+}
+
+/** Varování, na které se čeká: bez rozhodnutí člověka běh dál nepostoupí. */
+function awaitsOverride(validation: PayrollRunValidation): boolean {
+  return validation.requires_override && validation.overridden_at === null
+}
+
+function validationClass(validation: PayrollRunValidation): string {
+  if (validation.severity === 'blocker') {
+    return 'border-danger-500/30 bg-danger-50 text-danger-700'
+  }
+  if (validation.severity === 'info') {
+    return 'border-neutral-200 bg-neutral-50 text-neutral-700'
+  }
+  return 'border-warning-200 bg-warning-50 text-warning-800'
+}
+
+function overrideAuthorLabel(validation: PayrollRunValidation): string {
+  return t('payroll.runs.override.granted_by', {
+    name: validation.overridden_by_name ?? t('payroll.runs.override.unknown_author'),
+    at: formatDateTime(validation.overridden_at),
+  })
+}
 
 function defaultPaymentDate(value: string): string {
   const [year, month] = value.split('-').map(Number)
@@ -302,6 +346,67 @@ async function confirmCommand() {
     pendingCommand.value.command,
     reason,
   )
+}
+
+function askOverride(run: PayrollRun, validation: PayrollRunValidation) {
+  if (!canOverride.value || !overrideEditable(run)) return
+  pendingOverride.value = { run, validation }
+  overrideReason.value = ''
+  overrideError.value = ''
+}
+
+async function confirmOverride() {
+  const pending = pendingOverride.value
+  if (!pending) return
+  const reason = overrideReason.value.trim()
+  if (!reason) {
+    overrideError.value = t('payroll.runs.override.reason_required')
+    return
+  }
+  saving.value = true
+  try {
+    await payrollApi.overrideRunValidation(
+      pending.run.id,
+      pending.validation.id,
+      { row_version: pending.run.row_version, reason },
+      crypto.randomUUID(),
+    )
+    toast.success(t('payroll.runs.override.granted'))
+    pendingOverride.value = null
+    overrideReason.value = ''
+    await load()
+  } catch (error: any) {
+    // Server má na odůvodnění vlastní minimum a jeho věta je konkrétnější než
+    // cokoli, co bychom si tady vymysleli — proto se ukazuje v dialogu.
+    overrideError.value = error?.response?.data?.error?.message
+      || t('payroll.runs.override.failed')
+    if (error?.response?.status === 409) await load()
+  } finally {
+    saving.value = false
+  }
+}
+
+async function revokeOverride(run: PayrollRun, validation: PayrollRunValidation) {
+  if (!canOverride.value || !overrideEditable(run)) return
+  saving.value = true
+  try {
+    await payrollApi.revokeRunValidationOverride(
+      run.id,
+      validation.id,
+      { row_version: run.row_version },
+      crypto.randomUUID(),
+    )
+    toast.success(t('payroll.runs.override.revoked'))
+    await load()
+  } catch (error: any) {
+    toast.error(
+      error?.response?.data?.error?.message
+        || t('payroll.runs.override.revoke_failed'),
+    )
+    if (error?.response?.status === 409) await load()
+  } finally {
+    saving.value = false
+  }
 }
 
 function askDeleteRun(run: PayrollRun) {
@@ -561,9 +666,79 @@ onMounted(load)
           <div
             v-for="validation in run.validations"
             :key="validation.id"
-            class="rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800"
+            :data-testid="`payroll-validation-${validation.id}`"
+            class="rounded-lg border px-3 py-2 text-sm"
+            :class="validationClass(validation)"
           >
-            {{ validation.message }}
+            <p>{{ validation.message }}</p>
+
+            <!--
+              Varování, které čeká na člověka. Bez téhle věty uživatel vidí jen
+              nálepku a netuší, že právě ona drží celý běh.
+            -->
+            <div
+              v-if="awaitsOverride(validation)"
+              class="mt-2 flex flex-wrap items-center gap-2"
+              :data-testid="`payroll-validation-${validation.id}-awaiting`"
+            >
+              <p class="flex-1 text-xs leading-snug">
+                {{ t('payroll.runs.override.awaiting') }}
+              </p>
+              <button
+                v-if="canOverride && overrideEditable(run)"
+                type="button"
+                :data-testid="`payroll-validation-${validation.id}-override`"
+                :class="btnOutlineSm('warning')"
+                :disabled="saving"
+                @click="askOverride(run, validation)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.badgeCheck" />
+                </svg>
+                {{ t('payroll.runs.override.grant') }}
+              </button>
+              <p
+                v-else-if="!canOverride"
+                :class="BTN_DISABLED_NOTE"
+                :data-testid="`payroll-validation-${validation.id}-no-permission`"
+              >
+                {{ t('payroll.runs.override.no_permission') }}
+              </p>
+            </div>
+
+            <!-- Vyřešené varování: kdo a s jakým odůvodněním. -->
+            <div
+              v-else-if="validation.overridden_at"
+              class="mt-2 flex flex-wrap items-start gap-2 rounded-md bg-surface/70 px-2.5 py-2"
+              :data-testid="`payroll-validation-${validation.id}-resolved`"
+            >
+              <div class="flex-1 space-y-0.5">
+                <p class="text-xs font-medium">{{ overrideAuthorLabel(validation) }}</p>
+                <p class="text-xs leading-snug">
+                  {{ t('payroll.runs.override.reason_label', { reason: validation.override_reason }) }}
+                </p>
+              </div>
+              <button
+                v-if="canOverride && overrideEditable(run)"
+                type="button"
+                :data-testid="`payroll-validation-${validation.id}-revoke`"
+                :class="btnOutlineSm('neutral')"
+                :disabled="saving"
+                @click="revokeOverride(run, validation)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.uturn" />
+                </svg>
+                {{ t('payroll.runs.override.revoke') }}
+              </button>
+              <p
+                v-else-if="canOverride"
+                :class="BTN_DISABLED_NOTE"
+                :data-testid="`payroll-validation-${validation.id}-locked`"
+              >
+                {{ t('payroll.runs.override.locked_after_approval') }}
+              </p>
+            </div>
           </div>
         </div>
       </article>
@@ -614,6 +789,55 @@ onMounted(load)
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="commandIcon(pendingCommand.command)" /></svg>
             {{ commandLabel(pendingCommand.command) }}
+          </button>
+        </div>
+      </form>
+    </Modal>
+
+    <Modal
+      v-if="pendingOverride"
+      :title="t('payroll.runs.override.grant')"
+      width-class="max-w-xl"
+      @close="pendingOverride = null"
+    >
+      <form class="space-y-4" data-test="run-override-dialog" @submit.prevent="confirmOverride">
+        <p class="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800">
+          {{ pendingOverride.validation.message }}
+        </p>
+        <label class="block text-sm font-medium text-neutral-700">
+          {{ t('payroll.runs.override.reason_prompt') }}
+          <textarea
+            v-model="overrideReason"
+            class="mt-1 min-h-24 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+            required
+            autofocus
+            data-test="run-override-reason"
+          />
+        </label>
+        <p class="text-xs leading-snug text-neutral-500" data-test="run-override-hint">
+          {{ t('payroll.runs.override.reason_hint') }}
+        </p>
+        <p
+          v-if="overrideError"
+          class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+          role="alert"
+          data-test="run-override-error"
+        >
+          {{ overrideError }}
+        </p>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" @click="pendingOverride = null">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="submit"
+            :class="btnFilled('warning')"
+            :disabled="saving"
+            data-test="confirm-run-override"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+            {{ t('payroll.runs.override.grant') }}
           </button>
         </div>
       </form>

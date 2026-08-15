@@ -110,6 +110,7 @@ use MyInvoice\Action\Payroll\PayrollRegistrationAction;
 use MyInvoice\Action\Payroll\PayrollRegzelAction;
 use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
 use MyInvoice\Action\Payroll\PayrollRulesetAction;
+use MyInvoice\Action\Payroll\PayrollRunValidationOverrideAction;
 use MyInvoice\Action\Payroll\PayrollRunsAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionArtifactDownloadAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionDetailAction;
@@ -794,6 +795,16 @@ final class Routes
             $g->post(
                 '/runs/{id:[0-9]+}/commands/{command:[a-z_]+}',
                 [PayrollRunsAction::class, 'command'],
+            );
+            // MZ-01-W07 — chybějící půlka override: varování vyžadující schválení
+            // dosud zastavilo `approve` a nešlo ho odklidit žádnou routou.
+            $g->post(
+                '/runs/{id:[0-9]+}/validations/{validationId:[0-9]+}/override',
+                [PayrollRunValidationOverrideAction::class, 'grant'],
+            );
+            $g->delete(
+                '/runs/{id:[0-9]+}/validations/{validationId:[0-9]+}/override',
+                [PayrollRunValidationOverrideAction::class, 'revoke'],
             );
             $g->get('/documents', [PayrollDocumentAction::class, 'list']);
             $g->get('/documents/annual', [PayrollDocumentAction::class, 'listAnnual']);

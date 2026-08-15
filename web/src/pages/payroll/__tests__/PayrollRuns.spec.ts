@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
-import type { PayrollRun } from '@/api/payroll'
+import type { PayrollRun, PayrollRunValidation } from '@/api/payroll'
 
 const m = vi.hoisted(() => ({
   runs: vi.fn(),
@@ -9,6 +9,8 @@ const m = vi.hoisted(() => ({
   peopleOptions: vi.fn(),
   deleteRun: vi.fn(),
   commandRun: vi.fn(),
+  overrideValidation: vi.fn(),
+  revokeOverride: vi.fn(),
   canWrite: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
@@ -31,6 +33,8 @@ vi.mock('@/api/payroll', () => ({
     peopleOptions: m.peopleOptions,
     deleteRun: m.deleteRun,
     commandRun: m.commandRun,
+    overrideRunValidation: m.overrideValidation,
+    revokeRunValidationOverride: m.revokeOverride,
   },
 }))
 vi.mock('@/stores/auth', () => ({
@@ -70,6 +74,24 @@ function run(overrides: Partial<PayrollRun> = {}): PayrollRun {
   }
 }
 
+function validation(overrides: Partial<PayrollRunValidation> = {}): PayrollRunValidation {
+  return {
+    id: 71,
+    severity: 'warning',
+    code: 'employment_without_inputs',
+    entity_type: 'employment',
+    entity_id: 3,
+    message: 'Pracovní vztah nemá v období žádnou schválenou mzdovou složku.',
+    remediation_path: '/payroll/components',
+    requires_override: true,
+    override_reason: null,
+    overridden_by: null,
+    overridden_by_name: null,
+    overridden_at: null,
+    ...overrides,
+  }
+}
+
 describe('PayrollRuns', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -80,6 +102,8 @@ describe('PayrollRuns', () => {
     m.peopleOptions.mockResolvedValue([])
     m.deleteRun.mockResolvedValue(undefined)
     m.commandRun.mockResolvedValue({ outcome: null })
+    m.overrideValidation.mockResolvedValue({ granted: true, four_eyes_met: true })
+    m.revokeOverride.mockResolvedValue({ granted: false, four_eyes_met: true })
   })
 
   /*
@@ -249,6 +273,169 @@ describe('PayrollRuns', () => {
     await flushPromises()
 
     expect(m.runDetail).toHaveBeenCalledWith(15)
+  })
+
+  /*
+   * Varování s `requires_override` drží celý běh. Než k němu vedla routa, byla
+   * to slepá ulička; teď musí být na kartě vidět, že se čeká na člověka, a co
+   * má udělat.
+   */
+  it('says that a warning is waiting for a person and offers the way out', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [validation()],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="payroll-validation-71-awaiting"]').text())
+      .toContain('payroll.runs.override.awaiting')
+
+    await wrapper.get('[data-testid="payroll-validation-71-override"]').trigger('click')
+    expect(m.overrideValidation).not.toHaveBeenCalled()
+
+    const dialog = document.body.querySelector('[data-test="run-override-dialog"]')
+    expect(dialog).not.toBeNull()
+    expect(document.body.textContent).toContain('payroll.runs.override.reason_hint')
+
+    const textarea = document.body.querySelector<HTMLTextAreaElement>('[data-test="run-override-reason"]')!
+    textarea.value = 'Zaměstnanec byl celý měsíc na neplaceném volnu.'
+    textarea.dispatchEvent(new Event('input'))
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[data-test="confirm-run-override"]')?.click()
+    await flushPromises()
+
+    expect(m.overrideValidation).toHaveBeenCalledWith(
+      15,
+      71,
+      { row_version: 2, reason: 'Zaměstnanec byl celý měsíc na neplaceném volnu.' },
+      expect.any(String),
+    )
+    expect(m.success).toHaveBeenCalledWith('payroll.runs.override.granted')
+  })
+
+  /*
+   * Prázdné pole zastaví už `required` v prohlížeči; mezery ne — ty vypadají
+   * jako vyplněná odpověď. Dialog je zastaví sám, aby se prázdno neposílalo na
+   * server jako doložené rozhodnutí.
+   */
+  it('refuses to send a blank reason', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [validation()],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-validation-71-override"]').trigger('click')
+    const textarea = document.body.querySelector<HTMLTextAreaElement>('[data-test="run-override-reason"]')!
+    textarea.value = '     '
+    textarea.dispatchEvent(new Event('input'))
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[data-test="confirm-run-override"]')?.click()
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(m.overrideValidation).not.toHaveBeenCalled()
+    expect(document.body.querySelector('[data-test="run-override-error"]')?.textContent)
+      .toContain('payroll.runs.override.reason_required')
+  })
+
+  /* Serverová věta o minimu odůvodnění je konkrétnější — musí zůstat v dialogu. */
+  it('keeps the server rejection inside the dialog', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [validation()],
+    })])
+    m.overrideValidation.mockRejectedValue({
+      response: {
+        status: 422,
+        data: { error: { message: 'Důvod výjimky musí mít alespoň 20 znaků.' } },
+      },
+    })
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-validation-71-override"]').trigger('click')
+    const textarea = document.body.querySelector<HTMLTextAreaElement>('[data-test="run-override-reason"]')!
+    textarea.value = 'ok'
+    textarea.dispatchEvent(new Event('input'))
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[data-test="confirm-run-override"]')?.click()
+    await flushPromises()
+
+    expect(m.error).not.toHaveBeenCalled()
+    expect(document.body.querySelector('[data-test="run-override-error"]')?.textContent)
+      .toContain('alespoň 20 znaků')
+  })
+
+  it('shows who approved the exception and why, and lets it be taken back', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'reviewed',
+      can_delete: false,
+      validations: [validation({
+        overridden_at: '2026-08-14 09:30:00',
+        overridden_by: 8,
+        overridden_by_name: 'Jana Mzdová',
+        override_reason: 'Zaměstnanec byl celý měsíc na neplaceném volnu.',
+      })],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const resolved = wrapper.get('[data-testid="payroll-validation-71-resolved"]')
+    expect(resolved.text()).toContain('payroll.runs.override.granted_by')
+    expect(resolved.text()).toContain('payroll.runs.override.reason_label')
+    expect(wrapper.find('[data-testid="payroll-validation-71-awaiting"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="payroll-validation-71-revoke"]').trigger('click')
+    await flushPromises()
+
+    expect(m.revokeOverride).toHaveBeenCalledWith(15, 71, { row_version: 2 }, expect.any(String))
+    expect(m.success).toHaveBeenCalledWith('payroll.runs.override.revoked')
+  })
+
+  /* Po schválení běhu už výjimka zpět nejde — to by přepisovalo historii. */
+  it('hides the revoke button once the run is approved', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'approved',
+      can_delete: false,
+      validations: [validation({
+        overridden_at: '2026-08-14 09:30:00',
+        overridden_by: 8,
+        overridden_by_name: 'Jana Mzdová',
+        override_reason: 'Zaměstnanec byl celý měsíc na neplaceném volnu.',
+      })],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-validation-71-revoke"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="payroll-validation-71-locked"]').text())
+      .toContain('payroll.runs.override.locked_after_approval')
+  })
+
+  /* Bez práva schvalovat mzdu se nesmí nabízet tlačítko, které skončí 403. */
+  it('explains instead of offering a button the user may not press', async () => {
+    m.canWrite.mockImplementation((permission: string) => permission !== 'payroll.approve')
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [validation()],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-validation-71-override"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="payroll-validation-71-no-permission"]').text())
+      .toContain('payroll.runs.override.no_permission')
   })
 
   it('paginates instead of loading every run the company ever had', async () => {
