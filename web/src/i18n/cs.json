@@ -1932,6 +1932,19 @@
                 }
             },
             "cz_isco_code": "Kód CZ-ISCO",
+            "cz_isco": {
+                "placeholder": "Kód nebo název profese, třeba 43111 nebo účetní",
+                "hint": "Stačí napsat část kódu nebo názvu profese, diakritika nevadí.",
+                "searching": "Hledám v klasifikaci…",
+                "min_chars": "Zadejte alespoň dva znaky — část kódu nebo názvu profese",
+                "no_results": "Nic neodpovídá — zkuste část názvu profese",
+                "search_failed": "Číselník se teď nepodařilo načíst.",
+                "search_failed_hint": "Není to prázdný výsledek. Zkuste to znovu, nebo kód zapište ručně.",
+                "retry": "Zkusit znovu",
+                "manual_label": "Ruční zápis kódu CZ-ISCO",
+                "manual_placeholder": "např. 43111",
+                "unknown_code": "Kód není v aktuální klasifikaci ČSÚ"
+            },
             "activity_code": "Druh činnosti",
             "social_mode": "Účast na sociálním pojištění",
             "health_mode": "Účast na zdravotním pojištění",

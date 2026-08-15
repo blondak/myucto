@@ -72,6 +72,7 @@ use MyInvoice\Action\Payroll\PayrollAbsenceAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollComponentsAction;
 use MyInvoice\Action\Payroll\PayrollComponentJmhzMappingsAction;
+use MyInvoice\Action\Payroll\PayrollCzIscoAction;
 use MyInvoice\Action\Payroll\PayrollDeductionAgreementAction;
 use MyInvoice\Action\Payroll\PayrollDimensionAction;
 use MyInvoice\Action\Payroll\PayrollDocumentAction;
@@ -819,6 +820,9 @@ final class Routes
                 '/jmhz/municipalities',
                 [PayrollEmploymentAction::class, 'jmhzMunicipalities'],
             );
+            // Našeptávač klasifikace zaměstnání ČSÚ — hledání běží na serveru,
+            // do prohlížeče jde jen shoda (viz PayrollCzIscoAction).
+            $g->get('/cz-isco', [PayrollCzIscoAction::class, 'search']);
             $g->put('/employments/{id:[0-9]+}/terms', [PayrollEmploymentAction::class, 'addTerms']);
             $g->post(
                 '/employments/{id:[0-9]+}/transitions/{target:preregistered|active|suspended|ended|archived|no_show}',

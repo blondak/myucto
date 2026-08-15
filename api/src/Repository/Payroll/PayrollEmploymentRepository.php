@@ -185,6 +185,26 @@ final class PayrollEmploymentRepository
         });
     }
 
+    /**
+     * Kód CZ-ISCO, který u vztahu právě platí. Čte ho validátor smluvních
+     * podmínek, aby nezablokoval uložení kvůli historické hodnotě, na kterou
+     * uživatel vůbec nesahá — viz PayrollEmploymentValidator::optionalCzIscoCode().
+     */
+    public function currentCzIscoCode(int $supplierId, int $employmentId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT cz_isco_code
+               FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
     /** @param TermsInput $data
      *  @return array<string,mixed>
      */

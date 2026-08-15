@@ -1932,6 +1932,19 @@
                 }
             },
             "cz_isco_code": "CZ-ISCO code",
+            "cz_isco": {
+                "placeholder": "Code or occupation name, e.g. 43111 or accountant",
+                "hint": "Type part of the code or occupation name; accents do not matter.",
+                "searching": "Searching the classification…",
+                "min_chars": "Enter at least two characters — part of the code or occupation name",
+                "no_results": "Nothing matches — try part of the occupation name",
+                "search_failed": "The classification could not be loaded.",
+                "search_failed_hint": "This is not an empty result. Try again, or type the code manually.",
+                "retry": "Try again",
+                "manual_label": "Manual CZ-ISCO code entry",
+                "manual_placeholder": "e.g. 43111",
+                "unknown_code": "Code is not in the current ČSÚ classification"
+            },
             "activity_code": "Activity type",
             "social_mode": "Social insurance participation",
             "health_mode": "Health insurance participation",
