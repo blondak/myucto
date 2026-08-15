@@ -175,7 +175,7 @@ final class TaxRemittanceDetectorTest extends BankPostingTestCase
                     cssz_vsdp = NULL, health_insurance_number = NULL WHERE id = ?"
         )->execute([$this->supplierId]);
         $account = '0210120007928311';
-        $vs = '4442070407';
+        $vs = '4449999999';
 
         $unknown = $this->detector->detect($this->supplierId, $this->tx(account: $account, vs: $vs));
         self::assertNotNull($unknown);
