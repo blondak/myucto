@@ -301,12 +301,13 @@ nebo hromadně v seznamu faktur při označování plateb.
 
 ### 72.5.6 Pohoda kódy
 
-| Pole | Význam | Příklad |
+| Pole | Sloupec | Příklad |
 |---|---|---|
-| Číselná řada | `pohoda_account_code` | `FV` |
+| Účet (kód) | `pohoda_account_code` | `KB` |
 | Středisko | `pohoda_centre_code` | `01` |
 | Činnost | `pohoda_activity_code` | `100` |
-| Předkontace | `pohoda_classification_code` | `300` |
+| Zakázka | `pohoda_contract_code` | `ZAK1` |
+| Předkontace | `pohoda_accounting_code` | `300` |
 
 Viz [20. Exporty](20_Exporty.md).
 

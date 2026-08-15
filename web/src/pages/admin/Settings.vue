@@ -408,6 +408,7 @@ async function saveSupplier() {
       pohoda_centre_code: supplier.value.pohoda_centre_code,
       pohoda_activity_code: supplier.value.pohoda_activity_code,
       pohoda_contract_code: supplier.value.pohoda_contract_code,
+      pohoda_accounting_code: supplier.value.pohoda_accounting_code,
       invoice_number_format: supplier.value.invoice_number_format,
       proforma_number_format: supplier.value.proforma_number_format,
       credit_note_number_format: supplier.value.credit_note_number_format,
@@ -1499,6 +1500,10 @@ function vatCollisionLabel(c: VatStatusCollision): string {
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.pohoda_contract_code') }}</label>
               <input v-model="supplier.pohoda_contract_code" type="text" placeholder="ZAK1" class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.pohoda_accounting_code') }}</label>
+              <input v-model="supplier.pohoda_accounting_code" type="text" placeholder="300" class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             </div>
           </div>
         </div>

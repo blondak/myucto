@@ -277,7 +277,7 @@ final class PurchaseInvoiceExportService
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT ic, dic, pohoda_account_code, pohoda_centre_code,
-                    pohoda_activity_code, pohoda_contract_code
+                    pohoda_activity_code, pohoda_contract_code, pohoda_accounting_code
                FROM supplier WHERE id = ?'
         );
         $stmt->execute([$supplierId]);

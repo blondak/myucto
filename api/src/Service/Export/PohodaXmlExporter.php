@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Support\CompanyIdNormalizer;
 
 /**
  * Stormware Pohoda XML data package exporter.
@@ -32,20 +33,37 @@ use MyInvoice\Service\Bank\VariableSymbolNormalizer;
  * jsou z `inv:invoiceTypeType` (žádný „issuedTaxDocument" — ten v enum NEEXISTUJE).
  *
  * Per-supplier konfigurace (volitelná):
- *   pohoda_account_code  → <inv:account><typ:ids>...</typ:ids></inv:account>
- *   pohoda_centre_code   → <inv:centre><typ:ids>...</typ:ids></inv:centre>
- *   pohoda_activity_code → <inv:activity><typ:ids>...</typ:ids></inv:activity>
- *   pohoda_contract_code → <inv:contract><typ:ids>...</typ:ids></inv:contract>
+ *   pohoda_account_code    → <inv:account><typ:ids>...</typ:ids></inv:account>
+ *   pohoda_centre_code     → <inv:centre><typ:ids>...</typ:ids></inv:centre>
+ *   pohoda_activity_code   → <inv:activity><typ:ids>...</typ:ids></inv:activity>
+ *   pohoda_contract_code   → <inv:contract><typ:ids>...</typ:ids></inv:contract>
+ *   pohoda_accounting_code → <inv:accounting><typ:ids>...</typ:ids></inv:accounting>
+ *
+ * PŘEDKONTACE (`<inv:accounting>`) — bez ní si Pohoda po importu dosadí předkontaci
+ * z uživatelského nastavení cílové instalace (invoice.xsd: „Pokud není uveden typ
+ * předkontace, je nastavena předkontace dle uživatelského nastavení programu Pohoda").
+ * Doklad se tedy naimportuje zaúčtovaný na něco jiného, než čím ve skutečnosti je,
+ * a účetní to přepisuje ručně u každé faktury. Element patří v sekvenci hlavičky
+ * TĚSNĚ PŘED `classificationVAT` (jiné pořadí Pohoda odmítne) a posílá se i u
+ * proformy, kde `classificationVAT` naopak nemá co dělat.
  *
  * VAT classification (`<inv:classificationVAT>`) — Pohoda schema vyžaduje STRUKTUROVANÉ
  * dítě `<typ:ids>` + `<typ:classificationVATType>` ({inland, nonSubsume}), NE prostý text
  * (validation error: "typ Text v tomto kontextu elementu classificationVAT není povolen").
  * Mapování podle vat_rate_snapshot:
- *   21 %  → UDA5    + inland     (tuzemské plnění základní)
- *   12 %  → UDA5_12 + inland     (snížené)
- *   10 %  → (bez ids) + inland   (3. sazba — členění je instalace-specifické)
- *    0 %  → UNX     + nonSubsume (osvobozeno)
+ *   21 %  → UD / UDA5    + inland     (tuzemské plnění základní)
+ *   12 %  → UD / UDA5_12 + inland     (snížené)
+ *   10 %  → (bez ids)    + inland     (3. sazba — členění je instalace-specifické)
+ *    0 %  → UNX          + nonSubsume (osvobozeno)
  *   reverse_charge → PNAR + nonSubsume (přenesená daňová povinnost)
+ *
+ * UD vs. UDA5 rozhoduje ČESKÉ DIČ ODBĚRATELE, ne sazba: `UDA5`/`UDA5_12` je v Pohodě
+ * „tuzemské plnění BEZ OHLEDU NA LIMIT 10 000 Kč" s natvrdo předvyplněnou sekcí A.5
+ * kontrolního hlášení. Posílat ho na všechno znamená, že každý doklad nad limit vůči
+ * plátci skončí v A.5 místo A.4 — a Pohoda na tom nehlásí chybu, protože u UDA5 žádnou
+ * nevidí. U `UD` si Pohoda sekci určí sama podle výše dokladu, takže ho posíláme vždy,
+ * když protistrana má české DIČ; UDA5 zůstává pro plnění osobě bez českého DIČ, kam
+ * limit skutečně nesahá.
  *
  * SAZBA POLOŽKY — `<inv:rateVAT>` je jen ENUM sazbových ÚROVNÍ (`typ:vatRateEnum`),
  * ne procento. Kdo čte jen enum, musí za `high` dosadit sazbu, kterou zrovna považuje
@@ -125,7 +143,8 @@ final class PohodaXmlExporter
 
         // Supplier config + IČO pro dataPackHeader
         $stmt = $this->db->pdo()->prepare(
-            'SELECT ic, pohoda_account_code, pohoda_centre_code, pohoda_activity_code, pohoda_contract_code
+            'SELECT ic, pohoda_account_code, pohoda_centre_code, pohoda_activity_code, pohoda_contract_code,
+                    pohoda_accounting_code
                FROM supplier WHERE id = ?'
         );
         $stmt->execute([$supplierId]);
@@ -222,16 +241,27 @@ final class PohodaXmlExporter
             }
             $this->el($dom, $hdr, self::NS_INV, 'inv:dateDue', (string) $invoice['due_date']);
 
+            // Protistrana dokladu: u vydané faktury odběratel (client), u přijaté dodavatel
+            // (vendor ze supplier_snapshot). Řeší se UŽ TADY, protože její DIČ rozhoduje
+            // o členění DPH níže; do partnerIdentity se zapisuje až za hlavičkovými poli.
+            $counterparty = $isPurchase ? $this->resolveSupplier($invoice) : $this->resolveClient($invoice);
+
+            // Předkontace (per-supplier). V sekvenci hlavičky musí stát PŘED classificationVAT
+            // a posílá se i u proformy — bez ní si Pohoda dosadí default cílové instalace.
+            if (!empty($cfg['pohoda_accounting_code'])) {
+                $this->codeRef($dom, $hdr, 'inv:accounting', (string) $cfg['pohoda_accounting_code']);
+            }
+
             // Klasifikace DPH (per-faktura — vezme se nejvyšší VAT rate z položek; mix se v praxi
             // řeší per-položka v invoiceItem). Pohoda vyžaduje strukturované dítě, ne prostý text.
-            // `typ:ids` jsou členění DPH kódy Pohody (UDA5 = USKUTEČNĚNÉ/výstupní plnění) —
+            // `typ:ids` jsou členění DPH kódy Pohody (UD/UDA5 = USKUTEČNĚNÉ/výstupní plnění) —
             // platí pro VYDANÉ. U PŘIJATÝCH faktur (vstupní DPH / nárok na odpočet) by výstupní
             // kód byl chybný směr a navíc je členění specifické pro konkrétní instalaci Pohody,
             // proto kód neposíláme a necháme Pohodu doplnit správné členění pro agendu
             // receivedInvoice; uvádíme jen typ (inland/nonSubsume).
             // U zálohové/proforma faktury se classificationVAT dle schématu nepoužívá → vynecháme.
             if (($invoice['invoice_type'] ?? '') !== 'proforma') {
-                $defaultVatClass = $this->classifyVat($invoice);
+                $defaultVatClass = $this->classifyVat($invoice, $counterparty);
                 $classEl = $dom->createElementNS(self::NS_INV, 'inv:classificationVAT');
                 if (!$isPurchase && $defaultVatClass['ids'] !== null) {
                     $this->el($dom, $classEl, self::NS_TYP, 'typ:ids', $defaultVatClass['ids']);
@@ -266,10 +296,9 @@ final class PohodaXmlExporter
                 $this->codeRef($dom, $hdr, 'inv:contract', (string) $cfg['pohoda_contract_code']);
             }
 
-            // Obchodní partner (partnerIdentity): u vydané faktury odběratel (client),
-            // u přijaté faktury dodavatel (vendor ze supplier_snapshot). Pohoda do
-            // partnerIdentity vždy plní protistranu dokladu.
-            $client = $isPurchase ? $this->resolveSupplier($invoice) : $this->resolveClient($invoice);
+            // Obchodní partner (partnerIdentity) — Pohoda do něj vždy plní protistranu
+            // dokladu (viz $counterparty výše).
+            $client = $counterparty;
             $partner = $dom->createElementNS(self::NS_INV, 'inv:partnerIdentity');
             $address = $dom->createElementNS(self::NS_TYP, 'typ:address');
             $this->el($dom, $address, self::NS_TYP, 'typ:company', $this->partnerField($client, 'company_name'));
@@ -493,29 +522,70 @@ final class PohodaXmlExporter
     }
 
     /**
+     * Členění DPH dokladu. Kód tuzemského plnění se NEODVOZUJE jen ze sazby — rozhoduje
+     * i české DIČ protistrany, viz docblock třídy (UD nechá sekci A.4/A.5 na Pohodě,
+     * UDA5 ji vnutí na A.5). Header `vat_classification_code` tu ZÁMĚRNĚ nepřebíjíme:
+     * jsou to naše kódy plnění pro české přiznání/KH (1, 2, 3, 20, 22, 25s, 26), které
+     * StereoVatTypeResolver překládá vlastní tabulkou na Stereo TypeOfVAT. Pro tuzemské
+     * kódy (1, 2, 3) by mapování na Pohodu dalo přesně to, co spočítáme z rovnice
+     * sazba + DIČ + reverse_charge, a pro zbytek (dodání do EU, služba mimo tuzemsko,
+     * vývoz) neexistuje jedno správné členění Pohody — jsou instalace-specifická.
+     * Vymyslet tabulku, kterou nemáme jak ověřit, by kód nezpřesnilo, jen zneviditelnilo.
+     *
+     * @param array<string,mixed> $invoice
+     * @param array<string,mixed> $counterparty Protistrana dokladu (odběratel u vydané faktury).
      * @return array{ids:?string, type:string}  ids = zkratka členění v Pohodě, type = enum {inland, nonSubsume}
      */
-    private function classifyVat(array $invoice): array
+    private function classifyVat(array $invoice, array $counterparty): array
     {
         if (!empty($invoice['reverse_charge'])) {
             return ['ids' => 'PNAR', 'type' => 'nonSubsume'];
         }
+        $inlandHigh = $this->hasCzechVatId($counterparty) ? 'UD' : 'UDA5';
         $bd = $invoice['vat_breakdown'] ?? [];
         if (empty($bd)) {
-            return ['ids' => 'UDA5', 'type' => 'inland'];
+            return ['ids' => $inlandHigh, 'type' => 'inland'];
         }
         $maxRate = 0.0;
         foreach ($bd as $b) {
             if ((float) $b['rate'] > $maxRate) $maxRate = (float) $b['rate'];
         }
-        if ($maxRate >= $this->highBoundary($invoice)) return ['ids' => 'UDA5',    'type' => 'inland'];
-        if ($maxRate >= 11.5)                          return ['ids' => 'UDA5_12', 'type' => 'inland'];
+        if ($maxRate >= $this->highBoundary($invoice)) return ['ids' => $inlandHigh, 'type' => 'inland'];
+        if ($maxRate >= 11.5) {
+            return ['ids' => $inlandHigh === 'UD' ? 'UD' : 'UDA5_12', 'type' => 'inland'];
+        }
         // 3. sazba (10 %) je ZDANĚNÉ tuzemské plnění. Dřív propadala na UNX/nonSubsume,
         // tedy „nezahrnovat do DPH" — doklad s daní se do Pohody importoval jako
         // osvobozený. Kód členění pro 3. sazbu je instalace-specifický, proto ho
         // neposíláme a necháme ho doplnit Pohodu; typ `inland` ale poslat musíme.
         if ($maxRate >= 9.5)                           return ['ids' => null,      'type' => 'inland'];
         return ['ids' => 'UNX', 'type' => 'nonSubsume'];
+    }
+
+    /**
+     * Má protistrana české DIČ? Tvar bereme stejně jako kontrolní hlášení
+     * ({@see \MyInvoice\Service\Report\KontrolniHlaseniBuilder}): volitelný prefix „CZ"
+     * a 1–10 číslic, porovnání nad normalizovanou hodnotou („CZ 123 456 78" = „CZ12345678").
+     *
+     * Hodnota bez prefixu se za české DIČ považuje jen u tuzemské protistrany — jinak by
+     * slovenské DIČ zapsané bez „SK" udělalo ze zahraniční osoby českého plátce a doklad
+     * by se v Pohodě zařadil do A.4. Chybějící země znamená tuzemsko (stejný default jako
+     * {@see StereoVatTypeResolver}).
+     *
+     * @param array<string,mixed> $counterparty
+     */
+    private function hasCzechVatId(array $counterparty): bool
+    {
+        $dic = CompanyIdNormalizer::dic($counterparty['dic'] ?? null);
+        if ($dic === null) {
+            return false;
+        }
+        if (str_starts_with($dic, 'CZ')) {
+            return preg_match('/^CZ[0-9]{1,10}$/', $dic) === 1;
+        }
+        $country = strtoupper(trim((string) ($counterparty['country_iso2'] ?? 'CZ'))) ?: 'CZ';
+
+        return $country === 'CZ' && preg_match('/^[0-9]{1,10}$/', $dic) === 1;
     }
 
     private function resolveClient(array $invoice): array

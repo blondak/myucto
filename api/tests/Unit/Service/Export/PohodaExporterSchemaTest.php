@@ -158,6 +158,98 @@ final class PohodaExporterSchemaTest extends TestCase
             $xml, '//inv:invoiceHeader/inv:classificationVAT/typ:classificationVATType'));
     }
 
+    public function testInlandClassificationLetsPohodaDecideA4WhenCustomerHasCzechVatId(): void
+    {
+        // `UDA5` je v Pohodě „tuzemské plnění BEZ OHLEDU NA LIMIT 10 000 Kč" s natvrdo
+        // předvyplněnou sekcí A.5. Posílat ho plátci znamená, že doklad nad limit skončí
+        // v A.5 místo A.4 — a Pohoda si na tom nestěžuje, takže to nikdo nechytí.
+        // U `UD` si sekci určí Pohoda sama podle výše dokladu.
+        $xml = $this->exporter->buildXml([$this->issuedInvoice()], $this->issuedCfg());
+
+        $this->assertValidPohoda($xml);
+        self::assertSame('UD', $this->xpathOne($xml, '//inv:invoiceHeader/inv:classificationVAT/typ:ids'));
+
+        // Totéž pro sníženou sazbu: rozhoduje DIČ, ne sazba (UDA5_12 by opět vnutil A.5).
+        $low = $this->exporter->buildXml([$this->issuedInvoice([
+            'items'         => [$this->item(['vat_rate_snapshot' => 12.0, 'total_vat' => 302.4, 'total_with_vat' => 2822.4])],
+            'vat_breakdown' => [['rate' => 12.0, 'base' => 2520.0, 'vat' => 302.4]],
+            'totals'        => ['without_vat' => 2520.0, 'with_vat' => 2822.4, 'rounding' => 0.0],
+        ])], $this->issuedCfg());
+        self::assertSame('UD', $this->xpathOne($low, '//inv:invoiceHeader/inv:classificationVAT/typ:ids'));
+    }
+
+    public function testInlandClassificationForcesA5OnlyWithoutCzechVatId(): void
+    {
+        // Bez českého DIČ plnění do A.5 skutečně patří bez ohledu na limit — tam UDA5
+        // (resp. UDA5_12 u snížené sazby) zůstává správně.
+        $noDic = $this->issuedInvoice();
+        $noDic['client_snapshot']['dic'] = null;
+        $xml = $this->exporter->buildXml([$noDic], $this->issuedCfg());
+
+        $this->assertValidPohoda($xml);
+        self::assertSame('UDA5', $this->xpathOne($xml, '//inv:invoiceHeader/inv:classificationVAT/typ:ids'));
+
+        // Slovenské DIČ není české DIČ, i když je klient „firma s DIČ".
+        $foreign = $this->issuedInvoice();
+        $foreign['client_snapshot']['dic'] = 'SK2020123456';
+        $foreign['client_snapshot']['country_iso2'] = 'SK';
+        self::assertSame('UDA5', $this->xpathOne(
+            $this->exporter->buildXml([$foreign], $this->issuedCfg()),
+            '//inv:invoiceHeader/inv:classificationVAT/typ:ids',
+        ));
+
+        // Snížená sazba bez DIČ → UDA5_12.
+        $lowNoDic = $this->issuedInvoice([
+            'items'         => [$this->item(['vat_rate_snapshot' => 12.0, 'total_vat' => 302.4, 'total_with_vat' => 2822.4])],
+            'vat_breakdown' => [['rate' => 12.0, 'base' => 2520.0, 'vat' => 302.4]],
+            'totals'        => ['without_vat' => 2520.0, 'with_vat' => 2822.4, 'rounding' => 0.0],
+        ]);
+        $lowNoDic['client_snapshot']['dic'] = null;
+        self::assertSame('UDA5_12', $this->xpathOne(
+            $this->exporter->buildXml([$lowNoDic], $this->issuedCfg()),
+            '//inv:invoiceHeader/inv:classificationVAT/typ:ids',
+        ));
+    }
+
+    public function testAccountingCodeIsExportedAsPredkontace(): void
+    {
+        // Bez `<inv:accounting>` si Pohoda po importu dosadí předkontaci z nastavení cílové
+        // instalace — pronájem i služby naskočí jako prodej zboží. Element patří v sekvenci
+        // hlavičky PŘED classificationVAT, jinak dataPack neprojde XSD.
+        $xml = $this->exporter->buildXml(
+            [$this->issuedInvoice()],
+            array_merge($this->issuedCfg(), ['pohoda_accounting_code' => '300']),
+        );
+
+        $this->assertValidPohoda($xml);
+        self::assertSame('300', $this->xpathOne($xml, '//inv:invoiceHeader/inv:accounting/typ:ids'));
+
+        // Nevyplněná předkontace element neposílá (původní chování = default Pohody).
+        self::assertNull($this->xpathOne(
+            $this->exporter->buildXml([$this->issuedInvoice()], $this->issuedCfg()),
+            '//inv:invoiceHeader/inv:accounting',
+        ));
+    }
+
+    public function testAccountingCodeIsExportedForProformaAndReceivedInvoiceToo(): void
+    {
+        // Proforma nemá classificationVAT, předkontaci ale potřebuje stejně jako ostatní
+        // doklady — a přijatá faktura obzvlášť (u ní účetní přepisovala zaúčtování taky).
+        $proforma = $this->exporter->buildXml(
+            [$this->issuedInvoice(['invoice_type' => 'proforma'])],
+            array_merge($this->issuedCfg(), ['pohoda_accounting_code' => '300']),
+        );
+        $this->assertValidPohoda($proforma);
+        self::assertSame('300', $this->xpathOne($proforma, '//inv:invoiceHeader/inv:accounting/typ:ids'));
+
+        $received = $this->exporter->buildXml(
+            [$this->receivedInvoice()],
+            array_merge($this->purchaseCfg(), ['pohoda_accounting_code' => '5xx']),
+        );
+        $this->assertValidPohoda($received);
+        self::assertSame('5xx', $this->xpathOne($received, '//inv:invoiceHeader/inv:accounting/typ:ids'));
+    }
+
     // ─── Přijaté faktury (purchase) ───
 
     public function testReceivedInvoiceIsSchemaValid(): void
@@ -206,6 +298,7 @@ final class PohodaExporterSchemaTest extends TestCase
             'pohoda_centre_code' => str_repeat('C', 25),
             'pohoda_activity_code' => str_repeat('T', 25),
             'pohoda_contract_code' => str_repeat('K', 25),
+            'pohoda_accounting_code' => str_repeat('P', 25),
         ];
 
         foreach ([
@@ -233,7 +326,7 @@ final class PohodaExporterSchemaTest extends TestCase
             }
             self::assertSame(32, mb_strlen((string) $this->xpathOne($xml, '//inv:invoiceHeader/inv:numberOrder')));
             self::assertSame(10, mb_strlen((string) $this->xpathOne($xml, '//inv:invoiceItem/inv:unit')));
-            foreach (['account', 'centre', 'activity', 'contract'] as $reference) {
+            foreach (['account', 'centre', 'activity', 'contract', 'accounting'] as $reference) {
                 self::assertSame(19, mb_strlen((string) $this->xpathOne(
                     $xml,
                     "//inv:invoiceHeader/inv:{$reference}/typ:ids",

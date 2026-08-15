@@ -433,7 +433,10 @@ final class SettingsAction
             // admin-planted LFI (security report @andrejtomci #2).
             'default_hourly_rate', 'auto_send_reminders', 'reminder_days_after_due', 'auto_generate_recurring', 'embed_isdoc',
             'default_prices_include_vat',
+            // Pohoda kódy; `pohoda_accounting_code` = předkontace (migrace 1372) — bez ní
+            // si Pohoda po importu dosadí vlastní default a doklad se zaúčtuje jinam.
             'pohoda_account_code', 'pohoda_centre_code', 'pohoda_activity_code', 'pohoda_contract_code',
+            'pohoda_accounting_code',
             // Per-supplier konfigurace číslování faktur (migrace 0014; přijaté 0095)
             'invoice_number_format', 'proforma_number_format', 'credit_note_number_format',
             'purchase_invoice_number_format',
