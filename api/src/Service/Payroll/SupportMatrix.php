@@ -10,7 +10,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
 
 final class SupportMatrix
 {
-    public const VERSION = '2026-08-06-v6';
+    public const VERSION = '2026-08-15-v7';
 
     /**
      * Mzdový rok je podporovaný jen tehdy, když ho pokrývají VŠECHNY výpočtově
@@ -79,7 +79,10 @@ final class SupportMatrix
                 ['key' => 'payroll_runs', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-09'],
                 ['key' => 'payslips', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-16'],
                 ['key' => 'automatic_posting', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-18'],
-                ['key' => 'jmhz_export', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-22'],
+                // JMHZ export je dostupný: modul staví XML měsíčního hlášení,
+                // ověřuje ho připnutým XSD a projde s ním celý katalog kontrol
+                // ČSSZ. Neodesílá se — to je `direct_submission` níž.
+                ['key' => 'jmhz_export', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-22'],
                 ['key' => 'health_insurer_export', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-23'],
                 ['key' => 'direct_submission', 'status' => 'not_supported', 'available' => false, 'min_epic' => 'MZ-27'],
             ],

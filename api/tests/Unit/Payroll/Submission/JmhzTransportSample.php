@@ -16,6 +16,10 @@ final class JmhzTransportSample
     public const FORM_GUID = 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEE';
     public const OTHER_FORM_GUID = 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEF';
 
+    /**
+     * Záměrně JINÝ tvar než doložený — testy, které staví obálku, tak nemůžou
+     * nechtěně projít jen proto, že se trefily do výchozích hodnot.
+     */
     public static function shape(): JmhzGovTalkRequestShape
     {
         return new JmhzGovTalkRequestShape(
@@ -25,7 +29,7 @@ final class JmhzTransportSample
             'VS',
             '1.2',
             'request',
-            'test-only: tvar odesílané obálky není doložený',
+            'test-only: záměrně jiný tvar než doložený',
         );
     }
 

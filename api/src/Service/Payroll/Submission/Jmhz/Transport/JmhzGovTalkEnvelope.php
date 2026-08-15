@@ -41,6 +41,16 @@ final readonly class JmhzGovTalkEnvelope
     private const ENVIRONMENTS = ['test', 'production'];
     private const PAYLOAD_PLACEHOLDER = 'JMHZ-PAYLOAD-SLOT-2f0a1c';
 
+    /** SHA-2 varianta časové značky VREP; `ggdsig` je zděděná SHA-1. */
+    private const TIMESTAMP_VERSION = 'xmldsig';
+
+    /**
+     * ČSSZ obálka označuje base64 obsah zděděným microsoftím jmenným prostorem
+     * `dt`. Není to překlep ani ozdoba — je tak ve zveřejněném vzorku i v reálné
+     * odpovědi, takže se posílá doslova.
+     */
+    private const NS_MS_DATATYPES = 'urn:schemas-microsoft-com:datatypes';
+
     public function __construct(private ?JmhzGovTalkRequestShape $shape = null) {}
 
     public function build(
@@ -60,6 +70,11 @@ final readonly class JmhzGovTalkEnvelope
         }
 
         $dom = $this->skeleton($class, $shape->submitQualifier, $shape, $symbol);
+        // Protokol: „CorrelationID … při odeslání musí být prázdné." Přiděluje
+        // ho až VREP a je to identifikátor, pod kterým se pak podání dotazuje.
+        $this->requireElement($dom, 'MessageDetails', self::NS_GOVTALK)->appendChild(
+            $dom->createElementNS(self::NS_GOVTALK, 'CorrelationID'),
+        );
         $body = $this->requireElement($dom, 'Body', self::NS_GOVTALK);
         $body->appendChild($this->csszMessage($dom, $shape));
 
@@ -151,6 +166,18 @@ final readonly class JmhzGovTalkEnvelope
         $key->setAttribute('Type', $shape->variableSymbolKeyType);
         $keys->appendChild($key);
 
+        // Volba algoritmu časové značky VREP. `xmldsig` znamená SHA-2,
+        // `ggdsig` je zděděná varianta na SHA-1 — u nového podání nemá co dělat.
+        $additions = $dom->createElementNS(self::NS_GOVTALK, 'GatewayAdditions');
+        $govTalkDetails->appendChild($additions);
+        $flags = $dom->createElementNS(self::NS_GOVTALK, 'Flags');
+        $additions->appendChild($flags);
+        $flags->appendChild($dom->createElementNS(
+            self::NS_GOVTALK,
+            'TimestampVersion',
+            self::TIMESTAMP_VERSION,
+        ));
+
         $root->appendChild($dom->createElementNS(self::NS_GOVTALK, 'Body'));
 
         return $dom;
@@ -163,7 +190,7 @@ final readonly class JmhzGovTalkEnvelope
         $message = $dom->createElementNS(self::NS_CSSZ_ENVELOPE, 'Message');
         $message->setAttribute('version', $shape->bodyEnvelopeVersion);
         $message->setAttribute('eType', $shape->bodyEnvelopeType);
-        // Prázdná hlavička je slot pro podpis. Vyplní ho `sign()`; kostra sem
+        // Prázdná hlavička je slot pro podpis. Vyplní ho `seal()`; kostra sem
         // nic nedoplňuje, aby nevznikl dojem, že je obálka hotová.
         $message->appendChild(
             $dom->createElementNS(self::NS_CSSZ_ENVELOPE, 'Header'),
@@ -173,6 +200,88 @@ final readonly class JmhzGovTalkEnvelope
         $body->appendChild($dom->createTextNode(self::PAYLOAD_PLACEHOLDER));
 
         return $message;
+    }
+
+    /**
+     * Hotová obálka k odeslání: podepsaná odpojeným podpisem nad PŮVODNÍMI daty
+     * a s tělem zkomprimovaným, zašifrovaným na certifikát ČSSZ a zakódovaným
+     * do base64 — přesně v tomhle pořadí, jak předepisuje podací protokol.
+     *
+     * Podpis i šifra se počítají ze stejného vstupu, jaký prošel dry-runem;
+     * obálka se kolem nich jen obalí, takže se nemůže rozejít to, co se
+     * podepsalo, s tím, co se odeslalo.
+     */
+    public function seal(
+        string $bodyXml,
+        string $variableSymbol,
+        string $submissionClass,
+        string $environment,
+        JmhzSoftwareIdentification $software,
+        JmhzDetachedSigner $signer,
+        string $pfxBytes,
+        string $password,
+        ?JmhzCsszEncryption $encryption = null,
+    ): JmhzGovTalkDocument {
+        $shape = $this->requireShape();
+        $class = $this->assertClass($submissionClass);
+        $symbol = $this->assertVariableSymbol($variableSymbol);
+        $environment = $this->assertEnvironment($environment);
+        $payload = $this->parsePayload($bodyXml);
+        if ($class === 'CSSZ_JMHZ') {
+            $this->assertJmhzPayload($payload, $symbol, $software);
+        }
+        $exact = $this->payloadXml($payload);
+
+        $signature = $signer->sign($exact, $pfxBytes, $password);
+        $sealedBody = ($encryption ?? new JmhzCsszEncryption())->seal($exact);
+
+        $dom = $this->skeleton($class, $shape->submitQualifier, $shape, $symbol);
+        $this->requireElement($dom, 'MessageDetails', self::NS_GOVTALK)->appendChild(
+            $dom->createElementNS(self::NS_GOVTALK, 'CorrelationID'),
+        );
+        $govTalkBody = $this->requireElement($dom, 'Body', self::NS_GOVTALK);
+
+        $message = $dom->createElementNS(self::NS_CSSZ_ENVELOPE, 'Message');
+        $message->setAttribute('version', $shape->bodyEnvelopeVersion);
+        $message->setAttribute('eType', $shape->bodyEnvelopeType);
+        $govTalkBody->appendChild($message);
+
+        $header = $dom->createElementNS(self::NS_CSSZ_ENVELOPE, 'Header');
+        $message->appendChild($header);
+        $signatureNode = $dom->createElementNS(
+            self::NS_CSSZ_ENVELOPE,
+            'Signature',
+            base64_encode($signature),
+        );
+        $signatureNode->setAttributeNS(
+            'http://www.w3.org/2000/xmlns/',
+            'xmlns:dt',
+            self::NS_MS_DATATYPES,
+        );
+        $signatureNode->setAttributeNS(self::NS_MS_DATATYPES, 'dt:dt', 'bin.base64');
+        $header->appendChild($signatureNode);
+        $vendor = $dom->createElementNS(self::NS_CSSZ_ENVELOPE, 'Vendor');
+        $vendor->setAttribute('productName', $software->productName);
+        $vendor->setAttribute('version', $software->productVersion);
+        $header->appendChild($vendor);
+
+        $body = $dom->createElementNS(self::NS_CSSZ_ENVELOPE, 'Body', $sealedBody);
+        $body->setAttribute('encrypted', 'yes');
+        $body->setAttribute('contentEncoding', 'gzip');
+        $body->setAttributeNS(
+            'http://www.w3.org/2000/xmlns/',
+            'xmlns:dt',
+            self::NS_MS_DATATYPES,
+        );
+        $body->setAttributeNS(self::NS_MS_DATATYPES, 'dt:dt', 'bin.base64');
+        $message->appendChild($body);
+
+        return new JmhzGovTalkDocument(
+            $this->serialize($dom),
+            $environment,
+            $class,
+            $symbol,
+        );
     }
 
     /**
