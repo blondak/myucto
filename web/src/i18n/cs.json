@@ -2204,6 +2204,31 @@
                     "ik_mpsv": "IK MPSV {value}",
                     "id_ppv": "ID PPV {value}",
                     "form_guid": "Formulář {value}"
+                },
+                "automation": {
+                    "title": "Dotažení protokolu na pozadí",
+                    "description": "Aplikace se ČSSZ na výsledek doptává sama a po dotažení protokolu sama uzavře transakci. Tlačítka níž jsou tu pro případ, kdy je potřeba do toho zasáhnout dřív.",
+                    "next_poll": "Další dotaz je naplánovaný na {at}.",
+                    "next_poll_unknown": "Další dotaz proběhne při nejbližším běhu na pozadí.",
+                    "polls": "Dotazů na výsledek: {count}.",
+                    "last_polled": "Naposledy dotázáno {at}.",
+                    "last_error": "Poslední dotaz neuspěl: {message} Aplikace to zkusí znovu.",
+                    "closed": "Transakce u ČSSZ je uzavřená ({at}).",
+                    "close_pending": "Transakce u ČSSZ zatím není uzavřená; aplikace se o to pokusí sama.",
+                    "close_error": "Uzavření transakce neuspělo: {message} Zkuste ji uzavřít tlačítkem.",
+                    "expired_note": "Aplikace se přestala ptát. Zkontrolujte podání na ePortálu ČSSZ nebo v datové schránce a protokol načtěte tlačítkem „Načíst protokol“."
+                },
+                "closed_already": "Transakce téhle zprávy už byla uzavřená.",
+                "storno": {
+                    "action": "Stornovat podání",
+                    "confirm_title": "Opravdu stornovat celé hlášení za období {period}?",
+                    "confirm_text": "Storno zruší u ČSSZ VŠECHNA hlášení za tohle období, ne jen poslední odeslané. Podat ho lze jen do 20. dne následujícího měsíce; potom už jen opravným hlášením.",
+                    "confirm": "Ano, připravit storno",
+                    "cancel": "Nechat být",
+                    "frozen": "Storno je připravené jako podání č. {id}. Odešlete ho stejně jako řádné hlášení.",
+                    "already": "Storno k tomuhle hlášení už bylo připravené — je to podání č. {id}.",
+                    "failed": "Storno se nepodařilo připravit.",
+                    "unavailable": "Stornovat lze jen hlášení, které už bylo odeslané na ČSSZ."
                 }
             },
             "signing": {
@@ -2374,21 +2399,13 @@
                 "jmhz_dry_run_show_xml": "Zobrazit XML",
                 "jmhz_dry_run_hide_xml": "Skrýt XML",
                 "jmhz_dry_run_copy_xml": "Kopírovat XML",
-
                 "jmhz_dry_run_incomplete": "XML prošlo schématem, ale katalog kontrol ještě není celý vykonaný — podání zatím není připravené k odeslání.",
-
                 "jmhz_controls_summary": "Kontroly ČSSZ: {passed} splněno · {failed} nesplněno · {remote} rozhodne až ČSSZ · {gaps} bez implementace",
-
                 "jmhz_controls_blocking": "Nepropustné vady ({count}) — podání by bylo neúčinné",
-
                 "jmhz_controls_gaps": "Nevykonané nepropustné kontroly ({count})",
-
                 "jmhz_controls_warnings": "Propustné vady ({count}) — podání projde, data budou chybná",
-
                 "jmhz_controls_form": "součást {ordinal}",
-
                 "jmhz_deadline": "Lhůta pro podání: od {from} do {to} (posunuto na pracovní den).",
-
                 "jmhz_controls_deviations": "Odchylky od doslovného znění katalogu ({count}) — k ověření proti protokolu ČSSZ",
                 "jmhz_dry_run_failed": "Nácvik měsíčního hlášení se nepodařilo spustit.",
                 "jmhz_dry_run_blockers": {

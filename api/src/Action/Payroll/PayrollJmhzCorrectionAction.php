@@ -1,0 +1,175 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Action\Payroll;
+
+use MyInvoice\Http\Json;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzComponentCancellation;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCorrectiveSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
+use Psr\Http\Message\ResponseInterface as Response;
+use Psr\Http\Message\ServerRequestInterface as Request;
+
+/**
+ * Storno a opravné podání měsíčního hlášení.
+ *
+ * Endpoint podání jen ZMRAZÍ; odesílá se pak stejnou cestou jako řádné hlášení
+ * (`POST /submissions/{id}/jmhz-transport`), takže mu patří tentýž ledger
+ * pokusů, totéž dotažení protokolu i uzavření transakce. Dvě sloučené akce
+ * („zmraz a rovnou pošli") by znamenaly, že se při chybě odeslání nedá poznat,
+ * jestli storno vzniklo — a druhý pokus by ho založil znovu.
+ *
+ * Rozdíl mezi oběma akcemi je zásadní a musí být vidět i v adrese:
+ * `cancel` ruší za období VŠECHNO, `cancel-components` jen vyjmenované
+ * pracovněprávní vztahy.
+ */
+final class PayrollJmhzCorrectionAction
+{
+    use PayrollActionSupport;
+
+    public function __construct(
+        private readonly JmhzCorrectiveSubmissionService $corrections,
+        private readonly PayrollModuleAccess $access,
+    ) {}
+
+    /** @param array{submissionId:string} $args */
+    public function cancel(Request $request, Response $response, array $args): Response
+    {
+        return $this->run($request, $response, $args, null);
+    }
+
+    /** @param array{submissionId:string} $args */
+    public function cancelComponents(Request $request, Response $response, array $args): Response
+    {
+        $body = (array) ($request->getParsedBody() ?? []);
+        $rows = $body['components'] ?? null;
+        if (!is_array($rows) || $rows === []) {
+            return $this->invalid(
+                $response,
+                'Vyberte alespoň jeden pracovněprávní vztah, který se má stornovat.',
+            );
+        }
+        $components = [];
+        foreach (array_values($rows) as $index => $row) {
+            if (!is_array($row)) {
+                return $this->invalid(
+                    $response,
+                    'Položka č. ' . ($index + 1) . ' stornovaných součástí nemá platný tvar.',
+                );
+            }
+            try {
+                $components[] = JmhzComponentCancellation::create(
+                    (string) ($row['form_guid'] ?? ''),
+                    (string) ($row['person_external_identifier'] ?? ''),
+                    (string) ($row['employment_external_identifier'] ?? ''),
+                );
+            } catch (JmhzXmlException $exception) {
+                return $this->invalid($response, $exception->getMessage());
+            }
+        }
+
+        return $this->run($request, $response, $args, $components);
+    }
+
+    /**
+     * @param array{submissionId:string} $args
+     * @param list<JmhzComponentCancellation>|null $components
+     */
+    private function run(
+        Request $request,
+        Response $response,
+        array $args,
+        ?array $components,
+    ): Response {
+        if (($denied = $this->authorize($request, $response)) !== null) {
+            return $denied;
+        }
+        $environment = $this->environment($request);
+        if ($environment === null) {
+            return $this->invalid($response, 'Prostředí musí být test nebo production.');
+        }
+        if (preg_match('/^[1-9][0-9]*$/D', $args['submissionId']) !== 1) {
+            return $this->invalid($response, 'submissionId musí být kladné celé číslo.');
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $submissionId = (int) $args['submissionId'];
+
+        try {
+            $result = $components === null
+                ? $this->corrections->cancelSubmission(
+                    $supplierId,
+                    $environment,
+                    $submissionId,
+                    $this->userId($request),
+                )
+                : $this->corrections->cancelComponents(
+                    $supplierId,
+                    $environment,
+                    $submissionId,
+                    $components,
+                    $this->userId($request),
+                );
+        } catch (JmhzXmlException $exception) {
+            return $this->invalid($response, $exception->getMessage());
+        } catch (\InvalidArgumentException $exception) {
+            return $this->invalid($response, $exception->getMessage());
+        } catch (\DomainException $exception) {
+            return Json::error($response, 'conflict', $exception->getMessage(), 409);
+        }
+
+        return Json::ok($response, $result, $result['created'] ? 201 : 200)
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    private function environment(Request $request): ?string
+    {
+        $body = $request->getParsedBody();
+        $value = is_array($body) ? ($body['environment'] ?? null) : null;
+        if (!is_string($value)) {
+            $value = $request->getQueryParams()['environment'] ?? 'test';
+        }
+
+        return in_array($value, ['test', 'production'], true) ? $value : null;
+    }
+
+    private function invalid(Response $response, string $message): Response
+    {
+        return Json::error($response, 'validation_failed', $message, 422)
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    private function authorize(Request $request, Response $response): ?Response
+    {
+        // Storno je nevratné a jménem firmy: token se dá odcizit a nemá druhý
+        // faktor, takže sem se smí jen z přihlášené relace.
+        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
+            return Json::error(
+                $response,
+                'session_required',
+                'Tento endpoint je dostupný pouze z přihlášené relace.',
+                403,
+            );
+        }
+        $error = null;
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.submissions',
+            AccessLevel::WRITE,
+            $error,
+        )) {
+            return $error;
+        }
+        if (!$this->requirePayrollEnabled($request, $response, $this->access, $error)) {
+            return $error;
+        }
+
+        return null;
+    }
+}

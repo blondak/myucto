@@ -2204,6 +2204,31 @@
                     "ik_mpsv": "IK MPSV {value}",
                     "id_ppv": "ID PPV {value}",
                     "form_guid": "Form {value}"
+                },
+                "automation": {
+                    "title": "Protocol retrieval in the background",
+                    "description": "The application asks ČSSZ for the result on its own and closes the transaction once the protocol arrives. The buttons below are here for when you need to step in sooner.",
+                    "next_poll": "The next check is scheduled for {at}.",
+                    "next_poll_unknown": "The next check will run on the next background pass.",
+                    "polls": "Result checks so far: {count}.",
+                    "last_polled": "Last checked {at}.",
+                    "last_error": "The last check failed: {message} The application will try again.",
+                    "closed": "The transaction at ČSSZ is closed ({at}).",
+                    "close_pending": "The transaction at ČSSZ is not closed yet; the application will try on its own.",
+                    "close_error": "Closing the transaction failed: {message} Try closing it with the button.",
+                    "expired_note": "The application stopped asking. Check the submission on the ČSSZ ePortal or in your data box and load the protocol using “Load protocol”."
+                },
+                "closed_already": "This message's transaction was already closed.",
+                "storno": {
+                    "action": "Cancel submission",
+                    "confirm_title": "Really cancel the whole report for {period}?",
+                    "confirm_text": "A cancellation voids ALL reports filed at ČSSZ for this period, not just the last one sent. It can only be filed until the 20th of the following month; after that only an amendment will do.",
+                    "confirm": "Yes, prepare the cancellation",
+                    "cancel": "Leave it",
+                    "frozen": "The cancellation is prepared as submission no. {id}. Send it the same way as a regular report.",
+                    "already": "A cancellation for this report already exists — it is submission no. {id}.",
+                    "failed": "The cancellation could not be prepared.",
+                    "unavailable": "Only a report already sent to ČSSZ can be cancelled."
                 }
             },
             "signing": {
@@ -2374,21 +2399,13 @@
                 "jmhz_dry_run_show_xml": "Show XML",
                 "jmhz_dry_run_hide_xml": "Hide XML",
                 "jmhz_dry_run_copy_xml": "Copy XML",
-
                 "jmhz_dry_run_incomplete": "The XML passed the schema, but the control catalogue is not fully executed yet — the submission is not ready to send.",
-
                 "jmhz_controls_summary": "CSSZ controls: {passed} passed · {failed} failed · {remote} decided by CSSZ · {gaps} not implemented",
-
                 "jmhz_controls_blocking": "Blocking defects ({count}) — the submission would be ineffective",
-
                 "jmhz_controls_gaps": "Blocking controls not executed ({count})",
-
                 "jmhz_controls_warnings": "Passable defects ({count}) — the submission goes through with wrong data",
-
                 "jmhz_controls_form": "component {ordinal}",
-
                 "jmhz_deadline": "Submission window: {from} to {to} (shifted to a working day).",
-
                 "jmhz_controls_deviations": "Deviations from the literal catalogue wording ({count}) — verify against the CSSZ protocol",
                 "jmhz_dry_run_failed": "The monthly report dry run could not be started.",
                 "jmhz_dry_run_blockers": {

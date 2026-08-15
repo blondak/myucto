@@ -2102,13 +2102,42 @@ export interface PayrollJmhzTransportAttempt {
   response_http_status: number | null
   error_code: string | null
   error_message: string | null
+  /** Kdy se automatika ozve příště — u čekajícího pokusu dotaz, u dotaženého uzavření. */
   next_retry_at: string | null
+  /** Kolikrát jsme se ČSSZ ptali na výsledek. Roste i po neúspěšném dotazu. */
+  poll_count: number
+  last_polled_at: string | null
+  /** Proč poslední dotaz nedal odpověď; `null` = poslední dotaz prošel. */
+  last_poll_error: string | null
   sent_at: string | null
   completed_at: string | null
+  /** Kdy byla transakce u VREP uzavřena. `null` = transakce ještě visí otevřená. */
+  closed_at: string | null
+  close_attempts: number
+  close_error: string | null
   row_version: number
   created_by: number | null
   created_at: string
   updated_at: string
+}
+
+/** Zmrazené storno nebo opravné podání připravené k odeslání. */
+export interface PayrollJmhzCorrectiveSubmission {
+  submission_id: number
+  part_id: number
+  artifact_id: number
+  status: string
+  row_version: number
+  environment: PayrollJmhzTransportEnvironment
+  artifact_sha256: string
+  created: boolean
+  submission_kind: 'cancellation' | 'correction'
+  /** Podání, které se ruší nebo opravuje — bez něj se posloupnost nedá dohledat. */
+  corrects_submission_id: number
+  submission_guid: string
+  variable_symbol: string
+  month: number
+  year: number
 }
 
 export interface PayrollJmhzTransportHistory {
@@ -2846,10 +2875,38 @@ export const payrollApi = {
     attemptId: number,
     variableSymbol: string,
     environment: PayrollJmhzTransportEnvironment,
-  ) => api.post<{ closed: boolean }>(
+  ) => api.post<{
+    closed: boolean
+    already_closed: boolean
+    attempt: PayrollJmhzTransportAttempt
+  }>(
     `/payroll/submissions/jmhz-transport/${attemptId}/close`,
     { environment },
     { params: { variable_symbol: variableSymbol, environment } },
+  ).then(response => response.data),
+  /**
+   * Storno celého podání za období. Jen ho ZMRAZÍ — odesílá se pak stejnou
+   * cestou jako řádné hlášení, aby mu patřil tentýž ledger pokusů.
+   */
+  cancelJmhzSubmission: (
+    submissionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.post<PayrollJmhzCorrectiveSubmission>(
+    `/payroll/submissions/${submissionId}/jmhz-cancel`,
+    { environment },
+  ).then(response => response.data),
+  /** Opravné podání, které stornuje jen vyjmenované pracovněprávní vztahy. */
+  cancelJmhzSubmissionComponents: (
+    submissionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+    components: Array<{
+      form_guid: string
+      person_external_identifier: string
+      employment_external_identifier: string
+    }>,
+  ) => api.post<PayrollJmhzCorrectiveSubmission>(
+    `/payroll/submissions/${submissionId}/jmhz-cancel-components`,
+    { environment, components },
   ).then(response => response.data),
   /** Protokoly načtené ze souboru, od nejnovějšího období. */
   jmhzImportedProtocols: (environment: PayrollJmhzTransportEnvironment) =>

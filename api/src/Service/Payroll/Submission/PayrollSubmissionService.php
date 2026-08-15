@@ -43,6 +43,29 @@ final class PayrollSubmissionService
         'waiting_for_identity',
         'correction_required',
     ];
+    /**
+     * Na co se smí navázat oprava nebo storno.
+     *
+     * Podmínkou NENÍ rozhodnutí protistrany, ale to, že podání DOLOŽITELNĚ
+     * doputovalo k úřadu (`submitted_at` je vyplněné, což platforma vynucuje
+     * checkem u obou průběžných stavů). Storno měsíčního hlášení má lhůtu do
+     * 20. dne následujícího měsíce, kdežto protokol ČSSZ může přijít později —
+     * kdyby se čekalo na rozhodnutí, propadla by lhůta na opravu chyby, o které
+     * zaměstnavatel ví hned. Naopak `draft`…`ready` zůstávají nezpůsobilé:
+     * u nich úřad nemá co rušit a storno by se vázalo na GUID, který nikdy
+     * neopustil aplikaci.
+     *
+     * @var list<string>
+     */
+    private const CORRECTABLE_STATUSES = [
+        'submitted',
+        'processing',
+        'accepted',
+        'partially_accepted',
+        'rejected',
+        'correction_required',
+    ];
+
     private const VERIFIED_REMOTE_STATUSES = [
         'processing',
         'accepted',
@@ -234,12 +257,7 @@ final class PayrollSubmissionService
                     )
                     || !in_array(
                         $corrected['status'],
-                        [
-                            'accepted',
-                            'partially_accepted',
-                            'rejected',
-                            'correction_required',
-                        ],
+                        self::CORRECTABLE_STATUSES,
                         true,
                     )
                 ) {

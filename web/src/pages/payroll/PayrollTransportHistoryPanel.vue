@@ -39,7 +39,7 @@ import {
   type PayrollJmhzTransportStatus,
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
-import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -65,6 +65,9 @@ const success = ref('')
 const pollingId = ref<number | null>(null)
 const closingId = ref<number | null>(null)
 const copiedId = ref<number | null>(null)
+/** Podání, u kterého uživatel právě potvrzuje storno. Storno je nevratné. */
+const cancellingId = ref<number | null>(null)
+const cancelPendingId = ref<number | null>(null)
 
 /** Výsledky doptání, klíčované ID pokusu — zůstávají do dalšího načtení. */
 const polls = ref<Record<number, PayrollJmhzTransportPoll>>({})
@@ -81,7 +84,8 @@ const busy = computed(() =>
   loading.value
   || importing.value
   || pollingId.value !== null
-  || closingId.value !== null,
+  || closingId.value !== null
+  || cancelPendingId.value !== null,
 )
 
 const variableSymbolValid = computed(() =>
@@ -201,9 +205,20 @@ function canPoll(attempt: PayrollJmhzTransportAttempt): boolean {
 /**
  * Uzavřít se smí až po dotažení protokolu. Dřív by se výsledek ztratil, a to
  * je nevratné — proto se tlačítko u ostatních stavů vůbec nenabízí.
+ *
+ * Uzavřenou transakci nabízet znovu nemá smysl: automatika ji uzavírá sama a
+ * druhé uzavření by u ČSSZ byl dotaz na transakci, která už neexistuje.
  */
 function canClose(attempt: PayrollJmhzTransportAttempt): boolean {
-  return attempt.status === 'completed' && canPoll(attempt)
+  return attempt.status === 'completed' && canPoll(attempt) && !attempt.closed_at
+}
+
+/**
+ * Stornovat lze jen hlášení, které DOLOŽITELNĚ odešlo. Podání, které nikdy
+ * neopustilo aplikaci, u ČSSZ neexistuje a rušit se u něj nemá co.
+ */
+function canCancel(group: AttemptGroup): boolean {
+  return canWrite.value && group.attempts.some(attempt => attempt.sent_at !== null)
 }
 
 function periodLabel(submissionId: number): string {
@@ -402,13 +417,47 @@ async function poll(attempt: PayrollJmhzTransportAttempt) {
   }
 }
 
+function askToCancel(submissionId: number) {
+  if (busy.value) return
+  cancellingId.value = submissionId
+  actionError.value = ''
+  success.value = ''
+}
+
+/**
+ * Storno se jen PŘIPRAVÍ. Odesílá se pak stejnou cestou jako řádné hlášení —
+ * sloučit obojí do jednoho kliknutí by znamenalo, že se při chybě odeslání
+ * nedá poznat, jestli storno vzniklo, a druhý pokus by ho založil znovu.
+ */
+async function confirmCancel(submissionId: number) {
+  if (!canWrite.value || busy.value) return
+  cancelPendingId.value = submissionId
+  actionError.value = ''
+  success.value = ''
+  try {
+    const result = await payrollApi.cancelJmhzSubmission(submissionId, environment.value)
+    cancellingId.value = null
+    await load()
+    success.value = result.created
+      ? t('payroll.submissions.transport.storno.frozen', { id: result.submission_id })
+      : t('payroll.submissions.transport.storno.already', { id: result.submission_id })
+  } catch (exception: unknown) {
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.transport.storno.failed'),
+    )
+  } finally {
+    cancelPendingId.value = null
+  }
+}
+
 async function close(attempt: PayrollJmhzTransportAttempt) {
   if (!canWrite.value || !variableSymbolValid.value || busy.value) return
   closingId.value = attempt.id
   actionError.value = ''
   success.value = ''
   try {
-    await payrollApi.closeJmhzTransportAttempt(
+    const result = await payrollApi.closeJmhzTransportAttempt(
       attempt.id,
       variableSymbol.value.trim(),
       environment.value,
@@ -416,7 +465,9 @@ async function close(attempt: PayrollJmhzTransportAttempt) {
     // Potvrzení až po znovunačtení: `load()` hlášky čistí, takže nastavené
     // dřív by zmizelo dřív, než by ho někdo stihl přečíst.
     await load()
-    success.value = t('payroll.submissions.transport.closed', { id: attempt.id })
+    success.value = result.already_closed
+      ? t('payroll.submissions.transport.closed_already')
+      : t('payroll.submissions.transport.closed', { id: attempt.id })
   } catch (exception: unknown) {
     actionError.value = apiErrorMessage(
       exception,
@@ -653,6 +704,57 @@ onMounted(loadVariableSymbols)
                   total: entry.group.attempts.length,
                 }) }}
               </span>
+              <button
+                v-if="canCancel(entry.group) && cancellingId !== entry.group.submissionId"
+                type="button"
+                :data-test="`transport-cancel-${entry.group.submissionId}`"
+                :class="btnOutlineSm('danger')"
+                :disabled="busy"
+                @click="askToCancel(entry.group.submissionId)"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.x" />
+                </svg>
+                {{ t('payroll.submissions.transport.storno.action') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Storno ruší u ČSSZ všechna hlášení za období a je nevratné,
+               takže se nespouští jedním kliknutím. -->
+          <div
+            v-if="cancellingId === entry.group.submissionId"
+            :data-test="`transport-cancel-confirm-${entry.group.submissionId}`"
+            class="border-b border-danger-500/30 bg-danger-50 p-4 sm:p-6"
+            role="alert"
+          >
+            <p class="text-sm font-semibold text-danger-700">
+              {{ t('payroll.submissions.transport.storno.confirm_title', {
+                period: periodLabel(entry.group.submissionId),
+              }) }}
+            </p>
+            <p class="mt-1 text-sm text-danger-700">
+              {{ t('payroll.submissions.transport.storno.confirm_text') }}
+            </p>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                :data-test="`transport-cancel-submit-${entry.group.submissionId}`"
+                :class="btnFilled('danger')"
+                :disabled="busy"
+                @click="confirmCancel(entry.group.submissionId)"
+              >
+                {{ t('payroll.submissions.transport.storno.confirm') }}
+              </button>
+              <button
+                type="button"
+                :data-test="`transport-cancel-abort-${entry.group.submissionId}`"
+                :class="btnOutline('neutral')"
+                :disabled="busy"
+                @click="cancellingId = null"
+              >
+                {{ t('payroll.submissions.transport.storno.cancel') }}
+              </button>
             </div>
           </div>
 
@@ -723,12 +825,80 @@ onMounted(loadVariableSymbols)
                 {{ t('payroll.submissions.transport.awaiting_note') }}
               </p>
               <p
-                v-else-if="attempt.status === 'completed'"
+                v-else-if="attempt.status === 'completed' && !attempt.closed_at"
                 class="mt-3 text-sm text-neutral-600"
                 :data-test="`transport-close-note-${attempt.id}`"
               >
                 {{ t('payroll.submissions.transport.close_note') }}
               </p>
+              <p
+                v-else-if="attempt.status === 'expired'"
+                class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+                :data-test="`transport-expired-note-${attempt.id}`"
+                role="alert"
+              >
+                {{ t('payroll.submissions.transport.automation.expired_note') }}
+              </p>
+
+              <!-- Co dělá automatika. Bez tohohle by uživatel nevěděl, jestli
+                   se aplikace ptá sama, nebo jestli na něj podání čeká. -->
+              <div
+                v-if="attempt.status === 'awaiting_protocol' || attempt.status === 'completed'"
+                :data-test="`transport-automation-${attempt.id}`"
+                class="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700"
+              >
+                <p class="font-medium text-neutral-900">
+                  {{ t('payroll.submissions.transport.automation.title') }}
+                </p>
+                <p class="mt-1">
+                  {{ t('payroll.submissions.transport.automation.description') }}
+                </p>
+                <ul class="mt-2 space-y-1 text-xs text-neutral-600">
+                  <li v-if="attempt.status === 'awaiting_protocol'">
+                    {{ attempt.next_retry_at
+                      ? t('payroll.submissions.transport.automation.next_poll', {
+                        at: attempt.next_retry_at,
+                      })
+                      : t('payroll.submissions.transport.automation.next_poll_unknown') }}
+                  </li>
+                  <li>
+                    {{ t('payroll.submissions.transport.automation.polls', {
+                      count: attempt.poll_count,
+                    }) }}
+                    <template v-if="attempt.last_polled_at">
+                      {{ t('payroll.submissions.transport.automation.last_polled', {
+                        at: attempt.last_polled_at,
+                      }) }}
+                    </template>
+                  </li>
+                  <li v-if="attempt.closed_at" :data-test="`transport-closed-${attempt.id}`">
+                    {{ t('payroll.submissions.transport.automation.closed', {
+                      at: attempt.closed_at,
+                    }) }}
+                  </li>
+                  <li v-else-if="attempt.status === 'completed'">
+                    {{ t('payroll.submissions.transport.automation.close_pending') }}
+                  </li>
+                </ul>
+                <p
+                  v-if="attempt.last_poll_error"
+                  class="mt-2 text-xs text-warning-700"
+                  :data-test="`transport-poll-error-${attempt.id}`"
+                >
+                  {{ t('payroll.submissions.transport.automation.last_error', {
+                    message: attempt.last_poll_error,
+                  }) }}
+                </p>
+                <p
+                  v-if="attempt.close_error && !attempt.closed_at"
+                  class="mt-2 text-xs text-warning-700"
+                  :data-test="`transport-close-error-${attempt.id}`"
+                >
+                  {{ t('payroll.submissions.transport.automation.close_error', {
+                    message: attempt.close_error,
+                  }) }}
+                </p>
+              </div>
 
               <div
                 v-if="attempt.error_code || attempt.error_message"
