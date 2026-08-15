@@ -17,14 +17,20 @@ use PDO;
  * z tabulky zkrátit, katalog by byl na nic: jeden UPDATE a maže se pět let po
  * nástupu. Proto tabulka nenese „lhůtu", ale dvě různé věci:
  *
- *   `extra_years`    přičítá se k zákonné lhůtě (smlouva, vnitřní předpis).
- *   `override_years` dodává lhůtu tam, kde ji zákon NEMÁ — jen pro kategorie
- *                    se stavem `UNDETERMINED`. U kategorie se zákonnou lhůtou
- *                    se odmítne, protože by ji mohla zkrátit.
+ *   `extra_years`    přičítá se k lhůtě z katalogu (smlouva, vnitřní předpis).
+ *   `override_years` dodává lhůtu tam, kde ji katalog NEMÁ — tedy jen pro
+ *                    kategorie bez čísla (dnes spis k exekučním srážkám).
+ *                    U kategorie, která číslo má, se odmítne, protože by ho
+ *                    mohla zkrátit.
  *
- * Kategorie bez zákonné lhůty a bez `override_years` zůstává neurčená a osobu,
- * které se týká, modul k výmazu nenavrhne. To není chyba, ale výsledek: dokud
- * nikdo neřekne, jak dlouho se evidence pracovní doby drží, nesmí ji nic smazat.
+ * Zkracovat nejde ani lhůtu, kterou katalog vede jako DODANOU POLITIKU
+ * (`ORIGIN_HOUSE_POLICY`, dnes zdravotní pojištění). Není sice zákonná, ale
+ * odpovídá zákonnému minimu, které na tytéž řádky dopadá odjinud — a hlavně
+ * platí totéž riziko: číslo, které jde z tabulky snížit, maže dřív.
+ *
+ * Kategorie bez lhůty a bez `override_years` zůstává neurčená a osobu, které se
+ * týká, modul k výmazu nenavrhne. To není chyba, ale výsledek: dokud nikdo
+ * neřekne, jak dlouho se spis k exekuci drží, nesmí ho nic smazat.
  */
 final class PayrollRetentionPolicyRepository
 {
@@ -54,7 +60,7 @@ final class PayrollRetentionPolicyRepository
     private function applyOverride(PayrollRetentionRule $rule, ?array $override): ?int
     {
         if ($rule->retentionYears !== null) {
-            // Zákonná lhůta existuje — jde ji jen prodloužit. `override_years` se
+            // Lhůta z katalogu existuje — jde ji jen prodloužit. `override_years` se
             // tu ignoruje záměrně; upsert() ho pro takovou kategorii ani nepustí.
             return $rule->retentionYears + ($override['extra_years'] ?? 0);
         }
@@ -131,10 +137,15 @@ final class PayrollRetentionPolicyRepository
             );
         }
         if ($overrideYears !== null && $rule->isDetermined()) {
+            // Hláška musí říct PRAVDU o původu lhůty: u zdravotního pojištění za
+            // číslem nestojí paragraf, ale rozhodnutí aplikace. Tvrdit tam „zákonná
+            // lhůta" by uživatele odkazovalo na předpis, ve kterém žádná není.
             throw new PayrollRetentionPolicyException(
                 'payroll_retention_statutory_override',
-                'Kategorie „' . $rule->label . '" má zákonnou lhůtu (' . $rule->source()
-                . '). Vlastní lhůtu jí nastavit nelze — jde ji jen prodloužit.',
+                'Kategorie „' . $rule->label . '" má '
+                . ($rule->isStatutory() ? 'zákonnou lhůtu' : 'lhůtu dodanou aplikací')
+                . ' (' . $rule->source() . '). Vlastní lhůtu jí nastavit nelze — '
+                . 'jde ji jen prodloužit.',
             );
         }
         if ($overrideYears !== null && $overrideYears <= 0) {

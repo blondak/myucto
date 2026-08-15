@@ -26,8 +26,11 @@ use PDO;
  * je konzervativní směr: drží se déle, nikdy kratší dobu.
  *
  * ── Kategorie se vztahuje jen tehdy, když pro ni osoba má záznamy ────────────
- * Jinak by neurčená lhůta u evidence pracovní doby zablokovala úplně všechny
- * a funkce by nikdy nic nenavrhla. Osoba bez docházky se tedy posuzuje bez ní.
+ * Jinak by neurčená lhůta u spisu k exekučním srážkám zablokovala úplně všechny
+ * a funkce by nikdy nic nenavrhla. Osoba bez exekuce se tedy posuzuje bez ní.
+ * (Do 15. 8. 2026 to platilo i o evidenci pracovní doby — držel ji nesprávný
+ * stav `UNDETERMINED`, takže se osoba s docházkou nenavrhla vůbec. Lhůta
+ * existuje: § 96 věta druhá zákona č. 187/2006 Sb., 10 kalendářních roků.)
  *
  * ── Výmaz vs. anonymizace se NEROZHODUJE ZNOVU ────────────────────────────────
  * Otázka „smí ta osoba zmizet celá?" už v aplikaci zodpovězená je —
