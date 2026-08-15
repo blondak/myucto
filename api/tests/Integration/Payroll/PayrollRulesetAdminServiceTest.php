@@ -8,10 +8,13 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollRulesetRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetAdminService;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetGovernanceException;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetLifecycle;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetOrigin;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetOverrideHash;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry;
 use PDO;
@@ -116,6 +119,119 @@ final class PayrollRulesetAdminServiceTest extends TestCase
         self::assertNotNull($after);
         self::assertFalse($after['is_override']);
         self::assertSame('0.15', $this->parameter($after, 'advance.low_rate'));
+    }
+
+    /**
+     * Zákazník po instalaci nic neodklikává. Dodaná sada je účinná a domény, které
+     * NEJSOU vedené jako ruční posouzení, počítají hned.
+     */
+    public function testDeliveredSetIsCalculationReadyWithoutAnySetup(): void
+    {
+        $overview = $this->service->overview();
+        /** @var list<array<string, mixed>> $domains */
+        $domains = $overview['domains'];
+        $byDomain = array_column($domains, null, 'domain');
+
+        foreach ([
+            'income_tax',
+            'social_insurance',
+            'health_insurance',
+            'employment_thresholds',
+            'travel_allowances',
+            'enforcement_deductions',
+        ] as $domain) {
+            self::assertTrue($byDomain[$domain]['calculation_ready'], $domain);
+            self::assertSame('ready', $byDomain[$domain]['status'], $domain);
+        }
+
+        // Doložení místo odklikávání: zdroj je v PŘEHLEDU, ne až v detailu.
+        /** @var list<array<string, mixed>> $versions */
+        $versions = $byDomain['social_insurance']['versions'];
+        self::assertSame('vendor', $versions[0]['origin']);
+        /** @var list<array<string, mixed>> $sources */
+        $sources = $versions[0]['sources'];
+        self::assertNotSame([], $sources);
+        self::assertStringStartsWith('https://', (string) $sources[0]['url']);
+        self::assertSame(CzechPayrollRulesets2026::RETRIEVED_ON, $sources[0]['retrieved_on']);
+
+        // Nad účinnou dodanou sadou se nenabízí žádný další krok — ani „vyřadit".
+        self::assertNull($versions[0]['next_command']);
+    }
+
+    /**
+     * Přepis dodané hodnoty přenáší odpovědnost na zákazníka, takže se u něj
+     * schválení vyžaduje dál. Uložený override proto NESMÍ zůstat účinný jen proto,
+     * že dodaná sada účinná byla.
+     */
+    public function testCustomerOverrideOfTheDeliveredSetLosesEffectivenessUntilApproved(): void
+    {
+        $rulesetId = 'cz-payroll-2026.income-tax.v1';
+        $before = $this->service->detail($rulesetId) ?? self::fail('Dodaná sada daně chybí.');
+        self::assertSame('active', $before['lifecycle']);
+        self::assertTrue($before['calculation_ready']);
+
+        $saved = $this->service->save(
+            $rulesetId,
+            ['parameters' => ['advance.low_rate' => ['type' => 'decimal_rate', 'value' => '0.16']]],
+            'Zákaznický přepis sazby.',
+            (int) $before['row_version'],
+            self::EDITOR,
+        );
+
+        self::assertSame('customer_override', $saved['origin']);
+        self::assertSame('reviewed', $saved['lifecycle']);
+        self::assertFalse($saved['calculation_ready']);
+
+        $this->registry->forget();
+        try {
+            $this->registry->provider()->forCalculation(PayrollRulesetDomain::IncomeTax, '2026-06-15');
+            self::fail('Neschválený zákaznický přepis nesmí počítat.');
+        } catch (PayrollRulesetException $e) {
+            self::assertStringContainsString('not active', $e->getMessage());
+        }
+
+        // Cesta zpět existuje — jen vede přes schválení, ne přes nic.
+        $entry = $this->apply($rulesetId, 'approve', 'Odborné schválení přepisu.', self::APPROVER);
+        $entry = $this->apply($rulesetId, 'activate', 'Nasazení přepisu.', self::APPROVER, $entry);
+
+        self::assertSame('active', $entry['lifecycle']);
+        self::assertTrue($entry['calculation_ready']);
+        $this->registry->forget();
+        self::assertSame(
+            '0.16',
+            $this->registry->provider()
+                ->forCalculation(PayrollRulesetDomain::IncomeTax, '2026-06-15')
+                ->parameter('advance.low_rate')->value,
+        );
+    }
+
+    /**
+     * Totéž, ale bez aplikace: řádek zapsaný přímo do databáze s `lifecycle = active`
+     * a bez schvalovatele. Dřív se mu doklad o schválení domyslel se systémovou
+     * identitou a prošel jako schválený — dneska se přečte jako neúčinný.
+     */
+    public function testDirectDatabaseWriteCannotForgeAnActiveOverride(): void
+    {
+        $rulesetId = 'cz-payroll-2026.income-tax.v1';
+        $this->insertUnapprovedActiveOverride($rulesetId);
+        $this->registry->forget();
+
+        $entry = $this->registry->entry($rulesetId) ?? self::fail('Ruleset po zápisu chybí.');
+        self::assertSame('0.99', $entry['version']->parameter('advance.low_rate')->value);
+        self::assertNotSame(PayrollRulesetLifecycle::Active, $entry['version']->lifecycle);
+        self::assertSame(PayrollRulesetOrigin::CustomerOverride, $entry['version']->origin);
+        self::assertNull($entry['version']->approval);
+
+        $detail = $this->service->detail($rulesetId) ?? self::fail('Detail chybí.');
+        self::assertFalse($detail['calculation_ready']);
+        self::assertNull($this->registry->degradedReason(), 'Podvržený řádek nesmí položit celý registr.');
+
+        try {
+            $this->registry->provider()->forCalculation(PayrollRulesetDomain::IncomeTax, '2026-06-15');
+            self::fail('Řádek zapsaný mimo aplikaci nesmí počítat.');
+        } catch (PayrollRulesetException $e) {
+            self::assertStringContainsString('not active', $e->getMessage());
+        }
     }
 
     public function testAdminEditAloneUnblocksProductionCalculation(): void
@@ -323,9 +439,23 @@ final class PayrollRulesetAdminServiceTest extends TestCase
         $domains = $overview['domains'];
         $byDomain = array_column($domains, null, 'domain');
 
+        // Ruční posouzení drží CAPABILITY, ne stav. Překlopení dodané sady na
+        // `active` proto na těchhle čtyřech doménách nesmí změnit vůbec nic —
+        // aplikace tu vědomě netvrdí žádné číslo.
+        foreach (['compensation_averages', 'deadlines', 'codebooks', 'submissions'] as $domain) {
+            self::assertSame('manual_review', $byDomain[$domain]['status'], $domain);
+            self::assertFalse($byDomain[$domain]['calculation_ready'], $domain);
+            self::assertTrue($byDomain[$domain]['manual_review_by_design'], $domain);
+            /** @var list<array<string, mixed>> $versions */
+            $versions = $byDomain[$domain]['versions'];
+            foreach ($versions as $version) {
+                self::assertSame('active', $version['lifecycle'], $domain);
+                self::assertSame('manual_review', $version['capability'], $domain);
+                self::assertFalse($version['calculation_ready'], $domain);
+            }
+        }
+
         $deadlines = $byDomain['deadlines'];
-        self::assertSame('manual_review', $deadlines['status']);
-        self::assertTrue($deadlines['manual_review_by_design']);
         self::assertSame(1, $deadlines['manual_review_parameter_count']);
         self::assertSame(1, $deadlines['parameter_count']);
         self::assertIsString($deadlines['manual_review_explanation']);
@@ -486,6 +616,52 @@ final class PayrollRulesetAdminServiceTest extends TestCase
             PayrollRulesetOverrideHash::hash($row),
             'Řádek vložený mimo aplikaci.',
             self::APPROVER,
+        ]);
+    }
+
+    /**
+     * Přesně to, co by udělal někdo se zápisem do databáze a bez aplikace:
+     * změněná hodnota, `lifecycle = active`, žádný schvalovatel.
+     */
+    private function insertUnapprovedActiveOverride(string $rulesetId): void
+    {
+        $default = $this->registry->defaultVersion($rulesetId)
+            ?? self::fail("Dodaná sada {$rulesetId} chybí.");
+        $row = [
+            'ruleset_id' => $rulesetId,
+            'version' => $default->version,
+            'effective_from' => $default->effectiveFrom,
+            'effective_to' => $default->effectiveTo,
+            'lifecycle' => 'active',
+            'capability' => 'supported',
+            'data' => CanonicalJson::encode([
+                'parameters' => [
+                    'advance.low_rate' => [
+                        'capability' => 'supported',
+                        'note' => null,
+                        'type' => 'decimal_rate',
+                        'value' => '0.99',
+                    ],
+                ],
+            ]),
+        ];
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_rulesets
+                (ruleset_id, domain, version, effective_from, effective_to,
+                 lifecycle, capability, data, content_hash, reason)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        )->execute([
+            $rulesetId,
+            $default->domain->value,
+            $row['version'],
+            $row['effective_from'],
+            $row['effective_to'],
+            'active',
+            'supported',
+            $row['data'],
+            PayrollRulesetOverrideHash::hash($row),
+            'Řádek vložený mimo aplikaci.',
         ]);
     }
 

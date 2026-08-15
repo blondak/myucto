@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Ruleset;
 
 use InvalidArgumentException;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRuleValue;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetCapability;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetLifecycle;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetOrigin;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
 use MyInvoice\Service\Payroll\Ruleset\RulesetApproval;
 use MyInvoice\Service\Payroll\Ruleset\RulesetSource;
@@ -26,6 +28,66 @@ final class PayrollRulesetLifecycleTest extends TestCase
         self::assertTrue(PayrollRulesetLifecycle::Active->canTransitionTo(PayrollRulesetLifecycle::Superseded));
         self::assertFalse(PayrollRulesetLifecycle::Active->canTransitionTo(PayrollRulesetLifecycle::Draft));
         self::assertFalse(PayrollRulesetLifecycle::Superseded->canTransitionTo(PayrollRulesetLifecycle::Active));
+    }
+
+    /**
+     * Výjimka pro dodanou sadu je vázaná na OBSAH, ne na cestu ke konstruktoru.
+     * Stačí jediná změněná hodnota — a účinnost si znovu žádá schválení, přestože
+     * všechno ostatní (ID, verze, účinnost, zdroje) zůstalo stejné.
+     */
+    public function testChangingASingleDeliveredValueRevokesTheVendorExemption(): void
+    {
+        $delivered = CzechPayrollRulesets2026::provider()
+            ->forDate(PayrollRulesetDomain::IncomeTax, '2026-08-03');
+        self::assertSame(PayrollRulesetOrigin::Vendor, $delivered->origin);
+        self::assertSame(PayrollRulesetLifecycle::Active, $delivered->lifecycle);
+        self::assertNull($delivered->approval);
+
+        $parameters = $delivered->parameters;
+        $parameters['advance.low_rate'] = PayrollRuleValue::rate('0.16');
+        ksort($parameters, SORT_STRING);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('require approval evidence');
+        new PayrollRulesetVersion(
+            $delivered->id,
+            $delivered->version,
+            $delivered->domain,
+            $delivered->effectiveFrom,
+            $delivered->effectiveTo,
+            PayrollRulesetLifecycle::Active,
+            $delivered->capability,
+            $delivered->sources,
+            $parameters,
+            null,
+            $delivered->technicalReview,
+        );
+    }
+
+    /**
+     * Původ je ODVOZENÝ, ne předaný. Přejmenovaná kopie dodané sady — se stejnými
+     * hodnotami i zdroji — už dodaná sada není a bez schválení účinná nebude.
+     */
+    public function testRenamedCopyOfTheDeliveredSetIsNoLongerTheDeliveredSet(): void
+    {
+        $delivered = CzechPayrollRulesets2026::provider()
+            ->forDate(PayrollRulesetDomain::IncomeTax, '2026-08-03');
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('require approval evidence');
+        new PayrollRulesetVersion(
+            $delivered->id . '.copy',
+            $delivered->version,
+            $delivered->domain,
+            $delivered->effectiveFrom,
+            $delivered->effectiveTo,
+            PayrollRulesetLifecycle::Active,
+            $delivered->capability,
+            $delivered->sources,
+            $delivered->parameters,
+            null,
+            $delivered->technicalReview,
+        );
     }
 
     public function testActiveRulesetRequiresApprovalEvidence(): void

@@ -7,6 +7,23 @@ namespace MyInvoice\Service\Payroll\Ruleset;
 /**
  * Payroll-only immutable fixture. The broader legacy TaxConstants table remains
  * an accounting fallback and is deliberately not a runtime input to this registry.
+ *
+ * ## Proč je dodaná sada rovnou `active`
+ *
+ * Do 8/2026 tady stálo `PayrollRulesetLifecycle::Reviewed` a zákazník musel
+ * u každé z deseti domén projít `review → approve → activate`, jinak si mzdy
+ * nespočítal vůbec. Rešerše patnácti českých mzdových systémů
+ * (`private/LEGISLATIVNI-SADY-KONKURENCE.md`) ukázala, že schvalování
+ * legislativních sazeb uživatelem NEMÁ ANI JEDEN — kdo má nejsilnější důvod
+ * přenést odpovědnost, přenáší ji smlouvou, ne klikáním.
+ *
+ * Sada je proto dodávaná jako účinná. Invarianta „účinné vyžaduje schválení"
+ * se NERUŠÍ, jen se omezuje na obsah, který se od dodané sady liší — viz
+ * {@see VendorRulesetManifest}. Za dodané hodnoty ručí dodavatel a doloženy jsou
+ * {@see RulesetSource} (odkaz + datum stažení) a {@see RulesetTechnicalReview}.
+ *
+ * Co tím zatím NEVZNIKÁ: formální záznam o tom, KDO za hodnoty ručí. Technická
+ * kontrola není odborné ani právní schválení a `approval` zůstává `null`.
  */
 final class CzechPayrollRulesets2026
 {
@@ -19,9 +36,14 @@ final class CzechPayrollRulesets2026
      * změnit bez nasazení. Bydlí proto v registry jako každý jiný parametr
      * a pin hlídá už jen VÝCHOZÍ sadu z kódu — override z administrace má
      * vlastní `content_hash` a vlastní auditní stopu.
+     *
+     * Pozor, tenhle pin je nad PLNÝM snapshotem, tedy VČETNĚ lifecyclu — proto se
+     * posunul při překlopení dodané sady na `active`. Otisk obsahu, podle kterého
+     * se pozná dodaná sada, je v {@see VendorRulesetManifest} a ten se překlopením
+     * nezměnil.
      */
     public const ENFORCEMENT_DEDUCTIONS_HASH =
-        'e99327b76b19afeb4955d194167ea5ade4fe484fed34b8c038e6e4f6dc972f24';
+        '2eac7d62318c2d361ad6a00ce6d6d443fc68c78d9fff40f1bf900768302edfbd';
 
     public static function provider(): PayrollRulesetProvider
     {
@@ -320,7 +342,7 @@ final class CzechPayrollRulesets2026
             PayrollRulesetDomain::TravelAllowances,
             $effectiveFrom,
             $effectiveTo,
-            PayrollRulesetLifecycle::Reviewed,
+            PayrollRulesetLifecycle::Active,
             PayrollRulesetCapability::Supported,
             $sources,
             $parameters,
@@ -458,7 +480,7 @@ final class CzechPayrollRulesets2026
             $domain,
             '2026-01-01',
             '2026-12-31',
-            PayrollRulesetLifecycle::Reviewed,
+            PayrollRulesetLifecycle::Active,
             $capability,
             $sources,
             $parameters,

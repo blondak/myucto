@@ -19,6 +19,15 @@ use MyInvoice\Repository\Payroll\PayrollRulesetRepository;
  *
  * Runtime na tenhle registry sahá přes `PayrollRulesetProvider` (bind
  * v Bootstrapu), takže změna v administraci se projeví bez nasazení nové verze.
+ *
+ * ## Kdo za sloučenou verzi ručí
+ *
+ * Dodaná sada je účinná rovnou — ručí za ni dodavatel a zákazník ji neschvaluje
+ * ({@see CzechPayrollRulesets2026}). Jakmile override obsah SKUTEČNĚ změní,
+ * odpovědnost přebírá zákazník a účinnost si musí zaplatit schválením: bez
+ * doloženého schvalovatele se sloučená verze čte jako `reviewed`, ne `active`.
+ * Rozhoduje o tom otisk obsahu proti {@see VendorRulesetManifest}, ne příznak
+ * v databázi — uložený řádek proto nemůže účinnost bez schválení předstírat.
  */
 final class PayrollRulesetRegistry
 {
@@ -204,16 +213,51 @@ final class PayrollRulesetRegistry
             $reason,
         );
 
+        // Účinnost bez schválení smí mít jedině DODANÁ sada — za tu ručí dodavatel.
+        // Jestli uložený override dodanou sadu opravdu mění, se pozná až z otisku
+        // obsahu, a ten vzniká až konstrukcí verze. Zkušební sestavení proto proběhne
+        // ve stavu `reviewed` (ten je bez schválení přípustný vždy) a teprve podle
+        // jeho původu se rozhodne, jestli smí být verze účinná.
+        //
+        // Kdyby se to neudělalo, řádek s `lifecycle = active` a změněnou hodnotou by
+        // buď položil sestavení celého registru, nebo — hůř — prošel jako schválený.
+        // Takhle se z něj stane neúčinná verze čekající na schválení a je to vidět
+        // v administraci jako `awaiting_activation`.
+        $id = self::str($override, 'ruleset_id') ?? ($default === null ? '' : $default->id);
+        $versionNumber = self::str($override, 'version') ?? ($default === null ? '' : $default->version);
+        $domain = PayrollRulesetDomain::from(
+            self::str($override, 'domain') ?? ($default === null ? '' : $default->domain->value),
+        );
+        $from = self::str($override, 'effective_from')
+            ?? ($default === null ? '' : $default->effectiveFrom);
+        $to = self::str($override, 'effective_to')
+            ?? ($default === null ? '' : $default->effectiveTo);
+
+        if ($override !== null && $approval === null && self::requiresApproval($lifecycle)) {
+            $probe = new PayrollRulesetVersion(
+                $id,
+                $versionNumber,
+                $domain,
+                $from,
+                $to,
+                PayrollRulesetLifecycle::Reviewed,
+                $capability,
+                $sources,
+                $parameters,
+                null,
+                $technicalReview,
+            );
+            if ($probe->origin !== PayrollRulesetOrigin::Vendor) {
+                $lifecycle = PayrollRulesetLifecycle::Reviewed;
+            }
+        }
+
         return new PayrollRulesetVersion(
-            self::str($override, 'ruleset_id') ?? ($default === null ? '' : $default->id),
-            self::str($override, 'version') ?? ($default === null ? '' : $default->version),
-            PayrollRulesetDomain::from(
-                self::str($override, 'domain') ?? ($default === null ? '' : $default->domain->value),
-            ),
-            self::str($override, 'effective_from')
-                ?? ($default === null ? '' : $default->effectiveFrom),
-            self::str($override, 'effective_to')
-                ?? ($default === null ? '' : $default->effectiveTo),
+            $id,
+            $versionNumber,
+            $domain,
+            $from,
+            $to,
             $lifecycle,
             $capability,
             $sources,
@@ -221,6 +265,15 @@ final class PayrollRulesetRegistry
             $approval,
             $technicalReview,
         );
+    }
+
+    private static function requiresApproval(PayrollRulesetLifecycle $lifecycle): bool
+    {
+        return in_array($lifecycle, [
+            PayrollRulesetLifecycle::Approved,
+            PayrollRulesetLifecycle::Active,
+            PayrollRulesetLifecycle::Superseded,
+        ], true);
     }
 
     /** @param array{version:PayrollRulesetVersion,override:array<string,mixed>|null,is_override:bool,has_default:bool,default:PayrollRulesetVersion|null} $entry */

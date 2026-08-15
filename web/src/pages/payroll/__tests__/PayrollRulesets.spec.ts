@@ -59,6 +59,13 @@ function summary(overrides: Partial<PayrollRulesetSummary> = {}): PayrollRuleset
     lifecycle: 'reviewed',
     capability: 'supported',
     canonical_hash: 'a'.repeat(64),
+    origin: 'vendor',
+    sources: [{
+      id: 'fs-dependent-activity-2026',
+      title: 'Finanční správa: zaměstnanci a zaměstnavatelé 2026',
+      url: 'https://financnisprava.gov.cz/cs/dane/dane/dan-z-prijmu',
+      retrieved_on: '2026-08-03',
+    }],
     is_override: false,
     has_default: true,
     checksum_valid: true,
@@ -113,14 +120,17 @@ function parameter(overrides: Partial<PayrollRuleParameter> = {}): PayrollRulePa
   }
 }
 
-function detail(parameters: PayrollRuleParameter[]): PayrollRulesetDetail {
+function detail(
+  parameters: PayrollRuleParameter[],
+  overrides: Partial<PayrollRulesetDetail> = {},
+): PayrollRulesetDetail {
   return {
     ...summary({ ruleset_id: 'cz-payroll-2026.health-insurance.v1', domain: 'health_insurance' }),
     parameters,
-    sources: [],
     audit: [],
     default_diff: null,
     previous_ruleset_id: null,
+    ...overrides,
   }
 }
 
@@ -265,5 +275,58 @@ describe('PayrollRulesets', () => {
     expect(row.text()).toContain('Jedno univerzální datum neexistuje.')
     expect(row.text()).toContain('payroll.rulesets.manual_review_action')
     expect(row.text()).toContain('Nic tu neschvalujete, termín ukazuje stránka Podání.')
+  })
+
+  // Doložení zdrojem je náhrada za zrušené schvalovací klikání, takže musí být
+  // vidět rovnou u domény — ne až po otevření verze.
+  it('shows where a domain took its values from, with a link and a retrieval date', async () => {
+    const wrapper = await mountPage([group()])
+
+    const provenance = wrapper.get('[data-test="ruleset-provenance-income_tax"]')
+    expect(provenance.text()).toContain('payroll.rulesets.provenance.title')
+    expect(provenance.text())
+      .toContain('Finanční správa: zaměstnanci a zaměstnavatelé 2026')
+    expect(provenance.text())
+      .toContain('payroll.rulesets.provenance.retrieved:{"date":"2026-08-03"}')
+
+    const link = provenance.get('a')
+    expect(link.attributes('href'))
+      .toBe('https://financnisprava.gov.cz/cs/dane/dane/dan-z-prijmu')
+    expect(link.attributes('rel')).toBe('noopener noreferrer')
+  })
+
+  it('attributes a single-source version down to the parameter row', async () => {
+    m.detail.mockResolvedValue(detail([parameter()]))
+    const wrapper = await mountPage([group()])
+    await wrapper.get('section table tbody button').trigger('click')
+    await flushPromises()
+
+    const row = wrapper.get('[data-test="parameter-total.rate"]')
+    expect(row.text()).toContain('Finanční správa: zaměstnanci a zaměstnavatelé 2026')
+    expect(row.text()).toContain('payroll.rulesets.provenance.retrieved:{"date":"2026-08-03"}')
+  })
+
+  it('does not invent per-parameter provenance when the version has several sources', async () => {
+    m.detail.mockResolvedValue(detail([parameter()], {
+      sources: [
+        { id: 'a', title: 'VZP: metodika', url: 'https://www.vzp.cz/a', retrieved_on: '2026-08-03' },
+        { id: 'b', title: 'VZP: platby 2026', url: 'https://www.vzp.cz/b', retrieved_on: '2026-08-03' },
+      ],
+    }))
+    const wrapper = await mountPage([group()])
+    await wrapper.get('section table tbody button').trigger('click')
+    await flushPromises()
+
+    const row = wrapper.get('[data-test="parameter-total.rate"]')
+    expect(row.text()).toContain('payroll.rulesets.provenance.multiple:{"count":2}')
+    expect(row.text()).not.toContain('VZP: metodika')
+
+    // …ale za celou verzi zdroje uvedené jsou.
+    await row.get('button').trigger('click')
+    const tab = wrapper.get('[data-test="ruleset-sources-tab"]')
+    expect(tab.text()).toContain('payroll.rulesets.provenance.vendor_note')
+    expect(tab.text()).toContain('VZP: metodika')
+    expect(tab.text()).toContain('VZP: platby 2026')
+    expect(tab.text()).toContain('payroll.rulesets.provenance.no_approval')
   })
 })

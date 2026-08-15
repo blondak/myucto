@@ -455,32 +455,14 @@ final class MonthlyEmploymentIncomeTaxCalculatorTest extends TestCase
         self::assertSame(64, strlen($result->rulesetHash));
     }
 
+    /** Dodaná sada je účinná rovnou — není co aktivovat ani co schvalovat. */
     private function calculator(): MonthlyEmploymentIncomeTaxCalculator
     {
-        $provider = CzechPayrollRulesets2026::provider();
-        $reviewed = $provider->forDate(PayrollRulesetDomain::IncomeTax, '2026-08-31');
-        $approval = new RulesetApproval(
-            'synthetic-independent-reviewer',
-            '2026-08-02',
-            'synthetic-independent-approver',
-            '2026-08-03',
-            'Synthetic approval used only by deterministic unit tests.',
-        );
-        $approved = $reviewed->transition(
-            PayrollRulesetLifecycle::Approved,
-            'test.cz-payroll-2026.income-tax.approved',
-            '2026.1.1-test',
-            $approval,
-        );
-        $active = $approved->transition(
-            PayrollRulesetLifecycle::Active,
-            'test.cz-payroll-2026.income-tax.active',
-            '2026.1.2-test',
-            $approval,
-        );
-
         return new MonthlyEmploymentIncomeTaxCalculator(
-            new PayrollRulesetProvider([$active]),
+            new PayrollRulesetProvider([
+                CzechPayrollRulesets2026::provider()
+                    ->forDate(PayrollRulesetDomain::IncomeTax, '2026-08-31'),
+            ]),
         );
     }
 

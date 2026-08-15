@@ -7,7 +7,12 @@ namespace MyInvoice\Tests\Unit\Payroll\Ruleset;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetCapability;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetLifecycle;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetOrigin;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
+use MyInvoice\Service\Payroll\Ruleset\VendorRulesetManifest;
 use PHPUnit\Framework\TestCase;
 
 final class CzechPayrollRulesets2026Test extends TestCase
@@ -29,8 +34,12 @@ final class CzechPayrollRulesets2026Test extends TestCase
      * v hlavách účetních, takže výchozí mzdové složky měly `annual_limit_minor`
      * NULL a roční strop se nehlídal vůbec — viz
      * {@see \MyInvoice\Service\Payroll\Component\PayrollComponentDefaults}.
+     *
+     * Počtvrté překlopením dodané sady z `reviewed` na `active`. Lifecycle je
+     * součástí PLNÉHO snapshotu, ale ne otisku OBSAHU — hodnoty ani
+     * `VendorRulesetManifest::CONTENT_HASHES` se tím tedy nezměnily.
      */
-    private const EXPECTED_MANIFEST_SHA256 = '6f3fa27c68ac3efb889c45b2b21e3b9c44b11cc5c3d03db72984c6ec84f69252';
+    private const EXPECTED_MANIFEST_SHA256 = 'a48656b771c79eb89614b99555a049a78f95a6545cfc478361d03c18e9b63f38';
 
     public function testCanonicalManifestIsByteStable(): void
     {
@@ -79,13 +88,84 @@ final class CzechPayrollRulesets2026Test extends TestCase
 
         self::assertSame('cz-payroll-2026.income-tax.v1', $snapshot['id']);
         self::assertSame('2026.1.0', $snapshot['version']);
-        self::assertSame('reviewed', $snapshot['lifecycle']);
+        self::assertSame('active', $snapshot['lifecycle']);
         self::assertSame('2026-01-01', $snapshot['effective_from']);
         self::assertSame('2026-12-31', $snapshot['effective_to']);
         self::assertNull($snapshot['approval']);
         self::assertNotEmpty($snapshot['technical_review']);
         self::assertNotEmpty($snapshot['sources']);
         self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $ruleset->canonicalHash);
+    }
+
+    /**
+     * Podpis dodavatele pod dodanou sadou. Musí sedět PŘESNĚ — je to jediné,
+     * co odlišuje sadu, za kterou ručíme my, od obsahu, který si upravil zákazník.
+     */
+    public function testVendorManifestPinsEveryDeliveredVersion(): void
+    {
+        $versions = CzechPayrollRulesets2026::provider()->versions();
+        usort(
+            $versions,
+            static fn (PayrollRulesetVersion $left, PayrollRulesetVersion $right): int
+                => $left->id <=> $right->id,
+        );
+
+        $actual = [];
+        foreach ($versions as $version) {
+            $actual[] = $version->contentHash;
+        }
+
+        self::assertSame(
+            VendorRulesetManifest::CONTENT_HASHES,
+            $actual,
+            "Dodaná sada se změnila. Aktualizujte VendorRulesetManifest::CONTENT_HASHES na:\n"
+            . implode("\n", array_map(
+                static fn (PayrollRulesetVersion $version): string
+                    => sprintf("        // %s\n        '%s',", $version->id, $version->contentHash),
+                $versions,
+            )),
+        );
+    }
+
+    /**
+     * Zákazník si po instalaci mzdy spočítá, aniž by cokoli odklikával — a domény
+     * vedené jako RUČNÍ POSOUZENÍ zůstávají mimo výpočet i po překlopení lifecyclu.
+     * Tuhle vlastnost drží `capability`, ne stav; překlopení ji nesmí přebít.
+     */
+    public function testDeliveredSetIsActiveAndManualReviewDomainsStayOutOfCalculation(): void
+    {
+        $provider = CzechPayrollRulesets2026::provider();
+        $manualReviewDomains = [
+            PayrollRulesetDomain::CompensationAverages,
+            PayrollRulesetDomain::Deadlines,
+            PayrollRulesetDomain::Codebooks,
+            PayrollRulesetDomain::Submissions,
+        ];
+
+        foreach ($provider->versions() as $version) {
+            self::assertSame(PayrollRulesetLifecycle::Active, $version->lifecycle, $version->id);
+            self::assertSame(PayrollRulesetOrigin::Vendor, $version->origin, $version->id);
+            self::assertNull($version->approval, $version->id);
+            self::assertNotNull($version->technicalReview, $version->id);
+        }
+
+        foreach (PayrollRulesetDomain::cases() as $domain) {
+            $date = $domain === PayrollRulesetDomain::TravelAllowances ? '2026-08-03' : '2026-08-03';
+            if (in_array($domain, $manualReviewDomains, true)) {
+                try {
+                    $provider->forCalculation($domain, $date);
+                    self::fail("Doména {$domain->value} je ruční posouzení a nesmí do výpočtu.");
+                } catch (PayrollRulesetException $exception) {
+                    self::assertStringContainsString('requires manual review', $exception->getMessage());
+                }
+                continue;
+            }
+            self::assertSame(
+                PayrollRulesetCapability::Supported,
+                $provider->forCalculation($domain, $date)->capability,
+                $domain->value,
+            );
+        }
     }
 
     public function testCanonicalSupportedParameterMatrixAndManualReviewBoundary(): void

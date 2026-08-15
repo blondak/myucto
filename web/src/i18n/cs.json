@@ -588,7 +588,7 @@
     "payroll": {
         "rulesets": {
             "title": "Legislativní pravidla mezd",
-            "subtitle": "Sazby, hranice, lhůty a číselníky pro mzdový výpočet. Ověřená sada je v aplikaci; tady se dá přepsat a uvést do provozu bez nasazení nové verze. Hodnoty jsou národní a platí pro všechny firmy.",
+            "subtitle": "Sazby, hranice, lhůty a číselníky pro mzdový výpočet. Ověřenou sadu dodáváme účinnou a ručíme za ni — nemusíte nic schvalovat ani odklikávat; u každé domény je vidět, odkud hodnoty jsou. Přepsat je jde a projeví se to bez nasazení nové verze, za upravené hodnoty už ale ručí ten, kdo je zadal. Hodnoty jsou národní a platí pro všechny firmy.",
             "load_failed": "Legislativní pravidla se nepodařilo načíst.",
             "save_failed": "Změnu se nepodařilo uložit.",
             "command_failed": "Změnu stavu se nepodařilo provést.",
@@ -611,7 +611,7 @@
             "status_hint": {
                 "ready": "Mzdový výpočet z téhle domény čerpá.",
                 "manual_review": "Aplikace tu záměrně netvrdí žádné číslo, protože správné číslo závisí na konkrétním případu. Nemusíte nic odklikávat ani schvalovat.",
-                "awaiting_activation": "Ověřená sada je připravená, ale zatím není účinná. Otevřete verzi a projděte ji přes Odborně schválit a Uvést do provozu. Je to jeden průchod na doménu, ne na parametr.",
+                "awaiting_activation": "Dodaná sada je účinná sama od sebe — tady je verze, kterou někdo ručně upravil, a ta účinná zatím není. Za upravené hodnoty už ručíte vy, proto je potřeba je Odborně schválit a Uvést do provozu. Ruční úpravu můžete taky zahodit a vrátit se k ověřené sadě.",
                 "coverage_issue": "Verze domény nepokrývají celé období, takže z ní výpočet nečerpá. Doplňte chybějící účinnost.",
                 "missing": "Pro tuhle doménu není žádná verze."
             },
@@ -640,14 +640,28 @@
             },
             "tab": {
                 "parameters": "Parametry",
+                "sources": "Odkud hodnoty jsou",
                 "diff": "Rozdíl proti ověřené sadě",
                 "audit": "Historie změn"
+            },
+            "provenance": {
+                "title": "Odkud hodnoty jsou",
+                "retrieved": "staženo {date}",
+                "multiple": "{count} zdrojů verze",
+                "vendor_note": "Hodnoty dodáváme s aplikací a ručíme za ně — neschvalujete je. Níže je, o co se opírají: předpis nebo úřad, odkaz a datum, kdy jsme zdroj naposledy stahovali.",
+                "override_note": "Tahle verze se od dodané sady liší, protože ji někdo ručně upravil. Za upravené hodnoty ručí ten, kdo je zadal a schválil; zdroje níže patří k původní sadě.",
+                "technical_review": "Technická kontrola",
+                "checked": "Provedl {by} dne {on}. Technická kontrola není odborné ani právní schválení.",
+                "approval": "Odborné schválení",
+                "approved": "Schválil {by} dne {on}.",
+                "no_approval": "U dodané sady není evidované odborné schválení — hodnoty jsou doložené zdrojem a technickou kontrolou."
             },
             "column": {
                 "version": "Verze",
                 "effective": "Účinnost",
                 "lifecycle": "Stav",
                 "source": "Zdroj hodnot",
+                "provenance": "Doloženo",
                 "parameter": "Parametr",
                 "value": "Hodnota",
                 "note": "Poznámka",

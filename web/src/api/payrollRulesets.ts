@@ -8,6 +8,13 @@ import { api } from './client'
 
 export type PayrollRulesetLifecycle = 'draft' | 'reviewed' | 'approved' | 'active' | 'superseded'
 export type PayrollRulesetCapability = 'supported' | 'manual_review'
+
+/**
+ * Kdo za hodnoty ručí. Backend to ODVOZUJE z otisku obsahu proti sadě dodané
+ * s aplikací, není to nastavitelný příznak — `vendor` znamená „bajt po bajtu to,
+ * co jsme dodali", cokoli jiného je `customer_override`.
+ */
+export type PayrollRulesetOrigin = 'vendor' | 'customer_override'
 export type PayrollRulesetCommand = 'review' | 'approve' | 'activate' | 'supersede'
 export type PayrollRuleValueType =
   | 'decimal_rate'
@@ -67,6 +74,9 @@ export interface PayrollRulesetSummary {
   lifecycle: PayrollRulesetLifecycle
   capability: PayrollRulesetCapability
   canonical_hash: string
+  origin: PayrollRulesetOrigin
+  /** Odkud hodnoty jsou — chodí i v přehledu, ne až v detailu. */
+  sources: PayrollRulesetSource[]
   is_override: boolean
   has_default: boolean
   checksum_valid: boolean
@@ -123,7 +133,6 @@ export interface PayrollRulesetAuditRow {
 
 export interface PayrollRulesetDetail extends PayrollRulesetSummary {
   parameters: PayrollRuleParameter[]
-  sources: PayrollRulesetSource[]
   audit: PayrollRulesetAuditRow[]
   default_diff: PayrollRulesetDiff['parameters'] | null
   previous_ruleset_id: string | null

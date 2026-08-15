@@ -90,12 +90,13 @@ final class PayrollDependantCreditPreviewTest extends TestCase
         self::assertNull($result['monthly_credit_minor_units']);
     }
 
+    /** Dodaná sada je účinná rovnou, není co aktivovat. */
     private function activeProvider(): PayrollRulesetProvider
     {
-        $reviewed = CzechPayrollRulesets2026::provider()
-            ->forDate(PayrollRulesetDomain::IncomeTax, '2026-03-01');
-
-        return new PayrollRulesetProvider([$this->activate($reviewed, 'baseline')]);
+        return new PayrollRulesetProvider([
+            CzechPayrollRulesets2026::provider()
+                ->forDate(PayrollRulesetDomain::IncomeTax, '2026-03-01'),
+        ]);
     }
 
     private function rulesetWithoutChildRates(): PayrollRulesetVersion

@@ -588,7 +588,7 @@
     "payroll": {
         "rulesets": {
             "title": "Payroll legislation rules",
-            "subtitle": "Rates, thresholds, deadlines and code lists used by the payroll calculation. The verified set ships with the application; here it can be overridden and put into service without a new release. Values are national and apply to every company.",
+            "subtitle": "Rates, thresholds, deadlines and code lists used by the payroll calculation. The verified set ships effective and we stand behind it — there is nothing to approve or tick off, and every domain shows where its values come from. Overriding is possible and takes effect without a new release, but whoever enters the edited values stands behind them. Values are national and apply to every company.",
             "load_failed": "Legislation rules could not be loaded.",
             "save_failed": "The change could not be saved.",
             "command_failed": "The status change could not be applied.",
@@ -611,7 +611,7 @@
             "status_hint": {
                 "ready": "The payroll calculation reads from this domain.",
                 "manual_review": "The application deliberately states no number here, because the correct one depends on the individual case. There is nothing for you to tick off or approve.",
-                "awaiting_activation": "The verified set is ready but not effective yet. Open the version and take it through Approve and Activate. That is one pass per domain, not per parameter.",
+                "awaiting_activation": "The delivered set is effective on its own — this is a version somebody edited by hand, and that one is not effective yet. You now stand behind the edited values, so they need Approve and Activate. You can also discard the override and return to the verified set.",
                 "coverage_issue": "The domain versions do not cover the whole period, so the calculation does not read from it. Fill in the missing effectivity.",
                 "missing": "There is no version for this domain."
             },
@@ -640,14 +640,28 @@
             },
             "tab": {
                 "parameters": "Parameters",
+                "sources": "Where the values come from",
                 "diff": "Difference from verified set",
                 "audit": "Change history"
+            },
+            "provenance": {
+                "title": "Where the values come from",
+                "retrieved": "retrieved {date}",
+                "multiple": "{count} sources of this version",
+                "vendor_note": "These values ship with the application and we stand behind them — you do not approve them. Below is what they rest on: the regulation or authority, a link, and the date we last retrieved the source.",
+                "override_note": "This version differs from the delivered set because someone edited it by hand. Whoever entered and approved the edited values stands behind them; the sources below belong to the original set.",
+                "technical_review": "Technical check",
+                "checked": "Performed by {by} on {on}. A technical check is not a professional or legal approval.",
+                "approval": "Professional approval",
+                "approved": "Approved by {by} on {on}.",
+                "no_approval": "No professional approval is recorded for the delivered set — the values are evidenced by their source and by the technical check."
             },
             "column": {
                 "version": "Version",
                 "effective": "Effective",
                 "lifecycle": "Status",
                 "source": "Value source",
+                "provenance": "Evidence",
                 "parameter": "Parameter",
                 "value": "Value",
                 "note": "Note",

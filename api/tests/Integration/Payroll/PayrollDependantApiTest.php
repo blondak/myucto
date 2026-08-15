@@ -754,33 +754,14 @@ final class PayrollDependantApiTest extends TestCase
         ]);
     }
 
+    /** Dodaná sada je účinná rovnou — není co aktivovat ani co schvalovat. */
     private function calculator(): MonthlyEmploymentIncomeTaxCalculator
     {
-        $reviewed = CzechPayrollRulesets2026::provider()
-            ->forDate(PayrollRulesetDomain::IncomeTax, '2026-06-30');
-        $approval = new RulesetApproval(
-            'synthetic-independent-reviewer',
-            '2026-08-02',
-            'synthetic-independent-approver',
-            '2026-08-03',
-            'Synthetic approval used only by deterministic tests.',
-        );
-        $active = $reviewed
-            ->transition(
-                PayrollRulesetLifecycle::Approved,
-                'test.dependants.income-tax.approved',
-                '2026.8.1-test',
-                $approval,
-            )
-            ->transition(
-                PayrollRulesetLifecycle::Active,
-                'test.dependants.income-tax.active',
-                '2026.8.2-test',
-                $approval,
-            );
-
         return new MonthlyEmploymentIncomeTaxCalculator(
-            new PayrollRulesetProvider([$active]),
+            new PayrollRulesetProvider([
+                CzechPayrollRulesets2026::provider()
+                    ->forDate(PayrollRulesetDomain::IncomeTax, '2026-06-30'),
+            ]),
         );
     }
 }

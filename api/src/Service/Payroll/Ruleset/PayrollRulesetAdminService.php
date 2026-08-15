@@ -501,11 +501,17 @@ final class PayrollRulesetAdminService
             ];
         }
 
-        if ($entry['is_override'] && $version->lifecycle === PayrollRulesetLifecycle::Active) {
+        // Rozhoduje PŮVOD OBSAHU, ne existence řádku v databázi: override, který
+        // hodnoty nezměnil, je pořád dodaná sada a varovat u něj není proč.
+        if (
+            $version->origin === PayrollRulesetOrigin::CustomerOverride
+            && $version->lifecycle === PayrollRulesetLifecycle::Active
+        ) {
             $warnings[] = [
                 'code' => 'active_override',
-                'message' => 'Účinná verze běží na ručním overridu, ne na ověřeném defaultu z kódu.',
-                'context' => [],
+                'message' => 'Účinná verze běží na ručním overridu, ne na ověřené sadě dodané '
+                    . 's aplikací. Za upravené hodnoty ručí ten, kdo je zadal a schválil.',
+                'context' => ['origin' => $version->origin->value],
             ];
         }
 
@@ -646,7 +652,7 @@ final class PayrollRulesetAdminService
     {
         $version = $entry['version'];
         $override = $entry['override'];
-        $next = self::nextCommand($version->lifecycle);
+        $next = self::nextCommand($version->lifecycle, $version->origin);
 
         return [
             'ruleset_id' => $version->id,
@@ -656,7 +662,14 @@ final class PayrollRulesetAdminService
             'effective_to' => $version->effectiveTo,
             'lifecycle' => $version->lifecycle->value,
             'capability' => $version->capability->value,
-            'canonical_hash' => PayrollRulesetContent::hash(PayrollRulesetContent::encode($version)),
+            'canonical_hash' => $version->contentHash,
+            // Odkud hodnoty jsou. V přehledu, ne až v detailu: doložení zdrojem
+            // je náhrada za zrušené odklikávání, takže musí být vidět bez klikání.
+            'origin' => $version->origin->value,
+            'sources' => array_map(
+                static fn (RulesetSource $source): array => $source->toCanonicalArray(),
+                $version->sources,
+            ),
             'is_override' => $entry['is_override'],
             'has_default' => $entry['has_default'],
             'checksum_valid' => $override === null || PayrollRulesetOverrideHash::matches($override),
@@ -1004,13 +1017,23 @@ final class PayrollRulesetAdminService
         };
     }
 
-    private static function nextCommand(PayrollRulesetLifecycle $lifecycle): ?string
-    {
+    /**
+     * Nad ÚČINNOU DODANOU sadou se žádný další krok nenabízí. Vyřazení dodané sady
+     * není položka fronty, ale následek toho, že ji nahradila novější verze —
+     * nabízet ho jako hlavní akci u každé domény by z „nemáte co odklikávat"
+     * udělalo tlačítko, kterým si zákazník vypne výpočet.
+     */
+    private static function nextCommand(
+        PayrollRulesetLifecycle $lifecycle,
+        PayrollRulesetOrigin $origin,
+    ): ?string {
         return match ($lifecycle) {
             PayrollRulesetLifecycle::Draft => 'review',
             PayrollRulesetLifecycle::Reviewed => 'approve',
             PayrollRulesetLifecycle::Approved => 'activate',
-            PayrollRulesetLifecycle::Active => 'supersede',
+            PayrollRulesetLifecycle::Active => $origin === PayrollRulesetOrigin::Vendor
+                ? null
+                : 'supersede',
             PayrollRulesetLifecycle::Superseded => null,
         };
     }

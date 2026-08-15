@@ -158,6 +158,8 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Ruleset\PayrollRulesetCapability',
         'payrollRulesets.ts::PayrollRulesetCommand'
             => 'const:MyInvoice\Service\Payroll\Ruleset\PayrollRulesetAdminService::COMMANDS',
+        'payrollRulesets.ts::PayrollRulesetOrigin'
+            => 'enum:MyInvoice\Service\Payroll\Ruleset\PayrollRulesetOrigin',
 
         'payrollTravel.ts::TravelTransportMode' => 'enum:MyInvoice\Service\Payroll\Travel\TravelTransportMode',
         'payrollTravel.ts::TravelVehicleKind'   => 'enum:MyInvoice\Service\Payroll\Travel\TravelVehicleKind',
