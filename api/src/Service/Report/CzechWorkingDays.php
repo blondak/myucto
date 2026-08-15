@@ -18,19 +18,29 @@ namespace MyInvoice\Service\Report;
  */
 final class CzechWorkingDays
 {
-    /** Pevné svátky jako 'm-d' (245/2000 Sb.). */
+    /**
+     * Pevné svátky (245/2000 Sb.) jako 'm-d' → kód a název.
+     *
+     * JEDINÝ zdroj pravdy o českých svátcích v aplikaci. Lhůty potřebují jen
+     * odpověď „je to svátek", fond pracovní doby navíc kód a název — a právě
+     * proto tu sada žije s popisem, ne dvakrát ve dvou tvarech.
+     * {@see \MyInvoice\Service\Payroll\Time\CzechHolidayCalendar} je nad tímhle
+     * jen pojmenovaný pohled, vlastní seznam nemá.
+     *
+     * @var array<string,array{code:string,name:string}>
+     */
     private const FIXED_HOLIDAYS = [
-        '01-01', // Den obnovy samostatného českého státu / Nový rok
-        '05-01', // Svátek práce
-        '05-08', // Den vítězství
-        '07-05', // Cyril a Metoděj
-        '07-06', // Jan Hus
-        '09-28', // Den české státnosti
-        '10-28', // Vznik samostatného československého státu
-        '11-17', // Den boje za svobodu a demokracii
-        '12-24', // Štědrý den
-        '12-25', // 1. svátek vánoční
-        '12-26', // 2. svátek vánoční
+        '01-01' => ['code' => 'new_year', 'name' => 'Nový rok'],
+        '05-01' => ['code' => 'labour_day', 'name' => 'Svátek práce'],
+        '05-08' => ['code' => 'victory_day', 'name' => 'Den vítězství'],
+        '07-05' => ['code' => 'cyril_methodius', 'name' => 'Den slovanských věrozvěstů Cyrila a Metoděje'],
+        '07-06' => ['code' => 'jan_hus', 'name' => 'Den upálení mistra Jana Husa'],
+        '09-28' => ['code' => 'statehood_day', 'name' => 'Den české státnosti'],
+        '10-28' => ['code' => 'independent_state_day', 'name' => 'Den vzniku samostatného československého státu'],
+        '11-17' => ['code' => 'freedom_democracy_day', 'name' => 'Den boje za svobodu a demokracii'],
+        '12-24' => ['code' => 'christmas_eve', 'name' => 'Štědrý den'],
+        '12-25' => ['code' => 'christmas_day', 'name' => '1. svátek vánoční'],
+        '12-26' => ['code' => 'boxing_day', 'name' => '2. svátek vánoční'],
     ];
 
     /**
@@ -90,13 +100,41 @@ final class CzechWorkingDays
 
     public static function isPublicHoliday(\DateTimeImmutable $d): bool
     {
-        if (in_array($d->format('m-d'), self::FIXED_HOLIDAYS, true)) {
-            return true;
+        return isset(self::holidaysForYear((int) $d->format('Y'))[$d->format('Y-m-d')]);
+    }
+
+    /**
+     * Všechny svátky roku jako `Y-m-d` → kód a název, seřazené podle data.
+     *
+     * Pevná sada plus dva pohyblivé svátky odvozené od Velikonoc. Odpověď na
+     * „je tenhle den svátek" i „jak se ten svátek jmenuje" se skládá z jedné
+     * a téže množiny — dva nezávislé seznamy by se dřív nebo později rozešly
+     * a projevilo by se to posunutou lhůtou nebo špatným fondem pracovní doby.
+     *
+     * @return array<string,array{code:string,name:string}>
+     */
+    public static function holidaysForYear(int $year): array
+    {
+        /** @var array<int,array<string,array{code:string,name:string}>> $cache */
+        static $cache = [];
+        if (isset($cache[$year])) {
+            return $cache[$year];
         }
-        $easter = self::easterSunday((int) $d->format('Y'));
-        $ymd = $d->format('Y-m-d');
-        return $ymd === $easter->modify('-2 days')->format('Y-m-d')  // Velký pátek
-            || $ymd === $easter->modify('+1 day')->format('Y-m-d');  // Velikonoční pondělí
+
+        $holidays = [];
+        foreach (self::FIXED_HOLIDAYS as $monthDay => $holiday) {
+            $holidays[sprintf('%04d-%s', $year, $monthDay)] = $holiday;
+        }
+
+        $easter = self::easterSunday($year);
+        $holidays[$easter->modify('-2 days')->format('Y-m-d')]
+            = ['code' => 'good_friday', 'name' => 'Velký pátek'];
+        $holidays[$easter->modify('+1 day')->format('Y-m-d')]
+            = ['code' => 'easter_monday', 'name' => 'Velikonoční pondělí'];
+
+        ksort($holidays);
+
+        return $cache[$year] = $holidays;
     }
 
     /**
