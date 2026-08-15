@@ -179,19 +179,21 @@ do účetního systému Pohoda. Na rozdíl od ISDOC je to **jeden velký XML**
 
 ### 20.4.2 Per-dodavatel konfigurace
 
-Před prvním exportem do Pohody **musíš nastavit Pohoda kódy v dodavateli**:
+Pohoda kódy se nastavují v **Nastavení → Můj dodavatel → Pokročilé → Pohoda XML export**:
 
-**Systém → Dodavatelé → [tvůj] → Editovat → záložka Pohoda**
+| Pole | XML element | Význam | Příklad |
+|---|---|---|---|
+| Účet (kód) | `<inv:account>` | Bankovní účet / pokladna z číselníku Pohody | `KB` |
+| Středisko | `<inv:centre>` | Kód střediska | `01` |
+| Činnost | `<inv:activity>` | Kód činnosti | `100` |
+| Zakázka | `<inv:contract>` | Kód zakázky | `ZAK1` |
+| Předkontace | `<inv:accounting>` | Zkratka předkontace | `300` |
 
-| Pole | Význam | Příklad |
-|---|---|---|
-| Číselná řada | Kód číselné řady v Pohodě | `FV` |
-| Středisko | Kód střediska | `01` |
-| Činnost | Kód činnosti | `100` |
-| Předkontace | Kód předkontace | `300` |
-
-Bez vyplnění některého z těchto polí export proběhne, ale **import do Pohody
-hodí varování** — musíš v Pohodě dovyplnit při importu.
+Všechna pole jsou volitelná a platí pro **celý export** (všechny doklady v balíčku).
+Nevyplněné pole se do XML nepošle a Pohoda si po importu dosadí **vlastní default
+z uživatelského nastavení cílové instalace** — u předkontace to znamená, že se
+pronájem i služby zaúčtují jako to, co má instalace nastavené jako výchozí, takže
+kdo předkontaci nevyplní, přepisuje ji po importu ručně u každého dokladu.
 
 ### 20.4.3 Číslo zakázky
 
@@ -202,20 +204,28 @@ Pokud má faktura zakázku s vyplněným číslem, exportuje se do hlavičky:
 ```
 
 Pohoda toto pole standardně načítá jako „Číslo zakázky" / „Číslo objednávky".
-Pro per-supplier `pohoda_contract_code` (v Nastavení → Dodavatel → Pohoda)
+Pro per-supplier `pohoda_contract_code` (viz [§ 20.4.2](#2042-per-dodavatel-konfigurace))
 nadále platí samostatný `<inv:contract>` blok — ten se zapisuje pro celou
 číselnou řadu, `<inv:numberOrder>` per faktura.
 
 ### 20.4.4 VAT klasifikace
 
-MyÚčto mapuje DPH sazby na **Pohoda kódy klasifikace**:
+MyÚčto mapuje DPH sazby na **Pohoda kódy členění** (`<inv:classificationVAT>`):
 
-| MyÚčto DPH | Pohoda kód |
-|---|---|
-| 21 % | `UDA5` (úprava DPH 21 %) |
-| 12 % | `UDA5_12` (úprava DPH 12 %) |
-| 0 % osvobozeno | `UNX` (osvobozeno) |
-| 0 % reverse charge | `PNAR` (přenesená daňová povinnost) |
+| MyÚčto DPH | Odběratel s českým DIČ | Odběratel bez českého DIČ |
+|---|---|---|
+| 21 % | `UD` (tuzemské plnění) | `UDA5` (tuzemské plnění bez ohledu na limit) |
+| 12 % | `UD` (tuzemské plnění) | `UDA5_12` (snížená, bez ohledu na limit) |
+| 10 % | bez kódu (členění 3. sazby je specifické pro instalaci) | dtto |
+| 0 % osvobozeno | `UNX` (nezahrnovat do přiznání) | dtto |
+| reverse charge | `PNAR` (přenesená daňová povinnost) | dtto |
+
+> ⚠️ **Proč to rozlišení.** `UDA5` znamená v Pohodě „tuzemské plnění **bez ohledu
+> na limit 10 000 Kč**" a sekci **A.5** kontrolního hlášení má předvyplněnou natvrdo.
+> Kdyby se posílal i plátcům, skončil by každý doklad nad limit v A.5 místo A.4 —
+> a Pohoda by na to neupozornila, protože u `UDA5` žádnou chybu nevidí. Proto se
+> plátci posílá `UD` a sekci A.4/A.5 si Pohoda určí sama podle výše dokladu.
+> Rozhoduje DIČ protistrany ze snapshotu dokladu, ne dnešní stav karty odběratele.
 
 ### 20.4.5 Import do Pohody
 

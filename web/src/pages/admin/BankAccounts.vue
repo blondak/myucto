@@ -705,6 +705,33 @@ async function saveProvider() {
   }
 }
 
+// Společný (globální) provider nepatří žádné firmě, takže se jeho definice needituje
+// a UI u něj nenabízí Editovat. Zapnout/vypnout ho pro SVOJI firmu ale jít musí —
+// jinak je dodaný provider z produktu neovlivnitelný a nově zapnutá Česká spořitelna
+// by nešla umlčet. Backend si z payloadu vezme jen `enabled` a uloží per-supplier
+// override; definici proto posíláme beze změny — jakýkoli jiný rozdíl je záměrně chyba.
+async function toggleSharedProvider(provider: BankEmailProvider) {
+  if (provider.id === null || provider.supplier_id !== null) return
+  if (blockDemoMutation()) return
+  try {
+    await settingsApi.updateBankEmailProvider(provider.id, {
+      name: provider.name,
+      code: provider.code,
+      parser_type: provider.parser_type,
+      enabled: !provider.enabled,
+      sender_whitelist: provider.sender_whitelist,
+      subject_pattern: provider.subject_pattern,
+      body_pattern: provider.body_pattern,
+      field_patterns: provider.field_patterns ?? {},
+      normalizer_config: provider.normalizer_config ?? {},
+    })
+    toast.success(t('bank_accounts.provider_saved'))
+    await load()
+  } catch (e) {
+    toast.error(apiErrorMessage(e, t('bank_accounts.provider_save_failed')))
+  }
+}
+
 async function removeProvider(provider: BankEmailProvider) {
   if (provider.id === null || provider.supplier_id === null) return
   if (!window.confirm(t('bank_accounts.delete_provider_confirm', { name: provider.name }))) return
@@ -1291,6 +1318,10 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                   <span :class="p.enabled ? 'text-success-600' : 'text-neutral-500'">{{ p.enabled ? t('common.yes') : t('common.no') }}</span>
                 </td>
                 <td class="px-3 py-2 text-right whitespace-nowrap">
+                  <button v-if="p.id !== null && p.supplier_id === null" type="button" @click="toggleSharedProvider(p)"
+                    class="cursor-pointer text-primary-600 hover:text-primary-700 text-xs mr-2">
+                    {{ p.enabled ? t('bank_accounts.provider_disable') : t('bank_accounts.provider_enable') }}
+                  </button>
                   <button v-if="p.parser_type === 'regex'" type="button" @click="startCloneProvider(p)"
                     class="cursor-pointer text-primary-600 hover:text-primary-700 text-xs">
                     {{ t('bank_accounts.provider_clone') }}
