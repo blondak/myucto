@@ -63,6 +63,7 @@
         "delete": "Smazat",
         "delete_confirm": "Opravdu přesunout do koše?",
         "empty_trash_confirm": "Trvale smazat vše v koši? Tuto akci nelze vrátit zpět.",
+        "empty_trash_kept": "V koši zůstalo {n} dokladů, které jsou navázané jinou agendou:",
         "metadata": "Metadata",
         "name": "Název",
         "description": "Popis",

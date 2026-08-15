@@ -63,6 +63,7 @@
         "delete": "Delete",
         "delete_confirm": "Move to trash?",
         "empty_trash_confirm": "Permanently delete everything in trash? This cannot be undone.",
+        "empty_trash_kept": "{n} document(s) stayed in the trash because another agenda still links to them:",
         "metadata": "Metadata",
         "name": "Name",
         "description": "Description",

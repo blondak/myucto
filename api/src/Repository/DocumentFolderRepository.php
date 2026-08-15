@@ -214,14 +214,70 @@ final class DocumentFolderRepository
         return array_map([$this, 'hydrate'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
-    /** Smaže prázdné soft-deleted složky (po vysypání koše). */
+    /**
+     * Smaže prázdné soft-deleted složky (po vysypání koše).
+     *
+     * Složky, ve kterých po vysypání zůstal doklad, se ZÁMĚRNĚ nemažou:
+     * `documents.folder_id` je ON DELETE SET NULL, takže by doklad, který v koši
+     * zůstal kvůli živé vazbě, ztratil zařazení a uživatel by ho po obnovení
+     * hledal jinde, než ho nechal. Chrání se i celá cesta nahoru — smazaný
+     * rodič by kaskádou vzal i podsložku s dokladem.
+     */
     public function purgeTrashed(int $supplierId): int
     {
+        $keep = $this->trashedFoldersHoldingDocuments($supplierId);
+        $sql = 'DELETE FROM document_folders WHERE supplier_id = ? AND deleted_at IS NOT NULL';
+        $params = [$supplierId];
+        if ($keep !== []) {
+            $sql .= ' AND id NOT IN (' . implode(',', array_fill(0, count($keep), '?')) . ')';
+            $params = array_merge($params, $keep);
+        }
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->rowCount();
+    }
+
+    /**
+     * Smazané složky, ve kterých ještě leží doklad — vč. všech jejich předků.
+     *
+     * @return list<int>
+     */
+    private function trashedFoldersHoldingDocuments(int $supplierId): array
+    {
         $stmt = $this->db->pdo()->prepare(
-            'DELETE FROM document_folders WHERE supplier_id = ? AND deleted_at IS NOT NULL'
+            'SELECT DISTINCT f.id
+               FROM document_folders f
+               JOIN documents d ON d.folder_id = f.id AND d.supplier_id = f.supplier_id
+              WHERE f.supplier_id = ? AND f.deleted_at IS NOT NULL'
         );
         $stmt->execute([$supplierId]);
-        return $stmt->rowCount();
+        $keep = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) ?: [] as $id) {
+            $keep[(int) $id] = true;
+        }
+        if ($keep === []) {
+            return [];
+        }
+
+        $parents = $this->db->pdo()->prepare(
+            'SELECT id, parent_id FROM document_folders WHERE supplier_id = ?'
+        );
+        $parents->execute([$supplierId]);
+        $parentOf = [];
+        foreach ($parents->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $parentOf[(int) $row['id']] = $row['parent_id'] !== null ? (int) $row['parent_id'] : null;
+        }
+
+        foreach (array_keys($keep) as $id) {
+            $cursor = $parentOf[$id] ?? null;
+            $hops = count($parentOf) + 1;
+            while ($cursor !== null && $hops-- > 0 && !isset($keep[$cursor])) {
+                $keep[$cursor] = true;
+                $cursor = $parentOf[$cursor] ?? null;
+            }
+        }
+
+        return array_map('intval', array_keys($keep));
     }
 
     /** @param array<string,mixed> $r */

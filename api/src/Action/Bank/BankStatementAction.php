@@ -8,6 +8,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Deletion\BankStatementDeletionGuard;
+use MyInvoice\Repository\Deletion\ForeignKeyDeletionGuard;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
@@ -101,6 +103,9 @@ final class BankStatementAction
         // Cross-source dedup GPC ← e-mailové avízo — při importu ho volá
         // StatementImporter, tady ho potřebuje rematch pro už naimportované výpisy.
         private readonly \MyInvoice\Service\Bank\EmailNoticeReconciler $reconciler,
+        // Registr cizích vazeb, které smazání výpisu blokují (mzdový modul váže
+        // `payroll_payment_matches` na výpis i transakci přes RESTRICT).
+        private readonly BankStatementDeletionGuard $deletionGuard,
         private readonly ?SubsetSumSolver $subsetSolver = null,
     ) {}
 
@@ -1094,6 +1099,9 @@ final class BankStatementAction
      * Smaže výpis vč. transakcí (ON DELETE CASCADE) a payment_matches (CASCADE
      * přes bank_transactions). NEresetuje status faktur — ty zůstávají paid
      * (manuální cleanup u faktur, kterých se to týká, je doménou uživatele).
+     *
+     * Blokující vazby (mzdové doklady o vyplacení, RESTRICT) drží
+     * {@see BankStatementDeletionGuard} — kontrola předem i odchyt FK výjimky.
      */
     public function delete(Request $request, Response $response, array $args): Response
     {
@@ -1148,7 +1156,26 @@ final class BankStatementAction
             }
         }
 
-        $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$id]);
+        // Cizí vazby, které smazání blokují — kontrola PŘEDEM, aby uživatel dostal
+        // větu, která jmenuje co a kolik brání, ne syrovou hlášku databáze.
+        // Platí pro VŠECHNY zdroje výpisů: kontrola výš se týká jen avíz a jen
+        // spárovaných faktur, kdežto tahle mzdové vazby (RESTRICT) pokrývá i GPC.
+        $conflict = $this->deletionGuard->conflict($sid, $id);
+        if ($conflict !== null) {
+            return Json::error($response, $conflict->code, $conflict->message, 409, $conflict->toErrorExtra());
+        }
+
+        try {
+            $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$id]);
+        } catch (\PDOException $e) {
+            // Druhá půlka pojistky: vazba vznikla mezi kontrolou a mazáním, nebo
+            // ukazuje z tabulky, která v registru chybí. Ani tehdy nesmí uživatel
+            // dostat 500 se syrovým textem o cizím klíči.
+            if (!ForeignKeyDeletionGuard::isForeignKeyViolation($e)) {
+                throw $e;
+            }
+            return Json::error($response, 'has_dependencies', BankStatementDeletionGuard::raceMessage(), 409);
+        }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('bank.statement_deleted', $user['id'] ?? null, 'bank_statement', $id, [
