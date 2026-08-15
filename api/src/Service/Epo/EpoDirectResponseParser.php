@@ -184,19 +184,28 @@ final class EpoDirectResponseParser
             $embedded = $dataNode !== null
                 ? $this->decodeHex((string) $dataNode->textContent)
                 : null;
+            // Vazba potvrzenky na odeslané podání se bere z kontrolního součtu
+            // `Kontrola/Soubor/@KC`, což je MD5 odeslaného XML. Porovnávat
+            // místo toho bajty vloženého `<Data>` NEMŮŽE vyjít nikdy: EPO
+            // v potvrzence vrací REDUKOVANOU podobu podání — zahodí detailní
+            // řádky, přepíše identifikaci software, přeformátuje čísla
+            // i mezery a přidá vlastní blok `<Kontrola>`. Podání proto vždy
+            // končilo jako `confirmation_content_mismatch`, přestože bylo
+            // v pořádku. Ověřeno na skutečně přijatém KH v testovacím
+            // prostředí: KC souhlasilo na znak.
+            $sentXml = $this->extractXmlPayload($sentSignedData) ?? $sentSignedData;
+            $checksum = $this->confirmationChecksum($xpath);
             $contentMatch = null;
-            if ($embedded !== null) {
+            if ($checksum !== null) {
+                $contentMatch = hash_equals($checksum, strtolower(md5($sentXml)));
+            } elseif ($embedded !== null) {
+                // Starší potvrzenky bez `@KC`: zůstává porovnání obsahu, které
+                // vyjde jen u nezredukované podoby.
+                $embeddedXml = $this->extractXmlPayload($embedded) ?? $embedded;
                 $contentMatch = hash_equals(
-                    hash('sha256', $sentSignedData),
-                    hash('sha256', $embedded),
+                    hash('sha256', $sentXml),
+                    hash('sha256', $embeddedXml),
                 );
-                if (!$contentMatch) {
-                    $sentXml = $this->extractXmlPayload($sentSignedData);
-                    $embeddedXml = $this->extractXmlPayload($embedded);
-                    $contentMatch = $sentXml !== null
-                        && $embeddedXml !== null
-                        && hash_equals(hash('sha256', $sentXml), hash('sha256', $embeddedXml));
-                }
             }
             return [
                 'signature_valid' => true,
@@ -474,6 +483,23 @@ final class EpoDirectResponseParser
     }
 
     /** @param list<string> $names */
+    /**
+     * Kontrolní součet odeslaného podání z potvrzenky EPO
+     * (`Kontrola/Soubor/@KC`), normalizovaný na malá písmena. Je to MD5
+     * odeslaného XML — jediná vazba potvrzenky na to, co jsme poslali, protože
+     * samotný obsah vrací EPO zredukovaný.
+     */
+    private function confirmationChecksum(\DOMXPath $xpath): ?string
+    {
+        $node = $xpath->query('//*[local-name()="Soubor"]')->item(0);
+        if (!$node instanceof \DOMElement) {
+            return null;
+        }
+        $checksum = strtolower(trim($this->attribute($node, ['KC', 'kc'], 64) ?? ''));
+
+        return preg_match('/^[0-9a-f]{32}$/D', $checksum) === 1 ? $checksum : null;
+    }
+
     private function attribute(\DOMElement $element, array $names, int $limit = 100): ?string
     {
         foreach ($names as $name) {

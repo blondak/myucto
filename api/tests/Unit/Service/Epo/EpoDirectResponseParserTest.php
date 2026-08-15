@@ -87,6 +87,60 @@ XML;
         self::assertSame('state-secret', $result['state_password']);
     }
 
+    /**
+     * Doloženo skutečně přijatým kontrolním hlášením v testovacím prostředí:
+     * EPO vrací v potvrzence REDUKOVANOU podobu podání — 3 465 B se smrsklo
+     * na 935 B, zmizely detailní řádky, identifikace software se přepsala na
+     * „null" a čísla se přeformátovala. Porovnávat obsah proto nemůže vyjít
+     * nikdy a každé podání končilo jako `confirmation_content_mismatch`.
+     * Skutečnou vazbou je `Kontrola/Soubor/@KC`, tedy MD5 odeslaného XML.
+     */
+    public function testMatchesReducedConfirmationByItsChecksum(): void
+    {
+        if (!function_exists('openssl_cms_sign')) {
+            self::markTestSkipped('OpenSSL CMS není dostupné.');
+        }
+        $sentXml = '<Pisemnost><DPHKH1 dic="CZ00000019" rok="2026"><VetaD/><VetaA2/></DPHKH1></Pisemnost>';
+        $reduced = '<Pisemnost><DPHKH1 dic="CZ00000019" rok="2026"><VetaD/></DPHKH1></Pisemnost>';
+        $confirmationXml = sprintf(
+            '<Pisemnost><Data>%s</Data>'
+                . '<Kontrola><Soubor Delka="935" KC="%s" Nazev="DPHKH1-x"/></Kontrola>'
+                . '<Podani Cislo="123456" Datum="2026-07-25T10:15:30+02:00" Heslo="state-secret"/>'
+                . '</Pisemnost>',
+            bin2hex($reduced),
+            md5($sentXml),
+        );
+        $confirmation = (string) file_get_contents($this->signDer($confirmationXml));
+
+        $result = (new EpoDirectResponseParser())->confirmation($confirmation, $sentXml);
+
+        self::assertTrue($result['content_match']);
+    }
+
+    /**
+     * Kontrolní součet zůstává pojistkou, ne formalitou: potvrzenka k cizímu
+     * podání se nesmí spárovat jen proto, že přišla podepsaná.
+     */
+    public function testForeignChecksumStillFailsTheContentMatch(): void
+    {
+        if (!function_exists('openssl_cms_sign')) {
+            self::markTestSkipped('OpenSSL CMS není dostupné.');
+        }
+        $confirmationXml = sprintf(
+            '<Pisemnost><Data>%s</Data>'
+                . '<Kontrola><Soubor Delka="10" KC="%s" Nazev="DPHKH1-x"/></Kontrola>'
+                . '<Podani Cislo="123456" Datum="2026-07-25T10:15:30+02:00" Heslo="state-secret"/>'
+                . '</Pisemnost>',
+            bin2hex('<Pisemnost/>'),
+            md5('cizi podani'),
+        );
+        $confirmation = (string) file_get_contents($this->signDer($confirmationXml));
+
+        $result = (new EpoDirectResponseParser())->confirmation($confirmation, '<Pisemnost/>');
+
+        self::assertFalse($result['content_match']);
+    }
+
     public function testDoesNotDowngradeEmbeddedContentMismatch(): void
     {
         if (!function_exists('openssl_cms_sign')) {
