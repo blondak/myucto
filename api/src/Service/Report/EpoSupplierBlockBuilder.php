@@ -215,7 +215,7 @@ final class EpoSupplierBlockBuilder
      *   1) Má-li uživatel vyplněná samostatná `street_number_pop` / `street_number_orient`,
      *      použijí se a z `street` se odřízne trailing číslo, aby se nezdvojovalo.
      *   2) Jinak fallback parsing z `street`:
-     *      „Kardinála Berana 1104/36" → ['Kardinála Berana', '1104', '36']
+     *      „Zkušební 123/4"           → ['Zkušební', '123', '4']
      *      „Hlavní 12"                → ['Hlavní', '12', '']
      *      „Hlavní 12a"               → ['Hlavní', '12a', '']   (alfa suffix ok)
      *      „17. listopadu 220"        → ['17. listopadu', '220', '']  (číslo v NÁZVU ulice)

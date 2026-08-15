@@ -23,8 +23,8 @@ final class DppoEpoXmlParserTest extends TestCase
     private function sampleSupplier(): array
     {
         return [
-            'company_name' => 'Ukázková firma s.r.o.', 'street' => 'Kardinála Berana 1104/36',
-            'city' => 'Plzeň', 'zip' => '301 00', 'country_iso2' => 'CZ',
+            'company_name' => 'Ukázková firma s.r.o.', 'street' => 'Zkušební 123/4',
+            'city' => 'Vzorov', 'zip' => '100 00', 'country_iso2' => 'CZ',
             'ic' => '12345678', 'dic' => 'CZ12345678', 'taxpayer_type' => 'po',
             'financial_office_code' => '451', 'cz_nace_code' => '62020',
         ];

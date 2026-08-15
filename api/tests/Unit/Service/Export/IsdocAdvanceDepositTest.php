@@ -105,7 +105,7 @@ final class IsdocAdvanceDepositTest extends TestCase
             'amount_to_pay'    => $amountToPay,
             'supplier_snapshot' => [
                 'ic' => '12345679', 'dic' => 'CZ12345679', 'company_name' => 'Vzorová firma s.r.o.',
-                'street' => 'Kardinála Berana 1104/36', 'city' => 'Plzeň', 'zip' => '30100', 'country_iso2' => 'CZ',
+                'street' => 'Zkušební 123/4', 'city' => 'Vzorov', 'zip' => '10000', 'country_iso2' => 'CZ',
             ],
             'client_snapshot' => [
                 'ic' => '27140130', 'dic' => 'CZ27140130', 'company_name' => 'Studio Fialka',

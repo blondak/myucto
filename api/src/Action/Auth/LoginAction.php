@@ -423,7 +423,7 @@ final class LoginAction
             ->execute([$newHash, (int) $user['id']]);
     }
 
-    /** r***@hulan.cz — náznak adresy pro UI, bez prozrazení celého e-mailu. */
+    /** p***@example.cz — náznak adresy pro UI, bez prozrazení celého e-mailu. */
     private function maskEmail(string $email): string
     {
         $at = strpos($email, '@');

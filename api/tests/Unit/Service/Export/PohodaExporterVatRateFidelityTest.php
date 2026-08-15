@@ -367,7 +367,7 @@ final class PohodaExporterVatRateFidelityTest extends TestCase
             'note_above_items'  => null,
             'supplier_snapshot' => [
                 'ic' => '01698401', 'dic' => 'CZ01698401', 'company_name' => 'Dodavatel s.r.o.',
-                'street' => 'Kardinála Berana 1104/36', 'city' => 'Plzeň', 'zip' => '30100',
+                'street' => 'Zkušební 123/4', 'city' => 'Vzorov', 'zip' => '10000',
                 'country_iso2' => 'CZ',
             ],
             'client_snapshot'   => [

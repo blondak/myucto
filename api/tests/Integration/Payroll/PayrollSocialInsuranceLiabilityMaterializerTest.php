@@ -80,7 +80,7 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
             'INSERT INTO payroll_offices
                 (supplier_id, code, name, social_security_variable_symbol,
                  is_active, row_version)
-             VALUES (?, "PLZEN", "Syntetická účtárna Plzeň",
+             VALUES (?, "VZOROV", "Syntetická účtárna Vzorov",
                      "0012345678", 1, 1)',
         )->execute([$this->supplierId]);
         $this->officeId = (int) $pdo->lastInsertId();
