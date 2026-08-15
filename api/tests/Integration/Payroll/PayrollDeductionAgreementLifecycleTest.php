@@ -342,7 +342,9 @@ final class PayrollDeductionAgreementLifecycleTest extends TestCase
         $agreementId = (int) $agreement['id'];
 
         self::assertNull($this->repository->find($this->otherSupplierId, $agreementId));
-        self::assertSame([], $this->repository->listAgreements($this->otherSupplierId));
+        $foreignPage = $this->repository->listAgreements($this->otherSupplierId);
+        self::assertSame([], $foreignPage['items']);
+        self::assertSame(0, $foreignPage['total']);
 
         $this->expectException(\OutOfBoundsException::class);
         $this->repository->transition(

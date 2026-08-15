@@ -71,8 +71,6 @@ const cancelPendingId = ref<number | null>(null)
 
 /** Výsledky doptání, klíčované ID pokusu — zůstávají do dalšího načtení. */
 const polls = ref<Record<number, PayrollJmhzTransportPoll>>({})
-/** Období podání dotažené k ID; nepovinné, selhání se jen projeví chybějícím údajem. */
-const periods = ref<Record<number, { start: string; end: string }>>({})
 
 const variableSymbol = ref('')
 const variableSymbolTouched = ref(false)
@@ -94,6 +92,9 @@ const variableSymbolValid = computed(() =>
 
 interface AttemptGroup {
   submissionId: number
+  /** Období hlášení; nese ho každý řádek ledgeru, uvnitř skupiny je stejné. */
+  periodStart: string | null
+  periodEnd: string | null
   attempts: PayrollJmhzTransportAttempt[]
 }
 
@@ -107,7 +108,12 @@ const groups = computed<AttemptGroup[]>(() => {
   for (const attempt of attempts.value) {
     let group = byId.get(attempt.submission_id)
     if (!group) {
-      group = { submissionId: attempt.submission_id, attempts: [] }
+      group = {
+        submissionId: attempt.submission_id,
+        periodStart: attempt.period_start,
+        periodEnd: attempt.period_end,
+        attempts: [],
+      }
       byId.set(attempt.submission_id, group)
       ordered.push(group)
     }
@@ -128,15 +134,12 @@ type TimelineEntry =
  * zjistit, jde na konec — ne nahoru, kde by vytlačilo to, co je vidět jasně.
  */
 const timeline = computed<TimelineEntry[]>(() => {
-  const entries: TimelineEntry[] = groups.value.map(group => {
-    const period = periods.value[group.submissionId]
-    return {
-      source: 'app' as const,
-      key: `app-${group.submissionId}`,
-      sortKey: period?.start ?? '',
-      group,
-    }
-  })
+  const entries: TimelineEntry[] = groups.value.map(group => ({
+    source: 'app' as const,
+    key: `app-${group.submissionId}`,
+    sortKey: group.periodStart ?? '',
+    group,
+  }))
   for (const protocol of imported.value) {
     entries.push({
       source: 'imported' as const,
@@ -221,12 +224,19 @@ function canCancel(group: AttemptGroup): boolean {
   return canWrite.value && group.attempts.some(attempt => attempt.sent_at !== null)
 }
 
-function periodLabel(submissionId: number): string {
-  const period = periods.value[submissionId]
-  if (!period) return t('payroll.submissions.transport.group.period_unknown')
+/**
+ * Období podání je to, co uživatel hledá jako první („co jsem poslal za
+ * červenec"). Nese ho rovnou ledger, takže se na něj nikde nedoptáváme; když
+ * u pokusu chybí (podání už v evidenci není), zůstane jen odkaz na podání —
+ * chybějící období není důvod neukázat stavy.
+ */
+function periodLabel(group: AttemptGroup): string {
+  if (!group.periodStart || !group.periodEnd) {
+    return t('payroll.submissions.transport.group.period_unknown')
+  }
   return t('payroll.submissions.transport.group.period', {
-    start: period.start,
-    end: period.end,
+    start: group.periodStart,
+    end: group.periodEnd,
   })
 }
 
@@ -254,32 +264,6 @@ async function copyCorrelation(attempt: PayrollJmhzTransportAttempt) {
     // Schránka může být zakázaná politikou prohlížeče; text je vidět i tak.
     copiedId.value = null
   }
-}
-
-/**
- * Období podání je to, co uživatel hledá jako první („co jsem poslal za
- * červenec"). Ledger ho nenese, dotahuje se proto z detailu podání — a když
- * se nepovede, zůstane jen odkaz na podání. Chybějící období není důvod
- * neukázat stavy.
- */
-async function loadPeriods(rows: PayrollJmhzTransportAttempt[]) {
-  const ids = [...new Set(rows.map(row => row.submission_id))]
-    .filter(id => periods.value[id] === undefined)
-  if (ids.length === 0) return
-  const results = await Promise.allSettled(
-    ids.map(id => payrollApi.submissionDetail(id)),
-  )
-  const next = { ...periods.value }
-  results.forEach((result, index) => {
-    if (result.status !== 'fulfilled') return
-    const submission = result.value?.submission
-    if (!submission) return
-    next[ids[index]!] = {
-      start: submission.period_start,
-      end: submission.period_end,
-    }
-  })
-  periods.value = next
 }
 
 /** Nastavení zaměstnavatele zná variabilní symboly pracovišť — jinak se ptáme. */
@@ -329,7 +313,6 @@ async function load() {
     ])
     attempts.value = history.attempts ?? []
     imported.value = protocols.protocols ?? []
-    await loadPeriods(attempts.value)
   } catch (exception: unknown) {
     // Stav zůstává NEZNÁMÝ, ne prázdný — šablona podle `loadError` skryje
     // prázdný stav i seznam, aby se selhání nedalo přečíst jako „nic neodešlo".
@@ -388,9 +371,20 @@ async function switchEnvironment(next: PayrollJmhzTransportEnvironment) {
   await load()
 }
 
+/**
+ * Období nese jen přehled, ne odpověď na doptání — ta vrací holý řádek ledgeru.
+ * Převezme se proto z nahrazovaného pokusu, jinak by hlavička skupiny po
+ * doptání spadla na „období neznámé", aniž by se cokoli stalo.
+ */
 function replaceAttempt(updated: PayrollJmhzTransportAttempt) {
   attempts.value = attempts.value.map(
-    attempt => (attempt.id === updated.id ? updated : attempt),
+    attempt => (attempt.id === updated.id
+      ? {
+        ...updated,
+        period_start: updated.period_start ?? attempt.period_start,
+        period_end: updated.period_end ?? attempt.period_end,
+      }
+      : attempt),
   )
 }
 
@@ -684,7 +678,7 @@ onMounted(loadVariableSymbols)
           <div class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 p-4 sm:p-6">
             <div>
               <h3 class="text-base font-semibold text-neutral-900">
-                {{ periodLabel(entry.group.submissionId) }}
+                {{ periodLabel(entry.group) }}
               </h3>
               <p class="mt-1 text-xs text-neutral-500">
                 {{ t('payroll.submissions.transport.group.submission', {
@@ -730,7 +724,7 @@ onMounted(loadVariableSymbols)
           >
             <p class="text-sm font-semibold text-danger-700">
               {{ t('payroll.submissions.transport.storno.confirm_title', {
-                period: periodLabel(entry.group.submissionId),
+                period: periodLabel(entry.group),
               }) }}
             </p>
             <p class="mt-1 text-sm text-danger-700">

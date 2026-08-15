@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { PayrollInputImportPreview, PayrollPerson } from '@/api/payroll'
+import type { PayrollInputImportPreview } from '@/api/payroll'
+import type { PayrollAbsenceEmployment } from '@/api/payrollAbsences'
 import {
   canApplyPayrollImport,
   localPayrollPeriod,
   monthStart,
   parsePayrollAmountToMinor,
   parsePayrollHoursToMilli,
-  payrollEmploymentOptions,
+  payrollEmploymentOptionsFromContext,
   payrollImportFingerprint,
   payrollImportIssues,
   payrollMinorToInput,
@@ -66,18 +67,16 @@ describe('payrollComponentsUi', () => {
   })
 
   it('keeps the employee-employment contract used by mobile cards and forms', () => {
-    const people = [{
-      id: 8,
+    const employments = [{
+      id: 12,
+      employee_id: 8,
+      code: 'SYN-HPP',
+      relation_type: 'employment',
+      status: 'active',
       full_name: 'Syntetická osoba',
-      employments: [{
-        id: 12,
-        code: 'SYN-HPP',
-        relation_type: 'employment',
-        status: 'active',
-      }],
-    }] as PayrollPerson[]
+    }] as PayrollAbsenceEmployment[]
 
-    expect(payrollEmploymentOptions(people)).toEqual([{
+    expect(payrollEmploymentOptionsFromContext(employments)).toEqual([{
       employee_id: 8,
       employment_id: 12,
       full_name: 'Syntetická osoba',
@@ -88,18 +87,27 @@ describe('payrollComponentsUi', () => {
   })
 
   it('never offers an archived or never-started relation for a payroll input', () => {
-    const people = [{
-      id: 8,
-      full_name: 'Syntetická osoba',
-      employments: [
-        { id: 12, code: 'SYN-HPP', relation_type: 'employment', status: 'active' },
-        { id: 13, code: 'SYN-ARCH', relation_type: 'employment', status: 'archived' },
-        { id: 14, code: 'SYN-NOSHOW', relation_type: 'employment', status: 'no_show' },
-      ],
-    }] as PayrollPerson[]
+    const employments = [
+      { id: 12, employee_id: 8, code: 'SYN-HPP', relation_type: 'employment', status: 'active', full_name: 'Syntetická osoba' },
+      { id: 13, employee_id: 8, code: 'SYN-ARCH', relation_type: 'employment', status: 'archived', full_name: 'Syntetická osoba' },
+      { id: 14, employee_id: 8, code: 'SYN-NOSHOW', relation_type: 'employment', status: 'no_show', full_name: 'Syntetická osoba' },
+    ] as PayrollAbsenceEmployment[]
 
-    expect(payrollEmploymentOptions(people).map(option => option.employment_id))
+    expect(payrollEmploymentOptionsFromContext(employments).map(option => option.employment_id))
       .toEqual([12])
+  })
+
+  // Server řadí podle collation databáze, klient podle českých pravidel. Bez
+  // vlastního řazení by nabídka skákala podle toho, odkud přišla.
+  it('orders the offer by Czech collation, then by relation code', () => {
+    const employments = [
+      { id: 21, employee_id: 2, code: 'B', relation_type: 'employment', status: 'active', full_name: 'Žák' },
+      { id: 22, employee_id: 1, code: 'B', relation_type: 'employment', status: 'active', full_name: 'Čáp' },
+      { id: 23, employee_id: 1, code: 'A', relation_type: 'employment', status: 'active', full_name: 'Čáp' },
+    ] as PayrollAbsenceEmployment[]
+
+    expect(payrollEmploymentOptionsFromContext(employments).map(option => option.employment_id))
+      .toEqual([23, 22, 21])
   })
 
   it('converts user amounts without floating-point rounding', () => {

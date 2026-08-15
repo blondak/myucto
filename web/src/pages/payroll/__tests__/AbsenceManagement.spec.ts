@@ -4,7 +4,7 @@ import { ref } from 'vue'
 
 const m = vi.hoisted(() => ({
   context: vi.fn(),
-  absences: vi.fn(),
+  absencesPage: vi.fn(),
   averages: vi.fn(),
   leaveLedger: vi.fn(),
   decide: vi.fn(),
@@ -24,7 +24,7 @@ vi.mock('vue-router', () => ({
 vi.mock('@/api/payrollAbsences', () => ({
   payrollAbsenceApi: {
     context: m.context,
-    absences: m.absences,
+    absencesPage: m.absencesPage,
     averages: m.averages,
     leaveLedger: m.leaveLedger,
     decide: m.decide,
@@ -57,6 +57,48 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 
 import AbsenceManagement from '@/pages/payroll/AbsenceManagement.vue'
 
+function absence(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 44,
+    employment_id: 12,
+    full_name: 'Syntetická osoba',
+    employment_code: 'SYNTH-HPP',
+    absence_type: 'dpn',
+    date_from: '2026-06-15',
+    date_to: '2026-06-28',
+    partial_first_minutes: null,
+    partial_last_minutes: null,
+    average_snapshot_id: 8,
+    average_hourly_minor: 50_000,
+    note: null,
+    support_status: 'manual_review',
+    status: 'requested',
+    correction_pending: false,
+    row_version: 1,
+    ...overrides,
+  }
+}
+
+function absencesPage(absences: unknown[], total = absences.length) {
+  return { absences, total, limit: 12, offset: 0 }
+}
+
+// Plná první stránka z třiceti záznamů — jediný tvar, ve kterém má stránkování
+// co dělat. Dovolená místo DPN, ať karty nepřidávají posuzovací zaškrtávátka.
+function fullFirstPage() {
+  return absencesPage(
+    Array.from({ length: 12 }, (_, index) =>
+      absence({ id: index + 1, absence_type: 'vacation' })),
+    30,
+  )
+}
+
+// Stránka načítá i z watcheru nad vybraným vztahem, takže pořadí volání není
+// pevné — testy se ptají vždy na to poslední.
+function lastPageArgs() {
+  return m.absencesPage.mock.calls.at(-1)![3]
+}
+
 describe('AbsenceManagement', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -76,24 +118,7 @@ describe('AbsenceManagement', () => {
       status: 'active',
       full_name: 'Druhá syntetická osoba',
     }])
-    m.absences.mockResolvedValue([{
-      id: 44,
-      employment_id: 12,
-      full_name: 'Syntetická osoba',
-      employment_code: 'SYNTH-HPP',
-      absence_type: 'dpn',
-      date_from: '2026-06-15',
-      date_to: '2026-06-28',
-      partial_first_minutes: null,
-      partial_last_minutes: null,
-      average_snapshot_id: 8,
-      average_hourly_minor: 50_000,
-      note: null,
-      support_status: 'manual_review',
-      status: 'requested',
-      correction_pending: false,
-      row_version: 1,
-    }])
+    m.absencesPage.mockResolvedValue(absencesPage([absence()]))
     m.averages.mockResolvedValue([{
       id: 8,
       employment_id: 12,
@@ -115,7 +140,7 @@ describe('AbsenceManagement', () => {
   })
 
   it('offers a retry instead of an empty state when the absences fail to load', async () => {
-    m.absences.mockRejectedValue(new Error('network'))
+    m.absencesPage.mockRejectedValue(new Error('network'))
 
     const wrapper = mount(AbsenceManagement)
     await flushPromises()
@@ -124,7 +149,7 @@ describe('AbsenceManagement', () => {
     expect(wrapper.text()).toContain('payroll_absence.messages.load_failed_hint')
     expect(wrapper.text()).not.toContain('payroll_absence.absences.empty')
 
-    m.absences.mockResolvedValue([])
+    m.absencesPage.mockResolvedValue(absencesPage([]))
     await wrapper.get('[data-test="load-failed"] [data-test="empty-state-cta"]').trigger('click')
     await flushPromises()
 
@@ -132,7 +157,7 @@ describe('AbsenceManagement', () => {
   })
 
   it('shows the empty state when the relation genuinely has no absence', async () => {
-    m.absences.mockResolvedValue([])
+    m.absencesPage.mockResolvedValue(absencesPage([]))
 
     const wrapper = mount(AbsenceManagement)
     await flushPromises()
@@ -248,7 +273,7 @@ describe('AbsenceManagement', () => {
     const today = new Date()
     const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0)
     const expected = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`
-    expect(m.absences.mock.calls[0][1]).toBe(expected)
+    expect(m.absencesPage.mock.calls[0][1]).toBe(expected)
     wrapper.unmount()
   })
 
@@ -358,7 +383,7 @@ describe('AbsenceManagement', () => {
     const wrapper = mount(AbsenceManagement)
     await flushPromises()
 
-    expect(m.absences.mock.calls[0][2]).toBe(13)
+    expect(m.absencesPage.mock.calls[0][2]).toBe(13)
     const selectors = wrapper.findAllComponents({ name: 'SearchableSelect' })
     expect(selectors[0].props('modelValue')).toBe(13)
     expect(selectors[1].props('modelValue')).toBe('dpn')
@@ -371,9 +396,83 @@ describe('AbsenceManagement', () => {
     const wrapper = mount(AbsenceManagement)
     await flushPromises()
 
-    expect(m.absences.mock.calls[0][2]).toBe(12)
+    expect(m.absencesPage.mock.calls[0][2]).toBe(12)
     const selectors = wrapper.findAllComponents({ name: 'SearchableSelect' })
     expect(selectors[1].props('modelValue')).toBe('vacation')
+    wrapper.unmount()
+  })
+
+  /*
+   * Server strop drží tvrdě. Kdyby si stránka řekla o „všechno", zobrazila by
+   * jen prvních padesát nepřítomností a o zbytku by mlčela.
+   */
+  it('asks the server for one bounded page instead of everything', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    expect(m.absencesPage.mock.calls[0][3]).toEqual({ limit: 12, offset: 0 })
+    wrapper.unmount()
+  })
+
+  it('pages the card grid and re-asks the server with the new offset', async () => {
+    m.absencesPage.mockResolvedValue(fullFirstPage())
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    const pager = wrapper.findComponent({ name: 'PaginationBar' })
+    expect(pager.exists()).toBe(true)
+    expect(pager.props('total')).toBe(30)
+
+    pager.vm.$emit('update:page', 3)
+    await flushPromises()
+
+    expect(lastPageArgs()).toEqual({ limit: 12, offset: 24 })
+    wrapper.unmount()
+  })
+
+  it('hides the pager when a single page holds every absence', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="absence-pagination"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('returns to the first page when the date range changes', async () => {
+    m.absencesPage.mockResolvedValue(fullFirstPage())
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    wrapper.findComponent({ name: 'PaginationBar' }).vm.$emit('update:page', 3)
+    await flushPromises()
+    expect(lastPageArgs()).toEqual({ limit: 12, offset: 24 })
+
+    await wrapper.findAll('input[type="date"]')[0].setValue('2026-06-01')
+    const refresh = wrapper.findAll('button')
+      .find(button => button.text().includes('common.refresh'))
+    await refresh!.trigger('click')
+    await flushPromises()
+
+    expect(lastPageArgs()).toEqual({ limit: 12, offset: 0 })
+    wrapper.unmount()
+  })
+
+  it('returns to the first page when another relation is picked', async () => {
+    m.absencesPage.mockResolvedValue(fullFirstPage())
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    wrapper.findComponent({ name: 'PaginationBar' }).vm.$emit('update:page', 3)
+    await flushPromises()
+
+    expect(lastPageArgs()).toEqual({ limit: 12, offset: 24 })
+
+    wrapper.findAllComponents({ name: 'SearchableSelect' })[0]
+      .vm.$emit('update:modelValue', 13)
+    await flushPromises()
+
+    expect(m.absencesPage.mock.calls.at(-1)![2]).toBe(13)
+    expect(lastPageArgs()).toEqual({ limit: 12, offset: 0 })
     wrapper.unmount()
   })
 })

@@ -83,6 +83,13 @@ export interface EnforcementCaseSummary {
   updated_at: string
 }
 
+export interface EnforcementCasesPage {
+  cases: EnforcementCaseSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface EnforcementSettlementClaim {
   claim_id: number
   category: EnforcementClaimCategory
@@ -159,10 +166,18 @@ export interface EnforcementDependant {
 }
 
 export const payrollEnforcementApi = {
-  cases: (filters?: { employee_id?: number; status?: EnforcementCaseStatus }) =>
-    api.get<{ cases: EnforcementCaseSummary[] }>('/payroll/enforcement/cases', {
-      params: filters,
-    }).then(response => response.data.cases),
+  /**
+   * Stránka seznamu případů. Filtr i stránkování drží server — bez `limit` se
+   * neposílá „všechno", ale serverový strop, a o zbytku by výpis mlčel.
+   */
+  casesPage: (params?: {
+    employee_id?: number
+    status?: EnforcementCaseStatus
+    limit?: number
+    offset?: number
+  }) =>
+    api.get<EnforcementCasesPage>('/payroll/enforcement/cases', { params })
+      .then(response => response.data),
   detail: (id: number) =>
     api.get<{ case: EnforcementCaseDetail }>(`/payroll/enforcement/cases/${id}`)
       .then(response => response.data.case),

@@ -38,7 +38,7 @@ final class AnnualTaxCertificateService
                 . 'databázovou transakci.',
             );
         }
-        $storageLock = 'payroll-document-storage:supplier:' . $supplierId;
+        $storageLock = self::storageLockName($supplierId, $employeeId, $taxYear);
         $this->acquireStorageLock($pdo, $storageLock);
         try {
             $scope = $this->documents->beginStorageScope();
@@ -117,6 +117,32 @@ final class AnnualTaxCertificateService
         } finally {
             $this->releaseStorageLock($pdo, $storageLock);
         }
+    }
+
+    /**
+     * Zámek drží JEDNU osobu a JEDEN zdaňovací rok, ne celého zaměstnavatele.
+     *
+     * Dřív se zamykalo `payroll-document-storage:supplier:<id>`, jenže zámek se
+     * drží přes vykreslení PDF i archivaci — u padesáti zaměstnanců se roční
+     * potvrzení vydávala jedno po druhém a další žádost po deseti vteřinách
+     * spadla na „úložiště je používáno jinou operací". Přitom souběh dvou RŮZNÝCH
+     * osob kolidovat nemůže: úložiště je adresované obsahem (klíč = SHA-256
+     * souboru, zápis přes tmp + rename) a duplicitní vydání téhož dokladu chytá
+     * unikátní index `uq_payroll_document_idempotency`. Zbývá jediná skutečná
+     * kolize — dvě souběžná vydání TÉHOŽ potvrzení, kdy by úklid po neúspěšné
+     * dávce smazal soubor, na který se ta druhá právě odkázala. Ta se odehraje
+     * jen v rámci jedné osoby a roku, a přesně to tenhle zámek pokrývá.
+     *
+     * Druh dokladu v názvu záměrně není: potvrzení a jeho opravný protějšek se
+     * navzájem nahrazují, takže je bezpečnější je serializovat spolu — a název
+     * zámku se tím vejde do 64 znaků, což je limit MySQL.
+     */
+    private static function storageLockName(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+    ): string {
+        return "payroll-annual-document:{$supplierId}:{$employeeId}:{$taxYear}";
     }
 
     private function rollbackIfOpen(PDO $pdo): void

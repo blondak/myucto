@@ -54,16 +54,33 @@ final class PayrollEnforcementAction
                     PayrollTimeValue::string($query['status'], 'status'),
                 )
                 : null;
+            // Oba filtry jsou volitelné, takže bez stropu tenhle endpoint četl
+            // všechny případy, které firma kdy vedla. Strop je tvrdý (ne jen
+            // výchozí), aby ho nešlo zvednout parametrem z URL.
+            $limit = max(1, min(
+                PayrollEnforcementRepository::LIST_MAX_LIMIT,
+                (int) ($query['limit'] ?? PayrollEnforcementRepository::LIST_DEFAULT_LIMIT),
+            ));
+            $offset = max(0, (int) ($query['offset'] ?? 0));
         } catch (\ValueError|\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
 
+        $page = $this->repository->listCases(
+            $this->currentSupplierId($request),
+            $employeeId,
+            $status,
+            $limit,
+            $offset,
+        );
+
+        // Klíč `cases` zůstává, aby stávající volající nespadli; `total`/`limit`/
+        // `offset` přibyly vedle něj, protože seznam už nemusí být úplný.
         return Json::ok($response, [
-            'cases' => $this->repository->listCases(
-                $this->currentSupplierId($request),
-                $employeeId,
-                $status,
-            ),
+            'cases' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ]);
     }
 

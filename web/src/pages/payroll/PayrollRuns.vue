@@ -14,6 +14,7 @@ import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '
 import { formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
@@ -43,6 +44,7 @@ const breakdownLoading = ref<Record<number, boolean>>({})
 const total = ref(0)
 const pageSize = 12
 const offset = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const pendingCommand = ref<{ run: PayrollRun, command: PayrollRunCommand } | null>(null)
 const pendingDelete = ref<PayrollRun | null>(null)
 const commandReason = ref('')
@@ -162,7 +164,7 @@ async function load() {
   try {
     const [page, people] = await Promise.all([
       payrollApi.runsPage(period.value, { limit: pageSize, offset: offset.value }),
-      payrollApi.people().catch(() => null),
+      payrollApi.peopleOptions().catch(() => null),
     ])
     runs.value = page.runs
     total.value = page.total
@@ -183,8 +185,9 @@ async function load() {
   }
 }
 
-function goToPage(nextOffset: number) {
-  offset.value = Math.max(0, nextOffset)
+// Stránkuje sdílená `PaginationBar` (číslo stránky od jedné); server zná offset.
+function goToPage(nextPage: number) {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
   void load()
 }
 
@@ -557,37 +560,13 @@ onMounted(load)
         </div>
       </article>
 
-      <div
-        v-if="total > pageSize"
-        class="flex flex-wrap items-center justify-between gap-3 pt-1"
+      <PaginationBar
         data-testid="payroll-runs-pagination"
-      >
-        <p class="text-sm text-neutral-500">
-          {{ t('common.pagination_range', {
-            from: offset + 1,
-            to: Math.min(offset + runs.length, total),
-            total,
-          }) }}
-        </p>
-        <div class="flex gap-2">
-          <button
-            type="button"
-            :class="btnOutline('neutral')"
-            :disabled="loading || offset === 0"
-            @click="goToPage(offset - pageSize)"
-          >
-            {{ t('common.previous') }}
-          </button>
-          <button
-            type="button"
-            :class="btnOutline('neutral')"
-            :disabled="loading || offset + runs.length >= total"
-            @click="goToPage(offset + pageSize)"
-          >
-            {{ t('common.next') }}
-          </button>
-        </div>
-      </div>
+        :page="currentPage"
+        :per-page="pageSize"
+        :total="total"
+        @update:page="goToPage"
+      />
     </section>
 
     <Modal

@@ -69,12 +69,41 @@ export interface AbsencePayload {
   note: string | null
 }
 
+export interface PayrollAbsencesPage {
+  absences: PayrollAbsence[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export const payrollAbsenceApi = {
   context: () =>
     api.get<{ employments: PayrollAbsenceEmployment[] }>('/payroll/time/context')
       .then(response => response.data.employments),
+  /**
+   * Stránka nepřítomností. Server strop drží tvrdě (výchozí 50, maximum 200),
+   * takže bez `limit` a `offset` bychom viděli jen první stránku a o zbytku
+   * mlčeli — `total` je jediné, z čeho se pozná, že další záznamy existují.
+   */
+  absencesPage: (
+    from: string,
+    to: string,
+    employmentId?: number,
+    page?: { limit?: number, offset?: number },
+  ) =>
+    api.get<PayrollAbsencesPage>('/payroll/time/absences', {
+      params: {
+        from,
+        to,
+        employment_id: employmentId,
+        ...(page?.limit === undefined ? {} : { limit: page.limit }),
+        ...(page?.offset === undefined ? {} : { offset: page.offset }),
+      },
+    }).then(response => response.data),
+  // Nestránkovaný přehled pro karty zaměstnanců — vrací jen serverovou výchozí
+  // stránku, na plný seznam je `absencesPage()`.
   absences: (from: string, to: string, employmentId?: number) =>
-    api.get<{ absences: PayrollAbsence[] }>('/payroll/time/absences', {
+    api.get<PayrollAbsencesPage>('/payroll/time/absences', {
       params: { from, to, employment_id: employmentId },
     }).then(response => response.data.absences),
   createAbsence: (payload: AbsencePayload) =>

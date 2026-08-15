@@ -46,15 +46,36 @@ final class PayrollTravelAction
         if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
             return $error;
         }
-        $period = $request->getQueryParams()['period'] ?? null;
+        $query = $request->getQueryParams();
+        $period = $query['period'] ?? null;
         try {
             $periodStart = $period === null || $period === '' ? null : $this->month($period);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
+        // Období je volitelné, takže bez stropu tenhle endpoint četl všechny
+        // pracovní cesty firmy od jejího vzniku. Strop je tvrdý (ne jen výchozí),
+        // aby ho nešlo obejít parametrem z URL.
+        $limit = max(1, min(
+            PayrollBusinessTripRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollBusinessTripRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
 
+        $page = $this->trips->list(
+            $this->currentSupplierId($request),
+            $periodStart,
+            $limit,
+            $offset,
+        );
+
+        // Klíč `trips` zůstává, aby stávající volající nespadli; `total`/`limit`/`offset`
+        // přibyly vedle něj, protože seznam už nemusí být úplný.
         return Json::ok($response, [
-            'trips' => $this->trips->list($this->currentSupplierId($request), $periodStart),
+            'trips' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ]);
     }
 

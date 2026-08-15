@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { apiErrorMessage } from '@/api/errors'
@@ -7,6 +7,7 @@ import {
   payrollApi,
   type PayrollEmployment,
   type PayrollEmploymentCreatePayload,
+  type PayrollPeopleFilter,
   type PayrollPerson,
   type PayrollPersonCreatePayload,
   type PayrollPersonListItem,
@@ -15,6 +16,7 @@ import {
   type PayrollRelationType,
 } from '@/api/payroll'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
@@ -39,11 +41,28 @@ const loading = ref(true)
  */
 const loadFailed = ref(false)
 const people = ref<PayrollPersonListItem[]>([])
+/*
+ * Zúžení i stránkování dělá server. Kdyby zužoval prohlížeč, hledal by jen ve
+ * stránce, kterou má právě načtenou, a o člověku ze třetí stránky by tvrdil,
+ * že neexistuje.
+ */
+const pageSize = 25
+const offset = ref(0)
+const total = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
+/*
+ * „Firma nikoho nemá" a „zúžení nikoho nenašlo" jsou dvě různé zprávy, ale
+ * server na obojí vrací nulu. Rozhoduje se proto zvlášť — viz `load()`.
+ */
+const hasAnyPeople = ref(false)
 const expandedId = ref<number | null>(null)
 const details = ref<Record<number, PayrollPerson>>({})
 const loadingDetailId = ref<number | null>(null)
 const searchQuery = ref('')
-const peopleFilter = ref<'active' | 'all' | 'needs_setup'>('active')
+const peopleFilter = ref<PayrollPeopleFilter>('active')
+const narrowed = computed(
+  () => peopleFilter.value !== 'all' || searchQuery.value.trim() !== '',
+)
 const showEmployeeForm = ref(false)
 const savingEmployee = ref(false)
 const employeeError = ref('')
@@ -85,17 +104,6 @@ const employeeForm = reactive({
   planned_start_on: todayIso(),
   monthly_gross: null as number | null,
 })
-const filteredPeople = computed(() => {
-  const query = normalizeSearch(searchQuery.value)
-  return people.value.filter((person) => {
-    const matchesFilter = peopleFilter.value === 'all'
-      || (peopleFilter.value === 'active' && person.is_active)
-      || (peopleFilter.value === 'needs_setup' && person.needs_setup)
-    return matchesFilter
-      && (!query || normalizeSearch(person.full_name).includes(query))
-  })
-})
-
 /**
  * Editace osoby je vlastní POHLED, ne panel nad seznamem.
  *
@@ -110,11 +118,17 @@ const filteredPeople = computed(() => {
  * Adresa přesto zůstává sdílitelná: výběr se zrcadlí do `?person=<id>`, takže
  * odkaz i tlačítko Zpět v prohlížeči fungují.
  */
-const selectedPerson = computed<PayrollPersonListItem | null>(
-  () => people.value.find(item => item.id === expandedId.value) ?? null,
-)
 const selectedDetail = computed<PayrollPerson | null>(
   () => (expandedId.value === null ? null : details.value[expandedId.value] ?? null),
+)
+/*
+ * Řádek stránky je čerstvější, ale osoba otevřená z deep-linku na stránce být
+ * nemusí — pak platí načtený detail. Bez toho by u ní chybělo rozhodnutí
+ * o smazatelnosti a nabídka akcí by byla chudší jen kvůli tomu, odkud se
+ * obrazovka otevřela.
+ */
+const selectedPerson = computed<PayrollPersonListItem | null>(
+  () => people.value.find(item => item.id === expandedId.value) ?? selectedDetail.value,
 )
 const editing = computed(() => expandedId.value !== null)
 
@@ -173,6 +187,10 @@ async function removePerson() {
     backToList()
     delete details.value[person.id]
     people.value = people.value.filter(item => item.id !== person.id)
+    // Bez tohohle by pager dál počítal se smazanou osobou a nabídl stránku navíc.
+    total.value = Math.max(0, total.value - 1)
+    // Prázdno pod zúžením ještě neznamená, že firma nikoho nemá.
+    if (!narrowed.value) hasAnyPeople.value = total.value > 0
     toast.success(t('payroll.people.delete.person_done'))
   } catch (error) {
     toast.error(apiErrorMessage(error, t('payroll.people.mutation_failed')))
@@ -213,14 +231,6 @@ function removeEmploymentFromDetail(personId: number, employmentId: number) {
   if (listItem && listItem.employment_count > 0) listItem.employment_count -= 1
 }
 
-function normalizeSearch(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .trim()
-    .toLocaleLowerCase()
-}
-
 function resetEmployeeForm() {
   employeeForm.full_name = ''
   employeeForm.birth_date = ''
@@ -255,7 +265,26 @@ async function load() {
   loading.value = true
   loadFailed.value = false
   try {
-    people.value = await payrollApi.people()
+    const page = await payrollApi.peoplePage({
+      limit: pageSize,
+      offset: offset.value,
+      filter: peopleFilter.value,
+      q: searchQuery.value.trim(),
+    })
+    people.value = page.items
+    total.value = page.total
+    if (page.total > 0 || !narrowed.value) {
+      hasAnyPeople.value = page.total > 0
+    } else {
+      // Prázdno po zúžení znamená obojí. Rozhodne JEDEN doplňkový dotaz na
+      // nezúžený počet — a jen v tomhle vzácném případě.
+      hasAnyPeople.value = (await payrollApi.peoplePage({
+        limit: 1,
+        offset: 0,
+        filter: 'all',
+      })).total > 0
+    }
+    pruneDetails()
   } catch {
     // `people` se schválně nevynuluje — poslední známý seznam je pořád lepší
     // informace než prázdno, které by vypadalo jako „firma nemá zaměstnance".
@@ -265,6 +294,59 @@ async function load() {
     loading.value = false
   }
 }
+
+/*
+ * Detail se drží jen k řádkům, které jsou na stránce, plus k právě otevřené
+ * osobě. Jinak by po přestránkování zůstal v paměti někdo, koho seznam už
+ * nezobrazuje, a rozbalený řádek by ukazoval mimo obrazovku.
+ */
+function pruneDetails() {
+  const visible = new Set(people.value.map(item => item.id))
+  for (const key of Object.keys(details.value)) {
+    const id = Number(key)
+    if (!visible.has(id) && id !== expandedId.value) delete details.value[id]
+  }
+}
+
+/*
+ * Jiné zúžení = jiná množina osob; zůstat na třetí stránce by ukázalo prázdno.
+ * Rozbalený řádek se přitom zavírá — patřil předchozímu výběru a nad novým
+ * seznamem by visel jako řádek, který v něm nejde najít.
+ */
+function reloadFromFirstPage() {
+  offset.value = 0
+  backToList()
+  void load()
+}
+
+// Stránkuje sdílená `PaginationBar` (číslo stránky od jedné); server zná offset.
+function goToPage(nextPage: number) {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  backToList()
+  void load()
+}
+
+/*
+ * Filtr a hledání teď stojí požadavek, takže se hledání nesmí posílat na každé
+ * písmeno. Vlastní `setTimeout` proto, že sdílený pomocník v projektu není —
+ * stejný vzor používá i seznam bankovních výpisů.
+ */
+const SEARCH_DEBOUNCE_MS = 300
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+// Když zúžení přestaví kód (po založení osoby), načte si stránku sám; hlídač se
+// odmlčí, aby nenačítal podruhé a nezavřel právě otevřenou osobu.
+let suppressNarrowingReload = false
+
+watch(peopleFilter, () => {
+  if (suppressNarrowingReload) return
+  reloadFromFirstPage()
+})
+
+watch(searchQuery, () => {
+  if (searchTimer !== undefined) clearTimeout(searchTimer)
+  if (suppressNarrowingReload) return
+  searchTimer = setTimeout(reloadFromFirstPage, SEARCH_DEBOUNCE_MS)
+})
 
 async function toggleDetail(person: PayrollPersonListItem) {
   if (expandedId.value === person.id) {
@@ -408,10 +490,16 @@ async function createEmployee() {
   try {
     const created = await payrollApi.createPerson(payload)
     showEmployeeForm.value = false
-    await load()
-    createdEmployeeId.value = created.id
+    // Nová osoba musí být vidět bez ohledu na to, co bylo v hledání a filtru —
+    // zúžení se proto srovná JEŠTĚ před načtením, ne po něm.
+    suppressNarrowingReload = true
     peopleFilter.value = 'all'
     searchQuery.value = ''
+    offset.value = 0
+    await nextTick()
+    suppressNarrowingReload = false
+    await load()
+    createdEmployeeId.value = created.id
     details.value[created.id] = created
     expandedId.value = created.id
     toast.success(t('payroll.people.create.created'))
@@ -454,15 +542,34 @@ function toggleAdvancedProfile(event: Event) {
 /**
  * Deep-link na člověka (`/payroll/people?person=12`) — z karty zaměstnance
  * na přehledu mezd. Bez toho vede „karta zaměstnance" jen na seznam a uživatel
- * v něm musí jméno znovu najít. Neznámé id se ignoruje.
+ * v něm musí jméno znovu najít.
+ *
+ * Osoba nemusí být na načtené stránce — může být neaktivní, nebo až na páté.
+ * Detail se proto dotahuje PŘÍMO podle id; prolistovat kvůli jednomu odkazu
+ * celý seznam by stálo tolik požadavků, kolik má firma stránek. Neznámé ani
+ * cizí id nic neotevře.
  */
 async function openFromQuery() {
   const raw = Array.isArray(route.query.person) ? route.query.person[0] : route.query.person
   if (typeof raw !== 'string' || raw === '') return
-  const person = people.value.find(item => item.id === Number(raw))
-  if (!person) return
-  peopleFilter.value = 'all'
-  await toggleDetail(person)
+  const id = Number(raw)
+  if (!Number.isInteger(id) || id <= 0) return
+  const person = people.value.find(item => item.id === id)
+  if (person) {
+    await toggleDetail(person)
+    return
+  }
+
+  loadingDetailId.value = id
+  try {
+    details.value[id] = await payrollApi.person(id)
+    advancedProfileOpen.value = false
+    expandedId.value = id
+  } catch {
+    // Odkaz na neznámou osobu je slepý, ne rozbitý — seznam zůstane, jak byl.
+  } finally {
+    loadingDetailId.value = null
+  }
 }
 
 onMounted(async () => {
@@ -769,7 +876,7 @@ onMounted(async () => {
         @action="load"
       />
 
-      <div v-else-if="people.length === 0" class="p-8 text-center">
+      <div v-else-if="!hasAnyPeople" class="p-8 text-center">
         <h2 class="text-base font-semibold text-neutral-900">{{ t('payroll.people.empty_title') }}</h2>
         <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.people.empty_description') }}</p>
         <button
@@ -785,7 +892,7 @@ onMounted(async () => {
         </button>
       </div>
 
-      <div v-else-if="filteredPeople.length === 0" class="p-8 text-center">
+      <div v-else-if="people.length === 0" class="p-8 text-center">
         <h2 class="text-base font-semibold text-neutral-900">{{ t('payroll.people.no_results_title') }}</h2>
         <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.people.no_results_description') }}</p>
       </div>
@@ -803,7 +910,7 @@ onMounted(async () => {
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <template v-for="person in filteredPeople" :key="person.id">
+              <template v-for="person in people" :key="person.id">
                 <tr class="align-top">
                   <td class="px-4 py-3 font-medium text-neutral-900">{{ person.full_name }}</td>
                   <td class="px-4 py-3">
@@ -829,7 +936,7 @@ onMounted(async () => {
         </div>
 
         <div class="space-y-3 p-4 md:hidden">
-          <article v-for="person in filteredPeople" :key="person.id" class="min-w-0 overflow-hidden rounded-lg border border-neutral-200 p-4">
+          <article v-for="person in people" :key="person.id" class="min-w-0 overflow-hidden rounded-lg border border-neutral-200 p-4">
             <div class="flex flex-wrap items-start justify-between gap-2">
               <h2 class="font-semibold text-neutral-900">{{ person.full_name }}</h2>
               <div class="flex flex-wrap gap-1.5">
@@ -849,6 +956,15 @@ onMounted(async () => {
             </button>
           </article>
         </div>
+
+        <PaginationBar
+          data-testid="payroll-people-pagination"
+          embedded
+          :page="currentPage"
+          :per-page="pageSize"
+          :total="total"
+          @update:page="goToPage"
+        />
       </template>
     </section>
 

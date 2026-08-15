@@ -1,8 +1,8 @@
 import type {
   PayrollInputImportIssue,
   PayrollInputImportPreview,
-  PayrollPerson,
 } from '@/api/payroll'
+import type { PayrollAbsenceEmployment } from '@/api/payrollAbsences'
 
 export interface PayrollImportFingerprintSource {
   period: string
@@ -62,17 +62,31 @@ export function payrollImportIssues(
  */
 export const PAYROLL_INPUT_EXCLUDED_STATUSES = ['archived', 'no_show']
 
-export function payrollEmploymentOptions(people: PayrollPerson[]): PayrollEmploymentOption[] {
-  return people
-    .flatMap(person => person.employments.map(employment => ({
-      employee_id: person.id,
+/**
+ * Nabídka vztahů z JEDNOHO hromadného výpisu (`GET /payroll/time/context`).
+ *
+ * Dřív se stavěla ze seznamu osob a detailu KAŽDÉ z nich — jeden HTTP požadavek na
+ * zaměstnance, a každý vracel celou historii vztahů (podmínky, checklist, timeline),
+ * z níž stránka četla čtyři pole. Hromadný výpis to zvládne jedním dotazem a
+ * archivované ani nenastoupivší vztahy vůbec nevrací; filtr statusů se tady přesto
+ * opakuje, protože ten výpis primárně slouží absencím a jeho podmínka se může změnit
+ * bez ohledu na to, co smí do mzdového vstupu.
+ */
+export function payrollEmploymentOptionsFromContext(
+  employments: PayrollAbsenceEmployment[],
+): PayrollEmploymentOption[] {
+  return employments
+    .map(employment => ({
+      employee_id: employment.employee_id,
       employment_id: employment.id,
-      full_name: person.full_name,
+      full_name: employment.full_name,
       code: employment.code,
       relation_type: employment.relation_type,
       status: employment.status,
-    })))
+    }))
     .filter(option => !PAYROLL_INPUT_EXCLUDED_STATUSES.includes(option.status))
+    // Řazení drží klient: české řazení podle jména se v collation serveru
+    // a v `localeCompare` liší.
     .sort((left, right) =>
       left.full_name.localeCompare(right.full_name, 'cs')
       || left.code.localeCompare(right.code, 'cs'))
