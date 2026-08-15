@@ -15,18 +15,196 @@ final class PayrollPeopleRepository
         private readonly PayrollEmployeeDeletionRepository $deletion,
     ) {}
 
-    /** @return list<array<string,mixed>> */
-    public function listForTenant(int $supplierId): array
-    {
-        $stmt = $this->peopleQuery();
-        $stmt->execute([$supplierId, $supplierId]);
-        $people = [];
+    /**
+     * Strop stránky seznamu osob. Seznam je pracovní tabulka, ne číselník —
+     * uživatel v něm zakládá, opravuje a maže, takže dvě stě řádků naráz je
+     * horní hranice toho, co má smysl posílat. Výběr osoby do rozbalovátka
+     * potřebuje něco jiného a jede přes {@see self::listOptionsForTenant()}.
+     */
+    public const LIST_MAX_LIMIT = 200;
+
+    public const LIST_DEFAULT_LIMIT = 50;
+
+    /**
+     * Povolené zúžení seznamu. `all` je jediná hodnota, která nic neschovává —
+     * proto je i výchozí pro volající, kteří filtr neřeší.
+     */
+    public const LIST_FILTERS = ['all', 'active', 'needs_setup'];
+
+    public const LIST_DEFAULT_FILTER = 'all';
+
+    /**
+     * Znak, kterým se v hledání escapuje `%`, `_` a on sám. Zpětné lomítko by
+     * se cestou přes PHP a SQL literál zdvojovalo, tenhle znak ne.
+     */
+    private const LIKE_ESCAPE = '!';
+
+    /**
+     * Stránka seznamu osob s tvrdým stropem.
+     *
+     * Na KAŽDÝ řádek připadá rozhodnutí o smazatelnosti
+     * ({@see self::withDeletion()}), a to stojí vlastní dotazy. Bez stropu tedy
+     * jeden požadavek vyrobil tolik těžkých dotazů, kolik má firma zaměstnanců.
+     * Strop se ořezává i tady, ne jen na hraně HTTP — repozitář nesmí spoléhat
+     * na to, že ho volající ořízl za něj.
+     *
+     * Filtr a hledání se uplatní na stránku i na `total`. Kdyby platily jen na
+     * stránku, pager by nabízel stránky, na kterých po zúžení nikdo není.
+     * Neznámý filtr se chová jako `all`; na hraně HTTP ho odmítá akce.
+     *
+     * @return array{items: list<array<string,mixed>>, total: int}
+     */
+    public function listForTenant(
+        int $supplierId,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+        string $filter = self::LIST_DEFAULT_FILTER,
+        string $search = '',
+    ): array {
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+        $narrowing = $this->narrowingClause($filter, $search);
+
+        $countStmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) ' . self::fromClause()
+            . ' WHERE employee.supplier_id = ?' . $narrowing['sql'],
+        );
+        $position = 1;
+        $countStmt->bindValue($position++, $supplierId, PDO::PARAM_INT);
+        $countStmt->bindValue($position++, $supplierId, PDO::PARAM_INT);
+        foreach ($narrowing['params'] as $value) {
+            $countStmt->bindValue($position++, $value);
+        }
+        $countStmt->execute();
+        $total = (int) $countStmt->fetchColumn();
+
+        $stmt = $this->peopleQuery(paged: true, narrowing: $narrowing['sql']);
+        $position = 1;
+        $stmt->bindValue($position++, $supplierId, PDO::PARAM_INT);
+        $stmt->bindValue($position++, $supplierId, PDO::PARAM_INT);
+        foreach ($narrowing['params'] as $value) {
+            $stmt->bindValue($position++, $value);
+        }
+        $stmt->bindValue($position++, $limit, PDO::PARAM_INT);
+        $stmt->bindValue($position, $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $items = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $person = $this->castPerson($this->normalizeRow($row));
-            $people[] = $this->withDeletion($supplierId, $person);
+            $items[] = $this->withDeletion($supplierId, $person);
         }
 
-        return $people;
+        return ['items' => $items, 'total' => $total];
+    }
+
+    /**
+     * Zúžení seznamu — filtr a hledání pohromadě, aby je stránka i počítadlo
+     * dostaly ZAROVEŇ. Rozdělené by se dřív nebo později rozešly a pager by
+     * hlásil jiné číslo, než kolik jde odklikat.
+     *
+     * @return array{sql: string, params: list<string>}
+     */
+    private function narrowingClause(string $filter, string $search): array
+    {
+        $sql = '';
+        $params = [];
+
+        if ($filter === 'active') {
+            $sql .= ' AND employee.is_active = 1';
+        } elseif ($filter === 'needs_setup') {
+            $sql .= ' AND ' . self::needsSetupExpression();
+        }
+
+        $search = trim($search);
+        if ($search !== '') {
+            // Hledá se v účinném jméně, ne ve sloupci — po přejmenování osoby
+            // by ji hledání podle sloupce přestalo najít.
+            $sql .= ' AND ' . self::fullNameExpression()
+                . " LIKE ? ESCAPE '" . self::LIKE_ESCAPE . "'";
+            $params[] = '%' . self::escapeLike($search) . '%';
+        }
+
+        return ['sql' => $sql, 'params' => $params];
+    }
+
+    /**
+     * Napsané `%` a `_` jsou hledaný text, ne zástupné znaky — jinak by `_`
+     * našlo cokoli a `%` úplně všechny.
+     */
+    private static function escapeLike(string $value): string
+    {
+        return str_replace(
+            [self::LIKE_ESCAPE, '%', '_'],
+            [self::LIKE_ESCAPE . self::LIKE_ESCAPE, self::LIKE_ESCAPE . '%', self::LIKE_ESCAPE . '_'],
+            $value,
+        );
+    }
+
+    /**
+     * Tatáž podmínka, jakou nese vrácené pole `needs_setup`
+     * ({@see self::castPerson()}) — postavená nad TÝMIŽ výrazy, které vybírá
+     * SELECT. Filtr a příznak na řádku se tak nemůžou rozejít.
+     */
+    private static function needsSetupExpression(): string
+    {
+        return "(COALESCE(profile.profile_status, 'missing') <> 'ready'"
+            . ' OR COALESCE(relations.employment_count, 0) = 0)';
+    }
+
+    /**
+     * Lehký výběr osob pro rozbalovátka — JEDINÝ dotaz, žádné rozhodnutí
+     * o smazatelnosti a žádné doprovodné počty.
+     *
+     * Vrací se úmyslně celý a bez stránkování: cena je konstantní bez ohledu na
+     * počet zaměstnanců, takže stránkovat by znamenalo jen víc kol dokola.
+     * Řazení je stejné jako v seznamu, aby se obě obrazovky shodly na pořadí.
+     *
+     * `needs_setup` tu je proto, že rozbalovátko dokladů jím značí osoby
+     * s nedodělaným profilem. Víc polí sem nepatří — co si nabídka nepřečte,
+     * to se neposílá.
+     *
+     * @return list<array{id:int,full_name:string,is_active:bool,needs_setup:bool}>
+     */
+    public function listOptionsForTenant(int $supplierId): array
+    {
+        // Chybějící vztah se ptá přes NOT EXISTS, ne přes odvozený COUNT jako
+        // stránkovaný seznam: nabídka počty nikam nevrací a existenční dotaz
+        // se zastaví na prvním řádku.
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employee.id,
+                    ' . self::fullNameExpression() . ' AS full_name,
+                    employee.is_active,
+                    (
+                        COALESCE(profile.profile_status, "missing") <> "ready"
+                        OR NOT EXISTS (
+                            SELECT 1
+                              FROM payroll_employments relation
+                             WHERE relation.supplier_id = employee.supplier_id
+                               AND relation.employee_id = employee.id
+                        )
+                    ) AS needs_setup
+               FROM payroll_employees employee
+               LEFT JOIN payroll_employee_profiles profile
+                 ON profile.supplier_id = employee.supplier_id
+                AND profile.employee_id = employee.id
+              WHERE employee.supplier_id = ?
+              ORDER BY employee.is_active DESC, full_name ASC, employee.id ASC',
+        );
+        $stmt->execute([$supplierId]);
+
+        $options = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $option = $this->normalizeRow($row);
+            $options[] = [
+                'id' => $this->intValue($option, 'id'),
+                'full_name' => $this->stringValue($option, 'full_name'),
+                'is_active' => $this->boolValue($option, 'is_active'),
+                'needs_setup' => $this->boolValue($option, 'needs_setup'),
+            ];
+        }
+
+        return $options;
     }
 
     /** @return array<string,mixed>|null */
@@ -69,11 +247,14 @@ final class PayrollPeopleRepository
         return $person;
     }
 
-    private function peopleQuery(bool $single = false): \PDOStatement
+    /**
+     * Účinné jméno osoby z historie identit s pádem zpět na `payroll_employees`.
+     * Sdílí ho seznam i lehký výběr, aby se obě cesty nemohly rozejít.
+     */
+    private static function fullNameExpression(): string
     {
-        $sql = <<<'SQL'
-            SELECT employee.id,
-                   COALESCE(
+        return <<<'SQL'
+            COALESCE(
                        (
                            SELECT identity_history.full_name
                              FROM payroll_person_identity_history identity_history
@@ -89,14 +270,19 @@ final class PayrollPeopleRepository
                             LIMIT 1
                        ),
                        employee.full_name
-                   ) AS full_name,
-                   employee.is_active,
-                   profile.profile_status,
-                   employee.taxpayer_type AS legacy_taxpayer_type,
-                   employee.employment_type AS legacy_employment_type,
-                   COALESCE(relations.employment_count, 0) AS employment_count,
-                   COALESCE(relations.relation_types, '') AS relation_types
-              FROM payroll_employees employee
+                   )
+            SQL;
+    }
+
+    /**
+     * Zdroj řádků seznamu. Sdílí ho výpis i počítadlo, aby obě cesty vážily
+     * tytéž osoby stejnými výrazy. Nese jeden parametr — firmu v poddotazu
+     * pracovních vztahů.
+     */
+    private static function fromClause(): string
+    {
+        return <<<'SQL'
+            FROM payroll_employees employee
               LEFT JOIN payroll_employee_profiles profile
                 ON profile.supplier_id = employee.supplier_id
                AND profile.employee_id = employee.id
@@ -111,12 +297,33 @@ final class PayrollPeopleRepository
               ) relations
                 ON relations.supplier_id = employee.supplier_id
                AND relations.employee_id = employee.id
-             WHERE employee.supplier_id = ?
             SQL;
+    }
+
+    private function peopleQuery(
+        bool $single = false,
+        bool $paged = false,
+        string $narrowing = '',
+    ): \PDOStatement {
+        $sql = 'SELECT employee.id,
+                   ' . self::fullNameExpression() . <<<'SQL'
+             AS full_name,
+                   employee.is_active,
+                   profile.profile_status,
+                   employee.taxpayer_type AS legacy_taxpayer_type,
+                   employee.employment_type AS legacy_employment_type,
+                   COALESCE(relations.employment_count, 0) AS employment_count,
+                   COALESCE(relations.relation_types, '') AS relation_types
+            SQL
+            . ' ' . self::fromClause() . ' WHERE employee.supplier_id = ?';
         if ($single) {
             $sql .= ' AND employee.id = ?';
         }
+        $sql .= $narrowing;
         $sql .= ' ORDER BY employee.is_active DESC, full_name ASC, employee.id ASC';
+        if ($paged) {
+            $sql .= ' LIMIT ? OFFSET ?';
+        }
 
         return $this->db->pdo()->prepare($sql);
     }

@@ -33,38 +33,78 @@ final class PayrollDeductionAgreementRepository
         agreement.note, agreement.row_version, agreement.version_no,
         agreement.created_at, agreement.updated_at';
 
+    /**
+     * Strop stránky seznamu dohod. Dohody o srážkách jsou pracovní agenda —
+     * účetní prochází desítky živých dohod, ne všechny, co firma kdy uzavřela.
+     * Sto řádků pokryje i velkou firmu s jednou stránkou navíc.
+     */
+    public const LIST_MAX_LIMIT = 100;
+
+    public const LIST_DEFAULT_LIMIT = 50;
+
     public function __construct(private readonly Connection $db) {}
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * Seznam dohod o srážkách se stránkováním.
+     *
+     * Oba filtry jsou volitelné, takže volání bez parametrů četlo VŠECHNY dohody,
+     * které firma kdy uzavřela — objem roste s počtem zaměstnanců krát doba
+     * provozu. Strop se proto uplatňuje už tady, ne až u volajícího.
+     *
+     * @return array{items: list<array<string,mixed>>, total: int}
+     */
     public function listAgreements(
         int $supplierId,
         ?int $employeeId = null,
         ?DeductionAgreementStatus $status = null,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
     ): array {
-        $sql = 'SELECT ' . self::COLUMNS . ', employee.full_name
-                  FROM payroll_deduction_agreements agreement
-                  JOIN payroll_employees employee
-                    ON employee.supplier_id = agreement.supplier_id
-                   AND employee.id = agreement.employee_id
-                 WHERE agreement.supplier_id = ?';
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+
+        $where = ' WHERE agreement.supplier_id = ?';
         $params = [$supplierId];
         if ($employeeId !== null) {
-            $sql .= ' AND agreement.employee_id = ?';
+            $where .= ' AND agreement.employee_id = ?';
             $params[] = $employeeId;
         }
         if ($status !== null) {
-            $sql .= ' AND agreement.status = ?';
+            $where .= ' AND agreement.status = ?';
             $params[] = $status->value;
         }
-        $sql .= ' ORDER BY employee.full_name, agreement.priority_no, agreement.id';
+
+        // Tytéž filtry i tentýž povinný JOIN na zaměstnance jako ve stránkovaném
+        // dotazu, jinak by `total` neodpovídal seznamu.
+        $from = ' FROM payroll_deduction_agreements agreement
+                  JOIN payroll_employees employee
+                    ON employee.supplier_id = agreement.supplier_id
+                   AND employee.id = agreement.employee_id';
+        $countStmt = $this->db->pdo()->prepare('SELECT COUNT(*)' . $from . $where);
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+
+        $sql = 'SELECT ' . self::COLUMNS . ', employee.full_name'
+            . $from
+            . $where
+            . ' ORDER BY employee.full_name, agreement.priority_no, agreement.id
+                LIMIT ? OFFSET ?';
 
         $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute($params);
+        $position = 1;
+        foreach ($params as $param) {
+            $stmt->bindValue($position++, $param);
+        }
+        $stmt->bindValue($position++, $limit, PDO::PARAM_INT);
+        $stmt->bindValue($position, $offset, PDO::PARAM_INT);
+        $stmt->execute();
 
-        return array_values(array_map(
+        $items = array_values(array_map(
             self::present(...),
             $stmt->fetchAll(PDO::FETCH_ASSOC),
         ));
+
+        return ['items' => $items, 'total' => $total];
     }
 
     /** @return array<string,mixed>|null */

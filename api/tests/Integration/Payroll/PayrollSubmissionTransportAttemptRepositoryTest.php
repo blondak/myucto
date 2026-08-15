@@ -446,6 +446,80 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
         ));
     }
 
+    /**
+     * Přehled nese období rovnou s pokusem. Kdyby ho ledger nenesl, musela by
+     * se na něj obrazovka doptat u každého podání zvlášť — jeden HTTP požadavek
+     * navíc na řádek jen kvůli tomu, aby se dalo poznat „červenec".
+     *
+     * Pokus, jehož podání v evidenci není, přesto z ledgeru nesmí zmizet:
+     * ledger je přírůstkový důkaz o odeslání a chybějící řádek by byl horší
+     * než chybějící období.
+     */
+    public function testRecentLedgerCarriesThePeriodAndKeepsOrphanedAttempts(): void
+    {
+        $ours = $this->open('transport-period-join');
+        $orphan = $this->openOrphanedAttempt();
+
+        $recent = $this->repository->listRecent(
+            $this->supplierId,
+            self::ENVIRONMENT,
+        );
+        $byId = array_column($recent, null, 'id');
+
+        self::assertArrayHasKey($ours['id'], $byId);
+        self::assertSame('2026-07-01', $byId[$ours['id']]['period_start']);
+        self::assertSame('2026-07-31', $byId[$ours['id']]['period_end']);
+
+        self::assertArrayHasKey($orphan, $byId);
+        self::assertNull($byId[$orphan]['period_start']);
+        self::assertNull($byId[$orphan]['period_end']);
+
+        // Období smí přibýt jen do přehledu; detail pokusu i fronty na pozadí
+        // zůstávají beze změny, aby se jim nezměnil tvar řádku.
+        $detail = $this->repository->find(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            (int) $ours['id'],
+        );
+        self::assertIsArray($detail);
+        self::assertArrayNotHasKey('period_start', $detail);
+    }
+
+    /**
+     * Pokus, jehož podání v evidenci není.
+     *
+     * Cizí klíč i vstupní trigger (migrace 1372) to za normálního provozu
+     * nedovolí, takže se sem dá dostat jen obnovou po částech nebo zásahem do
+     * dat. Vyrábí se proto poctivě — pokus vznikne nad existujícím podáním a to
+     * se pak s vypnutou kontrolou smaže. Kdyby přehled joinoval natvrdo, takový
+     * pokus by z ledgeru zmizel a s ním i důkaz, že podání odešlo.
+     */
+    private function openOrphanedAttempt(): int
+    {
+        $pdo = $this->db->pdo();
+        $submissionId = $this->createSubmission($pdo, 'orphan');
+        $attemptId = (int) $this->repository->open(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $submissionId,
+            self::CHANNEL,
+            1,
+            'transport-period-orphan',
+            str_repeat('a', 64),
+            null,
+        )['id'];
+
+        $pdo->exec('SET foreign_key_checks = 0');
+        try {
+            $pdo->prepare('DELETE FROM payroll_submissions WHERE id = ?')
+                ->execute([$submissionId]);
+        } finally {
+            $pdo->exec('SET foreign_key_checks = 1');
+        }
+
+        return $attemptId;
+    }
+
     /** @return array<string,mixed> */
     private function open(string $idempotencyKey): array
     {
@@ -470,7 +544,7 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
         );
     }
 
-    private function createSubmission(PDO $pdo): int
+    private function createSubmission(PDO $pdo, string $tag = 'transport'): int
     {
         $pdo->prepare(
             'INSERT INTO payroll_obligations
@@ -478,16 +552,18 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
                  subject_reference, period_start, period_end, obligation_kind,
                  preferred_channel, source_event_type, source_event_reference,
                  source_event_hash, request_fingerprint, idempotency_key_hash)
-             VALUES (?, ?, "JMHZ", "office", "office:transport", "2026-07-01",
+             VALUES (?, ?, "JMHZ", "office", ?, "2026-07-01",
                      "2026-07-31", "regular", ?, "payroll_run_approved",
-                     "run:transport:2026-07", ?, ?, ?)',
+                     ?, ?, ?, ?)',
         )->execute([
             $this->supplierId,
             self::ENVIRONMENT,
+            'office:' . $tag,
             self::CHANNEL,
-            str_repeat('1', 64),
-            str_repeat('2', 64),
-            hash('sha256', "transport-obligation:{$this->supplierId}", true),
+            "run:{$tag}:2026-07",
+            hash('sha256', "obligation-event:{$tag}:{$this->supplierId}"),
+            hash('sha256', "obligation-request:{$tag}:{$this->supplierId}"),
+            hash('sha256', "transport-obligation:{$tag}:{$this->supplierId}", true),
         ]);
         $obligationId = (int) $pdo->lastInsertId();
 
@@ -502,9 +578,9 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
             self::ENVIRONMENT,
             $obligationId,
             self::CHANNEL,
-            str_repeat('3', 64),
-            str_repeat('4', 64),
-            hash('sha256', "transport-submission:{$this->supplierId}", true),
+            hash('sha256', "submission-snapshot:{$tag}:{$this->supplierId}"),
+            hash('sha256', "submission-request:{$tag}:{$this->supplierId}"),
+            hash('sha256', "transport-submission:{$tag}:{$this->supplierId}", true),
         ]);
 
         return (int) $pdo->lastInsertId();

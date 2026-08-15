@@ -30,11 +30,11 @@ final class AnnualTaxCertificateServiceTest extends TestCase
         $pdo->expects(self::once())->method('rollBack');
         $lock = $this->createMock(\PDOStatement::class);
         $lock->expects(self::once())->method('execute')
-            ->with(['payroll-document-storage:supplier:11']);
+            ->with(['payroll-annual-document:11:21:2026']);
         $lock->expects(self::once())->method('fetchColumn')->willReturn(1);
         $release = $this->createMock(\PDOStatement::class);
         $release->expects(self::once())->method('execute')
-            ->with(['payroll-document-storage:supplier:11']);
+            ->with(['payroll-annual-document:11:21:2026']);
         $release->expects(self::once())->method('fetchColumn')->willReturn(1);
         $pdo->expects(self::exactly(2))->method('prepare')
             ->willReturnOnConsecutiveCalls($lock, $release);
@@ -114,5 +114,86 @@ final class AnnualTaxCertificateServiceTest extends TestCase
                 throw new \RuntimeException('synthetic audit failure');
             },
         );
+    }
+
+    /**
+     * Zámek úložiště nesmí být na celého zaměstnavatele.
+     *
+     * Držel se přes vykreslení PDF, takže roční potvrzení padesáti lidí se
+     * vydávala jedno po druhém a další žádost spadla na desetivteřinovém
+     * timeoutu. Dvě různé osoby se proto musí zamykat každá zvlášť.
+     */
+    public function testStorageLockIsScopedToOnePersonAndYear(): void
+    {
+        $first = $this->capturedLockName(11, 21, 2026);
+        $sameEmployerOtherPerson = $this->capturedLockName(11, 22, 2026);
+
+        self::assertNotSame(
+            $first,
+            $sameEmployerOtherPerson,
+            'Dvě různé osoby téhož zaměstnavatele se nesmí zdržovat navzájem.',
+        );
+        self::assertStringContainsString('2026', $first, 'Zámek musí rozlišovat i rok.');
+        self::assertLessThanOrEqual(
+            64,
+            strlen($first),
+            'Delší jméno zámku MySQL odmítne.',
+        );
+    }
+
+    /** Spustí generování na atrapách a vrátí jméno, kterým se zamklo úložiště. */
+    private function capturedLockName(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+    ): string {
+        $names = [];
+        $pdo = $this->createStub(PDO::class);
+        $pdo->method('inTransaction')->willReturn(false);
+        $statement = $this->createStub(\PDOStatement::class);
+        $statement->method('execute')->willReturnCallback(
+            static function (array $params) use (&$names): bool {
+                $names[] = $params[0];
+                return true;
+            },
+        );
+        $statement->method('fetchColumn')->willReturn(1);
+        $pdo->method('prepare')->willReturn($statement);
+
+        $connection = (new \ReflectionClass(Connection::class))
+            ->newInstanceWithoutConstructor();
+        (new \ReflectionProperty(Connection::class, 'pdo'))
+            ->setValue($connection, $pdo);
+
+        $snapshot = $this->createStub(AnnualTaxCertificateSnapshotBuilder::class);
+        $snapshot->method('build')->willThrowException(
+            new \RuntimeException('synthetic stop after lock'),
+        );
+        $documents = $this->createStub(PayrollDocumentService::class);
+        $documents->method('beginStorageScope')
+            ->willReturn(new PayrollDocumentStorageScope());
+
+        $service = new AnnualTaxCertificateService(
+            $connection,
+            $snapshot,
+            $this->createStub(AnnualTaxCertificatePdfRenderer::class),
+            $documents,
+        );
+
+        try {
+            $service->generate(
+                $supplierId,
+                $employeeId,
+                $taxYear,
+                PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+                31,
+            );
+        } catch (\RuntimeException) {
+            // Zámek se bere ještě před snapshotem — víc než jeho jméno tenhle test nezajímá.
+        }
+
+        self::assertNotSame([], $names, 'Úložiště se vůbec nezamklo.');
+
+        return (string) $names[0];
     }
 }

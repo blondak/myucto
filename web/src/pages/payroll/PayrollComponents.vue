@@ -24,6 +24,7 @@ import {
   type PayrollRecurringComponent,
   type PayrollRecurringComponentPayload,
 } from '@/api/payroll'
+import { payrollAbsenceApi } from '@/api/payrollAbsences'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
@@ -39,7 +40,7 @@ import {
   localPayrollPeriod,
   monthStart,
   parsePayrollAmountToMinor,
-  payrollEmploymentOptions,
+  payrollEmploymentOptionsFromContext,
   payrollImportFingerprint,
   payrollImportIssues,
   payrollMinorToInput,
@@ -377,10 +378,11 @@ function setInclusionTreatment(
   if (value !== null) componentForm.value[field] = value
 }
 
+// Jeden požadavek na celou nabídku vztahů. Dřív jich bylo 1 + počet zaměstnanců,
+// protože se ke každé osobě dotahoval její detail — u padesáti lidí padesát jedna
+// požadavků při každém otevření stránky, a to jen kvůli názvu a kódu vztahu.
 async function loadEmploymentOptions() {
-  const people = await payrollApi.people()
-  const details = await Promise.all(people.map(person => payrollApi.person(person.id)))
-  employments.value = payrollEmploymentOptions(details)
+  employments.value = payrollEmploymentOptionsFromContext(await payrollAbsenceApi.context())
 }
 
 async function load() {

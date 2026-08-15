@@ -6,7 +6,7 @@ import type { PayrollRun } from '@/api/payroll'
 const m = vi.hoisted(() => ({
   runs: vi.fn(),
   runDetail: vi.fn(),
-  people: vi.fn(),
+  peopleOptions: vi.fn(),
   deleteRun: vi.fn(),
   commandRun: vi.fn(),
   canWrite: vi.fn(),
@@ -28,7 +28,7 @@ vi.mock('@/api/payroll', () => ({
         offset: page?.offset ?? 0,
       })),
     run: m.runDetail,
-    people: m.people,
+    peopleOptions: m.peopleOptions,
     deleteRun: m.deleteRun,
     commandRun: m.commandRun,
   },
@@ -77,7 +77,7 @@ describe('PayrollRuns', () => {
     m.runs.mockResolvedValue([run()])
     m.total.mockReturnValue(undefined)
     m.runDetail.mockResolvedValue(run())
-    m.people.mockResolvedValue([])
+    m.peopleOptions.mockResolvedValue([])
     m.deleteRun.mockResolvedValue(undefined)
     m.commandRun.mockResolvedValue({ outcome: null })
   })

@@ -4,7 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 const m = vi.hoisted(() => ({
   listDocuments: vi.fn(),
   listAnnualDocuments: vi.fn(),
-  people: vi.fn(),
+  peopleOptions: vi.fn(),
   generatePayrollSheet: vi.fn(),
   generateTaxCertificate: vi.fn(),
   generateMonthlyBundle: vi.fn(),
@@ -17,7 +17,7 @@ vi.mock('@/api/payroll', () => ({
   payrollApi: {
     listDocuments: m.listDocuments,
     listAnnualDocuments: m.listAnnualDocuments,
-    people: m.people,
+    peopleOptions: m.peopleOptions,
     generatePayrollSheet: m.generatePayrollSheet,
     generateTaxCertificate: m.generateTaxCertificate,
     generateMonthlyBundle: m.generateMonthlyBundle,
@@ -114,9 +114,10 @@ describe('PayrollDocuments', () => {
       year: 2026,
       items: [],
     })
-    m.people.mockResolvedValue([{
+    m.peopleOptions.mockResolvedValue([{
       id: 31,
       full_name: 'Testovací Zaměstnanec',
+      is_active: true,
       needs_setup: false,
     }])
     m.generatePayrollSheet.mockResolvedValue({

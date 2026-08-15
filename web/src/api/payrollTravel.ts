@@ -156,11 +156,27 @@ export interface TravelMaterialization {
   replayed: { part: string; component_code: string; input_id: number; amount_minor: number }[]
 }
 
+export interface TravelTripsPage {
+  trips: TravelTrip[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export const payrollTravelApi = {
-  list: (period?: string) =>
-    api.get<{ trips: TravelTrip[] }>('/payroll/travel/trips', {
-      params: period ? { period } : {},
-    }).then(response => response.data.trips),
+  /**
+   * Stránka seznamu cest. Server strop drží tvrdě (výchozí 50, maximum 100),
+   * takže bez `limit` a `offset` dostaneme jen první stránku a o zbytku bychom
+   * mlčeli — `total` je jediné, z čeho se pozná, že další cesty existují.
+   */
+  listPage: (period?: string, page?: { limit?: number, offset?: number }) =>
+    api.get<TravelTripsPage>('/payroll/travel/trips', {
+      params: {
+        ...(period ? { period } : {}),
+        ...(page?.limit === undefined ? {} : { limit: page.limit }),
+        ...(page?.offset === undefined ? {} : { offset: page.offset }),
+      },
+    }).then(response => response.data),
   preview: (payload: TravelTripPayload) =>
     api.post<{ calculation: TravelCalculation }>('/payroll/travel/preview', payload)
       .then(response => response.data.calculation),

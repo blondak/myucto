@@ -5,7 +5,7 @@ import { documentsApi, type DocItem } from '@/api/documents'
 import {
   payrollApi,
   type PayrollInstitutionAccount,
-  type PayrollPersonListItem,
+  type PayrollPersonOption,
 } from '@/api/payroll'
 import {
   payrollEnforcementApi,
@@ -22,6 +22,7 @@ import {
 } from '@/api/payrollEnforcement'
 import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
@@ -45,7 +46,13 @@ const loadFailed = ref(false)
 const supportFailed = ref(false)
 const saving = ref(false)
 const cases = ref<EnforcementCaseSummary[]>([])
-const people = ref<PayrollPersonListItem[]>([])
+const total = ref(0)
+const pageSize = 20
+const offset = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
+const employeeFilter = ref<number | null>(null)
+const statusFilter = ref<EnforcementCaseStatus | ''>('')
+const people = ref<PayrollPersonOption[]>([])
 const detail = ref<EnforcementCaseDetail | null>(null)
 const expandedId = ref<number | null>(null)
 const showCreate = ref(false)
@@ -117,6 +124,10 @@ const newClaim = ref<EnforcementClaimPayload>(emptyClaim())
 const claimAmountCzk = ref('')
 const maintenanceWeightCzk = ref('')
 const caseKinds: EnforcementCaseKind[] = ['enforcement', 'voluntary_agreement']
+const caseStatuses: EnforcementCaseStatus[] = [
+  'received', 'withhold_and_hold', 'remit', 'deferred_no_withholding',
+  'deferred_hold', 'paid', 'stopped',
+]
 const statutoryClaimCategories: EnforcementClaimCategory[] = [
   'current_maintenance', 'maintenance_arrears', 'substitute_maintenance',
   'other_priority', 'non_priority',
@@ -216,10 +227,17 @@ async function load() {
   loadFailed.value = false
   supportFailed.value = false
   try {
-    cases.value = await payrollEnforcementApi.cases()
+    const page = await payrollEnforcementApi.casesPage({
+      ...(employeeFilter.value ? { employee_id: employeeFilter.value } : {}),
+      ...(statusFilter.value ? { status: statusFilter.value } : {}),
+      limit: pageSize,
+      offset: offset.value,
+    })
+    cases.value = page.cases
+    total.value = page.total
     if (canReadPeople.value) {
       try {
-        people.value = await payrollApi.people()
+        people.value = await payrollApi.peopleOptions()
       } catch {
         people.value = []
         supportFailed.value = true
@@ -241,13 +259,31 @@ async function load() {
   }
 }
 
+/*
+ * Rozbalený panel patří ke konkrétnímu řádku seznamu. Po přestránkování ani po
+ * přefiltrování ten řádek na obrazovce být nemusí — otevřený detail by pak
+ * ukazoval případ, který v seznamu nikdo nevidí.
+ */
+function collapseDetail() {
+  ++detailRequestSequence
+  closeTransition()
+  showClaim.value = false
+  expandedId.value = null
+  detail.value = null
+  monthEvidence.value = null
+  dependants.value = []
+}
+
+// Stránkuje sdílená `PaginationBar` (číslo stránky od jedné); server zná offset.
+function goToPage(nextPage: number) {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  collapseDetail()
+  void load()
+}
+
 async function selectCase(item: EnforcementCaseSummary) {
   if (expandedId.value === item.id) {
-    ++detailRequestSequence
-    closeTransition()
-    showClaim.value = false
-    expandedId.value = null
-    detail.value = null
+    collapseDetail()
     return
   }
   const sequence = ++detailRequestSequence
@@ -508,6 +544,13 @@ watch(evidencePeriod, () => {
   if (detail.value) void loadMonthlyEvidence(detail.value.employee_id)
 })
 
+watch([employeeFilter, statusFilter], () => {
+  // Zúžený výběr má míň stránek; třetí stránka by po přefiltrování ukázala prázdno.
+  offset.value = 0
+  collapseDetail()
+  void load()
+})
+
 onMounted(load)
 </script>
 
@@ -563,6 +606,28 @@ onMounted(load)
       </div>
     </form>
 
+    <!--
+      Seznam je stránkovaný, takže zúžení musí jít na server: v prohlížeči by
+      filtr hledal jen v načtené stránce a případ ze druhé by prohlásil za
+      neexistující.
+    -->
+    <div class="flex flex-wrap items-end gap-3">
+      <label v-if="canReadPeople" class="text-xs font-medium text-neutral-600">
+        {{ t('payroll.enforcement.employee') }}
+        <select v-model="employeeFilter" data-test="enforcement-employee-filter" class="mt-1 block w-full min-w-48 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+          <option :value="null">{{ t('common.all') }}</option>
+          <option v-for="person in people" :key="person.id" :value="person.id">{{ person.full_name }}</option>
+        </select>
+      </label>
+      <label class="text-xs font-medium text-neutral-600">
+        {{ t('payroll.enforcement.status_label') }}
+        <select v-model="statusFilter" data-test="enforcement-status-filter" class="mt-1 block w-full min-w-40 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+          <option value="">{{ t('common.all') }}</option>
+          <option v-for="status in caseStatuses" :key="status" :value="status">{{ t(`payroll.enforcement.status.${status}`) }}</option>
+        </select>
+      </label>
+    </div>
+
     <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">
       <div v-if="loading" class="space-y-3 p-4 sm:p-6"><div v-for="index in 4" :key="index" class="h-16 animate-pulse rounded-lg bg-neutral-100" /></div>
       <EmptyState
@@ -588,7 +653,7 @@ onMounted(load)
                 <td class="px-4 py-3 text-neutral-600">{{ t(`payroll.enforcement.kinds.${item.case_kind}`) }}</td>
                 <td class="px-4 py-3 text-right">{{ item.claim_count }}</td>
                 <td class="px-4 py-3 text-right font-medium">{{ money(item.outstanding_minor_units) }}</td>
-                <td class="px-4 py-3 text-right"><button :class="btnOutlineSm('neutral')" @click="selectCase(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t(expandedId === item.id ? 'common.close' : 'common.detail') }}</button></td>
+                <td class="px-4 py-3 text-right"><button :class="btnOutlineSm('neutral')" :data-test="`enforcement-detail-${item.id}`" @click="selectCase(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t(expandedId === item.id ? 'common.close' : 'common.detail') }}</button></td>
               </tr>
             </tbody>
           </table>
@@ -601,9 +666,18 @@ onMounted(load)
           </article>
         </div>
       </template>
+      <PaginationBar
+        v-if="!loading && !loadFailed"
+        data-test="enforcement-pagination"
+        embedded
+        :page="currentPage"
+        :per-page="pageSize"
+        :total="total"
+        @update:page="goToPage"
+      />
     </section>
 
-    <section v-if="expandedId" class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 shadow-sm sm:p-6">
+    <section v-if="expandedId" data-test="enforcement-detail-panel" class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 shadow-sm sm:p-6">
       <div v-if="!detail" class="h-28 animate-pulse rounded-lg bg-neutral-100" />
       <div v-else class="space-y-4">
         <div class="flex flex-wrap items-start justify-between gap-3">

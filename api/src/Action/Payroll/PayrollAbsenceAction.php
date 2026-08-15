@@ -67,8 +67,8 @@ final class PayrollAbsenceAction
         if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
             return $error;
         }
+        $query = $request->getQueryParams();
         try {
-            $query = $request->getQueryParams();
             $from = $this->queryDate($query['from'] ?? null, 'from');
             $to = $this->queryDate($query['to'] ?? null, 'to');
             if ($to < $from) {
@@ -78,13 +78,32 @@ final class PayrollAbsenceAction
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
+        // Počet řádků roste součinem počtu zaměstnanců a délky rozsahu, takže
+        // roční filtr u větší firmy vrátí neomezenou odpověď. Strop je tvrdý
+        // (ne jen výchozí), aby ho nešlo obejít parametrem z URL.
+        $limit = max(1, min(
+            PayrollAbsenceRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollAbsenceRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
+
+        $page = $this->absences->list(
+            $this->currentSupplierId($request),
+            $from,
+            $to,
+            $employmentId,
+            $limit,
+            $offset,
+        );
+
+        // Klíč `absences` zůstává, aby stávající volající nespadli;
+        // `total`/`limit`/`offset` přibyly vedle něj, protože seznam už nemusí
+        // být úplný.
         return Json::ok($response, [
-            'absences' => $this->absences->list(
-                $this->currentSupplierId($request),
-                $from,
-                $to,
-                $employmentId,
-            ),
+            'absences' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ]);
     }
 

@@ -5,7 +5,7 @@ import {
   payrollApi,
   type PayrollDocument,
   type PayrollDocumentList,
-  type PayrollPersonListItem,
+  type PayrollPersonOption,
   type PayrollTaxCertificateKind,
   type PayrollTaxCertificateGenerationPayload,
 } from '@/api/payroll'
@@ -25,7 +25,7 @@ const year = ref(Number(period.value.slice(0, 4)))
 const activeTab = ref<'monthly' | 'annual'>('monthly')
 const data = ref<PayrollDocumentList | null>(null)
 const annualItems = ref<PayrollDocument[]>([])
-const people = ref<PayrollPersonListItem[]>([])
+const people = ref<PayrollPersonOption[]>([])
 const selectedEmployeeId = ref<number | null>(null)
 const loading = ref(true)
 const generatingRevisionId = ref<number | null>(null)
@@ -179,7 +179,7 @@ async function load(): Promise<void> {
     } else {
       const [loaded, loadedPeople] = await Promise.all([
         payrollApi.listAnnualDocuments(requestedYear),
-        people.value.length ? Promise.resolve(people.value) : payrollApi.people(),
+        people.value.length ? Promise.resolve(people.value) : payrollApi.peopleOptions(),
       ])
       if (sequence === loadSequence && requestedYear === year.value) {
         annualItems.value = loaded.items

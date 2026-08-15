@@ -130,6 +130,12 @@ final class PayrollSubmissionTransportAttemptRepository
      * podání číslo 14". Bez tohohle pohledu by odpověď existovala jen v
      * databázi a nedala by se v aplikaci najít.
      *
+     * Období hlášení nese rovnou tenhle seznam. Je to první údaj, podle kterého
+     * uživatel řádek pozná („co jsem poslal za červenec"), a doptávat se na něj
+     * u každého podání zvlášť by znamenalo jeden HTTP požadavek navíc na řádek.
+     * JOIN je LEVÝ ZÁMĚRNĚ: ledger je přírůstkový důkaz, takže pokus, jehož
+     * podání už v evidenci není, musí zůstat vidět — bez období, ale vidět.
+     *
      * @return list<array<string,mixed>>
      */
     public function listRecent(
@@ -145,10 +151,18 @@ final class PayrollSubmissionTransportAttemptRepository
         // v LIMIT vázané parametry nepřijímá. Rozsah je proto omezený tady.
         $limit = max(1, min($limit, 200));
         $statement = $this->db->pdo()->prepare(
-            'SELECT ' . self::COLUMNS . '
-               FROM ' . self::TABLE . '
-              WHERE supplier_id = ? AND environment = ?
-              ORDER BY id DESC
+            'SELECT ' . self::attemptColumns() . ',
+                    obligation.period_start, obligation.period_end
+               FROM ' . self::TABLE . ' attempt
+               LEFT JOIN payroll_submissions submission
+                      ON submission.supplier_id = attempt.supplier_id
+                     AND submission.id = attempt.submission_id
+               LEFT JOIN payroll_obligations obligation
+                      ON obligation.supplier_id = submission.supplier_id
+                     AND obligation.environment = submission.environment
+                     AND obligation.id = submission.obligation_id
+              WHERE attempt.supplier_id = ? AND attempt.environment = ?
+              ORDER BY attempt.id DESC
               LIMIT ' . $limit,
         );
         $statement->execute([$supplierId, $environment]);
@@ -772,8 +786,32 @@ final class PayrollSubmissionTransportAttemptRepository
                     : (int) $normalized[$field];
             }
         }
+        // Období přidává jen listRecent() a nese ho LEVÝ join, takže u pokusu
+        // bez podání chybí. Prázdno musí zůstat prázdnem, ne "".
+        foreach (['period_start', 'period_end'] as $field) {
+            if (array_key_exists($field, $normalized)) {
+                $normalized[$field] = $normalized[$field] === null
+                    ? null
+                    : (string) $normalized[$field];
+            }
+        }
 
         return $normalized;
+    }
+
+    /**
+     * Táž projekce s prefixem tabulky, pro dotaz s JOINem.
+     *
+     * `id`, `status`, `channel` i `created_at` má každá ze tří spojovaných
+     * tabulek, takže nekvalifikovaný seznam by byl dvojznačný. Odvozuje se
+     * z COLUMNS, aby se oba seznamy nemohly rozejít.
+     */
+    private static function attemptColumns(): string
+    {
+        return implode(', ', array_map(
+            static fn (string $column): string => 'attempt.' . trim($column),
+            explode(',', self::COLUMNS),
+        ));
     }
 
     private static function idempotencyHash(string $idempotencyKey): string

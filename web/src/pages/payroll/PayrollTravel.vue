@@ -10,6 +10,7 @@ import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { localPayrollPeriod } from './payrollComponentsUi'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { payrollAbsenceApi, type PayrollAbsenceEmployment } from '@/api/payrollAbsences'
 import {
   payrollTravelApi,
@@ -65,6 +66,10 @@ const loadFailed = ref(false)
 const saving = ref(false)
 const previewing = ref(false)
 const trips = ref<TravelTrip[]>([])
+const total = ref(0)
+const pageSize = 20
+const offset = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const employments = ref<PayrollAbsenceEmployment[]>([])
 const period = ref(localPayrollPeriod())
 const editorOpen = ref(false)
@@ -252,13 +257,14 @@ async function load() {
   loading.value = true
   loadFailed.value = false
   try {
-    const [tripList, context] = await Promise.all([
-      payrollTravelApi.list(period.value),
+    const [tripPage, context] = await Promise.all([
+      payrollTravelApi.listPage(period.value, { limit: pageSize, offset: offset.value }),
       employments.value.length === 0
         ? payrollAbsenceApi.context()
         : Promise.resolve(employments.value),
     ])
-    trips.value = tripList
+    trips.value = tripPage.trips
+    total.value = tripPage.total
     employments.value = context
   } catch (error: unknown) {
     loadFailed.value = true
@@ -266,6 +272,12 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+// Stránkuje sdílená `PaginationBar` (číslo stránky od jedné); server zná offset.
+function goToPage(nextPage: number) {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  void load()
 }
 
 function openEditor(trip: TravelTrip | null) {
@@ -366,6 +378,8 @@ function removeMeal(index: number) {
 }
 
 watch(period, () => {
+  // Jiné období = jiná množina cest; zůstat na třetí stránce by ukázalo prázdno.
+  offset.value = 0
   void load()
 })
 onMounted(load)
@@ -594,6 +608,14 @@ onMounted(load)
             </div>
           </article>
         </section>
+
+        <PaginationBar
+          data-test="travel-pagination"
+          :page="currentPage"
+          :per-page="pageSize"
+          :total="total"
+          @update:page="goToPage"
+        />
       </template>
     </template>
 

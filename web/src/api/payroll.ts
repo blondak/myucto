@@ -186,6 +186,24 @@ export interface PayrollPerson extends PayrollPersonListItem {
 
 export interface PayrollPeopleResponse {
   items: PayrollPersonListItem[]
+  total: number
+  limit: number
+  offset: number
+}
+
+/** Zúžení seznamu osob. Zužuje server, aby hledání nekončilo na hraně stránky. */
+export type PayrollPeopleFilter = 'all' | 'active' | 'needs_setup'
+
+/** Osoba v rozbalovací nabídce — jen to, čím se dá vybrat. */
+export interface PayrollPersonOption {
+  id: number
+  full_name: string
+  is_active: boolean
+  needs_setup: boolean
+}
+
+export interface PayrollPeopleOptionsResponse {
+  items: PayrollPersonOption[]
 }
 
 export interface PayrollPersonResponse {
@@ -2317,6 +2335,9 @@ export interface PayrollJmhzTransportAttempt {
   channel: string
   attempt_no: number
   status: PayrollJmhzTransportStatus
+  /** Období hlášení z povinnosti; `null` u pokusu, jehož podání už v evidenci není. */
+  period_start: string | null
+  period_end: string | null
   /** CorrelationID přidělené branou VREP; bez něj se na výsledek nelze zeptat. */
   correlation_reference: string | null
   request_sha256: string | null
@@ -2484,8 +2505,33 @@ export const payrollApi = {
     api.get<{ state: PayrollModuleState }>('/payroll/settings/activation').then(response => response.data.state),
   setActivation: (payload: { enabled: boolean; start_period: string | null; row_version: number }) =>
     api.put<{ state: PayrollModuleState }>('/payroll/settings/activation', payload).then(response => response.data.state),
-  people: () =>
-    api.get<PayrollPeopleResponse>('/payroll/people').then(response => response.data.items),
+  /**
+   * Stránka seznamu osob. Filtr i hledání jdou na server — kdyby zužoval
+   * prohlížeč, hledal by jen v načtené stránce a člověka ze třetí stránky by
+   * prohlásil za neexistujícího.
+   */
+  peoplePage: (params: {
+    limit: number
+    offset: number
+    filter?: PayrollPeopleFilter
+    q?: string
+  }) =>
+    api.get<PayrollPeopleResponse>('/payroll/people', {
+      params: {
+        limit: params.limit,
+        offset: params.offset,
+        filter: params.filter,
+        q: params.q === '' ? undefined : params.q,
+      },
+    }).then(response => response.data),
+  /**
+   * Jména osob pro rozbalovací nabídky. Levný pohled: server ho zvládne jedním
+   * dotazem, protože nepočítá rozhodnutí o smazatelnosti, které si stránkovaný
+   * seznam osob počítá řádek po řádku.
+   */
+  peopleOptions: () =>
+    api.get<PayrollPeopleOptionsResponse>('/payroll/people', { params: { view: 'options' } })
+      .then(response => response.data.items),
   createPerson: (payload: PayrollPersonCreatePayload) =>
     api.post<PayrollPersonResponse>('/payroll/people', payload)
       .then(response => response.data.person),

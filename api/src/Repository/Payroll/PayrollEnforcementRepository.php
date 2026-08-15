@@ -39,14 +39,60 @@ final class PayrollEnforcementRepository implements
     /** Alias skupinového klíče; po seskupení se z řádku zase odstraní. */
     private const GROUP_KEY = 'snapshot_group_employee_id';
 
+    /**
+     * Strop stránky seznamu případů. Exekuce je pracovní agenda — účetní řeší
+     * desítky živých případů, ne celou historii firmy naráz. Sto řádků pokryje
+     * i velkou firmu s jednou stránkou navíc.
+     */
+    public const LIST_MAX_LIMIT = 100;
+
+    public const LIST_DEFAULT_LIMIT = 50;
+
     public function __construct(private readonly Connection $db) {}
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * Seznam exekučních případů se stránkováním.
+     *
+     * Oba filtry jsou volitelné, takže volání bez parametrů četlo VŠECHNY případy,
+     * které firma kdy vedla — objem roste s počtem zaměstnanců krát doba provozu.
+     * Strop se proto uplatňuje už tady, ne až u volajícího.
+     *
+     * @return array{items: list<array<string,mixed>>, total: int}
+     */
     public function listCases(
         int $supplierId,
         ?int $employeeId = null,
         ?EnforcementCaseStatus $status = null,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
     ): array {
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+
+        $where = ' WHERE c.supplier_id = ?';
+        $params = [$supplierId];
+        if ($employeeId !== null) {
+            $where .= ' AND c.employee_id = ?';
+            $params[] = $employeeId;
+        }
+        if ($status !== null) {
+            $where .= ' AND c.status = ?';
+            $params[] = $status->value;
+        }
+
+        // Počet se bere nad případy, ne nad pohledávkami — `LEFT JOIN` na claims
+        // by řádky násobil. Filtry i povinný JOIN na zaměstnance jsou tytéž jako
+        // ve stránkovaném dotazu, jinak by `total` neodpovídal seznamu.
+        $countStmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*)
+               FROM payroll_enforcement_cases c
+               JOIN payroll_employees e
+                 ON e.supplier_id = c.supplier_id AND e.id = c.employee_id'
+            . $where
+        );
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+
         $sql = <<<'SQL'
             SELECT c.id, c.employee_id, c.case_kind, c.status, c.effective_from,
                    c.effective_to, c.evidence_complete, c.recipient_verified,
@@ -60,32 +106,33 @@ final class PayrollEnforcementRepository implements
                 ON e.supplier_id = c.supplier_id AND e.id = c.employee_id
               LEFT JOIN payroll_enforcement_claims cl
                 ON cl.supplier_id = c.supplier_id AND cl.case_id = c.id
-             WHERE c.supplier_id = ?
-            SQL;
-        $params = [$supplierId];
-        if ($employeeId !== null) {
-            $sql .= ' AND c.employee_id = ?';
-            $params[] = $employeeId;
-        }
-        if ($status !== null) {
-            $sql .= ' AND c.status = ?';
-            $params[] = $status->value;
-        }
-        $sql .= <<<'SQL'
+            SQL
+            . $where
+            . <<<'SQL'
+
              GROUP BY c.id, c.employee_id, c.case_kind, c.status, c.effective_from,
                       c.effective_to, c.evidence_complete, c.recipient_verified,
                       c.row_version, c.created_at, c.updated_at, e.full_name
              ORDER BY FIELD(c.status, 'received', 'withhold_and_hold', 'remit',
                             'deferred_hold', 'deferred_no_withholding', 'paid', 'stopped'),
                       c.effective_from, c.id
+             LIMIT ? OFFSET ?
             SQL;
         $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute($params);
+        $position = 1;
+        foreach ($params as $param) {
+            $stmt->bindValue($position++, $param);
+        }
+        $stmt->bindValue($position++, $limit, PDO::PARAM_INT);
+        $stmt->bindValue($position, $offset, PDO::PARAM_INT);
+        $stmt->execute();
 
-        return array_map(
+        $items = array_map(
             self::castCase(...),
             PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'enforcement_cases'),
         );
+
+        return ['items' => $items, 'total' => $total];
     }
 
     /** @return array<string,mixed>|null */

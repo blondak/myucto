@@ -9,6 +9,7 @@ import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '
 import { formatMoneyMinor as money } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { apiErrorMessage } from '@/api/errors'
 import {
   payrollAbsenceApi,
@@ -52,6 +53,10 @@ const entitlementError = ref('')
 const entryError = ref('')
 const employments = ref<PayrollAbsenceEmployment[]>([])
 const absences = ref<PayrollAbsence[]>([])
+const absenceTotal = ref(0)
+const absencePageSize = 12
+const absenceOffset = ref(0)
+const currentAbsencePage = computed(() => Math.floor(absenceOffset.value / absencePageSize) + 1)
 const averages = ref<AverageSnapshot[]>([])
 const leaveEntries = ref<LeaveEntry[]>([])
 const leaveBalance = ref(0)
@@ -260,13 +265,17 @@ async function loadData() {
   loadFailed.value = false
   try {
     const employmentId = selectedEmploymentId.value
-    const [absenceData, averageData, leaveData] = await Promise.all([
-      payrollAbsenceApi.absences(filterFrom.value, filterTo.value, employmentId),
+    const [absencePage, averageData, leaveData] = await Promise.all([
+      payrollAbsenceApi.absencesPage(filterFrom.value, filterTo.value, employmentId, {
+        limit: absencePageSize,
+        offset: absenceOffset.value,
+      }),
       payrollAbsenceApi.averages(employmentId),
       payrollAbsenceApi.leaveLedger(employmentId, leaveYear.value),
     ])
-    absences.value = absenceData
-    for (const item of absenceData) {
+    absences.value = absencePage.absences
+    absenceTotal.value = absencePage.total
+    for (const item of absencePage.absences) {
       if (['dpn', 'quarantine'].includes(item.absence_type) && !dpnReviews[item.id]) {
         dpnReviews[item.id] = {
           firstDayFullyWorked: false,
@@ -290,6 +299,12 @@ async function loadData() {
   } finally {
     loading.value = false
   }
+}
+
+// Stránkuje sdílená `PaginationBar` (číslo stránky od jedné); server zná offset.
+function goToAbsencePage(nextPage: number) {
+  absenceOffset.value = Math.max(0, (nextPage - 1) * absencePageSize)
+  void loadData()
 }
 
 async function createAbsence() {
@@ -465,7 +480,14 @@ watch(selectedEmploymentId, () => {
   averageError.value = ''
   entitlementError.value = ''
   entryError.value = ''
+  // Jiný vztah = jiná množina nepřítomností; třetí stránka by ukázala prázdno.
+  absenceOffset.value = 0
   void loadData()
+})
+// Rozsah dat se načítá až tlačítkem Načíst znovu, ale zúžený filtr nesmí
+// uživatele nechat stát na stránce, která už neexistuje.
+watch([filterFrom, filterTo], () => {
+  absenceOffset.value = 0
 })
 watch(leaveYear, (selectedYear, previousYear) => {
   entitlementForm.leave_year = selectedYear
@@ -728,6 +750,14 @@ onMounted(async () => {
             </div>
           </article>
         </div>
+        <PaginationBar
+          class="mt-4"
+          data-test="absence-pagination"
+          :page="currentAbsencePage"
+          :per-page="absencePageSize"
+          :total="absenceTotal"
+          @update:page="goToAbsencePage"
+        />
       </section>
     </template>
 

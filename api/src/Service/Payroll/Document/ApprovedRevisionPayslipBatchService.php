@@ -9,6 +9,23 @@ use MyInvoice\Repository\Payroll\ApprovedRevisionPayslipRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
 
+/**
+ * Výplatní pásky schválené revize — celá dávka, nebo nic.
+ *
+ * Vykreslení PDF běží UVNITŘ transakce, a je to záměr, ne opomenutí. Dávka je
+ * jeden účetní úkon: půlka lidí s páskou a půlka bez ní je horší stav než dávka,
+ * která spadla celá, protože pásky jsou neměnné doklady a částečnou sadu už nejde
+ * jen tak dogenerovat — každá páska nese otisk zdroje a čas vydání. Proto se
+ * revize zamkne `FOR UPDATE` (jeden řádek, ne celý zaměstnavatel), soubory se
+ * odkládají do `PayrollDocumentStorageScope` a při chybě je úklid smete spolu
+ * s rollbackem. Volající navíc dávku běžně vkládá do vlastní transakce mzdového
+ * běhu (odtud SAVEPOINT), takže atomicita je součástí schválení běhu.
+ *
+ * Cenou je doba transakce úměrná počtu osob. Kdyby to jednou vadilo, správný
+ * postup NENÍ transakci rozdělit, ale vykreslit PDF dopředu a dovnitř transakce
+ * pustit jen zápisy — s tím, že se pak musí po zamčení revize znovu ověřit otisk
+ * zdroje, protože dnes ho `prepareAll()` kontroluje až pod zámkem.
+ */
 final class ApprovedRevisionPayslipBatchService
 {
     private const SAVEPOINT = 'approved_revision_payslip_batch';

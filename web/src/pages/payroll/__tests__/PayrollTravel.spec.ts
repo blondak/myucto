@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const m = vi.hoisted(() => ({
-  list: vi.fn(),
+  listPage: vi.fn(),
   preview: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
@@ -14,7 +14,7 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/api/payrollTravel', () => ({
   payrollTravelApi: {
-    list: m.list,
+    listPage: m.listPage,
     preview: m.preview,
     create: m.create,
     update: m.update,
@@ -78,6 +78,10 @@ function trip(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function tripsPage(trips: unknown[], total = trips.length) {
+  return { trips, total, limit: 20, offset: 0 }
+}
+
 describe('PayrollTravel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -85,7 +89,7 @@ describe('PayrollTravel', () => {
     m.context.mockResolvedValue([
       { id: 5, employee_id: 3, code: 'SYN-TRV-1', relation_type: 'employment', status: 'active', full_name: 'Syntetická cestující' },
     ])
-    m.list.mockResolvedValue([trip()])
+    m.listPage.mockResolvedValue(tripsPage([trip()]))
   })
 
   it('renders both the desktop table and the mobile cards', async () => {
@@ -106,7 +110,7 @@ describe('PayrollTravel', () => {
   })
 
   it('offers posting to payroll only for an approved settlement', async () => {
-    m.list.mockResolvedValue([trip({ status: 'approved' })])
+    m.listPage.mockResolvedValue(tripsPage([trip({ status: 'approved' })]))
     const wrapper = mount(PayrollTravel)
     await flushPromises()
 
@@ -167,5 +171,71 @@ describe('PayrollTravel', () => {
 
     expect(wrapper.find('[data-test="travel-error"]').text())
       .toContain('Sazba stravného pásma 1 je nižší než zákonné minimum.')
+  })
+
+  /*
+   * Server strop drží tvrdě. Kdyby si stránka řekla o „všechno", dostala by
+   * prvních padesát cest a o zbytku by mlčela — uživatel se šedesáti cestami by
+   * se o deseti z nich nedozvěděl.
+   */
+  it('asks the server for one bounded page instead of everything', async () => {
+    const wrapper = mount(PayrollTravel)
+    await flushPromises()
+
+    expect(m.listPage).toHaveBeenCalledTimes(1)
+    expect(m.listPage.mock.calls[0][1]).toEqual({ limit: 20, offset: 0 })
+    wrapper.unmount()
+  })
+
+  it('pages through the list and re-asks the server with the new offset', async () => {
+    m.listPage.mockResolvedValue({
+      trips: Array.from({ length: 20 }, (_, index) => trip({ id: index + 1 })),
+      total: 45,
+      limit: 20,
+      offset: 0,
+    })
+    const wrapper = mount(PayrollTravel)
+    await flushPromises()
+
+    const pager = wrapper.findComponent({ name: 'PaginationBar' })
+    expect(pager.exists()).toBe(true)
+    expect(pager.props('total')).toBe(45)
+
+    pager.vm.$emit('update:page', 2)
+    await flushPromises()
+
+    expect(m.listPage).toHaveBeenCalledTimes(2)
+    expect(m.listPage.mock.calls[1][1]).toEqual({ limit: 20, offset: 20 })
+    wrapper.unmount()
+  })
+
+  it('hides the pager when a single page holds everything', async () => {
+    const wrapper = mount(PayrollTravel)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="travel-pagination"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('returns to the first page when the period changes', async () => {
+    m.listPage.mockResolvedValue({
+      trips: Array.from({ length: 20 }, (_, index) => trip({ id: index + 1 })),
+      total: 45,
+      limit: 20,
+      offset: 0,
+    })
+    const wrapper = mount(PayrollTravel)
+    await flushPromises()
+
+    wrapper.findComponent({ name: 'PaginationBar' }).vm.$emit('update:page', 2)
+    await flushPromises()
+    expect(m.listPage.mock.calls[1][1]).toEqual({ limit: 20, offset: 20 })
+
+    await wrapper.find('[data-test="travel-period"]').setValue('2026-01')
+    await flushPromises()
+
+    expect(m.listPage.mock.calls[2][0]).toBe('2026-01')
+    expect(m.listPage.mock.calls[2][1]).toEqual({ limit: 20, offset: 0 })
+    wrapper.unmount()
   })
 })

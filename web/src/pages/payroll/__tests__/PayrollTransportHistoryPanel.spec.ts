@@ -49,6 +49,8 @@ function attempt(overrides: Record<string, unknown> = {}) {
     channel: 'vrep_apep',
     attempt_no: 1,
     status: 'awaiting_protocol',
+    period_start: '2026-07-01',
+    period_end: '2026-07-31',
     correlation_reference: 'ABC-123-XYZ',
     request_sha256: 'a'.repeat(64),
     response_http_status: 200,
@@ -115,9 +117,6 @@ describe('PayrollTransportHistoryPanel', () => {
         social_security_variable_symbol: '1234567890',
         is_active: true,
       }],
-    })
-    m.submissionDetail.mockResolvedValue({
-      submission: { period_start: '2026-07-01', period_end: '2026-07-31' },
     })
     m.jmhzTransportHistory.mockResolvedValue({
       environment: 'production',
@@ -399,7 +398,10 @@ describe('PayrollTransportHistoryPanel', () => {
   })
 
   it('nedohledané období nezabrání zobrazení stavů', async () => {
-    m.submissionDetail.mockRejectedValue(new Error('nedostupné'))
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({ period_start: null, period_end: null })],
+    })
 
     const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()
@@ -407,6 +409,59 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(wrapper.get('[data-test="transport-group-70"]').text())
       .toContain('payroll.submissions.transport.group.period_unknown')
     expect(wrapper.find('[data-test="transport-status-1"]').exists()).toBe(true)
+  })
+
+  /**
+   * Období nese ledger, takže se na ně přehled nesmí doptávat po jednom podání.
+   * Kdyby ano, každý řádek by stál jeden HTTP požadavek navíc — tenhle test je
+   * pojistka proti návratu toho rozstřelu.
+   */
+  it('období vezme z ledgeru a na detail podání se vůbec neptá', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [
+        attempt({ id: 3, submission_id: 70 }),
+        attempt({ id: 2, submission_id: 70, attempt_no: 2 }),
+        attempt({
+          id: 9,
+          submission_id: 71,
+          period_start: '2026-06-01',
+          period_end: '2026-06-30',
+        }),
+      ],
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect(m.submissionDetail).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="transport-group-70"]').text())
+      .toContain('payroll.submissions.transport.group.period 2026-07-01 2026-07-31')
+    expect(wrapper.get('[data-test="transport-group-71"]').text())
+      .toContain('payroll.submissions.transport.group.period 2026-06-01 2026-06-30')
+    expect(m.jmhzTransportHistory).toHaveBeenCalledTimes(1)
+  })
+
+  /** Odpověď na doptání je holý řádek ledgeru — období se z hlavičky ztratit nesmí. */
+  it('po doptání zůstane období vidět, i když ho odpověď nenese', async () => {
+    const polled = attempt({ status: 'completed', completed_at: '2026-08-11 10:00:00' })
+    delete (polled as Record<string, unknown>).period_start
+    delete (polled as Record<string, unknown>).period_end
+    m.pollJmhzTransportAttempt.mockResolvedValue({
+      attempt: polled,
+      acknowledgement: null,
+      settled: true,
+      report: { status: 'ProcessedAndComplete', errors: [] },
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+    await wrapper.get('[data-test="transport-poll-1"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="transport-group-70"]').text())
+      .toContain('payroll.submissions.transport.group.period 2026-07-01 2026-07-31')
+    expect(m.submissionDetail).not.toHaveBeenCalled()
   })
 
   /**

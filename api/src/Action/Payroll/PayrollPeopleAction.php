@@ -21,6 +21,9 @@ final class PayrollPeopleAction
 {
     use PayrollActionSupport;
 
+    /** Delší hledaný řetězec už není jméno; ořízne se, aby se nedostal do dotazu. */
+    private const SEARCH_MAX_LENGTH = 100;
+
     public function __construct(
         private readonly PayrollPeopleRepository $people,
         private readonly PayrollModuleAccess $access,
@@ -41,8 +44,64 @@ final class PayrollPeopleAction
             return $this->guardFailure($error);
         }
 
+        $supplierId = $this->currentSupplierId($request);
+        $query = $request->getQueryParams();
+        $view = $query['view'] ?? '';
+        if ($view === 'options') {
+            // Číselníkové čtení pro rozbalovátka: jediný dotaz, tedy kompletní
+            // seznam bez stránkování.
+            return Json::ok($response, [
+                'items' => $this->people->listOptionsForTenant($supplierId),
+            ]);
+        }
+        if ($view !== '') {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Neznámý pohled seznamu osob.',
+                422,
+            );
+        }
+
+        $filter = $query['filter'] ?? '';
+        if (!is_string($filter)) {
+            $filter = '';
+        }
+        if ($filter === '') {
+            $filter = PayrollPeopleRepository::LIST_DEFAULT_FILTER;
+        }
+        if (!in_array($filter, PayrollPeopleRepository::LIST_FILTERS, true)) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Neznámý filtr seznamu osob.',
+                422,
+            );
+        }
+
+        // Hledání se zkracuje, ne odmítá: delší řetězec než jméno nikoho nenajde,
+        // ale prohlížeč ani odkaz kvůli tomu nemá dostat chybu.
+        $search = $query['q'] ?? '';
+        $search = is_string($search)
+            ? mb_substr(trim($search), 0, self::SEARCH_MAX_LENGTH)
+            : '';
+
+        // Strop je tvrdý, ne jen výchozí — parametrem z URL ho zvednout nejde.
+        $limit = max(1, min(
+            PayrollPeopleRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollPeopleRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
+
+        $page = $this->people->listForTenant($supplierId, $limit, $offset, $filter, $search);
+
+        // Klíč `items` zůstává, aby stávající volající nespadli; `total`/`limit`/
+        // `offset` přibyly vedle něj, protože seznam už nemusí být úplný.
         return Json::ok($response, [
-            'items' => $this->people->listForTenant($this->currentSupplierId($request)),
+            'items' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ]);
     }
 
