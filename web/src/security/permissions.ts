@@ -21,6 +21,7 @@ export const PERMISSION_KEYS = [
   'payroll.calculate', 'payroll.review', 'payroll.approve', 'payroll.reopen',
   'payroll.post', 'payroll.payments', 'payroll.submissions', 'payroll.enforcement',
   'payroll.insolvency', 'payroll.reports', 'payroll.rulesets', 'payroll.documents',
+  'payroll.retention', 'payroll.erasure',
   'cash', 'cash.document.write', 'cash.close',
   'assets', 'assets.write', 'assets.depreciation', 'assets.dispose',
   'stock', 'stock.items.write', 'stock.documents.write', 'stock.orders.write', 'stock.vendors.write',

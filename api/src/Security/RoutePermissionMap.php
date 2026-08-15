@@ -123,6 +123,17 @@ final class RoutePermissionMap
         ['GET', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices)(/|$)#', 'settings.signing', AccessLevel::READ],
         ['*', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices)(/|$)#', 'settings.signing', AccessLevel::WRITE],
 
+        // Retence a výmaz. Dvě různá práva ZÁMĚRNĚ: nastavit lhůtu nebo zadržet
+        // výmaz je správa evidence, kdežto schválit a provést výmaz je nevratný
+        // zásah do osobních údajů. Kdo lhůty spravuje, nemusí být tentýž člověk,
+        // který odklepne, že se data smažou.
+        //
+        // Konkrétní pravidla musí předcházet obecnému `/api/payroll/*` fallbacku
+        // i pravidlu na `/people`, jinak by `retention` spadlo do modulového práva.
+        ['GET', '#^/api/payroll/retention(/(assessment|holds))?$#', 'payroll.retention', AccessLevel::READ],
+        ['*', '#^/api/payroll/retention/(holds(/[0-9]+)?|policies/[a-z_]+)$#', 'payroll.retention', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/retention/erasure(/[0-9]+)?$#', 'payroll.erasure', AccessLevel::READ],
+        ['POST', '#^/api/payroll/retention/erasure(/[0-9]+/(approve|reject|execute))?$#', 'payroll.erasure', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/people$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+$#', 'payroll', AccessLevel::READ],
