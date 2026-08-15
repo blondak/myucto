@@ -1598,8 +1598,43 @@
                 "inactive": "Inactive"
             },
             "needs_setup": "Setup required",
-            "show_detail": "Edit employee",
-            "hide_detail": "Hide details",
+            "edit_person": "Edit employee",
+            "back_to_list": "Back to the list",
+            "employments_title": "Employment relationships",
+            "header_employments": "No relationship | 1 relationship | {count} relationships",
+            "breadcrumbs": {
+                "payroll": "Payroll",
+                "people": "Employees"
+            },
+            "registration_legacy_warning": "This relationship was imported from the legacy records. Before you file the registration, check whether the employee is not already registered with the social security office.",
+            "delete": {
+                "action": "Delete relationship",
+                "person_action": "Delete employee",
+                "confirm": "This deletes the employment relationship including {summary}. This action cannot be undone.",
+                "confirm_empty": "This deletes the employment relationship. This action cannot be undone.",
+                "person_confirm": "This deletes the employee {name} including {summary}. This action cannot be undone.",
+                "person_confirm_empty": "This deletes the employee {name}. This action cannot be undone.",
+                "done": "The employment relationship has been deleted.",
+                "person_done": "The employee has been deleted.",
+                "blocked_title": "Cannot be deleted:",
+                "cascade": {
+                    "terms": "no terms version | 1 terms version | {count} terms versions",
+                    "checklist": "no checklist item | 1 checklist item | {count} checklist items",
+                    "events": "no history entry | 1 history entry | {count} history entries",
+                    "dimensions": "no dimension | 1 assigned dimension | {count} assigned dimensions",
+                    "components": "no recurring component | 1 recurring pay component | {count} recurring pay components",
+                    "time": "no attendance record | 1 attendance and calendar record | {count} attendance and calendar records",
+                    "absences": "no absence | 1 absence and leave record | {count} absence and leave records"
+                },
+                "person_cascade": {
+                    "employments": "no relationship | 1 employment relationship | {count} employment relationships",
+                    "profile": "no profile detail | 1 profile and personal detail | {count} profile and personal details",
+                    "dependants": "no dependant | 1 dependant | {count} dependants",
+                    "tax": "no tax declaration | 1 tax declaration and credit | {count} tax declarations and credits",
+                    "insurance": "no insurance record | 1 insurance record | {count} insurance records",
+                    "payout_rules": "no payout rule | 1 payout rule | {count} payout rules"
+                }
+            },
             "detail_hint": "Each relationship has its own terms history, lifecycle, checklist and audit timeline.",
             "dependants": {
                 "title": "Dependants and child tax credit",
@@ -1883,7 +1918,6 @@
                     "save_failed": "The payout rules could not be saved."
                 }
             },
-            "legacy_projection": "Imported from the legacy agenda",
             "primary": "Primary relationship",
             "add_employment": "Add relationship",
             "employment_created": "The employment relationship has been created.",
@@ -1986,6 +2020,7 @@
             },
             "checklist": {
                 "employment_contract": "Employment contract / agreement",
+                "legacy_start_date": "Fill in the start date",
                 "health_insurance_registration": "Health insurer registration",
                 "social_jmhz_registration": "Social security / JMHZ registration",
                 "tax_declaration": "Tax declaration",

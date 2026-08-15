@@ -11,10 +11,14 @@ const m = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   routeQuery: {} as Record<string, string>,
+  routerReplace: vi.fn(),
+  deletePerson: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: m.routeQuery }),
+  useRouter: () => ({ replace: m.routerReplace }),
+  RouterLink: { template: '<a><slot /></a>' },
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -23,6 +27,7 @@ vi.mock('@/api/payroll', () => ({
     person: m.person,
     createPerson: m.createPerson,
     createEmployment: m.createEmployment,
+    deletePerson: m.deletePerson,
   },
 }))
 
@@ -65,6 +70,9 @@ function person(
     employment_count: 0,
     relation_types: [],
     needs_setup: needsSetup,
+    can_delete: true,
+    delete_blocker: null,
+    delete_cascade: { employments: 0, profile: 1 },
   }
 }
 
@@ -72,6 +80,10 @@ function mountPage() {
   return mount(PeopleList, {
     global: {
       stubs: {
+        ActionBar: {
+          props: ['actions'],
+          template: '<div data-test="person-actions"><button v-for="action in actions" v-show="action.show" :key="action.key" type="button" :data-test="`action-${action.key}`" @click="action.run && action.run()">{{ action.label }}</button></div>',
+        },
         RouterLink: {
           props: ['to'],
           template: '<a data-test="router-link"><slot /></a>',
@@ -165,6 +177,126 @@ describe('PeopleList toolbar and shared employee creation', () => {
     expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="quick-edit-stub"]').text()).toBe('1')
     expect(wrapper.get('[data-test="advanced-person-profile"]').attributes('open')).toBeUndefined()
+  })
+
+  it('names the edited person in the header even without a structured name', async () => {
+    // Osoba „test" má vyplněné jen zobrazované jméno — strukturované pole je
+    // prázdné a formulář by bez hlavičky vypadal anonymně.
+    m.person.mockResolvedValue({
+      ...person(1, 'test', true, true),
+      employment_count: 2,
+      employments: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="person-header-name"]').text()).toBe('test')
+    expect(wrapper.get('[data-test="person-breadcrumbs"]').text()).toContain('test')
+    expect(wrapper.get('[data-test="person-header-employments"]').text())
+      .toContain('payroll.people.header_employments')
+    expect(wrapper.text()).toContain('payroll.people.needs_setup')
+  })
+
+  it('hides the list while editing so no other person stays in view', async () => {
+    m.person.mockResolvedValue({
+      ...person(1, 'Alfa Aktivní', true, false),
+      employments: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Gama K doplnění')
+
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="people-list"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Gama K doplnění')
+    expect(wrapper.get('[data-test="person-header-name"]').text()).toBe('Alfa Aktivní')
+  })
+
+  it('returns to the list from the breadcrumb and keeps the search and filter', async () => {
+    m.person.mockResolvedValue({
+      ...person(3, 'Gama K doplnění', true, true),
+      employments: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const filter = wrapper.get('[data-test="people-filter"]')
+    await filter.get('input').trigger('focus')
+    const allOption = filter.findAll('[role="option"]')
+      .find(option => option.text() === 'payroll.people.filters.all')
+    await allOption!.trigger('click')
+    await nextTick()
+    await wrapper.get('[data-test="people-search"]').setValue('Gama')
+
+    await wrapper.get('[data-test="edit-employee-3"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="people-list"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="breadcrumb-people"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('[data-test="people-list"]').exists()).toBe(true)
+    // Návrat, který resetuje filtr, je horší než žádný.
+    expect((wrapper.get('[data-test="people-search"]').element as HTMLInputElement).value)
+      .toBe('Gama')
+    expect(wrapper.text()).toContain('Gama K doplnění')
+    expect(wrapper.text()).not.toContain('Alfa Aktivní')
+  })
+
+  it('names what disappears before deleting the person and drops them from the list', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    m.deletePerson.mockResolvedValue({})
+    m.person.mockResolvedValue({
+      ...person(1, 'Alfa Aktivní', true, false),
+      employments: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="action-delete-person"]').trigger('click')
+    await flushPromises()
+
+    // Dialog musí předem říct, že kaskáda odklidí i vztahy osoby.
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining('payroll.people.delete.person_confirm'),
+    )
+    expect(confirm.mock.calls[0]![0]).toContain('person_cascade.profile')
+    expect(m.deletePerson).toHaveBeenCalledWith(1)
+    expect(wrapper.find('[data-test="people-list"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('Alfa Aktivní')
+    confirm.mockRestore()
+  })
+
+  it('explains why a person cannot be deleted instead of hiding the reason', async () => {
+    m.people.mockResolvedValue([{
+      ...person(1, 'Alfa Aktivní', true, false),
+      can_delete: false,
+      delete_blocker: {
+        code: 'payroll_employee_in_run',
+        message: 'Zaměstnanec je zahrnutý v revizi mzdového běhu.',
+        employment_id: null,
+        employment_code: null,
+      },
+    }])
+    m.person.mockResolvedValue({
+      ...person(1, 'Alfa Aktivní', true, false),
+      employments: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="person-delete-blocker"]').text())
+      .toContain('Zaměstnanec je zahrnutý v revizi mzdového běhu.')
+    expect(wrapper.find('[data-test="action-delete-person"]').isVisible()).toBe(false)
   })
 
   it('creates the shared accounting employee, reloads payroll people and opens next-step detail', async () => {

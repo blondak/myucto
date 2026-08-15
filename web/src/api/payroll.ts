@@ -43,6 +43,21 @@ export type PayrollInsuranceParticipation = 'automatic' | 'included' | 'excluded
 export type PayrollTaxRegime = 'advance' | 'withholding' | 'foreign' | 'manual_review'
 export type PayrollChecklistStatus = 'pending' | 'completed' | 'not_applicable'
 
+/**
+ * Důvod, proč objekt nejde smazat. `message` je věta pro uživatele, podle které
+ * se dá jednat — ukazuje se místo zašedlého tlačítka bez vysvětlení.
+ * `employment_code` je vyplněný, když osobu blokuje konkrétní pracovní vztah.
+ */
+export interface PayrollDeleteBlocker {
+  code: string
+  message: string
+  employment_id: number | null
+  employment_code: string | null
+}
+
+/** Počty toho, co zmizí spolu s objektem. Klíče se překládají přes i18n. */
+export type PayrollDeleteCascade = Record<string, number>
+
 export interface PayrollPersonListItem {
   id: number
   full_name: string
@@ -53,6 +68,9 @@ export interface PayrollPersonListItem {
   employment_count: number
   relation_types: PayrollRelationType[]
   needs_setup: boolean
+  can_delete: boolean
+  delete_blocker: PayrollDeleteBlocker | null
+  delete_cascade: PayrollDeleteCascade
 }
 
 export interface PayrollEmploymentAccounting {
@@ -80,6 +98,9 @@ export interface PayrollEmployment {
   monthly_gross_minor: number | null
   row_version: number
   allowed_transitions: PayrollEmploymentStatus[]
+  can_delete: boolean
+  delete_blocker: PayrollDeleteBlocker | null
+  delete_cascade: PayrollDeleteCascade
   accounting: PayrollEmploymentAccounting
   terms: PayrollEmploymentTerms[]
   checklist: PayrollEmploymentChecklistItem[]
@@ -2535,6 +2556,19 @@ export const payrollApi = {
       `/payroll/employments/${employmentId}/transitions/${target}`,
       payload,
     ).then(response => response.data.employment),
+  /**
+   * Smazání vztahu, který vůbec neměl vzniknout. Není to náhrada za „nenástup" —
+   * ten je záznam o tom, že člověk byl přijat a nenastoupil.
+   */
+  deleteEmployment: (employmentId: number, rowVersion: number) =>
+    api.delete<{ deleted: boolean; cascade: PayrollDeleteCascade }>(
+      `/payroll/employments/${employmentId}`,
+      { data: { row_version: rowVersion } },
+    ).then(response => response.data.cascade),
+  deletePerson: (employeeId: number) =>
+    api.delete<{ deleted: boolean; cascade: PayrollDeleteCascade }>(
+      `/payroll/people/${employeeId}`,
+    ).then(response => response.data.cascade),
   updateEmploymentChecklist: (
     employmentId: number,
     itemKey: string,

@@ -6,6 +6,7 @@ import { payrollApi, type PayrollQuickInputRow } from '@/api/payroll'
 import { payrollAbsenceApi, type PayrollAbsence } from '@/api/payrollAbsences'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatPayrollMinor } from '@/pages/payroll/payrollComponentsUi'
+import { employmentCodeLabel } from './employmentLifecycleUi'
 
 /**
  * Karty zaměstnanců na přehledu mezd.
@@ -114,17 +115,9 @@ function relationLabel(row: PayrollQuickInputRow): string {
   return t(`payroll.people.relations.${row.relation_type}`)
 }
 
-/**
- * Kód vztahu se ukazuje jen tehdy, když něco znamená.
- *
- * Vztahy převzaté z původní evidence dostaly při migraci kód `legacy`
- * (migrace 1188, `is_legacy_projection = 1`). Je to interní značka, ne údaj
- * zaměstnavatele — na kartě člověka vypadá jako název pracovního poměru
- * a mate. Kdo si kód vyplní sám, uvidí ho beze změny.
- */
-function employmentCodeLabel(row: PayrollQuickInputRow): string {
-  const code = (row.employment_code ?? '').trim()
-  return code === '' || code.toLowerCase() === 'legacy' ? '' : code
+/** Pravidlo žije v `employmentLifecycleUi.ts` — karta zaměstnance ho sdílí. */
+function employmentCodeLabelOf(row: PayrollQuickInputRow): string {
+  return employmentCodeLabel(row.employment_code)
 }
 
 function statusLabel(row: PayrollQuickInputRow): string {
@@ -314,7 +307,7 @@ onMounted(load)
             <div class="min-w-0">
               <h3 class="truncate font-semibold text-neutral-900">{{ row.full_name }}</h3>
               <p class="mt-0.5 truncate text-xs text-neutral-500">
-                {{ relationLabel(row) }}<template v-if="employmentCodeLabel(row)"> · {{ employmentCodeLabel(row) }}</template>
+                {{ relationLabel(row) }}<template v-if="employmentCodeLabelOf(row)"> · {{ employmentCodeLabelOf(row) }}</template>
               </p>
             </div>
             <span class="shrink-0 rounded-full px-2 py-1 text-xs font-medium" :class="statusClass(row)">
