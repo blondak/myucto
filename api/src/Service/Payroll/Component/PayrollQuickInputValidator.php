@@ -13,7 +13,7 @@ final class PayrollQuickInputValidator
      *   rows:list<array{
      *     employment_id:int,
      *     employment_row_version:int,
-     *     base_amount_minor:int,
+     *     base_amount_minor:?int,
      *     overtime_mode:string,
      *     overtime_hours_milli:?int,
      *     overtime_amount_minor:?int,
@@ -86,10 +86,7 @@ final class PayrollQuickInputValidator
                     $raw['employment_row_version'] ?? null,
                     'employment_row_version',
                 ),
-                'base_amount_minor' => $this->nonNegativeInt(
-                    $raw['base_amount_minor'] ?? null,
-                    'base_amount_minor',
-                ),
+                'base_amount_minor' => $this->baseAmount($raw),
                 'overtime_mode' => $mode,
                 'overtime_hours_milli' => $mode === 'hours' ? $hours : null,
                 'overtime_amount_minor' => $mode === 'amount' ? $overtimeAmount : null,
@@ -124,6 +121,33 @@ final class PayrollQuickInputValidator
             throw new \InvalidArgumentException('period musí být měsíc YYYY-MM.');
         }
         return $value;
+    }
+
+    /**
+     * Základní mzda rozlišuje prázdné pole od zadané nuly.
+     *
+     * `null` = uživatel pole nevyplnil, základ v tomto měsíci neřeší.
+     * `0` = uživatel vědomě zadal nulu; v částečném nebo přerušeném měsíci to je
+     * plnohodnotný údaj („nic se nevydělalo"), a musí tedy vzniknout řádek.
+     * Bez tohoto rozlišení obojí přicházelo jako `0` a nulový základ nešlo zadat.
+     *
+     * Chybějící klíč zůstává chybou — jen výslovné `null` znamená „nevyplněno".
+     * Kdyby se klíč směl vynechat, rozbitý klient by tiše zrušil existující základ.
+     *
+     * @param array<string,mixed> $raw
+     */
+    private function baseAmount(array $raw): ?int
+    {
+        if (!array_key_exists('base_amount_minor', $raw)) {
+            throw new \InvalidArgumentException(
+                'base_amount_minor musí být uvedeno; nevyplněné pole pošlete jako null.'
+            );
+        }
+
+        return $this->nullableNonNegativeInt(
+            $raw['base_amount_minor'],
+            'base_amount_minor',
+        );
     }
 
     private function positiveInt(mixed $value, string $field): int

@@ -273,7 +273,41 @@ describe('PayrollQuickInputs', () => {
       .toBe('payroll.quick_inputs.suspended_in_month')
     expect(wrapper.text()).toContain('payroll.quick_inputs.blockers.suspended_month_base_required')
     expect(wrapper.get('[data-testid="quick-base-12"]').element).toHaveProperty('value', '')
-    expect(wrapper.get('[data-testid="quick-payroll-save"]').attributes('disabled')).toBeDefined()
+    // Prázdný základ ukládání neblokuje: znamená „základ neřeším". Východiskem
+    // z blokátoru je zadat nulu — viz test níž, který ji pošle jako 0.
+    expect(wrapper.get('[data-testid="quick-payroll-save"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('tells an entered zero apart from an unfilled base', async () => {
+    const partialMonthRow = () => fixture({
+      base_requires_entry: true,
+      base_amount_minor: 0,
+      blockers: ['partial_month_base_required'],
+    })
+    m.load.mockImplementation(async period => ({
+      period,
+      items: [partialMonthRow()],
+    }))
+    // Uložení vrací řádek zpátky, aby druhá polovina testu měla do čeho psát.
+    m.save.mockImplementation(async payload => ({
+      period: payload.period,
+      items: [partialMonthRow()],
+    }))
+
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="quick-base-12"]').element).toHaveProperty('value', '')
+
+    // Nevyplněné pole → null, na serveru „základ neřeším".
+    await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+    await flushPromises()
+    expect(m.save.mock.calls[0][0].rows[0].base_amount_minor).toBeNull()
+
+    // Zadaná nula → 0, na serveru plnohodnotný nulový základ.
+    await wrapper.get('[data-testid="quick-base-12"]').setValue('0')
+    await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+    await flushPromises()
+    expect(m.save.mock.calls[1][0].rows[0].base_amount_minor).toBe(0)
   })
 
   it('uses read-only mode while keeping the payroll-run navigation available', async () => {
@@ -287,17 +321,19 @@ describe('PayrollQuickInputs', () => {
     expect(wrapper.text()).toContain('payroll.quick_inputs.readonly_hint')
   })
 
+  // Prázdno je legitimní jen u základní mzdy. U odměny nese nulu jedině zadaná
+  // nula, takže prázdné pole tam zůstává chybou a ukládání dál blokuje.
   it('blocks saving when an editable amount is empty or invalid', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    await wrapper.get('[data-testid="quick-base-12"]').setValue('')
+    await wrapper.get('[data-testid="quick-bonus-12"]').setValue('')
 
     expect(wrapper.get('[data-testid="quick-payroll-save"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
     expect(m.save).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('payroll.quick_inputs.validation.amount_required')
     expect(wrapper.find('[data-testid="quick-payroll-validation-summary"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="quick-base-12"]').attributes('aria-invalid')).toBe('true')
+    expect(wrapper.get('[data-testid="quick-bonus-12"]').attributes('aria-invalid')).toBe('true')
   })
 
   it('rejects a negative amount locally and keeps the gross preview fail-safe', async () => {
