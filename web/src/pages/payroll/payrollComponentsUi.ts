@@ -54,6 +54,14 @@ export function payrollImportIssues(
   ].sort((left, right) => left.row_number - right.row_number)
 }
 
+/**
+ * Vztahy, na které lze v daném měsíci zadat mzdový vstup.
+ *
+ * Archivovaný vztah a vztah, do kterého nikdo nenastoupil, se nenabízejí —
+ * server je odmítne stejně (PayrollInputRepository::assertValidReferences).
+ */
+export const PAYROLL_INPUT_EXCLUDED_STATUSES = ['archived', 'no_show']
+
 export function payrollEmploymentOptions(people: PayrollPerson[]): PayrollEmploymentOption[] {
   return people
     .flatMap(person => person.employments.map(employment => ({
@@ -64,6 +72,7 @@ export function payrollEmploymentOptions(people: PayrollPerson[]): PayrollEmploy
       relation_type: employment.relation_type,
       status: employment.status,
     })))
+    .filter(option => !PAYROLL_INPUT_EXCLUDED_STATUSES.includes(option.status))
     .sort((left, right) =>
       left.full_name.localeCompare(right.full_name, 'cs')
       || left.code.localeCompare(right.code, 'cs'))

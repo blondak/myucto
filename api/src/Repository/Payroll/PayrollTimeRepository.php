@@ -20,29 +20,80 @@ final class PayrollTimeRepository
         private readonly JmhzSpecPackageRepository $jmhzSpecPackages,
     ) {}
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * Pracovní vztahy, které v období patří do docházky.
+     *
+     * Stav se čte K OBDOBÍ přes {@see PayrollEmploymentLifecycleSql}, ne k dnešku —
+     * stejně jako v {@see PayrollQuickInputRepository} a
+     * {@see \MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder}. Projekce
+     * `payroll_employments.status` je jen fallback pro vztahy bez událostí.
+     *
+     * Whitelist (ne `NOT IN`) je záměr: `archived` a `no_show` se nevypisují a
+     * jakákoliv budoucí hodnota enumu se musí do docházky přidat vědomě. Migrace
+     * 1195 hodnotu `cancelled` z enumu odstranila (přejmenovala na `no_show`),
+     * takže filtr na ni byl mrtvý a propouštěl i zrušené vztahy.
+     *
+     * `planned`/`preregistered` se vypíše jen tehdy, když nástup spadá do období
+     * nebo před něj — kdo ještě nenastoupil, v docházce za období nemá co dělat.
+     *
+     * @param string $periodEnd první den následujícího měsíce (výlučná hranice)
+     * @return list<array<string,mixed>>
+     */
     public function employments(int $supplierId, string $periodStart, string $periodEnd): array
     {
+        $periodLastDay = (new \DateTimeImmutable($periodEnd))
+            ->modify('-1 day')
+            ->format('Y-m-d');
         $stmt = $this->db->pdo()->prepare(
-            "SELECT employment.id,
+            'WITH effective_employment AS (
+                    SELECT employment.*,
+                           ' . PayrollEmploymentLifecycleSql::effectiveStatusAtPlaceholder() . '
+                               AS effective_status
+                      FROM payroll_employments employment
+                     WHERE employment.supplier_id = ?
+                 )
+             SELECT employment.id,
                     employment.employee_id,
                     employment.code,
                     employment.relation_type,
                     employment.status,
+                    employment.effective_status,
                     employment.start_date,
+                    employment.actual_start_date,
                     employment.end_date,
                     employee.full_name
-               FROM payroll_employments employment
+               FROM effective_employment employment
                JOIN payroll_employees employee
                  ON employee.supplier_id = employment.supplier_id
                 AND employee.id = employment.employee_id
-              WHERE employment.supplier_id = ?
-                AND employment.status <> 'cancelled'
+              WHERE employment.effective_status IN (
+                        "planned", "preregistered", "active", "suspended", "ended"
+                    )
                 AND (employment.start_date IS NULL OR employment.start_date < ?)
                 AND (employment.end_date IS NULL OR employment.end_date >= ?)
-              ORDER BY employee.full_name, employment.code, employment.id"
+                AND (
+                        employment.effective_status
+                            NOT IN ("planned", "preregistered")
+                     OR (
+                            COALESCE(
+                                employment.actual_start_date,
+                                employment.start_date
+                            ) IS NOT NULL
+                        AND COALESCE(
+                                employment.actual_start_date,
+                                employment.start_date
+                            ) <= ?
+                        )
+                    )
+              ORDER BY employee.full_name, employment.code, employment.id'
         );
-        $stmt->execute([$supplierId, $periodEnd, $periodStart]);
+        $stmt->execute([
+            $periodLastDay,
+            $supplierId,
+            $periodEnd,
+            $periodStart,
+            $periodLastDay,
+        ]);
         return self::rows($stmt);
     }
 

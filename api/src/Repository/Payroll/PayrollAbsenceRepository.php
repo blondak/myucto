@@ -28,7 +28,7 @@ final class PayrollAbsenceRepository
                  ON employee.supplier_id = employment.supplier_id
                 AND employee.id = employment.employee_id
               WHERE employment.supplier_id = ?
-                AND employment.status NOT IN ('cancelled', 'archived', 'no_show')
+                AND employment.status NOT IN ('archived', 'no_show')
               ORDER BY employee.full_name, employment.code"
         );
         $stmt->execute([$supplierId]);

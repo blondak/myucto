@@ -3042,6 +3042,10 @@ export const payrollApi = {
     api.post<{ input: PayrollInput }>(`/payroll/inputs/${id}/approve`, {
       row_version: rowVersion,
     }).then(response => response.data.input),
+  cancelInput: (id: number, rowVersion: number) =>
+    api.post<{ input: PayrollInput }>(`/payroll/inputs/${id}/cancel`, {
+      row_version: rowVersion,
+    }).then(response => response.data.input),
   previewInputImport: (payload: PayrollInputImportPayload) =>
     api.post<{ preview: PayrollInputImportPreview }>('/payroll/input-imports/preview', payload)
       .then(response => response.data.preview),

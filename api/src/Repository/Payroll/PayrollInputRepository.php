@@ -17,7 +17,16 @@ final class PayrollInputRepository
         private readonly PayrollComponentDefinitionFactory $definitionFactory,
     ) {}
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * Mzdové vstupy měsíce bez zrušených.
+     *
+     * Zrušený vstup se nevypisuje — jinak by zůstal v seznamu viset a uživatel by
+     * neměl jak poznat, že už neplatí. Do blokátoru mzdového běhu se nepočítá už
+     * tím, že {@see \MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBatchLoader}
+     * počítá výhradně `status = "draft"`.
+     *
+     * @return list<array<string,mixed>>
+     */
     public function list(int $supplierId, string $periodStart): array
     {
         $stmt = $this->db->pdo()->prepare(
@@ -40,6 +49,7 @@ final class PayrollInputRepository
                 AND component.id = input.component_id
               WHERE input.supplier_id = ?
                 AND input.period_start = ?
+                AND input.status <> "cancelled"
               ORDER BY employee.full_name, employment.code, component.code, input.id'
         );
         $stmt->execute([$supplierId, $periodStart]);
@@ -392,6 +402,178 @@ final class PayrollInputRepository
         return $this->find($supplierId, $id);
     }
 
+    /**
+     * Zrušení vlastního konceptu mzdového vstupu.
+     *
+     * Jde cestou `status = "cancelled"`, ne tvrdého DELETE — schéma pro to bylo
+     * navržené už v migraci 1210: hodnota je v enumu, CHECK ji vyjímá z povinnosti
+     * mít snapshot složky a generovaný `external_dedupe_key` se u ní nuluje, takže
+     * se uvolní i unikátní klíč externího vstupu. Zachová se tím auditní stopa
+     * a odpadne řešení cizích klíčů.
+     *
+     * Blokovat smí jen důkaz pohybu: rozpracovaný vstup bez schválení a bez
+     * navázané evidence zrušit lze, cokoliv dál v řetězci ne. Operace je
+     * idempotentní — druhé zrušení už jen vrátí stav.
+     *
+     * @return array<string,mixed>|null null, když vstup neexistuje
+     */
+    public function cancel(int $supplierId, int $id, int $expectedVersion): ?array
+    {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT id, status, approved_at, row_version, period_start
+                   FROM payroll_inputs
+                  WHERE supplier_id = ? AND id = ?
+                  FOR UPDATE'
+            );
+            $stmt->execute([$supplierId, $id]);
+            $raw = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($raw === false) {
+                if ($ownsTransaction) {
+                    $pdo->rollBack();
+                }
+                return null;
+            }
+            $row = PayrollTimeValue::row($raw, 'payroll_input_cancellation');
+            $status = PayrollTimeValue::string($row['status'] ?? null, 'status');
+            if ($status === 'cancelled') {
+                if ($ownsTransaction) {
+                    $pdo->commit();
+                }
+                return $this->find($supplierId, $id);
+            }
+            $currentVersion = PayrollTimeValue::int(
+                $row['row_version'] ?? null,
+                'row_version',
+            );
+            if ($currentVersion !== $expectedVersion) {
+                throw new PayrollInputConflictException($currentVersion);
+            }
+            if ($status !== 'draft' || $row['approved_at'] !== null) {
+                throw new PayrollInputCancellationException(
+                    'input_state_conflict',
+                    'Zrušit lze jen rozpracovaný mzdový vstup.',
+                );
+            }
+            $this->assertNoMovement(
+                $pdo,
+                $supplierId,
+                $id,
+                PayrollTimeValue::string($row['period_start'] ?? null, 'period_start'),
+            );
+            $update = $pdo->prepare(
+                'UPDATE payroll_inputs
+                    SET status = "cancelled", row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?
+                    AND status = "draft"'
+            );
+            $update->execute([$supplierId, $id, $expectedVersion]);
+            if ($update->rowCount() !== 1) {
+                throw new PayrollInputConflictException($currentVersion);
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $this->find($supplierId, $id);
+    }
+
+    /**
+     * Důkaz pohybu, který zrušení konceptu zakazuje.
+     *
+     * Schválení vstupu zakládá akumulátor benefitu, materializace pracovní cesty
+     * a import si drží vazbu na řádek zdroje a schválená revize běhu má vstup
+     * zmrazený ve svém snapshotu. Nic z toho se nesmí utrhnout od záznamu, na
+     * který ukazuje.
+     */
+    private function assertNoMovement(
+        PDO $pdo,
+        int $supplierId,
+        int $id,
+        string $periodStart,
+    ): void {
+        $benefit = $pdo->prepare(
+            'SELECT 1
+               FROM payroll_benefit_accumulators
+              WHERE supplier_id = ? AND input_id = ?
+              LIMIT 1'
+        );
+        $benefit->execute([$supplierId, $id]);
+        if ($benefit->fetchColumn() !== false) {
+            throw new PayrollInputCancellationException(
+                'input_has_movement',
+                'Vstup je navázaný na roční akumulátor benefitu; zrušit ho nelze.',
+            );
+        }
+
+        $travel = $pdo->prepare(
+            'SELECT 1
+               FROM payroll_travel_compensation_links
+              WHERE supplier_id = ? AND input_id = ?
+              LIMIT 1'
+        );
+        $travel->execute([$supplierId, $id]);
+        if ($travel->fetchColumn() !== false) {
+            throw new PayrollInputCancellationException(
+                'input_has_movement',
+                'Vstup je navázaný na vyúčtování pracovní cesty; zrušit ho nelze.',
+            );
+        }
+
+        $import = $pdo->prepare(
+            'SELECT 1
+               FROM payroll_input_import_rows
+              WHERE supplier_id = ? AND input_id = ?
+              LIMIT 1'
+        );
+        $import->execute([$supplierId, $id]);
+        if ($import->fetchColumn() !== false) {
+            throw new PayrollInputCancellationException(
+                'input_has_movement',
+                'Vstup vznikl importem a drží vazbu na jeho řádek; zrušit ho nelze.',
+            );
+        }
+
+        $frozen = $pdo->prepare(
+            'SELECT 1
+               FROM payroll_run_revisions revision
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE revision.supplier_id = ?
+                AND run.period_start = ?
+                AND JSON_CONTAINS(
+                        COALESCE(
+                            JSON_EXTRACT(
+                                revision.input_snapshot_json,
+                                "$.people[*].employments[*].inputs[*].id"
+                            ),
+                            JSON_ARRAY()
+                        ),
+                        ?
+                    )
+              LIMIT 1'
+        );
+        $frozen->execute([$supplierId, $periodStart, (string) $id]);
+        if ($frozen->fetchColumn() !== false) {
+            throw new PayrollInputCancellationException(
+                'input_has_movement',
+                'Vstup je zmrazený v revizi mzdového běhu; zrušit ho nelze.',
+            );
+        }
+    }
+
     public function annualBenefitTotal(
         int $supplierId,
         int $employeeId,
@@ -414,11 +596,19 @@ final class PayrollInputRepository
         );
     }
 
-    /** @param array<string,mixed> $data */
+    /**
+     * Kontrola referencí mzdového vstupu.
+     *
+     * Kromě příslušnosti k firmě hlídá i stav vztahu: na `archived` ani `no_show`
+     * se mzdový vstup zakládat nesmí. Nabídka vztahů ve formuláři je odfiltrovaná
+     * stejně, tohle je serverová pojistka — klient není zdroj pravdy.
+     *
+     * @param array<string,mixed> $data
+     */
     public function assertValidReferences(int $supplierId, array $data): void
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT 1
+            'SELECT employment.status
                FROM payroll_employments employment
                JOIN payroll_component_definitions component
                  ON component.supplier_id = employment.supplier_id
@@ -438,9 +628,15 @@ final class PayrollInputRepository
             $data['employment_id'],
             $data['employee_id'],
         ]);
-        if ($stmt->fetchColumn() === false) {
+        $status = $stmt->fetchColumn();
+        if ($status === false) {
             throw new \InvalidArgumentException(
                 'Zaměstnanec, vztah nebo účinná mzdová složka nepatří této firmě.'
+            );
+        }
+        if (in_array((string) $status, ['archived', 'no_show'], true)) {
+            throw new \InvalidArgumentException(
+                'Pracovní vztah je archivovaný nebo nenastoupil; mzdový vstup na něj založit nelze.'
             );
         }
     }
