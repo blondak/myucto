@@ -21,6 +21,20 @@ final class JmhzScenario1XmlSerializer
 {
     private const XMLNS = 'http://www.w3.org/2000/xmlns/';
 
+    /**
+     * Písmena § 5a odst. 1 ZPSZ a jejich elementy. Rozlišují sazbu
+     * zaměstnavatele — a) běžná, b) zdravotnická záchranná služba a hasičský
+     * záchranný sbor podniku, c) rizikové zaměstnání — takže záměna písmene
+     * je záměna sazby, ne kosmetika.
+     *
+     * @var array<string, string>
+     */
+    private const PARAGRAPH5_ELEMENTS = [
+        'a' => 'form:pismenoA',
+        'b' => 'form:pismenoB',
+        'c' => 'form:pismenoC',
+    ];
+
     public function serialize(
         JmhzScenario1NormalizedDocument $document,
         JmhzSubmissionEnvelope $envelope,
@@ -538,16 +552,47 @@ final class JmhzScenario1XmlSerializer
         // porovnávají odvedené pojistné se základem a chybějící základ berou
         // jako nulu, takže podání bez něj ČSSZ odmítne. Pořadí je dané
         // sekvencí `pojisteniBezPriznakuType` — základ patří mezi `trvani`
-        // a `eldpSeznam`.
+        // a `eldpSeznam`, hned za ním rozpad podle § 5a.
+        $social = $this->object($employment['social_base'] ?? null);
+        $amount = $this->int($social['assessment_base_czk'] ?? null, '10477');
         $base = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vymerovaciZaklad');
         $this->text(
             $dom,
             $base,
             JmhzSchemaCatalog::NS_FORM,
             'form:castkaOdvodPojistneho',
-            (string) $this->int($summary['social_assessment_base_czk'] ?? null, '10477'),
+            (string) $amount,
         );
         $node->appendChild($base);
+
+        // Ve větvi `bezPriznaku` vede matice datových scénářů dílčí základy
+        // podle § 5a jako povinné, a kontroly 216 a 284 to vynucují — ověřeno
+        // odmítnutím podání, ve kterém chyběly. U nulového základu se rozpad
+        // neuvádí: kontrola 284 se spouští až od nenulové částky a nula
+        // rozdělená na složky nenese žádnou informaci.
+        if ($amount > 0) {
+            $letter = $social['paragraph5_letter'] ?? null;
+            if (!is_string($letter) || !isset(self::PARAGRAPH5_ELEMENTS[$letter])) {
+                $this->invalid(
+                    'jmhz_xml_employer_rate_category_unknown',
+                    'Bez sazbové kategorie zaměstnavatele nelze vyměřovací základ'
+                        . ' rozdělit podle § 5a odst. 1 ZPSZ.',
+                );
+            }
+            $split = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:vymerovaciZakladParagraf5',
+            );
+            $this->text(
+                $dom,
+                $split,
+                JmhzSchemaCatalog::NS_FORM,
+                self::PARAGRAPH5_ELEMENTS[$letter],
+                (string) $amount,
+            );
+            $node->appendChild($split);
+        }
 
         $sections = $this->rows($eldp['eldp_sections'] ?? null);
         if ($sections === []) {

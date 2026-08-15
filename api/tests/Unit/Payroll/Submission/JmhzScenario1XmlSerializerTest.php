@@ -481,7 +481,11 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                         '10330' => 0,
                         '10331' => 0,
                     ],
-                    'insurance' => ['relationship_id' => 'employment:101'],
+                    'insurance' => [
+                        'relationship_id' => 'employment:101',
+                        'capped_assessment_base_minor_units' => 100_000,
+                        'employer_rate_category' => 'ordinary',
+                    ],
                 ]],
             ]],
             'source_versions' => [
@@ -574,6 +578,9 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                       <form:vymerovaciZaklad>
                         <form:castkaOdvodPojistneho>1000</form:castkaOdvodPojistneho>
                       </form:vymerovaciZaklad>
+                      <form:vymerovaciZakladParagraf5>
+                        <form:pismenoA>1000</form:pismenoA>
+                      </form:vymerovaciZakladParagraf5>
                       <form:eldpSeznam>
                         <form:eldp>
                           <form:kod>1++</form:kod>

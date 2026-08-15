@@ -695,7 +695,11 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
                         '10330' => 0,
                         '10331' => 0,
                     ],
-                    'insurance' => ['relationship_id' => 'employment:101'],
+                    'insurance' => [
+                        'relationship_id' => 'employment:101',
+                        'capped_assessment_base_minor_units' => 100_000,
+                        'employer_rate_category' => 'ordinary',
+                    ],
                 ]],
             ]],
             'source_versions' => [

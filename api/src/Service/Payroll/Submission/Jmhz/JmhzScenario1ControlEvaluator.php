@@ -2444,23 +2444,92 @@ final class JmhzScenario1ControlEvaluator
      * znalosti scénáře by tedy odmítalo podání, která projdou — a to je horší
      * chyba než kontrolu nevykonat.
      */
+    /**
+     * Větve formuláře, na které kontroly nad § 5a (216, 284) dopadají,
+     * a větve, kde jsou mimo datový scénář.
+     *
+     * Rozhoduje VĚTEV, ne atribut 10239. Ten je podle pokynů (kap. 1.4.13,
+     * s. 69) povinný jen tehdy, když zaměstnanec nemá přidělené OIČ ani ID PPV
+     * — v běžném scénáři tedy chybí vždycky, a podmiňovat jím vyhodnocení
+     * znamenalo, že se obě kontroly nespustily nikdy. Matice datových scénářů
+     * (`datove_scenare_interakce_povinnosti_MH_1.4.0.2.xlsx`, list MASTER)
+     * přitom vede dílčí základy jako CORE DATA právě u `bezPriznaku`
+     * a odloženého příjmu, kdežto u činností K–S a u pěstouna vůbec.
+     *
+     * Ověřeno odesláním: podání ve větvi `bezPriznaku` s nenulovým 10477 a bez
+     * § 5a vrátí blokující 20216 i 20284.
+     *
+     * @var array<string, bool> true = kontrola platí, false = mimo scénář
+     */
+    private const PARAGRAPH5_SCOPE = [
+        'bezPriznaku' => true,
+        'odlozenyPrijem' => true,
+        'cinnostKS' => false,
+        'pestoun' => false,
+    ];
+
+    /**
+     * Vrací true, když se u součásti nedá rozhodnout, jestli § 5a platí —
+     * tedy u větví, které matice scénářů nepokrývá. Neznámá větev se nesmí
+     * tvářit ani jako splněná kontrola, ani jako porušená.
+     */
     private function requiresActivityScenario(JmhzAttributeScope $form): bool
     {
-        return !$form->has('10239') && !$form->has('10502');
+        foreach ($form->bodies() as $body) {
+            if (array_key_exists($body, self::PARAGRAPH5_SCOPE)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
-    /** @return list<JmhzControlVerdict> */
+    /** Součást, na kterou § 5a podle matice datových scénářů nedopadá. */
+    private function outsideParagraph5Scenario(JmhzAttributeScope $form): bool
+    {
+        foreach ($form->bodies() as $body) {
+            if ((self::PARAGRAPH5_SCOPE[$body] ?? true) === false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Kontrola 216: 10477 = 10478 + 10479 + 10480.
+     *
+     * Rozhoduje se per součást, ne za celé podání: v jednom hlášení můžou být
+     * vedle sebe součásti ve větvi, kde pravidlo platí, i ve větvi, kde je
+     * mimo scénář. Jedna z nich nesmí umlčet druhou.
+     *
+     * @return list<JmhzControlVerdict>
+     */
     private function assessmentBaseSum(JmhzAttributeProjection $projection): array
     {
         if ($this->lacksActivityScenario($projection)) {
             return [$this->activityScenarioUnknown()];
         }
 
-        return $this->sumMatchesWhenPositive(
-            $projection,
-            '10477',
-            ['10478', '10479', '10480'],
-        );
+        return $this->perForm($projection, function (JmhzAttributeScope $form): ?string {
+            if ($this->outsideParagraph5Scenario($form)) {
+                return null;
+            }
+            $total = $form->integer('10477');
+            if ($total === null || $total <= 0) {
+                return null;
+            }
+            $sum = 0;
+            foreach (['10478', '10479', '10480'] as $part) {
+                $sum += $form->integer($part) ?? 0;
+            }
+            if ($total !== $sum) {
+                return "Vyměřovací základ 10477 = {$total} neodpovídá součtu dílčích"
+                    . " základů podle § 5a ({$sum}).";
+            }
+
+            return null;
+        });
     }
 
     /** @return list<JmhzControlVerdict> */
@@ -2488,15 +2557,18 @@ final class JmhzScenario1ControlEvaluator
     {
         return JmhzControlVerdict::notEvaluable(
             JmhzAttributeProjection::PART_FORM,
-            'Pravidlo se nevztahuje na vyjmenované datové scénáře; bez druhu'
-                . ' činnosti (10239) nelze rozhodnout, který scénář platí.',
+            'Větev formuláře součásti není v matici datových scénářů, takže'
+                . ' nelze rozhodnout, jestli § 5a na tuhle součást dopadá.',
         );
     }
 
     /** @return list<JmhzControlVerdict> */
     private function assessmentBaseHasComponent(JmhzAttributeProjection $projection): array
     {
-        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+        return $this->perForm($projection, function (JmhzAttributeScope $form): ?string {
+            if ($this->outsideParagraph5Scenario($form)) {
+                return null;
+            }
             $base = $form->integer('10477');
             if ($base === null || $base === 0) {
                 return null;

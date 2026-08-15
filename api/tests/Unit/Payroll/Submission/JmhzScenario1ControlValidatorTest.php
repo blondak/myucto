@@ -398,29 +398,50 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
     /**
      * Regrese na skutečné odmítnutí z testovacího prostředí ČSSZ: podání bez
      * vyměřovacího základu (10477) tam skončilo chybou 20315. Vykázané
-     * pojistné se totiž porovnává se základem a chybějící základ se bere jako
-     * nula — kontroly 118 i 315 proto musí padnout i u nás, jinak by lokální
-     * brána pustila dál něco, co ČSSZ vrátí.
+     * pojistné se porovnává se základem a chybějící základ se bere jako nula.
      */
     public function testInsuranceWithoutAssessmentBaseIsRefusedLikeCsszDoes(): void
     {
         $sample = JmhzXmlSample::minimal();
         $stripped = preg_replace(
-            '~\s*<form:vymerovaciZaklad>.*?</form:vymerovaciZaklad>~s',
+            '~\s*<form:vymerovaciZaklad>\s*<form:castkaOdvodPojistneho>'
+                . '.*?</form:vymerovaciZaklad>~s',
             '',
             $sample,
         );
         self::assertNotSame($sample, $stripped);
-        $report = $this->validate((string) $stripped);
 
-        $failed = $this->failedIds($report);
-        self::assertContains(118, $failed);
-        self::assertContains(315, $failed);
+        self::assertContains(118, $this->failedIds($this->validate((string) $stripped)));
+    }
+
+    /**
+     * Druhá půlka téhož odmítnutí. Po doplnění základu vrátila ČSSZ 20216
+     * a 20284: ve větvi `bezPriznaku` vede matice datových scénářů dílčí
+     * základy podle § 5a jako povinné, jakmile je základ nenulový.
+     *
+     * Tohle je přesně místo, kde byla brána děravá — obě kontroly se
+     * podmiňovaly druhem činnosti (10239), který se v tomhle scénáři
+     * nevyplňuje, takže se nespustily nikdy.
+     */
+    public function testAssessmentBaseWithoutParagraph5SplitIsRefused(): void
+    {
+        $sample = JmhzXmlSample::minimal();
+        $stripped = preg_replace(
+            '~\s*<form:vymerovaciZakladParagraf5>.*?</form:vymerovaciZakladParagraf5>~s',
+            '',
+            $sample,
+        );
+        self::assertNotSame($sample, $stripped);
+
+        $failed = $this->failedIds($this->validate((string) $stripped));
+        self::assertContains(216, $failed);
+        self::assertContains(284, $failed);
     }
 
     /**
      * Sazba se bere z katalogu k prvnímu dni období, ne z literálu — a rozdíl
-     * o korunu je vada, ne zaokrouhlení.
+     * o korunu je vada, ne zaokrouhlení. Rozejde se přitom i součet dílčích
+     * základů, takže padne i kontrola 216.
      */
     public function testInsuranceThatDoesNotMatchTheRateIsRefused(): void
     {
@@ -432,7 +453,29 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
 
         $failed = $this->failedIds($report);
         self::assertContains(118, $failed);
-        self::assertContains(315, $failed);
+        self::assertContains(216, $failed);
+    }
+
+    /**
+     * Ve větvi `cinnostKS` jsou dílčí základy podle § 5a mimo datový scénář —
+     * doloženo maticí scénářů i tím, že skutečná přijatá hlášení je nemají.
+     * Kdyby se kontrola pouštěla i tam, brána by blokovala správná podání.
+     */
+    public function testParagraph5IsNotRequiredOutsideItsScenario(): void
+    {
+        $sample = str_replace(
+            ['<form:bezPriznaku>', '</form:bezPriznaku>'],
+            ['<form:cinnostKS>', '</form:cinnostKS>'],
+            preg_replace(
+                '~\s*<form:vymerovaciZakladParagraf5>.*?</form:vymerovaciZakladParagraf5>~s',
+                '',
+                JmhzXmlSample::minimal(),
+            ) ?? '',
+        );
+
+        $failed = $this->failedIds($this->validate($sample));
+        self::assertNotContains(216, $failed);
+        self::assertNotContains(284, $failed);
     }
 
     public function testCreditsWithoutSignedDeclarationAreRefused(): void

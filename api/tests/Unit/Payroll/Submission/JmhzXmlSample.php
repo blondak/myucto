@@ -174,6 +174,9 @@ final class JmhzXmlSample
                       <form:vymerovaciZaklad>
                         <form:castkaOdvodPojistneho>1000</form:castkaOdvodPojistneho>
                       </form:vymerovaciZaklad>
+                      <form:vymerovaciZakladParagraf5>
+                        <form:pismenoA>1000</form:pismenoA>
+                      </form:vymerovaciZakladParagraf5>
                       <form:eldpSeznam>
             {$eldp}
                       </form:eldpSeznam>
