@@ -48,6 +48,13 @@ final class PayrollRuleParameterCatalog
             'advance.rounding.base_above_100_czk' => 'Zaokrouhlení základu zálohy nad 100 Kč',
             'advance.rounding.base_up_to_100_czk' => 'Zaokrouhlení základu zálohy do 100 Kč',
             'advance.rounding.result' => 'Zaokrouhlení vypočtené zálohy na daň',
+            'benefit_exemption.meal.per_shift' => 'Osvobozený příspěvek na stravování za směnu',
+            'benefit_exemption.non_cash_health.yearly' =>
+                'Roční limit osvobození nepeněžních zdravotnických plnění',
+            'benefit_exemption.non_cash_leisure.yearly' =>
+                'Roční limit osvobození nepeněžních volnočasových plnění',
+            'benefit_exemption.old_age_savings.yearly' =>
+                'Roční limit osvobození příspěvku na produkty spoření na stáří a pojištění dlouhodobé péče',
             'bonus.minimum_amount.monthly' => 'Nejnižší vyplatitelný měsíční daňový bonus',
             'bonus.minimum_income.monthly' => 'Minimální měsíční příjem pro nárok na daňový bonus',
             'bonus.minimum_income.yearly' => 'Minimální roční příjem pro nárok na daňový bonus',
@@ -208,6 +215,16 @@ final class PayrollRuleParameterCatalog
      * @var array<string, array<string, array{why: string, action: string}>>
      */
     private const MANUAL_REVIEW = [
+        'income_tax' => [
+            'benefit_exemption.meal.per_shift' => [
+                'why' => 'Osvobození příspěvku na stravování je 70 % horní hranice stravného za '
+                    . 'pracovní cestu 5 až 12 hodin, a platí ZA KAŽDOU SMĚNU zvlášť. Roční limit '
+                    . 'u mzdové složky proto na stravenkový paušál nesedí — aplikace nezná počet '
+                    . 'odpracovaných směn v okamžiku zadání složky a nebude si ho domýšlet.',
+                'action' => 'Nic tu nevyplňujte. Denní limit hlídejte při zadávání příspěvku na '
+                    . 'stravování; nadlimitní část zadejte jako běžný zdanitelný příjem.',
+            ],
+        ],
         'social_insurance' => [
             'employee.discount.agriculture_dpp' => [
                 'why' => 'Slevu na pojistném u zemědělské dohody o provedení práce lze uplatnit jen '
