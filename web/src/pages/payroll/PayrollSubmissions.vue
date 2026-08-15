@@ -11,6 +11,7 @@ import {
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import PayrollSubmissionInboxPanel from './PayrollSubmissionInboxPanel.vue'
 import PayrollSubmissionOverviewPanel from './PayrollSubmissionOverviewPanel.vue'
@@ -42,6 +43,11 @@ const downloadingId = ref<number | null>(null)
 const settings = ref<PayrollEmployerSettings | null>(null)
 const profile = ref<PayrollRegzelProfile | null>(null)
 const snapshots = ref<PayrollRegzelSnapshot[]>([])
+const snapshotsPageSize = 25
+const snapshotsTotal = ref(0)
+const snapshotsOffset = ref(0)
+const snapshotsPage = computed(() =>
+  Math.floor(snapshotsOffset.value / snapshotsPageSize) + 1)
 const environment = ref<PayrollRegzelEnvironment>('production')
 const officeId = ref<number | null>(null)
 const evidenceConfirmed = ref(false)
@@ -91,11 +97,22 @@ function apiMessage(exception: unknown, fallback: string): string {
 async function loadSnapshots() {
   error.value = ''
   try {
-    snapshots.value = await payrollApi.regzelSnapshots(environment.value)
+    const page = await payrollApi.regzelSnapshots(environment.value, {
+      limit: snapshotsPageSize,
+      offset: snapshotsOffset.value,
+    })
+    snapshots.value = page.items
+    snapshotsTotal.value = page.total
   } catch (exception: unknown) {
     snapshots.value = []
+    snapshotsTotal.value = 0
     error.value = apiMessage(exception, t('payroll.regzel.history.load_failed'))
   }
+}
+
+function goToSnapshotsPage(nextPage: number) {
+  snapshotsOffset.value = Math.max(0, (nextPage - 1) * snapshotsPageSize)
+  void loadSnapshots()
 }
 
 async function load() {
@@ -181,6 +198,8 @@ function readableBytes(bytes: number): string {
 watch(environment, async () => {
   evidenceConfirmed.value = false
   success.value = ''
+  // Jiné prostředí = jiný seznam, takže stránka musí zpět na začátek.
+  snapshotsOffset.value = 0
   if (!loading.value) {
     await loadSnapshots()
   }
@@ -500,6 +519,14 @@ onMounted(loadInboxBadge)
             </button>
           </article>
         </div>
+
+        <PaginationBar
+          embedded
+          :page="snapshotsPage"
+          :per-page="snapshotsPageSize"
+          :total="snapshotsTotal"
+          @update:page="goToSnapshotsPage"
+        />
       </section>
     </template>
 

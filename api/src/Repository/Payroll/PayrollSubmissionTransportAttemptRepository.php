@@ -24,6 +24,14 @@ final class PayrollSubmissionTransportAttemptRepository
     private const TABLE = 'payroll_submission_transport_attempts';
 
     /**
+     * Tvrdý strop stránky historie přenosů. Ledger je append-only, takže roste
+     * s každým pokusem o odeslání a nikdy se nezmenší.
+     */
+    public const LIST_MAX_LIMIT = 200;
+
+    public const LIST_DEFAULT_LIMIT = 50;
+
+    /**
      * Projekce záměrně vynechává `idempotency_key_hash`.
      *
      * Je to BINARY(32), takže by se volajícímu vracel binární balast, který se
@@ -174,6 +182,65 @@ final class PayrollSubmissionTransportAttemptRepository
         }
 
         return $rows;
+    }
+
+    /**
+     * Jedna stránka historie přenosů i s celkovým počtem.
+     *
+     * `listRecent()` sám o sobě jen mlčky usekne na 200 pokusů. Ledger je
+     * přírůstkový a u firmy, která podává každý měsíc za víc pracovišť, se
+     * přes dvě stě pokusů dostane během pár let — a uživatel neměl jak poznat,
+     * že starší pokusy vůbec existují, ani jak se k nim dostat.
+     *
+     * @return array{items:list<array<string,mixed>>,total:int}
+     */
+    public function listRecentPage(
+        int $supplierId,
+        string $environment,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        if (!$this->isAvailable()) {
+            return ['items' => [], 'total' => 0];
+        }
+        self::assertEnvironment($environment);
+        // Strop se klampuje i tady, ne jen na HTTP hranici. Limit i offset se
+        // vkládají do SQL jako celá čísla — MariaDB v LIMIT vázané parametry
+        // nepřijímá — takže je rozsah omezený právě tady.
+        $limit = max(1, min($limit, self::LIST_MAX_LIMIT));
+        $offset = max(0, $offset);
+
+        $countStatement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM ' . self::TABLE . ' attempt
+              WHERE attempt.supplier_id = ? AND attempt.environment = ?',
+        );
+        $countStatement->execute([$supplierId, $environment]);
+        $total = (int) $countStatement->fetchColumn();
+
+        $statement = $this->db->pdo()->prepare(
+            'SELECT ' . self::attemptColumns() . ',
+                    obligation.period_start, obligation.period_end
+               FROM ' . self::TABLE . ' attempt
+               LEFT JOIN payroll_submissions submission
+                      ON submission.supplier_id = attempt.supplier_id
+                     AND submission.id = attempt.submission_id
+               LEFT JOIN payroll_obligations obligation
+                      ON obligation.supplier_id = submission.supplier_id
+                     AND obligation.environment = submission.environment
+                     AND obligation.id = submission.obligation_id
+              WHERE attempt.supplier_id = ? AND attempt.environment = ?
+              ORDER BY attempt.id DESC
+              LIMIT ' . $limit . ' OFFSET ' . $offset,
+        );
+        $statement->execute([$supplierId, $environment]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (is_array($row)) {
+                $rows[] = self::normalize($row);
+            }
+        }
+
+        return ['items' => $rows, 'total' => $total];
     }
 
     /**

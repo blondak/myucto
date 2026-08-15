@@ -1018,6 +1018,10 @@ final class Routes
                 [PayrollJmhzProtocolImportAction::class, 'import'],
             );
             $g->get(
+                '/submissions/jmhz-protocol-import/{id:[0-9]+}/errors',
+                [PayrollJmhzProtocolImportAction::class, 'errors'],
+            );
+            $g->get(
                 '/submissions/{submissionId:[0-9]+}',
                 PayrollSubmissionDetailAction::class,
             );

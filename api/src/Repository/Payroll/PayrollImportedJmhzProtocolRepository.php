@@ -23,6 +23,14 @@ final class PayrollImportedJmhzProtocolRepository
     private const TABLE = 'payroll_imported_jmhz_protocols';
 
     /**
+     * Tvrdý strop stránky načtených protokolů. Doklad přibývá každý měsíc za
+     * každé pracoviště a nikdy se nemaže.
+     */
+    public const LIST_MAX_LIMIT = 100;
+
+    public const LIST_DEFAULT_LIMIT = 25;
+
+    /**
      * Projekce pro seznam. `payload_xml` v ní NENÍ: ven se syrový doklad
      * neposílá. Kdo ho potřebuje (vysvětlení chyb se počítá z originálu, ne
      * z uložené interpretace), řekne si o něj příznakem `$withPayload`.
@@ -79,6 +87,87 @@ final class PayrollImportedJmhzProtocolRepository
         }
 
         return $rows;
+    }
+
+    /**
+     * Jedna stránka načtených protokolů i s celkovým počtem.
+     *
+     * `payload_xml` se NENAČÍTÁ — jen se zjišťuje, jestli je uložený. Seznam
+     * dřív tahal originální XML u sta protokolů najednou (jednotky kilobajtů
+     * krát sto) jen proto, aby z nich znovu vyparsoval chyby; `error_count` je
+     * přitom uložený sloupec a detail chyb se dá dotáhnout na vyžádání pro
+     * jeden řádek.
+     *
+     * @return array{items:list<array<string,mixed>>,total:int}
+     */
+    public function listRecentPage(
+        int $supplierId,
+        string $environment,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        if (!$this->isAvailable()) {
+            return ['items' => [], 'total' => 0];
+        }
+        self::assertEnvironment($environment);
+        // Strop se klampuje i tady, ne jen na HTTP hranici. MariaDB v LIMIT
+        // vázané parametry nepřijímá, takže do SQL jdou celá čísla.
+        $limit = max(1, min($limit, self::LIST_MAX_LIMIT));
+        $offset = max(0, $offset);
+
+        $countStatement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ?',
+        );
+        $countStatement->execute([$supplierId, $environment]);
+        $total = (int) $countStatement->fetchColumn();
+
+        $statement = $this->db->pdo()->prepare(
+            'SELECT ' . self::LIST_COLUMNS . ',
+                    (payload_xml IS NOT NULL AND payload_xml <> "")
+                        AS has_payload
+               FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ?
+              ORDER BY period_year DESC, period_month DESC, id DESC
+              LIMIT ' . $limit . ' OFFSET ' . $offset,
+        );
+        $statement->execute([$supplierId, $environment]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (is_array($row)) {
+                $hasPayload = (bool) (int) ($row['has_payload'] ?? 0);
+                unset($row['has_payload']);
+                $normalized = self::normalize($row);
+                $normalized['detail_available'] = $hasPayload;
+                $rows[] = $normalized;
+            }
+        }
+
+        return ['items' => $rows, 'total' => $total];
+    }
+
+    /**
+     * Uložený originál jednoho protokolu. Vrací `null`, když protokol firmě
+     * nepatří nebo originál chybí.
+     */
+    public function payload(
+        int $supplierId,
+        string $environment,
+        int $protocolId,
+    ): ?string {
+        if (!$this->isAvailable()) {
+            return null;
+        }
+        self::assertEnvironment($environment);
+        $statement = $this->db->pdo()->prepare(
+            'SELECT payload_xml
+               FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ? AND id = ?',
+        );
+        $statement->execute([$supplierId, $environment, $protocolId]);
+        $payload = $statement->fetchColumn();
+
+        return is_string($payload) && $payload !== '' ? $payload : null;
     }
 
     /**

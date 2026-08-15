@@ -35,14 +35,32 @@ final class PayrollQuickInputsAction
         if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
             return $error;
         }
+        $query = $request->getQueryParams();
+        // Strop je tvrdý, ne jen výchozí — z URL ho zvednout nejde. Řádek je
+        // pracovní vztah, takže seznam roste s velikostí firmy.
+        $limit = self::pageLimit($query);
+        $offset = max(0, (int) ($query['offset'] ?? 0));
         try {
-            $period = $this->validator->period($request->getQueryParams()['period'] ?? null);
-            return Json::ok($response, [
-                'month' => $this->quickInputs->month($this->currentSupplierId($request), $period),
-            ]);
+            $period = $this->validator->period($query['period'] ?? null);
+            $month = $this->quickInputs->month(
+                $this->currentSupplierId($request),
+                $period,
+                $limit,
+                $offset,
+            );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
+
+        // Klíč `month` a jeho `items` zůstávají, aby stávající volající
+        // nespadli; `total`/`limit`/`offset` přibyly vedle něj ve stejném
+        // tvaru jako u ostatních stránkovaných seznamů.
+        return Json::ok($response, [
+            'month' => $month,
+            'total' => $month['total'],
+            'limit' => $limit,
+            'offset' => $offset,
+        ]);
     }
 
     public function save(Request $request, Response $response): Response
@@ -50,6 +68,12 @@ final class PayrollQuickInputsAction
         if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
             return $error;
         }
+        // Stránka se bere z URL, aby uložení vrátilo TU, na které uživatel byl.
+        // Vracet natvrdo první stránku by ho po každém uložení odhodilo na
+        // začátek seznamu.
+        $query = $request->getQueryParams();
+        $limit = self::pageLimit($query);
+        $offset = max(0, (int) ($query['offset'] ?? 0));
         try {
             $body = $request->getParsedBody();
             $data = $this->validator->validate(
@@ -60,6 +84,8 @@ final class PayrollQuickInputsAction
                 $data['period'],
                 $data['rows'],
                 $this->userId($request),
+                $limit,
+                $offset,
             );
         } catch (PayrollEmploymentConflictException $e) {
             return Json::error(
@@ -90,7 +116,21 @@ final class PayrollQuickInputsAction
             $request->getHeaderLine('User-Agent'),
             $this->currentSupplierId($request),
         );
-        return Json::ok($response, ['month' => $month]);
+        return Json::ok($response, [
+            'month' => $month,
+            'total' => $month['total'],
+            'limit' => $limit,
+            'offset' => $offset,
+        ]);
+    }
+
+    /** @param array<array-key,mixed> $query */
+    private static function pageLimit(array $query): int
+    {
+        return max(1, min(
+            PayrollQuickInputRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollQuickInputRepository::LIST_DEFAULT_LIMIT),
+        ));
     }
 
     private function authorize(Request $request, Response $response, AccessLevel $level): ?Response

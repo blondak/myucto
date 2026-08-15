@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollRegzelProfileConflictException;
+use MyInvoice\Repository\Payroll\PayrollRegzelRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
@@ -158,11 +159,20 @@ final class PayrollRegzelAction
             return $this->guardFailure($error);
         }
 
+        // Strop je tvrdý, ne jen výchozí — z URL ho zvednout nejde.
+        $query = $request->getQueryParams();
+        $limit = max(1, min(
+            PayrollRegzelRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollRegzelRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
         try {
             $environment = $this->queryEnvironment($request);
-            $items = $this->service->snapshots(
+            $page = $this->service->snapshots(
                 $this->currentSupplierId($request),
                 $environment,
+                $limit,
+                $offset,
             );
         } catch (RegzelValidationException $exception) {
             return Json::error(
@@ -173,9 +183,13 @@ final class PayrollRegzelAction
             );
         }
 
+        // Klíč `items` zůstává kvůli stávajícím volajícím.
         return Json::ok($response, [
             'environment' => $environment,
-            'items' => $items,
+            'items' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ]);
     }
 

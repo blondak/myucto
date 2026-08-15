@@ -2337,6 +2337,11 @@
                     "protocol_dated_at": "Protocol date",
                     "submitted_at": "Filing date",
                     "detail_unavailable": "The stored original could not be re-read, so error detail is unavailable here. The protocol reports {total} error(s).",
+                    "error_count": "Errors in protocol",
+                    "errors_show": "Show errors ({total})",
+                    "errors_hide": "Hide errors",
+                    "errors_loading": "Loading errors…",
+                    "errors_failed": "The protocol errors could not be loaded.",
                     "kind": {
                         "processing": "Processing protocol",
                         "completeness": "Completeness protocol",

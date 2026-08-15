@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollSubmissionConflictException;
+use MyInvoice\Repository\Payroll\PayrollSubmissionInboxRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
@@ -21,6 +22,7 @@ final class PayrollSubmissionInboxAction
 
     public function __construct(
         private readonly PayrollSubmissionInboxService $inbox,
+        private readonly PayrollSubmissionInboxRepository $items,
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
@@ -32,10 +34,10 @@ final class PayrollSubmissionInboxAction
             return $this->errorResponse($error);
         }
 
+        $query = $request->getQueryParams();
         try {
-            $environment = $this->environment(
-                $request->getQueryParams()['environment'] ?? null,
-            );
+            $environment = $this->environment($query['environment'] ?? null);
+            $status = $this->statusFilter($query['status'] ?? null);
         } catch (\InvalidArgumentException $exception) {
             return Json::error(
                 $response,
@@ -45,30 +47,38 @@ final class PayrollSubmissionInboxAction
             );
         }
 
-        $items = $this->inbox->list(
-            $this->currentSupplierId($request),
-            $environment,
-        );
-        $summary = [
-            'total' => 0,
-            'open' => 0,
-            'acknowledged' => 0,
-            'snoozed' => 0,
-        ];
-        foreach ($items as $item) {
-            if ($item['status'] === 'resolved') {
-                continue;
-            }
-            ++$summary['total'];
-            if (array_key_exists($item['status'], $summary)) {
-                ++$summary[$item['status']];
-            }
-        }
+        // Strop je tvrdý, ne jen výchozí — z URL ho zvednout nejde.
+        $limit = max(1, min(
+            PayrollSubmissionInboxRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollSubmissionInboxRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
 
+        // Derivace položek se musí odehrát před čtením — je to jediné místo,
+        // kde položky inboxu vznikají. Čte se ale až stránka, ne celý inbox.
+        $supplierId = $this->currentSupplierId($request);
+        $this->inbox->sync($supplierId, $environment);
+        // Stav filtruje SERVER, aby `total` popisoval právě ty řádky, které
+        // stránka ukáže. Výchozí `unresolved` je to, co inbox jako pracovní
+        // seznam chce; vyřešené položky zůstávají dohledatelné parametrem.
+        $page = $this->items->listItemsPage(
+            $supplierId,
+            $environment,
+            $limit,
+            $offset,
+            $status,
+        );
+
+        // `summary` se počítá nad celým inboxem, ne nad stránkou — jinak by
+        // „kolik toho čeká" záviselo na tom, kde uživatel v seznamu je.
         return Json::ok($response, [
             'environment' => $environment,
-            'summary' => $summary,
-            'items' => $items,
+            'status' => $status,
+            'summary' => $this->items->statusSummary($supplierId, $environment),
+            'items' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ])
             ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
@@ -301,6 +311,23 @@ final class PayrollSubmissionInboxAction
         ) {
             throw new \InvalidArgumentException(
                 'Prostředí inboxu musí být production nebo test.',
+            );
+        }
+
+        return $value;
+    }
+
+    private function statusFilter(mixed $value): string
+    {
+        if ($value === null || $value === '') {
+            return PayrollSubmissionInboxRepository::STATUS_FILTER_DEFAULT;
+        }
+        if (!is_string($value)
+            || !in_array($value, PayrollSubmissionInboxRepository::STATUS_FILTERS, true)
+        ) {
+            throw new \InvalidArgumentException(
+                'Výběr stavu inboxu musí být jeden z: '
+                    . implode(', ', PayrollSubmissionInboxRepository::STATUS_FILTERS) . '.',
             );
         }
 

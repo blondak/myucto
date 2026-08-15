@@ -157,7 +157,7 @@ final class PayrollNetWageLiabilityMaterializerTest extends TestCase
         $items = (new PayrollPaymentQueryService($this->db))->listForPeriod(
             $this->supplierId,
             '2099-01',
-        );
+        )['items'];
 
         self::assertCount(2, $items);
         $amounts = array_column($items, 'amount_minor');

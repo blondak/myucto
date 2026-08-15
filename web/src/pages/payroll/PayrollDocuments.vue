@@ -16,6 +16,10 @@ import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -35,6 +39,36 @@ const pendingCorrectionKind = ref<PayrollTaxCertificateKind | null>(null)
 const correctionReason = ref('')
 const downloadingId = ref<number | null>(null)
 let loadSequence = 0
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'document', labelKey: 'payroll.documents.document', required: true },
+  { key: 'employee', labelKey: 'payroll.documents.employee' },
+  { key: 'office', labelKey: 'payroll.documents.office' },
+  { key: 'revision', labelKey: 'payroll.documents.revision' },
+  { key: 'document_revision', labelKey: 'payroll.documents.document_revision', defaultHidden: true },
+  { key: 'created', labelKey: 'payroll.documents.created' },
+  { key: 'size', labelKey: 'payroll.documents.size' },
+  { key: 'actions', labelKey: 'payroll.documents.actions', required: true },
+]
+const tbl = useTablePrefs('payroll-documents', COLUMNS)
+
+// Měsíční i roční záložka sdílí jednu tabulku, takže si vystačí s jedním
+// offsetem — zobrazená je vždy jen jedna z nich.
+const pageSize = 25
+const total = ref(0)
+const offset = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
+
+function goToPage(nextPage: number): void {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  void load()
+}
+
+/** Změna filtru mění obsah seznamu, takže stránka musí zpět na začátek. */
+function reload(): void {
+  offset.value = 0
+  void load()
+}
 
 const canGenerate = computed(() =>
   auth.canWrite('payroll.documents') && (data.value?.revisions.length ?? 0) > 0,
@@ -171,18 +205,21 @@ async function load(): Promise<void> {
     annualItems.value = []
   }
   try {
+    const page = { limit: pageSize, offset: offset.value }
     if (requestedTab === 'monthly') {
-      const loaded = await payrollApi.listDocuments(requestedPeriod)
+      const loaded = await payrollApi.listDocuments(requestedPeriod, page)
       if (sequence === loadSequence && requestedPeriod === period.value) {
         data.value = loaded
+        total.value = loaded.total
       }
     } else {
       const [loaded, loadedPeople] = await Promise.all([
-        payrollApi.listAnnualDocuments(requestedYear),
+        payrollApi.listAnnualDocuments(requestedYear, page),
         people.value.length ? Promise.resolve(people.value) : payrollApi.peopleOptions(),
       ])
       if (sequence === loadSequence && requestedYear === year.value) {
         annualItems.value = loaded.items
+        total.value = loaded.total
         people.value = loadedPeople
         if (selectedEmployeeId.value === null && loadedPeople.length === 1) {
           selectedEmployeeId.value = loadedPeople[0].id
@@ -269,7 +306,7 @@ async function download(item: PayrollDocument): Promise<void> {
 
 watch(activeTab, () => {
   cancelCorrection()
-  void load()
+  reload()
 })
 watch([selectedEmployeeId, year], cancelCorrection)
 onMounted(load)
@@ -290,7 +327,7 @@ onMounted(load)
             type="month"
             min="2024-01"
             class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 focus:border-payroll-500 focus:ring-payroll-500/20"
-            @change="load"
+            @change="reload"
           >
         </label>
         <label v-else class="block">
@@ -301,7 +338,7 @@ onMounted(load)
             min="2000"
             max="2199"
             class="h-9 w-28 rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 focus:border-payroll-500 focus:ring-payroll-500/20"
-            @change="load"
+            @change="reload"
           >
         </label>
         <button type="button" :class="btnOutline('neutral')" :disabled="loading" @click="load">
@@ -460,30 +497,34 @@ onMounted(load)
 
     <template v-else>
       <section data-test="documents-table" class="hidden overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm md:block">
+        <div class="flex flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2">
+          <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+          <DensityToggle class="hidden md:block" :ctrl="tbl" />
+        </div>
         <div class="overflow-x-auto">
-          <table class="min-w-full divide-y divide-neutral-200 text-sm">
+          <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead class="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
               <tr>
-                <th class="px-4 py-3">{{ t('payroll.documents.document') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.documents.employee') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.documents.office') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.documents.revision') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.documents.document_revision') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.documents.created') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('payroll.documents.size') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('payroll.documents.actions') }}</th>
+                <th v-if="tbl.isVisible('document')" class="px-4 py-3">{{ t('payroll.documents.document') }}</th>
+                <th v-if="tbl.isVisible('employee')" class="px-4 py-3">{{ t('payroll.documents.employee') }}</th>
+                <th v-if="tbl.isVisible('office')" class="px-4 py-3">{{ t('payroll.documents.office') }}</th>
+                <th v-if="tbl.isVisible('revision')" class="px-4 py-3">{{ t('payroll.documents.revision') }}</th>
+                <th v-if="tbl.isVisible('document_revision')" class="px-4 py-3">{{ t('payroll.documents.document_revision') }}</th>
+                <th v-if="tbl.isVisible('created')" class="px-4 py-3">{{ t('payroll.documents.created') }}</th>
+                <th v-if="tbl.isVisible('size')" class="px-4 py-3 text-right">{{ t('payroll.documents.size') }}</th>
+                <th v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right">{{ t('payroll.documents.actions') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="item in visibleItems" :key="item.id">
-                <td class="px-4 py-3 font-medium text-neutral-900">{{ kindLabel(item) }}</td>
-                <td class="px-4 py-3 text-neutral-600">{{ item.employee_name || t('payroll.documents.company') }}</td>
-                <td class="px-4 py-3 text-neutral-600">{{ item.office_name || (item.tax_year ? String(item.tax_year) : t('payroll.documents.company')) }}</td>
-                <td class="px-4 py-3 text-neutral-600">{{ item.annual_revision_no ?? item.revision_no ?? '—' }}</td>
-                <td class="px-4 py-3 text-neutral-600">{{ item.document_revision_no ?? '—' }}</td>
-                <td class="whitespace-nowrap px-4 py-3 text-neutral-600">{{ formatCreated(item.created_at) }}</td>
-                <td class="whitespace-nowrap px-4 py-3 text-right text-neutral-600">{{ formatSize(item.size_bytes) }}</td>
-                <td class="px-4 py-3 text-right">
+                <td v-if="tbl.isVisible('document')" class="px-4 py-3 font-medium text-neutral-900">{{ kindLabel(item) }}</td>
+                <td v-if="tbl.isVisible('employee')" class="px-4 py-3 text-neutral-600">{{ item.employee_name || t('payroll.documents.company') }}</td>
+                <td v-if="tbl.isVisible('office')" class="px-4 py-3 text-neutral-600">{{ item.office_name || (item.tax_year ? String(item.tax_year) : t('payroll.documents.company')) }}</td>
+                <td v-if="tbl.isVisible('revision')" class="px-4 py-3 text-neutral-600">{{ item.annual_revision_no ?? item.revision_no ?? '—' }}</td>
+                <td v-if="tbl.isVisible('document_revision')" class="px-4 py-3 text-neutral-600">{{ item.document_revision_no ?? '—' }}</td>
+                <td v-if="tbl.isVisible('created')" class="whitespace-nowrap px-4 py-3 text-neutral-600">{{ formatCreated(item.created_at) }}</td>
+                <td v-if="tbl.isVisible('size')" class="whitespace-nowrap px-4 py-3 text-right text-neutral-600">{{ formatSize(item.size_bytes) }}</td>
+                <td v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right">
                   <button
                     type="button"
                     data-test="download-document"
@@ -546,6 +587,13 @@ onMounted(load)
           </button>
         </article>
       </section>
+
+      <PaginationBar
+        :page="currentPage"
+        :per-page="pageSize"
+        :total="total"
+        @update:page="goToPage"
+      />
     </template>
   </div>
 </template>

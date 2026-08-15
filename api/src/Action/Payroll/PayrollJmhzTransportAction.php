@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchOutcome;
@@ -41,6 +42,7 @@ final class PayrollJmhzTransportAction
     public function __construct(
         private readonly JmhzDispatchService $dispatch,
         private readonly JmhzProtocolExplainer $explainer,
+        private readonly PayrollSubmissionTransportAttemptRepository $attempts,
         private readonly PayrollModuleAccess $access,
     ) {}
 
@@ -108,12 +110,29 @@ final class PayrollJmhzTransportAction
             return $this->invalid($response, 'Prostředí musí být test nebo production.');
         }
 
+        // Ledger jen mlčky usekával na dvou stech pokusech. Strop zůstává
+        // tvrdý (z URL ho zvednout nejde), ale odpověď teď nese celkový počet
+        // a starší pokusy jdou dolistovat.
+        $query = $request->getQueryParams();
+        $limit = max(1, min(
+            PayrollSubmissionTransportAttemptRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit']
+                ?? PayrollSubmissionTransportAttemptRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
+        $page = $this->attempts->listRecentPage(
+            $this->currentSupplierId($request),
+            $environment,
+            $limit,
+            $offset,
+        );
+
         return $this->noStore(Json::ok($response, [
             'environment' => $environment,
-            'attempts' => $this->dispatch->history(
-                $this->currentSupplierId($request),
-                $environment,
-            ),
+            'attempts' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ]));
     }
 

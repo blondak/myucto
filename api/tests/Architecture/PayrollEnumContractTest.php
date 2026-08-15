@@ -127,6 +127,14 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlOutcome',
         'payroll.ts::PayrollJmhzProtocolStatus'
             => 'enum-names:MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSubmissionStatus',
+        // Skupina agend přehledu podání: klasifikaci dělá SQL v repozitáři,
+        // protože se podle ní filtruje stránka i souhrny. Frontend ji jen čte.
+        'payroll.ts::PayrollSubmissionAgendaGroup'
+            => 'const:MyInvoice\Repository\Payroll\PayrollSubmissionRepository::AGENDA_GROUPS',
+        // Výběr stavů inboxu: taky filtr, který drží SERVER, aby `total`
+        // popisoval právě to, co stránka ukáže.
+        'payroll.ts::PayrollSubmissionInboxStatusFilter'
+            => 'const:MyInvoice\Repository\Payroll\PayrollSubmissionInboxRepository::STATUS_FILTERS',
 
         // Politiky zaměstnavatele
         'payroll.ts::PayrollBusinessDayRule'     => 'policy:payday_business_day_rule',

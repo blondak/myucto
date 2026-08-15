@@ -92,17 +92,28 @@ function setup() {
     row_version: 1,
     updated_at: '2026-08-04 12:00:00',
   })
-  m.snapshots.mockResolvedValue([])
+  m.snapshots.mockResolvedValue({
+    environment: 'production',
+    items: [],
+    total: 0,
+    limit: 25,
+    offset: 0,
+  })
   // Stav odeslání je výchozí záložka, takže se ledger načítá při každém mountu.
   m.jmhzTransportHistory.mockResolvedValue({ environment: 'production', attempts: [] })
   m.submissionInbox.mockResolvedValue({
     environment: 'production',
+    status: 'unresolved',
     summary: { total: 0, open: 0, acknowledged: 0, snoozed: 0 },
     items: [],
+    total: 0,
+    limit: 25,
+    offset: 0,
   })
   m.overview.mockResolvedValue({
     environment: 'production',
     period: '2026-08',
+    agenda_group: 'jmhz',
     summary: {
       total: 1,
       open: 1,
@@ -128,6 +139,7 @@ function setup() {
       id: 7,
       environment: 'production',
       agenda_code: 'JMHZ',
+      agenda_group: 'jmhz',
       subject_type: 'office',
       subject_reference: 'office:synthetic',
       period_start: '2026-08-01',
@@ -147,6 +159,9 @@ function setup() {
       },
       latest_submission: null,
     }],
+    total: 1,
+    limit: 50,
+    offset: 0,
   })
   m.runs.mockResolvedValue([{
     id: 8,
@@ -351,15 +366,18 @@ describe('PayrollSubmissions', () => {
     await environment.trigger('keydown', { key: 'Enter' })
     await flushPromises()
 
-    expect(m.snapshots).toHaveBeenLastCalledWith('test')
+    expect(m.snapshots).toHaveBeenLastCalledWith('test', { limit: 25, offset: 0 })
     expect(wrapper.text()).toContain('payroll.regzel.environment.test_warning')
 
     const tabs = wrapper.findAll('[role="tab"]')
     await tabs[2]!.trigger('click')
     await flushPromises()
+    // Skupinu agend filtruje server — panel ji nesmí dofiltrovávat z přijaté
+    // stránky, jinak by pager počítal řádky, které tabulka neukazuje.
     expect(m.overview).toHaveBeenCalledWith(
       'production',
       expect.stringMatching(/^[0-9]{4}-[0-9]{2}$/),
+      { agenda_group: 'jmhz', limit: 50, offset: 0 },
     )
     expect(wrapper.text()).toContain('JMHZ')
     expect(wrapper.text()).toContain('payroll.submissions.jmhz_fail_closed')
@@ -573,8 +591,12 @@ describe('PayrollSubmissions', () => {
     }
     m.submissionInbox.mockResolvedValue({
       environment: 'production',
+      status: 'unresolved',
       summary: { total: 1, open: 1, acknowledged: 0, snoozed: 0 },
       items: [inboxItem],
+      total: 1,
+      limit: 25,
+      offset: 0,
     })
     m.acknowledgeInboxItem.mockResolvedValue({ id: 101, status: 'acknowledged', row_version: 2 })
     m.snoozeInboxItem.mockResolvedValue({
@@ -592,7 +614,12 @@ describe('PayrollSubmissions', () => {
     await wrapper.findAll('[role="tab"]')[4]!.trigger('click')
     await flushPromises()
 
-    expect(m.submissionInbox).toHaveBeenCalledWith('production')
+    // Stránkuje SERVER: panel musí posílat rozsah stránky, ne si řádky
+    // filtrovat až z odpovědi (vyřešené vyřazuje serverový výchozí filtr).
+    expect(m.submissionInbox).toHaveBeenCalledWith('production', {
+      limit: 25,
+      offset: 0,
+    })
     expect(wrapper.get('[data-test="inbox-row"]').text()).toContain('JMHZ')
 
     await wrapper.get('[data-test="inbox-acknowledge"]').trigger('click')

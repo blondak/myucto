@@ -80,6 +80,16 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   }),
 }))
 
+// Preference tabulek jdou přes Pinii a API; v testu stačí prázdné výchozí.
+vi.mock('@/composables/useUserPrefs', async () => {
+  const { computed } = await import('vue')
+  return {
+    ensurePrefsLoaded: () => Promise.resolve(),
+    getPagePrefs: () => computed(() => ({})),
+    patchPagePrefs: () => {},
+  }
+})
+
 import PayrollComponents from '@/pages/payroll/PayrollComponents.vue'
 
 describe('PayrollComponents', () => {
@@ -113,7 +123,12 @@ describe('PayrollComponents', () => {
       created_at: '2026-01-01 00:00:00',
       updated_at: '2026-01-01 00:00:00',
     }])
-    m.recurringComponents.mockResolvedValue([])
+    m.recurringComponents.mockResolvedValue({
+      recurring_components: [],
+      total: 0,
+      limit: 25,
+      offset: 0,
+    })
     m.inputs.mockResolvedValue([{
       id: 9,
       supplier_id: 1,

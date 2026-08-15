@@ -231,20 +231,36 @@ final readonly class EmployerRegistrationService
     }
 
     /**
-     * @return list<array{
+     * Stránka snímků i s celkovým počtem. Dřív se vracelo prvních sto bez
+     * jakéhokoli náznaku, že jich je víc — a k těm starším se nedalo dostat.
+     *
+     * @return array{items:list<array{
      *   id:int,environment:string,office_id:int,document_type:string,
      *   interaction_code:string,mapping_version:string,xsd_version:string,
      *   source_snapshot_hash:string,xml_sha256:string,xml_byte_size:int,
      *   created_at:string
-     * }>
+     * }>,total:int}
      */
-    public function snapshots(int $supplierId, string $environment): array
-    {
+    public function snapshots(
+        int $supplierId,
+        string $environment,
+        int $limit = PayrollRegzelRepository::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
         $environment = $this->environment($environment);
-        return array_map(
-            fn (array $row): array => $this->publicSnapshot($row),
-            $this->repository->listSnapshots($supplierId, $environment),
-        );
+
+        return [
+            'items' => array_map(
+                fn (array $row): array => $this->publicSnapshot($row),
+                $this->repository->listSnapshots(
+                    $supplierId,
+                    $environment,
+                    $limit,
+                    $offset,
+                ),
+            ),
+            'total' => $this->repository->countSnapshots($supplierId, $environment),
+        ];
     }
 
     /**

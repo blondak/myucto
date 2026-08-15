@@ -9,6 +9,14 @@ use PDO;
 
 final class PayrollRegzelRepository
 {
+    /**
+     * Tvrdý strop stránky snímků REGZEL. Snímek vzniká při každé přípravě
+     * podání, takže jich za pár let přibude víc, než se dá projít.
+     */
+    public const LIST_MAX_LIMIT = 100;
+
+    public const LIST_DEFAULT_LIMIT = 50;
+
     private int $savepointSequence = 0;
 
     public function __construct(private readonly Connection $db) {}
@@ -359,15 +367,20 @@ final class PayrollRegzelRepository
     public function listSnapshots(
         int $supplierId,
         string $environment,
-        int $limit = 50,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
     ): array {
-        $limit = max(1, min(100, $limit));
+        // Strop se klampuje i tady, ne jen na HTTP hranici. Limit i offset se
+        // vkládají do SQL jako celá čísla — MariaDB v LIMIT vázané parametry
+        // nepřijímá.
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
         $statement = $this->db->pdo()->prepare(
             'SELECT *
                FROM payroll_regzel_payload_snapshots
               WHERE supplier_id = ? AND environment = ?
               ORDER BY id DESC
-              LIMIT ' . $limit,
+              LIMIT ' . $limit . ' OFFSET ' . $offset,
         );
         $statement->execute([$supplierId, $environment]);
         $rows = [];
@@ -379,6 +392,24 @@ final class PayrollRegzelRepository
             $rows[] = self::snapshotRow($row);
         }
         return $rows;
+    }
+
+    /**
+     * Kolik snímků firma v daném prostředí vůbec má.
+     *
+     * Bez tohohle čísla seznam mlčky usekl na stovce a uživatel neměl jak
+     * poznat, že starší snímky existují — což je horší než dlouhý seznam.
+     */
+    public function countSnapshots(int $supplierId, string $environment): int
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*)
+               FROM payroll_regzel_payload_snapshots
+              WHERE supplier_id = ? AND environment = ?',
+        );
+        $statement->execute([$supplierId, $environment]);
+
+        return (int) $statement->fetchColumn();
     }
 
     /**

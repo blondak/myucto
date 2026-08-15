@@ -33,6 +33,16 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({ t: (key: string) => key, locale: ref('cs-CZ') }),
 }))
 
+// Preference tabulek jdou přes Pinii a API; v testu stačí prázdné výchozí.
+vi.mock('@/composables/useUserPrefs', async () => {
+  const { computed } = await import('vue')
+  return {
+    ensurePrefsLoaded: () => Promise.resolve(),
+    getPagePrefs: () => computed(() => ({})),
+    patchPagePrefs: () => {},
+  }
+})
+
 import PayrollQuickInputs from '@/pages/payroll/PayrollQuickInputs.vue'
 
 function inputRef(
@@ -393,7 +403,7 @@ describe('PayrollQuickInputs', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('Starý měsíc')
-    expect(m.load).toHaveBeenLastCalledWith('2026-07')
+    expect(m.load).toHaveBeenLastCalledWith('2026-07', { limit: 25, offset: 0 })
   })
 
   it('invalidates old rows when loading a new payroll period fails', async () => {

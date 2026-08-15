@@ -140,7 +140,10 @@ final class PayrollImportedJmhzProtocolRepositoryTest extends TestCase
             null,
         );
         self::assertFalse($again['created']);
-        self::assertCount(1, $service->history($this->supplierId, self::ENVIRONMENT));
+        self::assertCount(
+            1,
+            $service->history($this->supplierId, self::ENVIRONMENT)['items'],
+        );
 
         try {
             $service->import(
@@ -154,7 +157,10 @@ final class PayrollImportedJmhzProtocolRepositoryTest extends TestCase
         } catch (JmhzTransportException $exception) {
             self::assertSame('jmhz_protocol_tenant_mismatch', $exception->errorCode);
         }
-        self::assertCount(1, $service->history($this->supplierId, self::ENVIRONMENT));
+        self::assertCount(
+            1,
+            $service->history($this->supplierId, self::ENVIRONMENT)['items'],
+        );
     }
 
     /** Chyby se počítají z uloženého originálu, ne z uložené interpretace. */
@@ -174,13 +180,86 @@ final class PayrollImportedJmhzProtocolRepositoryTest extends TestCase
         );
 
         $history = $service->history($this->supplierId, self::ENVIRONMENT);
-        self::assertCount(1, $history);
-        self::assertTrue($history[0]['detail_available']);
-        self::assertSame('Rejected', $history[0]['status_name']);
-        /** @var list<array<string,mixed>> $errors */
-        $errors = $history[0]['errors'];
-        self::assertCount(1, $errors);
-        self::assertSame(20301, $errors[0]['code']);
+        self::assertCount(1, $history['items']);
+        self::assertSame(1, $history['total']);
+        self::assertTrue($history['items'][0]['detail_available']);
+        self::assertSame('Rejected', $history['items'][0]['status_name']);
+        self::assertSame(1, $history['items'][0]['error_count']);
+        // Seznam už chyby nenese — dotahují se pro jeden protokol na vyžádání,
+        // a pořád z uloženého ORIGINÁLU, ne ze zamrazené interpretace.
+        self::assertArrayNotHasKey('errors', $history['items'][0]);
+
+        $detail = $service->explain(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            (int) $history['items'][0]['id'],
+        );
+        self::assertTrue($detail['detail_available']);
+        self::assertCount(1, $detail['errors']);
+        self::assertSame(20301, $detail['errors'][0]['code']);
+    }
+
+    /** Cizí protokol se přes detail chyb nedá přečíst ani při znalosti ID. */
+    public function testExplainRefusesProtocolOfAnotherCompany(): void
+    {
+        $this->givenOfficeVariableSymbol('9990000001');
+        $service = new JmhzProtocolImportService(
+            $this->repository,
+            new JmhzProtocolExplainer(),
+        );
+        $stored = $service->import(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            self::protocolXml('9990000001', withFailure: true),
+            null,
+            null,
+        );
+
+        $foreign = $service->explain(
+            $this->supplierId + 1,
+            self::ENVIRONMENT,
+            (int) $stored['protocol']['id'],
+        );
+        self::assertFalse($foreign['detail_available']);
+        self::assertSame([], $foreign['errors']);
+    }
+
+    /** Stránkování: strop nejde zvednout a uživatel se dostane i za něj. */
+    public function testHistoryPagesThroughProtocols(): void
+    {
+        $this->givenOfficeVariableSymbol('9990000001');
+        $service = new JmhzProtocolImportService(
+            $this->repository,
+            new JmhzProtocolExplainer(),
+        );
+        for ($month = 1; $month <= 4; ++$month) {
+            $service->import(
+                $this->supplierId,
+                self::ENVIRONMENT,
+                self::protocolXml('9990000001', month: $month),
+                null,
+                null,
+            );
+        }
+
+        $first = $service->history($this->supplierId, self::ENVIRONMENT, 2, 0);
+        self::assertCount(2, $first['items']);
+        self::assertSame(4, $first['total']);
+
+        $second = $service->history($this->supplierId, self::ENVIRONMENT, 2, 2);
+        self::assertCount(2, $second['items']);
+        self::assertSame(4, $second['total']);
+        self::assertSame(
+            [],
+            array_intersect(
+                array_column($first['items'], 'id'),
+                array_column($second['items'], 'id'),
+            ),
+        );
+
+        // Strop je tvrdý: vyžádaný nesmysl se osekne, seznam se nezvětší.
+        $greedy = $service->history($this->supplierId, self::ENVIRONMENT, 99999, 0);
+        self::assertCount(4, $greedy['items']);
     }
 
     private function givenOfficeVariableSymbol(string $symbol): void
@@ -195,6 +274,7 @@ final class PayrollImportedJmhzProtocolRepositoryTest extends TestCase
     private static function protocolXml(
         string $variableSymbol,
         bool $withFailure = false,
+        int $month = 6,
     ): string {
         $failure = $withFailure
             ? '<chybySeznam><chyba><id>1</id><typChyby>zpracovani</typChyby>'
@@ -215,7 +295,7 @@ final class PayrollImportedJmhzProtocolRepositoryTest extends TestCase
             . '<idKonkretnihoPodani>AAAA1111BBBB2222CCCC3333DDDD4444</idKonkretnihoPodani>'
             . '<datumPodani>2026-07-02T16:15:36+02:00</datumPodani>'
             . '<idPodani>0195AAAA-1111-7222-8333-BBBBCCCCDDDD</idPodani>'
-            . '<mesic>6</mesic><rok>2026</rok>'
+            . '<mesic>' . $month . '</mesic><rok>2026</rok>'
             . '<stavMH>' . $status . '</stavMH>'
             . $failure
             . '</ProtokolOZpracovani>';

@@ -41,20 +41,32 @@ final class PayrollDocumentAction
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
             return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
         }
-        $period = trim((string) ($request->getQueryParams()['period'] ?? ''));
+        $query = $request->getQueryParams();
+        $period = trim((string) ($query['period'] ?? ''));
+        // Strop je tvrdý, ne jen výchozí: seznam dokumentů roste s počtem lidí
+        // i s počtem období, takže „limit=99999" z URL nesmí projít.
+        $limit = self::pageLimit($query);
+        $offset = max(0, (int) ($query['offset'] ?? 0));
         try {
             $result = $this->documents->listForPeriod(
                 $this->currentSupplierId($request),
                 $period,
+                $limit,
+                $offset,
             );
         } catch (\InvalidArgumentException $exception) {
             return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
         }
 
+        // Klíč `items` zůstává, aby stávající volající nespadli; `total`/`limit`/
+        // `offset` přibyly vedle něj, protože seznam už nemusí být úplný.
         return Json::ok($response, [
             'period' => $period,
             'revisions' => $result['revisions'],
             'items' => array_map(self::publicDocument(...), $result['items']),
+            'total' => $result['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ]);
     }
 
@@ -70,20 +82,36 @@ final class PayrollDocumentAction
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
             return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
         }
-        $year = (int) ($request->getQueryParams()['year'] ?? 0);
+        $query = $request->getQueryParams();
+        $year = (int) ($query['year'] ?? 0);
         if ($year < 2000 || $year > 2199) {
             return Json::error($response, 'validation_failed', 'Rok dokumentů není platný.', 422);
         }
+        $limit = self::pageLimit($query);
+        $offset = max(0, (int) ($query['offset'] ?? 0));
+        $page = $this->documentRepository->listAnnualDocuments(
+            $this->currentSupplierId($request),
+            $year,
+            $limit,
+            $offset,
+        );
+
         return Json::ok($response, [
             'year' => $year,
-            'items' => array_map(
-                self::publicDocument(...),
-                $this->documentRepository->listAnnualDocuments(
-                    $this->currentSupplierId($request),
-                    $year,
-                ),
-            ),
+            'items' => array_map(self::publicDocument(...), $page['items']),
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ]);
+    }
+
+    /** @param array<array-key,mixed> $query */
+    private static function pageLimit(array $query): int
+    {
+        return max(1, min(
+            PayrollDocumentRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollDocumentRepository::LIST_DEFAULT_LIMIT),
+        ));
     }
 
     /** @param array<string,string> $args */
