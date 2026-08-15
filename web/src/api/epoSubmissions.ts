@@ -188,7 +188,7 @@ export interface EpoStepUpProof {
   step_up_token?: string
 }
 
-function stepUpProofBody(proof: EpoStepUpProof): Record<string, string> {
+export function stepUpProofBody(proof: EpoStepUpProof): Record<string, string> {
   const body: Record<string, string> = {}
   if (proof.step_up_token) body.step_up_token = proof.step_up_token
   else if (proof.totp_code) body.totp_code = proof.totp_code
@@ -196,7 +196,7 @@ function stepUpProofBody(proof: EpoStepUpProof): Record<string, string> {
   return body
 }
 
-function appendStepUpProof(data: FormData, proof: EpoStepUpProof): void {
+export function appendStepUpProof(data: FormData, proof: EpoStepUpProof): void {
   for (const [key, value] of Object.entries(stepUpProofBody(proof))) {
     data.append(key, value)
   }

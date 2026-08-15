@@ -60,9 +60,6 @@ const credentials = ref<EpoSigningCredential[]>([])
 const selectedCredentialId = ref<number | null>(null)
 const credentialModalOpen = ref(false)
 const credentialBusy = ref(false)
-const credentialFile = ref<File | null>(null)
-const credentialLabel = ref('')
-const credentialPfxPassword = ref('')
 const stepPassword = ref('')
 const stepTotpCode = ref('')
 const directBusy = ref(false)
@@ -648,15 +645,7 @@ async function openCredentialModal() {
   }
 }
 
-function onCredentialFile(event: Event) {
-  credentialFile.value = (event.target as HTMLInputElement).files?.[0] ?? null
-  if (credentialFile.value && !credentialLabel.value) {
-    credentialLabel.value = credentialFile.value.name.replace(/\.(p12|pfx)$/i, '')
-  }
-}
-
 function resetCredentialSecrets() {
-  credentialPfxPassword.value = ''
   stepPassword.value = ''
   stepTotpCode.value = ''
   stepPasskeyToken.value = ''
@@ -666,30 +655,6 @@ function requireCredentialStepUp(): boolean {
   if (!credentialStepUpMissing.value) return true
   toast.error(credentialStepUpMissing.value)
   return false
-}
-
-async function uploadCredential() {
-  if (!credentialFile.value || credentialBusy.value) return
-  if (!requireCredentialStepUp()) return
-  credentialBusy.value = true
-  try {
-    const created = await epoSubmissionsApi.uploadCredential(
-      credentialFile.value,
-      credentialLabel.value,
-      credentialPfxPassword.value,
-      stepProof(),
-    )
-    await loadCredentials()
-    selectedCredentialId.value = created.id
-    credentialFile.value = null
-    credentialLabel.value = ''
-    resetCredentialSecrets()
-    toast.success(t('reports.submissions.credential_uploaded'))
-  } catch (e) {
-    toast.error(apiErrorMessage(e))
-  } finally {
-    credentialBusy.value = false
-  }
 }
 
 async function toggleCredential(credential: EpoSigningCredential) {
@@ -1705,47 +1670,15 @@ onMounted(async () => {
           </div>
 
           <div class="border-t border-neutral-200 pt-5">
-            <h3 class="font-medium text-sm">{{ t('reports.submissions.upload_certificate') }}</h3>
-            <p class="text-xs text-neutral-500 mt-1">{{ t('reports.submissions.upload_certificate_hint') }}</p>
-            <div class="grid sm:grid-cols-2 gap-3 mt-3">
-              <div class="sm:col-span-2 text-xs text-neutral-600">
-                <div>{{ t('reports.submissions.certificate_file') }}</div>
-                <input id="epo-certificate-file" type="file" accept=".p12,.pfx" class="sr-only"
-                  :disabled="credentialBusy" @change="onCredentialFile">
-                <div class="mt-1 flex flex-wrap items-center gap-3">
-                  <label for="epo-certificate-file" :class="[
-                    btnOutline('neutral'),
-                    credentialBusy ? 'pointer-events-none opacity-50' : '',
-                  ]">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.folderOpen"/>
-                    </svg>
-                    {{ t('reports.submissions.choose_certificate_file') }}
-                  </label>
-                  <span class="min-w-0 break-all text-sm text-neutral-700">
-                    {{ credentialFile?.name || t('reports.submissions.no_certificate_file') }}
-                  </span>
-                </div>
-              </div>
-              <label class="text-xs text-neutral-600">
-                {{ t('reports.submissions.certificate_label') }}
-                <input v-model="credentialLabel" type="text" maxlength="120"
-                  class="mt-1 w-full h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm">
-              </label>
-              <label class="text-xs text-neutral-600">
-                {{ t('reports.submissions.pfx_password') }}
-                <input v-model="credentialPfxPassword" type="password" autocomplete="off"
-                  class="mt-1 w-full h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm">
-              </label>
-            </div>
-            <button type="button" :class="btnFilled('primary')" class="mt-3"
-              :disabled="credentialBusy || !credentialFile || !credentialLabel || !credentialPfxPassword"
-              @click="uploadCredential">
+            <h3 class="font-medium text-sm">{{ t('reports.submissions.upload_moved_title') }}</h3>
+            <p class="text-xs text-neutral-500 mt-1">{{ t('reports.submissions.upload_moved_hint') }}</p>
+            <RouterLink to="/admin/electronic-signatures" :class="btnOutline('primary')" class="mt-3"
+              @click="credentialModalOpen = false">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload"/>
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock"/>
               </svg>
-              {{ t('reports.submissions.store_certificate') }}
-            </button>
+              {{ t('reports.submissions.upload_moved_link') }}
+            </RouterLink>
           </div>
         </div>
       </div>
