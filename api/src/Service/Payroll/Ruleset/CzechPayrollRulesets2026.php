@@ -21,14 +21,15 @@ final class CzechPayrollRulesets2026
      * vlastní `content_hash` a vlastní auditní stopu.
      */
     public const ENFORCEMENT_DEDUCTIONS_HASH =
-        '353471b01f6be8b43da321dcaceef65743a4a5ae917bc8bb9ec5ba5d72951a42';
+        'e99327b76b19afeb4955d194167ea5ade4fe484fed34b8c038e6e4f6dc972f24';
 
     public static function provider(): PayrollRulesetProvider
     {
         $technicalReview = new RulesetTechnicalReview(
             'myucto/payroll-ruleset-source-check',
             self::RETRIEVED_ON,
-            'Official-source manifest, exact-value checks and byte-stability test suite; not a professional or legal approval.',
+            'Manifest oficiálních zdrojů, kontrola přesných hodnot a testy bajtové stability — '
+            . 'technická kontrola, ne odborné ani právní schválení.',
         );
 
         return new PayrollRulesetProvider([
@@ -109,17 +110,19 @@ final class CzechPayrollRulesets2026
             [self::socialSecurity()],
             [
                 'employee.discount.agriculture_dpp' => PayrollRuleValue::manualReview(
-                    'Eligibility depends on the statutory agriculture conditions and must be reviewed.',
+                    'Nárok na slevu závisí na zákonných podmínkách sezónní zemědělské činnosti '
+                    . 'a musí ho posoudit člověk.',
                 ),
                 'employee.discount.working_pensioner' => PayrollRuleValue::rate('0.065'),
                 'employee.rate.ordinary' => PayrollRuleValue::rate('0.071'),
                 'employer.discount.part_time' => PayrollRuleValue::rate('0.05'),
                 'employer.rate.ordinary' => PayrollRuleValue::rate('0.248'),
                 'employer.rate.rescue_and_company_fire_service' => PayrollRuleValue::manualReview(
-                    'The 0.298 rate is official, but occupational classification requires manual review.',
+                    'Sazba 29,8 % je oficiální, ale zařazení zaměstnance k hasičskému záchrannému '
+                    . 'sboru nebo mezi podnikové hasiče musí posoudit člověk.',
                 ),
                 'employer.rate.risk_employment' => PayrollRuleValue::manualReview(
-                    'The 0.278 rate is official, but risk-employment classification requires manual review.',
+                    'Sazba 27,8 % je oficiální, ale zařazení práce mezi rizikové musí posoudit člověk.',
                 ),
                 'maximum_assessment_base.yearly' => PayrollRuleValue::moneyMinor(235_041_600),
                 'participation.dpp.minimum' => PayrollRuleValue::moneyMinor(1_200_000),
@@ -189,7 +192,8 @@ final class CzechPayrollRulesets2026
                 'wage_compensation.hourly_boundary_2_minor' => PayrollRuleValue::moneyMinor(42_858),
                 'wage_compensation.hourly_boundary_3_minor' => PayrollRuleValue::moneyMinor(85_698),
                 'wage_compensation.manual_review' => PayrollRuleValue::manualReview(
-                    'Eligibility, published-shift completeness, benefit conflicts and partial-shift breaks require payroll review.',
+                    'Nárok na náhradu, úplnost rozvrhu směn, souběh s dávkami a přerušené směny '
+                    . 'musí posoudit mzdová účetní.',
                 ),
                 'wage_compensation.reduction_band_1_rate' => PayrollRuleValue::rate('0.90'),
                 'wage_compensation.reduction_band_2_rate' => PayrollRuleValue::rate('0.60'),
@@ -250,7 +254,8 @@ final class CzechPayrollRulesets2026
     ): PayrollRulesetVersion {
         $parameters = [
             'foreign_travel' => PayrollRuleValue::manualReview(
-                'Foreign business trips (foreign meal allowance, pocket money, currency conversion) are outside this ruleset and must be settled manually.',
+                'Zahraniční pracovní cesty (zahraniční stravné, kapesné, přepočet měn) tenhle '
+                . 'ruleset neřeší a vyúčtují se ručně podle vyhlášky pro daný stát.',
             ),
             'fuel.average_price.diesel_per_litre' => PayrollRuleValue::moneyMinor($dieselPerLitreMinor),
             'fuel.average_price.electricity_per_kwh' => PayrollRuleValue::moneyMinor(720),
@@ -353,7 +358,8 @@ final class CzechPayrollRulesets2026
             [self::jmhzDocumentation()],
             [
                 'submission_calendar' => PayrollRuleValue::manualReview(
-                    'Deadlines depend on agenda, event, channel and transition rules and are not inferred.',
+                    'Lhůty závisí na agendě, události, kanálu podání a přechodných ustanoveních; '
+                    . 'aplikace je neodvozuje a termín u konkrétního hlášení ukazuje stránka Podání.',
                 ),
             ],
             $technicalReview,
@@ -369,7 +375,8 @@ final class CzechPayrollRulesets2026
             [self::jmhzDocumentation()],
             [
                 'catalog_versions' => PayrollRuleValue::manualReview(
-                    'Runtime codebooks must be imported with their own publication date and checksum.',
+                    'Provozní číselníky se nahrávají importem s vlastním datem vydání a kontrolním '
+                    . 'součtem, ne zápisem hodnoty do téhle sady.',
                 ),
             ],
             $technicalReview,
@@ -390,7 +397,8 @@ final class CzechPayrollRulesets2026
                 'regzec.schema_version' => PayrollRuleValue::text('1.4.0.4'),
                 'regzeldopl.schema_version' => PayrollRuleValue::text('1.2'),
                 'submission' => PayrollRuleValue::manualReview(
-                    'Schema versions are recorded, but direct submission remains outside calculation capability.',
+                    'Verze schémat jsou evidované, ale samotné odeslání podání není součástí '
+                    . 'mzdového výpočtu.',
                 ),
             ],
             $technicalReview,

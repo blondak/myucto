@@ -600,8 +600,25 @@
             "storage_unavailable": "Úložiště úprav není dostupné — chybí migrace databáze. Platí ověřená sada z aplikace.",
             "degraded": "Uložená úprava je nekonzistentní, takže výpočet běží na ověřené sadě z aplikace: {reason}",
             "version_count": "Verzí: {count}",
-            "ready": "Výpočet povolen",
-            "blocked": "Výpočet blokován",
+            "status": {
+                "ready": "Výpočet povolen",
+                "manual_review": "Ruční posouzení",
+                "awaiting_activation": "Zatím není účinné",
+                "coverage_issue": "Neúplná účinnost",
+                "missing": "Chybí sada"
+            },
+            "status_hint": {
+                "ready": "Mzdový výpočet z téhle domény čerpá.",
+                "manual_review": "Aplikace tu záměrně netvrdí žádné číslo, protože správné číslo závisí na konkrétním případu. Nemusíte nic odklikávat ani schvalovat.",
+                "awaiting_activation": "Ověřená sada je připravená, ale zatím není účinná. Otevřete verzi a projděte ji přes Odborně schválit a Uvést do provozu. Je to jeden průchod na doménu, ne na parametr.",
+                "coverage_issue": "Verze domény nepokrývají celé období, takže z ní výpočet nečerpá. Doplňte chybějící účinnost.",
+                "missing": "Pro tuhle doménu není žádná verze."
+            },
+            "manual_review_share": "Ruční posouzení se týká {manual} z {total} parametrů — zbytek se používá normálně.",
+            "manual_review_all": "Ruční posouzení se týká všech {total} parametrů domény.",
+            "manual_review_badge": "Ruční posouzení",
+            "manual_review_why": "Proč:",
+            "manual_review_action": "Co s tím:",
             "open": "Otevřít",
             "reset": "Vrátit ověřenou hodnotu",
             "reset_confirm": "Opravdu zahodit ruční úpravu a vrátit se k ověřené sadě z aplikace?",

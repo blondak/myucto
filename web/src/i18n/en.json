@@ -600,8 +600,25 @@
             "storage_unavailable": "The override storage is unavailable — the database migration is missing. The verified built-in set applies.",
             "degraded": "The stored override is inconsistent, so the calculation runs on the verified built-in set: {reason}",
             "version_count": "Versions: {count}",
-            "ready": "Calculation enabled",
-            "blocked": "Calculation blocked",
+            "status": {
+                "ready": "Calculation enabled",
+                "manual_review": "Manual judgement",
+                "awaiting_activation": "Not effective yet",
+                "coverage_issue": "Incomplete effectivity",
+                "missing": "No version"
+            },
+            "status_hint": {
+                "ready": "The payroll calculation reads from this domain.",
+                "manual_review": "The application deliberately states no number here, because the correct one depends on the individual case. There is nothing for you to tick off or approve.",
+                "awaiting_activation": "The verified set is ready but not effective yet. Open the version and take it through Approve and Activate. That is one pass per domain, not per parameter.",
+                "coverage_issue": "The domain versions do not cover the whole period, so the calculation does not read from it. Fill in the missing effectivity.",
+                "missing": "There is no version for this domain."
+            },
+            "manual_review_share": "Manual judgement applies to {manual} of {total} parameters — the rest is used normally.",
+            "manual_review_all": "Manual judgement applies to all {total} parameters of this domain.",
+            "manual_review_badge": "Manual judgement",
+            "manual_review_why": "Why:",
+            "manual_review_action": "What to do:",
             "open": "Open",
             "reset": "Restore verified value",
             "reset_confirm": "Really discard the manual override and return to the verified built-in set?",
