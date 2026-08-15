@@ -26,6 +26,7 @@ final class JmhzTransportSample
             'request',
             'poll',
             'submit',
+            'delete',
             'VS',
             '1.2',
             'request',

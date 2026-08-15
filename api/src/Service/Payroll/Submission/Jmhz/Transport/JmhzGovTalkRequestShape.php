@@ -7,18 +7,12 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
 /**
  * Vědomé, explicitní prohlášení tvaru ODESÍLANÉ GovTalk obálky.
  *
- * V podkladech ČSSZ je doložená jen obálka PŘÍCHOZÍ (protokol): jmenný prostor,
- * `EnvelopeVersion` 2.0, `Header/MessageDetails/{Class,Qualifier,Function}`,
- * prázdný `GovTalkDetails` a `Body` s ČSSZ obálkou `Message/@version` +
- * `@eType="response"`. O odesílané obálce podklady říkají jen dvě věci
- * nepřímo: nese variabilní symbol (chyba 63 „Variabilní symbol z GovTalk
- * obálky {0} není shodný s VS ve formuláři") a smí nést e-mail pro notifikaci.
- * Kam přesně, jak se jmenuje `Qualifier` požadavku a jaký je `eType` requestu,
- * doložené NENÍ.
+ * Tvar je doložený podacím protokolem ČSSZ a OVĚŘENÝ ODESLÁNÍM: testovací VREP
+ * podání přijal (`Qualifier=acknowledgement`) a přidělil CorrelationID.
  *
- * Proto se tvar nehádá: `JmhzGovTalkEnvelope` bez tohoto objektu obálku vůbec
- * nepostaví. Kdo ho vytvoří, prohlašuje, že tvar ověřil proti dokumentaci
- * APEP/VREP nebo experimentem na testovacím prostředí.
+ * Objekt zůstává povinný i tak: `JmhzGovTalkEnvelope` bez něj obálku nepostaví.
+ * Kdo ho vytvoří, prohlašuje, že tvar ověřil — `documented()` je ta prohlášená
+ * varianta, ne výchozí hodnota, kterou by šlo použít omylem.
  */
 final readonly class JmhzGovTalkRequestShape
 {
@@ -28,6 +22,7 @@ final readonly class JmhzGovTalkRequestShape
         public string $submitQualifier,
         public string $pollQualifier,
         public string $function,
+        public string $closeFunction,
         public string $variableSymbolKeyType,
         public string $bodyEnvelopeVersion,
         public string $bodyEnvelopeType,
@@ -37,6 +32,7 @@ final readonly class JmhzGovTalkRequestShape
             'submitQualifier' => $submitQualifier,
             'pollQualifier' => $pollQualifier,
             'function' => $function,
+            'closeFunction' => $closeFunction,
             'variableSymbolKeyType' => $variableSymbolKeyType,
             'bodyEnvelopeType' => $bodyEnvelopeType,
         ] as $field => $value) {
@@ -89,6 +85,7 @@ final readonly class JmhzGovTalkRequestShape
             submitQualifier: 'request',
             pollQualifier: 'poll',
             function: 'submit',
+            closeFunction: 'delete',
             variableSymbolKeyType: 'vars',
             bodyEnvelopeVersion: '1.2',
             bodyEnvelopeType: 'JMHZ25',

@@ -100,13 +100,24 @@ final readonly class JmhzGovTalkEnvelope
         string $correlationId,
         string $variableSymbol,
         string $submissionClass,
+        bool $close = false,
     ): string {
         $shape = $this->requireShape();
         $class = $this->assertClass($submissionClass);
         $symbol = $this->assertVariableSymbol($variableSymbol);
         $correlation = $this->assertCorrelationId($correlationId);
 
-        $dom = $this->skeleton($class, $shape->pollQualifier, $shape, $symbol);
+        // Uzavření transakce se liší FUNKCÍ, ne kvalifikátorem. Ověřeno pokusem:
+        // `Qualifier=delete` vrátí „Invalid qualifier". Protokol podání přitom
+        // uzavření vyžaduje — aplikace, které transakce neuzavírají, porušují
+        // pravidla provozu.
+        $dom = $this->skeleton(
+            $class,
+            $shape->pollQualifier,
+            $shape,
+            $symbol,
+            $close ? $shape->closeFunction : $shape->function,
+        );
         $details = $this->requireElement($dom, 'MessageDetails', self::NS_GOVTALK);
         $details->appendChild(
             $dom->createElementNS(self::NS_GOVTALK, 'CorrelationID', $correlation),
@@ -133,6 +144,7 @@ final readonly class JmhzGovTalkEnvelope
         string $qualifier,
         JmhzGovTalkRequestShape $shape,
         string $variableSymbol,
+        ?string $function = null,
     ): DOMDocument {
         $dom = new DOMDocument('1.0', 'UTF-8');
         $dom->formatOutput = false;
@@ -155,7 +167,7 @@ final readonly class JmhzGovTalkEnvelope
             $dom->createElementNS(self::NS_GOVTALK, 'Qualifier', $qualifier),
         );
         $details->appendChild(
-            $dom->createElementNS(self::NS_GOVTALK, 'Function', $shape->function),
+            $dom->createElementNS(self::NS_GOVTALK, 'Function', $function ?? $shape->function),
         );
 
         $govTalkDetails = $dom->createElementNS(self::NS_GOVTALK, 'GovTalkDetails');
