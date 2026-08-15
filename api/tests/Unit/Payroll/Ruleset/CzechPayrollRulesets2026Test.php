@@ -23,8 +23,14 @@ final class CzechPayrollRulesets2026Test extends TestCase
      * posouzení a popis technické kontroly jsou součástí kanonického snapshotu,
      * takže překlad do češtiny je z pohledu otisku obsahová změna. Hodnoty
      * parametrů se přitom nezměnily — hlídá to matice níže.
+     *
+     * Potřetí se posunul s doplněním limitů osvobození zaměstnaneckých benefitů
+     * (§ 6 odst. 9 písm. b), d) a p) ZDP). Doména daně z příjmů je nesla jen
+     * v hlavách účetních, takže výchozí mzdové složky měly `annual_limit_minor`
+     * NULL a roční strop se nehlídal vůbec — viz
+     * {@see \MyInvoice\Service\Payroll\Component\PayrollComponentDefaults}.
      */
-    private const EXPECTED_MANIFEST_SHA256 = '204d1db07a976cb786b373837bac18b307f8a0242430c1ffdcf2c64b7fe057f5';
+    private const EXPECTED_MANIFEST_SHA256 = '6f3fa27c68ac3efb889c45b2b21e3b9c44b11cc5c3d03db72984c6ec84f69252';
 
     public function testCanonicalManifestIsByteStable(): void
     {
@@ -96,6 +102,13 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'advance.rounding.base_above_100_czk' => ['text', 'ceil-to-100-czk'],
                 'advance.rounding.base_up_to_100_czk' => ['text', 'ceil-to-1-czk'],
                 'advance.rounding.result' => ['text', 'ceil-to-1-czk'],
+                // § 6 odst. 9 písm. d) ZDP, dva samostatné roční úhrnné limity
+                // z průměrné mzdy 48 967 Kč (§ 21g ZDP): bod 1 zdravotnická plnění
+                // celá průměrná mzda, bod 2 volnočasová plnění její polovina.
+                'benefit_exemption.non_cash_health.yearly' => ['money_minor', 4_896_700],
+                'benefit_exemption.non_cash_leisure.yearly' => ['money_minor', 2_448_350],
+                // § 6 odst. 9 písm. p) ZDP — pevná částka ze zákona, ne odvozenina.
+                'benefit_exemption.old_age_savings.yearly' => ['money_minor', 5_000_000],
                 'bonus.minimum_amount.monthly' => ['money_minor', 5_000],
                 'bonus.minimum_income.monthly' => ['money_minor', 1_120_000],
                 'bonus.minimum_income.yearly' => ['money_minor', 13_440_000],
@@ -140,7 +153,16 @@ final class CzechPayrollRulesets2026Test extends TestCase
         ], $supported, 'A supported 2026 payroll parameter changed or crossed the capability boundary.');
 
         self::assertSame([
-            'income_tax' => [],
+            'income_tax' => [
+                // Limit § 6 odst. 9 písm. b) ZDP je za směnu, ne za rok. Musí tu
+                // být VIDĚT jako vědomé ruční posouzení — kdyby se tichým doplněním
+                // částky stal „supported", roční strop mzdové složky by tvrdil
+                // limit, který zákon takhle nestanoví.
+                'benefit_exemption.meal.per_shift' =>
+                    'Příspěvek na stravování je osvobozený do 70 % horní hranice stravného za '
+                    . 'pracovní cestu 5 až 12 hodin, a to za každou směnu zvlášť. Roční limit '
+                    . 'mzdové složky takový strop nevyjádří a aplikace ho proto netvrdí.',
+            ],
             'social_insurance' => [
                 'employee.discount.agriculture_dpp' =>
                     'Nárok na slevu závisí na zákonných podmínkách sezónní zemědělské činnosti '

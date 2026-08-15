@@ -61,6 +61,38 @@ final class CzechPayrollRulesets2026
                 'advance.rounding.base_above_100_czk' => PayrollRuleValue::text('ceil-to-100-czk'),
                 'advance.rounding.base_up_to_100_czk' => PayrollRuleValue::text('ceil-to-1-czk'),
                 'advance.rounding.result' => PayrollRuleValue::text('ceil-to-1-czk'),
+                // § 6 odst. 9 písm. b) ZDP — příspěvek na stravování je osvobozený
+                // „v úhrnu do výše 70 % horní hranice stravného, které lze poskytnout
+                // zaměstnancům odměňovaným platem při pracovní cestě trvající 5 až
+                // 12 hodin". To je limit NA SMĚNU, ne na rok: 2026 vychází 70 % ze
+                // 185 Kč = 129,50 Kč (`meal_allowance.band_1.tax_exempt_maximum`
+                // v doméně cestovních náhrad). Roční limit mzdové složky
+                // (`payroll_component_definitions.annual_limit_minor`) ho vyjádřit
+                // neumí, protože nezná počet směn — proto tu není částka, ale
+                // vědomé ruční posouzení. Hodnota se tu ZÁMĚRNĚ nepočítá podruhé,
+                // aby nemohla utéct od sazby stravného, ze které plyne.
+                'benefit_exemption.meal.per_shift' => PayrollRuleValue::manualReview(
+                    'Příspěvek na stravování je osvobozený do 70 % horní hranice stravného za '
+                    . 'pracovní cestu 5 až 12 hodin, a to za každou směnu zvlášť. Roční limit '
+                    . 'mzdové složky takový strop nevyjádří a aplikace ho proto netvrdí.',
+                ),
+                // § 6 odst. 9 písm. d) ZDP — nepeněžní plnění zaměstnanci a jeho
+                // rodinnému příslušníkovi. Od 1. 1. 2025 má dva samostatné roční
+                // ÚHRNNÉ limity odvozené z průměrné mzdy za zdaňovací období
+                // (§ 21g ZDP, 2026 = 48 967 Kč):
+                //   bod 1 — zdravotnické služby a zdravotnické prostředky … průměrná mzda
+                //   bod 2 — rekreace a zájezd, sport, kultura, tisk, použití
+                //           vzdělávacích a předškolních zařízení … polovina průměrné mzdy
+                // Limit je úhrn za celé písmeno (resp. bod), ne za jednu mzdovou
+                // složku. Složkový `annual_limit_minor` je proto jen strop JEDNÉ
+                // složky — nutná, ne postačující podmínka; viz PayrollComponentDefaults.
+                'benefit_exemption.non_cash_health.yearly' => PayrollRuleValue::moneyMinor(4_896_700),
+                'benefit_exemption.non_cash_leisure.yearly' => PayrollRuleValue::moneyMinor(2_448_350),
+                // § 6 odst. 9 písm. p) ZDP — příspěvek zaměstnavatele na daňově
+                // podporované produkty spoření na stáří a na pojištění dlouhodobé
+                // péče, osvobozený v úhrnu nejvýše 50 000 Kč ročně. Částku píše
+                // zákon číslem, z průměrné mzdy se neodvozuje.
+                'benefit_exemption.old_age_savings.yearly' => PayrollRuleValue::moneyMinor(5_000_000),
                 'bonus.minimum_amount.monthly' => PayrollRuleValue::moneyMinor(5_000),
                 'bonus.minimum_income.monthly' => PayrollRuleValue::moneyMinor(1_120_000),
                 'bonus.minimum_income.yearly' => PayrollRuleValue::moneyMinor(13_440_000),
