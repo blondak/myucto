@@ -174,6 +174,12 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/submissions/jmhz-preparation/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/jmhz-xml-dry-run/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/jmhz-freeze/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
+        // Registrace zaměstnance je podání jako každé jiné, proto stejné právo
+        // jako zbytek `/submissions/*`: náhled READ, zmrazení WRITE. Vlastní
+        // právo by rozdělilo jednu roli („kdo podává za firmu") na dvě, které
+        // by se v praxi vždy přidělovaly společně.
+        ['GET', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::READ],
         ['*', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/jmhz-transport$#', 'payroll.submissions', AccessLevel::READ],

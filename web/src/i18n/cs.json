@@ -2124,6 +2124,32 @@
                 "partner_dependent": "Příjem společníka",
                 "statutory_body": "Odměna za výkon funkce"
             },
+            "registration": {
+                "title": "Přihláška na ČSSZ",
+                "description": "Přihlášení pracovního vztahu do registru pojištěnců. Formulář vybírá systém podle data nástupu a údajů o zaměstnanci.",
+                "action_preview": "Zjistit, co se podá",
+                "action_prepare": "Připravit podání",
+                "action_done": "Podání je připravené",
+                "preview": "Zobrazit znovu",
+                "window": "Podat lze od {from}, nejpozději {to}.",
+                "employer_window": "Pozor: jde o prvního zaměstnance. Přihlášku zaměstnavatele do evidence ČSSZ podejte nejpozději {to} — po tomto termínu vzniká fikce zaměstnavatele.",
+                "prepared": "{agenda} je připravená k odeslání.",
+                "not_sent_yet": "Zatím neodesláno. Zaměstnanec bude přihlášený až potvrzením od ČSSZ.",
+                "show_xml": "Zobrazit XML",
+                "hide_xml": "Skrýt XML",
+                "copy_xml": "Kopírovat XML",
+                "failed": "Přihlášku se nepodařilo připravit.",
+                "agenda": {
+                    "PREZEC26": "Částečné přihlášení před nástupem",
+                    "REGZEC25": "Plná registrace zaměstnance"
+                },
+                "interaction": {
+                    "limited_pre_registration": "před nástupem do práce",
+                    "pre_registration_no_show": "oznámení o nenastoupení",
+                    "direct_full_registration": "plná registrace",
+                    "full_registration_after_p1": "doplnění po předregistraci"
+                }
+            },
             "dimensions": {
                 "title": "Mzdové dimenze vztahu",
                 "hint": "Přiřazení středisek, zakázek a činností tomuto pracovnímu vztahu v čase.",

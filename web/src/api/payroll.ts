@@ -1507,6 +1507,53 @@ export interface PayrollJmhzXmlDryRun {
   }
 }
 
+/** PREZEC26 = částečné přihlášení před nástupem, REGZEC25 = plná registrace. */
+export type PayrollRegistrationAgenda = 'PREZEC26' | 'REGZEC25'
+
+export interface PayrollRegistrationDeadline {
+  earliest_registration_on: string
+  due_on: string
+  calendar_basis: string
+  ruleset_id: string
+}
+
+export interface PayrollRegistrationEmployerDeadline {
+  earliest_registration_on: string
+  due_on: string
+  deemed_employer_from: string
+  no_show_notification_due_on: string
+  calendar_basis: string
+  ruleset_id: string
+}
+
+export interface PayrollRegistrationPreview {
+  employment_id: number
+  agenda_code: PayrollRegistrationAgenda
+  interaction: string
+  action_code: number
+  xml: string
+  xml_sha256: string
+  deadline: PayrollRegistrationDeadline
+  employer_registration: PayrollRegistrationEmployerDeadline | null
+  official_submission: { supported: false, reason: string }
+}
+
+export interface PayrollRegistrationSubmission {
+  submission_id: number
+  obligation_id: number
+  part_id: number
+  artifact_id: number
+  /** Nejdál `ready`. „Připraveno" není „přihlášeno". */
+  status: string
+  row_version: number
+  environment: string
+  agenda_code: PayrollRegistrationAgenda
+  interaction: string
+  artifact_sha256: string
+  created: boolean
+  deadline: PayrollRegistrationDeadline
+}
+
 export interface PayrollRegzelProfile {
   supplier_id: number
   social_enterprise: boolean
@@ -2626,6 +2673,20 @@ export const payrollApi = {
   ) => api.get<PayrollJmhzXmlDryRun>(
     `/payroll/submissions/jmhz-xml-dry-run/${preparationId}`,
     { params: { environment } },
+  ).then(response => response.data),
+  previewEmploymentRegistration: (
+    employmentId: number,
+    environment: 'test' | 'production' = 'test',
+  ) => api.get<PayrollRegistrationPreview>(
+    `/payroll/submissions/registration/${employmentId}`,
+    { params: { environment } },
+  ).then(response => response.data),
+  prepareEmploymentRegistration: (
+    employmentId: number,
+    environment: 'test' | 'production' = 'test',
+  ) => api.post<PayrollRegistrationSubmission>(
+    `/payroll/submissions/registration/${employmentId}`,
+    { environment },
   ).then(response => response.data),
   downloadJmhzPvpojPreview: async (
     preview: PayrollJmhzPvpojPreview,
