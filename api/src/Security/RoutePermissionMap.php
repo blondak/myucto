@@ -115,6 +115,12 @@ final class RoutePermissionMap
         ['GET', '#^/api/purchase-ai-suggestion-availability$#', 'accounting', AccessLevel::WRITE],
         ['POST', '#^/api/bank-transactions/[0-9]+/unpost$#', 'bank.unpost', AccessLevel::WRITE],
 
+        // Průřezová fronta podání (datová schránka i EPO). Oprávnění je stejné
+        // jako u trezoru certifikátů: kdo smí spravovat podpisové prostředky,
+        // smí i odesílat podání — a naopak nikdo jiný.
+        ['GET', '#^/api/submissions/(outbox|inbox|recipients)(/|$)#', 'settings.signing', AccessLevel::READ],
+        ['*', '#^/api/submissions/(outbox|inbox|recipients)(/|$)#', 'settings.signing', AccessLevel::WRITE],
+
         ['GET', '#^/api/payroll/people$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/people$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+$#', 'payroll', AccessLevel::READ],
@@ -352,6 +358,12 @@ final class RoutePermissionMap
         // na tentýž endpoint se dřív nebo později rozejdou.
         ['GET', '#^/api/settings/certificates(/|$)#', 'settings.signing', AccessLevel::READ],
         ['*', '#^/api/settings/certificates(/|$)#', 'settings.signing', AccessLevel::WRITE],
+        // Datová schránka ze stejného důvodu jako trezor: certifikát ke schránce
+        // je stejná třída tajemství jako podpisový klíč a akce samy kontrolují
+        // `settings.signing`. Bez tohohle pravidla by na ně padl obecný fallback
+        // `/api/settings` s jiným oprávněním.
+        ['GET', '#^/api/settings/databox(/|$)#', 'settings.signing', AccessLevel::READ],
+        ['*', '#^/api/settings/databox(/|$)#', 'settings.signing', AccessLevel::WRITE],
         ['GET', '#^/api/settings/(signing|pdf-signing)(/|$)#', 'settings.signing', AccessLevel::READ],
         ['*', '#^/api/settings/(signing|pdf-signing)(/|$)#', 'settings.signing', AccessLevel::WRITE],
         ['GET', '#^/api/settings/accounting-activation/status$#', 'settings.company', AccessLevel::READ],

@@ -519,6 +519,21 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Logbook\Fuel\SummaryFuelParser::class),
             ]),
 
+            // Kanál datové schránky. PHP-DI neumí autowire interface → explicitní
+            // bind. Zatím míří na `UnavailableIsdsTransport`, protože rozhodnutí
+            // o ISDS knihovně ještě nepadlo (audit skončil verdiktem „go
+            // s výhradami", ale verze je čerstvá přestavba a bus factor je 1).
+            //
+            // ⚠️ Až rozhodnutí padne, mění se JEN tenhle řádek. Zbytek modulu —
+            // fronta, ledger, číselník, trezor, inbox, cron i UI — o knihovně
+            // neví a vědět nesmí; proto je celý postavený nad `IsdsTransport`.
+            \MyInvoice\Service\Submission\Channel\Isds\IsdsTransport::class => fn (ContainerInterface $c)
+                => $c->get(\MyInvoice\Service\Submission\Channel\Isds\UnavailableIsdsTransport::class),
+            \MyInvoice\Service\Submission\Channel\Epo\EpoAttemptStatusReader::class => fn (ContainerInterface $c)
+                => $c->get(\MyInvoice\Service\Submission\Channel\Epo\EpoAttemptStatusRepository::class),
+            \MyInvoice\Service\Submission\SubmissionArtifactResolver::class => fn (ContainerInterface $c)
+                => $c->get(\MyInvoice\Service\Submission\DefaultSubmissionArtifactResolver::class),
+
             // F7 — AI extrakční brána (LlmGateway). PHP-DI s useAttributes(false)
             // neumí autowire interface → explicitní bind na router. Konkrétní klienti
             // (AnthropicClient), LlmProviderRegistry i ResidencyPolicy zůstávají autowired.

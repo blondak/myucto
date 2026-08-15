@@ -1647,6 +1647,24 @@ final class Routes
         // i mzdová podání. EPO endpointy zůstávají a míří do téhož trezoru.
         $app->get    ('/api/settings/certificates',        [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'list']);
         $app->post   ('/api/settings/certificates',        [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'upload']);
+        // Datová schránka jako průřezový kanál podání (DPH, KH, SH, DPPO,
+        // přehledy ZP…). Systémový certifikát a souhlas s vybíráním schránky.
+        $app->get    ('/api/settings/databox',             [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'list']);
+        $app->post   ('/api/settings/databox',             [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'save']);
+        $app->post   ('/api/settings/databox/polling',     [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'setPolling']);
+        $app->delete ('/api/settings/databox/{environment:production|test}', [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'delete']);
+        $app->get    ('/api/submissions/recipients',       [\MyInvoice\Action\Submission\SubmissionRecipientAction::class, 'list']);
+        $app->post   ('/api/submissions/recipients',       [\MyInvoice\Action\Submission\SubmissionRecipientAction::class, 'save']);
+        $app->delete ('/api/submissions/recipients/{id:[0-9]+}', [\MyInvoice\Action\Submission\SubmissionRecipientAction::class, 'delete']);
+        $app->get    ('/api/submissions/outbox',           [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'list']);
+        $app->post   ('/api/submissions/outbox',           [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'enqueue']);
+        $app->get    ('/api/submissions/outbox/{id:[0-9]+}/attempts', [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'attempts']);
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/confirm',  [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'confirm']);
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/resolve',  [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'resolve']);
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/cancel',   [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'cancel']);
+        $app->get    ('/api/submissions/inbox',            [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'list']);
+        $app->post   ('/api/submissions/inbox/poll',       [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'poll']);
+        $app->post   ('/api/submissions/inbox/{id:[0-9]+}/classify', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'reclassify']);
         $app->get    ('/api/settings/signing',              [SigningProfilesAction::class, 'settings']);
         $app->put    ('/api/settings/signing',              [SigningProfilesAction::class, 'updateSettings']);
         $app->get    ('/api/settings/signing/profiles',              [SigningProfilesAction::class, 'listProfiles']);

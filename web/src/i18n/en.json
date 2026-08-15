@@ -14342,5 +14342,122 @@
         ],
         "attach_privacy": "The bundle is created in your installation and stays there until you attach it to an incident yourself. Logs are not included by default; if you add them, you see their contents beforehand.",
         "open_diagnostics": "Go to Diagnostics"
+    },
+    "databox": {
+        "title": "Data box",
+        "subtitle": "Filing through the Czech data box — VAT return, control and recapitulative statements, corporate income tax and health insurer overviews.",
+        "saved": "Saved.",
+        "env": {
+            "production": "Production",
+            "test": "Test environment"
+        },
+        "tabs": {
+            "access": "Access",
+            "outbox": "Outgoing filings",
+            "inbox": "Incoming messages",
+            "recipients": "Recipients"
+        },
+        "access": {
+            "title": "System certificate",
+            "certificateOnly": "The application signs in to the data box with a system certificate only. Do not enter your data box username and password here — by law they must not leave your own device and the data box administrator may invalidate them.",
+            "label": "Label",
+            "boxId": "Our data box ID",
+            "validTo": "Certificate valid until",
+            "certificate": "Certificate file (PFX or P12)",
+            "certificatePassword": "Certificate password"
+        },
+        "polling": {
+            "title": "Automatic mailbox collection",
+            "explanation": "Fetching a message from the data box counts as delivery and starts statutory deadlines. If you turn collection on, the application will collect the mailbox on your behalf — including at times when you are not looking at it yourself. Leave it off if you collect the mailbox elsewhere.",
+            "acknowledge": "I understand that a message fetched by the application counts as delivered and starts statutory deadlines.",
+            "ackRequired": "Please first confirm that fetching a message counts as delivery.",
+            "turnOn": "Turn collection on",
+            "turnOff": "Turn collection off",
+            "isOn": "Mailbox collection is on.",
+            "enabled": "Mailbox collection is on.",
+            "disabled": "Mailbox collection is off."
+        },
+        "dispatch": {
+            "ready": "Ready to send",
+            "sending": "Sending",
+            "send_uncertain": "Unknown whether it was sent",
+            "sent": "Sent, awaiting delivery receipt",
+            "delivered": "Delivered",
+            "failed": "Not sent",
+            "cancelled": "Cancelled"
+        },
+        "acceptance": {
+            "unknown": "Processing by the authority: not known yet",
+            "accepted": "Processed by the authority",
+            "rejected": "Rejected by the authority"
+        },
+        "attempt": {
+            "in_flight": "In progress",
+            "sent": "Sent",
+            "uncertain": "Uncertain",
+            "rejected": "Rejected",
+            "failed": "Failed"
+        },
+        "classification": {
+            "delivery_receipt": "Delivery receipt",
+            "cssz_protocol": "Social security protocol",
+            "health_insurer_response": "Health insurer response",
+            "tax_office_response": "Tax office response",
+            "unclassified": "Unclassified"
+        },
+        "recipientKind": {
+            "tax_office": "Tax office",
+            "cssz": "Social security administration",
+            "health_insurer": "Health insurer",
+            "other": "Other institution"
+        },
+        "outbox": {
+            "empty": "There is no filing in the queue.",
+            "reference": "Our reference",
+            "confirmSend": "Confirm and send",
+            "resolve": "Check whether it was sent",
+            "attempts": "Attempt history",
+            "cancel": "Cancel",
+            "attemptOutcome": "Outcome",
+            "messageId": "Message ID",
+            "startedAt": "Started",
+            "sent": "The filing was sent to the recipient data box.",
+            "notSent": "The filing could not be sent.",
+            "uncertain": "The connection broke and it is not certain whether the message was sent. Do not send it again — use “Check whether it was sent”.",
+            "uncertainHint": "It is not certain whether the message was sent. Do not resend it manually, that could create a duplicate filing — let it be looked up with the button below.",
+            "resolvedSent": "The message was found among sent messages — the filing did go out.",
+            "resolvedNotSent": "The message is not among sent messages — nothing was sent and you can safely queue it again.",
+            "resolveInconclusive": "The data box could not be reached, so we still do not know whether the message was sent. Please try again later.",
+            "deliveredNotProcessed": "The delivery receipt confirms the message reached the authority’s mailbox. It does not mean the authority has processed and accepted the filing — any defects will be notified in a separate message."
+        },
+        "inbox": {
+            "empty": "No downloaded messages.",
+            "poll": "Fetch new messages",
+            "polled": "New messages downloaded: {count}",
+            "pollingOff": "Mailbox collection is off. Turn it on in the Access tab — fetching a message counts as delivery.",
+            "subject": "Subject",
+            "sender": "Sender",
+            "classification": "Classification",
+            "deliveredAt": "Delivered",
+            "lastOkAt": "Last successful collection: {at}",
+            "unreachable": "The data box cannot be reached (failed attempts: {count}). We therefore do not know whether new messages are waiting — the empty list below does not mean there are none."
+        },
+        "recipients": {
+            "addTitle": "Add recipient",
+            "name": "Name",
+            "kind": "Kind",
+            "boxId": "Data box ID",
+            "code": "Code",
+            "source": "Source link",
+            "sourceLink": "Source",
+            "noBoxId": "ID not filled in",
+            "sourceHint": "Always state where the data box ID is documented. Do not store it without a source — a filing sent to the wrong mailbox counts as not filed at all.",
+            "missingBoxIds": "Records without a data box ID: {count}. Until you fill the ID in, no filing can be sent to them.",
+            "taxOfficeHint": "Tax offices are not pre-filled — we have no documented data box IDs for them and we do not guess. Fill them in from the tax administration list and always add the source link. A filing goes to the locally competent tax administrator, that is to the regional tax office mailbox, not to a local branch."
+        },
+        "errors": {
+            "certificateRequired": "Please upload the system certificate file (PFX or P12).",
+            "sourceRequired": "Add a source link for the data box ID you filled in."
+        }
     }
 }
