@@ -141,16 +141,6 @@ final class JmhzScenario1ControlEvaluator
             'absent' => [],
             'not_type' => ['O'],
         ],
-        273 => [
-            'reason' => 'Sleva pro ovocnářství a pěstování zeleniny se nevykazuje.',
-            'absent' => ['10546', '10547'],
-            'not_type' => [],
-        ],
-        275 => [
-            'reason' => 'Ani jedna z výlučných slev se nevykazuje.',
-            'absent' => ['10490', '10546'],
-            'not_type' => [],
-        ],
         278 => [
             'reason' => 'Roční atributy slevy na manžela se nevykazují.',
             'absent' => ['10541', '10542'],
@@ -206,10 +196,12 @@ final class JmhzScenario1ControlEvaluator
         return [
             1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 31, 37, 43, 44, 50, 56, 57, 58,
             60, 61, 62, 72, 74, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
-            103, 109, 129, 131, 132, 134, 135, 144, 145, 152, 153, 154, 157,
-            159, 162, 167, 168, 211, 227, 232, 235, 236, 240, 244, 248, 251,
-            253, 255, 260, 267, 282, 283, 286, 299, 300, 301, 303, 304, 306,
-            307, 309, 330, 332, 335, 341, 342, 354, 355,
+            103, 109, 121, 129, 131, 132, 134, 135, 144, 145, 152, 153, 154,
+            157, 159, 162, 165, 167, 168, 170, 208, 211, 216, 227, 232, 235,
+            236, 240, 244, 248, 251,
+            253, 255, 260, 267, 270, 271, 272, 273, 275, 282, 283, 284, 286,
+            296, 299, 300, 301, 303, 304, 306, 307, 309, 328, 329, 330, 332,
+            335, 341, 342, 354, 355,
         ];
     }
 
@@ -239,6 +231,14 @@ final class JmhzScenario1ControlEvaluator
                 . ' pojistné 71 Kč) by ji neprošlo ani zcela správné podání,'
                 . ' protože pojistné se zaokrouhluje u každého zaměstnance zvlášť.'
                 . ' Vynucuje se jen tolerance; o skutečné mezi rozhodne protokol.',
+            170 => 'Vedle tolerance žádá katalog i dolní mez 6,565 % z úhrnu'
+                . ' vyměřovacích základů. Je to táž konstrukce jako u kontroly 168'
+                . ' a se stejným důsledkem: sleva se zaokrouhluje u každého'
+                . ' zaměstnance zvlášť, takže by mez neprošlo ani správné podání.'
+                . ' Vynucuje se jen tolerance; o mezi rozhodne protokol.',
+            270 => 'Táž konstrukce jako u kontroly 168 a 170 — vedle tolerance'
+                . ' žádá katalog dolní mez 7,171 %, která by odmítla i správné'
+                . ' podání. Vynucuje se jen tolerance.',
             244 => 'Katalog zakazuje, aby slevy „nabývaly hodnot" bez podepsaného'
                 . ' prohlášení. Vykázaná nula ale žádnou slevu neuplatňuje, takže'
                 . ' se za hodnotu nepovažuje — jinak by neprošel ani zaměstnanec'
@@ -271,6 +271,9 @@ final class JmhzScenario1ControlEvaluator
             // Tolerance 7,1 % je v textu kontroly 168, ale katalog ji vede pod
             // parametrem svázaným s kontrolami 118 a 270, proto se uvádí navíc.
             168 => ['source_row_7'],
+            170 => ['source_row_9'],
+            270 => ['source_row_7'],
+            271 => ['source_row_16'],
         ];
     }
 
@@ -286,10 +289,11 @@ final class JmhzScenario1ControlEvaluator
     public function unenforcedParameterKeys(): array
     {
         return [
-            // Dolní mez 7,171 % z úhrnu základů. Na doloženém minimálním
-            // případě by jí neprošlo ani zcela správné podání, viz
-            // `documentedDeviations()`.
+            // Dolní meze nad tolerancí. Na doložených případech by jimi
+            // neprošlo ani zcela správné podání, viz `documentedDeviations()`.
             168 => ['source_row_8'],
+            170 => ['source_row_10'],
+            270 => ['source_row_8'],
         ];
     }
 
@@ -337,6 +341,46 @@ final class JmhzScenario1ControlEvaluator
             98 => $this->dayCountsWithinMonth($projection),
             99 => $this->eldpValidityWithinPeriod($projection),
             109 => $this->atMostIncome($projection, '10416'),
+            121 => $this->sumMatchesWhenPositive(
+                $projection,
+                '10357',
+                ['10358', '10359', '10360', '10362', '10536'],
+            ),
+            165 => $this->sumMatchesWhenPositive(
+                $projection,
+                '10366',
+                ['10473', '10474', '10475'],
+            ),
+            170 => $this->employeeDiscountTolerance(
+                $projection,
+                '10487',
+                '10486',
+                'source_row_9',
+            ),
+            208 => $this->onlyWithFlag($projection, '10491', '10490'),
+            216 => $this->assessmentBaseSum($projection),
+            270 => $this->employeeDiscountTolerance(
+                $projection,
+                '10545',
+                '10544',
+                'source_row_7',
+            ),
+            271 => $this->orchardDiscountAgainstAverageWage($projection),
+            272 => $this->onlyWithFlag($projection, '10547', '10546'),
+            273 => $this->orchardDiscountMatchesInsurance($projection),
+            275 => $this->discountsAreExclusive($projection),
+            284 => $this->assessmentBaseComponentPresence($projection),
+            296 => $this->orchardDiscountOnlyOnDpp($projection),
+            328 => $this->emptyWhenZero(
+                $projection,
+                '10375',
+                ['10462', '10463', '10464', '10465', '10466', '10468', '10469'],
+            ),
+            329 => $this->emptyWhenZero(
+                $projection,
+                '10357',
+                ['10358', '10359', '10360', '10362', '10536'],
+            ),
             135 => $this->insuranceDaysAgainstEldpCode($projection),
             157 => $this->eldpCodeFromCodebook($projection),
             211 => $this->cancelledFormsLeaveAtLeastOne($projection),
@@ -2107,6 +2151,286 @@ final class JmhzScenario1ControlEvaluator
                 return null;
             },
         );
+    }
+
+    // --- součty a slevy nad rámec prvního profilu -------------------------
+
+    /**
+     * Součtové pravidlo, které platí až od nenulového úhrnu. Nulový úhrn se
+     * nekontroluje — katalog ho podmiňuje výslovně a rozpad k nule se u ELDP
+     * běžně neuvádí.
+     *
+     * @param list<string> $parts
+     * @return list<JmhzControlVerdict>
+     */
+    private function sumMatchesWhenPositive(
+        JmhzAttributeProjection $projection,
+        string $totalId,
+        array $parts,
+    ): array {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($totalId, $parts): ?string {
+                $total = $form->integer($totalId);
+                if ($total === null || $total <= 0) {
+                    return null;
+                }
+                $sum = 0;
+                foreach ($parts as $part) {
+                    $sum += $form->integer($part) ?? 0;
+                }
+                if ($total !== $sum) {
+                    return "Úhrn {$totalId} = {$total} neodpovídá součtu složek {$sum}.";
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /**
+     * Slevu lze vykázat jen tehdy, když je uplatněná. Vykázaná částka bez
+     * příznaku je buď sleva, na kterou není nárok, nebo chybějící příznak —
+     * obojí ČSSZ zamítne.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function onlyWithFlag(
+        JmhzAttributeProjection $projection,
+        string $amountId,
+        string $flagId,
+    ): array {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($amountId, $flagId): ?string {
+                if (!$form->has($amountId)) {
+                    return null;
+                }
+                if ($form->boolean($flagId) === true) {
+                    return null;
+                }
+
+                return "Atribut {$amountId} smí být vyplněn jen při uplatněné slevě ({$flagId}).";
+            },
+        );
+    }
+
+    /**
+     * Tolerance úhrnu slev proti procentu z vyměřovacích základů. Stejná úvaha
+     * jako u kontroly 168: sleva se počítá a zaokrouhluje u každého zaměstnance
+     * zvlášť, takže úhrn nikdy nesedí na procento z celku přesně.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function employeeDiscountTolerance(
+        JmhzAttributeProjection $projection,
+        string $discountId,
+        string $baseId,
+        string $rateKey,
+    ): array {
+        $pvpoj = $projection->pvpoj();
+        $discount = $pvpoj->integer($discountId);
+        $base = $pvpoj->integer($baseId);
+        if ($discount === null && $base === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
+        }
+        if ($discount === null || $base === null) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_PVPOJ,
+                null,
+                "Vykázán jen jeden z údajů {$baseId} a {$discountId}; slevu nelze ověřit.",
+            )];
+        }
+        if ($base === 0) {
+            return $discount === 0
+                ? [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_PVPOJ)]
+                : [JmhzControlVerdict::failed(
+                    JmhzAttributeProjection::PART_PVPOJ,
+                    null,
+                    "Sleva {$discountId} = {$discount} Kč je vykázána bez vyměřovacího základu.",
+                )];
+        }
+        [$numerator, $denominator] = $this->parameters->multiplyExact(
+            $base,
+            $rateKey,
+            $this->periodStart($projection),
+        );
+        $deviation = abs($numerator - $discount * $denominator);
+        if ($deviation <= 100 * $denominator
+            || $deviation * 100 <= abs($discount * $denominator)
+        ) {
+            return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_PVPOJ)];
+        }
+
+        return [JmhzControlVerdict::failed(
+            JmhzAttributeProjection::PART_PVPOJ,
+            null,
+            "Úhrn slev {$discountId} = {$discount} Kč je mimo toleranci vůči úhrnu"
+                . " vyměřovacích základů {$base} Kč.",
+        )];
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function orchardDiscountAgainstAverageWage(JmhzAttributeProjection $projection): array
+    {
+        $limit = $this->parameters->integerValue(
+            'source_row_16',
+            $this->periodStart($projection),
+        );
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($limit): ?string {
+                $base = $form->integer('10477');
+                if ($base === null || $base <= $limit) {
+                    return null;
+                }
+                if ($form->boolean('10546') !== true) {
+                    return null;
+                }
+
+                return "Sleva pro ovocnářství se nesmí uplatnit, je-li vyměřovací základ"
+                    . " {$base} Kč vyšší než {$limit} Kč.";
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function orchardDiscountMatchesInsurance(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            if ($form->boolean('10546') !== true) {
+                return null;
+            }
+            $discount = $form->integer('10547');
+            $insurance = $form->integer('10370');
+            if ($discount === null || $insurance === null) {
+                return 'Uplatněná sleva pro ovocnářství vyžaduje slevu i pojistné zaměstnance.';
+            }
+            if ($discount !== $insurance) {
+                return "Sleva pro ovocnářství {$discount} Kč se musí rovnat pojistnému"
+                    . " zaměstnance {$insurance} Kč.";
+            }
+
+            return null;
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function discountsAreExclusive(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            if ($form->boolean('10490') === true && $form->boolean('10546') === true) {
+                return 'Obecnou slevu a slevu pro ovocnářství nelze uplatnit současně.';
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Obě pravidla o vyměřovacím základu zaměstnance katalog podmiňuje tím, že
+     * NEJDE o vyjmenované datové scénáře — činnosti K až S, pěstoun, a činnosti
+     * 1 až 9 s příznakem specifické skupiny. Rozhodnout to jde jedině z druhu
+     * činnosti (10239), případně z příznaku 10502.
+     *
+     * Doloženo skutečně přijatým podáním: ČSSZ přijala hlášení s nenulovým
+     * 10477 bez jediné složky 10478–10480 a bez 10239. Vynucovat pravidlo bez
+     * znalosti scénáře by tedy odmítalo podání, která projdou — a to je horší
+     * chyba než kontrolu nevykonat.
+     */
+    private function requiresActivityScenario(JmhzAttributeScope $form): bool
+    {
+        return !$form->has('10239') && !$form->has('10502');
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function assessmentBaseSum(JmhzAttributeProjection $projection): array
+    {
+        if ($this->lacksActivityScenario($projection)) {
+            return [$this->activityScenarioUnknown()];
+        }
+
+        return $this->sumMatchesWhenPositive(
+            $projection,
+            '10477',
+            ['10478', '10479', '10480'],
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function assessmentBaseComponentPresence(JmhzAttributeProjection $projection): array
+    {
+        if ($this->lacksActivityScenario($projection)) {
+            return [$this->activityScenarioUnknown()];
+        }
+
+        return $this->assessmentBaseHasComponent($projection);
+    }
+
+    private function lacksActivityScenario(JmhzAttributeProjection $projection): bool
+    {
+        foreach ($projection->forms() as $form) {
+            if ($this->requiresActivityScenario($form)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function activityScenarioUnknown(): JmhzControlVerdict
+    {
+        return JmhzControlVerdict::notEvaluable(
+            JmhzAttributeProjection::PART_FORM,
+            'Pravidlo se nevztahuje na vyjmenované datové scénáře; bez druhu'
+                . ' činnosti (10239) nelze rozhodnout, který scénář platí.',
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function assessmentBaseHasComponent(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $base = $form->integer('10477');
+            if ($base === null || $base === 0) {
+                return null;
+            }
+            foreach (['10478', '10479', '10480'] as $part) {
+                if ($form->has($part)) {
+                    return null;
+                }
+            }
+
+            return 'Nenulový vyměřovací základ zaměstnance neuvádí, ze které složky'
+                . ' se pojistné odvádí.';
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function orchardDiscountOnlyOnDpp(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            if ($form->boolean('10546') !== true) {
+                return null;
+            }
+            $activity = $form->value('10239');
+            if ($activity === null) {
+                return null;
+            }
+            // Dohody o provedení práce mají v číselníku druhů činnosti kódy
+            // T až ZC; sleva pro ovocnářství se jinam nevztahuje.
+            if (!in_array(
+                $activity,
+                ['T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'ZA', 'ZB', 'ZC'],
+                true,
+            )) {
+                return "Sleva pro ovocnářství se vztahuje jen na dohody o provedení"
+                    . " práce; druh činnosti je {$activity}.";
+            }
+
+            return null;
+        });
     }
 
     // --- kód ELDP ---------------------------------------------------------
