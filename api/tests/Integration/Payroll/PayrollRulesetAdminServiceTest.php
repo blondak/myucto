@@ -290,6 +290,81 @@ final class PayrollRulesetAdminServiceTest extends TestCase
         self::assertSame('active', $entry['lifecycle']);
     }
 
+    /**
+     * Uživatel má v editaci vidět český název parametru, ne jen kanonický klíč —
+     * ten zůstává jako identifikátor v auditní stopě a v rulesetu.
+     */
+    public function testDetailShipsCzechParameterNamesAndDecodedEnumValues(): void
+    {
+        $detail = $this->service->detail('cz-payroll-2026.health-insurance.v1')
+            ?? self::fail('Vestavěný ruleset zdravotního pojištění chybí.');
+        /** @var list<array<string, mixed>> $parameters */
+        $parameters = $detail['parameters'];
+        $byKey = array_column($parameters, null, 'key');
+
+        self::assertSame('Celková sazba pojistného (zaměstnanec i zaměstnavatel)', $byKey['total.rate']['label']);
+        self::assertSame('Zaokrouhlení celkového pojistného', $byKey['rounding.total']['label']);
+        self::assertSame('zaokrouhlit nahoru na celé koruny', $byKey['rounding.total']['value_label']);
+        self::assertSame('ceil-to-1-czk', $byKey['rounding.total']['value'], 'Klíčová hodnota se popiskem nesmí přepsat.');
+
+        foreach ($parameters as $parameter) {
+            self::assertIsString($parameter['label'], "Parametr {$parameter['key']} nemá český název.");
+        }
+    }
+
+    /**
+     * „Výpočet blokován" u domény s ručním posouzením není fronta ke schválení.
+     * Přehled proto musí nést, kolika parametrů se to týká a proč.
+     */
+    public function testManualReviewDomainReportsHowManyParametersAndWhy(): void
+    {
+        $overview = $this->service->overview();
+        /** @var list<array<string, mixed>> $domains */
+        $domains = $overview['domains'];
+        $byDomain = array_column($domains, null, 'domain');
+
+        $deadlines = $byDomain['deadlines'];
+        self::assertSame('manual_review', $deadlines['status']);
+        self::assertTrue($deadlines['manual_review_by_design']);
+        self::assertSame(1, $deadlines['manual_review_parameter_count']);
+        self::assertSame(1, $deadlines['parameter_count']);
+        self::assertIsString($deadlines['manual_review_explanation']);
+
+        // Sociální pojištění ruční posouzení MÁ, ale jen u části parametrů —
+        // doména jako celek zůstává použitelná.
+        $social = $byDomain['social_insurance'];
+        self::assertFalse($social['manual_review_by_design']);
+        self::assertSame(3, $social['manual_review_parameter_count']);
+        self::assertSame(10, $social['parameter_count']);
+        self::assertNotSame('manual_review', $social['status']);
+    }
+
+    public function testManualReviewParameterExplainsWhatTheUserShouldDo(): void
+    {
+        $detail = $this->service->detail('cz-payroll-2026.deadlines.v1')
+            ?? self::fail('Vestavěný ruleset lhůt chybí.');
+        /** @var list<array<string, mixed>> $parameters */
+        $parameters = $detail['parameters'];
+        $calendar = array_column($parameters, null, 'key')['submission_calendar'];
+
+        self::assertSame('manual_review', $calendar['capability']);
+        self::assertIsString($calendar['manual_review_why']);
+        self::assertIsString($calendar['manual_review_action']);
+        self::assertStringContainsString('neschvalujete', $calendar['manual_review_action']);
+
+        /** @var list<array<string, mixed>> $warnings */
+        $warnings = $detail['warnings'];
+        $codes = array_column($warnings, 'code');
+        self::assertContains('manual_review_capability', $codes);
+        self::assertContains('manual_review_parameters', $codes);
+        foreach ($warnings as $warning) {
+            if ($warning['code'] === 'manual_review_parameters') {
+                self::assertSame(1, $warning['context']['manual_review_count']);
+                self::assertSame(1, $warning['context']['parameter_count']);
+            }
+        }
+    }
+
     public function testAuditTrailRecordsWhoChangedWhatAndWhy(): void
     {
         $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2027-01-01', '2027-12-31');

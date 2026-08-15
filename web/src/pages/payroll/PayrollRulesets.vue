@@ -11,6 +11,8 @@ import {
   type PayrollRulesetCommand,
   type PayrollRulesetDetail,
   type PayrollRulesetDiff,
+  type PayrollRulesetDomainGroup,
+  type PayrollRulesetDomainStatus,
   type PayrollRulesetOverview,
   type PayrollRulesetSummary,
 } from '@/api/payrollRulesets'
@@ -44,6 +46,48 @@ const lifecycleClass: Record<string, string> = {
   superseded: 'bg-neutral-100 text-neutral-500',
 }
 
+/**
+ * Neutrální barva = „tady po vás nikdo nic nechce" (ruční posouzení),
+ * jantarová = „čeká to na vás" (neúčinná verze), červená = rozbitá sada.
+ * Dřív měly všechny tři stejný jantarový štítek „Výpočet blokován", takže
+ * vědomé rozhodnutí aplikace vypadalo jako neodbavená fronta.
+ */
+const domainStatusClass: Record<string, string> = {
+  ready: 'bg-success-50 text-success-600',
+  manual_review: 'bg-neutral-100 text-neutral-600',
+  awaiting_activation: 'bg-warning-50 text-warning-600',
+  coverage_issue: 'bg-danger-50 text-danger-500',
+  missing: 'bg-danger-50 text-danger-500',
+}
+
+function domainStatus(group: PayrollRulesetDomainGroup): PayrollRulesetDomainStatus {
+  return group.status ?? (group.calculation_ready ? 'ready' : 'awaiting_activation')
+}
+
+/** Kolika parametrů se ruční posouzení v doméně týká — a kolika ne. */
+function manualReviewShare(group: PayrollRulesetDomainGroup): string | null {
+  const manual = group.manual_review_parameter_count ?? 0
+  const total = group.parameter_count ?? 0
+  if (manual === 0 || total === 0) return null
+  return manual >= total
+    ? t('payroll.rulesets.manual_review_all', { total })
+    : t('payroll.rulesets.manual_review_share', { manual, total })
+}
+
+function isManualReview(parameter: PayrollRuleParameter): boolean {
+  return parameter.capability === 'manual_review' || parameter.type === 'manual_review'
+}
+
+/** Český název parametru; klíč zůstává vidět jako drobný doplněk pod ním. */
+function parameterName(parameter: PayrollRuleParameter): string {
+  return parameter.label ?? parameter.key
+}
+
+/** Název pro řádek diffu, kde chodí jen klíč. */
+function nameForKey(key: string): string {
+  return detail.value?.parameters.find(parameter => parameter.key === key)?.label ?? key
+}
+
 async function load() {
   loading.value = true
   try {
@@ -74,8 +118,25 @@ function close() {
   diff.value = null
 }
 
+/**
+ * Popisy výčtových hodnot z aktuální verze — aby i řádek diffu ukázal
+ * „zaokrouhlit nahoru na celé koruny" místo `ceil-to-1-czk`.
+ */
+const valueLabels = computed<Record<string, string>>(() => {
+  const map: Record<string, string> = {}
+  for (const parameter of detail.value?.parameters ?? []) {
+    if (typeof parameter.value === 'string' && parameter.value_label) {
+      map[parameter.value] = parameter.value_label
+    }
+  }
+  return map
+})
+
 /** Interní jednotky se v UI neukazují — haléře jako Kč, sazby jako procenta. */
 function displayValue(parameter: PayrollRuleParameter): string {
+  if (parameter.type === 'text' && typeof parameter.value === 'string') {
+    return parameter.value_label ?? valueLabels.value[parameter.value] ?? parameter.value
+  }
   if (parameter.type === 'money_minor' && typeof parameter.value === 'number') {
     return `${minorToCrowns(parameter.value).toLocaleString('cs-CZ', {
       minimumFractionDigits: 2,
@@ -308,15 +369,29 @@ onMounted(load)
         </div>
         <span
           class="rounded-full px-2.5 py-1 text-xs font-medium"
-          :class="group.calculation_ready
-            ? 'bg-success-50 text-success-600'
-            : 'bg-warning-50 text-warning-600'"
+          :class="domainStatusClass[domainStatus(group)]"
+          :data-test="`ruleset-status-${group.domain}`"
         >
-          {{ t(group.calculation_ready
-            ? 'payroll.rulesets.ready'
-            : 'payroll.rulesets.blocked') }}
+          {{ t(`payroll.rulesets.status.${domainStatus(group)}`) }}
         </span>
       </div>
+
+      <p
+        v-if="domainStatus(group) !== 'ready'"
+        class="mt-2 max-w-3xl text-sm text-neutral-600"
+        :data-test="`ruleset-status-hint-${group.domain}`"
+      >
+        {{ t(`payroll.rulesets.status_hint.${domainStatus(group)}`) }}
+        <span v-if="group.manual_review_explanation">{{ group.manual_review_explanation }}</span>
+      </p>
+
+      <p
+        v-if="manualReviewShare(group)"
+        class="mt-1 text-xs text-neutral-500"
+        :data-test="`ruleset-manual-share-${group.domain}`"
+      >
+        {{ manualReviewShare(group) }}
+      </p>
 
       <ul v-if="group.coverage_issues.length" class="mt-3 space-y-1">
         <li
@@ -328,8 +403,21 @@ onMounted(load)
         </li>
       </ul>
 
+      <!--
+        Každá doména má vlastní tabulku, takže by si šířky sloupců počítala
+        zvlášť a mezi kartami by se rozjely. `table-fixed` + shodný `colgroup`
+        je srovná; `min-w` drží čitelnost a užší obrazovku řeší vodorovné
+        rolování uvnitř karty, ne zúžení sloupců.
+      -->
       <div class="mt-4 hidden overflow-x-auto md:block">
-        <table class="min-w-full divide-y divide-neutral-200 text-sm">
+        <table class="w-full min-w-[42rem] table-fixed divide-y divide-neutral-200 text-sm">
+          <colgroup>
+            <col class="w-[24%]">
+            <col class="w-[26%]">
+            <col class="w-[21%]">
+            <col class="w-[16%]">
+            <col class="w-[13%]">
+          </colgroup>
           <thead>
             <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
               <th class="px-3 py-2">{{ t('payroll.rulesets.column.version') }}</th>
@@ -343,24 +431,26 @@ onMounted(load)
             <tr v-for="version in group.versions" :key="version.ruleset_id">
               <td class="px-3 py-3">
                 <div class="font-medium text-neutral-900">{{ version.version }}</div>
-                <div class="text-xs text-neutral-500">{{ version.ruleset_id }}</div>
+                <div class="text-xs break-all text-neutral-500">{{ version.ruleset_id }}</div>
               </td>
               <td class="px-3 py-3 whitespace-nowrap text-neutral-600">
                 {{ version.effective_from }} – {{ version.effective_to }}
               </td>
               <td class="px-3 py-3">
-                <span
-                  class="rounded-full px-2 py-1 text-xs font-medium"
-                  :class="lifecycleClass[version.lifecycle]"
-                >
-                  {{ t(`payroll.rulesets.lifecycle.${version.lifecycle}`) }}
-                </span>
-                <span
-                  v-if="!version.checksum_valid"
-                  class="ml-2 rounded-full bg-danger-50 px-2 py-1 text-xs font-medium text-danger-500"
-                >
-                  {{ t('payroll.rulesets.checksum_invalid') }}
-                </span>
+                <div class="flex flex-wrap items-center gap-1">
+                  <span
+                    class="rounded-full px-2 py-1 text-xs font-medium"
+                    :class="lifecycleClass[version.lifecycle]"
+                  >
+                    {{ t(`payroll.rulesets.lifecycle.${version.lifecycle}`) }}
+                  </span>
+                  <span
+                    v-if="!version.checksum_valid"
+                    class="rounded-full bg-danger-50 px-2 py-1 text-xs font-medium text-danger-500"
+                  >
+                    {{ t('payroll.rulesets.checksum_invalid') }}
+                  </span>
+                </div>
               </td>
               <td class="px-3 py-3 text-neutral-600">
                 {{ t(version.is_override
@@ -482,7 +572,12 @@ onMounted(load)
 
         <div v-if="tab === 'parameters'" class="space-y-3">
           <div class="hidden overflow-x-auto md:block">
-            <table class="min-w-full divide-y divide-neutral-200 text-sm">
+            <table class="w-full min-w-[44rem] table-fixed divide-y divide-neutral-200 text-sm">
+              <colgroup>
+                <col class="w-[38%]">
+                <col class="w-[26%]">
+                <col class="w-[36%]">
+              </colgroup>
               <thead>
                 <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
                   <th class="px-3 py-2">{{ t('payroll.rulesets.column.parameter') }}</th>
@@ -491,23 +586,49 @@ onMounted(load)
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
-                <tr v-for="parameter in detail.parameters" :key="parameter.key">
-                  <td class="px-3 py-2 font-medium break-all text-neutral-900">{{ parameter.key }}</td>
-                  <td class="px-3 py-2">
-                    <div v-if="canEdit && isEditable(parameter)" class="flex items-center gap-2">
-                      <input
-                        :value="draftFor(parameter)"
-                        :type="parameter.type === 'text' ? 'text' : 'number'"
-                        step="any"
-                        class="h-8 w-40 rounded-md border border-neutral-300 bg-surface px-2 text-sm text-neutral-900"
-                        @input="setDraft(parameter, ($event.target as HTMLInputElement).value)"
-                      >
-                      <span class="text-xs text-neutral-500">{{ unitLabel(parameter) }}</span>
-                    </div>
+                <tr v-for="parameter in detail.parameters" :key="parameter.key" :data-test="`parameter-${parameter.key}`">
+                  <td class="px-3 py-2 align-top">
+                    <div class="font-medium text-neutral-900">{{ parameterName(parameter) }}</div>
+                    <!-- Klíč je identifikátor v rulesetu i v auditní stopě, proto zůstává vidět. -->
+                    <div class="mt-0.5 font-mono text-xs break-all text-neutral-400">{{ parameter.key }}</div>
+                  </td>
+                  <td class="px-3 py-2 align-top">
+                    <template v-if="canEdit && isEditable(parameter)">
+                      <div class="flex items-center gap-2">
+                        <input
+                          :value="draftFor(parameter)"
+                          :type="parameter.type === 'text' ? 'text' : 'number'"
+                          step="any"
+                          class="h-8 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-2 text-sm text-neutral-900"
+                          @input="setDraft(parameter, ($event.target as HTMLInputElement).value)"
+                        >
+                        <span class="text-xs whitespace-nowrap text-neutral-500">{{ unitLabel(parameter) }}</span>
+                      </div>
+                      <!-- U výčtu se edituje kód, ale co znamená musí být vidět i při editaci. -->
+                      <p v-if="parameter.value_label" class="mt-1 text-xs text-neutral-500">
+                        {{ parameter.value_label }}
+                      </p>
+                    </template>
+                    <span
+                      v-else-if="isManualReview(parameter)"
+                      class="rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600"
+                    >
+                      {{ t('payroll.rulesets.manual_review_badge') }}
+                    </span>
                     <span v-else class="text-neutral-700">{{ displayValue(parameter) }}</span>
                   </td>
-                  <td class="px-3 py-2 text-xs text-neutral-500">
-                    {{ parameter.note ?? '' }}
+                  <td class="px-3 py-2 align-top text-xs text-neutral-500">
+                    <template v-if="parameter.manual_review_why || parameter.manual_review_action">
+                      <p v-if="parameter.manual_review_why">
+                        <strong class="font-medium text-neutral-600">{{ t('payroll.rulesets.manual_review_why') }}</strong>
+                        {{ parameter.manual_review_why }}
+                      </p>
+                      <p v-if="parameter.manual_review_action" class="mt-1">
+                        <strong class="font-medium text-neutral-600">{{ t('payroll.rulesets.manual_review_action') }}</strong>
+                        {{ parameter.manual_review_action }}
+                      </p>
+                    </template>
+                    <template v-else>{{ parameter.note ?? '' }}</template>
                   </td>
                 </tr>
               </tbody>
@@ -519,7 +640,8 @@ onMounted(load)
             :key="`m-${parameter.key}`"
             class="rounded-lg border border-neutral-200 p-3 md:hidden"
           >
-            <h4 class="text-sm font-medium break-all text-neutral-900">{{ parameter.key }}</h4>
+            <h4 class="text-sm font-medium text-neutral-900">{{ parameterName(parameter) }}</h4>
+            <p class="mt-0.5 font-mono text-xs break-all text-neutral-400">{{ parameter.key }}</p>
             <div v-if="canEdit && isEditable(parameter)" class="mt-2 flex items-center gap-2">
               <input
                 :value="draftFor(parameter)"
@@ -530,8 +652,24 @@ onMounted(load)
               >
               <span class="text-xs whitespace-nowrap text-neutral-500">{{ unitLabel(parameter) }}</span>
             </div>
+            <p
+              v-else-if="isManualReview(parameter)"
+              class="mt-2 inline-block rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600"
+            >
+              {{ t('payroll.rulesets.manual_review_badge') }}
+            </p>
             <p v-else class="mt-1 text-sm text-neutral-700">{{ displayValue(parameter) }}</p>
-            <p v-if="parameter.note" class="mt-1 text-xs text-neutral-500">{{ parameter.note }}</p>
+            <template v-if="parameter.manual_review_why || parameter.manual_review_action">
+              <p v-if="parameter.manual_review_why" class="mt-1 text-xs text-neutral-500">
+                <strong class="font-medium text-neutral-600">{{ t('payroll.rulesets.manual_review_why') }}</strong>
+                {{ parameter.manual_review_why }}
+              </p>
+              <p v-if="parameter.manual_review_action" class="mt-1 text-xs text-neutral-500">
+                <strong class="font-medium text-neutral-600">{{ t('payroll.rulesets.manual_review_action') }}</strong>
+                {{ parameter.manual_review_action }}
+              </p>
+            </template>
+            <p v-else-if="parameter.note" class="mt-1 text-xs text-neutral-500">{{ parameter.note }}</p>
           </article>
         </div>
 
@@ -549,7 +687,12 @@ onMounted(load)
               {{ t('payroll.rulesets.diff_identical') }}
             </p>
             <div v-else class="overflow-x-auto">
-              <table class="min-w-full divide-y divide-neutral-200 text-sm">
+              <table class="w-full min-w-[40rem] table-fixed divide-y divide-neutral-200 text-sm">
+                <colgroup>
+                  <col class="w-[44%]">
+                  <col class="w-[28%]">
+                  <col class="w-[28%]">
+                </colgroup>
                 <thead>
                   <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
                     <th class="px-3 py-2">{{ t('payroll.rulesets.column.parameter') }}</th>
@@ -559,19 +702,28 @@ onMounted(load)
                 </thead>
                 <tbody class="divide-y divide-neutral-100">
                   <tr v-for="row in diff.parameters.changed" :key="`c-${row.key}`">
-                    <td class="px-3 py-2 break-all text-neutral-900">{{ row.key }}</td>
-                    <td class="px-3 py-2 text-neutral-500 line-through">{{ diffValue(row.before) }}</td>
-                    <td class="px-3 py-2 font-medium text-neutral-900">{{ diffValue(row.after) }}</td>
+                    <td class="px-3 py-2 align-top text-neutral-900">
+                      {{ nameForKey(row.key) }}
+                      <span class="mt-0.5 block font-mono text-xs break-all text-neutral-400">{{ row.key }}</span>
+                    </td>
+                    <td class="px-3 py-2 align-top text-neutral-500 line-through">{{ diffValue(row.before) }}</td>
+                    <td class="px-3 py-2 align-top font-medium text-neutral-900">{{ diffValue(row.after) }}</td>
                   </tr>
                   <tr v-for="row in diff.parameters.added" :key="`a-${row.key}`">
-                    <td class="px-3 py-2 break-all text-neutral-900">{{ row.key }}</td>
-                    <td class="px-3 py-2 text-neutral-400">{{ t('payroll.rulesets.diff_added') }}</td>
-                    <td class="px-3 py-2 font-medium text-success-600">{{ diffValue(row.after) }}</td>
+                    <td class="px-3 py-2 align-top text-neutral-900">
+                      {{ nameForKey(row.key) }}
+                      <span class="mt-0.5 block font-mono text-xs break-all text-neutral-400">{{ row.key }}</span>
+                    </td>
+                    <td class="px-3 py-2 align-top text-neutral-400">{{ t('payroll.rulesets.diff_added') }}</td>
+                    <td class="px-3 py-2 align-top font-medium text-success-600">{{ diffValue(row.after) }}</td>
                   </tr>
                   <tr v-for="row in diff.parameters.removed" :key="`r-${row.key}`">
-                    <td class="px-3 py-2 break-all text-neutral-900">{{ row.key }}</td>
-                    <td class="px-3 py-2 text-neutral-500 line-through">{{ diffValue(row.before) }}</td>
-                    <td class="px-3 py-2 text-danger-500">{{ t('payroll.rulesets.diff_removed') }}</td>
+                    <td class="px-3 py-2 align-top text-neutral-900">
+                      {{ nameForKey(row.key) }}
+                      <span class="mt-0.5 block font-mono text-xs break-all text-neutral-400">{{ row.key }}</span>
+                    </td>
+                    <td class="px-3 py-2 align-top text-neutral-500 line-through">{{ diffValue(row.before) }}</td>
+                    <td class="px-3 py-2 align-top text-danger-500">{{ t('payroll.rulesets.diff_removed') }}</td>
                   </tr>
                 </tbody>
               </table>

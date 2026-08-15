@@ -23,12 +23,22 @@ export interface PayrollRulesetIssue {
   context: Record<string, unknown>
 }
 
+/**
+ * `label`, `value_label` a `manual_review_*` dodává backendový katalog
+ * (`PayrollRuleParameterCatalog`) natvrdo česky — jde o názvy české mzdové
+ * legislativy, ne o překládané texty rozhraní. `key` zůstává identifikátorem
+ * v rulesetu i v auditní stopě, proto se zobrazuje dál, jen jako doplněk.
+ */
 export interface PayrollRuleParameter {
   key: string
+  label?: string | null
   type: PayrollRuleValueType
   value: string | number | boolean | null
+  value_label?: string | null
   capability: PayrollRulesetCapability | null
   note: string | null
+  manual_review_why?: string | null
+  manual_review_action?: string | null
 }
 
 export interface PayrollRulesetSource {
@@ -70,6 +80,8 @@ export interface PayrollRulesetSummary {
   approved_by: number | null
   activated_by: number | null
   row_version: number
+  parameter_count: number
+  manual_review_parameters: string[]
   next_command: PayrollRulesetCommand | null
   blockers: PayrollRulesetIssue[]
   warnings: PayrollRulesetIssue[]
@@ -117,11 +129,29 @@ export interface PayrollRulesetDetail extends PayrollRulesetSummary {
   previous_ruleset_id: string | null
 }
 
+/**
+ * `status` rozpadá dřívější binární „povoleno / blokováno":
+ * `awaiting_activation` je fronta, kterou uživatel odbaví jedním příkazem na
+ * doménu; `manual_review` je vědomé rozhodnutí aplikace netvrdit hodnotu —
+ * tam se nic neschvaluje.
+ */
+export type PayrollRulesetDomainStatus =
+  | 'ready'
+  | 'manual_review'
+  | 'coverage_issue'
+  | 'awaiting_activation'
+  | 'missing'
+
 export interface PayrollRulesetDomainGroup {
   domain: string
   version_count: number
   active_count: number
   calculation_ready: boolean
+  status: PayrollRulesetDomainStatus
+  manual_review_by_design: boolean
+  manual_review_explanation: string | null
+  manual_review_parameter_count: number
+  parameter_count: number
   coverage_issues: PayrollRulesetIssue[]
   versions: PayrollRulesetSummary[]
 }

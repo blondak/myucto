@@ -18,8 +18,13 @@ final class CzechPayrollRulesets2026Test extends TestCase
      * 4 499 Kč → `other.withholding.threshold` 4 500 Kč. Hodnota je nově sama ROZHODNÁ
      * ČÁSTKA (§ 7a z. č. 187/2006 Sb.) a poměřuje se ostře, protože § 6 odst. 4 písm. a)
      * ZDP zní od 1. 1. 2025 „nedosáhne" — viz {@see \MyInvoice\Tests\Unit\Payroll\IncomeTax\DppWithholdingBoundaryParityTest}.
+     *
+     * Podruhé se posunul s počeštěním textů určených uživateli: důvody ručního
+     * posouzení a popis technické kontroly jsou součástí kanonického snapshotu,
+     * takže překlad do češtiny je z pohledu otisku obsahová změna. Hodnoty
+     * parametrů se přitom nezměnily — hlídá to matice níže.
      */
-    private const EXPECTED_MANIFEST_SHA256 = '64a6409743c7d37fa8d733a7c1e1599437e712f18a392bb0c9f401aff7ee37b9';
+    private const EXPECTED_MANIFEST_SHA256 = '204d1db07a976cb786b373837bac18b307f8a0242430c1ffdcf2c64b7fe057f5';
 
     public function testCanonicalManifestIsByteStable(): void
     {
@@ -138,11 +143,13 @@ final class CzechPayrollRulesets2026Test extends TestCase
             'income_tax' => [],
             'social_insurance' => [
                 'employee.discount.agriculture_dpp' =>
-                    'Eligibility depends on the statutory agriculture conditions and must be reviewed.',
+                    'Nárok na slevu závisí na zákonných podmínkách sezónní zemědělské činnosti '
+                    . 'a musí ho posoudit člověk.',
                 'employer.rate.rescue_and_company_fire_service' =>
-                    'The 0.298 rate is official, but occupational classification requires manual review.',
+                    'Sazba 29,8 % je oficiální, ale zařazení zaměstnance k hasičskému záchrannému '
+                    . 'sboru nebo mezi podnikové hasiče musí posoudit člověk.',
                 'employer.rate.risk_employment' =>
-                    'The 0.278 rate is official, but risk-employment classification requires manual review.',
+                    'Sazba 27,8 % je oficiální, ale zařazení práce mezi rizikové musí posoudit člověk.',
             ],
             'health_insurance' => [],
             'employment_thresholds' => [],
