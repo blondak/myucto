@@ -59,8 +59,8 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
       },
       official_submission: {
         supported: false,
-        reason_code: 'jmhz_transport_not_implemented',
-        reason: 'Kanál zatím není zapojený.',
+        reason_code: 'jmhz_dry_run_is_not_a_submission',
+        reason: 'Jde o lokální nácvik, ne o podání.',
       },
     })
 
@@ -93,8 +93,8 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
       ],
       official_submission: {
         supported: false,
-        reason_code: 'jmhz_transport_not_implemented',
-        reason: 'Kanál zatím není zapojený.',
+        reason_code: 'jmhz_dry_run_is_not_a_submission',
+        reason: 'Jde o lokální nácvik, ne o podání.',
       },
     })
 
@@ -169,8 +169,8 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
       },
       official_submission: {
         supported: false,
-        reason_code: 'jmhz_transport_not_implemented',
-        reason: 'Kanál zatím není zapojený.',
+        reason_code: 'jmhz_dry_run_is_not_a_submission',
+        reason: 'Jde o lokální nácvik, ne o podání.',
       },
     })
 

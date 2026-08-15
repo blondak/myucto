@@ -140,13 +140,26 @@ final readonly class JmhzScenario1XmlDryRunService
         return $guids;
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * Proč tenhle výsledek NENÍ podání.
+     *
+     * Důvod se změnil a mlčet o tom by bylo zavádějící: kanál VREP je zapojený
+     * a ověřený odesláním do testovacího prostředí ČSSZ. Nácvik ale zůstává
+     * nácvikem ze dvou důvodů, které s dopravou nesouvisejí — GUIDy tu vznikají
+     * při každém běhu nové, kdežto ostré podání si je musí zmrazit (duplicitu
+     * u ČSSZ nelze vzít zpět), a nezakládá se žádný záznam podání, takže není
+     * co odeslat ani k čemu přiřadit protokol.
+     *
+     * @return array<string,mixed>
+     */
     private function officialSubmission(): array
     {
         return [
             'supported' => false,
-            'reason_code' => 'jmhz_transport_not_implemented',
-            'reason' => 'Kanál VREP/APEP ani ISDS zatím není zapojený; jde o lokální nácvik, ne o podání.',
+            'reason_code' => 'jmhz_dry_run_is_not_a_submission',
+            'reason' => 'Jde o lokální nácvik: GUIDy vznikají při každém běhu nové'
+                . ' a nezakládá se žádné podání. Odeslání na ČSSZ se spouští'
+                . ' zvlášť nad zmrazeným podáním.',
         ];
     }
 }
