@@ -416,22 +416,33 @@ const navSections = computed<NavSection[]>(() => {
       key: 'payroll',
       title: t('nav.section_payroll'),
       accent: 'payroll',
+      // Pořadí = pořadí měsíčního mzdového kroku, ne abeceda ani historie vzniku
+      // stránek. Sled drží `PayrollGuide.vue` („Jak to funguje" na přehledu):
+      // nepřítomnosti → docházka → rychlé vstupy → běh → platby → doklady →
+      // podání. Menu do teď začínalo Běhy a Platbami, tedy prostředkem měsíce, a
+      // vstupy, bez kterých běh nespočítá správně, měl uživatel až pod nimi.
       items: [
+        // 1) Měsíční sled — přehled je rozcestník, zbytek jde v pořadí kroků.
         { to: '/payroll', label: t('nav.payroll_overview'), icon: ICONS.users, permission: 'payroll' as PermissionKey },
-        { to: '/payroll/runs', label: t('nav.payroll_runs'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
-        { to: '/payroll/payments', label: t('nav.payroll_payments'), icon: ICONS.payment_orders, permission: 'payroll.payments' as PermissionKey },
-        { to: '/payroll/posting-reconciliation', label: t('nav.payroll_posting_reconciliation'), icon: ICONS.accounting, permission: 'payroll.post' as PermissionKey },
-        { to: '/payroll/people', label: t('nav.payroll_people'), icon: ICONS.clients, permission: 'payroll' as PermissionKey },
-        { to: '/payroll/quick-inputs', label: t('nav.payroll_quick_inputs'), icon: ICONS.log, permission: 'payroll' as PermissionKey },
-        { to: '/payroll/components', label: t('nav.payroll_components'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },
-        { to: '/payroll/time', label: t('nav.payroll_time'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
         { to: '/payroll/absences', label: t('nav.payroll_absences'), icon: ICONS.log, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/time', label: t('nav.payroll_time'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
         { to: '/payroll/travel', label: t('nav.payroll_travel'), icon: ICONS.logbook, permission: 'payroll' as PermissionKey },
-        { to: '/payroll/deduction-agreements', label: t('nav.payroll_deduction_agreements'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },
-        { to: '/payroll/enforcement', label: t('nav.payroll_enforcement'), icon: ICONS.coin, permission: 'payroll.enforcement' as PermissionKey },
+        { to: '/payroll/quick-inputs', label: t('nav.payroll_quick_inputs'), icon: ICONS.log, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/runs', label: t('nav.payroll_runs'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/posting-reconciliation', label: t('nav.payroll_posting_reconciliation'), icon: ICONS.accounting, permission: 'payroll.post' as PermissionKey },
+        { to: '/payroll/payments', label: t('nav.payroll_payments'), icon: ICONS.payment_orders, permission: 'payroll.payments' as PermissionKey },
         { to: '/payroll/documents', label: t('nav.payroll_documents'), icon: ICONS.documents, permission: 'payroll.documents' as PermissionKey },
         { to: '/payroll/submissions', label: t('nav.payroll_submissions'), icon: ICONS.exports, permission: 'payroll.submissions' as PermissionKey },
-        { to: '/payroll/settings', label: t('nav.payroll_settings'), icon: ICONS.settings, permission: 'payroll.settings' as PermissionKey },
+        // 2) Kmenová evidence zaměstnance — nemá měsíční takt, udržuje se průběžně.
+        { to: '/payroll/people', label: t('nav.payroll_people'), icon: ICONS.clients, permission: 'payroll' as PermissionKey, dividerBefore: true },
+        { to: '/payroll/deduction-agreements', label: t('nav.payroll_deduction_agreements'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/enforcement', label: t('nav.payroll_enforcement'), icon: ICONS.coin, permission: 'payroll.enforcement' as PermissionKey },
+        // 3) Jednorázové nastavení — sáhne se do něj při zavádění a pak výjimečně.
+        { to: '/payroll/settings', label: t('nav.payroll_settings'), icon: ICONS.settings, permission: 'payroll.settings' as PermissionKey, dividerBefore: true },
+        { to: '/payroll/components', label: t('nav.payroll_components'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },
+        // Legislativní pravidla: stránka existovala od commitu 88853785, ale
+        // nevedl na ni jediný odkaz — dalo se tam jen ručně napsanou URL.
+        { to: '/payroll/rulesets', label: t('nav.payroll_rulesets'), icon: ICONS.codebooks, permission: 'payroll.rulesets' as PermissionKey },
       ],
     } as NavSection] : []),
   ]
@@ -1473,6 +1484,10 @@ onBeforeUnmount(() => {
                 : ''"
             >
             <template v-for="item in section.items" :key="item.to">
+              <!-- Vizuální předěl mezi skupinami uvnitř sekce (např. měsíční mzdová
+                   práce ↔ jednorázové nastavení). Postranní menu ho do teď ignorovalo,
+                   i když `NavItem.dividerBefore` existuje a horní lišta ho kreslí. -->
+              <div v-if="item.dividerBefore" class="my-1.5 border-t border-neutral-200" aria-hidden="true"></div>
               <a
                 v-if="item.external"
                 :href="item.to"

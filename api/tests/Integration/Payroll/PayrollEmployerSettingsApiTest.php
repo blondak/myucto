@@ -315,7 +315,7 @@ final class PayrollEmployerSettingsApiTest extends TestCase
             'row_version' => 0,
             'default_office_code' => $officeCode,
             'employer_registration_number' => 'P12345678',
-            'social_security_office_code' => 'P',
+            'social_security_office_code' => '110',
             'default_health_insurer_code' => '111',
             'payroll_contact_name' => 'Testovací účetní',
             'payroll_contact_email' => 'mzdy@example.invalid',

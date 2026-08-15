@@ -9,6 +9,14 @@ use MyInvoice\Service\Codebook\HealthInsurers;
 
 final class PayrollEmployerSettingsValidator
 {
+    /**
+     * Kód pracoviště ČSSZ (OSSZ/PSSZ/MSSZ Brno) je trojmístný — datový slovník
+     * JMHZ 1.4.1.6 váže atribut 10004 na číselník okresů, kde má všech 89
+     * položek právě tři číslice. Délkový limit 16 sám o sobě propouštěl cokoliv
+     * až do zákonného podání i do platebních příkazů.
+     */
+    private const SOCIAL_SECURITY_OFFICE_CODE_PATTERN = '/^[0-9]{3}$/';
+
     private const OPTIONAL_FIELDS = [
         'employer_registration_number' => 32,
         'social_security_office_code' => 16,
@@ -53,6 +61,17 @@ final class PayrollEmployerSettingsValidator
         if ($normalized['payroll_contact_email'] !== null
             && filter_var($normalized['payroll_contact_email'], FILTER_VALIDATE_EMAIL) === false) {
             throw new \InvalidArgumentException('E-mailový kontakt mzdové účtárny není platný.');
+        }
+        if ($normalized['social_security_office_code'] !== null
+            && preg_match(
+                self::SOCIAL_SECURITY_OFFICE_CODE_PATTERN,
+                $normalized['social_security_office_code'],
+            ) !== 1) {
+            throw new \InvalidArgumentException(
+                'Kód správy sociálního zabezpečení musí být trojmístné číslo, '
+                . 'například 110 pro Prahu 10. Kód najdete na potvrzení o '
+                . 'registraci zaměstnavatele u ČSSZ. Pole můžete nechat prázdné.',
+            );
         }
         // Výchozí pojišťovna zůstává nepovinná (prázdné = nenastaveno), ale
         // je-li zadaná, musí být z číselníku — délkový limit sám o sobě

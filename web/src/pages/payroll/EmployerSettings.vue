@@ -13,6 +13,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnIconSm, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import { healthInsurerOptions, isHealthInsurerCode } from '@/utils/healthInsurers'
 import HealthInsurerAccounts from './HealthInsurerAccounts.vue'
 import EmployerPolicies from './EmployerPolicies.vue'
 import PayrollDimensions from './PayrollDimensions.vue'
@@ -75,21 +76,6 @@ const defaultAccounts: PayrollEmployerAccounts = {
   partner_settlement_credit: '365',
 }
 
-/**
- * Číselník českých zdravotních pojišťoven — zrcadlí backendový
- * MyInvoice\Service\Codebook\HealthInsurers. Volný text tu dřív pustil
- * neexistující kód až do zákonného podání, proto výběr ze seznamu.
- */
-const HEALTH_INSURERS: Array<{ code: string; name: string }> = [
-  { code: '111', name: 'Všeobecná zdravotní pojišťovna ČR (VZP)' },
-  { code: '201', name: 'Vojenská zdravotní pojišťovna ČR (VoZP)' },
-  { code: '205', name: 'Česká průmyslová zdravotní pojišťovna (ČPZP)' },
-  { code: '207', name: 'Oborová zdravotní pojišťovna (OZP)' },
-  { code: '209', name: 'Zaměstnanecká pojišťovna Škoda (ZPŠ)' },
-  { code: '211', name: 'Zdravotní pojišťovna ministerstva vnitra ČR (ZPMV)' },
-  { code: '213', name: 'Revírní bratrská pokladna (RBP)' },
-]
-
 const form = reactive<EmployerSettingsForm>({
   row_version: 0,
   default_office_code: '',
@@ -124,13 +110,20 @@ const hasInvalidOffice = computed(() => formOffices.value.some((_office, index) 
 const defaultOfficeValid = computed(() =>
   activeOffices.value.some(office => office.code.trim().toUpperCase() === form.default_office_code),
 )
-const healthInsurerOptions = computed(() => HEALTH_INSURERS.map(insurer => ({
-  value: insurer.code,
-  label: `${insurer.code} — ${insurer.name}`,
-})))
+const insurerOptions = healthInsurerOptions()
 const healthInsurerValid = computed(() => {
   const code = form.default_health_insurer_code?.trim() ?? ''
-  return code === '' || HEALTH_INSURERS.some(insurer => insurer.code === code)
+  return code === '' || isHealthInsurerCode(code)
+})
+/**
+ * Kód OSSZ je trojmístný (JMHZ 1.4.1.6, atribut 10004 „Pracoviště ČSSZ" míří na
+ * číselník okresů — všech 89 položek má právě tři číslice). Do teď to bylo pole
+ * `maxlength=16` bez tvaru, takže do zákonných podání i do platebních příkazů
+ * mohl projít jakýkoli řetězec. Prázdné pole zůstává v pořádku, kód je nepovinný.
+ */
+const socialSecurityOfficeCodeValid = computed(() => {
+  const code = form.social_security_office_code?.trim() ?? ''
+  return code === '' || /^\d{3}$/.test(code)
 })
 const emailValid = computed(() => {
   const email = form.payroll_contact_email?.trim() ?? ''
@@ -148,7 +141,11 @@ const officesValid = computed(() =>
   && defaultOfficeValid.value,
 )
 const isValid = computed(() =>
-  emailValid.value && healthInsurerValid.value && accountsValid.value && officesValid.value)
+  emailValid.value
+  && healthInsurerValid.value
+  && socialSecurityOfficeCodeValid.value
+  && accountsValid.value
+  && officesValid.value)
 const showValidation = ref(false)
 
 function nullable(value: string | null): string | null {
@@ -437,6 +434,7 @@ onMounted(load)
         <p class="font-medium">{{ t('payroll.employer.validation.title') }}</p>
         <ul class="mt-2 list-disc space-y-1 pl-5">
           <li v-if="!officesValid">{{ t('payroll.employer.validation.offices') }}</li>
+          <li v-if="!socialSecurityOfficeCodeValid">{{ t('payroll.employer.validation.social_security_office_code') }}</li>
           <li v-if="!emailValid">{{ t('payroll.employer.validation.email') }}</li>
           <li v-if="!accountsValid">{{ t('payroll.employer.validation.accounts') }}</li>
         </ul>
@@ -460,14 +458,26 @@ onMounted(load)
 
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.social_security_office_code') }}</span>
-            <input v-model="form.social_security_office_code" type="text" maxlength="16" autocomplete="off" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
+            <input
+              v-model="form.social_security_office_code"
+              data-test="social-security-office-code"
+              type="text"
+              inputmode="numeric"
+              maxlength="3"
+              autocomplete="off"
+              :disabled="!canWrite"
+              :aria-invalid="showValidation && !socialSecurityOfficeCodeValid"
+              class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500"
+            >
+            <span v-if="showValidation && !socialSecurityOfficeCodeValid" class="mt-1 block text-xs text-danger-600">{{ t('payroll.employer.validation.social_security_office_code') }}</span>
+            <span v-else class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.social_security_office_code_hint') }}</span>
           </label>
 
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.default_health_insurer_code') }}</span>
             <SearchableSelect
               :model-value="form.default_health_insurer_code || null"
-              :options="healthInsurerOptions"
+              :options="insurerOptions"
               :placeholder="t('payroll.employer.select_default_health_insurer')"
               :no-results-label="t('payroll.employer.account_no_results')"
               :disabled="!canWrite"
