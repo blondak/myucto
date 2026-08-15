@@ -1,0 +1,581 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Payroll\Submission\Jmhz;
+
+use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
+use MyInvoice\Service\Report\EpoEnvelope;
+use Psr\Clock\ClockInterface;
+
+/**
+ * Most mezi ověřenou přípravou JMHZ a platformou podání: z přípravy udělá
+ * ZMRAZENÉ podání připravené k odeslání na VREP a jeho datovou větu uloží
+ * jako artefakt.
+ *
+ * Tři rozhodnutí, na kterých celá vrstva stojí:
+ *
+ * 1. **Kanál je `vrep_apep`, ne ruční nahrání.** Není to jen štítek: ledger
+ *    pokusů má databázový trigger vyžadující shodu kanálu pokusu s kanálem
+ *    podání, takže špatná hodnota tady udělá z podání něco, co se nedá odeslat.
+ * 2. **GUIDy vznikají právě jednou.** Nácvik je generuje při každém běhu nové —
+ *    proto je jen nácvik. Tady se vygenerují, zapíšou do XML a to XML se uloží
+ *    jako artefakt; artefakt JE zmrazená pravda, žádná další tabulka na GUIDy
+ *    není potřeba. Idempotentní opakování proto XML NESMÍ stavět znovu: nové
+ *    GUIDy by pod stejným podáním tiše vyrobily jiný dokument a duplicitu
+ *    přijatého podání nelze u ČSSZ vzít zpět.
+ * 3. **Co by ČSSZ zamítla, se nezmrazí.** Běží tu tentýž katalog kontrol jako
+ *    v nácviku; nepřipravené podání skončí výjimkou a NEZALOŽÍ SE NIC. Zmrazit
+ *    vědomě vadné podání znamená jen odsunout zamítnutí blíž ke lhůtě.
+ */
+final readonly class JmhzSubmissionBridgeService
+{
+    public const AGENDA_CODE = 'JMHZ25';
+    public const SOURCE_EVENT_TYPE = 'jmhz_preparation_snapshot';
+    private const CHANNEL = 'vrep_apep';
+    private const PRODUCT_NAME = 'MyÚčto.cz';
+    private const SUBJECT_TYPE = 'payroll_run';
+
+    public function __construct(
+        private JmhzScenario1DocumentService $documents,
+        private JmhzScenario1XmlValidator $validator,
+        private JmhzScenario1ControlValidator $controls,
+        private JmhzSubmissionGuidFactory $guids,
+        private PayrollSubmissionRepository $submissionRepository,
+        private PayrollSubmissionService $submissions,
+        private ClockInterface $clock,
+    ) {}
+
+    /**
+     * @return array{
+     *   submission_id:int,part_id:int,artifact_id:int,
+     *   status:string,row_version:int,environment:string,
+     *   source_snapshot_hash:string,artifact_sha256:string,created:bool,
+     *   submission_guid:string,variable_symbol:string
+     * }
+     */
+    public function bridge(
+        int $supplierId,
+        int $preparationId,
+        int $obligationId,
+        string $environment,
+        ?int $createdBy = null,
+    ): array {
+        if ($supplierId <= 0
+            || $preparationId <= 0
+            || $obligationId <= 0
+            || ($createdBy !== null && $createdBy <= 0)
+        ) {
+            throw new \InvalidArgumentException(
+                'Rozsah JMHZ bridge není platný.',
+            );
+        }
+
+        // Dokument se řeší JEŠTĚ PŘED transakcí a bez obálky, takže tu žádný
+        // GUID nevzniká. Kdyby se sestavoval až uvnitř, nešlo by rozhodnout
+        // o idempotenci dřív, než se něco zmrazí.
+        $resolution = $this->documents->resolve(
+            $supplierId,
+            $environment,
+            $preparationId,
+        );
+        if ($resolution->status() !== 'resolved') {
+            throw new JmhzXmlException(
+                'jmhz_submission_preparation_blocked',
+                'Příprava JMHZ není úplná, podání se nezakládá: '
+                    . self::describeBlockers($resolution->blockers),
+            );
+        }
+        $document = $resolution->requireResolvedDocument();
+        $snapshotHash = self::snapshotHash($document);
+        $runId = self::runId($document);
+        $periodStart = self::periodStart($document);
+        $keys = self::idempotencyKeys(
+            $supplierId,
+            $environment,
+            $obligationId,
+            $snapshotHash,
+        );
+
+        return $this->submissionRepository->transaction(function () use (
+            $supplierId,
+            $preparationId,
+            $obligationId,
+            $environment,
+            $createdBy,
+            $resolution,
+            $document,
+            $snapshotHash,
+            $runId,
+            $periodStart,
+            $keys,
+        ): array {
+            if (!$this->submissionRepository->lockSupplier($supplierId)) {
+                throw new \DomainException(
+                    'Firma JMHZ podání nebyla nalezena.',
+                );
+            }
+            $this->assertObligation(
+                $this->submissionRepository->lockObligation(
+                    $supplierId,
+                    $obligationId,
+                    $environment,
+                ),
+                $runId,
+                $periodStart,
+            );
+
+            $submission = $this->submissions->prepare(
+                $supplierId,
+                $obligationId,
+                'regular',
+                self::CHANNEL,
+                $snapshotHash,
+                $keys['submission'],
+                null,
+                null,
+                $createdBy,
+                $environment,
+            );
+            if (!$submission['created']) {
+                return $this->replayedResult(
+                    $supplierId,
+                    $environment,
+                    $snapshotHash,
+                    $submission,
+                    $keys['artifact'],
+                );
+            }
+
+            // Odsud dál se mrazí. GUIDy vznikají právě tady a nikde jinde.
+            $result = $this->validator->dryRun(
+                $resolution,
+                JmhzSubmissionEnvelope::create(
+                    $this->guids->next(),
+                    $this->formGuids($document),
+                    $this->filledAt(),
+                    self::PRODUCT_NAME,
+                    EpoEnvelope::appVersion() ?? '0',
+                ),
+            );
+            // XSD hlídá tvar, katalog kontrol obsah. Nepropustná vada nebo
+            // nepokrytá kontrola znamená, že by podání ČSSZ neprošlo — a pak
+            // se nesmí založit vůbec nic; výjimka vrátí transakci zpět.
+            $controls = $this->controls->validate(
+                $result['xml'],
+                JmhzControlContext::today(schemaValidated: true),
+            );
+            if (!$controls->submittable()) {
+                throw new JmhzXmlException(
+                    'jmhz_submission_controls_failed',
+                    'Podání JMHZ neprošlo katalogem kontrol, nezakládá se: '
+                        . self::describeControls($controls),
+                );
+            }
+            $identity = self::frozenIdentity($result['xml']);
+
+            $part = $this->submissions->addPart(
+                $supplierId,
+                $submission['id'],
+                $submission['row_version'],
+                "jmhz25:{$preparationId}",
+                self::AGENDA_CODE,
+                self::runReference($runId),
+                'jmhz_preparation',
+                self::sourceEventReference($preparationId),
+                $snapshotHash,
+            );
+            $artifact = $this->submissions->storeArtifact(
+                $supplierId,
+                $submission['id'],
+                $part['submission_row_version'],
+                $part['id'],
+                'outbound_xml',
+                'outbound',
+                'application/xml',
+                $result['xml'],
+                $result['schema']['package_key'],
+                JmhzControlSourceCatalog::CATALOG_KEY,
+                self::CHANNEL,
+                $keys['artifact'],
+                $createdBy,
+            );
+            if (!hash_equals(
+                $result['sha256'],
+                $artifact['artifact_sha256'],
+            )) {
+                throw new JmhzXmlException(
+                    'jmhz_submission_artifact_mismatch',
+                    'Otisk uloženého artefaktu neodpovídá zmrazenému XML JMHZ.',
+                );
+            }
+            $validated = $this->submissions->transition(
+                $supplierId,
+                $submission['id'],
+                $artifact['submission_row_version'],
+                'validated',
+            );
+            $ready = $this->submissions->transition(
+                $supplierId,
+                $submission['id'],
+                $validated['row_version'],
+                'ready',
+            );
+
+            return [
+                'submission_id' => $submission['id'],
+                'part_id' => $part['id'],
+                'artifact_id' => $artifact['id'],
+                'status' => $ready['status'],
+                'row_version' => $ready['row_version'],
+                'environment' => $environment,
+                'source_snapshot_hash' => $snapshotHash,
+                'artifact_sha256' => $artifact['artifact_sha256'],
+                'created' => true,
+                'submission_guid' => $identity['submission_guid'],
+                'variable_symbol' => $identity['variable_symbol'],
+            ];
+        });
+    }
+
+    public static function sourceEventReference(int $preparationId): string
+    {
+        if ($preparationId <= 0) {
+            throw new \InvalidArgumentException(
+                'Příprava JMHZ musí být kladné číslo.',
+            );
+        }
+
+        return "jmhz_preparation:{$preparationId}";
+    }
+
+    public static function runReference(int $runId): string
+    {
+        if ($runId <= 0) {
+            throw new \InvalidArgumentException(
+                'Mzdový běh musí být kladné číslo.',
+            );
+        }
+
+        return "payroll_run:{$runId}";
+    }
+
+    /**
+     * Idempotentní opakování. Vrací PŮVODNÍ artefakt a jeho bajty — XML se tu
+     * zásadně nestaví znovu, protože by dostalo nové GUIDy a pod týmž podáním
+     * by vznikl jiný dokument, než jaký je zmrazený.
+     *
+     * @param array{
+     *   id:int,status:string,row_version:int,request_fingerprint:string,
+     *   source_snapshot_hash:string,submission_kind:string,channel:string,
+     *   environment:string,obligation_id:int,corrects_submission_id:?int,
+     *   correlation_reference:?string,created:bool
+     * } $submission
+     * @return array{
+     *   submission_id:int,part_id:int,artifact_id:int,
+     *   status:string,row_version:int,environment:string,
+     *   source_snapshot_hash:string,artifact_sha256:string,created:bool,
+     *   submission_guid:string,variable_symbol:string
+     * }
+     */
+    private function replayedResult(
+        int $supplierId,
+        string $environment,
+        string $snapshotHash,
+        array $submission,
+        string $artifactKey,
+    ): array {
+        if ($submission['status'] !== 'ready'
+            || $submission['channel'] !== self::CHANNEL
+            || !hash_equals($snapshotHash, $submission['source_snapshot_hash'])
+        ) {
+            throw new JmhzXmlException(
+                'jmhz_submission_replay_state_invalid',
+                'Existující podání JMHZ už není v idempotentním stavu ready.',
+            );
+        }
+        $artifact = $this->submissionRepository
+            ->findArtifactByIdempotencyForUpdate(
+                $supplierId,
+                hash('sha256', $artifactKey, true),
+                $environment,
+            );
+        if ($artifact === null
+            || $artifact['submission_id'] !== $submission['id']
+            || $artifact['part_id'] === null
+            || $artifact['artifact_kind'] !== 'outbound_xml'
+            || $artifact['direction'] !== 'outbound'
+            || $artifact['mime_type'] !== 'application/xml'
+            || $artifact['xsd_version'] !== JmhzSchemaCatalog::PACKAGE_KEY
+            || $artifact['catalog_version']
+                !== JmhzControlSourceCatalog::CATALOG_KEY
+            || $artifact['channel'] !== self::CHANNEL
+        ) {
+            throw new JmhzXmlException(
+                'jmhz_submission_replay_mismatch',
+                'Zmrazený artefakt podání JMHZ chybí nebo neodpovídá podání.',
+            );
+        }
+        // `artifactBytes()` sám ověřuje délku i SHA-256 proti archivu, takže
+        // sem se nedostane nic jiného než přesně to, co se kdysi zmrazilo.
+        $identity = self::frozenIdentity(
+            $this->submissions->artifactBytes($supplierId, $artifact['id']),
+        );
+
+        return [
+            'submission_id' => $submission['id'],
+            'part_id' => $artifact['part_id'],
+            'artifact_id' => $artifact['id'],
+            'status' => $submission['status'],
+            'row_version' => $submission['row_version'],
+            'environment' => $environment,
+            'source_snapshot_hash' => $snapshotHash,
+            'artifact_sha256' => $artifact['artifact_sha256'],
+            'created' => false,
+            'submission_guid' => $identity['submission_guid'],
+            'variable_symbol' => $identity['variable_symbol'],
+        ];
+    }
+
+    /**
+     * @param array{
+     *   id:int,environment:string,agenda_code:string,subject_type:string,
+     *   subject_reference:string,period_start:string,period_end:string,
+     *   obligation_kind:string,status:string,row_version:int,
+     *   earliest_submission_on:string,due_on:string
+     * }|null $obligation
+     */
+    private function assertObligation(
+        ?array $obligation,
+        int $runId,
+        string $periodStart,
+    ): void {
+        if ($obligation === null) {
+            throw new JmhzXmlException(
+                'jmhz_submission_obligation_required',
+                'Podání JMHZ vyžaduje předem evidovanou povinnost a lhůtu.',
+            );
+        }
+        if ($obligation['agenda_code'] !== self::AGENDA_CODE
+            || $obligation['subject_type'] !== self::SUBJECT_TYPE
+            || $obligation['subject_reference'] !== self::runReference($runId)
+            || $obligation['obligation_kind'] !== 'regular'
+            || $obligation['period_start'] !== $periodStart
+            || !in_array($obligation['status'], ['open', 'prepared'], true)
+        ) {
+            throw new JmhzXmlException(
+                'jmhz_submission_obligation_scope_mismatch',
+                'Evidovaná povinnost neodpovídá mzdovému běhu, období ani agendě JMHZ.',
+            );
+        }
+    }
+
+    /**
+     * GUID podání a variabilní symbol se čtou ZE ZMRAZENÉHO XML, ne z dokumentu
+     * ani z databáze. Transportní vrstva staví obálku právě kolem těchhle dvou
+     * hodnot a GovTalk obálka vyžaduje shodu variabilního symbolu s hlavičkou
+     * datové věty — dohledávat je znovu jinde by tu shodu mohlo tiše rozbít.
+     *
+     * @return array{submission_guid:string,variable_symbol:string}
+     */
+    private static function frozenIdentity(string $xml): array
+    {
+        $dom = new \DOMDocument();
+        $previous = libxml_use_internal_errors(true);
+        libxml_clear_errors();
+        $loaded = $dom->loadXML($xml, LIBXML_NONET);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+        if (!$loaded) {
+            throw new JmhzXmlException(
+                'jmhz_submission_frozen_xml_unreadable',
+                'Zmrazené XML podání JMHZ nelze načíst.',
+            );
+        }
+        $xpath = new \DOMXPath($dom);
+        $xpath->registerNamespace('p', JmhzSchemaCatalog::NS_PODANI);
+        $guid = self::textAt($xpath, '/p:jmhz/p:hlavicka/p:idPodani');
+        $variableSymbol = self::textAt(
+            $xpath,
+            '/p:jmhz/p:hlavicka/p:variabilniSymbol',
+        );
+        if (preg_match(
+            '/^[0-9A-F]{8}-[0-9A-F]{4}-7[0-9A-F]{3}-[0-9A-F]{4}-[0-9A-F]{12}$/D',
+            $guid,
+        ) !== 1
+            || preg_match('/^\d{10}$/D', $variableSymbol) !== 1
+        ) {
+            throw new JmhzXmlException(
+                'jmhz_submission_frozen_identity_invalid',
+                'Zmrazené podání JMHZ nenese platný GUID nebo variabilní symbol.',
+            );
+        }
+
+        return [
+            'submission_guid' => $guid,
+            'variable_symbol' => $variableSymbol,
+        ];
+    }
+
+    private static function textAt(\DOMXPath $xpath, string $path): string
+    {
+        $nodes = $xpath->query($path);
+        $node = $nodes === false ? null : $nodes->item(0);
+        if ($node === null) {
+            throw new JmhzXmlException(
+                'jmhz_submission_frozen_identity_missing',
+                "Zmrazené podání JMHZ neobsahuje {$path}.",
+            );
+        }
+
+        return $node->textContent;
+    }
+
+    /** @return array<int,string> */
+    private function formGuids(JmhzScenario1NormalizedDocument $document): array
+    {
+        $people = $document->payload['people'] ?? null;
+        $guids = [];
+        if (!is_array($people)) {
+            return $guids;
+        }
+        foreach ($people as $person) {
+            $employments = is_array($person)
+                ? ($person['employments'] ?? null)
+                : null;
+            if (!is_array($employments)) {
+                continue;
+            }
+            foreach ($employments as $employment) {
+                $employmentId = is_array($employment)
+                    ? ($employment['employment_id'] ?? null)
+                    : null;
+                if (is_int($employmentId) && $employmentId > 0) {
+                    $guids[$employmentId] = $this->guids->next();
+                }
+            }
+        }
+
+        return $guids;
+    }
+
+    private function filledAt(): string
+    {
+        return \DateTimeImmutable::createFromInterface($this->clock->now())
+            ->setTimezone(new \DateTimeZone('UTC'))
+            ->format('Y-m-d\TH:i:s\Z');
+    }
+
+    private static function snapshotHash(
+        JmhzScenario1NormalizedDocument $document,
+    ): string {
+        $provenance = $document->payload['provenance'] ?? null;
+        $hash = is_array($provenance)
+            ? ($provenance['snapshot_fingerprint'] ?? null)
+            : null;
+        if (!is_string($hash)
+            || preg_match('/^[0-9a-f]{64}$/D', $hash) !== 1
+        ) {
+            throw new JmhzXmlException(
+                'jmhz_submission_snapshot_hash_missing',
+                'Dokument JMHZ nenese otisk přípravy, ze které vznikl.',
+            );
+        }
+
+        return $hash;
+    }
+
+    private static function runId(
+        JmhzScenario1NormalizedDocument $document,
+    ): int {
+        $scope = $document->payload['scope'] ?? null;
+        $runId = is_array($scope) ? ($scope['run_id'] ?? null) : null;
+        if (!is_int($runId) || $runId <= 0) {
+            throw new JmhzXmlException(
+                'jmhz_submission_run_missing',
+                'Dokument JMHZ nenese mzdový běh, ke kterému patří.',
+            );
+        }
+
+        return $runId;
+    }
+
+    private static function periodStart(
+        JmhzScenario1NormalizedDocument $document,
+    ): string {
+        $scope = $document->payload['scope'] ?? null;
+        $periodStart = is_array($scope)
+            ? ($scope['period_start'] ?? null)
+            : null;
+        if (!is_string($periodStart)
+            || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $periodStart) !== 1
+        ) {
+            throw new JmhzXmlException(
+                'jmhz_submission_period_missing',
+                'Dokument JMHZ nenese vykazované období.',
+            );
+        }
+
+        return $periodStart;
+    }
+
+    /**
+     * Stejné vstupy musí vést na totéž podání, různé nikdy na společné. Otisk
+     * přípravy je v klíči proto, že právě on odlišuje dvě podání za totéž
+     * období postavená nad jinými daty.
+     *
+     * @return array{submission:string,artifact:string}
+     */
+    private static function idempotencyKeys(
+        int $supplierId,
+        string $environment,
+        int $obligationId,
+        string $snapshotHash,
+    ): array {
+        $fingerprint = hash(
+            'sha256',
+            CanonicalJson::encode([
+                'schema_reference' => 'payroll-jmhz-submission-bridge.v1',
+                'supplier_id' => $supplierId,
+                'environment' => $environment,
+                'obligation_id' => $obligationId,
+                'source_snapshot_hash' => $snapshotHash,
+            ]),
+        );
+
+        return [
+            'submission' => "jmhz25-submission:{$fingerprint}",
+            'artifact' => "jmhz25-artifact:{$fingerprint}",
+        ];
+    }
+
+    /** @param list<JmhzScenario1Blocker> $blockers */
+    private static function describeBlockers(array $blockers): string
+    {
+        if ($blockers === []) {
+            return 'důvod neuveden';
+        }
+
+        return implode(', ', array_map(
+            static fn (JmhzScenario1Blocker $blocker): string
+                => $blocker->entityId === null
+                    ? $blocker->code
+                    : "{$blocker->code} ({$blocker->entityType} {$blocker->entityId})",
+            $blockers,
+        ));
+    }
+
+    private static function describeControls(
+        JmhzControlEvaluationReport $report,
+    ): string {
+        $parts = array_map(
+            static fn (JmhzControlFinding $finding): string
+                => "kontrola {$finding->controlId} — {$finding->message}",
+            [...$report->blocking(), ...$report->coverageGaps()],
+        );
+
+        return $parts === [] ? 'důvod neuveden' : implode('; ', $parts);
+    }
+}

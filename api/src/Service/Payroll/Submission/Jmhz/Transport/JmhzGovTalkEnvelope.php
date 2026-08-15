@@ -293,6 +293,7 @@ final readonly class JmhzGovTalkEnvelope
             $environment,
             $class,
             $symbol,
+            sealed: true,
         );
     }
 

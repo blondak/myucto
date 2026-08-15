@@ -55,6 +55,29 @@ final readonly class JmhzVaultEnvelopeSigner implements JmhzEnvelopeSignerInterf
                 'Prázdnou obálku nelze podepsat.',
             );
         }
+        $material = $this->unlock();
+
+        return $this->signer->sign(
+            $envelopeXml,
+            $material['pfx'],
+            $material['password'],
+        );
+    }
+
+    /**
+     * Ověřený klíčový materiál pro vrstvy, které si podpis staví samy — podpis
+     * datové věty uvnitř ČSSZ obálky potřebuje odpojený PKCS#7 nad PŮVODNÍMI
+     * bajty, ne nad obálkou, takže si ho `JmhzGovTalkEnvelope::seal()` dělá
+     * vlastní cestou.
+     *
+     * Materiál se vydává jen přes tuhle metodu právě proto, aby ty pojistky
+     * nešlo obejít: platnost certifikátu i shoda s registrací u ČSSZ se ověří
+     * pokaždé, ať se podepisuje odkudkoli.
+     *
+     * @return array{pfx:string,password:string,credential:array<string,mixed>}
+     */
+    public function unlock(): array
+    {
         $resolved = $this->vault->resolve(
             $this->credentialId,
             $this->ownerUserId,
@@ -62,11 +85,11 @@ final readonly class JmhzVaultEnvelopeSigner implements JmhzEnvelopeSignerInterf
         );
         $this->assertUsable($resolved);
 
-        return $this->signer->sign(
-            $envelopeXml,
-            $resolved['pfx'],
-            $this->secrets->decrypt($resolved['password_enc']),
-        );
+        return [
+            'pfx' => $resolved['pfx'],
+            'password' => $this->secrets->decrypt($resolved['password_enc']),
+            'credential' => $resolved['credential'],
+        ];
     }
 
     /** @param array<string,mixed> $resolved */

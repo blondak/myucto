@@ -7,9 +7,15 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
 use DOMDocument;
 
 /**
- * Sestavená, ale ještě NEODESÍLATELNÁ obálka. Nepodepsané XML je schválně
- * pojmenované `unsignedXml`, aby ho nešlo omylem předat klientovi — cesta ven
- * vede jen přes `sendableXml()`, které bez podepisovací vrstvy skončí výjimkou.
+ * Sestavená obálka VREP. Cesta ven vede jen přes `sendableXml()`, aby holé XML
+ * nešlo omylem předat klientovi.
+ *
+ * Rozlišují se dva stavy. Obálka z `build()` je NEPODEPSANÁ — datová věta v ní
+ * leží tak, jak přišla, a bez podepisovací vrstvy z ní odesílatelná zpráva
+ * nevznikne. Obálka ze `seal()` je ZAPEČETĚNÁ: podpis datové věty je uvnitř
+ * ČSSZ obálky a celá zpráva je v tomhle tvaru ověřená provozem, takže žádnou
+ * další vrstvu nepotřebuje a vyžadovat ji by znamenalo přibalit podpis navíc,
+ * o kterém není doloženo, že ho VREP čeká.
  */
 final readonly class JmhzGovTalkDocument
 {
@@ -18,6 +24,7 @@ final readonly class JmhzGovTalkDocument
         public string $environment,
         public string $submissionClass,
         public string $variableSymbol,
+        public bool $sealed = false,
     ) {}
 
     public function sha256(): string
@@ -27,6 +34,17 @@ final readonly class JmhzGovTalkDocument
 
     public function sendableXml(?JmhzEnvelopeSignerInterface $signer): string
     {
+        if ($this->sealed) {
+            if ($signer !== null) {
+                throw new JmhzTransportException(
+                    'jmhz_govtalk_double_signature',
+                    'Zapečetěná obálka už podpis nese; druhá vrstva by přidala'
+                        . ' něco, o čem není doloženo, že to VREP čeká.',
+                );
+            }
+
+            return $this->unsignedXml;
+        }
         if ($signer === null) {
             throw new JmhzTransportException(
                 'jmhz_govtalk_signer_missing',

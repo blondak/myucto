@@ -90,6 +90,7 @@ use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
 use MyInvoice\Action\Payroll\PayrollJmhzOrdinaryEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPreparationAction;
 use MyInvoice\Action\Payroll\PayrollJmhzSigningProfileAction;
+use MyInvoice\Action\Payroll\PayrollJmhzTransportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
 use MyInvoice\Action\Payroll\PayrollNetResultAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
@@ -923,6 +924,18 @@ final class Routes
             $g->delete(
                 '/submissions/signing-profile',
                 [PayrollJmhzSigningProfileAction::class, 'delete'],
+            );
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/jmhz-transport',
+                [PayrollJmhzTransportAction::class, 'send'],
+            );
+            $g->get(
+                '/submissions/jmhz-transport/{attemptId:[0-9]+}',
+                [PayrollJmhzTransportAction::class, 'poll'],
+            );
+            $g->post(
+                '/submissions/jmhz-transport/{attemptId:[0-9]+}/close',
+                [PayrollJmhzTransportAction::class, 'close'],
             );
             $g->get(
                 '/submissions/{submissionId:[0-9]+}',

@@ -230,6 +230,22 @@ final class Bootstrap
                         \MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService::class,
                     ),
                 ),
+            // Identifikace software jde do datové věty JMHZ a ČSSZ ji porovnává
+            // s obálkou. Verze se čte ze souboru VERSION, aby v protokolu
+            // seděla se skutečně nasazeným buildem — natvrdo zapsaná verze
+            // znemožní dohledat, která zpráva odkud pochází.
+            \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification::class
+                => function () use ($rootDir): \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification {
+                    $versionFile = $rootDir . DIRECTORY_SEPARATOR . 'VERSION';
+                    $version = is_file($versionFile)
+                        ? trim((string) @file_get_contents($versionFile))
+                        : '';
+
+                    return new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification(
+                        'MyÚčto.cz',
+                        $version === '' ? '0.0.0' : $version,
+                    );
+                },
             \MyInvoice\Service\Epo\EpoDirectResponseParser::class => function () use ($config, $rootDir): \MyInvoice\Service\Epo\EpoDirectResponseParser {
                 $caBundle = trim((string) $config->get('epo.ca_bundle_path', ''));
                 if (
