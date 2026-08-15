@@ -103,6 +103,8 @@ final class PermissionCatalog
             ['payroll.reports', 'payroll', 'Mzdové sestavy a exporty', $staffOnly],
             ['payroll.rulesets', 'payroll', 'Spravovat legislativní pravidla mezd', $staffOnly],
             ['payroll.documents', 'payroll', 'Mzdové dokumenty', $staffOnly],
+            ['payroll.retention', 'payroll', 'Retenční lhůty a zadržení výmazu', $staffOnly],
+            ['payroll.erasure', 'payroll', 'Schválit a provést výmaz osobních údajů', $staffOnly],
             ['cash', 'cash', 'Pokladna', $staffOnly],
             ['cash.document.write', 'cash', 'Pokladní doklady', $staffOnly],
             ['cash.close', 'cash', 'Uzavřít pokladnu', $staffOnly],

@@ -109,6 +109,7 @@ use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
 use MyInvoice\Action\Payroll\PayrollRegistrationAction;
 use MyInvoice\Action\Payroll\PayrollRegzelAction;
 use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
+use MyInvoice\Action\Payroll\PayrollRetentionAction;
 use MyInvoice\Action\Payroll\PayrollRulesetAction;
 use MyInvoice\Action\Payroll\PayrollRunsAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionArtifactDownloadAction;
@@ -1097,6 +1098,24 @@ final class Routes
             $g->delete('/time/leave-ledger/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteLeaveEntry']);
             $g->post('/time/leave-entitlements', [PayrollAbsenceAction::class, 'createEntitlement']);
             $g->delete('/time/leave-entitlements/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteEntitlement']);
+
+            // Retence osobních údajů, zadržení výmazu a výmaz jako NÁVRH ke schválení.
+            // Konkrétní cesty jdou před `{id}` (jinak by `erasure` spadlo do id).
+            // `execute` je samostatný požadavek po `approve` — výmaz se nedá odklepnout
+            // jedním kliknutím a bez schválení se neprovede vůbec.
+            $g->get('/retention', [PayrollRetentionAction::class, 'overview']);
+            $g->get('/retention/assessment', [PayrollRetentionAction::class, 'assessment']);
+            $g->get('/retention/holds', [PayrollRetentionAction::class, 'listHolds']);
+            $g->post('/retention/holds', [PayrollRetentionAction::class, 'placeHold']);
+            $g->delete('/retention/holds/{id:[0-9]+}', [PayrollRetentionAction::class, 'releaseHold']);
+            $g->get('/retention/erasure', [PayrollRetentionAction::class, 'listProposals']);
+            $g->post('/retention/erasure', [PayrollRetentionAction::class, 'createProposal']);
+            $g->get('/retention/erasure/{id:[0-9]+}', [PayrollRetentionAction::class, 'showProposal']);
+            $g->post('/retention/erasure/{id:[0-9]+}/approve', [PayrollRetentionAction::class, 'approveProposal']);
+            $g->post('/retention/erasure/{id:[0-9]+}/reject', [PayrollRetentionAction::class, 'rejectProposal']);
+            $g->post('/retention/erasure/{id:[0-9]+}/execute', [PayrollRetentionAction::class, 'executeProposal']);
+            $g->put('/retention/policies/{category:[a-z_]+}', [PayrollRetentionAction::class, 'putPolicy']);
+            $g->delete('/retention/policies/{category:[a-z_]+}', [PayrollRetentionAction::class, 'deletePolicy']);
         });
 
         // Podvojné účetnictví (Epic F1) — účtová osnova, období, deník, kontace.
