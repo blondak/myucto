@@ -86,8 +86,74 @@ final class JmhzProcessingProtocolTest extends TestCase
         ));
     }
 
-    private static function protocol(): string
+    /**
+     * Protokol nese variabilní symbol, období i datumy. Bez nich se načtený
+     * soubor nedá ověřit ani zařadit k období — a přesně to jsou údaje,
+     * kvůli kterým se do protokolu kouká.
+     */
+    public function testProtocolCarriesItsOwnIdentity(): void
     {
+        $report = (new JmhzProtocolParser())->parse(self::protocol());
+
+        self::assertSame(JmhzTransportSample::VARIABLE_SYMBOL, $report->variableSymbol);
+        self::assertSame(6, $report->periodMonth);
+        self::assertSame(2026, $report->periodYear);
+        self::assertSame('2026-07-02T16:20:20.382+02:00', $report->protocolDate);
+        self::assertSame('2026-07-02T16:15:36+02:00', $report->submittedDate);
+    }
+
+    /**
+     * REGRESE: chyby v protokolu o zpracování se četly v namespace odpovědi
+     * DZMH, takže `kod` nebyl k nalezení, přečetl se jako nula a
+     * `JmhzProtocolError::fromCode(0)` shodila celý protokol. Nečitelný byl
+     * tedy právě ten protokol, který chyby má — jediný, kvůli kterému stojí
+     * za to ho otevřít.
+     */
+    public function testFailedProtocolIsReadableAndKeepsItsErrorCodes(): void
+    {
+        $report = (new JmhzProtocolParser())->parse(self::protocol(
+            '3',
+            'Hlášení je zamítnuto',
+            '<chybySeznam><chyba>'
+                . '<id>1</id><typChyby>zpracovani</typChyby>'
+                . '<castPodani>form</castPodani>'
+                . '<idFormulare>' . JmhzTransportSample::FORM_GUID . '</idFormulare>'
+                . '<kod>20301</kod>'
+                . '<popis>Pojistné neodpovídá vyměřovacímu základu.</popis>'
+                . '</chyba></chybySeznam>',
+        ));
+
+        self::assertSame(JmhzSubmissionStatus::Rejected, $report->status);
+        self::assertCount(1, $report->errors);
+        self::assertSame(20301, $report->errors[0]->code);
+        self::assertSame(301, $report->errors[0]->controlId?->value);
+        self::assertSame(
+            'Pojistné neodpovídá vyměřovacímu základu.',
+            $report->errors[0]->message,
+        );
+        // Chyba musí zůstat přiřazená k formuláři, jinak se nedá dohledat,
+        // koho se týká.
+        self::assertCount(1, $report->errorsForForm(JmhzTransportSample::FORM_GUID));
+    }
+
+    /** Variabilní symbol mimo doložený tvar nesmí projít jako ověřený údaj. */
+    public function testUnreadableVariableSymbolIsRefused(): void
+    {
+        $this->expectException(JmhzTransportException::class);
+        $this->expectExceptionMessageMatches('/[Vv]ariabilní symbol/');
+
+        (new JmhzProtocolParser())->parse(str_replace(
+            '<variabilniSymbol>' . JmhzTransportSample::VARIABLE_SYMBOL . '</variabilniSymbol>',
+            '<variabilniSymbol>99900000012345</variabilniSymbol>',
+            self::protocol(),
+        ));
+    }
+
+    private static function protocol(
+        string $statusCode = '1',
+        string $statusLabel = 'Hlášení je zpracováno a je úplné',
+        string $failures = '',
+    ): string {
         return '<?xml version="1.0" encoding="utf-8"?>'
             . '<ProtokolOZpracovani'
             . ' xmlns="http://schemas.cssz.cz/JMHZ/ProtokolOZpracovani/2026">'
@@ -99,9 +165,10 @@ final class JmhzProcessingProtocolTest extends TestCase
             . '<mesic>6</mesic>'
             . '<rok>2026</rok>'
             . '<stavMH>'
-            . '<kod>1</kod>'
-            . '<nazev>Hlášení je zpracováno a je úplné</nazev>'
+            . '<kod>' . $statusCode . '</kod>'
+            . '<nazev>' . $statusLabel . '</nazev>'
             . '</stavMH>'
+            . $failures
             . '</ProtokolOZpracovani>';
     }
 }

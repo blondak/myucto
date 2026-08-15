@@ -17,12 +17,21 @@
  *    kód i hláška chyby jsou proto vidět rovnou, ne po rozkliknutí.
  *  * Ledger je přírůstkový. Několik pokusů k jednomu podání je doklad o tom,
  *    co se dělo, takže se seskupují a pořadí se zachovává.
+ *
+ * Čtvrté rozlišení přibylo s načítáním protokolů: NE VŠECHNO, co firma podala,
+ * odešlo naší cestou. Kdo přechází od jiného softwaru, má podání u ČSSZ a
+ * protokol v datové schránce, ale ledger prázdný — a prázdná obrazovka se čte
+ * jako „nic neodešlo". Načtené protokoly proto stojí v témž chronologickém
+ * přehledu jako naše pokusy, ale VŽDY označené zdrojem: u načteného protokolu
+ * aplikace nezná datovou větu, nemůže se doptat na stav ani uzavřít transakci,
+ * a tvářit se, že ano, by bylo horší než ho neukázat.
  */
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
+  type PayrollJmhzImportedProtocol,
   type PayrollJmhzProtocolError,
   type PayrollJmhzTransportAttempt,
   type PayrollJmhzTransportEnvironment,
@@ -40,6 +49,9 @@ const ENVIRONMENTS: PayrollJmhzTransportEnvironment[] = ['production', 'test']
 const environment = ref<PayrollJmhzTransportEnvironment>('production')
 const loading = ref(false)
 const attempts = ref<PayrollJmhzTransportAttempt[]>([])
+const imported = ref<PayrollJmhzImportedProtocol[]>([])
+const importing = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
 
 /**
  * Chyba načtení se drží ve stavu a NIKDY se nepřevádí na prázdný seznam.
@@ -66,7 +78,10 @@ const variableSymbolOptions = ref<Array<{ value: string; label: string }>>([])
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 const busy = computed(() =>
-  loading.value || pollingId.value !== null || closingId.value !== null,
+  loading.value
+  || importing.value
+  || pollingId.value !== null
+  || closingId.value !== null,
 )
 
 const variableSymbolValid = computed(() =>
@@ -97,6 +112,55 @@ const groups = computed<AttemptGroup[]>(() => {
   return ordered
 })
 
+type TimelineEntry =
+  | { source: 'app'; key: string; sortKey: string; group: AttemptGroup }
+  | { source: 'imported'; key: string; sortKey: string; protocol: PayrollJmhzImportedProtocol }
+
+/**
+ * Jeden chronologický přehled „co jsem podal", ať to odešlo odsud nebo odjinud.
+ *
+ * Řadí se podle OBDOBÍ hlášení, ne podle času založení řádku: uživatel hledá
+ * „červenec", ne „to, co jsem načetl naposled". Období, které se nepodařilo
+ * zjistit, jde na konec — ne nahoru, kde by vytlačilo to, co je vidět jasně.
+ */
+const timeline = computed<TimelineEntry[]>(() => {
+  const entries: TimelineEntry[] = groups.value.map(group => {
+    const period = periods.value[group.submissionId]
+    return {
+      source: 'app' as const,
+      key: `app-${group.submissionId}`,
+      sortKey: period?.start ?? '',
+      group,
+    }
+  })
+  for (const protocol of imported.value) {
+    entries.push({
+      source: 'imported' as const,
+      key: `imported-${protocol.id}`,
+      sortKey: protocol.period_year && protocol.period_month
+        ? `${protocol.period_year}-${String(protocol.period_month).padStart(2, '0')}-01`
+        : '',
+      protocol,
+    })
+  }
+  return entries.sort((a, b) => {
+    if (a.sortKey === b.sortKey) return a.key < b.key ? 1 : -1
+    if (a.sortKey === '') return 1
+    if (b.sortKey === '') return -1
+    return a.sortKey < b.sortKey ? 1 : -1
+  })
+})
+
+function importedPeriodLabel(protocol: PayrollJmhzImportedProtocol): string {
+  if (!protocol.period_year || !protocol.period_month) {
+    return t('payroll.submissions.transport.imported.period_unknown')
+  }
+  return t('payroll.submissions.transport.imported.period', {
+    month: protocol.period_month,
+    year: protocol.period_year,
+  })
+}
+
 const STATUS_TONES: Record<PayrollJmhzTransportStatus, string> = {
   prepared: 'bg-neutral-100 text-neutral-700',
   sent: 'bg-payroll-100 text-payroll-800',
@@ -109,6 +173,24 @@ const STATUS_TONES: Record<PayrollJmhzTransportStatus, string> = {
 
 function statusTone(status: PayrollJmhzTransportStatus): string {
   return STATUS_TONES[status] ?? 'bg-neutral-100 text-neutral-700'
+}
+
+/**
+ * Barva stavu z protokolu. „Částečně přijato" a „obsahuje propustné chyby"
+ * jsou výstražné, ne zelené: hlášení sice prošlo, ale něco v něm zůstalo
+ * nedořešené a zelená by to zavřela jako hotové.
+ */
+const PROTOCOL_TONES: Record<string, string> = {
+  ProcessedAndComplete: 'bg-success-100 text-success-700',
+  ContainsPassableErrors: 'bg-warning-100 text-warning-800',
+  PartiallyAccepted: 'bg-warning-100 text-warning-800',
+  Processing: 'bg-payroll-100 text-payroll-800',
+  Rejected: 'bg-danger-100 text-danger-700',
+  NotAccepted: 'bg-danger-100 text-danger-700',
+}
+
+function protocolTone(status: string): string {
+  return PROTOCOL_TONES[status] ?? 'bg-neutral-100 text-neutral-700'
 }
 
 /** Doptat se jde jen tam, kde brána přidělila CorrelationID. */
@@ -222,19 +304,65 @@ async function load() {
   actionError.value = ''
   success.value = ''
   try {
-    const history = await payrollApi.jmhzTransportHistory(environment.value)
+    // Obě strany přehledu se načítají naráz a SELHÁNÍ KTERÉKOLI Z NICH je
+    // selhání celku. Ukázat jen jednu polovinu a druhou tiše vynechat by
+    // znamenalo přehled, který zamlčuje podání — a přesně kvůli tomu se sem
+    // uživatel dívá.
+    const [history, protocols] = await Promise.all([
+      payrollApi.jmhzTransportHistory(environment.value),
+      payrollApi.jmhzImportedProtocols(environment.value),
+    ])
     attempts.value = history.attempts ?? []
+    imported.value = protocols.protocols ?? []
     await loadPeriods(attempts.value)
   } catch (exception: unknown) {
     // Stav zůstává NEZNÁMÝ, ne prázdný — šablona podle `loadError` skryje
     // prázdný stav i seznam, aby se selhání nedalo přečíst jako „nic neodešlo".
     attempts.value = []
+    imported.value = []
     loadError.value = apiErrorMessage(
       exception,
       t('payroll.submissions.transport.load_failed'),
     )
   } finally {
     loading.value = false
+  }
+}
+
+function pickProtocolFile() {
+  if (busy.value || !canWrite.value) return
+  fileInput.value?.click()
+}
+
+/**
+ * Načtení protokolu z datové schránky.
+ *
+ * Vstup se po každém pokusu čistí, aby šel tentýž soubor načíst znovu — po
+ * neúspěchu je druhý pokus s týmž souborem to první, co člověk zkusí.
+ */
+async function importProtocol(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || importing.value) return
+  importing.value = true
+  actionError.value = ''
+  success.value = ''
+  try {
+    const result = await payrollApi.importJmhzProtocol(file, environment.value)
+    await load()
+    success.value = result.created
+      ? t('payroll.submissions.transport.imported.added', {
+        status: t(`payroll.submissions.transport.protocol_status.${result.protocol.status_name}`),
+      })
+      : t('payroll.submissions.transport.imported.replaced')
+  } catch (exception: unknown) {
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.transport.imported.failed'),
+    )
+  } finally {
+    importing.value = false
   }
 }
 
@@ -315,19 +443,47 @@ onMounted(loadVariableSymbols)
             {{ t('payroll.submissions.transport.description') }}
           </p>
         </div>
-        <button
-          type="button"
-          data-test="transport-reload"
-          :class="btnOutline('neutral')"
-          :disabled="busy"
-          @click="load"
-        >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path :d="ICONS.cycle" />
-          </svg>
-          {{ t('common.refresh') }}
-        </button>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button
+            v-if="canWrite"
+            type="button"
+            data-test="transport-import-protocol"
+            :class="btnOutline('primary')"
+            :disabled="busy"
+            @click="pickProtocolFile"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.upload" />
+            </svg>
+            {{ importing
+              ? t('payroll.submissions.transport.imported.importing')
+              : t('payroll.submissions.transport.imported.action') }}
+          </button>
+          <input
+            ref="fileInput"
+            data-test="transport-import-input"
+            type="file"
+            accept=".xml,text/xml,application/xml"
+            class="hidden"
+            @change="importProtocol"
+          >
+          <button
+            type="button"
+            data-test="transport-reload"
+            :class="btnOutline('neutral')"
+            :disabled="busy"
+            @click="load"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.cycle" />
+            </svg>
+            {{ t('common.refresh') }}
+          </button>
+        </div>
       </div>
+      <p v-if="canWrite" class="mt-3 max-w-3xl text-sm text-neutral-600" data-test="transport-import-hint">
+        {{ t('payroll.submissions.transport.imported.hint') }}
+      </p>
 
       <div class="mt-5">
         <span class="mb-1 block text-sm font-medium text-neutral-700">
@@ -456,7 +612,7 @@ onMounted(loadVariableSymbols)
       </p>
 
       <div
-        v-if="groups.length === 0"
+        v-if="timeline.length === 0"
         data-test="transport-empty"
         class="rounded-xl border border-dashed border-neutral-300 bg-surface p-6 text-sm text-neutral-600"
       >
@@ -464,36 +620,45 @@ onMounted(loadVariableSymbols)
           {{ t('payroll.submissions.transport.empty.title') }}
         </p>
         <p class="mt-1">{{ t('payroll.submissions.transport.empty.description') }}</p>
+        <p class="mt-2">{{ t('payroll.submissions.transport.empty.import_hint') }}</p>
       </div>
 
       <template v-else>
+        <template v-for="entry in timeline" :key="entry.key">
         <section
-          v-for="group in groups"
-          :key="group.submissionId"
-          :data-test="`transport-group-${group.submissionId}`"
+          v-if="entry.source === 'app'"
+          :data-test="`transport-group-${entry.group.submissionId}`"
           class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
         >
           <div class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 p-4 sm:p-6">
             <div>
               <h3 class="text-base font-semibold text-neutral-900">
-                {{ periodLabel(group.submissionId) }}
+                {{ periodLabel(entry.group.submissionId) }}
               </h3>
               <p class="mt-1 text-xs text-neutral-500">
                 {{ t('payroll.submissions.transport.group.submission', {
-                  id: group.submissionId,
+                  id: entry.group.submissionId,
                 }) }}
               </p>
             </div>
-            <span class="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700">
-              {{ t('payroll.submissions.transport.group.attempts', {
-                total: group.attempts.length,
-              }) }}
-            </span>
+            <div class="flex flex-wrap items-center justify-end gap-2">
+              <span
+                class="rounded-full bg-payroll-100 px-2.5 py-1 text-xs font-medium text-payroll-800"
+                :data-test="`transport-source-app-${entry.group.submissionId}`"
+              >
+                {{ t('payroll.submissions.transport.source.app') }}
+              </span>
+              <span class="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700">
+                {{ t('payroll.submissions.transport.group.attempts', {
+                  total: entry.group.attempts.length,
+                }) }}
+              </span>
+            </div>
           </div>
 
           <div class="divide-y divide-neutral-100">
             <article
-              v-for="attempt in group.attempts"
+              v-for="attempt in entry.group.attempts"
               :key="attempt.id"
               :data-test="`transport-attempt-${attempt.id}`"
               class="p-4 sm:p-6"
@@ -717,6 +882,164 @@ onMounted(loadVariableSymbols)
             </article>
           </div>
         </section>
+
+        <section
+          v-else
+          :data-test="`transport-imported-${entry.protocol.id}`"
+          class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 p-4 sm:p-6">
+            <div>
+              <h3 class="text-base font-semibold text-neutral-900">
+                {{ importedPeriodLabel(entry.protocol) }}
+              </h3>
+              <p class="mt-1 text-xs text-neutral-500">
+                {{ t(`payroll.submissions.transport.imported.kind.${entry.protocol.protocol_kind}`) }}
+                <template v-if="entry.protocol.source_filename">
+                  · {{ entry.protocol.source_filename }}
+                </template>
+              </p>
+            </div>
+            <div class="flex flex-wrap items-center justify-end gap-2">
+              <!-- Zdroj je vidět vždy: u načteného protokolu aplikace nezná
+                   datovou větu, takže se nedá doptat na stav ani uzavřít
+                   transakci — a tvářit se opačně by bylo horší než mlčet. -->
+              <span
+                class="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700"
+                :data-test="`transport-source-imported-${entry.protocol.id}`"
+              >
+                {{ t('payroll.submissions.transport.source.imported') }}
+              </span>
+              <span
+                class="rounded-full px-2.5 py-1 text-xs font-semibold"
+                :class="protocolTone(entry.protocol.status_name)"
+                :data-test="`transport-imported-status-${entry.protocol.id}`"
+              >
+                {{ t(`payroll.submissions.transport.protocol_status.${entry.protocol.status_name}`) }}
+              </span>
+            </div>
+          </div>
+
+          <div class="p-4 sm:p-6">
+            <p class="text-sm text-neutral-600" :data-test="`transport-imported-note-${entry.protocol.id}`">
+              {{ t('payroll.submissions.transport.imported.note') }}
+            </p>
+
+            <dl class="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+              <div class="sm:col-span-2">
+                <dt class="text-xs uppercase tracking-wide text-neutral-500">
+                  {{ t('payroll.submissions.transport.imported.guid') }}
+                </dt>
+                <dd
+                  class="mt-0.5 break-all font-mono text-xs text-neutral-800"
+                  :data-test="`transport-imported-guid-${entry.protocol.id}`"
+                >
+                  {{ entry.protocol.submission_guid
+                    ?? t('payroll.submissions.transport.imported.guid_missing') }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-neutral-500">
+                  {{ t('payroll.submissions.transport.correlation') }}
+                </dt>
+                <dd class="mt-0.5 break-all font-mono text-xs text-neutral-800">
+                  {{ entry.protocol.correlation_reference
+                    ?? t('payroll.submissions.transport.correlation_missing') }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-neutral-500">
+                  {{ t('payroll.submissions.transport.imported.status_code') }}
+                </dt>
+                <dd class="mt-0.5 text-neutral-800">{{ entry.protocol.status_code }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-neutral-500">
+                  {{ t('payroll.submissions.transport.imported.protocol_dated_at') }}
+                </dt>
+                <dd class="mt-0.5 text-neutral-800">
+                  {{ entry.protocol.protocol_dated_at ?? '—' }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-neutral-500">
+                  {{ t('payroll.submissions.transport.imported.submitted_at') }}
+                </dt>
+                <dd class="mt-0.5 text-neutral-800">
+                  {{ entry.protocol.submitted_at ?? '—' }}
+                </dd>
+              </div>
+            </dl>
+
+            <p
+              v-if="entry.protocol.detail_available === false"
+              class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-800"
+              :data-test="`transport-imported-detail-missing-${entry.protocol.id}`"
+            >
+              {{ t('payroll.submissions.transport.imported.detail_unavailable', {
+                total: entry.protocol.error_count,
+              }) }}
+            </p>
+
+            <p
+              v-else-if="(entry.protocol.errors ?? []).length === 0"
+              class="mt-3 text-sm text-neutral-600"
+              :data-test="`transport-imported-clean-${entry.protocol.id}`"
+            >
+              {{ t('payroll.submissions.transport.report.no_errors') }}
+            </p>
+
+            <ul v-else class="mt-3 space-y-3">
+              <li
+                v-for="(error, index) in entry.protocol.errors ?? []"
+                :key="`${error.code}-${index}`"
+                :data-test="`transport-imported-error-${entry.protocol.id}-${index}`"
+                class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-mono text-xs font-semibold">{{ error.code }}</span>
+                  <span class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-700">
+                    {{ t(`payroll.submissions.transport.origin.${error.origin}`) }}
+                  </span>
+                </div>
+                <p class="mt-1 font-medium">{{ error.message }}</p>
+                <template v-if="error.control">
+                  <p class="mt-2 text-neutral-800">{{ error.control.name }}</p>
+                  <p v-if="error.control.detail" class="mt-1 text-xs text-neutral-600">
+                    {{ error.control.detail }}
+                  </p>
+                  <p v-if="error.control.area" class="mt-1 text-xs text-neutral-600">
+                    {{ t('payroll.submissions.transport.report.area', {
+                      area: error.control.area,
+                    }) }}
+                  </p>
+                  <div
+                    v-if="error.control.attribute_ids.length"
+                    class="mt-2 flex flex-wrap items-center gap-1"
+                  >
+                    <span class="text-xs text-neutral-600">
+                      {{ t('payroll.submissions.transport.report.attributes') }}
+                    </span>
+                    <span
+                      v-for="attributeId in error.control.attribute_ids"
+                      :key="attributeId"
+                      class="rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-xs text-neutral-700"
+                    >
+                      {{ attributeId }}
+                    </span>
+                  </div>
+                </template>
+                <p v-else class="mt-2 text-xs text-neutral-600">
+                  {{ t('payroll.submissions.transport.report.control_unknown') }}
+                </p>
+                <p v-if="errorLocation(error).length" class="mt-2 text-xs text-neutral-600">
+                  {{ errorLocation(error).join(' · ') }}
+                </p>
+              </li>
+            </ul>
+          </div>
+        </section>
+        </template>
       </template>
     </template>
   </section>

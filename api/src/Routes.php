@@ -86,6 +86,7 @@ use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
+use MyInvoice\Action\Payroll\PayrollJmhzProtocolImportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
 use MyInvoice\Action\Payroll\PayrollJmhzOrdinaryEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPreparationAction;
@@ -945,6 +946,14 @@ final class Routes
             $g->post(
                 '/submissions/jmhz-transport/{attemptId:[0-9]+}/close',
                 [PayrollJmhzTransportAction::class, 'close'],
+            );
+            $g->get(
+                '/submissions/jmhz-protocol-import',
+                [PayrollJmhzProtocolImportAction::class, 'history'],
+            );
+            $g->post(
+                '/submissions/jmhz-protocol-import',
+                [PayrollJmhzProtocolImportAction::class, 'import'],
             );
             $g->get(
                 '/submissions/{submissionId:[0-9]+}',

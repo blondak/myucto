@@ -362,6 +362,10 @@ final readonly class JmhzProtocolParser
             $parts,
             $errors,
             [],
+            null,
+            $this->variableSymbol($xpath, 'd'),
+            $this->periodPart($xpath, 'd', 'mesic', 1, 12),
+            $this->periodPart($xpath, 'd', 'rok', 2000, 2100),
         );
     }
 
@@ -418,15 +422,23 @@ final readonly class JmhzProtocolParser
             if (!$failure instanceof DOMElement) {
                 continue;
             }
+            $code = trim($this->childText($xpath, $failure, 'kod', 'p'));
+            if (preg_match('/^[0-9]+$/D', $code) !== 1) {
+                throw new JmhzTransportException(
+                    'jmhz_protocol_error_message_unreadable',
+                    'Chyba v protokolu o zpracování nemá čitelný kód.',
+                );
+            }
             $error = JmhzProtocolError::fromCode(
-                (int) trim($this->childText($xpath, $failure, 'kod')),
-                trim($this->childText($xpath, $failure, 'popis')),
+                (int) $code,
+                trim($this->childText($xpath, $failure, 'popis', 'p')),
             );
+            $this->assertErrorKind(trim($this->childText($xpath, $failure, 'typChyby', 'p')));
             $errors[] = $error;
             $parts[] = new JmhzProtocolPart(
-                $this->partScope(trim($this->childText($xpath, $failure, 'castPodani'))),
+                $this->partScope(trim($this->childText($xpath, $failure, 'castPodani', 'p'))),
                 $status,
-                $this->formGuid(trim($this->childText($xpath, $failure, 'idFormulare'))),
+                $this->formGuid(trim($this->childText($xpath, $failure, 'idFormulare', 'p'))),
                 null,
                 null,
                 [$error],
@@ -444,6 +456,11 @@ final readonly class JmhzProtocolParser
             $errors,
             [],
             $submissionGuid === '' ? null : $submissionGuid,
+            $this->variableSymbol($xpath, 'p'),
+            $this->periodPart($xpath, 'p', 'mesic', 1, 12),
+            $this->periodPart($xpath, 'p', 'rok', 2000, 2100),
+            $this->timestamp($xpath, '//p:datumProtokolu'),
+            $this->timestamp($xpath, '//p:datumPodani'),
         );
     }
 
@@ -678,14 +695,76 @@ final readonly class JmhzProtocolParser
         return $node === null ? '' : $node->textContent;
     }
 
+    /**
+     * Podřízený element v namespace, ve kterém protokol skutečně je.
+     *
+     * Prefix je parametr, ne konstanta: odpověď DZMH a protokol o zpracování
+     * mají stejné názvy elementů v RŮZNÝCH namespace. Napevno zadrátovaný `d:`
+     * u protokolu o zpracování znamenal, že se `kod` chyby nenašel, přečetl se
+     * jako nula a `JmhzProtocolError::fromCode(0)` shodila celý protokol —
+     * tedy právě ten, který má chyby a kvůli kterému se do něj kouká.
+     */
     private function childText(
         DOMXPath $xpath,
         DOMElement $context,
         string $localName,
+        string $prefix = 'd',
     ): string {
-        $node = $xpath->query("./d:{$localName}", $context)->item(0);
+        $node = $xpath->query("./{$prefix}:{$localName}", $context)->item(0);
 
         return $node === null ? '' : $node->textContent;
+    }
+
+    /**
+     * Variabilní symbol z protokolu. Prázdný je přípustný (nese ho jen část
+     * druhů), ale nečitelný ne — s VS mimo doložený tvar by se nedalo ověřit,
+     * komu protokol patří, a tvářit se přitom, že ověřen byl.
+     */
+    private function variableSymbol(DOMXPath $xpath, string $prefix): ?string
+    {
+        $value = trim($this->text($xpath, "//{$prefix}:variabilniSymbol"));
+        if ($value === '') {
+            return null;
+        }
+        if (preg_match('/^[0-9]{1,10}$/D', $value) !== 1) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_variable_symbol_invalid',
+                'Variabilní symbol v protokolu nemá tvar nejvýše deseti číslic.',
+            );
+        }
+
+        return $value;
+    }
+
+    private function periodPart(
+        DOMXPath $xpath,
+        string $prefix,
+        string $element,
+        int $min,
+        int $max,
+    ): ?int {
+        $value = trim($this->text($xpath, "//{$prefix}:{$element}"));
+        if ($value === '') {
+            return null;
+        }
+        if (preg_match('/^[0-9]{1,4}$/D', $value) !== 1
+            || (int) $value < $min
+            || (int) $value > $max
+        ) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_period_invalid',
+                "Údaj `{$element}` v protokolu není v přípustném rozsahu.",
+            );
+        }
+
+        return (int) $value;
+    }
+
+    private function timestamp(DOMXPath $xpath, string $expression): ?string
+    {
+        $value = trim($this->text($xpath, $expression));
+
+        return $value === '' ? null : $value;
     }
 
     private function intAttribute(DOMElement $element, string $name): int

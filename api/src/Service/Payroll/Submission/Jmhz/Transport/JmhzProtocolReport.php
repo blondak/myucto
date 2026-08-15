@@ -25,6 +25,21 @@ final readonly class JmhzProtocolReport
          * naším vlastním identifikátorem, ne jen tím, který přidělí ČSSZ.
          */
         public ?string $submissionGuid = null,
+        /**
+         * Variabilní symbol zaměstnavatele z protokolu.
+         *
+         * Je to JEDINÝ údaj, kterým se u načteného souboru dá ověřit, že
+         * protokol patří téhle firmě. Obálka GovTalk ho nenese, takže u ní
+         * zůstává `null` — a načtení takového protokolu se pak nesmí tvářit
+         * jako ověřené.
+         */
+        public ?string $variableSymbol = null,
+        /** Období hlášení, ke kterému protokol patří (`mesic`/`rok`). */
+        public ?int $periodMonth = null,
+        public ?int $periodYear = null,
+        /** `datumProtokolu` a `datumPodani` tak, jak je ČSSZ napsala. */
+        public ?string $protocolDate = null,
+        public ?string $submittedDate = null,
     ) {}
 
     /** @return list<JmhzProtocolError> */

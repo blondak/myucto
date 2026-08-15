@@ -1743,7 +1743,8 @@
                 "payout": {
                     "cash": "Cash",
                     "bank": "Bank account",
-                    "mixed": "Mixed"
+                    "mixed": "Mixed",
+                    "partner_settlement": "Set off against shareholder account"
                 },
                 "identity_title": "Name history",
                 "addresses_title": "Address history",
@@ -1790,6 +1791,11 @@
                 "primary_contact": "Primary contact",
                 "active": "Active",
                 "payout_method": "Payout method",
+                "partner_settlement_hint": "The net wage is not paid out — it is reclassified monthly as a set-off against the shareholder account (331/366 Dr / 365 Cr). No payment and no cash document is created.",
+                "partner_settlement_account": "Set-off account",
+                "partner_settlement_account_placeholder": "e.g. 365.100",
+                "partner_settlement_account_hint": "Analytic code of Other liabilities to shareholders from the company chart of accounts.",
+                "partner_settlement_unavailable": "Set-off against the shareholder account is available only for partner income or statutory-office remuneration.",
                 "cash_allocation": "Cash allocation (hundredths of %)",
                 "payout_effective_on": "Allocation valid from",
                 "account_hint": "Active bank allocations and cash must add up to 10,000.",
@@ -2114,7 +2120,34 @@
                 },
                 "empty": {
                     "title": "Nothing has been sent yet",
-                    "description": "No dispatch attempt has been made in this environment yet. Submissions are sent after freezing on the JMHZ tab."
+                    "description": "No dispatch attempt has been made in this environment yet. Submissions are sent after freezing on the JMHZ tab.",
+                    "import_hint": "If you filed in this environment using other software, import the processing protocol from your data box — the overview will then show it next to submissions sent from here."
+                },
+                "source": {
+                    "app": "Sent by this app",
+                    "imported": "Imported protocol"
+                },
+                "imported": {
+                    "action": "Import protocol from the data box",
+                    "importing": "Importing protocol…",
+                    "hint": "This overview does not know about submissions filed by other software. The processing protocol delivered by ČSSZ to your data box can be imported here as XML, so filings made outside the app show up as well. A protocol issued to another variable symbol is refused.",
+                    "added": "The protocol was imported. Submission status: {status}.",
+                    "replaced": "This protocol had already been imported — the record was updated, no duplicate was created.",
+                    "failed": "The protocol could not be imported.",
+                    "note": "This document arrived through the data box; the app did not send it. It therefore holds no submission payload — the status cannot be polled and no transaction can be closed. The protocol itself is the result.",
+                    "period": "Period {month}/{year}",
+                    "period_unknown": "The protocol states no period",
+                    "guid": "Submission ID (idPodani)",
+                    "guid_missing": "The protocol states no submission ID",
+                    "status_code": "Status code",
+                    "protocol_dated_at": "Protocol date",
+                    "submitted_at": "Filing date",
+                    "detail_unavailable": "The stored original could not be re-read, so error detail is unavailable here. The protocol reports {total} error(s).",
+                    "kind": {
+                        "processing": "Processing protocol",
+                        "completeness": "Completeness protocol",
+                        "partial_submission": "Partial submission protocol"
+                    }
                 },
                 "group": {
                     "period": "Period {start} – {end}",
@@ -2761,7 +2794,8 @@
                 "social_insurance": "Social insurance liability",
                 "health_insurance": "Health insurance liability",
                 "income_tax": "Income tax advance or withholding",
-                "other_deductions": "Other payroll deductions"
+                "other_deductions": "Other payroll deductions",
+                "partner_settlement": "Set-off against shareholder account"
             },
             "validation": {
                 "title": "Correct the highlighted fields before saving.",

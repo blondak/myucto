@@ -35,13 +35,14 @@ final readonly class JmhzProtocolExplainer
      */
     public function explain(JmhzProtocolReport $report): array
     {
-        $explained = [];
-        foreach ($report->errors as $error) {
-            $explained[] = $this->describe($error, null, null, null);
-        }
+        // Protokoly nesou touž chybu dvakrát: jednou v souhrnu a jednou
+        // u součásti, ke které patří. Vypsat obojí znamená ukázat uživateli
+        // dvě chyby tam, kde je jedna — a on pak hledá druhou závadu, která
+        // neexistuje. Zůstává ta UMÍSTĚNÁ, protože říká i to, koho se týká.
+        $located = [];
         foreach ($report->parts as $part) {
             foreach ($part->errors as $error) {
-                $explained[] = $this->describe(
+                $located[] = $this->describe(
                     $error,
                     $part->formGuid,
                     $part->ikMpsv,
@@ -49,8 +50,20 @@ final readonly class JmhzProtocolExplainer
                 );
             }
         }
+        $seen = [];
+        foreach ($located as $item) {
+            $seen[$item['code'] . '|' . $item['message']] = true;
+        }
 
-        return $explained;
+        $summary = [];
+        foreach ($report->errors as $error) {
+            if (isset($seen[$error->code . '|' . $error->message])) {
+                continue;
+            }
+            $summary[] = $this->describe($error, null, null, null);
+        }
+
+        return [...$summary, ...$located];
     }
 
     /** @return array<string,mixed> */

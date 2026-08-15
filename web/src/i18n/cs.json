@@ -1743,7 +1743,8 @@
                 "payout": {
                     "cash": "Hotově",
                     "bank": "Na účet",
-                    "mixed": "Kombinovaně"
+                    "mixed": "Kombinovaně",
+                    "partner_settlement": "Zápočtem na účet společníka"
                 },
                 "identity_title": "Historie jména",
                 "addresses_title": "Historie adres",
@@ -1790,6 +1791,11 @@
                 "primary_contact": "Primární kontakt",
                 "active": "Aktivní",
                 "payout_method": "Způsob výplaty",
+                "partner_settlement_hint": "Čistá mzda se nevyplácí — měsíčně se přeúčtuje jako zápočet proti účtu společníka (331/366 MD / 365 D). Nevzniká platba ani pokladní doklad.",
+                "partner_settlement_account": "Účet zápočtu",
+                "partner_settlement_account_placeholder": "např. 365.100",
+                "partner_settlement_account_hint": "Analytika účtu Ostatní dluhy ke společníkům obchodní korporace z osnovy firmy.",
+                "partner_settlement_unavailable": "Zápočet na účet společníka lze zvolit jen u příjmu společníka nebo odměny za výkon funkce.",
                 "cash_allocation": "Podíl hotovosti (setiny %)",
                 "payout_effective_on": "Rozdělení platí od",
                 "account_hint": "Součet aktivních bankovních podílů a hotovosti musí být 10 000.",
@@ -2114,7 +2120,34 @@
                 },
                 "empty": {
                     "title": "Zatím nebylo nic odesláno",
-                    "description": "V tomhle prostředí zatím neproběhl žádný pokus o odeslání. Podání se odesílá po zmrazení v záložce JMHZ."
+                    "description": "V tomhle prostředí zatím neproběhl žádný pokus o odeslání. Podání se odesílá po zmrazení v záložce JMHZ.",
+                    "import_hint": "Pokud jste za tohle prostředí podávali jiným softwarem, načtěte protokol o zpracování z datové schránky — přehled ho pak ukáže vedle podání odeslaných odsud."
+                },
+                "source": {
+                    "app": "Odesláno aplikací",
+                    "imported": "Načtený protokol"
+                },
+                "imported": {
+                    "action": "Načíst protokol z datové schránky",
+                    "importing": "Načítám protokol…",
+                    "hint": "Podání odeslaná jiným softwarem tenhle přehled nezná. Protokol o zpracování, který ČSSZ doručí do datové schránky, sem jde načíst jako XML — do přehledu se tím dostane i to, co odešlo mimo aplikaci. Protokol vystavený na cizí variabilní symbol systém odmítne.",
+                    "added": "Protokol byl načten. Stav hlášení: {status}.",
+                    "replaced": "Tenhle protokol už načtený byl — záznam se aktualizoval, druhý se nezaložil.",
+                    "failed": "Protokol se nepodařilo načíst.",
+                    "note": "Tenhle doklad přišel z datové schránky, neodeslala ho aplikace. Datovou větu podání proto nezná — na stav se nelze doptat ani uzavřít transakci, výsledek říká samotný protokol.",
+                    "period": "Období {month}/{year}",
+                    "period_unknown": "Období protokol neuvádí",
+                    "guid": "ID podání (idPodani)",
+                    "guid_missing": "Protokol ID podání neuvádí",
+                    "status_code": "Kód stavu",
+                    "protocol_dated_at": "Datum protokolu",
+                    "submitted_at": "Datum podání",
+                    "detail_unavailable": "Uložený originál se nepodařilo znovu přečíst, takže detail chyb tu není. Protokol hlásí chyb: {total}.",
+                    "kind": {
+                        "processing": "Protokol o zpracování",
+                        "completeness": "Protokol o kompletnosti",
+                        "partial_submission": "Protokol z dílčího podání"
+                    }
                 },
                 "group": {
                     "period": "Období {start} – {end}",
@@ -2761,7 +2794,8 @@
                 "social_insurance": "Závazek sociálního pojištění",
                 "health_insurance": "Závazek zdravotního pojištění",
                 "income_tax": "Záloha nebo srážka daně",
-                "other_deductions": "Ostatní srážky ze mzdy"
+                "other_deductions": "Ostatní srážky ze mzdy",
+                "partner_settlement": "Zápočet na účet společníka"
             },
             "validation": {
                 "title": "Před uložením opravte označená pole.",

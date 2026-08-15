@@ -47,6 +47,7 @@ function profile(): PayrollPersonProfile {
     full_name: 'Testovací Zaměstnanec',
     profile_status: 'setup',
     payout_method: 'bank',
+  partner_settlement_account_code: null,
     cash_allocation_basis_points: 0,
     payout_effective_on: '2026-08-01',
     secure_delivery_channel: 'portal',

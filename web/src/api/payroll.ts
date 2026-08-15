@@ -183,7 +183,7 @@ export interface PayrollPersonCreatePayload {
 
 export type PayrollPersonProfileStatus = 'missing' | 'legacy' | 'setup' | 'ready'
 export type PayrollPersonEditableProfileStatus = Exclude<PayrollPersonProfileStatus, 'missing'>
-export type PayrollPayoutMethod = 'cash' | 'bank' | 'mixed'
+export type PayrollPayoutMethod = 'cash' | 'bank' | 'mixed' | 'partner_settlement'
 export type PayrollSecureDeliveryChannel = 'portal' | 'paper'
 export type PayrollPersonAddressType = 'residence' | 'mailing'
 export type PayrollPersonContactType = 'email' | 'phone'
@@ -257,6 +257,7 @@ export interface PayrollPersonProfile {
   full_name: string
   profile_status: PayrollPersonProfileStatus
   payout_method: PayrollPayoutMethod
+  partner_settlement_account_code: string | null
   cash_allocation_basis_points: number
   payout_effective_on: string | null
   secure_delivery_channel: PayrollSecureDeliveryChannel
@@ -320,6 +321,7 @@ export interface PayrollPersonProfilePayload {
   row_version: number
   profile_status: PayrollPersonEditableProfileStatus
   payout_method: PayrollPayoutMethod
+  partner_settlement_account_code: string | null
   cash_allocation_basis_points: number
   payout_effective_on: string
   secure_delivery_channel: PayrollSecureDeliveryChannel
@@ -955,6 +957,7 @@ export interface PayrollEmployerAccounts {
   health_insurance_credit: string
   income_tax_credit: string
   other_deductions_credit: string
+  partner_settlement_credit: string
 }
 
 export interface PayrollAccountOption {
@@ -2168,6 +2171,62 @@ export interface PayrollJmhzTransportPoll {
   report: PayrollJmhzProtocolReport | null
 }
 
+/**
+ * Protokol ČSSZ načtený ze souboru z datové schránky.
+ *
+ * Podání odeslané cizím softwarem naše aplikace nezná, takže přehled stavu
+ * odeslání by u takové firmy zůstal prázdný, i když podala. Načtený protokol
+ * je doklad o podání — ale NENÍ to náš pokus o odeslání, a v přehledu se tak
+ * ani nesmí tvářit.
+ */
+export type PayrollJmhzImportedProtocolKind =
+  | 'processing'
+  | 'completeness'
+  | 'partial_submission'
+
+export interface PayrollJmhzImportedProtocol {
+  id: number
+  supplier_id: number
+  environment: string
+  protocol_kind: PayrollJmhzImportedProtocolKind
+  /** Ověřený variabilní symbol; cizí protokol se neuloží. */
+  variable_symbol: string
+  period_month: number | null
+  period_year: number | null
+  /** `idPodani` — GUID, kterým se protokol páruje k podání. */
+  submission_guid: string | null
+  correlation_reference: string | null
+  /** Kód stavu hlášení 1–6 podle číselníku ČSSZ. */
+  status_code: number
+  status_name: PayrollJmhzProtocolStatus
+  error_count: number
+  protocol_dated_at: string | null
+  submitted_at: string | null
+  source_filename: string | null
+  payload_sha256: string
+  row_version: number
+  imported_by: number | null
+  created_at: string
+  updated_at: string
+  /** Vysvětlené chyby; počítají se z uloženého originálu při každém čtení. */
+  errors?: PayrollJmhzProtocolError[]
+  /** `false`, když se uložený originál nepodařilo znovu přečíst. */
+  detail_available?: boolean
+}
+
+export interface PayrollJmhzImportedProtocolHistory {
+  environment: PayrollJmhzTransportEnvironment
+  protocols: PayrollJmhzImportedProtocol[]
+}
+
+export interface PayrollJmhzImportedProtocolResult {
+  environment: PayrollJmhzTransportEnvironment
+  protocol: PayrollJmhzImportedProtocol
+  /** `false` u opakovaného načtení téhož protokolu — řádek se přepsal. */
+  created: boolean
+  errors: PayrollJmhzProtocolError[]
+}
+
 export const payrollApi = {
   capabilities: () =>
     api.get<PayrollCapabilitiesResponse>('/payroll/capabilities').then(response => response.data),
@@ -2792,4 +2851,30 @@ export const payrollApi = {
     { environment },
     { params: { variable_symbol: variableSymbol, environment } },
   ).then(response => response.data),
+  /** Protokoly načtené ze souboru, od nejnovějšího období. */
+  jmhzImportedProtocols: (environment: PayrollJmhzTransportEnvironment) =>
+    api.get<PayrollJmhzImportedProtocolHistory>(
+      '/payroll/submissions/jmhz-protocol-import',
+      { params: { environment } },
+    ).then(response => response.data),
+  /**
+   * Načte XML protokol z datové schránky. Server ho odmítne, pokud jeho
+   * variabilní symbol nepatří téhle firmě — cizí doklad se neuloží.
+   */
+  importJmhzProtocol: (
+    file: File,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('environment', environment)
+    return api.post<PayrollJmhzImportedProtocolResult>(
+      '/payroll/submissions/jmhz-protocol-import',
+      fd,
+      {
+        params: { environment },
+        headers: { 'Content-Type': 'multipart/form-data' },
+      },
+    ).then(response => response.data)
+  },
 }
