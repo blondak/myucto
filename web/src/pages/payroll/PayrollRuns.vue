@@ -8,6 +8,7 @@ import {
   type PayrollRunResultPerson,
 } from '@/api/payroll'
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
+import PayrollInsuranceBreakdown from '@/components/payroll/PayrollInsuranceBreakdown.vue'
 import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
 import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
@@ -536,6 +537,13 @@ onMounted(load)
 
         <PayrollIncomeTaxBreakdown
           v-if="breakdowns[run.id]?.length"
+          :people="breakdowns[run.id]"
+          :person-names="personNames"
+        />
+
+        <PayrollInsuranceBreakdown
+          v-if="breakdowns[run.id]?.length"
+          :revision-id="run.revision_id"
           :people="breakdowns[run.id]"
           :person-names="personNames"
         />
