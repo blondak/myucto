@@ -14,7 +14,10 @@ use PDO;
  */
 final class PayrollBusinessTripRepository
 {
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollBusinessTripDeletionRepository $deletion,
+    ) {}
 
     /** @return list<array<string,mixed>> */
     public function list(int $supplierId, ?string $periodStart = null): array
@@ -45,7 +48,10 @@ final class PayrollBusinessTripRepository
             'payroll_business_trips',
         );
 
-        return array_map(fn (array $row): array => $this->hydrate($supplierId, $row), $trips);
+        return $this->deletion->decorate(
+            $supplierId,
+            array_map(fn (array $row): array => $this->hydrate($supplierId, $row), $trips),
+        );
     }
 
     /** @return array<string,mixed>|null */
@@ -69,7 +75,10 @@ final class PayrollBusinessTripRepository
 
         return $row === false
             ? null
-            : $this->hydrate($supplierId, PayrollTimeValue::row($row, 'payroll_business_trip'));
+            : $this->deletion->decorateOne(
+                $supplierId,
+                $this->hydrate($supplierId, PayrollTimeValue::row($row, 'payroll_business_trip')),
+            );
     }
 
     /**

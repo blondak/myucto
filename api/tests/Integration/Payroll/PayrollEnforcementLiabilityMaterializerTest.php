@@ -8,11 +8,13 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEnforcementPaymentRepository;
 use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
+use MyInvoice\Repository\Payroll\PayrollInstitutionAccountDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentBatchRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentMatchRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
@@ -99,6 +101,10 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
         $institutions = new PayrollInstitutionAccountRepository(
             $connection,
             $sensitive,
+            new PayrollInstitutionAccountDeletionRepository(
+                $connection,
+                new ActivityLogger($connection),
+            ),
         );
         $institutions->create($this->supplierId, [
             'institution_type' => 'other_recipient',

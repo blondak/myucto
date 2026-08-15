@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountConflictException;
+use MyInvoice\Repository\Payroll\PayrollInstitutionAccountDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountOverlapException;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Security\AccessLevel;
@@ -20,9 +21,11 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class PayrollInstitutionAccountsAction
 {
     use PayrollActionSupport;
+    use PayrollDeletionResponse;
 
     public function __construct(
         private readonly PayrollInstitutionAccountRepository $accounts,
+        private readonly PayrollInstitutionAccountDeletionRepository $deletion,
         private readonly PayrollInstitutionAccountValidator $validator,
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
@@ -150,6 +153,35 @@ final class PayrollInstitutionAccountsAction
 
         $this->audit($request, 'payroll.institution_account.updated', $account);
         return Json::ok($response, ['account' => $account]);
+    }
+
+    /**
+     * Odklidí duplicitní nebo omylem založený účet instituce.
+     *
+     * Právo je `payroll.settings`, tedy TOTÉŽ, kterým se účet zakládá a upravuje.
+     * Před účtem, ze kterého se už platilo, chrání blokátory v repozitáři.
+     *
+     * @param array<string,string> $args
+     */
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $cascade = $this->deletion->delete(
+                $this->currentSupplierId($request),
+                (int) ($args['id'] ?? 0),
+                $this->optionalRowVersion($this->input($request)['row_version'] ?? null),
+                $this->userId($request),
+                $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->deletionError($response, $e);
+        }
+
+        return Json::ok($response, ['deleted' => true, 'cascade' => $cascade]);
     }
 
     private function authorize(

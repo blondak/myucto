@@ -6,11 +6,13 @@ namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
+use MyInvoice\Repository\Payroll\PayrollEmployerPolicyDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerSettingsRepository;
 use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -391,7 +393,10 @@ final class PayrollRunSnapshotBuilder
         string $periodStart,
     ): array {
         $policy = ($this->employerPolicies
-            ?? new PayrollEmployerPolicyRepository($this->db))
+            ?? new PayrollEmployerPolicyRepository(
+                $this->db,
+                new PayrollEmployerPolicyDeletionRepository($this->db, new ActivityLogger($this->db)),
+            ))
             ->findEffective($supplierId, $periodStart);
         if ($policy === null) {
             throw new \DomainException(

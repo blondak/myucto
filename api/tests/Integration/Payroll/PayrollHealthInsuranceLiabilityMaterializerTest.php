@@ -6,10 +6,12 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollInstitutionAccountDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentBatchRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
@@ -68,6 +70,10 @@ final class PayrollHealthInsuranceLiabilityMaterializerTest extends TestCase
         $institutionRepository = new PayrollInstitutionAccountRepository(
             $connection,
             $sensitive,
+            new PayrollInstitutionAccountDeletionRepository(
+                $connection,
+                new ActivityLogger($connection),
+            ),
         );
         $this->institutionAccounts = $institutionRepository;
         $institutionRepository->create($this->supplierId, [
@@ -441,6 +447,10 @@ final class PayrollHealthInsuranceLiabilityMaterializerTest extends TestCase
         (new PayrollInstitutionAccountRepository(
             $this->db,
             $this->sensitiveData,
+            new PayrollInstitutionAccountDeletionRepository(
+                $this->db,
+                new ActivityLogger($this->db),
+            ),
         ))->create($otherSupplierId, [
             'institution_type' => 'health_insurer',
             'institution_code' => '201',

@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollRecurringComponentConflictException;
+use MyInvoice\Repository\Payroll\PayrollRecurringComponentDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollRecurringComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
@@ -21,9 +22,11 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class PayrollRecurringComponentsAction
 {
     use PayrollActionSupport;
+    use PayrollDeletionResponse;
 
     public function __construct(
         private readonly PayrollRecurringComponentRepository $recurring,
+        private readonly PayrollRecurringComponentDeletionRepository $deletion,
         private readonly PayrollRecurringComponentValidator $validator,
         private readonly PayrollRecurringMaterializer $materializer,
         private readonly PayrollModuleAccess $access,
@@ -117,6 +120,35 @@ final class PayrollRecurringComponentsAction
         }
         $this->audit($request, 'payroll.recurring_component.updated', $recurring);
         return Json::ok($response, ['recurring_component' => $recurring]);
+    }
+
+    /**
+     * Smaže čerstvý předpis, ze kterého se ještě nic nematerializovalo.
+     *
+     * Právo je `payroll.inputs.write`, tedy TOTÉŽ, kterým se předpis zakládá.
+     * Po materializaci chrání blokátor v repozitáři a zůstává deaktivace.
+     *
+     * @param array<string,string> $args
+     */
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $cascade = $this->deletion->delete(
+                $this->currentSupplierId($request),
+                (int) ($args['id'] ?? 0),
+                $this->optionalRowVersion($this->input($request)['row_version'] ?? null),
+                $this->userId($request),
+                $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->deletionError($response, $e);
+        }
+
+        return Json::ok($response, ['deleted' => true, 'cascade' => $cascade]);
     }
 
     public function materialize(Request $request, Response $response): Response

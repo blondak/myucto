@@ -20,7 +20,10 @@ final class PayrollEmployerPolicyRepository
         created_at, updated_at
         SQL;
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollEmployerPolicyDeletionRepository $deletion,
+    ) {}
 
     /** @return array<string,mixed>|null */
     public function find(int $supplierId, int $id): ?array
@@ -33,7 +36,9 @@ final class PayrollEmployerPolicyRepository
         $stmt->execute([$supplierId, $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        return $row === false ? null : self::hydrate($row);
+        return $row === false
+            ? null
+            : $this->deletion->decorateOne($supplierId, self::hydrate($row));
     }
 
     /** @return array<string,mixed>|null */
@@ -59,6 +64,21 @@ final class PayrollEmployerPolicyRepository
         return isset($rows[0]) ? self::hydrate($rows[0]) : null;
     }
 
+    /**
+     * Účinná politika pro API — na rozdíl od `findEffective()` nese `can_delete`
+     * a `delete_blocker`. Oddělené schválně: `findEffective()` čte mzdový běh do
+     * neměnného vstupního snapshotu, do kterého rozhodnutí o mazání nepatří,
+     * protože by měnilo jeho hash.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listEffective(int $supplierId, string $effectiveOn): array
+    {
+        $policy = $this->findEffective($supplierId, $effectiveOn);
+
+        return $policy === null ? [] : $this->deletion->decorate($supplierId, [$policy]);
+    }
+
     /** @return list<array<string,mixed>> */
     public function list(int $supplierId): array
     {
@@ -75,7 +95,7 @@ final class PayrollEmployerPolicyRepository
             $result[] = self::hydrate($row);
         }
 
-        return $result;
+        return $this->deletion->decorate($supplierId, $result);
     }
 
     /**
@@ -363,6 +383,9 @@ final class PayrollEmployerPolicyRepository
         string $action,
         ?int $actorUserId,
     ): void {
+        // Rozhodnutí o mazání je odvozený, časem proměnlivý údaj — do neměnného
+        // snapshotu politiky nepatří a nesmí ovlivnit jeho hash.
+        unset($policy['can_delete'], $policy['delete_blocker']);
         $json = json_encode(
             $policy,
             JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE

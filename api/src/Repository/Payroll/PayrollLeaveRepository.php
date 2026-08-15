@@ -11,7 +11,11 @@ use PDO;
 
 final class PayrollLeaveRepository
 {
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollLeaveLedgerDeletionRepository $ledgerDeletion,
+        private readonly PayrollLeaveEntitlementDeletionRepository $entitlementDeletion,
+    ) {}
 
     /** @return list<array<string,mixed>> */
     public function list(int $supplierId, int $employmentId, int $year): array
@@ -29,7 +33,55 @@ final class PayrollLeaveRepository
               ORDER BY ledger.effective_date, ledger.id'
         );
         $stmt->execute([$supplierId, $employmentId, $year]);
-        return array_map(self::cast(...), $stmt->fetchAll(PDO::FETCH_ASSOC));
+        $rows = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $rows[] = self::cast($row);
+        }
+
+        return $this->ledgerDeletion->decorate($supplierId, $rows);
+    }
+
+    /**
+     * Revize nároku na dovolenou za rok. Bez tohohle výpisu by uživatel neměl
+     * kde smazaný nárok najít — dosud se snapshot vracel jen v odpovědi na jeho
+     * vytvoření.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function entitlements(int $supplierId, int $employmentId, int $year): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, supplier_id, employment_id, leave_year, revision_no,
+                    relation_type, weekly_minutes, entitlement_weeks,
+                    continuous_calendar_days, worked_equivalent_minutes,
+                    worked_week_multiples, entitlement_minutes, rationale,
+                    support_status, leave_ledger_entry_id, row_version,
+                    created_by, created_at
+               FROM payroll_leave_entitlement_snapshots
+              WHERE supplier_id = ? AND employment_id = ? AND leave_year = ?
+              ORDER BY revision_no DESC'
+        );
+        $stmt->execute([$supplierId, $employmentId, $year]);
+        $rows = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            foreach ([
+                'id', 'supplier_id', 'employment_id', 'leave_year', 'revision_no',
+                'weekly_minutes', 'entitlement_weeks', 'continuous_calendar_days',
+                'worked_equivalent_minutes', 'worked_week_multiples',
+                'entitlement_minutes', 'row_version',
+            ] as $key) {
+                $row[$key] = (int) $row[$key];
+            }
+            foreach (['leave_ledger_entry_id', 'created_by'] as $key) {
+                $row[$key] = $row[$key] === null ? null : (int) $row[$key];
+            }
+            $rows[] = $row;
+        }
+
+        return $this->entitlementDeletion->decorate($supplierId, $rows);
     }
 
     public function balance(int $supplierId, int $employmentId, int $year, ?string $asOf = null): int

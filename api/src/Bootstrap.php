@@ -141,6 +141,9 @@ final class Bootstrap
                 fn (ContainerInterface $c) =>
                     new \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository(
                         $c->get(Connection::class),
+                        $c->get(
+                            \MyInvoice\Repository\Payroll\PayrollEmployerPolicyDeletionRepository::class,
+                        ),
                     ),
             \MyInvoice\Service\Payroll\Settings\PayrollEmployerPolicyService::class =>
                 fn (ContainerInterface $c) =>
