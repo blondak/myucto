@@ -106,7 +106,7 @@ final class CertificateVaultAction
         return Json::ok($response, $result);
     }
 
-    private function guard(Request $request, Response $response, string $level): ?Response
+    private function guard(Request $request, Response $response, AccessLevel $level): ?Response
     {
         if (!RequestAuthorization::allows($request, 'settings.signing', $level)) {
             return Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);

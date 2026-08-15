@@ -115,6 +115,7 @@ const effectiveCredentialSource = computed<'personal_vault' | 'uploaded_file'>((
  */
 const certificates = ref<CertificateVaultItem[]>([])
 const certificatesLoading = ref(false)
+const certificatesError = ref('')
 const certificateBusy = ref(false)
 const certificateFileInput = ref<HTMLInputElement | null>(null)
 const certificateFile = ref<File | null>(null)
@@ -374,13 +375,23 @@ async function loadPersonalCertificates() {
   }
 }
 
+/**
+ * Selhání načtení se NESMÍ tvářit jako prázdný trezor.
+ *
+ * Přesně tohle se stalo: endpoint vracel 500, tenhle blok chybu spolkl a
+ * uživatel četl „zatím tu žádný certifikát není" — tedy tvrzení o datech,
+ * které jsme nikdy neviděli. Chyba se proto drží ve stavu a šablona ji
+ * ukazuje místo prázdného stavu.
+ */
 async function loadCertificates(silent = true) {
   certificatesLoading.value = true
+  certificatesError.value = ''
   try {
     certificates.value = await settingsApi.listCertificates()
   } catch (e: any) {
     certificates.value = []
-    if (!silent) toast.error(apiErrorMessage(e, t('settings.certificate_vault_load_failed')))
+    certificatesError.value = apiErrorMessage(e, t('settings.certificate_vault_load_failed'))
+    if (!silent) toast.error(certificatesError.value)
   } finally {
     certificatesLoading.value = false
   }
@@ -956,6 +967,9 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
           {{ t('settings.certificate_vault_list_title') }}
         </h4>
         <div v-if="certificatesLoading" class="text-xs text-neutral-500 py-2">{{ t('common.loading') }}</div>
+        <div v-else-if="certificatesError" class="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+          {{ certificatesError }}
+        </div>
         <EmptyState v-else-if="certificates.length === 0" dense icon="lock" :title="t('settings.certificate_vault_empty')" />
         <div v-else class="space-y-3">
           <div v-for="certificate in certificates" :key="certificate.id" class="rounded-lg border border-neutral-200 p-4">

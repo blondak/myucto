@@ -333,6 +333,12 @@ final class RoutePermissionMap
         ['*', '#^/api/settings/(email-branding|supplier/logo)(/|$)#', 'settings.branding', AccessLevel::WRITE],
         ['GET', '#^/api/settings/ai-assist$#', 'settings.ai_provider', AccessLevel::READ],
         ['*', '#^/api/settings/.*/ai|^/api/settings/ai#', 'settings.ai_provider', AccessLevel::WRITE],
+        // Trezor certifikátů se řídí oprávněním k podpisům, ne k firmě. Bez
+        // tohohle pravidla propadne na obecný fallback `/api/settings` a hlídá
+        // ho jiné oprávnění, než jaké kontroluje sama akce — dvě různá pravidla
+        // na tentýž endpoint se dřív nebo později rozejdou.
+        ['GET', '#^/api/settings/certificates(/|$)#', 'settings.signing', AccessLevel::READ],
+        ['*', '#^/api/settings/certificates(/|$)#', 'settings.signing', AccessLevel::WRITE],
         ['GET', '#^/api/settings/(signing|pdf-signing)(/|$)#', 'settings.signing', AccessLevel::READ],
         ['*', '#^/api/settings/(signing|pdf-signing)(/|$)#', 'settings.signing', AccessLevel::WRITE],
         ['GET', '#^/api/settings/accounting-activation/status$#', 'settings.company', AccessLevel::READ],
