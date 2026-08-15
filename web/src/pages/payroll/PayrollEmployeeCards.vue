@@ -114,6 +114,19 @@ function relationLabel(row: PayrollQuickInputRow): string {
   return t(`payroll.people.relations.${row.relation_type}`)
 }
 
+/**
+ * Kód vztahu se ukazuje jen tehdy, když něco znamená.
+ *
+ * Vztahy převzaté z původní evidence dostaly při migraci kód `legacy`
+ * (migrace 1188, `is_legacy_projection = 1`). Je to interní značka, ne údaj
+ * zaměstnavatele — na kartě člověka vypadá jako název pracovního poměru
+ * a mate. Kdo si kód vyplní sám, uvidí ho beze změny.
+ */
+function employmentCodeLabel(row: PayrollQuickInputRow): string {
+  const code = (row.employment_code ?? '').trim()
+  return code === '' || code.toLowerCase() === 'legacy' ? '' : code
+}
+
 function statusLabel(row: PayrollQuickInputRow): string {
   if (row.suspended_in_month) return t('payroll.quick_inputs.suspended_in_month')
   return t(`payroll.people.employment_status.${row.effective_status}`)
@@ -301,7 +314,7 @@ onMounted(load)
             <div class="min-w-0">
               <h3 class="truncate font-semibold text-neutral-900">{{ row.full_name }}</h3>
               <p class="mt-0.5 truncate text-xs text-neutral-500">
-                {{ relationLabel(row) }} · {{ row.employment_code }}
+                {{ relationLabel(row) }}<template v-if="employmentCodeLabel(row)"> · {{ employmentCodeLabel(row) }}</template>
               </p>
             </div>
             <span class="shrink-0 rounded-full px-2 py-1 text-xs font-medium" :class="statusClass(row)">

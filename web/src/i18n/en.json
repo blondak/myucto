@@ -2081,6 +2081,7 @@
             "subtitle": "Prepare, verify and download statutory reports with clearly separated test and production environments.",
             "tabs_label": "Payroll submission types",
             "tabs": {
+                "transport": "Submission status",
                 "regzel": "Employer registration",
                 "jmhz": "JMHZ",
                 "health": "Health insurers",
@@ -2092,6 +2093,86 @@
             "jmhz_fail_closed": "Direct JMHZ preparation and submission are not available yet. Until mapping, receipt verification and corrections are complete, the system will not pretend that a submission occurred.",
             "health_title": "Health-insurer reports",
             "health_fail_closed": "Direct health-insurer submissions are not available yet. The system will not mark them as sent or accepted without a verified channel and receipt.",
+            "transport": {
+                "title": "Sent submissions and their status",
+                "description": "Every dispatch attempt to ČSSZ, newest first. Sending happens when a submission is frozen — this screen tracks the status and fetches the result.",
+                "load_failed": "The dispatch history could not be loaded.",
+                "state_unknown": "Until the request succeeds the system does not know what was sent — please do not read this empty screen as proof that nothing went out.",
+                "environment": {
+                    "label": "Environment",
+                    "production": "Production",
+                    "test": "Test",
+                    "production_note": "Live submissions to ČSSZ. What is in this list counts towards the authority.",
+                    "test_note": "ČSSZ test environment. A submission made here does not discharge the obligation."
+                },
+                "vs": {
+                    "label": "Employer variable symbol",
+                    "hint": "The VREP gateway identifies the submission by the employer's variable symbol — without it the status cannot be fetched and the transaction cannot be closed. You will find it on the ČSSZ registration decision.",
+                    "pick": "Take from workplace:",
+                    "missing": "No active workplace in the employer settings has a social-security variable symbol filled in. Add it in the settings, or type it here manually.",
+                    "required": "Enter the variable symbol (at most ten digits) so the status can be fetched or the transaction closed."
+                },
+                "empty": {
+                    "title": "Nothing has been sent yet",
+                    "description": "No dispatch attempt has been made in this environment yet. Submissions are sent after freezing on the JMHZ tab."
+                },
+                "group": {
+                    "period": "Period {start} – {end}",
+                    "period_unknown": "Period could not be resolved",
+                    "submission": "Submission no. {id}",
+                    "attempts": "Attempts: {total}"
+                },
+                "status": {
+                    "prepared": "Ready to send",
+                    "sent": "Sent",
+                    "awaiting_protocol": "Received, awaiting protocol",
+                    "completed": "Protocol retrieved",
+                    "failed": "Dispatch failed",
+                    "expired": "Expired"
+                },
+                "attempt_no": "Attempt no. {no}",
+                "sent_at": "Sent {at}",
+                "not_sent_yet": "Not sent yet",
+                "awaiting_note": "ČSSZ confirmed receipt of the message, not acceptance of the submission — only the processing protocol decides the result. Fetch the status; until then do not close the transaction or the result would be lost.",
+                "poll": "Fetch status",
+                "polling": "Fetching status…",
+                "poll_failed": "The submission status could not be fetched.",
+                "poll_inconclusive": "ČSSZ has returned neither a receipt confirmation nor a protocol yet. Please try again in a moment.",
+                "close": "Close",
+                "closing": "Closing…",
+                "close_failed": "The transaction could not be closed.",
+                "closed": "The transaction of attempt no. {id} has been closed.",
+                "close_note": "The protocol has been retrieved, so the transaction can be closed. The ČSSZ submission protocol requires closing it.",
+                "correlation": "CorrelationID",
+                "correlation_missing": "Not assigned",
+                "copy": "Copy",
+                "copied": "Copied",
+                "http_status": "HTTP response",
+                "completed_at": "Completed",
+                "acknowledged": "ČSSZ confirmed receipt, processing is running. Recommended delay before the next query: {seconds} s.",
+                "protocol_status": {
+                    "ProcessedAndComplete": "Processed and complete",
+                    "NotAccepted": "Not accepted",
+                    "Rejected": "Rejected",
+                    "PartiallyAccepted": "Partially accepted",
+                    "Processing": "Processing",
+                    "ContainsPassableErrors": "Contains passable errors"
+                },
+                "origin": {
+                    "dis": "DIS",
+                    "cjmhz": "cJMHZ",
+                    "platform": "Platform"
+                },
+                "report": {
+                    "no_errors": "The protocol contains no errors.",
+                    "area": "Area: {area}",
+                    "attributes": "Affected attributes:",
+                    "control_unknown": "Our catalog does not know this control — the message is therefore shown exactly as it arrived from ČSSZ.",
+                    "ik_mpsv": "IK MPSV {value}",
+                    "id_ppv": "ID PPV {value}",
+                    "form_guid": "Form {value}"
+                }
+            },
             "signing": {
                 "title": "ČSSZ signing certificate",
                 "description": "Choose which stored certificate signs this company's payroll submissions. Certificates are not uploaded here — the application has a single vault, under System → Electronic signatures.",

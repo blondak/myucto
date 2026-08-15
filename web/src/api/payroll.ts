@@ -2063,6 +2063,111 @@ export interface PayrollSigningProfilePayload {
   row_version?: number | null
 }
 
+/**
+ * Ledger odeslaných měsíčních hlášení na ČSSZ.
+ *
+ * Přírůstkový a nikdy se nepřepisuje: každý pokus o odeslání zakládá vlastní
+ * řádek, takže několik pokusů k jednomu podání je normální stav a zároveň
+ * doklad o tom, co se dělo — ne nepořádek, který by se měl schovat.
+ */
+export type PayrollJmhzTransportEnvironment = 'test' | 'production'
+
+/**
+ * Šest stavů pokusu. `awaiting_protocol` NENÍ přijaté podání: ČSSZ potvrzuje
+ * převzetí okamžitě a o výsledku rozhoduje až později. Hotovo znamená teprve
+ * `completed`, tedy „dotáhli jsme protokol o zpracování".
+ */
+export type PayrollJmhzTransportStatus =
+  | 'prepared'
+  | 'sent'
+  | 'awaiting_protocol'
+  | 'completed'
+  | 'failed'
+  | 'expired'
+
+export interface PayrollJmhzTransportAttempt {
+  id: number
+  supplier_id: number
+  environment: string
+  submission_id: number
+  channel: string
+  attempt_no: number
+  status: PayrollJmhzTransportStatus
+  /** CorrelationID přidělené branou VREP; bez něj se na výsledek nelze zeptat. */
+  correlation_reference: string | null
+  request_sha256: string | null
+  response_http_status: number | null
+  error_code: string | null
+  error_message: string | null
+  next_retry_at: string | null
+  sent_at: string | null
+  completed_at: string | null
+  row_version: number
+  created_by: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PayrollJmhzTransportHistory {
+  environment: PayrollJmhzTransportEnvironment
+  attempts: PayrollJmhzTransportAttempt[]
+}
+
+/** Potvrzení o PŘEVZETÍ zprávy, ne o přijetí podání. */
+export interface PayrollJmhzTransportAcknowledgement {
+  correlation_id: string
+  poll_interval_seconds: number | null
+  gateway_timestamp: string | null
+}
+
+/** Kontrola z katalogu ČSSZ dohledaná ke kódu chyby. */
+export interface PayrollJmhzProtocolControl {
+  name: string
+  detail: string | null
+  area: string | null
+  category: string | null
+  /** Atributy, kterých se kontrola týká — bez nich se hláška nedá dohledat v datech. */
+  attribute_ids: string[]
+}
+
+export interface PayrollJmhzProtocolError {
+  /** Číselný kód z protokolu (DIS = ID kontroly + 20000, cJMHZ = + 40000). */
+  code: number
+  message: string
+  origin: 'dis' | 'cjmhz' | 'platform'
+  control_id: number | null
+  form_guid: string | null
+  ik_mpsv: string | null
+  id_ppv: string | null
+  /**
+   * `null` u chyby, kterou náš katalog nezná — prostor kódů ČSSZ je širší.
+   * Taková chyba se ukazuje syrová, nikdy se neskrývá.
+   */
+  control: PayrollJmhzProtocolControl | null
+}
+
+/** `status` je jméno případu výčtu na backendu, tedy PascalCase. */
+export type PayrollJmhzProtocolStatus =
+  | 'ProcessedAndComplete'
+  | 'NotAccepted'
+  | 'Rejected'
+  | 'PartiallyAccepted'
+  | 'Processing'
+  | 'ContainsPassableErrors'
+
+export interface PayrollJmhzProtocolReport {
+  status: PayrollJmhzProtocolStatus
+  errors: PayrollJmhzProtocolError[]
+}
+
+export interface PayrollJmhzTransportPoll {
+  attempt: PayrollJmhzTransportAttempt
+  acknowledgement: PayrollJmhzTransportAcknowledgement | null
+  /** `true` teprve tehdy, když ČSSZ vrátila protokol o zpracování. */
+  settled: boolean
+  report: PayrollJmhzProtocolReport | null
+}
+
 export const payrollApi = {
   capabilities: () =>
     api.get<PayrollCapabilitiesResponse>('/payroll/capabilities').then(response => response.data),
@@ -2656,5 +2761,35 @@ export const payrollApi = {
   ) => api.delete<{ environment: PayrollSigningEnvironment; deleted: boolean }>(
     '/payroll/submissions/signing-profile',
     { data: { environment, ...stepUpProofBody(proof) } },
+  ).then(response => response.data),
+  /** Posledních 50 pokusů o odeslání, od nejnovějšího. */
+  jmhzTransportHistory: (environment: PayrollJmhzTransportEnvironment) =>
+    api.get<PayrollJmhzTransportHistory>('/payroll/submissions/jmhz-transport', {
+      params: { environment },
+    }).then(response => response.data),
+  /**
+   * Dotaz na výsledek. Variabilní symbol zaměstnavatele je povinný — brána VREP
+   * si jím ověřuje, že se ptá ten, kdo podával.
+   */
+  pollJmhzTransportAttempt: (
+    attemptId: number,
+    variableSymbol: string,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.get<PayrollJmhzTransportPoll>(
+    `/payroll/submissions/jmhz-transport/${attemptId}`,
+    { params: { variable_symbol: variableSymbol, environment } },
+  ).then(response => response.data),
+  /**
+   * Uzavření transakce. Podací protokol ho vyžaduje, ale až po dotažení
+   * protokolu — uzavřít dřív znamená přijít o výsledek.
+   */
+  closeJmhzTransportAttempt: (
+    attemptId: number,
+    variableSymbol: string,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.post<{ closed: boolean }>(
+    `/payroll/submissions/jmhz-transport/${attemptId}/close`,
+    { environment },
+    { params: { variable_symbol: variableSymbol, environment } },
   ).then(response => response.data),
 }

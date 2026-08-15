@@ -95,7 +95,7 @@ describe('PayrollDashboard monthly workspace', () => {
     })
   })
 
-  it('puts frequent monthly tasks before collapsible diagnostics', async () => {
+  it('dá běžné měsíční úkoly dopředu a diagnostiku běžnému uživateli vůbec neukáže', async () => {
     const wrapper = mountDashboard()
     await flushPromises()
 
@@ -107,8 +107,10 @@ describe('PayrollDashboard monthly workspace', () => {
     expect(destinations).toContain('{"name":"payroll-people"}')
     expect(destinations).toContain('{"name":"payroll-payments"}')
     expect(destinations).toContain('{"name":"payroll-documents"}')
-    expect(wrapper.get('[data-test="support-diagnostics"]').element.tagName).toBe('DETAILS')
-    expect(wrapper.get('[data-test="support-diagnostics"]').attributes('open')).toBeUndefined()
+    // Matice podporovaných scénářů nese interní identifikátory epiců a verzi
+    // support matrix. Zaměstnavateli neříká nic a budí dojem nehotového
+    // produktu — proto ji vidí jen superadmin.
+    expect(wrapper.find('[data-test="support-diagnostics"]').exists()).toBe(false)
   })
 
   it('shows the guide and employee cards for the current period', async () => {

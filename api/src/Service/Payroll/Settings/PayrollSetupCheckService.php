@@ -165,8 +165,10 @@ final class PayrollSetupCheckService
                 'jmhz_registry',
                 $features->jmhzRegistryReady,
                 $features->jmhzRegistryReady
-                    ? 'Registry zaměstnavatele pro JMHZ jsou připravené.'
-                    : 'JMHZ vyžaduje dokončené registry zaměstnavatele.',
+                    ? 'Registrační číslo zaměstnavatele u ČSSZ je vyplněné.'
+                    : 'Vyplňte registrační číslo zaměstnavatele přidělené ČSSZ'
+                        . ' (Mzdy → Podání → Registrace zaměstnavatele). Bez něj'
+                        . ' se hlášení nespáruje se zaměstnavatelem.',
             );
             $this->addCheck(
                 $checks,
@@ -174,8 +176,10 @@ final class PayrollSetupCheckService
                 'jmhz_certificate',
                 $features->jmhzCertificateReady,
                 $features->jmhzCertificateReady
-                    ? 'Přihlašovací prostředek pro JMHZ je připravený.'
-                    : 'JMHZ vyžaduje platný přihlašovací prostředek.',
+                    ? 'Podpisový certifikát pro produkční podání je zvolený a platný.'
+                    : 'Zvolte podpisový certifikát pro produkční prostředí'
+                        . ' (Mzdy → Podání → Certifikát). Testovací volba ani prošlý'
+                        . ' certifikát se nepočítají — hlášení by ČSSZ odmítla.',
             );
         }
 

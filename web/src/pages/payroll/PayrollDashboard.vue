@@ -342,7 +342,15 @@ onMounted(load)
         <PayrollEmployeeCards :period="currentPeriod" />
       </div>
 
+      <!--
+        Matice podporovaných scénářů je diagnostika pro podporu, ne informace
+        pro zaměstnavatele: jsou v ní interní identifikátory epiců a verze
+        support matrix. Na stránce, kterou uživatel používá k práci, jen
+        budí dojem nehotového produktu. Zůstává dostupná superadminovi
+        a přes API; běžný uživatel ji nevidí.
+      -->
       <details
+        v-if="auth.isSuperadmin"
         class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
         data-test="support-diagnostics"
       >

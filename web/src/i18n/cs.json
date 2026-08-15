@@ -2081,6 +2081,7 @@
             "subtitle": "Příprava, kontrola a stažení zákonných hlášení odděleně pro testovací a produkční prostředí.",
             "tabs_label": "Druhy mzdových podání",
             "tabs": {
+                "transport": "Stav odeslání",
                 "regzel": "Registrace zaměstnavatele",
                 "jmhz": "JMHZ",
                 "health": "Zdravotní pojišťovny",
@@ -2092,6 +2093,86 @@
             "jmhz_fail_closed": "Přímá příprava a odeslání JMHZ zatím nejsou zpřístupněné. Dokud nebude dokončené mapování, ověření dodejek a korekcí, systém žádné podání nepředstírá.",
             "health_title": "Hlášení zdravotním pojišťovnám",
             "health_fail_closed": "Přímá podání zdravotním pojišťovnám zatím nejsou zpřístupněná. Systém je nebude označovat jako odeslaná ani přijatá bez ověřeného kanálu a dodejky.",
+            "transport": {
+                "title": "Odeslaná podání a jejich stav",
+                "description": "Přehled všech pokusů o odeslání na ČSSZ, od nejnovějšího. Odesílá se při zmrazení podání — tady se stav sleduje a dotahuje výsledek.",
+                "load_failed": "Historii odeslání se nepodařilo načíst.",
+                "state_unknown": "Dokud se načtení nepovede, systém neví, co bylo odesláno — neberte prosím prázdnou obrazovku jako důkaz, že podání neodešlo.",
+                "environment": {
+                    "label": "Prostředí",
+                    "production": "Produkce",
+                    "test": "Testovací",
+                    "production_note": "Ostrá podání na ČSSZ. Co je v tomhle seznamu, platí vůči úřadu.",
+                    "test_note": "Testovací prostředí ČSSZ. Podání odsud se za splnění povinnosti nepovažuje."
+                },
+                "vs": {
+                    "label": "Variabilní symbol zaměstnavatele",
+                    "hint": "Brána VREP se na výsledek podání ptá pod variabilním symbolem zaměstnavatele — bez něj nelze zjistit stav ani uzavřít transakci. Najdete ho na rozhodnutí o registraci u ČSSZ.",
+                    "pick": "Převzít z pracoviště:",
+                    "missing": "V nastavení zaměstnavatele nemá variabilní symbol pro sociální zabezpečení vyplněný žádné aktivní pracoviště. Doplňte ho v nastavení, nebo ho zadejte tady ručně.",
+                    "required": "Zadejte variabilní symbol (nejvýše deset číslic), aby šlo zjistit stav nebo uzavřít transakci."
+                },
+                "empty": {
+                    "title": "Zatím nebylo nic odesláno",
+                    "description": "V tomhle prostředí zatím neproběhl žádný pokus o odeslání. Podání se odesílá po zmrazení v záložce JMHZ."
+                },
+                "group": {
+                    "period": "Období {start} – {end}",
+                    "period_unknown": "Období se nepodařilo dohledat",
+                    "submission": "Podání č. {id}",
+                    "attempts": "Pokusů: {total}"
+                },
+                "status": {
+                    "prepared": "Připraveno k odeslání",
+                    "sent": "Odesláno",
+                    "awaiting_protocol": "Převzato, čeká na protokol",
+                    "completed": "Protokol dotažen",
+                    "failed": "Odeslání selhalo",
+                    "expired": "Propadlo"
+                },
+                "attempt_no": "Pokus č. {no}",
+                "sent_at": "Odesláno {at}",
+                "not_sent_yet": "Zatím neodesláno",
+                "awaiting_note": "ČSSZ potvrdila převzetí zprávy, ne přijetí podání — o výsledku rozhoduje až protokol o zpracování. Zjistěte stav; do té doby transakci neuzavírejte, výsledek by se ztratil.",
+                "poll": "Zjistit stav",
+                "polling": "Zjišťuji stav…",
+                "poll_failed": "Stav podání se nepodařilo zjistit.",
+                "poll_inconclusive": "ČSSZ zatím nevrátila ani potvrzení o převzetí, ani protokol. Zkuste to prosím za chvíli znovu.",
+                "close": "Uzavřít",
+                "closing": "Uzavírám…",
+                "close_failed": "Transakci se nepodařilo uzavřít.",
+                "closed": "Transakce pokusu č. {id} byla uzavřena.",
+                "close_note": "Protokol je dotažený, transakci je proto možné uzavřít. Podací protokol ČSSZ uzavření vyžaduje.",
+                "correlation": "CorrelationID",
+                "correlation_missing": "Nepřiděleno",
+                "copy": "Kopírovat",
+                "copied": "Zkopírováno",
+                "http_status": "HTTP odpověď",
+                "completed_at": "Dokončeno",
+                "acknowledged": "ČSSZ potvrdila převzetí, zpracování běží. Doporučený odstup dalšího dotazu: {seconds} s.",
+                "protocol_status": {
+                    "ProcessedAndComplete": "Zpracováno a je úplné",
+                    "NotAccepted": "Nebylo přijato",
+                    "Rejected": "Zamítnuto",
+                    "PartiallyAccepted": "Částečně přijato",
+                    "Processing": "Ve zpracování",
+                    "ContainsPassableErrors": "Obsahuje propustné chyby"
+                },
+                "origin": {
+                    "dis": "DIS",
+                    "cjmhz": "cJMHZ",
+                    "platform": "Platforma"
+                },
+                "report": {
+                    "no_errors": "Protokol neobsahuje žádnou chybu.",
+                    "area": "Oblast: {area}",
+                    "attributes": "Dotčené atributy:",
+                    "control_unknown": "Tuhle kontrolu náš katalog nezná — hláška je proto zobrazená tak, jak přišla z ČSSZ.",
+                    "ik_mpsv": "IK MPSV {value}",
+                    "id_ppv": "ID PPV {value}",
+                    "form_guid": "Formulář {value}"
+                }
+            },
             "signing": {
                 "title": "Podpisový certifikát ČSSZ",
                 "description": "Vyberte, kterým z uložených certifikátů se podepisují mzdová podání této firmy. Certifikáty se sem nenahrávají — trezor je v aplikaci jeden, v Systém → Elektronické podpisy.",
