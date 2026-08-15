@@ -13,6 +13,10 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import {
   localPayrollPeriod,
   parsePayrollAmountToMinor,
@@ -58,6 +62,32 @@ const loadedPeriod = ref<string | null>(null)
 const saveError = ref<string | null>(null)
 const saveConflict = ref(false)
 let loadGeneration = 0
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'person', labelKey: 'payroll.quick_inputs.person', required: true },
+  { key: 'income_amount', labelKey: 'payroll.quick_inputs.income_amount', required: true },
+  { key: 'overtime', labelKey: 'payroll.quick_inputs.overtime' },
+  { key: 'bonus_amount', labelKey: 'payroll.quick_inputs.bonus_amount' },
+  { key: 'gross_preview', labelKey: 'payroll.quick_inputs.gross_preview' },
+]
+const tbl = useTablePrefs('payroll-quick-inputs', COLUMNS)
+
+const pageSize = 25
+const total = ref(0)
+const offset = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
+
+function goToPage(nextPage: number): void {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  void load()
+}
+
+/** Změna období mění obsah seznamu, takže stránka musí zpět na začátek. */
+function reload(): void {
+  offset.value = 0
+  void load()
+}
+
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
 const hasBlockingRows = computed(() => rows.value.some(row =>
   row.base_conflict || row.overtime_conflict || row.bonus_conflict))
@@ -283,10 +313,14 @@ async function load(): Promise<void> {
   saveError.value = null
   saveConflict.value = false
   try {
-    const month = await payrollApi.quickInputs(requestedPeriod)
+    const month = await payrollApi.quickInputs(requestedPeriod, {
+      limit: pageSize,
+      offset: offset.value,
+    })
     if (generation !== loadGeneration || period.value !== requestedPeriod
       || month.period !== requestedPeriod) return
     rows.value = month.items.map(toUi)
+    total.value = month.total
     loadedPeriod.value = requestedPeriod
   } catch (error) {
     if (generation === loadGeneration) {
@@ -343,10 +377,16 @@ async function save(): Promise<void> {
   saveError.value = null
   saveConflict.value = false
   try {
-    const month = await payrollApi.saveQuickInputs(payload())
+    const month = await payrollApi.saveQuickInputs(payload(), {
+      limit: pageSize,
+      offset: offset.value,
+    })
     if (generation !== loadGeneration || period.value !== requestedPeriod
       || month.period !== requestedPeriod) return
+    // Uložení dostalo v query tentýž limit/offset, takže vrací TU stránku,
+    // kterou měl uživatel před sebou — jinak by mu tabulka skočila na začátek.
     rows.value = month.items.map(toUi)
+    total.value = month.total
     toast.success(t('payroll.quick_inputs.saved'))
   } catch (error) {
     saveError.value = apiErrorMessage(error, t('payroll.quick_inputs.save_failed'))
@@ -394,7 +434,7 @@ onMounted(load)
             type="month"
             class="h-10 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
             :disabled="loading || saving"
-            @change="load"
+            @change="reload"
           >
         </label>
         <button :class="btnOutline('neutral')" :disabled="loading || saving" @click="load">
@@ -461,20 +501,24 @@ onMounted(load)
         <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.quick_inputs.empty_hint') }}</p>
       </div>
       <template v-else>
+        <div class="hidden flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2 lg:flex">
+          <ColumnPicker :ctrl="tbl" />
+          <DensityToggle :ctrl="tbl" />
+        </div>
         <div data-layout="desktop" class="hidden overflow-x-auto lg:block">
-          <table class="min-w-[1120px] w-full divide-y divide-neutral-200 text-sm">
+          <table class="min-w-[1120px] w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th class="px-4 py-3">{{ t('payroll.quick_inputs.person') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.quick_inputs.income_amount') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.quick_inputs.overtime') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.quick_inputs.bonus_amount') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('payroll.quick_inputs.gross_preview') }}</th>
+                <th v-if="tbl.isVisible('person')" class="px-4 py-3">{{ t('payroll.quick_inputs.person') }}</th>
+                <th v-if="tbl.isVisible('income_amount')" class="px-4 py-3">{{ t('payroll.quick_inputs.income_amount') }}</th>
+                <th v-if="tbl.isVisible('overtime')" class="px-4 py-3">{{ t('payroll.quick_inputs.overtime') }}</th>
+                <th v-if="tbl.isVisible('bonus_amount')" class="px-4 py-3">{{ t('payroll.quick_inputs.bonus_amount') }}</th>
+                <th v-if="tbl.isVisible('gross_preview')" class="px-4 py-3 text-right">{{ t('payroll.quick_inputs.gross_preview') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="row in rows" :key="row.employment_id" class="align-top">
-                <td class="px-4 py-4">
+                <td v-if="tbl.isVisible('person')" class="px-4 py-4">
                   <p class="font-semibold text-neutral-900">{{ row.full_name }}</p>
                   <p class="mt-0.5 text-xs text-neutral-500">{{ row.birth_number_masked ?? t('payroll.quick_inputs.identifier_missing') }}</p>
                   <p class="mt-1 text-xs text-neutral-500">{{ row.employment_code }}</p>
@@ -495,7 +539,7 @@ onMounted(load)
                     {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
                   </p>
                 </td>
-                <td class="px-4 py-4">
+                <td v-if="tbl.isVisible('income_amount')" class="px-4 py-4">
                   <p
                     :data-testid="`quick-income-label-${row.employment_id}`"
                     class="mb-1 text-xs font-medium text-neutral-600"
@@ -530,7 +574,7 @@ onMounted(load)
                     {{ fieldStateMessage(row, 'base') }}
                   </p>
                 </td>
-                <td class="px-4 py-4">
+                <td v-if="tbl.isVisible('overtime')" class="px-4 py-4">
                   <p class="mb-1 text-xs font-medium text-neutral-600">{{ additionalIncomeLabel(row) }}</p>
                   <div
                     v-if="row.overtime_hours_relation_supported"
@@ -604,7 +648,7 @@ onMounted(load)
                     {{ fieldStateMessage(row, 'overtime') }}
                   </p>
                 </td>
-                <td class="px-4 py-4">
+                <td v-if="tbl.isVisible('bonus_amount')" class="px-4 py-4">
                   <input
                     v-model="row.bonusAmount"
                     type="text"
@@ -633,7 +677,7 @@ onMounted(load)
                     {{ fieldStateMessage(row, 'bonus') }}
                   </p>
                 </td>
-                <td class="px-4 py-4 text-right">
+                <td v-if="tbl.isVisible('gross_preview')" class="px-4 py-4 text-right">
                   <p class="text-base font-semibold text-neutral-900">{{ formatMoney(grossPreview(row)) }}</p>
                   <p v-if="row.other_amount_minor" class="mt-1 text-xs text-neutral-500">
                     {{ t('payroll.quick_inputs.other_inputs', { amount: formatMoney(row.other_amount_minor) }) }}
@@ -788,6 +832,14 @@ onMounted(load)
             </div>
           </article>
         </div>
+
+        <PaginationBar
+          embedded
+          :page="currentPage"
+          :per-page="pageSize"
+          :total="total"
+          @update:page="goToPage"
+        />
       </template>
     </section>
 

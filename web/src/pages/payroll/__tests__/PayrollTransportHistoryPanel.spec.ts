@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   closeJmhzTransportAttempt: vi.fn(),
   cancelJmhzSubmission: vi.fn(),
   jmhzImportedProtocols: vi.fn(),
+  jmhzImportedProtocolErrors: vi.fn(),
   importJmhzProtocol: vi.fn(),
   employerSettings: vi.fn(),
   submissionDetail: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock('@/api/payroll', () => ({
     closeJmhzTransportAttempt: m.closeJmhzTransportAttempt,
     cancelJmhzSubmission: m.cancelJmhzSubmission,
     jmhzImportedProtocols: m.jmhzImportedProtocols,
+    jmhzImportedProtocolErrors: m.jmhzImportedProtocolErrors,
     importJmhzProtocol: m.importJmhzProtocol,
     employerSettings: m.employerSettings,
     submissionDetail: m.submissionDetail,
@@ -137,7 +139,7 @@ describe('PayrollTransportHistoryPanel', () => {
     const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()
 
-    expect(m.jmhzTransportHistory).toHaveBeenCalledWith('production')
+    expect(m.jmhzTransportHistory).toHaveBeenCalledWith('production', { limit: 25, offset: 0 })
     const group = wrapper.get('[data-test="transport-group-70"]')
     expect(group.text()).toContain('payroll.submissions.transport.group.attempts 2')
     expect(group.text()).toContain('2026-07-01')
@@ -375,7 +377,7 @@ describe('PayrollTransportHistoryPanel', () => {
     await wrapper.get('[data-test="transport-environment-test"]').trigger('click')
     await flushPromises()
 
-    expect(m.jmhzTransportHistory).toHaveBeenLastCalledWith('test')
+    expect(m.jmhzTransportHistory).toHaveBeenLastCalledWith('test', { limit: 25, offset: 0 })
     expect(wrapper.get('[data-test="transport-environment-note"]').text())
       .toContain('payroll.submissions.transport.environment.test_note')
   })
@@ -524,7 +526,7 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(order).toEqual(['transport-group-70', 'transport-imported-11'])
   })
 
-  it('protokol s chybou ukáže kód, hlášku i kontrolu z katalogu', async () => {
+  it('protokol s chybou dotáhne rozpad až po rozbalení a zapamatuje si ho', async () => {
     m.jmhzTransportHistory.mockResolvedValue({ environment: 'production', attempts: [] })
     m.jmhzImportedProtocols.mockResolvedValue({
       environment: 'production',
@@ -532,33 +534,54 @@ describe('PayrollTransportHistoryPanel', () => {
         status_code: 3,
         status_name: 'Rejected',
         error_count: 1,
-        errors: [{
-          code: 20301,
-          message: 'Pojistné neodpovídá vyměřovacímu základu.',
-          origin: 'dis',
-          control_id: 301,
-          form_guid: 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEE',
-          ik_mpsv: null,
-          id_ppv: null,
-          control: {
-            name: 'Kontrola pojistného',
-            detail: null,
-            area: 'Pojistné',
-            category: 'F1',
-            attribute_ids: ['10477'],
-          },
-        }],
       })],
+    })
+    m.jmhzImportedProtocolErrors.mockResolvedValue({
+      environment: 'production',
+      protocol_id: 11,
+      detail_available: true,
+      errors: [{
+        code: 20301,
+        message: 'Pojistné neodpovídá vyměřovacímu základu.',
+        origin: 'dis',
+        control_id: 301,
+        form_guid: 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEE',
+        ik_mpsv: null,
+        id_ppv: null,
+        control: {
+          name: 'Kontrola pojistného',
+          detail: null,
+          area: 'Pojistné',
+          category: 'F1',
+          attribute_ids: ['10477'],
+        },
+      }],
     })
 
     const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()
 
+    // Seznam nese jen počet; detail se do prohlížeče netahá, dokud si ho
+    // uživatel nevyžádá.
+    expect(m.jmhzImportedProtocolErrors).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="transport-imported-error-count-11"]').text()).toBe('1')
+    expect(wrapper.find('[data-test="transport-imported-error-11-0"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="transport-imported-errors-toggle-11"]').trigger('click')
+    await flushPromises()
+
+    expect(m.jmhzImportedProtocolErrors).toHaveBeenCalledWith(11, 'production')
     const error = wrapper.get('[data-test="transport-imported-error-11-0"]')
     expect(error.text()).toContain('20301')
     expect(error.text()).toContain('Pojistné neodpovídá vyměřovacímu základu.')
     expect(error.text()).toContain('Kontrola pojistného')
     expect(error.text()).toContain('10477')
+
+    // Zabalit a znovu rozbalit už na server nechodí — výsledek si držíme.
+    await wrapper.get('[data-test="transport-imported-errors-toggle-11"]').trigger('click')
+    await wrapper.get('[data-test="transport-imported-errors-toggle-11"]').trigger('click')
+    await flushPromises()
+    expect(m.jmhzImportedProtocolErrors).toHaveBeenCalledTimes(1)
   })
 
   it('načte protokol ze souboru a potvrdí, co ČSSZ hlásí', async () => {

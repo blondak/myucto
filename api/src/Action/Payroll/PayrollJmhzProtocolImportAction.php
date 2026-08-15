@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollImportedJmhzProtocolRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolImportService;
@@ -95,12 +96,66 @@ final class PayrollJmhzProtocolImportAction
             return $this->invalid($response, 'Prostředí musí být test nebo production.');
         }
 
+        // Strop je tvrdý, ne jen výchozí — z URL ho zvednout nejde.
+        $query = $request->getQueryParams();
+        $limit = max(1, min(
+            PayrollImportedJmhzProtocolRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollImportedJmhzProtocolRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
+        $page = $this->protocols->history(
+            $this->currentSupplierId($request),
+            $environment,
+            $limit,
+            $offset,
+        );
+
+        // Klíč `protocols` zůstává kvůli stávajícím volajícím.
         return $this->noStore(Json::ok($response, [
             'environment' => $environment,
-            'protocols' => $this->protocols->history(
-                $this->currentSupplierId($request),
-                $environment,
-            ),
+            'protocols' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
+        ]));
+    }
+
+    /**
+     * Vysvětlené chyby JEDNOHO protokolu.
+     *
+     * Seznam je záměrně nenese: počítají se z uloženého originálu, a načítat
+     * kvůli tomu XML všech protokolů na stránce znamenalo posílat databází
+     * desítky dokladů, ze kterých si uživatel otevře nanejvýš jeden.
+     *
+     * @param array<string,string> $args
+     */
+    public function errors(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $denied;
+        }
+        $environment = $this->environment($request);
+        if ($environment === null) {
+            return $this->invalid($response, 'Prostředí musí být test nebo production.');
+        }
+        $protocolId = filter_var($args['id'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        if (!is_int($protocolId)) {
+            return $this->invalid($response, 'Protokol musí být kladné celé číslo.');
+        }
+
+        $detail = $this->protocols->explain(
+            $this->currentSupplierId($request),
+            $environment,
+            $protocolId,
+        );
+
+        return $this->noStore(Json::ok($response, [
+            'environment' => $environment,
+            'protocol_id' => $protocolId,
+            'errors' => $detail['errors'],
+            'detail_available' => $detail['detail_available'],
         ]));
     }
 

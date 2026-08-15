@@ -194,7 +194,7 @@ final class PayrollHealthInsuranceLiabilityMaterializerTest extends TestCase
             $this->integerValue($incoming, 'amount_minor'),
         );
         $listed = (new PayrollPaymentQueryService($this->db))
-            ->listForPeriod($this->supplierId, '2026-06');
+            ->listForPeriod($this->supplierId, '2026-06')['items'];
         self::assertCount(2, $listed);
         self::assertSame('ready', $listed[0]['batch_eligibility']);
         self::assertNull($listed[0]['batch_block_reason']);
@@ -391,7 +391,7 @@ final class PayrollHealthInsuranceLiabilityMaterializerTest extends TestCase
             self::assertStringNotContainsString('bank_account_ciphertext', $source);
         }
         $listed = (new PayrollPaymentQueryService($this->db))
-            ->listForPeriod($this->supplierId, '2026-06');
+            ->listForPeriod($this->supplierId, '2026-06')['items'];
         self::assertCount(2, $listed);
         self::assertSame(
             [

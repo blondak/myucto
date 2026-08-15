@@ -35,12 +35,25 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
 }))
 
-vi.mock('vue-i18n', () => ({
+// `useTablePrefs` táhne @/i18n, které volá skutečné `createI18n` — továrna
+// proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
   }),
 }))
+
+// Preference tabulek jdou přes Pinii a API; v testu stačí prázdné výchozí.
+vi.mock('@/composables/useUserPrefs', async () => {
+  const { computed } = await import('vue')
+  return {
+    ensurePrefsLoaded: () => Promise.resolve(),
+    getPagePrefs: () => computed(() => ({})),
+    patchPagePrefs: () => {},
+  }
+})
 
 import PayrollDocuments from '@/pages/payroll/PayrollDocuments.vue'
 

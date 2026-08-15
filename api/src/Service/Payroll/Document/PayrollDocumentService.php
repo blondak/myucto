@@ -462,23 +462,40 @@ class PayrollDocumentService
     }
 
     /**
+     * Seznam dokumentů období. `revisions` je krátký číselník (revize běhů
+     * v měsíci), takže se nestránkuje; stránkují se `items`, kterých je za
+     * měsíc řádově tolik, kolik má firma pracovních poměrů.
+     *
      * @return array{
      *   revisions:list<array<string,mixed>>,
-     *   items:list<array<string,mixed>>
+     *   items:list<array<string,mixed>>,
+     *   total:int
      * }
      */
-    public function listForPeriod(int $supplierId, string $period): array
-    {
+    public function listForPeriod(
+        int $supplierId,
+        string $period,
+        int $limit = PayrollDocumentRepository::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
         if (preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $period) !== 1) {
             throw new \InvalidArgumentException('Payroll period must use YYYY-MM.');
         }
         $periodStart = $period . '-01';
+        $page = $this->documents->listForPeriod(
+            $supplierId,
+            $periodStart,
+            $limit,
+            $offset,
+        );
+
         return [
             'revisions' => $this->documents->approvedRevisionsForPeriod(
                 $supplierId,
                 $periodStart,
             ),
-            'items' => $this->documents->listForPeriod($supplierId, $periodStart),
+            'items' => $page['items'],
+            'total' => $page['total'],
         ];
     }
 

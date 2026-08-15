@@ -2450,6 +2450,11 @@
                     "protocol_dated_at": "Datum protokolu",
                     "submitted_at": "Datum podání",
                     "detail_unavailable": "Uložený originál se nepodařilo znovu přečíst, takže detail chyb tu není. Protokol hlásí chyb: {total}.",
+                    "error_count": "Chyb v protokolu",
+                    "errors_show": "Zobrazit chyby ({total})",
+                    "errors_hide": "Skrýt chyby",
+                    "errors_loading": "Načítám chyby…",
+                    "errors_failed": "Chyby protokolu se nepodařilo načíst.",
                     "kind": {
                         "processing": "Protokol o zpracování",
                         "completeness": "Protokol o kompletnosti",

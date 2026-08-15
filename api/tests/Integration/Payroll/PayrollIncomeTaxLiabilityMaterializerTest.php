@@ -165,7 +165,7 @@ final class PayrollIncomeTaxLiabilityMaterializerTest extends TestCase
             $rows,
         ));
         $listed = (new PayrollPaymentQueryService($this->db))
-            ->listForPeriod($this->supplierId, '2026-06');
+            ->listForPeriod($this->supplierId, '2026-06')['items'];
         self::assertSame(
             ['ready', 'ready'],
             array_column($listed, 'batch_eligibility'),

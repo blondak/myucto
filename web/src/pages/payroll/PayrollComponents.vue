@@ -35,6 +35,10 @@ import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, 
 import CodeNameFields from '@/components/ui/CodeNameFields.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import {
   canApplyPayrollImport,
   localPayrollPeriod,
@@ -94,6 +98,20 @@ const loadFailed = ref(false)
 const saving = ref(false)
 const components = ref<PayrollComponent[]>([])
 const recurring = ref<PayrollRecurringComponent[]>([])
+const RECURRING_COLUMNS: ColumnDef[] = [
+  { key: 'employment', labelKey: 'payroll.components.fields.employment', required: true },
+  { key: 'component', labelKey: 'payroll.components.fields.component' },
+  { key: 'calculation', labelKey: 'payroll.components.fields.calculation', required: true },
+  { key: 'validity', labelKey: 'payroll.components.fields.validity' },
+  { key: 'status', labelKey: 'payroll.components.fields.status' },
+  { key: 'actions', labelKey: 'payroll.components.fields.actions', required: true },
+]
+const recurringTbl = useTablePrefs('payroll-recurring-components', RECURRING_COLUMNS)
+const recurringPageSize = 25
+const recurringTotal = ref(0)
+const recurringOffset = ref(0)
+const recurringPage = computed(() =>
+  Math.floor(recurringOffset.value / recurringPageSize) + 1)
 const inputs = ref<PayrollInput[]>([])
 const employments = ref<PayrollEmploymentOption[]>([])
 const chartAccounts = ref<PayrollAccountOption[]>([])
@@ -403,13 +421,17 @@ async function load() {
   try {
     const [catalog, recurringItems, periodInputs, , accounts] = await Promise.all([
       payrollApi.components(),
-      payrollApi.recurringComponents(),
+      payrollApi.recurringComponents(undefined, {
+        limit: recurringPageSize,
+        offset: recurringOffset.value,
+      }),
       payrollApi.inputs(period.value),
       loadEmploymentOptions(),
       payrollApi.accountOptions(),
     ])
     components.value = catalog
-    recurring.value = recurringItems
+    recurring.value = recurringItems.recurring_components
+    recurringTotal.value = recurringItems.total
     inputs.value = periodInputs
     chartAccounts.value = accounts
   } catch (error: any) {
@@ -668,6 +690,20 @@ function recurringPayload(): PayrollRecurringComponentPayload | null {
   }
 }
 
+async function loadRecurringPage() {
+  const page = await payrollApi.recurringComponents(undefined, {
+    limit: recurringPageSize,
+    offset: recurringOffset.value,
+  })
+  recurring.value = page.recurring_components
+  recurringTotal.value = page.total
+}
+
+function goToRecurringPage(nextPage: number) {
+  recurringOffset.value = Math.max(0, (nextPage - 1) * recurringPageSize)
+  void loadRecurringPage()
+}
+
 async function saveRecurring() {
   const payload = recurringPayload()
   if (!payload) {
@@ -682,7 +718,7 @@ async function saveRecurring() {
     } else {
       await payrollApi.createRecurringComponent(payload)
     }
-    recurring.value = await payrollApi.recurringComponents()
+    await loadRecurringPage()
     recurringEditorOpen.value = false
     toast.success(t('payroll.components.recurring.saved'))
   } catch (error: any) {
@@ -1080,8 +1116,16 @@ onMounted(load)
         </section>
 
         <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">
-          <div data-layout="desktop" class="hidden overflow-x-auto md:block"><table class="min-w-full divide-y divide-neutral-200 text-sm"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="px-4 py-3">{{ t('payroll.components.fields.employment') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.component') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.calculation') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.validity') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="item in recurring" :key="item.id"><td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employee_name }}</p><p class="text-xs text-neutral-500">{{ item.employment_code }}</p></td><td class="px-4 py-3"><p>{{ item.component_name }}</p><p class="font-mono text-xs text-neutral-500">{{ item.component_code }}</p></td><td class="px-4 py-3"><p>{{ t(`payroll.components.calculation.${item.calculation_kind}`) }}</p><p class="text-xs text-neutral-500">{{ item.amount_minor !== null ? formatMoney(item.amount_minor) : item.rate_basis_points !== null ? `${item.rate_basis_points / 100} %` : '—' }}</p></td><td class="px-4 py-3 text-xs">{{ item.valid_from }} – {{ item.valid_to ?? t('payroll.components.open_ended') }}</td><td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(item.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></td><td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2"><button v-if="canWrite" :class="btnOutlineSm('neutral')" @click="editRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button></div></td></tr></tbody></table></div>
+          <div class="hidden flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2 md:flex"><ColumnPicker :ctrl="recurringTbl" /><DensityToggle :ctrl="recurringTbl" /></div>
+          <div data-layout="desktop" class="hidden overflow-x-auto md:block"><table class="min-w-full divide-y divide-neutral-200 text-sm" :class="recurringTbl.densityClass.value"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th v-if="recurringTbl.isVisible('employment')" class="px-4 py-3">{{ t('payroll.components.fields.employment') }}</th><th v-if="recurringTbl.isVisible('component')" class="px-4 py-3">{{ t('payroll.components.fields.component') }}</th><th v-if="recurringTbl.isVisible('calculation')" class="px-4 py-3">{{ t('payroll.components.fields.calculation') }}</th><th v-if="recurringTbl.isVisible('validity')" class="px-4 py-3">{{ t('payroll.components.fields.validity') }}</th><th v-if="recurringTbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th v-if="recurringTbl.isVisible('actions')" class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="item in recurring" :key="item.id"><td v-if="recurringTbl.isVisible('employment')" class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employee_name }}</p><p class="text-xs text-neutral-500">{{ item.employment_code }}</p></td><td v-if="recurringTbl.isVisible('component')" class="px-4 py-3"><p>{{ item.component_name }}</p><p class="font-mono text-xs text-neutral-500">{{ item.component_code }}</p></td><td v-if="recurringTbl.isVisible('calculation')" class="px-4 py-3"><p>{{ t(`payroll.components.calculation.${item.calculation_kind}`) }}</p><p class="text-xs text-neutral-500">{{ item.amount_minor !== null ? formatMoney(item.amount_minor) : item.rate_basis_points !== null ? `${item.rate_basis_points / 100} %` : '—' }}</p></td><td v-if="recurringTbl.isVisible('validity')" class="px-4 py-3 text-xs">{{ item.valid_from }} – {{ item.valid_to ?? t('payroll.components.open_ended') }}</td><td v-if="recurringTbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(item.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></td><td v-if="recurringTbl.isVisible('actions')" class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2"><button v-if="canWrite" :class="btnOutlineSm('neutral')" @click="editRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button></div></td></tr></tbody></table></div>
           <div data-layout="mobile" class="space-y-3 p-4 md:hidden"><article v-for="item in recurring" :key="item.id" class="rounded-lg border border-neutral-200 p-4"><div class="flex flex-wrap items-start justify-between gap-2"><div><h3 class="font-semibold text-neutral-900">{{ item.employee_name }}</h3><p class="text-xs text-neutral-500">{{ item.employment_code }} · {{ item.component_code }}</p></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(item.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></div><dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.component') }}</dt><dd>{{ item.component_name }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.amount') }}</dt><dd>{{ item.amount_minor !== null ? formatMoney(item.amount_minor) : item.rate_basis_points !== null ? `${item.rate_basis_points / 100} %` : '—' }}</dd></div><div class="col-span-2"><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.validity') }}</dt><dd>{{ item.valid_from }} – {{ item.valid_to ?? t('payroll.components.open_ended') }}</dd></div></dl><div v-if="canWrite" class="mt-4 flex flex-wrap gap-2"><button :class="btnOutlineSm('neutral')" @click="editRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button></div></article></div>
+          <PaginationBar
+            embedded
+            :page="recurringPage"
+            :per-page="recurringPageSize"
+            :total="recurringTotal"
+            @update:page="goToRecurringPage"
+          />
         </section>
       </section>
 

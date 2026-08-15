@@ -40,7 +40,8 @@ final class PayrollRecurringComponentsAction
         if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
             return $error;
         }
-        $employmentId = $request->getQueryParams()['employment_id'] ?? null;
+        $query = $request->getQueryParams();
+        $employmentId = $query['employment_id'] ?? null;
         if ($employmentId !== null) {
             $parsed = filter_var($employmentId, FILTER_VALIDATE_INT, [
                 'options' => ['min_range' => 1],
@@ -55,11 +56,26 @@ final class PayrollRecurringComponentsAction
             }
             $employmentId = (int) $parsed;
         }
+        // `employment_id` je volitelný, takže bez filtru je seznam součin
+        // „počet lidí × počet předpisů". Strop je tvrdý, ne jen výchozí.
+        $limit = max(1, min(
+            PayrollRecurringComponentRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollRecurringComponentRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
+        $page = $this->recurring->list(
+            $this->currentSupplierId($request),
+            is_int($employmentId) ? $employmentId : null,
+            $limit,
+            $offset,
+        );
+
+        // Klíč `recurring_components` zůstává kvůli stávajícím volajícím.
         return Json::ok($response, [
-            'recurring_components' => $this->recurring->list(
-                $this->currentSupplierId($request),
-                is_int($employmentId) ? $employmentId : null,
-            ),
+            'recurring_components' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ]);
     }
 

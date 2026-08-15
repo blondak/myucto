@@ -43,7 +43,21 @@ import PayrollSubmissionOverviewPanel from '@/pages/payroll/PayrollSubmissionOve
 describe('PayrollSubmissionOverviewPanel — odvození období', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    m.submissionOverview.mockResolvedValue({ items: [] })
+    m.submissionOverview.mockResolvedValue({
+      items: [],
+      total: 0,
+      deadline_summary: {
+        not_open: 0,
+        open: 0,
+        due_soon: 0,
+        due_today: 0,
+        overdue: 0,
+        awaiting_result: 0,
+        fulfilled: 0,
+        action_required: 0,
+        cancelled: 0,
+      },
+    })
     m.runs.mockResolvedValue([])
   })
 

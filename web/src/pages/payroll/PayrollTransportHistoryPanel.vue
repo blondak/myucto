@@ -39,6 +39,7 @@ import {
   type PayrollJmhzTransportStatus,
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
@@ -71,6 +72,73 @@ const cancelPendingId = ref<number | null>(null)
 
 /** Výsledky doptání, klíčované ID pokusu — zůstávají do dalšího načtení. */
 const polls = ref<Record<number, PayrollJmhzTransportPoll>>({})
+
+/*
+ * Vysvětlené chyby načtených protokolů. Seznam je nenese — počítají se z
+ * uloženého XML, takže se dotahují až pro řádek, který uživatel rozbalí, a pak
+ * si je pamatujeme: druhé rozbalení téhož protokolu už na server nechodí.
+ */
+const protocolErrors = ref<Record<number, PayrollJmhzProtocolError[]>>({})
+const protocolErrorsOpen = ref<Record<number, boolean>>({})
+const protocolErrorsLoading = ref<Record<number, boolean>>({})
+const protocolErrorsFailed = ref<Record<number, boolean>>({})
+/** `false` = uložený originál se nepodařilo znovu přečíst, detail neexistuje. */
+const protocolDetailAvailable = ref<Record<number, boolean>>({})
+
+const attemptsPageSize = 25
+const attemptsTotal = ref(0)
+const attemptsOffset = ref(0)
+const attemptsPage = computed(() =>
+  Math.floor(attemptsOffset.value / attemptsPageSize) + 1)
+
+const importedPageSize = 25
+const importedTotal = ref(0)
+const importedOffset = ref(0)
+const importedPage = computed(() =>
+  Math.floor(importedOffset.value / importedPageSize) + 1)
+
+function goToAttemptsPage(nextPage: number) {
+  attemptsOffset.value = Math.max(0, (nextPage - 1) * attemptsPageSize)
+  void load()
+}
+
+function goToImportedPage(nextPage: number) {
+  importedOffset.value = Math.max(0, (nextPage - 1) * importedPageSize)
+  void load()
+}
+
+function resetProtocolErrors() {
+  protocolErrors.value = {}
+  protocolErrorsOpen.value = {}
+  protocolErrorsLoading.value = {}
+  protocolErrorsFailed.value = {}
+  protocolDetailAvailable.value = {}
+}
+
+async function toggleProtocolErrors(protocol: PayrollJmhzImportedProtocol) {
+  const id = protocol.id
+  if (protocolErrorsOpen.value[id]) {
+    protocolErrorsOpen.value = { ...protocolErrorsOpen.value, [id]: false }
+    return
+  }
+  protocolErrorsOpen.value = { ...protocolErrorsOpen.value, [id]: true }
+  if (protocolErrors.value[id] !== undefined || protocolErrorsLoading.value[id]) return
+  protocolErrorsLoading.value = { ...protocolErrorsLoading.value, [id]: true }
+  protocolErrorsFailed.value = { ...protocolErrorsFailed.value, [id]: false }
+  try {
+    const detail = await payrollApi.jmhzImportedProtocolErrors(id, environment.value)
+    protocolErrors.value = { ...protocolErrors.value, [id]: detail.errors }
+    protocolDetailAvailable.value = {
+      ...protocolDetailAvailable.value,
+      [id]: detail.detail_available,
+    }
+  } catch {
+    protocolErrorsFailed.value = { ...protocolErrorsFailed.value, [id]: true }
+  } finally {
+    const { [id]: _pending, ...rest } = protocolErrorsLoading.value
+    protocolErrorsLoading.value = rest
+  }
+}
 
 const variableSymbol = ref('')
 const variableSymbolTouched = ref(false)
@@ -302,22 +370,35 @@ async function load() {
   loadError.value = ''
   actionError.value = ''
   success.value = ''
+  // Zapamatovaný rozpad chyb platí pro protokoly, které právě mizí z obrazovky
+  // — po znovunačtení (jiná stránka, nový import) by mohl patřit něčemu jinému.
+  resetProtocolErrors()
   try {
     // Obě strany přehledu se načítají naráz a SELHÁNÍ KTERÉKOLI Z NICH je
     // selhání celku. Ukázat jen jednu polovinu a druhou tiše vynechat by
     // znamenalo přehled, který zamlčuje podání — a přesně kvůli tomu se sem
     // uživatel dívá.
     const [history, protocols] = await Promise.all([
-      payrollApi.jmhzTransportHistory(environment.value),
-      payrollApi.jmhzImportedProtocols(environment.value),
+      payrollApi.jmhzTransportHistory(environment.value, {
+        limit: attemptsPageSize,
+        offset: attemptsOffset.value,
+      }),
+      payrollApi.jmhzImportedProtocols(environment.value, {
+        limit: importedPageSize,
+        offset: importedOffset.value,
+      }),
     ])
     attempts.value = history.attempts ?? []
+    attemptsTotal.value = history.total ?? 0
     imported.value = protocols.protocols ?? []
+    importedTotal.value = protocols.total ?? 0
   } catch (exception: unknown) {
     // Stav zůstává NEZNÁMÝ, ne prázdný — šablona podle `loadError` skryje
     // prázdný stav i seznam, aby se selhání nedalo přečíst jako „nic neodešlo".
     attempts.value = []
+    attemptsTotal.value = 0
     imported.value = []
+    importedTotal.value = 0
     loadError.value = apiErrorMessage(
       exception,
       t('payroll.submissions.transport.load_failed'),
@@ -368,6 +449,9 @@ async function switchEnvironment(next: PayrollJmhzTransportEnvironment) {
   if (next === environment.value || busy.value) return
   environment.value = next
   polls.value = {}
+  // Jiné prostředí = jiné seznamy, takže stránky musí zpět na začátek.
+  attemptsOffset.value = 0
+  importedOffset.value = 0
   await load()
 }
 
@@ -1133,10 +1217,22 @@ onMounted(loadVariableSymbols)
                   {{ entry.protocol.submitted_at ?? '—' }}
                 </dd>
               </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-neutral-500">
+                  {{ t('payroll.submissions.transport.imported.error_count') }}
+                </dt>
+                <dd
+                  class="mt-0.5 text-neutral-800"
+                  :data-test="`transport-imported-error-count-${entry.protocol.id}`"
+                >
+                  {{ entry.protocol.error_count }}
+                </dd>
+              </div>
             </dl>
 
             <p
-              v-if="entry.protocol.detail_available === false"
+              v-if="entry.protocol.detail_available === false
+                || protocolDetailAvailable[entry.protocol.id] === false"
               class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-800"
               :data-test="`transport-imported-detail-missing-${entry.protocol.id}`"
             >
@@ -1146,16 +1242,50 @@ onMounted(loadVariableSymbols)
             </p>
 
             <p
-              v-else-if="(entry.protocol.errors ?? []).length === 0"
+              v-else-if="entry.protocol.error_count === 0"
               class="mt-3 text-sm text-neutral-600"
               :data-test="`transport-imported-clean-${entry.protocol.id}`"
             >
               {{ t('payroll.submissions.transport.report.no_errors') }}
             </p>
 
-            <ul v-else class="mt-3 space-y-3">
+            <template v-else>
+              <button
+                type="button"
+                :class="[btnOutlineSm('neutral'), 'mt-3']"
+                :disabled="protocolErrorsLoading[entry.protocol.id]"
+                :data-test="`transport-imported-errors-toggle-${entry.protocol.id}`"
+                @click="toggleProtocolErrors(entry.protocol)"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.search" />
+                </svg>
+                {{
+                  protocolErrorsLoading[entry.protocol.id]
+                    ? t('payroll.submissions.transport.imported.errors_loading')
+                    : protocolErrorsOpen[entry.protocol.id]
+                      ? t('payroll.submissions.transport.imported.errors_hide')
+                      : t('payroll.submissions.transport.imported.errors_show', {
+                        total: entry.protocol.error_count,
+                      })
+                }}
+              </button>
+
+              <p
+                v-if="protocolErrorsFailed[entry.protocol.id]"
+                class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+                role="alert"
+                :data-test="`transport-imported-errors-failed-${entry.protocol.id}`"
+              >
+                {{ t('payroll.submissions.transport.imported.errors_failed') }}
+              </p>
+
+              <ul
+                v-else-if="protocolErrorsOpen[entry.protocol.id]"
+                class="mt-3 space-y-3"
+              >
               <li
-                v-for="(error, index) in entry.protocol.errors ?? []"
+                v-for="(error, index) in protocolErrors[entry.protocol.id] ?? []"
                 :key="`${error.code}-${index}`"
                 :data-test="`transport-imported-error-${entry.protocol.id}-${index}`"
                 class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
@@ -1200,11 +1330,40 @@ onMounted(loadVariableSymbols)
                   {{ errorLocation(error).join(' · ') }}
                 </p>
               </li>
-            </ul>
+              </ul>
+            </template>
           </div>
         </section>
         </template>
       </template>
+
+      <!--
+        Dvě lišty, protože přehled slévá dva nezávislé seznamy: pokusy naší
+        aplikace a protokoly načtené odjinud. Jeden společný stránkovač by
+        musel lhát aspoň jednomu z nich.
+      -->
+      <div v-if="attemptsTotal > attemptsPageSize" class="space-y-1">
+        <p class="text-xs font-medium uppercase tracking-wide text-neutral-500">
+          {{ t('payroll.submissions.transport.source.app') }}
+        </p>
+        <PaginationBar
+          :page="attemptsPage"
+          :per-page="attemptsPageSize"
+          :total="attemptsTotal"
+          @update:page="goToAttemptsPage"
+        />
+      </div>
+      <div v-if="importedTotal > importedPageSize" class="space-y-1">
+        <p class="text-xs font-medium uppercase tracking-wide text-neutral-500">
+          {{ t('payroll.submissions.transport.source.imported') }}
+        </p>
+        <PaginationBar
+          :page="importedPage"
+          :per-page="importedPageSize"
+          :total="importedTotal"
+          @update:page="goToImportedPage"
+        />
+      </div>
     </template>
   </section>
 </template>

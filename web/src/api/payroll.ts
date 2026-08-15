@@ -4,6 +4,19 @@ import { api } from './client'
 // kódování důkazu se nesmí rozejít se zbytkem aplikace.
 import { stepUpProofBody, type EpoStepUpProof } from './epoSubmissions'
 
+/** Stránka seznamu. Bez hodnot platí serverový výchozí strop, ne „všechno". */
+export interface PayrollPageParams {
+  limit?: number
+  offset?: number
+}
+
+export function pageParams(page?: PayrollPageParams): Record<string, number> {
+  return {
+    ...(page?.limit === undefined ? {} : { limit: page.limit }),
+    ...(page?.offset === undefined ? {} : { offset: page.offset }),
+  }
+}
+
 export type PayrollModuleStatus = 'disabled' | 'setup' | 'active' | 'suspended'
 export type PayrollSupportStatus = 'supported' | 'manual_review' | 'not_supported'
 
@@ -1026,6 +1039,8 @@ export interface PayrollQuickInputRow {
 export interface PayrollQuickInputMonth {
   period: string
   items: PayrollQuickInputRow[]
+  /** Počet vztahů v měsíci; `items` je jen aktuální stránka. */
+  total: number
 }
 
 export interface PayrollQuickInputSavePayload {
@@ -1241,10 +1256,14 @@ export type PayrollSubmissionDeadlinePhase =
   | 'action_required'
   | 'cancelled'
 
+/** Skupina agend; klasifikuje ji server, klient ji z kódu agendy neodvozuje. */
+export type PayrollSubmissionAgendaGroup = 'jmhz' | 'health' | 'other'
+
 export interface PayrollSubmissionOverviewItem {
   id: number
   environment: PayrollRegzelEnvironment
   agenda_code: string
+  agenda_group: PayrollSubmissionAgendaGroup
   subject_type: string
   subject_reference: string
   period_start: string
@@ -1275,6 +1294,8 @@ export interface PayrollSubmissionOverviewItem {
 export interface PayrollSubmissionOverviewResponse {
   environment: PayrollRegzelEnvironment
   period: string
+  /** `null` = bez filtru; jinak platí `items`, `total` i oba souhrny pro tuhle skupinu. */
+  agenda_group: PayrollSubmissionAgendaGroup | null
   summary: {
     total: number
     open: number
@@ -1287,6 +1308,9 @@ export interface PayrollSubmissionOverviewResponse {
   }
   deadline_summary: Record<PayrollSubmissionDeadlinePhase, number>
   items: PayrollSubmissionOverviewItem[]
+  total: number
+  limit: number
+  offset: number
 }
 
 export interface PayrollSubmissionDetail {
@@ -1397,8 +1421,17 @@ export interface PayrollSubmissionInboxItem {
   updated_at: string
 }
 
+/**
+ * Výběr stavů inboxu. Filtruje SERVER, aby `total` popisoval právě ty řádky,
+ * které stránka ukáže; `unresolved` je výchozí, protože inbox je pracovní
+ * seznam. Vyřešená položka je doklad, že se problém vyřešil — proto jde
+ * dohledat, ne že by se zahodila.
+ */
+export type PayrollSubmissionInboxStatusFilter = 'unresolved' | 'resolved' | 'all'
+
 export interface PayrollSubmissionInboxResponse {
   environment: PayrollRegzelEnvironment
+  status: PayrollSubmissionInboxStatusFilter
   summary: {
     total: number
     open: number
@@ -1406,6 +1439,9 @@ export interface PayrollSubmissionInboxResponse {
     snoozed: number
   }
   items: PayrollSubmissionInboxItem[]
+  total: number
+  limit: number
+  offset: number
 }
 
 export interface PayrollHealthPaymentOverview {
@@ -1936,11 +1972,17 @@ export interface PayrollDocumentList {
   period: string
   revisions: PayrollDocumentRevision[]
   items: PayrollDocument[]
+  total: number
+  limit: number
+  offset: number
 }
 
 export interface PayrollAnnualDocumentList {
   year: number
   items: PayrollDocument[]
+  total: number
+  limit: number
+  offset: number
 }
 
 export interface PayrollEmploymentExitReadinessItem {
@@ -2448,6 +2490,9 @@ export interface PayrollJmhzCorrectiveSubmission {
 export interface PayrollJmhzTransportHistory {
   environment: PayrollJmhzTransportEnvironment
   attempts: PayrollJmhzTransportAttempt[]
+  total: number
+  limit: number
+  offset: number
 }
 
 /** Potvrzení o PŘEVZETÍ zprávy, ne o přijetí podání. */
@@ -2542,7 +2587,10 @@ export interface PayrollJmhzImportedProtocol {
   imported_by: number | null
   created_at: string
   updated_at: string
-  /** Vysvětlené chyby; počítají se z uloženého originálu při každém čtení. */
+  /**
+   * Vysvětlené chyby. Seznam protokolů je NENESE — dotahují se na vyžádání
+   * přes `jmhzImportedProtocolErrors()` pro jeden rozbalený řádek.
+   */
   errors?: PayrollJmhzProtocolError[]
   /** `false`, když se uložený originál nepodařilo znovu přečíst. */
   detail_available?: boolean
@@ -2551,6 +2599,16 @@ export interface PayrollJmhzImportedProtocol {
 export interface PayrollJmhzImportedProtocolHistory {
   environment: PayrollJmhzTransportEnvironment
   protocols: PayrollJmhzImportedProtocol[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface PayrollJmhzImportedProtocolErrors {
+  environment: PayrollJmhzTransportEnvironment
+  protocol_id: number
+  errors: PayrollJmhzProtocolError[]
+  detail_available: boolean
 }
 
 export interface PayrollJmhzImportedProtocolResult {
@@ -2741,19 +2799,37 @@ export const payrollApi = {
     api.get<PayrollEmployerSettingsResponse>('/payroll/settings/employer').then(response => response.data.settings),
   saveEmployerSettings: (payload: PayrollEmployerSettingsPayload) =>
     api.put<PayrollEmployerSettingsResponse>('/payroll/settings/employer', payload).then(response => response.data.settings),
+  /**
+   * `agenda_group` filtruje na SERVERU. Odfiltrovat si skupinu až z přijaté
+   * stránky by znamenalo pager počítaný přes všechny agendy nad tabulkou,
+   * která ukazuje jen jednu.
+   */
   submissionOverview: (
     environment: PayrollRegzelEnvironment,
     period: string,
+    options?: PayrollPageParams & { agenda_group?: PayrollSubmissionAgendaGroup },
   ) =>
     api.get<PayrollSubmissionOverviewResponse>('/payroll/submissions/overview', {
-      params: { environment, period },
+      params: {
+        environment,
+        period,
+        ...(options?.agenda_group ? { agenda_group: options.agenda_group } : {}),
+        ...pageParams(options),
+      },
     }).then(response => response.data),
   submissionDetail: (submissionId: number) =>
     api.get<PayrollSubmissionDetail>(`/payroll/submissions/${submissionId}`)
       .then(response => response.data),
-  submissionInbox: (environment: PayrollRegzelEnvironment) =>
+  submissionInbox: (
+    environment: PayrollRegzelEnvironment,
+    page?: PayrollPageParams & { status?: PayrollSubmissionInboxStatusFilter },
+  ) =>
     api.get<PayrollSubmissionInboxResponse>('/payroll/submissions/inbox', {
-      params: { environment },
+      params: {
+        environment,
+        ...(page?.status === undefined ? {} : { status: page.status }),
+        ...pageParams(page),
+      },
     }).then(response => response.data),
   acknowledgeSubmissionInboxItem: (itemId: number, rowVersion: number) =>
     api.post<{ id: number; status: string; row_version: number }>(
@@ -2928,10 +3004,16 @@ export const payrollApi = {
   saveRegzelProfile: (payload: PayrollRegzelProfilePayload) =>
     api.put<{ profile: PayrollRegzelProfile }>('/payroll/submissions/regzel/profile', payload)
       .then(response => response.data.profile),
-  regzelSnapshots: (environment: PayrollRegzelEnvironment) =>
-    api.get<{ items: PayrollRegzelSnapshot[] }>('/payroll/submissions/regzel/snapshots', {
-      params: { environment },
-    }).then(response => response.data.items),
+  regzelSnapshots: (environment: PayrollRegzelEnvironment, page?: PayrollPageParams) =>
+    api.get<{
+      environment: PayrollRegzelEnvironment
+      items: PayrollRegzelSnapshot[]
+      total: number
+      limit: number
+      offset: number
+    }>('/payroll/submissions/regzel/snapshots', {
+      params: { environment, ...pageParams(page) },
+    }).then(response => response.data),
   prepareRegzel: (payload: {
     office_id: number
     environment: PayrollRegzelEnvironment
@@ -3014,12 +3096,14 @@ export const payrollApi = {
       `/payroll/employments/${employmentId}/dimensions/${assignmentId}`,
       payload,
     ).then(response => response.data.dimension),
-  listDocuments: (period: string) =>
-    api.get<PayrollDocumentList>('/payroll/documents', { params: { period } })
-      .then(response => response.data),
-  listAnnualDocuments: (year: number) =>
-    api.get<PayrollAnnualDocumentList>('/payroll/documents/annual', { params: { year } })
-      .then(response => response.data),
+  listDocuments: (period: string, page?: PayrollPageParams) =>
+    api.get<PayrollDocumentList>('/payroll/documents', {
+      params: { period, ...pageParams(page) },
+    }).then(response => response.data),
+  listAnnualDocuments: (year: number, page?: PayrollPageParams) =>
+    api.get<PayrollAnnualDocumentList>('/payroll/documents/annual', {
+      params: { year, ...pageParams(page) },
+    }).then(response => response.data),
   generatePayrollSheet: (employeeId: number, year: number) =>
     api.post<PayrollDocument>(
       `/payroll/people/${employeeId}/documents/payroll-sheet/${year}`,
@@ -3228,10 +3312,18 @@ export const payrollApi = {
     api.delete(`/payroll/components/${componentId}/jmhz-mapping`, {
       data: { row_version: rowVersion },
     }),
-  recurringComponents: (employmentId?: number) =>
-    api.get<{ recurring_components: PayrollRecurringComponent[] }>('/payroll/recurring-components', {
-      params: employmentId ? { employment_id: employmentId } : undefined,
-    }).then(response => response.data.recurring_components),
+  recurringComponents: (employmentId?: number, page?: PayrollPageParams) =>
+    api.get<{
+      recurring_components: PayrollRecurringComponent[]
+      total: number
+      limit: number
+      offset: number
+    }>('/payroll/recurring-components', {
+      params: {
+        ...(employmentId ? { employment_id: employmentId } : {}),
+        ...pageParams(page),
+      },
+    }).then(response => response.data),
   createRecurringComponent: (payload: PayrollRecurringComponentPayload) =>
     api.post<{ recurring_component: PayrollRecurringComponent }>('/payroll/recurring-components', payload)
       .then(response => response.data.recurring_component),
@@ -3252,12 +3344,14 @@ export const payrollApi = {
   inputs: (period: string) =>
     api.get<{ inputs: PayrollInput[] }>('/payroll/inputs', { params: { period } })
       .then(response => response.data.inputs),
-  quickInputs: (period: string) =>
-    api.get<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', { params: { period } })
-      .then(response => response.data.month),
-  saveQuickInputs: (payload: PayrollQuickInputSavePayload) =>
-    api.put<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', payload)
-      .then(response => response.data.month),
+  quickInputs: (period: string, page?: PayrollPageParams) =>
+    api.get<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', {
+      params: { period, ...pageParams(page) },
+    }).then(response => response.data.month),
+  saveQuickInputs: (payload: PayrollQuickInputSavePayload, page?: PayrollPageParams) =>
+    api.put<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', payload, {
+      params: pageParams(page),
+    }).then(response => response.data.month),
   previewInput: (payload: PayrollInputPayload) =>
     api.post<{ preview: PayrollInputPreview }>('/payroll/inputs/preview', payload)
       .then(response => response.data.preview),
@@ -3307,10 +3401,13 @@ export const payrollApi = {
     '/payroll/submissions/signing-profile',
     { data: { environment, ...stepUpProofBody(proof) } },
   ).then(response => response.data),
-  /** Posledních 50 pokusů o odeslání, od nejnovějšího. */
-  jmhzTransportHistory: (environment: PayrollJmhzTransportEnvironment) =>
+  /** Stránka pokusů o odeslání, od nejnovějšího. */
+  jmhzTransportHistory: (
+    environment: PayrollJmhzTransportEnvironment,
+    page?: PayrollPageParams,
+  ) =>
     api.get<PayrollJmhzTransportHistory>('/payroll/submissions/jmhz-transport', {
-      params: { environment },
+      params: { environment, ...pageParams(page) },
     }).then(response => response.data),
   /**
    * Dotaz na výsledek. Variabilní symbol zaměstnavatele je povinný — brána VREP
@@ -3366,9 +3463,25 @@ export const payrollApi = {
     { environment, components },
   ).then(response => response.data),
   /** Protokoly načtené ze souboru, od nejnovějšího období. */
-  jmhzImportedProtocols: (environment: PayrollJmhzTransportEnvironment) =>
+  jmhzImportedProtocols: (
+    environment: PayrollJmhzTransportEnvironment,
+    page?: PayrollPageParams,
+  ) =>
     api.get<PayrollJmhzImportedProtocolHistory>(
       '/payroll/submissions/jmhz-protocol-import',
+      { params: { environment, ...pageParams(page) } },
+    ).then(response => response.data),
+  /**
+   * Vysvětlené chyby jednoho protokolu. Seznam je nenese — počítají se z
+   * uloženého originálu, takže dotáhnout je pro celou stránku by znamenalo
+   * číst desítky XML kvůli jedinému rozbalenému řádku.
+   */
+  jmhzImportedProtocolErrors: (
+    protocolId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) =>
+    api.get<PayrollJmhzImportedProtocolErrors>(
+      `/payroll/submissions/jmhz-protocol-import/${protocolId}/errors`,
       { params: { environment } },
     ).then(response => response.data),
   /**

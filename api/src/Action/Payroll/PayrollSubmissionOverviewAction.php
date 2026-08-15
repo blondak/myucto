@@ -63,6 +63,7 @@ final class PayrollSubmissionOverviewAction
             [$periodStart, $periodEnd] = $this->period(
                 $query['period'] ?? null,
             );
+            $agendaGroup = $this->agendaGroup($query['agenda_group'] ?? null);
         } catch (\InvalidArgumentException $exception) {
             return Json::error(
                 $response,
@@ -72,14 +73,32 @@ final class PayrollSubmissionOverviewAction
             );
         }
 
-        $items = $this->repository->listOverview(
-            $this->currentSupplierId($request),
+        // Strop je tvrdý, ne jen výchozí — z URL ho zvednout nejde.
+        $limit = max(1, min(
+            PayrollSubmissionRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollSubmissionRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
+        $supplierId = $this->currentSupplierId($request);
+        // Skupina agend se filtruje na SERVERU. Panel ukazuje vždy jen jednu
+        // (JMHZ / zdravotní) a kdyby si ji odfiltroval až z přijaté stránky,
+        // pager by počítal řádky obou a tabulka ukazovala jen některé.
+        $page = $this->repository->listOverview(
+            $supplierId,
             $environment,
             $periodStart,
             $periodEnd,
+            $limit,
+            $offset,
+            $agendaGroup,
         );
+        $items = $page['items'];
+
+        // Oba souhrny se počítají nad CELÝM obdobím, ne nad stránkou. Dřív
+        // `summary.total` hlásil počet řádků po tichém oříznutí na dvě stě,
+        // takže se tvářil jako pravda a přitom říkal jen „kolik se vešlo".
         $summary = [
-            'total' => count($items),
+            'total' => $page['total'],
             'open' => 0,
             'prepared' => 0,
             'submitted' => 0,
@@ -99,31 +118,68 @@ final class PayrollSubmissionOverviewAction
             'action_required' => 0,
             'cancelled' => 0,
         ];
-        foreach ($items as &$item) {
-            $status = $item['status'];
+        foreach ($this->repository->overviewSummaryRows(
+            $supplierId,
+            $environment,
+            $periodStart,
+            $periodEnd,
+            $agendaGroup,
+        ) as $row) {
+            $status = $row['status'];
             if (array_key_exists($status, $summary) && $status !== 'total') {
                 ++$summary[$status];
             } else {
                 ++$summary['other'];
             }
-            $assessment = $this->deadlines->assess(
+            ++$deadlineSummary[$this->deadlines->assess(
+                $row['earliest_submission_on'],
+                $row['due_on'],
+                $status,
+                $row['submission_status'],
+            )->phase];
+        }
+
+        // Posouzení termínu u ZOBRAZENÝCH řádků — tady kvůli tomu, co uživatel
+        // u řádku vidí, ne kvůli souhrnu.
+        foreach ($items as &$item) {
+            $item['deadline'] = $this->deadlines->assess(
                 $item['earliest_submission_on'],
                 $item['due_on'],
-                $status,
+                $item['status'],
                 $item['latest_submission']['status'] ?? null,
-            );
-            $item['deadline'] = $assessment->toArray();
-            ++$deadlineSummary[$assessment->phase];
+            )->toArray();
         }
         unset($item);
 
+        // Klíč `items` zůstává kvůli stávajícím volajícím.
         return Json::ok($response, [
             'environment' => $environment,
             'period' => substr($periodStart, 0, 7),
+            'agenda_group' => $agendaGroup,
             'summary' => $summary,
             'deadline_summary' => $deadlineSummary,
             'items' => $items,
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ]);
+    }
+
+    private function agendaGroup(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!is_string($value)
+            || !in_array($value, PayrollSubmissionRepository::AGENDA_GROUPS, true)
+        ) {
+            throw new \InvalidArgumentException(
+                'Skupina agend musí být jedna z: '
+                    . implode(', ', PayrollSubmissionRepository::AGENDA_GROUPS) . '.',
+            );
+        }
+
+        return $value;
     }
 
     private function environment(mixed $value): string

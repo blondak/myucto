@@ -182,7 +182,7 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
         );
         self::assertArrayNotHasKey('bank_account_ciphertext', $source);
         $listed = (new PayrollPaymentQueryService($this->db))
-            ->listForPeriod($this->supplierId, '2026-06');
+            ->listForPeriod($this->supplierId, '2026-06')['items'];
         self::assertSame('ready', $listed[0]['batch_eligibility'] ?? null);
         $batch = $this->batches->build(
             $this->supplierId,

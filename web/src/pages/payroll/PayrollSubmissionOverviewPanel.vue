@@ -8,10 +8,12 @@ import {
   type PayrollJmhzPvpojPreview,
   type PayrollRegzelEnvironment,
   type PayrollRun,
+  type PayrollSubmissionDeadlinePhase,
   type PayrollSubmissionDetail,
   type PayrollSubmissionOverviewItem,
 } from '@/api/payroll'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollJmhzOrdinaryEvidencePanel from './PayrollJmhzOrdinaryEvidencePanel.vue'
 import PayrollJmhzXmlDryRunPanel from './PayrollJmhzXmlDryRunPanel.vue'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
@@ -29,7 +31,27 @@ const error = ref('')
 const healthError = ref('')
 const period = ref(localPayrollPeriod())
 const environment = ref<PayrollRegzelEnvironment>('production')
-const allItems = ref<PayrollSubmissionOverviewItem[]>([])
+// Server filtruje podle `agenda_group`, takže `items` je rovnou to, co panel
+// ukazuje — žádné doufiltrovávání na klientovi.
+const items = ref<PayrollSubmissionOverviewItem[]>([])
+const pageSize = 50
+const total = ref(0)
+const offset = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
+const EMPTY_DEADLINE_SUMMARY: Record<PayrollSubmissionDeadlinePhase, number> = {
+  not_open: 0,
+  open: 0,
+  due_soon: 0,
+  due_today: 0,
+  overdue: 0,
+  awaiting_result: 0,
+  fulfilled: 0,
+  action_required: 0,
+  cancelled: 0,
+}
+const deadlineSummary = ref<Record<PayrollSubmissionDeadlinePhase, number>>({
+  ...EMPTY_DEADLINE_SUMMARY,
+})
 const healthOverviews = ref<PayrollHealthPaymentOverview[]>([])
 const jmhzPreviews = ref<PayrollJmhzPvpojPreview[]>([])
 const jmhzApprovedRuns = ref<PayrollRun[]>([])
@@ -52,35 +74,20 @@ const environmentOptions = computed(() => [
     label: t('payroll.regzel.environment.test'),
   },
 ])
-const items = computed(() => allItems.value.filter(item =>
-  agendaGroup(item.agenda_code) === props.mode,
-))
-const counts = computed(() => ({
-  total: items.value.length,
-  open: items.value.filter(item =>
-    ['not_open', 'open', 'due_soon', 'due_today'].includes(item.deadline.phase),
-  ).length,
-  submitted: items.value.filter(item =>
-    item.deadline.phase === 'awaiting_result',
-  ).length,
-  fulfilled: items.value.filter(item =>
-    item.deadline.phase === 'fulfilled',
-  ).length,
-  attention: items.value.filter(item =>
-    ['overdue', 'action_required'].includes(item.deadline.phase),
-  ).length,
-}))
-
-function agendaGroup(code: string): 'jmhz' | 'health' | 'other' {
-  const normalized = code.trim().toUpperCase()
-  if (/^(?:HEALTH[_-])?(?:HOZ|PPZ)(?:[_-]|$)/.test(normalized)) {
-    return 'health'
+/*
+ * Karty stojí na serverovém `deadline_summary`, ne na načtené stránce — souhrn
+ * platí za celé období a (díky `agenda_group`) právě za agendu tohohle panelu.
+ */
+const counts = computed(() => {
+  const phases = deadlineSummary.value
+  return {
+    total: total.value,
+    open: phases.not_open + phases.open + phases.due_soon + phases.due_today,
+    submitted: phases.awaiting_result,
+    fulfilled: phases.fulfilled,
+    attention: phases.overdue + phases.action_required,
   }
-  if (/^(?:JMHZ?|REGZEL(?:DOPL)?|PREZAM|PREZEC|REGZEC|DZMH|OREZAM|ZREZAM)(?:[_-]|$)/.test(normalized)) {
-    return 'jmhz'
-  }
-  return 'other'
-}
+})
 
 function statusClass(status: string): string {
   if (status === 'fulfilled') return 'bg-success-50 text-success-700'
@@ -281,14 +288,19 @@ async function load() {
     const response = await payrollApi.submissionOverview(
       environment.value,
       period.value,
+      { agenda_group: props.mode, limit: pageSize, offset: offset.value },
     )
-    allItems.value = response.items
+    items.value = response.items
+    total.value = response.total
+    deadlineSummary.value = response.deadline_summary
     await Promise.all([
       loadHealthOverviews(),
       loadJmhzPreviews(),
     ])
   } catch (exception) {
-    allItems.value = []
+    items.value = []
+    total.value = 0
+    deadlineSummary.value = { ...EMPTY_DEADLINE_SUMMARY }
     healthOverviews.value = []
     jmhzPreviews.value = []
     jmhzApprovedRuns.value = []
@@ -301,7 +313,16 @@ async function load() {
   }
 }
 
-watch([environment, period, () => props.mode], load)
+function goToPage(nextPage: number) {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  void load()
+}
+
+// Změna filtru mění obsah seznamu, takže stránka musí zpět na začátek.
+watch([environment, period, () => props.mode], () => {
+  offset.value = 0
+  void load()
+})
 onMounted(load)
 </script>
 
@@ -485,6 +506,14 @@ onMounted(load)
             </button>
           </article>
         </div>
+
+        <PaginationBar
+          embedded
+          :page="currentPage"
+          :per-page="pageSize"
+          :total="total"
+          @update:page="goToPage"
+        />
       </section>
 
       <p
