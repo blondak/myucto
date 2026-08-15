@@ -75,6 +75,10 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollRunStatus'      => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunStatus',
         'payroll.ts::PayrollRunCommand'     => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunCommand',
         'payroll.ts::PayrollRunOutcomeCode' => 'consts:MyInvoice\Service\Payroll\Run\PayrollRunCommandOutcome',
+        // Proč rozklad pojistného není k dispozici. Každý důvod má na obrazovce
+        // vlastní větu — nová hodnota bez věty by se projevila prázdnou kartou.
+        'payrollInsurance.ts::PayrollInsuranceUnavailableReason' =>
+            'const:MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService::UNAVAILABLE_REASONS',
 
         // Pracovní vztah a jeho podmínky
         'payroll.ts::PayrollEmploymentStatus'        => 'db:payroll_employments.status',
