@@ -172,7 +172,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
                 self::YEAR,
                 [
                     'annual_revision_id' => $revisionId,
-                    'outcome' => $result->outcome?->value,
+                    'outcome' => $result->outcome->value,
                     'tax_difference_minor' => $result->taxDifferenceMinorUnits,
                     'bonus_difference_minor' => $result->bonusDifferenceMinorUnits,
                     'settlement_difference_minor' =>
@@ -194,7 +194,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
                 self::YEAR,
                 [
                     'annual_revision_id' => $revisionId,
-                    'outcome' => $result->outcome?->value,
+                    'outcome' => $result->outcome->value,
                     'tax_difference_minor' => $result->taxDifferenceMinorUnits,
                     'bonus_difference_minor' => $result->bonusDifferenceMinorUnits,
                     'settlement_difference_minor' =>
