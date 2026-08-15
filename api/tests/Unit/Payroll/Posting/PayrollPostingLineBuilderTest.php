@@ -352,6 +352,181 @@ final class PayrollPostingLineBuilderTest extends TestCase
         return $result;
     }
 
+    /**
+     * `payroll_dimensions.default_account_code` se dal nastavit od migrace 1307,
+     * validoval se ve službě i v DB — a zaúčtování ho nečetlo nikde. Uživatel
+     * nastavil středisku nákladový účet a mzda se zaúčtovala na výchozí
+     * předkontaci zaměstnavatele, bez jediného hlášení.
+     */
+    public function testDimensionDefaultAccountReplacesTheEmployerDefaultCostAccount(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['people'][0]['employments'][0]['dimensions'] = [
+            $this->dimension('cost_center', 'VYROBA', '521.100'),
+        ];
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        )->lines);
+
+        self::assertSame(100_000, $lineMap['521.100|debit'], 'Náklad jde na účet střediska.');
+        self::assertArrayNotHasKey('521|debit', $lineMap, 'Výchozí účet zaměstnavatele se už nepoužije.');
+        self::assertSame(
+            100_000,
+            $lineMap['331|credit'],
+            'Dimenze mění NÁKLAD, ne závazek vůči zaměstnanci.',
+        );
+        self::assertSame(
+            202_800,
+            $lineMap['524|debit'],
+            'Zákonné odvody zaměstnavatele dimenze nepřebíjí — jeden kód na dvě nákladové skupiny nesedí.',
+        );
+    }
+
+    /**
+     * `default_account_code` je podle svého jména i podle komentáře migrace 1307
+     * „analytika k VÝCHOZÍM kontacím". Explicitní volba u složky je konkrétnější
+     * a musí vyhrát — jinak by dimenze tiše rozbila ručně nastavenou předkontaci.
+     */
+    public function testExplicitComponentAccountBeatsTheDimensionDefault(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['people'][0]['employments'][0]['dimensions'] = [
+            $this->dimension('cost_center', 'VYROBA', '521.100'),
+        ];
+        $snapshot['people'][0]['employments'][0]['inputs'][0]['component'][
+            'accounting_debit_code'
+        ] = '518.900';
+        $snapshot['people'][0]['employments'][0]['inputs'][0]['component'][
+            'accounting_credit_code'
+        ] = '331.900';
+        $result = $this->calculatedResult();
+        $result['people'][0]['employments'][0]['inputs'][0]['accounting'] = [
+            'debit_code' => '518.900',
+            'credit_code' => '331.900',
+            'amount_minor' => 100_000,
+        ];
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        )->lines);
+
+        self::assertSame(100_000, $lineMap['518.900|debit']);
+        self::assertArrayNotHasKey('521.100|debit', $lineMap);
+    }
+
+    /**
+     * Vztah může mít středisko, zakázku i činnost současně a účet smí nést každá.
+     * Pořadí musí být pevné, jinak by tytéž vstupy zaúčtovaly různě podle toho,
+     * v jakém pořadí je někdo zadal.
+     */
+    public function testDimensionPriorityIsFixedCostCenterThenProjectThenActivity(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['people'][0]['employments'][0]['dimensions'] = [
+            $this->dimension('activity', 'MONTAZ', '521.300'),
+            $this->dimension('project', 'ZAKAZKA1', '521.200'),
+            $this->dimension('cost_center', 'VYROBA', '521.100'),
+        ];
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        )->lines);
+
+        self::assertSame(100_000, $lineMap['521.100|debit'], 'Středisko je primární nositel nákladové analytiky.');
+        self::assertArrayNotHasKey('521.200|debit', $lineMap);
+        self::assertArrayNotHasKey('521.300|debit', $lineMap);
+    }
+
+    /** Dimenze bez účtu je jen sledovací značka — na zaúčtování nesmí mít vliv. */
+    public function testDimensionWithoutDefaultAccountFallsBackToTheEmployerDefault(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['people'][0]['employments'][0]['dimensions'] = [
+            $this->dimension('cost_center', 'VYROBA', null),
+            $this->dimension('project', 'ZAKAZKA1', '521.200'),
+        ];
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        )->lines);
+
+        self::assertSame(
+            100_000,
+            $lineMap['521.200|debit'],
+            'Středisko účet nemá, takže rozhoduje zakázka.',
+        );
+    }
+
+    /**
+     * Revize zmrazené dřív, než dimenze začaly do snapshotu vstupovat, klíč
+     * `dimensions` vůbec nemají. Nesmí se přeúčtovat jinak než původně — proto
+     * absence znamená „žádná dimenze", ne dohledání dnešního přiřazení.
+     */
+    public function testHistoricalSnapshotWithoutDimensionsPostsExactlyAsBefore(): void
+    {
+        $snapshot = $this->snapshot();
+        self::assertArrayNotHasKey('dimensions', $snapshot['people'][0]['employments'][0]);
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $snapshot,
+            $this->calculatedResult(),
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        )->lines);
+
+        self::assertSame(100_000, $lineMap['521|debit']);
+    }
+
+    /** Nesmyslný účet v dimenzi zaúčtování zastaví, místo aby ho zapsal do deníku. */
+    public function testInvalidDimensionAccountIsRejected(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['people'][0]['employments'][0]['dimensions'] = [
+            $this->dimension('cost_center', 'VYROBA', 'nesmysl'),
+        ];
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $this->expectException(\DomainException::class);
+        $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function dimension(string $type, string $code, ?string $account): array
+    {
+        return [
+            'type' => $type,
+            'code' => $code,
+            'name' => $code,
+            'default_account_code' => $account,
+        ];
+    }
+
     /** @return array<string,mixed> */
     private function snapshot(): array
     {

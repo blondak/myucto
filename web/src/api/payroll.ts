@@ -1989,6 +1989,13 @@ export interface PayrollRun {
   validations: PayrollRunValidation[]
 }
 
+export interface PayrollRunsPage {
+  runs: PayrollRun[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface PayrollRunCommandResponse {
   command: PayrollRunCommand
   from_status: PayrollRunStatus
@@ -2772,10 +2779,27 @@ export const payrollApi = {
       payload,
       { headers: { 'Idempotency-Key': idempotencyKey } },
     ).then(response => response.data),
+  /**
+   * Stránka seznamu běhů. `result_snapshot` nese jen `totals` — osobní rozpad
+   * v seznamu není, ten se dotahuje přes `run()` pro jeden konkrétní běh.
+   * Bez `limit` platí serverový výchozí strop, ne „všechno".
+   */
+  runsPage: (period?: string, page?: { limit?: number, offset?: number }) =>
+    api.get<PayrollRunsPage>('/payroll/runs', {
+      params: {
+        ...(period ? { period } : {}),
+        ...(page?.limit === undefined ? {} : { limit: page.limit }),
+        ...(page?.offset === undefined ? {} : { offset: page.offset }),
+      },
+    }).then(response => response.data),
   runs: (period?: string) =>
-    api.get<{ runs: PayrollRun[] }>('/payroll/runs', {
+    api.get<PayrollRunsPage>('/payroll/runs', {
       params: period ? { period } : undefined,
     }).then(response => response.data.runs),
+  /** Jeden běh i s osobním rozpadem ve `result_snapshot.people`. */
+  run: (runId: number) =>
+    api.get<{ run: PayrollRun }>(`/payroll/runs/${runId}`)
+      .then(response => response.data.run),
   createRun: (payload: {
     period_start: string
     payment_date: string

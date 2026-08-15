@@ -74,6 +74,26 @@ final class PayrollPersonStatutoryEvidenceValidatorTest extends TestCase
         $this->validator->normalize(42, '2026-06-30', $raw);
     }
 
+    public function testRejectsHealthInsurerOutsideTheCodebook(): void
+    {
+        $raw = $this->completeRaw();
+        $raw['health']['coverages'][0]['insurer_code'] = '999';
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Kód zdravotní pojišťovny 999 neexistuje.');
+        $this->validator->normalize(42, '2026-06-30', $raw);
+    }
+
+    public function testAcceptsEveryInsurerFromTheCodebook(): void
+    {
+        foreach (['111', '201', '205', '207', '209', '211', '213'] as $code) {
+            $raw = $this->completeRaw();
+            $raw['health']['coverages'][0]['insurer_code'] = $code;
+            $snapshot = $this->validator->normalize(42, '2026-06-30', $raw);
+            self::assertSame($code, $snapshot['health']['coverage']['insurer_code']);
+        }
+    }
+
     public function testMissingEvidenceRemainsExplicitlyAbsent(): void
     {
         $snapshot = $this->validator->normalize(42, '2026-06-30', [

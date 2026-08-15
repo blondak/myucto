@@ -373,11 +373,16 @@ final class MonthlyEmploymentIncomeTaxCalculator
         if ($signed || $group === null) {
             return TaxRegime::Advance;
         }
-        $maximum = $group === 'dpp'
-            ? $policy->money('dpp.withholding.maximum')
-            : $policy->money('other.withholding.maximum');
+        // § 6 odst. 4 ZDP (znění zák. č. 470/2024 Sb. od 1. 1. 2025): srážka platí,
+        // jen když úhrn rozhodné částky NEDOSÁHNE. Test je proto ostrý — příjem
+        // PŘESNĚ na rozhodné částce zakládá účast na nemocenském pojištění
+        // (§ 7a z. č. 187/2006 Sb. „aspoň ve výši“) a daní se zálohou, ne srážkou.
+        // Obě hranice tak na sebe navazují bez díry i bez překryvu.
+        $threshold = $group === 'dpp'
+            ? $policy->money('dpp.withholding.threshold')
+            : $policy->money('other.withholding.threshold');
 
-        return $groupBase <= $maximum
+        return $groupBase < $threshold
             ? TaxRegime::Withholding
             : TaxRegime::Advance;
     }

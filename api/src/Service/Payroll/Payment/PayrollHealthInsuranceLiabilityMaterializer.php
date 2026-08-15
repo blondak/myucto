@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Payment;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
+use MyInvoice\Service\Codebook\HealthInsurers;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -287,9 +288,12 @@ final class PayrollHealthInsuranceLiabilityMaterializer
             'závazky zdravotních pojišťoven',
         ) as $row) {
             $code = $this->string($row, 'insurer_code');
-            if (preg_match('/^[0-9]{3}$/D', $code) !== 1) {
+            // Ze závazku se odvozuje reference i platební příkaz, takže
+            // pojišťovna musí být z číselníku — pouhý tvar `\d{3}` tu propustil
+            // neexistující kód až do zákonné platby.
+            if (!HealthInsurers::isValid($code)) {
                 throw new \DomainException(
-                    'Kód zdravotní pojišťovny není platný.',
+                    HealthInsurers::invalidCodeMessage($code),
                 );
             }
             $amount = $this->nonNegativeInt(

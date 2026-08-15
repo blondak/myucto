@@ -5,6 +5,7 @@ import {
   payrollApi,
   type PayrollRun,
   type PayrollRunCommand,
+  type PayrollRunResultPerson,
 } from '@/api/payroll'
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
 import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
@@ -23,6 +24,16 @@ const period = ref(localPayrollPeriod())
 const paymentDate = ref(defaultPaymentDate(period.value))
 const runs = ref<PayrollRun[]>([])
 const personNames = ref<Record<number, string>>({})
+/**
+ * Osobní rozpad běhu (`result_snapshot.people`) je ta objemná část výsledku a
+ * seznam ho úmyslně neposílá — server by ho jinak musel načíst pro všechny běhy
+ * firmy najednou. Drží se proto stranou a dotahuje se pro jeden rozbalený běh.
+ */
+const breakdowns = ref<Record<number, PayrollRunResultPerson[]>>({})
+const breakdownLoading = ref<Record<number, boolean>>({})
+const total = ref(0)
+const pageSize = 12
+const offset = ref(0)
 const pendingCommand = ref<{ run: PayrollRun, command: PayrollRunCommand } | null>(null)
 const pendingDelete = ref<PayrollRun | null>(null)
 const commandReason = ref('')
@@ -136,11 +147,14 @@ function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
 async function load() {
   loading.value = true
   try {
-    const [loadedRuns, people] = await Promise.all([
-      payrollApi.runs(period.value),
+    const [page, people] = await Promise.all([
+      payrollApi.runsPage(period.value, { limit: pageSize, offset: offset.value }),
       payrollApi.people().catch(() => null),
     ])
-    runs.value = loadedRuns
+    runs.value = page.runs
+    total.value = page.total
+    // Rozpad patří ke konkrétní revizi; po přenačtení seznamu už nemusí platit.
+    breakdowns.value = {}
     if (people !== null) {
       personNames.value = Object.fromEntries(
         people.map(person => [person.id, person.full_name]),
@@ -150,6 +164,36 @@ async function load() {
     toast.error(t('payroll.runs.load_failed'))
   } finally {
     loading.value = false
+  }
+}
+
+function goToPage(nextOffset: number) {
+  offset.value = Math.max(0, nextOffset)
+  void load()
+}
+
+/**
+ * Dotáhne osobní rozpad jednoho běhu. Opakované kliknutí rozpad schová, aby si
+ * uživatel mohl seznam zase zpřehlednit; jednou stažená data se drží v paměti.
+ */
+async function toggleBreakdown(run: PayrollRun) {
+  if (breakdowns.value[run.id] !== undefined) {
+    const { [run.id]: _removed, ...rest } = breakdowns.value
+    breakdowns.value = rest
+    return
+  }
+  breakdownLoading.value = { ...breakdownLoading.value, [run.id]: true }
+  try {
+    const detail = await payrollApi.run(run.id)
+    breakdowns.value = {
+      ...breakdowns.value,
+      [run.id]: detail.result_snapshot?.people ?? [],
+    }
+  } catch {
+    toast.error(t('payroll.runs.breakdown_failed'))
+  } finally {
+    const { [run.id]: _pending, ...rest } = breakdownLoading.value
+    breakdownLoading.value = rest
   }
 }
 
@@ -264,6 +308,8 @@ async function deleteRun() {
 
 function changePeriod() {
   paymentDate.value = defaultPaymentDate(period.value)
+  // Jiné období = jiná množina běhů; zůstat na třetí stránce by ukázalo prázdno.
+  offset.value = 0
   void load()
 }
 
@@ -434,17 +480,37 @@ onMounted(load)
           </div>
         </dl>
 
+        <button
+          v-if="run.result_snapshot"
+          type="button"
+          :data-testid="`payroll-run-${run.id}-breakdown-toggle`"
+          :class="[btnOutline('neutral'), 'mt-4']"
+          :disabled="breakdownLoading[run.id]"
+          @click="toggleBreakdown(run)"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.chart" />
+          </svg>
+          {{
+            breakdownLoading[run.id]
+              ? t('common.loading')
+              : breakdowns[run.id]
+                ? t('payroll.runs.breakdown_hide')
+                : t('payroll.runs.breakdown_show')
+          }}
+        </button>
+
         <PayrollIncomeTaxBreakdown
-          v-if="run.result_snapshot?.people"
-          :people="run.result_snapshot.people"
+          v-if="breakdowns[run.id]?.length"
+          :people="breakdowns[run.id]"
           :person-names="personNames"
         />
 
         <PayrollNetPayBreakdown
-          v-if="run.result_snapshot?.people"
+          v-if="breakdowns[run.id]?.length"
           :revision-id="run.revision_id"
           :approved="run.revision_status === 'approved'"
-          :people="run.result_snapshot.people"
+          :people="breakdowns[run.id]"
           :person-names="personNames"
         />
 
@@ -459,6 +525,38 @@ onMounted(load)
           </div>
         </div>
       </article>
+
+      <div
+        v-if="total > pageSize"
+        class="flex flex-wrap items-center justify-between gap-3 pt-1"
+        data-testid="payroll-runs-pagination"
+      >
+        <p class="text-sm text-neutral-500">
+          {{ t('common.pagination_range', {
+            from: offset + 1,
+            to: Math.min(offset + runs.length, total),
+            total,
+          }) }}
+        </p>
+        <div class="flex gap-2">
+          <button
+            type="button"
+            :class="btnOutline('neutral')"
+            :disabled="loading || offset === 0"
+            @click="goToPage(offset - pageSize)"
+          >
+            {{ t('common.previous') }}
+          </button>
+          <button
+            type="button"
+            :class="btnOutline('neutral')"
+            :disabled="loading || offset + runs.length >= total"
+            @click="goToPage(offset + pageSize)"
+          >
+            {{ t('common.next') }}
+          </button>
+        </div>
+      </div>
     </section>
 
     <Modal

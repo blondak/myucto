@@ -19,9 +19,10 @@ namespace MyInvoice\Service\Accounting\Payroll;
  * srážkový základ omylem uplatní sleva, což zákon nedovoluje.
  *
  * ── Kdy se použije ──────────────────────────────────────────────────────────────────
- *   § 6/4  DPP do 10 000 Kč měsíčně od JEDNOHO zaměstnavatele BEZ podepsaného
- *          prohlášení k dani. Tatáž hranice je od 1. 1. 2024 i limitem pro odvody
- *          na sociální a zdravotní pojištění z DPP — do limitu se neodvádí.
+ *   § 6/4  DPP od JEDNOHO zaměstnavatele BEZ podepsaného prohlášení k dani, jejíž
+ *          úhrn za měsíc NEDOSÁHNE rozhodné částky pro účast na nemocenském
+ *          pojištění (§ 7a z. č. 187/2006 Sb.; 2025 11 500 Kč, 2026 12 000 Kč).
+ *          Tatáž rozhodná částka řídí i odvody SP+ZP z DPP — pod ní se neodvádí.
  *   § 7/6  autorský honorář do 10 000 Kč měsíčně od jednoho plátce.
  *   § 36   příjmy nerezidentů (sazba se řídí smlouvou o zamezení dvojího zdanění;
  *          tu systém nezná, proto se bere zákonná sazba a hlásí se to).
@@ -73,15 +74,64 @@ final class WithholdingTaxCalculator
         }
 
         return match ($reason) {
-            // Podepsané prohlášení sráta vylučuje — příjem jde do zálohové daně, i když
+            // Podepsané prohlášení srážku vylučuje — příjem jde do zálohové daně, i když
             // je pod limitem. Bez téhle podmínky by se zaměstnanci s prohlášením upřely
             // slevy na dani.
-            self::REASON_DPP => !$taxDeclarationSigned
-                && $amount <= self::limit($c, 'dpp_withholding_limit'),
-            self::REASON_AUTHOR_FEE => $amount <= self::limit($c, 'author_fee_withholding_limit'),
+            self::REASON_DPP => !$taxDeclarationSigned && self::withinLimit($reason, $amount, $c),
+            self::REASON_AUTHOR_FEE => self::withinLimit($reason, $amount, $c),
             // U nerezidenta limit není — rozhoduje daňová rezidence, ne výše příjmu.
             self::REASON_NON_RESIDENT => true,
             default => throw new \InvalidArgumentException('Neznámý důvod srážky: ' . $reason),
+        };
+    }
+
+    /**
+     * Vejde se odměna do hranice pro daný důvod srážky?
+     *
+     * ── Proč to není prosté `<=` ────────────────────────────────────────────────
+     * U DPP na tom, jestli je hranice „do" nebo „pod", visí jiná daň. § 6 odst. 4
+     * písm. a) ZDP zněl do 31. 12. 2024 „NEPŘESÁHNE … 10 000 Kč" (hranice včetně)
+     * a od 1. 1. 2025 zní — po novele zák. č. 470/2024 Sb. — „NEDOSÁHNE částky
+     * rozhodné pro účast … na nemocenském pojištění" (hranice ostrá). Odměna
+     * PŘESNĚ na rozhodné částce už tedy srážkou nejde: podle § 7a z. č. 187/2006 Sb.
+     * jí zakládá účast na nemocenském pojištění („aspoň ve výši rozhodné částky"),
+     * a proto se daní zálohou a odvádí se z ní SP i ZP. Obě hranice na sebe
+     * navazují bez díry i bez překryvu — což je celý smysl té novely.
+     *
+     * Rok se sem nepašuje: rozdíl nese příznak v ročních konstantách, aby přepočet
+     * historického měsíce nepřeklopil starý režim do nového.
+     *
+     * § 7 odst. 6 ZDP (autorský honorář) novelou dotčený nebyl a zní dál
+     * „nepřesáhne … 10 000 Kč" — hranice tam zůstává včetně.
+     *
+     * @param array<string,mixed> $c roční daňové konstanty
+     */
+    private static function withinLimit(string $reason, float $amount, array $c): bool
+    {
+        $key = self::limitKeyFor($reason);
+        if ($key === null) {
+            return true;
+        }
+        $limit = self::limit($c, $key);
+        if ($reason !== self::REASON_DPP) {
+            return $amount <= $limit;
+        }
+
+        // Chybějící příznak = novější, přísnější výklad. Fail-safe: raději zálohová
+        // daň (kterou lze v ročním zúčtování narovnat) než neoprávněná srážka
+        // (kterou už poplatník nedožene).
+        return ($c['dpp_withholding_limit_inclusive'] ?? false) === true
+            ? $amount <= $limit
+            : $amount < $limit;
+    }
+
+    /** Klíč roční konstanty s hranicí, nebo `null` pro důvod bez hranice. */
+    private static function limitKeyFor(string $reason): ?string
+    {
+        return match ($reason) {
+            self::REASON_DPP => 'dpp_withholding_limit',
+            self::REASON_AUTHOR_FEE => 'author_fee_withholding_limit',
+            default => null,
         };
     }
 
@@ -124,7 +174,7 @@ final class WithholdingTaxCalculator
             // neuplatní, ačkoli ani jedna sama limit nepřekročí. Původní znění varovalo
             // jen na souběh u JINÝCH zaměstnavatelů, tedy na jedinou mezeru, kterou
             // systém zavřít nemůže, a mlčelo o té, kterou zavřít lze.
-            $warnings[] = 'Limit ' . number_format(self::limit($c, 'dpp_withholding_limit'), 0, ',', ' ')
+            $warnings[] = 'Rozhodná částka ' . number_format(self::limit($c, 'dpp_withholding_limit'), 0, ',', ' ')
                 . ' Kč platí na ÚHRN odměn od jednoho zaměstnavatele za kalendářní měsíc '
                 . '(§ 6 odst. 4 ZDP). Vyplácíte-li v témž měsíci víc dohod, zadejte jejich '
                 . 'součet — systém drží jeden mzdový záznam na měsíc. Souběh u JINÉHO '
@@ -153,24 +203,29 @@ final class WithholdingTaxCalculator
      */
     public static function overLimitReason(string $reason, float $amount, array $c): ?string
     {
-        $key = match ($reason) {
-            self::REASON_DPP => 'dpp_withholding_limit',
-            self::REASON_AUTHOR_FEE => 'author_fee_withholding_limit',
-            default => null,
-        };
-        if ($key === null) {
+        $key = self::limitKeyFor($reason);
+        if ($key === null || self::withinLimit($reason, $amount, $c)) {
             return null;
         }
         $limit = self::limit($c, $key);
-        if ($amount <= $limit) {
-            return null;
-        }
+
+        // Odměna PŘESNĚ na rozhodné částce je taky „mimo srážku", ale slovo
+        // „přesahuje" by na ni sedělo špatně a účetní by hlášku považoval za chybu
+        // systému. Rozlišujeme proto obě strany hranice. DPP se od 1. 1. 2025
+        // poměřuje ROZHODNOU ČÁSTKOU (§ 6 odst. 4 písm. a) ZDP), autorský honorář
+        // dál pevným limitem (§ 7 odst. 6) — hláška má mluvit jazykem zákona,
+        // ať si ji účetní dohledá.
+        $isDpp = $reason === self::REASON_DPP;
+        $formatted = number_format($limit, 0, ',', ' ');
+        $relation = $amount > $limit
+            ? sprintf('přesahuje %s %s Kč', $isDpp ? 'rozhodnou částku' : 'limit', $formatted)
+            : sprintf('dosahuje %s %s Kč', $isDpp ? 'rozhodné částky' : 'limitu', $formatted);
 
         return sprintf(
-            'Odměna %s Kč přesahuje limit %s Kč — srážkovou daní se nedaní ani část do limitu, '
-                . 'zdaňuje se celá částka běžným režimem.',
+            'Odměna %s Kč %s — srážkovou daní se nedaní ani část pod ní, zdaňuje se celá '
+                . 'částka běžným režimem (zálohová daň, odvody SP a ZP).',
             number_format($amount, 2, ',', ' '),
-            number_format($limit, 0, ',', ' '),
+            $relation,
         );
     }
 

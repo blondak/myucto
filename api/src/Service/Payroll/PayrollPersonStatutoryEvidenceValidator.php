@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll;
 
 use DateTimeImmutable;
 use InvalidArgumentException;
+use MyInvoice\Service\Codebook\HealthInsurers;
 
 final class PayrollPersonStatutoryEvidenceValidator
 {
@@ -253,8 +254,10 @@ final class PayrollPersonStatutoryEvidenceValidator
             $row,
             'insurer_evidence_reference',
         );
-        if ($insurerCode !== null && preg_match('/^\d{3}$/D', $insurerCode) !== 1) {
-            throw new InvalidArgumentException('insurer_code musí obsahovat tři číslice.');
+        // Tvar `\d{3}` nestačí — evidence jde až do zákonného podání, takže se
+        // kód musí shodovat se skutečným číselníkem pojišťoven.
+        if ($insurerCode !== null && !HealthInsurers::isValid($insurerCode)) {
+            throw new InvalidArgumentException(HealthInsurers::invalidCodeMessage($insurerCode));
         }
         if ($insurerStatus === 'verified'
             && ($insurerCode === null || $insurerEvidence === null)

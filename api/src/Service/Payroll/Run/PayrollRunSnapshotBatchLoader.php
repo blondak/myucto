@@ -277,6 +277,49 @@ final class PayrollRunSnapshotBatchLoader
     }
 
     /**
+     * Dimenze (středisko / zakázka / činnost) přiřazené pracovnímu vztahu.
+     *
+     * Do snapshotu vstupují kvůli `default_account_code`: ten určuje nákladový účet
+     * hrubé mzdy a zaúčtování jede nad ZMRAZENÝM snapshotem. Kdyby se dimenze četly
+     * až při účtování, přeúčtování historické revize by použilo dnešní přiřazení
+     * střediska a vyrobilo jiné zaúčtování než původní — přesně to, co snapshot
+     * existuje aby vyloučil.
+     *
+     * Účinnost se posuzuje k PRVNÍMU DNI období, stejně jako historický zámek
+     * {@see \MyInvoice\Repository\Payroll\PayrollDimensionRepository::isUsedInApprovedRevision()},
+     * který porovnává `ed.valid_from <= run.period_start`. Jiné datum by znamenalo,
+     * že se dimenze do snapshotu dostane, ale nepůjde smazat — nebo naopak.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,list<array<string,mixed>>>
+     */
+    public function employmentDimensions(
+        int $supplierId,
+        array $employmentIds,
+        string $periodStart,
+    ): array {
+        return $this->grouped($this->fetch(
+            'SELECT d.dimension_type, d.code, d.name, d.default_account_code,
+                    ed.employment_id AS ' . self::GROUP_KEY . '
+               FROM payroll_employment_dimensions ed
+               JOIN payroll_dimensions d
+                 ON d.supplier_id = ed.supplier_id
+                AND d.id = ed.dimension_id
+              WHERE ed.supplier_id = ?
+                AND ed.employment_id IN (%s)
+                AND ed.valid_from <= ?
+                AND (ed.valid_to IS NULL OR ed.valid_to >= ?)
+                AND d.is_active = 1
+                AND d.valid_from <= ?
+                AND (d.valid_to IS NULL OR d.valid_to >= ?)
+              ORDER BY d.dimension_type, d.code, d.id',
+            [$supplierId],
+            $employmentIds,
+            [$periodStart, $periodStart, $periodStart, $periodStart],
+        ));
+    }
+
+    /**
      * Spustí dotaz po dávkách a vrátí spojený výsledek.
      *
      * @param list<mixed> $leading parametry PŘED seznamem ID

@@ -12,7 +12,14 @@ use PHPUnit\Framework\TestCase;
 
 final class CzechPayrollRulesets2026Test extends TestCase
 {
-    private const EXPECTED_MANIFEST_SHA256 = 'e4252c4a671c57849199b4699df103136d29257c4124b7ccbf37e2d348d2cd96';
+    /**
+     * Pin se posunul s opravou hranice srážkové daně z DPP: `dpp.withholding.maximum`
+     * 11 999 Kč → `dpp.withholding.threshold` 12 000 Kč a `other.withholding.maximum`
+     * 4 499 Kč → `other.withholding.threshold` 4 500 Kč. Hodnota je nově sama ROZHODNÁ
+     * ČÁSTKA (§ 7a z. č. 187/2006 Sb.) a poměřuje se ostře, protože § 6 odst. 4 písm. a)
+     * ZDP zní od 1. 1. 2025 „nedosáhne" — viz {@see \MyInvoice\Tests\Unit\Payroll\IncomeTax\DppWithholdingBoundaryParityTest}.
+     */
+    private const EXPECTED_MANIFEST_SHA256 = '64a6409743c7d37fa8d733a7c1e1599437e712f18a392bb0c9f401aff7ee37b9';
 
     public function testCanonicalManifestIsByteStable(): void
     {
@@ -94,8 +101,8 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'credit.disability.extended.monthly' => ['money_minor', 42_000],
                 'credit.taxpayer.monthly' => ['money_minor', 257_000],
                 'credit.ztp_p.monthly' => ['money_minor', 134_500],
-                'dpp.withholding.maximum' => ['money_minor', 1_199_900],
-                'other.withholding.maximum' => ['money_minor', 449_900],
+                'dpp.withholding.threshold' => ['money_minor', 1_200_000],
+                'other.withholding.threshold' => ['money_minor', 450_000],
                 'withholding.rate' => ['decimal_rate', '0.15'],
             ],
             'social_insurance' => [
