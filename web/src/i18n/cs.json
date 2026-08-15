@@ -9641,6 +9641,8 @@
         "provider_saved": "Provider uložen.",
         "provider_created": "Provider vytvořen.",
         "provider_clone": "Duplikovat",
+        "provider_enable": "Zapnout pro firmu",
+        "provider_disable": "Vypnout pro firmu",
         "provider_copy_suffix": "(kopie)",
         "parser_builtin": "Vestavěný parser",
         "provider_save_failed": "Provider se nepodařilo uložit.",

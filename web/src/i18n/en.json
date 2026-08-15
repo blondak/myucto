@@ -9641,6 +9641,8 @@
         "provider_saved": "Provider saved.",
         "provider_created": "Provider created.",
         "provider_clone": "Duplicate",
+        "provider_enable": "Enable for company",
+        "provider_disable": "Disable for company",
         "provider_copy_suffix": "(copy)",
         "parser_builtin": "Built-in parser",
         "provider_save_failed": "Failed to save provider.",

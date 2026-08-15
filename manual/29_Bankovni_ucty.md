@@ -169,11 +169,13 @@ Typy providerů:
 - **Systémový provider** — dodaný aplikací, např. Raiffeisenbank, UniCredit Bank, ČSOB, Česká spořitelna, Fio banka, Banka CREDITAS, MONETA Money Bank nebo Air Bank.
 - **Regex provider** — vlastní provider dodavatele, konfigurovaný v UI.
 
-Předpřipravený společný provider **Česká spořitelna** je ve výchozím stavu **vypnutý**,
-protože nemá vyplněný whitelist odesílatelů (viz *Odesílatel je povinný* níže) a
-bez něj by přijímal avízo od kohokoli. Používáš-li ho, klikni na **Duplikovat**,
-do své kopie doplň skutečnou adresu, ze které ČS avíza posílá, kopii zapni
-a přepni na ni mapování účtu.
+Předpřipravený společný provider **Česká spořitelna** je zapnutý a má vyplněný
+whitelist odesílatelů (`csas.cz`) — stejně jako banky s vlastním parserem, které si
+odesílatele ověřují v kódu. Dřív byl dodáván s prázdným whitelistem, a protože
+prázdný whitelist nepustí nic (viz *Odesílatel je povinný* níže), nedokázal
+naparsovat vůbec žádné avízo; kdo na to narazil, musel si udělat vlastní kopii.
+Posílá-li tvoje ČS avíza z jiné adresy, klikni na **Duplikovat**, v kopii adresu
+uprav a přepni na ni mapování účtu.
 
 Systémový provider se přímo needituje (je společný pro všechny). Když ho chceš
 upravit, použij u něj tlačítko **Duplikovat** — vytvoří se editovatelná kopie,
@@ -181,11 +183,11 @@ ve které si dolaď vzory a otestuj ji přes **Test parseru**. V mapování úč
 přepneš účet z původního providera na svou kopii. Duplikovat lze i vlastní regex
 provider.
 
-Přepínač **Aktivní provider** u společného provideru je ale k dispozici: vypnutí
-platí **jen pro tvoji firmu** a ostatní firmy se nedotkne. Hodí se, když nechceš,
-aby se společný provider vůbec pokoušel tvoje e-maily zpracovat. Zpátky ho zapneš
-stejným přepínačem. Vzory se u společného provideru měnit nedají — pokus o to
-skončí hláškou s odkazem na **Duplikovat**.
+Tlačítko **Vypnout pro firmu** u společného provideru platí **jen pro tvoji firmu**
+a ostatních se nedotkne. Hodí se, když nechceš, aby se společný provider vůbec
+pokoušel tvoje e-maily zpracovat; stejným tlačítkem ho zapneš zpátky. Vzory se
+u společného provideru měnit nedají — pokus o to skončí hláškou s odkazem na
+**Duplikovat**.
 
 Systémový provider Raiffeisenbank rozlišuje směr převodu podle úvodního textu
 o příchozí nebo odchozí platbě; u starší či odlišné šablony použije jako záložní
