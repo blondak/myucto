@@ -7,7 +7,13 @@ namespace MyInvoice\Action\Accounting;
 use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollDeletionException;
+use MyInvoice\Repository\Payroll\PayrollEmployeeDeletionRepository;
+use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
+use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Repository\PayrollEmployeeRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\Payroll\PayrollCalculator;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
@@ -22,7 +28,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET    /api/accounting/payroll/employees        — seznam (readonly+)
  *   POST   /api/accounting/payroll/employees        — založit (účetní|admin)
  *   PUT    /api/accounting/payroll/employees/{id}    — upravit (účetní|admin)
- *   DELETE /api/accounting/payroll/employees/{id}    — smazat, jen bez historie (účetní|admin)
+ *   DELETE /api/accounting/payroll/employees/{id}    — smazat, jen bez historie (účetní|admin;
+ *          patří-li osoba novému mzdovému modulu, navíc `payroll.person.write` — viz {@see self::delete()})
  */
 final class PayrollEmployeeAction
 {
@@ -60,12 +67,50 @@ final class PayrollEmployeeAction
 
     private const GROSS_RANGE_MESSAGE = 'Pravidelná hrubá mzda musí být celé číslo v rozsahu 0 až 10 000 000 Kč.';
 
+    /**
+     * Stavy, ve kterých osobu vlastní NOVÝ mzdový modul a mazání proto rozhoduje
+     * {@see PayrollEmployeeDeletionRepository}. `suspended` je pozastavený modul,
+     * který už jednou běžel — data v něm jsou stejně reálná jako v `active`.
+     *
+     * @var list<string>
+     */
+    private const MODULE_OWNED_STATUSES = ['active', 'suspended'];
+
+    /**
+     * Překlad tabulek nového modulu do řeči účetní. Neúplný záměrně — co v mapě
+     * není, se shrne jako „další evidence modulu Mzdy"; hláška se tím nerozbije,
+     * jen bude obecnější, a přesný seznam tabulek jde ven v detailu chyby.
+     *
+     * @var array<string,string>
+     */
+    private const MODULE_DATA_LABELS = [
+        'payroll_employments' => 'pracovní vztah',
+        'payroll_employee_profiles' => 'mzdový profil',
+        'payroll_person_identity_history' => 'osobní údaje',
+        'payroll_person_addresses' => 'adresa',
+        'payroll_person_contacts' => 'kontakt',
+        'payroll_person_identifiers' => 'osobní identifikátor',
+        'payroll_person_accounts' => 'výplatní účet',
+        'payroll_payout_rules' => 'výplatní pravidlo',
+        'payroll_dependants' => 'vyživovaná osoba',
+        'payroll_person_tax_declarations' => 'prohlášení poplatníka',
+        'payroll_inputs' => 'mzdový vstup',
+        'payroll_business_trips' => 'pracovní cesta',
+        'payroll_generated_documents' => 'vydaný mzdový doklad',
+        'payroll_net_results' => 'schválený mzdový výpočet',
+        'payroll_payment_liabilities' => 'platební závazek',
+        'payroll_enforcement_cases' => 'exekuce nebo insolvence',
+        'payroll_person_external_ids' => 'registrace u ČSSZ nebo MPSV',
+    ];
+
     public function __construct(
         private readonly PayrollEmployeeRepository $employees,
         private readonly \MyInvoice\Repository\ChartOfAccountsRepository $accounts,
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollModuleStateRepository $moduleState,
+        private readonly PayrollEmployeeDeletionRepository $moduleDeletion,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -127,6 +172,28 @@ final class PayrollEmployeeAction
         ]);
     }
 
+    /**
+     * Smazání zaměstnance ze STARŠÍ agendy.
+     *
+     * ── Proč to není prosté DELETE ────────────────────────────────────────────────
+     * `payroll_employees` je TÁŽ tabulka, nad kterou stojí novější mzdový modul.
+     * Tahle routa hlídala jedinou navázanou tabulku (`payroll_monthly_records`),
+     * takže osobu, která žije jen v novém modulu, pustila — a databázová kaskáda
+     * pod ní tiše smetla profil, pracovní vztahy, docházku, absence, identitu,
+     * kontakty, účty i vyživované osoby. Rozhodnutí proto přebírá
+     * {@see PayrollEmployeeDeletionRepository}, jakmile osoba patří novému modulu.
+     *
+     * ── Tři větve ─────────────────────────────────────────────────────────────────
+     *  1. modul `active`/`suspended` → rozhoduje NOVÁ kontrola (blokátory + rekurze
+     *     přes pracovní vztahy + atomické mazání pod zámkem),
+     *  2. modul `setup`/`disabled`, ale data nového modulu UŽ EXISTUJÍ → odmítnout;
+     *     ve stavu `setup` totiž data vznikají dřív, než se modul překlopí, a nová
+     *     kontrola by se na ně nepodívala,
+     *  3. modul neaktivní a bez dat → stará agenda beze změny; firmy, které nový
+     *     modul nepoužívají, tahle oprava omezit nesmí.
+     *
+     * @param array{id:string} $args
+     */
     public function delete(Request $request, Response $response, array $args): Response
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
@@ -134,9 +201,32 @@ final class PayrollEmployeeAction
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
 
         $id = (int) $args['id'];
-        if ($this->employees->find($supplierId, $id) === null) {
+        // 404 dřív, než se cokoli dozví o stavu — cizí tenant nesmí poznat ani to,
+        // jestli id existuje.
+        $employee = $this->employees->find($supplierId, $id);
+        if ($employee === null) {
             return Json::error($response, 'not_found', 'Zaměstnanec nenalezen.', 404);
         }
+
+        $status = $this->moduleStatus($supplierId);
+        if (in_array($status, self::MODULE_OWNED_STATUSES, true)) {
+            return $this->deleteViaModule($request, $response, $supplierId, $id, $employee, $status);
+        }
+
+        $moduleData = $this->moduleData($supplierId, $id);
+        if ($moduleData !== []) {
+            return Json::error(
+                $response,
+                'employee_has_payroll_module_data',
+                'Zaměstnanec má rozepsaná data v modulu Mzdy (' . self::describe($moduleData) . '), '
+                    . 'a to i když modul ještě není zapnutý naostro. Smazáním odsud by se ta data '
+                    . 'ztratila i s pracovními vztahy a docházkou. Smažte osobu v modulu Mzdy '
+                    . '(Mzdy → Zaměstnanci), kde uvidíte, co přesně zmizí, nebo ji tady jen deaktivujte.',
+                409,
+                ['payroll_module_status' => $status, 'tables' => $moduleData],
+            );
+        }
+
         if ($this->employees->hasMonthlyRecords($supplierId, $id)) {
             return Json::error(
                 $response,
@@ -145,9 +235,161 @@ final class PayrollEmployeeAction
                 409,
             );
         }
-        $this->employees->delete($supplierId, $id);
-        $this->log($request, 'payroll_employee.deleted', $id, []);
+
+        try {
+            $this->employees->delete($supplierId, $id);
+        } catch (\PDOException $e) {
+            // FK RESTRICT z tabulky, kterou tahle větev nezná. Bez odchycení by
+            // uživatel dostal 500 se syrovou databázovou hláškou.
+            if ($e->getCode() !== '23000') {
+                throw $e;
+            }
+            return Json::error(
+                $response,
+                'employee_has_related_records',
+                'Na zaměstnance je navázaný další záznam, který smazání brání. '
+                    . 'Načtěte seznam znovu; pokud potíž trvá, osobu místo mazání deaktivujte.',
+                409,
+            );
+        }
+
+        $this->log($request, 'payroll_employee.deleted', $id, self::auditPayload($employee, 'legacy', $status, []));
         return Json::ok($response, ['deleted' => true]);
+    }
+
+    /**
+     * Větev 1 — osobu vlastní nový mzdový modul.
+     *
+     * ── Oprávnění ─────────────────────────────────────────────────────────────────
+     * Middleware sem pustí obecné `accounting` WRITE, protože z cesty stav modulu
+     * poznat nejde. Jenže tady se maže OSOBNÍ KARTA mzdového modulu se vším, co na
+     * ní visí — týž úkon jako DELETE /api/payroll/people/{id}, který si žádá
+     * `payroll.person.write`. Kdyby to obojí nešlo přes stejné právo, byla by tahle
+     * routa obchvat kolem něj. Vestavěná role „účetní" `payroll.person.write` má,
+     * takže účetní, která mzdy legitimně vede, nic neztratí; přijde o to jen role,
+     * které mzdy někdo vědomě odebral — a té ta osoba nepatří.
+     *
+     * @param array<string,mixed> $employee
+     */
+    private function deleteViaModule(
+        Request $request,
+        Response $response,
+        int $supplierId,
+        int $id,
+        array $employee,
+        string $status,
+    ): Response {
+        if (!RequestAuthorization::allows($request, 'payroll.person.write', AccessLevel::WRITE)) {
+            return Json::error(
+                $response,
+                'forbidden',
+                'Tenhle zaměstnanec patří do modulu Mzdy, takže jeho smazání vyžaduje právo '
+                    . '„Spravovat zaměstnance" v mzdách — samotné právo na účetnictví nestačí, '
+                    . 'protože by se smazala celá mzdová karta.',
+                403,
+            );
+        }
+
+        try {
+            $cascade = $this->moduleDeletion->delete(
+                $supplierId,
+                $id,
+                $this->userId($request),
+                $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (PayrollDeletionException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), 409, array_filter([
+                'employment_id' => $e->employmentId,
+                'employment_code' => $e->employmentCode,
+            ], static fn ($value): bool => $value !== null));
+        } catch (PayrollEmploymentNotFoundException $e) {
+            return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (\PDOException $e) {
+            if ($e->getCode() !== '23000') {
+                throw $e;
+            }
+            return Json::error(
+                $response,
+                'payroll_employee_delete_conflict',
+                'Na zaměstnance mezitím vznikla vazba, takže ho už smazat nejde. Načtěte seznam znovu.',
+                409,
+            );
+        }
+
+        $this->log($request, 'payroll_employee.deleted', $id, self::auditPayload($employee, 'payroll_module', $status, $cascade));
+        return Json::ok($response, ['deleted' => true, 'cascade' => $cascade]);
+    }
+
+    /**
+     * Stav mzdového modulu firmy. Chybějící tabulka = modul ve schématu ještě není,
+     * takže se chová jako `disabled` — starší agenda musí fungovat i na databázi,
+     * kde mzdové migrace neproběhly.
+     */
+    private function moduleStatus(int $supplierId): string
+    {
+        if (!$this->db->hasTable('payroll_module_state')) {
+            return 'disabled';
+        }
+
+        return $this->moduleState->get($supplierId)['status'];
+    }
+
+    /** @return array<string,int> tabulka => počet záznamů nového modulu */
+    private function moduleData(int $supplierId, int $id): array
+    {
+        if (!$this->db->hasTable('payroll_employments')) {
+            return [];
+        }
+
+        return $this->moduleDeletion->moduleDataCounts($supplierId, $id);
+    }
+
+    /**
+     * Hláška musí říct, CO přesně v novém modulu leží — „nelze smazat" bez důvodu
+     * uživateli nedovolí nic udělat. Jména tabulek jsou pro účetní nesrozumitelná,
+     * takže se překládají; strojový seznam tabulek jde ven v detailu chyby.
+     *
+     * @param array<string,int> $counts
+     */
+    private static function describe(array $counts): string
+    {
+        $labels = [];
+        foreach (array_keys($counts) as $table) {
+            $labels[self::MODULE_DATA_LABELS[$table] ?? 'další evidence modulu Mzdy'] = true;
+        }
+        $named = array_slice(array_keys($labels), 0, 3);
+        $rest = count($labels) - count($named);
+
+        return implode(', ', $named) . ($rest > 0 ? ' a další (' . $rest . ')' : '');
+    }
+
+    /**
+     * Auditní stopa smazání. Do teď byl payload PRÁZDNÝ, takže po smazané osobě
+     * nezůstalo nic dohledatelného — řádek zmizel a log neřekl ani jméno.
+     * Zapisuje se proto koho se to týkalo, kolik navázaných záznamů zmizelo
+     * a KTEROU cestou to šlo (stará agenda vs. kontrola nového modulu).
+     *
+     * U modulové cesty vzniknou záznamy dva: `payroll.employee.deleted` z repozitáře
+     * (co zmizelo v modulu) a `payroll_employee.deleted` odsud (kdo a kudy to spustil).
+     * Duplicita je záměrná — z prvního se nepozná, že šlo o starší agendu.
+     *
+     * @param array<string,mixed> $employee
+     * @param array<string,int> $cascade
+     * @return array<string,mixed>
+     */
+    private static function auditPayload(array $employee, string $path, string $status, array $cascade): array
+    {
+        return [
+            'path' => $path,
+            'payroll_module_status' => $status,
+            'full_name' => (string) ($employee['full_name'] ?? ''),
+            'employment_type' => (string) ($employee['employment_type'] ?? ''),
+            'taxpayer_type' => (string) ($employee['taxpayer_type'] ?? ''),
+            'is_active' => (bool) ($employee['is_active'] ?? false),
+            'cascade' => $cascade,
+            'cascade_total' => array_sum($cascade),
+        ];
     }
 
     /** @param array<string,mixed> $body @return array<string,mixed>|null */

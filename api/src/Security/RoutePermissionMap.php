@@ -297,6 +297,14 @@ final class RoutePermissionMap
         // Zaúčtování sdílí právo s ostatním účtováním deníku.
         ['*', '#^/api/accounting/payroll/preview$#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/payroll/post$#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Zaměstnanci starší agendy sdílejí tabulku `payroll_employees` s novým mzdovým
+        // modulem. Z CESTY se stav modulu poznat nedá, takže gate zůstává `accounting`
+        // (shodně s POST, které tutéž kartu zakládá) — je ale zapsaný VÝSLOVNĚ, aby ho
+        // nedržel jen univerzální fallback níže. Patří-li osoba novému modulu, žádá si
+        // PayrollEmployeeAction::delete() navíc `payroll.person.write`, protože pak jde
+        // o smazání celé mzdové karty.
+        ['GET', '#^/api/accounting/payroll/employees(/|$)#', 'accounting', AccessLevel::READ],
+        ['*',   '#^/api/accounting/payroll/employees(/|$)#', 'accounting', AccessLevel::WRITE],
         // Zúčtování DPH (migrace 1332): náhled je čtení, spuštění zakládá účetní zápis
         // v deníku → stejné právo jako ostatní účtování (ne pouhé `accounting` WRITE).
         ['GET', '#^/api/accounting/vat-clearing(/|$)#', 'accounting', AccessLevel::READ],
