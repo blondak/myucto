@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollModuleActivationService;
 use MyInvoice\Service\Payroll\SupportMatrix;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -20,6 +21,7 @@ final class PayrollCapabilitiesAction
         private readonly SupportMatrix $matrix,
         private readonly PayrollModuleStateRepository $state,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollModuleActivationService $activation,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -31,6 +33,14 @@ final class PayrollCapabilitiesAction
             return $error;
         }
         $supplierId = $this->currentSupplierId($request);
+        // Badge modulu se čte právě odsud, takže tady se taky musí vyhodnotit,
+        // jestli už firma nastavení dokončila — jinak by „Probíhá nastavení"
+        // viselo až do dalšího ručního zásahu. Když modul v `setup` není,
+        // je to no-op; setup-check se tedy počítá jen po dobu nastavování.
+        $this->activation->activateWhenSetupComplete(
+            $supplierId,
+            $this->userId($request),
+        );
 
         return Json::ok($response, [
             'state' => $this->state->get($supplierId),

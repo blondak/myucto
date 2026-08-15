@@ -88,6 +88,19 @@ const actions = computed<ActionItem[]>(() => [
     show: canConfigure.value,
     to: { name: 'payroll-settings' },
   },
+  // Zrušení rozdělaného nastavení není nic, k čemu by měl být uživatel vyzýván
+  // — patří mezi pokročilé akce v „…", ne vedle hlavních tlačítek. Ve stavu
+  // `active` mizí úplně: aktivovaný modul už vypnout nejde.
+  {
+    key: 'disable-setup',
+    label: t('payroll.activation.disable'),
+    icon: 'uturn',
+    tier: 'advanced',
+    variant: 'warning',
+    show: canConfigure.value && state.value?.status === 'setup',
+    disabled: saving.value,
+    run: () => void disableSetup(),
+  },
 ])
 
 const runStatusClass = computed(() => {
@@ -235,15 +248,6 @@ onMounted(load)
       </section>
 
       <div v-else class="space-y-6">
-        <div v-if="state.status === 'setup' && canConfigure" class="flex flex-wrap justify-end gap-2">
-          <button :class="btnOutline('warning')" :disabled="saving" @click="disableSetup">
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path :d="ICONS.uturn" />
-            </svg>
-            {{ t('payroll.activation.disable') }}
-          </button>
-        </div>
-
         <section
           v-if="setupBlockers.length > 0"
           class="rounded-xl border border-warning-500/40 bg-warning-50 p-4 sm:p-6"

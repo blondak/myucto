@@ -1753,10 +1753,32 @@ export type PayrollRunCommand =
   | 'calculate'
   | 'review'
   | 'approve'
+  | 'post'
+  | 'prepare_payments'
+  | 'mark_paid'
   | 'request_correction'
   | 'reopen'
   | 'cancel'
   | 'close'
+
+/**
+ * Co se při příkazu doopravdy stalo. Samotný přechod stavu to neřekne: firma
+ * v daňové evidenci projde `post` bez účetního zápisu a běh, kde je celá čistá
+ * mzda zápočtem na účet společníka, projde platbami bez jediné platby.
+ * Uživateli se to musí říct nahlas, ne zamlčet.
+ */
+export type PayrollRunOutcomeCode =
+  | 'posted'
+  | 'already_posted'
+  | 'posting_not_applicable'
+  | 'payments_prepared'
+  | 'payments_not_applicable'
+  | 'payments_settled'
+
+export interface PayrollRunOutcome {
+  outcome: PayrollRunOutcomeCode
+  details: Record<string, unknown>
+}
 
 export interface PayrollRunValidation {
   id: number
@@ -1890,6 +1912,7 @@ export interface PayrollRunCommandResponse {
   run: PayrollRun
   revision: Record<string, unknown> | null
   idempotent_replay: boolean
+  outcome: PayrollRunOutcome | null
 }
 
 export type PayrollDependantRelation =

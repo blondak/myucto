@@ -204,6 +204,14 @@ final class PayrollRunsAction
             'review', 'request_correction' => 'payroll.review',
             'approve' => 'payroll.approve',
             'reopen' => 'payroll.reopen',
+            // `post` vytváří účetní zápis v hlavní knize — patří pod stejné
+            // právo jako ostatní mzdové zaúčtování („Zaúčtovat mzdy"), ne pod
+            // právo na zápis mzdových vstupů.
+            'post' => 'payroll.post',
+            // `prepare_payments` materializuje platební závazky a `mark_paid`
+            // uzavírá platební ledger. Obojí je táž agenda jako platební dávky
+            // a párování úhrad, které už `payroll.payments` chrání.
+            'prepare_payments', 'mark_paid' => 'payroll.payments',
             default => 'payroll.inputs.write',
         };
         if (($error = $this->authorize(
@@ -312,6 +320,15 @@ final class PayrollRunsAction
                 $userId,
                 $reason,
             ),
+            'post' => $this->commands->post(
+                $supplierId, $runId, $version, $idempotencyKey, $userId,
+            ),
+            'prepare_payments' => $this->commands->preparePayments(
+                $supplierId, $runId, $version, $idempotencyKey, $userId,
+            ),
+            'mark_paid' => $this->commands->markPaid(
+                $supplierId, $runId, $version, $idempotencyKey, $userId,
+            ),
             'close' => $this->commands->close(
                 $supplierId, $runId, $version, $idempotencyKey, $userId,
             ),
@@ -331,6 +348,7 @@ final class PayrollRunsAction
             'run' => $result->run,
             'revision' => $result->revision,
             'idempotent_replay' => $result->idempotentReplay,
+            'outcome' => $result->outcome?->toArray(),
         ];
     }
 

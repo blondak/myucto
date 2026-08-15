@@ -231,6 +231,121 @@ final class PayrollApprovedRevisionPostingServiceTest extends TestCase
         );
     }
 
+    /**
+     * Ruční zaúčtování (příkaz `post` mzdového běhu) je jediná cesta, jak
+     * mzdy zaúčtovat u firmy, která má automatiku vypnutou. Přeskočit smí
+     * PRÁVĚ TENHLE přepínač — nic dalšího.
+     */
+    public function testManualPostingIgnoresDisabledAutomaticPolicyOnly(): void
+    {
+        $statutory = $this->createStub(PayrollStatutoryResultRepository::class);
+        $posting = $this->createMock(PayrollPostingAdapter::class);
+        $accountingModes = $this->createStub(AccountingModeRepository::class);
+        $accountingModes->method('forYear')->willReturn('double_entry');
+        $statutory->method('find')->willReturn([
+            'id' => 1,
+            'result_status' => 'calculated',
+        ]);
+        $accounts = PayrollAccountingDefaults::codes();
+        $snapshot = [
+            'schema_version' => 'payroll-run-input.v2',
+            'period_start' => '2026-06-01',
+            'employer_policy' => [
+                'id' => 15,
+                'row_version' => 3,
+                'automatic_posting_enabled' => false,
+            ],
+            'employer' => ['accounting_accounts' => $accounts],
+        ];
+        $expected = [
+            'batch_id' => 8,
+            'journal_entry_id' => null,
+            'status' => 'no_change',
+            'idempotent' => false,
+            'preview' => new PayrollPostingPreview(
+                [],
+                [],
+                hash('sha256', 'target'),
+                hash('sha256', 'delta'),
+                0,
+                0,
+            ),
+        ];
+        $posting->expects(self::once())
+            ->method('post')
+            ->with(10, 77, $snapshot, [], self::anything(), $accounts, ['user_id' => 9])
+            ->willReturn($expected);
+
+        $service = new PayrollApprovedRevisionPostingService(
+            $statutory,
+            $posting,
+            $accountingModes,
+        );
+        // Automatická cesta u vypnuté politiky pořád nezaúčtuje nic.
+        self::assertNull($service->post(10, 77, $snapshot, [], 9));
+        self::assertSame(
+            $expected,
+            $service->postManually(10, 77, $snapshot, [], 9),
+        );
+    }
+
+    public function testManualPostingStillSkipsTaxEvidence(): void
+    {
+        $statutory = $this->createMock(PayrollStatutoryResultRepository::class);
+        $posting = $this->createMock(PayrollPostingAdapter::class);
+        $accountingModes = $this->createStub(AccountingModeRepository::class);
+        $accountingModes->method('forYear')->willReturn('tax_evidence');
+        $statutory->expects(self::never())->method('find');
+        $posting->expects(self::never())->method('post');
+
+        self::assertNull((new PayrollApprovedRevisionPostingService(
+            $statutory,
+            $posting,
+            $accountingModes,
+        ))->postManually(
+            10,
+            77,
+            [
+                'schema_version' => 'payroll-run-input.v2',
+                'period_start' => '2026-06-01',
+                'employer_policy' => [
+                    'id' => 15,
+                    'row_version' => 3,
+                    'automatic_posting_enabled' => false,
+                ],
+            ],
+            ['schema_version' => 'payroll-run-result.v2'],
+            9,
+        ));
+    }
+
+    public function testManualPostingStillRequiresFrozenPolicyAndStatutorySets(): void
+    {
+        $statutory = $this->createMock(PayrollStatutoryResultRepository::class);
+        $posting = $this->createMock(PayrollPostingAdapter::class);
+        $accountingModes = $this->createMock(AccountingModeRepository::class);
+        $statutory->expects(self::never())->method('find');
+        $posting->expects(self::never())->method('post');
+        $accountingModes->expects(self::never())->method('forYear');
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('účinnou zaměstnavatelskou politiku');
+        (new PayrollApprovedRevisionPostingService(
+            $statutory,
+            $posting,
+            $accountingModes,
+        ))->postManually(
+            10,
+            77,
+            [
+                'schema_version' => 'payroll-run-input.v2',
+                'period_start' => '2026-06-01',
+            ],
+            ['schema_version' => 'payroll-run-result.v2'],
+            9,
+        );
+    }
+
     public function testTaxEvidenceSkipsAccountingWithoutLoadingStatutoryResults(): void
     {
         $statutory = $this->createMock(PayrollStatutoryResultRepository::class);
