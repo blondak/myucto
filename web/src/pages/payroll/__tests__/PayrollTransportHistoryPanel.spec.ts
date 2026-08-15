@@ -72,8 +72,8 @@ function protocol(overrides: Record<string, unknown> = {}) {
     variable_symbol: '1234567890',
     period_month: 6,
     period_year: 2026,
-    submission_guid: 'F2865C9A-3953-48E6-BE44-4E5B9C921307',
-    correlation_reference: '8E72FD2813264449A40E51427F484E1C',
+    submission_guid: '0195AAAA-1111-7222-8333-BBBBCCCCDDDD',
+    correlation_reference: 'AAAA1111BBBB2222CCCC3333DDDD4444',
     status_code: 1,
     status_name: 'ProcessedAndComplete',
     error_count: 0,
@@ -415,7 +415,7 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(wrapper.find('[data-test="transport-empty"]').exists()).toBe(false)
     const card = wrapper.get('[data-test="transport-imported-11"]')
     expect(card.text()).toContain('payroll.submissions.transport.imported.period 6 2026')
-    expect(card.text()).toContain('F2865C9A-3953-48E6-BE44-4E5B9C921307')
+    expect(card.text()).toContain('0195AAAA-1111-7222-8333-BBBBCCCCDDDD')
     expect(wrapper.get('[data-test="transport-imported-status-11"]').text())
       .toContain('payroll.submissions.transport.protocol_status.ProcessedAndComplete')
   })

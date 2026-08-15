@@ -92,7 +92,7 @@ final class JmhzVaultEnvelopeSignerTest extends TestCase
 
         // 0x176B96F = 24 554 607
         $this->expectSigningAttempt();
-        $this->signer($vault, registeredSerial: '24554607')->sign('<jmhz/>');
+        $this->signer($vault, registeredSerial: '12345678')->sign('<jmhz/>');
     }
 
     public function testCertificateWithoutSerialCannotBeVerified(): void
@@ -100,7 +100,7 @@ final class JmhzVaultEnvelopeSignerTest extends TestCase
         $vault = $this->vaultReturning(['credential' => ['serial_hex' => '']]);
 
         try {
-            $this->signer($vault, registeredSerial: '24554607')->sign('<jmhz/>');
+            $this->signer($vault, registeredSerial: '12345678')->sign('<jmhz/>');
             self::fail('Certifikát bez sériového čísla musí padnout.');
         } catch (JmhzTransportException $e) {
             self::assertSame('jmhz_signing_certificate_unidentified', $e->errorCode);

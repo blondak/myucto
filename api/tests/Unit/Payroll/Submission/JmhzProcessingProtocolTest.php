@@ -16,14 +16,15 @@ use PHPUnit\Framework\TestCase;
  * a skončil by na něm chybou „neznámý druh protokolu", tedy právě u toho
  * jediného, který se v praxi otevírá nejčastěji.
  *
- * Tvar je opsaný ze dvou skutečně doručených protokolů (06/2026 a 07/2026);
- * identifikátory jsou nahrazené smyšlenými, aby se cizí údaje nedostaly do
- * repozitáře.
+ * Tvar je opsaný ze dvou skutečně doručených protokolů (06/2026 a 07/2026).
+ * Všechny identifikátory jsou smyšlené — v prvním kole tu omylem zůstaly
+ * skutečné a tenhle komentář tvrdil opak, což je horší než nemít komentář
+ * žádný: čtenář se na něj spolehne a dál to nekontroluje.
  */
 final class JmhzProcessingProtocolTest extends TestCase
 {
-    private const CORRELATION = '8E72FD2813264449A40E51427F484E1C';
-    private const SUBMISSION_GUID = 'F2865C9A-3953-48E6-BE44-4E5B9C921307';
+    private const CORRELATION = 'AAAA1111BBBB2222CCCC3333DDDD4444';
+    private const SUBMISSION_GUID = '0195AAAA-1111-7222-8333-BBBBCCCCDDDD';
 
     public function testDeliveredProtocolIsRead(): void
     {
@@ -58,7 +59,7 @@ final class JmhzProcessingProtocolTest extends TestCase
         (new JmhzProtocolParser())->parse(
             self::protocol(),
             1,
-            '56CFA011B9034D8CBB73C38CF1AC54D8',
+            'EEEE5555FFFF6666AAAA7777BBBB8888',
         );
     }
 

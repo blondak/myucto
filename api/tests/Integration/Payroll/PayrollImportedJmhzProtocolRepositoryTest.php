@@ -127,7 +127,7 @@ final class PayrollImportedJmhzProtocolRepositoryTest extends TestCase
         self::assertSame(6, $result['protocol']['period_month']);
         self::assertSame(2026, $result['protocol']['period_year']);
         self::assertSame(
-            'F2865C9A-3953-48E6-BE44-4E5B9C921307',
+            '0195AAAA-1111-7222-8333-BBBBCCCCDDDD',
             $result['protocol']['submission_guid'],
         );
         self::assertSame([], $result['errors']);
@@ -212,9 +212,9 @@ final class PayrollImportedJmhzProtocolRepositoryTest extends TestCase
             . ' xmlns="http://schemas.cssz.cz/JMHZ/ProtokolOZpracovani/2026">'
             . '<datumProtokolu>2026-07-02T16:20:20.382+02:00</datumProtokolu>'
             . '<variabilniSymbol>' . $variableSymbol . '</variabilniSymbol>'
-            . '<idKonkretnihoPodani>8E72FD2813264449A40E51427F484E1C</idKonkretnihoPodani>'
+            . '<idKonkretnihoPodani>AAAA1111BBBB2222CCCC3333DDDD4444</idKonkretnihoPodani>'
             . '<datumPodani>2026-07-02T16:15:36+02:00</datumPodani>'
-            . '<idPodani>F2865C9A-3953-48E6-BE44-4E5B9C921307</idPodani>'
+            . '<idPodani>0195AAAA-1111-7222-8333-BBBBCCCCDDDD</idPodani>'
             . '<mesic>6</mesic><rok>2026</rok>'
             . '<stavMH>' . $status . '</stavMH>'
             . $failure
@@ -232,8 +232,8 @@ final class PayrollImportedJmhzProtocolRepositoryTest extends TestCase
             'variable_symbol' => '9990000001',
             'period_month' => 6,
             'period_year' => 2026,
-            'submission_guid' => 'F2865C9A-3953-48E6-BE44-4E5B9C921307',
-            'correlation_reference' => '8E72FD2813264449A40E51427F484E1C',
+            'submission_guid' => '0195AAAA-1111-7222-8333-BBBBCCCCDDDD',
+            'correlation_reference' => 'AAAA1111BBBB2222CCCC3333DDDD4444',
             'status_code' => 1,
             'status_name' => 'ProcessedAndComplete',
             'error_count' => 0,
