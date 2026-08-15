@@ -37,24 +37,25 @@ SET NAMES utf8mb4;
 -- 1. Nové sloupce
 -- ─────────────────────────────────────────────────────────────────────────────
 ALTER TABLE submission_outbox
-  ADD COLUMN dispatch_mode ENUM('channel','manual') NOT NULL DEFAULT 'channel'
+  ADD COLUMN IF NOT EXISTS dispatch_mode ENUM('channel','manual') NOT NULL DEFAULT 'channel'
     COMMENT 'channel = odeslala aplikace přes kanál; manual = odeslal člověk ze své datové schránky'
     AFTER channel,
   -- Jak vznikla vazba doručenky na tohle podání. `correlation_reference` je
   -- naše vlastní spisová značka z `dmSenderIdent`, `external_message_id` je
   -- dmID zapsané při ručním odeslání — obojí je přesný identifikátor.
   -- `manual` znamená, že shodu potvrdil člověk; nic slabšího automat nepoužije.
-  ADD COLUMN receipt_matched_by ENUM('correlation_reference','external_message_id','manual') NULL
+  ADD COLUMN IF NOT EXISTS receipt_matched_by ENUM('correlation_reference','external_message_id','manual') NULL
     AFTER receipt_signature_status,
-  ADD COLUMN receipt_inbox_message_id BIGINT UNSIGNED NULL
+  ADD COLUMN IF NOT EXISTS receipt_inbox_message_id BIGINT UNSIGNED NULL
     COMMENT 'Řádek v submission_inbox_messages, ze kterého doručenka pochází'
     AFTER receipt_matched_by,
-  ADD COLUMN receipt_attached_at DATETIME NULL AFTER receipt_inbox_message_id;
+  ADD COLUMN IF NOT EXISTS receipt_attached_at DATETIME NULL AFTER receipt_inbox_message_id;
 
 -- Vazba na příchozí zprávu. Jednosloupcový FK se `ON DELETE SET NULL` ze
 -- stejného důvodu jako u `fk_submission_inbox_outbox`: kompozitní klíč
 -- s NOT NULL sloupcem to neumí. Tenantovou shodu hlídá aplikace i trigger
 -- na straně inboxu.
+ALTER TABLE submission_outbox DROP CONSTRAINT IF EXISTS fk_submission_outbox_receipt_message;
 ALTER TABLE submission_outbox
   ADD CONSTRAINT fk_submission_outbox_receipt_message
     FOREIGN KEY (receipt_inbox_message_id) REFERENCES submission_inbox_messages (id) ON DELETE SET NULL;
@@ -64,6 +65,7 @@ ALTER TABLE submission_outbox
 --
 -- Pozor: CHECK nesmí sáhnout na `receipt_inbox_message_id`, protože ten mění
 -- FK akce `ON DELETE SET NULL` (MariaDB chyba 1901).
+ALTER TABLE submission_outbox DROP CONSTRAINT IF EXISTS chk_submission_outbox_receipt_evidence;
 ALTER TABLE submission_outbox
   ADD CONSTRAINT chk_submission_outbox_receipt_evidence
     CHECK (
@@ -86,6 +88,7 @@ ALTER TABLE submission_outbox
 ALTER TABLE submission_outbox
   DROP CONSTRAINT chk_submission_outbox_box_verification_gate;
 
+ALTER TABLE submission_outbox DROP CONSTRAINT IF EXISTS chk_submission_outbox_box_verification_gate;
 ALTER TABLE submission_outbox
   ADD CONSTRAINT chk_submission_outbox_box_verification_gate
     CHECK (
@@ -112,6 +115,7 @@ ALTER TABLE submission_outbox
 ALTER TABLE submission_outbox
   DROP CONSTRAINT chk_submission_outbox_validation_gate;
 
+ALTER TABLE submission_outbox DROP CONSTRAINT IF EXISTS chk_submission_outbox_validation_gate;
 ALTER TABLE submission_outbox
   ADD CONSTRAINT chk_submission_outbox_validation_gate
     CHECK (
