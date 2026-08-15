@@ -108,7 +108,10 @@ final class PayrollSubmissionReachabilityTest extends TestCase
     private function reachableFromRoots(array $graph): array
     {
         $seen = [];
-        $queue = array_keys($this->roots());
+        $queue = array_merge(
+            array_keys($this->roots()),
+            $this->scriptRootImports(),
+        );
         while ($queue !== []) {
             $class = array_pop($queue);
             if (isset($seen[$class])) {
@@ -129,6 +132,11 @@ final class PayrollSubmissionReachabilityTest extends TestCase
      * Kořeny běhu: HTTP Action vrstva a CLI příkazy. Nic jiného aplikace
      * sama od sebe nespustí — testy se za kořen záměrně nepovažují.
      *
+     * `api/bin` je plnohodnotný kořen: tam leží PHP entrypointy cronu
+     * a údržbových úloh. `cmd/` jsou jen tenké obálky (.cmd/.sh), které
+     * je spouštějí, takže samotné `cmd/` graf nezachytí — bez `api/bin`
+     * by test hlásil jako mrtvou každou službu volanou výhradně cronem.
+     *
      * @return array<string,string>
      */
     private function roots(): array
@@ -137,8 +145,59 @@ final class PayrollSubmissionReachabilityTest extends TestCase
 
         return array_merge(
             $this->classesIn($root . '/src/Action'),
+            $this->classesIn($root . '/bin'),
             $this->classesIn(dirname($root) . '/cmd'),
         );
+    }
+
+    /**
+     * Entrypointy cronu a údržbových úloh v `api/bin` jsou prosté skripty —
+     * mají `use` importy, ale žádný jmenný prostor ani třídu, takže je
+     * `classesIn()` přeskočí. Jejich importy jsou přitom stejně platná
+     * spouštěcí hrana jako konstruktor Action. Bez tohohle kroku by test
+     * hlásil jako mrtvou každou službu, kterou volá výhradně cron.
+     *
+     * @return list<string>
+     */
+    private function scriptRootImports(): array
+    {
+        $root = dirname(__DIR__, 2);
+        $imports = [];
+        foreach ([$root . '/bin', dirname($root) . '/cmd'] as $directory) {
+            if (!is_dir($directory)) {
+                continue;
+            }
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator(
+                    $directory,
+                    \FilesystemIterator::SKIP_DOTS,
+                ),
+            );
+            foreach ($iterator as $file) {
+                if (!$file instanceof \SplFileInfo
+                    || $file->getExtension() !== 'php'
+                ) {
+                    continue;
+                }
+                $source = (string) file_get_contents(
+                    (string) $file->getRealPath(),
+                );
+                if (preg_match('/^namespace\s+/m', $source) === 1) {
+                    continue;
+                }
+                if (preg_match_all(
+                    '/^use\s+(MyInvoice\\\\[^\s;]+)\s*;/m',
+                    $source,
+                    $matches,
+                ) >= 1) {
+                    foreach ($matches[1] as $import) {
+                        $imports[] = $import;
+                    }
+                }
+            }
+        }
+
+        return array_values(array_unique($imports));
     }
 
     /** @return array<string,string> */
@@ -160,6 +219,7 @@ final class PayrollSubmissionReachabilityTest extends TestCase
         $root = dirname(__DIR__, 2);
         $files = array_merge(
             $this->classesIn($root . '/src'),
+            $this->classesIn($root . '/bin'),
             $this->classesIn(dirname($root) . '/cmd'),
         );
         $known = [];
