@@ -353,6 +353,57 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         return $this->json($response)['employment'];
     }
 
+    /**
+     * Zpětná kompatibilita CZ-ISCO na úrovni API: uložený kód mimo klasifikaci
+     * nesmí zablokovat uložení, dokud na něj uživatel nesáhne — ale nová
+     * hodnota mimo číselník projít nesmí. Kód, který validátor toleruje, mu
+     * dodává zápisová cesta z databáze, ne požadavek klienta.
+     */
+    public function testCzIscoBlocksNewCodesOutsideClassificationButKeepsStoredLegacyValue(): void
+    {
+        $employment = $this->create($this->employeeId, 'ISCO-1', 'employment', true);
+
+        // Simulace dat z doby, kdy pole bylo volný text s kontrolou délky.
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET cz_isco_code = ?
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute(['99999', $this->supplierId, (int) $employment['id']]);
+
+        $kept = $this->terms($employment, [
+            ...$this->termsPayload(true, '2026-03-01'),
+            'cz_isco_code' => '99999',
+            'weekly_hours' => '30',
+            'workload_basis_points' => 7500,
+            'change_reason' => 'Změna úvazku, CZ-ISCO beze změny',
+        ]);
+        self::assertSame('99999', $kept['terms'][0]['cz_isco_code']);
+
+        $rejected = $this->action->addTerms(
+            $this->request(
+                'PUT',
+                "/api/payroll/employments/{$employment['id']}/terms",
+                [
+                    'row_version' => $kept['row_version'],
+                    ...$this->termsPayload(true, '2026-04-01'),
+                    'cz_isco_code' => '43110',
+                ],
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+        self::assertSame(422, $rejected->getStatusCode());
+        $message = $this->json($rejected)['error']['message'];
+        self::assertStringContainsString('43110', $message, 'Hláška musí kód jmenovat.');
+        self::assertStringContainsString('našeptávače', $message, 'Hláška musí poradit.');
+
+        $accepted = $this->terms($kept, [
+            ...$this->termsPayload(true, '2026-05-01'),
+            'cz_isco_code' => '24111',
+            'change_reason' => 'Kód z číselníku',
+        ]);
+        self::assertSame('24111', $accepted['terms'][0]['cz_isco_code']);
+    }
+
     /** @param array<string,mixed> $employment
      *  @param array<string,mixed> $payload
      *  @return array<string,mixed>
@@ -414,7 +465,7 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
             'jmhz_apz_instrument_code' => null,
             'jmhz_functional_benefits_status' => 'unverified',
             'jmhz_temporary_assignment_status' => 'unverified',
-            'cz_isco_code' => '43110',
+            'cz_isco_code' => '43111',
             'activity_code' => '1',
             'jmhz_relationship_detail_code' => '1',
             'social_insurance_participation' => 'automatic',

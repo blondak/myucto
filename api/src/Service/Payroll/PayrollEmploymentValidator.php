@@ -62,6 +62,7 @@ final class PayrollEmploymentValidator
 
     public function __construct(
         private readonly PayrollEmploymentJmhzEvidenceCatalog $jmhzEvidence,
+        private readonly CzIscoCodebook $czIsco,
     ) {}
 
     /** @param array<string,mixed> $input
@@ -100,10 +101,15 @@ final class PayrollEmploymentValidator
         ];
     }
 
-    /** @param array<string,mixed> $input
-     *  @return TermsInput
+    /**
+     * @param array<string,mixed> $input
+     * @param ?string $storedCzIscoCode Kód CZ-ISCO, který u tohoto vztahu už
+     *        v databázi je. Předává ho zápisová cesta, nikdy klient — je to
+     *        jediný důvod, proč smí projít kód mimo číselník (viz
+     *        {@see optionalCzIscoCode()}).
+     * @return TermsInput
      */
-    public function terms(array $input): array
+    public function terms(array $input, ?string $storedCzIscoCode = null): array
     {
         $effectiveFrom = $this->requiredDate($input, 'effective_from');
         $plannedStart = $this->requiredDate($input, 'planned_start_on');
@@ -236,7 +242,7 @@ final class PayrollEmploymentValidator
             'jmhz_apz_instrument_code' => $apzCode,
             'jmhz_functional_benefits_status' => $functionalBenefits,
             'jmhz_temporary_assignment_status' => $temporaryAssignment,
-            'cz_isco_code' => $this->optionalCzIscoCode($input, 'cz_isco_code'),
+            'cz_isco_code' => $this->optionalCzIscoCode($input, 'cz_isco_code', $storedCzIscoCode),
             'activity_code' => $activityCode,
             'jmhz_relationship_detail_code' => $relationshipDetailCode,
             'social_insurance_participation' => $social,
@@ -345,15 +351,49 @@ final class PayrollEmploymentValidator
      *
      * @param array<string,mixed> $input
      */
-    private function optionalCzIscoCode(array $input, string $key): ?string
+    /**
+     * Kód CZ-ISCO se ověřuje proti připnuté klasifikaci ČSÚ, ne jen tvarem.
+     * Dobře tvarovaný nesmysl (12345) do dneška prošel až do podání JMHZ a
+     * vrátil se jako odmítnutí ČSSZ — to je nejdražší možné místo, kde to zjistit.
+     *
+     * Zpětná kompatibilita má dvě úrovně, protože v databázi jsou data z doby,
+     * kdy pole bylo volný text:
+     *   1. **Vyřazený kód** (platil v některém starším vydání CZ-ISCO) projde vždy.
+     *      Byla to v době zadání legitimní hodnota a přepisovat historii při
+     *      revizi klasifikace by bylo horší než ji nechat být.
+     *   2. **Kód, který v CZ-ISCO nikdy nebyl**, projde jen tehdy, když je
+     *      shodný s tím, co u vztahu už uložené je. Uživatel tak může uložit
+     *      formulář, ve kterém mění dovolenou nebo mzdu, aniž by ho blokovalo
+     *      cizí historické pole — ale jakmile na CZ-ISCO sáhne, musí trefit
+     *      číselník. Nové hodnoty jsou tím vynucené, existující nezablokované.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function optionalCzIscoCode(array $input, string $key, ?string $storedCode = null): ?string
     {
         $value = $this->optionalText($input, $key, 16);
-        if ($value !== null && preg_match('/^[0-9]{4,5}$/D', $value) !== 1) {
+        if ($value === null) {
+            return null;
+        }
+        if (preg_match('/^[0-9]{4,5}$/D', $value) !== 1) {
             throw new \InvalidArgumentException(
                 "Kód CZ-ISCO {$value} nemá platný tvar. Zadejte čtyř- nebo pětimístné číslo, například 25120.",
             );
         }
-        return $value;
+        $status = $this->czIsco->status($value);
+        if ($status === CzIscoCodebook::STATUS_ACTIVE || $status === CzIscoCodebook::STATUS_RETIRED) {
+            return $value;
+        }
+        if ($storedCode !== null && $storedCode === $value) {
+            return $value;
+        }
+        throw new \InvalidArgumentException(sprintf(
+            'Kód CZ-ISCO %s v klasifikaci zaměstnání ČSÚ (verze %s) neexistuje. '
+                . 'Vyberte kód z našeptávače — stačí napsat část názvu profese, '
+                . 'třeba „účetní" najde 43111 Účetní všeobecní.',
+            $value,
+            CzIscoCodebook::CLASSIFICATION_VERSION,
+        ));
     }
 
     /** @param array<string,mixed> $input */

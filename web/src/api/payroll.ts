@@ -728,6 +728,34 @@ export interface PayrollJmhzMunicipalityOption {
   label: string
 }
 
+/** Položka klasifikace zaměstnání CZ-ISCO tak, jak ji vrací našeptávač. */
+export interface PayrollCzIscoOption {
+  code: string
+  label: string
+  /** 4 = podskupina, 5 = kategorie. Jiné úrovně endpoint nenabízí. */
+  level: number
+  parent_code: string | null
+  parent_label: string | null
+}
+
+/** Provenience připnutého číselníku ČSÚ — do UI jde jako popisek pod polem. */
+export interface PayrollCzIscoCodebookInfo {
+  package_key: string
+  manifest_sha256: string
+  classification_version: string
+  effective_from: string
+  legal_basis: string
+  licence: string
+  licence_url: string
+  source_url: string
+  entry_count: number
+}
+
+export interface PayrollCzIscoSearchResult {
+  items: PayrollCzIscoOption[]
+  codebook: PayrollCzIscoCodebookInfo
+}
+
 export interface PayrollComponentJmhzMapping {
   id: number
   component_definition_id: number
@@ -2526,6 +2554,14 @@ export const payrollApi = {
       '/payroll/jmhz/municipalities',
       { params: { q: query, limit } },
     ).then(response => response.data.items),
+  // Hledání v CZ-ISCO běží na serveru — číselník má skoro dva tisíce položek
+  // a do bundlu nepatří. Dotaz kratší než dva znaky vrátí 422, volající ho
+  // proto vůbec nemá posílat.
+  searchCzIsco: (query: string, limit = 20) =>
+    api.get<PayrollCzIscoSearchResult>(
+      '/payroll/cz-isco',
+      { params: { q: query, limit } },
+    ).then(response => response.data),
   transitionEmployment: (
     employmentId: number,
     target: PayrollEmploymentStatus,

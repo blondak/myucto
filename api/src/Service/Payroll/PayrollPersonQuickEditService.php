@@ -42,7 +42,7 @@ final class PayrollPersonQuickEditService
         }
         $normalizedEmployment = $employmentInput === null
             ? null
-            : $this->employment($employmentInput);
+            : $this->employment($employmentInput, $supplierId);
 
         return $this->transaction(function () use (
             $supplierId,
@@ -109,7 +109,7 @@ final class PayrollPersonQuickEditService
      *   terms:TermsInput
      * }
      */
-    private function employment(array $input): array
+    private function employment(array $input, int $supplierId): array
     {
         $id = $this->version($input['id'] ?? null, false);
         $rowVersion = $this->version($input['row_version'] ?? null, false);
@@ -124,6 +124,9 @@ final class PayrollPersonQuickEditService
         }
         $terms = $this->employmentValidator->terms(
             $this->object($input['terms'] ?? null, 'employment.terms'),
+            // Rychlá editace mění hlavně mzdu a osobní údaje — historický kód
+            // CZ-ISCO mimo číselník ji nesmí zablokovat, dokud na něj nikdo nesáhne.
+            $this->employments->currentCzIscoCode($supplierId, $id),
         );
 
         return [

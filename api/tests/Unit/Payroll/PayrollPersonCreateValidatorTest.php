@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll;
 
+use MyInvoice\Service\Payroll\CzIscoCodebook;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
 use MyInvoice\Service\Payroll\PayrollPersonCreateValidator;
@@ -41,6 +42,7 @@ final class PayrollPersonCreateValidatorTest extends TestCase
                 new JmhzSpecPackageCatalog(),
                 new JmhzExternalCodebookCatalog(new JmhzSpecPackageCatalog()),
             ),
+            new CzIscoCodebook(),
         )))->validate([
             'full_name' => 'Syntetická Osoba',
             'birth_date' => null,

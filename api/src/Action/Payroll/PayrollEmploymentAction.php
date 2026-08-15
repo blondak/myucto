@@ -88,10 +88,17 @@ final class PayrollEmploymentAction
         }
         try {
             $body = $this->body($request);
+            $supplierId = $this->currentSupplierId($request);
+            $employmentId = (int) $args['id'];
             $employment = $this->employments->addTerms(
-                $this->currentSupplierId($request),
-                (int) $args['id'],
-                $this->validator->terms($body),
+                $supplierId,
+                $employmentId,
+                $this->validator->terms(
+                    $body,
+                    // Uložený kód CZ-ISCO smí projít, i když v číselníku není —
+                    // hodnotu bere validátor odsud, nikdy z požadavku klienta.
+                    $this->employments->currentCzIscoCode($supplierId, $employmentId),
+                ),
                 $this->validator->rowVersion($body),
                 $this->userId($request),
                 $this->ip($request),

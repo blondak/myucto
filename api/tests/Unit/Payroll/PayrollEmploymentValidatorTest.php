@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll;
 
+use MyInvoice\Service\Payroll\CzIscoCodebook;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
@@ -144,7 +145,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
 
     public function testCzIscoAcceptsFourAndFiveDigitCodes(): void
     {
-        foreach (['2512', '43110', null] as $code) {
+        foreach (['2512', '43111', null] as $code) {
             $terms = $this->terms();
             $terms['cz_isco_code'] = $code;
             self::assertSame($code, $this->validator()->terms($terms)['cz_isco_code']);
@@ -163,6 +164,62 @@ final class PayrollEmploymentValidatorTest extends TestCase
                 self::assertStringContainsString('CZ-ISCO', $e->getMessage());
                 self::assertStringContainsString('25120', $e->getMessage());
             }
+        }
+    }
+
+    /**
+     * Tvar sám o sobě nestačí: 43110 vypadá jako kód CZ-ISCO, ale v klasifikaci
+     * není. Dřív prošel až do podání JMHZ a vrátil se jako odmítnutí ČSSZ.
+     */
+    public function testCzIscoRejectsWellFormedCodeMissingFromClassification(): void
+    {
+        $terms = $this->terms();
+        $terms['cz_isco_code'] = '43110';
+
+        try {
+            $this->validator()->terms($terms);
+            self::fail('Kód mimo klasifikaci měl být odmítnut.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('43110', $e->getMessage(), 'Hláška musí kód jmenovat.');
+            self::assertStringContainsString('našeptávače', $e->getMessage(), 'Hláška musí poradit.');
+        }
+    }
+
+    /** Kód, který platil ve starším vydání CZ-ISCO, je legitimní historická hodnota. */
+    public function testCzIscoAcceptsRetiredCodeFromOlderClassificationVersion(): void
+    {
+        $codebook = new CzIscoCodebook();
+        self::assertSame(CzIscoCodebook::STATUS_RETIRED, $codebook->status('32114'));
+
+        $terms = $this->terms();
+        $terms['cz_isco_code'] = '32114';
+
+        self::assertSame('32114', $this->validator()->terms($terms)['cz_isco_code']);
+    }
+
+    /**
+     * Zpětná kompatibilita: v databázi jsou hodnoty z doby, kdy pole bylo volný
+     * text. Uložení vztahu kvůli úplně jiné změně nesmí padnout na cizí kód —
+     * ale jakmile se kód změní, musí trefit číselník.
+     */
+    public function testCzIscoGrandfathersOnlyTheAlreadyStoredValue(): void
+    {
+        $terms = $this->terms();
+        $terms['cz_isco_code'] = '99999';
+
+        self::assertSame(
+            '99999',
+            $this->validator()->terms($terms, '99999')['cz_isco_code'],
+            'Beze změny pole musí uložení projít.',
+        );
+
+        $changed = $this->terms();
+        $changed['cz_isco_code'] = '99998';
+        try {
+            $this->validator()->terms($changed, '99999');
+            self::fail('Změna kódu na jiný nesmyslný kód měla být odmítnuta.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('99998', $e->getMessage());
         }
     }
 
@@ -186,7 +243,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
             'jmhz_apz_instrument_code' => null,
             'jmhz_functional_benefits_status' => 'unverified',
             'jmhz_temporary_assignment_status' => 'unverified',
-            'cz_isco_code' => '43110',
+            'cz_isco_code' => '43111',
             'activity_code' => '1',
             'jmhz_relationship_detail_code' => '1',
             'social_insurance_participation' => 'foreign',
@@ -231,6 +288,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
                 new JmhzSpecPackageCatalog(),
                 new JmhzExternalCodebookCatalog(new JmhzSpecPackageCatalog()),
             ),
+            new CzIscoCodebook(),
         );
     }
 }
