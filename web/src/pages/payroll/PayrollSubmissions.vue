@@ -30,7 +30,12 @@ const activeTab = ref<SubmissionTab>('transport')
 const tabs: SubmissionTab[] = [
   'transport', 'regzel', 'jmhz', 'health', 'inbox', 'certificate',
 ]
-const inboxOpenCount = ref(0)
+/*
+ * `null` = počet neznáme (načtení odznaku selhalo), ne „nula nevyřízených".
+ * Číslo 0 tu dřív zastupovalo obojí, takže po výpadku odznak tiše zmizel
+ * a záložka Inbox vypadala vyřízeně. Typ to teď nedovolí splést.
+ */
+const inboxOpenCount = ref<number | null>(null)
 const loading = ref(true)
 const preparing = ref(false)
 const downloadingId = ref<number | null>(null)
@@ -187,6 +192,8 @@ async function loadInboxBadge() {
     inboxOpenCount.value = response.summary.total
   } catch {
     // Odznak je jen orientační — chybu zobrazí až samotná záložka Inbox.
+    // Nesmí ale tvrdit „nic nevyřízeného": bez počtu se prostě nevykreslí.
+    inboxOpenCount.value = null
   }
 }
 
@@ -232,7 +239,7 @@ onMounted(loadInboxBadge)
       >
         {{ t(`payroll.submissions.tabs.${tab}`) }}
         <span
-          v-if="tab === 'inbox' && inboxOpenCount > 0"
+          v-if="tab === 'inbox' && inboxOpenCount !== null && inboxOpenCount > 0"
           class="ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-danger-600 px-1.5 py-0.5 text-xs font-semibold text-white"
           data-test="submissions-inbox-badge"
         >

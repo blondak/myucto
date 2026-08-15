@@ -30,12 +30,12 @@ import { apiErrorMessage } from '@/api/errors'
 import PayrollFileDropzone, {
   type PayrollFileRejectReason,
 } from '@/components/payroll/PayrollFileDropzone.vue'
-import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import CodeNameFields from '@/components/ui/CodeNameFields.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import {
   canApplyPayrollImport,
-  formatPayrollMinor,
   localPayrollPeriod,
   monthStart,
   parsePayrollAmountToMinor,
@@ -45,6 +45,8 @@ import {
   payrollMinorToInput,
   type PayrollEmploymentOption,
 } from '@/pages/payroll/payrollComponentsUi'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatMoneyMinor } from '@/composables/useFormat'
 
 type Tab = 'catalog' | 'recurring' | 'inputs' | 'import'
 
@@ -76,12 +78,18 @@ interface InputForm {
   external_id: string
 }
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const activeTab = ref<Tab>('inputs')
 const period = ref(localPayrollPeriod())
 const loading = ref(false)
+/*
+ * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
+ * není". Toast s chybou za pár vteřin zmizí a bez tohohle příznaku by na
+ * obrazovce zůstal prázdný stav, který lže.
+ */
+const loadFailed = ref(false)
 const saving = ref(false)
 const components = ref<PayrollComponent[]>([])
 const recurring = ref<PayrollRecurringComponent[]>([])
@@ -211,6 +219,22 @@ const valueKindOptions = computed(() => selectOptions(valueKinds, 'payroll.compo
 const frequencyOptions = computed(() => selectOptions(frequencies, 'payroll.components.frequency'))
 const taxTreatmentOptions = computed(() => selectOptions(taxTreatments, 'payroll.components.tax'))
 const inclusionTreatmentOptions = computed(() => selectOptions(inclusionTreatments, 'payroll.components.inclusion'))
+/*
+ * Proč nejde uložit mapování na JMHZ. Obě překážky mají jasné vyústění:
+ * buď chybí cílový atribut (vyberte ho v poli nad tlačítkem), nebo jde
+ * o mapování ze starší verze balíčku, které se nedá přepsat.
+ */
+const jmhzSaveBlockedReason = computed<string | null>(() => {
+  const component = editingJmhzComponent.value
+  if (component === null) return null
+  const mapping = jmhzState(component).mapping
+  if (mapping?.is_active && !mapping.is_current_package) {
+    return t('payroll.components.jmhz.legacy_mapping')
+  }
+  if (!jmhzTargetId.value) return t('payroll.components.jmhz.target_required')
+  return null
+})
+
 const jmhzTargetOptions = computed(() => jmhzTargets.value.map(target => ({
   value: target.attribute_id,
   label: `${target.attribute_id} · ${target.name}`,
@@ -319,7 +343,7 @@ function newInputForm(): InputForm {
 }
 
 function formatMoney(value: number | null): string {
-  return formatPayrollMinor(value, String(locale.value))
+  return formatMoneyMinor(value)
 }
 
 // Hlavní údaj je název vztahu, ne jeho technický kód. Dva vztahy téhož člověka
@@ -361,6 +385,7 @@ async function loadEmploymentOptions() {
 
 async function load() {
   loading.value = true
+  loadFailed.value = false
   jmhzLoading.value = true
   void Promise.all([
     payrollApi.componentJmhzTargets(),
@@ -386,6 +411,9 @@ async function load() {
     inputs.value = periodInputs
     chartAccounts.value = accounts
   } catch (error: any) {
+    // Katalog, opakující se složky ani vstupy se nemažou — po výpadku sítě
+    // by prázdný katalog vypadal jako „mzdové složky nejsou nastavené".
+    loadFailed.value = true
     toast.error(apiErrorMessage(error, t('payroll.components.load_failed')))
   } finally {
     loading.value = false
@@ -901,6 +929,15 @@ onMounted(load)
       <div v-for="index in 4" :key="index" class="h-24 animate-pulse rounded-xl bg-neutral-100" />
     </div>
 
+    <EmptyState
+      v-else-if="loadFailed"
+      variant="failed"
+      boxed
+      data-test="load-failed"
+      :message="t('payroll.components.load_failed_hint')"
+      @action="load"
+    />
+
     <template v-else>
       <section v-if="activeTab === 'catalog'" class="space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
@@ -985,11 +1022,14 @@ onMounted(load)
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>
               {{ t('payroll.components.jmhz.remove') }}
             </button>
-            <button :class="btnFilled('primary')" :disabled="saving || !jmhzTargetId || (jmhzState(editingJmhzComponent).mapping?.is_active && !jmhzState(editingJmhzComponent).mapping?.is_current_package)" @click="saveJmhzMapping">
+            <button :class="btnFilled('primary')" data-testid="payroll-jmhz-save" :disabled="saving || !jmhzTargetId || (jmhzState(editingJmhzComponent).mapping?.is_active && !jmhzState(editingJmhzComponent).mapping?.is_current_package)" :title="disabledTitle(jmhzSaveBlockedReason !== null, jmhzSaveBlockedReason)" @click="saveJmhzMapping">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>
               {{ t('common.save') }}
             </button>
           </div>
+          <p v-if="jmhzSaveBlockedReason" :class="[BTN_DISABLED_NOTE, 'mt-2 text-right']" data-testid="payroll-jmhz-save-blocked">
+            {{ jmhzSaveBlockedReason }}
+          </p>
         </section>
 
         <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">

@@ -45,7 +45,10 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
 }))
 
-vi.mock('vue-i18n', () => ({
+// `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
+// `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string) => key,
     locale: ref('cs-CZ'),
@@ -109,6 +112,64 @@ describe('AbsenceManagement', () => {
     m.createAverage.mockResolvedValue({ id: 9 })
     m.createEntitlement.mockResolvedValue({ id: 10 })
     m.createLeaveEntry.mockResolvedValue({ id: 11 })
+  })
+
+  it('offers a retry instead of an empty state when the absences fail to load', async () => {
+    m.absences.mockRejectedValue(new Error('network'))
+
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('payroll_absence.messages.load_failed_hint')
+    expect(wrapper.text()).not.toContain('payroll_absence.absences.empty')
+
+    m.absences.mockResolvedValue([])
+    await wrapper.get('[data-test="load-failed"] [data-test="empty-state-cta"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
+  })
+
+  it('shows the empty state when the relation genuinely has no absence', async () => {
+    m.absences.mockResolvedValue([])
+
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('payroll_absence.absences.empty')
+    expect(wrapper.text()).not.toContain('payroll_absence.messages.load_failed_hint')
+  })
+
+  /*
+   * Zašedlé „Vytvořit" u dovolené dřív mlčelo. Když navíc pro vztah není
+   * spočítaný žádný průměr, uživatel neměl jak zjistit, že se počítá jinde.
+   */
+  it('points to the Averages tab when no average exists for the relation', async () => {
+    m.averages.mockResolvedValue([])
+
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    const button = wrapper.get('[data-test="absence-create"]')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(button.attributes('title'))
+      .toBe('payroll_absence.absences.average_missing_for_relation')
+    expect(wrapper.get('[data-test="absence-create-blocked"]').text())
+      .toBe('payroll_absence.absences.average_missing_for_relation')
+
+    await wrapper.get('[data-test="go-to-averages"]').trigger('click')
+    expect(wrapper.text()).toContain('payroll_absence.averages.create')
+  })
+
+  it('asks for a pick when an average exists but none is selected', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="go-to-averages"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="absence-create"]').attributes('title'))
+      .toBe('payroll_absence.absences.average_required_hint')
   })
 
   it('renders a responsive DPN card and sends explicit review flags', async () => {

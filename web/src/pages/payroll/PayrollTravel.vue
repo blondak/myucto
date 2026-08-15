@@ -4,8 +4,12 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
-import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatMoneyMinor as money } from '@/composables/useFormat'
+import { localPayrollPeriod } from './payrollComponentsUi'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { payrollAbsenceApi, type PayrollAbsenceEmployment } from '@/api/payrollAbsences'
 import {
   payrollTravelApi,
@@ -38,7 +42,7 @@ interface MealForm {
   meal_count: number
 }
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 
@@ -52,11 +56,17 @@ const fieldClass = 'mt-1 h-10 w-full rounded-md border border-neutral-300 bg-sur
 const labelClass = 'mb-1 block text-xs font-medium text-neutral-600'
 
 const loading = ref(true)
+/*
+ * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
+ * není". Toast s chybou za pár vteřin zmizí a bez tohohle příznaku by na
+ * obrazovce zůstal prázdný stav, který lže.
+ */
+const loadFailed = ref(false)
 const saving = ref(false)
 const previewing = ref(false)
 const trips = ref<TravelTrip[]>([])
 const employments = ref<PayrollAbsenceEmployment[]>([])
-const period = ref(localMonth())
+const period = ref(localPayrollPeriod())
 const editorOpen = ref(false)
 const editingTrip = ref<TravelTrip | null>(null)
 const formError = ref('')
@@ -104,17 +114,6 @@ const fuelOptions = computed(() => fuelKinds.map(kind => ({
   value: kind,
   label: t(`payroll_travel.fuels.${kind}`),
 })))
-
-function localMonth() {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-}
-
-function money(minor: number | null | undefined) {
-  if (minor === null || minor === undefined) return '—'
-  return new Intl.NumberFormat(locale.value, { style: 'currency', currency: 'CZK' })
-    .format(minor / 100)
-}
 
 function hours(minutes: number) {
   return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`
@@ -251,6 +250,7 @@ function itemPayload(item: ItemForm): TravelTripItemPayload {
 
 async function load() {
   loading.value = true
+  loadFailed.value = false
   try {
     const [tripList, context] = await Promise.all([
       payrollTravelApi.list(period.value),
@@ -261,6 +261,7 @@ async function load() {
     trips.value = tripList
     employments.value = context
   } catch (error: unknown) {
+    loadFailed.value = true
     toast.error(apiErrorMessage(error, t('payroll_travel.messages.load_failed')))
   } finally {
     loading.value = false
@@ -408,6 +409,15 @@ onMounted(load)
     <div v-if="loading" class="grid gap-4 md:grid-cols-2">
       <div v-for="index in 4" :key="index" class="h-32 animate-pulse rounded-xl bg-neutral-100" />
     </div>
+
+    <EmptyState
+      v-else-if="loadFailed"
+      variant="failed"
+      boxed
+      data-test="load-failed"
+      :message="t('payroll_travel.messages.load_failed_hint')"
+      @action="load"
+    />
 
     <template v-else>
       <p
@@ -857,16 +867,22 @@ onMounted(load)
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.chart" /></svg>
           {{ t('payroll_travel.actions.preview') }}
         </button>
-        <button
-          data-test="travel-save"
-          :class="btnFilled('primary')"
-          class="whitespace-nowrap"
-          :disabled="saving || !canWrite"
-          @click="save"
-        >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
-          {{ t('common.save') }}
-        </button>
+        <div class="flex flex-col items-end gap-1.5">
+          <button
+            data-test="travel-save"
+            :class="btnFilled('primary')"
+            class="whitespace-nowrap"
+            :disabled="saving || !canWrite"
+            :title="disabledTitle(!canWrite, t('payroll_travel.messages.save_blocked_readonly'))"
+            @click="save"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+            {{ t('common.save') }}
+          </button>
+          <p v-if="!canWrite" :class="BTN_DISABLED_NOTE" data-test="travel-save-blocked">
+            {{ t('payroll_travel.messages.save_blocked_readonly') }}
+          </p>
+        </div>
       </div>
     </section>
   </div>

@@ -847,7 +847,10 @@
                     "matched": "Úhrada",
                     "reversed": "Reverze"
                 }
-            }
+            },
+            "materialize_blocked": "Závazky vzniknou až ze schválené revize mzdového běhu. Nejdřív schvalte revizi za toto období v Mzdových bězích.",
+            "materialize_blocked_unknown": "Nevíme, jestli je co připravit — mzdové běhy se pro toto období nenačetly. Zkuste načtení zopakovat.",
+            "load_failed_hint": "Závazky za toto období se nenačetly, takže seznam níže může být neúplný nebo zastaralý. Zkuste to prosím znovu."
         },
         "posting_reconciliation": {
             "title": "Shoda účtování mezd",
@@ -1081,7 +1084,10 @@
                 "correction_pending": "Čeká na opravu",
                 "reopened": "Oprava otevřena",
                 "cancelled": "Zrušeno"
-            }
+            },
+            "load_failed_hint": "Mzdové běhy se nenačetly, takže nevíme, jestli za období nějaký existuje. Zkuste to prosím znovu.",
+            "create_blocked_period": "Vyberte období, za které se má běh spočítat.",
+            "create_blocked_payment_date": "Doplňte datum výplaty — určuje splatnost odvodů i termíny podání."
         },
         "quick_inputs": {
             "title": "Rychlý měsíční vstup mezd",
@@ -1162,7 +1168,12 @@
                 "partial_month_base_required": "Pracovní vztah trvá jen část měsíce. Zadejte potvrzenou základní mzdu ručně.",
                 "suspended_month_base_required": "Pracovní vztah byl v měsíci přerušen. Zadejte potvrzený základ nebo příjem ručně.",
                 "employment_state_base_required": "Stav pracovního vztahu vyžaduje ruční potvrzení základu nebo příjmu."
-            }
+            },
+            "load_failed_hint": "Mzdové vstupy za toto období se nenačetly. Nezadávejte je znovu — nejdřív zkuste načtení zopakovat, ať nevzniknou duplicity.",
+            "save_blocked_loading": "Počkejte, než se vstupy za zvolené období načtou.",
+            "save_blocked_empty": "Za toto období není co uložit — nejsou tu žádné vztahy se mzdovým vstupem.",
+            "save_blocked_invalid": "Opravte červeně označená pole. Dokud v tabulce zůstane neplatná hodnota, uložit nejde.",
+            "save_blocked_rows": "Některý řádek má blokující stav (uzamčený vstup nebo ukončený vztah). Vyřešte ho a zkuste uložit znovu."
         },
         "components": {
             "title": "Mzdové složky a vstupy",
@@ -1394,7 +1405,8 @@
                 "approved": "Schválený",
                 "locked": "Uzamčený během",
                 "cancelled": "Zrušený"
-            }
+            },
+            "load_failed_hint": "Mzdové složky se nenačetly. Zkuste to prosím znovu; prázdný katalog teď neznamená, že nic není nastavené."
         },
         "documents": {
             "title": "Dokumenty a výstupy",
@@ -1541,7 +1553,9 @@
                 "break": "Přestávka (min)",
                 "standby": "Pohotovost (min)",
                 "remote": "Práce na dálku",
-                "publish": "Publikovat zaměstnanci"
+                "publish": "Publikovat zaměstnanci",
+                "blocked_no_employment": "Vyberte zaměstnance, kterému se záznam zapíše.",
+                "blocked_no_range": "Doplňte začátek i konec směny — bez nich se odpracovaná doba nedá spočítat."
             },
             "calendar": {
                 "default_name": "Pravidelný pracovní týden",
@@ -1569,8 +1583,10 @@
                 "xlsx_manual": "XLSX není automaticky podporován. Převeďte jej do CSV a spusťte znovu náhled.",
                 "preview_failed": "Náhled importu se nepodařilo vytvořit.",
                 "saved": "Import docházky byl zpracován.",
-                "failed": "Import docházky se nepodařilo zpracovat."
-            }
+                "failed": "Import docházky se nepodařilo zpracovat.",
+                "blocked_unsupported": "Tenhle formát souboru zatím neumíme naimportovat. Použijte podporovaný formát, nebo záznamy zadejte ručně."
+            },
+            "load_failed_hint": "Docházka za toto období se nenačetla. Než se to povede, neberte prázdný přehled jako doklad, že nikdo nic nevykázal."
         },
         "people": {
             "title": "Zaměstnanci",
@@ -2241,7 +2257,8 @@
                 "reload_current": "Načíst aktuální stav",
                 "new_title": "Nové přiřazení dimenze",
                 "edit_title": "Upravit přiřazení dimenze"
-            }
+            },
+            "load_failed_hint": "Seznam zaměstnanců se nenačetl, takže nevíme, koho firma má. Zkuste to prosím znovu."
         },
         "submissions": {
             "title": "Mzdová podání",
@@ -3435,7 +3452,11 @@
             },
             "validation": {
                 "amount": "Částku zadejte jako nezáporné číslo nejvýše se dvěma desetinnými místy."
-            }
+            },
+            "load_failed_hint": "Exekuce a insolvence se nenačetly. Prázdný seznam teď neznamená, že žádné nejsou — zkuste to prosím znovu.",
+            "support_failed": "Zaměstnance ani účty příjemců se nepodařilo načíst, takže výběr níže zůstal prázdný. Není to nastavením — zkuste načtení zopakovat.",
+            "transition_blocked_document": "Vyberte doklad, o který se přechod opírá. Bez něj by v případu chyběla stopa, odkud změna vzešla.",
+            "transition_blocked_reason": "Napište důvod. U tohoto kroku se ukládá do historie případu, takže ho nelze vynechat."
         },
         "features": {
             "module_shell": "Kostra a dashboard modulu",
@@ -8043,7 +8064,10 @@
             "title": "Zatím tu nic není",
             "filtered_title": "Filtru neodpovídá žádný záznam",
             "filtered_message": "Záznamy tu možná jsou, jen je schoval filtr. Zkuste jiné období, jiný hledaný výraz, nebo filtr zrušte.",
-            "clear_filters": "Zrušit filtr"
+            "clear_filters": "Zrušit filtr",
+            "failed_title": "Data se nepodařilo načíst",
+            "failed_message": "Spojení se serverem selhalo, takže o obsahu zatím nic nevíme. Zkuste načtení zopakovat; pokud potíž trvá, obnovte stránku.",
+            "retry": "Zkusit znovu"
         },
         "no_items": "Žádné položky.",
         "pagination_range": "{from}–{to} z {total}",
@@ -14109,7 +14133,9 @@
             "created": "Pracovní cesta byla založena.",
             "updated": "Pracovní cesta byla uložena.",
             "approved": "Vyúčtování bylo schváleno.",
-            "materialized": "Promítnuto do mzdy: {created} nových, {replayed} beze změny."
+            "materialized": "Promítnuto do mzdy: {created} nových, {replayed} beze změny.",
+            "load_failed_hint": "Pracovní cesty za toto období se nenačetly. Zkuste to prosím znovu.",
+            "save_blocked_readonly": "Nemáte oprávnění měnit pracovní cesty, můžete si je jen prohlížet."
         }
     },
     "payroll_absence": {
@@ -14164,7 +14190,10 @@
             "partial_last": "Čerpání poslední den (hodiny)",
             "create": "Založit absenci",
             "cancel_confirm": "Opravdu zrušit absenci? U dovolené vznikne dohledatelná reverzní položka.",
-            "correction_pending": "Navazující mzdový běh vyžaduje kontrolu opravy."
+            "correction_pending": "Navazující mzdový běh vyžaduje kontrolu opravy.",
+            "average_required_hint": "Vyberte průměrný výdělek, ze kterého se náhrada spočítá — bez něj nepřítomnost založit nejde.",
+            "average_missing_for_relation": "Pro tento vztah není spočítaný žádný průměrný výdělek. Spočítejte ho na záložce Průměry a vraťte se sem.",
+            "go_to_averages": "Přejít na Průměry"
         },
         "dpn": {
             "insurance": "Potvrzena účast na nemocenském pojištění",
@@ -14239,7 +14268,8 @@
             "average_created": "Snapshot průměru byl vypočten.",
             "average_approved": "Snapshot průměru byl schválen.",
             "entitlement_created": "Nárok byl zapsán do ledgeru.",
-            "entry_created": "Položka ledgeru byla přidána."
+            "entry_created": "Položka ledgeru byla přidána.",
+            "load_failed_hint": "Nepřítomnosti, průměry ani nárok na dovolenou se pro tento vztah nenačetly. Zkuste to prosím znovu."
         }
     },
     "diagnostics": {

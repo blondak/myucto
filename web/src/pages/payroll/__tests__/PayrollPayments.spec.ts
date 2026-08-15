@@ -46,7 +46,10 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.success, error: m.error }),
 }))
-vi.mock('vue-i18n', () => ({
+// `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
+// `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
@@ -230,6 +233,66 @@ describe('PayrollPayments', () => {
         liability_kind: 'net_wage',
       },
     })
+  })
+
+  /*
+   * Dva různé scénáře na téže obrazovce, které dřív vypadaly stejně:
+   * „nenačetlo se" vs. „za období opravdu nic není". První musí nabídnout
+   * opakování, druhý smí tvrdit, že je prázdno.
+   */
+  it('offers a retry instead of an empty state when the liabilities fail to load', async () => {
+    m.liabilities.mockRejectedValue(new Error('network'))
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('payroll.payments.load_failed_hint')
+    // Prázdný stav se nesmí ukázat — o závazcích nic nevíme.
+    expect(wrapper.text()).not.toContain('payroll.payments.empty_blocked')
+    expect(m.error).toHaveBeenCalled()
+
+    m.liabilities.mockResolvedValue({ period: '2026-08', items: [] })
+    await wrapper.get('[data-test="load-failed"] [data-test="empty-state-cta"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
+  })
+
+  it('shows the empty state when the period genuinely has no liabilities', async () => {
+    m.liabilities.mockResolvedValue({ period: '2026-08', items: [] })
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('payroll.payments.empty')
+    expect(wrapper.text()).not.toContain('payroll.payments.load_failed_hint')
+  })
+
+  it('explains why creating liabilities is disabled without an approved revision', async () => {
+    // Bez použitelné revize je hlavní akce mrtvá; vysvětlení dřív viselo jen
+    // v prázdném stavu, takže u neprázdného seznamu nebylo vidět vůbec.
+    m.runs.mockResolvedValue([])
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    const button = wrapper.get('[data-test="materialize"]')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(button.attributes('title')).toBe('payroll.payments.materialize_blocked')
+    expect(wrapper.get('[data-test="materialize-blocked"]').text())
+      .toBe('payroll.payments.materialize_blocked')
+  })
+
+  it('drops the disabled reason once the action is usable', async () => {
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    const button = wrapper.get('[data-test="materialize"]')
+    expect(button.attributes('disabled')).toBeUndefined()
+    expect(button.attributes('title')).toBeUndefined()
+    expect(wrapper.find('[data-test="materialize-blocked"]').exists()).toBe(false)
   })
 
   it('renders matching desktop and mobile liability views without sensitive references', async () => {

@@ -108,15 +108,6 @@ export function payrollMinorToInput(value: number | null): string {
   return `${sign}${Math.floor(absolute / 100)},${String(absolute % 100).padStart(2, '0')}`
 }
 
-export function formatPayrollMinor(value: number | null, locale = 'cs-CZ'): string {
-  if (value === null) return '—'
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency: 'CZK',
-    minimumFractionDigits: 2,
-  }).format(value / 100)
-}
-
 export function monthStart(period: string): string {
   return /^\d{4}-\d{2}$/.test(period) ? `${period}-01` : ''
 }

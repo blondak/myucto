@@ -20,14 +20,29 @@ import {
   type EnforcementDependant,
   type EnforcementMonthEvidence,
 } from '@/api/payrollEnforcement'
-import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const loading = ref(true)
+/*
+ * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
+ * není". Toast s chybou za pár vteřin zmizí a bez tohohle příznaku by na
+ * obrazovce zůstal prázdný stav, který lže.
+ */
+const loadFailed = ref(false)
+/*
+ * Lidé a účty příjemců jsou doplňky formuláře, ne podmínka výpisu — proto se
+ * načítají „měkce". Když ale selžou, zůstane prázdný výběr příjemce a uživatel
+ * nemá jak zjistit, že za tím není konfigurace, ale výpadek.
+ */
+const supportFailed = ref(false)
 const saving = ref(false)
 const cases = ref<EnforcementCaseSummary[]>([])
 const people = ref<PayrollPersonListItem[]>([])
@@ -143,6 +158,23 @@ const transitionCanSubmit = computed(() => {
   return !reasonCommands.has(command) || transitionReason.value.trim().length > 0
 })
 
+/*
+ * Proč nejde přechod potvrdit. Obě podmínky mají konkrétní nápravu hned
+ * v témž formuláři — obecné „akce není dostupná" by uživateli neřeklo, které
+ * z polí nad tlačítkem má doplnit.
+ */
+const transitionBlockedReason = computed<string | null>(() => {
+  const command = pendingCommand.value
+  if (!command) return null
+  if (documentCommands.has(command) && !selectedDocument.value) {
+    return t('payroll.enforcement.transition_blocked_document')
+  }
+  if (reasonCommands.has(command) && transitionReason.value.trim().length === 0) {
+    return t('payroll.enforcement.transition_blocked_reason')
+  }
+  return null
+})
+
 watch(documentQuery, (query) => {
   if (documentSearchTimer) clearTimeout(documentSearchTimer)
   if (query.trim().length < 2 || selectedDocument.value) {
@@ -161,14 +193,6 @@ watch(documentQuery, (query) => {
     }
   }, 220)
 })
-
-function money(minorUnits: number): string {
-  return new Intl.NumberFormat(locale.value, {
-    style: 'currency',
-    currency: 'CZK',
-    minimumFractionDigits: 2,
-  }).format(minorUnits / 100)
-}
 
 function minorUnits(value: string, required = true): number | null {
   const normalized = value.trim().replace(/\s/g, '').replace(',', '.')
@@ -189,6 +213,8 @@ function statusClass(status: EnforcementCaseStatus): string {
 
 async function load() {
   loading.value = true
+  loadFailed.value = false
+  supportFailed.value = false
   try {
     cases.value = await payrollEnforcementApi.cases()
     if (canReadPeople.value) {
@@ -196,6 +222,7 @@ async function load() {
         people.value = await payrollApi.people()
       } catch {
         people.value = []
+        supportFailed.value = true
       }
     }
     if (canReadPayrollSettings.value) {
@@ -203,9 +230,11 @@ async function load() {
         recipientAccounts.value = await payrollApi.institutionAccounts()
       } catch {
         recipientAccounts.value = []
+        supportFailed.value = true
       }
     }
   } catch {
+    loadFailed.value = true
     toast.error(t('payroll.enforcement.load_failed'))
   } finally {
     loading.value = false
@@ -499,6 +528,20 @@ onMounted(load)
       {{ t('payroll.enforcement.security_hint') }}
     </section>
 
+    <!--
+      Lidé a účty se načítají „měkce" (chyba nepotopí výpis případů). Když ale
+      selžou, zůstane výběr zaměstnance prázdný a bez téhle věty to vypadá jako
+      chybějící nastavení, ne jako výpadek.
+    -->
+    <p
+      v-if="showCreate && supportFailed"
+      class="rounded-xl border border-warning-500/40 bg-warning-50 p-3 text-sm text-warning-800"
+      role="alert"
+      data-test="support-failed"
+    >
+      {{ t('payroll.enforcement.support_failed') }}
+    </p>
+
     <form v-if="showCreate" class="grid grid-cols-1 gap-4 rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="createCase">
       <label class="text-xs font-medium text-neutral-600">{{ t('payroll.enforcement.employee') }}
         <select v-model="newCase.employee_id" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
@@ -522,6 +565,14 @@ onMounted(load)
 
     <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">
       <div v-if="loading" class="space-y-3 p-4 sm:p-6"><div v-for="index in 4" :key="index" class="h-16 animate-pulse rounded-lg bg-neutral-100" /></div>
+      <EmptyState
+        v-else-if="loadFailed"
+        variant="failed"
+        dense
+        data-test="load-failed"
+        :message="t('payroll.enforcement.load_failed_hint')"
+        @action="load"
+      />
       <div v-else-if="cases.length === 0" class="p-8 text-center">
         <h2 class="font-semibold text-neutral-900">{{ t('payroll.enforcement.empty_title') }}</h2>
         <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.enforcement.empty_description') }}</p>
@@ -591,7 +642,8 @@ onMounted(load)
           </div>
           <div class="mt-4 flex flex-wrap justify-end gap-2">
             <button type="button" :class="btnOutline('neutral')" @click="closeTransition"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button>
-            <button type="submit" :class="pendingCommand === 'stop' ? btnFilled('danger') : btnFilled('primary')" :disabled="saving || !transitionCanSubmit"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('payroll.enforcement.apply_transition') }}</button>
+            <button type="submit" data-test="transition-apply" :class="pendingCommand === 'stop' ? btnFilled('danger') : btnFilled('primary')" :disabled="saving || !transitionCanSubmit" :title="disabledTitle(transitionBlockedReason !== null, transitionBlockedReason)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('payroll.enforcement.apply_transition') }}</button>
+            <p v-if="transitionBlockedReason" :class="[BTN_DISABLED_NOTE, 'w-full text-right']" data-test="transition-apply-blocked">{{ transitionBlockedReason }}</p>
           </div>
         </form>
 

@@ -21,9 +21,15 @@ import {
   btnFilledSm,
   btnOutline,
   btnOutlineSm,
+  disabledTitle,
+  BTN_DISABLED_NOTE,
   ICONS,
 } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+// Formátování je sdílené (useFormat) — místní kopie se lišily locale i tvarem
+// data od zbytku aplikace, viz komentář u `formatMoneyMinor`.
+import { formatDate, formatDateTime, formatMoneyMinor as formatMoney } from '@/composables/useFormat'
 import { localPayrollPeriod } from './payrollComponentsUi'
 
 const { t } = useI18n()
@@ -32,6 +38,12 @@ const toast = useToast()
 const period = ref(localPayrollPeriod())
 const activeTab = ref<'liabilities' | 'batches' | 'settlements'>('liabilities')
 const loading = ref(true)
+/*
+ * Selhalo načtení? Pak o závazcích nevíme NIC — a to je něco jiného než „za
+ * tohle období žádné nejsou". Toast za pár vteřin zmizí a bez tohohle příznaku
+ * by na obrazovce zůstal prázdný stav, který tvrdí, že je hotovo.
+ */
+const loadFailed = ref(false)
 const materializing = ref(false)
 const creatingBatch = ref(false)
 const generatingBatchId = ref<number | null>(null)
@@ -72,6 +84,17 @@ const materializableRevisions = computed(() => {
 const canMaterialize = computed(() =>
   auth.canWrite('payroll.payments') && materializableRevisions.value.length > 0,
 )
+/*
+ * Proč je „Připravit závazky" zašedlé. Vrací `null`, když akce jde spustit —
+ * tlačítko pak žádnou omluvu nepotřebuje. Po selhání načtení je odpověď jiná:
+ * o revizích nic nevíme, takže neříkáme „schvalte revizi" (třeba už schválená
+ * je), ale pravdu — data chybí.
+ */
+const materializeBlockedReason = computed<string | null>(() => {
+  if (canMaterialize.value) return null
+  if (loadFailed.value) return t('payroll.payments.materialize_blocked_unknown')
+  return t('payroll.payments.materialize_blocked')
+})
 const totals = computed(() => items.value.reduce(
   (value, item) => ({
     amount: value.amount + signed(item, item.amount_minor),
@@ -295,30 +318,6 @@ function isSelected(id: number): boolean {
   return selectedIds.value.includes(id)
 }
 
-function formatMoney(amountMinor: number, currencyCode = 'CZK'): string {
-  return new Intl.NumberFormat(undefined, {
-    style: 'currency',
-    currency: currencyCode,
-  }).format(amountMinor / 100)
-}
-
-function formatDate(value: string): string {
-  const parsed = new Date(`${value}T00:00:00`)
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(parsed)
-}
-
-function formatDateTime(value: string): string {
-  const parsed = new Date(value.replace(' ', 'T'))
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : new Intl.DateTimeFormat(undefined, {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }).format(parsed)
-}
-
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   return `${new Intl.NumberFormat(undefined, {
@@ -415,6 +414,7 @@ async function load(): Promise<void> {
   const sequence = ++loadSequence
   const requestedPeriod = period.value
   loading.value = true
+  loadFailed.value = false
   try {
     const [
       liabilityList,
@@ -454,15 +454,16 @@ async function load(): Promise<void> {
     }
   } catch (error) {
     if (sequence === loadSequence) {
-      items.value = []
-      runs.value = []
-      payerOptions.value = []
-      batches.value = []
-      allocations.value = []
-      paymentMatches.value = []
-      bankEvidence.value = []
-      cashEvidence.value = []
+      /*
+       * Kolekce se schválně NEVYNULUJÍ. Prázdné pole se v šabloně nedá odlišit
+       * od „období nemá žádné závazky", takže by stránka po výpadku sítě
+       * sebejistě tvrdila nepravdu. Poslední úspěšně načtená data jsou pořád
+       * lepší informace než prázdno; nad nimi se vykreslí `loadFailed` stav
+       * s nabídkou opakování. Výběr se ale ruší — potvrzovat dávku nad daty,
+       * o kterých nevíme, jestli pořád platí, je past.
+       */
       selectedIds.value = []
+      loadFailed.value = true
       toast.error(apiErrorMessage(error, t('payroll.payments.load_failed')))
     }
   } finally {
@@ -753,18 +754,29 @@ onMounted(load)
           </svg>
           {{ t('payroll.payments.reload') }}
         </button>
-        <button
-          v-if="auth.canWrite('payroll.payments')"
-          type="button"
-          :class="btnFilled('primary')"
-          :disabled="!canMaterialize || materializing"
-          @click="materialize"
-        >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path :d="ICONS.coin" />
-          </svg>
-          {{ materializing ? t('payroll.payments.materializing') : t('payroll.payments.materialize') }}
-        </button>
+        <!--
+          Hlavní akce stránky. Když není co zhmotnit, nese s sebou i větu proč —
+          dřív to vysvětlení viselo jen v prázdném stavu (`empty_blocked`), takže
+          u neprázdného seznamu uživatel mačkal mrtvé tlačítko bez nápovědy.
+        -->
+        <div v-if="auth.canWrite('payroll.payments')" class="flex flex-col items-start gap-1.5">
+          <button
+            type="button"
+            :class="btnFilled('primary')"
+            :disabled="!canMaterialize || materializing"
+            :title="disabledTitle(!canMaterialize, materializeBlockedReason)"
+            data-test="materialize"
+            @click="materialize"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.coin" />
+            </svg>
+            {{ materializing ? t('payroll.payments.materializing') : t('payroll.payments.materialize') }}
+          </button>
+          <p v-if="materializeBlockedReason" :class="BTN_DISABLED_NOTE" data-test="materialize-blocked">
+            {{ materializeBlockedReason }}
+          </p>
+        </div>
       </div>
     </header>
 
@@ -880,9 +892,18 @@ onMounted(load)
         </p>
       </section>
 
+      <!-- Pořadí stavů: načítá se → selhalo → prázdno → data. -->
       <div v-if="loading" class="space-y-3">
         <div v-for="index in 4" :key="index" class="h-20 animate-pulse rounded-xl bg-neutral-100" />
       </div>
+      <EmptyState
+        v-else-if="loadFailed"
+        variant="failed"
+        boxed
+        data-test="load-failed"
+        :message="t('payroll.payments.load_failed_hint')"
+        @action="load"
+      />
       <section v-else-if="items.length === 0" class="rounded-xl border border-dashed border-neutral-300 bg-surface px-5 py-12 text-center">
         <svg class="mx-auto h-10 w-10 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
           <path :d="ICONS.coin" />

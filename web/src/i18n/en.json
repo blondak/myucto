@@ -847,7 +847,10 @@
                     "matched": "Payment",
                     "reversed": "Reversal"
                 }
-            }
+            },
+            "materialize_blocked": "Liabilities are created from an approved payroll run revision. Approve the revision for this period in Payroll runs first.",
+            "materialize_blocked_unknown": "We cannot tell whether there is anything to prepare — the payroll runs for this period failed to load. Please try again.",
+            "load_failed_hint": "The liabilities for this period did not load, so the list below may be incomplete or stale. Please try again."
         },
         "posting_reconciliation": {
             "title": "Payroll posting reconciliation",
@@ -1081,7 +1084,10 @@
                 "correction_pending": "Correction pending",
                 "reopened": "Correction open",
                 "cancelled": "Cancelled"
-            }
+            },
+            "load_failed_hint": "Payroll runs did not load, so we cannot tell whether one exists for this period. Please try again.",
+            "create_blocked_period": "Pick the period the run should be calculated for.",
+            "create_blocked_payment_date": "Fill in the payment date — it drives both contribution due dates and filing deadlines."
         },
         "quick_inputs": {
             "title": "Quick monthly payroll input",
@@ -1162,7 +1168,12 @@
                 "partial_month_base_required": "The employment covers only part of the month. Enter the confirmed base pay manually.",
                 "suspended_month_base_required": "The employment was suspended during the month. Enter the confirmed base or income manually.",
                 "employment_state_base_required": "The employment status requires a manually confirmed base or income."
-            }
+            },
+            "load_failed_hint": "Payroll inputs for this period did not load. Do not re-enter them — try loading again first, so you do not create duplicates.",
+            "save_blocked_loading": "Wait for the inputs for the selected period to load.",
+            "save_blocked_empty": "There is nothing to save for this period — no relation here has a payroll input.",
+            "save_blocked_invalid": "Fix the fields marked in red. Saving is blocked while an invalid value remains in the table.",
+            "save_blocked_rows": "Some row is in a blocking state (a locked input or an ended relation). Resolve it and try saving again."
         },
         "components": {
             "title": "Payroll components and inputs",
@@ -1394,7 +1405,8 @@
                 "approved": "Approved",
                 "locked": "Locked by run",
                 "cancelled": "Cancelled"
-            }
+            },
+            "load_failed_hint": "Payroll components did not load. Please try again; an empty catalogue right now does not mean nothing is configured."
         },
         "documents": {
             "title": "Documents and outputs",
@@ -1541,7 +1553,9 @@
                 "break": "Break (min)",
                 "standby": "Standby (min)",
                 "remote": "Remote work",
-                "publish": "Publish to employee"
+                "publish": "Publish to employee",
+                "blocked_no_employment": "Pick the employee the record will be written to.",
+                "blocked_no_range": "Fill in both the start and the end of the shift — hours worked cannot be calculated without them."
             },
             "calendar": {
                 "default_name": "Regular working week",
@@ -1569,8 +1583,10 @@
                 "xlsx_manual": "XLSX is not automatically supported. Convert it to CSV and run preview again.",
                 "preview_failed": "The import preview could not be created.",
                 "saved": "The time import was processed.",
-                "failed": "The time import could not be processed."
-            }
+                "failed": "The time import could not be processed.",
+                "blocked_unsupported": "We cannot import this file format yet. Use a supported format, or enter the records by hand."
+            },
+            "load_failed_hint": "Attendance for this period did not load. Until it does, do not read the empty overview as \"nobody reported anything\"."
         },
         "people": {
             "title": "Employees",
@@ -2241,7 +2257,8 @@
                 "reload_current": "Reload current state",
                 "new_title": "New dimension assignment",
                 "edit_title": "Edit dimension assignment"
-            }
+            },
+            "load_failed_hint": "The employee list did not load, so we do not know who the company has. Please try again."
         },
         "submissions": {
             "title": "Payroll submissions",
@@ -3435,7 +3452,11 @@
             },
             "validation": {
                 "amount": "Enter a non-negative amount with no more than two decimal places."
-            }
+            },
+            "load_failed_hint": "Enforcements and insolvencies did not load. An empty list right now does not mean there are none — please try again.",
+            "support_failed": "Employees and recipient accounts could not be loaded, so the selection below stayed empty. This is not a configuration problem — try loading again.",
+            "transition_blocked_document": "Pick the document the transition rests on. Without it the case would lack any trace of where the change came from.",
+            "transition_blocked_reason": "Write a reason. For this step it is stored in the case history, so it cannot be skipped."
         },
         "features": {
             "module_shell": "Module shell and dashboard",
@@ -8043,7 +8064,10 @@
             "title": "Nothing here yet",
             "filtered_title": "No record matches the filter",
             "filtered_message": "There may well be records — the filter is just hiding them. Try another period, another search term, or clear the filter.",
-            "clear_filters": "Clear filter"
+            "clear_filters": "Clear filter",
+            "failed_title": "The data could not be loaded",
+            "failed_message": "The connection to the server failed, so we know nothing about the contents yet. Try loading again; if the trouble persists, reload the page.",
+            "retry": "Try again"
         },
         "no_items": "No items.",
         "pagination_range": "{from}–{to} of {total}",
@@ -14109,7 +14133,9 @@
             "created": "The business trip was created.",
             "updated": "The business trip was saved.",
             "approved": "The settlement was approved.",
-            "materialized": "Posted to payroll: {created} new, {replayed} unchanged."
+            "materialized": "Posted to payroll: {created} new, {replayed} unchanged.",
+            "load_failed_hint": "Business trips for this period did not load. Please try again.",
+            "save_blocked_readonly": "You do not have permission to change business trips; you can only view them."
         }
     },
     "payroll_absence": {
@@ -14164,7 +14190,10 @@
             "partial_last": "Last-day absence (hours)",
             "create": "Create absence",
             "cancel_confirm": "Cancel this absence? Annual leave creates a traceable reversing entry.",
-            "correction_pending": "The related payroll run requires correction review."
+            "correction_pending": "The related payroll run requires correction review.",
+            "average_required_hint": "Pick the average earnings the compensation is calculated from — the absence cannot be created without it.",
+            "average_missing_for_relation": "No average earnings have been calculated for this relation. Calculate one on the Averages tab and come back here.",
+            "go_to_averages": "Go to Averages"
         },
         "dpn": {
             "insurance": "Sickness insurance participation confirmed",
@@ -14239,7 +14268,8 @@
             "average_created": "Average snapshot calculated.",
             "average_approved": "Average snapshot approved.",
             "entitlement_created": "Entitlement posted to the ledger.",
-            "entry_created": "Ledger entry added."
+            "entry_created": "Ledger entry added.",
+            "load_failed_hint": "Absences, averages and leave entitlement did not load for this relation. Please try again."
         }
     },
     "diagnostics": {

@@ -11,14 +11,16 @@ import {
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import {
-  formatPayrollMinor,
   localPayrollPeriod,
   parsePayrollAmountToMinor,
   parsePayrollHoursToMilli,
   payrollMinorToInput,
 } from '@/pages/payroll/payrollComponentsUi'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatMoneyMinor } from '@/composables/useFormat'
 
 interface UiRow extends PayrollQuickInputRow {
   baseAmount: string
@@ -39,11 +41,17 @@ type ValidationCode =
 
 const MAX_AMOUNT_MINOR = 1_000_000_000_000
 const MAX_OVERTIME_HOURS_MILLI = 1_000_000
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const period = ref(localPayrollPeriod())
 const loading = ref(false)
+/*
+ * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
+ * není". Toast s chybou za pár vteřin zmizí a bez tohohle příznaku by na
+ * obrazovce zůstal prázdný stav, který lže.
+ */
+const loadFailed = ref(false)
 const saving = ref(false)
 const rows = ref<UiRow[]>([])
 const loadedPeriod = ref<string | null>(null)
@@ -68,7 +76,7 @@ function toUi(row: PayrollQuickInputRow): UiRow {
 }
 
 function formatMoney(value: number): string {
-  return formatPayrollMinor(value, locale.value)
+  return formatMoneyMinor(value)
 }
 
 function editable(input: PayrollQuickInputRef | null): boolean {
@@ -194,6 +202,21 @@ function rowInvalid(row: UiRow): boolean {
 }
 
 const hasInvalidRows = computed(() => rows.value.some(rowInvalid))
+
+/*
+ * Proč nejde „Uložit vše". Blokací je několik a liší se tím, co má uživatel
+ * udělat, takže obecné „akce není dostupná" by mu nepomohlo ani jednou.
+ * Pořadí odpovídá tomu, co musí vyřešit dřív.
+ */
+const saveBlockedReason = computed<string | null>(() => {
+  if (loading.value || loadedPeriod.value !== period.value) {
+    return t('payroll.quick_inputs.save_blocked_loading')
+  }
+  if (rows.value.length === 0) return t('payroll.quick_inputs.save_blocked_empty')
+  if (hasInvalidRows.value) return t('payroll.quick_inputs.save_blocked_invalid')
+  if (hasBlockingRows.value) return t('payroll.quick_inputs.save_blocked_rows')
+  return null
+})
 const invalidFieldCount = computed(() => rows.value.reduce(
   (count, row) => count
     + Number(baseError(row) !== null)
@@ -254,6 +277,7 @@ async function load(): Promise<void> {
   const requestedPeriod = period.value
   const generation = ++loadGeneration
   loading.value = true
+  loadFailed.value = false
   rows.value = []
   loadedPeriod.value = null
   saveError.value = null
@@ -266,6 +290,10 @@ async function load(): Promise<void> {
     loadedPeriod.value = requestedPeriod
   } catch (error) {
     if (generation === loadGeneration) {
+      // Řádky se tady vyčistily už PŘED požadavkem (kvůli přepnutí období),
+      // takže po selhání zbyde prázdná tabulka. Bez příznaku by tvrdila, že
+      // v období nikdo není — proto ho musíme zvednout.
+      loadFailed.value = true
       toast.error(apiErrorMessage(error, t('payroll.quick_inputs.load_failed')))
     }
   } finally {
@@ -420,6 +448,14 @@ onMounted(load)
 
     <section class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
       <div v-if="loading" class="p-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
+      <EmptyState
+        v-else-if="loadFailed"
+        variant="failed"
+        dense
+        data-test="load-failed"
+        :message="t('payroll.quick_inputs.load_failed_hint')"
+        @action="load"
+      />
       <div v-else-if="rows.length === 0" class="p-8 text-center">
         <h2 class="font-semibold text-neutral-900">{{ t('payroll.quick_inputs.empty') }}</h2>
         <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.quick_inputs.empty_hint') }}</p>
@@ -764,7 +800,15 @@ onMounted(load)
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.chart" /></svg>
         {{ t('payroll.quick_inputs.continue_to_runs') }}
       </RouterLink>
-      <button v-if="canWrite" data-testid="quick-payroll-save" :class="[btnFilled('primary'), 'w-full sm:w-auto']" :disabled="saving || loading || loadedPeriod !== period || rows.length === 0 || hasBlockingRows || hasInvalidRows" @click="save">
+      <!--
+        Věta nad tlačítky, ne pod nimi: v přilepené liště je „Uložit vše"
+        poslední, co uživatel na obrazovce vidí, takže vysvětlení musí přijít
+        dřív než ono. `order-first` + `basis-full` ji drží na vlastním řádku.
+      -->
+      <p v-if="canWrite && saveBlockedReason" :class="[BTN_DISABLED_NOTE, 'order-first basis-full sm:text-right']" data-testid="quick-payroll-save-blocked">
+        {{ saveBlockedReason }}
+      </p>
+      <button v-if="canWrite" data-testid="quick-payroll-save" :class="[btnFilled('primary'), 'w-full sm:w-auto']" :disabled="saving || loading || loadedPeriod !== period || rows.length === 0 || hasBlockingRows || hasInvalidRows" :title="disabledTitle(saveBlockedReason !== null, saveBlockedReason)" @click="save">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
         {{ t('payroll.quick_inputs.save_all') }}
       </button>
