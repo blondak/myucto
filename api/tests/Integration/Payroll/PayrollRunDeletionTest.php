@@ -81,10 +81,12 @@ final class PayrollRunDeletionTest extends TestCase
         $pdo->prepare(
             'UPDATE supplier SET payroll_enabled = 1 WHERE id IN (?, ?)',
         )->execute([$this->supplierId, $this->otherSupplierId]);
+        // `setup` stačí — mzdový běh se v něm zakládá i maže a do `active`
+        // se modul překlopí sám (viz PayrollModuleActivationService).
         $module = $pdo->prepare(
             'INSERT INTO payroll_module_state
                 (supplier_id, status, start_period, activated_by, activated_at)
-             VALUES (?, "active", "2026-01-01", ?, NOW())',
+             VALUES (?, "setup", "2026-01-01", ?, NOW())',
         );
         foreach ([$this->supplierId, $this->otherSupplierId] as $supplierId) {
             $module->execute([$supplierId, $this->userId]);

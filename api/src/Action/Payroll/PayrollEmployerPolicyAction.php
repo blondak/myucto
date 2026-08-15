@@ -13,6 +13,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollModuleActivationService;
 use MyInvoice\Service\Payroll\Settings\PayrollEmployerPolicyService;
 use MyInvoice\Service\Payroll\Settings\PayrollSetupCheckService;
 use MyInvoice\Service\Payroll\Settings\PayrollSetupFeaturesResolver;
@@ -31,6 +32,7 @@ final class PayrollEmployerPolicyAction
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollModuleActivationService $activation,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -276,14 +278,21 @@ final class PayrollEmployerPolicyAction
             $supplierId,
             $effectiveOn,
         );
+        $setup = $this->setupCheckService->check(
+            $supplierId,
+            $effectiveOn,
+            $features,
+        );
+        // Dokončený setup je první ze dvou spouští překlopení modulu do
+        // `active`. Vyhodnocuje se tam, kde se výsledek kontroly poprvé
+        // objeví, aby uživatel nemusel nic dalšího odklikávat. Přechod je
+        // jednosměrný a idempotentní, takže opakované čtení nic nemění.
+        $this->activation->activateWhenSetupComplete(
+            $supplierId,
+            $this->userId($request),
+        );
 
-        return Json::ok($response, [
-            'setup' => $this->setupCheckService->check(
-                $supplierId,
-                $effectiveOn,
-                $features,
-            ),
-        ]);
+        return Json::ok($response, ['setup' => $setup]);
     }
 
     private function authorize(

@@ -1031,10 +1031,21 @@
                 "calculate": "Recalculate",
                 "review": "Review",
                 "approve": "Approve",
+                "post": "Post to accounting",
+                "prepare_payments": "Prepare payments",
+                "mark_paid": "Mark as paid",
                 "request_correction": "Request correction",
                 "reopen": "Open correction",
                 "cancel": "Cancel run",
                 "close": "Close"
+            },
+            "outcome": {
+                "posted": "Payroll has been posted to accounting.",
+                "already_posted": "Payroll was already posted; the run only moved forward.",
+                "posting_not_applicable": "The company keeps tax records, so no journal entry was created. The run moved forward.",
+                "payments_prepared": "Payment liabilities are ready.",
+                "payments_not_applicable": "Nothing to pay — the whole net pay is settled by offset. The run moved forward.",
+                "payments_settled": "Every liability of the run is covered by payments."
             },
             "status": {
                 "draft": "Draft",

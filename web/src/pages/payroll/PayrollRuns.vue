@@ -27,6 +27,7 @@ const pendingCommand = ref<{ run: PayrollRun, command: PayrollRunCommand } | nul
 const pendingDelete = ref<PayrollRun | null>(null)
 const commandReason = ref('')
 const commandError = ref('')
+const commandBlockers = ref<Record<number, string>>({})
 
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
 
@@ -56,23 +57,58 @@ function statusClass(status: PayrollRun['status']): string {
   return 'bg-neutral-100 text-neutral-600'
 }
 
+/**
+ * Jediná plná (primární) akce podle stavu — zbytek běhu je odbočka, ne
+ * rovnocenná volba. Uživatel má v každém stavu vidět jedno „co teď".
+ */
+const PRIMARY_COMMAND: Partial<Record<PayrollRun['status'], PayrollRunCommand>> = {
+  draft: 'lock_inputs',
+  inputs_locked: 'calculate',
+  reopened: 'calculate',
+  calculated: 'review',
+  reviewed: 'approve',
+  approved: 'post',
+  posted: 'prepare_payments',
+  payment_ready: 'mark_paid',
+  paid: 'close',
+  correction_pending: 'reopen',
+}
+
+const KNOWN_COMMANDS: PayrollRunCommand[] = [
+  'lock_inputs',
+  'calculate',
+  'review',
+  'approve',
+  'post',
+  'prepare_payments',
+  'mark_paid',
+  'request_correction',
+  'reopen',
+  'cancel',
+  'close',
+]
+
 function commandLabel(command: PayrollRunCommand): string {
   return t(`payroll.runs.commands.${command}`)
 }
 
-function commandClass(command: PayrollRunCommand): string {
-  if (command === 'approve') return btnFilled('success')
+function commandClass(run: PayrollRun, command: PayrollRunCommand): string {
+  if (PRIMARY_COMMAND[run.status] === command) {
+    return btnFilled(command === 'approve' ? 'success' : 'primary')
+  }
   if (command === 'cancel') return btnOutline('danger')
   if (command === 'request_correction' || command === 'reopen') {
     return btnOutline('warning')
   }
-  if (command === 'review') return btnOutline('success')
-  return btnFilled('primary')
+  return btnOutline('neutral')
 }
 
 function commandIcon(command: PayrollRunCommand): string {
   if (command === 'lock_inputs') return ICONS.lock
   if (command === 'calculate') return ICONS.cycle
+  if (command === 'post') return ICONS.doc
+  if (command === 'prepare_payments') return ICONS.coin
+  if (command === 'mark_paid') return ICONS.checkCircle
   if (command === 'review' || command === 'approve' || command === 'close') {
     return ICONS.check
   }
@@ -82,14 +118,17 @@ function commandIcon(command: PayrollRunCommand): string {
 
 function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
   return run.available_commands.filter(command => {
-    if (!['lock_inputs', 'calculate', 'review', 'approve', 'request_correction', 'reopen', 'cancel', 'close']
-      .includes(command)) return false
+    if (!KNOWN_COMMANDS.includes(command)) return false
     if (command === 'calculate') return auth.canWrite('payroll.calculate')
     if (command === 'review' || command === 'request_correction') {
       return auth.canWrite('payroll.review')
     }
     if (command === 'approve') return auth.canWrite('payroll.approve')
     if (command === 'reopen') return auth.canWrite('payroll.reopen')
+    if (command === 'post') return auth.canWrite('payroll.post')
+    if (command === 'prepare_payments' || command === 'mark_paid') {
+      return auth.canWrite('payroll.payments')
+    }
     return canWrite.value
   })
 }
@@ -148,14 +187,20 @@ async function submitCommand(
   reason?: string,
 ) {
   saving.value = true
+  delete commandBlockers.value[run.id]
   try {
-    await payrollApi.commandRun(
+    const response = await payrollApi.commandRun(
       run.id,
       command,
       { row_version: run.row_version, ...(reason ? { reason } : {}) },
       crypto.randomUUID(),
     )
-    toast.success(t('payroll.runs.command_done'))
+    const outcome = response.outcome?.outcome ?? null
+    toast.success(
+      outcome === null
+        ? t('payroll.runs.command_done')
+        : t(`payroll.runs.outcome.${outcome}`),
+    )
     pendingCommand.value = null
     commandReason.value = ''
     commandError.value = ''
@@ -163,11 +208,22 @@ async function submitCommand(
   } catch (error: any) {
     const message = error?.response?.data?.error?.message || t('payroll.runs.command_failed')
     if (pendingCommand.value) commandError.value = message
-    else toast.error(message)
+    // Blokující důvod u zaúčtování a plateb je celá věta („komu chybí výplatní
+    // pravidlo", „kolik zbývá uhradit"). V toastu se ztratí dřív, než se podle
+    // ní dá jednat — proto zůstane viset u konkrétního běhu.
+    else if (['post', 'prepare_payments', 'mark_paid'].includes(command)) {
+      commandBlockers.value = { ...commandBlockers.value, [run.id]: message }
+    } else toast.error(message)
     if (error?.response?.status === 409) await load()
   } finally {
     saving.value = false
   }
+}
+
+function dismissBlocker(runId: number) {
+  const next = { ...commandBlockers.value }
+  delete next[runId]
+  commandBlockers.value = next
 }
 
 async function confirmCommand() {
@@ -311,7 +367,8 @@ onMounted(load)
             <button
               v-for="command in visibleCommands(run)"
               :key="command"
-              :class="commandClass(command)"
+              :data-testid="`payroll-run-${run.id}-${command}`"
+              :class="commandClass(run, command)"
               :disabled="saving"
               @click="runCommand(run, command)"
             >
@@ -333,6 +390,27 @@ onMounted(load)
               {{ t('payroll.runs.delete') }}
             </button>
           </div>
+        </div>
+
+        <div
+          v-if="commandBlockers[run.id]"
+          :data-testid="`payroll-run-${run.id}-blocker`"
+          class="mt-4 flex items-start gap-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-700"
+        >
+          <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path :d="ICONS.bell" />
+          </svg>
+          <p class="flex-1">{{ commandBlockers[run.id] }}</p>
+          <button
+            type="button"
+            class="shrink-0 rounded p-1 text-warning-600 hover:bg-warning-100"
+            :aria-label="t('common.close')"
+            @click="dismissBlocker(run.id)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path :d="ICONS.x" />
+            </svg>
+          </button>
         </div>
 
         <dl v-if="run.result_snapshot?.totals" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -413,7 +491,11 @@ onMounted(load)
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}
           </button>
-          <button type="submit" :class="commandClass(pendingCommand.command)" :disabled="saving">
+          <button
+            type="submit"
+            :class="commandClass(pendingCommand.run, pendingCommand.command)"
+            :disabled="saving"
+          >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="commandIcon(pendingCommand.command)" /></svg>
             {{ commandLabel(pendingCommand.command) }}
           </button>

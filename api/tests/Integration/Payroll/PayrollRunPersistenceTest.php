@@ -133,11 +133,14 @@ final class PayrollRunPersistenceTest extends TestCase
             $this->createActor('reviewer'),
             $this->createActor('approver'),
         ];
+        // Firma zrovna dokončila nastavení a jde počítat první mzdu. Do
+        // `active` se modul překlopí sám (setup-check / první schválení),
+        // takže ho sem ručně vkládat nemusíme — mzdové běhy jedou i v `setup`.
         foreach ([$this->supplierId, $this->otherSupplierId] as $supplierId) {
             $pdo->prepare(
                 'INSERT INTO payroll_module_state
                     (supplier_id, status, start_period, activated_by, activated_at)
-                 VALUES (?, "active", "2026-01-01", ?, NOW())'
+                 VALUES (?, "setup", "2026-01-01", ?, NOW())'
             )->execute([$supplierId, $this->actors[0]]);
         }
         $policy = $this->policies->create(

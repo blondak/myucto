@@ -229,6 +229,18 @@ final class Bootstrap
                     $c->get(
                         \MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService::class,
                     ),
+                    // Volitelné class-parametry PHP-DI neautowiruje — bez
+                    // explicitního bindu by mzdový běh neuměl `prepare_payments`,
+                    // `mark_paid` ani překlopení modulu do `active`.
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Run\PayrollRunPaymentPreparationService::class,
+                    ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Run\PayrollRunPaymentSettlementService::class,
+                    ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\PayrollModuleActivationService::class,
+                    ),
                 ),
             // Identifikace software jde do datové věty JMHZ a ČSSZ ji porovnává
             // s obálkou. Verze se čte ze souboru VERSION, aby v protokolu

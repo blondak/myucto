@@ -140,6 +140,11 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/(review|request_correction)$#', 'payroll.review', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/approve$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/reopen$#', 'payroll.reopen', AccessLevel::WRITE],
+        // Zaúčtování a platební příkazy běhu nesmí spadnout pod catch-all
+        // `payroll.inputs.write` — to je právo na zápis mzdových vstupů, ne na
+        // účetní zápis v hlavní knize ani na platební ledger.
+        ['POST', '#^/api/payroll/runs/[0-9]+/commands/post$#', 'payroll.post', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/runs/[0-9]+/commands/(prepare_payments|mark_paid)$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/[a-z_]+$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/payments/liabilities$#', 'payroll.payments', AccessLevel::READ],
         ['GET', '#^/api/payroll/payments/(payer-options|batches|reconciliation)$#', 'payroll.payments', AccessLevel::READ],

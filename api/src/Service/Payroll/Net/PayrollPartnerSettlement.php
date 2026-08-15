@@ -16,10 +16,9 @@ namespace MyInvoice\Service\Payroll\Net;
  * příkaz ani pokladní doklad — je to čistě účetní přeúčtování závazku. Proto se
  * započtená částka nesmí objevit jako závazek čisté mzdy ani jako řádek platební
  * dávky; kdyby se objevila, firma by vyplatila peníze, které už jsou vypořádané.
- * Praktický důsledek: zápočet funguje i dnes, kdy bankovní a hotovostní výplata
- * v plném modulu doběhnout neumí (payroll_payout_rules nemá zapisovací API a
- * příkazy post/prepare_payments/mark_paid nejsou zapojené do
- * PayrollRunsAction::dispatch()) — zápočet totiž nic z toho nepotřebuje.
+ * Praktický důsledek: běh, kde je celá čistá mzda vypořádaná zápočtem, projde
+ * příkazy `prepare_payments` i `mark_paid` bez jediného platebního závazku —
+ * „není co platit" je legitimní výsledek, ne chyba přípravy plateb.
  */
 final class PayrollPartnerSettlement
 {

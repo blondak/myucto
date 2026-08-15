@@ -1031,10 +1031,21 @@
                 "calculate": "Přepočítat",
                 "review": "Zkontrolovat",
                 "approve": "Schválit",
+                "post": "Zaúčtovat",
+                "prepare_payments": "Připravit platby",
+                "mark_paid": "Označit za uhrazené",
                 "request_correction": "Vyžádat opravu",
                 "reopen": "Otevřít opravu",
                 "cancel": "Zrušit běh",
                 "close": "Uzavřít"
+            },
+            "outcome": {
+                "posted": "Mzdy jsou zaúčtované.",
+                "already_posted": "Mzdy už zaúčtované byly, běh jen postoupil dál.",
+                "posting_not_applicable": "Firma vede daňovou evidenci, účetní zápis proto nevznikl. Běh postoupil dál.",
+                "payments_prepared": "Platební závazky jsou připravené.",
+                "payments_not_applicable": "Není co platit — celá čistá mzda je vypořádaná zápočtem. Běh postoupil dál.",
+                "payments_settled": "Všechny závazky běhu jsou pokryté platbami."
             },
             "status": {
                 "draft": "Koncept",
