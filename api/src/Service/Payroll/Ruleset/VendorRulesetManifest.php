@@ -48,7 +48,7 @@ final class VendorRulesetManifest
         // cz-payroll-2026.deadlines.v1
         'b15c89442dc9e66e0c9ae2ea1749deb5883763541ad03220cce51fe3b43ff273',
         // cz-payroll-2026.employment-thresholds.v1
-        '7e30b1599d50beefdb0cc07e4a01d441542c33247cb49b6229b781de789e6a65',
+        '22905fba61e6204c0d615971e80b19fdf5e38327e97a2903b61e7255fb454add',
         // cz-payroll-2026.enforcement-deductions.v1
         'ed148cfae04da4449f38425a3ff641f5c54865d741122735992eadb202d8bd1e',
         // cz-payroll-2026.health-insurance.v1

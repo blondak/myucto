@@ -35,11 +35,14 @@ final class CzechPayrollRulesets2026Test extends TestCase
      * NULL a roční strop se nehlídal vůbec — viz
      * {@see \MyInvoice\Service\Payroll\Component\PayrollComponentDefaults}.
      *
+     * Popáté doplněním limitů přesčasové práce podle § 93 zákoníku práce do domény
+     * hranic zaměstnání, aby byly administrovatelné a ne zadrátované ve službě.
+     *
      * Počtvrté překlopením dodané sady z `reviewed` na `active`. Lifecycle je
      * součástí PLNÉHO snapshotu, ale ne otisku OBSAHU — hodnoty ani
      * `VendorRulesetManifest::CONTENT_HASHES` se tím tedy nezměnily.
      */
-    private const EXPECTED_MANIFEST_SHA256 = 'a48656b771c79eb89614b99555a049a78f95a6545cfc478361d03c18e9b63f38';
+    private const EXPECTED_MANIFEST_SHA256 = '4bdc84dcbbca7426d09b31023f11ac181b29390235d788232c9c0da979de1ddb';
 
     public function testCanonicalManifestIsByteStable(): void
     {
@@ -226,6 +229,11 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'average_wage.monthly' => ['money_minor', 4_896_700],
                 'minimum_wage.hourly_40h_week' => ['money_minor', 13_440],
                 'minimum_wage.monthly_40h_week' => ['money_minor', 2_240_000],
+                'overtime.annual.early_warning_basis_points' => ['integer', 8_000],
+                'overtime.averaging.max_weeks' => ['integer', 26],
+                'overtime.averaging.weekly_average_max_minutes' => ['integer', 480],
+                'overtime.ordered.weekly_max_minutes' => ['integer', 480],
+                'overtime.ordered.yearly_max_minutes' => ['integer', 9_000],
                 'participation.dpc.minimum' => ['money_minor', 450_000],
                 'participation.dpp.minimum' => ['money_minor', 1_200_000],
                 'participation.small_scale.minimum' => ['money_minor', 450_000],

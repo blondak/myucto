@@ -218,6 +218,19 @@ final class CzechPayrollRulesets2026
                 'average_wage.monthly' => PayrollRuleValue::moneyMinor(4_896_700),
                 'minimum_wage.hourly_40h_week' => PayrollRuleValue::moneyMinor(13_440),
                 'minimum_wage.monthly_40h_week' => PayrollRuleValue::moneyMinor(2_240_000),
+                // § 93 odst. 2 zákoníku práce — nařízený přesčas nesmí přesáhnout
+                // 8 hodin v jednotlivých týdnech a 150 hodin v kalendářním roce.
+                'overtime.ordered.weekly_max_minutes' => PayrollRuleValue::integer(480),
+                'overtime.ordered.yearly_max_minutes' => PayrollRuleValue::integer(9_000),
+                // § 93 odst. 4 — celkový přesčas nejvýše průměrně 8 hodin týdně ve
+                // vyrovnávacím období nejvýše 26 týdnů. Kolektivní smlouva ho smí
+                // rozšířit na 52, ale registr kolektivních smluv per zaměstnavatele
+                // neexistuje, takže je hodnota národní.
+                'overtime.averaging.max_weeks' => PayrollRuleValue::integer(26),
+                'overtime.averaging.weekly_average_max_minutes' => PayrollRuleValue::integer(480),
+                // Bez opory v zákoně: práh, od kterého se na blížící se roční limit
+                // upozorňuje dřív, než se vyčerpá.
+                'overtime.annual.early_warning_basis_points' => PayrollRuleValue::integer(8_000),
                 'participation.dpc.minimum' => PayrollRuleValue::moneyMinor(450_000),
                 'participation.dpp.minimum' => PayrollRuleValue::moneyMinor(1_200_000),
                 'participation.small_scale.minimum' => PayrollRuleValue::moneyMinor(450_000),
