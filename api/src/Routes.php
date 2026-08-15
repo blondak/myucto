@@ -90,6 +90,7 @@ use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
 use MyInvoice\Action\Payroll\PayrollJmhzOrdinaryEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPreparationAction;
 use MyInvoice\Action\Payroll\PayrollJmhzSigningProfileAction;
+use MyInvoice\Action\Payroll\PayrollJmhzSubmissionFreezeAction;
 use MyInvoice\Action\Payroll\PayrollJmhzTransportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
 use MyInvoice\Action\Payroll\PayrollNetResultAction;
@@ -912,6 +913,10 @@ final class Routes
             $g->get(
                 '/submissions/jmhz-xml-dry-run/{preparationId:[0-9]+}',
                 PayrollJmhzXmlDryRunAction::class,
+            );
+            $g->post(
+                '/submissions/jmhz-freeze/{preparationId:[0-9]+}',
+                PayrollJmhzSubmissionFreezeAction::class,
             );
             $g->get(
                 '/submissions/signing-profile',
