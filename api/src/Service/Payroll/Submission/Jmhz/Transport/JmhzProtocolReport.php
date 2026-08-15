@@ -19,6 +19,12 @@ final readonly class JmhzProtocolReport
         public array $parts,
         public array $errors,
         public array $formStatuses,
+        /**
+         * GUID podání (`idPodani`), pod kterým jsme zprávu odeslali.
+         * Protokol o zpracování ho vrací zpátky, takže se dvojice páruje
+         * naším vlastním identifikátorem, ne jen tím, který přidělí ČSSZ.
+         */
+        public ?string $submissionGuid = null,
     ) {}
 
     /** @return list<JmhzProtocolError> */

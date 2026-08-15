@@ -122,6 +122,45 @@ final class PayrollSubmissionTransportAttemptRepository
     }
 
     /**
+     * Poslední pokusy napříč podáními, od nejnovějšího.
+     *
+     * Uživatel se ptá „co jsem odeslal a v jakém je to stavu", ne „jak dopadlo
+     * podání číslo 14". Bez tohohle pohledu by odpověď existovala jen v
+     * databázi a nedala by se v aplikaci najít.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listRecent(
+        int $supplierId,
+        string $environment,
+        int $limit = 50,
+    ): array {
+        if (!$this->isAvailable()) {
+            return [];
+        }
+        self::assertEnvironment($environment);
+        // Limit se vkládá do SQL jako celé číslo, ne parametrem: MariaDB
+        // v LIMIT vázané parametry nepřijímá. Rozsah je proto omezený tady.
+        $limit = max(1, min($limit, 200));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . '
+               FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ?
+              ORDER BY id DESC
+              LIMIT ' . $limit,
+        );
+        $statement->execute([$supplierId, $environment]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (is_array($row)) {
+                $rows[] = self::normalize($row);
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
      * Celá historie pokusů jednoho podání v pořadí, v jakém vznikly.
      *
      * @return list<array<string,mixed>>

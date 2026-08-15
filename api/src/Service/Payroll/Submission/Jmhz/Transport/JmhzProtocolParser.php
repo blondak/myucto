@@ -23,6 +23,13 @@ final readonly class JmhzProtocolParser
 {
     private const NS_DZMH = 'http://schemas.cssz.cz/JMHZ/dotazNaStav/2025';
 
+    /**
+     * Protokol o zpracování, který ČSSZ doručuje sama (typicky do datové
+     * schránky). Není to odpověď na dotaz — chodí bez vyžádání a je to
+     * doklad, který uživatel reálně dostane do ruky.
+     */
+    private const NS_PROCESSING = 'http://schemas.cssz.cz/JMHZ/ProtokolOZpracovani/2026';
+
     /** Doložené hodnoty `Qualifier` v odpovědi na poll u POX endpointu. */
     private const QUALIFIER_ACCEPTED = 'response';
     private const QUALIFIER_REJECTED = 'error';
@@ -71,10 +78,16 @@ final readonly class JmhzProtocolParser
         ) {
             return $this->parseCompleteness($dom, $expectedCorrelation);
         }
+        if ($root->localName === 'ProtokolOZpracovani'
+            && $root->namespaceURI === self::NS_PROCESSING
+        ) {
+            return $this->parseProcessingProtocol($dom, $expectedCorrelation);
+        }
 
         throw new JmhzTransportException(
             'jmhz_protocol_kind_unknown',
-            'Kořen protokolu neodpovídá ani obálce GovTalk, ani odpovědi DZMH.',
+            'Kořen protokolu neodpovídá obálce GovTalk, odpovědi DZMH ani'
+                . ' protokolu o zpracování.',
         );
     }
 
@@ -353,6 +366,88 @@ final readonly class JmhzProtocolParser
     }
 
     /**
+     * Protokol o zpracování, který ČSSZ doručí sama do datové schránky.
+     *
+     * Není to odpověď na dotaz a nechodí kanálem podání — přijde bez vyžádání
+     * a je to doklad, který má uživatel v ruce. Parser ho proto musí umět
+     * přečíst i ze souboru, ne jen z odpovědi na dotaz; ověřeno proti dvěma
+     * skutečně doručeným protokolům (06/2026 a 07/2026).
+     *
+     * Nese `idPodani`, tedy GUID, který jsme sami vygenerovali. Dvojice
+     * podání–protokol se proto dá spárovat naším identifikátorem, ne jen tím,
+     * který přiděluje ČSSZ.
+     */
+    private function parseProcessingProtocol(
+        DOMDocument $dom,
+        ?string $expectedCorrelation = null,
+    ): JmhzProtocolReport {
+        $xpath = $this->xpath($dom);
+        $code = trim($this->text($xpath, '//p:stavMH/p:kod'));
+        if (preg_match('/^[0-9]+$/D', $code) !== 1) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_status_unknown',
+                'Protokol o zpracování neobsahuje čitelný kód stavu hlášení.',
+            );
+        }
+        $status = JmhzSubmissionStatus::fromCode((int) $code);
+        $label = trim($this->text($xpath, '//p:stavMH/p:nazev'));
+        if ($label !== '' && JmhzSubmissionStatus::fromDocumentedLabel($label) !== $status) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_status_conflict',
+                'Kód a název stavu v protokolu o zpracování si odporují.',
+            );
+        }
+
+        $reference = trim($this->text($xpath, '//p:idKonkretnihoPodani'));
+        $correlation = $reference === '' ? null : $this->correlationReference($reference);
+        // Protokol k cizímu podání se nesmí přiřadit k našemu jen proto, že
+        // dorazil do téže schránky.
+        if ($expectedCorrelation !== null
+            && $correlation !== null
+            && strcasecmp($correlation, $expectedCorrelation) !== 0
+        ) {
+            throw new JmhzTransportException(
+                'jmhz_protocol_correlation_mismatch',
+                'Protokol o zpracování patří jinému podání.',
+            );
+        }
+
+        $errors = [];
+        $parts = [];
+        foreach ($xpath->query('//p:chybySeznam/p:chyba') as $failure) {
+            if (!$failure instanceof DOMElement) {
+                continue;
+            }
+            $error = JmhzProtocolError::fromCode(
+                (int) trim($this->childText($xpath, $failure, 'kod')),
+                trim($this->childText($xpath, $failure, 'popis')),
+            );
+            $errors[] = $error;
+            $parts[] = new JmhzProtocolPart(
+                $this->partScope(trim($this->childText($xpath, $failure, 'castPodani'))),
+                $status,
+                $this->formGuid(trim($this->childText($xpath, $failure, 'idFormulare'))),
+                null,
+                null,
+                [$error],
+            );
+        }
+
+        $submissionGuid = trim($this->text($xpath, '//p:idPodani'));
+
+        return new JmhzProtocolReport(
+            JmhzProtocolKind::Completeness,
+            'CSSZ_JMHZ',
+            $status,
+            $correlation,
+            $parts,
+            $errors,
+            [],
+            $submissionGuid === '' ? null : $submissionGuid,
+        );
+    }
+
+    /**
      * Vybere z odpovědi DZMH protokol, který patří očekávanému podání.
      *
      * @param list<DOMElement> $protocols
@@ -571,6 +666,7 @@ final readonly class JmhzProtocolParser
         $xpath = new DOMXPath($dom);
         $xpath->registerNamespace('g', JmhzGovTalkEnvelope::NS_GOVTALK);
         $xpath->registerNamespace('d', self::NS_DZMH);
+        $xpath->registerNamespace('p', self::NS_PROCESSING);
 
         return $xpath;
     }
