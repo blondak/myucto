@@ -1399,7 +1399,8 @@
                 "time": "Time attendance",
                 "absence": "Absence",
                 "import": "Import",
-                "correction": "Correction"
+                "correction": "Correction",
+                "travel": "Business trip"
             },
             "input_status": {
                 "draft": "Draft",

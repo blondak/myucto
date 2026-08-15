@@ -861,7 +861,10 @@ export interface PayrollRecurringComponentPayload {
   is_active: boolean
 }
 
-export type PayrollInputSourceKind = 'manual' | 'recurring' | 'time' | 'absence' | 'import' | 'correction'
+// `travel` vzniká materializací schváleného vyúčtování pracovní cesty
+// (BusinessTripMaterializer, migrace 1308) — do vstupů se dostane bez zásahu
+// uživatele, takže ho klient musí znát i popsat.
+export type PayrollInputSourceKind = 'manual' | 'recurring' | 'time' | 'absence' | 'import' | 'correction' | 'travel'
 export type PayrollInputStatus = 'draft' | 'approved' | 'locked' | 'cancelled'
 
 export interface PayrollInput {
@@ -1496,11 +1499,18 @@ export interface PayrollJmhzXmlDryRunBlocker {
   attribute_ids: string[]
 }
 
+/**
+ * `not_evaluable` a `unverifiable` se nesmí slít: první znamená, že kontrolu
+ * lokálně vyhodnotit NELZE (rozhodne až protokol ČSSZ) a odeslání nebrání,
+ * druhé že vyhodnotit ji lze, ale chybí předpoklad — a odeslání brání.
+ * Backend je rozlišuje v `JmhzControlOutcome` a `counts` klíčuje všemi.
+ */
 export type PayrollJmhzControlOutcome =
   | 'passed'
   | 'failed'
   | 'not_applicable'
   | 'not_evaluable'
+  | 'unverifiable'
   | 'unimplemented'
 
 export interface PayrollJmhzControlFinding {
