@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Document;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Repository\Deletion\DeletionConflict;
+use MyInvoice\Repository\Deletion\DocumentDeletionGuard;
 use MyInvoice\Repository\DmsMessageRepository;
 use MyInvoice\Repository\DocumentFolderRepository;
 use MyInvoice\Repository\DocumentLinkRepository;
@@ -29,6 +31,9 @@ final class DocumentsAction
         private readonly DmsMessageRepository $dms,
         private readonly DocumentStorage $storage,
         private readonly ActivityLogger $logger,
+        // Registr vazeb, které trvalé smazání dokladu blokují (mzdové doklady,
+        // důkazy k exekucím, artefakty podání na finanční správu).
+        private readonly DocumentDeletionGuard $deletionGuard,
     ) {}
 
     /** GET /api/documents?folder_id=&doc_type= */
@@ -271,7 +276,20 @@ final class DocumentsAction
         return Json::ok($response, ['data' => $rows, 'meta' => $meta]);
     }
 
-    /** POST /api/documents/trash/empty — tvrdé smazání + dedup-aware mazání souborů. */
+    /**
+     * POST /api/documents/trash/empty — tvrdé smazání + dedup-aware mazání souborů.
+     *
+     * ── Proč to není jeden DELETE ─────────────────────────────────────────────
+     * Býval. Mzdový modul ale přidal na `documents` cizí klíče RESTRICT (mzdové
+     * doklady v DMS, důkazy k exekucím), takže jediný navázaný doklad shodil celý
+     * příkaz — koš pak nešlo vysypat NIKDY, uživatel neměl jak zjistit který doklad
+     * to je, a nemělo to obchvat. Dnes se blokované doklady vynechají, zbytek se
+     * vysype a odpověď řekne, kolik jich zůstalo a proč.
+     *
+     * Součástí registru je i `tax_submission_artifacts` — ta na `documents`
+     * kaskáduje, takže vysypání koše dosud mlčky mazalo důkaz o podání na finanční
+     * správu. Viz {@see DocumentDeletionGuard}.
+     */
     public function emptyTrash(Request $request, Response $response): Response
     {
         $sid = $this->supplierId($request);
@@ -280,12 +298,28 @@ final class DocumentsAction
         // cizí user doklady zůstanou v koši i s bajty (listTrashedRaw i hardDelete
         // sdílejí stejný scope, aby se ref-counting nekřížil).
         $rows = $this->documents->listTrashedRaw($sid, $viewer);
-        $count = $this->documents->hardDeleteTrashed($sid, $viewer);
+        $candidateIds = array_map(static fn (array $r): int => (int) $r['id'], $rows);
+
+        $blocked = $this->deletionGuard->blockedTrashDocuments($sid, $candidateIds);
+        $targets = array_values(array_diff($candidateIds, array_keys($blocked)));
+
+        // Vrací id, která v tabulce zůstala — kaskáda `parent_document_id` i souběžně
+        // vzniklá vazba by z `rowCount()` udělaly lež.
+        $survivors = $this->documents->hardDeleteTrashedByIds($sid, $viewer, $targets);
+        $keptIds = array_values(array_unique(array_merge(array_keys($blocked), $survivors)));
+        $deletedIds = array_values(array_diff($candidateIds, $keptIds));
+
         $this->folders->purgeTrashed($sid);
         $this->tags->purgeOrphans($sid); // osamocené tagy po skutečném smazání dokumentů
 
         // Po smazání DB řádků: fyzicky smaž soubory, na které už nikdo neukazuje.
+        // Jen za skutečně smazané řádky — bajt dokladu, který v koši zůstal, se
+        // odpojit nesmí, jinak by po obnovení chyběl soubor.
+        $deletedLookup = array_flip($deletedIds);
         foreach ($rows as $r) {
+            if (!isset($deletedLookup[(int) $r['id']])) {
+                continue;
+            }
             $this->storage->deleteIfOrphan(
                 $sid,
                 (string) $r['sha256'],
@@ -296,9 +330,48 @@ final class DocumentsAction
             );
         }
         $this->storage->pruneEmptyDirs($sid);
+
+        $kept = $this->describeKept($rows, $keptIds, $blocked);
         $this->logger->log('document.trash_emptied', $this->userId($request), 'document', null,
-            ['deleted' => $count], $this->clientIp($request), $request->getHeaderLine('User-Agent'), $sid);
-        return Json::ok($response, ['ok' => true, 'deleted' => $count]);
+            ['deleted' => count($deletedIds), 'kept' => count($keptIds), 'kept_ids' => $keptIds],
+            $this->clientIp($request), $request->getHeaderLine('User-Agent'), $sid);
+
+        return Json::ok($response, [
+            'ok'        => true,
+            'deleted'   => count($deletedIds),
+            'kept'      => count($keptIds),
+            'kept_documents' => $kept,
+        ]);
+    }
+
+    /**
+     * Výpis dokladů, které v koši zůstaly, i s důvodem — bez něj by uživatel
+     * viděl jen nižší číslo a netušil proč.
+     *
+     * @param list<array<string,mixed>>      $rows
+     * @param list<int>                      $keptIds
+     * @param array<int,DeletionConflict>    $blocked
+     * @return list<array{id:int,title:string,reason:string}>
+     */
+    private function describeKept(array $rows, array $keptIds, array $blocked): array
+    {
+        $titles = [];
+        foreach ($rows as $r) {
+            $titles[(int) $r['id']] = (string) ($r['title'] ?? '');
+        }
+
+        $kept = [];
+        foreach ($keptIds as $id) {
+            $kept[] = [
+                'id'     => $id,
+                'title'  => $titles[$id] ?? '',
+                'reason' => isset($blocked[$id])
+                    ? $blocked[$id]->message
+                    : DocumentDeletionGuard::raceMessage(),
+            ];
+        }
+
+        return $kept;
     }
 
     /** POST /api/documents/bulk {action, ids[], folder_ids[]?, folder_id?, tags?} */

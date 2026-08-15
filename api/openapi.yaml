@@ -2736,6 +2736,12 @@ paths:
                   deleted: { type: boolean, example: true }
         '403': { description: "Forbidden — role není admin" }
         '404': { description: "Výpis nenalezen nebo nepatří current supplier" }
+        '409':
+          description: |
+            Výpis nelze smazat — má živou vazbu z jiné agendy. `has_matches` =
+            avízo-výpis se spárovanými položkami; `has_dependencies` = položky
+            výpisu jsou doklad o vyplacení mezd (`error.blocked_by` uvádí počty
+            po druzích vazby).
 
   /api/v1/bank-statements/{id}/download:
     parameters:
@@ -11282,13 +11288,15 @@ paths:
         '422': { $ref: '#/components/responses/ValidationFailed' }
     delete:
       tags: [Accounting]
-      summary: Smazání draftu — účetní|admin
+      summary: Smazání draftu (s `?force=1` i zaúčtovaného dokladu) — účetní|admin
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: force, required: false, schema: { type: string, enum: ['1'] }, description: "Tvrdé smazání dokladu i s účetními zápisy" }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: "Doklad má živou vazbu z jiné agendy (kód `cash.error.has_dependencies`, `error.blocked_by` uvádí počty po druzích) — typicky je použit jako doklad o vyplacení mezd." }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/cash-documents/{id}/post:
@@ -14284,6 +14292,10 @@ paths:
         soubory, na které už po smazání neukazuje žádný jiný dokument/příloha
         (union ref-counting `documents` + `document_files`). Scope-aware: non-admin
         vysype jen firemní a vlastní osobní doklady, cizí osobní doklady v koši zůstanou.
+
+        Doklady, na které ukazuje živá vazba z jiné agendy (mzdové doklady v DMS,
+        důkazy k exekucím, artefakty podání na finanční správu), se **vynechají** —
+        vysypání se kvůli nim nezastaví. Vrátí se v `kept_documents` i s důvodem.
       responses:
         '200':
           description: OK
@@ -14294,6 +14306,16 @@ paths:
                 properties:
                   ok: { type: boolean }
                   deleted: { type: integer }
+                  kept: { type: integer, description: Kolik dokladů v koši zůstalo }
+                  kept_documents:
+                    type: array
+                    description: Doklady, které v koši zůstaly, i s vysvětlením proč
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        title: { type: string }
+                        reason: { type: string }
   /api/v1/documents/bulk:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'

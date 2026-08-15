@@ -349,6 +349,13 @@ async function emptyTrash() {
   const r = await documentsApi.emptyTrash()
   await loadTrash()
   toast.success(t('documents.upload_done', { n: r.deleted }))
+  // Co zůstalo, musí být vidět i s důvodem — jinak uživatel vidí jen nižší číslo.
+  if (r.kept > 0) {
+    const detail = r.kept_documents
+      .map(d => `${d.title || `#${d.id}`}: ${d.reason}`)
+      .join('\n')
+    toast.warning(`${t('documents.empty_trash_kept', { n: r.kept })}\n${detail}`)
+  }
 }
 
 // ───── upload ─────
