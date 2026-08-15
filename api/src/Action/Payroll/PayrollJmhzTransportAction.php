@@ -10,7 +10,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService;
-use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolError;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolExplainer;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -40,6 +40,7 @@ final class PayrollJmhzTransportAction
 
     public function __construct(
         private readonly JmhzDispatchService $dispatch,
+        private readonly JmhzProtocolExplainer $explainer,
         private readonly PayrollModuleAccess $access,
     ) {}
 
@@ -173,18 +174,9 @@ final class PayrollJmhzTransportAction
             'settled' => $outcome->isSettled(),
             'report' => $outcome->report === null ? null : [
                 'status' => $outcome->report->status->name,
-                'errors' => array_map(
-                    // `control_id` se posílá jen tehdy, když ho kód chyby
-                    // opravdu nese. Dopočítat ho u platformních kódů by
-                    // ukázalo na kontrolu, o kterou vůbec nešlo.
-                    static fn (JmhzProtocolError $error): array => [
-                        'code' => $error->code,
-                        'message' => $error->message,
-                        'origin' => $error->origin->value,
-                        'control_id' => $error->controlId?->value,
-                    ],
-                    $outcome->report->errors,
-                ),
+                // Chyby se posílají vysvětlené: samotná hláška z protokolu
+                // říká, co je špatně, ale ne u koho a ve kterém údaji.
+                'errors' => $this->explainer->explain($outcome->report),
             ],
         ]));
     }
