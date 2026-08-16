@@ -211,14 +211,24 @@ const personActions = computed<ActionItem[]>(() => [
   },
   {
     // Nevratná akce patří do „…", ne mezi hlavní tlačítka.
+    //
+    // Když smazat nejde, akce se NESKRÝVÁ a ani nezešedne — důvod se řekne až
+    // při pokusu. Trvalý banner nad kartou zabíral nejlepší místo stránky
+    // vysvětlením něčeho, co uživatel zrovna nedělá.
     key: 'delete-person',
     label: t('payroll.people.delete.person_action'),
     icon: 'trash',
     tier: 'advanced',
     variant: 'danger',
     disabled: deletingPerson.value,
-    show: canCreatePerson.value && selectedPerson.value?.can_delete === true,
-    run: () => void removePerson(),
+    show: canCreatePerson.value && selectedPerson.value !== null,
+    run: () => {
+      if (selectedPerson.value?.can_delete !== true) {
+        toast.error(personDeleteBlocker.value?.message ?? t('payroll.people.delete.blocked_title'))
+        return
+      }
+      void removePerson()
+    },
   },
 ])
 
@@ -777,19 +787,12 @@ onMounted(async () => {
             <ActionBar v-if="personActions.some(action => action.show)" :actions="personActions" />
           </div>
         </div>
-        <p
-          v-if="canCreatePerson && selectedPerson && !selectedPerson.can_delete && personDeleteBlocker"
-          class="mt-2 rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-600"
-          data-test="person-delete-blocker"
-        >
-          <span class="font-medium text-neutral-800">{{ t('payroll.people.delete.blocked_title') }}</span>
-          {{ personDeleteBlocker.message }}
-        </p>
       </div>
 
       <PayrollPersonQuickEdit
         :person-id="expandedId"
         :can-write="canQuickEditPerson"
+        :can-read-sensitive="auth.canRead('payroll.person.read_sensitive')"
         @saved="updateQuickEdit"
       />
 

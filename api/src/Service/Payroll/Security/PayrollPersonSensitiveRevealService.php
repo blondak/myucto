@@ -141,6 +141,7 @@ final class PayrollPersonSensitiveRevealService
                 $contacts,
                 $accounts,
                 $dependants,
+                $profile['addresses'] ?? [],
             );
             $this->activity->log(
                 action: 'payroll.person_sensitive.revealed',

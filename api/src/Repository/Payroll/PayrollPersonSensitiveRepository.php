@@ -32,11 +32,19 @@ use PDO;
  *   ciphertext:string,
  *   lookup_hash:string
  * }
+ * @phpstan-type PlainAddress array{
+ *   id:int,
+ *   address_type:string,
+ *   address:string,
+ *   effective_from:string,
+ *   effective_to:?string
+ * }
  * @phpstan-type EncryptedProfile array{
  *   identifiers:list<EncryptedIdentifier>,
  *   contacts:list<EncryptedContact>,
  *   accounts:list<EncryptedAccount>,
- *   dependants:list<EncryptedDependant>
+ *   dependants:list<EncryptedDependant>,
+ *   addresses:list<PlainAddress>
  * }
  */
 final class PayrollPersonSensitiveRepository
@@ -107,7 +115,59 @@ final class PayrollPersonSensitiveRepository
             'contacts' => $this->contacts($supplierId, $employeeId),
             'accounts' => $this->accounts($supplierId, $employeeId),
             'dependants' => $this->dependants($supplierId, $employeeId),
+            'addresses' => $this->addresses($supplierId, $employeeId),
         ];
+    }
+
+    /**
+     * Bydliště se v databázi NEšifruje — maskuje se až při čtení profilu
+     * (`PayrollPersonProfileRepository::maskAddress()`). Do odkrytí přesto patří:
+     * bez něj by tlačítko „Zobrazit údaje" odkrylo všechno kromě adresy a
+     * uživatel by nevěděl, jestli je to záměr, nebo chyba.
+     *
+     * @return list<PlainAddress>
+     */
+    private function addresses(int $supplierId, int $employeeId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, address_type, street_line, city, postal_code, country_code,
+                    effective_from, effective_to
+               FROM payroll_person_addresses
+              WHERE supplier_id = ? AND employee_id = ?
+              ORDER BY address_type ASC, effective_from DESC, id DESC'
+        );
+        $statement->execute([$supplierId, $employeeId]);
+        $result = [];
+        while (($fetched = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
+            $row = $this->row($fetched);
+            $parts = array_filter([
+                $this->optionalText($row['street_line'] ?? null),
+                $this->optionalText($row['postal_code'] ?? null),
+                $this->optionalText($row['city'] ?? null),
+                $this->optionalText($row['country_code'] ?? null),
+            ], static fn (?string $part): bool => $part !== null);
+            $effectiveTo = $this->optionalText($row['effective_to'] ?? null);
+            $result[] = [
+                'id' => $this->integer($row['id'] ?? null, 'id'),
+                'address_type' => $this->text(
+                    $row['address_type'] ?? null,
+                    'address_type',
+                ),
+                'address' => implode(', ', $parts),
+                'effective_from' => $this->text(
+                    $row['effective_from'] ?? null,
+                    'effective_from',
+                ),
+                'effective_to' => $effectiveTo,
+            ];
+        }
+
+        return $result;
+    }
+
+    private function optionalText(mixed $value): ?string
+    {
+        return is_string($value) && $value !== '' ? $value : null;
     }
 
     /** @return list<EncryptedDependant> */

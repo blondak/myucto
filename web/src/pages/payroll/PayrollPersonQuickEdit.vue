@@ -13,7 +13,8 @@ import {
   type PayrollPersonQuickEditResponse,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
-import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
+import type { PayrollPersonSensitiveReveal } from '@/api/payroll'
+import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
 import { todayIso } from './employmentLifecycleUi'
 import PayrollPersonContactQuickFields from './PayrollPersonContactQuickFields.vue'
@@ -22,6 +23,8 @@ import PayrollPersonIdentityQuickFields from './PayrollPersonIdentityQuickFields
 const props = defineProps<{
   personId: number
   canWrite: boolean
+  // Oprávnění chodí propem stejně jako `canWrite` — komponenta o store nic neví.
+  canReadSensitive?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -50,6 +53,14 @@ const { t } = useI18n()
 const toast = useToast()
 const loading = ref(true)
 const saving = ref(false)
+/**
+ * Karta se čte podstatně častěji, než se upravuje. Dřív byla trvale formulářem
+ * se čtyřmi podsekcemi a odstavcem nápovědy u každé, takže i „kolik ten člověk
+ * bere" znamenalo číst přes dvacet vstupních polí.
+ */
+const editing = ref(false)
+const revealing = ref(false)
+const revealed = ref<PayrollPersonSensitiveReveal | null>(null)
 const loadError = ref('')
 const saveError = ref('')
 const profile = ref<PayrollPersonProfile | null>(null)
@@ -100,6 +111,55 @@ const residenceAddress = computed(() => {
 })
 const primaryEmail = computed(() => preferredContact('email'))
 const primaryPhone = computed(() => preferredContact('phone'))
+
+/** Zobrazovaná hodnota: odkrytá, jinak maskovaná, jinak pomlčka. */
+function identifierValue(type: PayrollPersonIdentifierType): string {
+  const plain = revealed.value?.identifiers.find(row => row.identifier_type === type)
+  if (plain) return plain.value
+  const masked = profile.value?.identifiers.find(row => row.identifier_type === type)
+  return masked?.value_masked ?? '—'
+}
+
+function contactValue(type: 'email' | 'phone'): string {
+  const contact = preferredContact(type)
+  if (contact === null) return '—'
+  const plain = revealed.value?.contacts.find(row => row.id === contact.id)
+  return plain?.value ?? contact.value_masked
+}
+
+const residenceValue = computed(() => {
+  const address = residenceAddress.value
+  if (address === null) return null
+  const plain = revealed.value?.addresses.find(row => row.id === address.id)
+  return plain?.address ?? address.address_masked
+})
+
+async function toggleReveal() {
+  if (revealed.value !== null) {
+    revealed.value = null
+    return
+  }
+  if (revealing.value) return
+  revealing.value = true
+  try {
+    revealed.value = await payrollApi.revealPersonSensitive(props.personId)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.people.quick_edit.reveal_failed')))
+  } finally {
+    revealing.value = false
+  }
+}
+
+function startEdit() {
+  if (profile.value) hydrate(profile.value, person.value ?? undefined, primaryEmployment.value)
+  editing.value = true
+}
+
+function cancelEdit() {
+  if (profile.value) hydrate(profile.value, person.value ?? undefined, primaryEmployment.value)
+  saveError.value = ''
+  editing.value = false
+}
 
 function preferredContact(type: 'email' | 'phone') {
   const rows = profile.value?.contacts.filter(row =>
@@ -471,6 +531,10 @@ async function save() {
     }
     const result = await payrollApi.savePersonQuickEdit(props.personId, payload)
     hydrate(result.profile, undefined, result.employment)
+    // Uložené údaje se čtou, ne dál upravují — a odkrytá hodnota po zápisu
+    // nemusí platit, takže se zahodí a případně načte znovu.
+    revealed.value = null
+    editing.value = false
     emit('saved', result)
     toast.success(t('payroll.people.quick_edit.saved'))
   } catch (error) {
@@ -486,9 +550,34 @@ onMounted(load)
 
 <template>
   <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm" data-test="person-quick-edit">
-    <header class="border-b border-neutral-200 px-4 py-4 sm:px-6">
-      <h2 class="text-base font-semibold text-neutral-900">{{ t('payroll.people.quick_edit.title') }}</h2>
-      <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.people.quick_edit.subtitle') }}</p>
+    <header class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 px-4 py-4 sm:px-6">
+      <div class="min-w-0">
+        <h2 class="text-base font-semibold text-neutral-900">{{ t('payroll.people.quick_edit.title') }}</h2>
+        <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.people.quick_edit.subtitle') }}</p>
+      </div>
+      <div v-if="!loading && profile && !editing" class="flex flex-wrap gap-2">
+        <button
+          v-if="canReadSensitive === true"
+          type="button"
+          :class="btnOutline('neutral')"
+          :disabled="revealing"
+          data-test="reveal-sensitive"
+          @click="toggleReveal"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eye" /></svg>
+          {{ revealed ? t('payroll.people.quick_edit.hide_values') : t('payroll.people.quick_edit.reveal_values') }}
+        </button>
+        <button
+          v-if="canWrite"
+          type="button"
+          :class="btnOutline('primary')"
+          data-test="start-quick-edit"
+          @click="startEdit"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+          {{ t('common.edit') }}
+        </button>
+      </div>
     </header>
 
     <div v-if="loading" class="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 sm:p-6 lg:grid-cols-4">
@@ -500,6 +589,43 @@ onMounted(load)
         {{ loadError || t('payroll.people.quick_edit.load_failed') }}
       </div>
     </div>
+
+    <!--
+      Čtecí pohled. Maskovaná hodnota se dá odkrýt tlačítkem v hlavičce — dřív
+      se odkrýt nedala vůbec, přestože backend to od začátku uměl.
+    -->
+    <dl v-else-if="!editing" class="grid grid-cols-1 gap-x-6 gap-y-4 p-4 sm:grid-cols-2 sm:p-6" data-test="quick-edit-read">
+      <div>
+        <dt class="text-xs font-medium text-neutral-500">{{ t('payroll.people.quick_edit.name') }}</dt>
+        <dd class="mt-0.5 text-sm text-neutral-900">{{ profile.full_name || '—' }}</dd>
+      </div>
+      <div>
+        <dt class="text-xs font-medium text-neutral-500">{{ t('payroll.people.quick_edit.birth_number') }}</dt>
+        <dd class="mt-0.5 text-sm text-neutral-900" data-test="read-birth-number">{{ identifierValue('birth_number') }}</dd>
+      </div>
+      <div class="sm:col-span-2">
+        <dt class="text-xs font-medium text-neutral-500">{{ t('payroll.people.quick_edit.residence') }}</dt>
+        <dd class="mt-0.5 text-sm" :class="residenceValue ? 'text-neutral-900' : 'text-warning-700'" data-test="read-residence">
+          {{ residenceValue ?? t('payroll.people.quick_edit.not_filled') }}
+        </dd>
+      </div>
+      <div>
+        <dt class="text-xs font-medium text-neutral-500">{{ t('payroll.people.quick_edit.email') }}</dt>
+        <dd class="mt-0.5 break-all text-sm text-neutral-900" data-test="read-email">{{ contactValue('email') }}</dd>
+      </div>
+      <div>
+        <dt class="text-xs font-medium text-neutral-500">{{ t('payroll.people.quick_edit.phone') }}</dt>
+        <dd class="mt-0.5 text-sm text-neutral-900">{{ contactValue('phone') }}</dd>
+      </div>
+      <div v-if="primaryEmployment" class="sm:col-span-2 border-t border-neutral-200 pt-4">
+        <dt class="text-xs font-medium text-neutral-500">{{ t('payroll.people.quick_edit.employment_title') }}</dt>
+        <dd class="mt-0.5 text-sm text-neutral-900">
+          {{ t(`payroll.people.relations.${primaryEmployment.relation_type}`) }}
+          <template v-if="form.weekly_hours"> · {{ form.weekly_hours }} {{ t('payroll.people.quick_edit.hours_unit') }}</template>
+          <template v-if="form.monthly_gross"> · {{ form.monthly_gross }} Kč</template>
+        </dd>
+      </div>
+    </dl>
 
     <form v-else class="space-y-6 p-4 sm:p-6" @submit.prevent="save">
       <div
@@ -576,7 +702,12 @@ onMounted(load)
               <span class="pointer-events-none absolute right-3 top-1/2 mt-0.5 -translate-y-1/2 text-sm text-neutral-500">Kč</span>
             </div>
           </label>
-          <label :class="labelClass">
+          <!--
+            Datum účinnosti řeší jen ten, kdo úvazek nebo mzdu opravdu mění.
+            Trvale viditelné pole nutilo přemýšlet o verzování podmínek i toho,
+            kdo si přišel opravit překlep v telefonu.
+          -->
+          <label v-if="employmentChanged" :class="labelClass" data-test="employment-effective-from-field">
             {{ t('payroll.people.quick_edit.effective_from') }}
             <input
               v-model="form.employment_effective_from"
@@ -585,12 +716,26 @@ onMounted(load)
               :class="inputClass"
               data-test="employment-effective-from"
             >
+            <span class="mt-1 block text-xs font-normal text-neutral-500">
+              {{ t('payroll.people.quick_edit.employment_history_hint') }}
+            </span>
           </label>
         </div>
-        <p class="text-xs text-neutral-500">{{ t('payroll.people.quick_edit.employment_history_hint') }}</p>
       </fieldset>
 
       <div v-if="canWrite" class="flex flex-wrap justify-end gap-2 border-t border-neutral-200 pt-4">
+        <button
+          type="button"
+          :class="btnOutline('neutral')"
+          :disabled="saving"
+          data-test="cancel-quick-edit"
+          @click="cancelEdit"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.x" />
+          </svg>
+          {{ t('common.cancel') }}
+        </button>
         <button
           type="submit"
           :class="btnFilled('primary')"

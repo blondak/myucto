@@ -27,6 +27,13 @@ use JsonSerializable;
  *   full_name:string,
  *   birth_number:string
  * }
+ * @phpstan-type RevealedAddress array{
+ *   id:int,
+ *   address_type:string,
+ *   address:string,
+ *   effective_from:string,
+ *   effective_to:?string
+ * }
  */
 final readonly class PayrollPersonSensitiveReveal implements JsonSerializable
 {
@@ -35,6 +42,7 @@ final readonly class PayrollPersonSensitiveReveal implements JsonSerializable
      * @param list<RevealedContact> $contacts
      * @param list<RevealedAccount> $accounts
      * @param list<RevealedDependant> $dependants
+     * @param list<RevealedAddress> $addresses
      */
     public function __construct(
         public int $employeeId,
@@ -42,6 +50,7 @@ final readonly class PayrollPersonSensitiveReveal implements JsonSerializable
         public array $contacts,
         public array $accounts,
         public array $dependants = [],
+        public array $addresses = [],
     ) {}
 
     public function cacheControl(): string
@@ -64,7 +73,8 @@ final readonly class PayrollPersonSensitiveReveal implements JsonSerializable
      *   identifiers:list<RevealedIdentifier>,
      *   contacts:list<RevealedContact>,
      *   accounts:list<RevealedAccount>,
-     *   dependants:list<RevealedDependant>
+     *   dependants:list<RevealedDependant>,
+     *   addresses:list<RevealedAddress>
      * }
      */
     public function jsonSerialize(): array
@@ -75,6 +85,7 @@ final readonly class PayrollPersonSensitiveReveal implements JsonSerializable
             'contacts' => $this->contacts,
             'accounts' => $this->accounts,
             'dependants' => $this->dependants,
+            'addresses' => $this->addresses,
         ];
     }
 }

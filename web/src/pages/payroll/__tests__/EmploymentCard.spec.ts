@@ -33,8 +33,10 @@ vi.mock('@/api/payroll', () => ({
   },
 }))
 
+const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
+
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn() }),
+  useToast: () => toastMocks,
 }))
 
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
@@ -275,7 +277,8 @@ describe('EmploymentCard', () => {
     confirm.mockRestore()
   })
 
-  it('místo zašedlého tlačítka ukáže důvod, proč smazat nejde', () => {
+  it('důvod, proč smazat nejde, řekne až při pokusu', async () => {
+    toastMocks.error.mockClear()
     const blocked: PayrollEmployment = {
       ...employment(),
       can_delete: false,
@@ -292,9 +295,12 @@ describe('EmploymentCard', () => {
       global: { stubs: actionBarStub },
     })
 
-    expect(wrapper.get('[data-test="employment-delete-blocker"]').text())
-      .toContain('Pracovní vztah je zahrnutý v revizi mzdového běhu.')
-    expect(wrapper.get('[data-test="action-delete-employment"]').isVisible()).toBe(false)
+    // Trvalý odstavec pod kartou vysvětloval něco, co uživatel zrovna nedělá;
+    // akce se proto nabízí a důvod přijde na kliknutí.
+    expect(wrapper.find('[data-test="employment-delete-blocker"]').exists()).toBe(false)
+    await wrapper.get('[data-test="action-delete-employment"]').trigger('click')
+    expect(toastMocks.error)
+      .toHaveBeenCalledWith('Pracovní vztah je zahrnutý v revizi mzdového běhu.')
     // `no_show` zůstává — je to jiný případ, ne náhrada za mazání.
     expect(wrapper.get('[data-test="actions"]').text())
       .toContain('payroll.people.transition.no_show')

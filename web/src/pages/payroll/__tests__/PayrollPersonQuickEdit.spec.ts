@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   person: vi.fn(),
   personProfile: vi.fn(),
   savePersonQuickEdit: vi.fn(),
+  revealPersonSensitive: vi.fn(),
   countries: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock('@/api/payroll', () => ({
     person: mocks.person,
     personProfile: mocks.personProfile,
     savePersonQuickEdit: mocks.savePersonQuickEdit,
+    revealPersonSensitive: mocks.revealPersonSensitive,
   },
 }))
 
@@ -189,12 +191,29 @@ function profile(): PayrollPersonProfile {
   }
 }
 
+/**
+ * Karta se nově otevírá ve čtecím režimu — formulář se objeví až po „Upravit".
+ * Testy, které zkoumají chování formuláře, tedy musí do editace nejdřív vstoupit;
+ * read-only uživatel se do ní nedostane, tam se čte samotný čtecí pohled.
+ */
 async function mountedEditor(canWrite = true) {
   const wrapper = mount(PayrollPersonQuickEdit, {
     props: {
       personId: 17,
       canWrite,
     },
+  })
+  await flushPromises()
+  if (canWrite) {
+    await wrapper.get('[data-test="start-quick-edit"]').trigger('click')
+    await flushPromises()
+  }
+  return wrapper
+}
+
+async function mountedReader(canReadSensitive = false) {
+  const wrapper = mount(PayrollPersonQuickEdit, {
+    props: { personId: 17, canWrite: true, canReadSensitive },
   })
   await flushPromises()
   return wrapper
@@ -348,10 +367,14 @@ describe('PayrollPersonQuickEdit', () => {
     )
     expect(JSON.stringify(mocks.savePersonQuickEdit.mock.calls[0][1]))
       .not.toContain('••')
+    expect(mocks.success).toHaveBeenCalledWith('payroll.people.quick_edit.saved')
+
+    // Po uložení se karta vrací ke čtení a citlivá pole nesmí držet zadanou hodnotu.
+    expect(wrapper.find('[data-test="quick-edit-read"]').exists()).toBe(true)
+    await wrapper.get('[data-test="start-quick-edit"]').trigger('click')
     expect(wrapper.get<HTMLInputElement>('[data-test="birth-number"]').element.value).toBe('')
     expect(wrapper.get<HTMLInputElement>('[data-test="email"]').element.value).toBe('')
     expect(wrapper.get<HTMLInputElement>('[data-test="phone"]').element.value).toBe('')
-    expect(mocks.success).toHaveBeenCalledWith('payroll.people.quick_edit.saved')
   })
 
   it('při změně jen osobního údaje nevytvoří zbytečnou verzi pracovních podmínek', async () => {
@@ -613,8 +636,50 @@ describe('PayrollPersonQuickEdit', () => {
   it('v režimu pouze pro čtení nenechá běžné údaje měnit ani ukládat', async () => {
     const wrapper = await mountedEditor(false)
 
-    expect(wrapper.get<HTMLInputElement>('[data-test="first-name"]').element.matches(':disabled')).toBe(true)
-    expect(wrapper.get<HTMLInputElement>('[data-test="birth-number"]').element.matches(':disabled')).toBe(true)
+    expect(wrapper.find('[data-test="quick-edit-read"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="start-quick-edit"]').exists()).toBe(false)
+    expect(wrapper.find('form').exists()).toBe(false)
     expect(wrapper.find('[data-test="save-quick-edit"]').exists()).toBe(false)
+  })
+
+  it('kartu otevře ve čtecím režimu, ne jako formulář', async () => {
+    const wrapper = await mountedReader()
+
+    expect(wrapper.find('[data-test="quick-edit-read"]').exists()).toBe(true)
+    expect(wrapper.find('form').exists()).toBe(false)
+    // Datum účinnosti se objeví, teprve když se úvazek nebo mzda opravdu mění.
+    await wrapper.get('[data-test="start-quick-edit"]').trigger('click')
+    expect(wrapper.find('[data-test="employment-effective-from-field"]').exists()).toBe(false)
+    await wrapper.get('[data-test="monthly-gross"]').setValue('51000')
+    expect(wrapper.find('[data-test="employment-effective-from-field"]').exists()).toBe(true)
+  })
+
+  /**
+   * Endpoint na odkrytí existoval od začátku, ale frontend ho nikdy nezavolal —
+   * uživatel viděl „••••4523" a odkrýt to nešlo.
+   */
+  it('bez oprávnění odkrývat nenabídne tlačítko, s ním ukáže skutečné hodnoty', async () => {
+    expect((await mountedReader(false)).find('[data-test="reveal-sensitive"]').exists()).toBe(false)
+
+    mocks.revealPersonSensitive.mockResolvedValue({
+      employee_id: 17,
+      identifiers: [{ id: 1, identifier_type: 'birth_number', value: '760815/4523' }],
+      contacts: [{ id: 53, contact_type: 'email', value: 'jana@example.cz' }],
+      accounts: [],
+      dependants: [],
+    })
+
+    const wrapper = await mountedReader(true)
+    expect(wrapper.get('[data-test="read-birth-number"]').text()).toContain('••')
+
+    await wrapper.get('[data-test="reveal-sensitive"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="read-birth-number"]').text()).toBe('760815/4523')
+    expect(wrapper.get('[data-test="read-email"]').text()).toBe('jana@example.cz')
+
+    // Druhé kliknutí zase zamaskuje a nevolá server znovu.
+    await wrapper.get('[data-test="reveal-sensitive"]').trigger('click')
+    expect(wrapper.get('[data-test="read-birth-number"]').text()).toContain('••')
+    expect(mocks.revealPersonSensitive).toHaveBeenCalledTimes(1)
   })
 })

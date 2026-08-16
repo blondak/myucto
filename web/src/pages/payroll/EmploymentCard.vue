@@ -307,14 +307,23 @@ const actions = computed<ActionItem[]>(() => [
     // Patří do „…", ne mezi hlavní tlačítka: je to výjimečná a nevratná akce.
     // Vedle „Označit nenástup" (tier 'advanced'), protože řeší jiný případ —
     // nenástup je záznam o tom, že něco nastalo, tohle je oprava omylu.
+    //
+    // Když smazat nejde, důvod se řekne až při pokusu. Trvalý odstavec pod
+    // kartou vysvětloval něco, co uživatel zrovna nedělá.
     key: 'delete-employment',
     label: t('payroll.people.delete.action'),
     icon: 'trash',
     tier: 'advanced',
     variant: 'danger',
     disabled: busy.value,
-    show: props.canWrite && props.employment.can_delete,
-    run: () => void removeEmployment(),
+    show: props.canWrite,
+    run: () => {
+      if (!props.employment.can_delete) {
+        toast.error(deleteBlockerMessage.value || t('payroll.people.delete.blocked_title'))
+        return
+      }
+      void removeEmployment()
+    },
   },
 ])
 </script>
@@ -363,19 +372,6 @@ const actions = computed<ActionItem[]>(() => [
     </dl>
 
     <ActionBar v-if="actions.some(action => action.show)" :actions="actions" class="mt-4" />
-
-    <!--
-      Když smazat nejde, ukaž DŮVOD. Zašedlé tlačítko bez vysvětlení uživateli
-      neřekne nic a nedá mu vodítko, co s tím.
-    -->
-    <p
-      v-if="canWrite && !employment.can_delete && deleteBlockerMessage"
-      data-test="employment-delete-blocker"
-      class="mt-3 rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-600"
-    >
-      <span class="font-medium text-neutral-800">{{ t('payroll.people.delete.blocked_title') }}</span>
-      {{ deleteBlockerMessage }}
-    </p>
 
     <form v-if="editingTerms && termsForm" class="mt-4 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3 sm:p-4" @submit.prevent="saveTerms">
       <h4 class="text-sm font-semibold text-neutral-900">{{ t('payroll.people.new_terms') }}</h4>

@@ -304,6 +304,25 @@ export interface PayrollPersonVerifiedAccount {
   row_version: number
 }
 
+/**
+ * Odkryté citlivé údaje. Odpověď je `private, no-store` — nikam se neukládá,
+ * žije jen v paměti otevřené karty.
+ */
+export interface PayrollPersonSensitiveReveal {
+  employee_id: number
+  identifiers: { id: number, identifier_type: PayrollPersonIdentifierType, value: string }[]
+  contacts: { id: number, contact_type: PayrollPersonContactType, value: string }[]
+  accounts: { id: number, label: string, bank_account: string }[]
+  dependants: { id: number, full_name: string, birth_number: string }[]
+  addresses: {
+    id: number
+    address_type: PayrollPersonAddressType
+    address: string
+    effective_from: string
+    effective_to: string | null
+  }[]
+}
+
 export interface PayrollPersonProfile {
   employee_id: number
   full_name: string
@@ -2903,6 +2922,19 @@ export const payrollApi = {
   savePersonProfile: (id: number, payload: PayrollPersonProfilePayload) =>
     api.put<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`, payload)
       .then(response => response.data.profile),
+  /**
+   * Odkrytí maskovaných údajů. Endpoint existoval od začátku, ale nikdo ho nevolal —
+   * karta zaměstnance tak ukazovala „••••4523" bez možnosti se na vlastní data podívat.
+   *
+   * `reason` je povinný (10–500 znaků) a zapisuje se do auditní stopy. Kartě stačí
+   * konstantní důvod: kdo se dívá a kdy, plyne ze záznamu, a dialog na každý pohled
+   * by z běžné práce udělal obřad.
+   */
+  revealPersonSensitive: (id: number) =>
+    api.post<{ sensitive: PayrollPersonSensitiveReveal }>(
+      `/payroll/people/${id}/sensitive-reveal`,
+      { reason: 'Zobrazení údajů na kartě zaměstnance' },
+    ).then(response => response.data.sensitive),
   personDependants: (id: number) =>
     api.get<PayrollDependantsResponse>(`/payroll/people/${id}/dependants`)
       .then(response => response.data),

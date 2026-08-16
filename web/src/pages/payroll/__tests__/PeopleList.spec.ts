@@ -425,9 +425,12 @@ describe('PeopleList toolbar and shared employee creation', () => {
     await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('[data-test="person-delete-blocker"]').text())
-      .toContain('Zaměstnanec je zahrnutý v revizi mzdového běhu.')
-    expect(wrapper.find('[data-test="action-delete-person"]').isVisible()).toBe(false)
+    // Trvalý banner nad kartou zabíral nejlepší místo stránky vysvětlením něčeho,
+    // co uživatel zrovna nedělá — akce se proto nabízí a důvod přijde na kliknutí.
+    expect(wrapper.find('[data-test="person-delete-blocker"]').exists()).toBe(false)
+    await wrapper.get('[data-test="action-delete-person"]').trigger('click')
+    expect(m.toastError)
+      .toHaveBeenCalledWith('Zaměstnanec je zahrnutý v revizi mzdového běhu.')
   })
 
   it('creates the shared accounting employee, reloads payroll people and opens next-step detail', async () => {
