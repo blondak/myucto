@@ -303,6 +303,40 @@ Typické příčiny:
 Container s aplikací se restartoval, ale data v DB volume zůstávají
 nedotčena.
 
+#### Hodnoty s mezerou v `.env`
+
+Do verze 5.12.0 se `.env` v update skriptech **spouštěl jako shell kód**, takže
+hodnota s mezerou bez uvozovek aktualizaci utnula hned na začátku (v logu
+zůstala jen hláška typu `.env: line 12: Novak: command not found`):
+
+```bash
+# tohle dřív rozbilo autoupdater
+MYINVOICE_SMTP_FROM_NAME=Jan Novak
+```
+
+Nově se `.env` už jen **parsuje** (`cmd/lib/env-load.{sh,ps1}`), takže
+oba zápisy fungují stejně a nic z `.env` se nespouští:
+
+```bash
+MYINVOICE_SMTP_FROM_NAME=Jan Novak
+MYINVOICE_SMTP_FROM_NAME="Jan Novak"
+```
+
+Pravidla parseru — hodnota je celý zbytek řádku za prvním `=`; uvozovky
+(jednoduché i dvojité) se sundají; `#` **na začátku řádku** je komentář,
+uvnitř hodnoty jen po mezeře (`FOO=bar   # poznámka` → `bar`, `FOO=a#b` →
+`a#b`); `$PROMENNA` se **nerozvine**, bere se doslova; CRLF konce řádků
+nevadí. Když chceš mít v hodnotě mezeru na kraji nebo znak `#` bez mezery
+kolem, dej hodnotu do uvozovek.
+
+> ⚠️ Běžíš-li na starší verzi, kde autoupdater na hodnotě s mezerou padá,
+> stačí příslušný řádek `.env` uzavřít do uvozovek a spustit aktualizaci
+> znovu.
+
+Selhání kroku aktualizace už také nikdy nekončí tiše — skript vypíše
+`ERROR: … AKTUALIZACE NEBYLA DOKONČENA` s číslem řádku a skončí nenulovým
+kódem; watcher tenhle důvod propíše i do hlášky v UI.
+
 ### Nativní
 
 Worker zapíše `storage/upgrade-result.json` se `status: "failed"`,

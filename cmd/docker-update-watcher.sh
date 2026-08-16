@@ -97,9 +97,18 @@ while true; do
             MESSAGE="Upgrade dokončen. Log na hostu: ${LOG}"
             echo "[watcher] OK"
         else
+            RC=$?
             STATUS="failed"
-            MESSAGE="Upgrade selhal. Log na hostu: ${LOG}"
-            echo "[watcher] FAILED. Viz ${LOG}"
+            # Do UI posíláme i DŮVOD, ne jen cestu k logu na hostu (do které se
+            # uživatel z prohlížeče stejně nedostane) — jinak vypadá selhání jako
+            # „nedokončená aktualizace" bez vysvětlení (issue #14).
+            REASON="$(grep -a 'ERROR' "$LOG" 2>/dev/null | tail -n 3 | awk '{ printf "%s | ", $0 }' || true)"
+            if [[ -z "$REASON" ]]; then
+                REASON="$(tail -n 5 "$LOG" 2>/dev/null | awk '{ printf "%s | ", $0 }' || true)"
+            fi
+            REASON="$(printf '%s' "$REASON" | tr -d '\000-\037' | cut -c1-400)"
+            MESSAGE="Upgrade selhal (exit ${RC}). ${REASON}Log na hostu: ${LOG}"
+            echo "[watcher] FAILED (rc=${RC}). Viz ${LOG}"
         fi
 
         # Po `docker-update.sh` se kontejner restartuje — počkej, až bude zpátky.

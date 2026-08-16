@@ -127,9 +127,13 @@ mkdir myucto && cd myucto
 curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/docker-compose.production.yml
 curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cfg.sample.php
 curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cmd/docker-ghcr.sh
+curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cmd/lib/env-load.sh
 chmod +x docker-ghcr.sh
 ./docker-ghcr.sh
 ```
+
+> 🛈 `env-load.sh` je parser `.env` (skript ho jinak dotáhne sám). Díky němu
+> smí být v `.env` i hodnota s mezerou bez uvozovek — viz **§ 77.7**.
 
 Skript najde `docker-compose.production.yml` v aktuálním adresáři, takže
 nemusíš nic přejmenovávat. Update na novou verzi:

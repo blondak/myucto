@@ -33,6 +33,16 @@ $ProgressPreference = 'SilentlyContinue'
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $ProjectRoot
 
+# Zadne tiche selhani (issue #14) - protejsek ERR trapu v docker-update.sh.
+# Kazdy neosetreny pad vypise, KDE spadl, a skript konci nenulovym kodem, aby
+# ho watcher i UI reportovaly jako "selhalo", ne jako nedokoncenou aktualizaci.
+trap {
+    Write-Host ""
+    Write-Host "ERROR: docker-update.ps1 selhal na radku $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "       AKTUALIZACE NEBYLA DOKONCENA. Oprav pricinu vyse a spust skript znovu." -ForegroundColor Red
+    exit 1
+}
+
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Write-Error "docker not found in PATH"
 }
@@ -40,11 +50,15 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 if ($LASTEXITCODE -ne 0) { Write-Error "'docker compose' (v2) plugin required" }
 if (-not (Test-Path .env)) { Write-Error ".env not found - run docker-install.ps1 first" }
 
-# Load .env into hashtable
-$envVars = @{}
-Get-Content .env | ForEach-Object {
-    if ($_ -match '^\s*([A-Z_]+)\s*=\s*(.*)\s*$') { $envVars[$Matches[1]] = $Matches[2] }
+# `.env` se PARSUJE sdilenym loaderem (issue #14) - stary inline regex neumel
+# sundat uvozovky, neznal klice s cislici a inline komentar bral jako hodnotu.
+# POSIX protejsek: cmd/lib/env-load.sh (drz obe varianty v synchronizaci).
+$EnvLoader = Join-Path $PSScriptRoot 'lib\env-load.ps1'
+if (-not (Test-Path -LiteralPath $EnvLoader)) {
+    Write-Error "Chybi cmd\lib\env-load.ps1 - instalace je neuplna, dotahni repo (git pull)."
 }
+. $EnvLoader
+$envVars = Read-DotEnvFile -Path '.env'
 
 function Get-ComposeProjectName([string]$root) {
     if ($env:COMPOSE_PROJECT_NAME) { return $env:COMPOSE_PROJECT_NAME }
@@ -63,14 +77,10 @@ function Find-FreePort([int]$Start) {
 }
 
 # Prepise jeden klic v .env (a v $envVars), aby zmena prezila dalsi spusteni.
+# Vlastni zapis dela Set-DotEnvValue z lib/env-load.ps1 - zapisuje UTF-8 bez BOM,
+# LF konce radku a hodnotu v pripade potreby uvozuje.
 function Set-EnvValue([string]$Key, [string]$Value) {
-    $lines = Get-Content .env
-    $hit = $false
-    $out = $lines | ForEach-Object { if ($_ -match "^\s*$Key\s*=") { $hit = $true; "$Key=$Value" } else { $_ } }
-    if (-not $hit) { $out += "$Key=$Value" }
-    # UTF-8 bez BOM (Set-Content -Encoding UTF8 pise BOM v PS 5.1).
-    $envPath = Join-Path (Get-Location).Path '.env'
-    [System.IO.File]::WriteAllText($envPath, (($out -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding $false))
+    Set-DotEnvValue -Path (Join-Path (Get-Location).Path '.env') -Key $Key -Value $Value
     $script:envVars[$Key] = $Value
 }
 # Vrati $true, kdyz hostovy port $Port drzi CIZI (ne-myucto) kontejner nebo proces.

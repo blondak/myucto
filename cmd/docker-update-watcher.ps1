@@ -139,9 +139,24 @@ while ($true) {
                 $message = "Upgrade dokoncen. Log na hostu: $log"
                 Write-Host "[watcher] OK"
             } else {
+                $rc      = $LASTEXITCODE
                 $status  = 'failed'
-                $message = "Upgrade selhal (rc=$LASTEXITCODE). Log na hostu: $log"
-                Write-Host "[watcher] FAILED (rc=$LASTEXITCODE). Viz $log"
+                # Do UI posilame i DUVOD, ne jen cestu k logu na hostu (do ktere se
+                # uzivatel z prohlizece stejne nedostane) - jinak vypada selhani jako
+                # "nedokoncena aktualizace" bez vysvetleni (issue #14).
+                $reason = ''
+                if (Test-Path -LiteralPath $log) {
+                    $lines = @(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue |
+                        Where-Object { $_ -match 'ERROR' } | Select-Object -Last 3)
+                    if ($lines.Count -eq 0) {
+                        $lines = @(Get-Content -LiteralPath $log -Tail 5 -ErrorAction SilentlyContinue)
+                    }
+                    $reason = (($lines -join ' | ') -replace '[\x00-\x1f]', ' ')
+                    if ($reason.Length -gt 400) { $reason = $reason.Substring(0, 400) }
+                    if ($reason) { $reason = "$reason " }
+                }
+                $message = "Upgrade selhal (rc=$rc). ${reason}Log na hostu: $log"
+                Write-Host "[watcher] FAILED (rc=$rc). Viz $log"
             }
         } catch {
             $status  = 'failed'

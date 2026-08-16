@@ -10,7 +10,14 @@
 #
 # Používá docker-compose.production.yml (image pull, žádný build).
 # Idempotentní — bezpečné spouštět opakovaně.
-set -euo pipefail
+set -Eeuo pipefail
+
+# Žádné tiché selhání (issue #14) — viz komentář v docker-update.sh.
+trap 'rc=$?; {
+  echo ""
+  echo "ERROR: docker-ghcr.sh selhal na řádku ${LINENO} — příkaz: ${BASH_COMMAND}"
+  echo "       Exit kód ${rc}. INSTALACE NEBYLA DOKONČENA."
+} >&2; exit "$rc"' ERR
 
 # Detekce PROJECT_ROOT — skript se pouští dvěma způsoby:
 #   a) standalone install (curl 3 souborů do jedné složky): script vedle compose file
@@ -79,7 +86,35 @@ EOF
 else
   echo "==> .env already exists (skipping)"
 fi
-set -a; . ./.env; set +a
+# `.env` se PARSUJE, nespouští (issue #14) — hodnota s mezerou bez uvozovek
+# (`MYINVOICE_SMTP_FROM_NAME=Jan Novak`) dřív shell rozsekala a zbytek se pokusil
+# spustit jako příkaz; navíc byl `.env` de facto spustitelný kód.
+#
+# Helper hledáme na všech třech místech, kde se skript reálně pouští:
+#   a) klon repa       → cmd/lib/env-load.sh
+#   b) standalone dir  → lib/env-load.sh (kdo si stáhl celé lib/)
+#   c) standalone dir  → env-load.sh vedle skriptu (curl podle manuálu)
+# Když chybí všude, dotáhneme ho z repa — a když ani to nejde, končíme HLASITĚ.
+ENV_LOADER=""
+for c in "${SCRIPT_DIR}/lib/env-load.sh" "${PROJECT_ROOT}/cmd/lib/env-load.sh" "${SCRIPT_DIR}/env-load.sh"; do
+  if [[ -f "$c" ]]; then ENV_LOADER="$c"; break; fi
+done
+if [[ -z "$ENV_LOADER" ]]; then
+  echo "==> Stahuji helper env-load.sh (parser .env)…"
+  if curl -fsSL "https://raw.githubusercontent.com/radekhulan/myucto/master/cmd/lib/env-load.sh" \
+       -o "${SCRIPT_DIR}/env-load.sh"; then
+    ENV_LOADER="${SCRIPT_DIR}/env-load.sh"
+  else
+    rm -f "${SCRIPT_DIR}/env-load.sh"
+    echo "ERROR: nepodařilo se získat cmd/lib/env-load.sh." >&2
+    echo "       Stáhni jej ručně vedle tohoto skriptu:" >&2
+    echo "       curl -O https://raw.githubusercontent.com/radekhulan/myucto/master/cmd/lib/env-load.sh" >&2
+    exit 1
+  fi
+fi
+# shellcheck source=lib/env-load.sh
+. "$ENV_LOADER"
+dotenv_load ./.env
 
 # --- 2. cfg.docker.php -----------------------------------------------------
 if [[ ! -f cfg.docker.php ]]; then
@@ -174,7 +209,9 @@ echo "==> Starting database…"
 # --- 5. wait for DB health -------------------------------------------------
 echo "==> Waiting for database to become healthy…"
 for i in {1..45}; do
-  status=$("${COMPOSE[@]}" ps --format json db 2>/dev/null | grep -o '"Health":"[^"]*"' | head -1 | cut -d'"' -f4)
+  # `|| true`: dokud compose nevypíše "Health", grep nic nenajde → 1 → pod
+  # `pipefail` by `set -e` ukončil skript uprostřed čekání na DB, a to beze slova.
+  status=$("${COMPOSE[@]}" ps --format json db 2>/dev/null | grep -o '"Health":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
   if [[ "$status" == "healthy" ]]; then echo "    DB ready."; break; fi
   [[ "$status" == "unhealthy" ]] && echo "    DB hlásí 'unhealthy' — čekám dál (attempt $i/45)…"
   sleep 2

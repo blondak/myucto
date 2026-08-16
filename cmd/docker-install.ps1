@@ -36,6 +36,21 @@ $ProgressPreference = 'SilentlyContinue'
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $ProjectRoot
 
+# Zadne tiche selhani (issue #14) - protejsek ERR trapu v docker-install.sh.
+trap {
+    Write-Host ""
+    Write-Host "ERROR: docker-install.ps1 selhal na radku $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "       INSTALACE NEBYLA DOKONCENA." -ForegroundColor Red
+    exit 1
+}
+
+# Sdileny bezpecny parser `.env` (protejsek cmd/lib/env-load.sh).
+$EnvLoader = Join-Path $PSScriptRoot 'lib\env-load.ps1'
+if (-not (Test-Path -LiteralPath $EnvLoader)) {
+    Write-Error "Chybi cmd\lib\env-load.ps1 - instalace je neuplna, dotahni repo (git pull)."
+}
+. $EnvLoader
+
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Write-Error "docker not found in PATH"
 }
@@ -111,12 +126,10 @@ function Find-FreePort([int]$Start) {
 }
 
 # Prepise jeden klic v .env (a v $envVars), aby zmena prezila dalsi spusteni.
+# Vlastni zapis dela Set-DotEnvValue z lib/env-load.ps1 - UTF-8 bez BOM, LF konce
+# radku, hodnota se v pripade potreby uvozuje.
 function Set-EnvValue([string]$Key, [string]$Value) {
-    $lines = Get-Content .env
-    $hit = $false
-    $out = $lines | ForEach-Object { if ($_ -match "^\s*$Key\s*=") { $hit = $true; "$Key=$Value" } else { $_ } }
-    if (-not $hit) { $out += "$Key=$Value" }
-    Write-Utf8NoBom '.env' (($out -join "`n") + "`n")
+    Set-DotEnvValue -Path (Join-Path (Get-Location).Path '.env') -Key $Key -Value $Value
     $script:envVars[$Key] = $Value
 }
 
@@ -150,11 +163,10 @@ DB_PASSWORD=$userPass
     Write-Host "==> .env already exists (skipping)"
 }
 
-# Load .env into local hashtable
-$envVars = @{}
-Get-Content .env | ForEach-Object {
-    if ($_ -match '^\s*([A-Z_]+)\s*=\s*(.*)\s*$') { $envVars[$Matches[1]] = $Matches[2] }
-}
+# `.env` se PARSUJE sdilenym loaderem (issue #14) - stary inline regex neumel
+# sundat uvozovky, neznal klice s cislici a inline komentar bral jako hodnotu.
+# POSIX protejsek: cmd/lib/env-load.sh (drz obe varianty v synchronizaci).
+$envVars = Read-DotEnvFile -Path '.env'
 
 # --- 2. cfg.docker.php ----------------------------------------------------
 # Separate from cfg.php so the same checkout can run both native dev (`php -S`)

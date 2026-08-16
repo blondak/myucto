@@ -13,10 +13,17 @@
 #
 # Přebití: MYINVOICE_INSTALL_MODE=registry|source   nebo argument  --build.
 # Idempotent — safe to re-run.
-set -euo pipefail
+set -Eeuo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
+
+# Žádné tiché selhání (issue #14) — viz komentář v docker-update.sh.
+trap 'rc=$?; {
+  echo ""
+  echo "ERROR: docker-install.sh selhal na řádku ${LINENO} — příkaz: ${BASH_COMMAND}"
+  echo "       Exit kód ${rc}. INSTALACE NEBYLA DOKONČENA."
+} >&2; exit "$rc"' ERR
 
 FORCE_BUILD=0
 [[ "${1:-}" == "--build" ]] && FORCE_BUILD=1
@@ -52,8 +59,16 @@ EOF
 else
   echo "==> .env already exists (skipping)"
 fi
-# Load .env so the rest of the script sees the values
-set -a; . ./.env; set +a
+# Load .env so the rest of the script sees the values.
+# `.env` se PARSUJE, nespouští (issue #14) — hodnota s mezerou bez uvozovek
+# dřív shell rozsekala a zbytek se pokusil spustit jako příkaz.
+if [[ ! -f "${PROJECT_ROOT}/cmd/lib/env-load.sh" ]]; then
+  echo "ERROR: chybí cmd/lib/env-load.sh — instalace je neúplná, dotáhni repo (git pull)." >&2
+  exit 1
+fi
+# shellcheck source=lib/env-load.sh
+. "${PROJECT_ROOT}/cmd/lib/env-load.sh"
+dotenv_load ./.env
 
 # --- 2. cfg.docker.php -----------------------------------------------------
 # Separate from cfg.php so the same checkout can run both native dev (`php -S`)
@@ -217,7 +232,9 @@ echo "==> Starting database…"
 # --- 5. wait for DB health -------------------------------------------------
 echo "==> Waiting for database to become healthy…"
 for i in {1..45}; do
-  status=$("${DC[@]}" ps --format json db 2>/dev/null | grep -o '"Health":"[^"]*"' | head -1 | cut -d'"' -f4)
+  # `|| true`: dokud compose nevypíše "Health", grep nic nenajde → 1 → pod
+  # `pipefail` by `set -e` ukončil skript uprostřed čekání na DB, a to beze slova.
+  status=$("${DC[@]}" ps --format json db 2>/dev/null | grep -o '"Health":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
   if [[ "$status" == "healthy" ]]; then echo "    DB ready."; break; fi
   [[ "$status" == "unhealthy" ]] && echo "    DB hlásí 'unhealthy' — čekám dál (attempt $i/45)…"
   sleep 2

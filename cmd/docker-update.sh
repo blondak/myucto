@@ -13,10 +13,22 @@
 # Přebití: MYINVOICE_UPDATE_MODE=registry|source.
 #
 # Idempotent — safe to re-run. Volumes (DB data) persist; backup is your responsibility.
-set -euo pipefail
+set -Eeuo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
+
+# Žádné tiché selhání (issue #14): dřív se dalo skončit uprostřed updatu bez
+# jediného řádku výstupu (např. `x=$(… | grep …)`, kde grep nic nenašel → pod
+# `pipefail` nenulový exit → `set -e` ukončí skript beze slova). Trap zajistí,
+# že KAŽDÝ neošetřený pád je vidět a vrací nenulový exit kód — watcher i UI to
+# pak reportují jako „selhalo", ne jako nedokončenou aktualizaci.
+trap 'rc=$?; {
+  echo ""
+  echo "ERROR: docker-update.sh selhal na řádku ${LINENO} — příkaz: ${BASH_COMMAND}"
+  echo "       Exit kód ${rc}. AKTUALIZACE NEBYLA DOKONČENA."
+  echo "       Oprav příčinu výše a spusť skript znovu."
+} >&2; exit "$rc"' ERR
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "ERROR: docker not found in PATH" >&2; exit 1
@@ -28,7 +40,17 @@ if [[ ! -f .env ]]; then
   echo "ERROR: .env not found — run docker-install.sh first" >&2; exit 1
 fi
 
-set -a; . ./.env; set +a
+# `.env` se PARSUJE, nespouští (issue #14). Dřív tu bylo `set -a; . ./.env; set +a`,
+# takže hodnota s mezerou bez uvozovek (`MYINVOICE_SMTP_FROM_NAME=Jan Novak`)
+# shell rozsekala a zbytek se pokusil spustit jako příkaz → update umřel hned
+# tady. Navíc to byl RCE vektor (`.env` = spustitelný kód).
+if [[ ! -f "${PROJECT_ROOT}/cmd/lib/env-load.sh" ]]; then
+  echo "ERROR: chybí cmd/lib/env-load.sh — instalace je neúplná, dotáhni repo (git pull)." >&2
+  exit 1
+fi
+# shellcheck source=lib/env-load.sh
+. "${PROJECT_ROOT}/cmd/lib/env-load.sh"
+dotenv_load ./.env
 
 # Detect mode z IMAGE běžícího app kontejneru (autoritativní — nezávisí na tom,
 # který compose file je zrovna po ruce; staré řešení podle compose souborů bylo
@@ -39,7 +61,10 @@ set -a; . ./.env; set +a
 # Přebití: MYINVOICE_UPDATE_MODE=registry|source.
 MODE="${MYINVOICE_UPDATE_MODE:-}"
 
-running_image="$(docker ps --filter label=com.docker.compose.service=app --format '{{.Image}}' 2>/dev/null | grep -i myucto | head -1)"
+# `|| true`: když žádný myucto kontejner neběží, grep vrátí 1 → pod `pipefail`
+# by `set -e` skript ukončil TIŠE (bez jediného řádku výstupu) ještě před
+# detekcí režimu. Prázdný výsledek je tady legitimní stav, ne chyba.
+running_image="$(docker ps --filter label=com.docker.compose.service=app --format '{{.Image}}' 2>/dev/null | grep -i myucto | head -1 || true)"
 
 if [[ -z "$MODE" ]]; then
   if [[ -n "$running_image" ]]; then
@@ -198,7 +223,9 @@ echo "==> Restarting database…"
 # --- 3. wait for DB health -----------------------------------------------
 echo "==> Waiting for database to become healthy…"
 for i in {1..45}; do
-  status=$("${DC[@]}" ps --format json db 2>/dev/null | grep -o '"Health":"[^"]*"' | head -1 | cut -d'"' -f4)
+  # `|| true`: dokud compose nevypíše "Health", grep nic nenajde → 1 → pod
+  # `pipefail` by `set -e` ukončil skript uprostřed čekání na DB, a to beze slova.
+  status=$("${DC[@]}" ps --format json db 2>/dev/null | grep -o '"Health":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
   if [[ "$status" == "healthy" ]]; then echo "    DB ready."; break; fi
   [[ "$status" == "unhealthy" ]] && echo "    DB hlásí 'unhealthy' — čekám dál (attempt $i/45)…"
   sleep 2

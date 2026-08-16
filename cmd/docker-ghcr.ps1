@@ -44,6 +44,39 @@ Set-Location $ProjectRoot
 
 $ComposeFile = 'docker-compose.production.yml'
 
+# Zadne tiche selhani (issue #14) - protejsek ERR trapu v docker-ghcr.sh.
+trap {
+    Write-Host ""
+    Write-Host "ERROR: docker-ghcr.ps1 selhal na radku $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "       INSTALACE NEBYLA DOKONCENA." -ForegroundColor Red
+    exit 1
+}
+
+# Sdileny bezpecny parser `.env` (protejsek cmd/lib/env-load.sh, issue #14).
+# Skript se pousti i standalone (curl vedle compose file), takze helper hledame
+# na vsech mistech, kde muze byt, a kdyz chybi, dotahneme ho z repa. Kdyz ani to
+# nejde, koncime HLASITE - nikdy nepokracujeme s poloprazdnou konfiguraci.
+$EnvLoader = @(
+    (Join-Path $PSScriptRoot 'lib\env-load.ps1'),
+    (Join-Path $ProjectRoot  'cmd\lib\env-load.ps1'),
+    (Join-Path $PSScriptRoot 'env-load.ps1')
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $EnvLoader) {
+    Write-Host "==> Stahuji helper env-load.ps1 (parser .env)..."
+    $EnvLoader = Join-Path $PSScriptRoot 'env-load.ps1'
+    try {
+        Invoke-WebRequest -UseBasicParsing `
+            -Uri 'https://raw.githubusercontent.com/radekhulan/myucto/master/cmd/lib/env-load.ps1' `
+            -OutFile $EnvLoader
+    } catch {
+        Remove-Item -LiteralPath $EnvLoader -ErrorAction SilentlyContinue
+        Write-Error ("Nepodarilo se ziskat cmd\lib\env-load.ps1 ($($_.Exception.Message)). " +
+                     "Stahni jej rucne vedle tohoto skriptu z " +
+                     "https://raw.githubusercontent.com/radekhulan/myucto/master/cmd/lib/env-load.ps1")
+    }
+}
+. $EnvLoader
+
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Write-Error "docker not found in PATH"
 }
@@ -121,14 +154,10 @@ function Find-FreePort([int]$Start, [string]$OurProject, [string]$EnvVar) {
 }
 
 # Prepise jeden klic v .env (a v $envVars), aby zmena prezila dalsi spusteni.
+# Vlastni zapis dela Set-DotEnvValue z lib/env-load.ps1 - UTF-8 bez BOM, LF konce
+# radku, hodnota se v pripade potreby uvozuje.
 function Set-EnvValue([string]$Key, [string]$Value) {
-    $lines = Get-Content .env
-    $hit = $false
-    $out = $lines | ForEach-Object {
-        if ($_ -match "^\s*$Key\s*=") { $hit = $true; "$Key=$Value" } else { $_ }
-    }
-    if (-not $hit) { $out += "$Key=$Value" }
-    Write-Utf8NoBom '.env' (($out -join "`n") + "`n")
+    Set-DotEnvValue -Path (Join-Path (Get-Location).Path '.env') -Key $Key -Value $Value
     $script:envVars[$Key] = $Value
 }
 
@@ -174,10 +203,9 @@ DB_PASSWORD=$userPass
     Write-Host "==> .env already exists (skipping)"
 }
 
-$envVars = @{}
-Get-Content .env | ForEach-Object {
-    if ($_ -match '^\s*([A-Z_]+)\s*=\s*(.*)\s*$') { $envVars[$Matches[1]] = $Matches[2] }
-}
+# `.env` se PARSUJE sdilenym loaderem (issue #14) - stary inline regex neumel
+# sundat uvozovky, neznal klice s cislici a inline komentar bral jako hodnotu.
+$envVars = Read-DotEnvFile -Path '.env'
 
 # --- 2. cfg.docker.php ----------------------------------------------------
 if (-not (Test-Path cfg.docker.php)) {
