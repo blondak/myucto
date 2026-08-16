@@ -2,7 +2,8 @@
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, RouterLink, type RouteLocationRaw } from 'vue-router'
-import { accountingApi, type ChartAccount } from '@/api/accounting'
+import { accountingApi, postingErrorI18nKey, type ChartAccount } from '@/api/accounting'
+import { apiErrorMessage } from '@/api/errors'
 import {
   closingApi,
   type ClosingState,
@@ -90,6 +91,9 @@ const stockNetDiff = computed(() => stockSurplusTotal.value - stockShortageTotal
  */
 const depreciationRequired = computed(() => state.value?.depreciation_step_required !== false)
 const stockRequired = computed(() => state.value?.stock_step_required !== false)
+// Uzávěrka zásob je v pořadí až za daní z příjmů, ale mění náklady (způsob B odúčtuje
+// konečný stav z 501/504) — dokud neproběhla, je dopočtený základ daně předběžný.
+const stockStepPending = computed(() => stockRequired.value && step('stock')?.status === 'pending')
 function stepApplicable(key: ClosingStepKey): boolean {
   if (key === 'depreciation') return depreciationRequired.value
   if (key === 'stock') return stockRequired.value
@@ -176,6 +180,23 @@ const precheckStale = computed(() => state.value?.precheck_stale ?? false)
 const precheckHasErrors = computed(() =>
   !precheckStale.value && precheckItems.value.some(c => !c.ok && c.severity === 'error'))
 
+/**
+ * Proč nejde uzavřít knihy. Blokující nálezy jsou vidět jen v kroku 1, takže bez tohohle
+ * shrnutí zůstane u kroku 9 jen zašedlé tlačítko bez vysvětlení.
+ */
+const closeBlockedReason = computed<string | null>(() => {
+  if (!state.value || busy.value) return null
+  if (!isClosing.value) return t('accounting.closing.close.blocked_not_closing')
+  const failing = precheckItems.value.filter(c => !c.ok && c.severity === 'error')
+  if (!precheckStale.value && failing.length) {
+    return t('accounting.closing.close.blocked_precheck', {
+      checks: failing.map(c => checkLabel(c.key)).join(', '),
+    })
+  }
+  if (!(state.value.can_close ?? true)) return t('accounting.closing.close.blocked_steps')
+  return null
+})
+
 function runPrecheck() {
   mutate(() => closingApi.runStep(periodId, 'precheck', { row_version: rowVersion.value }),
     t('accounting.closing.precheck_done'))
@@ -235,6 +256,35 @@ function confirmStep(key: ClosingStepKey, status: 'done' | 'skipped') {
     status,
     ...(note ? { note } : {}),
   }), t('common.saved'))
+}
+
+// ── Odpisy roku (krok 2) ───────────────────────────────────────────────────
+const bookingDepreciation = ref(false)
+
+async function bookDepreciation() {
+  bookingDepreciation.value = true
+  try {
+    const r = await closingApi.bookDepreciation(periodId)
+    // Chyby nesou strojový kód — přeložíme ho a pojmenujeme dotčené karty, ať uživatel
+    // nemusí hádat, proč se nezaúčtovalo (dřív se ukazoval jen počet).
+    if (r.errors?.length) {
+      const byCode = new Map<string, number[]>()
+      for (const e of r.errors) byCode.set(e.code, [...(byCode.get(e.code) ?? []), e.asset_id])
+      const detail = [...byCode.entries()]
+        .map(([code, ids]) => `${t(postingErrorI18nKey(code))} (#${ids.join(', #')})`)
+        .join(' ')
+      toast.warning(`${t('accounting.assets.book.result_with_errors', {
+        booked: r.booked, skipped: r.skipped, errors: r.errors.length,
+      })} ${detail}`)
+    } else {
+      toast.success(t('accounting.assets.book.result', { booked: r.booked, skipped: r.skipped }))
+    }
+    await load()
+  } catch (e: any) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    bookingDepreciation.value = false
+  }
 }
 
 // ── Kurzové rozdíly ────────────────────────────────────────────────────────
@@ -361,7 +411,11 @@ function createAssisted(stepKey: 'estimates' | 'deferrals') {
 }
 
 function assistedEntries(stepKey: ClosingStepKey): AssistedEntryRef[] {
-  const raw = step(stepKey)?.payload?.entries ?? []
+  // `Array.isArray`, ne `?? []`: krok s prázdným payloadem přišel z backendu jako `[]`
+  // a `[].entries` není `undefined`, ale zděděná `Array.prototype.entries` — nullish
+  // operátor ji propustil a `.map()` pak shodil celou stránku uzávěrky na bílo.
+  const raw = step(stepKey)?.payload?.entries
+  if (!Array.isArray(raw)) return []
   // Backend ukládá klíč entry_id (ClosingService::createAssistedEntry) — sjednotit na id.
   return raw.map(e => (typeof e === 'number'
     ? { id: e }
@@ -811,6 +865,16 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
               {{ t('accounting.closing.depreciation_link') }}
             </RouterLink>
           </p>
+          <!-- Zaúčtování přímo z průvodce. Modul Majetek účtuje striktně do OTEVŘENÉHO
+               období, takže po zahájení uzávěrky tam odpisy neprojdou (period_not_open) —
+               tenhle endpoint je jediný, který smí zapsat do stavu „Uzavírá se". -->
+          <div v-if="depreciationRequired && isClosing" class="mt-3">
+            <button @click="bookDepreciation" :disabled="busy || bookingDepreciation" :class="btnOutline('primary')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
+              {{ t('accounting.closing.depreciation_book') }}
+            </button>
+            <p class="mt-1 text-xs text-neutral-500">{{ t('accounting.closing.depreciation_book_hint') }}</p>
+          </div>
           <div v-if="depreciationRequired && step('depreciation')?.status === 'pending' && isClosing" class="space-y-3">
             <input v-model="stepNote.depreciation" type="text" :placeholder="t('accounting.closing.note_placeholder')"
               class="w-full max-w-md h-9 px-3 border border-neutral-300 rounded-md text-sm" />
@@ -1280,6 +1344,13 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
                 {{ t('accounting.closing.income_tax.computed_from_ledger') }}:
                 <strong class="font-mono">{{ formatMoney(incomeTaxPreview.suggested_amount || 0) }}</strong>
               </div>
+              <!-- Uzávěrka zásob (krok 8) je AŽ ZA tímhle krokem, přitom mění náklady:
+                   způsobem B se konečný stav zásob odúčtuje z 501/504, takže základ daně
+                   po ní může být úplně jiný (i ztráta → zisk). Dokud krok neproběhl, je
+                   dopočet z účetnictví předběžný a nesmí vypadat jako hotové číslo. -->
+              <div v-if="stockStepPending" class="rounded-md bg-warning-50 px-3 py-2 text-warning-800">
+                {{ t('accounting.closing.income_tax.stock_pending') }}
+              </div>
               <div v-else class="text-neutral-500">{{ t('accounting.closing.income_tax.no_return') }}</div>
               <div class="text-xs text-neutral-500">
                 341: <span class="font-mono">{{ formatMoney(incomeTaxPreview.balance_341) }}</span> ·
@@ -1447,7 +1518,13 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
           <template v-else>
             <p class="text-sm text-neutral-600">{{ t('accounting.closing.close.hint') }}</p>
             <div v-if="!auth.canWrite('accounting.periods.close')" class="text-sm text-neutral-400">{{ t('accounting.periods.admin_only') }}</div>
-            <button v-else @click="showCloseConfirm = true"
+            <!-- Zašedlé tlačítko bez důvodu je slepá ulička: blokující nález sedí v kroku 1
+                 a uživatel u kroku 9 nemá jak zjistit, co mu brání. Vypíšeme ho jmenovitě. -->
+            <div v-if="auth.canWrite('accounting.periods.close') && closeBlockedReason"
+              class="rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-800">
+              {{ closeBlockedReason }}
+            </div>
+            <button v-if="auth.canWrite('accounting.periods.close')" @click="showCloseConfirm = true"
               :disabled="busy || !isClosing || !(state.can_close ?? true) || precheckHasErrors"
               :class="btnFilled('warning')">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.badgeCheck" /></svg>

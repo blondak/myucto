@@ -546,6 +546,13 @@ final class ClosingRepository
      * Založí/aktualizuje krok průvodce (INSERT ... ON DUPLICATE KEY UPDATE na
      * uq_acs_period_step). done_at/done_by se plní jen u done/skipped.
      *
+     * Payload se ukládá VŽDY jako JSON objekt, nikdy jako pole. Prázdné PHP pole by
+     * `json_encode` uložil jako `[]` a frontend pak na něm čte klíč (`payload.entries`)
+     * — jenže `[].entries` v JavaScriptu není `undefined`, ale zděděná metoda
+     * `Array.prototype.entries`, takže `?? []` nezabere a následné `.map()` shodí
+     * celou stránku uzávěrky do bílé obrazovky. JSON_FORCE_OBJECT tuhle třídu chyb
+     * odřízne u zdroje.
+     *
      * @param 'pending'|'done'|'skipped' $status
      */
     public function upsertStep(
@@ -570,7 +577,10 @@ final class ClosingRepository
             $periodId,
             $key,
             $status,
-            $payload === null ? null : json_encode($payload, JSON_UNESCAPED_UNICODE),
+            $payload === null ? null : json_encode(
+                $payload,
+                JSON_UNESCAPED_UNICODE | ($payload === [] ? JSON_FORCE_OBJECT : 0),
+            ),
             $note,
             $isDone ? date('Y-m-d H:i:s') : null,
             $isDone ? $userId : null,

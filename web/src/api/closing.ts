@@ -495,6 +495,15 @@ export interface TaxBaseDisposalRow {
   note: string
 }
 
+/** Výsledek zaúčtování odpisů v kroku 2 uzávěrky (shodný tvar s modulem Majetek). */
+export interface DepreciationBookResult {
+  booked: number
+  skipped: number
+  total_accounting: number
+  total_tax: number
+  errors: { asset_id: number; code: string }[]
+}
+
 export interface TaxBaseAdjustments {
   fiscal_year: number
   period: { id: number; starts_on: string; ends_on: string }
@@ -561,6 +570,14 @@ export const closingApi = {
     api.post(`/accounting/periods/${periodId}/profit-distribution`, payload).then(r => r.data),
   profitDistributionRevert: (periodId: number, targetRowVersion: number) =>
     api.post(`/accounting/periods/${periodId}/profit-distribution/revert`, { target_row_version: targetRowVersion }).then(r => r.data),
+  /**
+   * Zaúčtování odpisů roku v kroku 2 uzávěrky. Jediná cesta, která umí zapsat odpisy do
+   * období ve stavu `closing` — modul Majetek účtuje striktně do otevřeného období, takže
+   * po zahájení uzávěrky tam už neprojde (`period_not_open`).
+   */
+  bookDepreciation: (periodId: number) =>
+    api.post<DepreciationBookResult>(`/accounting/periods/${periodId}/closing/book-depreciation`, {})
+      .then(r => r.data),
   runStep: (periodId: number, step: ClosingStepKey, payload: RunStepPayload) =>
     api.post(`/accounting/periods/${periodId}/closing/steps/${step}/run`, payload).then(r => r.data),
   revertStep: (periodId: number, step: ClosingStepKey, rowVersion: number) =>

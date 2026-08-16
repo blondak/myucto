@@ -6022,6 +6022,8 @@
             "depreciation_hint": "Verify that the year's accounting depreciation is booked (551 / accumulated depreciation).",
             "depreciation_not_applicable": "There was no depreciable asset in this period — the step resolves itself and does not block closing the books.",
             "depreciation_link": "Go to Fixed assets — Book depreciation",
+            "depreciation_book": "Book the year's depreciation",
+            "depreciation_book_hint": "Books accounting depreciation for every in-use asset card (551 / accumulated depreciation). Re-running overwrites the entries instead of duplicating them. Once the closing has started this is the only route — the Fixed assets module posts into an open period only.",
             "fx": {
                 "needs_closing": "This step becomes available after the closing is started (Closing state).",
                 "col_document": "Document",
@@ -6125,6 +6127,9 @@
             "close": {
                 "hint": "Closes P&L accounts via 710 — Profit and loss account and balance sheet accounts via 702 — Final balance sheet account. Requires steps 1–5 completed and checks without errors.",
                 "button": "Close the books",
+                "blocked_precheck": "The books cannot be closed yet — the pre-checks report an error: {checks}. Fix it and run the checks again in step 1.",
+                "blocked_steps": "The books cannot be closed yet — one of the previous steps is neither confirmed nor skipped.",
+                "blocked_not_closing": "The books can only be closed after the closing has started (Closing state).",
                 "confirm_title": "Closing the books",
                 "confirm_text": "Closing entries will be booked as of {date} (UZ document series) and period {year} will become Closed. The step can be undone until the financial statements are approved.",
                 "done": "The books have been closed.",
@@ -6174,6 +6179,7 @@
             "income_tax": {
                 "suggested": "Proposal from the CIT return",
                 "computed_from_ledger": "Computed from the ledger (no finalized return) — verify before booking",
+                "stock_pending": "The inventory close (step 8) has not run yet. Under method B the closing stock is removed from expenses, so the tax base will still change — do not rely on this figure yet. Book the inventory first, then come back.",
                 "no_return": "No finalized CIT return for the year — enter the amount manually per the tax-base adjustments report.",
                 "amount": "Income tax payable",
                 "tax_base_link": "Tax-base adjustments report (source)",

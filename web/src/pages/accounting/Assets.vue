@@ -3,6 +3,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
 import { assetsApi, type AssetListItem, type AssetStatus, type PurchaseCandidate } from '@/api/assets'
+import { postingErrorI18nKey } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
@@ -215,15 +216,34 @@ const yearOptions = computed(() => {
   return arr
 })
 
+/** Popisek majetku pro chybovou hlášku — inventární číslo, ať je karta dohledatelná. */
+function assetLabels(ids: number[]): string {
+  return ids
+    .map(id => items.value.find(a => a.id === id)?.inventory_number || `#${id}`)
+    .join(', ')
+}
+
 async function runBook() {
   booking.value = true
   try {
     const r = await assetsApi.bookYear(bookYear.value)
     showBook.value = false
     if (r.errors && r.errors.length > 0) {
-      toast.warning(t('accounting.assets.book.result_with_errors', {
+      // Samotný počet chyb uživateli neporadí nic — důvod (uzavřené období, chybějící
+      // účet…) i dotčený majetek přitom odpověď nese. Kódy se slučují, ať u dvaceti
+      // karet se stejnou příčinou nevznikne dvacet hlášek.
+      const byCode = new Map<string, number[]>()
+      for (const e of r.errors) {
+        const list = byCode.get(e.code) ?? []
+        list.push(e.asset_id)
+        byCode.set(e.code, list)
+      }
+      const detail = [...byCode.entries()]
+        .map(([code, ids]) => `${t(postingErrorI18nKey(code))} (${assetLabels(ids)})`)
+        .join(' ')
+      toast.warning(`${t('accounting.assets.book.result_with_errors', {
         booked: r.booked, skipped: r.skipped, errors: r.errors.length,
-      }))
+      })} ${detail}`)
     } else {
       toast.success(t('accounting.assets.book.result', { booked: r.booked, skipped: r.skipped }))
     }

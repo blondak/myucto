@@ -6022,6 +6022,8 @@
             "depreciation_hint": "Zkontrolujte, že účetní odpisy roku jsou zaúčtované (551 / oprávky).",
             "depreciation_not_applicable": "V tomto období nebyl žádný odpisovaný majetek — krok se přeskakuje sám a uzavření knih neblokuje.",
             "depreciation_link": "Přejít na Majetek — Zaúčtovat odpisy",
+            "depreciation_book": "Zaúčtovat odpisy roku",
+            "depreciation_book_hint": "Zaúčtuje účetní odpisy všech karet v užívání (551 / oprávky). Opakované spuštění zápisy přepíše, nezdvojí. Po zahájení uzávěrky je tohle jediná cesta — modul Majetek účtuje jen do otevřeného období.",
             "fx": {
                 "needs_closing": "Krok je dostupný až po zahájení uzávěrky (stav Uzavírá se).",
                 "col_document": "Doklad",
@@ -6125,6 +6127,9 @@
             "close": {
                 "hint": "Uzavře výsledkové účty přes 710 — Účet zisků a ztrát a rozvahové účty přes 702 — Konečný účet rozvažný. Vyžaduje dokončené kroky 1–5 a kontroly bez chyb.",
                 "button": "Uzavřít knihy",
+                "blocked_precheck": "Uzavřít knihy zatím nejde — předběžné kontroly hlásí chybu: {checks}. Napravte ji a v kroku 1 spusťte kontroly znovu.",
+                "blocked_steps": "Uzavřít knihy zatím nejde — některý z předchozích kroků není potvrzený ani přeskočený.",
+                "blocked_not_closing": "Uzavřít knihy lze až po zahájení uzávěrky (stav Uzavírá se).",
                 "confirm_title": "Uzavření účetních knih",
                 "confirm_text": "Zaúčtují se uzávěrkové zápisy k {date} (doklad řady UZ) a období {year} přejde do stavu Uzavřené. Krok lze do schválení závěrky vzít zpět.",
                 "done": "Účetní knihy byly uzavřeny.",
@@ -6174,6 +6179,7 @@
             "income_tax": {
                 "suggested": "Návrh z DPPO přiznání",
                 "computed_from_ledger": "Dopočteno z účetnictví (bez finalizovaného přiznání) — ověřte před zaúčtováním",
+                "stock_pending": "Uzávěrka zásob (krok 8) zatím neproběhla. Způsobem B se konečný stav zásob odúčtuje z nákladů, takže základ daně se po ní ještě změní — z tohoto čísla zatím nevycházejte. Zaúčtujte nejdřív zásoby a pak se sem vraťte.",
                 "no_return": "Za rok není finalizované DPPO přiznání — zadejte částku ručně dle reportu úprav základu daně.",
                 "amount": "Splatná daň",
                 "tax_base_link": "Report úprav základu daně (podklad)",
