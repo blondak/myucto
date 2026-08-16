@@ -5,7 +5,7 @@ import { documentsApi, type DocItem } from '@/api/documents'
 import {
   payrollApi,
   type PayrollInstitutionAccount,
-  type PayrollPersonListItem,
+  type PayrollPersonOption,
 } from '@/api/payroll'
 import {
   payrollEnforcementApi,
@@ -20,17 +20,39 @@ import {
   type EnforcementDependant,
   type EnforcementMonthEvidence,
 } from '@/api/payrollEnforcement'
-import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const loading = ref(true)
+/*
+ * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
+ * není". Toast s chybou za pár vteřin zmizí a bez tohohle příznaku by na
+ * obrazovce zůstal prázdný stav, který lže.
+ */
+const loadFailed = ref(false)
+/*
+ * Lidé a účty příjemců jsou doplňky formuláře, ne podmínka výpisu — proto se
+ * načítají „měkce". Když ale selžou, zůstane prázdný výběr příjemce a uživatel
+ * nemá jak zjistit, že za tím není konfigurace, ale výpadek.
+ */
+const supportFailed = ref(false)
 const saving = ref(false)
 const cases = ref<EnforcementCaseSummary[]>([])
-const people = ref<PayrollPersonListItem[]>([])
+const total = ref(0)
+const pageSize = 20
+const offset = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
+const employeeFilter = ref<number | null>(null)
+const statusFilter = ref<EnforcementCaseStatus | ''>('')
+const people = ref<PayrollPersonOption[]>([])
 const detail = ref<EnforcementCaseDetail | null>(null)
 const expandedId = ref<number | null>(null)
 const showCreate = ref(false)
@@ -102,6 +124,10 @@ const newClaim = ref<EnforcementClaimPayload>(emptyClaim())
 const claimAmountCzk = ref('')
 const maintenanceWeightCzk = ref('')
 const caseKinds: EnforcementCaseKind[] = ['enforcement', 'voluntary_agreement']
+const caseStatuses: EnforcementCaseStatus[] = [
+  'received', 'withhold_and_hold', 'remit', 'deferred_no_withholding',
+  'deferred_hold', 'paid', 'stopped',
+]
 const statutoryClaimCategories: EnforcementClaimCategory[] = [
   'current_maintenance', 'maintenance_arrears', 'substitute_maintenance',
   'other_priority', 'non_priority',
@@ -143,6 +169,23 @@ const transitionCanSubmit = computed(() => {
   return !reasonCommands.has(command) || transitionReason.value.trim().length > 0
 })
 
+/*
+ * Proč nejde přechod potvrdit. Obě podmínky mají konkrétní nápravu hned
+ * v témž formuláři — obecné „akce není dostupná" by uživateli neřeklo, které
+ * z polí nad tlačítkem má doplnit.
+ */
+const transitionBlockedReason = computed<string | null>(() => {
+  const command = pendingCommand.value
+  if (!command) return null
+  if (documentCommands.has(command) && !selectedDocument.value) {
+    return t('payroll.enforcement.transition_blocked_document')
+  }
+  if (reasonCommands.has(command) && transitionReason.value.trim().length === 0) {
+    return t('payroll.enforcement.transition_blocked_reason')
+  }
+  return null
+})
+
 watch(documentQuery, (query) => {
   if (documentSearchTimer) clearTimeout(documentSearchTimer)
   if (query.trim().length < 2 || selectedDocument.value) {
@@ -161,14 +204,6 @@ watch(documentQuery, (query) => {
     }
   }, 220)
 })
-
-function money(minorUnits: number): string {
-  return new Intl.NumberFormat(locale.value, {
-    style: 'currency',
-    currency: 'CZK',
-    minimumFractionDigits: 2,
-  }).format(minorUnits / 100)
-}
 
 function minorUnits(value: string, required = true): number | null {
   const normalized = value.trim().replace(/\s/g, '').replace(',', '.')
@@ -189,13 +224,23 @@ function statusClass(status: EnforcementCaseStatus): string {
 
 async function load() {
   loading.value = true
+  loadFailed.value = false
+  supportFailed.value = false
   try {
-    cases.value = await payrollEnforcementApi.cases()
+    const page = await payrollEnforcementApi.casesPage({
+      ...(employeeFilter.value ? { employee_id: employeeFilter.value } : {}),
+      ...(statusFilter.value ? { status: statusFilter.value } : {}),
+      limit: pageSize,
+      offset: offset.value,
+    })
+    cases.value = page.cases
+    total.value = page.total
     if (canReadPeople.value) {
       try {
-        people.value = await payrollApi.people()
+        people.value = await payrollApi.peopleOptions()
       } catch {
         people.value = []
+        supportFailed.value = true
       }
     }
     if (canReadPayrollSettings.value) {
@@ -203,22 +248,42 @@ async function load() {
         recipientAccounts.value = await payrollApi.institutionAccounts()
       } catch {
         recipientAccounts.value = []
+        supportFailed.value = true
       }
     }
   } catch {
+    loadFailed.value = true
     toast.error(t('payroll.enforcement.load_failed'))
   } finally {
     loading.value = false
   }
 }
 
+/*
+ * Rozbalený panel patří ke konkrétnímu řádku seznamu. Po přestránkování ani po
+ * přefiltrování ten řádek na obrazovce být nemusí — otevřený detail by pak
+ * ukazoval případ, který v seznamu nikdo nevidí.
+ */
+function collapseDetail() {
+  ++detailRequestSequence
+  closeTransition()
+  showClaim.value = false
+  expandedId.value = null
+  detail.value = null
+  monthEvidence.value = null
+  dependants.value = []
+}
+
+// Stránkuje sdílená `PaginationBar` (číslo stránky od jedné); server zná offset.
+function goToPage(nextPage: number) {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  collapseDetail()
+  void load()
+}
+
 async function selectCase(item: EnforcementCaseSummary) {
   if (expandedId.value === item.id) {
-    ++detailRequestSequence
-    closeTransition()
-    showClaim.value = false
-    expandedId.value = null
-    detail.value = null
+    collapseDetail()
     return
   }
   const sequence = ++detailRequestSequence
@@ -479,6 +544,13 @@ watch(evidencePeriod, () => {
   if (detail.value) void loadMonthlyEvidence(detail.value.employee_id)
 })
 
+watch([employeeFilter, statusFilter], () => {
+  // Zúžený výběr má míň stránek; třetí stránka by po přefiltrování ukázala prázdno.
+  offset.value = 0
+  collapseDetail()
+  void load()
+})
+
 onMounted(load)
 </script>
 
@@ -498,6 +570,20 @@ onMounted(load)
     <section class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
       {{ t('payroll.enforcement.security_hint') }}
     </section>
+
+    <!--
+      Lidé a účty se načítají „měkce" (chyba nepotopí výpis případů). Když ale
+      selžou, zůstane výběr zaměstnance prázdný a bez téhle věty to vypadá jako
+      chybějící nastavení, ne jako výpadek.
+    -->
+    <p
+      v-if="showCreate && supportFailed"
+      class="rounded-xl border border-warning-500/40 bg-warning-50 p-3 text-sm text-warning-800"
+      role="alert"
+      data-test="support-failed"
+    >
+      {{ t('payroll.enforcement.support_failed') }}
+    </p>
 
     <form v-if="showCreate" class="grid grid-cols-1 gap-4 rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="createCase">
       <label class="text-xs font-medium text-neutral-600">{{ t('payroll.enforcement.employee') }}
@@ -520,8 +606,38 @@ onMounted(load)
       </div>
     </form>
 
+    <!--
+      Seznam je stránkovaný, takže zúžení musí jít na server: v prohlížeči by
+      filtr hledal jen v načtené stránce a případ ze druhé by prohlásil za
+      neexistující.
+    -->
+    <div class="flex flex-wrap items-end gap-3">
+      <label v-if="canReadPeople" class="text-xs font-medium text-neutral-600">
+        {{ t('payroll.enforcement.employee') }}
+        <select v-model="employeeFilter" data-test="enforcement-employee-filter" class="mt-1 block w-full min-w-48 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+          <option :value="null">{{ t('common.all') }}</option>
+          <option v-for="person in people" :key="person.id" :value="person.id">{{ person.full_name }}</option>
+        </select>
+      </label>
+      <label class="text-xs font-medium text-neutral-600">
+        {{ t('payroll.enforcement.status_label') }}
+        <select v-model="statusFilter" data-test="enforcement-status-filter" class="mt-1 block w-full min-w-40 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+          <option value="">{{ t('common.all') }}</option>
+          <option v-for="status in caseStatuses" :key="status" :value="status">{{ t(`payroll.enforcement.status.${status}`) }}</option>
+        </select>
+      </label>
+    </div>
+
     <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">
       <div v-if="loading" class="space-y-3 p-4 sm:p-6"><div v-for="index in 4" :key="index" class="h-16 animate-pulse rounded-lg bg-neutral-100" /></div>
+      <EmptyState
+        v-else-if="loadFailed"
+        variant="failed"
+        dense
+        data-test="load-failed"
+        :message="t('payroll.enforcement.load_failed_hint')"
+        @action="load"
+      />
       <div v-else-if="cases.length === 0" class="p-8 text-center">
         <h2 class="font-semibold text-neutral-900">{{ t('payroll.enforcement.empty_title') }}</h2>
         <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.enforcement.empty_description') }}</p>
@@ -537,7 +653,7 @@ onMounted(load)
                 <td class="px-4 py-3 text-neutral-600">{{ t(`payroll.enforcement.kinds.${item.case_kind}`) }}</td>
                 <td class="px-4 py-3 text-right">{{ item.claim_count }}</td>
                 <td class="px-4 py-3 text-right font-medium">{{ money(item.outstanding_minor_units) }}</td>
-                <td class="px-4 py-3 text-right"><button :class="btnOutlineSm('neutral')" @click="selectCase(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t(expandedId === item.id ? 'common.close' : 'common.detail') }}</button></td>
+                <td class="px-4 py-3 text-right"><button :class="btnOutlineSm('neutral')" :data-test="`enforcement-detail-${item.id}`" @click="selectCase(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t(expandedId === item.id ? 'common.close' : 'common.detail') }}</button></td>
               </tr>
             </tbody>
           </table>
@@ -550,9 +666,18 @@ onMounted(load)
           </article>
         </div>
       </template>
+      <PaginationBar
+        v-if="!loading && !loadFailed"
+        data-test="enforcement-pagination"
+        embedded
+        :page="currentPage"
+        :per-page="pageSize"
+        :total="total"
+        @update:page="goToPage"
+      />
     </section>
 
-    <section v-if="expandedId" class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 shadow-sm sm:p-6">
+    <section v-if="expandedId" data-test="enforcement-detail-panel" class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 shadow-sm sm:p-6">
       <div v-if="!detail" class="h-28 animate-pulse rounded-lg bg-neutral-100" />
       <div v-else class="space-y-4">
         <div class="flex flex-wrap items-start justify-between gap-3">
@@ -591,7 +716,8 @@ onMounted(load)
           </div>
           <div class="mt-4 flex flex-wrap justify-end gap-2">
             <button type="button" :class="btnOutline('neutral')" @click="closeTransition"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button>
-            <button type="submit" :class="pendingCommand === 'stop' ? btnFilled('danger') : btnFilled('primary')" :disabled="saving || !transitionCanSubmit"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('payroll.enforcement.apply_transition') }}</button>
+            <button type="submit" data-test="transition-apply" :class="pendingCommand === 'stop' ? btnFilled('danger') : btnFilled('primary')" :disabled="saving || !transitionCanSubmit" :title="disabledTitle(transitionBlockedReason !== null, transitionBlockedReason)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('payroll.enforcement.apply_transition') }}</button>
+            <p v-if="transitionBlockedReason" :class="[BTN_DISABLED_NOTE, 'w-full text-right']" data-test="transition-apply-blocked">{{ transitionBlockedReason }}</p>
           </div>
         </form>
 

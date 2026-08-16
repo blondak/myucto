@@ -5,42 +5,29 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Component\PayrollComponentDefaults;
 use PDO;
 use PDOException;
 
 final class PayrollComponentRepository
 {
-    /** @var list<list<string|null>> */
-    private const DEFAULTS = [
-        ['MZDA_MESICNI', 'Základní měsíční mzda', 'base_wage', 'monetary', 'regular', 'included', 'included', 'included', 'included', 'included', 'included', 'included'],
-        ['MZDA_HODINOVA', 'Základní hodinová mzda', 'hourly_wage', 'monetary', 'regular', 'included', 'included', 'included', 'included', 'included', 'included', 'included'],
-        ['MZDA_UKOLOVA', 'Úkolová mzda', 'task_wage', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included'],
-        ['ODMENA', 'Odměna', 'bonus', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included'],
-        ['PREMIE_PRIPLATKY', 'Prémie a příplatky', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included'],
-        ['PROVIZE', 'Provize', 'commission', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included'],
-        ['NAHRADA_MZDY', 'Náhrada mzdy', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included'],
-        ['ODSTUPNE', 'Odstupné', 'severance', 'monetary', 'one_off', 'included', 'excluded', 'excluded', 'excluded', 'included', 'included', 'included'],
-        ['NAHRADA_KONKURENCNI_DOLOZKA', 'Náhrada za konkurenční doložku', 'competitive_clause', 'monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included'],
-        ['DOPLATEK_MZDY', 'Doplatek mzdy za minulé období', 'backpay', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included'],
-        ['NEPENEZNI_PRIJEM', 'Nepeněžní příjem', 'non_cash', 'non_monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included'],
-        ['PRISPEVEK_STRAVOVANI', 'Příspěvek na stravování', 'benefit_meal', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included'],
-        ['SOUKROME_VOZIDLO', 'Soukromé užití vozidla', 'benefit_vehicle', 'non_monetary', 'regular', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included'],
-        ['PRISPEVEK_PENZE_ZIVOTNI', 'Příspěvek na penzijní a životní produkty', 'benefit_pension', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included'],
-        ['PRISPEVEK_DLOUHODOBA_PECE', 'Příspěvek na dlouhodobou péči', 'benefit_care', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included'],
-        ['VZDELAVANI', 'Vzdělávání zaměstnance', 'benefit_education', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included'],
-        ['REKREACE_VOLNY_CAS', 'Rekreace a volnočasový benefit', 'benefit_recreation', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included'],
-        ['ZDRAVOTNI_BENEFIT', 'Zdravotní benefit', 'benefit_health', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included'],
-        ['PRISPEVEK_RIZIKOVE_SPORENI', 'Povinný příspěvek na spoření u rizikové práce', 'risky_savings', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included'],
-        ['CESTOVNI_NAHRADA', 'Cestovní náhrada', 'travel_reimbursement', 'monetary', 'one_off', 'manual_review', 'excluded', 'excluded', 'excluded', 'excluded', 'manual_review', 'included'],
-        // MZ-08-W07 — klasifikovaný rozpad vyúčtování pracovní cesty. Do zákonného
-        // limitu (§ 6 odst. 7 písm. a) ZDP) není náhrada předmětem daně, pojistného,
-        // průměrného výdělku ani exekučních srážek; nadlimitní část je běžný
-        // zdanitelný příjem ze závislé činnosti a vstupuje do vyměřovacích základů.
-        ['CESTOVNI_NAHRADA_LIMIT', 'Cestovní náhrada do zákonného limitu', 'travel_reimbursement', 'monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'included'],
-        ['CESTOVNI_NAHRADA_NADLIMIT', 'Nadlimitní cestovní náhrada', 'travel_reimbursement', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included'],
-    ];
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollComponentDeletionRepository $deletion,
+        private readonly PayrollComponentDefaults $defaults,
+    ) {}
 
-    public function __construct(private readonly Connection $db) {}
+    /**
+     * Kódy složek, které si aplikace zakládá sama (`ensureDefaults()`). Mazání je
+     * potřebuje znát: smazaná systémová složka by se při dalším výpisu vrátila,
+     * takže tam mazání nedává smysl a nabízí se místo něj deaktivace.
+     *
+     * @return list<string>
+     */
+    public static function defaultCodes(): array
+    {
+        return PayrollComponentDefaults::codes();
+    }
 
     /** @return list<array<string,mixed>> */
     public function list(int $supplierId, ?string $effectiveOn = null): array
@@ -62,11 +49,14 @@ final class PayrollComponentRepository
         );
         $stmt->execute($params);
 
-        return array_map(
-            self::cast(...),
-            PayrollTimeValue::rows(
-                $stmt->fetchAll(PDO::FETCH_ASSOC),
-                'payroll_component_definitions',
+        return $this->deletion->decorate(
+            $supplierId,
+            array_map(
+                self::cast(...),
+                PayrollTimeValue::rows(
+                    $stmt->fetchAll(PDO::FETCH_ASSOC),
+                    'payroll_component_definitions',
+                ),
             ),
         );
     }
@@ -84,7 +74,10 @@ final class PayrollComponentRepository
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false
             ? null
-            : self::cast(PayrollTimeValue::row($row, 'payroll_component_definition'));
+            : $this->deletion->decorateOne(
+                $supplierId,
+                self::cast(PayrollTimeValue::row($row, 'payroll_component_definition')),
+            );
     }
 
     /**
@@ -254,9 +247,32 @@ final class PayrollComponentRepository
         return $this->find($supplierId, $id);
     }
 
+    /**
+     * Založí firmě chybějící verze výchozího číselníku mzdových složek.
+     *
+     * Dvě věci, které se tady dřív neděly:
+     *
+     *  - `annual_limit_minor` VŮBEC NEBYL mezi vkládanými sloupci, takže výchozí
+     *    benefitní složky měly roční limit NULL. `PayrollInputRepository::approve()`
+     *    hlídá strop jen u složky s NENULOVÝM limitem, takže se roční limit
+     *    osvobození benefitů u výchozích složek nehlídal vůbec.
+     *  - `valid_from` bylo natvrdo `'2026-01-01'`, takže legislativní změnu
+     *    klasifikace nešlo do existující firmy rozvést: `INSERT IGNORE` narazil na
+     *    `uq_payroll_component_version (supplier_id, code, valid_from)` a tiše
+     *    neudělal nic.
+     *
+     * Verze se zakládají chronologicky. Před založením verze, která není nejstarší,
+     * se předchozí OTEVŘENÉ verzi téhož kódu dopočítá `valid_to` na den před
+     * účinností nové — stejný vzor jako {@see prepareVersionInterval()} u ručně
+     * zakládané verze. Historie se tím nepřepisuje: stará verze si ponechá svoje
+     * hodnoty i svůj interval a schválené mzdové vstupy dál ukazují na ni.
+     *
+     * Obojí je idempotentní: `INSERT IGNORE` podruhé nic nevloží a uzavírací UPDATE
+     * podruhé nenajde otevřenou starší verzi.
+     */
     public function ensureDefaults(int $supplierId): void
     {
-        $stmt = $this->db->pdo()->prepare(
+        $insert = $this->db->pdo()->prepare(
             'INSERT IGNORE INTO payroll_component_definitions
                 (supplier_id, code, name, component_kind, value_kind,
                  frequency_kind, tax_treatment,
@@ -264,27 +280,46 @@ final class PayrollComponentRepository
                  health_participation_treatment, health_treatment,
                  average_earning_treatment,
                  enforcement_treatment, jmhz_treatment, statistics_treatment,
-                 valid_from)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "2026-01-01")'
+                 annual_limit_minor, valid_from)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
-        foreach (self::DEFAULTS as $row) {
-            $stmt->execute([
-                $supplierId,
-                $row[0],
-                $row[1],
-                $row[2],
-                $row[3],
-                $row[4],
-                $row[5],
-                $row[6],
-                $row[6],
-                $row[7],
-                $row[7],
-                $row[8],
-                $row[9],
-                $row[10],
-                $row[11],
-            ]);
+        $closePrevious = $this->db->pdo()->prepare(
+            'UPDATE payroll_component_definitions
+                SET valid_to = DATE_SUB(?, INTERVAL 1 DAY),
+                    row_version = row_version + 1
+              WHERE supplier_id = ? AND code = ?
+                AND valid_from < ? AND valid_to IS NULL'
+        );
+        foreach ($this->defaults->versions() as $index => $version) {
+            foreach ($version['rows'] as $row) {
+                if ($index > 0) {
+                    $closePrevious->execute([
+                        $version['valid_from'],
+                        $supplierId,
+                        $row['code'],
+                        $version['valid_from'],
+                    ]);
+                }
+                $insert->execute([
+                    $supplierId,
+                    $row['code'],
+                    $row['name'],
+                    $row['component_kind'],
+                    $row['value_kind'],
+                    $row['frequency_kind'],
+                    $row['tax_treatment'],
+                    $row['social_treatment'],
+                    $row['social_treatment'],
+                    $row['health_treatment'],
+                    $row['health_treatment'],
+                    $row['average_earning_treatment'],
+                    $row['enforcement_treatment'],
+                    $row['jmhz_treatment'],
+                    $row['statistics_treatment'],
+                    $row['annual_limit_minor'],
+                    $version['valid_from'],
+                ]);
+            }
         }
     }
 

@@ -5,7 +5,9 @@ const m = vi.hoisted(() => ({
   jmhzTransportHistory: vi.fn(),
   pollJmhzTransportAttempt: vi.fn(),
   closeJmhzTransportAttempt: vi.fn(),
+  cancelJmhzSubmission: vi.fn(),
   jmhzImportedProtocols: vi.fn(),
+  jmhzImportedProtocolErrors: vi.fn(),
   importJmhzProtocol: vi.fn(),
   employerSettings: vi.fn(),
   submissionDetail: vi.fn(),
@@ -17,7 +19,9 @@ vi.mock('@/api/payroll', () => ({
     jmhzTransportHistory: m.jmhzTransportHistory,
     pollJmhzTransportAttempt: m.pollJmhzTransportAttempt,
     closeJmhzTransportAttempt: m.closeJmhzTransportAttempt,
+    cancelJmhzSubmission: m.cancelJmhzSubmission,
     jmhzImportedProtocols: m.jmhzImportedProtocols,
+    jmhzImportedProtocolErrors: m.jmhzImportedProtocolErrors,
     importJmhzProtocol: m.importJmhzProtocol,
     employerSettings: m.employerSettings,
     submissionDetail: m.submissionDetail,
@@ -47,14 +51,22 @@ function attempt(overrides: Record<string, unknown> = {}) {
     channel: 'vrep_apep',
     attempt_no: 1,
     status: 'awaiting_protocol',
+    period_start: '2026-07-01',
+    period_end: '2026-07-31',
     correlation_reference: 'ABC-123-XYZ',
     request_sha256: 'a'.repeat(64),
     response_http_status: 200,
     error_code: null,
     error_message: null,
     next_retry_at: null,
+    poll_count: 0,
+    last_polled_at: null,
+    last_poll_error: null,
     sent_at: '2026-08-10 09:00:00',
     completed_at: null,
+    closed_at: null,
+    close_attempts: 0,
+    close_error: null,
     row_version: 2,
     created_by: 3,
     created_at: '2026-08-10 08:59:00',
@@ -108,9 +120,6 @@ describe('PayrollTransportHistoryPanel', () => {
         is_active: true,
       }],
     })
-    m.submissionDetail.mockResolvedValue({
-      submission: { period_start: '2026-07-01', period_end: '2026-07-31' },
-    })
     m.jmhzTransportHistory.mockResolvedValue({
       environment: 'production',
       attempts: [attempt()],
@@ -130,7 +139,7 @@ describe('PayrollTransportHistoryPanel', () => {
     const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()
 
-    expect(m.jmhzTransportHistory).toHaveBeenCalledWith('production')
+    expect(m.jmhzTransportHistory).toHaveBeenCalledWith('production', { limit: 25, offset: 0 })
     const group = wrapper.get('[data-test="transport-group-70"]')
     expect(group.text()).toContain('payroll.submissions.transport.group.attempts 2')
     expect(group.text()).toContain('2026-07-01')
@@ -314,7 +323,11 @@ describe('PayrollTransportHistoryPanel', () => {
       environment: 'production',
       attempts: [attempt({ id: 8, status: 'completed', completed_at: '2026-08-11 10:00:00' })],
     })
-    m.closeJmhzTransportAttempt.mockResolvedValue({ closed: true })
+    m.closeJmhzTransportAttempt.mockResolvedValue({
+      closed: true,
+      already_closed: false,
+      attempt: attempt({ id: 8, status: 'completed', closed_at: '2026-08-11 10:05:00' }),
+    })
 
     const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()
@@ -364,7 +377,7 @@ describe('PayrollTransportHistoryPanel', () => {
     await wrapper.get('[data-test="transport-environment-test"]').trigger('click')
     await flushPromises()
 
-    expect(m.jmhzTransportHistory).toHaveBeenLastCalledWith('test')
+    expect(m.jmhzTransportHistory).toHaveBeenLastCalledWith('test', { limit: 25, offset: 0 })
     expect(wrapper.get('[data-test="transport-environment-note"]').text())
       .toContain('payroll.submissions.transport.environment.test_note')
   })
@@ -387,7 +400,10 @@ describe('PayrollTransportHistoryPanel', () => {
   })
 
   it('nedohledané období nezabrání zobrazení stavů', async () => {
-    m.submissionDetail.mockRejectedValue(new Error('nedostupné'))
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({ period_start: null, period_end: null })],
+    })
 
     const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()
@@ -395,6 +411,59 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(wrapper.get('[data-test="transport-group-70"]').text())
       .toContain('payroll.submissions.transport.group.period_unknown')
     expect(wrapper.find('[data-test="transport-status-1"]').exists()).toBe(true)
+  })
+
+  /**
+   * Období nese ledger, takže se na ně přehled nesmí doptávat po jednom podání.
+   * Kdyby ano, každý řádek by stál jeden HTTP požadavek navíc — tenhle test je
+   * pojistka proti návratu toho rozstřelu.
+   */
+  it('období vezme z ledgeru a na detail podání se vůbec neptá', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [
+        attempt({ id: 3, submission_id: 70 }),
+        attempt({ id: 2, submission_id: 70, attempt_no: 2 }),
+        attempt({
+          id: 9,
+          submission_id: 71,
+          period_start: '2026-06-01',
+          period_end: '2026-06-30',
+        }),
+      ],
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect(m.submissionDetail).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="transport-group-70"]').text())
+      .toContain('payroll.submissions.transport.group.period 2026-07-01 2026-07-31')
+    expect(wrapper.get('[data-test="transport-group-71"]').text())
+      .toContain('payroll.submissions.transport.group.period 2026-06-01 2026-06-30')
+    expect(m.jmhzTransportHistory).toHaveBeenCalledTimes(1)
+  })
+
+  /** Odpověď na doptání je holý řádek ledgeru — období se z hlavičky ztratit nesmí. */
+  it('po doptání zůstane období vidět, i když ho odpověď nenese', async () => {
+    const polled = attempt({ status: 'completed', completed_at: '2026-08-11 10:00:00' })
+    delete (polled as Record<string, unknown>).period_start
+    delete (polled as Record<string, unknown>).period_end
+    m.pollJmhzTransportAttempt.mockResolvedValue({
+      attempt: polled,
+      acknowledgement: null,
+      settled: true,
+      report: { status: 'ProcessedAndComplete', errors: [] },
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+    await wrapper.get('[data-test="transport-poll-1"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="transport-group-70"]').text())
+      .toContain('payroll.submissions.transport.group.period 2026-07-01 2026-07-31')
+    expect(m.submissionDetail).not.toHaveBeenCalled()
   })
 
   /**
@@ -457,7 +526,7 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(order).toEqual(['transport-group-70', 'transport-imported-11'])
   })
 
-  it('protokol s chybou ukáže kód, hlášku i kontrolu z katalogu', async () => {
+  it('protokol s chybou dotáhne rozpad až po rozbalení a zapamatuje si ho', async () => {
     m.jmhzTransportHistory.mockResolvedValue({ environment: 'production', attempts: [] })
     m.jmhzImportedProtocols.mockResolvedValue({
       environment: 'production',
@@ -465,33 +534,54 @@ describe('PayrollTransportHistoryPanel', () => {
         status_code: 3,
         status_name: 'Rejected',
         error_count: 1,
-        errors: [{
-          code: 20301,
-          message: 'Pojistné neodpovídá vyměřovacímu základu.',
-          origin: 'dis',
-          control_id: 301,
-          form_guid: 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEE',
-          ik_mpsv: null,
-          id_ppv: null,
-          control: {
-            name: 'Kontrola pojistného',
-            detail: null,
-            area: 'Pojistné',
-            category: 'F1',
-            attribute_ids: ['10477'],
-          },
-        }],
       })],
+    })
+    m.jmhzImportedProtocolErrors.mockResolvedValue({
+      environment: 'production',
+      protocol_id: 11,
+      detail_available: true,
+      errors: [{
+        code: 20301,
+        message: 'Pojistné neodpovídá vyměřovacímu základu.',
+        origin: 'dis',
+        control_id: 301,
+        form_guid: 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEE',
+        ik_mpsv: null,
+        id_ppv: null,
+        control: {
+          name: 'Kontrola pojistného',
+          detail: null,
+          area: 'Pojistné',
+          category: 'F1',
+          attribute_ids: ['10477'],
+        },
+      }],
     })
 
     const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()
 
+    // Seznam nese jen počet; detail se do prohlížeče netahá, dokud si ho
+    // uživatel nevyžádá.
+    expect(m.jmhzImportedProtocolErrors).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="transport-imported-error-count-11"]').text()).toBe('1')
+    expect(wrapper.find('[data-test="transport-imported-error-11-0"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="transport-imported-errors-toggle-11"]').trigger('click')
+    await flushPromises()
+
+    expect(m.jmhzImportedProtocolErrors).toHaveBeenCalledWith(11, 'production')
     const error = wrapper.get('[data-test="transport-imported-error-11-0"]')
     expect(error.text()).toContain('20301')
     expect(error.text()).toContain('Pojistné neodpovídá vyměřovacímu základu.')
     expect(error.text()).toContain('Kontrola pojistného')
     expect(error.text()).toContain('10477')
+
+    // Zabalit a znovu rozbalit už na server nechodí — výsledek si držíme.
+    await wrapper.get('[data-test="transport-imported-errors-toggle-11"]').trigger('click')
+    await wrapper.get('[data-test="transport-imported-errors-toggle-11"]').trigger('click')
+    await flushPromises()
+    expect(m.jmhzImportedProtocolErrors).toHaveBeenCalledTimes(1)
   })
 
   it('načte protokol ze souboru a potvrdí, co ČSSZ hlásí', async () => {
@@ -566,6 +656,130 @@ describe('PayrollTransportHistoryPanel', () => {
 
     expect(wrapper.get('[data-test="transport-error"]').text()).toContain('nepatří')
     expect(wrapper.findAll('[data-test^="transport-imported-"]')).toHaveLength(0)
+  })
+
+  /**
+   * Automatika musí být VIDĚT. Bez toho uživatel neví, jestli se aplikace ptá
+   * sama, nebo jestli podání čeká na něj — a to je přesně ten rozdíl, kvůli
+   * kterému se přestane sledovat výsledek.
+   */
+  it('u čekajícího podání ukáže, kdy se aplikace zeptá znovu', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({
+        id: 12,
+        poll_count: 3,
+        last_polled_at: '2026-08-11 09:00:00',
+        next_retry_at: '2026-08-11 10:00:00',
+        last_poll_error: 'Brána VREP neodpověděla.',
+      })],
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    const automation = wrapper.get('[data-test="transport-automation-12"]')
+    expect(automation.text()).toContain('payroll.submissions.transport.automation.next_poll 2026-08-11 10:00:00')
+    expect(automation.text()).toContain('payroll.submissions.transport.automation.polls 3')
+    expect(wrapper.get('[data-test="transport-poll-error-12"]').text())
+      .toContain('Brána VREP neodpověděla.')
+  })
+
+  /**
+   * Uzavřenou transakci nemá smysl nabízet znovu — druhé uzavření by u ČSSZ
+   * byl dotaz na transakci, která už neexistuje.
+   */
+  it('u uzavřené transakce tlačítko nenabídne a řekne, že je uzavřená', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({
+        id: 13,
+        status: 'completed',
+        completed_at: '2026-08-11 10:00:00',
+        closed_at: '2026-08-11 10:05:00',
+        close_attempts: 1,
+        poll_count: 2,
+      })],
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="transport-close-13"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="transport-closed-13"]').text())
+      .toContain('payroll.submissions.transport.automation.closed 2026-08-11 10:05:00')
+  })
+
+  /**
+   * Pokus, který automatika vzdala, musí nést větu, podle které se dá jednat —
+   * ne kód a ne mlčení.
+   */
+  it('vzdaný pokus řekne, co má uživatel udělat', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({
+        id: 14,
+        status: 'expired',
+        error_code: 'jmhz_protocol_not_delivered',
+        error_message: 'ČSSZ protokol nevydala.',
+        poll_count: 30,
+      })],
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="transport-expired-note-14"]').text())
+      .toContain('payroll.submissions.transport.automation.expired_note')
+    expect(wrapper.get('[data-test="transport-failure-14"]').text())
+      .toContain('ČSSZ protokol nevydala.')
+  })
+
+  /**
+   * Storno ruší u ČSSZ všechna hlášení za období a vzít zpět se nedá, takže se
+   * nesmí spustit jedním kliknutím.
+   */
+  it('storno se nejdřív potvrzuje a teprve pak připraví podání', async () => {
+    m.cancelJmhzSubmission.mockResolvedValue({
+      submission_id: 91,
+      part_id: 1,
+      artifact_id: 2,
+      status: 'ready',
+      row_version: 3,
+      environment: 'production',
+      artifact_sha256: 'd'.repeat(64),
+      created: true,
+      submission_kind: 'cancellation',
+      corrects_submission_id: 70,
+      submission_guid: '0195AAAA-1111-7222-8333-BBBBCCCCDDDD',
+      variable_symbol: '1234567890',
+      month: 7,
+      year: 2026,
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    await wrapper.get('[data-test="transport-cancel-70"]').trigger('click')
+    expect(m.cancelJmhzSubmission).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="transport-cancel-confirm-70"]').text())
+      .toContain('payroll.submissions.transport.storno.confirm_text')
+
+    await wrapper.get('[data-test="transport-cancel-submit-70"]').trigger('click')
+    await flushPromises()
+
+    expect(m.cancelJmhzSubmission).toHaveBeenCalledWith(70, 'production')
+    expect(wrapper.get('[data-test="transport-success"]').text())
+      .toContain('payroll.submissions.transport.storno.frozen 91')
+  })
+
+  it('v režimu jen pro čtení storno vůbec nenabídne', async () => {
+    m.canWrite.mockReturnValue(false)
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="transport-cancel-70"]').exists()).toBe(false)
   })
 
   /**

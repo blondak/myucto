@@ -278,6 +278,33 @@ final class DocumentIngestService
         return ['created_ids' => $created, 'skipped' => $skipped, 'cancelled' => $cancelled];
     }
 
+    /**
+     * ZFO přijaté z kanálu (datová schránka) — bajty rovnou do DMS.
+     *
+     * Existuje proto, aby stažená zpráva šla do Dokumentů TOUTÉŽ cestou jako
+     * ta, kterou dnes uživatel nahrává ručně: stejný kontejner, stejné
+     * rozbalení příloh, stejné metadata v `dms_messages`. Druhá cesta k témuž
+     * cíli by se dřív nebo později rozešla.
+     *
+     * @return array{container_id:int,created_ids:list<int>,skipped:list<array{name:string,reason:string}>}
+     * @throws DocumentException
+     */
+    public function ingestZfoBytes(
+        string $bytes,
+        int $supplierId,
+        ?int $folderId,
+        string $originalName,
+        ?int $userId,
+    ): array {
+        $stored = $this->storage->storeFromBytes($bytes, $supplierId, $originalName);
+        $result = $this->ingestStoredZfo($stored, $supplierId, $folderId, $originalName, $userId);
+        return [
+            'container_id' => $result['created_ids'][0] ?? 0,
+            'created_ids' => $result['created_ids'],
+            'skipped' => $result['skipped'],
+        ];
+    }
+
     /** Bezpečně rozbalí ZIP z cesty na entries (pro job — vrací entries k ingestu). */
     public function extractZip(string $zipPath): array
     {

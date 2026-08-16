@@ -66,15 +66,18 @@ use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\AccountingActivationAction;
 use MyInvoice\Action\Payroll\AnnualTaxCertificateAction;
+use MyInvoice\Action\Payroll\PayrollAnnualSettlementAction;
 use MyInvoice\Action\Payroll\PayrollActivationAction;
 use MyInvoice\Action\Payroll\PayrollAccountOptionsAction;
 use MyInvoice\Action\Payroll\PayrollAbsenceAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollComponentsAction;
 use MyInvoice\Action\Payroll\PayrollComponentJmhzMappingsAction;
+use MyInvoice\Action\Payroll\PayrollCzIscoAction;
 use MyInvoice\Action\Payroll\PayrollDeductionAgreementAction;
 use MyInvoice\Action\Payroll\PayrollDimensionAction;
 use MyInvoice\Action\Payroll\PayrollDocumentAction;
+use MyInvoice\Action\Payroll\PayrollEldpAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentExitDocumentAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementAction;
 use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
@@ -86,6 +89,8 @@ use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
+use MyInvoice\Action\Payroll\PayrollInsuranceBreakdownAction;
+use MyInvoice\Action\Payroll\PayrollJmhzCorrectionAction;
 use MyInvoice\Action\Payroll\PayrollJmhzProtocolImportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
 use MyInvoice\Action\Payroll\PayrollJmhzOrdinaryEvidenceAction;
@@ -96,15 +101,19 @@ use MyInvoice\Action\Payroll\PayrollJmhzTransportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
 use MyInvoice\Action\Payroll\PayrollNetResultAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
+use MyInvoice\Action\Payroll\PayrollPayoutRulesAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
 use MyInvoice\Action\Payroll\PayrollPersonQuickEditAction;
 use MyInvoice\Action\Payroll\PayrollPersonSensitiveRevealAction;
 use MyInvoice\Action\Payroll\PayrollPostingReconciliationAction;
 use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
+use MyInvoice\Action\Payroll\PayrollRegistrationAction;
 use MyInvoice\Action\Payroll\PayrollRegzelAction;
 use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
+use MyInvoice\Action\Payroll\PayrollRetentionAction;
 use MyInvoice\Action\Payroll\PayrollRulesetAction;
+use MyInvoice\Action\Payroll\PayrollRunValidationOverrideAction;
 use MyInvoice\Action\Payroll\PayrollRunsAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionArtifactDownloadAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionDetailAction;
@@ -660,6 +669,9 @@ final class Routes
             $g->put('/components/{id:[0-9]+}/jmhz-mapping', [PayrollComponentJmhzMappingsAction::class, 'put']);
             $g->delete('/components/{id:[0-9]+}/jmhz-mapping', [PayrollComponentJmhzMappingsAction::class, 'remove']);
             $g->put('/components/{id:[0-9]+}', [PayrollComponentsAction::class, 'update']);
+            // Smazat jde jen NIKDY NEPOUŽITÁ verze složky; u použité zůstává
+            // deaktivace a ukončení platnosti přes PUT výše.
+            $g->delete('/components/{id:[0-9]+}', [PayrollComponentsAction::class, 'delete']);
             $g->get('/deduction-agreements', [PayrollDeductionAgreementAction::class, 'list']);
             $g->post('/deduction-agreements', [PayrollDeductionAgreementAction::class, 'create']);
             $g->get(
@@ -704,12 +716,15 @@ final class Routes
             $g->post('/inputs', [PayrollInputsAction::class, 'create']);
             $g->put('/inputs/{id:[0-9]+}', [PayrollInputsAction::class, 'update']);
             $g->post('/inputs/{id:[0-9]+}/approve', [PayrollInputsAction::class, 'approve']);
+            $g->post('/inputs/{id:[0-9]+}/cancel', [PayrollInputsAction::class, 'cancel']);
             $g->get('/quick-inputs', [PayrollQuickInputsAction::class, 'list']);
             $g->put('/quick-inputs', [PayrollQuickInputsAction::class, 'save']);
             $g->get('/recurring-components', [PayrollRecurringComponentsAction::class, 'list']);
             $g->post('/recurring-components', [PayrollRecurringComponentsAction::class, 'create']);
             $g->post('/recurring-components/materialize', [PayrollRecurringComponentsAction::class, 'materialize']);
             $g->put('/recurring-components/{id:[0-9]+}', [PayrollRecurringComponentsAction::class, 'update']);
+            // Smazat jde jen předpis, ze kterého ještě nevznikl mzdový vstup.
+            $g->delete('/recurring-components/{id:[0-9]+}', [PayrollRecurringComponentsAction::class, 'delete']);
             $g->get('/travel/trips', [PayrollTravelAction::class, 'list']);
             $g->post('/travel/trips', [PayrollTravelAction::class, 'create']);
             $g->post('/travel/preview', [PayrollTravelAction::class, 'preview']);
@@ -717,6 +732,10 @@ final class Routes
             $g->get('/travel/trips/{id:[0-9]+}/calculation', [PayrollTravelAction::class, 'recalculate']);
             $g->post('/travel/trips/{id:[0-9]+}/approve', [PayrollTravelAction::class, 'approve']);
             $g->post('/travel/trips/{id:[0-9]+}/materialize', [PayrollTravelAction::class, 'materialize']);
+            // Dvě různé akce: `cancel` nechá stopu po cestě, která se nekonala,
+            // `delete` odklidí koncept, který vůbec neměl vzniknout.
+            $g->post('/travel/trips/{id:[0-9]+}/cancel', [PayrollTravelAction::class, 'cancel']);
+            $g->delete('/travel/trips/{id:[0-9]+}', [PayrollTravelAction::class, 'delete']);
             $g->post('/input-imports/preview', [PayrollInputImportsAction::class, 'preview']);
             $g->post('/input-imports/apply', [PayrollInputImportsAction::class, 'apply']);
             $g->get('/payments/liabilities', [PayrollPaymentAction::class, 'listLiabilities']);
@@ -758,17 +777,37 @@ final class Routes
                 '/revisions/{revisionId:[0-9]+}/net-results/{employeeId:[0-9]+}',
                 [PayrollNetResultAction::class, 'detail'],
             );
+            // MZ-10-W07 / MZ-11-W07 — jak vzniklo sociální a zdravotní pojistné.
+            // Rozklad se nedotahuje se seznamem běhů: je objemný a potřebný jen
+            // tehdy, když si ho účetní vyžádá u konkrétní osoby.
+            $g->get(
+                '/revisions/{revisionId:[0-9]+}/insurance-breakdowns/{employeeId:[0-9]+}',
+                [PayrollInsuranceBreakdownAction::class, 'detail'],
+            );
             // MZ-18-W07 — read-only reconciliation účetního můstku mezd.
             $g->get(
                 '/posting/reconciliation',
                 [PayrollPostingReconciliationAction::class, 'get'],
             );
             $g->get('/runs', [PayrollRunsAction::class, 'list']);
+            // Detail existuje kvůli tomu, aby seznam nemusel posílat celý
+            // výsledkový snapshot každého běhu — ten se dotahuje na vyžádání.
+            $g->get('/runs/{id:[0-9]+}', [PayrollRunsAction::class, 'detail']);
             $g->post('/runs', [PayrollRunsAction::class, 'create']);
             $g->delete('/runs/{id:[0-9]+}', [PayrollRunsAction::class, 'delete']);
             $g->post(
                 '/runs/{id:[0-9]+}/commands/{command:[a-z_]+}',
                 [PayrollRunsAction::class, 'command'],
+            );
+            // MZ-01-W07 — chybějící půlka override: varování vyžadující schválení
+            // dosud zastavilo `approve` a nešlo ho odklidit žádnou routou.
+            $g->post(
+                '/runs/{id:[0-9]+}/validations/{validationId:[0-9]+}/override',
+                [PayrollRunValidationOverrideAction::class, 'grant'],
+            );
+            $g->delete(
+                '/runs/{id:[0-9]+}/validations/{validationId:[0-9]+}/override',
+                [PayrollRunValidationOverrideAction::class, 'revoke'],
             );
             $g->get('/documents', [PayrollDocumentAction::class, 'list']);
             $g->get('/documents/annual', [PayrollDocumentAction::class, 'listAnnual']);
@@ -779,6 +818,25 @@ final class Routes
             $g->post(
                 '/people/{employeeId:[0-9]+}/documents/tax-certificate/{kind:advance|withholding}/{year:[0-9]{4}}',
                 [AnnualTaxCertificateAction::class, 'generate'],
+            );
+            // MZ-25 — roční zúčtování záloh a daňového zvýhodnění (§ 38ch ZDP).
+            // Náhled a provedení jsou dvě routy schválně: provedení je právní
+            // úkon plátce daně a nesmí se stát tím, že se někdo podívá.
+            $g->get(
+                '/annual-settlements/{year:[0-9]{4}}',
+                [PayrollAnnualSettlementAction::class, 'list'],
+            );
+            $g->get(
+                '/annual-settlements/{year:[0-9]{4}}/people/{employeeId:[0-9]+}',
+                [PayrollAnnualSettlementAction::class, 'preview'],
+            );
+            $g->put(
+                '/annual-settlements/{year:[0-9]{4}}/people/{employeeId:[0-9]+}/request',
+                [PayrollAnnualSettlementAction::class, 'saveRequest'],
+            );
+            $g->post(
+                '/annual-settlements/{year:[0-9]{4}}/people/{employeeId:[0-9]+}/settle',
+                [PayrollAnnualSettlementAction::class, 'settle'],
             );
             $g->post(
                 '/runs/{runId:[0-9]+}/revisions/{revisionId:[0-9]+}/documents/monthly-bundle',
@@ -803,7 +861,9 @@ final class Routes
             $g->get('/people', [PayrollPeopleAction::class, 'list']);
             $g->post('/people', [PayrollPeopleAction::class, 'create']);
             $g->get('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'detail']);
+            $g->delete('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'delete']);
             $g->post('/people/{id:[0-9]+}/employments', [PayrollEmploymentAction::class, 'create']);
+            $g->delete('/employments/{id:[0-9]+}', [PayrollEmploymentAction::class, 'delete']);
             $g->get(
                 '/jmhz/employment-evidence-options',
                 [PayrollEmploymentAction::class, 'jmhzEvidenceOptions'],
@@ -812,6 +872,9 @@ final class Routes
                 '/jmhz/municipalities',
                 [PayrollEmploymentAction::class, 'jmhzMunicipalities'],
             );
+            // Našeptávač klasifikace zaměstnání ČSÚ — hledání běží na serveru,
+            // do prohlížeče jde jen shoda (viz PayrollCzIscoAction).
+            $g->get('/cz-isco', [PayrollCzIscoAction::class, 'search']);
             $g->put('/employments/{id:[0-9]+}/terms', [PayrollEmploymentAction::class, 'addTerms']);
             $g->post(
                 '/employments/{id:[0-9]+}/transitions/{target:preregistered|active|suspended|ended|archived|no_show}',
@@ -854,6 +917,26 @@ final class Routes
             $g->post(
                 '/people/{employeeId:[0-9]+}/accounts/{accountId:[0-9]+}/verify',
                 [PayrollPaymentAction::class, 'verifyPersonAccount'],
+            );
+            $g->get(
+                '/people/{employeeId:[0-9]+}/payout-rules',
+                [PayrollPayoutRulesAction::class, 'list'],
+            );
+            $g->post(
+                '/people/{employeeId:[0-9]+}/payout-rules',
+                [PayrollPayoutRulesAction::class, 'create'],
+            );
+            $g->post(
+                '/people/{employeeId:[0-9]+}/payout-rules/apply-defaults',
+                [PayrollPayoutRulesAction::class, 'applyDefaults'],
+            );
+            $g->put(
+                '/people/{employeeId:[0-9]+}/payout-rules/{ruleId:[0-9]+}',
+                [PayrollPayoutRulesAction::class, 'update'],
+            );
+            $g->delete(
+                '/people/{employeeId:[0-9]+}/payout-rules/{ruleId:[0-9]+}',
+                [PayrollPayoutRulesAction::class, 'deactivate'],
             );
             $g->get(
                 '/submissions/regzel/profile',
@@ -919,6 +1002,27 @@ final class Routes
                 '/submissions/jmhz-freeze/{preparationId:[0-9]+}',
                 PayrollJmhzSubmissionFreezeAction::class,
             );
+            // Evidenční list důchodového pojištění. Vlastní zákonná povinnost
+            // s vlastní lhůtou; `prepare` končí ve stavu `prepared`, odeslání
+            // spouští člověk.
+            $g->get(
+                '/submissions/eldp',
+                [PayrollEldpAction::class, 'get'],
+            );
+            $g->post(
+                '/submissions/eldp',
+                [PayrollEldpAction::class, 'prepare'],
+            );
+            // Přihlášení pracovního vztahu u ČSSZ. Cesta nenese kód formuláře:
+            // PREZEC vs. REGZEC rozhoduje resolver z faktů, ne volající.
+            $g->get(
+                '/submissions/registration/{employmentId:[0-9]+}',
+                [PayrollRegistrationAction::class, 'preview'],
+            );
+            $g->post(
+                '/submissions/registration/{employmentId:[0-9]+}',
+                [PayrollRegistrationAction::class, 'prepare'],
+            );
             $g->get(
                 '/submissions/signing-profile',
                 [PayrollJmhzSigningProfileAction::class, 'show'],
@@ -947,6 +1051,16 @@ final class Routes
                 '/submissions/jmhz-transport/{attemptId:[0-9]+}/close',
                 [PayrollJmhzTransportAction::class, 'close'],
             );
+            // Storno ruší za období všechno, oprava jen vyjmenované vztahy —
+            // rozdíl musí být vidět i v adrese, ne až v těle požadavku.
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/jmhz-cancel',
+                [PayrollJmhzCorrectionAction::class, 'cancel'],
+            );
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/jmhz-cancel-components',
+                [PayrollJmhzCorrectionAction::class, 'cancelComponents'],
+            );
             $g->get(
                 '/submissions/jmhz-protocol-import',
                 [PayrollJmhzProtocolImportAction::class, 'history'],
@@ -954,6 +1068,10 @@ final class Routes
             $g->post(
                 '/submissions/jmhz-protocol-import',
                 [PayrollJmhzProtocolImportAction::class, 'import'],
+            );
+            $g->get(
+                '/submissions/jmhz-protocol-import/{id:[0-9]+}/errors',
+                [PayrollJmhzProtocolImportAction::class, 'errors'],
             );
             $g->get(
                 '/submissions/{submissionId:[0-9]+}',
@@ -979,6 +1097,7 @@ final class Routes
             $g->put('/time/calendars/{employmentId:[0-9]+}', [PayrollTimeAction::class, 'calendar']);
             $g->post('/time/shifts', [PayrollTimeAction::class, 'shift']);
             $g->post('/time/entries', [PayrollTimeAction::class, 'entry']);
+            $g->post('/time/overtime-consents', [PayrollTimeAction::class, 'overtimeConsent']);
             $g->post('/time/imports/preview', [PayrollTimeAction::class, 'previewImport']);
             $g->post('/time/imports', [PayrollTimeAction::class, 'import']);
             $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/approve', [PayrollTimeAction::class, 'approve']);
@@ -992,11 +1111,15 @@ final class Routes
             $g->post('/settings/policies', [PayrollEmployerPolicyAction::class, 'create']);
             $g->get('/settings/policies/{id:[0-9]+}', [PayrollEmployerPolicyAction::class, 'detail']);
             $g->put('/settings/policies/{id:[0-9]+}', [PayrollEmployerPolicyAction::class, 'update']);
+            // Smazat jde jen verze, podle které se ještě nic nespočítalo.
+            $g->delete('/settings/policies/{id:[0-9]+}', [PayrollEmployerPolicyAction::class, 'delete']);
             $g->get('/setup-check', [PayrollEmployerPolicyAction::class, 'setupCheck']);
             $g->get('/settings/institution-accounts', [PayrollInstitutionAccountsAction::class, 'list']);
             $g->post('/settings/institution-accounts', [PayrollInstitutionAccountsAction::class, 'create']);
             $g->get('/settings/institution-accounts/{id:[0-9]+}', [PayrollInstitutionAccountsAction::class, 'detail']);
             $g->put('/settings/institution-accounts/{id:[0-9]+}', [PayrollInstitutionAccountsAction::class, 'update']);
+            // Duplicitní nebo omylem založený účet, ze kterého se nikdy neplatilo.
+            $g->delete('/settings/institution-accounts/{id:[0-9]+}', [PayrollInstitutionAccountsAction::class, 'delete']);
             $g->get('/settings/dimensions', [PayrollDimensionAction::class, 'list']);
             $g->post('/settings/dimensions', [PayrollDimensionAction::class, 'create']);
             $g->get('/settings/dimensions/{id:[0-9]+}', [PayrollDimensionAction::class, 'detail']);
@@ -1016,9 +1139,30 @@ final class Routes
             $g->get('/time/averages', [PayrollAbsenceAction::class, 'averages']);
             $g->post('/time/averages', [PayrollAbsenceAction::class, 'createAverage']);
             $g->post('/time/averages/{id:[0-9]+}/approve', [PayrollAbsenceAction::class, 'approveAverage']);
+            $g->delete('/time/averages/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteAverage']);
             $g->get('/time/leave-ledger', [PayrollAbsenceAction::class, 'leaveLedger']);
             $g->post('/time/leave-ledger', [PayrollAbsenceAction::class, 'createLeaveEntry']);
+            $g->delete('/time/leave-ledger/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteLeaveEntry']);
             $g->post('/time/leave-entitlements', [PayrollAbsenceAction::class, 'createEntitlement']);
+            $g->delete('/time/leave-entitlements/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteEntitlement']);
+
+            // Retence osobních údajů, zadržení výmazu a výmaz jako NÁVRH ke schválení.
+            // Konkrétní cesty jdou před `{id}` (jinak by `erasure` spadlo do id).
+            // `execute` je samostatný požadavek po `approve` — výmaz se nedá odklepnout
+            // jedním kliknutím a bez schválení se neprovede vůbec.
+            $g->get('/retention', [PayrollRetentionAction::class, 'overview']);
+            $g->get('/retention/assessment', [PayrollRetentionAction::class, 'assessment']);
+            $g->get('/retention/holds', [PayrollRetentionAction::class, 'listHolds']);
+            $g->post('/retention/holds', [PayrollRetentionAction::class, 'placeHold']);
+            $g->delete('/retention/holds/{id:[0-9]+}', [PayrollRetentionAction::class, 'releaseHold']);
+            $g->get('/retention/erasure', [PayrollRetentionAction::class, 'listProposals']);
+            $g->post('/retention/erasure', [PayrollRetentionAction::class, 'createProposal']);
+            $g->get('/retention/erasure/{id:[0-9]+}', [PayrollRetentionAction::class, 'showProposal']);
+            $g->post('/retention/erasure/{id:[0-9]+}/approve', [PayrollRetentionAction::class, 'approveProposal']);
+            $g->post('/retention/erasure/{id:[0-9]+}/reject', [PayrollRetentionAction::class, 'rejectProposal']);
+            $g->post('/retention/erasure/{id:[0-9]+}/execute', [PayrollRetentionAction::class, 'executeProposal']);
+            $g->put('/retention/policies/{category:[a-z_]+}', [PayrollRetentionAction::class, 'putPolicy']);
+            $g->delete('/retention/policies/{category:[a-z_]+}', [PayrollRetentionAction::class, 'deletePolicy']);
         });
 
         // Podvojné účetnictví (Epic F1) — účtová osnova, období, deník, kontace.
@@ -1626,6 +1770,41 @@ final class Routes
         // i mzdová podání. EPO endpointy zůstávají a míří do téhož trezoru.
         $app->get    ('/api/settings/certificates',        [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'list']);
         $app->post   ('/api/settings/certificates',        [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'upload']);
+        // Datová schránka jako průřezový kanál podání (DPH, KH, SH, DPPO,
+        // přehledy ZP…). Systémový certifikát a souhlas s vybíráním schránky.
+        $app->get    ('/api/settings/databox',             [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'list']);
+        $app->post   ('/api/settings/databox',             [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'save']);
+        $app->post   ('/api/settings/databox/polling',     [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'setPolling']);
+        $app->delete ('/api/settings/databox/{environment:production|test}', [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'delete']);
+        $app->get    ('/api/submissions/recipients',       [\MyInvoice\Action\Submission\SubmissionRecipientAction::class, 'list']);
+        $app->post   ('/api/submissions/recipients',       [\MyInvoice\Action\Submission\SubmissionRecipientAction::class, 'save']);
+        $app->delete ('/api/submissions/recipients/{id:[0-9]+}', [\MyInvoice\Action\Submission\SubmissionRecipientAction::class, 'delete']);
+        $app->get    ('/api/submissions/outbox',           [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'list']);
+        $app->post   ('/api/submissions/outbox',           [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'enqueue']);
+        $app->get    ('/api/submissions/outbox/{id:[0-9]+}/attempts', [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'attempts']);
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/confirm',  [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'confirm']);
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/resolve',  [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'resolve']);
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/cancel',   [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'cancel']);
+        // Ruční cesta: uživatel odešle zprávu ze své datové schránky a přinese
+        // zpátky doručenku. Bez těchhle dvou kroků by podání odeslané ručně
+        // zůstalo navždy v „připraveno".
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/mark-sent', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'markSent']);
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/receipt',   [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'upload']);
+        $app->post   ('/api/submissions/receipts',                     [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'upload']);
+        $app->get    ('/api/submissions/receipts/unmatched',           [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'unmatched']);
+        $app->get    ('/api/submissions/receipts/{id:[0-9]+}/candidates', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'candidates']);
+        $app->post   ('/api/submissions/receipts/{id:[0-9]+}/match',   [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'match']);
+        $app->get    ('/api/submissions/inbox',            [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'list']);
+        $app->post   ('/api/submissions/inbox/poll',       [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'poll']);
+        $app->post   ('/api/submissions/inbox/{id:[0-9]+}/classify', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'reclassify']);
+        // Doručení a jeho následky. `delivery/refresh` nesahá na síť — jen znovu
+        // posoudí už stažené zprávy, protože běžící lhůta fikce (§ 17 odst. 4
+        // zák. 300/2008 Sb.) se mění pouhým během času.
+        $app->post   ('/api/submissions/inbox/delivery/refresh', [\MyInvoice\Action\Submission\SubmissionDefectNoticeAction::class, 'refreshDelivery']);
+        $app->get    ('/api/submissions/defect-notices',   [\MyInvoice\Action\Submission\SubmissionDefectNoticeAction::class, 'list']);
+        $app->post   ('/api/submissions/defect-notices',   [\MyInvoice\Action\Submission\SubmissionDefectNoticeAction::class, 'create']);
+        $app->patch  ('/api/submissions/defect-notices/{id:[0-9]+}', [\MyInvoice\Action\Submission\SubmissionDefectNoticeAction::class, 'amend']);
+        $app->post   ('/api/submissions/defect-notices/{id:[0-9]+}/response', [\MyInvoice\Action\Submission\SubmissionDefectNoticeAction::class, 'respond']);
         $app->get    ('/api/settings/signing',              [SigningProfilesAction::class, 'settings']);
         $app->put    ('/api/settings/signing',              [SigningProfilesAction::class, 'updateSettings']);
         $app->get    ('/api/settings/signing/profiles',              [SigningProfilesAction::class, 'listProfiles']);

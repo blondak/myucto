@@ -24,6 +24,14 @@ final class PayrollSubmissionTransportAttemptRepository
     private const TABLE = 'payroll_submission_transport_attempts';
 
     /**
+     * Tvrdý strop stránky historie přenosů. Ledger je append-only, takže roste
+     * s každým pokusem o odeslání a nikdy se nezmenší.
+     */
+    public const LIST_MAX_LIMIT = 200;
+
+    public const LIST_DEFAULT_LIMIT = 50;
+
+    /**
      * Projekce záměrně vynechává `idempotency_key_hash`.
      *
      * Je to BINARY(32), takže by se volajícímu vracel binární balast, který se
@@ -34,7 +42,9 @@ final class PayrollSubmissionTransportAttemptRepository
     private const COLUMNS = 'id, supplier_id, environment, submission_id, channel,
                     attempt_no, status, correlation_reference, request_sha256,
                     response_http_status, error_code, error_message,
-                    next_retry_at, sent_at, completed_at, row_version,
+                    next_retry_at, poll_count, last_polled_at, last_poll_error,
+                    sent_at, completed_at, closed_at, close_attempts,
+                    close_error, row_version,
                     created_by, created_at, updated_at';
 
     /** VARCHAR(500) v utf8mb4 — limit je ve ZNACÍCH, ne v bajtech. */
@@ -128,6 +138,12 @@ final class PayrollSubmissionTransportAttemptRepository
      * podání číslo 14". Bez tohohle pohledu by odpověď existovala jen v
      * databázi a nedala by se v aplikaci najít.
      *
+     * Období hlášení nese rovnou tenhle seznam. Je to první údaj, podle kterého
+     * uživatel řádek pozná („co jsem poslal za červenec"), a doptávat se na něj
+     * u každého podání zvlášť by znamenalo jeden HTTP požadavek navíc na řádek.
+     * JOIN je LEVÝ ZÁMĚRNĚ: ledger je přírůstkový důkaz, takže pokus, jehož
+     * podání už v evidenci není, musí zůstat vidět — bez období, ale vidět.
+     *
      * @return list<array<string,mixed>>
      */
     public function listRecent(
@@ -143,10 +159,18 @@ final class PayrollSubmissionTransportAttemptRepository
         // v LIMIT vázané parametry nepřijímá. Rozsah je proto omezený tady.
         $limit = max(1, min($limit, 200));
         $statement = $this->db->pdo()->prepare(
-            'SELECT ' . self::COLUMNS . '
-               FROM ' . self::TABLE . '
-              WHERE supplier_id = ? AND environment = ?
-              ORDER BY id DESC
+            'SELECT ' . self::attemptColumns() . ',
+                    obligation.period_start, obligation.period_end
+               FROM ' . self::TABLE . ' attempt
+               LEFT JOIN payroll_submissions submission
+                      ON submission.supplier_id = attempt.supplier_id
+                     AND submission.id = attempt.submission_id
+               LEFT JOIN payroll_obligations obligation
+                      ON obligation.supplier_id = submission.supplier_id
+                     AND obligation.environment = submission.environment
+                     AND obligation.id = submission.obligation_id
+              WHERE attempt.supplier_id = ? AND attempt.environment = ?
+              ORDER BY attempt.id DESC
               LIMIT ' . $limit,
         );
         $statement->execute([$supplierId, $environment]);
@@ -158,6 +182,65 @@ final class PayrollSubmissionTransportAttemptRepository
         }
 
         return $rows;
+    }
+
+    /**
+     * Jedna stránka historie přenosů i s celkovým počtem.
+     *
+     * `listRecent()` sám o sobě jen mlčky usekne na 200 pokusů. Ledger je
+     * přírůstkový a u firmy, která podává každý měsíc za víc pracovišť, se
+     * přes dvě stě pokusů dostane během pár let — a uživatel neměl jak poznat,
+     * že starší pokusy vůbec existují, ani jak se k nim dostat.
+     *
+     * @return array{items:list<array<string,mixed>>,total:int}
+     */
+    public function listRecentPage(
+        int $supplierId,
+        string $environment,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        if (!$this->isAvailable()) {
+            return ['items' => [], 'total' => 0];
+        }
+        self::assertEnvironment($environment);
+        // Strop se klampuje i tady, ne jen na HTTP hranici. Limit i offset se
+        // vkládají do SQL jako celá čísla — MariaDB v LIMIT vázané parametry
+        // nepřijímá — takže je rozsah omezený právě tady.
+        $limit = max(1, min($limit, self::LIST_MAX_LIMIT));
+        $offset = max(0, $offset);
+
+        $countStatement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM ' . self::TABLE . ' attempt
+              WHERE attempt.supplier_id = ? AND attempt.environment = ?',
+        );
+        $countStatement->execute([$supplierId, $environment]);
+        $total = (int) $countStatement->fetchColumn();
+
+        $statement = $this->db->pdo()->prepare(
+            'SELECT ' . self::attemptColumns() . ',
+                    obligation.period_start, obligation.period_end
+               FROM ' . self::TABLE . ' attempt
+               LEFT JOIN payroll_submissions submission
+                      ON submission.supplier_id = attempt.supplier_id
+                     AND submission.id = attempt.submission_id
+               LEFT JOIN payroll_obligations obligation
+                      ON obligation.supplier_id = submission.supplier_id
+                     AND obligation.environment = submission.environment
+                     AND obligation.id = submission.obligation_id
+              WHERE attempt.supplier_id = ? AND attempt.environment = ?
+              ORDER BY attempt.id DESC
+              LIMIT ' . $limit . ' OFFSET ' . $offset,
+        );
+        $statement->execute([$supplierId, $environment]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (is_array($row)) {
+                $rows[] = self::normalize($row);
+            }
+        }
+
+        return ['items' => $rows, 'total' => $total];
     }
 
     /**
@@ -302,6 +385,7 @@ final class PayrollSubmissionTransportAttemptRepository
         string $correlationReference,
         int $httpStatus,
         int $expectedVersion,
+        ?string $nextRetryAt = null,
     ): array {
         if (
             preg_match(
@@ -314,15 +398,231 @@ final class PayrollSubmissionTransportAttemptRepository
             );
         }
         self::assertHttpStatus($httpStatus);
+        if ($nextRetryAt !== null) {
+            $nextRetryAt = self::assertDateTime($nextRetryAt);
+        }
 
         return $this->mutate(
             'SET status = "awaiting_protocol", correlation_reference = ?,
                  response_http_status = ?, sent_at = UTC_TIMESTAMP(),
+                 next_retry_at = ?,
                  row_version = row_version + 1',
-            [$correlationReference, $httpStatus],
+            [$correlationReference, $httpStatus, $nextRetryAt],
             $attemptId,
             $expectedVersion,
         );
+    }
+
+    /**
+     * Zaznamená JEDEN dotaz na výsledek zpracování — ať dopadl jakkoli.
+     *
+     * Počitadlo roste vždy, i když odpověď nedávala smysl. Právě proto strop
+     * pokusů funguje: kdyby se počítaly jen úspěšné dotazy, mlčící protistrana
+     * by automatiku nechala běžet donekonečna.
+     *
+     * `$lastPollError` je věta pro člověka, ne kód: dotaz, který selhal, není
+     * selhání PODÁNÍ (to je u ČSSZ a nic se mu nestalo), takže sem nepatří
+     * `error_code` ani stav `failed`. Prázdná hodnota znamená, že poslední
+     * dotaz odpověď dal.
+     *
+     * @return array<string,mixed>
+     */
+    public function recordPoll(
+        int $attemptId,
+        ?string $nextRetryAt,
+        ?string $lastPollError,
+        int $expectedVersion,
+    ): array {
+        if ($nextRetryAt !== null) {
+            $nextRetryAt = self::assertDateTime($nextRetryAt);
+        }
+        $error = $lastPollError === null ? null : trim($lastPollError);
+        if ($error === '') {
+            $error = null;
+        }
+        if ($error !== null && mb_strlen($error) > self::ERROR_MESSAGE_MAX_LENGTH) {
+            $error = mb_substr($error, 0, self::ERROR_MESSAGE_MAX_LENGTH);
+        }
+
+        return $this->mutate(
+            'SET poll_count = poll_count + 1, last_polled_at = UTC_TIMESTAMP(),
+                 last_poll_error = ?, next_retry_at = ?,
+                 row_version = row_version + 1',
+            [$error, $nextRetryAt],
+            $attemptId,
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Automatika to vzdala. `expired` je terminální stav, takže se pokus už
+     * nebude dotazovat sám — a protože nezná výsledek, MUSÍ nést důvod, podle
+     * kterého se dá jednat ručně.
+     *
+     * @return array<string,mixed>
+     */
+    public function markExpired(
+        int $attemptId,
+        string $errorCode,
+        string $errorMessage,
+        int $expectedVersion,
+    ): array {
+        if (preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $errorCode) !== 1) {
+            throw new \DomainException(
+                'Kód důvodu vzdání pokusu musí odpovídat ^[a-z][a-z0-9_]{0,63}$, dostali jsme "'
+                . $errorCode . '".',
+            );
+        }
+        $message = trim($errorMessage);
+        if ($message === '') {
+            throw new \DomainException(
+                'Vzdaný pokus o odeslání musí nést i důvod, nejen kód.',
+            );
+        }
+        if (mb_strlen($message) > self::ERROR_MESSAGE_MAX_LENGTH) {
+            $message = mb_substr($message, 0, self::ERROR_MESSAGE_MAX_LENGTH);
+        }
+
+        return $this->mutate(
+            'SET status = "expired", error_code = ?, error_message = ?,
+                 next_retry_at = NULL,
+                 row_version = row_version + 1',
+            [$errorCode, $message],
+            $attemptId,
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Doklad o uzavření transakce u VREP. Podací protokol uzavření vyžaduje,
+     * takže neuzavřená transakce je porušení pravidel provozu — a bez zápisu by
+     * se nedalo poznat, které transakce ještě otevřené jsou.
+     *
+     * `closed_at` je jednorázové přiřazení (trigger 1379), takže druhé volání
+     * nad už uzavřeným pokusem není no-op, ale chyba; volající to musí ošetřit
+     * dřív — {@see \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService::close()}.
+     *
+     * @return array<string,mixed>
+     */
+    public function markClosed(int $attemptId, int $expectedVersion): array
+    {
+        $current = $this->requireById($attemptId);
+        if ($current['status'] !== 'completed') {
+            throw new \DomainException(
+                'Uzavřít transakci lze jen u pokusu s dotaženým protokolem.',
+            );
+        }
+        if ($current['closed_at'] !== null) {
+            throw new \DomainException(
+                'Transakce pokusu o odeslání #' . $attemptId . ' už je uzavřená.',
+            );
+        }
+
+        return $this->mutate(
+            'SET closed_at = UTC_TIMESTAMP(), close_attempts = close_attempts + 1,
+                 close_error = NULL, next_retry_at = NULL,
+                 row_version = row_version + 1',
+            [],
+            $attemptId,
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Neúspěšné uzavření. Nesmí vypadat jako uzavřené — `closed_at` zůstává
+     * prázdné a v ledgeru je vidět, kolikrát to nevyšlo a proč.
+     *
+     * @return array<string,mixed>
+     */
+    public function recordCloseFailure(
+        int $attemptId,
+        string $error,
+        ?string $nextRetryAt,
+        int $expectedVersion,
+    ): array {
+        $message = trim($error);
+        if ($message === '') {
+            throw new \DomainException(
+                'Neúspěšné uzavření transakce musí nést důvod.',
+            );
+        }
+        if (mb_strlen($message) > self::ERROR_MESSAGE_MAX_LENGTH) {
+            $message = mb_substr($message, 0, self::ERROR_MESSAGE_MAX_LENGTH);
+        }
+        if ($nextRetryAt !== null) {
+            $nextRetryAt = self::assertDateTime($nextRetryAt);
+        }
+
+        return $this->mutate(
+            'SET close_attempts = close_attempts + 1, close_error = ?,
+                 next_retry_at = ?,
+                 row_version = row_version + 1',
+            [$message, $nextRetryAt],
+            $attemptId,
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Pokusy, které čekají na protokol a mají se znovu zeptat.
+     *
+     * Dotaz je NAPŘÍČ FIRMAMI, protože běh na pozadí nemá přihlášeného uživatele
+     * ani tenanta — scope si dohledá volající z vráceného řádku.
+     *
+     * Prázdné `next_retry_at` znamená „zeptej se hned", ne „nikdy": pokusy
+     * založené před migrací 1379 termín nemají a vynechat je by znamenalo, že
+     * na ně automatika nikdy nesáhne.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listDuePolls(int $limit = 50): array
+    {
+        return $this->listDue(
+            'status = "awaiting_protocol" AND correlation_reference IS NOT NULL',
+            $limit,
+        );
+    }
+
+    /**
+     * Dotažené pokusy s neuzavřenou transakcí. Strop pokusů je v dotazu, aby
+     * beznadějné uzavírání nezabíralo místo ve frontě.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listDueCloses(int $limit, int $maxCloseAttempts): array
+    {
+        return $this->listDue(
+            'status = "completed" AND closed_at IS NULL
+               AND correlation_reference IS NOT NULL
+               AND close_attempts < ' . max(1, $maxCloseAttempts),
+            $limit,
+        );
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function listDue(string $condition, int $limit): array
+    {
+        if (!$this->isAvailable()) {
+            return [];
+        }
+        $limit = max(1, min($limit, 200));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . '
+               FROM ' . self::TABLE . '
+              WHERE ' . $condition . '
+                AND (next_retry_at IS NULL OR next_retry_at <= UTC_TIMESTAMP())
+              ORDER BY next_retry_at IS NOT NULL, next_retry_at, id
+              LIMIT ' . $limit,
+        );
+        $statement->execute();
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (is_array($row)) {
+                $rows[] = self::normalize($row);
+            }
+        }
+
+        return $rows;
     }
 
     /**
@@ -341,6 +641,15 @@ final class PayrollSubmissionTransportAttemptRepository
         ) {
             throw new \DomainException(
                 'Dokončit lze jen pokus, který byl odeslán a má correlation reference.',
+            );
+        }
+        // Terminální stav hlídá i trigger, ale ten vrátí SQLSTATE. Sem se ta
+        // situace dostane běžně (souběh automatiky a tlačítka), takže si
+        // zaslouží větu, ne pád MariaDB.
+        if (in_array($current['status'], ['completed', 'expired'], true)) {
+            throw new \DomainException(
+                'Pokus o odeslání #' . $attemptId . ' je už uzavřený ('
+                . (string) $current['status'] . ') a znovu otevřít se nedá.',
             );
         }
 
@@ -527,7 +836,10 @@ final class PayrollSubmissionTransportAttemptRepository
             $normalized[(string) $key] = $value;
         }
         foreach (
-            ['id', 'supplier_id', 'submission_id', 'attempt_no', 'row_version']
+            [
+                'id', 'supplier_id', 'submission_id', 'attempt_no',
+                'row_version', 'poll_count', 'close_attempts',
+            ]
             as $field
         ) {
             if (array_key_exists($field, $normalized)) {
@@ -541,8 +853,32 @@ final class PayrollSubmissionTransportAttemptRepository
                     : (int) $normalized[$field];
             }
         }
+        // Období přidává jen listRecent() a nese ho LEVÝ join, takže u pokusu
+        // bez podání chybí. Prázdno musí zůstat prázdnem, ne "".
+        foreach (['period_start', 'period_end'] as $field) {
+            if (array_key_exists($field, $normalized)) {
+                $normalized[$field] = $normalized[$field] === null
+                    ? null
+                    : (string) $normalized[$field];
+            }
+        }
 
         return $normalized;
+    }
+
+    /**
+     * Táž projekce s prefixem tabulky, pro dotaz s JOINem.
+     *
+     * `id`, `status`, `channel` i `created_at` má každá ze tří spojovaných
+     * tabulek, takže nekvalifikovaný seznam by byl dvojznačný. Odvozuje se
+     * z COLUMNS, aby se oba seznamy nemohly rozejít.
+     */
+    private static function attemptColumns(): string
+    {
+        return implode(', ', array_map(
+            static fn (string $column): string => 'attempt.' . trim($column),
+            explode(',', self::COLUMNS),
+        ));
     }
 
     private static function idempotencyHash(string $idempotencyKey): string

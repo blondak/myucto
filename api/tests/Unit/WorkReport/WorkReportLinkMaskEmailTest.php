@@ -14,8 +14,8 @@ final class WorkReportLinkMaskEmailTest extends TestCase
 {
     public function testMasksLocalPart(): void
     {
-        // 'radek' = 5 znaků → první písmeno + 4 hvězdičky
-        self::assertSame('r****@hulan.cz', WorkReportLinkService::maskEmail('radek@hulan.cz'));
+        // 'pavel' = 5 znaků → první písmeno + 4 hvězdičky
+        self::assertSame('p****@example.cz', WorkReportLinkService::maskEmail('pavel@example.cz'));
     }
 
     public function testSingleCharLocalPart(): void

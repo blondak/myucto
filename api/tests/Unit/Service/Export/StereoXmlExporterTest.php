@@ -231,9 +231,9 @@ final class StereoXmlExporterTest extends TestCase
             ],
             'supplier_snapshot' => [
                 'company_name' => 'Dodavatel s.r.o.',
-                'street' => 'Kardinala Berana 1104/36',
-                'city' => 'Plzen',
-                'zip' => '30100',
+                'street' => 'Zkusebni 123/4',
+                'city' => 'Vzorov',
+                'zip' => '10000',
                 'country_iso2' => 'CZ',
                 'ic' => '01698401',
                 'dic' => 'CZ01698401',

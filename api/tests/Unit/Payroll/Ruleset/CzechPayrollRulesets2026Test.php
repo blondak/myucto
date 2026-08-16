@@ -7,12 +7,42 @@ namespace MyInvoice\Tests\Unit\Payroll\Ruleset;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetCapability;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetLifecycle;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetOrigin;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
+use MyInvoice\Service\Payroll\Ruleset\VendorRulesetManifest;
 use PHPUnit\Framework\TestCase;
 
 final class CzechPayrollRulesets2026Test extends TestCase
 {
-    private const EXPECTED_MANIFEST_SHA256 = 'e4252c4a671c57849199b4699df103136d29257c4124b7ccbf37e2d348d2cd96';
+    /**
+     * Pin se posunul s opravou hranice srážkové daně z DPP: `dpp.withholding.maximum`
+     * 11 999 Kč → `dpp.withholding.threshold` 12 000 Kč a `other.withholding.maximum`
+     * 4 499 Kč → `other.withholding.threshold` 4 500 Kč. Hodnota je nově sama ROZHODNÁ
+     * ČÁSTKA (§ 7a z. č. 187/2006 Sb.) a poměřuje se ostře, protože § 6 odst. 4 písm. a)
+     * ZDP zní od 1. 1. 2025 „nedosáhne" — viz {@see \MyInvoice\Tests\Unit\Payroll\IncomeTax\DppWithholdingBoundaryParityTest}.
+     *
+     * Podruhé se posunul s počeštěním textů určených uživateli: důvody ručního
+     * posouzení a popis technické kontroly jsou součástí kanonického snapshotu,
+     * takže překlad do češtiny je z pohledu otisku obsahová změna. Hodnoty
+     * parametrů se přitom nezměnily — hlídá to matice níže.
+     *
+     * Potřetí se posunul s doplněním limitů osvobození zaměstnaneckých benefitů
+     * (§ 6 odst. 9 písm. b), d) a p) ZDP). Doména daně z příjmů je nesla jen
+     * v hlavách účetních, takže výchozí mzdové složky měly `annual_limit_minor`
+     * NULL a roční strop se nehlídal vůbec — viz
+     * {@see \MyInvoice\Service\Payroll\Component\PayrollComponentDefaults}.
+     *
+     * Popáté doplněním limitů přesčasové práce podle § 93 zákoníku práce do domény
+     * hranic zaměstnání, aby byly administrovatelné a ne zadrátované ve službě.
+     *
+     * Počtvrté překlopením dodané sady z `reviewed` na `active`. Lifecycle je
+     * součástí PLNÉHO snapshotu, ale ne otisku OBSAHU — hodnoty ani
+     * `VendorRulesetManifest::CONTENT_HASHES` se tím tedy nezměnily.
+     */
+    private const EXPECTED_MANIFEST_SHA256 = '4bdc84dcbbca7426d09b31023f11ac181b29390235d788232c9c0da979de1ddb';
 
     public function testCanonicalManifestIsByteStable(): void
     {
@@ -61,13 +91,84 @@ final class CzechPayrollRulesets2026Test extends TestCase
 
         self::assertSame('cz-payroll-2026.income-tax.v1', $snapshot['id']);
         self::assertSame('2026.1.0', $snapshot['version']);
-        self::assertSame('reviewed', $snapshot['lifecycle']);
+        self::assertSame('active', $snapshot['lifecycle']);
         self::assertSame('2026-01-01', $snapshot['effective_from']);
         self::assertSame('2026-12-31', $snapshot['effective_to']);
         self::assertNull($snapshot['approval']);
         self::assertNotEmpty($snapshot['technical_review']);
         self::assertNotEmpty($snapshot['sources']);
         self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $ruleset->canonicalHash);
+    }
+
+    /**
+     * Podpis dodavatele pod dodanou sadou. Musí sedět PŘESNĚ — je to jediné,
+     * co odlišuje sadu, za kterou ručíme my, od obsahu, který si upravil zákazník.
+     */
+    public function testVendorManifestPinsEveryDeliveredVersion(): void
+    {
+        $versions = CzechPayrollRulesets2026::provider()->versions();
+        usort(
+            $versions,
+            static fn (PayrollRulesetVersion $left, PayrollRulesetVersion $right): int
+                => $left->id <=> $right->id,
+        );
+
+        $actual = [];
+        foreach ($versions as $version) {
+            $actual[] = $version->contentHash;
+        }
+
+        self::assertSame(
+            VendorRulesetManifest::CONTENT_HASHES,
+            $actual,
+            "Dodaná sada se změnila. Aktualizujte VendorRulesetManifest::CONTENT_HASHES na:\n"
+            . implode("\n", array_map(
+                static fn (PayrollRulesetVersion $version): string
+                    => sprintf("        // %s\n        '%s',", $version->id, $version->contentHash),
+                $versions,
+            )),
+        );
+    }
+
+    /**
+     * Zákazník si po instalaci mzdy spočítá, aniž by cokoli odklikával — a domény
+     * vedené jako RUČNÍ POSOUZENÍ zůstávají mimo výpočet i po překlopení lifecyclu.
+     * Tuhle vlastnost drží `capability`, ne stav; překlopení ji nesmí přebít.
+     */
+    public function testDeliveredSetIsActiveAndManualReviewDomainsStayOutOfCalculation(): void
+    {
+        $provider = CzechPayrollRulesets2026::provider();
+        $manualReviewDomains = [
+            PayrollRulesetDomain::CompensationAverages,
+            PayrollRulesetDomain::Deadlines,
+            PayrollRulesetDomain::Codebooks,
+            PayrollRulesetDomain::Submissions,
+        ];
+
+        foreach ($provider->versions() as $version) {
+            self::assertSame(PayrollRulesetLifecycle::Active, $version->lifecycle, $version->id);
+            self::assertSame(PayrollRulesetOrigin::Vendor, $version->origin, $version->id);
+            self::assertNull($version->approval, $version->id);
+            self::assertNotNull($version->technicalReview, $version->id);
+        }
+
+        foreach (PayrollRulesetDomain::cases() as $domain) {
+            $date = $domain === PayrollRulesetDomain::TravelAllowances ? '2026-08-03' : '2026-08-03';
+            if (in_array($domain, $manualReviewDomains, true)) {
+                try {
+                    $provider->forCalculation($domain, $date);
+                    self::fail("Doména {$domain->value} je ruční posouzení a nesmí do výpočtu.");
+                } catch (PayrollRulesetException $exception) {
+                    self::assertStringContainsString('requires manual review', $exception->getMessage());
+                }
+                continue;
+            }
+            self::assertSame(
+                PayrollRulesetCapability::Supported,
+                $provider->forCalculation($domain, $date)->capability,
+                $domain->value,
+            );
+        }
     }
 
     public function testCanonicalSupportedParameterMatrixAndManualReviewBoundary(): void
@@ -84,6 +185,13 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'advance.rounding.base_above_100_czk' => ['text', 'ceil-to-100-czk'],
                 'advance.rounding.base_up_to_100_czk' => ['text', 'ceil-to-1-czk'],
                 'advance.rounding.result' => ['text', 'ceil-to-1-czk'],
+                // § 6 odst. 9 písm. d) ZDP, dva samostatné roční úhrnné limity
+                // z průměrné mzdy 48 967 Kč (§ 21g ZDP): bod 1 zdravotnická plnění
+                // celá průměrná mzda, bod 2 volnočasová plnění její polovina.
+                'benefit_exemption.non_cash_health.yearly' => ['money_minor', 4_896_700],
+                'benefit_exemption.non_cash_leisure.yearly' => ['money_minor', 2_448_350],
+                // § 6 odst. 9 písm. p) ZDP — pevná částka ze zákona, ne odvozenina.
+                'benefit_exemption.old_age_savings.yearly' => ['money_minor', 5_000_000],
                 'bonus.minimum_amount.monthly' => ['money_minor', 5_000],
                 'bonus.minimum_income.monthly' => ['money_minor', 1_120_000],
                 'bonus.minimum_income.yearly' => ['money_minor', 13_440_000],
@@ -94,8 +202,8 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'credit.disability.extended.monthly' => ['money_minor', 42_000],
                 'credit.taxpayer.monthly' => ['money_minor', 257_000],
                 'credit.ztp_p.monthly' => ['money_minor', 134_500],
-                'dpp.withholding.maximum' => ['money_minor', 1_199_900],
-                'other.withholding.maximum' => ['money_minor', 449_900],
+                'dpp.withholding.threshold' => ['money_minor', 1_200_000],
+                'other.withholding.threshold' => ['money_minor', 450_000],
                 'withholding.rate' => ['decimal_rate', '0.15'],
             ],
             'social_insurance' => [
@@ -121,6 +229,11 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'average_wage.monthly' => ['money_minor', 4_896_700],
                 'minimum_wage.hourly_40h_week' => ['money_minor', 13_440],
                 'minimum_wage.monthly_40h_week' => ['money_minor', 2_240_000],
+                'overtime.annual.early_warning_basis_points' => ['integer', 8_000],
+                'overtime.averaging.max_weeks' => ['integer', 26],
+                'overtime.averaging.weekly_average_max_minutes' => ['integer', 480],
+                'overtime.ordered.weekly_max_minutes' => ['integer', 480],
+                'overtime.ordered.yearly_max_minutes' => ['integer', 9_000],
                 'participation.dpc.minimum' => ['money_minor', 450_000],
                 'participation.dpp.minimum' => ['money_minor', 1_200_000],
                 'participation.small_scale.minimum' => ['money_minor', 450_000],
@@ -128,14 +241,25 @@ final class CzechPayrollRulesets2026Test extends TestCase
         ], $supported, 'A supported 2026 payroll parameter changed or crossed the capability boundary.');
 
         self::assertSame([
-            'income_tax' => [],
+            'income_tax' => [
+                // Limit § 6 odst. 9 písm. b) ZDP je za směnu, ne za rok. Musí tu
+                // být VIDĚT jako vědomé ruční posouzení — kdyby se tichým doplněním
+                // částky stal „supported", roční strop mzdové složky by tvrdil
+                // limit, který zákon takhle nestanoví.
+                'benefit_exemption.meal.per_shift' =>
+                    'Příspěvek na stravování je osvobozený do 70 % horní hranice stravného za '
+                    . 'pracovní cestu 5 až 12 hodin, a to za každou směnu zvlášť. Roční limit '
+                    . 'mzdové složky takový strop nevyjádří a aplikace ho proto netvrdí.',
+            ],
             'social_insurance' => [
                 'employee.discount.agriculture_dpp' =>
-                    'Eligibility depends on the statutory agriculture conditions and must be reviewed.',
+                    'Nárok na slevu závisí na zákonných podmínkách sezónní zemědělské činnosti '
+                    . 'a musí ho posoudit člověk.',
                 'employer.rate.rescue_and_company_fire_service' =>
-                    'The 0.298 rate is official, but occupational classification requires manual review.',
+                    'Sazba 29,8 % je oficiální, ale zařazení zaměstnance k hasičskému záchrannému '
+                    . 'sboru nebo mezi podnikové hasiče musí posoudit člověk.',
                 'employer.rate.risk_employment' =>
-                    'The 0.278 rate is official, but risk-employment classification requires manual review.',
+                    'Sazba 27,8 % je oficiální, ale zařazení práce mezi rizikové musí posoudit člověk.',
             ],
             'health_insurance' => [],
             'employment_thresholds' => [],

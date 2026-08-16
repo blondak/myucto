@@ -383,6 +383,109 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
     }
 
     /** Naseeduje osoby do aktuální firmy; ID se posunou o pořadí firmy. */
+    /**
+     * Dimenze vztahu (středisko / zakázka / činnost) musí do snapshotu VSTOUPIT.
+     *
+     * `payroll_dimensions.default_account_code` určuje nákladový účet hrubé mzdy
+     * a zaúčtování jede nad zmrazeným snapshotem. Kdyby se dimenze dohledávaly až
+     * při účtování, přeúčtování starší revize by použilo dnešní přiřazení střediska
+     * a vyrobilo jiné zaúčtování než původní — přesně to, čemu snapshot brání.
+     *
+     * Vztah bez přiřazení musí mít prázdný seznam, ne chybějící klíč: jinak by se
+     * kanonický JSON lišil podle toho, jestli firma dimenze vůbec používá.
+     */
+    public function testEmploymentDimensionsAreFrozenIntoTheSnapshot(): void
+    {
+        $this->seed(2);
+        $employmentIds = $this->ids(
+            'SELECT id FROM payroll_employments WHERE supplier_id = ? ORDER BY id',
+            [$this->supplierId],
+        );
+        self::assertGreaterThanOrEqual(2, count($employmentIds));
+
+        $dimensionId = $this->seedDimension('cost_center', 'VYROBA', '521.100');
+        $this->assignDimension($employmentIds[0], $dimensionId);
+
+        $byEmployment = [];
+        foreach ($this->build()->data['people'] as $person) {
+            foreach ($person['employments'] as $employment) {
+                $byEmployment[(int) $employment['employment']['id']] = $employment['dimensions'];
+            }
+        }
+
+        self::assertSame(
+            [[
+                'type' => 'cost_center',
+                'code' => 'VYROBA',
+                'name' => 'VYROBA',
+                'default_account_code' => '521.100',
+            ]],
+            $byEmployment[$employmentIds[0]],
+        );
+        self::assertSame(
+            [],
+            $byEmployment[$employmentIds[1]],
+            'Vztah bez dimenze má prázdný seznam, ne chybějící klíč.',
+        );
+    }
+
+    /** Dimenze účinná až po období do snapshotu daného měsíce nepatří. */
+    public function testDimensionEffectiveAfterThePeriodIsNotFrozenIn(): void
+    {
+        $this->seed(1);
+        $employmentId = $this->ids(
+            'SELECT id FROM payroll_employments WHERE supplier_id = ? ORDER BY id',
+            [$this->supplierId],
+        )[0];
+        $dimensionId = $this->seedDimension('cost_center', 'BUDOUCI', '521.900');
+        $this->assignDimension($employmentId, $dimensionId, '2099-01-01');
+
+        $dimensions = $this->build()->data['people'][0]['employments'][0]['dimensions'];
+
+        self::assertSame([], $dimensions);
+    }
+
+    private function seedDimension(string $type, string $code, ?string $account): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_dimensions
+                 (supplier_id, dimension_type, code, name, valid_from, valid_to,
+                  is_active, default_account_code, created_by, updated_by)
+             VALUES (?, ?, ?, ?, "2000-01-01", NULL, 1, ?, ?, ?)',
+        );
+        $stmt->execute([
+            $this->supplierId,
+            $type,
+            $code,
+            $code,
+            $account,
+            $this->actorId,
+            $this->actorId,
+        ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function assignDimension(
+        int $employmentId,
+        int $dimensionId,
+        string $validFrom = '2000-01-01',
+    ): void {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_dimensions
+                 (supplier_id, employment_id, dimension_id, valid_from, valid_to,
+                  created_by, updated_by)
+             VALUES (?, ?, ?, ?, NULL, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $employmentId,
+            $dimensionId,
+            $validFrom,
+            $this->actorId,
+            $this->actorId,
+        ]);
+    }
+
     private function seed(int $headcount): void
     {
         (new PayrollRunScaleFixture(

@@ -26,16 +26,16 @@ final class AnthropicClientUnitTest extends TestCase
     public function testTenantBlock_full_info_includes_name_ic_dic(): void
     {
         $client = $this->makeClient([
-            'company_name' => 'MyWebdesign.cz s.r.o.',
-            'ic'           => '21370362',
-            'dic'          => 'CZ21370362',
+            'company_name' => 'Vzorová firma s.r.o.',
+            'ic'           => '12345679',
+            'dic'          => 'CZ12345679',
         ]);
 
         $block = $this->invokeBuild($client, 1);
         $this->assertNotEmpty($block);
-        $this->assertStringContainsString('MyWebdesign.cz s.r.o.', $block);
-        $this->assertStringContainsString('21370362', $block);
-        $this->assertStringContainsString('CZ21370362', $block);
+        $this->assertStringContainsString('Vzorová firma s.r.o.', $block);
+        $this->assertStringContainsString('12345679', $block);
+        $this->assertStringContainsString('CZ12345679', $block);
         // Klíčové sdělení: tenant je VŽDY odběratel
         $this->assertStringContainsString('VŽDY odběratel', $block);
         $this->assertStringContainsString('NIKDY', $block);

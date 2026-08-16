@@ -92,6 +92,36 @@ export function btnOutline(variant: ActionVariant = 'neutral'): string {
   return `${BTN_BASE} ${OUTLINE[variant]}`
 }
 
+/*
+ * ─── Zašedlé tlačítko musí říct PROČ ────────────────────────────────────────
+ *
+ * Konvence platná pro celou aplikaci: kde je `:disabled` navázané na podmínku,
+ * patří k němu i věta, která tu podmínku vysvětlí. Zašedlé tlačítko bez důvodu
+ * je slepá ulička — uživatel vidí, že akce existuje, ale nemá jak zjistit, co
+ * pro ni musí udělat, a zkouší klikat.
+ *
+ * V `ActionBar` to obstarává `ActionItem.disabledReason`. Pro samostatná
+ * tlačítka mimo lištu je tady stejný pár:
+ *
+ *   <button :class="btnFilled('primary')" :disabled="!canPost"
+ *     :title="disabledTitle(!canPost, reason)">…</button>
+ *   <p v-if="reason" :class="BTN_DISABLED_NOTE">{{ reason }}</p>
+ *
+ * Obojí, ne jen tooltip: `title` se na dotykovém displeji nedá vyvolat vůbec a
+ * u `disabled` prvku ho přeskočí i čtečka obrazovky. Text formulovat jako větu,
+ * podle které se dá jednat („Nejdřív zaúčtujte revizi za toto období."),
+ * ne jako „Akce není dostupná".
+ */
+export function disabledTitle(
+  disabled: boolean | undefined,
+  reason: string | null | undefined,
+): string | undefined {
+  return disabled && reason ? reason : undefined
+}
+
+/** Třídy viditelné věty „proč to nejde", která patří hned pod zašedlé tlačítko. */
+export const BTN_DISABLED_NOTE = 'max-w-prose text-xs leading-snug text-warning-700'
+
 // Kompaktní varianta (h-7, text-xs) pro husté řádky tabulek — akce v řádku výpisu
 // transakcí apod., kde plná výška h-9 zabere moc místa.
 export const BTN_SM_BASE =

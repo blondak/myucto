@@ -26,7 +26,7 @@ use PHPUnit\Framework\TestCase;
 final class BankPostingServiceTest extends TestCase
 {
     private const YEAR = 2099;
-    private const ACCOUNT = '112866706'; // currencies řádek supplier 1 (tenant resolution)
+    private const ACCOUNT = '1700000006'; // currencies řádek supplier 1 (tenant resolution)
     private const BANK_CODE = '2250';
 
     private Connection $db;

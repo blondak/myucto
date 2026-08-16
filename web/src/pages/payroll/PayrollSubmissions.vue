@@ -11,13 +11,16 @@ import {
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import PayrollEldpPanel from './PayrollEldpPanel.vue'
 import PayrollSubmissionInboxPanel from './PayrollSubmissionInboxPanel.vue'
 import PayrollSubmissionOverviewPanel from './PayrollSubmissionOverviewPanel.vue'
 import PayrollSigningCertificatePanel from './PayrollSigningCertificatePanel.vue'
 import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
 
-type SubmissionTab = 'transport' | 'regzel' | 'jmhz' | 'health' | 'inbox' | 'certificate'
+type SubmissionTab =
+  'transport' | 'regzel' | 'jmhz' | 'eldp' | 'health' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -27,16 +30,29 @@ const auth = useAuthStore()
 const activeTab = ref<SubmissionTab>('transport')
 // Certifikát je poslední záložka, ale vlastní: podepisuje se jím REGZEL i JMHZ,
 // takže nepatří pod žádné jednotlivé hlášení.
+// ELDP stojí hned za JMHZ: od roku 2026 ho ČSSZ sestavuje z měsíčního
+// hlášení sama, takže samostatný evidenční list je navazující a přechodná
+// agenda, ne konkurenční hlášení.
 const tabs: SubmissionTab[] = [
-  'transport', 'regzel', 'jmhz', 'health', 'inbox', 'certificate',
+  'transport', 'regzel', 'jmhz', 'eldp', 'health', 'inbox', 'certificate',
 ]
-const inboxOpenCount = ref(0)
+/*
+ * `null` = počet neznáme (načtení odznaku selhalo), ne „nula nevyřízených".
+ * Číslo 0 tu dřív zastupovalo obojí, takže po výpadku odznak tiše zmizel
+ * a záložka Inbox vypadala vyřízeně. Typ to teď nedovolí splést.
+ */
+const inboxOpenCount = ref<number | null>(null)
 const loading = ref(true)
 const preparing = ref(false)
 const downloadingId = ref<number | null>(null)
 const settings = ref<PayrollEmployerSettings | null>(null)
 const profile = ref<PayrollRegzelProfile | null>(null)
 const snapshots = ref<PayrollRegzelSnapshot[]>([])
+const snapshotsPageSize = 25
+const snapshotsTotal = ref(0)
+const snapshotsOffset = ref(0)
+const snapshotsPage = computed(() =>
+  Math.floor(snapshotsOffset.value / snapshotsPageSize) + 1)
 const environment = ref<PayrollRegzelEnvironment>('production')
 const officeId = ref<number | null>(null)
 const evidenceConfirmed = ref(false)
@@ -86,11 +102,22 @@ function apiMessage(exception: unknown, fallback: string): string {
 async function loadSnapshots() {
   error.value = ''
   try {
-    snapshots.value = await payrollApi.regzelSnapshots(environment.value)
+    const page = await payrollApi.regzelSnapshots(environment.value, {
+      limit: snapshotsPageSize,
+      offset: snapshotsOffset.value,
+    })
+    snapshots.value = page.items
+    snapshotsTotal.value = page.total
   } catch (exception: unknown) {
     snapshots.value = []
+    snapshotsTotal.value = 0
     error.value = apiMessage(exception, t('payroll.regzel.history.load_failed'))
   }
+}
+
+function goToSnapshotsPage(nextPage: number) {
+  snapshotsOffset.value = Math.max(0, (nextPage - 1) * snapshotsPageSize)
+  void loadSnapshots()
 }
 
 async function load() {
@@ -176,6 +203,8 @@ function readableBytes(bytes: number): string {
 watch(environment, async () => {
   evidenceConfirmed.value = false
   success.value = ''
+  // Jiné prostředí = jiný seznam, takže stránka musí zpět na začátek.
+  snapshotsOffset.value = 0
   if (!loading.value) {
     await loadSnapshots()
   }
@@ -187,6 +216,8 @@ async function loadInboxBadge() {
     inboxOpenCount.value = response.summary.total
   } catch {
     // Odznak je jen orientační — chybu zobrazí až samotná záložka Inbox.
+    // Nesmí ale tvrdit „nic nevyřízeného": bez počtu se prostě nevykreslí.
+    inboxOpenCount.value = null
   }
 }
 
@@ -232,7 +263,7 @@ onMounted(loadInboxBadge)
       >
         {{ t(`payroll.submissions.tabs.${tab}`) }}
         <span
-          v-if="tab === 'inbox' && inboxOpenCount > 0"
+          v-if="tab === 'inbox' && inboxOpenCount !== null && inboxOpenCount > 0"
           class="ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-danger-600 px-1.5 py-0.5 text-xs font-semibold text-white"
           data-test="submissions-inbox-badge"
         >
@@ -247,6 +278,12 @@ onMounted(loadInboxBadge)
       odpověď na „co jsem odeslal" objeví později, než by musela.
     -->
     <PayrollTransportHistoryPanel v-if="activeTab === 'transport'" />
+
+    <!--
+      Evidenční list si data obstarává sám a nepotřebuje načtení REGZEL
+      profilu, proto stojí mimo společný skeleton.
+    -->
+    <PayrollEldpPanel v-else-if="activeTab === 'eldp'" />
 
     <div v-else-if="loading" class="space-y-4">
       <div class="h-28 animate-pulse rounded-xl bg-neutral-100" />
@@ -493,6 +530,14 @@ onMounted(loadInboxBadge)
             </button>
           </article>
         </div>
+
+        <PaginationBar
+          embedded
+          :page="snapshotsPage"
+          :per-page="snapshotsPageSize"
+          :total="snapshotsTotal"
+          @update:page="goToSnapshotsPage"
+        />
       </section>
     </template>
 

@@ -1,8 +1,8 @@
 import type {
   PayrollInputImportIssue,
   PayrollInputImportPreview,
-  PayrollPerson,
 } from '@/api/payroll'
+import type { PayrollAbsenceEmployment } from '@/api/payrollAbsences'
 
 export interface PayrollImportFingerprintSource {
   period: string
@@ -54,16 +54,39 @@ export function payrollImportIssues(
   ].sort((left, right) => left.row_number - right.row_number)
 }
 
-export function payrollEmploymentOptions(people: PayrollPerson[]): PayrollEmploymentOption[] {
-  return people
-    .flatMap(person => person.employments.map(employment => ({
-      employee_id: person.id,
+/**
+ * Vztahy, na které lze v daném měsíci zadat mzdový vstup.
+ *
+ * Archivovaný vztah a vztah, do kterého nikdo nenastoupil, se nenabízejí —
+ * server je odmítne stejně (PayrollInputRepository::assertValidReferences).
+ */
+export const PAYROLL_INPUT_EXCLUDED_STATUSES = ['archived', 'no_show']
+
+/**
+ * Nabídka vztahů z JEDNOHO hromadného výpisu (`GET /payroll/time/context`).
+ *
+ * Dřív se stavěla ze seznamu osob a detailu KAŽDÉ z nich — jeden HTTP požadavek na
+ * zaměstnance, a každý vracel celou historii vztahů (podmínky, checklist, timeline),
+ * z níž stránka četla čtyři pole. Hromadný výpis to zvládne jedním dotazem a
+ * archivované ani nenastoupivší vztahy vůbec nevrací; filtr statusů se tady přesto
+ * opakuje, protože ten výpis primárně slouží absencím a jeho podmínka se může změnit
+ * bez ohledu na to, co smí do mzdového vstupu.
+ */
+export function payrollEmploymentOptionsFromContext(
+  employments: PayrollAbsenceEmployment[],
+): PayrollEmploymentOption[] {
+  return employments
+    .map(employment => ({
+      employee_id: employment.employee_id,
       employment_id: employment.id,
-      full_name: person.full_name,
+      full_name: employment.full_name,
       code: employment.code,
       relation_type: employment.relation_type,
       status: employment.status,
-    })))
+    }))
+    .filter(option => !PAYROLL_INPUT_EXCLUDED_STATUSES.includes(option.status))
+    // Řazení drží klient: české řazení podle jména se v collation serveru
+    // a v `localeCompare` liší.
     .sort((left, right) =>
       left.full_name.localeCompare(right.full_name, 'cs')
       || left.code.localeCompare(right.code, 'cs'))
@@ -97,15 +120,6 @@ export function payrollMinorToInput(value: number | null): string {
   const sign = value < 0 ? '-' : ''
   const absolute = Math.abs(value)
   return `${sign}${Math.floor(absolute / 100)},${String(absolute % 100).padStart(2, '0')}`
-}
-
-export function formatPayrollMinor(value: number | null, locale = 'cs-CZ'): string {
-  if (value === null) return '—'
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency: 'CZK',
-    minimumFractionDigits: 2,
-  }).format(value / 100)
 }
 
 export function monthStart(period: string): string {

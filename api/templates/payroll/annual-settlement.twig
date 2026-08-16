@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="cs">
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {
+            color: #241c22;
+            font-family: montserrat, dejavusans, sans-serif;
+            font-size: 9pt;
+            line-height: 1.35;
+        }
+        h1 {
+            color: #341c2b;
+            font-size: 15pt;
+            line-height: 1.15;
+            margin: 0 0 2mm;
+        }
+        h2 {
+            color: #341c2b;
+            font-size: 10.5pt;
+            margin: 0 0 2mm;
+        }
+        p { margin: 0 0 1.5mm; }
+        .meta {
+            color: #6b5c66;
+            font-size: 8pt;
+            margin-bottom: 4mm;
+        }
+        .box {
+            border: 0.5pt solid #dec8d4;
+            border-radius: 2mm;
+            margin-bottom: 4mm;
+            padding: 3mm;
+        }
+        .identity { border-collapse: collapse; width: 100%; }
+        .identity td {
+            padding: 0.8mm 1.5mm 0.8mm 0;
+            vertical-align: top;
+            width: 50%;
+        }
+        .label {
+            color: #776873;
+            display: block;
+            font-size: 7.5pt;
+            text-transform: uppercase;
+        }
+        .rows { border-collapse: collapse; width: 100%; }
+        .rows th {
+            background: #f4edf1;
+            border-bottom: 0.5pt solid #dec8d4;
+            color: #5c334a;
+            font-size: 7.5pt;
+            padding: 2mm;
+            text-align: left;
+            text-transform: uppercase;
+        }
+        .rows td {
+            border-bottom: 0.3pt solid #eadce4;
+            padding: 1.7mm 2mm;
+            vertical-align: top;
+        }
+        .rows .amount { text-align: right; white-space: nowrap; width: 32mm; }
+        .rows .months { text-align: center; white-space: nowrap; width: 20mm; }
+        .rows tr.total td {
+            background: #faf5f8;
+            border-bottom: 0.5pt solid #dec8d4;
+            font-weight: 700;
+        }
+        .result {
+            background: #f4edf1;
+            border: 0.5pt solid #dec8d4;
+            border-radius: 2mm;
+            margin-bottom: 4mm;
+            padding: 3mm;
+        }
+        .result .amount { font-size: 13pt; font-weight: 700; }
+        .note { color: #6b5c66; font-size: 7.5pt; margin-top: 1.5mm; }
+    </style>
+</head>
+<body>
+<h1>Výpočet daně a roční zúčtování záloh a daňového zvýhodnění</h1>
+<p class="meta">
+    Zdaňovací období {{ tax_year }} · § 38ch zákona č. 586/1992 Sb., o daních z příjmů ·
+    provedeno {{ settled_on }} · uzavřených měsíců: {{ completed_months }}
+</p>
+
+<div class="box">
+    <table class="identity">
+        <tr>
+            <td>
+                <span class="label">Plátce daně</span>
+                {{ employer.name }}<br>
+                IČO {{ employer.identification_number }}<br>
+                {{ employer.address }}
+            </td>
+            <td>
+                <span class="label">Poplatník</span>
+                {{ employee.name }}<br>
+                {{ employee.identifier_label }} {{ employee.identifier_value }}
+            </td>
+        </tr>
+    </table>
+</div>
+
+<h2>Výpočet daně</h2>
+<table class="rows">
+    <tr>
+        <th>Položka</th>
+        <th class="amount">Kč</th>
+    </tr>
+    <tr>
+        <td>Úhrn základů pro výpočet záloh (§ 38h odst. 1)</td>
+        <td class="amount">{{ advance_base_minor_units|minor_money }}</td>
+    </tr>
+    <tr>
+        <td>Základ daně zaokrouhlený na celá sta Kč dolů (§ 16 odst. 2)</td>
+        <td class="amount">{{ rounded_tax_base_minor_units|minor_money }}</td>
+    </tr>
+    <tr class="total">
+        <td>Daň podle § 16 odst. 1</td>
+        <td class="amount">{{ tax_before_credits_minor_units|minor_money }}</td>
+    </tr>
+</table>
+
+<h2>Slevy na dani podle § 35ba</h2>
+<table class="rows">
+    <tr>
+        <th>Sleva</th>
+        <th class="amount">Kč</th>
+    </tr>
+    {% for row in credit_rows %}
+        <tr>
+            <td>{{ row.label }}</td>
+            <td class="amount">{{ row.amount_minor_units|minor_money }}</td>
+        </tr>
+    {% else %}
+        <tr>
+            <td colspan="2">Poplatník neuplatnil žádnou slevu podle § 35ba.</td>
+        </tr>
+    {% endfor %}
+    <tr class="total">
+        <td>Uplatněno (nejvýše do výše daně)</td>
+        <td class="amount">{{ applied_credits_minor_units|minor_money }}</td>
+    </tr>
+</table>
+
+<h2>Daňové zvýhodnění podle § 35c</h2>
+<table class="rows">
+    <tr>
+        <th>Dítě</th>
+        <th class="months">Měsíců</th>
+        <th class="amount">Kč</th>
+    </tr>
+    {% for row in child_rows %}
+        <tr>
+            <td>{{ row.label }}</td>
+            <td class="months">{{ row.months }}</td>
+            <td class="amount">{{ row.amount_minor_units|minor_money }}</td>
+        </tr>
+    {% else %}
+        <tr>
+            <td colspan="3">Poplatník neuplatnil daňové zvýhodnění na dítě.</td>
+        </tr>
+    {% endfor %}
+    <tr>
+        <td colspan="2">Uplatněno jako sleva na dani (§ 35c odst. 2)</td>
+        <td class="amount">{{ child_credit_minor_units|minor_money }}</td>
+    </tr>
+    <tr class="total">
+        <td colspan="2">Daňový bonus za zdaňovací období (§ 35c odst. 3)</td>
+        <td class="amount">{{ annual_tax_bonus_minor_units|minor_money }}</td>
+    </tr>
+</table>
+
+<h2>Porovnání se zálohami (§ 35d odst. 7)</h2>
+<table class="rows">
+    <tr>
+        <th>Položka</th>
+        <th class="amount">Kč</th>
+    </tr>
+    <tr>
+        <td>Daň po slevách a po daňovém zvýhodnění</td>
+        <td class="amount">{{ tax_after_all_credits_minor_units|minor_money }}</td>
+    </tr>
+    <tr>
+        <td>Úhrn zálohově sražené daně</td>
+        <td class="amount">{{ advance_tax_minor_units|minor_money }}</td>
+    </tr>
+    <tr>
+        <td>Rozdíl na dani</td>
+        <td class="amount">{{ tax_difference_minor_units|minor_money }}</td>
+    </tr>
+    <tr>
+        <td>Úhrn vyplacených měsíčních daňových bonusů</td>
+        <td class="amount">{{ monthly_tax_bonus_minor_units|minor_money }}</td>
+    </tr>
+    <tr>
+        <td>Rozdíl na daňovém bonusu</td>
+        <td class="amount">{{ bonus_difference_minor_units|minor_money }}</td>
+    </tr>
+    <tr class="total">
+        <td>Doplatek ze zúčtování (§ 35d odst. 8)</td>
+        <td class="amount">{{ settlement_difference_minor_units|minor_money }}</td>
+    </tr>
+</table>
+
+<div class="result">
+    {% if outcome == 'overpayment' %}
+        <span class="label">Vrací se poplatníkovi</span>
+        <span class="amount">{{ payable_minor_units|minor_money }} Kč</span>
+        <p class="note">
+            Vyplatí se nejpozději při zúčtování mzdy za březen po uplynutí
+            zdaňovacího období (§ 38ch odst. 5, § 35d odst. 8).
+        </p>
+    {% elseif outcome == 'overpayment_below_threshold' %}
+        <span class="label">Přeplatek se nevyplácí</span>
+        <span class="amount">{{ settlement_difference_minor_units|minor_money }} Kč</span>
+        <p class="note">
+            Vrací se jen přeplatek vyšší než 50 Kč (§ 38ch odst. 5).
+            Roční zúčtování bylo provedeno.
+        </p>
+    {% elseif outcome == 'underpayment_not_withheld' %}
+        <span class="label">Nedoplatek se nesráží</span>
+        <span class="amount">{{ settlement_difference_minor_units|minor_money }} Kč</span>
+        <p class="note">
+            Případný nedoplatek z ročního zúčtování se poplatníkovi nesráží
+            (§ 38ch odst. 5 věta poslední, § 35d odst. 8 věta druhá).
+        </p>
+    {% else %}
+        <span class="label">Bez rozdílu</span>
+        <span class="amount">0,00 Kč</span>
+        <p class="note">
+            Sražené zálohy odpovídají dani po slevách. Roční zúčtování bylo provedeno.
+        </p>
+    {% endif %}
+</div>
+
+<p class="meta">
+    Otisk zdrojového snapshotu: {{ source_snapshot_sha256 }} ·
+    verze šablony {{ renderer_version }}
+</p>
+</body>
+</html>

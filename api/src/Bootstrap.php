@@ -141,6 +141,9 @@ final class Bootstrap
                 fn (ContainerInterface $c) =>
                     new \MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository(
                         $c->get(Connection::class),
+                        $c->get(
+                            \MyInvoice\Repository\Payroll\PayrollEmployerPolicyDeletionRepository::class,
+                        ),
                     ),
             \MyInvoice\Service\Payroll\Settings\PayrollEmployerPolicyService::class =>
                 fn (ContainerInterface $c) =>
@@ -191,7 +194,25 @@ final class Bootstrap
                     $c->get(
                         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog::class,
                     ),
+                    // Volitelné class-parametry PHP-DI neautowiruje — bez tohohle
+                    // bindu by se limity § 93 tiše nehlídaly vůbec.
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService::class,
+                    ),
                 ),
+            \MyInvoice\Service\Payroll\Time\Overtime\OvertimeLimitRules::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Service\Payroll\Time\Overtime\OvertimeLimitRules(
+                        $c->get(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class),
+                    ),
+            \MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService(
+                        $c->get(\MyInvoice\Repository\Payroll\PayrollOvertimeRepository::class),
+                        $c->get(
+                            \MyInvoice\Service\Payroll\Time\Overtime\OvertimeLimitRules::class,
+                        ),
+                    ),
             // Katalog kontrol se načítá z připnutého manifestu a ověřuje otisk
             // zdrojového XLSX, což je na každý požadavek zbytečně drahé —
             // kontejner ho proto drží jako singleton.
@@ -228,6 +249,18 @@ final class Bootstrap
                     ),
                     $c->get(
                         \MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService::class,
+                    ),
+                    // Volitelné class-parametry PHP-DI neautowiruje — bez
+                    // explicitního bindu by mzdový běh neuměl `prepare_payments`,
+                    // `mark_paid` ani překlopení modulu do `active`.
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Run\PayrollRunPaymentPreparationService::class,
+                    ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Run\PayrollRunPaymentSettlementService::class,
+                    ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\PayrollModuleActivationService::class,
                     ),
                 ),
             // Identifikace software jde do datové věty JMHZ a ČSSZ ji porovnává
@@ -284,6 +317,24 @@ final class Bootstrap
                 // navždy prázdný a nikdo by se to nedozvěděl.
                 $c->get(\MyInvoice\Service\Tax\RelatedPartyService::class),
             ),
+            // JMHZ transport — poslední dva argumenty jsou volitelné kvůli
+            // testovacím dvojníkům (falešný VREP, mockovaný ledger), ale
+            // PHP-DI optional class-param neautowiruje. Bez tohohle bindu by
+            // v produkci odeslané podání zůstalo navždy ve stavu `ready`
+            // a nešlo by odeslat storno ani opravu bez ručně předaného XML.
+            \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService::class
+                => fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService(
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository::class),
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollSigningProfileRepository::class),
+                    $c->get(\MyInvoice\Service\Signing\PersonalCertificateVaultService::class),
+                    $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification::class),
+                    null,
+                    new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzAcknowledgementParser(),
+                    new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolParser(),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader::class),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\PayrollSubmissionService::class),
+                ),
             // § 33a — zřetězení auditní stopy hashem. Druhý argument loggeru je volitelný
             // kvůli testovacím dvojníkům; bez explicitního bindu by se v produkci nic
             // nepečetilo a řetěz by neexistoval, aniž by to cokoli ohlásilo.
@@ -506,6 +557,21 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Logbook\Fuel\AiFuelStatementParser::class),
                 $c->get(\MyInvoice\Service\Logbook\Fuel\SummaryFuelParser::class),
             ]),
+
+            // Kanál datové schránky. PHP-DI neumí autowire interface → explicitní
+            // bind. Zatím míří na `UnavailableIsdsTransport`, protože rozhodnutí
+            // o ISDS knihovně ještě nepadlo (audit skončil verdiktem „go
+            // s výhradami", ale verze je čerstvá přestavba a bus factor je 1).
+            //
+            // ⚠️ Až rozhodnutí padne, mění se JEN tenhle řádek. Zbytek modulu —
+            // fronta, ledger, číselník, trezor, inbox, cron i UI — o knihovně
+            // neví a vědět nesmí; proto je celý postavený nad `IsdsTransport`.
+            \MyInvoice\Service\Submission\Channel\Isds\IsdsTransport::class => fn (ContainerInterface $c)
+                => $c->get(\MyInvoice\Service\Submission\Channel\Isds\UnavailableIsdsTransport::class),
+            \MyInvoice\Service\Submission\Channel\Epo\EpoAttemptStatusReader::class => fn (ContainerInterface $c)
+                => $c->get(\MyInvoice\Service\Submission\Channel\Epo\EpoAttemptStatusRepository::class),
+            \MyInvoice\Service\Submission\SubmissionArtifactResolver::class => fn (ContainerInterface $c)
+                => $c->get(\MyInvoice\Service\Submission\DefaultSubmissionArtifactResolver::class),
 
             // F7 — AI extrakční brána (LlmGateway). PHP-DI s useAttributes(false)
             // neumí autowire interface → explicitní bind na router. Konkrétní klienti

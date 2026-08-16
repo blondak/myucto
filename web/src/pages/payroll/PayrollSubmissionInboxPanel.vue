@@ -9,23 +9,41 @@ import {
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import Modal from '@/components/ui/Modal.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatDate, formatDateTime } from '@/composables/useFormat'
 
 const emit = defineEmits<{
-  (e: 'update:open-count', count: number): void
+  /** `null` = počet se nepodařilo zjistit; rodič pak odznak nevykreslí vůbec. */
+  (e: 'update:open-count', count: number | null): void
 }>()
 
-const { locale, t } = useI18n()
+const { t } = useI18n()
 const auth = useAuthStore()
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 const loading = ref(true)
 const error = ref('')
 const environment = ref<PayrollRegzelEnvironment>('production')
-const allItems = ref<PayrollSubmissionInboxItem[]>([])
+// Vyřešené položky odfiltrovává SERVER (výchozí `status=unresolved`), takže
+// `total` popisuje právě ty řádky, které tabulka ukáže. Dokud se filtrovalo
+// tady, pager počítal i vyřešené: stránka měla míň řádků, než sliboval, a
+// poslední mohla vyjít prázdná.
+const items = ref<PayrollSubmissionInboxItem[]>([])
 const summary = ref({ total: 0, open: 0, acknowledged: 0, snoozed: 0 })
 const acknowledgingId = ref<number | null>(null)
 const actionError = ref('')
+
+const pageSize = 25
+const total = ref(0)
+const offset = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
+
+function goToPage(nextPage: number) {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  void load()
+}
 
 const snoozeTarget = ref<PayrollSubmissionInboxItem | null>(null)
 const snoozeUntilInput = ref('')
@@ -37,12 +55,6 @@ const environmentOptions = computed(() => [
   { value: 'production' as const, label: t('payroll.regzel.environment.production') },
   { value: 'test' as const, label: t('payroll.regzel.environment.test') },
 ])
-
-// Vyřešené položky už nejsou aktivním problémem — inbox ukazuje jen to, co
-// aktuálně vyžaduje pozornost.
-const items = computed(() =>
-  allItems.value.filter(item => item.status !== 'resolved'),
-)
 
 function escalationClass(item: PayrollSubmissionInboxItem): string {
   if (item.escalation_level === 'overdue') return 'bg-danger-50 text-danger-700'
@@ -64,33 +76,27 @@ function statusLabel(status: string): string {
   return t(`payroll.submissions.inbox.status.${status}`)
 }
 
-function formatDate(value: string): string {
-  const date = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat(locale.value === 'en' ? 'en-GB' : 'cs-CZ').format(date)
-}
-
-function formatDateTime(value: string): string {
-  const date = new Date(value.includes('T') || value.includes(' ') ? `${value.replace(' ', 'T')}Z` : value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat(locale.value === 'en' ? 'en-GB' : 'cs-CZ', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(date)
-}
-
 async function load() {
   loading.value = true
   error.value = ''
   actionError.value = ''
   try {
-    const response = await payrollApi.submissionInbox(environment.value)
-    allItems.value = response.items
+    const response = await payrollApi.submissionInbox(environment.value, {
+      limit: pageSize,
+      offset: offset.value,
+    })
+    items.value = response.items
+    total.value = response.total
+    // Souhrn počítá server nad CELÝM inboxem — dopočítat ho ze stránky by
+    // znamenalo hlásit odznakem jen tolik, kolik se zrovna vešlo na obrazovku.
     summary.value = response.summary
     emit('update:open-count', response.summary.total)
   } catch (exception) {
-    allItems.value = []
+    items.value = []
+    total.value = 0
     summary.value = { total: 0, open: 0, acknowledged: 0, snoozed: 0 }
+    // Ať rodič odznak schová — zastaralý počet je horší než žádný.
+    emit('update:open-count', null)
     error.value = apiErrorMessage(exception, t('payroll.submissions.inbox.load_failed'))
   } finally {
     loading.value = false
@@ -155,7 +161,11 @@ async function confirmSnooze() {
   }
 }
 
-watch(environment, load)
+// Jiné prostředí = jiný obsah seznamu, takže stránka musí zpět na začátek.
+watch(environment, () => {
+  offset.value = 0
+  void load()
+})
 onMounted(load)
 
 defineExpose({ reload: load })
@@ -358,6 +368,14 @@ defineExpose({ reload: load })
             </div>
           </article>
         </div>
+
+        <PaginationBar
+          embedded
+          :page="currentPage"
+          :per-page="pageSize"
+          :total="total"
+          @update:page="goToPage"
+        />
       </section>
     </template>
 

@@ -11,26 +11,39 @@ use PDOException;
 
 final class PayrollRecurringComponentRepository
 {
-    public function __construct(private readonly Connection $db)
-    {
+    /**
+     * Tvrdý strop seznamu předpisů. `employment_id` je volitelný filtr, takže
+     * bez něj je seznam součin „počet pracovních vztahů × počet předpisů" —
+     * a právě tak se čte, když si uživatel otevře přehled za celou firmu.
+     */
+    public const LIST_MAX_LIMIT = 200;
+
+    public const LIST_DEFAULT_LIMIT = 50;
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollRecurringComponentDeletionRepository $deletion,
+    ) {
     }
 
-    /** @return list<array<string,mixed>> */
-    public function list(int $supplierId, ?int $employmentId = null): array
-    {
+    /** @return array{items:list<array<string,mixed>>,total:int} */
+    public function list(
+        int $supplierId,
+        ?int $employmentId = null,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        // Strop se klampuje i tady, ne jen na HTTP hranici.
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+
         $params = [$supplierId];
         $employmentFilter = '';
         if ($employmentId !== null) {
             $employmentFilter = ' AND recurring.employment_id = ?';
             $params[] = $employmentId;
         }
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT recurring.*, employment.employee_id,
-                    employment.code AS employment_code,
-                    employee.full_name AS employee_name,
-                    component.code AS component_code,
-                    component.name AS component_name
-               FROM payroll_recurring_components recurring
+        $from = ' FROM payroll_recurring_components recurring
                JOIN payroll_employments employment
                  ON employment.supplier_id = recurring.supplier_id
                 AND employment.id = recurring.employment_id
@@ -41,18 +54,44 @@ final class PayrollRecurringComponentRepository
                  ON component.supplier_id = recurring.supplier_id
                 AND component.id = recurring.component_id
               WHERE recurring.supplier_id = ?'
-            . $employmentFilter
+            . $employmentFilter;
+
+        $countStmt = $this->db->pdo()->prepare('SELECT COUNT(*)' . $from);
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT recurring.*, employment.employee_id,
+                    employment.code AS employment_code,
+                    employee.full_name AS employee_name,
+                    component.code AS component_code,
+                    component.name AS component_name'
+            . $from
             . ' ORDER BY recurring.is_active DESC, employee.full_name,
-                       recurring.valid_from DESC, recurring.id DESC'
+                       recurring.valid_from DESC, recurring.id DESC
+              LIMIT ? OFFSET ?'
         );
-        $stmt->execute($params);
-        return array_map(
-            self::cast(...),
-            PayrollTimeValue::rows(
-                $stmt->fetchAll(PDO::FETCH_ASSOC),
-                'payroll_recurring_components',
+        $position = 1;
+        foreach ($params as $param) {
+            $stmt->bindValue($position++, $param);
+        }
+        $stmt->bindValue($position++, $limit, PDO::PARAM_INT);
+        $stmt->bindValue($position, $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return [
+            'items' => $this->deletion->decorate(
+                $supplierId,
+                array_map(
+                    self::cast(...),
+                    PayrollTimeValue::rows(
+                        $stmt->fetchAll(PDO::FETCH_ASSOC),
+                        'payroll_recurring_components',
+                    ),
+                ),
             ),
-        );
+            'total' => $total,
+        ];
     }
 
     /** @return array<string,mixed>|null */
@@ -80,7 +119,10 @@ final class PayrollRecurringComponentRepository
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false
             ? null
-            : self::cast(PayrollTimeValue::row($row, 'payroll_recurring_component'));
+            : $this->deletion->decorateOne(
+                $supplierId,
+                self::cast(PayrollTimeValue::row($row, 'payroll_recurring_component')),
+            );
     }
 
     /**

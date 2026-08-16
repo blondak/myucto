@@ -103,7 +103,7 @@ function settings(accounts: PayrollEmployerAccounts = defaultAccounts): PayrollE
     supplier_id: 1,
     row_version: 3,
     employer_registration_number: '12345678',
-    social_security_office_code: 'P',
+    social_security_office_code: '110',
     default_health_insurer_code: '111',
     payroll_contact_name: 'Testovací účetní',
     payroll_contact_email: 'payroll@example.test',
@@ -257,6 +257,112 @@ describe('EmployerSettings — účtová osnova', () => {
     expect(m.saveEmployerSettings).not.toHaveBeenCalled()
     expect(input.attributes('aria-invalid')).toBe('true')
     expect(wrapper.text()).toContain('payroll.employer.validation.social_security_variable_symbol')
+
+    wrapper.unmount()
+  })
+
+  it('nabízí zdravotní pojišťovny z číselníku místo volného textu', async () => {
+    const wrapper = await mountPage()
+    const picker = wrapper.get('[data-test="default-health-insurer"]')
+    const input = picker.get('input[role="combobox"]')
+    expect((input.element as HTMLInputElement).value).toContain('111')
+
+    await input.trigger('focus')
+    const optionTexts = Array.from(document.querySelectorAll<HTMLElement>('[role="option"]'))
+      .map(option => option.textContent ?? '')
+    expect(optionTexts).toHaveLength(7)
+    expect(optionTexts.some(text => text.includes('213'))).toBe(true)
+    expect(optionTexts.some(text => text.includes('999'))).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('pošle kód pojišťovny vybraný ze seznamu', async () => {
+    const wrapper = await mountPage()
+    const input = wrapper.get('[data-test="default-health-insurer"]').get('input[role="combobox"]')
+
+    await input.trigger('focus')
+    await input.setValue('205')
+    await input.trigger('keydown', { key: 'Enter' })
+
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
+    expect(m.saveEmployerSettings.mock.calls[0][0].default_health_insurer_code).toBe('205')
+
+    wrapper.unmount()
+  })
+
+  it('neuloží pojišťovnu mimo číselník', async () => {
+    const wrapper = await mountPage({ ...settings(), default_health_insurer_code: '999' })
+
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+
+    expect(m.saveEmployerSettings).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('payroll.employer.validation.default_health_insurer_code')
+
+    wrapper.unmount()
+  })
+
+  it('prázdná pojišťovna je platná a odejde jako null', async () => {
+    const wrapper = await mountPage({ ...settings(), default_health_insurer_code: null })
+
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
+    expect(m.saveEmployerSettings.mock.calls[0][0].default_health_insurer_code).toBeNull()
+
+    wrapper.unmount()
+  })
+
+  it('pustí trojmístný kód OSSZ a nabízí jen tři znaky', async () => {
+    const wrapper = await mountPage()
+    const field = wrapper.get('[data-test="social-security-office-code"]')
+    expect(field.attributes('maxlength')).toBe('3')
+    expect(field.attributes('inputmode')).toBe('numeric')
+
+    await field.setValue('115')
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
+    expect(m.saveEmployerSettings.mock.calls[0][0].social_security_office_code).toBe('115')
+
+    wrapper.unmount()
+  })
+
+  it('neuloží kód OSSZ jiného tvaru než tří číslic a řekne, jak má vypadat', async () => {
+    const wrapper = await mountPage()
+
+    for (const invalid of ['1', '1105', 'PSSZ', '11a']) {
+      m.saveEmployerSettings.mockClear()
+      await wrapper.get('[data-test="social-security-office-code"]').setValue(invalid)
+      const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+      await save!.trigger('click')
+      await flushPromises()
+
+      expect(m.saveEmployerSettings).not.toHaveBeenCalled()
+      expect(wrapper.text()).toContain('payroll.employer.validation.social_security_office_code')
+    }
+
+    wrapper.unmount()
+  })
+
+  it('prázdný kód OSSZ zůstává platný a odejde jako null', async () => {
+    const wrapper = await mountPage({ ...settings(), social_security_office_code: null })
+
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
+    expect(m.saveEmployerSettings.mock.calls[0][0].social_security_office_code).toBeNull()
 
     wrapper.unmount()
   })

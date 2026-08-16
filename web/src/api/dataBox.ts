@@ -1,0 +1,466 @@
+import { api } from './client'
+
+/**
+ * Datová schránka jako průřezový kanál podání.
+ *
+ * Není to mzdová odbočka: touhle cestou jde odeslat přiznání k DPH, kontrolní
+ * i souhrnné hlášení, DPPO i přehledy zdravotním pojišťovnám.
+ */
+
+/** Doprava — co víme o cestě zprávy k příjemci. */
+export type DispatchState =
+  | 'ready'
+  | 'sending'
+  | 'send_uncertain'
+  | 'sent'
+  | 'delivered'
+  | 'failed'
+  | 'cancelled'
+
+/**
+ * Vyřízení — co o podání rozhodl ÚŘAD.
+ *
+ * ⚠️ Samostatná osa schválně. Datová schránka vrací doručenku, tedy důkaz
+ * o DORUČENÍ, ne o zpracování; `acceptance_state` proto u ISDS podání zůstává
+ * `unknown` i poté, co je `dispatch_state` `delivered`. Kdo obě osy v UI slije,
+ * vyrobí podání, které se tváří jako přijaté, aniž o něm úřad rozhodl.
+ */
+export type AcceptanceState = 'unknown' | 'accepted' | 'rejected'
+
+export type AcceptanceEvidence = 'epo_protocol' | 'agency_protocol_message' | 'manual_confirmation'
+
+export type RecipientKind = 'tax_office' | 'cssz' | 'health_insurer' | 'other'
+
+export type InboxClassification =
+  | 'delivery_receipt'
+  | 'cssz_protocol'
+  | 'health_insurer_response'
+  | 'tax_office_response'
+  | 'unclassified'
+
+export interface DataBoxCredential {
+  id: number
+  supplier_id: number
+  environment: 'production' | 'test'
+  channel: 'isds'
+  label: string
+  box_id: string
+  auth_mode: 'certificate'
+  certificate_fingerprint: string | null
+  certificate_valid_to: string | null
+  last_verified_at: string | null
+  /** Vybírání schránky — vypnuté, dokud ho uživatel vědomě nezapne (§ 17 odst. 3). */
+  inbox_polling_enabled: boolean
+  inbox_polling_enabled_at: string | null
+  inbox_polling_enabled_by: number | null
+}
+
+export interface SubmissionRecipient {
+  id: number
+  supplier_id: number | null
+  code: string
+  name: string
+  kind: RecipientKind
+  isds_box_id: string | null
+  source_url: string | null
+  source_note: string | null
+  is_active: boolean
+  is_system: boolean
+  /** Číselník smí být prázdný — u finančních úřadů doklad nemáme a nehádáme. */
+  has_box_id: boolean
+  verified_in_isds_at: string | null
+}
+
+/**
+ * Jak podání opustilo aplikaci.
+ *
+ * `manual` = odeslal ho člověk ze své vlastní datové schránky. Není to nouzový
+ * režim: strojové napojení na ISDS nasazené není, takže tohle je dnes běžná
+ * cesta a UI podle ní musí uživateli říct, co má udělat.
+ */
+export type DispatchMode = 'channel' | 'manual'
+
+/**
+ * Čím se doručenka spárovala s podáním.
+ *
+ * `correlation_reference` a `external_message_id` jsou PŘESNÉ identifikátory —
+ * podle nich se páruje automaticky. `manual` znamená, že vazbu potvrdil člověk;
+ * nic slabšího automat nepoužije, protože špatně přiřazená doručenka tvrdí něco
+ * o podání, o kterém nic neví.
+ */
+export type ReceiptMatchedBy = 'correlation_reference' | 'external_message_id' | 'manual'
+
+export interface OutboxSubmission {
+  id: number
+  environment: 'production' | 'test'
+  channel: 'epo' | 'isds'
+  dispatch_mode: DispatchMode
+  agenda_code: string
+  recipient_id: number | null
+  recipient_box_id: string | null
+  subject: string
+  artifact_kind: 'payroll_submission' | 'tax_submission' | 'document'
+  artifact_id: number
+  artifact_filename: string
+  dispatch_state: DispatchState
+  acceptance_state: AcceptanceState
+  acceptance_evidence_kind: AcceptanceEvidence | null
+  acceptance_note: string | null
+  correlation_reference: string
+  external_message_id: string | null
+  artifact_validation_status: 'passed' | 'failed' | 'skipped' | null
+  recipient_box_verified_at: string | null
+  receipt_document_id: number | null
+  /**
+   * ⚠️ Vždycky `unverified`, dokud CMS podpis doručenky sami neověříme.
+   * UI to musí říct nahlas — poctivé „nevíme" je lepší než falešná jistota.
+   */
+  receipt_signature_status: 'unverified' | 'trusted'
+  receipt_matched_by: ReceiptMatchedBy | null
+  receipt_inbox_message_id: number | null
+  receipt_attached_at: string | null
+  confirmed_by: number | null
+  confirmed_at: string | null
+  sent_at: string | null
+  delivered_at: string | null
+  accepted_at: string | null
+  rejected_at: string | null
+  last_error_code: string | null
+  last_error_message: string | null
+  row_version: number
+  created_at: string
+}
+
+export interface OutboxAttempt {
+  id: number
+  attempt_no: number
+  outcome: 'in_flight' | 'sent' | 'uncertain' | 'rejected' | 'failed'
+  external_message_id: string | null
+  error_code: string | null
+  error_message: string | null
+  started_at: string
+  finished_at: string | null
+}
+
+export interface InboxMessage {
+  id: number
+  external_message_id: string
+  sender_box_id: string | null
+  sender_name: string | null
+  subject: string | null
+  sender_ident: string | null
+  classification: InboxClassification
+  matched_outbox_id: number | null
+  document_id: number | null
+  signature_status: 'unverified' | 'trusted'
+  delivered_at: string | null
+  accepted_at: string | null
+  fetched_at: string
+  /** Rozhodný den doručení a čím je podložený — viz {@link DeliveryBasis}. */
+  delivery_basis?: DeliveryBasis
+  delivered_on?: string | null
+  fiction_statutory_on?: string | null
+  fiction_due_on?: string | null
+  fiction_days?: number | null
+  fiction_days_source?: 'ruleset' | 'statute' | null
+  sender_is_public_authority?: boolean | null
+  delivery_resolved_at?: string | null
+  delivery_note?: string | null
+}
+
+/**
+ * Čím je doručení podložené (§ 17 odst. 3 a 4 zák. 300/2008 Sb.).
+ *
+ * `pending` a `unknown` doručení NETVRDÍ — a nejsou totéž: `pending` znamená
+ * „lhůta fikce běží", `unknown` znamená „nevíme". Ani jedno není „v pořádku".
+ */
+export type DeliveryBasis = 'login' | 'fiction' | 'login_or_fiction' | 'pending' | 'unknown'
+
+/** Které písmeno § 74 odst. 1 daňového řádu výzva uvádí. */
+export type DefectGround =
+  | 'a_not_processable'
+  | 'b_no_effects'
+  | 'c_wrong_way'
+  | 'd_wrong_format'
+  | 'unknown'
+
+/**
+ * Následek neodstranění vady. Neúčinnost hrozí JEN u písmen a) a b)
+ * (§ 74 odst. 4 DŘ) — u c) a d) podání nezaniká, ale hrozí pokuta podle
+ * § 247a DŘ. `unknown` znamená, že to z evidence nejde určit.
+ */
+export type DefectConsequence = 'ineffective' | 'no_ineffectiveness' | 'unknown'
+
+export type DefectNoticeStatus =
+  | 'unknown'
+  | 'open'
+  | 'answered_in_time'
+  | 'answered_late'
+  | 'missed'
+  | 'withdrawn'
+
+export type DefectNoticeOutcome = 'unknown' | 'cured' | 'ineffective' | 'penalty_risk'
+
+/** Vyhodnocení výzvy — co z ní právě teď plyne. */
+export interface DefectNoticeAssessment {
+  status: DefectNoticeStatus
+  consequence: DefectConsequence
+  outcome: DefectNoticeOutcome
+  respond_by_on: string | null
+  respond_by_source: 'stated_in_notice' | 'derived_from_days' | 'unknown'
+  respond_by_shifted: boolean
+  days_left: number | null
+  sentence: string
+  suspiciously_short_period: boolean
+  needs_attention: boolean
+}
+
+/** Výzva k odstranění vad podání podle § 74 daňového řádu. */
+export interface DefectNotice {
+  id: number
+  environment: 'production' | 'test'
+  outbox_id: number | null
+  inbox_message_id: number | null
+  notice_reference: string | null
+  authority_kind: RecipientKind
+  defect_ground: DefectGround
+  consequence: DefectConsequence
+  delivered_on: string | null
+  respond_by_on: string | null
+  respond_by_source: 'stated_in_notice' | 'derived_from_days' | 'unknown'
+  stated_period_days: number | null
+  respond_by_shifted: boolean
+  status: DefectNoticeStatus
+  responded_on: string | null
+  response_outbox_id: number | null
+  outcome: DefectNoticeOutcome
+  note: string | null
+  row_version: number
+  created_at: string
+  assessment: DefectNoticeAssessment
+}
+
+/** Vstup pro založení výzvy. Lhůtu aplikace nedopočítává — musí přijít odsud. */
+export interface DefectNoticeInput {
+  environment: string
+  outbox_id?: number | null
+  inbox_message_id?: number | null
+  notice_reference?: string | null
+  authority_kind?: RecipientKind
+  defect_ground?: DefectGround
+  delivered_on?: string | null
+  respond_by_on?: string | null
+  stated_period_days?: number | null
+  note?: string | null
+}
+
+/**
+ * Stav dotazování schránky.
+ *
+ * `last_attempt_at` a `last_ok_at` jsou zvlášť schválně: bez toho by „žádné
+ * nové zprávy" a „na schránku se nedovoláme" vypadaly v UI stejně.
+ */
+export interface InboxPollState {
+  last_attempt_at: string | null
+  last_ok_at: string | null
+  last_ok_count: number | null
+  consecutive_failures: number
+  last_error_code: string | null
+  last_error_message: string | null
+}
+
+/** Jedno podání, ke kterému by nahraná doručenka mohla patřit. */
+export interface ReceiptCandidate {
+  id: number
+  subject: string
+  agenda_code: string
+  recipient_box_id: string | null
+  dispatch_state: DispatchState
+  correlation_reference: string
+  created_at: string
+  /** Které signály sedí: `recipient_box`, `subject`, `period`. Ne důkaz, nápověda. */
+  reasons: string[]
+}
+
+/**
+ * Výsledek nahrání doručenky.
+ *
+ * `status` je celý smysl téhle odpovědi:
+ *   - `matched`            — spárováno přes přesný identifikátor, stav se posunul,
+ *   - `candidates`         — nabízíme podání, ale ROZHODUJE ČLOVĚK; nic se nezměnilo,
+ *   - `unmatched`          — nemáme co nabídnout, doručenka leží v nezařazených,
+ *   - `already_processed`  — tuhle doručenku už máme, druhý průchod nic nedělá.
+ */
+export interface ReceiptUploadResult {
+  status: 'matched' | 'candidates' | 'unmatched' | 'already_processed'
+  message: string
+  reason: string
+  inbox_message_id: number
+  document_id: number | null
+  outbox_id: number | null
+  matched_by: ReceiptMatchedBy | null
+  candidates: ReceiptCandidate[]
+  submission: OutboxSubmission | null
+  delivery_recorded?: boolean
+  validation?: { status: string; checked: boolean; errors: string[] } | null
+  receipt: {
+    message_id: string
+    sender_box_id: string | null
+    sender_name: string | null
+    recipient_box_id: string | null
+    recipient_name: string | null
+    sender_ident: string | null
+    subject: string | null
+    sent_at: string | null
+    delivered_at: string | null
+    signature_status: 'unverified' | 'trusted'
+  }
+}
+
+export const dataBoxApi = {
+  credentials: () =>
+    api.get<{ items: DataBoxCredential[] }>('/settings/databox').then(r => r.data.items),
+
+  saveCredential: (data: FormData) =>
+    api.post<DataBoxCredential>('/settings/databox', data, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data),
+
+  deleteCredential: (environment: string) =>
+    api.delete(`/settings/databox/${environment}`).then(r => r.data),
+
+  /**
+   * Zapnutí/vypnutí vybírání schránky. `acknowledged` musí být `true` —
+   * je to potvrzení, že uživatel ví, že vyzvednutí zprávy je doručení
+   * a rozjíždí zákonné lhůty.
+   */
+  setPolling: (environment: string, enabled: boolean, acknowledged: boolean) =>
+    api.post<{ inbox_polling_enabled: boolean }>('/settings/databox/polling', {
+      environment,
+      enabled,
+      acknowledged,
+    }).then(r => r.data),
+
+  recipients: (kind?: RecipientKind) =>
+    api.get<{ items: SubmissionRecipient[] }>('/submissions/recipients', {
+      params: kind ? { kind } : undefined,
+    }).then(r => r.data.items),
+
+  saveRecipient: (data: Partial<SubmissionRecipient>) =>
+    api.post<{ id: number }>('/submissions/recipients', data).then(r => r.data),
+
+  deleteRecipient: (id: number) =>
+    api.delete(`/submissions/recipients/${id}`).then(r => r.data),
+
+  outbox: (environment: string) =>
+    api.get<{ items: OutboxSubmission[] }>('/submissions/outbox', {
+      params: { environment },
+    }).then(r => r.data.items),
+
+  attempts: (id: number) =>
+    api.get<{ items: OutboxAttempt[] }>(`/submissions/outbox/${id}/attempts`).then(r => r.data.items),
+
+  confirm: (id: number, environment: string) =>
+    api.post<{ row: OutboxSubmission; dispatched: boolean }>(
+      `/submissions/outbox/${id}/confirm`,
+      { environment },
+    ).then(r => r.data),
+
+  resolve: (id: number, environment: string) =>
+    api.post<OutboxSubmission>(`/submissions/outbox/${id}/resolve`, { environment }).then(r => r.data),
+
+  cancel: (id: number) =>
+    api.post<OutboxSubmission>(`/submissions/outbox/${id}/cancel`, {}).then(r => r.data),
+
+  inbox: (environment: string, classification?: InboxClassification) =>
+    api.get<{ items: InboxMessage[]; state: InboxPollState | null }>('/submissions/inbox', {
+      params: { environment, classification },
+    }).then(r => r.data),
+
+  pollInbox: (environment: string) =>
+    api.post<{ fetched: number; stored: number; skipped: number; failed: number; unclassified: number }>(
+      '/submissions/inbox/poll',
+      { environment },
+    ).then(r => r.data),
+
+  classify: (id: number, classification: InboxClassification, outboxId: number | null) =>
+    api.post(`/submissions/inbox/${id}/classify`, { classification, outbox_id: outboxId }).then(r => r.data),
+
+  /**
+   * „Odeslal jsem to ručně." ID zprávy není formalita — je to přesný
+   * identifikátor, podle kterého se doručenka spáruje sama, i kdyby v ní naše
+   * spisová značka nebyla.
+   */
+  markSentManually: (id: number, externalMessageId: string, sentAt?: string) =>
+    api.post<{ row: OutboxSubmission; recorded: boolean; validation: { status: string; checked: boolean; errors: string[] } }>(
+      `/submissions/outbox/${id}/mark-sent`,
+      { external_message_id: externalMessageId, sent_at: sentAt },
+    ).then(r => r.data),
+
+  /** Nahrání doručenky přímo u podání — vazbu určuje uživatel. */
+  uploadReceiptFor: (id: number, environment: string, file: File) =>
+    api.post<ReceiptUploadResult>(`/submissions/outbox/${id}/receipt`, receiptForm(environment, file), {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data),
+
+  /** Nahrání doručenky bez určeného podání — párování hledá aplikace. */
+  uploadReceipt: (environment: string, file: File) =>
+    api.post<ReceiptUploadResult>('/submissions/receipts', receiptForm(environment, file), {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data),
+
+  unmatchedReceipts: (environment: string) =>
+    api.get<{ items: InboxMessage[] }>('/submissions/receipts/unmatched', {
+      params: { environment },
+    }).then(r => r.data.items),
+
+  receiptCandidates: (inboxMessageId: number) =>
+    api.get<{ items: ReceiptCandidate[] }>(`/submissions/receipts/${inboxMessageId}/candidates`)
+      .then(r => r.data.items),
+
+  matchReceipt: (inboxMessageId: number, outboxId: number) =>
+    api.post<ReceiptUploadResult>(`/submissions/receipts/${inboxMessageId}/match`, { outbox_id: outboxId })
+      .then(r => r.data),
+
+  /**
+   * Přepočet rozhodného dne doručení. Nesahá na síť ani na schránku — jen
+   * znovu posoudí už stažené zprávy. Běžící lhůta fikce se totiž mění pouhým
+   * během času a bez přepočtu by zpráva zůstala navěky v „lhůta běží".
+   */
+  refreshDelivery: (environment: string) =>
+    api.post<{ checked: number; changed: number; delivered_by_fiction: number }>(
+      '/submissions/inbox/delivery/refresh',
+      { environment },
+    ).then(r => r.data),
+
+  /**
+   * Výzvy k odstranění vad. `notice` v odpovědi je důležité: prázdný seznam
+   * znamená „žádná zaevidovaná", ne „žádná nepřišla" — aplikace výzvy
+   * z datové schránky sama nerozpoznává.
+   */
+  defectNotices: (environment: string, openOnly = false) =>
+    api.get<{ supported: boolean; items: DefectNotice[]; notice: string }>('/submissions/defect-notices', {
+      params: { environment, open: openOnly ? '1' : undefined },
+    }).then(r => r.data),
+
+  createDefectNotice: (data: DefectNoticeInput) =>
+    api.post<DefectNotice & { created: boolean }>('/submissions/defect-notices', data).then(r => r.data),
+
+  amendDefectNotice: (id: number, rowVersion: number, data: Partial<DefectNoticeInput> & { withdrawn?: boolean }) =>
+    api.patch<DefectNotice>(`/submissions/defect-notices/${id}`, { ...data, row_version: rowVersion })
+      .then(r => r.data),
+
+  answerDefectNotice: (id: number, rowVersion: number, respondedOn: string, responseOutboxId?: number | null) =>
+    api.post<DefectNotice>(`/submissions/defect-notices/${id}/response`, {
+      row_version: rowVersion,
+      responded_on: respondedOn,
+      response_outbox_id: responseOutboxId ?? null,
+    }).then(r => r.data),
+}
+
+function receiptForm(environment: string, file: File): FormData {
+  const form = new FormData()
+  form.append('environment', environment)
+  form.append('receipt', file)
+  return form
+}

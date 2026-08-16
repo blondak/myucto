@@ -126,9 +126,9 @@ final class EpoSupplierBlockBuilderTest extends TestCase
      */
     public function testTypDsPodleTypuDanovehoSubjektu(): void
     {
-        $po = $this->fillFor(['taxpayer_type' => 'po', 'company_name' => 'MyWebdesign.cz s.r.o.', 'data_box_type' => null]);
+        $po = $this->fillFor(['taxpayer_type' => 'po', 'company_name' => 'Vzorová firma s.r.o.', 'data_box_type' => null]);
         $this->assertSame('P', $po->getAttribute('typ_ds'));
-        $this->assertSame('MyWebdesign.cz s.r.o.', $po->getAttribute('zkrobchjm'));
+        $this->assertSame('Vzorová firma s.r.o.', $po->getAttribute('zkrobchjm'));
 
         // data_box_type se do typ_ds nesmí promítnout ani když je vyplněný
         $poSDatovkou = $this->fillFor(['taxpayer_type' => 'po', 'company_name' => 'Firma s.r.o.', 'data_box_type' => 'OVM']);

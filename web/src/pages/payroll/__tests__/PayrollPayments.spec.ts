@@ -46,14 +46,52 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.success, error: m.error }),
 }))
-vi.mock('vue-i18n', () => ({
+// `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
+// `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
   }),
 }))
 
+// Preference tabulek jdou přes Pinii a API; v testu stačí prázdné výchozí.
+vi.mock('@/composables/useUserPrefs', async () => {
+  const { computed } = await import('vue')
+  return {
+    ensurePrefsLoaded: () => Promise.resolve(),
+    getPagePrefs: () => computed(() => ({})),
+    patchPagePrefs: () => {},
+  }
+})
+
 import PayrollPayments from '@/pages/payroll/PayrollPayments.vue'
+
+/**
+ * Odpověď seznamu závazků. `totals` jsou za CELÉ období a znaménko v nich má
+ * server už vyřešené (příchozí závazek odečítá) — tady se kvůli tomu dopočítají
+ * stejným pravidlem, ne prostým součtem.
+ */
+function liabilityList(items: Array<Record<string, unknown>>) {
+  const sum = (key: 'amount_minor' | 'allocated_minor' | 'settled_minor'): number =>
+    items.reduce((total, item) => {
+      const amount = item[key] as number
+      return total + (item.direction === 'incoming' ? -amount : amount)
+    }, 0)
+  return {
+    period: '2026-08',
+    items,
+    total: items.length,
+    totals: {
+      amount_minor: sum('amount_minor'),
+      allocated_minor: sum('allocated_minor'),
+      settled_minor: sum('settled_minor'),
+    },
+    limit: 50,
+    offset: 0,
+  }
+}
 
 describe('PayrollPayments', () => {
   beforeEach(() => {
@@ -61,35 +99,32 @@ describe('PayrollPayments', () => {
     m.canWrite.mockImplementation(
       (permission: string) => permission === 'payroll.payments',
     )
-    m.liabilities.mockResolvedValue({
-      period: '2026-08',
-      items: [{
-        id: 41,
-        run_id: 11,
-        revision_id: 12,
-        revision_no: 1,
-        employee_id: 31,
-        employee_name: 'Syntetická osoba',
-        recipient_name: 'Syntetická osoba',
-        institution_type: null,
-        institution_code: null,
-        liability_kind: 'net_wage',
-        direction: 'outgoing',
-        recipient_kind: 'bank',
-        payment_target_status: 'ready',
-        payment_target_masked: '••••0005/0100',
-        batch_eligibility: 'ready',
-        batch_block_reason: null,
-        revision_kind: 'regular',
-        due_on: '2026-08-15',
-        currency_code: 'CZK',
-        amount_minor: 4_250_000,
-        allocated_minor: 0,
-        settled_minor: 0,
-        state: 'open',
-        created_at: '2026-08-03 08:00:00',
-      }],
-    })
+    m.liabilities.mockResolvedValue(liabilityList([{
+      id: 41,
+      run_id: 11,
+      revision_id: 12,
+      revision_no: 1,
+      employee_id: 31,
+      employee_name: 'Syntetická osoba',
+      recipient_name: 'Syntetická osoba',
+      institution_type: null,
+      institution_code: null,
+      liability_kind: 'net_wage',
+      direction: 'outgoing',
+      recipient_kind: 'bank',
+      payment_target_status: 'ready',
+      payment_target_masked: '••••0005/0100',
+      batch_eligibility: 'ready',
+      batch_block_reason: null,
+      revision_kind: 'regular',
+      due_on: '2026-08-15',
+      currency_code: 'CZK',
+      amount_minor: 4_250_000,
+      allocated_minor: 0,
+      settled_minor: 0,
+      state: 'open',
+      created_at: '2026-08-03 08:00:00',
+    }]))
     m.runs.mockResolvedValue([{
       id: 11,
       period_start: '2026-08-01',
@@ -232,6 +267,66 @@ describe('PayrollPayments', () => {
     })
   })
 
+  /*
+   * Dva různé scénáře na téže obrazovce, které dřív vypadaly stejně:
+   * „nenačetlo se" vs. „za období opravdu nic není". První musí nabídnout
+   * opakování, druhý smí tvrdit, že je prázdno.
+   */
+  it('offers a retry instead of an empty state when the liabilities fail to load', async () => {
+    m.liabilities.mockRejectedValue(new Error('network'))
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('payroll.payments.load_failed_hint')
+    // Prázdný stav se nesmí ukázat — o závazcích nic nevíme.
+    expect(wrapper.text()).not.toContain('payroll.payments.empty_blocked')
+    expect(m.error).toHaveBeenCalled()
+
+    m.liabilities.mockResolvedValue(liabilityList([]))
+    await wrapper.get('[data-test="load-failed"] [data-test="empty-state-cta"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
+  })
+
+  it('shows the empty state when the period genuinely has no liabilities', async () => {
+    m.liabilities.mockResolvedValue(liabilityList([]))
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('payroll.payments.empty')
+    expect(wrapper.text()).not.toContain('payroll.payments.load_failed_hint')
+  })
+
+  it('explains why creating liabilities is disabled without an approved revision', async () => {
+    // Bez použitelné revize je hlavní akce mrtvá; vysvětlení dřív viselo jen
+    // v prázdném stavu, takže u neprázdného seznamu nebylo vidět vůbec.
+    m.runs.mockResolvedValue([])
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    const button = wrapper.get('[data-test="materialize"]')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(button.attributes('title')).toBe('payroll.payments.materialize_blocked')
+    expect(wrapper.get('[data-test="materialize-blocked"]').text())
+      .toBe('payroll.payments.materialize_blocked')
+  })
+
+  it('drops the disabled reason once the action is usable', async () => {
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    const button = wrapper.get('[data-test="materialize"]')
+    expect(button.attributes('disabled')).toBeUndefined()
+    expect(button.attributes('title')).toBeUndefined()
+    expect(wrapper.find('[data-test="materialize-blocked"]').exists()).toBe(false)
+  })
+
   it('renders matching desktop and mobile liability views without sensitive references', async () => {
     const wrapper = mount(PayrollPayments)
     await flushPromises()
@@ -272,51 +367,48 @@ describe('PayrollPayments', () => {
       state: 'open',
       created_at: '2026-08-03 08:00:00',
     }
-    m.liabilities.mockResolvedValue({
-      period: '2026-08',
-      items: [
-        healthItem,
-        {
-          ...healthItem,
-          id: 43,
-          recipient_name: 'Syntetická pojišťovna 201',
-          institution_code: '201',
-          payment_target_masked: '••••1005/0100',
-          amount_minor: 650_000,
-        },
-        {
-          ...healthItem,
-          id: 44,
-          revision_id: 13,
-          revision_no: 2,
-          direction: 'incoming',
-          batch_eligibility: 'blocked',
-          batch_block_reason: 'unsupported_direction',
-          revision_kind: 'correction',
-          amount_minor: 50_000,
-        },
-        {
-          ...healthItem,
-          id: 45,
-          recipient_name: 'Syntetická správa sociálního zabezpečení',
-          institution_type: 'social_security',
-          institution_code: 'P',
-          liability_kind: 'social_insurance',
-          payment_target_masked: '••••2005/0100',
-          amount_minor: 3_190_000,
-        },
-        {
-          ...healthItem,
-          id: 46,
-          recipient_name: 'Syntetický finanční úřad',
-          institution_type: 'tax_office',
-          institution_code: 'advance_tax',
-          liability_kind: 'advance_tax',
-          payment_target_masked: '••••3005/0100',
-          amount_minor: 1_250_000,
-        },
-      ],
-    })
+    m.liabilities.mockResolvedValue(liabilityList([
+      healthItem,
+      {
+        ...healthItem,
+        id: 43,
+        recipient_name: 'Syntetická pojišťovna 201',
+        institution_code: '201',
+        payment_target_masked: '••••1005/0100',
+        amount_minor: 650_000,
+      },
+      {
+        ...healthItem,
+        id: 44,
+        revision_id: 13,
+        revision_no: 2,
+        direction: 'incoming',
+        batch_eligibility: 'blocked',
+        batch_block_reason: 'unsupported_direction',
+        revision_kind: 'correction',
+        amount_minor: 50_000,
+      },
+      {
+        ...healthItem,
+        id: 45,
+        recipient_name: 'Syntetická správa sociálního zabezpečení',
+        institution_type: 'social_security',
+        institution_code: 'P',
+        liability_kind: 'social_insurance',
+        payment_target_masked: '••••2005/0100',
+        amount_minor: 3_190_000,
+      },
+      {
+        ...healthItem,
+        id: 46,
+        recipient_name: 'Syntetický finanční úřad',
+        institution_type: 'tax_office',
+        institution_code: 'advance_tax',
+        liability_kind: 'advance_tax',
+        payment_target_masked: '••••3005/0100',
+        amount_minor: 1_250_000,
+      },
+    ]))
 
     const wrapper = mount(PayrollPayments)
     await flushPromises()

@@ -223,6 +223,190 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
         );
     }
 
+    /**
+     * Dotaz na stav se zapisuje jako DŮKAZ, ne jako stavová proměnná: počitadlo
+     * roste, termín dalšího dotazu se posouvá a důvod neúspěchu je vidět. Bez
+     * toho by strop pokusů nešlo vynutit a automatika by se ptala donekonečna.
+     */
+    public function testPollBookkeepingGrowsAndSchedulesTheNextAsk(): void
+    {
+        $sent = $this->repository->markSent(
+            (int) $this->open('transport-poll-bookkeeping')['id'],
+            'VREP-2026-07-0010',
+            200,
+            1,
+            '2026-08-15 06:00:00',
+        );
+        self::assertSame('2026-08-15 06:00:00', $sent['next_retry_at']);
+        self::assertSame(0, $sent['poll_count']);
+
+        $first = $this->repository->recordPoll(
+            (int) $sent['id'],
+            '2026-08-15 07:00:00',
+            'VREP neodpovědělo.',
+            (int) $sent['row_version'],
+        );
+        self::assertSame(1, $first['poll_count']);
+        self::assertSame('2026-08-15 07:00:00', $first['next_retry_at']);
+        self::assertSame('VREP neodpovědělo.', $first['last_poll_error']);
+        self::assertNotNull($first['last_polled_at']);
+
+        // Úspěšný dotaz důvod smaže — jinak by u pokusu navždy visela chyba,
+        // která už neplatí.
+        $second = $this->repository->recordPoll(
+            (int) $sent['id'],
+            '2026-08-15 08:00:00',
+            null,
+            (int) $first['row_version'],
+        );
+        self::assertSame(2, $second['poll_count']);
+        self::assertNull($second['last_poll_error']);
+    }
+
+    /**
+     * Fronta na pozadí bere jen to, čemu dozrál termín. Prázdný termín znamená
+     * „zeptej se hned" — pokusy z doby před migrací 1379 ho nemají a vynechat
+     * je by znamenalo, že na ně automatika nikdy nesáhne.
+     */
+    public function testDueQueuesTakeOnlyRipeAttempts(): void
+    {
+        $ripe = $this->repository->markSent(
+            (int) $this->open('transport-due-ripe')['id'],
+            'VREP-2026-07-0011',
+            200,
+            1,
+            '2020-01-01 00:00:00',
+        );
+        $later = $this->repository->markSent(
+            (int) $this->open('transport-due-later')['id'],
+            'VREP-2026-07-0012',
+            200,
+            1,
+            '2099-01-01 00:00:00',
+        );
+
+        $due = array_column($this->repository->listDuePolls(50), 'id');
+        self::assertContains($ripe['id'], $due);
+        self::assertNotContains($later['id'], $due);
+
+        // Dotažený pokus už se nedotazuje, ale čeká na uzavření transakce.
+        $completed = $this->repository->markCompleted(
+            (int) $ripe['id'],
+            (int) $ripe['row_version'],
+        );
+        self::assertNotContains(
+            $completed['id'],
+            array_column($this->repository->listDuePolls(50), 'id'),
+        );
+        self::assertContains(
+            $completed['id'],
+            array_column($this->repository->listDueCloses(50, 8), 'id'),
+        );
+    }
+
+    /**
+     * Transakce se uzavírá právě jednou. `closed_at` je jednorázové přiřazení,
+     * takže druhý pokus není tichý no-op, ale hlasitá chyba — volající si musí
+     * ověřit stav dřív, než začne posílat.
+     */
+    public function testTransactionIsClosedExactlyOnce(): void
+    {
+        $sent = $this->repository->markSent(
+            (int) $this->open('transport-close-once')['id'],
+            'VREP-2026-07-0013',
+            200,
+            1,
+        );
+        $completed = $this->repository->markCompleted(
+            (int) $sent['id'],
+            (int) $sent['row_version'],
+        );
+
+        $closed = $this->repository->markClosed(
+            (int) $completed['id'],
+            (int) $completed['row_version'],
+        );
+        self::assertNotNull($closed['closed_at']);
+        self::assertSame(1, $closed['close_attempts']);
+        self::assertNull($closed['next_retry_at']);
+        // Uzavřený pokus z fronty na uzavření mizí, takže druhý běh na pozadí
+        // nemá co uzavírat.
+        self::assertNotContains(
+            $closed['id'],
+            array_column($this->repository->listDueCloses(50, 8), 'id'),
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->repository->markClosed(
+            (int) $closed['id'],
+            (int) $closed['row_version'],
+        );
+    }
+
+    /**
+     * Dotažený pokus přijme JEDINOU změnu: doklad o uzavření transakce. Kdyby
+     * šlo přepsat cokoli dalšího, přestal by být důkazem o tom, jak podání
+     * dopadlo.
+     */
+    public function testCompletedAttemptAcceptsOnlyTheClosingRecord(): void
+    {
+        $sent = $this->repository->markSent(
+            (int) $this->open('transport-terminal-guard')['id'],
+            'VREP-2026-07-0014',
+            200,
+            1,
+        );
+        $completed = $this->repository->markCompleted(
+            (int) $sent['id'],
+            (int) $sent['row_version'],
+        );
+
+        try {
+            $this->db->pdo()->prepare(
+                'UPDATE payroll_submission_transport_attempts
+                    SET error_code = "rewritten", row_version = row_version + 1
+                  WHERE id = ?',
+            )->execute([$completed['id']]);
+            self::fail('Dotažený pokus nesmí přijmout přepis výsledku.');
+        } catch (PDOException $exception) {
+            self::assertStringContainsString(
+                'accepts only the closing record',
+                $exception->getMessage(),
+            );
+        }
+    }
+
+    /**
+     * Vzdaný pokus je terminální a nese důvod, podle kterého se dá jednat.
+     * Otevřít ho zpátky nelze — jinak by se automatika mohla vrátit k podání,
+     * které už převzal člověk.
+     */
+    public function testGivenUpAttemptIsTerminalAndCarriesTheReason(): void
+    {
+        $sent = $this->repository->markSent(
+            (int) $this->open('transport-expired')['id'],
+            'VREP-2026-07-0015',
+            200,
+            1,
+        );
+
+        $expired = $this->repository->markExpired(
+            (int) $sent['id'],
+            'jmhz_protocol_not_delivered',
+            'ČSSZ protokol nevydala; zkontrolujte podání na ePortálu ČSSZ.',
+            (int) $sent['row_version'],
+        );
+        self::assertSame('expired', $expired['status']);
+        self::assertNull($expired['next_retry_at']);
+        self::assertStringContainsString('ePortálu', (string) $expired['error_message']);
+
+        $this->expectException(\DomainException::class);
+        $this->repository->markCompleted(
+            (int) $expired['id'],
+            (int) $expired['row_version'],
+        );
+    }
+
     public function testAttemptRowsCannotBeDeleted(): void
     {
         $opened = $this->open('transport-append-only');
@@ -262,6 +446,80 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
         ));
     }
 
+    /**
+     * Přehled nese období rovnou s pokusem. Kdyby ho ledger nenesl, musela by
+     * se na něj obrazovka doptat u každého podání zvlášť — jeden HTTP požadavek
+     * navíc na řádek jen kvůli tomu, aby se dalo poznat „červenec".
+     *
+     * Pokus, jehož podání v evidenci není, přesto z ledgeru nesmí zmizet:
+     * ledger je přírůstkový důkaz o odeslání a chybějící řádek by byl horší
+     * než chybějící období.
+     */
+    public function testRecentLedgerCarriesThePeriodAndKeepsOrphanedAttempts(): void
+    {
+        $ours = $this->open('transport-period-join');
+        $orphan = $this->openOrphanedAttempt();
+
+        $recent = $this->repository->listRecent(
+            $this->supplierId,
+            self::ENVIRONMENT,
+        );
+        $byId = array_column($recent, null, 'id');
+
+        self::assertArrayHasKey($ours['id'], $byId);
+        self::assertSame('2026-07-01', $byId[$ours['id']]['period_start']);
+        self::assertSame('2026-07-31', $byId[$ours['id']]['period_end']);
+
+        self::assertArrayHasKey($orphan, $byId);
+        self::assertNull($byId[$orphan]['period_start']);
+        self::assertNull($byId[$orphan]['period_end']);
+
+        // Období smí přibýt jen do přehledu; detail pokusu i fronty na pozadí
+        // zůstávají beze změny, aby se jim nezměnil tvar řádku.
+        $detail = $this->repository->find(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            (int) $ours['id'],
+        );
+        self::assertIsArray($detail);
+        self::assertArrayNotHasKey('period_start', $detail);
+    }
+
+    /**
+     * Pokus, jehož podání v evidenci není.
+     *
+     * Cizí klíč i vstupní trigger (migrace 1372) to za normálního provozu
+     * nedovolí, takže se sem dá dostat jen obnovou po částech nebo zásahem do
+     * dat. Vyrábí se proto poctivě — pokus vznikne nad existujícím podáním a to
+     * se pak s vypnutou kontrolou smaže. Kdyby přehled joinoval natvrdo, takový
+     * pokus by z ledgeru zmizel a s ním i důkaz, že podání odešlo.
+     */
+    private function openOrphanedAttempt(): int
+    {
+        $pdo = $this->db->pdo();
+        $submissionId = $this->createSubmission($pdo, 'orphan');
+        $attemptId = (int) $this->repository->open(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $submissionId,
+            self::CHANNEL,
+            1,
+            'transport-period-orphan',
+            str_repeat('a', 64),
+            null,
+        )['id'];
+
+        $pdo->exec('SET foreign_key_checks = 0');
+        try {
+            $pdo->prepare('DELETE FROM payroll_submissions WHERE id = ?')
+                ->execute([$submissionId]);
+        } finally {
+            $pdo->exec('SET foreign_key_checks = 1');
+        }
+
+        return $attemptId;
+    }
+
     /** @return array<string,mixed> */
     private function open(string $idempotencyKey): array
     {
@@ -286,7 +544,7 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
         );
     }
 
-    private function createSubmission(PDO $pdo): int
+    private function createSubmission(PDO $pdo, string $tag = 'transport'): int
     {
         $pdo->prepare(
             'INSERT INTO payroll_obligations
@@ -294,16 +552,18 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
                  subject_reference, period_start, period_end, obligation_kind,
                  preferred_channel, source_event_type, source_event_reference,
                  source_event_hash, request_fingerprint, idempotency_key_hash)
-             VALUES (?, ?, "JMHZ", "office", "office:transport", "2026-07-01",
+             VALUES (?, ?, "JMHZ", "office", ?, "2026-07-01",
                      "2026-07-31", "regular", ?, "payroll_run_approved",
-                     "run:transport:2026-07", ?, ?, ?)',
+                     ?, ?, ?, ?)',
         )->execute([
             $this->supplierId,
             self::ENVIRONMENT,
+            'office:' . $tag,
             self::CHANNEL,
-            str_repeat('1', 64),
-            str_repeat('2', 64),
-            hash('sha256', "transport-obligation:{$this->supplierId}", true),
+            "run:{$tag}:2026-07",
+            hash('sha256', "obligation-event:{$tag}:{$this->supplierId}"),
+            hash('sha256', "obligation-request:{$tag}:{$this->supplierId}"),
+            hash('sha256', "transport-obligation:{$tag}:{$this->supplierId}", true),
         ]);
         $obligationId = (int) $pdo->lastInsertId();
 
@@ -318,9 +578,9 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
             self::ENVIRONMENT,
             $obligationId,
             self::CHANNEL,
-            str_repeat('3', 64),
-            str_repeat('4', 64),
-            hash('sha256', "transport-submission:{$this->supplierId}", true),
+            hash('sha256', "submission-snapshot:{$tag}:{$this->supplierId}"),
+            hash('sha256', "submission-request:{$tag}:{$this->supplierId}"),
+            hash('sha256', "transport-submission:{$tag}:{$this->supplierId}", true),
         ]);
 
         return (int) $pdo->lastInsertId();

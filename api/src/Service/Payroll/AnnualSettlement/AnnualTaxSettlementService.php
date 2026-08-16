@@ -1,0 +1,497 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Payroll\AnnualSettlement;
+
+use DateTimeImmutable;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository;
+use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
+use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorUnavailableException;
+use MyInvoice\Service\Payroll\Document\AnnualSettlementPdfRenderer;
+use MyInvoice\Service\Payroll\Document\AnnualSettlementSnapshotBuilder;
+use MyInvoice\Service\Payroll\Document\PayrollDocumentService;
+use MyInvoice\Service\Payroll\IncomeTax\ExternalEmployerTaxCertificate;
+use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
+use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationStatus;
+use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
+
+/**
+ * Roční zúčtování záloh a daňového zvýhodnění — § 38ch ZDP.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Dvě operace, schválně oddělené
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  - `preview()` posoudí podmínky a spočítá výsledek, ale NIC neuloží. Je to
+ *    to, co uživatel vidí, než se rozhodne. Smí se volat kolikrát chce.
+ *  - `settle()` udělá totéž a výsledek zmrazí do dokladu. Je idempotentní:
+ *    druhé spuštění vrátí ten původní výsledek, nezaloží druhý.
+ *
+ * Kdyby to byla jedna metoda, nešlo by se podívat, jak by to dopadlo, aniž by
+ * se tím rovnou provedl právní úkon plátce daně.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Odmítnutí je taky výsledek
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Nesplněné podmínky nevyhazují výjimku — vracejí `AnnualSettlementResult`
+ * s `performed = false` a seznamem překážek. Volající tak vždycky dostane
+ * odpověď na otázku „co s tím", ne jen „nepovedlo se". Výjimka je vyhrazená pro
+ * rozbitý podklad (`AnnualSettlementUnavailableException`).
+ */
+final class AnnualTaxSettlementService
+{
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollAnnualSettlementRepository $settlements,
+        private readonly PayrollStatutoryAccumulatorRepository $accumulators,
+        private readonly PayrollRulesetProvider $rulesets,
+        private readonly AnnualSettlementEligibility $eligibility,
+        private readonly AnnualSettlementClaimMonths $claimMonths,
+        private readonly AnnualTaxSettlementCalculator $calculator,
+        private readonly AnnualSettlementSnapshotBuilder $snapshots,
+        private readonly AnnualSettlementPdfRenderer $renderer,
+        private readonly PayrollDocumentService $documents,
+    ) {}
+
+    /**
+     * @return array{
+     *   result:AnnualSettlementResult,
+     *   request:array<string,mixed>,
+     *   credit_rows:list<array{label:string,amount_minor_units:int}>,
+     *   child_rows:list<array{label:string,months:int,amount_minor_units:int}>,
+     *   already_settled:?array<string,mixed>
+     * }
+     */
+    public function preview(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+        ?DateTimeImmutable $today = null,
+    ): array {
+        return $this->assess($supplierId, $employeeId, $taxYear, $today ?? new DateTimeImmutable());
+    }
+
+    /**
+     * Provede roční zúčtování a zmrazí ho do dokladu.
+     *
+     * @return array{
+     *   result:AnnualSettlementResult,
+     *   outcome:?array<string,mixed>,
+     *   document:?array<string,mixed>,
+     *   created:bool
+     * }
+     */
+    public function settle(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+        ?int $actorUserId,
+        ?DateTimeImmutable $today = null,
+    ): array {
+        $pdo = $this->db->pdo();
+        if ($pdo->inTransaction()) {
+            throw new \LogicException(
+                'Roční zúčtování musí vlastnit databázovou transakci.',
+            );
+        }
+        $today ??= new DateTimeImmutable();
+
+        // Posouzení běží mimo transakci jen jako rychlá odpověď „nemá cenu
+        // začínat". Uvnitř transakce se opakuje, aby mezi posouzením a zápisem
+        // nemohl nikdo změnit evidenci.
+        $preflight = $this->assess($supplierId, $employeeId, $taxYear, $today);
+        if (!$preflight['result']->performed) {
+            return [
+                'result' => $preflight['result'],
+                'outcome' => $preflight['already_settled'],
+                'document' => null,
+                'created' => false,
+            ];
+        }
+
+        $scope = $this->documents->beginStorageScope();
+        $pdo->beginTransaction();
+        try {
+            $assessment = $this->assess($supplierId, $employeeId, $taxYear, $today, true);
+            $result = $assessment['result'];
+            if (!$result->performed) {
+                $pdo->rollBack();
+                $this->documents->cleanupStorageScope($supplierId, $scope);
+
+                return [
+                    'result' => $result,
+                    'outcome' => $assessment['already_settled'],
+                    'document' => null,
+                    'created' => false,
+                ];
+            }
+
+            $prepared = $this->snapshots->build(
+                $supplierId,
+                $employeeId,
+                $taxYear,
+                $result,
+                $today->format('Y-m-d'),
+                $assessment['credit_rows'],
+                $assessment['child_rows'],
+                $actorUserId,
+            );
+            $revisionId = (int) $prepared['revision']['id'];
+
+            $stored = $this->settlements->insertOutcome(
+                $supplierId,
+                $employeeId,
+                $taxYear,
+                [
+                    'annual_revision_id' => $revisionId,
+                    'outcome' => $result->outcome?->value,
+                    'tax_difference_minor' => $result->taxDifferenceMinorUnits,
+                    'bonus_difference_minor' => $result->bonusDifferenceMinorUnits,
+                    'settlement_difference_minor' => $result->settlementDifferenceMinorUnits,
+                    'payable_minor' => $result->payableMinorUnits,
+                    'payout_threshold_minor' =>
+                        AnnualSettlementStatute::PAYOUT_THRESHOLD_MINOR_UNITS,
+                    'settled_on' => $today->format('Y-m-d'),
+                ],
+                $actorUserId,
+            );
+
+            $artifact = $this->renderer->render($prepared['document']);
+            $document = $this->documents->archiveAnnualPdf(
+                $supplierId,
+                $revisionId,
+                $employeeId,
+                $artifact,
+                'annual-settlement:' . hash('sha256', implode("\0", [
+                    (string) $supplierId,
+                    (string) $employeeId,
+                    (string) $taxYear,
+                    $artifact->sourceSnapshotHash,
+                    $artifact->rendererVersion,
+                ])),
+                $actorUserId,
+                $scope,
+            );
+
+            $pdo->commit();
+            $this->documents->commitStorageScope($scope);
+
+            return [
+                'result' => $result,
+                'outcome' => $stored['outcome'],
+                'document' => $document,
+                'created' => $stored['created'],
+            ];
+        } catch (\Throwable $exception) {
+            $this->rollbackIfOpen($pdo);
+            try {
+                $this->documents->cleanupStorageScope($supplierId, $scope);
+            } catch (\Throwable $cleanup) {
+                throw new \RuntimeException(
+                    'Roční zúčtování selhalo a osiřelý soubor se nepodařilo uklidit.',
+                    previous: $cleanup,
+                );
+            }
+            throw $exception;
+        }
+    }
+
+    /**
+     * Posouzení podmínek plus výpočet. Sdílené jádro obou operací — kdyby
+     * existovalo dvakrát, mohl by náhled ukázat jiné číslo, než jaké se pak
+     * zapíše do dokladu.
+     *
+     * @return array{
+     *   result:AnnualSettlementResult,
+     *   request:array<string,mixed>,
+     *   credit_rows:list<array{label:string,amount_minor_units:int}>,
+     *   child_rows:list<array{label:string,months:int,amount_minor_units:int}>,
+     *   already_settled:?array<string,mixed>
+     * }
+     */
+    private function assess(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+        DateTimeImmutable $today,
+        bool $lockOutcome = false,
+    ): array {
+        $request = $this->loadRequest($supplierId, $employeeId, $taxYear);
+        $blockers = [];
+
+        $settled = $this->settlements->findOutcome(
+            $supplierId,
+            $employeeId,
+            $taxYear,
+            $lockOutcome,
+        );
+        if ($settled !== null) {
+            $blockers[] = AnnualSettlementBlocker::AlreadySettled;
+        }
+
+        // Roční sazby jdou z rulesetu účinného pro celý rok. Nepokrývá-li ho
+        // souvisle, roční částky odvodit nelze — a odhadovat je nebudeme.
+        $rates = null;
+        if (!PayrollRulesetYearCoverage::coversYear(
+            $this->rulesets,
+            PayrollRulesetDomain::IncomeTax,
+            $taxYear,
+        )) {
+            $blockers[] = AnnualSettlementBlocker::RulesetYearNotCovered;
+        } else {
+            $rates = AnnualTaxRates::forRuleset($this->rulesets->forCalculation(
+                PayrollRulesetDomain::IncomeTax,
+                sprintf('%04d-12-01', $taxYear),
+            ));
+        }
+
+        // Prohlášení a rezidentství se posuzují k 31. 12. zdaňovacího období —
+        // § 38k odst. 4 mluví o prohlášení „na příslušné zdaňovací období",
+        // takže rozhodný je stav za ten rok, ne dnešek.
+        $evidence = $this->settlements->statutoryEvidenceOn(
+            $supplierId,
+            $employeeId,
+            sprintf('%04d-12-31', $taxYear),
+        );
+        $declaration = TaxDeclarationStatus::tryFrom((string) $evidence['declaration'])
+            ?? TaxDeclarationStatus::Unverified;
+        $residence = TaxResidence::tryFrom((string) $evidence['residence'])
+            ?? TaxResidence::Unverified;
+
+        $credits = $this->claimMonths->credits(
+            $this->settlements->creditClaimsForYear($supplierId, $employeeId, $taxYear),
+            $taxYear,
+        );
+        $children = $this->claimMonths->children(
+            $this->settlements->childClaimsForYear($supplierId, $employeeId, $taxYear),
+            $taxYear,
+        );
+        $blockers = [...$blockers, ...$credits['blockers'], ...$children['blockers']];
+
+        $blockers = $this->eligibility->evaluate(
+            $request,
+            $declaration,
+            $residence,
+            $today,
+            $blockers,
+        );
+
+        try {
+            $state = $this->accumulators->stateForYear(
+                $supplierId,
+                $employeeId,
+                $taxYear,
+                'income_tax',
+            );
+            $totals = is_array($state['totals'] ?? null) ? $state['totals'] : [];
+        } catch (PayrollStatutoryAccumulatorUnavailableException) {
+            $blockers[] = AnnualSettlementBlocker::AccumulatorMissing;
+            $totals = null;
+        }
+
+        if ($rates === null || $totals === null) {
+            return [
+                'result' => AnnualSettlementResult::refused(
+                    $taxYear,
+                    $this->unique($blockers),
+                    ['rates' => $rates?->toArray()],
+                ),
+                'request' => $request->toArray(),
+                'credit_rows' => [],
+                'child_rows' => [],
+                'already_settled' => $settled,
+            ];
+        }
+
+        $input = new AnnualSettlementInput(
+            $taxYear,
+            (int) ($totals['completed_months'] ?? 0),
+            (int) ($totals['advance_base_minor_units'] ?? 0),
+            (int) ($totals['advance_tax_minor_units'] ?? 0),
+            (int) ($totals['applied_non_refundable_credits_minor_units'] ?? 0),
+            (int) ($totals['applied_child_credit_minor_units'] ?? 0),
+            (int) ($totals['tax_bonus_minor_units'] ?? 0),
+            (int) ($totals['bonus_qualifying_income_minor_units'] ?? 0),
+            (int) ($totals['withholding_base_minor_units'] ?? 0),
+            (int) ($totals['withholding_tax_minor_units'] ?? 0),
+            $credits['credits'],
+            $children['children'],
+            $this->externalCertificates(),
+        );
+
+        $result = $this->calculator->calculate($input, $rates, $this->unique($blockers));
+
+        return [
+            'result' => $result,
+            'request' => $request->toArray(),
+            'credit_rows' => $this->creditRows($result),
+            'child_rows' => $this->childRows($result),
+            'already_settled' => $settled,
+        ];
+    }
+
+    /**
+     * Vrácení transakce, když ještě běží.
+     *
+     * Vlastní metoda kvůli statické analýze: v `catch` bloku je pro ni stav
+     * transakce pořád ten, který platil na začátku metody, takže by přímou
+     * podmínku označila za vždy nepravdivou. Stejný vzor má
+     * `AnnualPayrollSheetService`.
+     */
+    private function rollbackIfOpen(\PDO $pdo): void
+    {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+    }
+
+    /**
+     * Potvrzení od předchozích plátců (§ 38ch odst. 3).
+     *
+     * Vrací prázdný seznam, protože je modul dnes NEEVIDUJE — datový typ
+     * `ExternalEmployerTaxCertificate` existuje a měsíční výpočet ho protahuje
+     * dál, ale žádná tabulka ani formulář ho neplní. Metoda tu je proto, aby
+     * bylo na jednom místě vidět, kde se doplní, a aby se na ni dalo napojit,
+     * až potvrzení ponese i měsíční slevy a vyplacené bonusy. Do té doby by
+     * jakékoli potvrzení znamenalo `ExternalCertificateIncomplete`.
+     *
+     * @return list<ExternalEmployerTaxCertificate>
+     */
+    private function externalCertificates(): array
+    {
+        return [];
+    }
+
+    /** @return list<array{label:string,amount_minor_units:int}> */
+    private function creditRows(AnnualSettlementResult $result): array
+    {
+        $credits = $result->trace['credits'] ?? [];
+        if (!is_array($credits)) {
+            return [];
+        }
+        $rows = [];
+        foreach ($credits as $kindValue => $credit) {
+            if (!is_array($credit)) {
+                continue;
+            }
+            $kind = TaxCreditKind::tryFrom((string) $kindValue);
+            if ($kind === null) {
+                continue;
+            }
+            $rows[] = [
+                'label' => self::creditLabel($kind, (int) ($credit['months'] ?? 0)),
+                'amount_minor_units' => (int) ($credit['amount_minor_units'] ?? 0),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /** @return list<array{label:string,months:int,amount_minor_units:int}> */
+    private function childRows(AnnualSettlementResult $result): array
+    {
+        $children = $result->trace['children'] ?? [];
+        if (!is_array($children)) {
+            return [];
+        }
+        $rows = [];
+        foreach ($children as $child) {
+            if (!is_array($child)) {
+                continue;
+            }
+            $order = (int) ($child['order'] ?? 0);
+            $ztpPMonths = (int) ($child['ztp_p_months'] ?? 0);
+            $rows[] = [
+                'label' => sprintf(
+                    '%d. dítě%s',
+                    $order,
+                    $ztpPMonths > 0
+                        ? sprintf(' (průkaz ZTP/P %d měs.)', $ztpPMonths)
+                        : '',
+                ),
+                'months' => (int) ($child['months'] ?? 0),
+                'amount_minor_units' => (int) ($child['amount_minor_units'] ?? 0),
+            ];
+        }
+
+        return $rows;
+    }
+
+    private static function creditLabel(TaxCreditKind $kind, int $months): string
+    {
+        $name = match ($kind) {
+            // § 35ba odst. 3 dvanáctinovou úpravu na slevu na poplatníka
+            // nevztahuje, proto se u ní počet měsíců neuvádí — vedlo by to
+            // ke špatnému závěru, že se krátí.
+            TaxCreditKind::Taxpayer => 'Základní sleva na poplatníka (§ 35ba odst. 1 písm. a)',
+            TaxCreditKind::DisabilityBasic => 'Základní sleva na invaliditu (§ 35ba odst. 1 písm. c)',
+            TaxCreditKind::DisabilityExtended => 'Rozšířená sleva na invaliditu (§ 35ba odst. 1 písm. d)',
+            TaxCreditKind::ZtpP => 'Sleva na držitele průkazu ZTP/P (§ 35ba odst. 1 písm. e)',
+        };
+        if ($kind === TaxCreditKind::Taxpayer) {
+            return $name;
+        }
+
+        return sprintf('%s — %d měs.', $name, $months);
+    }
+
+    private function loadRequest(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+    ): AnnualSettlementRequest {
+        $row = $this->settlements->findRequest($supplierId, $employeeId, $taxYear);
+        if ($row === null) {
+            return AnnualSettlementRequest::unknown($taxYear);
+        }
+
+        return new AnnualSettlementRequest(
+            $taxYear,
+            AnnualSettlementRequestStatus::from((string) $row['request_status']),
+            self::date($row['requested_on'] ?? null),
+            self::text($row['request_evidence_reference'] ?? null),
+            AnnualSettlementPriorEmployers::from((string) $row['prior_employers']),
+            self::date($row['prior_documents_received_on'] ?? null),
+            AnnualSettlementFilingObligation::from((string) $row['filing_obligation']),
+            self::text($row['filing_obligation_reason'] ?? null),
+            AnnualSettlementAnnualClaims::from((string) $row['annual_claims']),
+            self::text($row['annual_claims_note'] ?? null),
+            self::text($row['note'] ?? null),
+            (int) $row['row_version'],
+        );
+    }
+
+    private static function date(mixed $value): ?DateTimeImmutable
+    {
+        if (!is_string($value) || $value === '') {
+            return null;
+        }
+        $date = DateTimeImmutable::createFromFormat('!Y-m-d', substr($value, 0, 10));
+
+        return $date === false ? null : $date;
+    }
+
+    private static function text(mixed $value): ?string
+    {
+        return is_string($value) && trim($value) !== '' ? trim($value) : null;
+    }
+
+    /**
+     * @param list<AnnualSettlementBlocker> $blockers
+     * @return list<AnnualSettlementBlocker>
+     */
+    private function unique(array $blockers): array
+    {
+        $unique = [];
+        foreach ($blockers as $blocker) {
+            $unique[$blocker->value] = $blocker;
+        }
+        ksort($unique);
+
+        return array_values($unique);
+    }
+}

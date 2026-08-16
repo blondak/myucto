@@ -582,7 +582,7 @@ final class WorkReportLinkService
         return $svg;
     }
 
-    /** r***@hulan.cz — náznak adresy pro UI bez prozrazení celé adresy. */
+    /** p***@example.cz — náznak adresy pro UI bez prozrazení celé adresy. */
     public static function maskEmail(string $email): string
     {
         $at = strpos($email, '@');

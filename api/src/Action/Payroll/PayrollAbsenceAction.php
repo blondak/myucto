@@ -10,10 +10,14 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollAbsenceConflictException;
 use MyInvoice\Repository\Payroll\PayrollAbsenceOverlapException;
 use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
+use MyInvoice\Repository\Payroll\PayrollAverageEarningDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollAverageEarningRepository;
+use MyInvoice\Repository\Payroll\PayrollLeaveEntitlementDeletionRepository;
+use MyInvoice\Repository\Payroll\PayrollLeaveLedgerDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollLeaveRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Absence\AverageEarningCalculator;
 use MyInvoice\Service\Payroll\Absence\LeaveEntitlementCalculator;
 use MyInvoice\Service\Payroll\Absence\SicknessCompensationCalculator;
@@ -27,6 +31,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class PayrollAbsenceAction
 {
     use PayrollActionSupport;
+    use PayrollDeletionResponse;
 
     public function __construct(
         private readonly Connection $db,
@@ -40,6 +45,10 @@ final class PayrollAbsenceAction
         private readonly SicknessCompensationCalculator $sicknessCalculator,
         private readonly PayrollModuleAccess $access,
         private readonly PayrollRulesetProvider $rulesets,
+        private readonly PayrollAverageEarningDeletionRepository $averageDeletion,
+        private readonly PayrollLeaveLedgerDeletionRepository $ledgerDeletion,
+        private readonly PayrollLeaveEntitlementDeletionRepository $entitlementDeletion,
+        private readonly IpMatcher $ipMatcher,
     ) {}
 
     public function context(Request $request, Response $response): Response
@@ -58,8 +67,8 @@ final class PayrollAbsenceAction
         if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
             return $error;
         }
+        $query = $request->getQueryParams();
         try {
-            $query = $request->getQueryParams();
             $from = $this->queryDate($query['from'] ?? null, 'from');
             $to = $this->queryDate($query['to'] ?? null, 'to');
             if ($to < $from) {
@@ -69,13 +78,32 @@ final class PayrollAbsenceAction
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
+        // Počet řádků roste součinem počtu zaměstnanců a délky rozsahu, takže
+        // roční filtr u větší firmy vrátí neomezenou odpověď. Strop je tvrdý
+        // (ne jen výchozí), aby ho nešlo obejít parametrem z URL.
+        $limit = max(1, min(
+            PayrollAbsenceRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollAbsenceRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
+
+        $page = $this->absences->list(
+            $this->currentSupplierId($request),
+            $from,
+            $to,
+            $employmentId,
+            $limit,
+            $offset,
+        );
+
+        // Klíč `absences` zůstává, aby stávající volající nespadli;
+        // `total`/`limit`/`offset` přibyly vedle něj, protože seznam už nemusí
+        // být úplný.
         return Json::ok($response, [
-            'absences' => $this->absences->list(
-                $this->currentSupplierId($request),
-                $from,
-                $to,
-                $employmentId,
-            ),
+            'absences' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ]);
     }
 
@@ -338,6 +366,9 @@ final class PayrollAbsenceAction
         $supplierId = $this->currentSupplierId($request);
         return Json::ok($response, [
             'entries' => $this->leave->list($supplierId, $employmentId, $year),
+            // Revize nároku patří do stejné odpovědi jako kniha — bez nich by
+            // uživatel neměl kde spočítaný nárok najít, natož ho smazat.
+            'entitlements' => $this->leave->entitlements($supplierId, $employmentId, $year),
             'balance_minutes' => $this->leave->balance($supplierId, $employmentId, $year),
         ]);
     }
@@ -405,6 +436,93 @@ final class PayrollAbsenceAction
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
         return Json::ok($response, ['entitlement' => $entitlement], 201);
+    }
+
+    /**
+     * Smaže špatně zadaný průměrný výdělek, který ještě nikdo neschválil.
+     *
+     * Právo je `payroll.time.write`, tedy TOTÉŽ, kterým se průměr zakládá.
+     * Před schváleným výpočtem a navázanou náhradou chrání blokátory
+     * v repozitáři, ne zvláštní právo.
+     *
+     * @param array<string,string> $args
+     */
+    public function deleteAverage(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+
+        return $this->runDeletion(
+            $request,
+            $response,
+            fn (int $supplierId, int $id, ?int $version, ?int $userId, string $ip, string $agent): array
+                => $this->averageDeletion->delete($supplierId, $id, $version, $userId, $ip, $agent),
+            (int) ($args['id'] ?? 0),
+        );
+    }
+
+    /**
+     * Smaže ručně zadaný zápis v knize dovolené.
+     *
+     * @param array<string,string> $args
+     */
+    public function deleteLeaveEntry(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+
+        return $this->runDeletion(
+            $request,
+            $response,
+            fn (int $supplierId, int $id, ?int $version, ?int $userId, string $ip, string $agent): array
+                => $this->ledgerDeletion->delete($supplierId, $id, $version, $userId, $ip, $agent),
+            (int) ($args['id'] ?? 0),
+        );
+    }
+
+    /**
+     * Smaže poslední revizi nároku na dovolenou i její zápisy v knize.
+     *
+     * @param array<string,string> $args
+     */
+    public function deleteEntitlement(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+
+        return $this->runDeletion(
+            $request,
+            $response,
+            fn (int $supplierId, int $id, ?int $version, ?int $userId, string $ip, string $agent): array
+                => $this->entitlementDeletion->delete($supplierId, $id, $version, $userId, $ip, $agent),
+            (int) ($args['id'] ?? 0),
+        );
+    }
+
+    /** @param \Closure(int,int,?int,?int,string,string):array<string,int> $delete */
+    private function runDeletion(
+        Request $request,
+        Response $response,
+        \Closure $delete,
+        int $id,
+    ): Response {
+        try {
+            $cascade = $delete(
+                $this->currentSupplierId($request),
+                $id,
+                $this->optionalRowVersion($this->deletionBody($request)['row_version'] ?? null),
+                $this->userId($request),
+                $this->ipMatcher->clientIpFromRequest($this->deletionServerParams($request)),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->deletionError($response, $e);
+        }
+
+        return Json::ok($response, ['deleted' => true, 'cascade' => $cascade]);
     }
 
     private function authorize(Request $request, Response $response, AccessLevel $level): ?Response

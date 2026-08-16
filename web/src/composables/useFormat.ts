@@ -35,6 +35,23 @@ export function formatMoney(value: number | null | undefined, currency: string =
   return `${formatter.format(value)} ${symbol}`
 }
 
+/**
+ * Peníze uložené v setinách (minor units) — tak je drží celý mzdový modul
+ * i banka, aby se na částkách nikdy neprojevila plovoucí čárka.
+ *
+ * Existuje zvlášť od `formatMoney`, protože rozdíl mezi „12,34 Kč" a
+ * „1 234,00 Kč" je jen v tom, kdo dělí stem — a když to dělá každá stránka
+ * sama, dřív nebo později to jedna zapomene.
+ */
+export function formatMoneyMinor(
+  value: number | null | undefined,
+  currency: string = 'CZK',
+  decimals?: number,
+): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—'
+  return formatMoney(value / 100, currency, decimals)
+}
+
 export function formatNumber(
   value: number | null | undefined,
   options: Intl.NumberFormatOptions = {},
@@ -56,7 +73,10 @@ export function formatCompactNumber(value: number | null | undefined): string {
 
 export function formatDate(date: string | null | undefined): string {
   if (!date) return '—'
-  const d = new Date(date)
+  // „2026-08-15 10:30:00" (tvar, ve kterém timestampy vrací API) není podle
+  // specifikace platný vstup `new Date()` — V8 ho spolkne, jiné enginy z něj
+  // udělají NaN. Mezera na „T" to sjednotí; časová složka se stejně zahodí.
+  const d = new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(date) ? date.replace(' ', 'T') : date)
   if (Number.isNaN(d.getTime())) return date
   return new Intl.DateTimeFormat(activeLocale(), { day: '2-digit', month: '2-digit', year: 'numeric' }).format(d)
 }
@@ -77,13 +97,29 @@ export function formatDateTime(date: string | null | undefined): string {
   }).format(d)
 }
 
-export function formatMonth(yyyymm: string): string {
-  const [y, m] = yyyymm.split('-').map(Number)
-  if (!y || !m) return yyyymm
+/**
+ * Období „YYYY-MM" jako „srpen 2026" / „August 2026".
+ *
+ * Strojové `2026-08` je pro člověka horší než zbytečné — v sestavě plné dat
+ * ve tvaru `01.08.2026` se od nich pohledem nedá odlišit a čte se jako
+ * useknuté datum. Kdekoli se období ukazuje uživateli, patří sem.
+ *
+ * Vstup, který na období nevypadá, se vrací beze změny — je to popisek, ne
+ * validace, a pád na půl vykreslené sestavy by byl horší než syrový řetězec.
+ */
+export function formatPeriod(period: string | null | undefined): string {
+  if (!period) return '—'
+  const [y, m] = period.split('-').map(Number)
+  if (!y || !m || m < 1 || m > 12) return period
   const monthsCs = ['leden', 'únor', 'březen', 'duben', 'květen', 'červen', 'červenec', 'srpen', 'září', 'říjen', 'listopad', 'prosinec']
   const monthsEn = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
   const months = i18n.global.locale.value === 'en' ? monthsEn : monthsCs
   return `${months[m - 1]} ${y}`
+}
+
+/** Historický název `formatPeriod`; drží se kvůli volajícím mimo mzdy. */
+export function formatMonth(yyyymm: string): string {
+  return yyyymm ? formatPeriod(yyyymm) : yyyymm
 }
 
 export function formatPercent(value: number | null | undefined, decimals?: number): string {

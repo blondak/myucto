@@ -241,9 +241,9 @@ final class ViesClient
      * pokud nemá smysl parsovat, vrátí null a frontend nechá raw `address` k zobrazení.
      *
      * CZ pattern (3 řádky):
-     *   "Kardinála Berana 1104/36"          ← ulice + č.p.
-     *   "PLZEŇ 3 - JIŽNÍ PŘEDMĚSTÍ"          ← městská část (zahodit)
-     *   "301 00  PLZEŇ 1"                   ← PSČ + město
+     *   "Zkušební 123/4"                    ← ulice + č.p.
+     *   "VZOROV 3 - JIŽNÍ PŘEDMĚSTÍ"         ← městská část (zahodit)
+     *   "100 00  VZOROV 1"                  ← PSČ + město
      *
      * SK pattern: podobný CZ.
      * DE/AT pattern: typicky "Straße 1\n12345 Stadt" (2 řádky).
@@ -286,7 +286,7 @@ final class ViesClient
         }
         if (empty($lines)) return null;
 
-        // Poslední řádek = "PSČ město" — CZ má "301 00 Plzeň", SK má "82108 Bratislava"
+        // Poslední řádek = "PSČ město" — CZ má "100 00 Vzorov", SK má "82108 Bratislava"
         $last = end($lines);
         if (!preg_match('/^(\d{3}\s?\d{2})\s+(.+)$/u', $last, $m)) {
             return null;
@@ -333,7 +333,7 @@ final class ViesClient
     }
 
     /**
-     * Konvertuje "KARDINÁLA BERANA" → "Kardinála Berana", "PLZEŇ 1" → "Plzeň 1".
+     * Konvertuje "ZKUŠEBNÍ" → "Zkušební", "VZOROV 1" → "Vzorov 1".
      * Pro CZ/SK adresy jsou často všechny velké, ALE názvy ulic/měst chceme s velkým prvním písmenem.
      */
     private function prettyCase(string $s): string

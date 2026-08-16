@@ -92,6 +92,157 @@ final class PayrollRunWorkflowTest extends TestCase
         self::assertSame($command, $transition->command);
     }
 
+    /**
+     * Celý řetěz od konceptu po uzavření musí projít jedním průchodem — jinak
+     * se dá zaúčtování nebo platby v matici „ztratit" a běh skončí v
+     * `approved`, jak to bylo před doplněním příkazů `post`, `prepare_payments`
+     * a `mark_paid`.
+     */
+    public function testHappyPathReachesClosedThroughPostingAndPayments(): void
+    {
+        $status = PayrollRunStatus::DRAFT;
+        $visited = [$status->value];
+        foreach ([
+            PayrollRunCommand::LOCK_INPUTS,
+            PayrollRunCommand::CALCULATE,
+            PayrollRunCommand::REVIEW,
+            PayrollRunCommand::APPROVE,
+            PayrollRunCommand::POST,
+            PayrollRunCommand::PREPARE_PAYMENTS,
+            PayrollRunCommand::MARK_PAID,
+            PayrollRunCommand::CLOSE,
+        ] as $command) {
+            $status = $this->workflow
+                ->transition($status, $command, $this->context())
+                ->to;
+            $visited[] = $status->value;
+        }
+
+        self::assertSame([
+            'draft',
+            'inputs_locked',
+            'calculated',
+            'reviewed',
+            'approved',
+            'posted',
+            'payment_ready',
+            'paid',
+            'closed',
+        ], $visited);
+    }
+
+    /** @return iterable<string,array{PayrollRunStatus,PayrollRunCommand}> */
+    public static function forbiddenPaymentTransitions(): iterable
+    {
+        yield 'zaúčtování před schválením' => [
+            PayrollRunStatus::REVIEWED,
+            PayrollRunCommand::POST,
+        ];
+        yield 'zaúčtování podruhé' => [
+            PayrollRunStatus::POSTED,
+            PayrollRunCommand::POST,
+        ];
+        yield 'platby před zaúčtováním' => [
+            PayrollRunStatus::APPROVED,
+            PayrollRunCommand::PREPARE_PAYMENTS,
+        ];
+        yield 'platby podruhé' => [
+            PayrollRunStatus::PAYMENT_READY,
+            PayrollRunCommand::PREPARE_PAYMENTS,
+        ];
+        yield 'úhrada před přípravou plateb' => [
+            PayrollRunStatus::POSTED,
+            PayrollRunCommand::MARK_PAID,
+        ];
+        yield 'úhrada podruhé' => [
+            PayrollRunStatus::PAID,
+            PayrollRunCommand::MARK_PAID,
+        ];
+        yield 'uzavření před úhradou' => [
+            PayrollRunStatus::PAYMENT_READY,
+            PayrollRunCommand::CLOSE,
+        ];
+        yield 'zaúčtování zrušeného běhu' => [
+            PayrollRunStatus::CANCELLED,
+            PayrollRunCommand::POST,
+        ];
+        yield 'platby zrušeného běhu' => [
+            PayrollRunStatus::CANCELLED,
+            PayrollRunCommand::PREPARE_PAYMENTS,
+        ];
+        yield 'úhrada uzavřeného běhu' => [
+            PayrollRunStatus::CLOSED,
+            PayrollRunCommand::MARK_PAID,
+        ];
+        yield 'zaúčtování běhu čekajícího na opravu' => [
+            PayrollRunStatus::CORRECTION_PENDING,
+            PayrollRunCommand::POST,
+        ];
+    }
+
+    #[DataProvider('forbiddenPaymentTransitions')]
+    public function testForbiddenPaymentTransitions(
+        PayrollRunStatus $from,
+        PayrollRunCommand $command,
+    ): void {
+        $this->expectException(\DomainException::class);
+        $this->workflow->transition($from, $command, $this->context());
+    }
+
+    /** @return iterable<string,array{PayrollRunStatus}> */
+    public static function correctableStatuses(): iterable
+    {
+        yield 'posted' => [PayrollRunStatus::POSTED];
+        yield 'payment_ready' => [PayrollRunStatus::PAYMENT_READY];
+        yield 'paid' => [PayrollRunStatus::PAID];
+    }
+
+    #[DataProvider('correctableStatuses')]
+    public function testPaymentStatesStayCorrectable(
+        PayrollRunStatus $from,
+    ): void {
+        $transition = $this->workflow->transition(
+            $from,
+            PayrollRunCommand::REQUEST_CORRECTION,
+            $this->context(reason: 'Syntetický důvod opravy'),
+        );
+
+        self::assertSame(
+            PayrollRunStatus::CORRECTION_PENDING,
+            $transition->to,
+        );
+    }
+
+    public function testPostingAndPaymentGatesBlockWithoutEvidence(): void
+    {
+        foreach ([
+            [PayrollRunStatus::APPROVED, PayrollRunCommand::POST, $this->context(hasPostingBatch: false)],
+            [PayrollRunStatus::PAYMENT_READY, PayrollRunCommand::MARK_PAID, $this->context(hasPaymentBatch: false)],
+        ] as [$from, $command, $context]) {
+            try {
+                $this->workflow->transition($from, $command, $context);
+                self::fail($command->value);
+            } catch (\DomainException $e) {
+                self::assertNotSame('', $e->getMessage());
+            }
+        }
+
+        // Příprava plateb žádnou předchozí evidenci nevyžaduje — brána je až
+        // ve službě (materializace musí projít celá), workflow ji nesmí
+        // blokovat na neexistující dávce.
+        self::assertSame(
+            PayrollRunStatus::PAYMENT_READY,
+            $this->workflow->transition(
+                PayrollRunStatus::POSTED,
+                PayrollRunCommand::PREPARE_PAYMENTS,
+                $this->context(
+                    hasPostingBatch: false,
+                    hasPaymentBatch: false,
+                ),
+            )->to,
+        );
+    }
+
     public function testTransitionMatrixRejectsSkippedApproval(): void
     {
         $this->expectException(\DomainException::class);

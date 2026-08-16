@@ -116,7 +116,7 @@ final class PayrollRegistrationIdentitySnapshotBuilder
     /**
      * @param array<string,mixed> $source
      * @return array{
-     *   supplier_id:int,submission_id:int,source_revision_id:int,
+     *   supplier_id:int,submission_id:int,source_revision_id:?int,
      *   employee_id:int,employment_id:int,environment:string,
      *   agenda_code:string,effective_on:string
      * }
@@ -141,8 +141,15 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         return [
             'supplier_id' => $this->positive($source, 'supplier_id'),
             'submission_id' => $this->positive($source, 'submission_id'),
+            // Registrace pracovního vztahu NEVZNIKÁ z mzdového běhu: přihláška
+            // se podává před zahájením práce, tedy dřív, než vůbec může
+            // existovat revize běhu. Vynucovat tu kladné číslo by znamenalo
+            // buď registraci odložit za první běh (a zmeškat zákonnou lhůtu),
+            // nebo do zmrazeného snapshotu zapsat vymyšlenou revizi. JMHZ
+            // cestu to nemění — ta posílá skutečné id dál, takže kanonické
+            // JSON i otisky už zmrazených snapshotů zůstávají beze změny.
             'source_revision_id' =>
-                $this->positive($source, 'source_revision_id'),
+                $this->optionalPositive($source, 'source_revision_id'),
             'employee_id' => $this->positive($source, 'employee_id'),
             'employment_id' => $this->positive($source, 'employment_id'),
             'environment' => $environment,
@@ -535,6 +542,17 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         }
 
         return $result;
+    }
+
+    /** @param array<string,mixed> $source */
+    private function optionalPositive(array $source, string $key): ?int
+    {
+        $value = $source[$key] ?? null;
+        if ($value === null) {
+            return null;
+        }
+
+        return $this->positive($source, $key);
     }
 
     /** @param array<string,mixed> $source */

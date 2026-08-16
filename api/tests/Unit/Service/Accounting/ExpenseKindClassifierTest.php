@@ -243,7 +243,7 @@ final class ExpenseKindClassifierTest extends TestCase
     {
         $s = $this->c->classify(
             'Prodej vozu BMW 330d xDrive Touring, SPZ: 9AV 3443, Rok první registrace: 2023, Záruka do: 5/2028',
-            'Radek Hulán',
+            'Jan Novák',
             null,
             1157024.79,
             self::LIMIT,

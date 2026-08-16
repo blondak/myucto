@@ -9,6 +9,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
+use MyInvoice\Service\Payroll\Ruleset\RulesetApproval;
 use MyInvoice\Tests\Fixtures\Payroll\ShiftedYearPayrollRulesetFixture;
 use PHPUnit\Framework\TestCase;
 
@@ -89,6 +90,8 @@ final class PayrollRulesetYearCoverageTest extends TestCase
         $base = CzechPayrollRulesets2026::provider()
             ->forDate(PayrollRulesetDomain::CompensationAverages, '2026-08-03');
 
+        // Osekaná kopie už není dodaná sada, takže si účinnost musí zaplatit
+        // schválením — stejně jako každý zákaznický přepis.
         return new PayrollRulesetProvider([
             new PayrollRulesetVersion(
                 $base->id . '.partial',
@@ -100,7 +103,13 @@ final class PayrollRulesetYearCoverageTest extends TestCase
                 $base->capability,
                 $base->sources,
                 $base->parameters,
-                $base->approval,
+                $base->approval ?? new RulesetApproval(
+                    'synthetic-independent-reviewer',
+                    '2026-08-02',
+                    'synthetic-independent-approver',
+                    '2026-08-03',
+                    'Synthetic approval used only by deterministic unit tests.',
+                ),
                 $base->technicalReview,
             ),
         ]);

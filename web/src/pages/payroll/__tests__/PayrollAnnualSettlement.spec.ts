@@ -1,0 +1,329 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const m = vi.hoisted(() => ({
+  listAnnualSettlements: vi.fn(),
+  previewAnnualSettlement: vi.fn(),
+  saveAnnualSettlementRequest: vi.fn(),
+  settleAnnualSettlement: vi.fn(),
+  downloadDocument: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn(),
+  success: vi.fn(),
+}))
+
+vi.mock('@/api/payroll', () => ({
+  payrollApi: {
+    listAnnualSettlements: m.listAnnualSettlements,
+    previewAnnualSettlement: m.previewAnnualSettlement,
+    saveAnnualSettlementRequest: m.saveAnnualSettlementRequest,
+    settleAnnualSettlement: m.settleAnnualSettlement,
+    downloadDocument: m.downloadDocument,
+  },
+}))
+
+vi.mock('@/api/errors', () => ({
+  apiErrorMessage: (_error: unknown, fallback: string) => fallback,
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ canWrite: () => true }),
+}))
+
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({
+    error: m.error,
+    success: m.success,
+    warning: m.warning,
+  }),
+}))
+
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
+  useI18n: () => ({
+    t: (key: string) => key,
+    locale: { value: 'cs' },
+  }),
+}))
+
+import PayrollAnnualSettlement from '@/pages/payroll/PayrollAnnualSettlement.vue'
+
+const actionBarStub = {
+  props: ['actions'],
+  template:
+    '<div data-test="action-bar">'
+    + '<button v-for="a in actions" :key="a.key" :data-action="a.key" '
+    + ':disabled="a.disabled" :data-reason="a.disabledReason" @click="a.run && a.run()">'
+    + '{{ a.label }}</button></div>',
+}
+
+const emptyStateStub = {
+  props: ['variant', 'title', 'message', 'cta'],
+  template: '<div data-test="empty-state" :data-variant="variant">{{ title }}</div>',
+}
+
+function listResponse(items: unknown[]) {
+  return {
+    tax_year: 2026,
+    request_deadline: '2027-02-15',
+    settlement_deadline: '2027-03-31',
+    payout_period: '2027-03',
+    payout_threshold_minor: 5000,
+    items,
+  }
+}
+
+function person(overrides: Record<string, unknown> = {}) {
+  return {
+    employee_id: 7,
+    employee_name: 'Syntetická osoba',
+    request_status: 'requested',
+    requested_on: '2027-02-05',
+    prior_employers: 'none',
+    filing_obligation: 'none',
+    annual_claims: 'none',
+    row_version: 1,
+    outcome_id: null,
+    outcome: null,
+    tax_difference_minor: null,
+    bonus_difference_minor: null,
+    settlement_difference_minor: null,
+    payable_minor: null,
+    settled_on: null,
+    payroll_input_id: null,
+    annual_revision_id: null,
+    ...overrides,
+  }
+}
+
+function result(overrides: Record<string, unknown> = {}) {
+  return {
+    schema_version: 'payroll-annual-settlement.v1',
+    tax_year: 2026,
+    performed: true,
+    blockers: [],
+    outcome: 'overpayment',
+    rounded_tax_base_minor_units: 50_000_000,
+    tax_before_credits_minor_units: 7_500_000,
+    annual_credits_minor_units: 3_084_000,
+    applied_credits_minor_units: 3_084_000,
+    child_entitlement_minor_units: 0,
+    child_credit_minor_units: 0,
+    annual_tax_bonus_minor_units: 0,
+    tax_after_all_credits_minor_units: 4_416_000,
+    tax_difference_minor_units: 120_000,
+    bonus_difference_minor_units: 0,
+    settlement_difference_minor_units: 120_000,
+    payable_minor_units: 120_000,
+    annual_bonus_threshold_met: true,
+    ...overrides,
+  }
+}
+
+function previewResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    tax_year: 2026,
+    employee_id: 7,
+    request: {
+      tax_year: 2026,
+      request_status: 'requested',
+      requested_on: '2027-02-05',
+      request_evidence_reference: 'synthetic',
+      prior_employers: 'none',
+      prior_documents_received_on: null,
+      filing_obligation: 'none',
+      filing_obligation_reason: null,
+      annual_claims: 'none',
+      annual_claims_note: null,
+      note: null,
+      row_version: 1,
+    },
+    result: result(),
+    credit_rows: [{ label: 'Základní sleva na poplatníka', amount_minor_units: 3_084_000 }],
+    child_rows: [],
+    already_settled: null,
+    ...overrides,
+  }
+}
+
+/**
+ * Výchozí rok stránky je UPLYNULÉ zdaňovací období — zúčtovává se to, co
+ * skončilo. Test si ho odvozuje stejně, aby nezčernal 1. ledna.
+ */
+const defaultYear = new Date().getFullYear() - 1
+
+function mountPage() {
+  return mount(PayrollAnnualSettlement, {
+    global: {
+      stubs: {
+        ActionBar: actionBarStub,
+        EmptyState: emptyStateStub,
+      },
+    },
+  })
+}
+
+describe('Roční zúčtování', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.listAnnualSettlements.mockResolvedValue(listResponse([person()]))
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse())
+  })
+
+  /**
+   * Prázdný rok NENÍ selhání. Musí se odlišit od nenačtených dat, jinak by
+   * uživatel z prázdné obrazovky usoudil, že za rok nikdo nepožádal.
+   */
+  it('u firmy bez zaměstnanců ukáže prázdný stav, ne chybu', async () => {
+    m.listAnnualSettlements.mockResolvedValue(listResponse([]))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const empty = wrapper.find('[data-test="empty-state"]')
+    expect(empty.exists()).toBe(true)
+    expect(empty.attributes('data-variant')).toBe('empty')
+    expect(m.error).not.toHaveBeenCalled()
+  })
+
+  it('při selhání načtení ukáže stav „nepovedlo se", ne prázdno', async () => {
+    m.listAnnualSettlements.mockRejectedValue(new Error('boom'))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="empty-state"]').attributes('data-variant'))
+      .toBe('failed')
+    expect(m.error).toHaveBeenCalled()
+  })
+
+  it('vypíše všechny překážky větami a hlavní akci nechá zašedlou s důvodem', async () => {
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      result: result({
+        performed: false,
+        outcome: null,
+        blockers: ['declaration_not_signed', 'filing_obligation_unknown'],
+        payable_minor_units: 0,
+      }),
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    const blockers = wrapper.find('[data-test="annual-settlement-blockers"]')
+    expect(blockers.exists()).toBe(true)
+    expect(blockers.text()).toContain('payroll.annual_settlement.blocker.declaration_not_signed')
+    expect(blockers.text()).toContain('payroll.annual_settlement.blocker.filing_obligation_unknown')
+    // Výsledková tabulka se nesmí objevit — nedopočítalo se „aspoň částečně".
+    expect(wrapper.find('[data-test="annual-settlement-result"]').exists()).toBe(false)
+
+    // Tlačítko zůstává vidět, jen zašedlé — a nese větu, proč.
+    const settle = wrapper.find('[data-action="settle"]')
+    expect(settle.exists()).toBe(true)
+    expect(settle.attributes('disabled')).toBeDefined()
+    expect(settle.attributes('data-reason'))
+      .toBe('payroll.annual_settlement.blocker.declaration_not_signed')
+  })
+
+  it('u splněných podmínek ukáže výsledek a nechá zúčtování provést', async () => {
+    m.settleAnnualSettlement.mockResolvedValue({
+      tax_year: 2026,
+      employee_id: 7,
+      performed: true,
+      created: true,
+      result: result(),
+      outcome: null,
+      document: { id: 42, document_kind: 'annual_settlement_result' },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="annual-settlement-result"]').exists()).toBe(true)
+    const settle = wrapper.find('[data-action="settle"]')
+    expect(settle.attributes('disabled')).toBeUndefined()
+
+    await settle.trigger('click')
+    await flushPromises()
+
+    expect(m.settleAnnualSettlement).toHaveBeenCalledWith(defaultYear, 7)
+    expect(m.success).toHaveBeenCalledWith('payroll.annual_settlement.settled')
+    expect(wrapper.find('[data-test="annual-settlement-download"]').exists()).toBe(true)
+  })
+
+  /**
+   * Odmítnutí přijde z API jako úspěšná odpověď s `performed: false`. Nesmí se
+   * zobrazit jako chyba serveru — je to řádný závěr posouzení podmínek.
+   */
+  it('odmítnuté zúčtování nehlásí jako chybu, ale vypíše překážky', async () => {
+    m.settleAnnualSettlement.mockResolvedValue({
+      tax_year: 2026,
+      employee_id: 7,
+      performed: false,
+      result: result({
+        performed: false,
+        outcome: null,
+        blockers: ['already_settled'],
+        payable_minor_units: 0,
+      }),
+      already_settled: null,
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-action="settle"]').trigger('click')
+    await flushPromises()
+
+    expect(m.error).not.toHaveBeenCalled()
+    expect(m.warning).toHaveBeenCalledWith('payroll.annual_settlement.settle_refused')
+    expect(wrapper.find('[data-test="annual-settlement-blockers"]').text())
+      .toContain('payroll.annual_settlement.blocker.already_settled')
+  })
+
+  it('u už provedeného zúčtování řekne kdy proběhlo', async () => {
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      result: result({
+        performed: false,
+        outcome: null,
+        blockers: ['already_settled'],
+        payable_minor_units: 0,
+      }),
+      already_settled: {
+        id: 3,
+        employee_id: 7,
+        tax_year: 2026,
+        annual_revision_id: 9,
+        outcome: 'overpayment',
+        tax_difference_minor: 120_000,
+        bonus_difference_minor: 0,
+        settlement_difference_minor: 120_000,
+        payable_minor: 120_000,
+        settled_on: '2027-03-10',
+        payroll_input_id: null,
+      },
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="annual-settlement-already"]').exists()).toBe(true)
+  })
+
+  it('uloží podklady s row_version, aby souběžná úprava nepřepsala odpovědi', async () => {
+    m.saveAnnualSettlementRequest.mockResolvedValue({})
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-save-request"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveAnnualSettlementRequest).toHaveBeenCalledWith(
+      defaultYear,
+      7,
+      expect.objectContaining({ row_version: 1, request_status: 'requested' }),
+    )
+  })
+})

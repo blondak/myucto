@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
 
 use MyInvoice\Repository\Payroll\HealthInsuranceOverviewRepository;
+use MyInvoice\Service\Codebook\HealthInsurers;
 
 final class HealthPaymentOverviewService
 {
@@ -35,9 +36,9 @@ final class HealthPaymentOverviewService
         int $revisionId,
         string $insurerCode,
     ): HealthPaymentOverview {
-        if (preg_match('/^[0-9]{3}$/D', $insurerCode) !== 1) {
+        if (!HealthInsurers::isValid($insurerCode)) {
             throw new \InvalidArgumentException(
-                'Kód zdravotní pojišťovny není platný.',
+                HealthInsurers::invalidCodeMessage($insurerCode),
             );
         }
         foreach ($this->overviews($supplierId, $revisionId) as $overview) {

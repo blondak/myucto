@@ -6,11 +6,13 @@ namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
+use MyInvoice\Repository\Payroll\PayrollEmployerPolicyDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerSettingsRepository;
 use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -18,6 +20,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookValueException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
+use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
 use PDO;
 
 final class PayrollRunSnapshotBuilder
@@ -39,6 +42,7 @@ final class PayrollRunSnapshotBuilder
         private readonly ?PayrollEmployerSettingsRepository $employerSettings = null,
         private readonly ?PayrollEmployerPolicyRepository $employerPolicies = null,
         private readonly ?JmhzExternalCodebookCatalog $jmhzExternalCodebooks = null,
+        private readonly ?PayrollOvertimeLimitService $overtimeLimits = null,
     ) {
         // Loader je čistý SQL pomocník nad týmž spojením — vědomě se nedává do
         // konstruktoru, aby nepřibyl další volitelný parametr, který by PHP-DI
@@ -116,6 +120,19 @@ final class PayrollRunSnapshotBuilder
         }
         $employeeIds = array_keys($employeeIds);
 
+        // Limity přesčasové práce podle § 93 zákoníku práce. Nálezy se přidávají
+        // k VALIDACÍM, ne do `$data` — kanonický snapshot a tím i `input_hash`
+        // proto zůstávají beze změny a přepočet starší revize dá bit po bitu
+        // tentýž vstup jako předtím.
+        foreach ($this->overtimeValidations(
+            $supplierId,
+            $employments,
+            $periodStart,
+            $periodEnd,
+        ) as $validation) {
+            $validations[] = $validation;
+        }
+
         $timeMonthRows = $this->batch->timeMonths(
             $supplierId,
             $employmentIds,
@@ -127,6 +144,11 @@ final class PayrollRunSnapshotBuilder
             $periodStart,
         );
         $inputRows = $this->batch->inputs($supplierId, $employmentIds, $periodStart);
+        $dimensionRows = $this->batch->employmentDimensions(
+            $supplierId,
+            $employmentIds,
+            $periodStart,
+        );
         $absenceRows = $this->batch->absences(
             $supplierId,
             $employmentIds,
@@ -205,6 +227,13 @@ final class PayrollRunSnapshotBuilder
             }
             $inputs = $this->inputs($inputRows[$employmentId] ?? []);
             if ($inputs === []) {
+                // JEDINÉ místo v modulu, které si žádá ruční override. Vztah bez
+                // složky je většinou chyba zadání, ale legitimní důvody existují
+                // (celý měsíc neplaceného volna, spící dohoda), takže se to nedá
+                // rozhodnout automaticky — musí to odklepnout člověk. Do MZ-01-W07
+                // to ale byla past: workflow na nevyřešeném overridu zastavilo
+                // `approve` a cesta, jak override udělit, neexistovala. Vede k němu
+                // {@see \MyInvoice\Service\Payroll\Run\PayrollRunValidationOverrideService}.
                 $validations[] = new PayrollRunValidation(
                     'warning',
                     'employment_without_inputs',
@@ -312,6 +341,7 @@ final class PayrollRunSnapshotBuilder
                 'time_month' => $timeMonth,
                 'absences' => $absences,
                 'inputs' => $inputs,
+                'dimensions' => $this->dimensions($dimensionRows[$employmentId] ?? []),
             ];
         }
         ksort($people, SORT_NUMERIC);
@@ -347,6 +377,47 @@ final class PayrollRunSnapshotBuilder
             hash('sha256', $manifestJson),
             $validations,
         );
+    }
+
+    /**
+     * Varování k § 93. Bez nakonfigurované služby se nic nepřidává — kontrola je
+     * tím pádem přídavek, který nemůže rozbít běh, který ji nemá zapnutou.
+     *
+     * @param list<array<string,mixed>> $employments
+     * @return list<PayrollRunValidation>
+     */
+    private function overtimeValidations(
+        int $supplierId,
+        array $employments,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        if ($this->overtimeLimits === null || $employments === []) {
+            return [];
+        }
+        $employmentIds = [];
+        $starts = [];
+        foreach ($employments as $row) {
+            $employmentId = (int) $row['employment_id'];
+            $employmentIds[] = $employmentId;
+            $start = $row['actual_start_date'] ?? $row['start_date'] ?? null;
+            $starts[$employmentId] = is_string($start) ? $start : null;
+        }
+
+        $validations = [];
+        foreach ($this->overtimeLimits->assessMany(
+            $supplierId,
+            $employmentIds,
+            $periodStart,
+            $periodEnd,
+            $starts,
+        ) as $assessment) {
+            foreach ($this->overtimeLimits->validations($assessment) as $validation) {
+                $validations[] = $validation;
+            }
+        }
+
+        return $validations;
     }
 
     /** @param array<string,mixed> $row */
@@ -385,7 +456,10 @@ final class PayrollRunSnapshotBuilder
         string $periodStart,
     ): array {
         $policy = ($this->employerPolicies
-            ?? new PayrollEmployerPolicyRepository($this->db))
+            ?? new PayrollEmployerPolicyRepository(
+                $this->db,
+                new PayrollEmployerPolicyDeletionRepository($this->db, new ActivityLogger($this->db)),
+            ))
             ->findEffective($supplierId, $periodStart);
         if ($policy === null) {
             throw new \DomainException(
@@ -904,6 +978,38 @@ final class PayrollRunSnapshotBuilder
                 'component_snapshot_hash' =>
                     strtolower((string) $row['component_snapshot_hash']),
                 'component' => $component,
+            ];
+        }
+        return $result;
+    }
+
+    /**
+     * Dimenze pracovního vztahu zmrazené do snapshotu.
+     *
+     * Nesou `default_account_code`, tedy nákladový účet hrubé mzdy pro dané
+     * středisko/zakázku/činnost. Uživatel ho v číselníku dimenzí nastavoval už od
+     * migrace 1307, ale zaúčtování ho nikdy nečetlo — nastavení bylo tiše k ničemu.
+     *
+     * Do snapshotu patří proto, že zaúčtování běží nad zmrazenými daty: kdyby se
+     * dimenze dohledávaly až při účtování, přeúčtování starší revize by použilo
+     * dnešní přiřazení střediska a vyrobilo jiné zaúčtování než původní. Starší
+     * revize klíč `dimensions` nemají vůbec a
+     * {@see \MyInvoice\Service\Payroll\Posting\PayrollPostingLineBuilder} to čte jako
+     * „žádná dimenze“ — účtují se tedy dál přesně tak, jak se účtovaly.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function dimensions(array $rows): array
+    {
+        $result = [];
+        foreach ($rows as $row) {
+            $account = $row['default_account_code'];
+            $result[] = [
+                'type' => (string) $row['dimension_type'],
+                'code' => (string) $row['code'],
+                'name' => (string) $row['name'],
+                'default_account_code' => $account === null ? null : (string) $account,
             ];
         }
         return $result;

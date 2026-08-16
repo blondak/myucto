@@ -147,6 +147,36 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // Dotažení protokolu ČSSZ a uzavření transakce u VREP. Deset
+                // minut je kompromis: protokol nevzniká v řádu sekund (rozvrh
+                // dotazů drží JmhzPollSchedule a začíná na minutě, ustálí se na
+                // hodině), ale lhůta pro měsíční hlášení je do 20. dne, takže
+                // hodinový tick by u čerstvého podání zbytečně čekal. Vlastní
+                // odstup si hlídá ledger, tick ho jen obsluhuje.
+                'script' => 'cron-jmhz-poll',
+                'recommended' => 'every_10_min',
+                'linux_cron' => '*/10 * * * *',
+                'windows_schtasks' => '/sc minute /mo 10',
+                'max_age_hours' => 4,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
+                // Datová schránka — vyzvednutí nových zpráv (výzvy podle § 74 DŘ
+                // chodí jen tudy). Každou hodinu, ne každou minutu: vyzvednutí
+                // je právní úkon (doručení podle § 17 odst. 3 zák. 300/2008 Sb.),
+                // takže častější dotazování by lhůty jen rozjíždělo dřív, aniž by
+                // to komukoli pomohlo. Úloha běží výhradně nad firmami, které si
+                // vybírání schránky výslovně zapnuly — viz `CronPreflight`.
+                'script' => 'cron-databox-inbox',
+                'recommended' => 'hourly',
+                'linux_cron' => '15 * * * *',
+                'windows_schtasks' => '/sc hourly /mo 1',
+                'max_age_hours' => 6,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 'script' => 'cron-generate-recurring-invoices',
                 'recommended' => 'daily_0630',
                 'linux_cron' => '30 6 * * *',

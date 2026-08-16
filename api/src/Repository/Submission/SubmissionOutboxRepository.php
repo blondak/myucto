@@ -1,0 +1,545 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Repository\Submission;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use PDO;
+use PDOException;
+
+/**
+ * Odchozí fronta podání (migrace 1381).
+ *
+ * Projekce {@see COLUMNS} vědomě neobsahuje `idempotency_key_hash` — stejně
+ * jako u `PayrollSubmissionTransportAttemptRepository`. Klíč slouží k hlídání
+ * duplicit, ne k zobrazování.
+ *
+ * Všechny mutace jdou přes {@see mutate()} s optimistickým zámkem
+ * (`row_version`), protože DB trigger vyžaduje posun právě o jedničku.
+ */
+final class SubmissionOutboxRepository
+{
+    private const TABLE = 'submission_outbox';
+
+    private const COLUMNS = 'id, supplier_id, environment, channel, dispatch_mode, agenda_code, recipient_id,
+        recipient_box_id, subject, artifact_kind, artifact_id, artifact_filename, artifact_sha256,
+        dispatch_state, acceptance_state, acceptance_evidence_kind, acceptance_note,
+        correlation_reference, external_message_id, artifact_validation_status, artifact_validated_at,
+        recipient_box_verified_at, receipt_document_id, receipt_signature_status,
+        receipt_matched_by, receipt_inbox_message_id, receipt_attached_at,
+        confirmed_by, confirmed_at, sent_at,
+        delivered_at, accepted_at, rejected_at, failed_at, last_error_code, last_error_message,
+        row_version, created_by, created_at, updated_at';
+
+    /**
+     * Stavy, ve kterých má smysl k podání připojovat doručenku.
+     *
+     * `ready` je ve výčtu schválně: u ručního odeslání aplikace o odchodu
+     * zprávy neví, dokud uživatel nepřinese doručenku. Ta je tedy zároveň
+     * důkazem, že podání odešlo.
+     */
+    private const RECEIPT_OPEN_STATES = ['ready', 'sending', 'send_uncertain', 'sent'];
+
+    public function __construct(private readonly Connection $db) {}
+
+    public function isAvailable(): bool
+    {
+        return $this->db->hasTable(self::TABLE);
+    }
+
+    /**
+     * Zařadí podání do fronty. Idempotentní: shodný klíč vrátí existující
+     * řádek místo druhého zápisu.
+     *
+     * @param array{
+     *   supplier_id:int, environment:string, channel:string, agenda_code:string,
+     *   recipient_id:?int, recipient_box_id:?string, subject:string,
+     *   artifact_kind:string, artifact_id:int, artifact_filename:string, artifact_sha256:string,
+     *   correlation_reference:string, created_by:?int
+     * } $data
+     * @return array{row:array<string,mixed>,created:bool}
+     */
+    public function enqueue(array $data, string $idempotencyKey): array
+    {
+        $this->assertAvailable();
+        $hash = hash('sha256', $idempotencyKey, true);
+
+        try {
+            $stmt = $this->db->pdo()->prepare(
+                'INSERT INTO ' . self::TABLE . '
+                    (supplier_id, environment, channel, agenda_code, recipient_id, recipient_box_id,
+                     subject, artifact_kind, artifact_id, artifact_filename, artifact_sha256,
+                     idempotency_key_hash, correlation_reference, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->execute([
+                $data['supplier_id'],
+                $data['environment'],
+                $data['channel'],
+                $data['agenda_code'],
+                $data['recipient_id'],
+                $data['recipient_box_id'],
+                $data['subject'],
+                $data['artifact_kind'],
+                $data['artifact_id'],
+                $data['artifact_filename'],
+                $data['artifact_sha256'],
+                $hash,
+                $data['correlation_reference'],
+                $data['created_by'],
+            ]);
+        } catch (PDOException $e) {
+            if ((string) $e->getCode() !== '23000') {
+                throw $e;
+            }
+            $existing = $this->findByIdempotencyHash($hash);
+            if ($existing === null) {
+                // Kolidovala correlation reference, ne idempotenční klíč —
+                // to je jiný artefakt se stejnou značkou a musí dostat novou.
+                throw new \DomainException('Spisová značka podání se opakuje, vygenerujte novou.');
+            }
+            if ((int) $existing['supplier_id'] !== $data['supplier_id']) {
+                throw new \DomainException('Idempotenční klíč už patří jiné firmě.');
+            }
+            if ((string) $existing['artifact_sha256'] !== $data['artifact_sha256']) {
+                throw new \DomainException(
+                    'Stejný idempotenční klíč nesmí nést jiný obsah podání.',
+                );
+            }
+            return ['row' => $existing, 'created' => false];
+        }
+
+        $id = (int) $this->db->pdo()->lastInsertId();
+        $row = $this->find($data['supplier_id'], $id);
+        if ($row === null) {
+            throw new \RuntimeException('Podání se zařadilo, ale nepodařilo se ho načíst.');
+        }
+        return ['row' => $row, 'created' => true];
+    }
+
+    /** @return array<string,mixed>|null */
+    public function find(int $supplierId, int $id): ?array
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . ' WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false ? self::normalize($row) : null;
+    }
+
+    /** @return array<string,mixed>|null */
+    public function findByCorrelation(int $supplierId, string $correlationReference): ?array
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND correlation_reference = ?'
+        );
+        $stmt->execute([$supplierId, $correlationReference]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false ? self::normalize($row) : null;
+    }
+
+    /** @return array<string,mixed>|null */
+    public function findByExternalMessageId(int $supplierId, string $channel, string $messageId): ?array
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND channel = ? AND external_message_id = ?'
+        );
+        $stmt->execute([$supplierId, $channel, $messageId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false ? self::normalize($row) : null;
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function listForSupplier(int $supplierId, string $environment, int $limit = 100): array
+    {
+        $this->assertAvailable();
+        $limit = max(1, min(500, $limit));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND environment = ?
+              ORDER BY id DESC LIMIT ' . $limit
+        );
+        $stmt->execute([$supplierId, $environment]);
+        return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Podání, u kterých má smysl se ptát na stav (odeslaná bez doručenky
+     * a nedořešená po přerušeném odeslání).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listPollable(int $limit = 50): array
+    {
+        $this->assertAvailable();
+        $limit = max(1, min(200, $limit));
+        // `sending` je ve výběru schválně: řádek, který v něm uvízl po pádu
+        // procesu, je stejná nevědomost jako `send_uncertain` a musí se dořešit
+        // dohledáním, ne zapomenout.
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
+              WHERE dispatch_state IN (\'sent\', \'send_uncertain\', \'sending\')
+              ORDER BY updated_at ASC LIMIT ' . $limit
+        );
+        $stmt->execute();
+        return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Přechod `ready` → `sending`, který smí uspět jen jednou.
+     *
+     * Tohle je celý zámek idempotence potvrzení: druhé kliknutí (nebo druhý
+     * běžící požadavek) narazí na `dispatch_state = 'ready'` v WHERE a
+     * nezmění nic, takže druhé podání prostě nevznikne.
+     *
+     * @return array<string,mixed>
+     */
+    public function claimForSending(int $supplierId, int $id, int $confirmedBy): ?array
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE ' . self::TABLE . '
+                SET dispatch_state = \'sending\', confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(),
+                    row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ? AND dispatch_state = \'ready\''
+        );
+        $stmt->execute([$confirmedBy, $supplierId, $id]);
+        if ($stmt->rowCount() !== 1) {
+            return null;
+        }
+        return $this->find($supplierId, $id);
+    }
+
+    /** @return array<string,mixed> */
+    public function markSent(int $supplierId, int $id, string $externalMessageId, int $expectedVersion): array
+    {
+        return $this->mutate(
+            $supplierId,
+            $id,
+            'dispatch_state = \'sent\', external_message_id = ?, sent_at = UTC_TIMESTAMP(),
+             last_error_code = NULL, last_error_message = NULL',
+            [$externalMessageId],
+            $expectedVersion,
+        );
+    }
+
+    /** @return array<string,mixed> */
+    public function markUncertain(int $supplierId, int $id, string $errorCode, string $errorMessage, int $expectedVersion): array
+    {
+        return $this->mutate(
+            $supplierId,
+            $id,
+            'dispatch_state = \'send_uncertain\', last_error_code = ?, last_error_message = ?',
+            [$errorCode, mb_substr($errorMessage, 0, 500)],
+            $expectedVersion,
+        );
+    }
+
+    /** @return array<string,mixed> */
+    public function markFailed(int $supplierId, int $id, string $errorCode, string $errorMessage, int $expectedVersion): array
+    {
+        return $this->mutate(
+            $supplierId,
+            $id,
+            'dispatch_state = \'failed\', failed_at = UTC_TIMESTAMP(), last_error_code = ?, last_error_message = ?',
+            [$errorCode, mb_substr($errorMessage, 0, 500)],
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Zapíše doručení — a NIC JINÉHO.
+     *
+     * Osy vyřízení se nedotýká ani náhodou; DB trigger by zápis, který by obojí
+     * změnil jedním UPDATE, odmítl. Je to úmysl: doručenka není protokol.
+     *
+     * @return array<string,mixed>
+     */
+    public function markDelivered(int $supplierId, int $id, \DateTimeImmutable $deliveredAt, int $expectedVersion): array
+    {
+        return $this->mutate(
+            $supplierId,
+            $id,
+            'dispatch_state = \'delivered\', delivered_at = ?',
+            [$deliveredAt->format('Y-m-d H:i:s')],
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Zapíše rozhodnutí úřadu. `$evidenceKind` je povinné a DB ho vyžaduje
+     * také — doručenka pro něj nemá hodnotu, takže se sem nedostane.
+     *
+     * @return array<string,mixed>
+     */
+    public function recordAcceptance(
+        int $supplierId,
+        int $id,
+        string $acceptanceState,
+        string $evidenceKind,
+        ?string $note,
+        int $expectedVersion,
+    ): array {
+        $timeColumn = $acceptanceState === 'accepted' ? 'accepted_at' : 'rejected_at';
+        return $this->mutate(
+            $supplierId,
+            $id,
+            'acceptance_state = ?, acceptance_evidence_kind = ?, acceptance_note = ?, '
+            . $timeColumn . ' = UTC_TIMESTAMP()',
+            [$acceptanceState, $evidenceKind, $note !== null ? mb_substr($note, 0, 500) : null],
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Zapíše výsledek lokální XSD kontroly. Bez ní se podání datovkou
+     * neodešle — hlídá to CHECK `chk_submission_outbox_validation_gate`.
+     *
+     * @return array<string,mixed>
+     */
+    public function recordValidation(int $supplierId, int $id, string $status, int $expectedVersion): array
+    {
+        return $this->mutate(
+            $supplierId,
+            $id,
+            'artifact_validation_status = ?, artifact_validated_at = UTC_TIMESTAMP()',
+            [$status],
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Zapíše, že schránka příjemce byla ověřena dotazem do ISDS.
+     *
+     * @return array<string,mixed>
+     */
+    public function recordRecipientVerified(int $supplierId, int $id, int $expectedVersion): array
+    {
+        return $this->mutate(
+            $supplierId,
+            $id,
+            'recipient_box_verified_at = UTC_TIMESTAMP()',
+            [],
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Připojí archivovanou doručenku k podání (důkaz o dni podání dle § 73 odst. 1 DŘ).
+     *
+     * `$matchedBy` je auditní stopa, ne dekorace: podle ní se pozná, jestli
+     * vazbu našel automat přes přesný identifikátor, nebo ji potvrdil člověk.
+     * Přiřazení je jednorázové — hlídá to i DB trigger, takže druhá doručenka
+     * první nepřepíše.
+     *
+     * `receipt_signature_status` tu ZÁMĚRNĚ zůstává `unverified`: CMS podpis
+     * ani časové razítko doručenky neověřujeme.
+     *
+     * @param 'correlation_reference'|'external_message_id'|'manual' $matchedBy
+     * @return array<string,mixed>
+     */
+    public function attachReceipt(
+        int $supplierId,
+        int $id,
+        int $documentId,
+        ?int $inboxMessageId,
+        string $matchedBy,
+        int $expectedVersion,
+    ): array {
+        return $this->mutate(
+            $supplierId,
+            $id,
+            'receipt_document_id = ?, receipt_inbox_message_id = ?, receipt_matched_by = ?,
+             receipt_attached_at = UTC_TIMESTAMP()',
+            [$documentId, $inboxMessageId, $matchedBy],
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Přechod `ready` → `sending` pro RUČNÍ odeslání.
+     *
+     * Liší se od {@see claimForSending()} jedinou věcí, která je ale zásadní:
+     * zároveň přepíná `dispatch_mode` na `manual`, a tím vypíná bránu ověření
+     * schránky v ISDS. Ta se u ručního odeslání nemá čím naplnit — adresáta
+     * vybírá člověk ve své datové schránce. Trigger dovolí `dispatch_mode`
+     * změnit jen dokud je řádek `ready`, takže se to musí stát právě tady.
+     *
+     * @return array<string,mixed>|null null, když už řádek `ready` není
+     */
+    public function claimForManualSending(int $supplierId, int $id, int $confirmedBy): ?array
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE ' . self::TABLE . '
+                SET dispatch_state = \'sending\', dispatch_mode = \'manual\',
+                    confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(),
+                    row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ? AND dispatch_state = \'ready\''
+        );
+        $stmt->execute([$confirmedBy, $supplierId, $id]);
+        if ($stmt->rowCount() !== 1) {
+            return null;
+        }
+
+        return $this->find($supplierId, $id);
+    }
+
+    /**
+     * Zapíše odeslání, které proběhlo mimo aplikaci.
+     *
+     * Čas odeslání se NEBERE z hodin serveru: u ručního odeslání se zpráva
+     * podala dřív, než jsme se o tom dozvěděli, a `sent_at` z „teď" by se
+     * dostalo za `delivered_at` z doručenky — což CHECK `chk_submission_outbox_timeline`
+     * správně odmítne.
+     *
+     * @return array<string,mixed>
+     */
+    public function markSentManually(
+        int $supplierId,
+        int $id,
+        string $externalMessageId,
+        \DateTimeImmutable $sentAt,
+        int $expectedVersion,
+    ): array {
+        return $this->mutate(
+            $supplierId,
+            $id,
+            'dispatch_state = \'sent\', external_message_id = ?, sent_at = ?,
+             last_error_code = NULL, last_error_message = NULL',
+            [$externalMessageId, $sentAt->format('Y-m-d H:i:s')],
+            $expectedVersion,
+        );
+    }
+
+    /**
+     * Podání, ke kterým může nahraná doručenka patřit.
+     *
+     * ⚠️ Tohle je NABÍDKA ČLOVĚKU, ne párovací pravidlo. Shoda schránky
+     * příjemce a časového okna je domněnka; automatická vazba vzniká jedině
+     * přes přesný identifikátor (naši spisovou značku nebo dmID). Kdyby se
+     * podle téhle nabídky párovalo samo, stačily by dvě podání stejné agendy
+     * do stejné schránky k tomu, aby se doručenka přilepila k tomu špatnému.
+     *
+     * @param ?string $recipientBoxId schránka, do které doručenka míří (z doručenky)
+     * @param ?\DateTimeImmutable $around čas dodání z doručenky
+     * @return list<array<string,mixed>>
+     */
+    public function listReceiptCandidates(
+        int $supplierId,
+        string $environment,
+        ?string $recipientBoxId,
+        ?\DateTimeImmutable $around,
+        int $limit = 20,
+    ): array {
+        $this->assertAvailable();
+        $limit = max(1, min(50, $limit));
+
+        $states = "'" . implode("','", self::RECEIPT_OPEN_STATES) . "'";
+        $sql = 'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
+                 WHERE supplier_id = ? AND environment = ? AND channel = \'isds\'
+                   AND dispatch_state IN (' . $states . ')
+                   AND receipt_document_id IS NULL';
+        $params = [$supplierId, $environment];
+
+        if ($recipientBoxId !== null && $recipientBoxId !== '') {
+            $sql .= ' AND recipient_box_id = ?';
+            $params[] = $recipientBoxId;
+        }
+        if ($around !== null) {
+            // Podání se do fronty zařadí před odesláním, doručenka přijde po něm.
+            // Okno je široké schválně — raději nabídnout víc a nechat rozhodnout
+            // člověka, než tichým zúžením zatajit ten správný řádek.
+            // Dopředná tolerance kryje i to, že `created_at` je serverový čas,
+            // kdežto čas v doručence nese vlastní posun.
+            $sql .= ' AND created_at BETWEEN DATE_SUB(?, INTERVAL 400 DAY) AND DATE_ADD(?, INTERVAL 7 DAY)';
+            $params[] = $around->format('Y-m-d H:i:s');
+            $params[] = $around->format('Y-m-d H:i:s');
+        }
+        $sql .= ' ORDER BY created_at DESC, id DESC LIMIT ' . $limit;
+
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+
+        return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /** @return array<string,mixed> */
+    public function cancel(int $supplierId, int $id, int $expectedVersion): array
+    {
+        return $this->mutate($supplierId, $id, 'dispatch_state = \'cancelled\'', [], $expectedVersion);
+    }
+
+    // ───────────────────────── interní ─────────────────────────
+
+    /** @return array<string,mixed>|null */
+    private function findByIdempotencyHash(string $hash): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . ' WHERE idempotency_key_hash = ?'
+        );
+        $stmt->execute([$hash]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false ? self::normalize($row) : null;
+    }
+
+    /**
+     * @param list<mixed> $params
+     *
+     * @return array<string,mixed>
+     */
+    private function mutate(int $supplierId, int $id, string $set, array $params, int $expectedVersion): array
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE ' . self::TABLE . ' SET ' . $set . ', row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ? AND row_version = ?'
+        );
+        $stmt->execute([...$params, $supplierId, $id, $expectedVersion]);
+        if ($stmt->rowCount() !== 1) {
+            $current = $this->find($supplierId, $id);
+            if ($current === null) {
+                throw new \DomainException('Podání ve frontě neexistuje.');
+            }
+            throw new \DomainException(sprintf(
+                'Podání se mezitím změnilo (očekávána verze %d, aktuální %d).',
+                $expectedVersion,
+                (int) $current['row_version'],
+            ));
+        }
+        $row = $this->find($supplierId, $id);
+        if ($row === null) {
+            throw new \RuntimeException('Podání se změnilo, ale nepodařilo se ho načíst.');
+        }
+        return $row;
+    }
+
+    private function assertAvailable(): void
+    {
+        if (!$this->isAvailable()) {
+            throw new \DomainException('Fronta podání není v databázi k dispozici (chybí migrace 1381).');
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private static function normalize(array $row): array
+    {
+        foreach (['id', 'supplier_id', 'artifact_id', 'row_version'] as $key) {
+            $row[$key] = (int) $row[$key];
+        }
+        foreach (['recipient_id', 'confirmed_by', 'created_by', 'receipt_document_id', 'receipt_inbox_message_id'] as $key) {
+            $row[$key] = $row[$key] !== null ? (int) $row[$key] : null;
+        }
+        return $row;
+    }
+}

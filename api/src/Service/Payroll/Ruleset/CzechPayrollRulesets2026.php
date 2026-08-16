@@ -7,6 +7,23 @@ namespace MyInvoice\Service\Payroll\Ruleset;
 /**
  * Payroll-only immutable fixture. The broader legacy TaxConstants table remains
  * an accounting fallback and is deliberately not a runtime input to this registry.
+ *
+ * ## Proč je dodaná sada rovnou `active`
+ *
+ * Do 8/2026 tady stálo `PayrollRulesetLifecycle::Reviewed` a zákazník musel
+ * u každé z deseti domén projít `review → approve → activate`, jinak si mzdy
+ * nespočítal vůbec. Rešerše patnácti českých mzdových systémů
+ * (`private/LEGISLATIVNI-SADY-KONKURENCE.md`) ukázala, že schvalování
+ * legislativních sazeb uživatelem NEMÁ ANI JEDEN — kdo má nejsilnější důvod
+ * přenést odpovědnost, přenáší ji smlouvou, ne klikáním.
+ *
+ * Sada je proto dodávaná jako účinná. Invarianta „účinné vyžaduje schválení"
+ * se NERUŠÍ, jen se omezuje na obsah, který se od dodané sady liší — viz
+ * {@see VendorRulesetManifest}. Za dodané hodnoty ručí dodavatel a doloženy jsou
+ * {@see RulesetSource} (odkaz + datum stažení) a {@see RulesetTechnicalReview}.
+ *
+ * Co tím zatím NEVZNIKÁ: formální záznam o tom, KDO za hodnoty ručí. Technická
+ * kontrola není odborné ani právní schválení a `approval` zůstává `null`.
  */
 final class CzechPayrollRulesets2026
 {
@@ -19,16 +36,22 @@ final class CzechPayrollRulesets2026
      * změnit bez nasazení. Bydlí proto v registry jako každý jiný parametr
      * a pin hlídá už jen VÝCHOZÍ sadu z kódu — override z administrace má
      * vlastní `content_hash` a vlastní auditní stopu.
+     *
+     * Pozor, tenhle pin je nad PLNÝM snapshotem, tedy VČETNĚ lifecyclu — proto se
+     * posunul při překlopení dodané sady na `active`. Otisk obsahu, podle kterého
+     * se pozná dodaná sada, je v {@see VendorRulesetManifest} a ten se překlopením
+     * nezměnil.
      */
     public const ENFORCEMENT_DEDUCTIONS_HASH =
-        '353471b01f6be8b43da321dcaceef65743a4a5ae917bc8bb9ec5ba5d72951a42';
+        '2eac7d62318c2d361ad6a00ce6d6d443fc68c78d9fff40f1bf900768302edfbd';
 
     public static function provider(): PayrollRulesetProvider
     {
         $technicalReview = new RulesetTechnicalReview(
             'myucto/payroll-ruleset-source-check',
             self::RETRIEVED_ON,
-            'Official-source manifest, exact-value checks and byte-stability test suite; not a professional or legal approval.',
+            'Manifest oficiálních zdrojů, kontrola přesných hodnot a testy bajtové stability — '
+            . 'technická kontrola, ne odborné ani právní schválení.',
         );
 
         return new PayrollRulesetProvider([
@@ -60,6 +83,38 @@ final class CzechPayrollRulesets2026
                 'advance.rounding.base_above_100_czk' => PayrollRuleValue::text('ceil-to-100-czk'),
                 'advance.rounding.base_up_to_100_czk' => PayrollRuleValue::text('ceil-to-1-czk'),
                 'advance.rounding.result' => PayrollRuleValue::text('ceil-to-1-czk'),
+                // § 6 odst. 9 písm. b) ZDP — příspěvek na stravování je osvobozený
+                // „v úhrnu do výše 70 % horní hranice stravného, které lze poskytnout
+                // zaměstnancům odměňovaným platem při pracovní cestě trvající 5 až
+                // 12 hodin". To je limit NA SMĚNU, ne na rok: 2026 vychází 70 % ze
+                // 185 Kč = 129,50 Kč (`meal_allowance.band_1.tax_exempt_maximum`
+                // v doméně cestovních náhrad). Roční limit mzdové složky
+                // (`payroll_component_definitions.annual_limit_minor`) ho vyjádřit
+                // neumí, protože nezná počet směn — proto tu není částka, ale
+                // vědomé ruční posouzení. Hodnota se tu ZÁMĚRNĚ nepočítá podruhé,
+                // aby nemohla utéct od sazby stravného, ze které plyne.
+                'benefit_exemption.meal.per_shift' => PayrollRuleValue::manualReview(
+                    'Příspěvek na stravování je osvobozený do 70 % horní hranice stravného za '
+                    . 'pracovní cestu 5 až 12 hodin, a to za každou směnu zvlášť. Roční limit '
+                    . 'mzdové složky takový strop nevyjádří a aplikace ho proto netvrdí.',
+                ),
+                // § 6 odst. 9 písm. d) ZDP — nepeněžní plnění zaměstnanci a jeho
+                // rodinnému příslušníkovi. Od 1. 1. 2025 má dva samostatné roční
+                // ÚHRNNÉ limity odvozené z průměrné mzdy za zdaňovací období
+                // (§ 21g ZDP, 2026 = 48 967 Kč):
+                //   bod 1 — zdravotnické služby a zdravotnické prostředky … průměrná mzda
+                //   bod 2 — rekreace a zájezd, sport, kultura, tisk, použití
+                //           vzdělávacích a předškolních zařízení … polovina průměrné mzdy
+                // Limit je úhrn za celé písmeno (resp. bod), ne za jednu mzdovou
+                // složku. Složkový `annual_limit_minor` je proto jen strop JEDNÉ
+                // složky — nutná, ne postačující podmínka; viz PayrollComponentDefaults.
+                'benefit_exemption.non_cash_health.yearly' => PayrollRuleValue::moneyMinor(4_896_700),
+                'benefit_exemption.non_cash_leisure.yearly' => PayrollRuleValue::moneyMinor(2_448_350),
+                // § 6 odst. 9 písm. p) ZDP — příspěvek zaměstnavatele na daňově
+                // podporované produkty spoření na stáří a na pojištění dlouhodobé
+                // péče, osvobozený v úhrnu nejvýše 50 000 Kč ročně. Částku píše
+                // zákon číslem, z průměrné mzdy se neodvozuje.
+                'benefit_exemption.old_age_savings.yearly' => PayrollRuleValue::moneyMinor(5_000_000),
                 'bonus.minimum_amount.monthly' => PayrollRuleValue::moneyMinor(5_000),
                 'bonus.minimum_income.monthly' => PayrollRuleValue::moneyMinor(1_120_000),
                 'bonus.minimum_income.yearly' => PayrollRuleValue::moneyMinor(13_440_000),
@@ -70,8 +125,30 @@ final class CzechPayrollRulesets2026
                 'credit.disability.extended.monthly' => PayrollRuleValue::moneyMinor(42_000),
                 'credit.taxpayer.monthly' => PayrollRuleValue::moneyMinor(257_000),
                 'credit.ztp_p.monthly' => PayrollRuleValue::moneyMinor(134_500),
-                'dpp.withholding.maximum' => PayrollRuleValue::moneyMinor(1_199_900),
-                'other.withholding.maximum' => PayrollRuleValue::moneyMinor(449_900),
+                // ROZHODNÁ ČÁSTKA, ne „nejvyšší ještě sražená odměna“. § 6 odst. 4
+                // ZDP ve znění zák. č. 470/2024 Sb. (od 1. 1. 2025) říká „NEDOSÁHNE
+                // částky rozhodné pro účast … na nemocenském pojištění“ — test je
+                // tedy OSTRÝ (`<`) a hodnota je sama rozhodná částka, ne o korunu
+                // nižší číslo. Do 31. 12. 2024 stálo v zákoně „nepřesáhne 10 000 Kč“,
+                // tedy hranice včetně; proto se ta stará mez nedá vyjádřit týmž
+                // klíčem a v tomhle rulesetu ani není.
+                //
+                // Klíče se jmenovaly `*.maximum` a nesly 11 999 / 4 499 Kč, což byl
+                // přepis populárního výkladu „limit je 11 999" do `<=`. Pro celé
+                // koruny to vychází stejně, pro odměnu s haléři ne: 11 999,50 Kč
+                // rozhodné částky NEDOSÁHNE, a měla by tedy jít srážkou — se starým
+                // zápisem šla zálohou. Přejmenování je záměrné: uložený override na
+                // starý klíč se po obratu operátoru NESMÍ tiše použít dál, jinak by
+                // posunul hranici o korunu níž.
+                //
+                // 2026: 25 % průměrné mzdy 48 967 = 12 241,75 → dolů na celých 500
+                // (§ 7a odst. 2 z. č. 187/2006 Sb.) = 12 000 Kč.
+                'dpp.withholding.threshold' => PayrollRuleValue::moneyMinor(1_200_000),
+                // § 6 odst. 4 písm. b) ZDP — ostatní příjmy ze závislé činnosti;
+                // rozhodná částka pro účast na nemocenském pojištění podle § 6 odst. 1
+                // písm. a) z. č. 187/2006 Sb. je 1/10 průměrné mzdy zaokrouhlená dolů
+                // na celých 500 Kč: 48 967 / 10 = 4 896,7 → 4 500 Kč.
+                'other.withholding.threshold' => PayrollRuleValue::moneyMinor(450_000),
                 'withholding.rate' => PayrollRuleValue::rate('0.15'),
             ],
             $technicalReview,
@@ -87,17 +164,19 @@ final class CzechPayrollRulesets2026
             [self::socialSecurity()],
             [
                 'employee.discount.agriculture_dpp' => PayrollRuleValue::manualReview(
-                    'Eligibility depends on the statutory agriculture conditions and must be reviewed.',
+                    'Nárok na slevu závisí na zákonných podmínkách sezónní zemědělské činnosti '
+                    . 'a musí ho posoudit člověk.',
                 ),
                 'employee.discount.working_pensioner' => PayrollRuleValue::rate('0.065'),
                 'employee.rate.ordinary' => PayrollRuleValue::rate('0.071'),
                 'employer.discount.part_time' => PayrollRuleValue::rate('0.05'),
                 'employer.rate.ordinary' => PayrollRuleValue::rate('0.248'),
                 'employer.rate.rescue_and_company_fire_service' => PayrollRuleValue::manualReview(
-                    'The 0.298 rate is official, but occupational classification requires manual review.',
+                    'Sazba 29,8 % je oficiální, ale zařazení zaměstnance k hasičskému záchrannému '
+                    . 'sboru nebo mezi podnikové hasiče musí posoudit člověk.',
                 ),
                 'employer.rate.risk_employment' => PayrollRuleValue::manualReview(
-                    'The 0.278 rate is official, but risk-employment classification requires manual review.',
+                    'Sazba 27,8 % je oficiální, ale zařazení práce mezi rizikové musí posoudit člověk.',
                 ),
                 'maximum_assessment_base.yearly' => PayrollRuleValue::moneyMinor(235_041_600),
                 'participation.dpp.minimum' => PayrollRuleValue::moneyMinor(1_200_000),
@@ -139,6 +218,19 @@ final class CzechPayrollRulesets2026
                 'average_wage.monthly' => PayrollRuleValue::moneyMinor(4_896_700),
                 'minimum_wage.hourly_40h_week' => PayrollRuleValue::moneyMinor(13_440),
                 'minimum_wage.monthly_40h_week' => PayrollRuleValue::moneyMinor(2_240_000),
+                // § 93 odst. 2 zákoníku práce — nařízený přesčas nesmí přesáhnout
+                // 8 hodin v jednotlivých týdnech a 150 hodin v kalendářním roce.
+                'overtime.ordered.weekly_max_minutes' => PayrollRuleValue::integer(480),
+                'overtime.ordered.yearly_max_minutes' => PayrollRuleValue::integer(9_000),
+                // § 93 odst. 4 — celkový přesčas nejvýše průměrně 8 hodin týdně ve
+                // vyrovnávacím období nejvýše 26 týdnů. Kolektivní smlouva ho smí
+                // rozšířit na 52, ale registr kolektivních smluv per zaměstnavatele
+                // neexistuje, takže je hodnota národní.
+                'overtime.averaging.max_weeks' => PayrollRuleValue::integer(26),
+                'overtime.averaging.weekly_average_max_minutes' => PayrollRuleValue::integer(480),
+                // Bez opory v zákoně: práh, od kterého se na blížící se roční limit
+                // upozorňuje dřív, než se vyčerpá.
+                'overtime.annual.early_warning_basis_points' => PayrollRuleValue::integer(8_000),
                 'participation.dpc.minimum' => PayrollRuleValue::moneyMinor(450_000),
                 'participation.dpp.minimum' => PayrollRuleValue::moneyMinor(1_200_000),
                 'participation.small_scale.minimum' => PayrollRuleValue::moneyMinor(450_000),
@@ -167,7 +259,8 @@ final class CzechPayrollRulesets2026
                 'wage_compensation.hourly_boundary_2_minor' => PayrollRuleValue::moneyMinor(42_858),
                 'wage_compensation.hourly_boundary_3_minor' => PayrollRuleValue::moneyMinor(85_698),
                 'wage_compensation.manual_review' => PayrollRuleValue::manualReview(
-                    'Eligibility, published-shift completeness, benefit conflicts and partial-shift breaks require payroll review.',
+                    'Nárok na náhradu, úplnost rozvrhu směn, souběh s dávkami a přerušené směny '
+                    . 'musí posoudit mzdová účetní.',
                 ),
                 'wage_compensation.reduction_band_1_rate' => PayrollRuleValue::rate('0.90'),
                 'wage_compensation.reduction_band_2_rate' => PayrollRuleValue::rate('0.60'),
@@ -228,7 +321,8 @@ final class CzechPayrollRulesets2026
     ): PayrollRulesetVersion {
         $parameters = [
             'foreign_travel' => PayrollRuleValue::manualReview(
-                'Foreign business trips (foreign meal allowance, pocket money, currency conversion) are outside this ruleset and must be settled manually.',
+                'Zahraniční pracovní cesty (zahraniční stravné, kapesné, přepočet měn) tenhle '
+                . 'ruleset neřeší a vyúčtují se ručně podle vyhlášky pro daný stát.',
             ),
             'fuel.average_price.diesel_per_litre' => PayrollRuleValue::moneyMinor($dieselPerLitreMinor),
             'fuel.average_price.electricity_per_kwh' => PayrollRuleValue::moneyMinor(720),
@@ -261,7 +355,7 @@ final class CzechPayrollRulesets2026
             PayrollRulesetDomain::TravelAllowances,
             $effectiveFrom,
             $effectiveTo,
-            PayrollRulesetLifecycle::Reviewed,
+            PayrollRulesetLifecycle::Active,
             PayrollRulesetCapability::Supported,
             $sources,
             $parameters,
@@ -331,7 +425,8 @@ final class CzechPayrollRulesets2026
             [self::jmhzDocumentation()],
             [
                 'submission_calendar' => PayrollRuleValue::manualReview(
-                    'Deadlines depend on agenda, event, channel and transition rules and are not inferred.',
+                    'Lhůty závisí na agendě, události, kanálu podání a přechodných ustanoveních; '
+                    . 'aplikace je neodvozuje a termín u konkrétního hlášení ukazuje stránka Podání.',
                 ),
             ],
             $technicalReview,
@@ -347,7 +442,8 @@ final class CzechPayrollRulesets2026
             [self::jmhzDocumentation()],
             [
                 'catalog_versions' => PayrollRuleValue::manualReview(
-                    'Runtime codebooks must be imported with their own publication date and checksum.',
+                    'Provozní číselníky se nahrávají importem s vlastním datem vydání a kontrolním '
+                    . 'součtem, ne zápisem hodnoty do téhle sady.',
                 ),
             ],
             $technicalReview,
@@ -368,7 +464,8 @@ final class CzechPayrollRulesets2026
                 'regzec.schema_version' => PayrollRuleValue::text('1.4.0.4'),
                 'regzeldopl.schema_version' => PayrollRuleValue::text('1.2'),
                 'submission' => PayrollRuleValue::manualReview(
-                    'Schema versions are recorded, but direct submission remains outside calculation capability.',
+                    'Verze schémat jsou evidované, ale samotné odeslání podání není součástí '
+                    . 'mzdového výpočtu.',
                 ),
             ],
             $technicalReview,
@@ -396,7 +493,7 @@ final class CzechPayrollRulesets2026
             $domain,
             '2026-01-01',
             '2026-12-31',
-            PayrollRulesetLifecycle::Reviewed,
+            PayrollRulesetLifecycle::Active,
             $capability,
             $sources,
             $parameters,

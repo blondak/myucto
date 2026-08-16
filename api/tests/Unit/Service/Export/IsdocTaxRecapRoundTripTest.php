@@ -67,7 +67,7 @@ final class IsdocTaxRecapRoundTripTest extends TestCase
             'amount_to_pay'    => 15460.0,
             'supplier_snapshot' => [
                 'ic' => '01698401', 'dic' => 'CZ01698401', 'company_name' => 'Dodavatel s.r.o.',
-                'street' => 'Kardinála Berana 1104/36', 'city' => 'Plzeň', 'zip' => '30100', 'country_iso2' => 'CZ',
+                'street' => 'Zkušební 123/4', 'city' => 'Vzorov', 'zip' => '10000', 'country_iso2' => 'CZ',
             ],
             'client_snapshot' => [
                 'ic' => '27140130', 'dic' => 'CZ27140130', 'company_name' => 'Odběratel a.s.',

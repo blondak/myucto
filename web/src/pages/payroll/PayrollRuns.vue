@@ -5,42 +5,103 @@ import {
   payrollApi,
   type PayrollRun,
   type PayrollRunCommand,
+  type PayrollRunResultPerson,
+  type PayrollRunValidation,
 } from '@/api/payroll'
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
+import PayrollInsuranceBreakdown from '@/components/payroll/PayrollInsuranceBreakdown.vue'
 import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatDateTime, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const loading = ref(false)
+/*
+ * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
+ * není". Toast s chybou za pár vteřin zmizí a bez tohohle příznaku by na
+ * obrazovce zůstal prázdný stav, který lže.
+ */
+const loadFailed = ref(false)
 const saving = ref(false)
 const period = ref(localPayrollPeriod())
 const paymentDate = ref(defaultPaymentDate(period.value))
 const runs = ref<PayrollRun[]>([])
 const personNames = ref<Record<number, string>>({})
+/**
+ * Osobní rozpad běhu (`result_snapshot.people`) je ta objemná část výsledku a
+ * seznam ho úmyslně neposílá — server by ho jinak musel načíst pro všechny běhy
+ * firmy najednou. Drží se proto stranou a dotahuje se pro jeden rozbalený běh.
+ */
+const breakdowns = ref<Record<number, PayrollRunResultPerson[]>>({})
+const breakdownLoading = ref<Record<number, boolean>>({})
+const total = ref(0)
+const pageSize = 12
+const offset = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const pendingCommand = ref<{ run: PayrollRun, command: PayrollRunCommand } | null>(null)
 const pendingDelete = ref<PayrollRun | null>(null)
 const commandReason = ref('')
 const commandError = ref('')
+const commandBlockers = ref<Record<number, string>>({})
+const pendingOverride = ref<{ run: PayrollRun, validation: PayrollRunValidation } | null>(null)
+const overrideReason = ref('')
+const overrideError = ref('')
 
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
+/*
+ * Schválení výjimky je věcně část schválení mzdy („vím o vadě a přesto se
+ * vyplácí"), proto stejné právo jako u příkazu `approve` — server to vynucuje
+ * stejně, tohle je jen to, aby se nenabízelo tlačítko, které skončí 403.
+ */
+const canOverride = computed(() => auth.canWrite('payroll.approve'))
+
+/** Stavy, ve kterých se s výjimkou ještě smí hýbat — po schválení běhu už ne. */
+const OVERRIDE_EDITABLE_STATUSES: PayrollRun['status'][] = [
+  'inputs_locked',
+  'calculated',
+  'reviewed',
+  'reopened',
+]
+
+function overrideEditable(run: PayrollRun): boolean {
+  return OVERRIDE_EDITABLE_STATUSES.includes(run.status)
+}
+
+/** Varování, na které se čeká: bez rozhodnutí člověka běh dál nepostoupí. */
+function awaitsOverride(validation: PayrollRunValidation): boolean {
+  return validation.requires_override && validation.overridden_at === null
+}
+
+function validationClass(validation: PayrollRunValidation): string {
+  if (validation.severity === 'blocker') {
+    return 'border-danger-500/30 bg-danger-50 text-danger-700'
+  }
+  if (validation.severity === 'info') {
+    return 'border-neutral-200 bg-neutral-50 text-neutral-700'
+  }
+  return 'border-warning-200 bg-warning-50 text-warning-800'
+}
+
+function overrideAuthorLabel(validation: PayrollRunValidation): string {
+  return t('payroll.runs.override.granted_by', {
+    name: validation.overridden_by_name ?? t('payroll.runs.override.unknown_author'),
+    at: formatDateTime(validation.overridden_at),
+  })
+}
 
 function defaultPaymentDate(value: string): string {
   const [year, month] = value.split('-').map(Number)
   const date = new Date(Date.UTC(year, month, 15))
   return date.toISOString().slice(0, 10)
-}
-
-function money(value: number | undefined): string {
-  return new Intl.NumberFormat(locale.value, {
-    style: 'currency',
-    currency: 'CZK',
-  }).format((value ?? 0) / 100)
 }
 
 function statusClass(status: PayrollRun['status']): string {
@@ -56,23 +117,58 @@ function statusClass(status: PayrollRun['status']): string {
   return 'bg-neutral-100 text-neutral-600'
 }
 
+/**
+ * Jediná plná (primární) akce podle stavu — zbytek běhu je odbočka, ne
+ * rovnocenná volba. Uživatel má v každém stavu vidět jedno „co teď".
+ */
+const PRIMARY_COMMAND: Partial<Record<PayrollRun['status'], PayrollRunCommand>> = {
+  draft: 'lock_inputs',
+  inputs_locked: 'calculate',
+  reopened: 'calculate',
+  calculated: 'review',
+  reviewed: 'approve',
+  approved: 'post',
+  posted: 'prepare_payments',
+  payment_ready: 'mark_paid',
+  paid: 'close',
+  correction_pending: 'reopen',
+}
+
+const KNOWN_COMMANDS: PayrollRunCommand[] = [
+  'lock_inputs',
+  'calculate',
+  'review',
+  'approve',
+  'post',
+  'prepare_payments',
+  'mark_paid',
+  'request_correction',
+  'reopen',
+  'cancel',
+  'close',
+]
+
 function commandLabel(command: PayrollRunCommand): string {
   return t(`payroll.runs.commands.${command}`)
 }
 
-function commandClass(command: PayrollRunCommand): string {
-  if (command === 'approve') return btnFilled('success')
+function commandClass(run: PayrollRun, command: PayrollRunCommand): string {
+  if (PRIMARY_COMMAND[run.status] === command) {
+    return btnFilled(command === 'approve' ? 'success' : 'primary')
+  }
   if (command === 'cancel') return btnOutline('danger')
   if (command === 'request_correction' || command === 'reopen') {
     return btnOutline('warning')
   }
-  if (command === 'review') return btnOutline('success')
-  return btnFilled('primary')
+  return btnOutline('neutral')
 }
 
 function commandIcon(command: PayrollRunCommand): string {
   if (command === 'lock_inputs') return ICONS.lock
   if (command === 'calculate') return ICONS.cycle
+  if (command === 'post') return ICONS.doc
+  if (command === 'prepare_payments') return ICONS.coin
+  if (command === 'mark_paid') return ICONS.checkCircle
   if (command === 'review' || command === 'approve' || command === 'close') {
     return ICONS.check
   }
@@ -82,35 +178,86 @@ function commandIcon(command: PayrollRunCommand): string {
 
 function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
   return run.available_commands.filter(command => {
-    if (!['lock_inputs', 'calculate', 'review', 'approve', 'request_correction', 'reopen', 'cancel', 'close']
-      .includes(command)) return false
+    if (!KNOWN_COMMANDS.includes(command)) return false
     if (command === 'calculate') return auth.canWrite('payroll.calculate')
     if (command === 'review' || command === 'request_correction') {
       return auth.canWrite('payroll.review')
     }
     if (command === 'approve') return auth.canWrite('payroll.approve')
     if (command === 'reopen') return auth.canWrite('payroll.reopen')
+    if (command === 'post') return auth.canWrite('payroll.post')
+    if (command === 'prepare_payments' || command === 'mark_paid') {
+      return auth.canWrite('payroll.payments')
+    }
     return canWrite.value
   })
 }
 
+/*
+ * Proč nejde založit běh. Období i datum výplaty jsou povinné vstupy formuláře
+ * hned vedle tlačítka — bez věty ale nebylo poznat, které z nich chybí.
+ */
+const createBlockedReason = computed<string | null>(() => {
+  if (!period.value) return t('payroll.runs.create_blocked_period')
+  if (!paymentDate.value) return t('payroll.runs.create_blocked_payment_date')
+  return null
+})
+
 async function load() {
   loading.value = true
+  loadFailed.value = false
   try {
-    const [loadedRuns, people] = await Promise.all([
-      payrollApi.runs(period.value),
-      payrollApi.people().catch(() => null),
+    const [page, people] = await Promise.all([
+      payrollApi.runsPage(period.value, { limit: pageSize, offset: offset.value }),
+      payrollApi.peopleOptions().catch(() => null),
     ])
-    runs.value = loadedRuns
+    runs.value = page.runs
+    total.value = page.total
+    // Rozpad patří ke konkrétní revizi; po přenačtení seznamu už nemusí platit.
+    breakdowns.value = {}
     if (people !== null) {
       personNames.value = Object.fromEntries(
         people.map(person => [person.id, person.full_name]),
       )
     }
   } catch {
+    // Seznam běhů se nechává být: „za období nebyl spuštěn žádný běh" je
+    // závěr, na který po výpadku sítě nemáme právo.
+    loadFailed.value = true
     toast.error(t('payroll.runs.load_failed'))
   } finally {
     loading.value = false
+  }
+}
+
+// Stránkuje sdílená `PaginationBar` (číslo stránky od jedné); server zná offset.
+function goToPage(nextPage: number) {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  void load()
+}
+
+/**
+ * Dotáhne osobní rozpad jednoho běhu. Opakované kliknutí rozpad schová, aby si
+ * uživatel mohl seznam zase zpřehlednit; jednou stažená data se drží v paměti.
+ */
+async function toggleBreakdown(run: PayrollRun) {
+  if (breakdowns.value[run.id] !== undefined) {
+    const { [run.id]: _removed, ...rest } = breakdowns.value
+    breakdowns.value = rest
+    return
+  }
+  breakdownLoading.value = { ...breakdownLoading.value, [run.id]: true }
+  try {
+    const detail = await payrollApi.run(run.id)
+    breakdowns.value = {
+      ...breakdowns.value,
+      [run.id]: detail.result_snapshot?.people ?? [],
+    }
+  } catch {
+    toast.error(t('payroll.runs.breakdown_failed'))
+  } finally {
+    const { [run.id]: _pending, ...rest } = breakdownLoading.value
+    breakdownLoading.value = rest
   }
 }
 
@@ -148,14 +295,20 @@ async function submitCommand(
   reason?: string,
 ) {
   saving.value = true
+  delete commandBlockers.value[run.id]
   try {
-    await payrollApi.commandRun(
+    const response = await payrollApi.commandRun(
       run.id,
       command,
       { row_version: run.row_version, ...(reason ? { reason } : {}) },
       crypto.randomUUID(),
     )
-    toast.success(t('payroll.runs.command_done'))
+    const outcome = response.outcome?.outcome ?? null
+    toast.success(
+      outcome === null
+        ? t('payroll.runs.command_done')
+        : t(`payroll.runs.outcome.${outcome}`),
+    )
     pendingCommand.value = null
     commandReason.value = ''
     commandError.value = ''
@@ -163,11 +316,22 @@ async function submitCommand(
   } catch (error: any) {
     const message = error?.response?.data?.error?.message || t('payroll.runs.command_failed')
     if (pendingCommand.value) commandError.value = message
-    else toast.error(message)
+    // Blokující důvod u zaúčtování a plateb je celá věta („komu chybí výplatní
+    // pravidlo", „kolik zbývá uhradit"). V toastu se ztratí dřív, než se podle
+    // ní dá jednat — proto zůstane viset u konkrétního běhu.
+    else if (['post', 'prepare_payments', 'mark_paid'].includes(command)) {
+      commandBlockers.value = { ...commandBlockers.value, [run.id]: message }
+    } else toast.error(message)
     if (error?.response?.status === 409) await load()
   } finally {
     saving.value = false
   }
+}
+
+function dismissBlocker(runId: number) {
+  const next = { ...commandBlockers.value }
+  delete next[runId]
+  commandBlockers.value = next
 }
 
 async function confirmCommand() {
@@ -182,6 +346,67 @@ async function confirmCommand() {
     pendingCommand.value.command,
     reason,
   )
+}
+
+function askOverride(run: PayrollRun, validation: PayrollRunValidation) {
+  if (!canOverride.value || !overrideEditable(run)) return
+  pendingOverride.value = { run, validation }
+  overrideReason.value = ''
+  overrideError.value = ''
+}
+
+async function confirmOverride() {
+  const pending = pendingOverride.value
+  if (!pending) return
+  const reason = overrideReason.value.trim()
+  if (!reason) {
+    overrideError.value = t('payroll.runs.override.reason_required')
+    return
+  }
+  saving.value = true
+  try {
+    await payrollApi.overrideRunValidation(
+      pending.run.id,
+      pending.validation.id,
+      { row_version: pending.run.row_version, reason },
+      crypto.randomUUID(),
+    )
+    toast.success(t('payroll.runs.override.granted'))
+    pendingOverride.value = null
+    overrideReason.value = ''
+    await load()
+  } catch (error: any) {
+    // Server má na odůvodnění vlastní minimum a jeho věta je konkrétnější než
+    // cokoli, co bychom si tady vymysleli — proto se ukazuje v dialogu.
+    overrideError.value = error?.response?.data?.error?.message
+      || t('payroll.runs.override.failed')
+    if (error?.response?.status === 409) await load()
+  } finally {
+    saving.value = false
+  }
+}
+
+async function revokeOverride(run: PayrollRun, validation: PayrollRunValidation) {
+  if (!canOverride.value || !overrideEditable(run)) return
+  saving.value = true
+  try {
+    await payrollApi.revokeRunValidationOverride(
+      run.id,
+      validation.id,
+      { row_version: run.row_version },
+      crypto.randomUUID(),
+    )
+    toast.success(t('payroll.runs.override.revoked'))
+    await load()
+  } catch (error: any) {
+    toast.error(
+      error?.response?.data?.error?.message
+        || t('payroll.runs.override.revoke_failed'),
+    )
+    if (error?.response?.status === 409) await load()
+  } finally {
+    saving.value = false
+  }
 }
 
 function askDeleteRun(run: PayrollRun) {
@@ -208,6 +433,8 @@ async function deleteRun() {
 
 function changePeriod() {
   paymentDate.value = defaultPaymentDate(period.value)
+  // Jiné období = jiná množina běhů; zůstat na třetí stránce by ukázalo prázdno.
+  offset.value = 0
   void load()
 }
 
@@ -248,23 +475,38 @@ onMounted(load)
           </svg>
           {{ t('payroll.runs.quick_inputs') }}
         </RouterLink>
-        <button
-          v-if="canWrite"
-          :class="btnFilled('primary')"
-          :disabled="saving || !period || !paymentDate"
-          @click="createRun"
-        >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path :d="ICONS.plus" />
-          </svg>
-          {{ t('payroll.runs.create') }}
-        </button>
+        <div v-if="canWrite" class="flex flex-col items-start gap-1.5">
+          <button
+            :class="btnFilled('primary')"
+            :disabled="saving || !period || !paymentDate"
+            :title="disabledTitle(createBlockedReason !== null, createBlockedReason)"
+            data-test="run-create"
+            @click="createRun"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path :d="ICONS.plus" />
+            </svg>
+            {{ t('payroll.runs.create') }}
+          </button>
+          <p v-if="createBlockedReason" :class="BTN_DISABLED_NOTE" data-test="run-create-blocked">
+            {{ createBlockedReason }}
+          </p>
+        </div>
       </div>
     </header>
 
     <div v-if="loading" class="space-y-3">
       <div v-for="index in 2" :key="index" class="h-40 animate-pulse rounded-xl bg-neutral-100" />
     </div>
+
+    <EmptyState
+      v-else-if="loadFailed"
+      variant="failed"
+      boxed
+      data-test="load-failed"
+      :message="t('payroll.runs.load_failed_hint')"
+      @action="load"
+    />
 
     <section
       v-else-if="runs.length === 0"
@@ -293,7 +535,7 @@ onMounted(load)
           <div>
             <div class="flex flex-wrap items-center gap-2">
               <h2 class="text-lg font-semibold text-neutral-900">
-                {{ t('payroll.runs.run_label', { period: run.period_start.slice(0, 7) }) }}
+                {{ t('payroll.runs.run_label', { period: formatPeriod(run.period_start.slice(0, 7)) }) }}
               </h2>
               <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(run.status)">
                 {{ t(`payroll.runs.status.${run.status}`) }}
@@ -311,7 +553,8 @@ onMounted(load)
             <button
               v-for="command in visibleCommands(run)"
               :key="command"
-              :class="commandClass(command)"
+              :data-testid="`payroll-run-${run.id}-${command}`"
+              :class="commandClass(run, command)"
               :disabled="saving"
               @click="runCommand(run, command)"
             >
@@ -335,6 +578,27 @@ onMounted(load)
           </div>
         </div>
 
+        <div
+          v-if="commandBlockers[run.id]"
+          :data-testid="`payroll-run-${run.id}-blocker`"
+          class="mt-4 flex items-start gap-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-700"
+        >
+          <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path :d="ICONS.bell" />
+          </svg>
+          <p class="flex-1">{{ commandBlockers[run.id] }}</p>
+          <button
+            type="button"
+            class="shrink-0 rounded p-1 text-warning-600 hover:bg-warning-100"
+            :aria-label="t('common.close')"
+            @click="dismissBlocker(run.id)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path :d="ICONS.x" />
+            </svg>
+          </button>
+        </div>
+
         <dl v-if="run.result_snapshot?.totals" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div class="rounded-lg bg-neutral-50 p-3">
             <dt class="text-xs text-neutral-500">{{ t('payroll.runs.cash_before') }}</dt>
@@ -356,17 +620,44 @@ onMounted(load)
           </div>
         </dl>
 
+        <button
+          v-if="run.result_snapshot"
+          type="button"
+          :data-testid="`payroll-run-${run.id}-breakdown-toggle`"
+          :class="[btnOutline('neutral'), 'mt-4']"
+          :disabled="breakdownLoading[run.id]"
+          @click="toggleBreakdown(run)"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.chart" />
+          </svg>
+          {{
+            breakdownLoading[run.id]
+              ? t('common.loading')
+              : breakdowns[run.id]
+                ? t('payroll.runs.breakdown_hide')
+                : t('payroll.runs.breakdown_show')
+          }}
+        </button>
+
         <PayrollIncomeTaxBreakdown
-          v-if="run.result_snapshot?.people"
-          :people="run.result_snapshot.people"
+          v-if="breakdowns[run.id]?.length"
+          :people="breakdowns[run.id]"
+          :person-names="personNames"
+        />
+
+        <PayrollInsuranceBreakdown
+          v-if="breakdowns[run.id]?.length"
+          :revision-id="run.revision_id"
+          :people="breakdowns[run.id]"
           :person-names="personNames"
         />
 
         <PayrollNetPayBreakdown
-          v-if="run.result_snapshot?.people"
+          v-if="breakdowns[run.id]?.length"
           :revision-id="run.revision_id"
           :approved="run.revision_status === 'approved'"
-          :people="run.result_snapshot.people"
+          :people="breakdowns[run.id]"
           :person-names="personNames"
         />
 
@@ -375,12 +666,90 @@ onMounted(load)
           <div
             v-for="validation in run.validations"
             :key="validation.id"
-            class="rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800"
+            :data-testid="`payroll-validation-${validation.id}`"
+            class="rounded-lg border px-3 py-2 text-sm"
+            :class="validationClass(validation)"
           >
-            {{ validation.message }}
+            <p>{{ validation.message }}</p>
+
+            <!--
+              Varování, které čeká na člověka. Bez téhle věty uživatel vidí jen
+              nálepku a netuší, že právě ona drží celý běh.
+            -->
+            <div
+              v-if="awaitsOverride(validation)"
+              class="mt-2 flex flex-wrap items-center gap-2"
+              :data-testid="`payroll-validation-${validation.id}-awaiting`"
+            >
+              <p class="flex-1 text-xs leading-snug">
+                {{ t('payroll.runs.override.awaiting') }}
+              </p>
+              <button
+                v-if="canOverride && overrideEditable(run)"
+                type="button"
+                :data-testid="`payroll-validation-${validation.id}-override`"
+                :class="btnOutlineSm('warning')"
+                :disabled="saving"
+                @click="askOverride(run, validation)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.badgeCheck" />
+                </svg>
+                {{ t('payroll.runs.override.grant') }}
+              </button>
+              <p
+                v-else-if="!canOverride"
+                :class="BTN_DISABLED_NOTE"
+                :data-testid="`payroll-validation-${validation.id}-no-permission`"
+              >
+                {{ t('payroll.runs.override.no_permission') }}
+              </p>
+            </div>
+
+            <!-- Vyřešené varování: kdo a s jakým odůvodněním. -->
+            <div
+              v-else-if="validation.overridden_at"
+              class="mt-2 flex flex-wrap items-start gap-2 rounded-md bg-surface/70 px-2.5 py-2"
+              :data-testid="`payroll-validation-${validation.id}-resolved`"
+            >
+              <div class="flex-1 space-y-0.5">
+                <p class="text-xs font-medium">{{ overrideAuthorLabel(validation) }}</p>
+                <p class="text-xs leading-snug">
+                  {{ t('payroll.runs.override.reason_label', { reason: validation.override_reason }) }}
+                </p>
+              </div>
+              <button
+                v-if="canOverride && overrideEditable(run)"
+                type="button"
+                :data-testid="`payroll-validation-${validation.id}-revoke`"
+                :class="btnOutlineSm('neutral')"
+                :disabled="saving"
+                @click="revokeOverride(run, validation)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.uturn" />
+                </svg>
+                {{ t('payroll.runs.override.revoke') }}
+              </button>
+              <p
+                v-else-if="canOverride"
+                :class="BTN_DISABLED_NOTE"
+                :data-testid="`payroll-validation-${validation.id}-locked`"
+              >
+                {{ t('payroll.runs.override.locked_after_approval') }}
+              </p>
+            </div>
           </div>
         </div>
       </article>
+
+      <PaginationBar
+        data-testid="payroll-runs-pagination"
+        :page="currentPage"
+        :per-page="pageSize"
+        :total="total"
+        @update:page="goToPage"
+      />
     </section>
 
     <Modal
@@ -413,9 +782,62 @@ onMounted(load)
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}
           </button>
-          <button type="submit" :class="commandClass(pendingCommand.command)" :disabled="saving">
+          <button
+            type="submit"
+            :class="commandClass(pendingCommand.run, pendingCommand.command)"
+            :disabled="saving"
+          >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="commandIcon(pendingCommand.command)" /></svg>
             {{ commandLabel(pendingCommand.command) }}
+          </button>
+        </div>
+      </form>
+    </Modal>
+
+    <Modal
+      v-if="pendingOverride"
+      :title="t('payroll.runs.override.grant')"
+      width-class="max-w-xl"
+      @close="pendingOverride = null"
+    >
+      <form class="space-y-4" data-test="run-override-dialog" @submit.prevent="confirmOverride">
+        <p class="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800">
+          {{ pendingOverride.validation.message }}
+        </p>
+        <label class="block text-sm font-medium text-neutral-700">
+          {{ t('payroll.runs.override.reason_prompt') }}
+          <textarea
+            v-model="overrideReason"
+            class="mt-1 min-h-24 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+            required
+            autofocus
+            data-test="run-override-reason"
+          />
+        </label>
+        <p class="text-xs leading-snug text-neutral-500" data-test="run-override-hint">
+          {{ t('payroll.runs.override.reason_hint') }}
+        </p>
+        <p
+          v-if="overrideError"
+          class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+          role="alert"
+          data-test="run-override-error"
+        >
+          {{ overrideError }}
+        </p>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" @click="pendingOverride = null">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="submit"
+            :class="btnFilled('warning')"
+            :disabled="saving"
+            data-test="confirm-run-override"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+            {{ t('payroll.runs.override.grant') }}
           </button>
         </div>
       </form>

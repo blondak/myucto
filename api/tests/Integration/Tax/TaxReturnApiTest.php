@@ -74,7 +74,7 @@ final class TaxReturnApiTest extends TestCase
         $stmt = $pdo->prepare(
             'INSERT INTO supplier (company_name, street, city, zip, country_id, email, default_currency_id, default_vat_rate_id,
                                    taxpayer_type, ic, dic, financial_office_code, cz_nace_code, opr_jmeno, opr_prijmeni, opr_postaveni)
-             VALUES (?, "Testovací 1104/36", "Plzeň", "30100", ?, "dp-api@example.com", ?, ?,
+             VALUES (?, "Zkušební 123/4", "Vzorov", "10000", ?, "dp-api@example.com", ?, ?,
                      "po", "12345678", "CZ12345678", "451", "62020", "Jan", "Novák", "jednatel")'
         );
         $stmt->execute(['DP API test s.r.o.', $czId, $currencyId, $vatRateId]);

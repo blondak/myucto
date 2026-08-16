@@ -4,8 +4,12 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatMoneyMinor as money } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { apiErrorMessage } from '@/api/errors'
 import {
   payrollAbsenceApi,
@@ -17,7 +21,7 @@ import {
   type PayrollAbsenceEmployment,
 } from '@/api/payrollAbsences'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const route = useRoute()
 const toast = useToast()
 const auth = useAuthStore()
@@ -35,6 +39,12 @@ const decisiveFrom = localDate(new Date(year, applicationQuarterStartMonth - 3, 
 const decisiveTo = localDate(new Date(year, applicationQuarterStartMonth, 0))
 
 const loading = ref(true)
+/*
+ * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
+ * není". Toast s chybou za pár vteřin zmizí a bez tohohle příznaku by na
+ * obrazovce zůstal prázdný stav, který lže.
+ */
+const loadFailed = ref(false)
 const saving = ref(false)
 const tab = ref<'absences' | 'averages' | 'leave'>('absences')
 const absenceError = ref('')
@@ -43,6 +53,10 @@ const entitlementError = ref('')
 const entryError = ref('')
 const employments = ref<PayrollAbsenceEmployment[]>([])
 const absences = ref<PayrollAbsence[]>([])
+const absenceTotal = ref(0)
+const absencePageSize = 12
+const absenceOffset = ref(0)
+const currentAbsencePage = computed(() => Math.floor(absenceOffset.value / absencePageSize) + 1)
 const averages = ref<AverageSnapshot[]>([])
 const leaveEntries = ref<LeaveEntry[]>([])
 const leaveBalance = ref(0)
@@ -110,6 +124,12 @@ const dpnReviews = reactive<Record<number, {
 }>>({})
 
 const approvedAverages = computed(() => averages.value.filter(item => item.status === 'approved'))
+/*
+ * Firma bez jediného pracovního vztahu. Celá stránka stojí na výběru
+ * zaměstnance, takže filtr ani záložky nemají co ukazovat — místo prázdných
+ * ovládacích prvků se vykreslí rozcestník do evidence osob.
+ */
+const hasNoEmployments = computed(() => !loading.value && !loadFailed.value && employments.value.length === 0)
 const employmentOptions = computed(() => employments.value.map(item => ({
   value: item.id,
   label: `${item.full_name} · ${item.code}`,
@@ -132,6 +152,24 @@ const needsAverage = computed(() =>
   ['vacation', 'dpn', 'quarantine', 'employee_obstacle', 'employer_obstacle']
     .includes(absenceForm.absence_type),
 )
+/*
+ * Proč „Vytvořit" nejde zmáčknout. Dovolená, DPN a překážky se počítají
+ * z průměrného výdělku, takže bez vybraného průměru nemá server z čeho počítat.
+ * Rozlišujeme dva různé stavy: průměr existuje a jen není vybraný (uživatel ho
+ * doplní tady) versus pro vztah žádný spočítaný není (musí se nejdřív spočítat
+ * na záložce Průměry — bez odkazu tam uživatel netrefil).
+ */
+const missingAverage = computed(() =>
+  needsAverage.value && absenceForm.average_snapshot_id === null)
+const noAverageAvailable = computed(() =>
+  missingAverage.value && averageOptions.value.length === 0)
+const absenceBlockedReason = computed<string | null>(() => {
+  if (!missingAverage.value) return null
+  return noAverageAvailable.value
+    ? t('payroll_absence.absences.average_missing_for_relation')
+    : t('payroll_absence.absences.average_required_hint')
+})
+
 const canCreateAbsence = computed(() =>
   !saving.value && (!needsAverage.value || absenceForm.average_snapshot_id !== null),
 )
@@ -228,17 +266,28 @@ async function loadContext() {
 }
 
 async function loadData() {
-  if (selectedEmploymentId.value === null) return
+  if (selectedEmploymentId.value === null) {
+    // Bez pracovního vztahu není co načítat — ale `loading` se musí shodit,
+    // jinak na stránce natrvalo zůstanou skeletony a vypadá to jako zaseknuté
+    // načítání. Firma bez zaměstnanců je legitimní stav, ne chyba.
+    loading.value = false
+    return
+  }
   loading.value = true
+  loadFailed.value = false
   try {
     const employmentId = selectedEmploymentId.value
-    const [absenceData, averageData, leaveData] = await Promise.all([
-      payrollAbsenceApi.absences(filterFrom.value, filterTo.value, employmentId),
+    const [absencePage, averageData, leaveData] = await Promise.all([
+      payrollAbsenceApi.absencesPage(filterFrom.value, filterTo.value, employmentId, {
+        limit: absencePageSize,
+        offset: absenceOffset.value,
+      }),
       payrollAbsenceApi.averages(employmentId),
       payrollAbsenceApi.leaveLedger(employmentId, leaveYear.value),
     ])
-    absences.value = absenceData
-    for (const item of absenceData) {
+    absences.value = absencePage.absences
+    absenceTotal.value = absencePage.total
+    for (const item of absencePage.absences) {
       if (['dpn', 'quarantine'].includes(item.absence_type) && !dpnReviews[item.id]) {
         dpnReviews[item.id] = {
           firstDayFullyWorked: false,
@@ -255,10 +304,19 @@ async function loadData() {
     entitlementForm.employment_id = employmentId
     entryForm.employment_id = employmentId
   } catch (error: any) {
+    // Nepřítomnosti, průměry ani nárok se nemažou. Prázdný seznam by tu byl
+    // obzvlášť zrádný: „žádná dovolená" a „nevíme" vedou k opačnému jednání.
+    loadFailed.value = true
     toast.error(error?.response?.data?.error?.message || t('payroll_absence.messages.load_failed'))
   } finally {
     loading.value = false
   }
+}
+
+// Stránkuje sdílená `PaginationBar` (číslo stránky od jedné); server zná offset.
+function goToAbsencePage(nextPage: number) {
+  absenceOffset.value = Math.max(0, (nextPage - 1) * absencePageSize)
+  void loadData()
 }
 
 async function createAbsence() {
@@ -422,11 +480,6 @@ async function createEntry() {
   }
 }
 
-function money(minor: number | null) {
-  if (minor === null) return '—'
-  return new Intl.NumberFormat(locale.value, { style: 'currency', currency: 'CZK' }).format(minor / 100)
-}
-
 function minutes(value: number) {
   const sign = value < 0 ? '−' : ''
   const absolute = Math.abs(value)
@@ -439,7 +492,14 @@ watch(selectedEmploymentId, () => {
   averageError.value = ''
   entitlementError.value = ''
   entryError.value = ''
+  // Jiný vztah = jiná množina nepřítomností; třetí stránka by ukázala prázdno.
+  absenceOffset.value = 0
   void loadData()
+})
+// Rozsah dat se načítá až tlačítkem Načíst znovu, ale zúžený filtr nesmí
+// uživatele nechat stát na stránce, která už neexistuje.
+watch([filterFrom, filterTo], () => {
+  absenceOffset.value = 0
 })
 watch(leaveYear, (selectedYear, previousYear) => {
   entitlementForm.leave_year = selectedYear
@@ -486,6 +546,19 @@ onMounted(async () => {
       {{ t('payroll_absence.review_notice') }}
     </section>
 
+    <EmptyState
+      v-if="hasNoEmployments"
+      boxed
+      icon="user"
+      cta-icon="user"
+      data-test="no-employments"
+      :title="t('payroll_absence.empty.no_employments_title')"
+      :message="t('payroll_absence.empty.no_employments_message')"
+      :cta="t('payroll_absence.empty.no_employments_cta')"
+      to="/payroll/people"
+    />
+
+    <template v-else>
     <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
       <div class="grid gap-4 md:grid-cols-4">
         <div class="md:col-span-2">
@@ -537,6 +610,15 @@ onMounted(async () => {
       <div v-for="index in 4" :key="index" class="h-40 animate-pulse rounded-xl bg-neutral-100" />
     </div>
 
+    <EmptyState
+      v-else-if="loadFailed"
+      variant="failed"
+      boxed
+      data-test="load-failed"
+      :message="t('payroll_absence.messages.load_failed_hint')"
+      @action="loadData"
+    />
+
     <template v-else-if="tab === 'absences'">
       <section v-if="canWrite" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll_absence.absences.new') }}</h2>
@@ -568,6 +650,22 @@ onMounted(async () => {
               accent="payroll"
               :aria-label="t('payroll_absence.absences.average')"
             />
+            <!--
+              Prázdný výběr sám o sobě neřekne, kam jít. Průměry se počítají na
+              vlastní záložce a odkaz tam dosud nikde nebyl.
+            -->
+            <button
+              v-if="noAverageAvailable"
+              type="button"
+              :class="[btnOutline('primary'), 'mt-2']"
+              data-test="go-to-averages"
+              @click="tab = 'averages'"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.chart" />
+              </svg>
+              {{ t('payroll_absence.absences.go_to_averages') }}
+            </button>
           </div>
           <label>
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.absences.partial_first') }}</span>
@@ -595,13 +693,21 @@ onMounted(async () => {
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.note') }}</span>
             <input v-model="absenceForm.note" maxlength="1000" type="text" :class="fieldClass">
           </label>
-          <div class="flex flex-wrap justify-end sm:col-span-2 lg:col-span-4">
-            <button :class="btnFilled('primary')" :disabled="!canCreateAbsence">
+          <div class="flex flex-col items-end gap-1.5 sm:col-span-2 lg:col-span-4">
+            <button
+              :class="btnFilled('primary')"
+              :disabled="!canCreateAbsence"
+              :title="disabledTitle(!canCreateAbsence, absenceBlockedReason)"
+              data-test="absence-create"
+            >
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path :d="ICONS.plus" />
               </svg>
               {{ t('payroll_absence.absences.create') }}
             </button>
+            <p v-if="absenceBlockedReason" :class="BTN_DISABLED_NOTE" data-test="absence-create-blocked">
+              {{ absenceBlockedReason }}
+            </p>
           </div>
           <p
             v-if="absenceError"
@@ -669,6 +775,14 @@ onMounted(async () => {
             </div>
           </article>
         </div>
+        <PaginationBar
+          class="mt-4"
+          data-test="absence-pagination"
+          :page="currentAbsencePage"
+          :per-page="absencePageSize"
+          :total="absenceTotal"
+          @update:page="goToAbsencePage"
+        />
       </section>
     </template>
 
@@ -750,6 +864,7 @@ onMounted(async () => {
           </article>
         </div>
       </section>
+    </template>
     </template>
   </div>
 </template>

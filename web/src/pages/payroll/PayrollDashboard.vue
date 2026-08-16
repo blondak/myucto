@@ -11,6 +11,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { formatPeriod } from '@/composables/useFormat'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 import PayrollEmployeeCards from '@/pages/payroll/PayrollEmployeeCards.vue'
 import PayrollGuide from '@/pages/payroll/PayrollGuide.vue'
@@ -87,6 +88,19 @@ const actions = computed<ActionItem[]>(() => [
     variant: 'neutral',
     show: canConfigure.value,
     to: { name: 'payroll-settings' },
+  },
+  // Zrušení rozdělaného nastavení není nic, k čemu by měl být uživatel vyzýván
+  // — patří mezi pokročilé akce v „…", ne vedle hlavních tlačítek. Ve stavu
+  // `active` mizí úplně: aktivovaný modul už vypnout nejde.
+  {
+    key: 'disable-setup',
+    label: t('payroll.activation.disable'),
+    icon: 'uturn',
+    tier: 'advanced',
+    variant: 'warning',
+    show: canConfigure.value && state.value?.status === 'setup',
+    disabled: saving.value,
+    run: () => void disableSetup(),
   },
 ])
 
@@ -235,15 +249,6 @@ onMounted(load)
       </section>
 
       <div v-else class="space-y-6">
-        <div v-if="state.status === 'setup' && canConfigure" class="flex flex-wrap justify-end gap-2">
-          <button :class="btnOutline('warning')" :disabled="saving" @click="disableSetup">
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path :d="ICONS.uturn" />
-            </svg>
-            {{ t('payroll.activation.disable') }}
-          </button>
-        </div>
-
         <section
           v-if="setupBlockers.length > 0"
           class="rounded-xl border border-warning-500/40 bg-warning-50 p-4 sm:p-6"
@@ -291,7 +296,7 @@ onMounted(load)
                   : t('payroll.dashboard.month.run_missing') }}
               </span>
               <span class="rounded-full bg-payroll-50 px-2.5 py-1 text-xs font-medium text-payroll-700">
-                {{ currentPeriod }}
+                {{ formatPeriod(currentPeriod) }}
               </span>
             </div>
           </div>

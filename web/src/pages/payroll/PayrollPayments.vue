@@ -21,9 +21,19 @@ import {
   btnFilledSm,
   btnOutline,
   btnOutlineSm,
+  disabledTitle,
+  BTN_DISABLED_NOTE,
   ICONS,
 } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+// Formátování je sdílené (useFormat) — místní kopie se lišily locale i tvarem
+// data od zbytku aplikace, viz komentář u `formatMoneyMinor`.
+import { formatDate, formatDateTime, formatMoneyMinor as formatMoney } from '@/composables/useFormat'
 import { localPayrollPeriod } from './payrollComponentsUi'
 
 const { t } = useI18n()
@@ -32,11 +42,18 @@ const toast = useToast()
 const period = ref(localPayrollPeriod())
 const activeTab = ref<'liabilities' | 'batches' | 'settlements'>('liabilities')
 const loading = ref(true)
+/*
+ * Selhalo načtení? Pak o závazcích nevíme NIC — a to je něco jiného než „za
+ * tohle období žádné nejsou". Toast za pár vteřin zmizí a bez tohohle příznaku
+ * by na obrazovce zůstal prázdný stav, který tvrdí, že je hotovo.
+ */
+const loadFailed = ref(false)
 const materializing = ref(false)
 const creatingBatch = ref(false)
 const generatingBatchId = ref<number | null>(null)
 const downloadingExportId = ref<number | null>(null)
 const items = ref<PayrollPaymentLiability[]>([])
+const periodTotals = ref({ amount_minor: 0, allocated_minor: 0, settled_minor: 0 })
 const runs = ref<PayrollRun[]>([])
 const payerOptions = ref<PayrollPayerOption[]>([])
 const batches = ref<PayrollPaymentBatch[]>([])
@@ -59,6 +76,33 @@ let loadSequence = 0
 const pendingExportKeys = new Map<number, string>()
 const pendingReconciliationKeys = new Map<string, string>()
 
+const COLUMNS: ColumnDef[] = [
+  { key: 'recipient', labelKey: 'payroll.payments.recipient_label', required: true },
+  { key: 'kind', labelKey: 'payroll.payments.kind_label' },
+  { key: 'destination', labelKey: 'payroll.payments.destination' },
+  { key: 'due_on', labelKey: 'payroll.payments.due_on' },
+  { key: 'amount', labelKey: 'payroll.payments.amount', required: true },
+  { key: 'settled', labelKey: 'payroll.payments.settled' },
+  { key: 'status', labelKey: 'payroll.payments.status' },
+]
+const tbl = useTablePrefs('payroll-payments', COLUMNS)
+
+const pageSize = 50
+const total = ref(0)
+const offset = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
+
+function goToPage(nextPage: number): void {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  void load()
+}
+
+/** Změna období mění obsah seznamu, takže stránka musí zpět na začátek. */
+function reload(): void {
+  offset.value = 0
+  void load()
+}
+
 const materializableRevisions = computed(() => {
   const seen = new Set<number>()
   return runs.value.filter(run => {
@@ -72,14 +116,28 @@ const materializableRevisions = computed(() => {
 const canMaterialize = computed(() =>
   auth.canWrite('payroll.payments') && materializableRevisions.value.length > 0,
 )
-const totals = computed(() => items.value.reduce(
-  (value, item) => ({
-    amount: value.amount + signed(item, item.amount_minor),
-    allocated: value.allocated + signed(item, item.allocated_minor),
-    settled: value.settled + signed(item, item.settled_minor),
-  }),
-  { amount: 0, allocated: 0, settled: 0 },
-))
+/*
+ * Proč je „Připravit závazky" zašedlé. Vrací `null`, když akce jde spustit —
+ * tlačítko pak žádnou omluvu nepotřebuje. Po selhání načtení je odpověď jiná:
+ * o revizích nic nevíme, takže neříkáme „schvalte revizi" (třeba už schválená
+ * je), ale pravdu — data chybí.
+ */
+const materializeBlockedReason = computed<string | null>(() => {
+  if (canMaterialize.value) return null
+  if (loadFailed.value) return t('payroll.payments.materialize_blocked_unknown')
+  return t('payroll.payments.materialize_blocked')
+})
+/*
+ * Součty za celé období počítá server. Sečíst je z `items` by po zavedení
+ * stránkování znamenalo hlásit jako „celkem" jen tolik, kolik se zrovna vešlo
+ * na obrazovku. Znaménko příchozích závazků má server vyřešené stejně jako
+ * `signed()`.
+ */
+const totals = computed(() => ({
+  amount: periodTotals.value.amount_minor,
+  allocated: periodTotals.value.allocated_minor,
+  settled: periodTotals.value.settled_minor,
+}))
 const selectedItems = computed(() => {
   const ids = new Set(selectedIds.value)
   return items.value.filter(item => ids.has(item.id))
@@ -295,30 +353,6 @@ function isSelected(id: number): boolean {
   return selectedIds.value.includes(id)
 }
 
-function formatMoney(amountMinor: number, currencyCode = 'CZK'): string {
-  return new Intl.NumberFormat(undefined, {
-    style: 'currency',
-    currency: currencyCode,
-  }).format(amountMinor / 100)
-}
-
-function formatDate(value: string): string {
-  const parsed = new Date(`${value}T00:00:00`)
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(parsed)
-}
-
-function formatDateTime(value: string): string {
-  const parsed = new Date(value.replace(' ', 'T'))
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : new Intl.DateTimeFormat(undefined, {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }).format(parsed)
-}
-
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   return `${new Intl.NumberFormat(undefined, {
@@ -415,6 +449,7 @@ async function load(): Promise<void> {
   const sequence = ++loadSequence
   const requestedPeriod = period.value
   loading.value = true
+  loadFailed.value = false
   try {
     const [
       liabilityList,
@@ -423,7 +458,7 @@ async function load(): Promise<void> {
       batchList,
       reconciliation,
     ] = await Promise.all([
-      payrollPaymentsApi.liabilities(requestedPeriod),
+      payrollPaymentsApi.liabilities(requestedPeriod, { limit: pageSize, offset: offset.value }),
       payrollApi.runs(requestedPeriod),
       payrollPaymentsApi.payerOptions(),
       payrollPaymentsApi.batches(requestedPeriod),
@@ -431,6 +466,8 @@ async function load(): Promise<void> {
     ])
     if (sequence === loadSequence && requestedPeriod === period.value) {
       items.value = liabilityList.items
+      total.value = liabilityList.total
+      periodTotals.value = liabilityList.totals
       runs.value = runList
       payerOptions.value = payerList
       batches.value = batchList.items
@@ -454,15 +491,16 @@ async function load(): Promise<void> {
     }
   } catch (error) {
     if (sequence === loadSequence) {
-      items.value = []
-      runs.value = []
-      payerOptions.value = []
-      batches.value = []
-      allocations.value = []
-      paymentMatches.value = []
-      bankEvidence.value = []
-      cashEvidence.value = []
+      /*
+       * Kolekce se schválně NEVYNULUJÍ. Prázdné pole se v šabloně nedá odlišit
+       * od „období nemá žádné závazky", takže by stránka po výpadku sítě
+       * sebejistě tvrdila nepravdu. Poslední úspěšně načtená data jsou pořád
+       * lepší informace než prázdno; nad nimi se vykreslí `loadFailed` stav
+       * s nabídkou opakování. Výběr se ale ruší — potvrzovat dávku nad daty,
+       * o kterých nevíme, jestli pořád platí, je past.
+       */
       selectedIds.value = []
+      loadFailed.value = true
       toast.error(apiErrorMessage(error, t('payroll.payments.load_failed')))
     }
   } finally {
@@ -744,7 +782,7 @@ onMounted(load)
             type="month"
             min="2024-01"
             class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm focus:border-payroll-500 focus:ring-payroll-500/20"
-            @change="load"
+            @change="reload"
           >
         </label>
         <button type="button" :class="btnOutline('neutral')" :disabled="loading" @click="load">
@@ -753,18 +791,29 @@ onMounted(load)
           </svg>
           {{ t('payroll.payments.reload') }}
         </button>
-        <button
-          v-if="auth.canWrite('payroll.payments')"
-          type="button"
-          :class="btnFilled('primary')"
-          :disabled="!canMaterialize || materializing"
-          @click="materialize"
-        >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path :d="ICONS.coin" />
-          </svg>
-          {{ materializing ? t('payroll.payments.materializing') : t('payroll.payments.materialize') }}
-        </button>
+        <!--
+          Hlavní akce stránky. Když není co zhmotnit, nese s sebou i větu proč —
+          dřív to vysvětlení viselo jen v prázdném stavu (`empty_blocked`), takže
+          u neprázdného seznamu uživatel mačkal mrtvé tlačítko bez nápovědy.
+        -->
+        <div v-if="auth.canWrite('payroll.payments')" class="flex flex-col items-start gap-1.5">
+          <button
+            type="button"
+            :class="btnFilled('primary')"
+            :disabled="!canMaterialize || materializing"
+            :title="disabledTitle(!canMaterialize, materializeBlockedReason)"
+            data-test="materialize"
+            @click="materialize"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.coin" />
+            </svg>
+            {{ materializing ? t('payroll.payments.materializing') : t('payroll.payments.materialize') }}
+          </button>
+          <p v-if="materializeBlockedReason" :class="BTN_DISABLED_NOTE" data-test="materialize-blocked">
+            {{ materializeBlockedReason }}
+          </p>
+        </div>
       </div>
     </header>
 
@@ -880,9 +929,18 @@ onMounted(load)
         </p>
       </section>
 
+      <!-- Pořadí stavů: načítá se → selhalo → prázdno → data. -->
       <div v-if="loading" class="space-y-3">
         <div v-for="index in 4" :key="index" class="h-20 animate-pulse rounded-xl bg-neutral-100" />
       </div>
+      <EmptyState
+        v-else-if="loadFailed"
+        variant="failed"
+        boxed
+        data-test="load-failed"
+        :message="t('payroll.payments.load_failed_hint')"
+        @action="load"
+      />
       <section v-else-if="items.length === 0" class="rounded-xl border border-dashed border-neutral-300 bg-surface px-5 py-12 text-center">
         <svg class="mx-auto h-10 w-10 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
           <path :d="ICONS.coin" />
@@ -895,8 +953,12 @@ onMounted(load)
 
       <template v-else>
         <section data-layout="desktop" class="hidden overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm md:block">
+          <div class="flex flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2">
+            <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+            <DensityToggle class="hidden md:block" :ctrl="tbl" />
+          </div>
           <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-neutral-200 text-sm">
+            <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
               <thead class="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
                 <tr>
                   <th v-if="auth.canWrite('payroll.payments')" class="w-12 px-4 py-3">
@@ -908,13 +970,13 @@ onMounted(load)
                       @change="toggleAll"
                     >
                   </th>
-                  <th class="px-4 py-3">{{ t('payroll.payments.recipient_label') }}</th>
-                  <th class="px-4 py-3">{{ t('payroll.payments.kind_label') }}</th>
-                  <th class="px-4 py-3">{{ t('payroll.payments.destination') }}</th>
-                  <th class="px-4 py-3">{{ t('payroll.payments.due_on') }}</th>
-                  <th class="px-4 py-3 text-right">{{ t('payroll.payments.amount') }}</th>
-                  <th class="px-4 py-3 text-right">{{ t('payroll.payments.settled') }}</th>
-                  <th class="px-4 py-3">{{ t('payroll.payments.status') }}</th>
+                  <th v-if="tbl.isVisible('recipient')" class="px-4 py-3">{{ t('payroll.payments.recipient_label') }}</th>
+                  <th v-if="tbl.isVisible('kind')" class="px-4 py-3">{{ t('payroll.payments.kind_label') }}</th>
+                  <th v-if="tbl.isVisible('destination')" class="px-4 py-3">{{ t('payroll.payments.destination') }}</th>
+                  <th v-if="tbl.isVisible('due_on')" class="px-4 py-3">{{ t('payroll.payments.due_on') }}</th>
+                  <th v-if="tbl.isVisible('amount')" class="px-4 py-3 text-right">{{ t('payroll.payments.amount') }}</th>
+                  <th v-if="tbl.isVisible('settled')" class="px-4 py-3 text-right">{{ t('payroll.payments.settled') }}</th>
+                  <th v-if="tbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.payments.status') }}</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
@@ -931,14 +993,14 @@ onMounted(load)
                       @change="toggleSelection(item)"
                     >
                   </td>
-                  <td class="px-4 py-3">
+                  <td v-if="tbl.isVisible('recipient')" class="px-4 py-3">
                     <div class="font-medium text-neutral-900">{{ recipientName(item) }}</div>
                     <div v-if="item.institution_code" class="mt-0.5 text-xs text-neutral-500">
                       {{ item.institution_code }}
                     </div>
                   </td>
-                  <td class="px-4 py-3 text-neutral-700">{{ kindLabel(item.liability_kind) }}</td>
-                  <td class="px-4 py-3 text-neutral-600">
+                  <td v-if="tbl.isVisible('kind')" class="px-4 py-3 text-neutral-700">{{ kindLabel(item.liability_kind) }}</td>
+                  <td v-if="tbl.isVisible('destination')" class="px-4 py-3 text-neutral-600">
                     <div>{{ t(`payroll.payments.recipient.${item.recipient_kind}`) }}</div>
                     <div v-if="item.payment_target_masked" class="mt-0.5 text-xs text-neutral-500">
                       {{ item.payment_target_masked }}
@@ -950,12 +1012,12 @@ onMounted(load)
                       {{ t('payroll.payments.target.ready') }}
                     </span>
                   </td>
-                  <td class="whitespace-nowrap px-4 py-3 text-neutral-600">{{ formatDate(item.due_on) }}</td>
-                  <td class="whitespace-nowrap px-4 py-3 text-right font-medium" :class="item.direction === 'incoming' ? 'text-success-700' : 'text-neutral-900'">
+                  <td v-if="tbl.isVisible('due_on')" class="whitespace-nowrap px-4 py-3 text-neutral-600">{{ formatDate(item.due_on) }}</td>
+                  <td v-if="tbl.isVisible('amount')" class="whitespace-nowrap px-4 py-3 text-right font-medium" :class="item.direction === 'incoming' ? 'text-success-700' : 'text-neutral-900'">
                     {{ formatMoney(signed(item, item.amount_minor), item.currency_code) }}
                   </td>
-                  <td class="whitespace-nowrap px-4 py-3 text-right text-neutral-600">{{ formatMoney(signed(item, item.settled_minor), item.currency_code) }}</td>
-                  <td class="px-4 py-3">
+                  <td v-if="tbl.isVisible('settled')" class="whitespace-nowrap px-4 py-3 text-right text-neutral-600">{{ formatMoney(signed(item, item.settled_minor), item.currency_code) }}</td>
+                  <td v-if="tbl.isVisible('status')" class="px-4 py-3">
                     <div class="flex flex-wrap gap-1">
                       <span class="rounded-full px-2 py-1 text-xs font-medium" :class="stateClass(item.state)">{{ stateLabel(item.state) }}</span>
                       <span v-if="item.revision_kind === 'correction'" class="rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700">
@@ -1030,6 +1092,13 @@ onMounted(load)
             </dl>
           </article>
         </section>
+
+        <PaginationBar
+          :page="currentPage"
+          :per-page="pageSize"
+          :total="total"
+          @update:page="goToPage"
+        />
       </template>
     </template>
 

@@ -110,36 +110,63 @@ final readonly class JmhzProtocolImportService
     }
 
     /**
-     * Načtené protokoly i s vysvětlením chyb.
+     * Stránka načtených protokolů.
      *
-     * Chyby se počítají z ULOŽENÉHO ORIGINÁLU, ne z uložené interpretace: náš
-     * katalog kontrol se doplňuje, takže dnes nevysvětlená hláška může být
-     * zítra dohledaná — a zamrazený výklad by tomu bránil. Když se originál
-     * z jakéhokoli důvodu nepodaří znovu přečíst, řádek se ukáže bez detailu
-     * chyb; zmizet nesmí, protože právě on je dokladem o podání.
+     * PROČ SEZNAM UŽ NENESE VYSVĚTLENÉ CHYBY: dřív si pro každý ze sta řádků
+     * dotáhl uložené XML jen proto, aby z něj vysvětlení znovu vyparsoval —
+     * tedy sto originálních dokladů přenesených z databáze a stokrát spuštěný
+     * parser na jedno otevření obrazovky. Kolik chyb protokol má, je přitom
+     * uložený sloupec `error_count`, a JESTLI se dá detail zobrazit, se pozná
+     * z toho, že je originál uložený; ani jedno XML nepotřebuje.
      *
-     * @return list<array<string,mixed>>
+     * Vysvětlení se proto dotahuje až na vyžádání pro JEDEN protokol
+     * ({@see self::explain()}). Zachovává to zásadu, že se chyby počítají
+     * z ULOŽENÉHO ORIGINÁLU, ne ze zamrazené interpretace — náš katalog
+     * kontrol se doplňuje, takže dnes nevysvětlená hláška může být zítra
+     * dohledaná. Zamrazit výklad při importu by tomu bránilo.
+     *
+     * @return array{items:list<array<string,mixed>>,total:int}
      */
-    public function history(int $supplierId, string $environment): array
-    {
-        $rows = [];
-        foreach ($this->protocols->listRecent($supplierId, $environment, 100, true) as $row) {
-            $payload = (string) ($row['payload_xml'] ?? '');
-            unset($row['payload_xml']);
-            $row['errors'] = [];
-            $row['detail_available'] = false;
-            if ($payload !== '') {
-                try {
-                    $row['errors'] = $this->explainer->explain($this->parser->parse($payload));
-                    $row['detail_available'] = true;
-                } catch (\Throwable) {
-                    // Viz docblock — bez detailu, ale s dokladem.
-                }
-            }
-            $rows[] = $row;
-        }
+    public function history(
+        int $supplierId,
+        string $environment,
+        int $limit = PayrollImportedJmhzProtocolRepository::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        return $this->protocols->listRecentPage(
+            $supplierId,
+            $environment,
+            $limit,
+            $offset,
+        );
+    }
 
-        return $rows;
+    /**
+     * Vysvětlené chyby jednoho načteného protokolu.
+     *
+     * Když se originál z jakéhokoli důvodu nepodaří přečíst nebo rozebrat,
+     * vrací se prázdný seznam s `detail_available = false`: řádek v evidenci
+     * zmizet nesmí, protože právě on je dokladem o podání.
+     *
+     * @return array{errors:list<array<string,mixed>>,detail_available:bool}
+     */
+    public function explain(
+        int $supplierId,
+        string $environment,
+        int $protocolId,
+    ): array {
+        $payload = $this->protocols->payload($supplierId, $environment, $protocolId);
+        if ($payload === null) {
+            return ['errors' => [], 'detail_available' => false];
+        }
+        try {
+            return [
+                'errors' => $this->explainer->explain($this->parser->parse($payload)),
+                'detail_available' => true,
+            ];
+        } catch (\Throwable) {
+            return ['errors' => [], 'detail_available' => false];
+        }
     }
 
     /**

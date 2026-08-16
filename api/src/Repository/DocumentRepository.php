@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Deletion\ForeignKeyDeletionGuard;
 use PDO;
 
 /**
@@ -410,21 +411,98 @@ final class DocumentRepository
     {
         [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, sha256, filename, thumb_path FROM documents
+            'SELECT id, title, folder_id, sha256, filename, thumb_path FROM documents
               WHERE supplier_id = ? AND deleted_at IS NOT NULL' . $scopeSql
         );
         $stmt->execute(array_merge([$supplierId], $scopeParams));
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
-    public function hardDeleteTrashed(int $supplierId, DocumentViewerContext $viewer): int
+    /**
+     * Tvrdé smazání VYJMENOVANÝCH dokladů v koši.
+     *
+     * Dřív to byl jeden hromadný `DELETE ... WHERE deleted_at IS NOT NULL`. Jenže
+     * mzdový modul přidal na `documents` cizí klíče RESTRICT, takže jediný navázaný
+     * doklad shodil celý příkaz — koš pak nešlo vysypat vůbec nikdy a uživatel
+     * neměl jak zjistit, který doklad to způsobil. Proto se maže po dávkách a dávka,
+     * která narazí na cizí klíč, se dojede po jednom: co jde, zmizí, a co nejde,
+     * zůstane v koši a volající o něm řekne.
+     *
+     * Návratová hodnota se ZÁMĚRNĚ neopírá o `rowCount()` — `documents.parent_document_id`
+     * kaskáduje, takže smazání rodiče odstraní i potomka a součet řádků by lhal.
+     * Pravdu říká až kontrola, které id v tabulce zbyla.
+     *
+     * @param list<int> $ids
+     * @return list<int> id dokladů, které v tabulce zůstaly (blokované nebo souběh)
+     */
+    public function hardDeleteTrashedByIds(int $supplierId, DocumentViewerContext $viewer, array $ids): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        if ($ids === []) {
+            return [];
+        }
+
+        foreach (array_chunk($ids, 200) as $chunk) {
+            try {
+                $this->deleteTrashedChunk($supplierId, $viewer, $chunk);
+            } catch (\PDOException $e) {
+                if (!ForeignKeyDeletionGuard::isForeignKeyViolation($e)) {
+                    throw $e;
+                }
+                foreach ($chunk as $id) {
+                    try {
+                        $this->deleteTrashedChunk($supplierId, $viewer, [$id]);
+                    } catch (\PDOException $inner) {
+                        if (!ForeignKeyDeletionGuard::isForeignKeyViolation($inner)) {
+                            throw $inner;
+                        }
+                    }
+                }
+            }
+        }
+
+        return $this->existingIds($supplierId, $ids);
+    }
+
+    /** @param list<int> $ids */
+    private function deleteTrashedChunk(int $supplierId, DocumentViewerContext $viewer, array $ids): void
     {
         [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $stmt = $this->db->pdo()->prepare(
-            'DELETE FROM documents WHERE supplier_id = ? AND deleted_at IS NOT NULL' . $scopeSql
+            "DELETE FROM documents WHERE supplier_id = ? AND deleted_at IS NOT NULL AND id IN ({$placeholders})"
+            . $scopeSql
         );
-        $stmt->execute(array_merge([$supplierId], $scopeParams));
-        return $stmt->rowCount();
+        $stmt->execute(array_merge([$supplierId], $ids, $scopeParams));
+    }
+
+    /**
+     * Která z daných id v tabulce pořád jsou — jediný spolehlivý způsob, jak po
+     * mazání s kaskádou zjistit, co reálně zmizelo.
+     *
+     * @param list<int> $ids
+     * @return list<int>
+     */
+    public function existingIds(int $supplierId, array $ids): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        if ($ids === []) {
+            return [];
+        }
+
+        $found = [];
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT id FROM documents WHERE supplier_id = ? AND id IN ({$placeholders})"
+            );
+            $stmt->execute(array_merge([$supplierId], $chunk));
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) ?: [] as $id) {
+                $found[] = (int) $id;
+            }
+        }
+
+        return $found;
     }
 
     /**

@@ -48,10 +48,23 @@ final class PayrollRunsAction
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
-        $items = $this->runs->list(
+        $query = $request->getQueryParams();
+        // Období je volitelné, takže bez stropu tenhle endpoint četl kompletní
+        // mzdovou historii firmy. Strop je tvrdý (ne jen výchozí), aby ho nešlo
+        // obejít parametrem z URL.
+        $limit = max(1, min(
+            PayrollRunRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollRunRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
+
+        $page = $this->runs->list(
             $this->currentSupplierId($request),
             $period === null ? null : "{$period}-01",
+            $limit,
+            $offset,
         );
+        $items = $page['items'];
         foreach ($items as &$item) {
             $status = PayrollTimeValue::string(
                 $item['status'] ?? null,
@@ -82,7 +95,42 @@ final class PayrollRunsAction
             $item['can_delete'] = $deletion !== null && $deletion->canDelete;
         }
         unset($item);
-        return Json::ok($response, ['runs' => $items]);
+
+        // Klíč `runs` zůstává, aby stávající volající nespadli; `total`/`limit`/`offset`
+        // přibyly vedle něj, protože seznam už nemusí být úplný.
+        return Json::ok($response, [
+            'runs' => $items,
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
+        ]);
+    }
+
+    /**
+     * Detail běhu s CELÝM výsledkovým snapshotem — objemná data, která seznam
+     * záměrně neposílá. Frontend si je dotahuje pro jeden rozbalený běh.
+     *
+     * @param array<string,string> $args
+     */
+    public function detail(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll',
+            AccessLevel::READ,
+        )) !== null) {
+            return $error;
+        }
+        $run = $this->runs->detail(
+            $this->currentSupplierId($request),
+            (int) ($args['id'] ?? 0),
+        );
+        if ($run === null) {
+            return Json::error($response, 'not_found', 'Mzdový běh neexistuje.', 404);
+        }
+
+        return Json::ok($response, ['run' => $run]);
     }
 
     public function create(Request $request, Response $response): Response
@@ -204,6 +252,14 @@ final class PayrollRunsAction
             'review', 'request_correction' => 'payroll.review',
             'approve' => 'payroll.approve',
             'reopen' => 'payroll.reopen',
+            // `post` vytváří účetní zápis v hlavní knize — patří pod stejné
+            // právo jako ostatní mzdové zaúčtování („Zaúčtovat mzdy"), ne pod
+            // právo na zápis mzdových vstupů.
+            'post' => 'payroll.post',
+            // `prepare_payments` materializuje platební závazky a `mark_paid`
+            // uzavírá platební ledger. Obojí je táž agenda jako platební dávky
+            // a párování úhrad, které už `payroll.payments` chrání.
+            'prepare_payments', 'mark_paid' => 'payroll.payments',
             default => 'payroll.inputs.write',
         };
         if (($error = $this->authorize(
@@ -312,6 +368,15 @@ final class PayrollRunsAction
                 $userId,
                 $reason,
             ),
+            'post' => $this->commands->post(
+                $supplierId, $runId, $version, $idempotencyKey, $userId,
+            ),
+            'prepare_payments' => $this->commands->preparePayments(
+                $supplierId, $runId, $version, $idempotencyKey, $userId,
+            ),
+            'mark_paid' => $this->commands->markPaid(
+                $supplierId, $runId, $version, $idempotencyKey, $userId,
+            ),
             'close' => $this->commands->close(
                 $supplierId, $runId, $version, $idempotencyKey, $userId,
             ),
@@ -331,6 +396,7 @@ final class PayrollRunsAction
             'run' => $result->run,
             'revision' => $result->revision,
             'idempotent_replay' => $result->idempotentReplay,
+            'outcome' => $result->outcome?->toArray(),
         ];
     }
 

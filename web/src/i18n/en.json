@@ -63,6 +63,7 @@
         "delete": "Delete",
         "delete_confirm": "Move to trash?",
         "empty_trash_confirm": "Permanently delete everything in trash? This cannot be undone.",
+        "empty_trash_kept": "{n} document(s) stayed in the trash because another agenda still links to them:",
         "metadata": "Metadata",
         "name": "Name",
         "description": "Description",
@@ -426,10 +427,12 @@
         "payroll_absences": "Absence and leave",
         "payroll_travel": "Travel allowances",
         "payroll_documents": "Documents and outputs",
+        "payroll_annual_settlement": "Annual settlement",
         "payroll_submissions": "Submissions and reports",
         "payroll_enforcement": "Deductions and enforcement",
         "payroll_deduction_agreements": "Deduction agreements",
         "payroll_settings": "Payroll settings",
+        "payroll_rulesets": "Payroll legislative rules",
         "settings": "Settings",
         "branding": "Branding",
         "supplier_current": "Supplier",
@@ -586,7 +589,7 @@
     "payroll": {
         "rulesets": {
             "title": "Payroll legislation rules",
-            "subtitle": "Rates, thresholds, deadlines and code lists used by the payroll calculation. The verified set ships with the application; here it can be overridden and put into service without a new release. Values are national and apply to every company.",
+            "subtitle": "Rates, thresholds, deadlines and code lists used by the payroll calculation. The verified set ships effective and we stand behind it — there is nothing to approve or tick off, and every domain shows where its values come from. Overriding is possible and takes effect without a new release, but whoever enters the edited values stands behind them. Values are national and apply to every company.",
             "load_failed": "Legislation rules could not be loaded.",
             "save_failed": "The change could not be saved.",
             "command_failed": "The status change could not be applied.",
@@ -599,8 +602,25 @@
             "storage_unavailable": "The override storage is unavailable — the database migration is missing. The verified built-in set applies.",
             "degraded": "The stored override is inconsistent, so the calculation runs on the verified built-in set: {reason}",
             "version_count": "Versions: {count}",
-            "ready": "Calculation enabled",
-            "blocked": "Calculation blocked",
+            "status": {
+                "ready": "Calculation enabled",
+                "manual_review": "Manual judgement",
+                "awaiting_activation": "Not effective yet",
+                "coverage_issue": "Incomplete effectivity",
+                "missing": "No version"
+            },
+            "status_hint": {
+                "ready": "The payroll calculation reads from this domain.",
+                "manual_review": "The application deliberately states no number here, because the correct one depends on the individual case. There is nothing for you to tick off or approve.",
+                "awaiting_activation": "The delivered set is effective on its own — this is a version somebody edited by hand, and that one is not effective yet. You now stand behind the edited values, so they need Approve and Activate. You can also discard the override and return to the verified set.",
+                "coverage_issue": "The domain versions do not cover the whole period, so the calculation does not read from it. Fill in the missing effectivity.",
+                "missing": "There is no version for this domain."
+            },
+            "manual_review_share": "Manual judgement applies to {manual} of {total} parameters — the rest is used normally.",
+            "manual_review_all": "Manual judgement applies to all {total} parameters of this domain.",
+            "manual_review_badge": "Manual judgement",
+            "manual_review_why": "Why:",
+            "manual_review_action": "What to do:",
             "open": "Open",
             "reset": "Restore verified value",
             "reset_confirm": "Really discard the manual override and return to the verified built-in set?",
@@ -621,14 +641,28 @@
             },
             "tab": {
                 "parameters": "Parameters",
+                "sources": "Where the values come from",
                 "diff": "Difference from verified set",
                 "audit": "Change history"
+            },
+            "provenance": {
+                "title": "Where the values come from",
+                "retrieved": "retrieved {date}",
+                "multiple": "{count} sources of this version",
+                "vendor_note": "These values ship with the application and we stand behind them — you do not approve them. Below is what they rest on: the regulation or authority, a link, and the date we last retrieved the source.",
+                "override_note": "This version differs from the delivered set because someone edited it by hand. Whoever entered and approved the edited values stands behind them; the sources below belong to the original set.",
+                "technical_review": "Technical check",
+                "checked": "Performed by {by} on {on}. A technical check is not a professional or legal approval.",
+                "approval": "Professional approval",
+                "approved": "Approved by {by} on {on}.",
+                "no_approval": "No professional approval is recorded for the delivered set — the values are evidenced by their source and by the technical check."
             },
             "column": {
                 "version": "Version",
                 "effective": "Effective",
                 "lifecycle": "Status",
                 "source": "Value source",
+                "provenance": "Evidence",
                 "parameter": "Parameter",
                 "value": "Value",
                 "note": "Note",
@@ -829,7 +863,10 @@
                     "matched": "Payment",
                     "reversed": "Reversal"
                 }
-            }
+            },
+            "materialize_blocked": "Liabilities are created from an approved payroll run revision. Approve the revision for this period in Payroll runs first.",
+            "materialize_blocked_unknown": "We cannot tell whether there is anything to prepare — the payroll runs for this period failed to load. Please try again.",
+            "load_failed_hint": "The liabilities for this period did not load, so the list below may be incomplete or stale. Please try again."
         },
         "posting_reconciliation": {
             "title": "Payroll posting reconciliation",
@@ -896,6 +933,9 @@
             "deleted": "The empty payroll run was deleted.",
             "delete_failed": "The empty payroll run could not be deleted.",
             "load_failed": "Payroll runs could not be loaded.",
+            "breakdown_show": "Show per-employee breakdown",
+            "breakdown_hide": "Hide per-employee breakdown",
+            "breakdown_failed": "The per-employee breakdown could not be loaded. Please try again.",
             "save_failed": "Payroll run could not be created.",
             "command_done": "Payroll run status was changed.",
             "command_failed": "Payroll run command failed.",
@@ -908,7 +948,24 @@
             "cash_before": "Cash income before enforcement",
             "enforcement_withheld": "Enforcement withholding and fee",
             "payable_after": "Payable after enforcement",
-            "validations": "Blocking checks",
+            "validations": "Run checks",
+            "override": {
+                "awaiting": "This warning is waiting for a person. Until someone takes responsibility for it and writes down why, the payroll run cannot be approved.",
+                "grant": "Approve exception",
+                "granted": "The exception is approved, the run can continue.",
+                "granted_by": "Exception approved by {name} on {at}.",
+                "unknown_author": "unknown user",
+                "reason_label": "Reason: {reason}",
+                "reason_prompt": "Why is the payroll being paid out despite this finding?",
+                "reason_hint": "Write a full sentence — at least 20 characters and three words. A year from now it has to show what you knew and why you decided this way.",
+                "reason_required": "An exception cannot be approved without a reason.",
+                "failed": "The exception could not be approved.",
+                "revoke": "Take the exception back",
+                "revoked": "The exception was taken back, the warning is unresolved again.",
+                "revoke_failed": "The exception could not be taken back.",
+                "locked_after_approval": "The run is approved, so the exception can no longer be taken back — that would rewrite the record the payout was based on.",
+                "no_permission": "Only someone allowed to approve the payroll run may approve an exception."
+            },
             "net": {
                 "title": "Net pay breakdown",
                 "subtitle": "From gross income through contributions, tax and deductions to the payout split — from the approved revision.",
@@ -941,6 +998,85 @@
                 "destination_bank": "Bank account",
                 "destination_cash": "Cash",
                 "no_allocations": "The revision has no frozen payout rules."
+            },
+            "insurance": {
+                "title": "Social and health insurance breakdown",
+                "subtitle": "Assessment base, rate, annual maximum and monthly minimum, and rounding — exactly as stored by the calculation that produced the amount.",
+                "people_tabs": "Employee contributions",
+                "person_fallback": "Employee no. {id}",
+                "load_failed": "The insurance breakdown could not be loaded.",
+                "not_calculated": "Not calculated",
+                "none": "none",
+                "relationships_show": "Show employment relationships",
+                "relationships_hide": "Hide employment relationships",
+                "social_title": "Social insurance",
+                "health_title": "Health insurance",
+                "status": {
+                    "calculated": "Calculated",
+                    "manual_review": "Needs manual review",
+                    "error": "The calculation contains an error"
+                },
+                "unavailable": {
+                    "result_set_missing": "This revision has no stored statutory insurance result, so there is nothing to evidence the calculation with. The breakdown appears for revisions calculated by the current version of the module.",
+                    "schema_unsupported": "The statutory result of this revision uses a schema version the breakdown cannot read. We would rather show nothing than interpret the amounts incorrectly.",
+                    "person_missing": "This person is not part of the revision's stored statutory result, so their contributions cannot be explained."
+                },
+                "ruleset_note": "Calculated with ruleset {id} as of {date}.",
+                "participating_base": "Assessment base from participating relationships",
+                "capped_base": "Base after the annual maximum",
+                "employee_contribution": "Employee contribution",
+                "employer_contribution": "Employer contribution",
+                "annual_maximum_applied": "The annual maximum assessment base applied: {ytd} has already been assessed this year, so this month's base was reduced by {reduction} to {capped}.",
+                "employee_rate": "Employee rate",
+                "employer_rate": "Employer rate",
+                "step_sentence": "{base} × {rate} = {raw}, rounded up to whole crowns {rounded}",
+                "step_not_recorded": "This revision did not record the intermediate step.",
+                "working_pensioner_discount": "Working pensioner discount",
+                "part_time_discount": "Part-time employment discount",
+                "employer_title": "Employer contribution",
+                "employer_scope_note": "The employer pays from the sum of all employees' assessment bases and the rounding happens on that sum. There is therefore no per-person split — the figure covers the whole company and month.",
+                "relationship_kind": {
+                    "employment": "Employment",
+                    "dpp": "Agreement to complete a job (DPP)",
+                    "dpc": "Agreement to perform work (DPČ)",
+                    "corporate_body": "Corporate body member",
+                    "foster_reward": "Foster carer reward"
+                },
+                "participation": {
+                    "participates": "Participates",
+                    "does_not_participate": "Does not participate",
+                    "manual_review": "Participation needs review"
+                },
+                "relationship_base": "Relationship assessment base",
+                "relationship_capped_base": "Allocated to the maximum",
+                "relationship_participating_base": "Counted base",
+                "threshold": "Participation threshold",
+                "excluded_components": "Excluded components",
+                "reasons": "Decision reasons: {codes}",
+                "issue": "Finding to review: {code}",
+                "health_base": "Assessment base at this employer",
+                "health_minimum": "Minimum assessment base",
+                "health_total_rate": "Total rate",
+                "health_employee_share": "Employee share (one third)",
+                "health_employer_share": "Employer share (two thirds)",
+                "health_no_contribution": "No health insurance arose at this employer — there was no participation, so there is nothing for the rate to apply to.",
+                "health_rate_not_recorded": "This revision was calculated by an older version of the module that did not store the health insurance rate or rounding. They cannot be reconstructed from today's rules — they would describe a different calculation than the one that produced the stored amount. The stored amounts below still hold; they can be evidenced once the revision is recalculated.",
+                "health_top_up_title": "Top-up to the minimum assessment base",
+                "health_top_up_detail": "The base {base} did not reach the minimum {minimum}, so the difference {difference} is topped up and the contribution rises by {amount}.",
+                "health_top_up_amount_only": "The base did not reach the minimum {minimum} and the contribution rose by {amount}. This revision did not store what exactly the top-up was calculated from — it can be evidenced once the revision is recalculated.",
+                "top_up_responsibility": {
+                    "employee": "The employee pays the top-up.",
+                    "employer_obstacle_verified": "The employer pays the top-up — an obstacle on their side is evidenced.",
+                    "unverified": "Who pays the top-up is not evidenced."
+                },
+                "health_minimum_days": "The minimum is prorated to {applicable} calendar days ({excluded} days are not counted); the full monthly minimum is {statutory}.",
+                "health_other_employers": "Other employers evidence a base of {other}, {combined} in total — the minimum is therefore assessed from the sum.",
+                "insurer_split_title": "Split by health insurer",
+                "insurer_split_hint": "Each insurer is paid separately; this split covers the whole company and month. One person belongs to exactly one insurer per month.",
+                "insurer": "Insurer",
+                "insurer_people": "People",
+                "insurer_total": "Total",
+                "insurer_of_person": "this person's insurer"
             },
             "tax": {
                 "title": "Employment income tax breakdown",
@@ -1031,10 +1167,21 @@
                 "calculate": "Recalculate",
                 "review": "Review",
                 "approve": "Approve",
+                "post": "Post to accounting",
+                "prepare_payments": "Prepare payments",
+                "mark_paid": "Mark as paid",
                 "request_correction": "Request correction",
                 "reopen": "Open correction",
                 "cancel": "Cancel run",
                 "close": "Close"
+            },
+            "outcome": {
+                "posted": "Payroll has been posted to accounting.",
+                "already_posted": "Payroll was already posted; the run only moved forward.",
+                "posting_not_applicable": "The company keeps tax records, so no journal entry was created. The run moved forward.",
+                "payments_prepared": "Payment liabilities are ready.",
+                "payments_not_applicable": "Nothing to pay — the whole net pay is settled by offset. The run moved forward.",
+                "payments_settled": "Every liability of the run is covered by payments."
             },
             "status": {
                 "draft": "Draft",
@@ -1049,7 +1196,10 @@
                 "correction_pending": "Correction pending",
                 "reopened": "Correction open",
                 "cancelled": "Cancelled"
-            }
+            },
+            "load_failed_hint": "Payroll runs did not load, so we cannot tell whether one exists for this period. Please try again.",
+            "create_blocked_period": "Pick the period the run should be calculated for.",
+            "create_blocked_payment_date": "Fill in the payment date — it drives both contribution due dates and filing deadlines."
         },
         "quick_inputs": {
             "title": "Quick monthly payroll input",
@@ -1130,7 +1280,12 @@
                 "partial_month_base_required": "The employment covers only part of the month. Enter the confirmed base pay manually.",
                 "suspended_month_base_required": "The employment was suspended during the month. Enter the confirmed base or income manually.",
                 "employment_state_base_required": "The employment status requires a manually confirmed base or income."
-            }
+            },
+            "load_failed_hint": "Payroll inputs for this period did not load. Do not re-enter them — try loading again first, so you do not create duplicates.",
+            "save_blocked_loading": "Wait for the inputs for the selected period to load.",
+            "save_blocked_empty": "There is nothing to save for this period — no relation here has a payroll input.",
+            "save_blocked_invalid": "Fix the fields marked in red. Saving is blocked while an invalid value remains in the table.",
+            "save_blocked_rows": "Some row is in a blocking state (a locked input or an ended relation). Resolve it and try saving again."
         },
         "components": {
             "title": "Payroll components and inputs",
@@ -1215,6 +1370,10 @@
                 "approve": "Approve",
                 "approved": "The monthly input was approved and received an immutable component snapshot.",
                 "approve_failed": "The monthly input could not be approved.",
+                "cancel": "Cancel",
+                "cancel_confirm": "Really cancel this draft payroll input? It disappears from the list and stops blocking the payroll run.",
+                "cancelled": "The monthly input was cancelled.",
+                "cancel_failed": "The monthly input could not be cancelled.",
                 "empty": "There are no payroll inputs in this period",
                 "empty_hint": "Add a one-off input, import a file or materialize recurring assignments."
             },
@@ -1351,14 +1510,16 @@
                 "time": "Time attendance",
                 "absence": "Absence",
                 "import": "Import",
-                "correction": "Correction"
+                "correction": "Correction",
+                "travel": "Business trip"
             },
             "input_status": {
                 "draft": "Draft",
                 "approved": "Approved",
                 "locked": "Locked by run",
                 "cancelled": "Cancelled"
-            }
+            },
+            "load_failed_hint": "Payroll components did not load. Please try again; an empty catalogue right now does not mean nothing is configured."
         },
         "documents": {
             "title": "Documents and outputs",
@@ -1419,7 +1580,122 @@
                 "taxable_income_withholding_certificate": "Withholding-tax income certificate",
                 "employment_certificate": "Employment certificate",
                 "average_earnings_certificate": "Average earnings certificate",
+                "annual_settlement_result": "Annual tax settlement",
                 "monthly_bundle": "Monthly ZIP bundle"
+            }
+        },
+        "annual_settlement": {
+            "title": "Annual tax settlement",
+            "subtitle": "Annual settlement of tax advances and the child tax benefit under Section 38ch of the Czech Income Tax Act.",
+            "year": "Tax year",
+            "reload": "Reload",
+            "deadlines": "The employee may ask by {request} at the latest, and must hand over certificates from previous employers by the same day. You perform the settlement by {settlement} and return any overpayment with the {payout} payroll at the latest.",
+            "load_failed": "The annual settlement could not be loaded.",
+            "empty_title": "Nobody has asked for an annual settlement for this year yet",
+            "empty_description": "Once an employee asks, record the request and the documents they provided. Without them the settlement is not performed.",
+            "no_employees_title": "This company has no employees yet",
+            "no_employees_description": "The annual settlement is computed from approved payroll, so people and monthly payroll runs come first.",
+            "employee": "Employee",
+            "state": "Request state",
+            "result": "Result",
+            "settled_on": "Performed",
+            "not_settled": "Not performed",
+            "detail": "Details",
+            "select_employee": "Pick an employee and record what they provided.",
+            "request_section": "Request and supporting documents",
+            "request_status": "The employee asked for an annual settlement",
+            "requested_on": "Request date",
+            "request_evidence": "How the request is documented",
+            "request_evidence_placeholder": "For example the received request number or a reference to the file…",
+            "prior_employers": "Certificates from previous employers",
+            "prior_documents_received_on": "Date the certificates arrived",
+            "filing_obligation": "Files or must file a tax return",
+            "filing_obligation_reason": "Why they file a return",
+            "filing_obligation_reason_placeholder": "For example self-employment income above CZK 20,000…",
+            "annual_claims": "Claims items that can only be applied annually",
+            "annual_claims_hint": "Gifts, mortgage interest, pension and life insurance, the spouse credit or the halted-enforcement credit. The application cannot compute these yet.",
+            "annual_claims_note": "What exactly they claim",
+            "annual_claims_note_placeholder": "For example mortgage interest…",
+            "note": "Note",
+            "save_request": "Save documents",
+            "request_saved": "The annual settlement documents are saved.",
+            "request_save_failed": "The documents could not be saved.",
+            "request_conflict": "Somebody else changed the documents in the meantime. Reload them and repeat your change.",
+            "preview_section": "Calculation",
+            "preview_failed": "The annual settlement calculation could not be loaded.",
+            "settle": "Perform annual settlement",
+            "settling": "Performing the annual settlement…",
+            "settled": "The annual settlement is done and the document is ready to download.",
+            "settle_failed": "The annual settlement could not be performed.",
+            "settle_refused": "We did not perform the annual settlement. Below you can see what is missing.",
+            "blockers_title": "What blocks the settlement",
+            "already_settled": "The annual settlement for {year} was performed on {date}.",
+            "payout_note": "The overpayment is returned through payroll — with the {payout} payroll at the latest. Create a payroll input for it under pay components.",
+            "no_payout_note": "Nothing is paid out. An underpayment from the annual settlement is never withheld from the employee.",
+            "below_threshold_note": "The settlement was performed, but by law an overpayment of up to {threshold} is not paid out.",
+            "row_tax_base": "Total advance tax bases",
+            "row_rounded_base": "Rounded annual tax base",
+            "row_tax": "Tax for the tax year",
+            "row_credits": "Tax credits",
+            "row_child": "Child tax benefit",
+            "row_bonus": "Tax bonus",
+            "row_tax_after": "Tax after credits",
+            "row_tax_difference": "Difference on tax",
+            "row_bonus_difference": "Difference on the tax bonus",
+            "row_settlement": "Settlement balance",
+            "row_payable": "Returned to the employee",
+            "months": "{count} mo.",
+            "document": "Annual settlement document",
+            "request_status_options": {
+                "unknown": "Unknown",
+                "requested": "Yes, they asked",
+                "not_requested": "No, they did not ask",
+                "withdrawn": "They withdrew the request"
+            },
+            "prior_employers_options": {
+                "unknown": "Unknown",
+                "none": "They had no other employer this year",
+                "all_documented": "All provided",
+                "missing": "Missing"
+            },
+            "filing_obligation_options": {
+                "unknown": "Unknown",
+                "none": "No",
+                "required": "Yes"
+            },
+            "annual_claims_options": {
+                "unknown": "Unknown",
+                "none": "No, none",
+                "present_unsupported": "Yes, they do"
+            },
+            "outcome": {
+                "overpayment": "Overpayment to return",
+                "overpayment_below_threshold": "Overpayment below the payout limit",
+                "no_difference": "No difference",
+                "underpayment_not_withheld": "Underpayment that is not withheld"
+            },
+            "blocker": {
+                "not_requested": "The employee did not ask for an annual settlement, or we have no record of it. Without a request no settlement is performed and the tax is settled by the advances withheld.",
+                "requested_after_deadline": "The request arrived after 15 February. After that day the employer can no longer perform the annual settlement.",
+                "declaration_not_signed": "The employee did not sign a taxpayer declaration with you for this year. Without it no credits are applied, monthly or annually.",
+                "declaration_unverified": "The taxpayer declaration has no supporting evidence. Add it on the employee card.",
+                "prior_employer_documents_missing": "Certificates from previous employers for this year are missing. The law does not allow a settlement without them.",
+                "prior_employer_documents_late": "Certificates from previous employers arrived after 15 February.",
+                "must_file_tax_return": "The employee files their own tax return. The employer must not perform an annual settlement for them.",
+                "filing_obligation_unknown": "We do not know whether the employee files a tax return. Answer this — it decides whether a settlement is possible at all.",
+                "annual_only_claims_unsupported": "The employee claims deductions or credits the application cannot compute yet. The settlement has to be done outside the application, or the employee files their own return.",
+                "annual_only_claims_unknown": "We do not know whether the employee claims deductions or credits that apply only annually.",
+                "external_certificate_unverified": "The certificate from a previous employer has no supporting evidence.",
+                "external_certificate_incomplete": "The certificate from a previous employer does not carry the monthly credits and tax bonuses the law requires, so the application leaves it out of the settlement.",
+                "accumulator_missing": "The annual tax accumulation for this year is missing. Check the employee's opening balances and approved payroll.",
+                "no_approved_months": "The employee has no approved month in this year, so there is nothing to settle.",
+                "settlement_deadline_passed": "31 March has passed — the day by which the employer performs the annual settlement.",
+                "non_resident": "The employee is not a documented Czech tax resident. Employers do not perform an annual settlement for them.",
+                "credit_evidence_unverified": "A tax credit claim has no supporting evidence, or the documented claims contradict each other.",
+                "child_evidence_unverified": "A child tax benefit claim has no supporting evidence.",
+                "child_claim_conflict": "The child claims contradict each other — check the child order, the shared-household confirmation and the exclusion of the other taxpayer.",
+                "already_settled": "The annual settlement for this year has already been performed. It is done once a year.",
+                "ruleset_year_not_covered": "We have no effective tax rules covering the whole of this year, so annual amounts cannot be derived."
             }
         },
         "time": {
@@ -1505,7 +1781,9 @@
                 "break": "Break (min)",
                 "standby": "Standby (min)",
                 "remote": "Remote work",
-                "publish": "Publish to employee"
+                "publish": "Publish to employee",
+                "blocked_no_employment": "Pick the employee the record will be written to.",
+                "blocked_no_range": "Fill in both the start and the end of the shift — hours worked cannot be calculated without them."
             },
             "calendar": {
                 "default_name": "Regular working week",
@@ -1533,7 +1811,26 @@
                 "xlsx_manual": "XLSX is not automatically supported. Convert it to CSV and run preview again.",
                 "preview_failed": "The import preview could not be created.",
                 "saved": "The time import was processed.",
-                "failed": "The time import could not be processed."
+                "failed": "The time import could not be processed.",
+                "blocked_unsupported": "We cannot import this file format yet. Use a supported format, or enter the records by hand."
+            },
+            "load_failed_hint": "Attendance for this period did not load. Until it does, do not read the empty overview as \"nobody reported anything\".",
+            "overtime": {
+                "title": "Overtime — Section 93 Labour Code limits",
+                "year_summary": "Ordered overtime this year: {used} of {limit}.",
+                "consent_missing": "No consent to overtime beyond the ordered limit is on record.",
+                "consent_open": "Overtime consent on record from {from}, open-ended.",
+                "consent_until": "Overtime consent on record from {from} to {to}.",
+                "consent_action": "Overtime consent",
+                "consent_title": "Employee consent to overtime work",
+                "consent_hint": "Beyond the ordered limit (8 hours per week and 150 hours per year) overtime may only be required by agreement with the employee — Section 93(3) of the Labour Code. Record the date the agreement takes effect; without it all recorded overtime is measured against the ordered-overtime limits.",
+                "consent_valid_from": "Valid from",
+                "consent_valid_to": "Valid until (empty = open-ended)",
+                "consent_reference": "Document reference",
+                "consent_note": "Note",
+                "consent_saved": "Overtime consent saved.",
+                "consent_failed": "Overtime consent could not be saved.",
+                "consent_blocked_no_date": "Fill in the date the agreement takes effect."
             }
         },
         "people": {
@@ -1584,8 +1881,43 @@
                 "inactive": "Inactive"
             },
             "needs_setup": "Setup required",
-            "show_detail": "Edit employee",
-            "hide_detail": "Hide details",
+            "edit_person": "Edit employee",
+            "back_to_list": "Back to the list",
+            "employments_title": "Employment relationships",
+            "header_employments": "No relationship | 1 relationship | {count} relationships",
+            "breadcrumbs": {
+                "payroll": "Payroll",
+                "people": "Employees"
+            },
+            "registration_legacy_warning": "This relationship was imported from the legacy records. Before you file the registration, check whether the employee is not already registered with the social security office.",
+            "delete": {
+                "action": "Delete relationship",
+                "person_action": "Delete employee",
+                "confirm": "This deletes the employment relationship including {summary}. This action cannot be undone.",
+                "confirm_empty": "This deletes the employment relationship. This action cannot be undone.",
+                "person_confirm": "This deletes the employee {name} including {summary}. This action cannot be undone.",
+                "person_confirm_empty": "This deletes the employee {name}. This action cannot be undone.",
+                "done": "The employment relationship has been deleted.",
+                "person_done": "The employee has been deleted.",
+                "blocked_title": "Cannot be deleted:",
+                "cascade": {
+                    "terms": "no terms version | 1 terms version | {count} terms versions",
+                    "checklist": "no checklist item | 1 checklist item | {count} checklist items",
+                    "events": "no history entry | 1 history entry | {count} history entries",
+                    "dimensions": "no dimension | 1 assigned dimension | {count} assigned dimensions",
+                    "components": "no recurring component | 1 recurring pay component | {count} recurring pay components",
+                    "time": "no attendance record | 1 attendance and calendar record | {count} attendance and calendar records",
+                    "absences": "no absence | 1 absence and leave record | {count} absence and leave records"
+                },
+                "person_cascade": {
+                    "employments": "no relationship | 1 employment relationship | {count} employment relationships",
+                    "profile": "no profile detail | 1 profile and personal detail | {count} profile and personal details",
+                    "dependants": "no dependant | 1 dependant | {count} dependants",
+                    "tax": "no tax declaration | 1 tax declaration and credit | {count} tax declarations and credits",
+                    "insurance": "no insurance record | 1 insurance record | {count} insurance records",
+                    "payout_rules": "no payout rule | 1 payout rule | {count} payout rules"
+                }
+            },
             "detail_hint": "Each relationship has its own terms history, lifecycle, checklist and audit timeline.",
             "dependants": {
                 "title": "Dependants and child tax credit",
@@ -1816,9 +2148,59 @@
                     "employee_confirmation": "Employee confirmation",
                     "bank_document": "Bank document",
                     "user_verified": "User check"
+                },
+                "payout_rules": {
+                    "title": "Payout rules",
+                    "hint": "A rule says where the net pay goes and in what order. The payout method above is only a declaration — payments follow these rules.",
+                    "missing_title": "Without a payout rule the employee cannot be paid.",
+                    "missing_hint": "The rule decides where the net pay goes — to a specific payout account, to the cash desk, or as a set-off against the partner's account. Until an active rule exists here, the payout cannot be processed.",
+                    "add": "Add rule",
+                    "empty": "There is no payout rule yet.",
+                    "destination": "Payout destination",
+                    "destination_kind": {
+                        "bank": "To account",
+                        "cash": "In cash",
+                        "partner_settlement": "Set-off against partner's account"
+                    },
+                    "account": "Payout account",
+                    "account_placeholder": "Select a payout account",
+                    "account_missing": "no account selected",
+                    "account_unknown": "Account #{id} (not among the payout accounts)",
+                    "account_required": "The employee has no active payout account. Add one above and save the profile first.",
+                    "settlement_account": "Set-off account",
+                    "allocation": "Allocation",
+                    "allocation_kind": {
+                        "fixed": "Fixed amount",
+                        "percentage": "Percentage of net pay",
+                        "remainder": "Remainder of the payout"
+                    },
+                    "amount": "Amount (CZK)",
+                    "percentage": "Share (%)",
+                    "priority": "Order",
+                    "priority_summary": "Order {priority}",
+                    "state_active": "Active",
+                    "state_inactive": "Inactive",
+                    "deactivate": "Deactivate",
+                    "reactivate": "Reactivate",
+                    "pending_deactivation": "Once the profile is saved the rule is deactivated and disappears from the active list. It stays with the historical payouts made under it.",
+                    "unverified_account": "The account is not verified yet — the wage cannot be prepared for payment until verification is done.",
+                    "verify_account": "Verify account",
+                    "save_hint": "Payout rule changes are saved together with the profile using the Save button above.",
+                    "summary": {
+                        "remainder": "Remainder of the net pay",
+                        "percentage": "{percent} % of the net pay",
+                        "fixed": "Fixed {amount}"
+                    },
+                    "defaults_title": "Default rule from the payout method",
+                    "defaults_preview": "This will create: {summary}",
+                    "apply_defaults": "Create default rule",
+                    "defaults_applied": "The default payout rule has been created.",
+                    "defaults_failed": "The default payout rule could not be created.",
+                    "load_failed": "The payout rules could not be loaded.",
+                    "saved": "The payout rules have been saved.",
+                    "save_failed": "The payout rules could not be saved."
                 }
             },
-            "legacy_projection": "Imported from the legacy agenda",
             "primary": "Primary relationship",
             "add_employment": "Add relationship",
             "employment_created": "The employment relationship has been created.",
@@ -1863,6 +2245,19 @@
                 }
             },
             "cz_isco_code": "CZ-ISCO code",
+            "cz_isco": {
+                "placeholder": "Code or occupation name, e.g. 43111 or accountant",
+                "hint": "Type part of the code or occupation name; accents do not matter.",
+                "searching": "Searching the classification…",
+                "min_chars": "Enter at least two characters — part of the code or occupation name",
+                "no_results": "Nothing matches — try part of the occupation name",
+                "search_failed": "The classification could not be loaded.",
+                "search_failed_hint": "This is not an empty result. Try again, or type the code manually.",
+                "retry": "Try again",
+                "manual_label": "Manual CZ-ISCO code entry",
+                "manual_placeholder": "e.g. 43111",
+                "unknown_code": "Code is not in the current ČSÚ classification"
+            },
             "activity_code": "Activity type",
             "social_mode": "Social insurance participation",
             "health_mode": "Health insurance participation",
@@ -1921,6 +2316,7 @@
             },
             "checklist": {
                 "employment_contract": "Employment contract / agreement",
+                "legacy_start_date": "Fill in the start date",
                 "health_insurance_registration": "Health insurer registration",
                 "social_jmhz_registration": "Social security / JMHZ registration",
                 "tax_declaration": "Tax declaration",
@@ -2059,6 +2455,32 @@
                 "partner_dependent": "Partner's income",
                 "statutory_body": "Statutory-office remuneration"
             },
+            "registration": {
+                "title": "Social security registration",
+                "description": "Registers this employment relation with the Czech social security administration. The system picks the form from the start date and the employee's details.",
+                "action_preview": "See what will be filed",
+                "action_prepare": "Prepare the filing",
+                "action_done": "Filing is ready",
+                "preview": "Show again",
+                "window": "Can be filed from {from}, no later than {to}.",
+                "employer_window": "Note: this is the first employee. File the employer's own registration no later than {to} — after that date the employer status is presumed by law.",
+                "prepared": "{agenda} is ready to be sent.",
+                "not_sent_yet": "Not sent yet. The employee is registered only once the social security administration confirms it.",
+                "show_xml": "Show XML",
+                "hide_xml": "Hide XML",
+                "copy_xml": "Copy XML",
+                "failed": "The registration could not be prepared.",
+                "agenda": {
+                    "PREZEC26": "Partial pre-start registration",
+                    "REGZEC25": "Full employee registration"
+                },
+                "interaction": {
+                    "limited_pre_registration": "before work starts",
+                    "pre_registration_no_show": "notice of non-appearance",
+                    "direct_full_registration": "full registration",
+                    "full_registration_after_p1": "completion after pre-registration"
+                }
+            },
             "dimensions": {
                 "title": "Payroll dimensions of this relation",
                 "hint": "Assignment of cost centers, projects and activities to this employment relation over time.",
@@ -2080,7 +2502,8 @@
                 "reload_current": "Reload current state",
                 "new_title": "New dimension assignment",
                 "edit_title": "Edit dimension assignment"
-            }
+            },
+            "load_failed_hint": "The employee list did not load, so we do not know who the company has. Please try again."
         },
         "submissions": {
             "title": "Payroll submissions",
@@ -2090,6 +2513,7 @@
                 "transport": "Submission status",
                 "regzel": "Employer registration",
                 "jmhz": "JMHZ",
+                "eldp": "Pension record sheet",
                 "health": "Health insurers",
                 "inbox": "Inbox",
                 "certificate": "Certificate"
@@ -2143,6 +2567,11 @@
                     "protocol_dated_at": "Protocol date",
                     "submitted_at": "Filing date",
                     "detail_unavailable": "The stored original could not be re-read, so error detail is unavailable here. The protocol reports {total} error(s).",
+                    "error_count": "Errors in protocol",
+                    "errors_show": "Show errors ({total})",
+                    "errors_hide": "Hide errors",
+                    "errors_loading": "Loading errors…",
+                    "errors_failed": "The protocol errors could not be loaded.",
                     "kind": {
                         "processing": "Processing protocol",
                         "completeness": "Completeness protocol",
@@ -2204,6 +2633,31 @@
                     "ik_mpsv": "IK MPSV {value}",
                     "id_ppv": "ID PPV {value}",
                     "form_guid": "Form {value}"
+                },
+                "automation": {
+                    "title": "Protocol retrieval in the background",
+                    "description": "The application asks ČSSZ for the result on its own and closes the transaction once the protocol arrives. The buttons below are here for when you need to step in sooner.",
+                    "next_poll": "The next check is scheduled for {at}.",
+                    "next_poll_unknown": "The next check will run on the next background pass.",
+                    "polls": "Result checks so far: {count}.",
+                    "last_polled": "Last checked {at}.",
+                    "last_error": "The last check failed: {message} The application will try again.",
+                    "closed": "The transaction at ČSSZ is closed ({at}).",
+                    "close_pending": "The transaction at ČSSZ is not closed yet; the application will try on its own.",
+                    "close_error": "Closing the transaction failed: {message} Try closing it with the button.",
+                    "expired_note": "The application stopped asking. Check the submission on the ČSSZ ePortal or in your data box and load the protocol using “Load protocol”."
+                },
+                "closed_already": "This message's transaction was already closed.",
+                "storno": {
+                    "action": "Cancel submission",
+                    "confirm_title": "Really cancel the whole report for {period}?",
+                    "confirm_text": "A cancellation voids ALL reports filed at ČSSZ for this period, not just the last one sent. It can only be filed until the 20th of the following month; after that only an amendment will do.",
+                    "confirm": "Yes, prepare the cancellation",
+                    "cancel": "Leave it",
+                    "frozen": "The cancellation is prepared as submission no. {id}. Send it the same way as a regular report.",
+                    "already": "A cancellation for this report already exists — it is submission no. {id}.",
+                    "failed": "The cancellation could not be prepared.",
+                    "unavailable": "Only a report already sent to ČSSZ can be cancelled."
                 }
             },
             "signing": {
@@ -2374,21 +2828,13 @@
                 "jmhz_dry_run_show_xml": "Show XML",
                 "jmhz_dry_run_hide_xml": "Hide XML",
                 "jmhz_dry_run_copy_xml": "Copy XML",
-
                 "jmhz_dry_run_incomplete": "The XML passed the schema, but the control catalogue is not fully executed yet — the submission is not ready to send.",
-
                 "jmhz_controls_summary": "CSSZ controls: {passed} passed · {failed} failed · {remote} decided by CSSZ · {gaps} not implemented",
-
                 "jmhz_controls_blocking": "Blocking defects ({count}) — the submission would be ineffective",
-
                 "jmhz_controls_gaps": "Blocking controls not executed ({count})",
-
                 "jmhz_controls_warnings": "Passable defects ({count}) — the submission goes through with wrong data",
-
                 "jmhz_controls_form": "component {ordinal}",
-
                 "jmhz_deadline": "Submission window: {from} to {to} (shifted to a working day).",
-
                 "jmhz_controls_deviations": "Deviations from the literal catalogue wording ({count}) — verify against the CSSZ protocol",
                 "jmhz_dry_run_failed": "The monthly report dry run could not be started.",
                 "jmhz_dry_run_blockers": {
@@ -2485,6 +2931,38 @@
                 }
             }
         },
+        "eldp": {
+            "title": "Pension insurance record sheet",
+            "intro": "Builds the record sheet for a calendar year, or for the part of it that ends when the employee leaves pension insurance. The source is always a frozen approved payroll revision; a missing month or an absence the module cannot record blocks preparation and says why.",
+            "legalBasis": "Act No. 582/1991 Coll., Sections 38 and 39. From 2026 the Czech Social Security Administration assembles the record sheet from the monthly employer report; a standalone sheet remains for years before 2026, for participation ending before 1 April 2026, and on request from the authority.",
+            "person": "Person",
+            "employment": "Employment",
+            "year": "Year",
+            "note": "Confirmation note",
+            "prepare": "Prepare record sheet",
+            "confirmExcluded": "I confirm the excluded periods derived from the recorded absences.",
+            "confirmDeducted": "I confirm there are no deductible periods after retirement age in the reported period.",
+            "requestedByAuthority": "The record sheet is being prepared at the request of the authority.",
+            "noSendNotice": "Preparation stops at the prepared state. A person triggers sending from Submission status; the outgoing ELDP data message is not part of the pinned official schema set yet.",
+            "preparedCreated": "The record sheet was built and the submission is ready to be sent.",
+            "preparedReplayed": "The record sheet already existed; repeating did not create a second submission.",
+            "kind": {
+                "annual": "Regular annual",
+                "termination": "On leaving insurance"
+            },
+            "summary": {
+                "period": "Period",
+                "insuranceDays": "Insured days",
+                "excludedDays": "Excluded days",
+                "kind": "Kind",
+                "dueOn": "Due",
+                "sections": "Sections"
+            },
+            "errors": {
+                "loadFailed": "The record sheet source data could not be loaded.",
+                "prepareFailed": "The record sheet could not be built."
+            }
+        },
         "regzel": {
             "description": "Safely prepares supplemental employer information only. Initial registration, lifecycle changes and corrections remain blocked.",
             "load_failed": "The REGZEL evidence could not be loaded.",
@@ -2565,7 +3043,9 @@
             "registration_number": "Employer registration number",
             "registration_number_hint": "Registration number assigned by the social security administration; enter the payment variable symbol on the relevant payroll office.",
             "social_security_office_code": "Social security office code",
+            "social_security_office_code_hint": "Three-digit code of the social security branch, for example 110 for Prague 10. You will find it on the employer registration confirmation. Optional.",
             "default_health_insurer_code": "Default health insurer code",
+            "select_default_health_insurer": "Not set",
             "default_office": "Default payroll office",
             "select_default_office": "Select an active office",
             "unnamed_office": "Unnamed",
@@ -2740,6 +3220,10 @@
                 "institution_type": "Institution type",
                 "institution": "Institution",
                 "institution_code": "Institution code",
+                "insurer": "Health insurer",
+                "select_insurer": "Select an insurer from the list",
+                "insurer_hint": "Selecting an insurer fills in both the code and the name.",
+                "insurer_manual": "Enter the code and name manually",
                 "institution_name": "Institution name",
                 "account": "Bank account",
                 "bank_account": "Institution bank account",
@@ -2801,10 +3285,12 @@
                 "title": "Correct the highlighted fields before saving.",
                 "offices": "Enter at least one active payroll office and select it as the default.",
                 "default_office": "Select an existing active payroll office.",
+                "default_health_insurer_code": "Select a health insurer from the list, or leave the field empty.",
                 "office_code": "The code must start with a letter or number and may contain only A–Z, 0–9, a hyphen and an underscore.",
                 "office_code_duplicate": "Payroll office codes must be unique.",
                 "office_name": "Enter the payroll office name.",
                 "social_security_variable_symbol": "The social security variable symbol must contain 1 to 10 digits.",
+                "social_security_office_code": "The social security office code must be a three-digit number, for example 110. You may leave the field empty.",
                 "email": "Enter a valid email address.",
                 "accounts": "Select existing active accounts of the correct type.",
                 "account_invalid_format": "The account code has an invalid format.",
@@ -3249,7 +3735,11 @@
             },
             "validation": {
                 "amount": "Enter a non-negative amount with no more than two decimal places."
-            }
+            },
+            "load_failed_hint": "Enforcements and insolvencies did not load. An empty list right now does not mean there are none — please try again.",
+            "support_failed": "Employees and recipient accounts could not be loaded, so the selection below stayed empty. This is not a configuration problem — try loading again.",
+            "transition_blocked_document": "Pick the document the transition rests on. Without it the case would lack any trace of where the change came from.",
+            "transition_blocked_reason": "Write a reason. For this step it is stored in the case history, so it cannot be skipped."
         },
         "features": {
             "module_shell": "Module shell and dashboard",
@@ -7866,7 +8356,10 @@
             "title": "Nothing here yet",
             "filtered_title": "No record matches the filter",
             "filtered_message": "There may well be records — the filter is just hiding them. Try another period, another search term, or clear the filter.",
-            "clear_filters": "Clear filter"
+            "clear_filters": "Clear filter",
+            "failed_title": "The data could not be loaded",
+            "failed_message": "The connection to the server failed, so we know nothing about the contents yet. Try loading again; if the trouble persists, reload the page.",
+            "retry": "Try again"
         },
         "no_items": "No items.",
         "pagination_range": "{from}–{to} of {total}",
@@ -13944,7 +14437,9 @@
             "created": "The business trip was created.",
             "updated": "The business trip was saved.",
             "approved": "The settlement was approved.",
-            "materialized": "Posted to payroll: {created} new, {replayed} unchanged."
+            "materialized": "Posted to payroll: {created} new, {replayed} unchanged.",
+            "load_failed_hint": "Business trips for this period did not load. Please try again.",
+            "save_blocked_readonly": "You do not have permission to change business trips; you can only view them."
         }
     },
     "payroll_absence": {
@@ -13952,6 +14447,11 @@
         "subtitle": "Absence records, average earning snapshots and an auditable leave ledger.",
         "manual_review": "Manual review required",
         "review_notice": "Results are working papers. Before approval, verify the decisive period, qualifying time, published shifts and statutory conditions for the employee.",
+        "empty": {
+            "no_employments_title": "No employees yet",
+            "no_employments_message": "Absences, average earnings and the leave ledger are all tracked per employment. Create an employee and their employment in People, then come back here.",
+            "no_employments_cta": "Go to People"
+        },
         "employment": "Employment",
         "from": "From",
         "to": "To",
@@ -13999,7 +14499,10 @@
             "partial_last": "Last-day absence (hours)",
             "create": "Create absence",
             "cancel_confirm": "Cancel this absence? Annual leave creates a traceable reversing entry.",
-            "correction_pending": "The related payroll run requires correction review."
+            "correction_pending": "The related payroll run requires correction review.",
+            "average_required_hint": "Pick the average earnings the compensation is calculated from — the absence cannot be created without it.",
+            "average_missing_for_relation": "No average earnings have been calculated for this relation. Calculate one on the Averages tab and come back here.",
+            "go_to_averages": "Go to Averages"
         },
         "dpn": {
             "insurance": "Sickness insurance participation confirmed",
@@ -14074,7 +14577,8 @@
             "average_created": "Average snapshot calculated.",
             "average_approved": "Average snapshot approved.",
             "entitlement_created": "Entitlement posted to the ledger.",
-            "entry_created": "Ledger entry added."
+            "entry_created": "Ledger entry added.",
+            "load_failed_hint": "Absences, averages and leave entitlement did not load for this relation. Please try again."
         }
     },
     "diagnostics": {
@@ -14301,5 +14805,221 @@
         ],
         "attach_privacy": "The bundle is created in your installation and stays there until you attach it to an incident yourself. Logs are not included by default; if you add them, you see their contents beforehand.",
         "open_diagnostics": "Go to Diagnostics"
+    },
+    "databox": {
+        "title": "Data box",
+        "subtitle": "Filing through the Czech data box — VAT return, control and recapitulative statements, corporate income tax and health insurer overviews.",
+        "saved": "Saved.",
+        "env": {
+            "production": "Production",
+            "test": "Test environment"
+        },
+        "tabs": {
+            "access": "Access",
+            "outbox": "Outgoing filings",
+            "inbox": "Incoming messages",
+            "recipients": "Recipients",
+            "notices": "Defect notices"
+        },
+        "access": {
+            "title": "System certificate",
+            "certificateOnly": "The application signs in to the data box with a system certificate only. Do not enter your data box username and password here — by law they must not leave your own device and the data box administrator may invalidate them.",
+            "label": "Label",
+            "boxId": "Our data box ID",
+            "validTo": "Certificate valid until",
+            "certificate": "Certificate file (PFX or P12)",
+            "certificatePassword": "Certificate password"
+        },
+        "polling": {
+            "title": "Automatic mailbox collection",
+            "explanation": "Fetching a message from the data box counts as delivery and starts statutory deadlines. If you turn collection on, the application will collect the mailbox on your behalf — including at times when you are not looking at it yourself. Leave it off if you collect the mailbox elsewhere.",
+            "acknowledge": "I understand that a message fetched by the application counts as delivered and starts statutory deadlines.",
+            "ackRequired": "Please first confirm that fetching a message counts as delivery.",
+            "turnOn": "Turn collection on",
+            "turnOff": "Turn collection off",
+            "isOn": "Mailbox collection is on.",
+            "enabled": "Mailbox collection is on.",
+            "disabled": "Mailbox collection is off."
+        },
+        "dispatch": {
+            "ready": "Ready to send",
+            "sending": "Sending",
+            "send_uncertain": "Unknown whether it was sent",
+            "sent": "Sent, awaiting delivery receipt",
+            "delivered": "Delivered",
+            "failed": "Not sent",
+            "cancelled": "Cancelled"
+        },
+        "acceptance": {
+            "unknown": "Processing by the authority: not known yet",
+            "accepted": "Processed by the authority",
+            "rejected": "Rejected by the authority"
+        },
+        "attempt": {
+            "in_flight": "In progress",
+            "sent": "Sent",
+            "uncertain": "Uncertain",
+            "rejected": "Rejected",
+            "failed": "Failed"
+        },
+        "classification": {
+            "delivery_receipt": "Delivery receipt",
+            "cssz_protocol": "Social security protocol",
+            "health_insurer_response": "Health insurer response",
+            "tax_office_response": "Tax office response",
+            "unclassified": "Unclassified"
+        },
+        "recipientKind": {
+            "tax_office": "Tax office",
+            "cssz": "Social security administration",
+            "health_insurer": "Health insurer",
+            "other": "Other institution"
+        },
+        "outbox": {
+            "empty": "There is no filing in the queue.",
+            "reference": "Our reference",
+            "confirmSend": "Confirm and send",
+            "resolve": "Check whether it was sent",
+            "attempts": "Attempt history",
+            "cancel": "Cancel",
+            "attemptOutcome": "Outcome",
+            "messageId": "Message ID",
+            "startedAt": "Started",
+            "sent": "The filing was sent to the recipient data box.",
+            "notSent": "The filing could not be sent.",
+            "uncertain": "The connection broke and it is not certain whether the message was sent. Do not send it again — use “Check whether it was sent”.",
+            "uncertainHint": "It is not certain whether the message was sent. Do not resend it manually, that could create a duplicate filing — let it be looked up with the button below.",
+            "resolvedSent": "The message was found among sent messages — the filing did go out.",
+            "resolvedNotSent": "The message is not among sent messages — nothing was sent and you can safely queue it again.",
+            "resolveInconclusive": "The data box could not be reached, so we still do not know whether the message was sent. Please try again later.",
+            "deliveredNotProcessed": "The delivery receipt confirms the message reached the authority’s mailbox. It does not mean the authority has processed and accepted the filing — any defects will be notified in a separate message.",
+            "markSent": "Mark as sent manually",
+            "markSentConfirm": "Record the dispatch",
+            "messageIdLabel": "Data box message ID",
+            "messageIdHint": "You will find it in the sent message detail in your data box as “Message ID”. The delivery receipt is then matched to this filing automatically.",
+            "messageIdRequired": "Please fill in the data box message ID.",
+            "markedSent": "The dispatch is recorded. Upload the delivery receipt here once it arrives.",
+            "validationFailed": "The submitted file failed validation against the XSD schema. The authority may return it as a defective filing under § 74 of the Tax Code — fix it and file again.",
+            "uploadReceipt": "Upload delivery receipt",
+            "receiptAttached": "Delivery receipt attached ({at}).",
+            "receiptUnverified": "we do not verify the receipt signature yet",
+            "manualDispatch": "Sent manually from your data box. No delivery receipt yet."
+        },
+        "manual": {
+            "title": "What to do now",
+            "step1": "Download the file {file}.",
+            "step2": "In your data box create a new message to mailbox {box}, attach the file and put this reference into the “Our reference number” field:",
+            "step3": "Send the message, come back here and click “Mark as sent manually” — we will ask for the message ID.",
+            "step4": "Once the delivery receipt arrives, download it from your data box (a .zfo file) and upload it here with “Upload delivery receipt”.",
+            "why": "The reference number is the only trace that lets us match the delivery receipt to this filing automatically. Without it we will offer the filings it might belong to and you pick one — we never guess for you."
+        },
+        "receipts": {
+            "title": "Unassigned delivery receipts ({count})",
+            "intro": "These receipts are stored but not linked to any filing. They are not lost — pick the filing they belong to.",
+            "uploadAny": "Upload delivery receipt",
+            "showCandidates": "Offer filings",
+            "noCandidates": "We have nothing to offer for this receipt. Check that it was uploaded under the right company and environment.",
+            "candidatesHint": "We did not match this receipt automatically. Pick the filing it belongs to:",
+            "assign": "Assign to this filing",
+            "messageId": "Message ID",
+            "deliveredAt": "Delivered",
+            "noSubject": "No subject",
+            "reasons": {
+                "recipient_box": "recipient mailbox matches",
+                "subject": "subject matches",
+                "period": "period matches",
+                "recipient_box_mismatch": "recipient mailbox does not match — please check",
+                "environment_mismatch": "the filing is from a different environment"
+            },
+            "matchedBy": {
+                "correlation_reference": "matched by our reference number",
+                "external_message_id": "matched by message ID",
+                "manual": "you assigned it manually"
+            }
+        },
+        "inbox": {
+            "empty": "No downloaded messages.",
+            "poll": "Fetch new messages",
+            "polled": "New messages downloaded: {count}",
+            "pollingOff": "Mailbox collection is off. Turn it on in the Access tab — fetching a message counts as delivery.",
+            "subject": "Subject",
+            "sender": "Sender",
+            "classification": "Classification",
+            "deliveredAt": "Delivered",
+            "lastOkAt": "Last successful collection: {at}",
+            "unreachable": "The data box cannot be reached (failed attempts: {count}). We therefore do not know whether new messages are waiting — the empty list below does not mean there are none."
+        },
+        "recipients": {
+            "addTitle": "Add recipient",
+            "name": "Name",
+            "kind": "Kind",
+            "boxId": "Data box ID",
+            "code": "Code",
+            "source": "Source link",
+            "sourceLink": "Source",
+            "noBoxId": "ID not filled in",
+            "sourceHint": "Always state where the data box ID is documented. Do not store it without a source — a filing sent to the wrong mailbox counts as not filed at all.",
+            "missingBoxIds": "Records without a data box ID: {count}. Until you fill the ID in, no filing can be sent to them.",
+            "taxOfficeHint": "Tax offices are not pre-filled — we have no documented data box IDs for them and we do not guess. Fill them in from the tax administration list and always add the source link. A filing goes to the locally competent tax administrator, that is to the regional tax office mailbox, not to a local branch."
+        },
+        "errors": {
+            "certificateRequired": "Please upload the system certificate file (PFX or P12).",
+            "sourceRequired": "Add a source link for the data box ID you filled in."
+        },
+        "delivery": {
+            "column": "Effective delivery",
+            "refresh": "Recalculate delivery",
+            "refreshed": "Messages checked: {checked}, delivered by legal fiction: {fiction}.",
+            "explain": "The recalculation does not touch the data box — it only re-evaluates messages already downloaded. If nobody logs in within ten days of arrival, the message counts as delivered on the last day of that period (Section 17(4) of Act 300/2008 Coll.), and that happens purely with the passage of time.",
+            "deliveredOn": "Delivered on {date}",
+            "fictionDueOn": "Delivery by legal fiction falls on {date}",
+            "basis": {
+                "login": "Delivered on log-in",
+                "fiction": "Delivered by legal fiction",
+                "login_or_fiction": "Delivered — on log-in, or by fiction",
+                "pending": "Period running, not delivered yet",
+                "unknown": "Delivery unknown"
+            },
+            "notApplicable": "Receipt for our own filing — the delivery fiction does not apply to it."
+        },
+        "notices": {
+            "title": "Notices to remedy defects in a filing",
+            "intro": "A defective filing is handled by the tax authority through a notice under Section 74 of the Tax Procedure Code. Remedy the defect within the stated period and the filing is treated as if it had been made properly and on time. Fail to remedy a defect under Section 74(1)(a) or (b) and the filing becomes ineffective once the period expires.",
+            "addTitle": "Record a notice",
+            "recordFromMessage": "Record as a notice",
+            "reference": "Reference number",
+            "ground": "Which defect (Section 74(1))",
+            "deliveredOn": "Date the notice was delivered",
+            "respondBy": "Respond by (date stated in the notice)",
+            "periodDays": "Or the number of days stated in the notice",
+            "note": "Note",
+            "save": "Save notice",
+            "saved": "The notice has been recorded.",
+            "duplicate": "A notice for this message already exists; nothing changed.",
+            "empty": "No notice recorded.",
+            "deadlineHint": "The application does not invent the period — the law sets no length, the tax authority states it in the notice. Copy either the date or the number of days. Without it the notice stays in the \"deadline unknown\" state and will never look settled.",
+            "shifted": "The last day fell on a Saturday, Sunday or public holiday, so it moved to the next working day (Section 33(4) of the Tax Procedure Code).",
+            "shortPeriod": "The period is shorter than eight days. The law allows that only quite exceptionally (Section 32(2) of the Tax Procedure Code) — check that it is copied correctly.",
+            "answer": "Record the remedy",
+            "answerSave": "Save",
+            "answerSaved": "The remedy has been recorded.",
+            "answeredOn": "Date the defect was remedied",
+            "answerDateRequired": "Fill in the day you remedied the defect — meeting the deadline is counted in days.",
+            "grounds": {
+                "unknown": "We do not know which letter the notice cites",
+                "a_not_processable": "(a) the filing cannot be dealt with",
+                "b_no_effects": "(b) the filing cannot have its intended effects",
+                "c_wrong_way": "(c) the filing was not made in the prescribed manner",
+                "d_wrong_format": "(d) the filing was not in the prescribed format or structure"
+            },
+            "statuses": {
+                "unknown": "Deadline unknown",
+                "open": "Period running",
+                "answered_in_time": "Remedied within the period",
+                "answered_late": "Remedied after the period",
+                "missed": "Deadline missed",
+                "withdrawn": "Notice withdrawn"
+            }
+        }
     }
 }

@@ -12,7 +12,10 @@ use PDO;
 
 final class PayrollAverageEarningRepository
 {
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollAverageEarningDeletionRepository $deletion,
+    ) {}
 
     /** @return list<array<string,mixed>> */
     public function list(int $supplierId, int $employmentId): array
@@ -24,7 +27,12 @@ final class PayrollAverageEarningRepository
               ORDER BY applicable_year DESC, applicable_quarter DESC, revision_no DESC'
         );
         $stmt->execute([$supplierId, $employmentId]);
-        return array_map(self::cast(...), $stmt->fetchAll(PDO::FETCH_ASSOC));
+        $rows = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $rows[] = self::cast($row);
+        }
+
+        return $this->deletion->decorate($supplierId, $rows);
     }
 
     /** @return array<string,mixed> */
@@ -188,7 +196,9 @@ final class PayrollAverageEarningRepository
         );
         $stmt->execute([$supplierId, $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return is_array($row) ? self::cast($row) : null;
+        return is_array($row)
+            ? $this->deletion->decorateOne($supplierId, self::cast($row))
+            : null;
     }
 
     /**

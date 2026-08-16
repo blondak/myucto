@@ -23,7 +23,10 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
 }))
 
-vi.mock('vue-i18n', () => ({
+// `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
+// `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
@@ -52,6 +55,9 @@ function employment(relationType: PayrollEmployment['relation_type'] = 'employme
     monthly_gross_minor: 4000000,
     row_version: 2,
     allowed_transitions: ['archived'],
+    can_delete: false,
+    delete_blocker: null,
+    delete_cascade: {},
     accounting: {
       gross_debit: '521',
       gross_credit: '331',

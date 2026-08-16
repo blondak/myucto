@@ -14,38 +14,84 @@ use PDO;
  */
 final class PayrollBusinessTripRepository
 {
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollBusinessTripDeletionRepository $deletion,
+    ) {}
 
-    /** @return list<array<string,mixed>> */
-    public function list(int $supplierId, ?string $periodStart = null): array
-    {
+    /**
+     * Strop stránky seznamu. Cesty jsou pracovní tabulka — čte se pár desítek
+     * posledních, ne archiv firmy. Strop je nízký i proto, že {@see self::hydrate()}
+     * dotahuje ke KAŽDÉ cestě položky a bezplatná jídla dvěma dalšími dotazy.
+     */
+    public const LIST_MAX_LIMIT = 100;
+
+    public const LIST_DEFAULT_LIMIT = 50;
+
+    /**
+     * Seznam pracovních cest firmy. Filtr na období je volitelný, takže bez
+     * stropu tenhle dotaz přečetl všechny cesty od vzniku firmy — a ke každé
+     * ještě její položky a jídla. Stránkuje se s tvrdým stropem.
+     *
+     * @return array{items: list<array<string,mixed>>, total: int}
+     */
+    public function list(
+        int $supplierId,
+        ?string $periodStart = null,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+
         $params = [$supplierId];
         $where = '';
         if ($periodStart !== null) {
             $where = ' AND trip.settlement_period_start = ?';
             $params[] = $periodStart;
         }
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT trip.*, employee.full_name AS employee_name,
-                    employment.code AS employment_code,
-                    employment.relation_type
-               FROM payroll_business_trips trip
+        $from = 'FROM payroll_business_trips trip
                JOIN payroll_employees employee
                  ON employee.supplier_id = trip.supplier_id
                 AND employee.id = trip.employee_id
                JOIN payroll_employments employment
                  ON employment.supplier_id = trip.supplier_id
                 AND employment.id = trip.employment_id
-              WHERE trip.supplier_id = ?' . $where . '
-              ORDER BY trip.departure_at DESC, trip.id DESC'
+              WHERE trip.supplier_id = ?' . $where;
+
+        $countStmt = $this->db->pdo()->prepare('SELECT COUNT(*) ' . $from);
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+
+        // `trip.id` na konci řazení je nutný rozstřel — dvě cesty se stejným
+        // odjezdem by jinak mezi stránkami skákaly.
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT trip.*, employee.full_name AS employee_name,
+                    employment.code AS employment_code,
+                    employment.relation_type
+               ' . $from . '
+              ORDER BY trip.departure_at DESC, trip.id DESC
+              LIMIT ? OFFSET ?'
         );
-        $stmt->execute($params);
+        $position = 1;
+        foreach ($params as $param) {
+            $stmt->bindValue($position++, $param);
+        }
+        $stmt->bindValue($position++, $limit, PDO::PARAM_INT);
+        $stmt->bindValue($position, $offset, PDO::PARAM_INT);
+        $stmt->execute();
         $trips = PayrollTimeValue::rows(
             $stmt->fetchAll(PDO::FETCH_ASSOC),
             'payroll_business_trips',
         );
 
-        return array_map(fn (array $row): array => $this->hydrate($supplierId, $row), $trips);
+        return [
+            'items' => $this->deletion->decorate(
+                $supplierId,
+                array_map(fn (array $row): array => $this->hydrate($supplierId, $row), $trips),
+            ),
+            'total' => $total,
+        ];
     }
 
     /** @return array<string,mixed>|null */
@@ -69,7 +115,10 @@ final class PayrollBusinessTripRepository
 
         return $row === false
             ? null
-            : $this->hydrate($supplierId, PayrollTimeValue::row($row, 'payroll_business_trip'));
+            : $this->deletion->decorateOne(
+                $supplierId,
+                $this->hydrate($supplierId, PayrollTimeValue::row($row, 'payroll_business_trip')),
+            );
     }
 
     /**

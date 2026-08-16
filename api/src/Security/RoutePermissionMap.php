@@ -115,11 +115,39 @@ final class RoutePermissionMap
         ['GET', '#^/api/purchase-ai-suggestion-availability$#', 'accounting', AccessLevel::WRITE],
         ['POST', '#^/api/bank-transactions/[0-9]+/unpost$#', 'bank.unpost', AccessLevel::WRITE],
 
+        // Průřezová fronta podání (datová schránka i EPO). Oprávnění je stejné
+        // jako u trezoru certifikátů: kdo smí spravovat podpisové prostředky,
+        // smí i odesílat podání — a naopak nikdo jiný.
+        // `defect-notices` = výzvy k odstranění vad podle § 74 daňového řádu.
+        // Patří sem, protože se týkají osudu odeslaného podání, ne mzdové agendy.
+        ['GET', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices)(/|$)#', 'settings.signing', AccessLevel::READ],
+        ['*', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices)(/|$)#', 'settings.signing', AccessLevel::WRITE],
+
+        // Retence a výmaz. Dvě různá práva ZÁMĚRNĚ: nastavit lhůtu nebo zadržet
+        // výmaz je správa evidence, kdežto schválit a provést výmaz je nevratný
+        // zásah do osobních údajů. Kdo lhůty spravuje, nemusí být tentýž člověk,
+        // který odklepne, že se data smažou.
+        //
+        // Konkrétní pravidla musí předcházet obecnému `/api/payroll/*` fallbacku
+        // i pravidlu na `/people`, jinak by `retention` spadlo do modulového práva.
+        ['GET', '#^/api/payroll/retention(/(assessment|holds))?$#', 'payroll.retention', AccessLevel::READ],
+        ['*', '#^/api/payroll/retention/(holds(/[0-9]+)?|policies/[a-z_]+)$#', 'payroll.retention', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/retention/erasure(/[0-9]+)?$#', 'payroll.erasure', AccessLevel::READ],
+        ['POST', '#^/api/payroll/retention/erasure(/[0-9]+/(approve|reject|execute))?$#', 'payroll.erasure', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/people$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+$#', 'payroll', AccessLevel::READ],
+        // Smazání omylem založené osoby je opak jejího založení, ne přísnější úkon —
+        // stejné právo jako POST /people. Před skutečnými pohyby chrání blokátory
+        // v `PayrollEmployeeDeletionRepository`, ne zvláštní oprávnění.
+        ['DELETE', '#^/api/payroll/people/[0-9]+$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+/profile$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/people/[0-9]+/profile$#', 'payroll.person.write', AccessLevel::WRITE],
+        // Výplatní pravidlo je součást osobní karty (stejná rodina jako výplatní
+        // účty a jejich ověření níže), proto `payroll.person.write` na zápis
+        // a obecné `payroll` na čtení.
+        ['GET', '#^/api/payroll/people/[0-9]+/payout-rules$#', 'payroll', AccessLevel::READ],
+        ['*', '#^/api/payroll/people/[0-9]+/payout-rules(/(apply-defaults|[0-9]+))?$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+/dependants$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/people/[0-9]+/dependants(/[0-9]+(/claims(/[0-9]+)?)?)?$#', 'payroll.person.write', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/people/[0-9]+/quick-edit$#', 'payroll.person.write', AccessLevel::WRITE],
@@ -127,20 +155,35 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/people/[0-9]+/employments$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/jmhz/employment-evidence-options$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/jmhz/municipalities$#', 'payroll', AccessLevel::READ],
+        // Klasifikace zaměstnání ČSÚ je veřejná referenční data, ne data nájemce —
+        // stejná úroveň jako sousední našeptávač obcí.
+        ['GET', '#^/api/payroll/cz-isco$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/employments/[0-9]+/(terms|transitions/[a-z_]+|checklist/[a-z0-9_]+)$#', 'payroll.employment.write', AccessLevel::WRITE],
+        // Totéž právo jako založení vztahu (POST /people/{id}/employments výše).
+        ['DELETE', '#^/api/payroll/employments/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/time/month$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/time/calendars/[0-9]+$#', 'payroll.time.write', AccessLevel::WRITE],
         ['*', '#^/api/payroll/time/(shifts|entries|imports(?:/preview)?)$#', 'payroll.time.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/time/months/[0-9]{4}-[0-9]{2}/approve$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/time/months/[0-9]{4}-[0-9]{2}/reopen$#', 'payroll.reopen', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/runs$#', 'payroll', AccessLevel::READ],
+        ['GET', '#^/api/payroll/runs/[0-9]+$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/runs$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['DELETE', '#^/api/payroll/runs/[0-9]+$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/calculate$#', 'payroll.calculate', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/(review|request_correction)$#', 'payroll.review', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/approve$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/reopen$#', 'payroll.reopen', AccessLevel::WRITE],
+        // Zaúčtování a platební příkazy běhu nesmí spadnout pod catch-all
+        // `payroll.inputs.write` — to je právo na zápis mzdových vstupů, ne na
+        // účetní zápis v hlavní knize ani na platební ledger.
+        ['POST', '#^/api/payroll/runs/[0-9]+/commands/post$#', 'payroll.post', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/runs/[0-9]+/commands/(prepare_payments|mark_paid)$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/[a-z_]+$#', 'payroll.inputs.write', AccessLevel::WRITE],
+        // Schválení a odvolání výjimky u validace běhu je věcně část schválení
+        // mzdy („vím o vadě a přesto se vyplácí"), proto `payroll.approve`.
+        ['POST', '#^/api/payroll/runs/[0-9]+/validations/[0-9]+/override$#', 'payroll.approve', AccessLevel::WRITE],
+        ['DELETE', '#^/api/payroll/runs/[0-9]+/validations/[0-9]+/override$#', 'payroll.approve', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/payments/liabilities$#', 'payroll.payments', AccessLevel::READ],
         ['GET', '#^/api/payroll/payments/(payer-options|batches|reconciliation)$#', 'payroll.payments', AccessLevel::READ],
         ['POST', '#^/api/payroll/payments/batches$#', 'payroll.payments', AccessLevel::WRITE],
@@ -163,6 +206,16 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/submissions/jmhz-preparation/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/jmhz-xml-dry-run/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/jmhz-freeze/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
+        // Evidenční list důchodového pojištění je podání jako každé jiné:
+        // náhled READ, příprava WRITE. Odeslání tudy nevede.
+        ['GET', '#^/api/payroll/submissions/eldp$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/eldp$#', 'payroll.submissions', AccessLevel::WRITE],
+        // Registrace zaměstnance je podání jako každé jiné, proto stejné právo
+        // jako zbytek `/submissions/*`: náhled READ, zmrazení WRITE. Vlastní
+        // právo by rozdělilo jednu roli („kdo podává za firmu") na dvě, které
+        // by se v praxi vždy přidělovaly společně.
+        ['GET', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::READ],
         ['*', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/jmhz-transport$#', 'payroll.submissions', AccessLevel::READ],
@@ -178,12 +231,23 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/settings/policies(?:/[0-9]+)?$#', 'payroll.settings', AccessLevel::READ],
         ['POST', '#^/api/payroll/settings/policies$#', 'payroll.settings', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/settings/policies/[0-9]+$#', 'payroll.settings', AccessLevel::WRITE],
+        // Totéž právo jako založení verze — smazání omylem založené budoucí verze
+        // je opak jejího založení, ne přísnější úkon.
+        ['DELETE', '#^/api/payroll/settings/policies/[0-9]+$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/setup-check$#', 'payroll.settings', AccessLevel::READ],
         ['GET', '#^/api/payroll/documents$#', 'payroll.documents', AccessLevel::READ],
         ['GET', '#^/api/payroll/documents/annual$#', 'payroll.documents', AccessLevel::READ],
         ['POST', '#^/api/payroll/people/[0-9]+/documents/payroll-sheet/[0-9]{4}$#', 'payroll.documents', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/people/[0-9]+/documents/tax-certificate/(advance|withholding)/[0-9]{4}$#', 'payroll.documents', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/revisions/[0-9]+/documents/monthly-bundle$#', 'payroll.documents', AccessLevel::WRITE],
+        // Roční zúčtování (§ 38ch ZDP). Čtení a evidence žádosti pod
+        // `payroll.documents`, ale samotné PROVEDENÍ pod `payroll.approve`:
+        // je to právní úkon plátce daně, po kterém se zaměstnanci vyplácí
+        // přeplatek — stejná váha jako schválení mzdového běhu.
+        ['GET', '#^/api/payroll/annual-settlements/[0-9]{4}$#', 'payroll.documents', AccessLevel::READ],
+        ['GET', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+$#', 'payroll.documents', AccessLevel::READ],
+        ['PUT', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+/request$#', 'payroll.documents', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+/settle$#', 'payroll.approve', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/employments/[0-9]+/documents/exit$#', 'payroll.documents', AccessLevel::READ],
         ['POST', '#^/api/payroll/employments/[0-9]+/documents/exit/(employment-certificate|average-earnings-certificate)$#', 'payroll.documents', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/documents/[0-9]+/download-grant$#', 'payroll.documents', AccessLevel::READ],
@@ -198,11 +262,15 @@ final class RoutePermissionMap
         ['*', '#^/api/payroll/components/[0-9]+/jmhz-mapping$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['*', '#^/api/payroll/components(?:/[0-9]+)?$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/travel/trips(?:/[0-9]+/calculation)?$#', 'payroll', AccessLevel::READ],
-        ['POST', '#^/api/payroll/travel/trips/[0-9]+/(approve|materialize)$#', 'payroll.approve', AccessLevel::WRITE],
+        // Zrušení schválené cesty bere zpět schválení — proto stejné právo jako
+        // schválit a vyúčtovat. Smazání KONCEPTU spadá pod `payroll.inputs.write`
+        // v catch-all pravidle níž: kdo cestu založil, musí umět svůj překlep uklidit.
+        ['POST', '#^/api/payroll/travel/trips/[0-9]+/(approve|materialize|cancel)$#', 'payroll.approve', AccessLevel::WRITE],
         ['*', '#^/api/payroll/travel(?:/.*)?$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/deduction-agreements(?:/|$)#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/deduction-agreements(?:/|$)#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/revisions/[0-9]+/net-results/[0-9]+$#', 'payroll', AccessLevel::READ],
+        ['GET', '#^/api/payroll/revisions/[0-9]+/insurance-breakdowns/[0-9]+$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/enforcement(?:/|$)#', 'payroll.enforcement', AccessLevel::READ],
         ['*', '#^/api/payroll/enforcement(?:/|$)#', 'payroll.enforcement', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/inputs$#', 'payroll', AccessLevel::READ],
@@ -265,6 +333,14 @@ final class RoutePermissionMap
         // Zaúčtování sdílí právo s ostatním účtováním deníku.
         ['*', '#^/api/accounting/payroll/preview$#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/payroll/post$#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Zaměstnanci starší agendy sdílejí tabulku `payroll_employees` s novým mzdovým
+        // modulem. Z CESTY se stav modulu poznat nedá, takže gate zůstává `accounting`
+        // (shodně s POST, které tutéž kartu zakládá) — je ale zapsaný VÝSLOVNĚ, aby ho
+        // nedržel jen univerzální fallback níže. Patří-li osoba novému modulu, žádá si
+        // PayrollEmployeeAction::delete() navíc `payroll.person.write`, protože pak jde
+        // o smazání celé mzdové karty.
+        ['GET', '#^/api/accounting/payroll/employees(/|$)#', 'accounting', AccessLevel::READ],
+        ['*',   '#^/api/accounting/payroll/employees(/|$)#', 'accounting', AccessLevel::WRITE],
         // Zúčtování DPH (migrace 1332): náhled je čtení, spuštění zakládá účetní zápis
         // v deníku → stejné právo jako ostatní účtování (ne pouhé `accounting` WRITE).
         ['GET', '#^/api/accounting/vat-clearing(/|$)#', 'accounting', AccessLevel::READ],
@@ -342,6 +418,12 @@ final class RoutePermissionMap
         // na tentýž endpoint se dřív nebo později rozejdou.
         ['GET', '#^/api/settings/certificates(/|$)#', 'settings.signing', AccessLevel::READ],
         ['*', '#^/api/settings/certificates(/|$)#', 'settings.signing', AccessLevel::WRITE],
+        // Datová schránka ze stejného důvodu jako trezor: certifikát ke schránce
+        // je stejná třída tajemství jako podpisový klíč a akce samy kontrolují
+        // `settings.signing`. Bez tohohle pravidla by na ně padl obecný fallback
+        // `/api/settings` s jiným oprávněním.
+        ['GET', '#^/api/settings/databox(/|$)#', 'settings.signing', AccessLevel::READ],
+        ['*', '#^/api/settings/databox(/|$)#', 'settings.signing', AccessLevel::WRITE],
         ['GET', '#^/api/settings/(signing|pdf-signing)(/|$)#', 'settings.signing', AccessLevel::READ],
         ['*', '#^/api/settings/(signing|pdf-signing)(/|$)#', 'settings.signing', AccessLevel::WRITE],
         ['GET', '#^/api/settings/accounting-activation/status$#', 'settings.company', AccessLevel::READ],

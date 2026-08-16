@@ -10,6 +10,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetCapability;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetLifecycle;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetOrigin;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
 use MyInvoice\Service\Payroll\Ruleset\RulesetApproval;
@@ -29,7 +30,7 @@ final class PayrollRulesetProviderTest extends TestCase
         self::assertSame($january->id, $december->id);
         self::assertSame(14_690_100, $january->parameter('advance.high_threshold.monthly')->value);
         self::assertSame('0.15', $january->parameter('advance.low_rate')->value);
-        self::assertSame(1_199_900, $january->parameter('dpp.withholding.maximum')->value);
+        self::assertSame(1_200_000, $january->parameter('dpp.withholding.threshold')->value);
     }
 
     public function testSelectionFailsClosedOutsideSupportedPeriod(): void
@@ -46,17 +47,27 @@ final class PayrollRulesetProviderTest extends TestCase
         }
     }
 
-    public function testFactoryRulesetCannotEnterCalculationWithoutExternalApprovalAndActivation(): void
+    /**
+     * Dodaná sada počítá hned po instalaci a NEnese schválení — za hodnoty ručí
+     * dodavatel, doložené jsou zdrojem a technickou kontrolou. Dřív tenhle test
+     * tvrdil opak (`is not active`) a byl to jediný důvod, proč si zákazník mzdy
+     * bez proklikání schvalování nespočítal.
+     */
+    public function testDeliveredRulesetCalculatesWithoutCustomerApproval(): void
     {
         $provider = CzechPayrollRulesets2026::provider();
         $inspection = $provider->forDate(PayrollRulesetDomain::IncomeTax, '2026-08-03');
-        self::assertSame(PayrollRulesetLifecycle::Reviewed, $inspection->lifecycle);
+
+        self::assertSame(PayrollRulesetLifecycle::Active, $inspection->lifecycle);
+        self::assertSame(PayrollRulesetOrigin::Vendor, $inspection->origin);
         self::assertNull($inspection->approval);
         self::assertNotNull($inspection->technicalReview);
+        self::assertNotSame([], $inspection->sources);
 
-        $this->expectException(PayrollRulesetException::class);
-        $this->expectExceptionMessage('is not active');
-        $provider->forCalculation(PayrollRulesetDomain::IncomeTax, '2026-08-03');
+        self::assertSame(
+            $inspection,
+            $provider->forCalculation(PayrollRulesetDomain::IncomeTax, '2026-08-03'),
+        );
     }
 
     public function testManualReviewDomainRemainsBlockedAtParameterLevel(): void

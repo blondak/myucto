@@ -157,7 +157,7 @@ final class PayrollNetWageLiabilityMaterializerTest extends TestCase
         $items = (new PayrollPaymentQueryService($this->db))->listForPeriod(
             $this->supplierId,
             '2099-01',
-        );
+        )['items'];
 
         self::assertCount(2, $items);
         $amounts = array_column($items, 'amount_minor');
@@ -430,12 +430,15 @@ final class PayrollNetWageLiabilityMaterializerTest extends TestCase
             includePayoutAccounts: false,
         );
 
-        $runs = (new PayrollRunRepository($this->db))->list(
+        // Příznak počítá SQL nad snapshotem, ne PHP nad dekódovaným polem —
+        // seznam běhů kvůli paměti LONGTEXT sloupce vůbec nečte.
+        $page = (new PayrollRunRepository($this->db))->list(
             $this->supplierId,
             '2099-01-01',
         );
-        self::assertCount(1, $runs);
-        self::assertFalse($runs[0]['payment_materialization_supported']);
+        self::assertCount(1, $page['items']);
+        self::assertSame(1, $page['total']);
+        self::assertFalse($page['items'][0]['payment_materialization_supported']);
 
         try {
             $this->service->materialize(

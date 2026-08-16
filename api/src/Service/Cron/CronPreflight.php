@@ -49,6 +49,28 @@ final class CronPreflight
     }
 
     /**
+     * Čeká nějaké mzdové podání na protokol ČSSZ nebo na uzavření transakce?
+     *
+     * Permisivní protějšek
+     * {@see \MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository::listDuePolls()}
+     * a `listDueCloses()` — bez podmínky na correlation reference a bez stropu
+     * pokusů o uzavření. Odchylka stojí nanejvýš jeden zbytečný bootstrap,
+     * nikdy ne zmeškaný protokol.
+     */
+    public static function hasJmhzTransportWork(PDO $pdo): bool
+    {
+        return self::probe($pdo, "
+            SELECT 1 FROM payroll_submission_transport_attempts
+             WHERE (
+                     status = 'awaiting_protocol'
+                     OR (status = 'completed' AND closed_at IS NULL)
+                   )
+               AND (next_retry_at IS NULL OR next_retry_at <= UTC_TIMESTAMP())
+             LIMIT 1
+        ");
+    }
+
+    /**
      * Je co zpracovat v AI frontě?
      *
      * Permisivní protějšek {@see \MyInvoice\Service\Ai\AiJobService::claimBatch()}.
@@ -60,6 +82,30 @@ final class CronPreflight
         return self::probe($pdo, "
             SELECT 1 FROM ai_jobs
              WHERE status IN ('queued','running')
+             LIMIT 1
+        ");
+    }
+
+    /**
+     * Má cron sahat na nějakou datovou schránku?
+     *
+     * Odpověď je „ano" jen tehdy, když si vybírání schránky někdo VÝSLOVNĚ
+     * zapnul. Není to jen úspora — vyzvednutí seznamu je doručení podle
+     * § 17 odst. 3 zák. 300/2008 Sb. a rozjíždí lhůty, takže brána tady je
+     * poslední místo, kde se dá zabránit tomu, aby aplikace doručovala
+     * zprávy někomu, kdo o to nepožádal.
+     *
+     * `probe()` je fail-open (při chybě vrací true), ale to je tu bezpečné:
+     * skutečnou bránu drží
+     * {@see \MyInvoice\Service\Submission\SubmissionInboxService::poll()},
+     * která bez souhlasu na síť nesáhne. Tohle jen šetří stavbu kontejneru.
+     */
+    public static function hasDataBoxInboxWork(PDO $pdo): bool
+    {
+        return self::probe($pdo, "
+            SELECT 1 FROM submission_channel_credentials
+             WHERE channel = 'isds'
+               AND inbox_polling_enabled = 1
              LIMIT 1
         ");
     }

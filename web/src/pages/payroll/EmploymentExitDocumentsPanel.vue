@@ -19,6 +19,8 @@ import {
   btnOutlineSm,
   ICONS,
 } from '@/components/ui/buttonStyles'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 
 const props = defineProps<{
@@ -99,11 +101,6 @@ function blockerLabel(
   return te(key)
     ? t(key, params ?? {})
     : t('payroll.people.exit_documents.blockers.unknown', { code })
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
-    .format(new Date(value.replace(' ', 'T')))
 }
 
 function formatSize(bytes: number): string {
@@ -250,7 +247,7 @@ onMounted(() => void load())
         v-for="tab in (['employment', 'average'] as const)"
         :key="tab"
         type="button"
-        class="relative -mb-px whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition"
+        class="whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition"
         :class="activeTab === tab
           ? 'border-payroll-500 text-payroll-700'
           : 'border-transparent text-neutral-600 hover:text-neutral-900'"

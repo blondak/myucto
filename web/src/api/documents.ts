@@ -235,7 +235,14 @@ export const documentsApi = {
         ...(opts.perPage ? { per_page: opts.perPage } : {}),
       },
     }).then(r => r.data),
-  emptyTrash: () => api.post<{ ok: boolean; deleted: number }>('/documents/trash/empty').then(r => r.data),
+  // `kept_documents` = doklady, které v koši zůstaly kvůli živé vazbě z jiné agendy
+  // (mzdy, exekuce, podání na FS) — vysypání se kvůli nim nezastaví, jen je vynechá.
+  emptyTrash: () => api.post<{
+    ok: boolean
+    deleted: number
+    kept: number
+    kept_documents: { id: number; title: string; reason: string }[]
+  }>('/documents/trash/empty').then(r => r.data),
 
   bulk: (action: 'move' | 'delete' | 'tag', ids: number[], extra: Record<string, unknown> = {}) =>
     api.post<{ ok: boolean; affected: number }>('/documents/bulk', { action, ids, ...extra }).then(r => r.data),

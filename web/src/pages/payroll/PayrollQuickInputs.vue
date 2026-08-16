@@ -11,14 +11,20 @@ import {
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import {
-  formatPayrollMinor,
   localPayrollPeriod,
   parsePayrollAmountToMinor,
   parsePayrollHoursToMilli,
   payrollMinorToInput,
 } from '@/pages/payroll/payrollComponentsUi'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatMoneyMinor } from '@/composables/useFormat'
 
 interface UiRow extends PayrollQuickInputRow {
   baseAmount: string
@@ -39,17 +45,49 @@ type ValidationCode =
 
 const MAX_AMOUNT_MINOR = 1_000_000_000_000
 const MAX_OVERTIME_HOURS_MILLI = 1_000_000
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const period = ref(localPayrollPeriod())
 const loading = ref(false)
+/*
+ * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
+ * není". Toast s chybou za pár vteřin zmizí a bez tohohle příznaku by na
+ * obrazovce zůstal prázdný stav, který lže.
+ */
+const loadFailed = ref(false)
 const saving = ref(false)
 const rows = ref<UiRow[]>([])
 const loadedPeriod = ref<string | null>(null)
 const saveError = ref<string | null>(null)
 const saveConflict = ref(false)
 let loadGeneration = 0
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'person', labelKey: 'payroll.quick_inputs.person', required: true },
+  { key: 'income_amount', labelKey: 'payroll.quick_inputs.income_amount', required: true },
+  { key: 'overtime', labelKey: 'payroll.quick_inputs.overtime' },
+  { key: 'bonus_amount', labelKey: 'payroll.quick_inputs.bonus_amount' },
+  { key: 'gross_preview', labelKey: 'payroll.quick_inputs.gross_preview' },
+]
+const tbl = useTablePrefs('payroll-quick-inputs', COLUMNS)
+
+const pageSize = 25
+const total = ref(0)
+const offset = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
+
+function goToPage(nextPage: number): void {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  void load()
+}
+
+/** Změna období mění obsah seznamu, takže stránka musí zpět na začátek. */
+function reload(): void {
+  offset.value = 0
+  void load()
+}
+
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
 const hasBlockingRows = computed(() => rows.value.some(row =>
   row.base_conflict || row.overtime_conflict || row.bonus_conflict))
@@ -68,7 +106,7 @@ function toUi(row: PayrollQuickInputRow): UiRow {
 }
 
 function formatMoney(value: number): string {
-  return formatPayrollMinor(value, locale.value)
+  return formatMoneyMinor(value)
 }
 
 function editable(input: PayrollQuickInputRef | null): boolean {
@@ -160,10 +198,18 @@ function hoursError(value: string): ValidationCode | null {
   return null
 }
 
+// U základní mzdy je prázdné pole legitimní stav, ne chyba: znamená „základ
+// v tomto měsíci neřeším". Zadaná nula je něco jiného — ta se uloží jako nulový
+// základ a v částečném nebo přerušeném měsíci je to plnohodnotný údaj. Kdyby
+// prázdné pole zůstalo chybou, uživatel by nulu neměl jak od nevyplnění odlišit.
 function baseError(row: UiRow): ValidationCode | null {
-  return row.base_managed_elsewhere || !editable(row.inputs.base)
-    ? null
-    : amountError(row.baseAmount)
+  if (row.base_managed_elsewhere || !editable(row.inputs.base)) return null
+  if (baseIsBlank(row)) return null
+  return amountError(row.baseAmount)
+}
+
+function baseIsBlank(row: UiRow): boolean {
+  return row.baseAmount.trim() === ''
 }
 
 function bonusError(row: UiRow): ValidationCode | null {
@@ -186,6 +232,21 @@ function rowInvalid(row: UiRow): boolean {
 }
 
 const hasInvalidRows = computed(() => rows.value.some(rowInvalid))
+
+/*
+ * Proč nejde „Uložit vše". Blokací je několik a liší se tím, co má uživatel
+ * udělat, takže obecné „akce není dostupná" by mu nepomohlo ani jednou.
+ * Pořadí odpovídá tomu, co musí vyřešit dřív.
+ */
+const saveBlockedReason = computed<string | null>(() => {
+  if (loading.value || loadedPeriod.value !== period.value) {
+    return t('payroll.quick_inputs.save_blocked_loading')
+  }
+  if (rows.value.length === 0) return t('payroll.quick_inputs.save_blocked_empty')
+  if (hasInvalidRows.value) return t('payroll.quick_inputs.save_blocked_invalid')
+  if (hasBlockingRows.value) return t('payroll.quick_inputs.save_blocked_rows')
+  return null
+})
 const invalidFieldCount = computed(() => rows.value.reduce(
   (count, row) => count
     + Number(baseError(row) !== null)
@@ -246,18 +307,27 @@ async function load(): Promise<void> {
   const requestedPeriod = period.value
   const generation = ++loadGeneration
   loading.value = true
+  loadFailed.value = false
   rows.value = []
   loadedPeriod.value = null
   saveError.value = null
   saveConflict.value = false
   try {
-    const month = await payrollApi.quickInputs(requestedPeriod)
+    const month = await payrollApi.quickInputs(requestedPeriod, {
+      limit: pageSize,
+      offset: offset.value,
+    })
     if (generation !== loadGeneration || period.value !== requestedPeriod
       || month.period !== requestedPeriod) return
     rows.value = month.items.map(toUi)
+    total.value = month.total
     loadedPeriod.value = requestedPeriod
   } catch (error) {
     if (generation === loadGeneration) {
+      // Řádky se tady vyčistily už PŘED požadavkem (kvůli přepnutí období),
+      // takže po selhání zbyde prázdná tabulka. Bez příznaku by tvrdila, že
+      // v období nikdo není — proto ho musíme zvednout.
+      loadFailed.value = true
       toast.error(apiErrorMessage(error, t('payroll.quick_inputs.load_failed')))
     }
   } finally {
@@ -271,7 +341,7 @@ function payload(): PayrollQuickInputSavePayload {
     rows: rows.value.map(row => ({
       employment_id: row.employment_id,
       employment_row_version: row.employment_row_version,
-      base_amount_minor: parsedAmount(row.baseAmount) as number,
+      base_amount_minor: baseIsBlank(row) ? null : parsedAmount(row.baseAmount),
       overtime_mode: row.overtime_mode,
       overtime_hours_milli: row.overtime_mode === 'hours' ? parsedHoursMilli(row) : null,
       overtime_amount_minor: row.overtime_mode === 'amount'
@@ -307,10 +377,16 @@ async function save(): Promise<void> {
   saveError.value = null
   saveConflict.value = false
   try {
-    const month = await payrollApi.saveQuickInputs(payload())
+    const month = await payrollApi.saveQuickInputs(payload(), {
+      limit: pageSize,
+      offset: offset.value,
+    })
     if (generation !== loadGeneration || period.value !== requestedPeriod
       || month.period !== requestedPeriod) return
+    // Uložení dostalo v query tentýž limit/offset, takže vrací TU stránku,
+    // kterou měl uživatel před sebou — jinak by mu tabulka skočila na začátek.
     rows.value = month.items.map(toUi)
+    total.value = month.total
     toast.success(t('payroll.quick_inputs.saved'))
   } catch (error) {
     saveError.value = apiErrorMessage(error, t('payroll.quick_inputs.save_failed'))
@@ -358,7 +434,7 @@ onMounted(load)
             type="month"
             class="h-10 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
             :disabled="loading || saving"
-            @change="load"
+            @change="reload"
           >
         </label>
         <button :class="btnOutline('neutral')" :disabled="loading || saving" @click="load">
@@ -412,25 +488,37 @@ onMounted(load)
 
     <section class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
       <div v-if="loading" class="p-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
+      <EmptyState
+        v-else-if="loadFailed"
+        variant="failed"
+        dense
+        data-test="load-failed"
+        :message="t('payroll.quick_inputs.load_failed_hint')"
+        @action="load"
+      />
       <div v-else-if="rows.length === 0" class="p-8 text-center">
         <h2 class="font-semibold text-neutral-900">{{ t('payroll.quick_inputs.empty') }}</h2>
         <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.quick_inputs.empty_hint') }}</p>
       </div>
       <template v-else>
+        <div class="hidden flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2 lg:flex">
+          <ColumnPicker :ctrl="tbl" />
+          <DensityToggle :ctrl="tbl" />
+        </div>
         <div data-layout="desktop" class="hidden overflow-x-auto lg:block">
-          <table class="min-w-[1120px] w-full divide-y divide-neutral-200 text-sm">
+          <table class="min-w-[1120px] w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th class="px-4 py-3">{{ t('payroll.quick_inputs.person') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.quick_inputs.income_amount') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.quick_inputs.overtime') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.quick_inputs.bonus_amount') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('payroll.quick_inputs.gross_preview') }}</th>
+                <th v-if="tbl.isVisible('person')" class="px-4 py-3">{{ t('payroll.quick_inputs.person') }}</th>
+                <th v-if="tbl.isVisible('income_amount')" class="px-4 py-3">{{ t('payroll.quick_inputs.income_amount') }}</th>
+                <th v-if="tbl.isVisible('overtime')" class="px-4 py-3">{{ t('payroll.quick_inputs.overtime') }}</th>
+                <th v-if="tbl.isVisible('bonus_amount')" class="px-4 py-3">{{ t('payroll.quick_inputs.bonus_amount') }}</th>
+                <th v-if="tbl.isVisible('gross_preview')" class="px-4 py-3 text-right">{{ t('payroll.quick_inputs.gross_preview') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="row in rows" :key="row.employment_id" class="align-top">
-                <td class="px-4 py-4">
+                <td v-if="tbl.isVisible('person')" class="px-4 py-4">
                   <p class="font-semibold text-neutral-900">{{ row.full_name }}</p>
                   <p class="mt-0.5 text-xs text-neutral-500">{{ row.birth_number_masked ?? t('payroll.quick_inputs.identifier_missing') }}</p>
                   <p class="mt-1 text-xs text-neutral-500">{{ row.employment_code }}</p>
@@ -451,7 +539,7 @@ onMounted(load)
                     {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
                   </p>
                 </td>
-                <td class="px-4 py-4">
+                <td v-if="tbl.isVisible('income_amount')" class="px-4 py-4">
                   <p
                     :data-testid="`quick-income-label-${row.employment_id}`"
                     class="mb-1 text-xs font-medium text-neutral-600"
@@ -486,7 +574,7 @@ onMounted(load)
                     {{ fieldStateMessage(row, 'base') }}
                   </p>
                 </td>
-                <td class="px-4 py-4">
+                <td v-if="tbl.isVisible('overtime')" class="px-4 py-4">
                   <p class="mb-1 text-xs font-medium text-neutral-600">{{ additionalIncomeLabel(row) }}</p>
                   <div
                     v-if="row.overtime_hours_relation_supported"
@@ -560,12 +648,13 @@ onMounted(load)
                     {{ fieldStateMessage(row, 'overtime') }}
                   </p>
                 </td>
-                <td class="px-4 py-4">
+                <td v-if="tbl.isVisible('bonus_amount')" class="px-4 py-4">
                   <input
                     v-model="row.bonusAmount"
                     type="text"
                     inputmode="decimal"
                     autocomplete="off"
+                    :data-testid="`quick-bonus-${row.employment_id}`"
                     :aria-label="t('payroll.quick_inputs.bonus_amount')"
                     :aria-invalid="bonusError(row) !== null"
                     :aria-describedby="bonusError(row) ? `quick-bonus-error-${row.employment_id}` : undefined"
@@ -588,7 +677,7 @@ onMounted(load)
                     {{ fieldStateMessage(row, 'bonus') }}
                   </p>
                 </td>
-                <td class="px-4 py-4 text-right">
+                <td v-if="tbl.isVisible('gross_preview')" class="px-4 py-4 text-right">
                   <p class="text-base font-semibold text-neutral-900">{{ formatMoney(grossPreview(row)) }}</p>
                   <p v-if="row.other_amount_minor" class="mt-1 text-xs text-neutral-500">
                     {{ t('payroll.quick_inputs.other_inputs', { amount: formatMoney(row.other_amount_minor) }) }}
@@ -743,6 +832,14 @@ onMounted(load)
             </div>
           </article>
         </div>
+
+        <PaginationBar
+          embedded
+          :page="currentPage"
+          :per-page="pageSize"
+          :total="total"
+          @update:page="goToPage"
+        />
       </template>
     </section>
 
@@ -755,7 +852,15 @@ onMounted(load)
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.chart" /></svg>
         {{ t('payroll.quick_inputs.continue_to_runs') }}
       </RouterLink>
-      <button v-if="canWrite" data-testid="quick-payroll-save" :class="[btnFilled('primary'), 'w-full sm:w-auto']" :disabled="saving || loading || loadedPeriod !== period || rows.length === 0 || hasBlockingRows || hasInvalidRows" @click="save">
+      <!--
+        Věta nad tlačítky, ne pod nimi: v přilepené liště je „Uložit vše"
+        poslední, co uživatel na obrazovce vidí, takže vysvětlení musí přijít
+        dřív než ono. `order-first` + `basis-full` ji drží na vlastním řádku.
+      -->
+      <p v-if="canWrite && saveBlockedReason" :class="[BTN_DISABLED_NOTE, 'order-first basis-full sm:text-right']" data-testid="quick-payroll-save-blocked">
+        {{ saveBlockedReason }}
+      </p>
+      <button v-if="canWrite" data-testid="quick-payroll-save" :class="[btnFilled('primary'), 'w-full sm:w-auto']" :disabled="saving || loading || loadedPeriod !== period || rows.length === 0 || hasBlockingRows || hasInvalidRows" :title="disabledTitle(saveBlockedReason !== null, saveBlockedReason)" @click="save">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
         {{ t('payroll.quick_inputs.save_all') }}
       </button>

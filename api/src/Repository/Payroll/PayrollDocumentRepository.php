@@ -10,6 +10,16 @@ use PDOException;
 
 final class PayrollDocumentRepository
 {
+    /**
+     * Tvrdý strop seznamu dokumentů. Za měsíc vzniká výplatní páska na každý
+     * pracovní poměr plus balíček, za rok mzdový list na každého zaměstnance —
+     * seznam tedy roste s počtem lidí i s počtem období a bez stropu by u
+     * větší firmy načítal celou archivní historii najednou.
+     */
+    public const LIST_MAX_LIMIT = 200;
+
+    public const LIST_DEFAULT_LIMIT = 50;
+
     public function __construct(private readonly Connection $db) {}
 
     /** @return array<string,mixed>|null */
@@ -74,18 +84,20 @@ final class PayrollDocumentRepository
     }
 
     /**
-     * @return list<array<string,mixed>>
+     * @return array{items:list<array<string,mixed>>,total:int}
      */
-    public function listForPeriod(int $supplierId, string $periodStart): array
-    {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT document.*,
-                    revision.revision_no,
-                    revision.status AS revision_status,
-                    employee.full_name AS employee_name,
-                    run.office_id,
-                    office.name AS office_name
-               FROM payroll_generated_documents document
+    public function listForPeriod(
+        int $supplierId,
+        string $periodStart,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        // Strop se klampuje i tady, ne jen na HTTP hranici: repozitář volá
+        // i jiný kód než akce a „nekonečný" seznam nesmí jít objednat nikudy.
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+
+        $from = ' FROM payroll_generated_documents document
                JOIN payroll_runs run
                  ON run.supplier_id = document.supplier_id
                 AND run.id = document.run_id
@@ -99,17 +111,39 @@ final class PayrollDocumentRepository
                  ON office.supplier_id = run.supplier_id
                 AND office.id = run.office_id
               WHERE document.supplier_id = ?
-                AND run.period_start = ?
-              ORDER BY document.document_kind = "monthly_bundle" DESC,
+                AND run.period_start = ?';
+
+        $countStmt = $this->db->pdo()->prepare('SELECT COUNT(*)' . $from);
+        $countStmt->execute([$supplierId, $periodStart]);
+        $total = (int) $countStmt->fetchColumn();
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT document.*,
+                    revision.revision_no,
+                    revision.status AS revision_status,
+                    employee.full_name AS employee_name,
+                    run.office_id,
+                    office.name AS office_name'
+            . $from
+            . ' ORDER BY document.document_kind = "monthly_bundle" DESC,
                        employee.full_name,
                        document.document_kind,
-                       document.id DESC'
+                       document.id DESC
+              LIMIT ? OFFSET ?'
         );
-        $stmt->execute([$supplierId, $periodStart]);
-        return array_values(array_map(
-            self::cast(...),
-            $stmt->fetchAll(PDO::FETCH_ASSOC),
-        ));
+        $stmt->bindValue(1, $supplierId, PDO::PARAM_INT);
+        $stmt->bindValue(2, $periodStart, PDO::PARAM_STR);
+        $stmt->bindValue(3, $limit, PDO::PARAM_INT);
+        $stmt->bindValue(4, $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return [
+            'items' => array_values(array_map(
+                self::cast(...),
+                $stmt->fetchAll(PDO::FETCH_ASSOC),
+            )),
+            'total' => $total,
+        ];
     }
 
     /** @return list<array<string,mixed>> */
@@ -352,32 +386,55 @@ final class PayrollDocumentRepository
         return $row === false ? null : self::cast($row);
     }
 
-    /** @return list<array<string,mixed>> */
-    public function listAnnualDocuments(int $supplierId, int $taxYear): array
-    {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT document.*,
-                    annual.tax_year,
-                    annual.purpose,
-                    annual.revision_no AS annual_revision_no,
-                    employee.full_name AS employee_name
-               FROM payroll_generated_documents document
+    /** @return array{items:list<array<string,mixed>>,total:int} */
+    public function listAnnualDocuments(
+        int $supplierId,
+        int $taxYear,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+
+        $from = ' FROM payroll_generated_documents document
                JOIN payroll_annual_document_revisions annual
                  ON annual.supplier_id = document.supplier_id
                 AND annual.id = document.annual_revision_id
                JOIN payroll_employees employee
                  ON employee.supplier_id = document.supplier_id
                 AND employee.id = document.employee_id
-              WHERE document.supplier_id = ? AND annual.tax_year = ?
-              ORDER BY employee.full_name,
+              WHERE document.supplier_id = ? AND annual.tax_year = ?';
+
+        $countStmt = $this->db->pdo()->prepare('SELECT COUNT(*)' . $from);
+        $countStmt->execute([$supplierId, $taxYear]);
+        $total = (int) $countStmt->fetchColumn();
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT document.*,
+                    annual.tax_year,
+                    annual.purpose,
+                    annual.revision_no AS annual_revision_no,
+                    employee.full_name AS employee_name'
+            . $from
+            . ' ORDER BY employee.full_name,
                        document.document_kind,
-                       document.document_revision_no DESC'
+                       document.document_revision_no DESC,
+                       document.id DESC
+              LIMIT ? OFFSET ?'
         );
-        $stmt->execute([$supplierId, $taxYear]);
-        return array_values(array_map(
-            self::cast(...),
-            $stmt->fetchAll(PDO::FETCH_ASSOC),
-        ));
+        $stmt->bindValue(1, $supplierId, PDO::PARAM_INT);
+        $stmt->bindValue(2, $taxYear, PDO::PARAM_INT);
+        $stmt->bindValue(3, $limit, PDO::PARAM_INT);
+        $stmt->bindValue(4, $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return [
+            'items' => array_values(array_map(
+                self::cast(...),
+                $stmt->fetchAll(PDO::FETCH_ASSOC),
+            )),
+            'total' => $total,
+        ];
     }
 
     /** @return list<array<string,mixed>> */

@@ -6,6 +6,8 @@ namespace MyInvoice\Action\Accounting\Cash;
 
 use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\Json;
+use MyInvoice\Repository\Deletion\CashDocumentDeletionGuard;
+use MyInvoice\Repository\Deletion\ForeignKeyDeletionGuard;
 use MyInvoice\Service\Accounting\Cash\CashDocumentService;
 use MyInvoice\Service\Accounting\Cash\CashException;
 use MyInvoice\Service\Accounting\Cash\CashRulePresets;
@@ -41,6 +43,9 @@ final class CashDocumentAction
         private readonly IpMatcher $ipMatcher,
         private readonly CashDocumentPdfRenderer $pdfRenderer,
         private readonly CashRulePresets $rulePresets,
+        // Registr cizích vazeb, které smazání blokují — bez něj končila
+        // `payroll_payment_matches.cash_document_id` (RESTRICT) jako HTTP 500.
+        private readonly CashDocumentDeletionGuard $deletionGuard,
     ) {}
 
     /**
@@ -145,6 +150,16 @@ final class CashDocumentAction
         $id = (int) $args['id'];
         // ?force=1 → tvrdé smazání dokladu i s účetními zápisy (jinak jen draft).
         $force = ((string) (($request->getQueryParams()['force'] ?? '')) === '1');
+
+        // Kontrola PŘEDEM — obě větve, protože rozhodovat musí existence vazby,
+        // ne stav dokladu. Scopovaná na tenanta, aby cizí id skončilo na 404
+        // z ověření níž, ne na 409 (to by prozradilo, že doklad existuje).
+        $conflict = $this->deletionGuard->conflict($supplierId, $id);
+        if ($conflict !== null) {
+            return Json::error($response, 'cash.error.has_dependencies', $conflict->message, 409,
+                $conflict->toErrorExtra());
+        }
+
         try {
             if ($force) {
                 $result = $this->service->deleteDocument($supplierId, $id);
@@ -157,6 +172,15 @@ final class CashDocumentAction
                 $this->log($request, 'cash.document_deleted', $id, []);
             }
             return Json::ok($response, ['deleted' => true]);
+        } catch (\PDOException $e) {
+            // Druhá půlka pojistky: vazba vznikla mezi kontrolou a mazáním, nebo
+            // ukazuje z tabulky, která v registru chybí. `mapCashError()` by
+            // netypovanou výjimku přehodil dál a uživatel by dostal HTTP 500.
+            if (!ForeignKeyDeletionGuard::isForeignKeyViolation($e)) {
+                throw $e;
+            }
+            return Json::error($response, 'cash.error.has_dependencies',
+                CashDocumentDeletionGuard::raceMessage(), 409);
         } catch (\Throwable $e) {
             return $this->mapCashError($response, $e);
         }

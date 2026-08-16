@@ -132,9 +132,9 @@ final class PurchaseInvoiceIsdocPaymentTest extends TestCase
             'ic'           => '01698401',
             'dic'          => 'CZ01698401',
             'company_name' => 'Naše firma s.r.o.',
-            'street'       => 'Kardinála Berana 1104/36',
-            'city'         => 'Plzeň',
-            'zip'          => '30100',
+            'street'       => 'Zkušební 123/4',
+            'city'         => 'Vzorov',
+            'zip'          => '10000',
             'country_iso2' => 'CZ',
         ]);
 

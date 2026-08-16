@@ -71,7 +71,8 @@ final class PayrollPaymentAction
         )) {
             return $this->errorResponse($error);
         }
-        $periodValue = $request->getQueryParams()['period'] ?? null;
+        $query = $request->getQueryParams();
+        $periodValue = $query['period'] ?? null;
         if (!is_string($periodValue)) {
             return Json::error(
                 $response,
@@ -81,10 +82,18 @@ final class PayrollPaymentAction
             );
         }
         $period = trim($periodValue);
+        // Strop je tvrdý, ne jen výchozí — z URL ho zvednout nejde.
+        $limit = max(1, min(
+            PayrollPaymentQueryService::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollPaymentQueryService::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
         try {
-            $items = $this->queries->listForPeriod(
+            $page = $this->queries->listForPeriod(
                 $this->currentSupplierId($request),
                 $period,
+                $limit,
+                $offset,
             );
         } catch (\InvalidArgumentException $exception) {
             return Json::error(
@@ -95,7 +104,18 @@ final class PayrollPaymentAction
             );
         }
 
-        return Json::ok($response, ['period' => $period, 'items' => $items])
+        // Klíč `items` zůstává kvůli stávajícím volajícím; `total`/`limit`/
+        // `offset` přibyly vedle něj. `totals` jsou součty za CELÉ období —
+        // frontend je dřív sčítal z `items`, což by se stránkováním tiše
+        // změnilo na „součet téhle stránky". U peněz je to nepřijatelné.
+        return Json::ok($response, [
+            'period' => $period,
+            'items' => $page['items'],
+            'total' => $page['total'],
+            'totals' => $page['totals'],
+            'limit' => $limit,
+            'offset' => $offset,
+        ])
             ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
     }

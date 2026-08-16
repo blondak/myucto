@@ -6,9 +6,11 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollInstitutionAccountDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
@@ -76,6 +78,10 @@ final class PayrollIncomeTaxLiabilityMaterializerTest extends TestCase
         $institutions = new PayrollInstitutionAccountRepository(
             $connection,
             $sensitive,
+            new PayrollInstitutionAccountDeletionRepository(
+                $connection,
+                new ActivityLogger($connection),
+            ),
         );
         $this->createTaxTarget(
             $institutions,
@@ -159,7 +165,7 @@ final class PayrollIncomeTaxLiabilityMaterializerTest extends TestCase
             $rows,
         ));
         $listed = (new PayrollPaymentQueryService($this->db))
-            ->listForPeriod($this->supplierId, '2026-06');
+            ->listForPeriod($this->supplierId, '2026-06')['items'];
         self::assertSame(
             ['ready', 'ready'],
             array_column($listed, 'batch_eligibility'),

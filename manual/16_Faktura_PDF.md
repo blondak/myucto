@@ -248,8 +248,8 @@ klientovi (N)** — bulk action.
 
 Per dodavatel lze nastavit:
 
-- **From: jméno** — co se zobrazí jako odesílatel (např. „MyWebdesign.cz s.r.o.")
-- **Reply-To** — kam má klient odpovědět (např. `fakturace@mywebdesign.cz` ≠
+- **From: jméno** — co se zobrazí jako odesílatel (např. „Vzorová firma s.r.o.")
+- **Reply-To** — kam má klient odpovědět (např. `fakturace@vzorova-firma.cz` ≠
   technická adresa, ze které jde SMTP)
 
 Nastavuje se v **Systém → Dodavatelé → [tvůj dodavatel] → Editovat**.

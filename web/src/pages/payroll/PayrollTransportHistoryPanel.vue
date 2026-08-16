@@ -39,7 +39,8 @@ import {
   type PayrollJmhzTransportStatus,
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
-import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
+import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -65,11 +66,79 @@ const success = ref('')
 const pollingId = ref<number | null>(null)
 const closingId = ref<number | null>(null)
 const copiedId = ref<number | null>(null)
+/** Podání, u kterého uživatel právě potvrzuje storno. Storno je nevratné. */
+const cancellingId = ref<number | null>(null)
+const cancelPendingId = ref<number | null>(null)
 
 /** Výsledky doptání, klíčované ID pokusu — zůstávají do dalšího načtení. */
 const polls = ref<Record<number, PayrollJmhzTransportPoll>>({})
-/** Období podání dotažené k ID; nepovinné, selhání se jen projeví chybějícím údajem. */
-const periods = ref<Record<number, { start: string; end: string }>>({})
+
+/*
+ * Vysvětlené chyby načtených protokolů. Seznam je nenese — počítají se z
+ * uloženého XML, takže se dotahují až pro řádek, který uživatel rozbalí, a pak
+ * si je pamatujeme: druhé rozbalení téhož protokolu už na server nechodí.
+ */
+const protocolErrors = ref<Record<number, PayrollJmhzProtocolError[]>>({})
+const protocolErrorsOpen = ref<Record<number, boolean>>({})
+const protocolErrorsLoading = ref<Record<number, boolean>>({})
+const protocolErrorsFailed = ref<Record<number, boolean>>({})
+/** `false` = uložený originál se nepodařilo znovu přečíst, detail neexistuje. */
+const protocolDetailAvailable = ref<Record<number, boolean>>({})
+
+const attemptsPageSize = 25
+const attemptsTotal = ref(0)
+const attemptsOffset = ref(0)
+const attemptsPage = computed(() =>
+  Math.floor(attemptsOffset.value / attemptsPageSize) + 1)
+
+const importedPageSize = 25
+const importedTotal = ref(0)
+const importedOffset = ref(0)
+const importedPage = computed(() =>
+  Math.floor(importedOffset.value / importedPageSize) + 1)
+
+function goToAttemptsPage(nextPage: number) {
+  attemptsOffset.value = Math.max(0, (nextPage - 1) * attemptsPageSize)
+  void load()
+}
+
+function goToImportedPage(nextPage: number) {
+  importedOffset.value = Math.max(0, (nextPage - 1) * importedPageSize)
+  void load()
+}
+
+function resetProtocolErrors() {
+  protocolErrors.value = {}
+  protocolErrorsOpen.value = {}
+  protocolErrorsLoading.value = {}
+  protocolErrorsFailed.value = {}
+  protocolDetailAvailable.value = {}
+}
+
+async function toggleProtocolErrors(protocol: PayrollJmhzImportedProtocol) {
+  const id = protocol.id
+  if (protocolErrorsOpen.value[id]) {
+    protocolErrorsOpen.value = { ...protocolErrorsOpen.value, [id]: false }
+    return
+  }
+  protocolErrorsOpen.value = { ...protocolErrorsOpen.value, [id]: true }
+  if (protocolErrors.value[id] !== undefined || protocolErrorsLoading.value[id]) return
+  protocolErrorsLoading.value = { ...protocolErrorsLoading.value, [id]: true }
+  protocolErrorsFailed.value = { ...protocolErrorsFailed.value, [id]: false }
+  try {
+    const detail = await payrollApi.jmhzImportedProtocolErrors(id, environment.value)
+    protocolErrors.value = { ...protocolErrors.value, [id]: detail.errors }
+    protocolDetailAvailable.value = {
+      ...protocolDetailAvailable.value,
+      [id]: detail.detail_available,
+    }
+  } catch {
+    protocolErrorsFailed.value = { ...protocolErrorsFailed.value, [id]: true }
+  } finally {
+    const { [id]: _pending, ...rest } = protocolErrorsLoading.value
+    protocolErrorsLoading.value = rest
+  }
+}
 
 const variableSymbol = ref('')
 const variableSymbolTouched = ref(false)
@@ -81,7 +150,8 @@ const busy = computed(() =>
   loading.value
   || importing.value
   || pollingId.value !== null
-  || closingId.value !== null,
+  || closingId.value !== null
+  || cancelPendingId.value !== null,
 )
 
 const variableSymbolValid = computed(() =>
@@ -90,6 +160,9 @@ const variableSymbolValid = computed(() =>
 
 interface AttemptGroup {
   submissionId: number
+  /** Období hlášení; nese ho každý řádek ledgeru, uvnitř skupiny je stejné. */
+  periodStart: string | null
+  periodEnd: string | null
   attempts: PayrollJmhzTransportAttempt[]
 }
 
@@ -103,7 +176,12 @@ const groups = computed<AttemptGroup[]>(() => {
   for (const attempt of attempts.value) {
     let group = byId.get(attempt.submission_id)
     if (!group) {
-      group = { submissionId: attempt.submission_id, attempts: [] }
+      group = {
+        submissionId: attempt.submission_id,
+        periodStart: attempt.period_start,
+        periodEnd: attempt.period_end,
+        attempts: [],
+      }
       byId.set(attempt.submission_id, group)
       ordered.push(group)
     }
@@ -124,15 +202,12 @@ type TimelineEntry =
  * zjistit, jde na konec — ne nahoru, kde by vytlačilo to, co je vidět jasně.
  */
 const timeline = computed<TimelineEntry[]>(() => {
-  const entries: TimelineEntry[] = groups.value.map(group => {
-    const period = periods.value[group.submissionId]
-    return {
-      source: 'app' as const,
-      key: `app-${group.submissionId}`,
-      sortKey: period?.start ?? '',
-      group,
-    }
-  })
+  const entries: TimelineEntry[] = groups.value.map(group => ({
+    source: 'app' as const,
+    key: `app-${group.submissionId}`,
+    sortKey: group.periodStart ?? '',
+    group,
+  }))
   for (const protocol of imported.value) {
     entries.push({
       source: 'imported' as const,
@@ -201,17 +276,35 @@ function canPoll(attempt: PayrollJmhzTransportAttempt): boolean {
 /**
  * Uzavřít se smí až po dotažení protokolu. Dřív by se výsledek ztratil, a to
  * je nevratné — proto se tlačítko u ostatních stavů vůbec nenabízí.
+ *
+ * Uzavřenou transakci nabízet znovu nemá smysl: automatika ji uzavírá sama a
+ * druhé uzavření by u ČSSZ byl dotaz na transakci, která už neexistuje.
  */
 function canClose(attempt: PayrollJmhzTransportAttempt): boolean {
-  return attempt.status === 'completed' && canPoll(attempt)
+  return attempt.status === 'completed' && canPoll(attempt) && !attempt.closed_at
 }
 
-function periodLabel(submissionId: number): string {
-  const period = periods.value[submissionId]
-  if (!period) return t('payroll.submissions.transport.group.period_unknown')
+/**
+ * Stornovat lze jen hlášení, které DOLOŽITELNĚ odešlo. Podání, které nikdy
+ * neopustilo aplikaci, u ČSSZ neexistuje a rušit se u něj nemá co.
+ */
+function canCancel(group: AttemptGroup): boolean {
+  return canWrite.value && group.attempts.some(attempt => attempt.sent_at !== null)
+}
+
+/**
+ * Období podání je to, co uživatel hledá jako první („co jsem poslal za
+ * červenec"). Nese ho rovnou ledger, takže se na něj nikde nedoptáváme; když
+ * u pokusu chybí (podání už v evidenci není), zůstane jen odkaz na podání —
+ * chybějící období není důvod neukázat stavy.
+ */
+function periodLabel(group: AttemptGroup): string {
+  if (!group.periodStart || !group.periodEnd) {
+    return t('payroll.submissions.transport.group.period_unknown')
+  }
   return t('payroll.submissions.transport.group.period', {
-    start: period.start,
-    end: period.end,
+    start: group.periodStart,
+    end: group.periodEnd,
   })
 }
 
@@ -239,32 +332,6 @@ async function copyCorrelation(attempt: PayrollJmhzTransportAttempt) {
     // Schránka může být zakázaná politikou prohlížeče; text je vidět i tak.
     copiedId.value = null
   }
-}
-
-/**
- * Období podání je to, co uživatel hledá jako první („co jsem poslal za
- * červenec"). Ledger ho nenese, dotahuje se proto z detailu podání — a když
- * se nepovede, zůstane jen odkaz na podání. Chybějící období není důvod
- * neukázat stavy.
- */
-async function loadPeriods(rows: PayrollJmhzTransportAttempt[]) {
-  const ids = [...new Set(rows.map(row => row.submission_id))]
-    .filter(id => periods.value[id] === undefined)
-  if (ids.length === 0) return
-  const results = await Promise.allSettled(
-    ids.map(id => payrollApi.submissionDetail(id)),
-  )
-  const next = { ...periods.value }
-  results.forEach((result, index) => {
-    if (result.status !== 'fulfilled') return
-    const submission = result.value?.submission
-    if (!submission) return
-    next[ids[index]!] = {
-      start: submission.period_start,
-      end: submission.period_end,
-    }
-  })
-  periods.value = next
 }
 
 /** Nastavení zaměstnavatele zná variabilní symboly pracovišť — jinak se ptáme. */
@@ -303,23 +370,35 @@ async function load() {
   loadError.value = ''
   actionError.value = ''
   success.value = ''
+  // Zapamatovaný rozpad chyb platí pro protokoly, které právě mizí z obrazovky
+  // — po znovunačtení (jiná stránka, nový import) by mohl patřit něčemu jinému.
+  resetProtocolErrors()
   try {
     // Obě strany přehledu se načítají naráz a SELHÁNÍ KTERÉKOLI Z NICH je
     // selhání celku. Ukázat jen jednu polovinu a druhou tiše vynechat by
     // znamenalo přehled, který zamlčuje podání — a přesně kvůli tomu se sem
     // uživatel dívá.
     const [history, protocols] = await Promise.all([
-      payrollApi.jmhzTransportHistory(environment.value),
-      payrollApi.jmhzImportedProtocols(environment.value),
+      payrollApi.jmhzTransportHistory(environment.value, {
+        limit: attemptsPageSize,
+        offset: attemptsOffset.value,
+      }),
+      payrollApi.jmhzImportedProtocols(environment.value, {
+        limit: importedPageSize,
+        offset: importedOffset.value,
+      }),
     ])
     attempts.value = history.attempts ?? []
+    attemptsTotal.value = history.total ?? 0
     imported.value = protocols.protocols ?? []
-    await loadPeriods(attempts.value)
+    importedTotal.value = protocols.total ?? 0
   } catch (exception: unknown) {
     // Stav zůstává NEZNÁMÝ, ne prázdný — šablona podle `loadError` skryje
     // prázdný stav i seznam, aby se selhání nedalo přečíst jako „nic neodešlo".
     attempts.value = []
+    attemptsTotal.value = 0
     imported.value = []
+    importedTotal.value = 0
     loadError.value = apiErrorMessage(
       exception,
       t('payroll.submissions.transport.load_failed'),
@@ -370,12 +449,26 @@ async function switchEnvironment(next: PayrollJmhzTransportEnvironment) {
   if (next === environment.value || busy.value) return
   environment.value = next
   polls.value = {}
+  // Jiné prostředí = jiné seznamy, takže stránky musí zpět na začátek.
+  attemptsOffset.value = 0
+  importedOffset.value = 0
   await load()
 }
 
+/**
+ * Období nese jen přehled, ne odpověď na doptání — ta vrací holý řádek ledgeru.
+ * Převezme se proto z nahrazovaného pokusu, jinak by hlavička skupiny po
+ * doptání spadla na „období neznámé", aniž by se cokoli stalo.
+ */
 function replaceAttempt(updated: PayrollJmhzTransportAttempt) {
   attempts.value = attempts.value.map(
-    attempt => (attempt.id === updated.id ? updated : attempt),
+    attempt => (attempt.id === updated.id
+      ? {
+        ...updated,
+        period_start: updated.period_start ?? attempt.period_start,
+        period_end: updated.period_end ?? attempt.period_end,
+      }
+      : attempt),
   )
 }
 
@@ -402,13 +495,47 @@ async function poll(attempt: PayrollJmhzTransportAttempt) {
   }
 }
 
+function askToCancel(submissionId: number) {
+  if (busy.value) return
+  cancellingId.value = submissionId
+  actionError.value = ''
+  success.value = ''
+}
+
+/**
+ * Storno se jen PŘIPRAVÍ. Odesílá se pak stejnou cestou jako řádné hlášení —
+ * sloučit obojí do jednoho kliknutí by znamenalo, že se při chybě odeslání
+ * nedá poznat, jestli storno vzniklo, a druhý pokus by ho založil znovu.
+ */
+async function confirmCancel(submissionId: number) {
+  if (!canWrite.value || busy.value) return
+  cancelPendingId.value = submissionId
+  actionError.value = ''
+  success.value = ''
+  try {
+    const result = await payrollApi.cancelJmhzSubmission(submissionId, environment.value)
+    cancellingId.value = null
+    await load()
+    success.value = result.created
+      ? t('payroll.submissions.transport.storno.frozen', { id: result.submission_id })
+      : t('payroll.submissions.transport.storno.already', { id: result.submission_id })
+  } catch (exception: unknown) {
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.transport.storno.failed'),
+    )
+  } finally {
+    cancelPendingId.value = null
+  }
+}
+
 async function close(attempt: PayrollJmhzTransportAttempt) {
   if (!canWrite.value || !variableSymbolValid.value || busy.value) return
   closingId.value = attempt.id
   actionError.value = ''
   success.value = ''
   try {
-    await payrollApi.closeJmhzTransportAttempt(
+    const result = await payrollApi.closeJmhzTransportAttempt(
       attempt.id,
       variableSymbol.value.trim(),
       environment.value,
@@ -416,7 +543,9 @@ async function close(attempt: PayrollJmhzTransportAttempt) {
     // Potvrzení až po znovunačtení: `load()` hlášky čistí, takže nastavené
     // dřív by zmizelo dřív, než by ho někdo stihl přečíst.
     await load()
-    success.value = t('payroll.submissions.transport.closed', { id: attempt.id })
+    success.value = result.already_closed
+      ? t('payroll.submissions.transport.closed_already')
+      : t('payroll.submissions.transport.closed', { id: attempt.id })
   } catch (exception: unknown) {
     actionError.value = apiErrorMessage(
       exception,
@@ -633,7 +762,7 @@ onMounted(loadVariableSymbols)
           <div class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 p-4 sm:p-6">
             <div>
               <h3 class="text-base font-semibold text-neutral-900">
-                {{ periodLabel(entry.group.submissionId) }}
+                {{ periodLabel(entry.group) }}
               </h3>
               <p class="mt-1 text-xs text-neutral-500">
                 {{ t('payroll.submissions.transport.group.submission', {
@@ -653,6 +782,57 @@ onMounted(loadVariableSymbols)
                   total: entry.group.attempts.length,
                 }) }}
               </span>
+              <button
+                v-if="canCancel(entry.group) && cancellingId !== entry.group.submissionId"
+                type="button"
+                :data-test="`transport-cancel-${entry.group.submissionId}`"
+                :class="btnOutlineSm('danger')"
+                :disabled="busy"
+                @click="askToCancel(entry.group.submissionId)"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.x" />
+                </svg>
+                {{ t('payroll.submissions.transport.storno.action') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Storno ruší u ČSSZ všechna hlášení za období a je nevratné,
+               takže se nespouští jedním kliknutím. -->
+          <div
+            v-if="cancellingId === entry.group.submissionId"
+            :data-test="`transport-cancel-confirm-${entry.group.submissionId}`"
+            class="border-b border-danger-500/30 bg-danger-50 p-4 sm:p-6"
+            role="alert"
+          >
+            <p class="text-sm font-semibold text-danger-700">
+              {{ t('payroll.submissions.transport.storno.confirm_title', {
+                period: periodLabel(entry.group),
+              }) }}
+            </p>
+            <p class="mt-1 text-sm text-danger-700">
+              {{ t('payroll.submissions.transport.storno.confirm_text') }}
+            </p>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                :data-test="`transport-cancel-submit-${entry.group.submissionId}`"
+                :class="btnFilled('danger')"
+                :disabled="busy"
+                @click="confirmCancel(entry.group.submissionId)"
+              >
+                {{ t('payroll.submissions.transport.storno.confirm') }}
+              </button>
+              <button
+                type="button"
+                :data-test="`transport-cancel-abort-${entry.group.submissionId}`"
+                :class="btnOutline('neutral')"
+                :disabled="busy"
+                @click="cancellingId = null"
+              >
+                {{ t('payroll.submissions.transport.storno.cancel') }}
+              </button>
             </div>
           </div>
 
@@ -723,12 +903,80 @@ onMounted(loadVariableSymbols)
                 {{ t('payroll.submissions.transport.awaiting_note') }}
               </p>
               <p
-                v-else-if="attempt.status === 'completed'"
+                v-else-if="attempt.status === 'completed' && !attempt.closed_at"
                 class="mt-3 text-sm text-neutral-600"
                 :data-test="`transport-close-note-${attempt.id}`"
               >
                 {{ t('payroll.submissions.transport.close_note') }}
               </p>
+              <p
+                v-else-if="attempt.status === 'expired'"
+                class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+                :data-test="`transport-expired-note-${attempt.id}`"
+                role="alert"
+              >
+                {{ t('payroll.submissions.transport.automation.expired_note') }}
+              </p>
+
+              <!-- Co dělá automatika. Bez tohohle by uživatel nevěděl, jestli
+                   se aplikace ptá sama, nebo jestli na něj podání čeká. -->
+              <div
+                v-if="attempt.status === 'awaiting_protocol' || attempt.status === 'completed'"
+                :data-test="`transport-automation-${attempt.id}`"
+                class="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700"
+              >
+                <p class="font-medium text-neutral-900">
+                  {{ t('payroll.submissions.transport.automation.title') }}
+                </p>
+                <p class="mt-1">
+                  {{ t('payroll.submissions.transport.automation.description') }}
+                </p>
+                <ul class="mt-2 space-y-1 text-xs text-neutral-600">
+                  <li v-if="attempt.status === 'awaiting_protocol'">
+                    {{ attempt.next_retry_at
+                      ? t('payroll.submissions.transport.automation.next_poll', {
+                        at: attempt.next_retry_at,
+                      })
+                      : t('payroll.submissions.transport.automation.next_poll_unknown') }}
+                  </li>
+                  <li>
+                    {{ t('payroll.submissions.transport.automation.polls', {
+                      count: attempt.poll_count,
+                    }) }}
+                    <template v-if="attempt.last_polled_at">
+                      {{ t('payroll.submissions.transport.automation.last_polled', {
+                        at: attempt.last_polled_at,
+                      }) }}
+                    </template>
+                  </li>
+                  <li v-if="attempt.closed_at" :data-test="`transport-closed-${attempt.id}`">
+                    {{ t('payroll.submissions.transport.automation.closed', {
+                      at: attempt.closed_at,
+                    }) }}
+                  </li>
+                  <li v-else-if="attempt.status === 'completed'">
+                    {{ t('payroll.submissions.transport.automation.close_pending') }}
+                  </li>
+                </ul>
+                <p
+                  v-if="attempt.last_poll_error"
+                  class="mt-2 text-xs text-warning-700"
+                  :data-test="`transport-poll-error-${attempt.id}`"
+                >
+                  {{ t('payroll.submissions.transport.automation.last_error', {
+                    message: attempt.last_poll_error,
+                  }) }}
+                </p>
+                <p
+                  v-if="attempt.close_error && !attempt.closed_at"
+                  class="mt-2 text-xs text-warning-700"
+                  :data-test="`transport-close-error-${attempt.id}`"
+                >
+                  {{ t('payroll.submissions.transport.automation.close_error', {
+                    message: attempt.close_error,
+                  }) }}
+                </p>
+              </div>
 
               <div
                 v-if="attempt.error_code || attempt.error_message"
@@ -969,10 +1217,22 @@ onMounted(loadVariableSymbols)
                   {{ entry.protocol.submitted_at ?? '—' }}
                 </dd>
               </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-neutral-500">
+                  {{ t('payroll.submissions.transport.imported.error_count') }}
+                </dt>
+                <dd
+                  class="mt-0.5 text-neutral-800"
+                  :data-test="`transport-imported-error-count-${entry.protocol.id}`"
+                >
+                  {{ entry.protocol.error_count }}
+                </dd>
+              </div>
             </dl>
 
             <p
-              v-if="entry.protocol.detail_available === false"
+              v-if="entry.protocol.detail_available === false
+                || protocolDetailAvailable[entry.protocol.id] === false"
               class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-800"
               :data-test="`transport-imported-detail-missing-${entry.protocol.id}`"
             >
@@ -982,16 +1242,50 @@ onMounted(loadVariableSymbols)
             </p>
 
             <p
-              v-else-if="(entry.protocol.errors ?? []).length === 0"
+              v-else-if="entry.protocol.error_count === 0"
               class="mt-3 text-sm text-neutral-600"
               :data-test="`transport-imported-clean-${entry.protocol.id}`"
             >
               {{ t('payroll.submissions.transport.report.no_errors') }}
             </p>
 
-            <ul v-else class="mt-3 space-y-3">
+            <template v-else>
+              <button
+                type="button"
+                :class="[btnOutlineSm('neutral'), 'mt-3']"
+                :disabled="protocolErrorsLoading[entry.protocol.id]"
+                :data-test="`transport-imported-errors-toggle-${entry.protocol.id}`"
+                @click="toggleProtocolErrors(entry.protocol)"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.search" />
+                </svg>
+                {{
+                  protocolErrorsLoading[entry.protocol.id]
+                    ? t('payroll.submissions.transport.imported.errors_loading')
+                    : protocolErrorsOpen[entry.protocol.id]
+                      ? t('payroll.submissions.transport.imported.errors_hide')
+                      : t('payroll.submissions.transport.imported.errors_show', {
+                        total: entry.protocol.error_count,
+                      })
+                }}
+              </button>
+
+              <p
+                v-if="protocolErrorsFailed[entry.protocol.id]"
+                class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+                role="alert"
+                :data-test="`transport-imported-errors-failed-${entry.protocol.id}`"
+              >
+                {{ t('payroll.submissions.transport.imported.errors_failed') }}
+              </p>
+
+              <ul
+                v-else-if="protocolErrorsOpen[entry.protocol.id]"
+                class="mt-3 space-y-3"
+              >
               <li
-                v-for="(error, index) in entry.protocol.errors ?? []"
+                v-for="(error, index) in protocolErrors[entry.protocol.id] ?? []"
                 :key="`${error.code}-${index}`"
                 :data-test="`transport-imported-error-${entry.protocol.id}-${index}`"
                 class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
@@ -1036,11 +1330,40 @@ onMounted(loadVariableSymbols)
                   {{ errorLocation(error).join(' · ') }}
                 </p>
               </li>
-            </ul>
+              </ul>
+            </template>
           </div>
         </section>
         </template>
       </template>
+
+      <!--
+        Dvě lišty, protože přehled slévá dva nezávislé seznamy: pokusy naší
+        aplikace a protokoly načtené odjinud. Jeden společný stránkovač by
+        musel lhát aspoň jednomu z nich.
+      -->
+      <div v-if="attemptsTotal > attemptsPageSize" class="space-y-1">
+        <p class="text-xs font-medium uppercase tracking-wide text-neutral-500">
+          {{ t('payroll.submissions.transport.source.app') }}
+        </p>
+        <PaginationBar
+          :page="attemptsPage"
+          :per-page="attemptsPageSize"
+          :total="attemptsTotal"
+          @update:page="goToAttemptsPage"
+        />
+      </div>
+      <div v-if="importedTotal > importedPageSize" class="space-y-1">
+        <p class="text-xs font-medium uppercase tracking-wide text-neutral-500">
+          {{ t('payroll.submissions.transport.source.imported') }}
+        </p>
+        <PaginationBar
+          :page="importedPage"
+          :per-page="importedPageSize"
+          :total="importedTotal"
+          @update:page="goToImportedPage"
+        />
+      </div>
     </template>
   </section>
 </template>

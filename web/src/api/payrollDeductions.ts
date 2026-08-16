@@ -55,6 +55,13 @@ export interface DeductionAgreementSummary {
   updated_at: string
 }
 
+export interface DeductionAgreementsPage {
+  agreements: DeductionAgreementSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface DeductionAgreementVersion {
   id: number
   version_no: number
@@ -163,10 +170,18 @@ export interface NetResultBreakdown {
 }
 
 export const payrollDeductionsApi = {
-  agreements: (filters?: { employee_id?: number; status?: DeductionAgreementStatus }) =>
-    api.get<{ agreements: DeductionAgreementSummary[] }>('/payroll/deduction-agreements', {
-      params: filters,
-    }).then(response => response.data.agreements),
+  /**
+   * Stránka seznamu srážek. Filtr i stránkování drží server — bez `limit` se
+   * neposílá „všechno", ale serverový strop, a o zbytku by výpis mlčel.
+   */
+  agreementsPage: (params?: {
+    employee_id?: number
+    status?: DeductionAgreementStatus
+    limit?: number
+    offset?: number
+  }) =>
+    api.get<DeductionAgreementsPage>('/payroll/deduction-agreements', { params })
+      .then(response => response.data),
   agreement: (id: number) =>
     api.get<{ agreement: DeductionAgreementDetail }>(`/payroll/deduction-agreements/${id}`)
       .then(response => response.data.agreement),

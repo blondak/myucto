@@ -58,14 +58,48 @@ final class PayrollRulesetAdminService
                     $entry['version']->capability === PayrollRulesetCapability::Supported,
             ));
 
+            $coverageIssues = PayrollRulesetCoverage::issues(
+                array_map(self::intervalOf(...), $selectable),
+            );
+            $manualByDesign = array_filter(
+                $selectable,
+                static fn (array $entry): bool =>
+                    $entry['version']->capability === PayrollRulesetCapability::ManualReview,
+            ) !== [];
+
+            $manualKeys = [];
+            $parameterKeys = [];
+            foreach ($selectable as $entry) {
+                foreach ($entry['version']->parameters as $key => $parameter) {
+                    $parameterKeys[$key] = true;
+                    if ($parameter->capability === PayrollRulesetCapability::ManualReview) {
+                        $manualKeys[$key] = true;
+                    }
+                }
+            }
+
             $domains[] = [
                 'domain' => $domain->value,
                 'version_count' => count($domainEntries),
                 'active_count' => count($active),
                 'calculation_ready' => $ready !== [],
-                'coverage_issues' => PayrollRulesetCoverage::issues(
-                    array_map(self::intervalOf(...), $selectable),
-                ),
+                // Proč z domény výpočet nečerpá. Rozlišuje to, co dosud splývalo
+                // do jediného „Výpočet blokován": `awaiting_activation` je fronta,
+                // kterou uživatel odbaví (jedním příkazem na doménu),
+                // `manual_review` je vědomé rozhodnutí aplikace netvrdit číslo —
+                // tam není co odklikávat.
+                'status' => match (true) {
+                    $ready !== [] => 'ready',
+                    $manualByDesign => 'manual_review',
+                    $coverageIssues !== [] => 'coverage_issue',
+                    $selectable !== [] => 'awaiting_activation',
+                    default => 'missing',
+                },
+                'manual_review_by_design' => $manualByDesign,
+                'manual_review_explanation' => PayrollRuleParameterCatalog::domainManualReview($domain->value),
+                'manual_review_parameter_count' => count($manualKeys),
+                'parameter_count' => count($parameterKeys),
+                'coverage_issues' => $coverageIssues,
                 'versions' => array_map(fn (array $entry): array => $this->summary($entry), $domainEntries),
             ];
         }
@@ -424,33 +458,60 @@ final class PayrollRulesetAdminService
             ];
         }
 
+        $manual = self::manualReviewKeys($version);
+        $total = count($version->parameters);
+
+        // Ruční posouzení NENÍ fronta ke schválení: je to vědomé odmítnutí
+        // tvrdit jedno číslo tam, kde žádné univerzálně platné neexistuje.
+        // Hláška proto musí říct, co má uživatel dělat — obvykle nic.
         if ($version->capability === PayrollRulesetCapability::ManualReview) {
             $warnings[] = [
                 'code' => 'manual_review_capability',
-                'message' => 'Doména je označená jako vyžadující ruční posouzení, takže z ní výpočet nečerpá.',
-                'context' => [],
+                'message' => 'Tahle doména je celá vedená jako ruční posouzení: aplikace tu záměrně '
+                    . 'netvrdí žádnou hodnotu, protože ta správná závisí na konkrétním případu. '
+                    . 'Není tu co odklikávat ani schvalovat a mzdový výpočet z domény nečerpá.'
+                    . (PayrollRuleParameterCatalog::domainManualReview($version->domain->value) === null
+                        ? ''
+                        : ' ' . PayrollRuleParameterCatalog::domainManualReview($version->domain->value)),
+                'context' => [
+                    'domain' => $version->domain->value,
+                    'manual_review_count' => count($manual),
+                    'parameter_count' => $total,
+                ],
             ];
         }
 
-        $manual = [];
-        foreach ($version->parameters as $key => $parameter) {
-            if ($parameter->capability === PayrollRulesetCapability::ManualReview) {
-                $manual[] = $key;
-            }
-        }
         if ($manual !== []) {
             $warnings[] = [
                 'code' => 'manual_review_parameters',
-                'message' => 'Některé parametry jsou zadané jako „vyžaduje ruční posouzení" a výpočet je odmítne.',
-                'context' => ['parameters' => $manual],
+                'message' => sprintf(
+                    'Ruční posouzení vyžadují %d z %d parametrů — u nich aplikace vědomě nedosazuje '
+                    . 'žádné číslo a výpočet z nich nečerpá. Zbylých %d se používá normálně. '
+                    . 'Nemusíte nic odklikávat: hodnotu doplňte jen tehdy, když na takový případ '
+                    . 'skutečně narazíte.',
+                    count($manual),
+                    $total,
+                    $total - count($manual),
+                ),
+                'context' => [
+                    'parameters' => $manual,
+                    'manual_review_count' => count($manual),
+                    'parameter_count' => $total,
+                ],
             ];
         }
 
-        if ($entry['is_override'] && $version->lifecycle === PayrollRulesetLifecycle::Active) {
+        // Rozhoduje PŮVOD OBSAHU, ne existence řádku v databázi: override, který
+        // hodnoty nezměnil, je pořád dodaná sada a varovat u něj není proč.
+        if (
+            $version->origin === PayrollRulesetOrigin::CustomerOverride
+            && $version->lifecycle === PayrollRulesetLifecycle::Active
+        ) {
             $warnings[] = [
                 'code' => 'active_override',
-                'message' => 'Účinná verze běží na ručním overridu, ne na ověřeném defaultu z kódu.',
-                'context' => [],
+                'message' => 'Účinná verze běží na ručním overridu, ne na ověřené sadě dodané '
+                    . 's aplikací. Za upravené hodnoty ručí ten, kdo je zadal a schválil.',
+                'context' => ['origin' => $version->origin->value],
             ];
         }
 
@@ -591,7 +652,7 @@ final class PayrollRulesetAdminService
     {
         $version = $entry['version'];
         $override = $entry['override'];
-        $next = self::nextCommand($version->lifecycle);
+        $next = self::nextCommand($version->lifecycle, $version->origin);
 
         return [
             'ruleset_id' => $version->id,
@@ -601,7 +662,14 @@ final class PayrollRulesetAdminService
             'effective_to' => $version->effectiveTo,
             'lifecycle' => $version->lifecycle->value,
             'capability' => $version->capability->value,
-            'canonical_hash' => PayrollRulesetContent::hash(PayrollRulesetContent::encode($version)),
+            'canonical_hash' => $version->contentHash,
+            // Odkud hodnoty jsou. V přehledu, ne až v detailu: doložení zdrojem
+            // je náhrada za zrušené odklikávání, takže musí být vidět bez klikání.
+            'origin' => $version->origin->value,
+            'sources' => array_map(
+                static fn (RulesetSource $source): array => $source->toCanonicalArray(),
+                $version->sources,
+            ),
             'is_override' => $entry['is_override'],
             'has_default' => $entry['has_default'],
             'checksum_valid' => $override === null || PayrollRulesetOverrideHash::matches($override),
@@ -616,6 +684,8 @@ final class PayrollRulesetAdminService
             'approved_by' => self::nullableInt($override, 'approved_by'),
             'activated_by' => self::nullableInt($override, 'activated_by'),
             'row_version' => self::nullableInt($override, 'row_version') ?? 0,
+            'parameter_count' => count($version->parameters),
+            'manual_review_parameters' => self::manualReviewKeys($version),
             'next_command' => $next,
             'blockers' => $next === null ? [] : $this->blockers($entry, $next),
             'warnings' => $this->warnings($entry),
@@ -843,6 +913,19 @@ final class PayrollRulesetAdminService
         return $reason;
     }
 
+    /** @return list<string> klíče parametrů, u kterých aplikace vědomě netvrdí hodnotu */
+    private static function manualReviewKeys(PayrollRulesetVersion $version): array
+    {
+        $manual = [];
+        foreach ($version->parameters as $key => $parameter) {
+            if ($parameter->capability === PayrollRulesetCapability::ManualReview) {
+                $manual[] = $key;
+            }
+        }
+
+        return $manual;
+    }
+
     /**
      * @param array{version:PayrollRulesetVersion,override:array<string,mixed>|null,is_override:bool,has_default:bool,default:PayrollRulesetVersion|null} $entry
      * @return array{id:int, effective_from:string, effective_to:string, ruleset_id:string}
@@ -867,17 +950,27 @@ final class PayrollRulesetAdminService
         if (!is_array($raw)) {
             return [];
         }
+        $domain = is_string($snapshot['domain'] ?? null) ? (string) $snapshot['domain'] : '';
         $parameters = [];
         foreach ($raw as $key => $value) {
             if (!is_string($key) || !is_array($value)) {
                 continue;
             }
+            // Český název, popis výčtové hodnoty a vysvětlení ručního posouzení
+            // se přibalují až tady: do kanonického snapshotu (a tím do otisku
+            // a auditní stopy) nepatří, ale bez nich je administrace čitelná
+            // jen pro toho, kdo napsal klíče.
+            $explanation = PayrollRuleParameterCatalog::manualReview($domain, $key);
             $parameters[] = [
                 'key' => $key,
+                'label' => PayrollRuleParameterCatalog::label($domain, $key),
                 'type' => $value['type'] ?? null,
                 'value' => $value['value'] ?? null,
+                'value_label' => PayrollRuleParameterCatalog::valueLabel($value['value'] ?? null),
                 'capability' => $value['capability'] ?? null,
                 'note' => $value['note'] ?? null,
+                'manual_review_why' => $explanation['why'] ?? null,
+                'manual_review_action' => $explanation['action'] ?? null,
             ];
         }
         usort($parameters, static fn (array $a, array $b): int => (string) $a['key'] <=> (string) $b['key']);
@@ -924,13 +1017,23 @@ final class PayrollRulesetAdminService
         };
     }
 
-    private static function nextCommand(PayrollRulesetLifecycle $lifecycle): ?string
-    {
+    /**
+     * Nad ÚČINNOU DODANOU sadou se žádný další krok nenabízí. Vyřazení dodané sady
+     * není položka fronty, ale následek toho, že ji nahradila novější verze —
+     * nabízet ho jako hlavní akci u každé domény by z „nemáte co odklikávat"
+     * udělalo tlačítko, kterým si zákazník vypne výpočet.
+     */
+    private static function nextCommand(
+        PayrollRulesetLifecycle $lifecycle,
+        PayrollRulesetOrigin $origin,
+    ): ?string {
         return match ($lifecycle) {
             PayrollRulesetLifecycle::Draft => 'review',
             PayrollRulesetLifecycle::Reviewed => 'approve',
             PayrollRulesetLifecycle::Approved => 'activate',
-            PayrollRulesetLifecycle::Active => 'supersede',
+            PayrollRulesetLifecycle::Active => $origin === PayrollRulesetOrigin::Vendor
+                ? null
+                : 'supersede',
             PayrollRulesetLifecycle::Superseded => null,
         };
     }

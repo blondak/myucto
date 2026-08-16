@@ -31,7 +31,7 @@ final class EpoStreetParsingTest extends TestCase
      */
     public static function addresses(): iterable
     {
-        yield 'č.p. i č.o.'          => [['street' => 'Kardinála Berana 1104/36'], 'Kardinála Berana', '1104', '36'];
+        yield 'č.p. i č.o.'          => [['street' => 'Zkušební 123/4'], 'Zkušební', '123', '4'];
         yield 'jen č.p.'             => [['street' => 'Hlavní 12'], 'Hlavní', '12', ''];
         yield 'alfanumerické č.p.'   => [['street' => 'Hlavní 12a'], 'Hlavní', '12a', ''];
         yield 'alfa v č.o.'          => [['street' => 'K Lesu 1234/5b'], 'K Lesu', '1234', '5b'];
@@ -46,8 +46,8 @@ final class EpoStreetParsingTest extends TestCase
         // Vyplněná samostatná čísla mají PŘEDNOST a z ulice se odřízne trailing číslo,
         // aby se nezdvojovalo („Hlavní 12" + pop=12 nesmí dát ulici „Hlavní 12").
         yield 'ruční čísla, ulice s číslem' => [
-            ['street' => 'Kardinála Berana 1104/36', 'street_number_pop' => '1104', 'street_number_orient' => '36'],
-            'Kardinála Berana', '1104', '36',
+            ['street' => 'Zkušební 123/4', 'street_number_pop' => '123', 'street_number_orient' => '4'],
+            'Zkušební', '123', '4',
         ];
         yield 'ruční č.p., ulice bez čísla' => [
             ['street' => 'Hlavní', 'street_number_pop' => '12'],
@@ -86,7 +86,7 @@ final class EpoStreetParsingTest extends TestCase
      */
     public static function houseNumbers(): iterable
     {
-        yield 'obě čísla'   => ['1104', '36', '1104/36'];
+        yield 'obě čísla'   => ['123', '4', '123/4'];
         yield 'jen č.p.'    => ['12', '', '12'];
         yield 'jen č.o.'    => ['', '9', '9'];
         yield 'žádné číslo' => ['', '', ''];

@@ -12,6 +12,15 @@ final readonly class PayrollRulesetVersion
     public string $canonicalHash;
 
     /**
+     * Otisk samotného OBSAHU (bez lifecyclu a podpisů) — přechodem stavu se nemění.
+     * Zároveň je to jediné, podle čeho se pozná dodaná sada od zákaznického přepisu.
+     */
+    public string $contentHash;
+
+    /** Odvozeno z {@see $contentHash}, NIKDY se nepředává zvenčí. */
+    public PayrollRulesetOrigin $origin;
+
+    /**
      * @param list<RulesetSource> $sources
      * @param array<string, PayrollRuleValue> $parameters
      */
@@ -43,13 +52,6 @@ final readonly class PayrollRulesetVersion
         if ($lifecycle !== PayrollRulesetLifecycle::Draft && $technicalReview === null) {
             throw new InvalidArgumentException('Reviewed, approved, active and superseded rulesets require technical review evidence.');
         }
-        if (in_array(
-            $lifecycle,
-            [PayrollRulesetLifecycle::Approved, PayrollRulesetLifecycle::Active, PayrollRulesetLifecycle::Superseded],
-            true,
-        ) && $approval === null) {
-            throw new InvalidArgumentException('Approved, active and superseded rulesets require approval evidence.');
-        }
         if (
             in_array($lifecycle, [PayrollRulesetLifecycle::Draft, PayrollRulesetLifecycle::Reviewed], true)
             && $approval !== null
@@ -66,6 +68,27 @@ final readonly class PayrollRulesetVersion
         $sourceIds = array_map(static fn (RulesetSource $source): string => $source->id, $sources);
         if (count(array_unique($sourceIds)) !== count($sourceIds)) {
             throw new InvalidArgumentException('Ruleset source IDs must be unique.');
+        }
+
+        // Původ se ODVOZUJE, nepředává. Dodanou sadou je jedině obsah, jehož otisk
+        // je zkompilovaný ve {@see VendorRulesetManifest} — uložený override ani
+        // požadavek z API takový otisk vyrobit nemůže, aniž by BYL dodanou sadou.
+        $this->contentHash = PayrollRulesetContent::hash(PayrollRulesetContent::encode($this));
+        $this->origin = VendorRulesetManifest::contains($this->contentHash)
+            ? PayrollRulesetOrigin::Vendor
+            : PayrollRulesetOrigin::CustomerOverride;
+
+        // Za dodanou sadu ručí dodavatel, ne zákazník — proto je účinná bez
+        // zákaznického schválení. Jakmile se obsah odchýlí, odpovědnost přebírá
+        // zákazník a doklad o schválení se vyžaduje dál.
+        if (in_array(
+            $lifecycle,
+            [PayrollRulesetLifecycle::Approved, PayrollRulesetLifecycle::Active, PayrollRulesetLifecycle::Superseded],
+            true,
+        ) && $approval === null && $this->origin !== PayrollRulesetOrigin::Vendor) {
+            throw new InvalidArgumentException(
+                'Approved, active and superseded rulesets require approval evidence unless they are the delivered vendor set.',
+            );
         }
 
         $this->canonicalSnapshot = CanonicalJson::encode($this->snapshotArray());

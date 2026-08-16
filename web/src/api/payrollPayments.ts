@@ -1,4 +1,5 @@
 import { api } from './client'
+import { pageParams, type PayrollPageParams } from './payroll'
 
 export type PayrollPaymentLiabilityState =
   | 'open'
@@ -40,6 +41,18 @@ export interface PayrollPaymentLiability {
 export interface PayrollPaymentLiabilityList {
   period: string
   items: PayrollPaymentLiability[]
+  total: number
+  /**
+   * Součty za CELÉ období, ne za stránku. Znaménko už nese server (příchozí
+   * závazek částku odečítá), takže se nedopočítávají z `items`.
+   */
+  totals: {
+    amount_minor: number
+    allocated_minor: number
+    settled_minor: number
+  }
+  limit: number
+  offset: number
 }
 
 export interface PayrollPaymentPreparationIssue {
@@ -201,9 +214,9 @@ export interface PayrollPaymentReconciliationEventResult {
 }
 
 export const payrollPaymentsApi = {
-  liabilities: (period: string) =>
+  liabilities: (period: string, page?: PayrollPageParams) =>
     api.get<PayrollPaymentLiabilityList>('/payroll/payments/liabilities', {
-      params: { period },
+      params: { period, ...pageParams(page) },
     }).then(response => response.data),
   materializeNetWages: (revisionId: number) =>
     api.post<{ liability_ids: number[]; created_count: number }>(

@@ -1,6 +1,7 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ref } from 'vue'
 
 const m = vi.hoisted(() => ({
   importStructured: vi.fn(),
@@ -8,8 +9,10 @@ const m = vi.hoisted(() => ({
   expenseSuggestions: vi.fn(),
 }))
 
+// `locale` musí být v mocku taky: editor ho čte v computed formátování data,
+// takže bez něj render spadne na `locale.value` a wrapper zůstane prázdný.
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({ t: (key: string) => key, locale: ref('cs-CZ') }),
 }))
 
 vi.mock('@/api/purchaseInvoices', () => ({

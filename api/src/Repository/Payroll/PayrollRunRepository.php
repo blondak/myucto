@@ -13,32 +13,109 @@ final class PayrollRunRepository
 {
     public function __construct(private readonly Connection $db) {}
 
-    /** @return list<array<string,mixed>> */
-    public function list(int $supplierId, ?string $periodStart = null): array
-    {
+    /**
+     * Verze vstupního snapshotu, od které běh umí materializovat výplaty.
+     * Jediná definice pro SQL v seznamu i pro PHP test v detailu.
+     */
+    private const INPUT_SCHEMA_WITH_PAYOUTS = 'payroll-run-input.v2';
+
+    /** Strop stránky seznamu — víc než rok a půl období naráz nikdo nečte. */
+    public const LIST_MAX_LIMIT = 50;
+
+    public const LIST_DEFAULT_LIMIT = 12;
+
+    /**
+     * Seznam mzdových běhů — VÝHRADNĚ lehká data.
+     *
+     * ── Co se opravovalo ────────────────────────────────────────────────────────
+     * Dotaz tahal `revision.input_snapshot_json` i `revision.result_snapshot_json`
+     * (oba LONGTEXT) pro VŠECHNY běhy firmy a oba `json_decode`oval do paměti.
+     * Období je přitom volitelné, takže `GET /payroll/runs` bez filtru načetl
+     * kompletní mzdovou historii firmy — u firmy se stovkou zaměstnanců a pár lety
+     * provozu to znamená stovky megabajtů a pád na `memory_limit`. Ze vstupního
+     * snapshotu se přitom používal JEDINÝ boolean a z výsledkového tři částky.
+     *
+     * ── Co se dělá teď ──────────────────────────────────────────────────────────
+     * Oba LONGTEXTy zůstávají v databázi a čtou se celé jen v detailu běhu
+     * ({@see self::detail()}). Do seznamu se z nich SQL vytáhne jen to, co seznam
+     * skutečně zobrazuje, a stránkuje se s tvrdým stropem.
+     *
+     * Osobní rozpad (`result_snapshot.people`) v seznamu ZÁMĚRNĚ není — to je ta
+     * objemná část a frontend si ji dotahuje na vyžádání pro jeden konkrétní běh.
+     *
+     * @return array{items: list<array<string,mixed>>, total: int}
+     */
+    public function list(
+        int $supplierId,
+        ?string $periodStart = null,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+
+        $where = ' WHERE run.supplier_id = ?';
+        $params = [$supplierId];
+        if ($periodStart !== null) {
+            $where .= ' AND run.period_start = ?';
+            $params[] = $periodStart;
+        }
+
+        $countStmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_runs run' . $where,
+        );
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+
+        // `payment_materialization_supported`: schéma v2 a KAŽDÁ osoba nese pole
+        // `payout_accounts`. Wildcard `$.people[*].payout_accounts` vrací v MariaDB
+        // pole všech nalezených hodnot (i pro jedinou osobu), takže osoba bez klíče
+        // sníží počet — porovnání délek je tedy úplný test „nikomu nechybí".
+        // Prázdné `people` dá 0 = 0, tedy true, stejně jako se dřív choval PHP cyklus.
+        // Jediná vědomá odchylka od původního PHP testu: `payout_accounts` uložené
+        // jako objekt místo pole tu projde. Snapshot builder pole zapisuje vždy,
+        // a cena za odstranění dekódu celého LONGTEXTu je to nesrovnatelně nižší.
         $sql = 'SELECT run.*,
                        revision.id AS revision_id,
                        revision.revision_no,
                        revision.status AS revision_status,
-                       revision.input_snapshot_json,
-                       revision.result_snapshot_json,
                        revision.calculated_by,
                        revision.reviewed_by,
-                       revision.approved_by
+                       revision.approved_by,
+                       (revision.input_snapshot_json IS NOT NULL
+                        AND JSON_VALUE(revision.input_snapshot_json, "$.schema_version")
+                            = "' . self::INPUT_SCHEMA_WITH_PAYOUTS . '"
+                        AND JSON_TYPE(JSON_QUERY(revision.input_snapshot_json, "$.people")) = "ARRAY"
+                        AND JSON_LENGTH(revision.input_snapshot_json, "$.people")
+                            = COALESCE(JSON_LENGTH(JSON_EXTRACT(
+                                  revision.input_snapshot_json, "$.people[*].payout_accounts"
+                              )), 0)
+                       ) AS payment_materialization_supported,
+                       (revision.result_snapshot_json IS NOT NULL) AS has_result_snapshot,
+                       JSON_VALUE(revision.result_snapshot_json, "$.totals.cash_payable_minor")
+                           AS total_cash_payable_minor,
+                       JSON_VALUE(revision.result_snapshot_json, "$.totals.enforcement_withheld_minor")
+                           AS total_enforcement_withheld_minor,
+                       JSON_VALUE(revision.result_snapshot_json, "$.totals.payable_after_enforcement_minor")
+                           AS total_payable_after_enforcement_minor
                   FROM payroll_runs run
              LEFT JOIN payroll_run_revisions revision
                     ON revision.supplier_id = run.supplier_id
                    AND revision.run_id = run.id
-                   AND revision.revision_no = run.current_revision_no
-                 WHERE run.supplier_id = ?';
-        $params = [$supplierId];
-        if ($periodStart !== null) {
-            $sql .= ' AND run.period_start = ?';
-            $params[] = $periodStart;
-        }
-        $sql .= ' ORDER BY run.period_start DESC, run.office_scope_id, run.id';
+                   AND revision.revision_no = run.current_revision_no'
+            . $where
+            . ' ORDER BY run.period_start DESC, run.office_scope_id, run.id
+                 LIMIT ? OFFSET ?';
+
         $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute($params);
+        $position = 1;
+        foreach ($params as $param) {
+            $stmt->bindValue($position++, $param);
+        }
+        $stmt->bindValue($position++, $limit, PDO::PARAM_INT);
+        $stmt->bindValue($position, $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
         $items = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $run = self::castRun($row);
@@ -49,30 +126,106 @@ final class PayrollRunRepository
                 ? null
                 : (int) $row['revision_no'];
             $run['revision_status'] = $row['revision_status'];
-            $inputSnapshot = $row['input_snapshot_json'] === null
-                ? null
-                : json_decode(
-                    (string) $row['input_snapshot_json'],
-                    true,
-                    flags: JSON_THROW_ON_ERROR,
-                );
             $run['payment_materialization_supported'] =
-                self::supportsPaymentMaterialization($inputSnapshot);
-            $run['result_snapshot'] = $row['result_snapshot_json'] === null
-                ? null
-                : json_decode(
-                    (string) $row['result_snapshot_json'],
-                    true,
-                    flags: JSON_THROW_ON_ERROR,
-                );
+                (bool) (int) $row['payment_materialization_supported'];
+            $run['result_snapshot'] = self::listTotals($row);
             foreach (['calculated_by', 'reviewed_by', 'approved_by'] as $field) {
                 $run[$field] = $row[$field] === null ? null : (int) $row[$field];
             }
-            unset($run['result_snapshot_json']);
-            unset($run['input_snapshot_json']);
+            foreach ([
+                'has_result_snapshot',
+                'total_cash_payable_minor',
+                'total_enforcement_withheld_minor',
+                'total_payable_after_enforcement_minor',
+            ] as $scratch) {
+                unset($run[$scratch]);
+            }
             $items[] = $run;
         }
-        return $items;
+
+        return ['items' => $items, 'total' => $total];
+    }
+
+    /**
+     * Jeden běh včetně CELÉHO výsledkového snapshotu — objemná data, která seznam
+     * záměrně neposílá. Vstupní snapshot se nevrací vůbec: nese osobní údaje všech
+     * zaměstnanců a žádná obrazovka ho nezobrazuje.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function detail(int $supplierId, int $id): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT run.*,
+                    revision.id AS revision_id,
+                    revision.revision_no,
+                    revision.status AS revision_status,
+                    revision.result_snapshot_json,
+                    revision.input_snapshot_json,
+                    revision.calculated_by,
+                    revision.reviewed_by,
+                    revision.approved_by
+               FROM payroll_runs run
+          LEFT JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run.supplier_id
+                AND revision.run_id = run.id
+                AND revision.revision_no = run.current_revision_no
+              WHERE run.supplier_id = ? AND run.id = ?',
+        );
+        $stmt->execute([$supplierId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+
+        $run = self::castRun($row);
+        $run['revision_id'] = $row['revision_id'] === null ? null : (int) $row['revision_id'];
+        $run['revision_no'] = $row['revision_no'] === null ? null : (int) $row['revision_no'];
+        $run['revision_status'] = $row['revision_status'];
+        $inputSnapshot = $row['input_snapshot_json'] === null
+            ? null
+            : json_decode((string) $row['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $run['payment_materialization_supported'] =
+            self::supportsPaymentMaterialization($inputSnapshot);
+        $run['result_snapshot'] = $row['result_snapshot_json'] === null
+            ? null
+            : json_decode((string) $row['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        foreach (['calculated_by', 'reviewed_by', 'approved_by'] as $field) {
+            $run[$field] = $row[$field] === null ? null : (int) $row[$field];
+        }
+        unset($run['result_snapshot_json'], $run['input_snapshot_json']);
+
+        return $run;
+    }
+
+    /**
+     * Zmenšený `result_snapshot` pro seznam: `null`, když revize výsledek nemá,
+     * jinak jen blok `totals`. Tvar odpovědi tak zůstává týž jako dřív, jen bez
+     * osobního rozpadu — frontend čte `result_snapshot?.totals` beze změny.
+     *
+     * @param array<string,mixed> $row
+     * @return array{totals: array<string,int|null>}|null
+     */
+    private static function listTotals(array $row): ?array
+    {
+        if ((int) $row['has_result_snapshot'] !== 1) {
+            return null;
+        }
+
+        return [
+            'totals' => [
+                'cash_payable_minor' => self::nullableMinor($row['total_cash_payable_minor']),
+                'enforcement_withheld_minor' => self::nullableMinor($row['total_enforcement_withheld_minor']),
+                'payable_after_enforcement_minor' => self::nullableMinor(
+                    $row['total_payable_after_enforcement_minor'],
+                ),
+            ],
+        ];
+    }
+
+    private static function nullableMinor(mixed $value): ?int
+    {
+        return $value === null ? null : (int) $value;
     }
 
     /** @return array<string,mixed> */
@@ -934,28 +1087,133 @@ final class PayrollRunRepository
         ));
     }
 
+    /**
+     * Sloupce validace i s tím, kdo k ní schválil výjimku.
+     *
+     * Jméno schvalovatele se dotahuje JOINem: samotné `overridden_by` je číslo,
+     * které na kartě běhu nikomu nic neřekne — a věta „schválil Jan Novák" je
+     * celý smysl toho, že se schvalovatel eviduje.
+     */
+    private const VALIDATION_SELECT =
+        'SELECT validation.*, actor.name AS overridden_by_name
+           FROM payroll_run_validations validation
+      LEFT JOIN users actor ON actor.id = validation.overridden_by';
+
     /** @return list<array<string,mixed>> */
     public function validations(int $supplierId, int $revisionId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM payroll_run_validations
-              WHERE supplier_id = ? AND revision_id = ?
-              ORDER BY FIELD(severity, "blocker", "warning", "info"), id'
+            self::VALIDATION_SELECT
+            . ' WHERE validation.supplier_id = ? AND validation.revision_id = ?
+                ORDER BY FIELD(validation.severity, "blocker", "warning", "info"),
+                         validation.id'
         );
         $stmt->execute([$supplierId, $revisionId]);
         return array_values(array_map(
-            static function (array $row): array {
-                foreach (['id', 'revision_id'] as $field) {
-                    $row[$field] = (int) $row[$field];
-                }
-                $row['entity_id'] = $row['entity_id'] === null
-                    ? null
-                    : (int) $row['entity_id'];
-                $row['requires_override'] = (bool) $row['requires_override'];
-                return $row;
-            },
+            self::castValidation(...),
             $stmt->fetchAll(PDO::FETCH_ASSOC),
         ));
+    }
+
+    /** @return array<string,mixed>|null */
+    public function validation(int $supplierId, int $validationId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            self::VALIDATION_SELECT
+            . ' WHERE validation.supplier_id = ? AND validation.id = ?'
+        );
+        $stmt->execute([$supplierId, $validationId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : self::castValidation($row);
+    }
+
+    /**
+     * Validace i s během, ke kterému patří, pod zámkem.
+     *
+     * `payroll_run_validations` nese jen `revision_id`, takže příslušnost k běhu
+     * z URL se musí ověřit přes revizi — jinak by šlo cizí validací hýbat přes
+     * vlastní běh. `FOR UPDATE` drží řádek do konce transakce, aby dva souběžné
+     * zápisy výjimky nepřepsaly jeden druhého.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function lockValidation(int $supplierId, int $validationId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT validation.*, revision.run_id, revision.status AS revision_status
+               FROM payroll_run_validations validation
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = validation.supplier_id
+                AND revision.id = validation.revision_id
+              WHERE validation.supplier_id = ? AND validation.id = ?
+              FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $validationId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $row['run_id'] = (int) $row['run_id'];
+        return self::castValidation($row);
+    }
+
+    /**
+     * Zapíše schválení výjimky.
+     *
+     * Podmínky v `WHERE` nejsou ozdoba: `requires_override = 1` zabrání tomu, aby
+     * někdo „odklidil" blokující nález, a `overridden_at IS NULL` udělá ze zápisu
+     * jednorázovou akci — druhý souběžný pokus ovlivní nula řádků a volající se
+     * o tom dozví, místo aby tiše přepsal cizí odůvodnění.
+     */
+    public function applyValidationOverride(
+        int $supplierId,
+        int $validationId,
+        string $reason,
+        int $actorUserId,
+    ): bool {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_run_validations
+                SET override_reason = ?, overridden_by = ?, overridden_at = NOW()
+              WHERE supplier_id = ? AND id = ?
+                AND requires_override = 1
+                AND overridden_at IS NULL'
+        );
+        $stmt->execute([$reason, $actorUserId, $supplierId, $validationId]);
+        return $stmt->rowCount() === 1;
+    }
+
+    /** Odvolá schválenou výjimku; historii nese `payroll_run_events`. */
+    public function clearValidationOverride(
+        int $supplierId,
+        int $validationId,
+    ): bool {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_run_validations
+                SET override_reason = NULL, overridden_by = NULL, overridden_at = NULL
+              WHERE supplier_id = ? AND id = ?
+                AND requires_override = 1
+                AND overridden_at IS NOT NULL'
+        );
+        $stmt->execute([$supplierId, $validationId]);
+        return $stmt->rowCount() === 1;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private static function castValidation(array $row): array
+    {
+        foreach (['id', 'revision_id'] as $field) {
+            $row[$field] = (int) $row[$field];
+        }
+        foreach (['entity_id', 'overridden_by'] as $field) {
+            $row[$field] = ($row[$field] ?? null) === null
+                ? null
+                : (int) $row[$field];
+        }
+        $row['requires_override'] = (bool) $row['requires_override'];
+        return $row;
     }
 
     /** @return array{blockers:int,unresolved_overrides:int} */
@@ -1492,7 +1750,7 @@ final class PayrollRunRepository
     private static function supportsPaymentMaterialization(mixed $snapshot): bool
     {
         if (!is_array($snapshot) || array_is_list($snapshot)
-            || ($snapshot['schema_version'] ?? null) !== 'payroll-run-input.v2'
+            || ($snapshot['schema_version'] ?? null) !== self::INPUT_SCHEMA_WITH_PAYOUTS
         ) {
             return false;
         }

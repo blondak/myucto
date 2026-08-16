@@ -38,6 +38,8 @@ final class AuditGateCoverageTest extends TestCase
         'DphLineWhitelistGuardTest.php'       => 'whitelist řádků DPH přiznání se nerozejde s mapou',
         'ExplicitDiBindingArityTest.php'      => 'ruční DI binding dostane všechny závislosti',
         'LocaleParityGuardTest.php'           => 'cs.json a en.json mají identickou množinu klíčů',
+        'PayrollEnumContractTest.php'         => 'mzdový číselník se nerozejde mezi PHP, TypeScriptem a slovníkem',
+        'CzechHolidaySingleSourceTest.php'    => 'české svátky mají jediný zdroj pravdy',
     ];
 
     /** Spustitelné artefakty auditu mimo testovou sadu. */

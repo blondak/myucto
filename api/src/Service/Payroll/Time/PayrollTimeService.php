@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Time;
 
+use MyInvoice\Repository\Payroll\PayrollOvertimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
 
 final class PayrollTimeService
 {
@@ -22,6 +24,8 @@ final class PayrollTimeService
         private readonly PayrollTimeRepository $repository,
         private readonly PayrollCalendarFundService $fund,
         private readonly PayrollJmhzWorkMonthSummaryBuilder $jmhzWorkSummary,
+        private readonly PayrollOvertimeLimitService $overtimeLimits,
+        private readonly PayrollOvertimeRepository $overtime,
     ) {}
 
     /** @return array<string,mixed> */
@@ -45,6 +49,29 @@ final class PayrollTimeService
         foreach ($this->repository->monthStates($supplierId, $periodStart) as $state) {
             $states[PayrollTimeValue::int($state['employment_id'] ?? null, 'employment_id')] = $state;
         }
+
+        // § 93 zákoníku práce — stav limitů přesčasu se počítá pro CELÝ přehled
+        // jedním dotazem, protože roční i vyrovnávací okno sahá mimo měsíc a
+        // dotaz na vztah by se jinak opakoval pro každý řádek.
+        $employmentIds = [];
+        $employmentStarts = [];
+        foreach ($employments as $employment) {
+            $id = PayrollTimeValue::int($employment['id'] ?? null, 'id');
+            $employmentIds[] = $id;
+            $start = $employment['actual_start_date'] ?? $employment['start_date'] ?? null;
+            $employmentStarts[$id] = is_string($start) ? $start : null;
+        }
+        $periodLastDay = (new \DateTimeImmutable($periodEnd))
+            ->modify('-1 day')
+            ->format('Y-m-d');
+        $overtimeLimits = $this->overtimeLimits->assessMany(
+            $supplierId,
+            $employmentIds,
+            $periodStart,
+            $periodLastDay,
+            $employmentStarts,
+        );
+        $overtimeConsents = $this->overtime->consentRowsForMany($supplierId, $employmentIds);
 
         $items = [];
         foreach ($employments as $employment) {
@@ -188,6 +215,10 @@ final class PayrollTimeService
                         : null,
                     'current_revision' => $jmhzRevision,
                 ],
+                'overtime_limits' => isset($overtimeLimits[$employmentId])
+                    ? $overtimeLimits[$employmentId]->toArray()
+                    : null,
+                'overtime_consents' => $overtimeConsents[$employmentId] ?? [],
                 'shifts' => $employmentShifts,
                 'entries' => $employmentEntries,
             ];
@@ -388,6 +419,42 @@ final class PayrollTimeService
             $periodStart,
             $this->nonNegativeInt($input, 'row_version'),
             $jmhzWorkSummary,
+            $userId,
+        );
+    }
+
+    /**
+     * Souhlas zaměstnance s prací přesčas nad nařízený rozsah (§ 93 odst. 3).
+     *
+     * Bez téhle evidence nejde 151. hodinu přesčasu odlišit od porušení zákona,
+     * proto je to samostatná právní skutečnost s vlastní platností, ne příznak
+     * na docházce.
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public function saveOvertimeConsent(
+        int $supplierId,
+        array $input,
+        ?int $userId,
+    ): array {
+        $validFrom = $this->date($input['valid_from'] ?? null, 'valid_from');
+        $validTo = $this->nullableDate($input['valid_to'] ?? null, 'valid_to');
+        if ($validTo !== null && $validTo < $validFrom) {
+            throw new \InvalidArgumentException(
+                'Konec platnosti souhlasu nesmí předcházet jeho začátku.',
+            );
+        }
+
+        return $this->overtime->saveConsent(
+            $supplierId,
+            $this->positiveInt($input, 'employment_id'),
+            $this->nullablePositiveInt($input, 'id'),
+            $validFrom,
+            $validTo,
+            $this->nullableString($input['document_reference'] ?? null, 191),
+            $this->nullableString($input['note'] ?? null, 500),
+            $this->nonNegativeInt($input, 'row_version'),
             $userId,
         );
     }

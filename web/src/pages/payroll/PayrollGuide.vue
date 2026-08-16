@@ -8,7 +8,8 @@ import { ICONS } from '@/components/ui/buttonStyles'
  * Krátký in-page návod „Jak to funguje".
  *
  * Why: pořadí kroků mzdového měsíce je dané stavy běhu
- * (`lock_inputs → calculate → review → approve → close`), ale v UI nebylo nikde
+ * (`lock_inputs → calculate → review → approve → post → prepare_payments →
+ * mark_paid → close`), ale v UI nebylo nikde
  * napsané — menu mzdové sekce má 15 položek v jiném pořadí. Nový uživatel tak
  * nemá jak zjistit, že nepřítomnosti musí být v systému DŘÍV než výpočet.
  *

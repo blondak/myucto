@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollBusinessTripConflictException;
+use MyInvoice\Repository\Payroll\PayrollBusinessTripDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollBusinessTripRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
@@ -27,9 +28,11 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class PayrollTravelAction
 {
     use PayrollActionSupport;
+    use PayrollDeletionResponse;
 
     public function __construct(
         private readonly PayrollBusinessTripRepository $trips,
+        private readonly PayrollBusinessTripDeletionRepository $deletion,
         private readonly BusinessTripValidator $validator,
         private readonly BusinessTripCalculator $calculator,
         private readonly BusinessTripMaterializer $materializer,
@@ -43,15 +46,36 @@ final class PayrollTravelAction
         if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
             return $error;
         }
-        $period = $request->getQueryParams()['period'] ?? null;
+        $query = $request->getQueryParams();
+        $period = $query['period'] ?? null;
         try {
             $periodStart = $period === null || $period === '' ? null : $this->month($period);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
+        // Období je volitelné, takže bez stropu tenhle endpoint četl všechny
+        // pracovní cesty firmy od jejího vzniku. Strop je tvrdý (ne jen výchozí),
+        // aby ho nešlo obejít parametrem z URL.
+        $limit = max(1, min(
+            PayrollBusinessTripRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollBusinessTripRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
 
+        $page = $this->trips->list(
+            $this->currentSupplierId($request),
+            $periodStart,
+            $limit,
+            $offset,
+        );
+
+        // Klíč `trips` zůstává, aby stávající volající nespadli; `total`/`limit`/`offset`
+        // přibyly vedle něj, protože seznam už nemusí být úplný.
         return Json::ok($response, [
-            'trips' => $this->trips->list($this->currentSupplierId($request), $periodStart),
+            'trips' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ]);
     }
 
@@ -250,6 +274,79 @@ final class PayrollTravelAction
         );
 
         return Json::ok($response, ['materialization' => $result]);
+    }
+
+    /**
+     * Smaže rozpracovanou pracovní cestu, která vůbec neměla vzniknout.
+     *
+     * Právo je `payroll.inputs.write`, tedy TOTÉŽ, kterým se cesta zakládá:
+     * smazání konceptu je opak jeho založení, ne přísnější úkon. Před schválenou
+     * a vyúčtovanou cestou chrání blokátory v repozitáři, ne zvláštní právo.
+     *
+     * @param array<string,string> $args
+     */
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $cascade = $this->deletion->delete(
+                $this->currentSupplierId($request),
+                (int) ($args['id'] ?? 0),
+                $this->optionalRowVersion($this->input($request)['row_version'] ?? null),
+                $this->userId($request),
+                $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->deletionError($response, $e);
+        }
+
+        return Json::ok($response, ['deleted' => true, 'cascade' => $cascade]);
+    }
+
+    /**
+     * Zruší cestu, která se nakonec nekonala. Na rozdíl od smazání nechá stopu.
+     *
+     * Právo je `payroll.approve` — zrušení schválené cesty bere zpět schválení,
+     * a to je úkon téže váhy jako schválit nebo vyúčtovat. Kdo má jen
+     * `payroll.inputs.write`, uklidí svůj vlastní překlep smazáním konceptu.
+     *
+     * @param array<string,string> $args
+     */
+    public function cancel(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            AccessLevel::WRITE,
+            'payroll.approve',
+        )) !== null) {
+            return $error;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $id = (int) ($args['id'] ?? 0);
+        try {
+            $changed = $this->deletion->cancel(
+                $supplierId,
+                $id,
+                $this->optionalRowVersion($this->input($request)['row_version'] ?? null),
+                $this->userId($request),
+                $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->deletionError($response, $e);
+        }
+        $trip = $this->trips->find($supplierId, $id);
+        if ($trip === null) {
+            return Json::error($response, 'not_found', 'Pracovní cesta nebyla nalezena.', 404);
+        }
+
+        // `changed` je false, když už cesta zrušená byla — opakované zrušení
+        // nesmí spadnout ani vyrobit druhý auditní záznam.
+        return Json::ok($response, ['trip' => $trip, 'cancelled' => $changed]);
     }
 
     /** @param array<string,mixed> $data */

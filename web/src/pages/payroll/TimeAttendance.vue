@@ -14,7 +14,8 @@ import PayrollFileDropzone, {
   type PayrollFileRejectReason,
 } from '@/components/payroll/PayrollFileDropzone.vue'
 import Modal from '@/components/ui/Modal.vue'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import {
   formatPayrollMinutes,
   payrollWallTimeToIso,
@@ -27,6 +28,12 @@ const toast = useToast()
 const period = ref(localPayrollPeriod())
 const incompleteOnly = ref(false)
 const loading = ref(false)
+/*
+ * Selhalo načtení? Pak o obsahu nevíme NIC — a to je něco jiného než „nic tu
+ * není". Toast s chybou za pár vteřin zmizí a bez tohohle příznaku by na
+ * obrazovce zůstal prázdný stav, který lže.
+ */
+const loadFailed = ref(false)
 const saving = ref(false)
 const overview = ref<PayrollTimeOverview | null>(null)
 const editorOpen = ref(false)
@@ -34,6 +41,20 @@ const importOpen = ref(false)
 const recordType = ref<'entry' | 'shift'>('entry')
 const employmentId = ref<number | null>(null)
 const category = ref<PayrollTimeCategory>('regular')
+/*
+ * Proč nejde uložit záznam docházky, resp. použít import. Obojí vrací `null`,
+ * když akce jde spustit — zašedlé tlačítko bez věty je slepá ulička.
+ */
+const recordBlockedReason = computed<string | null>(() => {
+  if (!selected.value) return t('payroll.time.editor.blocked_no_employment')
+  if (!startsAt.value || !endsAt.value) return t('payroll.time.editor.blocked_no_range')
+  return null
+})
+const importBlockedReason = computed<string | null>(() =>
+  importPreview.value && !importPreview.value.supported
+    ? t('payroll.time.import.blocked_unsupported')
+    : null)
+
 const startsAt = ref('')
 const endsAt = ref('')
 const breakMinutes = ref(0)
@@ -100,8 +121,15 @@ const categories: PayrollTimeCategory[] = [
   'difficult_environment',
 ]
 
+// V docházce se vypisuje název vztahu, ne jeho technický kód — dva vztahy téhož
+// člověka se jinak lišily jen řetězci typu „legacy" a „ZAM-2".
+function relationLabel(type: string): string {
+  return t(`payroll.people.relations.${type}`)
+}
+
 async function load() {
   loading.value = true
+  loadFailed.value = false
   try {
     overview.value = await payrollApi.timeMonth(period.value, incompleteOnly.value)
     selectedEmploymentIds.value = []
@@ -109,6 +137,9 @@ async function load() {
       employmentId.value = overview.value.items[0].employment.id
     }
   } catch (error: any) {
+    // `overview` zůstává, jak bylo — prázdná docházka a nenačtená docházka
+    // vypadaly na obrazovce stejně.
+    loadFailed.value = true
     toast.error(error?.response?.data?.error?.message || t('payroll.time.load_failed'))
   } finally {
     loading.value = false
@@ -231,6 +262,97 @@ function setObstaclesOccurred(value: boolean) {
 function optionalHours(value: string): string | null {
   const normalized = value.trim()
   return normalized === '' ? null : normalized
+}
+
+/*
+ * ─── Limity přesčasu podle § 93 zákoníku práce ──────────────────────────────
+ *
+ * Věty pro uživatele skládá backend (`overtime_limits.findings[].message`),
+ * protože nesou konkrétní čísla a odkaz na odstavec zákona — překládat je přes
+ * `t()` by znamenalo držet právní text na dvou místech. Tady zůstává jen rámec
+ * kolem nich: nadpis, souhrn čerpání a evidence souhlasu.
+ */
+const consentItem = ref<PayrollTimeOverviewItem | null>(null)
+const consentValidFrom = ref('')
+const consentValidTo = ref('')
+const consentReference = ref('')
+const consentNote = ref('')
+const consentError = ref('')
+
+const consentBlockedReason = computed<string | null>(() =>
+  consentValidFrom.value === '' ? t('payroll.time.overtime.consent_blocked_no_date') : null,
+)
+
+function overtimeWarnings(item: PayrollTimeOverviewItem) {
+  return item.overtime_limits?.findings.filter(finding => finding.severity === 'warning') ?? []
+}
+
+function overtimeVisible(item: PayrollTimeOverviewItem): boolean {
+  const limits = item.overtime_limits
+  if (!limits) return false
+  return limits.findings.length > 0
+    || limits.ordered_year_minutes > 0
+    || limits.agreed_year_minutes > 0
+}
+
+function overtimeYearSummary(item: PayrollTimeOverviewItem): string {
+  const limits = item.overtime_limits
+  if (!limits) return ''
+  return t('payroll.time.overtime.year_summary', {
+    used: formatPayrollMinutes(limits.ordered_year_minutes),
+    limit: formatPayrollMinutes(limits.ordered_year_limit_minutes),
+  })
+}
+
+function overtimeConsentSummary(item: PayrollTimeOverviewItem): string {
+  const consents = item.overtime_consents
+  if (!consents.length) return t('payroll.time.overtime.consent_missing')
+  const open = consents.find(consent => consent.valid_to === null)
+  return open
+    ? t('payroll.time.overtime.consent_open', { from: open.valid_from })
+    : t('payroll.time.overtime.consent_until', {
+      from: consents[consents.length - 1].valid_from,
+      to: consents[consents.length - 1].valid_to ?? '',
+    })
+}
+
+function openConsent(item: PayrollTimeOverviewItem) {
+  consentItem.value = item
+  consentValidFrom.value = `${period.value}-01`
+  consentValidTo.value = ''
+  consentReference.value = ''
+  consentNote.value = ''
+  consentError.value = ''
+}
+
+function closeConsent() {
+  consentItem.value = null
+  consentError.value = ''
+}
+
+async function saveConsent() {
+  const item = consentItem.value
+  if (!item || consentBlockedReason.value) return
+  saving.value = true
+  consentError.value = ''
+  try {
+    await payrollApi.saveOvertimeConsent({
+      employment_id: item.employment.id,
+      valid_from: consentValidFrom.value,
+      valid_to: consentValidTo.value === '' ? null : consentValidTo.value,
+      document_reference: consentReference.value.trim() === '' ? null : consentReference.value.trim(),
+      note: consentNote.value.trim() === '' ? null : consentNote.value.trim(),
+      row_version: 0,
+    })
+    toast.success(t('payroll.time.overtime.consent_saved'))
+    closeConsent()
+    await load()
+  } catch (error: any) {
+    consentError.value = error?.response?.data?.error?.message
+      || t('payroll.time.overtime.consent_failed')
+  } finally {
+    saving.value = false
+  }
 }
 
 function closeApproval() {
@@ -491,7 +613,7 @@ onMounted(load)
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.editor.employment') }}</span>
           <select v-model="employmentId" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
             <option v-for="item in overview?.items" :key="item.employment.id" :value="item.employment.id">
-              {{ item.employment.full_name }} · {{ item.employment.code }}
+              {{ item.employment.full_name }} · {{ relationLabel(item.employment.relation_type) }} ({{ item.employment.code }})
             </option>
           </select>
         </label>
@@ -534,10 +656,21 @@ onMounted(load)
         <label class="inline-flex items-center gap-2 text-sm"><input v-model="publish" type="checkbox"> {{ t('payroll.time.editor.publish') }}</label>
       </div>
       <div class="mt-5 flex flex-wrap justify-end gap-2">
-        <button :class="btnFilled('primary')" :disabled="saving || !selected || !startsAt || !endsAt" @click="saveRecord">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
-          {{ t('common.save') }}
-        </button>
+        <div class="flex flex-col items-end gap-1.5">
+          <button
+            :class="btnFilled('primary')"
+            :disabled="saving || !selected || !startsAt || !endsAt"
+            :title="disabledTitle(recordBlockedReason !== null, recordBlockedReason)"
+            data-test="time-record-save"
+            @click="saveRecord"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+            {{ t('common.save') }}
+          </button>
+          <p v-if="recordBlockedReason" :class="BTN_DISABLED_NOTE" data-test="time-record-save-blocked">
+            {{ recordBlockedReason }}
+          </p>
+        </div>
       </div>
     </section>
 
@@ -565,10 +698,21 @@ onMounted(load)
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>
             {{ t('payroll.time.import.preview') }}
           </button>
-          <button v-if="importPreview" :class="btnFilled('primary')" :disabled="saving || !importPreview.supported" @click="applyImport">
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.upload" /></svg>
-            {{ t('payroll.time.import.apply') }}
-          </button>
+          <div v-if="importPreview" class="flex flex-col gap-1.5">
+            <button
+              :class="btnFilled('primary')"
+              :disabled="saving || !importPreview.supported"
+              :title="disabledTitle(importBlockedReason !== null, importBlockedReason)"
+              data-test="time-import-apply"
+              @click="applyImport"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.upload" /></svg>
+              {{ t('payroll.time.import.apply') }}
+            </button>
+            <p v-if="importBlockedReason" :class="BTN_DISABLED_NOTE" data-test="time-import-apply-blocked">
+              {{ importBlockedReason }}
+            </p>
+          </div>
         </div>
       </div>
       <div v-if="importPreview" class="mt-4 rounded-lg bg-neutral-50 p-4 text-sm">
@@ -585,6 +729,14 @@ onMounted(load)
     <div v-if="loading" class="space-y-3">
       <div v-for="index in 4" :key="index" class="h-28 animate-pulse rounded-xl bg-neutral-100" />
     </div>
+    <EmptyState
+      v-else-if="loadFailed"
+      variant="failed"
+      boxed
+      data-test="load-failed"
+      :message="t('payroll.time.load_failed_hint')"
+      @action="load"
+    />
     <section v-else-if="!overview?.items.length" class="rounded-xl border border-neutral-200 bg-surface p-8 text-center">
       <h2 class="font-semibold text-neutral-900">{{ t('payroll.time.empty') }}</h2>
       <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.time.empty_hint') }}</p>
@@ -610,7 +762,8 @@ onMounted(load)
             <th class="px-4 py-3 text-right">{{ t('payroll.time.columns.actions') }}</th>
           </tr></thead>
           <tbody class="divide-y divide-neutral-100">
-            <tr v-for="item in overview.items" :key="item.employment.id">
+            <template v-for="item in overview.items" :key="item.employment.id">
+            <tr>
               <td class="px-4 py-3">
                 <input
                   v-if="item.month.status === 'open'"
@@ -620,7 +773,7 @@ onMounted(load)
                   @change="toggleSelection(item.employment.id)"
                 >
               </td>
-              <td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employment.full_name }}</p><p class="text-xs text-neutral-500">{{ item.employment.code }}</p></td>
+              <td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employment.full_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p></td>
               <td class="px-4 py-3">{{ formatPayrollMinutes(item.summary.fund_minutes) }}</td>
               <td class="px-4 py-3">{{ formatPayrollMinutes(item.summary.planned_minutes) }}</td>
               <td class="px-4 py-3">{{ formatPayrollMinutes(item.summary.actual_minutes) }}</td>
@@ -630,17 +783,55 @@ onMounted(load)
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
                 <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" :disabled="saving" @click="openApproval(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
+                <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openConsent(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t('payroll.time.overtime.consent_action') }}</button>
                 <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" :disabled="saving" @click="openReopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
               </div></td>
             </tr>
+            <tr v-if="overtimeVisible(item)" :data-test="`overtime-limits-${item.employment.id}`">
+              <td />
+              <td colspan="7" class="px-4 pb-4">
+                <div
+                  class="rounded-lg border px-3 py-2 text-sm"
+                  :class="overtimeWarnings(item).length
+                    ? 'border-warning-500/40 bg-warning-50 text-warning-700'
+                    : 'border-neutral-200 bg-neutral-50 text-neutral-600'"
+                >
+                  <p class="text-xs font-semibold uppercase tracking-wide">{{ t('payroll.time.overtime.title') }}</p>
+                  <p
+                    v-for="finding in item.overtime_limits?.findings ?? []"
+                    :key="finding.code + finding.scope_from"
+                    class="mt-1 max-w-prose leading-snug"
+                    :data-test="`overtime-finding-${finding.code}`"
+                  >{{ finding.message }}</p>
+                  <p class="mt-1 text-xs">{{ overtimeYearSummary(item) }} {{ overtimeConsentSummary(item) }}</p>
+                </div>
+              </td>
+            </tr>
+            </template>
           </tbody>
         </table>
       </div>
       <div class="space-y-3 p-4 md:hidden">
         <article v-for="item in overview.items" :key="item.employment.id" class="rounded-lg border border-neutral-200 p-4">
-          <div class="flex flex-wrap items-start justify-between gap-2"><div class="flex items-start gap-3"><input v-if="item.month.status === 'open'" type="checkbox" class="mt-1" :checked="selectedEmploymentIds.includes(item.employment.id)" :aria-label="t('payroll.time.bulk.select', { name: item.employment.full_name })" @change="toggleSelection(item.employment.id)"><div><h2 class="font-semibold text-neutral-900">{{ item.employment.full_name }}</h2><p class="text-xs text-neutral-500">{{ item.employment.code }}</p></div></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.month.status === 'approved' ? 'bg-success-50 text-success-600' : item.summary.incomplete ? 'bg-warning-50 text-warning-700' : 'bg-payroll-50 text-payroll-600'">{{ t(`payroll.time.status.${item.month.status === 'approved' ? 'approved' : item.summary.incomplete ? 'incomplete' : 'open'}`) }}</span></div>
+          <div class="flex flex-wrap items-start justify-between gap-2"><div class="flex items-start gap-3"><input v-if="item.month.status === 'open'" type="checkbox" class="mt-1" :checked="selectedEmploymentIds.includes(item.employment.id)" :aria-label="t('payroll.time.bulk.select', { name: item.employment.full_name })" @change="toggleSelection(item.employment.id)"><div><h2 class="font-semibold text-neutral-900">{{ item.employment.full_name }}</h2><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p></div></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.month.status === 'approved' ? 'bg-success-50 text-success-600' : item.summary.incomplete ? 'bg-warning-50 text-warning-700' : 'bg-payroll-50 text-payroll-600'">{{ t(`payroll.time.status.${item.month.status === 'approved' ? 'approved' : item.summary.incomplete ? 'incomplete' : 'open'}`) }}</span></div>
           <dl class="mt-4 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.fund') }}</dt><dd>{{ formatPayrollMinutes(item.summary.fund_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.plan') }}</dt><dd>{{ formatPayrollMinutes(item.summary.planned_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.actual') }}</dt><dd>{{ formatPayrollMinutes(item.summary.actual_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.difference') }}</dt><dd>{{ formatPayrollMinutes(item.summary.difference_minutes) }}</dd></div></dl>
+          <div
+            v-if="overtimeVisible(item)"
+            class="mt-4 rounded-lg border px-3 py-2 text-sm"
+            :class="overtimeWarnings(item).length
+              ? 'border-warning-500/40 bg-warning-50 text-warning-700'
+              : 'border-neutral-200 bg-neutral-50 text-neutral-600'"
+          >
+            <p class="text-xs font-semibold uppercase tracking-wide">{{ t('payroll.time.overtime.title') }}</p>
+            <p
+              v-for="finding in item.overtime_limits?.findings ?? []"
+              :key="finding.code + finding.scope_from"
+              class="mt-1 leading-snug"
+            >{{ finding.message }}</p>
+            <p class="mt-1 text-xs">{{ overtimeYearSummary(item) }} {{ overtimeConsentSummary(item) }}</p>
+          </div>
           <div class="mt-4 flex flex-wrap gap-2">
+            <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openConsent(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t('payroll.time.overtime.consent_action') }}</button>
             <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
             <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
             <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" @click="openApproval(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
@@ -783,6 +974,62 @@ onMounted(load)
           </button>
         </div>
       </form>
+    </Modal>
+
+    <Modal
+      v-if="consentItem"
+      :title="t('payroll.time.overtime.consent_title')"
+      width-class="max-w-lg"
+      @close="closeConsent"
+    >
+      <div data-test="overtime-consent-modal">
+        <p class="mb-2 text-sm text-neutral-600">
+          {{ consentItem.employment.full_name }} · {{ consentItem.employment.code }}
+        </p>
+        <p class="mb-4 max-w-prose text-sm text-neutral-600">
+          {{ t('payroll.time.overtime.consent_hint') }}
+        </p>
+        <form data-test="overtime-consent-form" class="space-y-4" @submit.prevent="saveConsent">
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="block">
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_from') }}</span>
+              <input v-model="consentValidFrom" data-test="overtime-consent-valid-from" type="date" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_to') }}</span>
+              <input v-model="consentValidTo" data-test="overtime-consent-valid-to" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+            </label>
+          </div>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_reference') }}</span>
+            <input v-model="consentReference" data-test="overtime-consent-reference" maxlength="191" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_note') }}</span>
+            <textarea v-model="consentNote" data-test="overtime-consent-note" maxlength="500" rows="3" class="w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
+          </label>
+          <p v-if="consentError" data-test="overtime-consent-error" class="text-sm text-danger-500">{{ consentError }}</p>
+          <div class="flex flex-wrap justify-end gap-2">
+            <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="closeConsent">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              type="submit"
+              data-test="overtime-consent-save"
+              :class="btnFilled('primary')"
+              :disabled="saving || Boolean(consentBlockedReason)"
+              :title="disabledTitle(Boolean(consentBlockedReason), consentBlockedReason)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+              {{ t('common.save') }}
+            </button>
+          </div>
+          <p v-if="consentBlockedReason" :class="BTN_DISABLED_NOTE" data-test="overtime-consent-save-blocked">
+            {{ consentBlockedReason }}
+          </p>
+        </form>
+      </div>
     </Modal>
 
     <Modal

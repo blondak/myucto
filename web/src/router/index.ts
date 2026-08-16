@@ -114,6 +114,10 @@ const routes: RouteRecordRaw[] = [
       { path: 'payroll/deduction-agreements', name: 'payroll-deduction-agreements', component: () => import('@/pages/payroll/DeductionAgreements.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/enforcement', name: 'payroll-enforcement', component: () => import('@/pages/payroll/EnforcementCases.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/documents', name: 'payroll-documents', component: () => import('@/pages/payroll/PayrollDocuments.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      // Roční zúčtování (§ 38ch ZDP) je vlastní agenda, ne záložka dokumentů:
+      // z devadesáti procent je to evidence podkladů a rozhodnutí, jestli
+      // zúčtování vůbec provést lze. Doklad je až výsledek.
+      { path: 'payroll/annual-settlement', name: 'payroll-annual-settlement', component: () => import('@/pages/payroll/PayrollAnnualSettlement.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/submissions', name: 'payroll-submissions', component: () => import('@/pages/payroll/PayrollSubmissions.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/settings', name: 'payroll-settings', component: () => import('@/pages/payroll/EmployerSettings.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Legislativní rulesety jsou GLOBÁLNÍ číselník (národní sazby a lhůty), ne
@@ -269,6 +273,7 @@ const routes: RouteRecordRaw[] = [
       },
       { path: 'admin/tax-constants',    name: 'admin-tax-constants', component: () => import('@/pages/admin/TaxConstants.vue'), meta: {  } },
       { path: 'admin/electronic-signatures', name: 'admin-electronic-signatures', component: () => import('@/pages/admin/ElectronicSignatures.vue'), meta: {  } },
+      { path: 'admin/databox', name: 'admin-databox', component: () => import('@/pages/admin/DataBox.vue'), meta: {  } },
       // Globální katalog šablon bankovních pravidel — systémová (ne per-firma) agenda,
       // proto vlastní routa pod Systém místo záložky v per-firma /templates.
       { path: 'admin/bank-rule-templates', name: 'admin-bank-rule-templates', component: () => import('@/pages/admin/BankRuleTemplates.vue'), meta: {  } },
@@ -437,6 +442,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'payroll-deduction-agreements': ['payroll'],
   'payroll-enforcement': ['payroll.enforcement'],
   'payroll-documents': ['payroll.documents'],
+  'payroll-annual-settlement': ['payroll.documents'],
   'payroll-submissions': ['payroll.submissions'],
   'payroll-settings': ['payroll.settings'],
   'payroll-rulesets': ['payroll.rulesets'],
@@ -464,7 +470,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'stock-warehouses': ['stock'], 'stock-vendor-offers': ['stock'],
   'stock-takes': ['stock'], 'stock-take-detail': ['stock'], 'stock-reports': ['stock'], eshop: ['eshop'],
   logbook: ['logbook'], stats: ['dashboard'], 'purchase-stats': ['dashboard'], 'bank-statements': ['bank'], 'bank-detail': ['bank'],
-  'admin-electronic-signatures': ['settings.signing', 'write'], templates: ['accounting.templates'], tools: ['utilities'], 'crm-dashboard': ['dashboard.portfolio'], 'portfolio-overview': ['dashboard.portfolio'],
+  'admin-electronic-signatures': ['settings.signing', 'write'], 'admin-databox': ['settings.signing', 'write'], templates: ['accounting.templates'], tools: ['utilities'], 'crm-dashboard': ['dashboard.portfolio'], 'portfolio-overview': ['dashboard.portfolio'],
   'automation-cockpit': ['accounting'],
   'admin-settings': ['settings.company.write', 'write'], 'admin-branding': ['settings.branding', 'write'], 'admin-integrations': ['settings.company.write', 'write'],
   'admin-price-list': ['settings.company.write', 'write'], 'admin-price-list-new': ['settings.company.write', 'write'], 'admin-price-list-edit': ['settings.company.write', 'write'],

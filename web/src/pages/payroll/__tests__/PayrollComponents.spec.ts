@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   inputs: vi.fn(),
   people: vi.fn(),
   person: vi.fn(),
+  absenceContext: vi.fn(),
   accountOptions: vi.fn(),
   componentJmhzTargets: vi.fn(),
   componentJmhzMappings: vi.fn(),
@@ -51,6 +52,12 @@ vi.mock('@/api/payroll', () => ({
   },
 }))
 
+vi.mock('@/api/payrollAbsences', () => ({
+  payrollAbsenceApi: {
+    context: m.absenceContext,
+  },
+}))
+
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: m.canWrite }),
 }))
@@ -63,12 +70,25 @@ vi.mock('@/api/slug', () => ({
   slugify: m.slugify,
 }))
 
-vi.mock('vue-i18n', () => ({
+// `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
+// `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string) => key,
     locale: ref('cs-CZ'),
   }),
 }))
+
+// Preference tabulek jdou přes Pinii a API; v testu stačí prázdné výchozí.
+vi.mock('@/composables/useUserPrefs', async () => {
+  const { computed } = await import('vue')
+  return {
+    ensurePrefsLoaded: () => Promise.resolve(),
+    getPagePrefs: () => computed(() => ({})),
+    patchPagePrefs: () => {},
+  }
+})
 
 import PayrollComponents from '@/pages/payroll/PayrollComponents.vue'
 
@@ -103,7 +123,12 @@ describe('PayrollComponents', () => {
       created_at: '2026-01-01 00:00:00',
       updated_at: '2026-01-01 00:00:00',
     }])
-    m.recurringComponents.mockResolvedValue([])
+    m.recurringComponents.mockResolvedValue({
+      recurring_components: [],
+      total: 0,
+      limit: 25,
+      offset: 0,
+    })
     m.inputs.mockResolvedValue([{
       id: 9,
       supplier_id: 1,
@@ -133,7 +158,14 @@ describe('PayrollComponents', () => {
       created_at: '2026-06-01 00:00:00',
       updated_at: '2026-06-01 00:00:00',
     }])
-    m.people.mockResolvedValue([{ id: 8, full_name: 'Syntetická osoba' }])
+    m.absenceContext.mockResolvedValue([{
+      id: 12,
+      employee_id: 8,
+      code: 'SYN-HPP',
+      relation_type: 'employment',
+      status: 'active',
+      full_name: 'Syntetická osoba',
+    }])
     m.accountOptions.mockResolvedValue([
       {
         id: 1,
@@ -200,16 +232,6 @@ describe('PayrollComponents', () => {
       },
     })
     m.removeComponentJmhzMapping.mockResolvedValue(undefined)
-    m.person.mockResolvedValue({
-      id: 8,
-      full_name: 'Syntetická osoba',
-      employments: [{
-        id: 12,
-        code: 'SYN-HPP',
-        relation_type: 'employment',
-        status: 'active',
-      }],
-    })
     m.previewInputImport.mockResolvedValue({
       format: 'csv',
       source_name: 'synthetic.csv',
@@ -253,6 +275,28 @@ describe('PayrollComponents', () => {
     expect(wrapper.get('[data-layout="desktop"]').text()).toContain('Syntetická osoba')
     expect(wrapper.get('[data-layout="mobile"]').text()).toContain('Syntetická osoba')
     expect(wrapper.get('[data-layout="mobile"]').text()).toContain('SYN_BONUS')
+    wrapper.unmount()
+  })
+
+  // Nabídka vztahů se dřív skládala ze seznamu osob a detailu KAŽDÉ z nich —
+  // u padesáti zaměstnanců padesát jedna požadavků při každém otevření stránky.
+  // Počet požadavků na nabídku nesmí růst s počtem lidí, ať jich přijde kolik chce.
+  it('builds the relation offer from one bulk call, not one request per employee', async () => {
+    m.absenceContext.mockResolvedValue(Array.from({ length: 50 }, (_unused, index) => ({
+      id: 100 + index,
+      employee_id: 200 + index,
+      code: `SYN-${index}`,
+      relation_type: 'employment',
+      status: 'active',
+      full_name: `Syntetická osoba ${index}`,
+    })))
+
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    expect(m.absenceContext).toHaveBeenCalledTimes(1)
+    expect(m.people).not.toHaveBeenCalled()
+    expect(m.person).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

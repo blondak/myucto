@@ -107,7 +107,7 @@ final class PayrollRunStatutoryAccumulatorApproverTest extends TestCase
         $pdo->prepare(
             'INSERT INTO payroll_module_state
                 (supplier_id, status, start_period, activated_by, activated_at)
-             VALUES (?, "active", "2026-01-01", ?, NOW())
+             VALUES (?, "setup", "2026-01-01", ?, NOW())
              ON DUPLICATE KEY UPDATE
                 status = VALUES(status),
                 start_period = VALUES(start_period)'

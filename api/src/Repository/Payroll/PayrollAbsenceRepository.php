@@ -28,7 +28,7 @@ final class PayrollAbsenceRepository
                  ON employee.supplier_id = employment.supplier_id
                 AND employee.id = employment.employee_id
               WHERE employment.supplier_id = ?
-                AND employment.status NOT IN ('cancelled', 'archived', 'no_show')
+                AND employment.status NOT IN ('archived', 'no_show')
               ORDER BY employee.full_name, employment.code"
         );
         $stmt->execute([$supplierId]);
@@ -39,26 +39,35 @@ final class PayrollAbsenceRepository
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * Strop stránky seznamu. Absence jsou pracovní tabulka — obrazovka ukazuje
+     * pár desítek řádků jednoho období. Počet řádků přitom roste součinem
+     * počtu zaměstnanců a délky filtrovaného rozsahu, takže bez stropu je
+     * odpověď u větší firmy a ročního filtru neomezená.
+     */
+    public const LIST_MAX_LIMIT = 200;
+
+    public const LIST_DEFAULT_LIMIT = 50;
+
+    /** @return array{items: list<array<string,mixed>>, total: int} */
     public function list(
         int $supplierId,
         string $from,
         string $to,
         ?int $employmentId = null,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
     ): array {
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+
         $where = 'absence.supplier_id = ? AND absence.date_from <= ? AND absence.date_to >= ?';
         $params = [$supplierId, $to, $from];
         if ($employmentId !== null) {
             $where .= ' AND absence.employment_id = ?';
             $params[] = $employmentId;
         }
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT absence.*, employment.code AS employment_code,
-                    employment.relation_type, employee.full_name,
-                    average.average_hourly_minor,
-                    average.applicable_year AS average_year,
-                    average.applicable_quarter AS average_quarter
-               FROM payroll_absences absence
+        $source = "FROM payroll_absences absence
                JOIN payroll_employments employment
                  ON employment.supplier_id = absence.supplier_id
                 AND employment.id = absence.employment_id
@@ -68,11 +77,34 @@ final class PayrollAbsenceRepository
                LEFT JOIN payroll_average_earning_snapshots average
                  ON average.supplier_id = absence.supplier_id
                 AND average.id = absence.average_snapshot_id
-              WHERE {$where}
-              ORDER BY absence.date_from, employee.full_name, absence.id"
+              WHERE {$where}";
+
+        $countStmt = $this->db->pdo()->prepare("SELECT COUNT(*) {$source}");
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT absence.*, employment.code AS employment_code,
+                    employment.relation_type, employee.full_name,
+                    average.average_hourly_minor,
+                    average.applicable_year AS average_year,
+                    average.applicable_quarter AS average_quarter
+               {$source}
+              ORDER BY absence.date_from, employee.full_name, absence.id
+              LIMIT ? OFFSET ?"
         );
-        $stmt->execute($params);
-        return array_map(self::cast(...), $stmt->fetchAll(PDO::FETCH_ASSOC));
+        $position = 1;
+        foreach ($params as $param) {
+            $stmt->bindValue($position++, $param);
+        }
+        $stmt->bindValue($position++, $limit, PDO::PARAM_INT);
+        $stmt->bindValue($position, $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return [
+            'items' => array_map(self::cast(...), $stmt->fetchAll(PDO::FETCH_ASSOC)),
+            'total' => $total,
+        ];
     }
 
     /** @param array<string,mixed> $data @return array<string,mixed> */

@@ -40,14 +40,79 @@ final class PayrollApprovedRevisionPostingService
         array $result,
         int $actorUserId,
     ): ?array {
-        if ($supplierId <= 0 || $revisionId <= 0 || $actorUserId <= 0) {
-            throw new \InvalidArgumentException(
-                'Firma, revize a uživatel účetního můstku musí být kladná čísla.',
-            );
-        }
+        $this->assertPostingArguments($supplierId, $revisionId, $actorUserId);
         if (!self::automaticPostingEnabled($snapshot)) {
             return null;
         }
+
+        return $this->execute(
+            $supplierId,
+            $revisionId,
+            $snapshot,
+            $result,
+            $actorUserId,
+        );
+    }
+
+    /**
+     * Ruční zaúčtování schválené revize — vstupní bod pro příkaz `post`
+     * mzdového běhu. Od automatické cesty se liší JEDINÝM bodem: neptá se na
+     * `automatic_posting_enabled` ve zmrazené zaměstnavatelské politice.
+     * Vypnuté automatické zaúčtování je rozhodnutí o tom, kdy se účtuje, ne
+     * o tom, zda se účtuje — účetní si účetní zápis vyvolá sám. Všechny
+     * ostatní kontroly (platnost zmrazené politiky, účetní režim firmy, čtyři
+     * zákonné sady, zmrazená sada předkontací, idempotence adaptéru) zůstávají
+     * beze změny.
+     *
+     * @param array<string,mixed> $snapshot
+     * @param array<string,mixed> $result
+     * @return array{
+     *   batch_id:int,
+     *   journal_entry_id:?int,
+     *   status:'posted'|'no_change',
+     *   idempotent:bool,
+     *   preview:PayrollPostingPreview
+     * }|null null = účetní můstek se na firmu nevztahuje (daňová evidence)
+     */
+    public function postManually(
+        int $supplierId,
+        int $revisionId,
+        array $snapshot,
+        array $result,
+        int $actorUserId,
+    ): ?array {
+        $this->assertPostingArguments($supplierId, $revisionId, $actorUserId);
+        // Tvar zmrazené politiky ověřujeme i tady (fail-closed), jen ignorujeme
+        // její příznak automatiky.
+        self::automaticPostingEnabled($snapshot);
+
+        return $this->execute(
+            $supplierId,
+            $revisionId,
+            $snapshot,
+            $result,
+            $actorUserId,
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $snapshot
+     * @param array<string,mixed> $result
+     * @return array{
+     *   batch_id:int,
+     *   journal_entry_id:?int,
+     *   status:'posted'|'no_change',
+     *   idempotent:bool,
+     *   preview:PayrollPostingPreview
+     * }|null
+     */
+    private function execute(
+        int $supplierId,
+        int $revisionId,
+        array $snapshot,
+        array $result,
+        int $actorUserId,
+    ): ?array {
         $year = self::snapshotYear($snapshot);
         if ($this->accountingModes->forYear($supplierId, $year) !== 'double_entry') {
             return null;
@@ -100,6 +165,18 @@ final class PayrollApprovedRevisionPostingService
             $normalizedAccounts,
             ['user_id' => $actorUserId],
         );
+    }
+
+    private function assertPostingArguments(
+        int $supplierId,
+        int $revisionId,
+        int $actorUserId,
+    ): void {
+        if ($supplierId <= 0 || $revisionId <= 0 || $actorUserId <= 0) {
+            throw new \InvalidArgumentException(
+                'Firma, revize a uživatel účetního můstku musí být kladná čísla.',
+            );
+        }
     }
 
     /** @param array<string,mixed> $snapshot */

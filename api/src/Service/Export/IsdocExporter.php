@@ -466,7 +466,7 @@ final class IsdocExporter
 
         $addr = $dom->createElementNS(self::NS, 'PostalAddress');
         // Schema má StreetName + BuildingNumber jako samostatné povinné elementy.
-        // V naší DB je street single string ("Kardinála Berana 1104/36") — extrahujeme
+        // V naší DB je street single string ("Zkušební 123/4") — extrahujeme
         // trailing číselný/lomítkový token jako BuildingNumber, zbytek jako StreetName.
         [$streetName, $buildingNumber] = $this->splitStreet((string) ($party['street'] ?? ''));
         $this->el($dom, $addr, 'StreetName', $streetName);
@@ -585,7 +585,7 @@ final class IsdocExporter
     }
 
     /**
-     * Rozdělí "Kardinála Berana 1104/36" na ["Kardinála Berana", "1104/36"].
+     * Rozdělí "Zkušební 123/4" na ["Zkušební", "123/4"].
      * Pokud street neobsahuje trailing číslo, vrací [original, ''].
      */
     private function splitStreet(string $street): array

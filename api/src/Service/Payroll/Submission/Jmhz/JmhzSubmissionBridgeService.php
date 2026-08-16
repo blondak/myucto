@@ -382,55 +382,12 @@ final readonly class JmhzSubmissionBridgeService
      */
     private static function frozenIdentity(string $xml): array
     {
-        $dom = new \DOMDocument();
-        $previous = libxml_use_internal_errors(true);
-        libxml_clear_errors();
-        $loaded = $dom->loadXML($xml, LIBXML_NONET);
-        libxml_clear_errors();
-        libxml_use_internal_errors($previous);
-        if (!$loaded) {
-            throw new JmhzXmlException(
-                'jmhz_submission_frozen_xml_unreadable',
-                'Zmrazené XML podání JMHZ nelze načíst.',
-            );
-        }
-        $xpath = new \DOMXPath($dom);
-        $xpath->registerNamespace('p', JmhzSchemaCatalog::NS_PODANI);
-        $guid = self::textAt($xpath, '/p:jmhz/p:hlavicka/p:idPodani');
-        $variableSymbol = self::textAt(
-            $xpath,
-            '/p:jmhz/p:hlavicka/p:variabilniSymbol',
-        );
-        if (preg_match(
-            '/^[0-9A-F]{8}-[0-9A-F]{4}-7[0-9A-F]{3}-[0-9A-F]{4}-[0-9A-F]{12}$/D',
-            $guid,
-        ) !== 1
-            || preg_match('/^\d{10}$/D', $variableSymbol) !== 1
-        ) {
-            throw new JmhzXmlException(
-                'jmhz_submission_frozen_identity_invalid',
-                'Zmrazené podání JMHZ nenese platný GUID nebo variabilní symbol.',
-            );
-        }
+        $identity = JmhzFrozenSubmissionIdentity::read($xml);
 
         return [
-            'submission_guid' => $guid,
-            'variable_symbol' => $variableSymbol,
+            'submission_guid' => $identity->submissionGuid,
+            'variable_symbol' => $identity->variableSymbol,
         ];
-    }
-
-    private static function textAt(\DOMXPath $xpath, string $path): string
-    {
-        $nodes = $xpath->query($path);
-        $node = $nodes === false ? null : $nodes->item(0);
-        if ($node === null) {
-            throw new JmhzXmlException(
-                'jmhz_submission_frozen_identity_missing',
-                "Zmrazené podání JMHZ neobsahuje {$path}.",
-            );
-        }
-
-        return $node->textContent;
     }
 
     /** @return array<int,string> */

@@ -9,6 +9,8 @@ import {
 } from '@/api/payrollPosting'
 import { apiErrorMessage } from '@/api/errors'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatMoneyMinor as formatMoney } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { localPayrollPeriod } from './payrollComponentsUi'
 
@@ -41,11 +43,6 @@ async function load(): Promise<void> {
   } finally {
     loading.value = false
   }
-}
-
-function formatMoney(amountMinor: number | null): string {
-  if (amountMinor === null) return '—'
-  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'CZK' }).format(amountMinor / 100)
 }
 
 function formatDiff(diffMinor: number | null): string {

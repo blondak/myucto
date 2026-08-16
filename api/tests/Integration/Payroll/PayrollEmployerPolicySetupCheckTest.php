@@ -7,7 +7,9 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyConflictException;
+use MyInvoice\Repository\Payroll\PayrollEmployerPolicyDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Settings\PayrollEmployerPolicyService;
 use MyInvoice\Service\Payroll\Settings\PayrollSetupCheckService;
 use MyInvoice\Service\Payroll\Settings\PayrollSetupFeatures;
@@ -53,7 +55,13 @@ final class PayrollEmployerPolicySetupCheckTest extends TestCase
             $sourceSupplierId,
         );
         $this->actorId = $this->createActor($pdo);
-        $this->repository = new PayrollEmployerPolicyRepository($connection);
+        $this->repository = new PayrollEmployerPolicyRepository(
+            $connection,
+            new PayrollEmployerPolicyDeletionRepository(
+                $connection,
+                new ActivityLogger($connection),
+            ),
+        );
         $this->policies = new PayrollEmployerPolicyService($this->repository);
         $this->setupCheck = new PayrollSetupCheckService(
             $connection,
@@ -307,7 +315,13 @@ final class PayrollEmployerPolicySetupCheckTest extends TestCase
         ]);
     }
 
-    public function testPolicyCannotBeDeletedTogetherWithItsAuditTrail(): void
+    /**
+     * Migrace 1388 změnila bezvýhradný zákaz mazání na PODMÍNĚNOU obranu: blokovat
+     * smí jen důkaz pohybu, a tím je u politiky mzdový běh v její platnosti.
+     * Verze, podle které se ještě nic nespočítalo, zmizí i s vlastní auditní stopou
+     * (FK ON DELETE CASCADE); fakt, že existovala, zůstává v `activity_log`.
+     */
+    public function testPolicyWithoutPayrollRunIsDeletableTogetherWithItsAuditTrail(): void
     {
         $created = $this->policies->save(
             $this->supplierId,
@@ -316,6 +330,31 @@ final class PayrollEmployerPolicySetupCheckTest extends TestCase
             0,
             $this->actorId,
         );
+        $policyId = $this->intValue($created, 'id');
+        self::assertNotSame([], $this->repository->auditTrail($this->supplierId, $policyId));
+
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_employer_policies
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $policyId]);
+
+        self::assertNull($this->repository->find($this->supplierId, $policyId));
+        self::assertSame([], $this->repository->auditTrail($this->supplierId, $policyId));
+    }
+
+    public function testPolicyUsedByPayrollRunCannotBeDeleted(): void
+    {
+        $created = $this->policies->save(
+            $this->supplierId,
+            null,
+            $this->policyInput(),
+            0,
+            $this->actorId,
+        );
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_runs (supplier_id, period_start, payment_date)
+             VALUES (?, "2026-03-01", "2026-04-10")',
+        )->execute([$this->supplierId]);
 
         $this->expectException(\PDOException::class);
         $this->db->pdo()->prepare(

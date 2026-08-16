@@ -23,7 +23,7 @@ final class PohodaXmlParserTest extends TestCase
 <dat:dataPack xmlns:dat="http://www.stormware.cz/schema/version_2/data.xsd"
               xmlns:inv="http://www.stormware.cz/schema/version_2/invoice.xsd"
               xmlns:typ="http://www.stormware.cz/schema/version_2/type.xsd"
-              ico="21370362" version="2.0">
+              ico="12345679" version="2.0">
   <dat:dataPackItem id="i1">
     <inv:invoice>
       <inv:invoiceHeader>
@@ -61,7 +61,7 @@ XML;
     public function testHappyPath(): void
     {
         $result = $this->parser->parse($this->minimalPohoda());
-        self::assertSame('21370362', $result['supplier_ic']);
+        self::assertSame('12345679', $result['supplier_ic']);
         self::assertCount(1, $result['invoices']);
 
         $inv = $result['invoices'][0];
@@ -232,7 +232,7 @@ XML;
 <?xml version="1.0"?>
 <!DOCTYPE pwn [<!ENTITY x SYSTEM "file:///etc/passwd">]>
 <dat:dataPack xmlns:dat="http://www.stormware.cz/schema/version_2/data.xsd"
-              ico="21370362" version="2.0"/>
+              ico="12345679" version="2.0"/>
 XML;
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessageMatches('/DOCTYPE/i');
@@ -466,7 +466,7 @@ XML;
         <dat:dataPack xmlns:dat="http://www.stormware.cz/schema/version_2/data.xsd"
                       xmlns:inv="http://www.stormware.cz/schema/version_2/invoice.xsd"
                       xmlns:typ="http://www.stormware.cz/schema/version_2/type.xsd"
-                      ico="21370362" version="2.0">
+                      ico="12345679" version="2.0">
           <dat:dataPackItem id="i1">
             <inv:invoice version="2.0">
               <inv:invoiceHeader>

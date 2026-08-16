@@ -9,6 +9,7 @@ use MyInvoice\Repository\Payroll\PayrollRunConflictException;
 use MyInvoice\Repository\Payroll\PayrollRunDeletionException;
 use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
+use MyInvoice\Service\Payroll\PayrollModuleActivationService;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
 use MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentStorageScope;
@@ -35,6 +36,12 @@ final class PayrollRunCommandService
             $approvedPayslips = null,
         private readonly ?PayrollControlTotalsService
             $controlTotals = null,
+        private readonly ?PayrollRunPaymentPreparationService
+            $paymentPreparation = null,
+        private readonly ?PayrollRunPaymentSettlementService
+            $paymentSettlement = null,
+        private readonly ?PayrollModuleActivationService
+            $moduleActivation = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -143,6 +150,57 @@ final class PayrollRunCommandService
             $runId,
             $expectedVersion,
             PayrollRunCommand::APPROVE,
+            $idempotencyKey,
+            $actorUserId,
+        );
+    }
+
+    public function post(
+        int $supplierId,
+        int $runId,
+        int $expectedVersion,
+        string $idempotencyKey,
+        int $actorUserId,
+    ): PayrollRunCommandResult {
+        return $this->execute(
+            $supplierId,
+            $runId,
+            $expectedVersion,
+            PayrollRunCommand::POST,
+            $idempotencyKey,
+            $actorUserId,
+        );
+    }
+
+    public function preparePayments(
+        int $supplierId,
+        int $runId,
+        int $expectedVersion,
+        string $idempotencyKey,
+        int $actorUserId,
+    ): PayrollRunCommandResult {
+        return $this->execute(
+            $supplierId,
+            $runId,
+            $expectedVersion,
+            PayrollRunCommand::PREPARE_PAYMENTS,
+            $idempotencyKey,
+            $actorUserId,
+        );
+    }
+
+    public function markPaid(
+        int $supplierId,
+        int $runId,
+        int $expectedVersion,
+        string $idempotencyKey,
+        int $actorUserId,
+    ): PayrollRunCommandResult {
+        return $this->execute(
+            $supplierId,
+            $runId,
+            $expectedVersion,
+            PayrollRunCommand::MARK_PAID,
             $idempotencyKey,
             $actorUserId,
         );
@@ -441,6 +499,27 @@ final class PayrollRunCommandService
                     $supplierId,
                     (int) $revision['id'],
                 );
+            // Účetní a platební brána se vyhodnocuje ze skutečnosti v databázi,
+            // ne z přání volajícího. `post` navíc účetní dávku sám vytvoří,
+            // takže musí proběhnout dřív, než workflow ověří svoji podmínku —
+            // jinak by ruční zaúčtování nikdy neprošlo. Side effect pouštíme
+            // až po ověření, že je příkaz v tomto stavu vůbec dostupný.
+            $outcome = null;
+            $commandAvailable = in_array(
+                $command,
+                $this->workflow->availableCommands($from),
+                true,
+            );
+            if ($commandAvailable && $command === PayrollRunCommand::POST) {
+                $outcome = $this->applyPosting(
+                    $supplierId,
+                    $revision,
+                    $actorUserId,
+                );
+            }
+            if ($commandAvailable && $command === PayrollRunCommand::MARK_PAID) {
+                $outcome = $this->assertPaymentsSettled($supplierId, $revision);
+            }
             $context = new PayrollRunTransitionContext(
                 actorUserId: $actorUserId,
                 calculatedBy: $revision['calculated_by'] ?? null,
@@ -450,6 +529,28 @@ final class PayrollRunCommandService
                 hasImmutableSnapshot: $snapshot !== null || $revision !== null,
                 hasCalculatedResult:
                     $revision !== null && $revision['result_snapshot_json'] !== null,
+                hasPostingBatch: $outcome !== null && in_array(
+                    $outcome->outcome,
+                    [
+                        PayrollRunCommandOutcome::POSTED,
+                        PayrollRunCommandOutcome::ALREADY_POSTED,
+                        // Daňová evidence účetní můstek nepoužívá. Podmínka je
+                        // splněná tím, že zaúčtování na firmu nedopadá — běh
+                        // se musí dostat dál, jen se nesmí tvářit zaúčtovaně.
+                        PayrollRunCommandOutcome::POSTING_NOT_APPLICABLE,
+                    ],
+                    true,
+                ),
+                hasPaymentBatch: $outcome !== null && in_array(
+                    $outcome->outcome,
+                    [
+                        PayrollRunCommandOutcome::PAYMENTS_SETTLED,
+                        // Běh, kde není co platit (celá čistá mzda je zápočet
+                        // na účet společníka), platební dávku nikdy mít nebude.
+                        PayrollRunCommandOutcome::PAYMENTS_NOT_APPLICABLE,
+                    ],
+                    true,
+                ),
                 reason: $reason,
             );
             $transition = $this->workflow->transition($from, $command, $context);
@@ -609,9 +710,51 @@ final class PayrollRunCommandService
                     $actorUserId,
                     $payslipStorageScope,
                 );
+                // Druhá spoušť aktivace modulu: schválený mzdový běh je důkaz,
+                // že nastavení je fakticky hotové. Idempotentní — druhé
+                // schválení už stav nemění.
+                $this->moduleActivation?->activateAfterApprovedRun(
+                    $supplierId,
+                    $actorUserId,
+                );
                 $revision = $this->runs->revision(
                     $supplierId,
                     (int) $revision['id'],
+                );
+                $run = $this->runs->updateRun(
+                    $supplierId,
+                    $runId,
+                    $expectedVersion,
+                    $transition->to->value,
+                    null,
+                    $actorUserId,
+                );
+            } elseif ($command === PayrollRunCommand::PREPARE_PAYMENTS) {
+                if ($revision === null) {
+                    throw new \DomainException('Mzdový běh nemá revizi.');
+                }
+                if ($this->paymentPreparation === null) {
+                    throw new \DomainException(
+                        'Příprava mzdových plateb není v této instalaci dostupná.',
+                    );
+                }
+                $prepared = $this->paymentPreparation->prepare(
+                    $supplierId,
+                    (int) $revision['id'],
+                    $actorUserId,
+                    self::snapshotObject(
+                        $revision['input_snapshot'] ?? null,
+                        'vstupní',
+                    ),
+                );
+                $outcome = new PayrollRunCommandOutcome(
+                    $prepared['liability_ids'] === []
+                        ? PayrollRunCommandOutcome::PAYMENTS_NOT_APPLICABLE
+                        : PayrollRunCommandOutcome::PAYMENTS_PREPARED,
+                    [
+                        'created_count' => $prepared['created_count'],
+                        'liability_count' => count($prepared['liability_ids']),
+                    ],
                 );
                 $run = $this->runs->updateRun(
                     $supplierId,
@@ -639,6 +782,7 @@ final class PayrollRunCommandService
                 'from_status' => $transition->from->value,
                 'to_status' => $transition->to->value,
                 'row_version' => (int) $run['row_version'],
+                'outcome' => $outcome?->toArray(),
             ];
             $this->runs->insertEvent(
                 $supplierId,
@@ -681,6 +825,7 @@ final class PayrollRunCommandService
                 $run,
                 $revision,
                 false,
+                $outcome,
             );
         } catch (\Throwable $e) {
             $this->rollbackCommandTransaction($pdo, $nestedTransaction);
@@ -726,6 +871,12 @@ final class PayrollRunCommandService
         $revision = $receipt['revision_id'] === null
             ? null
             : $this->runs->revision($supplierId, (int) $receipt['revision_id']);
+        // Replay musí vrátit i to, CO se při původním příkazu stalo — jinak by
+        // se opakované zaúčtování tvářilo jinak než to původní. Druhý účetní
+        // zápis tady vzniknout nemůže: potvrzenka nás vrací dřív, než se
+        // účetní můstek vůbec zavolá.
+        $storedOutcome = $receipt['result']['outcome'] ?? null;
+
         return new PayrollRunCommandResult(
             $command,
             PayrollRunStatus::from((string) $receipt['from_status']),
@@ -733,7 +884,131 @@ final class PayrollRunCommandService
             $run,
             $revision,
             true,
+            is_array($storedOutcome) && !array_is_list($storedOutcome)
+                ? PayrollRunCommandOutcome::fromArray($storedOutcome)
+                : null,
         );
+    }
+
+    /**
+     * Zaúčtování jako samostatný krok běhu.
+     *
+     * Zaúčtování dosud běželo jen jako vedlejší efekt schválení a jen tehdy,
+     * když ho zmrazená zaměstnavatelská politika povolila. Příkaz `post` je
+     * ruční cesta: dávku, která už existuje, jen potvrdí (idempotence),
+     * chybějící vytvoří, a u firmy v daňové evidenci řekne nahlas, že se
+     * účetní můstek nepoužívá.
+     *
+     * @param array<string,mixed>|null $revision
+     */
+    private function applyPosting(
+        int $supplierId,
+        ?array $revision,
+        int $actorUserId,
+    ): PayrollRunCommandOutcome {
+        if ($revision === null) {
+            throw new \DomainException('Mzdový běh nemá revizi k zaúčtování.');
+        }
+        $revisionId = (int) $revision['id'];
+        $existing = $this->postingBatch($supplierId, $revisionId);
+        if ($existing !== null) {
+            return new PayrollRunCommandOutcome(
+                PayrollRunCommandOutcome::ALREADY_POSTED,
+                $existing,
+            );
+        }
+        if ($this->approvedPosting === null) {
+            throw new \DomainException(
+                'Účetní můstek mezd není v této instalaci dostupný.',
+            );
+        }
+        $posted = $this->approvedPosting->postManually(
+            $supplierId,
+            $revisionId,
+            self::snapshotObject($revision['input_snapshot'] ?? null, 'vstupní'),
+            self::snapshotObject($revision['result_snapshot'] ?? null, 'výsledný'),
+            $actorUserId,
+        );
+        if ($posted === null) {
+            return new PayrollRunCommandOutcome(
+                PayrollRunCommandOutcome::POSTING_NOT_APPLICABLE,
+                ['reason' => 'tax_evidence'],
+            );
+        }
+
+        return new PayrollRunCommandOutcome(
+            PayrollRunCommandOutcome::POSTED,
+            [
+                'batch_id' => $posted['batch_id'],
+                'journal_entry_id' => $posted['journal_entry_id'],
+                'posting_status' => $posted['status'],
+            ],
+        );
+    }
+
+    /**
+     * @param array<string,mixed>|null $revision
+     */
+    private function assertPaymentsSettled(
+        int $supplierId,
+        ?array $revision,
+    ): PayrollRunCommandOutcome {
+        if ($revision === null) {
+            throw new \DomainException('Mzdový běh nemá revizi.');
+        }
+        if ($this->paymentSettlement === null) {
+            throw new \DomainException(
+                'Kontrola úhrad mezd není v této instalaci dostupná.',
+            );
+        }
+        $coverage = $this->paymentSettlement->inspect(
+            $supplierId,
+            (int) $revision['id'],
+        );
+        if ($coverage['liability_count'] === 0) {
+            return new PayrollRunCommandOutcome(
+                PayrollRunCommandOutcome::PAYMENTS_NOT_APPLICABLE,
+                ['reason' => 'nothing_to_pay'],
+            );
+        }
+        if ($coverage['uncovered'] !== []) {
+            throw new \DomainException(
+                $this->paymentSettlement->blockingReason($coverage),
+            );
+        }
+
+        return new PayrollRunCommandOutcome(
+            PayrollRunCommandOutcome::PAYMENTS_SETTLED,
+            [
+                'liability_count' => $coverage['liability_count'],
+                'batch_count' => $coverage['batch_count'],
+                'settled_minor' => $coverage['allocated_minor'],
+            ],
+        );
+    }
+
+    /** @return array{batch_id:int,journal_entry_id:?int,posting_status:string}|null */
+    private function postingBatch(int $supplierId, int $revisionId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, journal_entry_id, status
+               FROM payroll_posting_batches
+              WHERE supplier_id = ? AND revision_id = ?
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $revisionId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'batch_id' => (int) $row['id'],
+            'journal_entry_id' => $row['journal_entry_id'] === null
+                ? null
+                : (int) $row['journal_entry_id'],
+            'posting_status' => (string) $row['status'],
+        ];
     }
 
     private function assertModuleAvailable(int $supplierId, string $periodStart): void

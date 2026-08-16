@@ -17,5 +17,6 @@ final readonly class PayrollRunCommandResult
         public array $run,
         public ?array $revision,
         public bool $idempotentReplay,
+        public ?PayrollRunCommandOutcome $outcome = null,
     ) {}
 }

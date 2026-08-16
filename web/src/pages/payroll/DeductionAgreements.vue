@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { payrollApi, type PayrollPersonListItem } from '@/api/payroll'
+import { payrollApi, type PayrollPersonOption } from '@/api/payroll'
 import {
   deductionAgreementKinds,
   deductionPriorityCeiling,
@@ -15,6 +15,9 @@ import {
 } from '@/api/payrollDeductions'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
 
 const { t, locale } = useI18n()
@@ -23,7 +26,7 @@ const auth = useAuthStore()
 const loading = ref(true)
 const saving = ref(false)
 const agreements = ref<DeductionAgreementSummary[]>([])
-const people = ref<PayrollPersonListItem[]>([])
+const people = ref<PayrollPersonOption[]>([])
 const detail = ref<DeductionAgreementDetail | null>(null)
 const expandedId = ref<number | null>(null)
 const creating = ref(false)
@@ -31,6 +34,10 @@ const formError = ref('')
 const listError = ref('')
 const employeeFilter = ref<number | null>(null)
 const statusFilter = ref<DeductionAgreementStatus | ''>('')
+const total = ref(0)
+const pageSize = 20
+const offset = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
 const statuses: DeductionAgreementStatus[] = ['draft', 'active', 'paused', 'ended', 'cancelled']
@@ -79,14 +86,6 @@ function emptyForm(): AgreementForm {
   }
 }
 const form = ref<AgreementForm>(emptyForm())
-
-function money(minorUnits: number | null | undefined): string {
-  return new Intl.NumberFormat(locale.value, {
-    style: 'currency',
-    currency: 'CZK',
-    minimumFractionDigits: 2,
-  }).format((minorUnits ?? 0) / 100)
-}
 
 function percent(basisPoints: number | null): string {
   if (basisPoints === null) return '—'
@@ -175,14 +174,17 @@ async function load() {
   loading.value = true
   listError.value = ''
   try {
-    const [loaded, loadedPeople] = await Promise.all([
-      payrollDeductionsApi.agreements({
+    const [page, loadedPeople] = await Promise.all([
+      payrollDeductionsApi.agreementsPage({
         ...(employeeFilter.value ? { employee_id: employeeFilter.value } : {}),
         ...(statusFilter.value ? { status: statusFilter.value } : {}),
+        limit: pageSize,
+        offset: offset.value,
       }),
-      people.value.length ? Promise.resolve(people.value) : payrollApi.people().catch(() => []),
+      people.value.length ? Promise.resolve(people.value) : payrollApi.peopleOptions().catch(() => []),
     ])
-    agreements.value = loaded
+    agreements.value = page.agreements
+    total.value = page.total
     people.value = loadedPeople
   } catch (error: any) {
     listError.value = apiMessage(error, 'payroll.deductions.load_failed')
@@ -333,7 +335,30 @@ async function transition(command: DeductionAgreementCommand) {
   }
 }
 
-watch([employeeFilter, statusFilter], () => void load())
+/**
+ * Rozbalený detail patří ke konkrétnímu řádku seznamu. Po přestránkování ani po
+ * přefiltrování ten řádek na obrazovce být nemusí a otevřený panel by pak
+ * ukazoval dohodu, kterou v seznamu nikdo nevidí.
+ */
+function collapseDetail() {
+  if (expandedId.value === null) return
+  expandedId.value = null
+  detail.value = null
+}
+
+// Stránkuje sdílená `PaginationBar` (číslo stránky od jedné); server zná offset.
+function goToPage(nextPage: number) {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  collapseDetail()
+  void load()
+}
+
+watch([employeeFilter, statusFilter], () => {
+  // Zúžený výběr má míň stránek; třetí stránka by po přefiltrování ukázala prázdno.
+  offset.value = 0
+  collapseDetail()
+  void load()
+})
 onMounted(load)
 </script>
 
@@ -357,14 +382,14 @@ onMounted(load)
     <div class="flex flex-wrap items-end gap-3">
       <label class="text-xs font-medium text-neutral-600">
         {{ t('payroll.deductions.employee') }}
-        <select v-model="employeeFilter" class="mt-1 block w-full min-w-48 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+        <select v-model="employeeFilter" data-test="deduction-employee-filter" class="mt-1 block w-full min-w-48 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
           <option :value="null">{{ t('payroll.deductions.all_employees') }}</option>
           <option v-for="person in people" :key="person.id" :value="person.id">{{ person.full_name }}</option>
         </select>
       </label>
       <label class="text-xs font-medium text-neutral-600">
         {{ t('payroll.deductions.status_label') }}
-        <select v-model="statusFilter" class="mt-1 block w-full min-w-40 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+        <select v-model="statusFilter" data-test="deduction-status-filter" class="mt-1 block w-full min-w-40 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
           <option value="">{{ t('payroll.deductions.all_statuses') }}</option>
           <option v-for="status in statuses" :key="status" :value="status">{{ t(`payroll.deductions.status.${status}`) }}</option>
         </select>
@@ -418,7 +443,7 @@ onMounted(load)
                 <td class="px-4 py-3 text-right">{{ money(item.withheld_total_minor) }}</td>
                 <td class="px-4 py-3 text-neutral-600">{{ item.valid_from }} – {{ item.valid_to || '∞' }}</td>
                 <td class="px-4 py-3 text-right">
-                  <button :class="btnOutlineSm('neutral')" @click="openDetail(item)">
+                  <button :class="btnOutlineSm('neutral')" :data-test="`deduction-detail-${item.id}`" @click="openDetail(item)">
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>
                     {{ t(expandedId === item.id ? 'common.close' : 'common.detail') }}
                   </button>
@@ -461,9 +486,18 @@ onMounted(load)
           </article>
         </div>
       </template>
+      <PaginationBar
+        v-if="!loading"
+        data-test="deduction-pagination"
+        embedded
+        :page="currentPage"
+        :per-page="pageSize"
+        :total="total"
+        @update:page="goToPage"
+      />
     </section>
 
-    <section v-if="creating || detail" class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 shadow-sm sm:p-6">
+    <section v-if="creating || detail" data-test="deduction-detail-panel" class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 shadow-sm sm:p-6">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <h2 class="text-lg font-semibold text-neutral-900">

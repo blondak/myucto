@@ -534,7 +534,7 @@ final class PohodaExporterSchemaTest extends TestCase
             'note_above_items'  => null,
             'supplier_snapshot' => [
                 'ic' => '01698401', 'dic' => 'CZ01698401', 'company_name' => 'Dodavatel s.r.o.',
-                'street' => 'Kardinála Berana 1104/36', 'city' => 'Plzeň', 'zip' => '30100',
+                'street' => 'Zkušební 123/4', 'city' => 'Vzorov', 'zip' => '10000',
                 'country_iso2' => 'CZ', 'main_email' => 'fakturace@dodavatel.cz',
             ],
             'client_snapshot'   => [
@@ -578,7 +578,7 @@ final class PohodaExporterSchemaTest extends TestCase
             ],
             'client_snapshot'    => [
                 'ic' => '01698401', 'dic' => 'CZ01698401', 'company_name' => 'Naše firma s.r.o.',
-                'street' => 'Kardinála Berana 1104/36', 'city' => 'Plzeň', 'zip' => '30100', 'country_iso2' => 'CZ',
+                'street' => 'Zkušební 123/4', 'city' => 'Vzorov', 'zip' => '10000', 'country_iso2' => 'CZ',
             ],
             'items'              => [$this->item()],
             'vat_breakdown'      => [['rate' => 21.0, 'base' => 2520.0, 'vat' => 529.2]],

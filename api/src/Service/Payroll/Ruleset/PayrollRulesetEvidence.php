@@ -10,6 +10,7 @@ use DateTimeImmutable;
  * Doklady o kontrole a schválení pro verzi složenou z defaultu a DB overridu.
  *
  * `PayrollRulesetVersion` odmítne `approved`/`active` bez `RulesetApproval`
+ * (s jedinou výjimkou dodané sady, viz {@see VendorRulesetManifest})
  * a `RulesetApproval` odmítne shodného kontrolora a schvalovatele. To je správné
  * pro dokument, který popisuje, ČÍM je verze podložená — ale nesmí to znamenat,
  * že jeden admin nemůže ruleset uvést do provozu. Když je editor i schvalovatel
@@ -75,8 +76,13 @@ final class PayrollRulesetEvidence
             return null;
         }
 
+        // Bez jmenovaného schvalovatele se doklad o schválení NEVYRÁBÍ. Dřív se tu
+        // dopisovala syntetická `RulesetApproval` se systémovou identitou, takže
+        // řádek zapsaný přímo do DB s `lifecycle = active` prošel jako schválený,
+        // aniž by kdokoli schvaloval. Chybějící schvalovatel = chybějící schválení;
+        // co s tím udělá lifecycle, řeší {@see PayrollRulesetRegistry::merge()}.
         $approvedBy = self::nullableInt($override, 'approved_by');
-        if ($approvedBy === null && $default !== null) {
+        if ($approvedBy === null) {
             return $default;
         }
 

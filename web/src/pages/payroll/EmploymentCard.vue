@@ -10,13 +10,22 @@ import {
   type PayrollJmhzMunicipalityOption,
   type PayrollEmploymentTermsPayload,
 } from '@/api/payroll'
+import CzIscoPicker from '@/components/payroll/CzIscoPicker.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnOutlineSm } from '@/components/ui/buttonStyles'
+// Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
+import { formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import EmploymentDimensionsPanel from './EmploymentDimensionsPanel.vue'
 import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
-import { todayIso, transitionPresentation } from './employmentLifecycleUi'
+import EmploymentRegistrationPanel from './EmploymentRegistrationPanel.vue'
+import {
+  employmentCodeLabel,
+  employmentEventNote,
+  todayIso,
+  transitionPresentation,
+} from './employmentLifecycleUi'
 
 const props = defineProps<{
   employment: PayrollEmployment
@@ -26,6 +35,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   updated: [employment: PayrollEmployment]
+  deleted: [employmentId: number]
 }>()
 
 const { t } = useI18n()
@@ -43,12 +53,6 @@ const currentTerms = computed(() => props.employment.terms[0] ?? null)
 const openChecklist = computed(() =>
   props.employment.checklist.filter(item => item.status === 'pending'),
 )
-
-function formatDate(value: string | null): string {
-  if (!value) return '—'
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
-    .format(new Date(`${value}T00:00:00`))
-}
 
 function relationLabel(): string {
   return t(`payroll.people.relations.${props.employment.relation_type}`)
@@ -204,6 +208,44 @@ async function setChecklist(itemKey: string, rowVersion: number, status: Payroll
   }
 }
 
+/**
+ * Věta „Smaže se … Tuhle akci nelze vzít zpět." musí JMENOVAT, co přesně zmizí —
+ * jinak uživatel potvrzuje naslepo. Vypisují se jen nenulové položky.
+ */
+const cascadeSummary = computed<string>(() => {
+  const parts = Object.entries(props.employment.delete_cascade ?? {})
+    .filter(([, count]) => count > 0)
+    .map(([key, count]) => t(`payroll.people.delete.cascade.${key}`, { count }, count))
+  return parts.join(', ')
+})
+
+const deleteBlockerMessage = computed<string>(
+  () => props.employment.delete_blocker?.message ?? '',
+)
+
+async function removeEmployment() {
+  if (busy.value || !props.employment.can_delete) return
+  const summary = cascadeSummary.value
+  const question = summary === ''
+    ? t('payroll.people.delete.confirm_empty')
+    : t('payroll.people.delete.confirm', { summary })
+  if (!window.confirm(question)) return
+
+  busy.value = true
+  try {
+    await payrollApi.deleteEmployment(props.employment.id, props.employment.row_version)
+    emit('deleted', props.employment.id)
+    toast.success(t('payroll.people.delete.done'))
+  } catch (error) {
+    // Blokace nese větu, podle které se dá jednat — ukaž ji, ne obecné „nepovedlo se".
+    const message = (error as { response?: { data?: { error?: { message?: string } } } })
+      ?.response?.data?.error?.message
+    toast.error(message ?? t('payroll.people.mutation_failed'))
+  } finally {
+    busy.value = false
+  }
+}
+
 const actions = computed<ActionItem[]>(() => [
   ...transitionPresentation(props.employment.allowed_transitions).map(presentation => ({
     key: `transition-${presentation.target}`,
@@ -226,6 +268,19 @@ const actions = computed<ActionItem[]>(() => [
       && ['planned', 'preregistered', 'active', 'suspended'].includes(props.employment.status),
     run: () => void startTermsEdit(),
   },
+  {
+    // Patří do „…", ne mezi hlavní tlačítka: je to výjimečná a nevratná akce.
+    // Vedle „Označit nenástup" (tier 'advanced'), protože řeší jiný případ —
+    // nenástup je záznam o tom, že něco nastalo, tohle je oprava omylu.
+    key: 'delete-employment',
+    label: t('payroll.people.delete.action'),
+    icon: 'trash',
+    tier: 'advanced',
+    variant: 'danger',
+    disabled: busy.value,
+    show: props.canWrite && props.employment.can_delete,
+    run: () => void removeEmployment(),
+  },
 ])
 </script>
 
@@ -241,11 +296,8 @@ const actions = computed<ActionItem[]>(() => [
           <span v-if="employment.is_primary" class="rounded-full bg-success-50 px-2 py-1 text-xs font-medium text-success-700">
             {{ t('payroll.people.primary') }}
           </span>
-          <span v-if="employment.is_legacy_projection" class="rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">
-            {{ t('payroll.people.legacy_projection') }}
-          </span>
         </div>
-        <p class="mt-1 text-xs text-neutral-500">{{ employment.code }}<template v-if="employment.office_name"> · {{ employment.office_name }}</template></p>
+        <p v-if="employmentCodeLabel(employment.code) || employment.office_name" data-test="employment-code" class="mt-1 text-xs text-neutral-500">{{ employmentCodeLabel(employment.code) }}<template v-if="employment.office_name"><template v-if="employmentCodeLabel(employment.code)"> · </template>{{ employment.office_name }}</template></p>
       </div>
       <div v-if="canWrite && employment.allowed_transitions.length" class="flex items-center gap-2">
         <label class="text-xs text-neutral-500">
@@ -263,6 +315,19 @@ const actions = computed<ActionItem[]>(() => [
     </dl>
 
     <ActionBar v-if="actions.some(action => action.show)" :actions="actions" class="mt-4" />
+
+    <!--
+      Když smazat nejde, ukaž DŮVOD. Zašedlé tlačítko bez vysvětlení uživateli
+      neřekne nic a nedá mu vodítko, co s tím.
+    -->
+    <p
+      v-if="canWrite && !employment.can_delete && deleteBlockerMessage"
+      data-test="employment-delete-blocker"
+      class="mt-3 rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-600"
+    >
+      <span class="font-medium text-neutral-800">{{ t('payroll.people.delete.blocked_title') }}</span>
+      {{ deleteBlockerMessage }}
+    </p>
 
     <form v-if="editingTerms && termsForm" class="mt-4 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3 sm:p-4" @submit.prevent="saveTerms">
       <h4 class="text-sm font-semibold text-neutral-900">{{ t('payroll.people.new_terms') }}</h4>
@@ -302,7 +367,10 @@ const actions = computed<ActionItem[]>(() => [
           <p v-if="jmhzOptionsFailed" class="text-xs text-danger-700 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_evidence.options_failed') }}</p>
           <p v-if="termsForm.jmhz_temporary_assignment_status === 'yes'" class="text-xs text-warning-700 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_evidence.temporary_assignment_blocker') }}</p>
         </fieldset>
-        <label class="text-xs text-neutral-600">{{ t('payroll.people.cz_isco_code') }}<input v-model="termsForm.cz_isco_code" maxlength="16" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+        <div class="text-xs text-neutral-600">
+          <label class="block">{{ t('payroll.people.cz_isco_code') }}</label>
+          <CzIscoPicker v-model="termsForm.cz_isco_code" class="mt-1" />
+        </div>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.activity_code') }}<select v-model="termsForm.activity_code" data-test="jmhz-activity-code" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" @change="onActivityCodeChange"><option :value="null">—</option><option v-for="option in jmhzOptions?.activity_codes ?? []" :key="option.code" :value="option.code">{{ option.code }} · {{ option.label }}</option></select></label>
         <label v-if="/^[1-9]$/.test(termsForm.activity_code ?? '')" class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.relationship_detail') }}<select v-model="termsForm.jmhz_relationship_detail_code" data-test="jmhz-relationship-detail" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option :value="null">—</option><option v-for="option in jmhzOptions?.relationship_detail_codes ?? []" :key="option.code" :value="option.code">{{ option.code }} · {{ option.label }}</option></select></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.social_mode') }}<select v-model="termsForm.social_insurance_participation" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option></select></label>
@@ -351,11 +419,35 @@ const actions = computed<ActionItem[]>(() => [
             <ul v-if="event.diff" class="mt-1 space-y-0.5 text-neutral-600">
               <li v-for="(change, key) in event.diff" :key="key">{{ t(`payroll.people.term_field.${key}`) }}: {{ String(change.from ?? '—') }} → {{ String(change.to ?? '—') }}</li>
             </ul>
-            <p v-if="event.note" class="mt-1 text-neutral-600">{{ event.note }}</p>
+            <p v-if="employmentEventNote(event.note)" class="mt-1 text-neutral-600">{{ employmentEventNote(event.note) }}</p>
           </li>
         </ol>
       </section>
     </div>
+
+    <!--
+      Registrace patří ke KONKRÉTNÍMU pracovnímu vztahu, ne k osobě: jedna
+      osoba může mít víc souběžných vztahů a každý se u ČSSZ přihlašuje zvlášť.
+      Proto je panel tady, vedle checklistu, jehož položku „Přihláška na ČSSZ"
+      obsluhuje.
+    -->
+    <!--
+      Převzatý vztah registraci NESKRÝVÁ. Skrývat zákonnou povinnost bez
+      vysvětlení je horší než ji nabídnout s varováním — API ji nikdy neblokovalo,
+      bylo to jen `v-if` bez zdůvodnění. Kdyby pro blokaci existoval skutečný
+      důvod, patří do API jako stav s větou, ne do šablony.
+    -->
+    <p
+      v-if="employment.is_legacy_projection"
+      data-test="legacy-registration-warning"
+      class="mt-4 rounded-md bg-warning-50 px-3 py-2 text-xs text-warning-800"
+    >
+      {{ t('payroll.people.registration_legacy_warning') }}
+    </p>
+    <EmploymentRegistrationPanel
+      :employment-id="employment.id"
+      :can-write="canWrite"
+    />
 
     <EmploymentDimensionsPanel
       :employment-id="employment.id"

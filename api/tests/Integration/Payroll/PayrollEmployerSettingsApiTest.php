@@ -116,11 +116,11 @@ final class PayrollEmployerSettingsApiTest extends TestCase
 
     public function testSettingsAreSavedAndTenantIsolated(): void
     {
-        $first = $this->put($this->supplierId, $this->payload('PLZEN', 'Plzeňská účtárna'));
+        $first = $this->put($this->supplierId, $this->payload('VZOROV', 'Vzorová účtárna'));
         self::assertSame(200, $first->getStatusCode());
         $saved = $this->json($first)['settings'];
         self::assertSame(1, $saved['row_version']);
-        self::assertSame('PLZEN', $saved['default_office_code']);
+        self::assertSame('VZOROV', $saved['default_office_code']);
         self::assertSame('P12345678', $saved['employer_registration_number']);
         self::assertArrayNotHasKey('health_insurance_payer_number', $saved);
         self::assertCount(1, $saved['offices']);
@@ -128,8 +128,8 @@ final class PayrollEmployerSettingsApiTest extends TestCase
         $updatedPayload = $this->payload('BRNO', 'Brněnská účtárna');
         $updatedPayload['row_version'] = 1;
         $updatedPayload['offices'][] = [
-            'code' => 'PLZEN',
-            'name' => 'Plzeňská účtárna',
+            'code' => 'VZOROV',
+            'name' => 'Vzorová účtárna',
             'is_active' => false,
         ];
         $updated = $this->put($this->supplierId, $updatedPayload);
@@ -137,7 +137,7 @@ final class PayrollEmployerSettingsApiTest extends TestCase
         $updatedSettings = $this->json($updated)['settings'];
         self::assertSame(2, $updatedSettings['row_version']);
         self::assertSame('BRNO', $updatedSettings['default_office_code']);
-        self::assertFalse(array_column($updatedSettings['offices'], null, 'code')['PLZEN']['is_active']);
+        self::assertFalse(array_column($updatedSettings['offices'], null, 'code')['VZOROV']['is_active']);
 
         $other = $this->action->get(
             $this->request('GET', $this->otherSupplierId),
@@ -315,7 +315,7 @@ final class PayrollEmployerSettingsApiTest extends TestCase
             'row_version' => 0,
             'default_office_code' => $officeCode,
             'employer_registration_number' => 'P12345678',
-            'social_security_office_code' => 'P',
+            'social_security_office_code' => '110',
             'default_health_insurer_code' => '111',
             'payroll_contact_name' => 'Testovací účetní',
             'payroll_contact_email' => 'mzdy@example.invalid',

@@ -141,7 +141,7 @@ final class AccountNumberNormalizerTest extends TestCase
 
     /**
      * REGRESE (nezaúčtované převody mezi vlastními účty): týž účet přijde ve výpisech
-     * jednou jako `112866706` a jindy jako nulami vycpaný `0000000112866706`. Obě
+     * jednou jako `1700000006` a jindy jako nulami vycpaný `00000001700000006`. Obě
      * podoby MUSÍ dát tentýž kanonický klíč, jinak
      * {@see \MyInvoice\Repository\SupplierBankAccountRepository::matchCounterparty()}
      * protistranu nenajde, {@see \MyInvoice\Service\Accounting\Bank\OwnTransferDetector::detect()}
@@ -154,15 +154,15 @@ final class AccountNumberNormalizerTest extends TestCase
      */
     public function testZeroPaddedStatementFormCanonicalisesLikeThePlainOne(): void
     {
-        $plain = AccountNumberNormalizer::canonical('112866706');
-        $padded = AccountNumberNormalizer::canonical('0000000112866706');
+        $plain = AccountNumberNormalizer::canonical('1700000006');
+        $padded = AccountNumberNormalizer::canonical('00000001700000006');
 
-        self::assertSame('112866706', $plain);
+        self::assertSame('1700000006', $plain);
         self::assertSame($plain, $padded, 'Vycpaná GPC podoba je týž účet jako holé číslo.');
-        self::assertTrue(AccountNumberNormalizer::equals('112866706', '0000000112866706'));
+        self::assertTrue(AccountNumberNormalizer::equals('1700000006', '00000001700000006'));
 
         // A totéž s kódem banky za lomítkem, jak číslo chodí z UI nastavení.
-        self::assertSame($plain, AccountNumberNormalizer::canonical('112866706/0300'));
+        self::assertSame($plain, AccountNumberNormalizer::canonical('1700000006/0300'));
     }
 
     /**

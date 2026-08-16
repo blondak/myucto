@@ -174,7 +174,7 @@ final class PayrollRulesetSingleSourceGuardTest extends TestCase
                 public function read(object $ruleset): void
                 {
                     $rate = $ruleset->parameter('withholding.rate');
-                    $limit = $this->money($ruleset, 'dpp.withholding.maximum');
+                    $limit = $this->money($ruleset, 'dpp.withholding.threshold');
                     $keys = ['credit.taxpayer.monthly', 'credit.ztp_p.monthly'];
                 }
             }
