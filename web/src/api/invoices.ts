@@ -229,6 +229,8 @@ export interface Invoice {
   revenue_category_id: number | null
   revenue_category_label?: string | null
   revenue_category_code?: string | null
+  /** Klasifikace plnění pro DPHDP3/KH nastavená na hlavičce (položky mohou mít vlastní). */
+  vat_classification_code?: string | null
   // Cross-link na související doklady (z find()): u proformy → vystavený daňový doklad;
   // u dokladu s parent_invoice_id → rodič (proforma / původní faktura).
   final_invoice?: { id: number; varsymbol: string | null; status: InvoiceStatus } | null

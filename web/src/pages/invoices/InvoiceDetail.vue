@@ -25,6 +25,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
+import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 
 const { t, te, locale } = useI18n()
 const toast = useToast()
@@ -522,7 +523,28 @@ function formatBytes(n: number): string {
   return (n / (1024 * 1024)).toFixed(2) + ' MB'
 }
 
-onMounted(load)
+// Doklad nese jen KÓD klasifikace plnění; popis („§ 92e stavební práce…") žije
+// v číselníku. Bez něj by v detailu svítil holý kód. Číselník je malý a společný
+// pro celou firmu; když se nenačte, zůstane samotný kód.
+const vatClassifications = ref<VatClassification[]>([])
+const vatClassificationLabel = computed(() => {
+  const code = invoice.value?.vat_classification_code
+  if (!code) return null
+  return vatClassifications.value.find(vc => vc.code === code)?.label ?? null
+})
+
+async function loadVatClassifications() {
+  try {
+    vatClassifications.value = await vatClassificationsApi.list('sale', true)
+  } catch {
+    vatClassifications.value = []
+  }
+}
+
+onMounted(() => {
+  void load()
+  void loadVatClassifications()
+})
 // Detail se recykluje při navigaci /invoices/:id → :id (proklik na související doklad,
 // dobropis/parent) → onMounted se znovu nespustí, proto přenačtení řídí watch.
 watch(() => route.params.id, load)
@@ -1950,7 +1972,8 @@ const invoiceActions = computed<ActionItem[]>(() => {
         <dl class="space-y-1.5 text-sm">
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('common.currency') }}</dt><dd class="font-mono">{{ invoice.currency }}</dd></div>
           <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.language') }}</dt><dd>{{ invoice.language.toUpperCase() }}</dd></div>
-          <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.reverse_charge') }}</dt><dd>{{ invoice.reverse_charge ? t('common.yes') : t('common.no') }}</dd></div>
+          <!-- Reverse charge se ukazuje v kartě „Daňové zařazení" níž (jeden domov
+               pro daňová pole), tady zůstává jen měna, jazyk, OSS doložka a úhrada. -->
           <!-- OSS řádek se ukazuje jen na dokladu, který OSS plnění opravdu má — jinak by
                u drtivé většiny faktur jen přibyl prázdný řádek. Doklad v tomhle režimu nese
                v PDF i ve veřejném náhledu doložku o odvodu daně ve státě spotřeby. -->
@@ -2346,12 +2369,55 @@ const invoiceActions = computed<ActionItem[]>(() => {
       <p class="text-sm text-neutral-700 whitespace-pre-wrap">{{ invoice.note_below_items }}</p>
     </div>
 
-    <div v-if="invoice.revenue_category_label" class="bg-surface border border-neutral-200 rounded-lg px-5 py-3 shadow-sm flex items-center justify-between text-sm">
-      <span class="text-neutral-500">{{ t('invoice.classification.revenue_category') }}</span>
-      <span class="font-medium text-neutral-900">
-        {{ invoice.revenue_category_label }}
-        <span class="text-neutral-400">({{ invoice.revenue_category_code }})</span>
-      </span>
+    <!-- Daňové zařazení — co jde nastavit v editoru, musí být vidět i v detailu.
+         Dřív tu byl jen proužek s kategorií výnosu a zbytek (klasifikace plnění,
+         zjednodušený doklad § 30, ceny včetně DPH, osvobození od daně z příjmů)
+         nešlo bez otevření editoru zkontrolovat. -->
+    <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+      <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('invoice.classification.section') }}</h3>
+      <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5 text-sm">
+        <div class="flex justify-between gap-3">
+          <dt class="text-neutral-500">{{ t('invoice.reverse_charge') }}</dt>
+          <dd class="font-medium text-right" :class="invoice.reverse_charge ? 'text-warning-600' : 'text-neutral-700'">
+            {{ invoice.reverse_charge ? t('common.yes') : t('common.no') }}
+          </dd>
+        </div>
+        <div class="flex justify-between gap-3">
+          <dt class="text-neutral-500">{{ t('invoice.classification.vat_classification') }}</dt>
+          <dd class="font-medium text-right text-neutral-700">
+            <template v-if="invoice.vat_classification_code">
+              <span class="font-mono">{{ invoice.vat_classification_code }}</span>
+              <span v-if="vatClassificationLabel" class="ml-1 text-neutral-400">{{ vatClassificationLabel }}</span>
+            </template>
+            <span v-else class="text-neutral-400">{{ t('invoice.classification.no_vat_class') }}</span>
+          </dd>
+        </div>
+        <div class="flex justify-between gap-3">
+          <dt class="text-neutral-500">{{ t('invoice.simplified_document') }}</dt>
+          <dd class="font-medium text-right">{{ invoice.is_simplified ? t('common.yes') : t('common.no') }}</dd>
+        </div>
+        <div class="flex justify-between gap-3">
+          <dt class="text-neutral-500">{{ t('invoice.prices_include_vat') }}</dt>
+          <dd class="font-medium text-right">{{ invoice.prices_include_vat ? t('common.yes') : t('common.no') }}</dd>
+        </div>
+        <div class="flex justify-between gap-3">
+          <dt class="text-neutral-500">{{ t('invoice.classification.income_tax_exempt') }}</dt>
+          <dd class="font-medium text-right" :class="invoice.income_tax_exempt ? 'text-warning-600' : 'text-neutral-700'">
+            {{ invoice.income_tax_exempt ? t('common.yes') : t('common.no') }}
+            <span v-if="invoice.income_tax_exempt && invoice.income_tax_exempt_reason" class="block text-xs font-normal text-neutral-400">{{ invoice.income_tax_exempt_reason }}</span>
+          </dd>
+        </div>
+        <div class="flex justify-between gap-3">
+          <dt class="text-neutral-500">{{ t('invoice.classification.revenue_category') }}</dt>
+          <dd class="font-medium text-right text-neutral-700">
+            <template v-if="invoice.revenue_category_label">
+              {{ invoice.revenue_category_label }}
+              <span class="text-neutral-400">({{ invoice.revenue_category_code }})</span>
+            </template>
+            <span v-else class="text-neutral-400">—</span>
+          </dd>
+        </div>
+      </dl>
     </div>
 
     <!-- Elektronický podpis dokumentu -->

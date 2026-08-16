@@ -6461,6 +6461,7 @@
     "purchase_invoice": {
         "title": "Přijaté faktury",
         "subtitle": "Doklady od dodavatelů — náklady firmy.",
+        "currency_payment_section": "Měna a úhrada",
         "advance_posting_hint": "Zálohový doklad se neúčtuje jako předpis. Účtuje se až jeho úhrada z banky nebo pokladny na účet 314.",
         "new": "Nová přijatá faktura",
         "scan_inbox_btn": "Nascanovat inbox",
@@ -6498,6 +6499,7 @@
             "tax_date_rc_hint": "U reverse charge se doklad zařazuje do DPH období podle DUZP (povinnost přiznat daň vzniká bez ohledu na doručení dokladu). U pořízení zboží z EU je DUZP dle § 25 ZDPH 15. den měsíce následujícího po dodání, pokud doklad nebyl vystaven dříve.",
             "due_date": "Splatnost",
             "received_at": "Datum přijetí",
+            "received_at_source_import": "(z importu)",
             "vat_claim_hint": "Nárok na odpočet DPH z tohoto dokladu spadá do období {period} — {basis}. Podle § 73 odst. 1 písm. a) ZDPH lze odpočet uplatnit nejdříve za období, ve kterém máte doklad k dispozici; samotné DUZP proto doklad do svého měsíce nestáhne, pokud byl vystaven nebo přijat později.",
             "vat_claim_basis": {
                 "tax_date": "rozhoduje DUZP",
@@ -6903,6 +6905,7 @@
         },
         "classification": {
             "title": "Klasifikace",
+            "section": "Daňové zařazení",
             "expense_category": "Kategorie nákladu",
             "no_category": "(bez kategorie)",
             "manage_categories": "Spravovat kategorie v Číselnících →",
@@ -8475,6 +8478,8 @@
         },
         "classification": {
             "title": "Klasifikace",
+            "section": "Daňové zařazení",
+            "income_tax_exempt": "Osvobozeno od daně z příjmů",
             "vat_classification": "VAT klasifikace (DPH přiznání)",
             "no_vat_class": "(auto-default podle sazby)",
             "vat_classification_hint": "Auto-přiřazení podle sazby DPH (21%→1, 12%→2, 0%→3, reverse→20).",

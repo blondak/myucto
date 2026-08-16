@@ -14,6 +14,9 @@ Detail ukazuje:
 
 - **Hlavičku** — variabilní symbol, typ, klient, data, částka, stav
 - **Položky** — read-only zobrazení řádků
+- **Daňové zařazení** — karta se vším, co jde nastavit v editoru: reverse charge,
+  VAT klasifikace (kód i popis), zjednodušený daňový doklad § 30, ceny zadané
+  včetně DPH, osvobození od daně z příjmů i s důvodem a kategorie tržby
 - **Náhled PDF** — embed iframe (lze otevřít na celou obrazovku)
 - **Zdrojové PDF z importu** — jen u faktur naimportovaných z iDoklad/Fakturoid:
   originální PDF dokladu, jak dorazil ze zdrojového systému (náhled + stažení).

@@ -6461,6 +6461,7 @@
     "purchase_invoice": {
         "title": "Received invoices",
         "subtitle": "Vendor documents — company expenses.",
+        "currency_payment_section": "Currency & payment",
         "advance_posting_hint": "An advance document is not posted as a liability. Its bank or cash payment is posted to account 314 instead.",
         "new": "New received invoice",
         "scan_inbox_btn": "Scan inbox",
@@ -6498,6 +6499,7 @@
             "tax_date_rc_hint": "Under reverse charge the document is assigned to the VAT period by the tax point date (the obligation to declare tax arises regardless of receiving the document). For EU goods acquisitions the tax point is, per § 25 of the Czech VAT Act, the 15th day of the month following delivery, unless the invoice was issued earlier.",
             "due_date": "Due date",
             "received_at": "Received on",
+            "received_at_source_import": "(from import)",
             "vat_claim_hint": "Input VAT from this document falls into the {period} period — {basis}. Under § 73(1)(a) of the Czech VAT Act the deduction can be claimed no earlier than the period in which you hold the document, so the tax point alone cannot pull the document into its own month if it was issued or received later.",
             "vat_claim_basis": {
                 "tax_date": "driven by the tax point",
@@ -6903,6 +6905,7 @@
         },
         "classification": {
             "title": "Classification",
+            "section": "Tax classification",
             "expense_category": "Expense category",
             "no_category": "(no category)",
             "manage_categories": "Manage categories in Codebooks →",
@@ -8475,6 +8478,8 @@
         },
         "classification": {
             "title": "Classification",
+            "section": "Tax classification",
+            "income_tax_exempt": "Exempt from income tax",
             "vat_classification": "VAT classification (VAT return)",
             "no_vat_class": "(auto-default by rate)",
             "vat_classification_hint": "Auto-assigned by VAT rate (21%→1, 12%→2, 0%→3, reverse→20).",
