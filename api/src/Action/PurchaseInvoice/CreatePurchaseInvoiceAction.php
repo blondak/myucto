@@ -22,6 +22,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Report\VatClassificationDefaulter;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
 use MyInvoice\Service\Ai\AiSuggestionService;
+use MyInvoice\Support\AdvanceTaxDocumentText;
 use MyInvoice\Support\ExchangeRateDate;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -339,16 +340,17 @@ final class CreatePurchaseInvoiceAction
         if ($documentKind !== 'receipt' || $id <= 0) {
             return false;
         }
+        // Rozhoduje sdílený SSOT ({@see AdvanceTaxDocumentText}), ne LIKE v SQL: dřív tu
+        // stálo mimo jiné `%daňový doklad k%`, což chytalo i „Daňový doklad k objednávce"
+        // — a hlavně to bylo citlivé na diakritiku i velikost písmen. Popisy tahá do PHP
+        // jeden dotaz (účtenka má jednotky řádků).
         $stmt = $db->pdo()->prepare(
-            "SELECT 1 FROM purchase_invoice_items
-              WHERE purchase_invoice_id = ?
-                AND (description LIKE '%přijaté platb%' OR description LIKE '%přijaté úhrad%'
-                     OR description LIKE '%daňový doklad k%' OR description LIKE '%před uskutečněním plnění%'
-                     OR description LIKE '%k záloze%' OR description LIKE '%zaplacené zálo%')
-              LIMIT 1"
+            'SELECT description FROM purchase_invoice_items WHERE purchase_invoice_id = ? LIMIT 200'
         );
         $stmt->execute([$id]);
-        return $stmt->fetchColumn() !== false;
+        return AdvanceTaxDocumentText::anyIndicatesAdvanceTaxDocument(
+            $stmt->fetchAll(\PDO::FETCH_COLUMN)
+        );
     }
 
     /**

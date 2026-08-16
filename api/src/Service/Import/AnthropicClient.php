@@ -292,6 +292,12 @@ DŮLEŽITÉ k poli `document_kind`:
   na DPH z té zálohy (§28 ZDPH) — vyčísluje DPH ze zaplacené zálohy a odkazuje na
   zálohovou fakturu/proformu, ale NENÍ to konečné vyúčtování celého plnění. Neúčtuje se
   jako náklad, jen jako nárok na odpočet DPH.
+- POZOR: samotný nadpis "Daňový doklad" (i "Faktura — daňový doklad", "Daňový doklad č. …",
+  "Faktura/daňový doklad") `"tax_document"` NEZNAMENÁ. Takhle je nadepsaná úplně obyčejná
+  faktura od operátora, energetiky nebo e-shopu. `"tax_document"` vracej JEN tehdy, když
+  doklad výslovně mluví o PŘIJATÉ/PROVEDENÉ PLATBĚ nebo o ZÁLOZE ("k přijaté platbě",
+  "k provedené platbě", "k záloze", "z přijaté úplaty") a vyčísluje DPH z už zaplacené
+  zálohy. Bez toho vrať `"invoice"` — i když je slovo "daňový doklad" na dokladu několikrát.
 - Pokud doklad je "Konečná faktura", "Vyúčtovací faktura" nebo "Konečné vyúčtování"
   (odečítá zaplacené zálohy a vyúčtovává celé plnění) → vrať `"invoice"`, NIKOLI
   `"tax_document"` ani `"advance"`.

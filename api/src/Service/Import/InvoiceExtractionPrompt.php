@@ -133,10 +133,16 @@ DŮLEŽITÉ k poli `document_kind`:
   zaúčtován jako náklad, jen jako nárok na odpočet DPH. Poznáš ho tak, že vyčísluje DPH
   ze zaplacené zálohy a odkazuje na zálohovou fakturu/proformu, ale NENÍ to konečné
   vyúčtování celého plnění.
+- POZOR: samotný nadpis "Daňový doklad" (i "Faktura — daňový doklad", "Daňový doklad č. …",
+  "Faktura/daňový doklad") "tax_document" NEZNAMENÁ. Takhle je nadepsaná úplně obyčejná
+  faktura od operátora, energetiky nebo e-shopu. "tax_document" vracej JEN tehdy, když
+  doklad výslovně mluví o PŘIJATÉ/PROVEDENÉ PLATBĚ nebo o ZÁLOZE ("k přijaté platbě",
+  "k provedené platbě", "k záloze", "z přijaté úplaty") a vyčísluje DPH z už zaplacené
+  zálohy. Bez toho vrať "invoice" — i když je slovo "daňový doklad" na dokladu několikrát.
 - "Konečná faktura"/"Vyúčtovací faktura"/"Konečné vyúčtování" (odečítá zaplacené zálohy
   a vyúčtovává celé plnění) → "invoice", NIKOLI "tax_document" ani "advance".
 - "Účtenka"/"Paragon"/"Pokladní doklad"/"Receipt" → "receipt".
-- Jinak → "invoice".
+- Jinak (běžná faktura / daňový doklad za dodané plnění) → "invoice".
 
 DŮLEŽITÉ k poli `unit_prices_include_vat`:
 - Na účtenkách/paragonech (document_kind="receipt") jsou ceny položek typicky VČETNĚ DPH.

@@ -401,6 +401,13 @@ faktury platí zrcadlově.
 Po uložení / přechodu na detail:
 
 - Vidíš dodavatele (s IČO/DIČ), datumy, položky, DPH rozpis, totály, K úhradě.
+- Karta **Daňové zařazení** shrnuje všechno, co jde nastavit v editoru: typ dokladu,
+  reverse charge, plátcovství dodavatele, VAT klasifikaci (kód i popis), nárok na
+  odpočet včetně procenta u kráceného, daňovou uznatelnost, dlouhodobý majetek
+  a kategorii nákladu. Ceny včetně DPH najdeš v kartě Měna, u data přijetí je
+  označené, jestli pochází z importu, nebo ho zadala účetní (viz [§ 23.2.4](#2324-danova-uznatelnost-a-narok-na-odpocet)).
+- U položek je vidět **druh nákladu** (služba / materiál / drobný nebo dlouhodobý
+  majetek), jejich vlastní VAT klasifikace a období časového rozlišení.
 - Sekce **Originální PDF od dodavatele** — pokud jsi nahrál, můžeš stáhnout zpět.
 - Badge **„ISDOC"** v hlavičce (a akce **Zdrojový doklad** v menu) — u faktur importovaných ze strukturovaného zdroje stáhne původní strojově čitelný originál (důkazní stopa, viz [§ 23.2.1](#2321-drag-drop-dokladu)).
 - Tlačítka pro **přechod stavu** podle state-machine:
@@ -443,6 +450,13 @@ mezi kandidáty stejně jako zálohovou fakturu, spáruje se stejným tlačítke
 propojení funguje symetricky (z detailu DDKP i z detailu finální faktury). DDKP,
 který už patří k jiné zálohové faktuře, se mezi kandidáty nenabízí — vyúčtovává se
 přes tu zálohu, ne přímo.
+
+**Špatně určený typ dokladu.** Běžná faktura mívá v hlavičce nadpis „Daňový doklad" —
+to ještě není daňový doklad k platbě. Pokud takový doklad přesto skončí jako *Daňový
+doklad k platbě*, přepni typ v editoru zpět na *Faktura* a ulož; u zaúčtovaného dokladu
+se zároveň přeúčtuje účetní zápis. Změna projde jen u DDKP, na kterém nevisí vazba —
+je-li navázaný na zálohovou fakturu nebo je jím už vyúčtovaná konečná faktura, uložení
+skončí hláškou a nejdřív je potřeba zrušit tu vazbu.
 
 Dokud propojení nevznikne, zůstává na DDKP viditelné **upozornění**, pokud je z něj
 na účtu 314 otevřený zůstatek a od stejného dodavatele existuje nespárovaná faktura,

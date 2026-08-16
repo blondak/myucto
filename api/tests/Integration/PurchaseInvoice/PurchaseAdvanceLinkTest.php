@@ -190,39 +190,51 @@ final class PurchaseAdvanceLinkTest extends TestCase
     }
 
     /**
-     * Druh DDKP je neměnný. Do `tax_document` se přepnout nedá (není v povoleném
-     * výčtu), ale ODEJÍT z něj šlo — a to je jednosměrka do rozbitého stavu:
-     * doklad by ztratil výjimky (mimo příkaz k úhradě, mimo náklady, vlastní větev
-     * v PostingService) a vznikl by fantomový závazek v plné výši už zaplacené zálohy.
+     * Druh VÁZANÉHO DDKP je neměnný. Odejít z `tax_document` je u dokladu, který patří
+     * k zálohové faktuře, jednosměrka do rozbitého stavu: doklad by ztratil výjimky
+     * (mimo příkaz k úhradě, mimo náklady, vlastní větev v PostingService) a vznikl by
+     * fantomový závazek v plné výši už zaplacené zálohy.
      *
-     * Editor `tax_document` v nabídce nemá, takže by ho tiše přepsalo i pouhé
-     * otevření a uložení DDKP — proto se hlídají OBĚ cesty.
+     * Hlídají se OBĚ cesty — rychlá změna ze seznamu i uložení z editoru; ta druhá
+     * navíc musí SELHAT HLASITĚ, ne tiše vrátit starý druh (jinak uživatel v editoru
+     * pořád vidí typ, který právě přepnul).
+     *
+     * Samostatný DDKP bez vazeb naopak přepnout JDE — je to typicky jen špatná AI
+     * klasifikace obyčejné faktury ({@see PurchaseTaxDocumentKindChangeTest}).
      */
-    public function testTaxDocumentKindIsImmutable(): void
+    public function testLinkedTaxDocumentKindIsImmutable(): void
     {
-        $vendor = $this->vendor('Dodavatel DDKP', 'CZ10000010');
-        $ddkp = $this->purchase($vendor, 'tax_document', 'DDKP-1', 'received', 2100.0, $this->d(15));
+        $vendor  = $this->vendor('Dodavatel DDKP', 'CZ10000010');
+        $advance = $this->purchase($vendor, 'advance', 'ZAL-DDKP-1', 'received', 2100.0, $this->d(10));
+        $ddkp    = $this->purchase($vendor, 'tax_document', 'DDKP-1', 'received', 2100.0, $this->d(15));
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET parent_purchase_invoice_id = ? WHERE id = ?')
+            ->execute([$advance, $ddkp]);
 
         // Cesta A: explicitní změna druhu → odmítnutí s hláškou.
         $err = $this->repo->updateDocumentKind($ddkp, $this->supplierId, 'invoice');
-        self::assertNotNull($err, 'Překlopení DDKP musí být odmítnuto.');
-        self::assertStringContainsString('nelze překlopit', $err);
+        self::assertNotNull($err, 'Překlopení vázaného DDKP musí být odmítnuto.');
+        self::assertStringContainsString('zálohov', $err);
         self::assertSame('tax_document', $this->repo->find($ddkp, $this->supplierId)['document_kind']);
 
-        // Cesta B: uložení z editoru, který tax_document v nabídce nemá → druh se zachová.
-        $this->repo->updateDraft($ddkp, [
-            'vendor_id'              => $vendor,
-            'vendor_invoice_number'  => 'DDKP-1',
-            'document_kind'          => 'invoice',
-            'issue_date'             => $this->d(15),
-            'due_date'               => $this->d(15),
-            'received_at'            => $this->d(15),
-            'currency_id'            => $this->currencyId,
-        ], $this->supplierId);
+        // Cesta B: uložení z editoru → výjimka, druh zůstává.
+        try {
+            $this->repo->updateDraft($ddkp, [
+                'vendor_id'              => $vendor,
+                'vendor_invoice_number'  => 'DDKP-1',
+                'document_kind'          => 'invoice',
+                'issue_date'             => $this->d(15),
+                'due_date'               => $this->d(15),
+                'received_at'            => $this->d(15),
+                'currency_id'            => $this->currencyId,
+            ], $this->supplierId);
+            self::fail('Uložení vázaného DDKP jako faktury musí selhat.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('zálohov', $e->getMessage());
+        }
         self::assertSame(
             'tax_document',
             $this->repo->find($ddkp, $this->supplierId)['document_kind'],
-            'Uložení z editoru nesmí druh DDKP přepsat.',
+            'Uložení z editoru nesmí druh vázaného DDKP přepsat.',
         );
     }
 

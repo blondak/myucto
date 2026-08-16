@@ -99,6 +99,9 @@ final class ErrorCatalog
         'iso2 musí být 2 znaky.' => '"iso2" must be 2 characters.',
         'mode musí být "internal" nebo "credit_note".' => '"mode" must be "internal" or "credit_note".',
         'Žádný platný příjemce (chybí email klienta).' => 'No valid recipient (client email missing).',
+        // Změna druhu dokladu u DDKP (§ 28 ZDPH) — hlášky nesou důvod, proč to nejde.
+        'Daňový doklad k platbě je navázaný na zálohovou fakturu a jeho DPH už byla uplatněna — druh dokladu proto změnit nelze. Nejdřív zrušte vazbu na zálohu, nebo doklad stornujte.' => 'The tax document for a payment is linked to an advance invoice and its VAT has already been claimed, so the document kind cannot be changed. Remove the advance link first, or cancel the document.',
+        'Daňovým dokladem k platbě je už vyúčtovaná konečná faktura — druh dokladu proto změnit nelze. Nejdřív zrušte vyúčtování na konečné faktuře.' => 'A final invoice already settles this tax document for a payment, so the document kind cannot be changed. Remove the settlement on the final invoice first.',
         // Otevírací rozvaha aktivace — rozhraní tyhle věty ukazuje doslova (jsou to jediné
         // místo, kde je vidět KTERÝ řádek je vadný), takže musí být přeložitelné.
         'Otevírací zápis patří uzávěrce předchozího období.' => 'The opening entry belongs to the previous period closing.',

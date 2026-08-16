@@ -1426,23 +1426,39 @@ final class PurchaseInvoiceRepository
             }
         }
 
-        $documentKind = (string) ($data['document_kind'] ?? 'invoice');
-        if (!in_array($documentKind, ['invoice', 'receipt', 'credit_note', 'advance', 'tax_document'], true)) {
-            $documentKind = 'invoice';
-        }
-        // Druh DDKP je NEMĚNNÝ. Editor ho v nabídce nemá (jen invoice/receipt/credit_note/
-        // advance), takže otevřením daňového dokladu k záloze a uložením by se druh tiše
-        // přepsal na jiný — doklad by rázem ztratil všechny výjimky: vypadl by z guardu
-        // příkazu k úhradě (fantomový závazek v plné výši už zaplacené zálohy), započetl by
-        // se do nákladů a PostingService by ho zaúčtoval jako běžnou fakturu místo 343/314.
-        // Zpětná cesta neexistuje — do 'tax_document' se přes updateDocumentKind přepnout nedá.
-        // Zachováváme tiše (ne výjimkou), ať editace ostatních polí DDKP zůstane možná.
         $kindStmt = $this->db->pdo()->prepare(
             'SELECT document_kind FROM purchase_invoices WHERE id = ? AND supplier_id = ?'
         );
         $kindStmt->execute([$id, $supplierId]);
-        if ((string) ($kindStmt->fetchColumn() ?: '') === 'tax_document') {
-            $documentKind = 'tax_document';
+        $currentKind = (string) ($kindStmt->fetchColumn() ?: '');
+
+        // Druh dokladu píšeme JEN když ho volající poslal — stejně jako kurz, formu úhrady
+        // nebo vazbu dobropisu níž. Bez téhle podmínky by částečný PUT (samotné DUZP,
+        // poznámka) překlopil zálohu/účtenku/dobropis na 'invoice' jen proto, že klíč
+        // v těle nebyl.
+        if (array_key_exists('document_kind', $data)) {
+            $documentKind = (string) ($data['document_kind'] ?? 'invoice');
+            if (!in_array($documentKind, ['invoice', 'receipt', 'credit_note', 'advance', 'tax_document'], true)) {
+                $documentKind = 'invoice';
+            }
+        } else {
+            $documentKind = $currentKind !== '' ? $currentKind : 'invoice';
+        }
+
+        // Odchod z DDKP (daňový doklad k poskytnuté záloze, § 28 ZDPH) je destruktivní jen
+        // tehdy, když na dokladu VISÍ VAZBA: patří k zálohové faktuře, nebo přes něj někdo
+        // vyúčtoval konečnou fakturu. Pak by překlopením vznikl fantomový závazek v plné
+        // výši už zaplacené zálohy, duplicitní náklad i duplicitní odpočet.
+        // Samostatný DDKP bez vazeb žádnou takovou stopu nemá — a přesně tak vypadá doklad,
+        // který AI klasifikovala špatně (obyčejná faktura s nadpisem „Daňový doklad"). Ten
+        // musí jít opravit; dřív se změna druhu tiše zahodila a v editoru se pořád vracel
+        // starý typ. Blokujeme proto jen vázaný DDKP, a hlasitě
+        // ({@see taxDocumentKindChangeBlocker()} — týž SSOT používá i updateDocumentKind()).
+        if ($currentKind === 'tax_document' && $documentKind !== 'tax_document') {
+            $blocker = $this->taxDocumentKindChangeBlocker($id, $supplierId);
+            if ($blocker !== null) {
+                throw new \InvalidArgumentException($blocker);
+            }
         }
 
         $vendorInvoiceNumber = trim((string) ($data['vendor_invoice_number'] ?? ''));
@@ -2686,6 +2702,52 @@ final class PurchaseInvoiceRepository
     }
 
     /**
+     * Smí doklad OPUSTIT druh `tax_document` (DDKP, daňový doklad k poskytnuté záloze,
+     * § 28 ZDPH)? Vrací `null` = ano, jinak hlášku pro uživatele.
+     *
+     * DDKP je všude výjimka: mimo náklady, mimo závazky, mimo příkaz k úhradě, vlastní
+     * větev v {@see \MyInvoice\Service\Accounting\PostingService} (343/314 místo 5xx/321).
+     * Ztratit ji smí jen doklad, na kterém žádná z těch vazeb nevisí:
+     *   - `parent_purchase_invoice_id` = DDKP patřící k zálohové faktuře (odpočet DPH
+     *     ze zálohy je navázaný na ni),
+     *   - jiný doklad ho vyúčtoval jako zálohu (`advance_purchase_invoice_id`) —
+     *     konečná faktura na něm drží zúčtování zálohy.
+     * Samostatný DDKP bez vazeb je typicky jen špatná AI klasifikace obyčejné faktury
+     * (nadpis „Daňový doklad") — tu musí jít opravit, ne ji jen stornovat.
+     *
+     * Jediné místo, kde tohle pravidlo žije: volá ho {@see updateDraft()} (editor
+     * dokladu, tvrdě výjimkou) i {@see updateDocumentKind()} (rychlá změna ze seznamu).
+     */
+    public function taxDocumentKindChangeBlocker(int $id, int $supplierId): ?string
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'SELECT document_kind, parent_purchase_invoice_id
+               FROM purchase_invoices WHERE id = ? AND supplier_id = ?'
+        );
+        $stmt->execute([$id, $supplierId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row === false || (string) $row['document_kind'] !== 'tax_document') {
+            return null;
+        }
+        if (($row['parent_purchase_invoice_id'] ?? null) !== null) {
+            return 'Daňový doklad k platbě je navázaný na zálohovou fakturu a jeho DPH už byla '
+                . 'uplatněna — druh dokladu proto změnit nelze. Nejdřív zrušte vazbu na zálohu, '
+                . 'nebo doklad stornujte.';
+        }
+        $used = $pdo->prepare(
+            'SELECT 1 FROM purchase_invoices
+              WHERE supplier_id = ? AND advance_purchase_invoice_id = ? LIMIT 1'
+        );
+        $used->execute([$supplierId, $id]);
+        if ($used->fetchColumn() !== false) {
+            return 'Daňovým dokladem k platbě je už vyúčtovaná konečná faktura — druh dokladu '
+                . 'proto změnit nelze. Nejdřív zrušte vyúčtování na konečné faktuře.';
+        }
+        return null;
+    }
+
+    /**
      * Rychlá změna typu dokladu (#232) — pro opravu po AI importu, kdy AI účtenku
      * klasifikuje jako `receipt` („Doklad o úhradě"), ale účetní ji chce vést jako
      * `invoice`. Řádkové totály ani `prices_include_vat` NEmění (jsou uložené), jde
@@ -2719,17 +2781,13 @@ final class PurchaseInvoiceRepository
         if ($current === 'advance' || $kind === 'advance') {
             return 'Změnu na/ze zálohy proveďte v editoru dokladu (má vazby na vyúčtování).';
         }
-        // Do 'tax_document' se přepnout nedá (není v $allowed), ale ODEJÍT z něj šlo —
-        // a to je jednosměrka do rozbitého stavu. DDKP účtuje jen odpočet DPH (343/314),
-        // je strukturálně vázaný na zálohu přes parent_purchase_invoice_id a všude má
-        // výjimky: mimo příkaz k úhradě, mimo náklady, mimo závazky, vlastní větev
-        // v PostingService. Po překlopení na 'invoice' by je ztratil — vznikl by
-        // fantomový závazek v plné výši už zaplacené zálohy a duplicitní náklad
-        // i odpočet — a zpět už ho nikdo nepřepne.
+        // Do 'tax_document' se přepnout nedá (není v $allowed); ODEJÍT z něj smí jen DDKP
+        // bez vazeb — týž SSOT jako v updateDraft().
         if ($current === 'tax_document') {
-            return 'Daňový doklad k záloze nelze překlopit na jiný druh — je vázaný na '
-                . 'zálohovou fakturu a jeho DPH už byla uplatněna. Pokud doklad nemá '
-                . 'existovat, stornuj ho.';
+            $blocker = $this->taxDocumentKindChangeBlocker($id, $supplierId);
+            if ($blocker !== null) {
+                return $blocker;
+            }
         }
         $pdo->prepare(
             'UPDATE purchase_invoices SET document_kind = ? WHERE id = ? AND supplier_id = ?'

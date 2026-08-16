@@ -12,6 +12,7 @@ use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\Expense\ExpenseKindClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKindSuggestion;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
+use MyInvoice\Support\AdvanceTaxDocumentText;
 use MyInvoice\Support\PaymentMethods;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -313,7 +314,7 @@ final class AiPdfExtractor
                 'purchase_invoice_id' => $invoiceId,
                 'vendor_id'           => $resolved['id'],
                 'vendor_name'         => (string) ($resolved['company_name'] ?? ($data['vendor']['company_name'] ?? '')),
-                'document_kind'       => $this->normalizeDocumentKind((string) ($data['document_kind'] ?? 'invoice')),
+                'document_kind'       => self::resolveDocumentKind($data),
                 'total_with_vat'      => isset($data['total_with_vat']) ? (float) $data['total_with_vat'] : null,
                 'currency'            => (string) ($data['currency'] ?? ''),
                 'source'              => 'ai',
@@ -467,7 +468,17 @@ final class AiPdfExtractor
             $data['due_date']   = $dateSwap['due_date'];
         }
 
-        $documentKind = $this->normalizeDocumentKind((string) ($data['document_kind'] ?? 'invoice'));
+        $aiKind = $this->normalizeDocumentKind((string) ($data['document_kind'] ?? 'invoice'));
+        $documentKind = self::resolveDocumentKind($data);
+        if ($documentKind !== $aiKind) {
+            $this->logger->info(
+                'AI extractor: document_kind=tax_document bez jediné stopy po záloze/platbě, přeřazeno na invoice',
+                [
+                    'vendor_invoice_number' => $data['vendor_invoice_number'] ?? null,
+                    'ai_document_kind'      => $aiKind,
+                ]
+            );
+        }
 
         // Fallback detekce dobropisu — AI občas vrátí document_kind='invoice', ale items mají
         // záporné quantity/unit_price (PDF byl dobropis). Trust the amounts: záporné částky
@@ -1940,10 +1951,60 @@ final class AiPdfExtractor
     }
 
     /**
+     * Druh dokladu z AI odpovědi PO kontrole, že DDKP je opravdu DDKP.
+     *
+     * Model klasifikuje `tax_document` (daňový doklad k přijaté platbě, § 28 ZDPH)
+     * i u úplně obyčejné faktury, protože ta má v hlavičce „Daňový doklad" — a to je
+     * běžný nadpis faktury operátora, energetiky i e-shopu, ne doklad k záloze
+     * ({@see \MyInvoice\Support\AdvanceTaxDocumentText}). Takový doklad by se pak
+     * zaúčtoval jako 343/314, vypadl by z nákladů, ze závazků i z příkazu k úhradě.
+     *
+     * DDKP se pozná podle STOPY PO ZÁLOZE: odkaz na zálohovou fakturu
+     * (`advance_reference` — prompt ho u DDKP vyžaduje) nebo text položek / povahy
+     * plnění mluvící o přijaté či provedené platbě nebo o záloze. Když není ani jedno,
+     * jde o běžnou fakturu.
+     *
+     * @param array<string,mixed> $data
+     */
+    private static function resolveDocumentKind(array $data): string
+    {
+        $kind = self::normalizeDocumentKindValue((string) ($data['document_kind'] ?? 'invoice'));
+        if ($kind !== 'tax_document' || self::hasAdvanceEvidence($data)) {
+            return $kind;
+        }
+        return 'invoice';
+    }
+
+    /**
+     * Má doklad aspoň jednu stopu po záloze / přijaté platbě?
+     *
+     * @param array<string,mixed> $data
+     */
+    private static function hasAdvanceEvidence(array $data): bool
+    {
+        if (trim((string) ($data['advance_reference'] ?? '')) !== '') {
+            return true;
+        }
+        $texts = [(string) ($data['supply_nature'] ?? '')];
+        foreach ((array) ($data['items'] ?? []) as $line) {
+            if (is_array($line)) {
+                $texts[] = (string) ($line['description'] ?? '');
+            }
+        }
+        return AdvanceTaxDocumentText::anyIndicatesAdvanceTaxDocument($texts);
+    }
+
+    /** Instanční obal nad {@see normalizeDocumentKindValue()} pro volání z metod objektu. */
+    private function normalizeDocumentKind(string $kind): string
+    {
+        return self::normalizeDocumentKindValue($kind);
+    }
+
+    /**
      * Normalizuje document_kind z AI odpovědi na povolený enum
      * (whitelist matchující ENUM v `purchase_invoices.document_kind`).
      */
-    private function normalizeDocumentKind(string $kind): string
+    private static function normalizeDocumentKindValue(string $kind): string
     {
         $k = strtolower(trim($kind));
         return in_array($k, ['invoice', 'credit_note', 'advance', 'receipt', 'tax_document'], true)
