@@ -859,41 +859,66 @@ final class ReportXlsxExporter
         $sheet->setCellValue('A3', 'Sestaveno: ' . (string) ($entity['prepared_at'] ?? ''));
         $sheet->getStyle('A3')->getFont()->setSize(9)->setItalic(true);
 
-        /** @var list<array<string,mixed>> $rows */
-        $rows = [];
+        // Pohledávky a závazky jsou opačné strany salda — jeden seznam řazený dle
+        // splatnosti je stavěl vedle sebe a odlišoval jen kódem účtu v prvním sloupci.
+        // Každá strana proto dostane vlastní blok se součtem, shodně s UI.
+        /** @var array{receivable:list<array<string,mixed>>, payable:list<array<string,mixed>>} $bySide */
+        $bySide = ['receivable' => [], 'payable' => []];
         foreach ($data['accounts'] ?? [] as $acc) {
             $accountCode = (string) ($acc['account']['code'] ?? '');
+            $side = (string) ($acc['account']['normal_side'] ?? 'debit') === 'credit' ? 'payable' : 'receivable';
             foreach ($acc['partners'] ?? [] as $p) {
                 $partnerName = (string) ($p['partner_name'] ?? '');
                 foreach ($p['items'] ?? [] as $it) {
-                    $rows[] = $it + ['account_code' => $accountCode, 'partner_name' => $partnerName];
+                    $bySide[$side][] = $it + ['account_code' => $accountCode, 'partner_name' => $partnerName];
                 }
             }
         }
-        usort($rows, static fn (array $a, array $b): int => strcmp((string) ($a['due_date'] ?? ''), (string) ($b['due_date'] ?? '')));
 
         $headers = ['Účet', 'Partner', 'Doklad', 'Vystaveno', 'Splatnost', 'Dní po spl.', 'Měna', 'Částka', 'Uhrazeno', 'Zbývá (Kč)'];
         $cols = count($headers);
-        $head = 5;
-        $this->headerRow($sheet, $head, $headers);
+        $labels = [
+            'receivable' => ['Pohledávky — co dluží nám', 'Pohledávky celkem'],
+            'payable'    => ['Závazky — co dlužíme my', 'Závazky celkem'],
+        ];
 
-        $r = $head + 1;
-        foreach ($rows as $it) {
-            $ccy = (string) ($it['currency_code'] ?? 'CZK');
-            $sheet->setCellValueExplicit([1, $r], (string) ($it['account_code'] ?? ''), DataType::TYPE_STRING);
-            $sheet->setCellValueExplicit([2, $r], (string) ($it['partner_name'] ?? ''), DataType::TYPE_STRING);
-            $sheet->setCellValueExplicit([3, $r], (string) ($it['doc_no'] ?? ''), DataType::TYPE_STRING);
-            $sheet->setCellValue([4, $r], $this->czDate((string) ($it['issue_date'] ?? '')));
-            $sheet->setCellValue([5, $r], $this->czDate((string) ($it['due_date'] ?? '')));
-            $sheet->setCellValue([6, $r], (int) ($it['days_overdue'] ?? 0) > 0 ? (int) $it['days_overdue'] : '');
-            $sheet->setCellValueExplicit([7, $r], $ccy, DataType::TYPE_STRING);
-            $sheet->setCellValue([8, $r], (float) ($it['booked_czk'] ?? 0));
-            $sheet->setCellValue([9, $r], (float) ($it['paid_czk'] ?? 0));
-            $sheet->setCellValue([10, $r], (float) ($it['remaining_czk'] ?? 0));
+        $r = 5;
+        foreach ($bySide as $side => $rows) {
+            if ($rows === []) {
+                continue;
+            }
+            usort($rows, static fn (array $a, array $b): int => strcmp((string) ($a['due_date'] ?? ''), (string) ($b['due_date'] ?? '')));
+
+            $sheet->setCellValue("A{$r}", $labels[$side][0]);
+            $sheet->getStyle("A{$r}")->getFont()->setBold(true)->setSize(11);
             $r++;
-        }
-        if ($r > $head + 1) {
-            $this->finishTable($sheet, $head, $r - 1, $cols, 6);
+
+            $head = $r;
+            $this->headerRow($sheet, $head, $headers);
+            $r++;
+
+            $total = 0.0;
+            foreach ($rows as $it) {
+                $ccy = (string) ($it['currency_code'] ?? 'CZK');
+                $sheet->setCellValueExplicit([1, $r], (string) ($it['account_code'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit([2, $r], (string) ($it['partner_name'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit([3, $r], (string) ($it['doc_no'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValue([4, $r], $this->czDate((string) ($it['issue_date'] ?? '')));
+                $sheet->setCellValue([5, $r], $this->czDate((string) ($it['due_date'] ?? '')));
+                $sheet->setCellValue([6, $r], (int) ($it['days_overdue'] ?? 0) > 0 ? (int) $it['days_overdue'] : '');
+                $sheet->setCellValueExplicit([7, $r], $ccy, DataType::TYPE_STRING);
+                $sheet->setCellValue([8, $r], (float) ($it['booked_czk'] ?? 0));
+                $sheet->setCellValue([9, $r], (float) ($it['paid_czk'] ?? 0));
+                $sheet->setCellValue([10, $r], (float) ($it['remaining_czk'] ?? 0));
+                $total += (float) ($it['remaining_czk'] ?? 0);
+                $r++;
+            }
+
+            $sheet->setCellValueExplicit([1, $r], $labels[$side][1], DataType::TYPE_STRING);
+            $sheet->setCellValue([10, $r], round($total, 2));
+            $this->boldRow($sheet, $r, $cols);
+            $this->finishTable($sheet, $head, $r, $cols, 6);
+            $r += 2; // mezera mezi stranami salda
         }
 
         return $this->out($ss, 'saldokonto-doklady-' . $asOf . '.xlsx');

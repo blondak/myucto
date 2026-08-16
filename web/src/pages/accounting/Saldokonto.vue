@@ -44,10 +44,26 @@ function queryParams() {
 type ViewMode = 'partner' | 'flat'
 const viewMode = ref<ViewMode>('flat')
 
+/**
+ * Strana salda podle normální strany účtu: 311/314 (debet) = co dluží nám,
+ * 321/324 (kredit) = co dlužíme my. Plochý pohled dřív míchal obojí do jedné
+ * tabulky řazené dle splatnosti, takže mezi nezaplacenými fakturami odběratelů
+ * seděla přijatá faktura od dodavatele — účetně opačná věc, kterou od sebe
+ * odlišoval jen tříznakový kód účtu v prvním sloupci.
+ */
+type SaldoSide = 'receivable' | 'payable'
+
+const SIDE_ORDER: SaldoSide[] = ['receivable', 'payable']
+
+function sideOfAccount(normalSide: string): SaldoSide {
+  return normalSide === 'credit' ? 'payable' : 'receivable'
+}
+
 interface FlatRow extends SaldoItem {
   account_code: string
   partner_id: number
   partner_name: string
+  side: SaldoSide
 }
 
 /** Plochý rozpad accounts→partners→items, beze seskupení — zdroj pro flat pohled i export. */
@@ -55,9 +71,10 @@ const flatRows = computed<FlatRow[]>(() => {
   if (!report.value) return []
   const rows: FlatRow[] = []
   for (const acc of report.value.accounts) {
+    const side = sideOfAccount(acc.account.normal_side)
     for (const p of acc.partners) {
       for (const it of p.items) {
-        rows.push({ ...it, account_code: acc.account.code, partner_id: p.partner_id, partner_name: p.partner_name })
+        rows.push({ ...it, account_code: acc.account.code, partner_id: p.partner_id, partner_name: p.partner_name, side })
       }
     }
   }
@@ -109,6 +126,26 @@ const filteredFlatRows = computed<FlatRow[]>(() => {
     if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
     return String(av ?? '').localeCompare(String(bv ?? ''), 'cs') * dir
   })
+})
+
+/**
+ * Sestava rozdělená na pohledávky a závazky — bloky konfrontace i řádky dokladů
+ * dostane každá strana vlastní. Strana bez účtu v sestavě se vůbec nevykreslí.
+ */
+const sections = computed(() => {
+  const r = report.value
+  if (!r) return []
+  return SIDE_ORDER
+    .map(side => {
+      const rows = filteredFlatRows.value.filter(x => x.side === side)
+      return {
+        side,
+        blocks: r.accounts.filter(b => sideOfAccount(b.account.normal_side) === side),
+        rows,
+        total: Math.round(rows.reduce((s, x) => s + x.remaining_czk, 0) * 100) / 100,
+      }
+    })
+    .filter(s => s.blocks.length > 0)
 })
 
 // ── Task #3: as_of napříč obdobími — UI upozornění, když se liší od výběru ──
@@ -309,93 +346,111 @@ onMounted(async () => {
 
     <EmptyState v-else-if="!report || report.accounts.length === 0" boxed accent="neutral" icon="coin" :title="t('accounting.saldo.empty')" />
 
-    <!-- Task #2: plochý seznam dokladů — jedna tabulka napříč partnery/účty -->
+    <!-- Task #2: plochý seznam dokladů — samostatně za pohledávky a za závazky -->
     <template v-else-if="viewMode === 'flat'">
-      <!-- Konfrontace se zůstatkem hlavní knihy patří do OBOU pohledů. Dokud byla
-           jen v pohledu podle partnera, četl uživatel seznam dokladů jako úplný,
-           i když se na účtu lišil o statisíce (ruční zápisy, nezaúčtované úhrady). -->
-      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mb-4">
-        <div v-for="b in report.accounts" :key="b.account.id" class="border-b border-neutral-100 last:border-b-0">
-          <div class="px-4 py-3 grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
-            <div>
-              <div class="text-xs text-neutral-500 uppercase tracking-wide">{{ t('accounting.saldo.col_account') }}</div>
-              <div class="font-semibold">{{ accountBlockLabel(b) }}</div>
-            </div>
-            <div>
-              <div class="text-xs text-neutral-500 uppercase tracking-wide">{{ t('accounting.saldo.gl_balance') }}</div>
-              <div class="font-mono font-semibold">{{ formatMoney(b.gl_balance) }}</div>
-            </div>
-            <div>
-              <div class="text-xs text-neutral-500 uppercase tracking-wide">{{ t('accounting.saldo.open_items_total') }}</div>
-              <div class="font-mono font-semibold">{{ formatMoney(b.open_items_total) }}</div>
-            </div>
-            <div>
-              <div class="text-xs text-neutral-500 uppercase tracking-wide">{{ t('accounting.saldo.difference') }}</div>
-              <div class="font-mono font-semibold flex items-center gap-1"
-                :class="b.matches ? 'text-success-600' : 'text-danger-500'">
-                <span>{{ b.matches ? '✓' : '✗' }}</span>
-                <span>{{ formatMoney(b.difference) }}</span>
+      <div v-for="s in sections" :key="s.side" class="mb-6 last:mb-0">
+        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 mb-2">
+          <h2 class="text-base font-semibold">{{ t(`accounting.saldo.side_${s.side}`) }}</h2>
+          <span class="text-xs text-neutral-500">{{ t(`accounting.saldo.side_${s.side}_hint`) }}</span>
+        </div>
+
+        <!-- Konfrontace se zůstatkem hlavní knihy patří do OBOU pohledů. Dokud byla
+             jen v pohledu podle partnera, četl uživatel seznam dokladů jako úplný,
+             i když se na účtu lišil o statisíce (ruční zápisy, nezaúčtované úhrady). -->
+        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mb-3">
+          <div v-for="b in s.blocks" :key="b.account.id" class="border-b border-neutral-100 last:border-b-0">
+            <div class="px-4 py-3 grid grid-cols-1 sm:grid-cols-4 gap-3 text-sm">
+              <div>
+                <div class="text-xs text-neutral-500 uppercase tracking-wide">{{ t('accounting.saldo.col_account') }}</div>
+                <div class="font-semibold">{{ accountBlockLabel(b) }}</div>
+              </div>
+              <div>
+                <div class="text-xs text-neutral-500 uppercase tracking-wide">{{ t('accounting.saldo.gl_balance') }}</div>
+                <div class="font-mono font-semibold">{{ formatMoney(b.gl_balance) }}</div>
+              </div>
+              <div>
+                <div class="text-xs text-neutral-500 uppercase tracking-wide">{{ t('accounting.saldo.open_items_total') }}</div>
+                <div class="font-mono font-semibold">{{ formatMoney(b.open_items_total) }}</div>
+              </div>
+              <div>
+                <div class="text-xs text-neutral-500 uppercase tracking-wide">{{ t('accounting.saldo.difference') }}</div>
+                <div class="font-mono font-semibold flex items-center gap-1"
+                  :class="b.matches ? 'text-success-600' : 'text-danger-500'">
+                  <span>{{ b.matches ? '✓' : '✗' }}</span>
+                  <span>{{ formatMoney(b.difference) }}</span>
+                </div>
               </div>
             </div>
-          </div>
-          <div v-if="!b.matches" class="px-4 py-2 text-xs text-danger-600 bg-danger-50 border-t border-danger-500/20">
-            {{ t('accounting.saldo.difference_hint') }}
+            <div v-if="!b.matches" class="px-4 py-2 text-xs text-danger-600 bg-danger-50 border-t border-danger-500/20">
+              {{ t('accounting.saldo.difference_hint') }}
+            </div>
           </div>
         </div>
-      </div>
 
-      <EmptyState v-if="filteredFlatRows.length === 0" boxed accent="neutral" icon="search" :title="t('accounting.saldo.flat_empty')" />
-      <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
-              <tr>
-                <SortableTh :label="t('accounting.saldo.col_account')" sort-key="account_code" :sort="sort" @toggle="toggleSort" />
-                <SortableTh :label="t('accounting.saldo.col_partner')" sort-key="partner_name" :sort="sort" @toggle="toggleSort" />
-                <SortableTh :label="t('accounting.saldo.col_doc')" sort-key="doc_no" :sort="sort" @toggle="toggleSort" />
-                <SortableTh :label="t('accounting.saldo.col_issue')" sort-key="issue_date" :sort="sort" @toggle="toggleSort" />
-                <SortableTh :label="t('accounting.saldo.col_due')" sort-key="due_date" :sort="sort" @toggle="toggleSort" />
-                <SortableTh :label="t('accounting.saldo.col_overdue')" sort-key="days_overdue" :sort="sort" align="right" @toggle="toggleSort" />
-                <SortableTh :label="t('accounting.saldo.col_amount')" sort-key="booked_czk" :sort="sort" align="right" @toggle="toggleSort" />
-                <SortableTh :label="t('accounting.saldo.col_paid')" sort-key="paid_czk" :sort="sort" align="right" @toggle="toggleSort" />
-                <SortableTh :label="t('accounting.saldo.col_remaining')" sort-key="remaining_czk" :sort="sort" align="right" @toggle="toggleSort" />
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-neutral-100">
-              <tr v-for="it in filteredFlatRows" :key="`${it.account_code}-${it.doc_type}-${it.doc_id}`" class="hover:bg-neutral-50">
-                <td class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ it.account_code }}</td>
-                <td class="px-3 py-2">{{ it.partner_name }}</td>
-                <td class="px-3 py-2">
-                  <RouterLink :to="docLink(it)" class="text-primary-600 hover:text-primary-700 hover:underline font-mono">
-                    {{ it.doc_no }}
-                  </RouterLink>
-                </td>
-                <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.issue_date) }}</td>
-                <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.due_date) }}</td>
-                <td class="px-3 py-2 text-right" :class="it.days_overdue > 0 ? 'text-danger-500 font-medium' : 'text-neutral-400'">
-                  {{ it.days_overdue > 0 ? it.days_overdue : '—' }}
-                </td>
-                <td class="px-3 py-2 text-right font-mono">
-                  {{ formatMoney(it.booked_czk) }}
-                  <span v-if="it.currency_code !== 'CZK'" class="block text-xs text-neutral-400">
-                    {{ formatMoney(it.amount_foreign) }} {{ it.currency_code }}
-                  </span>
-                </td>
-                <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.paid_czk) }}</td>
-                <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.remaining_czk) }}</td>
-              </tr>
-            </tbody>
-          </table>
+        <EmptyState v-if="s.rows.length === 0" boxed accent="neutral" icon="search" :title="t('accounting.saldo.flat_empty')" />
+        <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+                <tr>
+                  <SortableTh :label="t('accounting.saldo.col_account')" sort-key="account_code" :sort="sort" @toggle="toggleSort" />
+                  <SortableTh :label="t('accounting.saldo.col_partner')" sort-key="partner_name" :sort="sort" @toggle="toggleSort" />
+                  <SortableTh :label="t('accounting.saldo.col_doc')" sort-key="doc_no" :sort="sort" @toggle="toggleSort" />
+                  <SortableTh :label="t('accounting.saldo.col_issue')" sort-key="issue_date" :sort="sort" @toggle="toggleSort" />
+                  <SortableTh :label="t('accounting.saldo.col_due')" sort-key="due_date" :sort="sort" @toggle="toggleSort" />
+                  <SortableTh :label="t('accounting.saldo.col_overdue')" sort-key="days_overdue" :sort="sort" align="right" @toggle="toggleSort" />
+                  <SortableTh :label="t('accounting.saldo.col_amount')" sort-key="booked_czk" :sort="sort" align="right" @toggle="toggleSort" />
+                  <SortableTh :label="t('accounting.saldo.col_paid')" sort-key="paid_czk" :sort="sort" align="right" @toggle="toggleSort" />
+                  <SortableTh :label="t('accounting.saldo.col_remaining')" sort-key="remaining_czk" :sort="sort" align="right" @toggle="toggleSort" />
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-neutral-100">
+                <tr v-for="it in s.rows" :key="`${it.account_code}-${it.doc_type}-${it.doc_id}`" class="hover:bg-neutral-50">
+                  <td class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ it.account_code }}</td>
+                  <td class="px-3 py-2">{{ it.partner_name }}</td>
+                  <td class="px-3 py-2">
+                    <RouterLink :to="docLink(it)" class="text-primary-600 hover:text-primary-700 hover:underline font-mono">
+                      {{ it.doc_no }}
+                    </RouterLink>
+                  </td>
+                  <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.issue_date) }}</td>
+                  <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.due_date) }}</td>
+                  <td class="px-3 py-2 text-right" :class="it.days_overdue > 0 ? 'text-danger-500 font-medium' : 'text-neutral-400'">
+                    {{ it.days_overdue > 0 ? it.days_overdue : '—' }}
+                  </td>
+                  <td class="px-3 py-2 text-right font-mono">
+                    {{ formatMoney(it.booked_czk) }}
+                    <span v-if="it.currency_code !== 'CZK'" class="block text-xs text-neutral-400">
+                      {{ formatMoney(it.amount_foreign) }} {{ it.currency_code }}
+                    </span>
+                  </td>
+                  <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.paid_czk) }}</td>
+                  <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.remaining_czk) }}</td>
+                </tr>
+              </tbody>
+              <tfoot class="bg-neutral-50 text-sm font-semibold">
+                <tr>
+                  <td class="px-3 py-2" colspan="8">{{ t(`accounting.saldo.side_${s.side}_total`) }}</td>
+                  <td class="px-3 py-2 text-right font-mono">{{ formatMoney(s.total) }}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         </div>
       </div>
     </template>
 
-    <!-- Task #2: původní pohled "podle partnera" — beze změny -->
-    <div v-else-if="viewMode === 'partner'" class="space-y-6">
-      <div v-for="b in report.accounts" :key="b.account.id"
-        class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+    <!-- Task #2: pohled "podle partnera" — účty seskupené po stranách salda -->
+    <div v-else-if="viewMode === 'partner'" class="space-y-8">
+      <div v-for="s in sections" :key="s.side" class="space-y-3">
+        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <h2 class="text-base font-semibold">{{ t(`accounting.saldo.side_${s.side}`) }}</h2>
+          <span class="text-xs text-neutral-500">{{ t(`accounting.saldo.side_${s.side}_hint`) }}</span>
+        </div>
+        <div v-for="b in s.blocks" :key="b.account.id"
+          class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <div class="px-4 py-3 border-b border-neutral-200">
-          <h2 class="text-base font-semibold">{{ accountBlockLabel(b) }}</h2>
+          <h3 class="text-sm font-semibold">{{ accountBlockLabel(b) }}</h3>
         </div>
 
         <!-- Konfrontace -->
@@ -476,6 +531,7 @@ onMounted(async () => {
               </template>
             </tbody>
           </table>
+        </div>
         </div>
       </div>
     </div>

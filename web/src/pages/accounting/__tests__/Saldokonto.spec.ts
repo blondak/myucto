@@ -198,6 +198,49 @@ describe('Saldokonto.vue', () => {
     routeQuery.value = {}
   })
 
+  it('(i) pohledávky a závazky jsou dvě oddělené tabulky, ne jeden seznam dle splatnosti', async () => {
+    // Přijatá faktura je splatná mezi vydanými — v jednom seznamu řazeném dle
+    // splatnosti seděla mezi nimi a od pohledávek ji odlišoval jen kód účtu.
+    const base = makeReport()
+    m.getSaldo.mockResolvedValue(makeReport({
+      accounts: [
+        base.accounts[0],
+        {
+          account: { id: 2, code: '321', name: 'Dodavatelé', normal_side: 'credit' as any },
+          gl_balance: 300,
+          open_items_total: 300,
+          difference: 0,
+          matches: true,
+          partners: [
+            {
+              partner_id: 20,
+              partner_name: 'Vodafone Czech Republic a.s.',
+              total_remaining: 300,
+              items: [
+                { doc_type: 'purchase_invoice', doc_id: 201, doc_no: 'PF-201', issue_date: '2099-02-01', due_date: '2099-02-20',
+                  currency_code: 'CZK', amount_foreign: 0, booked_czk: 300, paid_czk: 0, remaining_czk: 300, days_overdue: 0 },
+              ],
+            },
+          ],
+        },
+      ],
+    }))
+    const wrapper = mount(Saldokonto)
+    await flushPromises()
+
+    const tables = wrapper.findAll('table')
+    expect(tables).toHaveLength(2)
+    const receivables = tables[0].text()
+    const payables = tables[1].text()
+    expect(receivables).toContain('F-101')
+    expect(receivables).toContain('F-102')
+    expect(receivables).not.toContain('PF-201')
+    expect(payables).toContain('PF-201')
+    expect(payables).not.toContain('F-101')
+    expect(wrapper.text()).toContain('accounting.saldo.side_receivable')
+    expect(wrapper.text()).toContain('accounting.saldo.side_payable')
+  })
+
   it('(h) neexistující období z adresy nezhodí načtení, spadne na výchozí rok', async () => {
     routeQuery.value = { period_id: '999' }
     m.getSaldo.mockResolvedValue(makeReport())
