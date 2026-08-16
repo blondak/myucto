@@ -28,3 +28,9 @@ api/resources/payroll/jmhz/**/*.json text eol=lf
 # spadne na koncích řádků místo na obsahu.
 api/resources/payroll/cz-isco/SHA256SUMS text eol=lf
 api/resources/payroll/cz-isco/**/*.json text eol=lf
+
+# Otevřená data ČSSZ (sazby pojistného) se pinují otiskem staženého souboru —
+# ten má CRLF. Bez -text je git při commitu normalizoval na LF, takže otisk
+# seděl jen na Windows checkoutu a v Linuxovém CI padal na koncích řádků.
+api/resources/payroll/cssz-insurance-rates/**/*.csv -text -diff
+api/resources/payroll/cssz-insurance-rates/SHA256SUMS text eol=lf
