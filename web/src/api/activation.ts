@@ -81,7 +81,12 @@ export interface ActivationStatus {
   accounting_mode: 'tax_evidence' | 'double_entry'
   starts_on: string | null
   pending: PendingBackfillCounts
-  opening: { rows: number; balanced: boolean }
+  /**
+   * `editable` = otevírací zápis k datu zahájení jde (ještě) založit — cílové období je
+   * otevřené a otevření nepatří uzávěrce předchozího roku. Průvodce podle toho nechává
+   * krok 2 dosažitelný i po dokončené aktivaci; `blocked_reason` říká proč ne.
+   */
+  opening: { rows: number; balanced: boolean; posted: boolean; editable: boolean; blocked_reason: string | null }
   locked_until: string | null
   active_job: BackfillJob | null
   last_job: BackfillJob | null

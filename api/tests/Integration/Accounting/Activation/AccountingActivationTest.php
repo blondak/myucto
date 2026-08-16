@@ -31,6 +31,7 @@ final class AccountingActivationTest extends TestCase
     private AccountingBackfillJobRepository $jobs;
     private OpeningBalanceService $opening;
     private BackfillService $backfill;
+    private AccountingPeriodRepository $periods;
     private int $supplierId = 0;
     private int $userId = 0;
     private bool $inTx = false;
@@ -51,6 +52,7 @@ final class AccountingActivationTest extends TestCase
             $this->backfill = $container->get(BackfillService::class);
             $seeder = $container->get(ChartOfAccountsSeeder::class);
             $periods = $container->get(AccountingPeriodRepository::class);
+            $this->periods = $periods;
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
@@ -131,6 +133,127 @@ final class AccountingActivationTest extends TestCase
         self::assertSame('completed', $this->jobs->find($secondId, $this->supplierId)['status']);
         self::assertSame(1, $this->openingEntryCount(), 'Opakovaný execute nevytvořil duplicitní opening.');
         self::assertSame($firstEntryId, $this->openingEntryId(), 'Opening se přepsal in-place.');
+    }
+
+    /**
+     * Kontrola nanečisto má ostrému běhu předejít, ne ho pustit do chyby. Nad zavřeným
+     * obdobím zahájení hlásila `failed_total: 0` a teprve execute skončil `failed`
+     * s hláškou „Období zahájení účetnictví není otevřené."
+     */
+    public function testDryRunFailsWhenStartingPeriodIsNotOpen(): void
+    {
+        $draft = $this->opening->saveDraft($this->supplierId, [
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 100.00],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 100.00],
+        ]);
+        $period = $this->periods->findForDate($this->supplierId, self::STARTS_ON);
+        self::assertNotNull($period);
+        self::assertTrue($this->periods->setStatus((int) $period['id'], $this->supplierId, 'closed'));
+
+        $dryId = $this->jobs->create($this->supplierId, 'dry_run', [
+            'starts_on' => self::STARTS_ON,
+            'opening_hash' => $draft['hash'],
+            'with_rules' => false,
+        ], $this->userId);
+        try {
+            $this->backfill->run($dryId);
+        } catch (\Throwable) {
+            // Worker výjimku loguje; pro test rozhoduje uložený stav jobu.
+        }
+
+        $dry = $this->jobs->find($dryId, $this->supplierId);
+        self::assertSame('failed', $dry['status'], 'Kontrola nanečisto nesmí nad zavřeným obdobím projít.');
+        self::assertSame('period_not_open', $dry['report_json']['fatal_error']);
+        self::assertGreaterThan(0, (int) $dry['report_json']['failed_total']);
+        self::assertSame(0, $this->openingEntryCount(), 'Kontrola nanečisto nic nezapsala.');
+    }
+
+    /** Prázdná rozvaha nemá co postovat — zavřené období jí nevadí a kontrola projde. */
+    public function testDryRunWithoutOpeningRowsIgnoresClosedPeriod(): void
+    {
+        $period = $this->periods->findForDate($this->supplierId, self::STARTS_ON);
+        self::assertNotNull($period);
+        $this->periods->setStatus((int) $period['id'], $this->supplierId, 'closed');
+
+        $dryId = $this->jobs->create($this->supplierId, 'dry_run', [
+            'starts_on' => self::STARTS_ON,
+            'opening_hash' => $this->opening->draft($this->supplierId)['hash'],
+            'with_rules' => false,
+        ], $this->userId);
+        $this->backfill->run($dryId);
+
+        $dry = $this->jobs->find($dryId, $this->supplierId);
+        self::assertSame('completed', $dry['status']);
+        self::assertSame('skipped', $dry['report_json']['phases']['opening']['status']);
+    }
+
+    /**
+     * Po dokončené aktivaci musí zůstat cesta zpět k otevírací rozvaze, dokud je cílové
+     * období otevřené — jinak chybějící počáteční stavy nejde doplnit už nikdy.
+     */
+    public function testOpeningStaysEditableAfterCompletedActivation(): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE supplier SET accounting_mode = 'double_entry', accounting_activation_status = 'completed' WHERE id = ?"
+        )->execute([$this->supplierId]);
+
+        $payload = $this->json($this->action->status($this->request('GET'), new Psr7Response()));
+        self::assertTrue($payload['opening']['editable'], 'Rozvahu lze doplnit i po aktivaci.');
+        self::assertFalse($payload['opening']['posted'], 'Přeskočená rozvaha nemá otevírací zápis.');
+        self::assertNull($payload['opening']['blocked_reason']);
+
+        $period = $this->periods->findForDate($this->supplierId, self::STARTS_ON);
+        $this->periods->setStatus((int) $period['id'], $this->supplierId, 'closed');
+
+        $closed = $this->json($this->action->status($this->request('GET'), new Psr7Response()));
+        self::assertFalse($closed['opening']['editable'], 'Nad zavřeným obdobím už rozvahu doplnit nejde.');
+        self::assertSame('period_not_open', $closed['opening']['blocked_reason']);
+    }
+
+    /** Zaúčtovanou rozvahu průvodce nenabízí doplnit — `posted` to rozliší od přeskočené. */
+    public function testStatusReportsPostedOpeningEntry(): void
+    {
+        $this->opening->saveDraft($this->supplierId, [
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 250.00],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 250.00],
+        ]);
+        $this->opening->post($this->supplierId, self::STARTS_ON, ['user_id' => $this->userId]);
+
+        $payload = $this->json($this->action->status($this->request('GET'), new Psr7Response()));
+        self::assertTrue($payload['opening']['posted']);
+        self::assertTrue($payload['opening']['editable']);
+    }
+
+    /**
+     * U rozvahy o víc řádcích je konkrétní důvod jediná použitelná informace — server
+     * proto vedle zprávy vrací i index vadného řádku, aby ho rozhraní umělo ukázat.
+     */
+    public function testInvalidOpeningRowReturnsReasonAndRowIndex(): void
+    {
+        $request = $this->request('PUT')->withParsedBody(['rows' => [
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 100.00],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 0],
+        ]]);
+        $response = $this->action->saveOpening($request, new Psr7Response());
+        $payload = $this->json($response);
+
+        self::assertSame(400, $response->getStatusCode());
+        self::assertSame('validation_failed', $payload['error']['code']);
+        self::assertSame(1, $payload['error']['row'], 'Chyba ukazuje na druhý řádek.');
+        self::assertStringContainsString('částka musí být kladná', $payload['error']['message']);
+    }
+
+    /** Dvakrát tentýž účet na téže straně hlásí SVŮJ kód a SVŮJ řádek, ne obecné „údaje nejsou platné". */
+    public function testDuplicateAccountSideReturnsAccountCodeAndRowIndex(): void
+    {
+        $request = $this->request('PUT')->withParsedBody(['rows' => [
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 100.00],
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 50.00],
+        ]]);
+        $payload = $this->json($this->action->saveOpening($request, new Psr7Response()));
+
+        self::assertSame(1, $payload['error']['row']);
+        self::assertStringContainsString('211', $payload['error']['message']);
     }
 
     public function testUnbalancedOpeningBlocksExecuteBeforeJobCreation(): void

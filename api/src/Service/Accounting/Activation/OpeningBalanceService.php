@@ -74,6 +74,61 @@ final class OpeningBalanceService
         return $this->replace($supplierId, $rows, 'manual');
     }
 
+    /**
+     * Read-only odpověď na otázku „půjde otevírací zápis k tomuto datu vůbec založit?".
+     *
+     * Jediný zdroj pravdy pro tři místa, která se ptají na totéž: ostré zaúčtování
+     * ({@see post()}), kontrola nanečisto (dřív hlásila `failed_total: 0` i nad
+     * zavřeným obdobím a pustila uživatele do ostrého běhu, který skončil `failed`)
+     * a stav průvodce (rozvahu smí doplnit, dokud je cílové období otevřené).
+     *
+     * Nic nezakládá: období, které ještě neexistuje, si post() vytvoří jako otevřené,
+     * takže překážka to není.
+     *
+     * @return array{code:string, message:string, status:int}|null null = zápis projde
+     */
+    public function postBlocker(int $supplierId, string $startsOn): ?array
+    {
+        $previousDay = (new \DateTimeImmutable($startsOn))->modify('-1 day')->format('Y-m-d');
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM accounting_periods
+              WHERE supplier_id = ? AND ends_on = ? AND status IN ('closing','closed','approved') LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $previousDay]);
+        if ($stmt->fetchColumn() !== false) {
+            return [
+                'code' => 'opening_owned_by_closing',
+                'message' => 'Otevírací zápis patří uzávěrce předchozího období.',
+                'status' => 409,
+            ];
+        }
+
+        $period = $this->periods->findForDate($supplierId, $startsOn);
+        if ($period !== null && (string) $period['status'] !== 'open') {
+            return [
+                'code' => 'period_not_open',
+                'message' => 'Období zahájení účetnictví není otevřené.',
+                'status' => 422,
+            ];
+        }
+        return null;
+    }
+
+    /** Má už firma otevírací zápis k datu zahájení? Rozhoduje o tom, zda ho průvodce nabídne doplnit. */
+    public function isPosted(int $supplierId, string $startsOn): bool
+    {
+        $period = $this->periods->findForDate($supplierId, $startsOn);
+        if ($period === null) {
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM journal_entries
+              WHERE supplier_id = ? AND source_type = 'opening' AND source_id = ? LIMIT 1"
+        );
+        $stmt->execute([$supplierId, (int) $period['id']]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     public function post(int $supplierId, string $startsOn, array $meta): array
     {
         $draft = $this->draft($supplierId);
@@ -84,17 +139,14 @@ final class OpeningBalanceService
             throw new PostingException('opening_unbalanced', 'Otevírací rozvaha není vyrovnaná.', 422);
         }
 
-        $previousDay = (new \DateTimeImmutable($startsOn))->modify('-1 day')->format('Y-m-d');
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT id, status FROM accounting_periods
-              WHERE supplier_id = ? AND ends_on = ? AND status IN ('closing','closed','approved') LIMIT 1"
-        );
-        $stmt->execute([$supplierId, $previousDay]);
-        if ($stmt->fetchColumn() !== false) {
-            throw new PostingException('opening_owned_by_closing', 'Otevírací zápis patří uzávěrce předchozího období.', 409);
+        $blocker = $this->postBlocker($supplierId, $startsOn);
+        if ($blocker !== null) {
+            throw new PostingException($blocker['code'], $blocker['message'], $blocker['status']);
         }
 
         $period = $this->periods->ensureOpenPeriodFor($supplierId, $startsOn);
+        // Pojistka proti souběhu: mezi postBlocker() a tímhle řádkem mohla uzávěrka
+        // období zavřít. Kontrola nad již načteným řádkem, takže stojí nula dotazů.
         if ((string) $period['status'] !== 'open') {
             throw new PostingException('period_not_open', 'Období zahájení účetnictví není otevřené.', 422);
         }
@@ -146,17 +198,23 @@ final class OpeningBalanceService
     {
         $clean = [];
         $seen = [];
-        foreach ($rows as $row) {
-            if (!is_array($row)) throw new PostingException('validation_failed', 'Řádek rozvahy není platný.', 400);
+        // Index řádku putuje do PostingException::$context → do JSON chyby → do editoru,
+        // který dotčený řádek zvýrazní. Bez něj uživatel u dvacetiřádkové rozvahy jen
+        // čte, že „něco" je špatně, a hledá to metodou pokus-omyl.
+        foreach (array_values($rows) as $index => $row) {
+            $at = ['row' => $index];
+            if (!is_array($row)) throw new PostingException('validation_failed', 'Řádek rozvahy není platný.', 400, $at);
             $code = trim((string) ($row['account_code'] ?? ''));
             $side = (string) ($row['side'] ?? '');
             $amount = round((float) ($row['amount'] ?? 0), 2);
-            if ($code === '701') throw new PostingException('opening_701_forbidden', 'Účet 701 doplní systém automaticky.', 400);
+            if ($code === '701') throw new PostingException('opening_701_forbidden', 'Účet 701 doplní systém automaticky.', 400, $at);
             $account = $this->accounts->findByCode($supplierId, $code);
-            if ($account === null || !$account['is_active']) throw new PostingException('validation_failed', 'Účet ' . $code . ' není v aktivní účtové osnově.', 400);
-            if (!in_array($side, ['debit', 'credit'], true) || $amount <= 0) throw new PostingException('validation_failed', 'Strana musí být MD nebo D a částka musí být kladná.', 400);
+            // Kód účtu je schválně až na konci věty: ErrorCatalog umí prefix-match, takže
+            // hláška s proměnnou zůstane přeložitelná (jinak by v EN zůstala česky).
+            if ($account === null || !$account['is_active']) throw new PostingException('validation_failed', 'Účet není v aktivní účtové osnově: ' . $code, 400, $at);
+            if (!in_array($side, ['debit', 'credit'], true) || $amount <= 0) throw new PostingException('validation_failed', 'Strana musí být MD nebo D a částka musí být kladná.', 400, $at);
             $key = $code . ':' . $side;
-            if (isset($seen[$key])) throw new PostingException('validation_failed', 'Účet ' . $code . ' je na stejné straně uveden vícekrát.', 400);
+            if (isset($seen[$key])) throw new PostingException('validation_failed', 'Účet je na stejné straně uveden vícekrát: ' . $code, 400, $at);
             $seen[$key] = true;
             $clean[] = [
                 'account_code' => $code,

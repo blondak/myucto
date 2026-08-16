@@ -63,12 +63,22 @@ final class AccountingActivationAction
         $lock = $this->db->pdo()->prepare('SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ?');
         $lock->execute([$supplierId]);
         $lockedUntil = $lock->fetchColumn();
+        // `editable` drží průvodce průchodným i po dokončené aktivaci: dokud jde
+        // otevírací zápis založit, musí být krok „Otevírací rozvaha" dosažitelný.
+        // Bez toho se chybějící počáteční stavy nedaly doplnit už nikdy.
+        $blocker = $startsOn === null ? null : $this->opening->postBlocker($supplierId, $startsOn);
         return [
             'activation_status' => (string) $supplier['accounting_activation_status'],
             'accounting_mode' => (string) $supplier['accounting_mode'],
             'starts_on' => $startsOn,
             'pending' => $this->pending->count($supplierId, $startsOn),
-            'opening' => ['rows' => count($draft['rows']), 'balanced' => $draft['totals']['balanced']],
+            'opening' => [
+                'rows' => count($draft['rows']),
+                'balanced' => $draft['totals']['balanced'],
+                'posted' => $startsOn !== null && $this->opening->isPosted($supplierId, $startsOn),
+                'editable' => $startsOn !== null && $blocker === null,
+                'blocked_reason' => $blocker['code'] ?? null,
+            ],
             'locked_until' => $lockedUntil === false || $lockedUntil === null ? null : (string) $lockedUntil,
             'active_job' => $this->jobs->activeForTenant($supplierId),
             'last_job' => $this->jobs->lastForTenant($supplierId),
@@ -116,7 +126,8 @@ final class AccountingActivationAction
                 is_array($body['rows'] ?? null) ? $body['rows'] : [],
             ));
         } catch (PostingException $e) {
-            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            // $context nese index vadného řádku — editor podle něj chybu ukáže na místě.
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->context);
         }
     }
 
@@ -130,7 +141,7 @@ final class AccountingActivationAction
         try {
             return Json::ok($response, $this->opening->prefill($supplierId, $asOf));
         } catch (PostingException $e) {
-            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->context);
         }
     }
 

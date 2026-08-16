@@ -6,7 +6,7 @@ import { ICONS, btnOutlineSm } from '@/components/ui/buttonStyles'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
-const props = defineProps<{ modelValue: OpeningBalanceRow[] }>()
+const props = defineProps<{ modelValue: OpeningBalanceRow[]; invalidIndex?: number | null }>()
 const emit = defineEmits<{ 'update:modelValue': [OpeningBalanceRow[]] }>()
 const { t } = useI18n()
 
@@ -23,6 +23,12 @@ const pageOffset = computed(() => (page.value - 1) * perPage)
 const pagedRows = computed(() => rows.value.slice(pageOffset.value, pageOffset.value + perPage))
 watch(() => rows.value.length, length => {
   page.value = Math.min(page.value, Math.max(1, Math.ceil(length / perPage)))
+})
+// Server u zamítnuté rozvahy hlásí index vadného řádku — přelistujeme na něj, ať ho
+// uživatel nehledá po stránkách podle textu hlášky.
+watch(() => props.invalidIndex, index => {
+  if (typeof index !== 'number' || index < 0 || index >= rows.value.length) return
+  page.value = Math.floor(index / perPage) + 1
 })
 
 function addRow() {
@@ -44,7 +50,7 @@ const money = (value: number) => new Intl.NumberFormat('cs-CZ', { minimumFractio
           <tr><th class="px-3 py-2">{{ t('activation.account') }}</th><th class="px-3 py-2">{{ t('activation.side') }}</th><th class="px-3 py-2">{{ t('activation.amount') }}</th><th class="px-3 py-2">{{ t('activation.note') }}</th><th class="w-12"></th></tr>
         </thead>
         <tbody class="divide-y divide-neutral-100">
-          <tr v-for="(row, index) in pagedRows" :key="pageOffset + index">
+          <tr v-for="(row, index) in pagedRows" :key="pageOffset + index" :class="pageOffset + index === invalidIndex ? 'bg-danger-50' : ''">
             <td class="px-3 py-2"><input v-model.trim="row.account_code" class="h-9 w-28 rounded-md border border-neutral-300 px-2 font-mono" maxlength="10" /><span v-if="row.account_name" class="ml-2 text-xs text-neutral-500">{{ row.account_name }}</span></td>
             <td class="px-3 py-2"><select v-model="row.side" class="h-9 rounded-md border border-neutral-300 px-2"><option value="debit">MD</option><option value="credit">D</option></select></td>
             <td class="px-3 py-2"><input v-model.number="row.amount" type="number" min="0.01" step="0.01" class="h-9 w-36 rounded-md border border-neutral-300 px-2 text-right font-mono" /></td>

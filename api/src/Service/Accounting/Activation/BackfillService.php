@@ -66,6 +66,17 @@ final class BackfillService
             if ($opening['rows'] === []) {
                 $report['phases']['opening'] = ['status' => 'skipped'];
             } elseif ($dryRun) {
+                // Kontrola nanečisto musí narazit na TOTÉŽ, na co narazí ostrý běh.
+                // Dřív se ptala jen na vyrovnanost, takže nad zavřeným obdobím hlásila
+                // failed_total: 0 — a teprve ostrý běh skončil ve stavu failed.
+                $blocker = $this->opening->postBlocker($supplierId, $startsOn);
+                if ($blocker !== null) {
+                    throw new \MyInvoice\Service\Accounting\PostingException(
+                        $blocker['code'],
+                        $blocker['message'],
+                        $blocker['status'],
+                    );
+                }
                 $report['phases']['opening'] = ['status' => 'checked', 'rows' => count($opening['rows'])];
             } else {
                 $posted = $this->opening->post($supplierId, $startsOn, ['user_id' => $userId, 'posted_by' => $userId]);

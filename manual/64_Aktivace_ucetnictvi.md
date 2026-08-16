@@ -50,6 +50,15 @@ vyrovnaný na haléř. Uložení nahrazuje celý koncept v jedné transakci a vr
 hash normalizovaných řádků. Tento hash váže pozdější dry-run k přesné verzi
 počátečních stavů.
 
+Zamítnutá rozvaha se nevrací jako obecná chyba: server pojmenuje důvod (nulová
+částka, účet mimo osnovu, dvakrát tentýž účet na téže straně) a označí řádek,
+který ji způsobil. Průvodce na ten řádek přelistuje a zvýrazní ho.
+
+Přeskočení rozvahy je vedlejší akce s potvrzením, ne hlavní tlačítko. Prázdný
+výsledek předvyplnění neznamená, že firma počáteční stavy nemá: předvyplnění umí
+najít jen zůstatky vedené v této aplikaci, takže u firmy přecházející z jiného
+programu nenajde nic, i když počáteční stavy existují.
+
 ### 64.3.1 Předvyplnění z přechodového můstku
 
 Akce **Předvyplnit** sestaví návrh k dni předcházejícímu zahájení:
@@ -90,10 +99,29 @@ Pokud předchozí den patří uzavíranému, uzavřenému nebo schválenému obd
 otevření už vlastní uzávěrka předchozího období a aktivační zápis se odmítne.
 Opakovaný běh používá stejné `source_type + source_id`, takže zápis neduplikuje.
 
+### 64.3.3 Doplnění rozvahy po dokončené aktivaci
+
+Kroky průvodce jsou obousměrné: na krok **Otevírací rozvaha** se dostaneš
+kliknutím ve stepperu, dokud je období zahájení otevřené. Platí to i po dokončené
+aktivaci — protokol navíc nabídne tlačítko **Doplnit otevírací rozvahu**, pokud
+firma otevírací zápis nemá.
+
+Postup doplnění: zadej řádky, ulož, spusť znovu kontrolu nanečisto a doúčtování.
+Vznikne otevírací zápis; existující zápisy se díky idempotentnímu zdrojovému
+klíči nezdvojí. Změna rozvahy mění hash, takže ostrý běh bez nové kontroly
+skončí na `dry_run_required`.
+
+Cestu zpět zavírá až uzavřené (uzavírané, schválené) období: pak otevření vlastní
+uzávěrka předchozího roku a počáteční stavy patří do ní. Krok **Datum zahájení**
+se po dokončené aktivaci nezpřístupní vůbec — přepsal by datum přechodu a vrátil
+stav na `draft`.
+
 ## 64.4 Krok 3 — kontrola nanečisto
 
 Dry-run vytvoří background úlohu a projde stejné fáze jako ostrý běh, ale nic
-nezaúčtuje:
+nezaúčtuje. Ověřuje i předpoklady, na kterých by ostrý běh spadl — u neprázdné
+rozvahy zejména to, že období zahájení je otevřené a že otevření nepatří
+uzávěrce předchozího roku:
 
 1. kontrola otevírací rozvahy,
 2. vydané a přijaté doklady,
@@ -185,6 +213,8 @@ stavy, joby a zrušení vyžadují administrátorské
 |---|---|
 | `opening_unbalanced` | Doplň protistranu nebo oprav částku |
 | `opening_empty` | Otevírací rozvaha neobsahuje žádný řádek |
+| `period_not_open` | Období zahájení není otevřené; otevři je v účetních obdobích |
+| `opening_owned_by_closing` | Otevírací zápis patří uzávěrce předchozího roku |
 | `dry_run_required` | Změnila se data; spusť znovu kontrolu |
 | `job_already_running` | Počkej na aktivní job nebo jej řízeně zruš |
 | `remaining/period/lock` | Zdrojová data či období se od náhledu změnily |

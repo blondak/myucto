@@ -99,6 +99,17 @@ final class ErrorCatalog
         'iso2 musí být 2 znaky.' => '"iso2" must be 2 characters.',
         'mode musí být "internal" nebo "credit_note".' => '"mode" must be "internal" or "credit_note".',
         'Žádný platný příjemce (chybí email klienta).' => 'No valid recipient (client email missing).',
+        // Otevírací rozvaha aktivace — rozhraní tyhle věty ukazuje doslova (jsou to jediné
+        // místo, kde je vidět KTERÝ řádek je vadný), takže musí být přeložitelné.
+        'Otevírací zápis patří uzávěrce předchozího období.' => 'The opening entry belongs to the previous period closing.',
+        'Období zahájení účetnictví není otevřené.' => 'The accounting start period is not open.',
+        'Otevírací rozvaha není vyrovnaná.' => 'The opening balance is not balanced.',
+        'Otevírací rozvaha neobsahuje žádné řádky.' => 'The opening balance has no rows.',
+        'Strana musí být MD nebo D a částka musí být kladná.' => 'Side must be Dr or Cr and the amount must be positive.',
+        'Řádek rozvahy není platný.' => 'The opening balance row is not valid.',
+        'Účet 701 doplní systém automaticky.' => 'Account 701 is added by the system automatically.',
+        'Účet není v aktivní účtové osnově: ' => 'Account is not in the active chart of accounts: ',
+        'Účet je na stejné straně uveden vícekrát: ' => 'The account appears twice on the same side: ',
         // Časté hlášky používané v jednom callsite, ale stejný text se opakuje (např. not_found):
         'Klient nenalezen.' => 'Client not found.',
         'Faktura nenalezena.' => 'Invoice not found.',
