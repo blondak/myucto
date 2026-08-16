@@ -211,6 +211,10 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollPersonProfileStatus' =>
             'Sloupec `payroll_employee_profiles.profile_status` zná legacy/setup/ready; '
             . '`missing` je čistě klientský stav „profil ještě nevznikl" a v DB být nemůže.',
+        'payroll.ts::PayrollPersonSetupGap' =>
+            'Co osobě chybí, aby na ni šlo spustit mzdy. Klíče skládá '
+            . 'PayrollPeopleRepository::setupGapExpressions() z existenčních dotazů '
+            . 'nad čtyřmi tabulkami; uložená hodnota to není a sloupec pro ni neexistuje.',
         'payroll.ts::PayrollComponentJmhzMappingStatus' =>
             'Odvozený stav vazby složky na JMHZ — klient ho skládá z `jmhz_treatment` '
             . 'a existence mapování, backend takovou hodnotu neposílá.',

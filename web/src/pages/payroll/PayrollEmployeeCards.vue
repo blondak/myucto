@@ -36,6 +36,7 @@ const loading = ref(true)
 const failed = ref(false)
 const rows = ref<PayrollQuickInputRow[]>([])
 const absences = ref<PayrollAbsence[]>([])
+const headcount = ref(0)
 const search = ref('')
 const statusFilter = ref<StatusFilter>('active')
 
@@ -173,14 +174,19 @@ async function load() {
   failed.value = false
   const range = periodRange(props.period)
   try {
-    const [month, monthAbsences] = await Promise.all([
+    const [month, monthAbsences, people] = await Promise.all([
       payrollApi.quickInputs(props.period),
       // Nepřítomnosti jsou doplněk, ne podmínka — když je uživatel nesmí číst,
       // karty se stejně vykreslí, jen bez odznaku „je pryč".
       payrollAbsenceApi.absences(range.from, range.to).catch(() => [] as PayrollAbsence[]),
+      // Kolik lidí firma vůbec má. Bez toho přehled tvrdil „Zatím žádný
+      // zaměstnanec" i firmě, která zaměstnance má — jen žádný z nich nebyl
+      // v tomhle měsíci na výplatní listině.
+      payrollApi.peopleOptions().catch(() => []),
     ])
     rows.value = month.items
     absences.value = monthAbsences
+    headcount.value = people.length
   } catch {
     failed.value = true
     rows.value = []
@@ -226,12 +232,27 @@ onMounted(load)
       {{ t('payroll.employee_cards.load_failed') }}
     </p>
 
-    <div v-else-if="rows.length === 0" class="mt-4 rounded-lg border border-dashed border-neutral-300 p-8 text-center">
-      <h3 class="text-base font-semibold text-neutral-900">{{ t('payroll.employee_cards.empty_title') }}</h3>
-      <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.employee_cards.empty_hint') }}</p>
+    <!--
+      Dva různé prázdné stavy. „Firma nemá nikoho" a „nikdo není v tomhle měsíci
+      na listině" vypadaly stejně, takže přehled tvrdil, že zaměstnanci nejsou,
+      i když byli — jen měli vztah ve stavu plánovaný nebo archivovaný.
+    -->
+    <div v-else-if="rows.length === 0" class="mt-4 rounded-lg border border-dashed border-neutral-300 p-8 text-center" data-test="employee-cards-empty">
+      <h3 class="text-base font-semibold text-neutral-900">
+        {{ headcount === 0
+          ? t('payroll.employee_cards.empty_title')
+          : t('payroll.employee_cards.none_active_title') }}
+      </h3>
+      <p class="mt-1 text-sm text-neutral-500">
+        {{ headcount === 0
+          ? t('payroll.employee_cards.empty_hint')
+          : t('payroll.employee_cards.none_active_hint') }}
+      </p>
       <RouterLink :to="{ name: 'payroll-people' }" :class="[btnOutline('primary'), 'mt-4']">
-        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
-        {{ t('payroll.employee_cards.empty_action') }}
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="headcount === 0 ? ICONS.plus : ICONS.user" /></svg>
+        {{ headcount === 0
+          ? t('payroll.employee_cards.empty_action')
+          : t('payroll.employee_cards.none_active_action') }}
       </RouterLink>
     </div>
 

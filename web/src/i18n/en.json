@@ -1880,7 +1880,14 @@
                 "active": "Active",
                 "inactive": "Inactive"
             },
-            "needs_setup": "Setup required",
+            "needs_setup": "Missing",
+            "setup_gap": {
+                "name": "first and last name",
+                "residence": "residence",
+                "contact": "contact",
+                "identifier": "birth number (or ECP/VCP)",
+                "employment": "employment relationship"
+            },
             "edit_person": "Edit employee",
             "back_to_list": "Back to the list",
             "employments_title": "Employment relationships",
@@ -2218,7 +2225,7 @@
             "terms_saved": "A new version of the contractual terms has been saved.",
             "mutation_failed": "The employment relationship could not be updated.",
             "transition_saved": "The employment status has been changed.",
-            "transition_date": "Status change effective date",
+            "transition_date": "Status change on",
             "effective_from": "Terms effective from",
             "planned_start": "Planned start",
             "actual_start": "Actual start",
@@ -2281,6 +2288,7 @@
             "hide_detail": "Hide",
             "timeline_title": "Timeline and changes",
             "complete": "Complete",
+            "not_applicable": "Not applicable",
             "reopen": "Reopen",
             "start_date": "From",
             "end_date": "To",
@@ -2300,7 +2308,8 @@
                 "suspended": "Suspend",
                 "ended": "End",
                 "archived": "Archive",
-                "no_show": "Mark no show"
+                "no_show": "Mark no show",
+                "unarchive": "Restore from archive"
             },
             "transition_confirm": {
                 "ended": "End the employment relationship on the selected date?",
@@ -3459,6 +3468,9 @@
             "empty_title": "No employees yet",
             "empty_hint": "Add the first person and their employment — their card will show up here.",
             "empty_action": "Add employee",
+            "none_active_title": "No employee is paid for this period",
+            "none_active_hint": "You do have employees, but none of their employment relationships is running this month — usually a start that was never confirmed, or a relationship that already ended. Open the employee and check the relationship status.",
+            "none_active_action": "Open employees",
             "search": "Search",
             "search_placeholder": "Name or employment code",
             "no_results": "No employee matches the filter.",

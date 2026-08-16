@@ -130,8 +130,80 @@ final class PayrollRunScaleFixture
              VALUES (?, ?, "ready")',
             [$this->supplierId, $id],
         );
+        $this->completeProfile($id, $index);
 
         return $id;
+    }
+
+    /**
+     * Strukturované jméno, bydliště, primární kontakt a osobní identifikátor.
+     *
+     * Bez nich osoba není hotová, i když má `profile_status = ready`: příznak
+     * „vyžaduje doplnění" se odvozuje z těchto čtyř podmínek, ne z ručně
+     * přepínaného stavu. Fixture, která seedne jen stav, by tedy tvrdila,
+     * že je osoba kompletní, a přitom by jí chyběly všechny údaje.
+     *
+     * Šifrované sloupce nesou syntetickou hodnotu — nic z toho se nedešifruje,
+     * kontroluje se jen existence řádku.
+     *
+     * Identita má schválně velmi staré `effective_from`: účinné jméno se čte
+     * z NEJNOVĚJŠÍHO řádku historie, takže test, který osobu přejmenuje vlastním
+     * řádkem, musí zůstat ten účinný.
+     */
+    private function completeProfile(int $employeeId, int $index): void
+    {
+        $this->exec(
+            'INSERT INTO payroll_person_identity_history
+                (id, supplier_id, employee_id, full_name, first_name, last_name,
+                 effective_from)
+             VALUES (?, ?, ?, ?, "Syntetická", ?, "2000-01-01")',
+            [
+                $this->id(17, $index),
+                $this->supplierId,
+                $employeeId,
+                'Syntetická osoba ' . ($index + 1),
+                'Osoba ' . ($index + 1),
+            ],
+        );
+        $this->exec(
+            'INSERT INTO payroll_person_addresses
+                (id, supplier_id, employee_id, address_type, street_line, city,
+                 postal_code, country_code, effective_from)
+             VALUES (?, ?, ?, "residence", ?, "Praha", "11000", "CZ", "2026-01-01")',
+            [
+                $this->id(18, $index),
+                $this->supplierId,
+                $employeeId,
+                sprintf('Syntetická %d', $index + 1),
+            ],
+        );
+        $this->exec(
+            'INSERT INTO payroll_person_contacts
+                (id, supplier_id, employee_id, contact_type,
+                 contact_value_ciphertext, contact_value_hash,
+                 contact_value_masked, is_primary, is_active)
+             VALUES (?, ?, ?, "email", "synthetic-ciphertext", ?, ?, 1, 1)',
+            [
+                $this->id(19, $index),
+                $this->supplierId,
+                $employeeId,
+                hash('sha256', "scale-contact:{$employeeId}", true),
+                sprintf('s****%d@example.invalid', $index),
+            ],
+        );
+        $this->exec(
+            'INSERT INTO payroll_person_identifiers
+                (id, supplier_id, employee_id, identifier_type,
+                 value_ciphertext, value_hash, value_masked)
+             VALUES (?, ?, ?, "birth_number", "synthetic-ciphertext", ?, ?)',
+            [
+                $this->id(20, $index),
+                $this->supplierId,
+                $employeeId,
+                hash('sha256', "scale-identifier:{$employeeId}", true),
+                sprintf('******%04d', $index % 10_000),
+            ],
+        );
     }
 
     private function employment(int $employeeId, int $index, int $slot): int

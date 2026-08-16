@@ -234,16 +234,19 @@ final class PayrollPeopleListScaleTest extends TestCase
     /**
      * Filtr „k doplnění" se musí shodovat s příznakem `needs_setup` na řádku.
      *
-     * Dva různé důvody, tentýž závěr: nehotový profil a žádný pracovní vztah.
-     * Kdyby filtr četl jen jeden z nich, seznam by nabízel osobu s výstražným
-     * štítkem, kterou by pak sám nenašel.
+     * Dva různé důvody, tentýž závěr: chybějící údaj profilu a žádný pracovní
+     * vztah. Kdyby filtr četl jen jeden z nich, seznam by nabízel osobu
+     * s výstražným štítkem, kterou by pak sám nenašel.
+     *
+     * Mezera se dělá SMAZÁNÍM bydliště, ne přepnutím `profile_status` — ten je
+     * ručně nastavovaný a příznak se z něj schválně neodvozuje.
      */
     public function testNeedsSetupFilterAgreesWithTheFlagOnTheRow(): void
     {
         $this->seed(6);
         $ids = $this->employeeIds();
         $this->exec(
-            'UPDATE payroll_employee_profiles SET profile_status = "setup"
+            'DELETE FROM payroll_person_addresses
               WHERE supplier_id = ? AND employee_id = ?',
             [$this->supplierId, $ids[0]],
         );
@@ -370,10 +373,19 @@ final class PayrollPeopleListScaleTest extends TestCase
         return $id;
     }
 
+    /**
+     * Přejmenování musí projít i historií identit — účinné jméno se čte z ní
+     * a sloupec `payroll_employees.full_name` je jen záložní zdroj.
+     */
     private function rename(int $employeeId, string $fullName): void
     {
         $this->exec(
             'UPDATE payroll_employees SET full_name = ? WHERE supplier_id = ? AND id = ?',
+            [$fullName, $this->supplierId, $employeeId],
+        );
+        $this->exec(
+            'UPDATE payroll_person_identity_history SET full_name = ?
+              WHERE supplier_id = ? AND employee_id = ?',
             [$fullName, $this->supplierId, $employeeId],
         );
     }

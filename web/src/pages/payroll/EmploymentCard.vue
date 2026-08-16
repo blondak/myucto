@@ -190,7 +190,10 @@ function selectMunicipality(code: string | null) {
 
 async function transition(target: PayrollEmploymentStatus) {
   if (!transitionDate.value || busy.value) return
-  if (['ended', 'archived', 'no_show'].includes(target)
+  // Návrat z archivu míří na `ended`/`no_show`, ale nic neukončuje — ptát se
+  // „Ukončit pracovní vztah?" by uživateli tvrdilo opak toho, co dělá.
+  if (props.employment.status !== 'archived'
+      && ['ended', 'archived', 'no_show'].includes(target)
       && !window.confirm(t(`payroll.people.transition_confirm.${target}`))) return
 
   busy.value = true
@@ -282,9 +285,14 @@ async function removeEmployment() {
 }
 
 const actions = computed<ActionItem[]>(() => [
-  ...transitionPresentation(props.employment.allowed_transitions).map(presentation => ({
+  ...transitionPresentation(
+    props.employment.allowed_transitions,
+    props.employment.status,
+  ).map(presentation => ({
     key: `transition-${presentation.target}`,
-    label: t(`payroll.people.transition.${presentation.target}`),
+    label: props.employment.status === 'archived'
+      ? t('payroll.people.transition.unarchive')
+      : t(`payroll.people.transition.${presentation.target}`),
     icon: presentation.icon,
     tier: presentation.tier,
     variant: presentation.variant,
@@ -348,8 +356,13 @@ const actions = computed<ActionItem[]>(() => [
         <p v-if="employmentCodeLabel(employment.code) || employment.office_name" data-test="employment-code" class="mt-1 text-xs text-neutral-500">{{ employmentCodeLabel(employment.code) }}<template v-if="employment.office_name"><template v-if="employmentCodeLabel(employment.code)"> · </template>{{ employment.office_name }}</template></p>
       </div>
       <div class="flex items-center gap-2">
-        <label v-if="canWrite && employment.allowed_transitions.length && expanded" class="text-xs text-neutral-500">
-          <span class="sr-only">{{ t('payroll.people.transition_date') }}</span>
+        <!--
+          Datum NENÍ údaj vztahu, který by se ukládal — je to účinnost pro
+          tlačítka pod ním. Bez viditelného popisku vypadalo jako políčko
+          k vyplnění a uživatel k němu marně hledal „Uložit".
+        -->
+        <label v-if="canWrite && employment.allowed_transitions.length && expanded" class="flex items-center gap-1.5 text-xs text-neutral-500">
+          {{ t('payroll.people.transition_date') }}
           <input v-model="transitionDate" type="date" class="h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm text-neutral-800">
         </label>
         <button
@@ -459,8 +472,16 @@ const actions = computed<ActionItem[]>(() => [
               <p class="font-medium text-neutral-800">{{ t(`payroll.people.checklist.${item.item_key}`) }}</p>
               <p class="text-neutral-500">{{ formatDate(item.due_date) }} · {{ t(`payroll.people.checklist_status.${item.status}`) }}</p>
             </div>
+            <!--
+              „Netýká se" model uměl od začátku, ale karta nabízela jen splnit
+              a vrátit — nešlo tedy říct, že povinnost na tenhle vztah nesedí
+              (prohlášení k dani u někoho, kdo ho podepsal u jiného plátce).
+            -->
             <div v-if="canWrite" class="flex flex-wrap gap-1">
-              <button v-if="item.status !== 'completed'" type="button" :class="btnOutlineSm('success')" :disabled="busy" @click="setChecklist(item.item_key, item.row_version, 'completed')">{{ t('payroll.people.complete') }}</button>
+              <template v-if="item.status === 'pending'">
+                <button type="button" :class="btnOutlineSm('success')" :disabled="busy" @click="setChecklist(item.item_key, item.row_version, 'completed')">{{ t('payroll.people.complete') }}</button>
+                <button type="button" :class="btnOutlineSm('neutral')" :disabled="busy" :data-test="`checklist-na-${item.item_key}`" @click="setChecklist(item.item_key, item.row_version, 'not_applicable')">{{ t('payroll.people.not_applicable') }}</button>
+              </template>
               <button v-else type="button" :class="btnOutlineSm('neutral')" :disabled="busy" @click="setChecklist(item.item_key, item.row_version, 'pending')">{{ t('payroll.people.reopen') }}</button>
             </div>
           </div>

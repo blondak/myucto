@@ -156,6 +156,20 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         $archived = $this->transition($ended, 'archived', '2027-01-02');
         self::assertSame('archived', $archived['status']);
         self::assertNotNull($archived['archived_at']);
+
+        /*
+         * Archiv není slepá ulička: nabídne se JEDINÝ návrat, a to do stavu,
+         * ze kterého se archivovalo. Datum konce přitom zůstává — vrácení
+         * z archivu je oprava omylu, ne nové ukončení.
+         */
+        self::assertSame(['ended'], $archived['allowed_transitions']);
+        $restored = $this->transition($archived, 'ended', '2027-03-01');
+        self::assertSame('ended', $restored['status']);
+        self::assertNull($restored['archived_at']);
+        self::assertSame('2026-12-31', $restored['end_date']);
+        $archivedAgain = $this->transition($restored, 'archived', '2027-03-02');
+        self::assertSame('archived', $archivedAgain['status']);
+        $archived = $archivedAgain;
         $archivedTerms = $this->action->addTerms(
             $this->request(
                 'PUT',

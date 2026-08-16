@@ -1880,7 +1880,14 @@
                 "active": "Aktivní",
                 "inactive": "Neaktivní"
             },
-            "needs_setup": "Vyžaduje doplnění",
+            "needs_setup": "Chybí",
+            "setup_gap": {
+                "name": "jméno a příjmení",
+                "residence": "bydliště",
+                "contact": "kontakt",
+                "identifier": "rodné číslo (nebo EČP či VČP)",
+                "employment": "pracovní vztah"
+            },
             "edit_person": "Upravit zaměstnance",
             "back_to_list": "Zpět na přehled",
             "employments_title": "Pracovní vztahy",
@@ -2218,7 +2225,7 @@
             "terms_saved": "Nová verze smluvních podmínek byla uložena.",
             "mutation_failed": "Změnu pracovního vztahu se nepodařilo uložit.",
             "transition_saved": "Stav pracovního vztahu byl změněn.",
-            "transition_date": "Účinnost změny stavu",
+            "transition_date": "Změna stavu k",
             "effective_from": "Účinnost podmínek od",
             "planned_start": "Plánovaný nástup",
             "actual_start": "Skutečný nástup",
@@ -2281,6 +2288,7 @@
             "hide_detail": "Skrýt",
             "timeline_title": "Časová osa a změny",
             "complete": "Splnit",
+            "not_applicable": "Netýká se",
             "reopen": "Vrátit",
             "start_date": "Od",
             "end_date": "Do",
@@ -2300,7 +2308,8 @@
                 "suspended": "Přerušit",
                 "ended": "Ukončit",
                 "archived": "Archivovat",
-                "no_show": "Označit nenástup"
+                "no_show": "Označit nenástup",
+                "unarchive": "Vrátit z archivu"
             },
             "transition_confirm": {
                 "ended": "Ukončit pracovní vztah k vybranému datu?",
@@ -3459,6 +3468,9 @@
             "empty_title": "Zatím žádný zaměstnanec",
             "empty_hint": "Založte prvního člověka a jeho pracovní vztah — pak se tady objeví jeho karta.",
             "empty_action": "Přidat zaměstnance",
+            "none_active_title": "Za tohle období nemá mzdu žádný zaměstnanec",
+            "none_active_hint": "Zaměstnance evidujete, ale žádný jejich pracovní vztah v tomhle měsíci neběží — bývá to nezahájený nástup nebo už ukončený vztah. Otevřete kartu a zkontrolujte stav vztahu.",
+            "none_active_action": "Otevřít zaměstnance",
             "search": "Hledat",
             "search_placeholder": "Jméno nebo kód vztahu",
             "no_results": "Filtru neodpovídá žádný zaměstnanec.",

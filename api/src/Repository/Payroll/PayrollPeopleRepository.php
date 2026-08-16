@@ -142,14 +142,76 @@ final class PayrollPeopleRepository
     }
 
     /**
+     * Co osobě chybí, aby na ni šlo spustit mzdy — jedna podmínka na mezeru.
+     *
+     * Dřív se odvozovalo z `profile.profile_status`, jenže ten je RUČNĚ přepínaný
+     * ENUM (`legacy | setup | ready`). Osoba s kompletním profilem tak svítila
+     * „Vyžaduje doplnění" jen proto, že nikdo přepínač nepřehodil, a štítek
+     * neuměl říct co chybí, protože nevěděl nic než že hodnota není `ready`.
+     *
+     * Podmínky jsou schválně TYTÉŽ čtyři, které vynucuje
+     * {@see PayrollPersonProfileRepository::assertReadyProfile()}. Kdyby se
+     * rozešly, jedna obrazovka by nabízela doplnit něco, co druhá odmítne uložit.
+     *
+     * @return array<string,string>
+     */
+    private static function setupGapExpressions(): array
+    {
+        return [
+            'name' => "NOT EXISTS (
+                SELECT 1 FROM payroll_person_identity_history gap
+                 WHERE gap.supplier_id = employee.supplier_id
+                   AND gap.employee_id = employee.id
+                   AND gap.first_name IS NOT NULL AND gap.first_name <> ''
+                   AND gap.last_name IS NOT NULL AND gap.last_name <> ''
+                   AND gap.effective_from <= CURRENT_DATE
+                   AND (gap.effective_to IS NULL OR gap.effective_to >= CURRENT_DATE))",
+            'residence' => "NOT EXISTS (
+                SELECT 1 FROM payroll_person_addresses gap
+                 WHERE gap.supplier_id = employee.supplier_id
+                   AND gap.employee_id = employee.id
+                   AND gap.address_type = 'residence'
+                   AND gap.effective_from <= CURRENT_DATE
+                   AND (gap.effective_to IS NULL OR gap.effective_to >= CURRENT_DATE))",
+            'contact' => 'NOT EXISTS (
+                SELECT 1 FROM payroll_person_contacts gap
+                 WHERE gap.supplier_id = employee.supplier_id
+                   AND gap.employee_id = employee.id
+                   AND gap.is_active = 1 AND gap.is_primary = 1)',
+            'identifier' => "NOT EXISTS (
+                SELECT 1 FROM payroll_person_identifiers gap
+                 WHERE gap.supplier_id = employee.supplier_id
+                   AND gap.employee_id = employee.id
+                   AND gap.identifier_type IN ('birth_number', 'ecp', 'vcp'))",
+            'employment' => 'NOT EXISTS (
+                SELECT 1 FROM payroll_employments gap
+                 WHERE gap.supplier_id = employee.supplier_id
+                   AND gap.employee_id = employee.id)',
+        ];
+    }
+
+    /** Sloupce `setup_gap_*`, ze kterých karta poskládá výčet chybějícího. */
+    private static function setupGapColumns(): string
+    {
+        $columns = [];
+        foreach (self::setupGapExpressions() as $key => $expression) {
+            $columns[] = "({$expression}) AS setup_gap_{$key}";
+        }
+
+        return implode(",\n                   ", $columns);
+    }
+
+    /**
      * Tatáž podmínka, jakou nese vrácené pole `needs_setup`
      * ({@see self::castPerson()}) — postavená nad TÝMIŽ výrazy, které vybírá
      * SELECT. Filtr a příznak na řádku se tak nemůžou rozejít.
      */
     private static function needsSetupExpression(): string
     {
-        return "(COALESCE(profile.profile_status, 'missing') <> 'ready'"
-            . ' OR COALESCE(relations.employment_count, 0) = 0)';
+        return '(' . implode(' OR ', array_map(
+            static fn (string $expression): string => "({$expression})",
+            array_values(self::setupGapExpressions()),
+        )) . ')';
     }
 
     /**
@@ -168,26 +230,14 @@ final class PayrollPeopleRepository
      */
     public function listOptionsForTenant(int $supplierId): array
     {
-        // Chybějící vztah se ptá přes NOT EXISTS, ne přes odvozený COUNT jako
-        // stránkovaný seznam: nabídka počty nikam nevrací a existenční dotaz
-        // se zastaví na prvním řádku.
+        // Tentýž výraz jako stránkovaný seznam — jinak by nabídka značila jiné
+        // osoby než přehled a uživatel by nevěděl, které ze dvou čísel platí.
         $stmt = $this->db->pdo()->prepare(
             'SELECT employee.id,
                     ' . self::fullNameExpression() . ' AS full_name,
                     employee.is_active,
-                    (
-                        COALESCE(profile.profile_status, "missing") <> "ready"
-                        OR NOT EXISTS (
-                            SELECT 1
-                              FROM payroll_employments relation
-                             WHERE relation.supplier_id = employee.supplier_id
-                               AND relation.employee_id = employee.id
-                        )
-                    ) AS needs_setup
+                    ' . self::needsSetupExpression() . ' AS needs_setup
                FROM payroll_employees employee
-               LEFT JOIN payroll_employee_profiles profile
-                 ON profile.supplier_id = employee.supplier_id
-                AND profile.employee_id = employee.id
               WHERE employee.supplier_id = ?
               ORDER BY employee.is_active DESC, full_name ASC, employee.id ASC',
         );
@@ -313,8 +363,9 @@ final class PayrollPeopleRepository
                    employee.taxpayer_type AS legacy_taxpayer_type,
                    employee.employment_type AS legacy_employment_type,
                    COALESCE(relations.employment_count, 0) AS employment_count,
-                   COALESCE(relations.relation_types, '') AS relation_types
+                   COALESCE(relations.relation_types, '') AS relation_types,
             SQL
+            . "\n                   " . self::setupGapColumns()
             . ' ' . self::fromClause() . ' WHERE employee.supplier_id = ?';
         if ($single) {
             $sql .= ' AND employee.id = ?';
@@ -341,6 +392,14 @@ final class PayrollPeopleRepository
         $relationTypes = $row['relation_types'] === ''
             ? []
             : explode(',', $this->stringValue($row, 'relation_types'));
+        // Štítek „Vyžaduje doplnění" má JMENOVAT, co chybí — prázdný štítek
+        // uživatele jen posílal hádat po celé kartě.
+        $setupGaps = [];
+        foreach (array_keys(self::setupGapExpressions()) as $gap) {
+            if ($this->boolValue($row, "setup_gap_{$gap}")) {
+                $setupGaps[] = $gap;
+            }
+        }
 
         return [
             'id' => $this->intValue($row, 'id'),
@@ -351,7 +410,8 @@ final class PayrollPeopleRepository
             'legacy_employment_type' => $this->stringValue($row, 'legacy_employment_type'),
             'employment_count' => $employmentCount,
             'relation_types' => $relationTypes,
-            'needs_setup' => $profileStatus !== 'ready' || $employmentCount === 0,
+            'setup_gaps' => $setupGaps,
+            'needs_setup' => $setupGaps !== [],
         ];
     }
 

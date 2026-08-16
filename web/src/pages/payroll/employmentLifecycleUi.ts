@@ -4,7 +4,7 @@ export interface EmploymentTransitionPresentation {
   target: PayrollEmploymentStatus
   variant: 'primary' | 'success' | 'warning' | 'danger' | 'neutral'
   tier: 'primary' | 'secondary' | 'overflow' | 'advanced'
-  icon: 'check' | 'play' | 'pause' | 'archive' | 'x'
+  icon: 'check' | 'play' | 'pause' | 'archive' | 'x' | 'cycle'
 }
 
 const PRESENTATION: Record<PayrollEmploymentStatus, Omit<EmploymentTransitionPresentation, 'target'>> = {
@@ -19,7 +19,19 @@ const PRESENTATION: Record<PayrollEmploymentStatus, Omit<EmploymentTransitionPre
 
 export function transitionPresentation(
   allowed: PayrollEmploymentStatus[],
+  from?: PayrollEmploymentStatus,
 ): EmploymentTransitionPresentation[] {
+  // Z archivu vede zpátky jediná cesta a server ji vybral podle historie.
+  // Uživatel ale nehledá „skončený" ani „nenastoupil" — hledá „vrátit z archivu",
+  // takže se nabídne pod tímhle jménem a s neutrální, ne nebezpečnou barvou.
+  if (from === 'archived') {
+    return allowed.map(target => ({
+      target,
+      variant: 'neutral' as const,
+      tier: 'secondary' as const,
+      icon: 'cycle' as const,
+    }))
+  }
   return allowed.map(target => ({ target, ...PRESENTATION[target] }))
 }
 

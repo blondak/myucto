@@ -14,7 +14,12 @@ final class PayrollEmploymentLifecycle
         'suspended' => ['active', 'ended'],
         'ended' => ['archived'],
         'no_show' => ['archived'],
-        'archived' => [],
+        // Archiv není slepá ulička. Archivace je úklid, ne rozhodnutí o osudu
+        // vztahu — omylem archivovaný vztah šel dřív jen smazat, a to u vztahu
+        // s navázanými mzdami nejde vůbec. Vrací se do stavu, ze kterého se
+        // archivovalo; „obnovit do aktivního" tu schválně NENÍ, protože takový
+        // vztah má vyplněné datum konce a oživit ho znamená založit nový.
+        'archived' => ['ended', 'no_show'],
     ];
 
     /** @return list<string> */

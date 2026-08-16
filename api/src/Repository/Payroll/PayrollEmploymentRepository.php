@@ -38,6 +38,24 @@ final class PayrollEmploymentRepository
         ],
     ];
 
+    /**
+     * Povinnosti, které na daný druh vztahu nesedí a nemají se ani zakládat.
+     * Checklist se dřív seedoval pro každý vztah stejně, takže „Příjem společníka"
+     * dostal „Pracovní smlouvu / dohodu" — dokument, který u něj nevzniká.
+     *
+     * DPP ani DPČ tu záměrně NEJSOU. Účast na pojištění u nich není vlastností
+     * druhu vztahu, ale prahovou agregací příjmu (`SocialParticipationResolver`),
+     * takže automatika podle druhu by mlčky vynechala povinnost, která vzniknout
+     * může. Tam se položka založí a uživatel ji podle skutečnosti označí
+     * „Netýká se".
+     *
+     * @var array<string,list<string>>
+     */
+    private const CHECKLIST_EXCEPTIONS = [
+        'partner_dependent' => ['employment_contract'],
+        'statutory_body' => ['employment_contract'],
+    ];
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollEmploymentLifecycle $lifecycle,
@@ -103,7 +121,11 @@ final class PayrollEmploymentRepository
                     ? null
                     : (int) $row['monthly_gross_minor'],
                 'row_version' => (int) $row['row_version'],
-                'allowed_transitions' => $this->lifecycle->allowedTargets((string) $row['status']),
+                'allowed_transitions' => $this->allowedTransitions(
+                    $supplierId,
+                    $employmentId,
+                    (string) $row['status'],
+                ),
                 'can_delete' => $deletion !== null && $deletion->canDelete,
                 'delete_blocker' => $deletion?->blockerPayload(),
                 'delete_cascade' => $deletion === null ? [] : $deletion->cascade,
@@ -176,6 +198,7 @@ final class PayrollEmploymentRepository
                 $employmentId,
                 'onboarding',
                 $data['terms']['planned_start_on'],
+                $data['relation_type'],
             );
             $this->activityLogger->log(
                 'payroll.employment.created',
@@ -330,7 +353,13 @@ final class PayrollEmploymentRepository
                 $diff,
                 $userId,
             );
-            $this->ensureChecklist($supplierId, $employmentId, 'change', $data['effective_from']);
+            $this->ensureChecklist(
+                $supplierId,
+                $employmentId,
+                'change',
+                $data['effective_from'],
+                (string) $employment['relation_type'],
+            );
             $this->activityLogger->log(
                 'payroll.employment.terms_changed',
                 $userId,
@@ -383,10 +412,16 @@ final class PayrollEmploymentRepository
                 $assignments[] = 'actual_start_date = ?';
                 $values[] = $effectiveOn;
             }
-            if (in_array($target, ['ended', 'no_show'], true)) {
+            // Návrat z archivu je ÚKLID, ne nové ukončení: datum konce už platí
+            // a přepsat ho dnešním dnem by z opravy omylu udělalo změnu historie.
+            $unarchiving = $from === 'archived';
+            if (in_array($target, ['ended', 'no_show'], true) && !$unarchiving) {
                 $assignments[] = 'end_date = ?';
                 $values[] = $effectiveOn;
                 $assignments[] = 'is_primary = 0';
+            }
+            if ($unarchiving) {
+                $assignments[] = 'archived_at = NULL';
             }
             if ($target === 'archived') {
                 $assignments[] = 'archived_at = CURRENT_TIMESTAMP';
@@ -416,7 +451,13 @@ final class PayrollEmploymentRepository
                 $userId,
             );
             if ($target === 'ended') {
-                $this->ensureChecklist($supplierId, $employmentId, 'offboarding', $effectiveOn);
+                $this->ensureChecklist(
+                    $supplierId,
+                    $employmentId,
+                    'offboarding',
+                    $effectiveOn,
+                    (string) $employment['relation_type'],
+                );
             }
             $this->activityLogger->log(
                 'payroll.employment.status_changed',
@@ -769,18 +810,63 @@ final class PayrollEmploymentRepository
         ]);
     }
 
+    /**
+     * Z archivu vede zpátky JEDINÁ cesta — do stavu, ze kterého se archivovalo.
+     *
+     * Lifecycle zná jen stav, ne historii, takže by nabídl „skončený" i
+     * „nenastoupil" naráz a uživatel by si musel vybrat mezi dvěma nabídkami,
+     * z nichž jedna přepisuje minulost. Předchozí stav je přitom zaznamenaný
+     * v události archivace.
+     *
+     * @return list<string>
+     */
+    private function allowedTransitions(
+        int $supplierId,
+        int $employmentId,
+        string $status,
+    ): array {
+        $targets = $this->lifecycle->allowedTargets($status);
+        if ($status !== 'archived') {
+            return $targets;
+        }
+        $previous = $this->statusBeforeArchive($supplierId, $employmentId);
+
+        return $previous !== null && in_array($previous, $targets, true) ? [$previous] : [];
+    }
+
+    private function statusBeforeArchive(int $supplierId, int $employmentId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT from_status
+               FROM payroll_employment_events
+              WHERE supplier_id = ? AND employment_id = ?
+                AND event_type = 'status_changed' AND to_status = 'archived'
+              ORDER BY id DESC
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
     private function ensureChecklist(
         int $supplierId,
         int $employmentId,
         string $phase,
         string $dueDate,
+        string $relationType,
     ): void {
         $insert = $this->db->pdo()->prepare(
             'INSERT IGNORE INTO payroll_employment_checklist_items
                 (supplier_id, employment_id, phase, item_key, due_date)
              VALUES (?, ?, ?, ?, ?)'
         );
+        $skipped = self::CHECKLIST_EXCEPTIONS[$relationType] ?? [];
         foreach (self::CHECKLISTS[$phase] as $itemKey) {
+            if (in_array($itemKey, $skipped, true)) {
+                continue;
+            }
             $insert->execute([$supplierId, $employmentId, $phase, $itemKey, $dueDate]);
         }
     }
@@ -806,7 +892,7 @@ final class PayrollEmploymentRepository
         ?int $expectedVersion,
     ): array {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, employee_id, status, is_primary, start_date,
+            'SELECT id, employee_id, relation_type, status, is_primary, start_date,
                     actual_start_date, end_date, monthly_gross_minor, row_version
                FROM payroll_employments
               WHERE supplier_id = ? AND id = ?
@@ -891,6 +977,12 @@ final class PayrollEmploymentRepository
     /** @param array<string,string|int|bool|null> $employment */
     private function assertTransitionDate(array $employment, string $target, string $effectiveOn): void
     {
+        // Návrat z archivu žádné datum nenastavuje, takže se proti nástupu
+        // nemá co porovnávat — jinak by oprava omylu spadla na tom, že se
+        // vztah vrací dřív, než kdy začal.
+        if (($employment['status'] ?? null) === 'archived') {
+            return;
+        }
         $start = $employment['actual_start_date'] ?? $employment['start_date'];
         if (in_array($target, ['ended', 'no_show'], true)
             && $start !== null

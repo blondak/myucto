@@ -416,6 +416,34 @@ describe('EmploymentCard', () => {
     expect(open.find('[data-test="employment-checklist"]').exists()).toBe(true)
   })
 
+  /**
+   * Archiv býval slepá ulička — omylem archivovaný vztah šel jen smazat,
+   * a to u vztahu s navázanými mzdami nejde vůbec.
+   */
+  it('archivovaný vztah nabídne návrat pod jménem, které uživatel hledá', async () => {
+    const archived = employment()
+    archived.status = 'archived'
+    archived.end_date = '2026-06-30'
+    // Server vybírá cíl podle historie — karta z něj dělá jedno tlačítko.
+    archived.allowed_transitions = ['ended']
+
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: archived, canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+    await wrapper.get('[data-test="employment-toggle"]').trigger('click')
+
+    const action = wrapper.get('[data-test="action-transition-ended"]')
+    expect(action.text()).toBe('payroll.people.transition.unarchive')
+    expect(action.text()).not.toContain('payroll.people.transition.ended')
+
+    // Návrat z archivu nic neukončuje, takže se neptá „Ukončit vztah?".
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    await action.trigger('click')
+    expect(confirmSpy).not.toHaveBeenCalled()
+    confirmSpy.mockRestore()
+  })
+
   it('změnu stavu neukáže dvakrát — hlavička ji už nese', () => {
     const detail = employment()
     detail.timeline = [{

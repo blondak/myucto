@@ -130,6 +130,7 @@ function person(primary = employment()): PayrollPerson {
     can_delete: false,
     delete_blocker: null,
     delete_cascade: {},
+    setup_gaps: [],
     needs_setup: false,
     employments: [primary],
   }
@@ -667,6 +668,7 @@ describe('PayrollPersonQuickEdit', () => {
       contacts: [{ id: 53, contact_type: 'email', value: 'jana@example.cz' }],
       accounts: [],
       dependants: [],
+      addresses: [],
     })
 
     const wrapper = await mountedReader(true)

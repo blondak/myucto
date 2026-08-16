@@ -6,10 +6,11 @@ import type { PayrollQuickInputRow } from '@/api/payroll'
 const m = vi.hoisted(() => ({
   quickInputs: vi.fn(),
   absences: vi.fn(),
+  peopleOptions: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
-  payrollApi: { quickInputs: m.quickInputs },
+  payrollApi: { quickInputs: m.quickInputs, peopleOptions: m.peopleOptions },
 }))
 
 vi.mock('@/api/payrollAbsences', () => ({
@@ -87,6 +88,9 @@ describe('PayrollEmployeeCards', () => {
     vi.clearAllMocks()
     m.quickInputs.mockResolvedValue({ period: '2026-08', items: [row()] })
     m.absences.mockResolvedValue([])
+    m.peopleOptions.mockResolvedValue([
+      { id: 5, full_name: 'Alfa Aktivní', is_active: true, needs_setup: false },
+    ])
   })
 
   it('shows name, employment type, status and pay on one scannable card', async () => {
@@ -186,6 +190,41 @@ describe('PayrollEmployeeCards', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="employee-card-12"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="employee-cards-failed"]').exists()).toBe(false)
+  })
+
+  /**
+   * Přehled tvrdil „Zatím žádný zaměstnanec" i firmě, která zaměstnance má —
+   * jen jim vztah nikdo nezahájil nebo už skončil. Prázdný stav proto musí
+   * rozlišit „nikoho nemáte" od „nikdo tenhle měsíc neběží".
+   */
+  it('rozliší firmu bez lidí od firmy, které nikdo v tomhle měsíci neběží', async () => {
+    m.quickInputs.mockResolvedValue({ period: '2026-08', items: [] })
+    m.peopleOptions.mockResolvedValue([])
+    const nobody = mountCards()
+    await flushPromises()
+    expect(nobody.get('[data-test="employee-cards-empty"]').text())
+      .toContain('payroll.employee_cards.empty_title')
+
+    m.peopleOptions.mockResolvedValue([
+      { id: 5, full_name: 'Alfa Aktivní', is_active: true, needs_setup: false },
+    ])
+    const idle = mountCards()
+    await flushPromises()
+    const text = idle.get('[data-test="employee-cards-empty"]').text()
+    expect(text).toContain('payroll.employee_cards.none_active_title')
+    expect(text).not.toContain('payroll.employee_cards.empty_title')
+  })
+
+  /** Výpadek počtu lidí nesmí shodit celý přehled — je to jen upřesnění hlášky. */
+  it('bez seznamu osob se prázdný stav vrátí k původní hlášce', async () => {
+    m.quickInputs.mockResolvedValue({ period: '2026-08', items: [] })
+    m.peopleOptions.mockRejectedValue(new Error('403'))
+    const wrapper = mountCards()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="employee-cards-empty"]').text())
+      .toContain('payroll.employee_cards.empty_title')
     expect(wrapper.find('[data-test="employee-cards-failed"]').exists()).toBe(false)
   })
 

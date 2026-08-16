@@ -12,6 +12,7 @@ import {
   type PayrollPersonCreatePayload,
   type PayrollPersonListItem,
   type PayrollPersonProfile,
+  type PayrollPersonSetupGap,
   type PayrollPersonQuickEditResponse,
   type PayrollRelationType,
 } from '@/api/payroll'
@@ -457,7 +458,9 @@ async function saveNew(personId: number) {
       if (!listItem.relation_types.includes(employment.relation_type)) {
         listItem.relation_types.push(employment.relation_type)
       }
-      listItem.needs_setup = listItem.profile_status !== 'ready'
+      // Vztah zaplnil právě jednu mezeru; ostatní čtyři zná jen server.
+      listItem.setup_gaps = listItem.setup_gaps.filter(gap => gap !== 'employment')
+      listItem.needs_setup = listItem.setup_gaps.length > 0
     }
     creatingForId.value = null
     newEmployment.value = null
@@ -524,17 +527,54 @@ async function createEmployee() {
   }
 }
 
+/**
+ * Optimistické přepočítání mezer po uložení profilu. Autoritou zůstává server
+ * (`setup_gaps` v seznamu) — tohle jen srovná štítek hned po uložení, aby po
+ * doplnění adresy nesvítil dál až do dalšího načtení seznamu.
+ *
+ * Mezera `employment` se tu nepočítá: profil o pracovních vztazích nic neví,
+ * takže se přebírá z dosavadní hodnoty.
+ */
+function profileSetupGaps(
+  updated: PayrollPersonProfile,
+  previous: PayrollPersonSetupGap[],
+): PayrollPersonSetupGap[] {
+  const today = todayIso()
+  const effective = (from: string, to: string | null): boolean =>
+    from <= today && (to === null || to >= today)
+
+  const gaps: PayrollPersonSetupGap[] = []
+  if (!updated.identity_history.some(row =>
+    (row.first_name ?? '') !== '' && (row.last_name ?? '') !== ''
+    && effective(row.effective_from, row.effective_to),
+  )) gaps.push('name')
+  if (!updated.addresses.some(row =>
+    row.address_type === 'residence' && effective(row.effective_from, row.effective_to),
+  )) gaps.push('residence')
+  if (!updated.contacts.some(row => row.is_active && row.is_primary)) gaps.push('contact')
+  if (!updated.identifiers.some(row =>
+    ['birth_number', 'ecp', 'vcp'].includes(row.identifier_type),
+  )) gaps.push('identifier')
+  if (previous.includes('employment')) gaps.push('employment')
+
+  return gaps
+}
+
 function updatePersonProfile(updated: PayrollPersonProfile) {
   const person = people.value.find(item => item.id === updated.employee_id)
-  if (!person) return
-  person.full_name = updated.full_name
-  person.profile_status = updated.profile_status
-  person.needs_setup = updated.profile_status !== 'ready'
   const detail = details.value[updated.employee_id]
+  const gaps = profileSetupGaps(updated, person?.setup_gaps ?? detail?.setup_gaps ?? [])
+  if (person) {
+    person.full_name = updated.full_name
+    person.profile_status = updated.profile_status
+    person.setup_gaps = gaps
+    person.needs_setup = gaps.length > 0
+  }
   if (detail) {
     detail.full_name = updated.full_name
     detail.profile_status = updated.profile_status
-    detail.needs_setup = updated.profile_status !== 'ready'
+    detail.setup_gaps = gaps
+    detail.needs_setup = gaps.length > 0
   }
 }
 
@@ -771,8 +811,18 @@ onMounted(async () => {
                 class="rounded-full px-2 py-1 font-medium"
                 :class="selectedSummary.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'"
               >{{ statusLabel(selectedSummary.is_active) }}</span>
-              <span v-if="selectedSummary?.needs_setup" class="rounded-full bg-warning-50 px-2 py-1 font-medium text-warning-700">
-                {{ t('payroll.people.needs_setup') }}
+              <!--
+                Štítek JMENUJE, co chybí. Dřív svítil prázdný „Vyžaduje doplnění"
+                a uživatel to hledal po celé kartě — často u profilu, kterému
+                nechybělo nic a jen měl neaktualizovaný ruční stav.
+              -->
+              <span
+                v-if="selectedSummary?.needs_setup"
+                class="rounded-full bg-warning-50 px-2 py-1 font-medium text-warning-700"
+                data-test="person-setup-gaps"
+              >
+                {{ t('payroll.people.needs_setup') }}:
+                {{ (selectedSummary.setup_gaps ?? []).map(gap => t(`payroll.people.setup_gap.${gap}`)).join(', ') }}
               </span>
               <span class="text-neutral-500" data-test="person-header-employments">
                 {{ t('payroll.people.header_employments', { count: selectedEmploymentCount }, selectedEmploymentCount) }}

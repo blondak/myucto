@@ -71,6 +71,18 @@ export interface PayrollDeleteBlocker {
 /** Počty toho, co zmizí spolu s objektem. Klíče se překládají přes i18n. */
 export type PayrollDeleteCascade = Record<string, number>
 
+/**
+ * Co osobě chybí, aby na ni šlo spustit mzdy. Odvozuje se ze stejných čtyř
+ * podmínek, jaké vynucuje uložení profilu — štítek „Vyžaduje doplnění" už tedy
+ * nemusí mlčet o tom, co doplnit.
+ */
+export type PayrollPersonSetupGap =
+  | 'name'
+  | 'residence'
+  | 'contact'
+  | 'identifier'
+  | 'employment'
+
 export interface PayrollPersonListItem {
   id: number
   full_name: string
@@ -80,6 +92,7 @@ export interface PayrollPersonListItem {
   legacy_employment_type: string
   employment_count: number
   relation_types: PayrollRelationType[]
+  setup_gaps: PayrollPersonSetupGap[]
   needs_setup: boolean
   can_delete: boolean
   delete_blocker: PayrollDeleteBlocker | null
