@@ -569,6 +569,72 @@ final class ClosingProvisionsIncomeTaxTest extends TestCase
         self::assertSame((int) $target['id'], (int) $res['target_period_id']);
     }
 
+    /**
+     * Zpětné rozdělení VH nad rozdělanou uzávěrkou. Kdo zahájil uzávěrku dřív, než rozdělil
+     * loňský výsledek, se dřív zasekl: uzavření knih blokuje precheck vh_431_undistributed,
+     * přerušit uzávěrku po prvních uzávěrkových zápisech nejde a rozdělení se nad obdobím
+     * ve stavu 'closing' vůbec nenabízelo.
+     */
+    public function testProfitDistributionWorksIntoPeriodBeingClosed(): void
+    {
+        [$approvedId, $target] = $this->approvedPeriodWithProfit(100000.00);
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ? AND supplier_id = ?")
+            ->execute([(int) $target['id'], $this->supplierId]);
+        $target = $this->periods->findById($this->supplierId, (int) $target['id']);
+
+        $res = $this->closing->runProfitDistribution($this->supplierId, $approvedId, [
+            'decision_date' => $target['fiscal_year'] . '-06-30',
+            'target_row_version' => (int) $target['row_version'],
+            'allocations' => [
+                ['account_code' => '428', 'amount' => 100000.00, 'kind' => 'retained'],
+            ],
+        ], $this->meta());
+
+        $lines = $this->entryLines((int) $res['entry_id']);
+        self::assertEqualsWithDelta(100000.00, $this->sideAmount($lines, '431', 'debit'), 0.001);
+        self::assertEqualsWithDelta(100000.00, $this->sideAmount($lines, '428', 'credit'), 0.001);
+        self::assertEqualsWithDelta(
+            0.0,
+            (float) $this->closing->profitDistributionPreview($this->supplierId, $approvedId)['balance_431'],
+            0.001,
+            '431 je po zpětném rozdělení vynulovaný i v uzavíraném období.',
+        );
+    }
+
+    /** Uzavřené období zůstává pro rozdělení zakázané — tam už se účtovat nesmí (§35 ZoÚ). */
+    public function testProfitDistributionRejectsClosedTargetPeriod(): void
+    {
+        [$approvedId, $target] = $this->approvedPeriodWithProfit(100000.00);
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ? AND supplier_id = ?")
+            ->execute([(int) $target['id'], $this->supplierId]);
+
+        try {
+            $this->closing->profitDistributionPreview($this->supplierId, $approvedId);
+            self::fail('Do uzavřeného období se rozdělení VH účtovat nesmí.');
+        } catch (ClosingException $e) {
+            self::assertSame('next_period_not_open', $e->errorCode);
+        }
+    }
+
+    /** Uzávěrku nelze zahájit s nerozděleným výsledkem na 431 — jinak se uživatel zasekne. */
+    public function testClosingCannotStartWithUndistributedProfitOn431(): void
+    {
+        [, $target] = $this->approvedPeriodWithProfit(100000.00);
+        $targetId = (int) $target['id'];
+
+        try {
+            $this->closing->start($this->supplierId, $targetId, (int) $target['row_version'], $this->meta());
+            self::fail('Uzávěrka se nesmí zahájit s nerozděleným VH na 431.');
+        } catch (ClosingException $e) {
+            self::assertSame('profit_not_distributed', $e->errorCode);
+        }
+        self::assertSame(
+            'open',
+            (string) $this->periods->findById($this->supplierId, $targetId)['status'],
+            'Odmítnuté zahájení nesmí období přepnout.',
+        );
+    }
+
     public function testOpenPeriodDistributionRequiresApprovedPreviousPeriod(): void
     {
         $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ? AND supplier_id = ?")

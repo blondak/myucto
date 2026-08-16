@@ -1562,8 +1562,11 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
       </div>
     </div>
 
-    <!-- D10) Rozdělení výsledku hospodaření (nad approved/open obdobím) -->
-    <div v-if="state && (state.period.status === 'approved' || state.period.status === 'open')"
+    <!-- D10) Rozdělení výsledku hospodaření (nad approved/open/closing obdobím).
+         `closing` je tu schválně: kdo zahájil uzávěrku dřív, než rozdělil loňský výsledek,
+         se jinak zasekne — uzavření knih blokuje precheck a přerušit uzávěrku po prvních
+         zápisech už nejde. -->
+    <div v-if="state && ['approved', 'open', 'closing'].includes(state.period.status)"
       class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 mt-4 space-y-3">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>

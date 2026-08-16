@@ -367,13 +367,25 @@ final class ClosingWorkflowTest extends TestCase
         self::assertTrue($this->closing->state($this->supplierId, $this->periodId)['can_close']);
     }
 
+    /**
+     * Nerozdělený zůstatek 431 už PŘED zahájením blokuje start() (uživatel by se jinak
+     * zasekl uprostřed uzávěrky). Pojistka u uzavření knih ale musí zůstat funkční pro
+     * případ, kdy 431 vznikne až v průběhu — proto ho sem vpravíme až po zahájení.
+     */
     public function testUndistributed431BlocksCloseBooks(): void
     {
+        $this->runStepsUntilCloseReady();
+
+        $pdo = $this->db->pdo();
+        $toStatus = static fn (string $s): string =>
+            "UPDATE accounting_periods SET status = '{$s}' WHERE id = ? AND supplier_id = ?";
+        $pdo->prepare($toStatus('open'))->execute([$this->periodId, $this->supplierId]);
         $this->manual([
             self::l('221', 'debit', 10000.00),
             self::l('431', 'credit', 10000.00),
         ], self::YEAR . '-01-01');
-        $this->runStepsUntilCloseReady('vh_431_undistributed');
+        $pdo->prepare($toStatus('closing'))->execute([$this->periodId, $this->supplierId]);
+        $this->closing->runPrecheck($this->supplierId, $this->periodId, $this->rv(), $this->meta());
 
         try {
             $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());

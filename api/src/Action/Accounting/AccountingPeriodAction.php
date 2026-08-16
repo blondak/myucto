@@ -234,10 +234,20 @@ final class AccountingPeriodAction
         // close_books v průvodci — jinak by reopen nechal v deníku osiřelé závěrkové zápisy.
         if ($transition === 'closed→open') {
             $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
-            if ($this->closingRepo->hasClosingEntries($supplierId, $id)
-                || ($next !== null && $this->closingRepo->hasOpeningEntries($supplierId, (int) $next['id']))) {
+            // Jmenujeme jen kroky, které se OPRAVDU musí vzít zpět. Hláška dřív vždycky
+            // vyjmenovala oba, takže posílala uživatele revertovat i krok, který nikdy
+            // nespustil — a ten pak v průvodci marně hledal tlačítko.
+            $blocking = [];
+            if ($next !== null && $this->closingRepo->hasOpeningEntries($supplierId, (int) $next['id'])) {
+                $blocking[] = 'Otevření nového roku';
+            }
+            if ($this->closingRepo->hasClosingEntries($supplierId, $id)) {
+                $blocking[] = 'Uzavření knih';
+            }
+            if ($blocking !== []) {
                 return Json::error($response, 'closing_entries_exist',
-                    'Období má zaúčtované závěrkové zápisy — nejprve revertujte kroky open_next a close_books v uzávěrkovém průvodci.', 422);
+                    'Období má zaúčtované závěrkové zápisy — nejprve v uzávěrkovém průvodci vezměte zpět krok '
+                    . implode(' a ', $blocking) . '.', 422);
             }
         }
 

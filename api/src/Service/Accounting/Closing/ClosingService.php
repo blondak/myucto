@@ -259,6 +259,20 @@ final class ClosingService
                     'Předchozí období ' . $prev['fiscal_year'] . ' není uzavřené — uzavírej chronologicky (R5).',
                 );
             }
+            // Nerozdělený výsledek na 431 blokuje uzavření knih (precheck vh_431_undistributed),
+            // ale rozdělení se účtuje do TOHOTO období — a jakmile je ve stavu 'closing',
+            // uživatel se k němu dostane hůř. Řekneme to rovnou na vstupu, ať to nezjistí
+            // až u kroku 9 s hromadou uzávěrkových zápisů za sebou.
+            $balance431 = round($this->closing->accountBalance($supplierId, '431', (string) $period['ends_on']), 2);
+            if (abs($balance431) >= 0.005) {
+                throw new ClosingException(
+                    'profit_not_distributed',
+                    'Na účtu 431 je nerozdělený výsledek hospodaření ' . number_format($balance431, 2, ',', ' ')
+                    . ' Kč. Rozdělte ho (431 → 428/429) ještě před zahájením uzávěrky — po zahájení '
+                    . 'se do období účtuje hůř a uzavření knih by stejně neprošlo.',
+                    422,
+                );
+            }
             $this->casStatus($supplierId, $periodId, 'closing', $rowVersion, $meta);
             $this->audit($supplierId, 'accounting.closing_started', $periodId, [], $meta);
             return ['period_id' => $periodId, 'status' => 'closing', 'row_version' => $rowVersion + 1];
@@ -2607,12 +2621,12 @@ final class ClosingService
             $sourceId = (int) $period['id'];
             $targetId = (int) $target['id'];
             $lockedTarget = $this->lockPeriod($supplierId, $targetId, $targetRowVersion);
-            $this->assertStatus($lockedTarget, ['open']);
+            $this->assertStatus($lockedTarget, self::PROFIT_DISTRIBUTION_TARGET_STATUSES);
             $withholdingRate ??= $this->withholdingRateForYear((int) $lockedTarget['fiscal_year']);
             if ($decisionDate < (string) $lockedTarget['starts_on'] || $decisionDate > (string) $lockedTarget['ends_on']) {
                 throw new ClosingException(
                     'validation_failed',
-                    'Datum rozhodnutí VH musí ležet uvnitř otevřeného období ' . $lockedTarget['starts_on'] . '–' . $lockedTarget['ends_on'] . '.',
+                    'Datum rozhodnutí VH musí ležet uvnitř období ' . $lockedTarget['starts_on'] . '–' . $lockedTarget['ends_on'] . '.',
                 );
             }
 
@@ -2704,6 +2718,9 @@ final class ClosingService
                 'user_id' => $meta['user_id'] ?? null,
                 'ip' => $meta['ip'] ?? null,
                 'user_agent' => $meta['user_agent'] ?? null,
+                // Cíl smí být i 'closing' (zpětné rozdělení u rozdělané uzávěrky) — R7 flag
+                // nastavuje výhradně tato třída a jen když je období opravdu 'closing'.
+                'allow_closing_period' => (string) $lockedTarget['status'] === 'closing',
             ]);
 
             $this->bumpVersion($supplierId, $targetId, $targetRowVersion);
@@ -2757,7 +2774,8 @@ final class ClosingService
             $sourceId = (int) $period['id'];
             $targetId = (int) $target['id'];
             $lockedTarget = $this->lockPeriod($supplierId, $targetId, $targetRowVersion);
-            $this->assertStatus($lockedTarget, ['open']);
+            // Symetrie s zaúčtováním: co jde zaúčtovat do 'closing', musí jít i vzít zpět.
+            $this->assertStatus($lockedTarget, self::PROFIT_DISTRIBUTION_TARGET_STATUSES);
 
             $existing = $this->findEntryWithLines($supplierId, 'profit_distribution', $sourceId);
             if ($existing === null) {
@@ -2845,9 +2863,18 @@ final class ClosingService
         return $rate !== null ? (float) $rate : self::WITHHOLDING_RATE;
     }
 
+    /**
+     * Cílové období rozdělení smí být `open` i `closing`. Kdo uzávěrku zahájil dřív, než
+     * rozdělil loňský výsledek, se jinak zasekne: uzavření knih blokuje precheck
+     * `vh_431_undistributed`, přerušit uzávěrku po prvních uzávěrkových zápisech nejde
+     * a nad obdobím ve stavu `closing` se rozdělení nenabízelo vůbec. `closed`/`approved`
+     * cíl zůstává zakázaný — tam už se účtovat nesmí (§35 ZoÚ).
+     */
+    private const PROFIT_DISTRIBUTION_TARGET_STATUSES = ['open', 'closing'];
+
     private function profitDistributionContext(int $supplierId, array $period): array
     {
-        if ((string) $period['status'] === 'open') {
+        if (in_array((string) $period['status'], self::PROFIT_DISTRIBUTION_TARGET_STATUSES, true)) {
             $source = $this->previousPeriod($supplierId, (string) $period['starts_on']);
             if ($source === null || (string) $source['status'] !== 'approved') {
                 throw new ClosingException(
@@ -2861,14 +2888,14 @@ final class ClosingService
         if ((string) $period['status'] !== 'approved') {
             throw new ClosingException(
                 'invalid_status_transition',
-                'Rozdělení výsledku hospodaření je dostupné jen pro schválené (approved) nebo otevřené období (stav: ' . $period['status'] . ').',
+                'Rozdělení výsledku hospodaření je dostupné jen pro schválené (approved), otevřené nebo uzavírané období (stav: ' . $period['status'] . ').',
             );
         }
         $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
         if ($next === null) {
             throw new ClosingException('next_period_missing', 'Následující období (kam se rozdělení účtuje) neexistuje — nejprve otevři nový rok.');
         }
-        if ((string) $next['status'] !== 'open') {
+        if (!in_array((string) $next['status'], self::PROFIT_DISTRIBUTION_TARGET_STATUSES, true)) {
             throw new ClosingException('next_period_not_open', 'Následující období ' . $next['fiscal_year'] . ' není otevřené (stav: ' . $next['status'] . ').');
         }
         return ['source' => $period, 'target' => $next];
