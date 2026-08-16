@@ -130,6 +130,53 @@ describe('BalanceInventory.vue', () => {
     expect(acc411.resolution).toBe('open')
   })
 
+  it('(d) pasivní účet se ukazuje i zadává kladně, na server jde znaménková báze', async () => {
+    // Bez orientace na normální stranu ukazoval účet 411 zůstatek −1000 a kladně
+    // zapsaný skutečný stav dělal dvojnásobný rozdíl.
+    m.getClosingInventory.mockResolvedValue(makeReport())
+    m.saveClosingInventory.mockResolvedValue({ status: 'in_progress', unresolved_count: 1, item_count: 2, completed: false, ok: false, row_version: 4 })
+    const wrapper = mount(BalanceInventory)
+    await flushPromises()
+
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows[1].text()).toContain('1000')
+    expect(rows[1].text()).not.toContain('-1000')
+
+    const countedInputs = wrapper.findAll('tbody input[inputmode="decimal"]')
+    await countedInputs[1].setValue('1000')
+    await flushPromises()
+
+    // Kladně zadaná shoda = nulový rozdíl, tedy vyřešený řádek.
+    const saveBtn = wrapper.findAll('button').find(b => b.text() === 'accounting.balance_inventory.save')
+    await saveBtn!.trigger('click')
+    await flushPromises()
+
+    const acc411 = m.saveClosingInventory.mock.calls[0][1].items.find((i: any) => i.account_id === 12)
+    expect(acc411.counted_balance).toBe(-1000) // zpět na bázi MD − D
+    expect(acc411.resolution).toBe('resolved')
+  })
+
+  it('(e) uložený skutečný stav se hydratuje na normální stranu účtu', async () => {
+    const r = makeReport()
+    r.rows[1].counted_balance = -1000
+    r.rows[1].resolution = 'resolved'
+    m.getClosingInventory.mockResolvedValue(r)
+    m.saveClosingInventory.mockResolvedValue({ status: 'in_progress', unresolved_count: 1, item_count: 2, completed: false, ok: false, row_version: 4 })
+    const wrapper = mount(BalanceInventory)
+    await flushPromises()
+
+    const countedInputs = wrapper.findAll('tbody input[inputmode="decimal"]')
+    expect((countedInputs[1].element as HTMLInputElement).value).toBe('1000')
+
+    // Uložení beze změny nesmí hodnotu překlopit — round-trip drží znaménko.
+    const saveBtn = wrapper.findAll('button').find(b => b.text() === 'accounting.balance_inventory.save')
+    await saveBtn!.trigger('click')
+    await flushPromises()
+
+    const acc411 = m.saveClosingInventory.mock.calls[0][1].items.find((i: any) => i.account_id === 12)
+    expect(acc411.counted_balance).toBe(-1000)
+  })
+
   it('(c) dokončení s nevyřešeným rozdílem → backend vrací completed:false → warning', async () => {
     m.getClosingInventory.mockResolvedValue(makeReport())
     m.saveClosingInventory.mockResolvedValue({ status: 'in_progress', unresolved_count: 2, item_count: 2, completed: false, ok: false, row_version: 4 })

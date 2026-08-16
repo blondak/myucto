@@ -43,8 +43,38 @@ const selectedPeriod = computed<AccountingPeriod | undefined>(() =>
 // Uložit skutečný stav lze jen v otevřeném / uzavíraném období (server totéž vynucuje).
 const editable = computed(() => ['open', 'closing'].includes(selectedPeriod.value?.status ?? ''))
 
+/**
+ * Účetní i skutečný stav se ukazují a zadávají na NORMÁLNÍ straně účtu, tedy
+ * kladně: závazek 230 850 Kč, ne −230 850 Kč. Server drží znaménkovou bázi
+ * (MD − D) — na ní staví rozdíl i gating uzavření knih — takže se převádí jen
+ * na hranici UI. Dokud se ukazovala syrová báze, napsala účetní do skutečného
+ * stavu pasivního účtu kladné číslo a rozdíl vyšel dvojnásobný.
+ */
+function sideSign(row: BalanceInventoryRow): 1 | -1 {
+  return row.normal_side === 'credit' ? -1 : 1
+}
+/**
+ * Obourstranný účet (343 DPH, 431 výsledek hospodaření) nemá v osnově normální
+ * stranu — u něj zůstává znaménková báze a sloupec strany to přiznává, ať je
+ * poznat, že se záporná hodnota čte jako opačná strana, ne jako chyba.
+ */
+function sideLabel(row: BalanceInventoryRow): string {
+  if (row.normal_side === 'credit') return t('accounting.balance_inventory.side_credit')
+  if (row.normal_side === 'debit') return t('accounting.balance_inventory.side_debit')
+  return t('accounting.balance_inventory.side_both')
+}
+/** Nula bez znaménka: −1 × 0 dá v JS −0 a vypsalo by se „−0,00 Kč“. */
+function orient(row: BalanceInventoryRow, value: number): number {
+  const v = sideSign(row) * value
+  return v === 0 ? 0 : v
+}
+/** Účetní stav na normální straně účtu (kladný zůstatek aktiva i pasiva). */
 function bookBalance(row: BalanceInventoryRow): number {
-  return row.book_balance ?? (row.ks_md - row.ks_d)
+  return orient(row, row.book_balance ?? (row.ks_md - row.ks_d))
+}
+/** Uložený skutečný stav na normální straně účtu; null = dosud nenapočítáno. */
+function countedBalance(row: BalanceInventoryRow): number | null {
+  return row.counted_balance != null ? orient(row, row.counted_balance) : null
 }
 function liveDifference(row: BalanceInventoryRow): number | null {
   const e = edits[row.account_id]
@@ -68,8 +98,9 @@ const inventoryStatus = computed(() => report.value?.inventory?.status ?? 'in_pr
 function hydrateEdits(r: BalanceInventoryReport) {
   for (const k of Object.keys(edits)) delete edits[Number(k)]
   for (const row of r.rows) {
+    const counted = countedBalance(row)
     edits[row.account_id] = {
-      counted: row.counted_balance != null ? String(row.counted_balance) : '',
+      counted: counted != null ? String(counted) : '',
       resolved: row.resolution === 'resolved',
       note: row.item_note ?? '',
     }
@@ -116,7 +147,8 @@ function buildPayload(complete: boolean): BalanceInventorySavePayload {
       const counted = countedRaw === '' || Number.isNaN(Number(countedRaw)) ? null : Number(countedRaw)
       return {
         account_id: row.account_id,
-        counted_balance: counted,
+        // Zpět na znaménkovou bázi serveru (MD − D).
+        counted_balance: counted === null ? null : sideSign(row) * counted,
         resolution: rowResolved(row) ? 'resolved' as const : 'open' as const,
         note: e?.note?.trim() || null,
       }
@@ -222,8 +254,9 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-if="report" class="mb-4 px-3 py-2 rounded-md bg-neutral-50 border border-neutral-200 text-neutral-600 text-sm">
-      {{ t('accounting.balance_inventory.as_of_hint', { date: report.as_of }) }}
+    <div v-if="report" class="mb-4 px-3 py-2 rounded-md bg-neutral-50 border border-neutral-200 text-neutral-600 text-sm space-y-1">
+      <div>{{ t('accounting.balance_inventory.as_of_hint', { date: report.as_of }) }}</div>
+      <div>{{ t('accounting.balance_inventory.sign_hint') }}</div>
     </div>
 
     <div v-if="report && report.draft_count > 0"
@@ -292,6 +325,7 @@ onMounted(async () => {
             <tr>
               <th class="px-3 py-2 text-left font-medium w-24">{{ t('accounting.balance_inventory.col_account') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('accounting.balance_inventory.col_name') }}</th>
+              <th class="px-3 py-2 text-center font-medium w-16">{{ t('accounting.balance_inventory.col_side') }}</th>
               <th class="px-3 py-2 text-right font-medium">{{ t('accounting.balance_inventory.col_book') }}</th>
               <th class="px-3 py-2 text-right font-medium">{{ t('accounting.balance_inventory.col_counted') }}</th>
               <th class="px-3 py-2 text-right font-medium">{{ t('accounting.balance_inventory.col_difference') }}</th>
@@ -309,11 +343,12 @@ onMounted(async () => {
                 </RouterLink>
               </td>
               <td class="px-3 py-2 align-top">{{ row.name }}</td>
+              <td class="px-3 py-2 text-center align-top text-xs text-neutral-500 font-mono">{{ sideLabel(row) }}</td>
               <td class="px-3 py-2 text-right font-mono align-top">{{ formatMoney(bookBalance(row)) }}</td>
               <td class="px-3 py-2 text-right align-top">
                 <input v-if="editable" v-model="edits[row.account_id].counted" type="text" inputmode="decimal"
                   class="w-28 h-8 px-2 text-right font-mono border border-neutral-300 rounded-md text-sm bg-surface" />
-                <span v-else class="font-mono">{{ row.counted_balance != null ? formatMoney(row.counted_balance) : '—' }}</span>
+                <span v-else class="font-mono">{{ countedBalance(row) != null ? formatMoney(countedBalance(row)!) : '—' }}</span>
               </td>
               <td class="px-3 py-2 text-right font-mono align-top"
                 :class="liveDifference(row) != null && Math.abs(liveDifference(row)!) >= 0.005 ? 'text-danger-600 font-semibold' : 'text-neutral-500'">
@@ -335,9 +370,15 @@ onMounted(async () => {
             </tr>
           </tbody>
           <tfoot>
+            <!-- Na normální straně účtu se aktiva a pasiva sčítat nedají (vyšel by
+                 součet obou stran rozvahy dohromady) — proto Σ MD a Σ D zvlášť,
+                 což je zároveň kontrola, že se rozvaha rovná. -->
             <tr class="border-t-2 border-neutral-300 font-semibold bg-neutral-50">
-              <td class="px-3 py-2" colspan="2">{{ t('accounting.balance_inventory.totals', { n: report.count }) }}</td>
-              <td class="px-3 py-2 text-right font-mono">{{ formatMoney(report.totals.ks_md - report.totals.ks_d) }}</td>
+              <td class="px-3 py-2" colspan="3">{{ t('accounting.balance_inventory.totals', { n: report.count }) }}</td>
+              <td class="px-3 py-2 text-right font-mono text-xs whitespace-nowrap">
+                <div>{{ t('accounting.balance_inventory.side_debit') }} {{ formatMoney(report.totals.ks_md) }}</div>
+                <div>{{ t('accounting.balance_inventory.side_credit') }} {{ formatMoney(report.totals.ks_d) }}</div>
+              </td>
               <td class="px-3 py-2"></td>
               <td class="px-3 py-2"></td>
               <td class="px-3 py-2"></td>
