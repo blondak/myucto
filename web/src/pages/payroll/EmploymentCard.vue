@@ -22,6 +22,8 @@ import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
 import EmploymentRegistrationPanel from './EmploymentRegistrationPanel.vue'
 import {
   employmentCodeLabel,
+  employmentDiffFields,
+  employmentDiffValue,
   employmentEventNote,
   todayIso,
   transitionPresentation,
@@ -60,6 +62,16 @@ function relationLabel(): string {
 
 function statusLabel(status: PayrollEmploymentStatus): string {
   return t(`payroll.people.employment_status.${status}`)
+}
+
+function diffValueLabel(field: string, value: unknown): string {
+  const resolved = employmentDiffValue(field, value)
+  switch (resolved.kind) {
+    case 'empty': return '—'
+    case 'date': return formatDate(resolved.iso)
+    case 'key': return t(resolved.key)
+    default: return resolved.text
+  }
 }
 
 async function startTermsEdit() {
@@ -416,8 +428,11 @@ const actions = computed<ActionItem[]>(() => [
             <span class="absolute -left-[1.18rem] top-1 h-2 w-2 rounded-full bg-payroll-500"></span>
             <p class="font-medium text-neutral-800">{{ t(`payroll.people.event.${event.event_type}`) }}</p>
             <p class="text-neutral-500">{{ formatDate(event.effective_on) }}<template v-if="event.from_status && event.to_status"> · {{ statusLabel(event.from_status) }} → {{ statusLabel(event.to_status) }}</template></p>
-            <ul v-if="event.diff" class="mt-1 space-y-0.5 text-neutral-600">
-              <li v-for="(change, key) in event.diff" :key="key">{{ t(`payroll.people.term_field.${key}`) }}: {{ String(change.from ?? '—') }} → {{ String(change.to ?? '—') }}</li>
+            <ul class="mt-1 space-y-0.5 text-neutral-600">
+              <li
+                v-for="key in employmentDiffFields(event.diff, Boolean(event.from_status && event.to_status))"
+                :key="key"
+              >{{ t(`payroll.people.term_field.${key}`) }}: {{ diffValueLabel(key, event.diff?.[key]?.from) }} → {{ diffValueLabel(key, event.diff?.[key]?.to) }}</li>
             </ul>
             <p v-if="employmentEventNote(event.note)" class="mt-1 text-neutral-600">{{ employmentEventNote(event.note) }}</p>
           </li>

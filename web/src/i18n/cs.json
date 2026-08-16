@@ -2365,6 +2365,7 @@
                 "relation_type": "Typ vztahu",
                 "status": "Stav",
                 "employment_contract": "Pracovní smlouva",
+                "legacy_start_date": "Doplnit datum nástupu",
                 "health_insurance_registration": "Registrace ZP",
                 "social_jmhz_registration": "Registrace ČSSZ / JMHZ",
                 "tax_declaration": "Prohlášení k dani",

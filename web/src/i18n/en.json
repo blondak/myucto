@@ -2365,6 +2365,7 @@
                 "relation_type": "Relationship type",
                 "status": "Status",
                 "employment_contract": "Employment contract",
+                "legacy_start_date": "Add start date",
                 "health_insurance_registration": "Health registration",
                 "social_jmhz_registration": "Social security / JMHZ registration",
                 "tax_declaration": "Tax declaration",

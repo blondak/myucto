@@ -330,4 +330,59 @@ describe('EmploymentCard', () => {
       .toContain('payroll.people.registration_legacy_warning')
     expect(wrapper.findComponent({ name: 'EmploymentRegistrationPanel' }).exists()).toBe(true)
   })
+
+  /**
+   * Časová osa dřív vypisovala hodnoty diffu syrově z databáze, takže uživatel
+   * v české aplikaci četl „pending → completed" a „→ partner_dependent".
+   */
+  it('v časové ose nenechá projít syrovou databázovou hodnotu', () => {
+    const detail = employment()
+    detail.timeline = [{
+      id: 2,
+      event_type: 'checklist_changed',
+      from_status: null,
+      to_status: null,
+      effective_on: '2026-01-05',
+      note: null,
+      diff: {
+        social_jmhz_registration: { from: 'pending', to: 'completed' },
+        relation_type: { from: null, to: 'partner_dependent' },
+      },
+      created_at: '2026-01-05 00:00:00',
+    }]
+
+    const text = mount(EmploymentCard, {
+      props: { employment: detail, canWrite: false },
+    }).text()
+
+    expect(text).toContain('payroll.people.checklist_status.pending')
+    expect(text).toContain('payroll.people.checklist_status.completed')
+    expect(text).toContain('payroll.people.relations.partner_dependent')
+    // Syrová podoba by zněla „…social_jmhz_registration: pending → completed";
+    // po překladu stojí mezi dvojtečkou a hodnotou vždycky překladový klíč.
+    expect(text).not.toContain(': pending')
+    expect(text).not.toContain('→ completed')
+    expect(text).not.toContain('→ partner_dependent')
+  })
+
+  it('změnu stavu neukáže dvakrát — hlavička ji už nese', () => {
+    const detail = employment()
+    detail.timeline = [{
+      id: 3,
+      event_type: 'status_changed',
+      from_status: 'active',
+      to_status: 'ended',
+      effective_on: '2026-06-30',
+      note: null,
+      diff: { status: { from: 'active', to: 'ended' } },
+      created_at: '2026-06-30 00:00:00',
+    }]
+
+    const text = mount(EmploymentCard, {
+      props: { employment: detail, canWrite: false },
+    }).text()
+
+    expect(text).toContain('payroll.people.employment_status.ended')
+    expect(text).not.toContain('payroll.people.term_field.status')
+  })
 })
