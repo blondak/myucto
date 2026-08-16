@@ -8,7 +8,15 @@ final class PayrollEmploymentLifecycle
 {
     /** @var array<string,list<string>> */
     private const TRANSITIONS = [
-        'planned' => ['preregistered', 'no_show'],
+        /*
+         * `planned → active` je zkratka pro nástup, který se prostě stal.
+         *
+         * Předregistrace odpovídá akci 9 – Předpokládaný nástup a dává smysl
+         * u nástupu v BUDOUCNU. Jako povinná mezizastávka pro nástup starý rok
+         * a půl znamenala, že vztah zůstal „plánovaný", nedostal skutečné datum
+         * nástupu, a tím vypadl i z výplatní listiny — aniž by kdokoli řekl proč.
+         */
+        'planned' => ['preregistered', 'active', 'no_show'],
         'preregistered' => ['active', 'no_show'],
         'active' => ['suspended', 'ended'],
         'suspended' => ['active', 'ended'],

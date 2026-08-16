@@ -886,7 +886,11 @@ onMounted(async () => {
           <p class="text-xs text-neutral-500">{{ t('payroll.people.detail_hint') }}</p>
         </div>
         <form v-if="creatingForId === expandedId && newEmployment" class="grid grid-cols-1 gap-3 rounded-lg border border-payroll-500/30 bg-payroll-50 p-4 sm:grid-cols-2 lg:grid-cols-4" data-test="new-employment-form" @submit.prevent="saveNew(expandedId)">
-          <label class="text-xs text-neutral-600">{{ t('payroll.people.code') }}<input v-model="newEmployment.code" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <!--
+            Kód vztahu tu není. Server ho vygeneruje jako pořadové číslo u osoby
+            a nepotřebuje ho žádný zákonný výstup; kdo importuje docházku, změní
+            si označení přes „…" na kartě vztahu.
+          -->
           <label class="text-xs text-neutral-600">
             {{ t('payroll.people.relation_type') }}
             <SearchableSelect v-model="newEmployment.relation_type" class="mt-1" :options="relationOptions" :clearable="false" accent="payroll" />

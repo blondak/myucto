@@ -2932,6 +2932,12 @@ export const payrollApi = {
   personProfile: (id: number) =>
     api.get<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`)
       .then(response => response.data.profile),
+  /** Označení vztahu pro import docházky — párovací klíč CSV, ne údaj o vztahu. */
+  renameEmployment: (employmentId: number, rowVersion: number, code: string) =>
+    api.patch<{ employment: PayrollEmployment }>(
+      `/payroll/employments/${employmentId}/code`,
+      { row_version: rowVersion, code },
+    ).then(response => response.data.employment),
   savePersonProfile: (id: number, payload: PayrollPersonProfilePayload) =>
     api.put<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`, payload)
       .then(response => response.data.profile),

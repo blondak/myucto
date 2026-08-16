@@ -5,6 +5,7 @@ import { payrollApi, type PayrollEmployment } from '@/api/payroll'
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     transitionEmployment: vi.fn(),
+    renameEmployment: vi.fn(),
     addEmploymentTerms: vi.fn(),
     updateEmploymentChecklist: vi.fn(),
     deleteEmployment: vi.fn(),
@@ -77,7 +78,8 @@ function employment(): PayrollEmployment {
     is_legacy_projection: false,
     monthly_gross_minor: 4000000,
     row_version: 1,
-    allowed_transitions: ['preregistered', 'no_show'],
+    // Nástup jde z plánovaného potvrdit rovnou; předregistrace zůstává volbou.
+    allowed_transitions: ['preregistered', 'active', 'no_show'],
     can_delete: true,
     delete_blocker: null,
     delete_cascade: { terms: 1, checklist: 4, events: 1 },
@@ -414,6 +416,65 @@ describe('EmploymentCard', () => {
     })
     expect(open.find('[data-test="employment-toggle"]').exists()).toBe(false)
     expect(open.find('[data-test="employment-checklist"]').exists()).toBe(true)
+  })
+
+  /**
+   * Nástup starý rok a půl zůstával „plánovaný", protože nikdo neproklikal dva
+   * stavové přechody — a tím vztah vypadl i z výplatní listiny.
+   */
+  it('nástup, který už nastal, potvrdí jedním krokem a k datu nástupu', async () => {
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    const confirm = wrapper.get('[data-test="action-confirm-start"]')
+    expect(confirm.text()).toContain('payroll.people.confirm_start')
+    // „Zahájit" se vedle toho nenabízí podruhé.
+    expect(wrapper.find('[data-test="action-transition-active"]').isVisible()).toBe(false)
+
+    vi.mocked(payrollApi.transitionEmployment).mockResolvedValue(employment())
+    await confirm.trigger('click')
+    await flushPromises()
+
+    expect(payrollApi.transitionEmployment).toHaveBeenCalledWith(10, 'active', {
+      row_version: 1,
+      effective_on: '2026-01-01',
+    })
+  })
+
+  it('u nástupu v budoucnu nabídne předregistraci, ne potvrzení', () => {
+    const future = employment()
+    future.start_date = '2099-01-01'
+
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: future, canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    expect(wrapper.find('[data-test="action-confirm-start"]').isVisible()).toBe(false)
+    expect(wrapper.get('[data-test="action-transition-preregistered"]').isVisible()).toBe(true)
+  })
+
+  /**
+   * Kód se generuje sám, ale je to párovací klíč CSV importu docházky —
+   * kdo importuje, musí ho umět srovnat s tím, co posílá druhá strana.
+   */
+  it('označení pro import docházky jde změnit', async () => {
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    expect(wrapper.find('[data-test="employment-rename"]').exists()).toBe(false)
+    await wrapper.get('[data-test="action-rename-employment"]').trigger('click')
+    await wrapper.get('[data-test="employment-code-input"]').setValue('DOCHAZKA-7')
+
+    vi.mocked(payrollApi.renameEmployment).mockResolvedValue(employment())
+    await wrapper.get('[data-test="employment-rename"]').trigger('submit')
+    await flushPromises()
+
+    expect(payrollApi.renameEmployment).toHaveBeenCalledWith(10, 1, 'DOCHAZKA-7')
   })
 
   /**

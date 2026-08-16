@@ -92,7 +92,8 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertTrue($hpp['is_primary']);
         self::assertSame('planned', $dpp['status']);
         self::assertCount(4, $hpp['checklist']);
-        self::assertSame(['preregistered', 'no_show'], $hpp['allowed_transitions']);
+        // Nástup jde potvrdit rovnou; předregistrace zůstává volbou pro budoucí nástup.
+        self::assertSame(['preregistered', 'active', 'no_show'], $hpp['allowed_transitions']);
 
         $hpp = $this->transition($hpp, 'preregistered', '2026-01-01');
         $hpp = $this->transition($hpp, 'active', '2026-01-02');
@@ -194,18 +195,28 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
     {
         $employment = $this->create($this->employeeId, 'ZMR-1', 'small_scale_employment', true);
 
-        $skipped = $this->action->transition(
+        /*
+         * Nástup jde z plánovaného potvrdit rovnou a rovnou zapíše skutečné
+         * datum nástupu — bez něj vztah vypadne z výplatní listiny.
+         */
+        $started = $this->transition($employment, 'active', '2026-01-01');
+        self::assertSame('active', $started['status']);
+        self::assertSame('2026-01-01', $started['actual_start_date']);
+
+        // Zpátky do plánovaného ale nic nevede.
+        $reverse = $this->action->transition(
             $this->request(
                 'POST',
-                "/api/payroll/employments/{$employment['id']}/transitions/active",
-                ['row_version' => 1, 'effective_on' => '2026-01-01'],
+                "/api/payroll/employments/{$started['id']}/transitions/preregistered",
+                ['row_version' => $started['row_version'], 'effective_on' => '2026-01-02'],
             ),
             new Response(),
-            ['id' => (string) $employment['id'], 'target' => 'active'],
+            ['id' => (string) $started['id'], 'target' => 'preregistered'],
         );
-        self::assertSame(409, $skipped->getStatusCode());
-        self::assertSame('invalid_transition', $this->json($skipped)['error']['code']);
+        self::assertSame(409, $reverse->getStatusCode());
+        self::assertSame('invalid_transition', $this->json($reverse)['error']['code']);
 
+        $employment = $this->create($this->employeeId, 'ZMR-2', 'small_scale_employment', false);
         $noShow = $this->transition($employment, 'no_show', '2026-01-01');
         self::assertSame('no_show', $noShow['status']);
 
@@ -220,6 +231,50 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         );
         self::assertSame(409, $stale->getStatusCode());
         self::assertSame('row_version_conflict', $this->json($stale)['error']['code']);
+    }
+
+    /**
+     * Kód se generuje sám a jde přejmenovat.
+     *
+     * Býval povinný a uživatel ho vymýšlel jako první pole formuláře, přestože
+     * ho nepotřebuje žádný zákonný výstup. Po založení byl navíc neměnný — a to
+     * u párovacího klíče CSV importu docházky znamenalo založit vztah znovu.
+     */
+    public function testEmploymentCodeIsGeneratedAndRenamable(): void
+    {
+        $first = $this->create($this->employeeId, '', 'employment', true);
+        $second = $this->create($this->employeeId, '', 'dpp', false);
+
+        self::assertSame('1', $first['code'], 'První vztah osoby dostane pořadové číslo 1.');
+        self::assertSame('2', $second['code'], 'Druhý vztah pokračuje v řadě.');
+
+        // Obsazené číslo se přeskočí — u převzatých osob existují vlastní kódy.
+        $manual = $this->create($this->employeeId, '3', 'dpc', false);
+        self::assertSame('3', $manual['code']);
+        self::assertSame('4', $this->create($this->employeeId, '', 'dpc', false)['code']);
+
+        $renamed = $this->action->rename(
+            $this->request(
+                'PATCH',
+                "/api/payroll/employments/{$first['id']}/code",
+                ['row_version' => $first['row_version'], 'code' => 'DOCHAZKA-7'],
+            ),
+            new Response(),
+            ['id' => (string) $first['id']],
+        );
+        self::assertSame(200, $renamed->getStatusCode(), (string) $renamed->getBody());
+        self::assertSame('DOCHAZKA-7', $this->json($renamed)['employment']['code']);
+
+        $invalid = $this->action->rename(
+            $this->request(
+                'PATCH',
+                "/api/payroll/employments/{$second['id']}/code",
+                ['row_version' => $second['row_version'], 'code' => 'má mezeru'],
+            ),
+            new Response(),
+            ['id' => (string) $second['id']],
+        );
+        self::assertSame(422, $invalid->getStatusCode());
     }
 
     public function testPrimaryUniquenessTenantBoundarySessionAndPermissionFailClosed(): void

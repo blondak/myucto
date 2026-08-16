@@ -79,6 +79,63 @@ const accentClass = computed(() => {
 
 const expanded = ref(!isClosed.value)
 
+/**
+ * Nástup, který se prostě stal, se potvrdí jedním krokem.
+ *
+ * Předregistrace odpovídá akci 9 – Předpokládaný nástup a dává smysl u nástupu
+ * v BUDOUCNU. Jako povinná mezizastávka pro nástup starý rok a půl znamenala,
+ * že vztah zůstal „plánovaný", nedostal skutečné datum nástupu, a tím vypadl
+ * i z výplatní listiny — aniž by kdokoli řekl proč.
+ */
+const startDate = computed(() => props.employment.start_date)
+const startAlreadyHappened = computed(
+  () => props.employment.status === 'planned'
+    && startDate.value !== null
+    && startDate.value <= todayIso(),
+)
+
+const renaming = ref(false)
+const codeDraft = ref('')
+
+function startRename() {
+  codeDraft.value = props.employment.code
+  renaming.value = true
+}
+
+async function saveCode() {
+  const code = codeDraft.value.trim()
+  if (busy.value || code === '' || code === props.employment.code) {
+    renaming.value = false
+    return
+  }
+  busy.value = true
+  try {
+    emit('updated', await payrollApi.renameEmployment(
+      props.employment.id,
+      props.employment.row_version,
+      code,
+    ))
+    renaming.value = false
+  } catch (error) {
+    const message = (error as { response?: { data?: { error?: { message?: string } } } })
+      ?.response?.data?.error?.message
+    toast.error(message ?? t('payroll.people.mutation_failed'))
+  } finally {
+    busy.value = false
+  }
+}
+
+/**
+ * Potvrzení nástupu použije datum nástupu, ne dnešek — jinak by se do evidence
+ * zapsalo, že člověk nastoupil ve chvíli, kdy si toho někdo všiml.
+ */
+async function confirmStart() {
+  const on = startDate.value
+  if (on === null) return
+  transitionDate.value = on
+  await transition('active')
+}
+
 function relationLabel(): string {
   return t(`payroll.people.relations.${props.employment.relation_type}`)
 }
@@ -285,6 +342,16 @@ async function removeEmployment() {
 }
 
 const actions = computed<ActionItem[]>(() => [
+  {
+    key: 'confirm-start',
+    label: t('payroll.people.confirm_start', { date: formatDate(startDate.value) }),
+    icon: 'check',
+    tier: 'primary',
+    variant: 'success',
+    disabled: busy.value,
+    show: props.canWrite && startAlreadyHappened.value,
+    run: () => void confirmStart(),
+  },
   ...transitionPresentation(
     props.employment.allowed_transitions,
     props.employment.status,
@@ -294,12 +361,32 @@ const actions = computed<ActionItem[]>(() => [
       ? t('payroll.people.transition.unarchive')
       : t(`payroll.people.transition.${presentation.target}`),
     icon: presentation.icon,
-    tier: presentation.tier,
-    variant: presentation.variant,
+    // Dokud nástup nenastal, hlavní krok je předregistrace (akce 9). Jakmile
+    // nastal, hlavním krokem je „Potvrdit nástup" — ustoupí tedy jen ta akce,
+    // která byla hlavní. Kdyby ustoupily všechny, vytlačí „Označit nenástup"
+    // z „…" mezi běžná tlačítka a odsune odtud „Novou verzi podmínek".
+    tier: startAlreadyHappened.value && presentation.tier === 'primary'
+      ? 'secondary'
+      : presentation.tier,
+    variant: startAlreadyHappened.value && presentation.tier === 'primary'
+      ? 'neutral'
+      : presentation.variant,
     disabled: busy.value || !transitionDate.value,
-    show: props.canWrite,
+    show: props.canWrite
+      // „Zahájit" se vedle „Potvrdit nástup" nenabízí dvakrát.
+      && !(startAlreadyHappened.value && presentation.target === 'active'),
     run: () => void transition(presentation.target),
   } satisfies ActionItem)),
+  {
+    key: 'rename-employment',
+    label: t('payroll.people.rename_action'),
+    icon: 'edit',
+    tier: 'advanced',
+    variant: 'neutral',
+    disabled: busy.value,
+    show: props.canWrite,
+    run: () => startRename(),
+  },
   {
     key: 'new-terms',
     label: t('payroll.people.new_terms'),
@@ -377,6 +464,23 @@ const actions = computed<ActionItem[]>(() => [
     </div>
 
     <template v-if="expanded">
+    <form
+      v-if="renaming"
+      class="mt-3 flex flex-wrap items-end gap-2 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3"
+      data-test="employment-rename"
+      @submit.prevent="saveCode"
+    >
+      <label class="min-w-0 flex-1 text-xs text-neutral-600">
+        {{ t('payroll.people.rename_label') }}
+        <input v-model="codeDraft" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="employment-code-input">
+        <span class="mt-1 block text-neutral-500">{{ t('payroll.people.rename_hint') }}</span>
+      </label>
+      <div class="flex gap-2 pb-6">
+        <button type="button" :class="btnOutlineSm('neutral')" @click="renaming = false">{{ t('common.cancel') }}</button>
+        <button type="submit" :class="btnOutlineSm('accent')" :disabled="busy">{{ t('common.save') }}</button>
+      </div>
+    </form>
+
     <dl class="mt-4 grid grid-cols-2 gap-3 text-xs lg:grid-cols-4">
       <div><dt class="text-neutral-500">{{ t('payroll.people.start_date') }}</dt><dd class="mt-0.5 text-neutral-800">{{ formatDate(employment.start_date) }}</dd></div>
       <div><dt class="text-neutral-500">{{ t('payroll.people.actual_start') }}</dt><dd class="mt-0.5 text-neutral-800">{{ formatDate(employment.actual_start_date) }}</dd></div>

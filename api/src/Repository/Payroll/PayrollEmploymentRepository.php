@@ -160,6 +160,9 @@ final class PayrollEmploymentRepository
             $this->lockEmployee($supplierId, $employeeId);
             $this->assertOffice($supplierId, $data['terms']['office_id']);
             $this->assertPrimaryAvailable($supplierId, $employeeId, $data['terms']['is_primary'], null);
+            if ($data['code'] === '') {
+                $data['code'] = $this->nextEmploymentCode($supplierId, $employeeId);
+            }
 
             $stmt = $this->db->pdo()->prepare(
                 "INSERT INTO payroll_employments
@@ -379,6 +382,61 @@ final class PayrollEmploymentRepository
     }
 
     /** @return array<string,mixed> */
+    /**
+     * Přejmenování označení pro import docházky. Nemění nic o vztahu samotném,
+     * jen jeho párovací klíč — proto žádná událost na časové ose, ale záznam
+     * do auditní stopy.
+     *
+     * @return array<string,mixed>
+     */
+    public function rename(
+        int $supplierId,
+        int $employmentId,
+        string $code,
+        int $expectedVersion,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        return $this->transaction(function () use (
+            $supplierId,
+            $employmentId,
+            $code,
+            $expectedVersion,
+            $userId,
+            $ip,
+            $userAgent,
+        ): array {
+            $employment = $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
+            $previous = (string) $employment['code'];
+            $update = $this->db->pdo()->prepare(
+                'UPDATE payroll_employments
+                    SET code = ?, row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?'
+            );
+            $update->execute([$code, $supplierId, $employmentId, $expectedVersion]);
+            if ($update->rowCount() !== 1) {
+                throw new PayrollEmploymentConflictException($expectedVersion);
+            }
+            $this->activityLogger->log(
+                'payroll.employment.renamed',
+                $userId,
+                'payroll_employment',
+                $employmentId,
+                ['from' => $previous, 'to' => $code],
+                $ip,
+                $userAgent,
+                $supplierId,
+            );
+
+            return $this->find(
+                $supplierId,
+                (int) $employment['employee_id'],
+                $employmentId,
+            );
+        });
+    }
+
     public function transition(
         int $supplierId,
         int $employmentId,
@@ -811,6 +869,33 @@ final class PayrollEmploymentRepository
     }
 
     /**
+     * Pořadové číslo vztahu u osoby — první vztah `1`, druhý `2`.
+     *
+     * Bez prefixu a bez ročníku: unikátnost hlídá `uq_payroll_employment_code`
+     * per firma+osoba, takže pořadí stačí. Přeskakují se obsazená čísla, protože
+     * u převzatých osob můžou existovat vlastní kódy i značka `legacy`.
+     *
+     * Volá se pod zámkem osoby (`lockEmployee`), takže dva souběžné požadavky
+     * nedostanou totéž číslo.
+     */
+    private function nextEmploymentCode(int $supplierId, int $employeeId): string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT code FROM payroll_employments
+              WHERE supplier_id = ? AND employee_id = ?'
+        );
+        $stmt->execute([$supplierId, $employeeId]);
+        $taken = array_map(strval(...), $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+        $next = 1;
+        while (in_array((string) $next, $taken, true)) {
+            ++$next;
+        }
+
+        return (string) $next;
+    }
+
+    /**
      * Z archivu vede zpátky JEDINÁ cesta — do stavu, ze kterého se archivovalo.
      *
      * Lifecycle zná jen stav, ne historii, takže by nabídl „skončený" i
@@ -892,7 +977,7 @@ final class PayrollEmploymentRepository
         ?int $expectedVersion,
     ): array {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, employee_id, relation_type, status, is_primary, start_date,
+            'SELECT id, employee_id, code, relation_type, status, is_primary, start_date,
                     actual_start_date, end_date, monthly_gross_minor, row_version
                FROM payroll_employments
               WHERE supplier_id = ? AND id = ?

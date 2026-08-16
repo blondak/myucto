@@ -113,6 +113,38 @@ final class PayrollEmploymentAction
         return Json::ok($response, ['employment' => $employment]);
     }
 
+    /**
+     * Označení vztahu pro import docházky.
+     *
+     * Kód se generuje sám a uživatel ho běžně nevidí — jenže je to párovací klíč
+     * CSV importu, takže kdo importuje z docházkového systému, musí ho umět
+     * srovnat s tím, co posílá druhá strana. Dřív byl po založení neměnný, což
+     * u importního klíče znamenalo založit vztah znovu.
+     *
+     * @param array{id:string} $args
+     */
+    public function rename(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $employment = $this->employments->rename(
+                $this->currentSupplierId($request),
+                (int) $args['id'],
+                $this->validator->code($body),
+                $this->validator->rowVersion($body),
+                $this->userId($request),
+                $this->ip($request),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+        return Json::ok($response, ['employment' => $employment]);
+    }
+
     /** @param array{id:string,target:string} $args */
     public function transition(Request $request, Response $response, array $args): Response
     {

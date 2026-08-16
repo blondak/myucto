@@ -65,13 +65,38 @@ final class PayrollEmploymentValidator
         private readonly CzIscoCodebook $czIsco,
     ) {}
 
+    /**
+     * Označení vztahu při přejmenování. Na rozdíl od zakládání je tady povinné —
+     * „vygeneruj mi nové číslo" není akce, kterou by kdo hledal.
+     *
+     * @param array<string,mixed> $input
+     */
+    public function code(array $input): string
+    {
+        $code = trim($this->inputString($input['code'] ?? ''));
+        if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,63}$/', $code)) {
+            throw new \InvalidArgumentException('Označení pracovního vztahu není platné.');
+        }
+
+        return $code;
+    }
+
     /** @param array<string,mixed> $input
      *  @return EmploymentCreateInput
      */
     public function create(array $input): array
     {
+        /*
+         * Kód je nepovinný a prázdný znamená „vygeneruj".
+         *
+         * Býval povinný a uživatel ho vymýšlel jako první pole formuláře, přestože
+         * ho nepotřebuje žádný zákonný výstup — neobjeví se v registraci ČSSZ,
+         * v ELDP, v JMHZ, v zápočtovém listu ani v PDF. Je to interní popisek
+         * a párovací klíč CSV importu docházky. Průvodce založením osoby si ho
+         * ostatně generoval odjakživa sám.
+         */
         $code = trim($this->inputString($input['code'] ?? ''));
-        if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,63}$/', $code)) {
+        if ($code !== '' && !preg_match('/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,63}$/', $code)) {
             throw new \InvalidArgumentException('Kód pracovního vztahu není platný.');
         }
         $relationType = $this->inputString($input['relation_type'] ?? '');

@@ -876,6 +876,7 @@ final class Routes
             // do prohlížeče jde jen shoda (viz PayrollCzIscoAction).
             $g->get('/cz-isco', [PayrollCzIscoAction::class, 'search']);
             $g->put('/employments/{id:[0-9]+}/terms', [PayrollEmploymentAction::class, 'addTerms']);
+            $g->patch('/employments/{id:[0-9]+}/code', [PayrollEmploymentAction::class, 'rename']);
             $g->post(
                 '/employments/{id:[0-9]+}/transitions/{target:preregistered|active|suspended|ended|archived|no_show}',
                 [PayrollEmploymentAction::class, 'transition'],

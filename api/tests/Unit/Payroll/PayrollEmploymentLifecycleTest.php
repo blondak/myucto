@@ -31,15 +31,24 @@ final class PayrollEmploymentLifecycleTest extends TestCase
         self::addToAssertionCount(1);
     }
 
+    /**
+     * `planned → active` tu schválně NENÍ: nástup, který se prostě stal, se
+     * potvrzuje jedním krokem. Předregistrace zůstává, ale jako volba pro nástup
+     * v budoucnu, ne jako povinná mezizastávka.
+     *
+     * `archived → active` odmítnuté zůstává — z archivu vede cesta jen zpátky
+     * do stavu, ze kterého se archivovalo, ne k oživení skončeného vztahu.
+     */
     public function testRejectsSkippedAndReverseTransitions(): void
     {
         $lifecycle = new PayrollEmploymentLifecycle();
         foreach ([
-            ['planned', 'active'],
             ['planned', 'ended'],
+            ['planned', 'suspended'],
             ['active', 'planned'],
             ['ended', 'active'],
             ['archived', 'active'],
+            ['archived', 'planned'],
         ] as [$from, $to]) {
             try {
                 $lifecycle->assertTransition($from, $to);
