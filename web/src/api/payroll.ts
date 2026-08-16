@@ -336,6 +336,32 @@ export interface PayrollPersonSensitiveReveal {
   }[]
 }
 
+/**
+ * Úhrny za jeden měsíc předchozího zpracování, v haléřích. Uživatel je opisuje
+ * ze sestavy původního programu, server z nich složí roční kumulaci.
+ */
+export interface PayrollOpeningMonth {
+  month: number
+  social_assessment_base_minor_units: number
+  advance_base_minor_units: number
+  advance_tax_minor_units: number
+  withholding_base_minor_units: number
+  withholding_tax_minor_units: number
+  applied_non_refundable_credits_minor_units: number
+  applied_child_credit_minor_units: number
+  tax_bonus_minor_units: number
+  bonus_qualifying_income_minor_units: number
+}
+
+export interface PayrollOpeningBalances {
+  year: number
+  months: PayrollOpeningMonth[]
+  /** Id aktuální verze podle druhu kumulace; oprava se na ně navazuje. */
+  openings: Record<string, number | null>
+  /** Po schválené mzdě za daný rok už počáteční stavy měnit nelze. */
+  locked: boolean
+}
+
 export interface PayrollPersonProfile {
   employee_id: number
   full_name: string
@@ -2932,6 +2958,20 @@ export const payrollApi = {
   personProfile: (id: number) =>
     api.get<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`)
       .then(response => response.data.profile),
+    /** Počáteční stavy zákonných kumulací za rok — úhrny z předchozího zpracování. */
+  statutoryOpenings: (employeeId: number, year: number) =>
+    api.get<{ openings: PayrollOpeningBalances }>(
+      `/payroll/people/${employeeId}/statutory-openings`,
+      { params: { year } },
+    ).then(response => response.data.openings),
+  saveStatutoryOpenings: (
+    employeeId: number,
+    payload: { year: number, source_reference: string, months: PayrollOpeningMonth[] },
+  ) =>
+    api.put<{ openings: PayrollOpeningBalances }>(
+      `/payroll/people/${employeeId}/statutory-openings`,
+      payload,
+    ).then(response => response.data.openings),
   /** Označení vztahu pro import docházky — párovací klíč CSV, ne údaj o vztahu. */
   renameEmployment: (employmentId: number, rowVersion: number, code: string) =>
     api.patch<{ employment: PayrollEmployment }>(

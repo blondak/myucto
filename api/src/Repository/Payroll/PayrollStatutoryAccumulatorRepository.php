@@ -930,6 +930,44 @@ final class PayrollStatutoryAccumulatorRepository
     }
 
     /** @return array<string,mixed>|null */
+    /**
+     * Aktuální (nenahrazená) verze počátečního stavu, nebo `null`.
+     *
+     * Pro průvodce počátečními stavy: potřebuje `id`, protože oprava se na
+     * aktuální verzi musí explicitně navázat — jinak ji `appendOpeningBalance()`
+     * odmítne jako duplicitu.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function openingBalance(
+        int $supplierId,
+        int $employeeId,
+        int $year,
+        string $calculationKind,
+    ): ?array {
+        return $this->currentOpening($supplierId, $employeeId, $year, $calculationKind, false);
+    }
+
+    /**
+     * Má zaměstnanec za daný rok schválený zákonný výsledek?
+     *
+     * Řádek kumulace vzniká JEN schválením revize, takže je to nejlevnější
+     * a nejpřesnější doklad o tom, že se z počátečního stavu už počítalo.
+     * Po něm ho měnit nelze — přepsal by se základ hotového výpočtu.
+     */
+    public function hasApprovedResult(int $supplierId, int $employeeId, int $year): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_statutory_accumulator_entries
+              WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employeeId, $year]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
     private function currentOpening(
         int $supplierId,
         int $employeeId,

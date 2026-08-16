@@ -20,6 +20,7 @@ import { useToast } from '@/composables/useToast'
 import EmploymentDimensionsPanel from './EmploymentDimensionsPanel.vue'
 import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
 import EmploymentRegistrationPanel from './EmploymentRegistrationPanel.vue'
+import PayrollOpeningBalancesPanel from './PayrollOpeningBalancesPanel.vue'
 import {
   employmentCodeLabel,
   employmentDiffFields,
@@ -34,6 +35,8 @@ const props = defineProps<{
   canWrite: boolean
   canReadDocuments?: boolean
   canWriteDocuments?: boolean
+  // Období, od kterého firma vede mzdy v MyÚčtu (`payroll_module_state.start_period`).
+  payrollStartPeriod?: string | null
 }>()
 const emit = defineEmits<{
   updated: [employment: PayrollEmployment]
@@ -93,6 +96,46 @@ const startAlreadyHappened = computed(
     && startDate.value !== null
     && startDate.value <= todayIso(),
 )
+
+/**
+ * Registrační povinnost u ČSSZ. Dokud visí, má smysl varovat před dvojí
+ * přihláškou; jakmile ji někdo vyřídí, je varování jen šum.
+ */
+const registrationItem = computed(
+  () => props.employment.checklist.find(item => item.item_key === 'social_jmhz_registration') ?? null,
+)
+const registrationPending = computed(() => registrationItem.value?.status === 'pending')
+
+/**
+ * „Přihlášený je, jen ne přes nás." Konkurence to řeší stavem registrace na
+ * poměru, ne zákazem — a MyÚčto na to stav `not_applicable` má, jen ho z tohohle
+ * místa nešlo nastavit.
+ */
+async function markRegisteredElsewhere() {
+  const item = registrationItem.value
+  if (item === null) return
+  await setChecklist(item.item_key, item.row_version, 'not_applicable')
+}
+
+/**
+ * Zaměstnanec nastoupil dřív, než firma začala vést mzdy v MyÚčtu.
+ *
+ * Nejde o kosmetiku: bez počátečních stavů vypadne osoba z dávky zákonného
+ * výpočtu, celý běh spadne do `manual_review` a přebít se to nedá — override
+ * pracuje nad řádky validací, kdežto tohle je issue statutory bundlu.
+ */
+// Období se ořezává na YYYY-MM: API ho posílá tak, databáze drží celé datum.
+const payrollStartMonth = computed(() => props.payrollStartPeriod?.slice(0, 7) ?? null)
+// „2026-07" je tvar pro stroj; ve větě má stát „7/2026".
+const payrollStartLabel = computed(() => {
+  const period = payrollStartMonth.value
+  return period === null ? '' : `${Number(period.slice(5, 7))}/${period.slice(0, 4)}`
+})
+const startsBeforePayroll = computed(() => {
+  const period = payrollStartMonth.value
+  const start = props.employment.start_date
+  return period != null && start !== null && start.slice(0, 7) < period
+})
 
 const renaming = ref(false)
 const codeDraft = ref('')
@@ -464,6 +507,26 @@ const actions = computed<ActionItem[]>(() => [
     </div>
 
     <template v-if="expanded">
+    <div
+      v-if="startsBeforePayroll"
+      class="mt-3 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3 text-xs text-neutral-700"
+      data-test="opening-balances-needed"
+    >
+      <p class="font-medium text-neutral-900">{{ t('payroll.people.openings.title') }}</p>
+      <p class="mt-1">
+        {{ t('payroll.people.openings.hint', {
+          start: formatDate(employment.start_date),
+          period: payrollStartLabel,
+        }) }}
+      </p>
+      <PayrollOpeningBalancesPanel
+        class="mt-3"
+        :person-id="employment.employee_id"
+        :start-period="payrollStartMonth!"
+        :can-write="canWrite"
+      />
+    </div>
+
     <form
       v-if="renaming"
       class="mt-3 flex flex-wrap items-end gap-2 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3"
@@ -629,12 +692,25 @@ const actions = computed<ActionItem[]>(() => [
       bylo to jen `v-if` bez zdůvodnění. Kdyby pro blokaci existoval skutečný
       důvod, patří do API jako stav s větou, ne do šablony.
     -->
+    <!--
+      Varování mizí, jakmile je registrační povinnost vyřízená — ať už splněním,
+      nebo „Netýká se" u někoho, kdo je přihlášený mimo MyÚčto. Dřív svítilo
+      natrvalo a nedalo se s ním nic udělat.
+    -->
     <p
-      v-if="employment.is_legacy_projection"
+      v-if="employment.is_legacy_projection && registrationPending"
       data-test="legacy-registration-warning"
       class="mt-4 rounded-md bg-warning-50 px-3 py-2 text-xs text-warning-800"
     >
       {{ t('payroll.people.registration_legacy_warning') }}
+      <button
+        v-if="canWrite && registrationPending"
+        type="button"
+        class="ml-1 font-medium underline underline-offset-2"
+        :disabled="busy"
+        data-test="registration-already-done"
+        @click="markRegisteredElsewhere"
+      >{{ t('payroll.people.registered_elsewhere') }}</button>
     </p>
     <EmploymentRegistrationPanel
       :employment-id="employment.id"

@@ -622,9 +622,19 @@ async function openFromQuery() {
   }
 }
 
+/**
+ * Od kdy firma vede mzdy v MyÚčtu. Karta vztahu z toho pozná zaměstnance, který
+ * nastoupil dřív — takový potřebuje počáteční stavy, jinak jeho mzda nespočítá.
+ * Výpadek nesmí shodit seznam, proto tichý fallback.
+ */
+const payrollStartPeriod = ref<string | null>(null)
+
 onMounted(async () => {
   await load()
   await openFromQuery()
+  payrollStartPeriod.value = await payrollApi.capabilities()
+    .then(data => data.state.start_period)
+    .catch(() => null)
 })
 </script>
 
@@ -912,6 +922,7 @@ onMounted(async () => {
           :can-write="auth.canWrite('payroll.employment.write')"
           :can-read-documents="auth.canRead('payroll.documents')"
           :can-write-documents="auth.canWrite('payroll.documents')"
+          :payroll-start-period="payrollStartPeriod"
           @updated="updateEmployment(expandedId, $event)"
           @deleted="removeEmploymentFromDetail(expandedId, $event)"
         />

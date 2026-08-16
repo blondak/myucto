@@ -313,6 +313,16 @@ describe('EmploymentCard', () => {
       ...employment(),
       code: 'legacy',
       is_legacy_projection: true,
+      checklist: [{
+        id: 2,
+        phase: 'onboarding',
+        item_key: 'social_jmhz_registration',
+        status: 'pending',
+        due_date: '2026-01-01',
+        completed_at: null,
+        note: null,
+        row_version: 1,
+      }],
       timeline: [{
         id: 1,
         event_type: 'created',
@@ -337,6 +347,46 @@ describe('EmploymentCard', () => {
     expect(wrapper.get('[data-test="legacy-registration-warning"]').text())
       .toContain('payroll.people.registration_legacy_warning')
     expect(wrapper.findComponent({ name: 'EmploymentRegistrationPanel' }).exists()).toBe(true)
+  })
+
+  /**
+   * Varování bylo slepá ulička — svítilo natrvalo a nedalo se s ním nic udělat,
+   * přestože u někoho přihlášeného mimo MyÚčto je jen šum.
+   */
+  it('varování o dvojí přihlášce jde vyřešit a pak zmizí', async () => {
+    const legacy = employment()
+    legacy.is_legacy_projection = true
+    legacy.checklist = [{
+      id: 2,
+      phase: 'onboarding',
+      item_key: 'social_jmhz_registration',
+      status: 'pending',
+      due_date: '2026-01-01',
+      completed_at: null,
+      note: null,
+      row_version: 3,
+    }]
+
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: legacy, canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    const resolved = { ...legacy }
+    resolved.checklist = [{ ...legacy.checklist[0], status: 'not_applicable' as const }]
+    vi.mocked(payrollApi.updateEmploymentChecklist).mockResolvedValue(resolved)
+
+    await wrapper.get('[data-test="registration-already-done"]').trigger('click')
+    await flushPromises()
+
+    expect(payrollApi.updateEmploymentChecklist)
+      .toHaveBeenCalledWith(10, 'social_jmhz_registration', {
+        row_version: 3,
+        status: 'not_applicable',
+      })
+
+    await wrapper.setProps({ employment: resolved })
+    expect(wrapper.find('[data-test="legacy-registration-warning"]').exists()).toBe(false)
   })
 
   /**
