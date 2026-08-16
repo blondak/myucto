@@ -638,6 +638,10 @@ export interface InboxScanResultDetail {
   purchase_invoice_id?: number
   isdoc_invoice_count?: number
   supplier_ic?: string | null
+  /** PDF spárované s ISDOC podle shodného základu jména (bez volání AI). */
+  paired_pdf?: string | null
+  /** Měkké varování: spárované PDF si s daty nesedí (doklad přesto vznikl i s přílohou). */
+  warning?: string
 }
 
 export interface InboxScanResult {

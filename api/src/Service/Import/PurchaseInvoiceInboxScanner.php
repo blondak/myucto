@@ -17,19 +17,26 @@ use MyInvoice\Infrastructure\Database\Connection;
  * Postup:
  *   1. Načti inbox_dir z config; pokud prázdné → vrať [skipped: 'inbox not configured'].
  *   2. Rekurzivně projdi adresář, filtruj přípony z allowed_exts.
- *   3. Per soubor: spočti SHA-256 obsahu.
- *   4. Pokud existuje purchase_invoice s tímto pdf_hash → skip (dedup).
- *   5. Pokud .isdoc → parsuj přímo IsdocParser.
- *      Pokud .pdf → PdfIsdocExtractor → pokud najde embedded ISDOC, parsuj; jinak skip
- *        (fáze 1 nepodporuje AI fallback — to dorazí v fázi 2c).
- *      Pokud .xml → zkus parsovat jako ISDOC (může to být payload bez PDF wrapping).
+ *   3. Seskup soubory do ZÁSILEK podle základu jména ({@see InboxFileGrouper}) — dvojice
+ *      `faktura.isdoc` + `faktura.pdf` je jeden doklad, ne dvě nezávislé věci.
+ *   4. Per zásilku: spočti SHA-256 každého členu; když některý z nich už v DB je
+ *      (`pdf_hash` NEBO `source_hash`), celou zásilku přeskoč (dedup).
+ *   5. Data ber vždy ze strojového originálu, je-li v zásilce:
+ *      `.isdoc`/`.xml` → IsdocParser, `.isdocx` → rozbal a parsuj.
+ *      Jen PDF → embedded ISDOC (PDF/A-3), jinak AI extrakce.
+ *      Nečitelný ISDOC se sourozeneckým PDF → spadni na PDF větev (nikdy nebrickovat import).
  *   6. Z parsovaných dat:
  *      - Najdi/vytvoř vendor (matchuj přes IČ; pokud chybí, vytvoř nový clients řádek s is_vendor=1).
  *      - Vytvoř purchase_invoice draft.
  *      - Insertni items + recompute totals.
- *      - Archivuj PDF (přesun do archive_storage, fill pdf_path/hash/size/original_name).
- *      - Volitelně přesuň source file do move_processed_to subdiru.
+ *      - Archivuj čitelné PDF (sourozenecké > vnitřní z isdocx) a strojový originál.
  *   7. Vrať souhrn { created: int, skipped: int, failed: int, details: [{file, status, reason, purchase_invoice_id?}] }.
+ *
+ * PROČ ZÁSILKY: dřív se šlo soubor po souboru, takže PDF vedle ISDOC šlo na placenou AI
+ * extrakci i s přesnými daty po ruce a při sebemenším rozdílu vznikl druhý koncept —
+ * a když vyhrál ISDOC, doklad zůstal bez čitelné podoby. Že to většinou dopadlo dobře,
+ * drželo jen abecední pořadí (`.isdoc` < `.pdf`) a unikátní klíče v DB; u `.xml`
+ * (> `.pdf`) nedrželo vůbec.
  *
  * Security:
  *   - Realpath check: každý file musí být uvnitř configured inbox_dir (ochrana symlinks).
@@ -41,6 +48,9 @@ final class PurchaseInvoiceInboxScanner
     private const MAX_FILE_SIZE = 20 * 1024 * 1024;
     private const MAX_FILES_PER_RUN = 500;
 
+    /** Mapa `source_format` pro strojový originál podle přípony datového souboru. */
+    private const SOURCE_FORMAT = ['isdoc' => 'isdoc', 'xml' => 'isdoc', 'isdocx' => 'isdocx'];
+
     public function __construct(
         private readonly Config $config,
         private readonly Connection $db,
@@ -51,6 +61,7 @@ final class PurchaseInvoiceInboxScanner
         private readonly IsdocToPurchaseInvoiceMapper $mapper,
         private readonly AiPdfExtractor $aiExtractor,
         private readonly PurchaseInvoicePdfArchiver $pdfArchiver,
+        private readonly InboxPairVerifier $pairVerifier,
     ) {}
 
     /**
@@ -65,9 +76,10 @@ final class PurchaseInvoiceInboxScanner
      */
     /**
      * @param callable|null $progress Optional callback(array $event) fired for each
-     *        per-file event. Events have shape:
+     *        per-group event. Events have shape:
      *          - ['phase' => 'start',  'file' => abs, 'index' => 1-based, 'total' => N]
      *          - ['phase' => 'result', 'file' => abs, 'status' => ..., 'reason' => ...]
+     *        `index`/`total` počítají ZÁSILKY, ne soubory (dvojice pdf+isdoc = jedna položka).
      *        Použito v cron skriptu pro live progress výpis do konzole/logu.
      */
     public function scan(int $supplierId, int $userId, bool $dryRun = false, ?callable $progress = null): array
@@ -123,199 +135,405 @@ final class PurchaseInvoiceInboxScanner
         $allowedExts = (array) $this->config->get('purchase_invoice.allowed_exts', ['pdf', 'isdoc', 'isdocx', 'xml']);
         $allowedExts = array_map('strtolower', $allowedExts);
 
-        $created = 0; $skipped = 0; $failed = 0;
         $details = [];
+        $counters = ['created' => 0, 'skipped' => 0, 'failed' => 0];
 
-        $files = $this->listFiles($inboxReal, $recursive, $allowedExts);
-        $totalFiles = count($files);
-        // Helper closure — wrap detail push + fire progress callback (pokud existuje).
-        // Tím se výpis posílá průběžně po každém souboru, ne až na konci.
-        $emit = function (array $detail) use (&$details, $progress): void {
+        $groups = InboxFileGrouper::group($this->listFiles($inboxReal, $recursive, $allowedExts));
+        $totalGroups = count($groups);
+
+        // Helper closure — wrap detail push + počítadlo + progress callback (pokud existuje).
+        // Počítadlo se odvozuje ze `status`, ať se souhrn nikdy nerozejde s detaily.
+        $emit = function (array $detail) use (&$details, &$counters, $progress): void {
             $details[] = $detail;
+            $bucket = match ((string) ($detail['status'] ?? '')) {
+                'created', 'imported' => 'created',
+                'skipped'             => 'skipped',
+                'failed', 'rejected'  => 'failed',
+                default               => null,
+            };
+            if ($bucket !== null) {
+                $counters[$bucket]++;
+            }
             if ($progress !== null) {
                 ($progress)(['phase' => 'result'] + $detail);
             }
         };
-        foreach ($files as $idx => $absPath) {
+
+        $filesProcessed = 0;
+        foreach ($groups as $idx => $group) {
+            $primary = $group->primary();
             if ($progress !== null) {
                 ($progress)([
                     'phase' => 'start',
-                    'file'  => $absPath,
+                    'file'  => $primary,
                     'index' => $idx + 1,
-                    'total' => $totalFiles,
+                    'total' => $totalGroups,
                 ]);
             }
-            if ($created + $skipped + $failed >= self::MAX_FILES_PER_RUN) {
-                $emit(['file' => $absPath, 'status' => 'limit_reached', 'reason' => 'Maximální počet souborů per run dosažen']);
+            if ($filesProcessed >= self::MAX_FILES_PER_RUN) {
+                $emit(['file' => $primary, 'status' => 'limit_reached', 'reason' => 'Maximální počet souborů per run dosažen']);
                 break;
             }
 
-            // Realpath check — file MUSÍ být uvnitř inboxReal.
-            // POZOR: Windows je case-insensitive FS, ale realpath() vrací path s casing
-            // dle prvního použití (může se lišit mezi inboxReal a per-file real).
-            // Na Linuxu je FS case-sensitive — porovnáváme striktně.
-            $real = realpath($absPath);
-            if ($real === false) {
-                $failed++;
-                $emit(['file' => $absPath, 'status' => 'rejected', 'reason' => 'Nelze resolvovat realpath']);
-                continue;
-            }
-            $isWindows = DIRECTORY_SEPARATOR === '\\';
-            $needle    = ($isWindows ? strtolower($inboxReal) : $inboxReal) . DIRECTORY_SEPARATOR;
-            $haystack  = $isWindows ? strtolower($real) : $real;
-            if (!str_starts_with($haystack, $needle)) {
-                $failed++;
-                $emit(['file' => $absPath, 'status' => 'rejected', 'reason' => 'Path traversal']);
-                continue;
-            }
-
-            $size = @filesize($real);
-            if ($size === false || $size === 0) {
-                $failed++;
-                $emit(['file' => $real, 'status' => 'rejected', 'reason' => 'Prázdný nebo nečitelný']);
-                continue;
-            }
-            if ($size > self::MAX_FILE_SIZE) {
-                $failed++;
-                $emit(['file' => $real, 'status' => 'rejected', 'reason' => 'Soubor větší než 20 MiB']);
-                continue;
-            }
-
-            $sha = hash_file('sha256', $real);
-            if ($sha === false) {
-                $failed++;
-                $emit(['file' => $real, 'status' => 'rejected', 'reason' => 'Nelze spočítat hash']);
-                continue;
-            }
-
-            $existingId = $this->purchaseRepo->findIdByPdfHash($supplierId, $sha);
-            if ($existingId !== null) {
-                $skipped++;
-                $emit(['file' => $real, 'status' => 'skipped', 'reason' => 'Již importováno', 'purchase_invoice_id' => $existingId]);
-                continue;
-            }
-
-            $ext = strtolower(pathinfo($real, PATHINFO_EXTENSION));
-            $bytes = @file_get_contents($real);
-            if ($bytes === false) {
-                $failed++;
-                $emit(['file' => $real, 'status' => 'rejected', 'reason' => 'Nelze načíst obsah souboru']);
-                continue;
-            }
-
-            // ISDOC-first rozhodnutí (F7 §3.9) — sdílený router (stejná logika jako upload).
-            $decision = $this->router->decide($bytes, $ext);
-
-            // LLM signalizován: buď žádný ISDOC (source=ai), nebo přítomný ISDOC selhal
-            // parse (isdocPresent=true; router už chybu zalogoval → nikdy nebrickovat).
-            // AI fallback jde jen pro PDF, nakonfigurovaného tenanta a mimo dry-run.
-            if ($decision->useLlm) {
-                if ($ext === 'pdf' && !$dryRun && $this->isAiConfigured($supplierId)) {
-                    $aiResult = $this->aiExtractor->extractAndCreate(
-                        $supplierId, $userId, $bytes, null, basename($real),
-                    );
-                    if (!empty($aiResult['ok']) && !empty($aiResult['purchase_invoice_id'])) {
-                        $created++;
-                        $emit([
-                            'file'   => $real,
-                            'status' => 'imported',
-                            'reason' => 'AI extract',
-                            'purchase_invoice_id' => $aiResult['purchase_invoice_id'],
-                            'vendor_id'           => $aiResult['vendor_id'] ?? null,
-                            'source'              => $aiResult['source'] ?? 'ai',
-                        ]);
-                        continue;
+            // 1) Ověř a ohashuj členy zásilky. Vada PRIMÁRNÍHO souboru shodí celou
+            //    zásilku; nečitelný sourozenec se jen vypustí (data jsou přednější).
+            /** @var array<string, array{real:string, sha:string, size:int}> $members */
+            $members = [];
+            $primaryBroken = null;
+            foreach ($group->members() as $path) {
+                $info = $this->inspect($path, $inboxReal);
+                if (isset($info['error'])) {
+                    if ($path === $primary) {
+                        $primaryBroken = $info;
+                        break;
                     }
-                    // AI selhalo — pokračujeme do skipped s AI error msg.
-                    $emit([
-                        'file'   => $real,
-                        'status' => 'skipped',
-                        'reason' => 'AI extrakce selhala: ' . ($aiResult['error'] ?? 'unknown'),
-                    ]);
-                    $skipped++;
                     continue;
                 }
-
-                // AI nedostupné (ne-PDF / dry-run / nenakonfigurováno). Rozliš fyzicky
-                // přítomný, ale nevalidní ISDOC (→ failed) od žádného ISDOC (→ skipped).
-                if ($decision->isdocPresent) {
-                    $failed++;
-                    $emit([
-                        'file'   => $real,
-                        'status' => 'failed',
-                        'reason' => 'ISDOC se nepodařilo naparsovat: ' . ($decision->parseError ?? 'neznámá chyba'),
-                    ]);
-                } else {
-                    $skipped++;
-                    $emit([
-                        'file'   => $real,
-                        'status' => 'skipped',
-                        'reason' => $ext === 'pdf'
-                            ? 'PDF neobsahuje ISDOC. Pro AI extrakci nakonfiguruj Anthropic Claude v Externí integrace → AI.'
-                            : 'Soubor nelze parsovat jako ISDOC',
-                    ]);
-                }
+                /** @var array{real:string, sha:string, size:int} $info */
+                $members[$path] = $info;
+            }
+            if ($primaryBroken !== null) {
+                $emit(['file' => $primaryBroken['real'], 'status' => 'rejected', 'reason' => (string) $primaryBroken['error']]);
                 continue;
             }
+            $filesProcessed += count($members);
 
-            // Deterministický ISDOC — router už naparsoval validní fakturu(y).
-            $parsed = (array) $decision->parsed;
-
-            // Fáze 2 — mapper aktivní. Pro každou ISDOC invoice v souboru (typicky 1)
-            // vytvoříme draft purchase_invoice + uložíme PDF do archive_storage.
-            if ($dryRun) {
-                $skipped++;
+            // 2) Dedup — stačí, aby už systém znal KTERÝKOLIV soubor zásilky.
+            $known = null;
+            foreach ($members as $info) {
+                $existingId = $this->purchaseRepo->findIdByPdfHash($supplierId, $info['sha'])
+                    ?? $this->purchaseRepo->findIdBySourceHash($supplierId, $info['sha']);
+                if ($existingId !== null) {
+                    $known = ['file' => $info['real'], 'id' => $existingId];
+                    break;
+                }
+            }
+            if ($known !== null) {
                 $emit([
-                    'file'   => $real,
+                    'file'   => $members[$primary]['real'] ?? $known['file'],
                     'status' => 'skipped',
-                    'reason' => 'dry-run — nezapisuji do DB',
-                    'isdoc_invoice_count' => count($parsed['invoices']),
-                    'supplier_ic'         => $parsed['supplier_ic'] ?? null,
+                    'reason' => 'Již importováno',
+                    'purchase_invoice_id' => $known['id'],
                 ]);
+                $this->emitExtras($group, $members, $emit, 'Zásilka už byla importována');
                 continue;
             }
 
-            $createdInThisFile = 0;
-            foreach ($parsed['invoices'] as $inv) {
-                try {
-                    $result = $this->mapper->map($inv, $supplierId, $userId);
-                    // Archive PDF — uložení do storage + metadata (pdf_hash dedup)
-                    if ($ext === 'pdf') {
-                        $this->archivePdf($result['purchase_invoice_id'], $supplierId, $real, $sha, $size);
-                    } elseif ($ext === 'isdocx') {
-                        // ISDOCX nese čitelné PDF uvnitř → archivuj ho pro náhled.
-                        // pdf_hash = hash celého .isdocx (= klíč scannerova dedupu nahoře),
-                        // ať se re-scan téhož souboru přeskočí.
-                        $this->archiveIsdocxInnerPdf($result['purchase_invoice_id'], $supplierId, $real, $sha);
-                    }
-                    $created++;
-                    $createdInThisFile++;
+            $dataPath = $group->data;
+            $pdfPath  = ($group->pdf !== null && isset($members[$group->pdf])) ? $group->pdf : null;
+
+            // 3) Data ze strojového originálu, je-li v zásilce.
+            $isdocError = null;
+            if ($dataPath !== null) {
+                $handled = $this->processDataFile(
+                    $members, $dataPath, $pdfPath, $supplierId, $userId, $dryRun, $emit, $isdocError,
+                );
+                if ($handled) {
+                    $this->emitExtras($group, $members, $emit, 'Duplicitní sourozenec téže zásilky');
+                    continue;
+                }
+                // ISDOC nečitelný. Bez PDF končíme, s PDF zkusíme obraz.
+                if ($pdfPath === null) {
                     $emit([
-                        'file'   => $real,
-                        'status' => 'created',
-                        'reason' => $result['vendor_created']
-                            ? 'vytvořen vendor + draft přijaté faktury'
-                            : 'draft přijaté faktury (vendor reuse)',
-                        'purchase_invoice_id' => $result['purchase_invoice_id'],
+                        'file'   => $members[$dataPath]['real'],
+                        'status' => 'failed',
+                        'reason' => 'ISDOC se nepodařilo naparsovat: ' . ($isdocError ?? 'neznámá chyba'),
                     ]);
-                } catch (\InvalidArgumentException $e) {
-                    $failed++;
-                    $emit(['file' => $real, 'status' => 'rejected', 'reason' => $e->getMessage()]);
-                } catch (\Throwable $e) {
-                    $failed++;
-                    $emit(['file' => $real, 'status' => 'failed', 'reason' => 'Mapper error: ' . $e->getMessage()]);
+                    $this->emitExtras($group, $members, $emit, 'Duplicitní sourozenec téže zásilky');
+                    continue;
                 }
             }
+
+            // 4) PDF větev — samostatné PDF, nebo záchrana po nečitelném ISDOC.
+            if ($pdfPath !== null) {
+                $this->processPdfFile(
+                    $members[$pdfPath], $supplierId, $userId, $dryRun, $emit,
+                    $isdocError !== null
+                        ? 'ISDOC vedle PDF se nepodařilo naparsovat (' . $isdocError . '), zkouším samotné PDF. '
+                        : '',
+                );
+            }
+
+            $this->emitExtras($group, $members, $emit, 'Duplicitní sourozenec téže zásilky');
         }
 
         return [
-            'created'   => $created,
-            'skipped'   => $skipped,
-            'failed'    => $failed,
+            'created'   => $counters['created'],
+            'skipped'   => $counters['skipped'],
+            'failed'    => $counters['failed'],
             'dry_run'   => $dryRun,
             'inbox_dir' => $inboxReal,
             'details'   => $details,
         ];
+    }
+
+    /**
+     * Zpracuje strojový originál zásilky. Vrací true, když je zásilka vyřízená
+     * (draft vytvořen, dry-run, nebo tvrdá chyba mapperu); false znamená „ISDOC
+     * nečitelný, zkus PDF" a důvod předá v `$isdocError`.
+     *
+     * @param array<string, array{real:string, sha:string, size:int}> $members
+     */
+    private function processDataFile(
+        array $members,
+        string $dataPath,
+        ?string $pdfPath,
+        int $supplierId,
+        int $userId,
+        bool $dryRun,
+        callable $emit,
+        ?string &$isdocError,
+    ): bool {
+        $real  = $members[$dataPath]['real'];
+        $bytes = @file_get_contents($real);
+        if ($bytes === false) {
+            $emit(['file' => $real, 'status' => 'rejected', 'reason' => 'Nelze načíst obsah souboru']);
+            return true;
+        }
+
+        $ext = strtolower(pathinfo($real, PATHINFO_EXTENSION));
+        // ISDOC-first rozhodnutí (F7 §3.9) — sdílený router (stejná logika jako upload).
+        $decision = $this->router->decide($bytes, $ext);
+        if ($decision->useLlm) {
+            // Datový soubor, který se nepodařilo přečíst jako ISDOC. AI na něj nepouštíme
+            // (AI umí jen PDF) — rozhodnutí předáme volajícímu.
+            $isdocError = $decision->isdocPresent
+                ? ($decision->parseError ?? 'neznámá chyba')
+                : 'soubor nelze parsovat jako ISDOC';
+            return false;
+        }
+
+        $parsed   = (array) $decision->parsed;
+        $invoices = (array) $parsed['invoices'];
+
+        if ($dryRun) {
+            $emit([
+                'file'   => $real,
+                'status' => 'skipped',
+                'reason' => 'dry-run — nezapisuji do DB'
+                    . ($pdfPath !== null ? ' (spárováno s ' . basename($pdfPath) . ')' : ''),
+                'isdoc_invoice_count' => count($invoices),
+                'supplier_ic'         => $parsed['supplier_ic'] ?? null,
+                'paired_pdf'          => $pdfPath !== null ? basename($pdfPath) : null,
+            ]);
+            return true;
+        }
+
+        // Ověření dvojice je MĚKKÉ (jen varování) a jen u jednofakturového ISDOC —
+        // u víc faktur v souboru se součet z PDF s jednotlivou fakturou logicky nepotká.
+        $warning = null;
+        if ($pdfPath !== null && count($invoices) === 1) {
+            $pdfBytes = @file_get_contents($members[$pdfPath]['real']);
+            if ($pdfBytes !== false) {
+                $warning = $this->pairVerifier->verify($pdfBytes, (array) $invoices[0]);
+            }
+        }
+
+        foreach ($invoices as $inv) {
+            try {
+                $result = $this->mapper->map((array) $inv, $supplierId, $userId);
+                $invoiceId = (int) $result['purchase_invoice_id'];
+
+                // Čitelný obraz: sourozenecké PDF má přednost před tím vytaženým
+                // z nitra .isdocx (dodavatelův originál > náš rozbalený render).
+                if ($pdfPath !== null) {
+                    $this->archivePdf(
+                        $invoiceId, $supplierId,
+                        $members[$pdfPath]['real'], $members[$pdfPath]['sha'], $members[$pdfPath]['size'],
+                    );
+                } elseif ($ext === 'isdocx') {
+                    // ISDOCX nese čitelné PDF uvnitř → archivuj ho pro náhled.
+                    // pdf_hash = hash celého .isdocx (= klíč scannerova dedupu nahoře),
+                    // ať se re-scan téhož souboru přeskočí.
+                    $this->archiveIsdocxInnerPdf($invoiceId, $supplierId, $real, $members[$dataPath]['sha']);
+                }
+
+                // Strojový originál do `sources/` — vedle auditní stopy je jeho
+                // `source_hash` JEDINÝ dedup klíč holého .isdoc (žádné PDF nemá).
+                $this->archiveSource($invoiceId, $supplierId, $bytes, $real, $ext);
+
+                $reason = $result['vendor_created']
+                    ? 'vytvořen vendor + draft přijaté faktury'
+                    : 'draft přijaté faktury (vendor reuse)';
+                if ($pdfPath !== null) {
+                    $reason .= ', PDF ' . basename($pdfPath) . ' spárováno podle jména (AI se nevolala)';
+                }
+
+                $detail = [
+                    'file'   => $real,
+                    'status' => 'created',
+                    'reason' => $reason,
+                    'purchase_invoice_id' => $invoiceId,
+                    'paired_pdf' => $pdfPath !== null ? basename($pdfPath) : null,
+                ];
+                if ($warning !== null) {
+                    $detail['warning'] = $warning;
+                }
+                $emit($detail);
+            } catch (\InvalidArgumentException $e) {
+                $emit(['file' => $real, 'status' => 'rejected', 'reason' => $e->getMessage()]);
+            } catch (\Throwable $e) {
+                $emit(['file' => $real, 'status' => 'failed', 'reason' => 'Mapper error: ' . $e->getMessage()]);
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Samostatné PDF: embedded ISDOC (PDF/A-3) → deterministický import, jinak AI extrakce.
+     *
+     * @param array{real:string, sha:string, size:int} $pdf
+     */
+    private function processPdfFile(
+        array $pdf,
+        int $supplierId,
+        int $userId,
+        bool $dryRun,
+        callable $emit,
+        string $reasonPrefix,
+    ): void {
+        $real  = $pdf['real'];
+        $bytes = @file_get_contents($real);
+        if ($bytes === false) {
+            $emit(['file' => $real, 'status' => 'rejected', 'reason' => $reasonPrefix . 'Nelze načíst obsah souboru']);
+            return;
+        }
+
+        $decision = $this->router->decide($bytes, 'pdf');
+
+        // LLM signalizován: buď žádný ISDOC (source=ai), nebo přítomný ISDOC selhal
+        // parse (isdocPresent=true; router už chybu zalogoval → nikdy nebrickovat).
+        // AI fallback jde jen pro nakonfigurovaného tenanta a mimo dry-run.
+        if ($decision->useLlm) {
+            if (!$dryRun && $this->isAiConfigured($supplierId)) {
+                $aiResult = $this->aiExtractor->extractAndCreate(
+                    $supplierId, $userId, $bytes, null, basename($real),
+                );
+                if (!empty($aiResult['ok']) && !empty($aiResult['purchase_invoice_id'])) {
+                    $emit([
+                        'file'   => $real,
+                        'status' => 'imported',
+                        'reason' => $reasonPrefix . 'AI extract',
+                        'purchase_invoice_id' => $aiResult['purchase_invoice_id'],
+                        'vendor_id'           => $aiResult['vendor_id'] ?? null,
+                        'source'              => $aiResult['source'] ?? 'ai',
+                    ]);
+                    return;
+                }
+                // AI selhalo — pokračujeme do skipped s AI error msg.
+                $emit([
+                    'file'   => $real,
+                    'status' => 'skipped',
+                    'reason' => $reasonPrefix . 'AI extrakce selhala: ' . ($aiResult['error'] ?? 'unknown'),
+                ]);
+                return;
+            }
+
+            // AI nedostupné (dry-run / nenakonfigurováno). Rozliš fyzicky přítomný,
+            // ale nevalidní ISDOC (→ failed) od žádného ISDOC (→ skipped).
+            if ($decision->isdocPresent) {
+                $emit([
+                    'file'   => $real,
+                    'status' => 'failed',
+                    'reason' => $reasonPrefix . 'ISDOC se nepodařilo naparsovat: ' . ($decision->parseError ?? 'neznámá chyba'),
+                ]);
+            } else {
+                $emit([
+                    'file'   => $real,
+                    'status' => 'skipped',
+                    'reason' => $reasonPrefix . 'PDF neobsahuje ISDOC. Pro AI extrakci nakonfiguruj Anthropic Claude v Externí integrace → AI.',
+                ]);
+            }
+            return;
+        }
+
+        // Deterministický ISDOC vytažený z PDF/A-3.
+        $parsed = (array) $decision->parsed;
+
+        if ($dryRun) {
+            $emit([
+                'file'   => $real,
+                'status' => 'skipped',
+                'reason' => $reasonPrefix . 'dry-run — nezapisuji do DB',
+                'isdoc_invoice_count' => count((array) $parsed['invoices']),
+                'supplier_ic'         => $parsed['supplier_ic'] ?? null,
+            ]);
+            return;
+        }
+
+        foreach ((array) $parsed['invoices'] as $inv) {
+            try {
+                $result = $this->mapper->map((array) $inv, $supplierId, $userId);
+                $this->archivePdf((int) $result['purchase_invoice_id'], $supplierId, $real, $pdf['sha'], $pdf['size']);
+                $emit([
+                    'file'   => $real,
+                    'status' => 'created',
+                    'reason' => $reasonPrefix . ($result['vendor_created']
+                        ? 'vytvořen vendor + draft přijaté faktury'
+                        : 'draft přijaté faktury (vendor reuse)'),
+                    'purchase_invoice_id' => $result['purchase_invoice_id'],
+                ]);
+            } catch (\InvalidArgumentException $e) {
+                $emit(['file' => $real, 'status' => 'rejected', 'reason' => $reasonPrefix . $e->getMessage()]);
+            } catch (\Throwable $e) {
+                $emit(['file' => $real, 'status' => 'failed', 'reason' => $reasonPrefix . 'Mapper error: ' . $e->getMessage()]);
+            }
+        }
+    }
+
+    /**
+     * Sourozenci nad rámec dvojice data+PDF (druhý datový formát téhož základu jména).
+     * Nezpracovávají se, ale patří do reportu — jinak by se ztratili beze stopy.
+     *
+     * @param array<string, array{real:string, sha:string, size:int}> $members
+     */
+    private function emitExtras(InboxFileGroup $group, array $members, callable $emit, string $reason): void
+    {
+        foreach ($group->extras as $extra) {
+            if (!isset($members[$extra])) {
+                continue;
+            }
+            $emit(['file' => $members[$extra]['real'], 'status' => 'skipped', 'reason' => $reason]);
+        }
+    }
+
+    /**
+     * Bezpečnostní a čitelnostní kontrola jednoho souboru + jeho SHA-256.
+     *
+     * @return array{real:string, sha:string, size:int}|array{real:string, error:string}
+     */
+    private function inspect(string $absPath, string $inboxReal): array
+    {
+        // Realpath check — file MUSÍ být uvnitř inboxReal.
+        // POZOR: Windows je case-insensitive FS, ale realpath() vrací path s casing
+        // dle prvního použití (může se lišit mezi inboxReal a per-file real).
+        // Na Linuxu je FS case-sensitive — porovnáváme striktně.
+        $real = realpath($absPath);
+        if ($real === false) {
+            return ['real' => $absPath, 'error' => 'Nelze resolvovat realpath'];
+        }
+        $isWindows = DIRECTORY_SEPARATOR === '\\';
+        $needle    = ($isWindows ? strtolower($inboxReal) : $inboxReal) . DIRECTORY_SEPARATOR;
+        $haystack  = $isWindows ? strtolower($real) : $real;
+        if (!str_starts_with($haystack, $needle)) {
+            return ['real' => $real, 'error' => 'Path traversal'];
+        }
+
+        $size = @filesize($real);
+        if ($size === false || $size === 0) {
+            return ['real' => $real, 'error' => 'Prázdný nebo nečitelný'];
+        }
+        if ($size > self::MAX_FILE_SIZE) {
+            return ['real' => $real, 'error' => 'Soubor větší než 20 MiB'];
+        }
+
+        $sha = hash_file('sha256', $real);
+        if ($sha === false) {
+            return ['real' => $real, 'error' => 'Nelze spočítat hash'];
+        }
+
+        return ['real' => $real, 'sha' => $sha, 'size' => (int) $size];
     }
 
     /**
@@ -370,6 +588,16 @@ final class PurchaseInvoiceInboxScanner
         $this->pdfArchiver->archiveBytes(
             $purchaseInvoiceId, $supplierId, $pkg['pdf'], basename($sourcePath), $isdocxSha256,
         );
+    }
+
+    /** Uloží strojově čitelný originál (ISDOC/ISDOCX) do `sources/` + zapíše `source_hash`. */
+    private function archiveSource(int $purchaseInvoiceId, int $supplierId, string $bytes, string $sourcePath, string $ext): void
+    {
+        $format = self::SOURCE_FORMAT[$ext] ?? null;
+        if ($format === null) {
+            return;
+        }
+        $this->pdfArchiver->archiveSourceBytes($purchaseInvoiceId, $supplierId, $bytes, basename($sourcePath), $format);
     }
 
     private function emptyResult(string $inboxDir, bool $dryRun, array $details): array

@@ -200,6 +200,36 @@ final class PdfTotalExtractor
             return null;
         }
 
+        return $this->maxMoney($text, $debug);
+    }
+
+    /**
+     * Textová vrstva PDF, nebo null když ji nelze přečíst (skenovaný obraz, poškozený
+     * soubor). Veřejné kvůli {@see InboxPairVerifier}, který nad JEDNÍM parse potřebuje
+     * jak částku, tak hledání variabilního symbolu — dvojí parse téhož PDF je zbytečně
+     * drahý (~50-200 ms) při dávce desítek souborů.
+     */
+    public function extractText(string $pdfBytes): ?string
+    {
+        try {
+            return (new PdfTextParser())->parseContent($pdfBytes)->getText();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /** Nejvyšší peněžní hodnota v už vytaženém textu — viz {@see extractText()}. */
+    public function totalFromText(string $text): ?float
+    {
+        $ignored = [];
+        return $this->maxMoney($text, $ignored);
+    }
+
+    /**
+     * @param array<string,mixed> $debug
+     */
+    private function maxMoney(string $text, array &$debug): ?float
+    {
         // Money + mandatory currency suffix. Symboly Kč/€ a kódy CZK/EUR/USD.
         // Decimal pattern: 1 234,56 / 1.234,56 / 12345,67 / 1234.56 / -123,45
         $pattern = '/(-?\d{1,3}(?:[\s\xc2\xa0.]\d{3})*[,.]\d{2}|-?\d+[,.]\d{2})\s*(K\xc4\x8d|Kč|CZK|EUR|USD|€|\$)/u';

@@ -11,11 +11,13 @@ declare(strict_types=1);
  *     'allowed_exts' => ['pdf', 'isdoc', 'xml'],
  *   ]
  *
- * Skenuje rekurzivně inbox_dir, hledá podporované soubory.
- * Pro každý:
- *   - SHA-256 dedup vůči purchase_invoices.pdf_hash
- *   - Pokud má embedded ISDOC → parse + vytvoř draft
- *   - Pokud PDF bez ISDOC a tenant má Anthropic AI nakonfigurovanou →
+ * Skenuje rekurzivně inbox_dir, hledá podporované soubory a seskupuje je do zásilek
+ * podle základu jména (`faktura.isdoc` + `faktura.pdf` = jeden doklad). Pro každou:
+ *   - SHA-256 dedup vůči purchase_invoices.pdf_hash i source_hash
+ *   - Je-li v zásilce ISDOC/ISDOCX/XML → data z něj, sourozenecké PDF se jen archivuje
+ *     (AI se nevolá vůbec)
+ *   - Samotné PDF s embedded ISDOC → parse + vytvoř draft
+ *   - Samotné PDF bez ISDOC a tenant má Anthropic AI nakonfigurovanou →
  *     volá AI extract + vytvoří draft
  *   - Jinak skipne s důvodem
  *
@@ -117,6 +119,9 @@ $progress = static function (array $event): void {
             $extra = ' (#' . (int) $event['purchase_invoice_id'] . ')';
         }
         $line = sprintf("      → %s%s%s\n", $status, $extra, $reason !== '' ? ' — ' . $reason : '');
+        if (!empty($event['warning'])) {
+            $line .= '      ⚠ ' . (string) $event['warning'] . "\n";
+        }
     }
     fwrite(STDOUT, $line);
     fflush(STDOUT);
@@ -135,9 +140,11 @@ foreach ($supplierIds as $sid) {
     $totalSummary['created'] += (int) ($result['created'] ?? 0);
     $totalSummary['skipped'] += (int) ($result['skipped'] ?? 0);
     $totalSummary['failed']  += (int) ($result['failed']  ?? 0);
-    // Jen failed/skipped do logu (created jsou očekávaný šum)
+    // Jen failed/skipped do logu (úspěšné importy jsou očekávaný šum) — plus doklady,
+    // které vznikly, ale nesou varování ke spárovanému PDF (ty chce člověk vidět).
     foreach ($result['details'] ?? [] as $d) {
-        if (($d['status'] ?? '') !== 'imported') {
+        $status = (string) ($d['status'] ?? '');
+        if (($status !== 'imported' && $status !== 'created') || !empty($d['warning'])) {
             $totalSummary['details'][] = ['supplier_id' => $sid] + $d;
         }
     }
@@ -158,6 +165,9 @@ if (!empty($totalSummary['details'])) {
     foreach ($totalSummary['details'] as $d) {
         $file = isset($d['file']) ? basename((string) $d['file']) : '?';
         echo "    [{$d['status']}] {$file} — " . ($d['reason'] ?? '') . "\n";
+        if (!empty($d['warning'])) {
+            echo "        ⚠ " . (string) $d['warning'] . "\n";
+        }
     }
 }
 
@@ -176,6 +186,7 @@ $detailsForReport = array_slice(array_map(static function (array $d) use ($inbox
         'file'        => $file,
         'status'      => (string) ($d['status'] ?? ''),
         'reason'      => (string) ($d['reason'] ?? ''),
+        'warning'     => (string) ($d['warning'] ?? ''),
     ];
 }, $totalSummary['details']), 0, 50);
 

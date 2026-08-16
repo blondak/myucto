@@ -66,10 +66,12 @@ const scanRunning = ref(false)
 const scanResult = ref<InboxScanResult | null>(null)
 const scanDryRun = ref(false)
 
-// Items které NEBYLY importovány (AI selhalo / ISDOC missing bez AI / parser error)
+// Items které NEBYLY importovány (AI selhalo / ISDOC missing bez AI / parser error),
+// plus doklady, které sice vznikly, ale u nichž spárované PDF nesedí s daty (`warning`) —
+// ty potřebují oko uživatele stejně jako selhání, jen z jiného důvodu.
 const notImportedItems = computed(() => {
   if (!scanResult.value) return []
-  return scanResult.value.details.filter(d => d.status === 'skipped' || d.status === 'failed')
+  return scanResult.value.details.filter(d => d.status === 'skipped' || d.status === 'failed' || !!d.warning)
 })
 
 // AI integration status — load při mount aby uživatel věděl, zda PDF bez ISDOC
@@ -248,6 +250,7 @@ async function runScan() {
                 <div class="flex-1 min-w-0">
                   <div class="font-mono text-neutral-800 truncate">{{ d.file ? d.file.split(/[/\\]/).pop() : '—' }}</div>
                   <div v-if="d.reason" class="text-neutral-600 mt-0.5">{{ d.reason }}</div>
+                  <div v-if="d.warning" class="text-warning-700 mt-0.5">⚠ {{ d.warning }}</div>
                 </div>
               </li>
             </ul>
@@ -262,6 +265,7 @@ async function runScan() {
                 <span class="inline-block px-1.5 py-0.5 rounded text-[10px]" :class="statusBadge(d.status)">{{ d.status }}</span>
                 <span class="ml-1 text-neutral-700">{{ d.file ? d.file.split(/[/\\]/).pop() : '—' }}</span>
                 <span v-if="d.reason" class="ml-1 text-neutral-500">— {{ d.reason }}</span>
+                <span v-if="d.warning" class="ml-1 text-warning-700">⚠ {{ d.warning }}</span>
               </li>
             </ul>
           </details>

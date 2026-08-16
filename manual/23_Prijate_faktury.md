@@ -581,12 +581,25 @@ sdílených dokladů, nakonfiguruj **inbox adresář** v `cfg.php`:
 V seznamu Přijaté faktury klikni **📥 Nascanovat inbox**:
 
 - Systém rekurzivně projde nakonfigurovaný adresář.
-- Pro každý soubor spočte SHA-256 — pokud už existuje faktura se stejným otiskem, soubor přeskočí.
+- **Soubory se shodným základem jména bere jako jednu zásilku.** Dorazí-li faktura
+  obvyklou dvojicí `faktura.pdf` + `faktura.isdoc` (nebo `.xml` / `.isdocx`), data se
+  vezmou z ISDOC — jsou přesná a zadarmo — a PDF se k témuž dokladu jen archivuje jako
+  čitelná podoba. **AI se v takovém případě nevolá vůbec** a nevzniká druhý koncept.
+  Páruje se jen v rámci téhož adresáře a bez ohledu na velikost písmen.
+- Pro každý soubor spočte SHA-256 — pokud už některý soubor zásilky v systému je
+  (archivované PDF nebo strojový originál), přeskočí se celá zásilka.
 - Z PDF s embedded ISDOC rozpozná data dodavatele a obsah.
-- Samostatné `.isdoc` i `.isdocx` balíčky v inboxu rozbalí a naimportuje přímo (z `.isdocx` navíc archivuje zabalené PDF pro náhled).
-- Plain PDF (bez ISDOC) jsou při scanu inboxu přeskakovány; takový doklad nahraj přes formulář, kde lze použít AI extrakci.
+- Samostatné `.isdoc` i `.isdocx` balíčky v inboxu rozbalí a naimportuje přímo (z `.isdocx`
+  archivuje zabalené PDF pro náhled — pokud ale vedle leží PDF od dodavatele, použije se to).
+- Plain PDF (bez ISDOC a bez datového sourozence) jde na AI extrakci, je-li nakonfigurovaná;
+  jinak se přeskočí a doklad nahraj přes formulář.
 
 Modal po skončení zobrazí přehled: vytvořeno / přeskočeno / chyby + per-soubor detail.
+
+Pokud se u spárované dvojice nepodaří v textu PDF najít variabilní symbol z ISDOC **a**
+zároveň nesedí ani celková částka, doklad i příloha přesto vzniknou, ale report u nich
+ukáže **⚠ varování**, že PDF možná patří k jiné faktuře. Skenovaný obraz bez textové
+vrstvy se neověřuje (nemá čím), takže u něj varování nikdy nevyskočí.
 
 **Bezpečnost:** soubory mimo configured `inbox_dir` jsou odmítnuty (path traversal guard
 přes `realpath()`). Maximum 500 souborů per běh (DoS protection na velké adresáře).

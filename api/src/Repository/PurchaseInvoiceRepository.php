@@ -2847,6 +2847,24 @@ final class PurchaseInvoiceRepository
     }
 
     /**
+     * Vrátí ID faktury s daným source_hash u tenanta, nebo null.
+     *
+     * Protějšek {@see findIdByPdfHash} pro STROJOVÝ originál (ISDOC/ISDOCX/XML). Holý
+     * `.isdoc` žádné PDF nearchivuje, takže `pdf_hash` u něj zůstává prázdný a bez téhle
+     * cesty by opakovaný sken téhož souboru pokaždé znovu prošel celým importem (nový
+     * doklad sice neodmítl unikátní klíč, ale report ho počítal jako `created`).
+     */
+    public function findIdBySourceHash(int $supplierId, string $sha256): ?int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id FROM purchase_invoices WHERE supplier_id = ? AND source_hash = ? LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $sha256]);
+        $id = $stmt->fetchColumn();
+        return $id === false ? null : (int) $id;
+    }
+
+    /**
      * Vrátí ID faktury s daným vendor_invoice_number u (tenant, vendor, issue_date) tuple,
      * nebo null pokud neexistuje. Respektuje UNIQUE KEY uq_pi_vendor_invoice — caller
      * tím detekuje "tahle faktura už je v systému" před voláním createDraft (které by
