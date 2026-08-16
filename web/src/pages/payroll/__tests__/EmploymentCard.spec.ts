@@ -365,6 +365,51 @@ describe('EmploymentCard', () => {
     expect(text).not.toContain('→ partner_dependent')
   })
 
+  /**
+   * Karta ukazovala deset povinností a deset událostí naráz, takže jeden člověk
+   * se dvěma vztahy zabral přes čtyřicet řádků evidence.
+   */
+  it('povinnosti otevře, jen když je co plnit', () => {
+    const pending = employment()
+    expect(mount(EmploymentCard, { props: { employment: pending, canWrite: false } })
+      .get('[data-test="employment-checklist"]').attributes('open')).toBeDefined()
+
+    const done = employment()
+    done.checklist = done.checklist.map(item => ({ ...item, status: 'completed' as const }))
+    expect(mount(EmploymentCard, { props: { employment: done, canWrite: false } })
+      .get('[data-test="employment-checklist"]').attributes('open')).toBeUndefined()
+  })
+
+  it('časovou osu nechá sbalenou', () => {
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: false },
+    })
+    expect(wrapper.get('[data-test="employment-timeline"]').attributes('open')).toBeUndefined()
+  })
+
+  it('skončený vztah sbalí celý, aktivní nechá otevřený', async () => {
+    const closed = employment()
+    closed.status = 'archived'
+    closed.end_date = '2026-06-30'
+    closed.allowed_transitions = []
+
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: closed, canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    expect(wrapper.find('[data-test="employment-checklist"]').exists()).toBe(false)
+    await wrapper.get('[data-test="employment-toggle"]').trigger('click')
+    expect(wrapper.find('[data-test="employment-checklist"]').exists()).toBe(true)
+
+    const open = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+    expect(open.find('[data-test="employment-toggle"]').exists()).toBe(false)
+    expect(open.find('[data-test="employment-checklist"]').exists()).toBe(true)
+  })
+
   it('změnu stavu neukáže dvakrát — hlavička ji už nese', () => {
     const detail = employment()
     detail.timeline = [{

@@ -62,8 +62,13 @@ final class PayrollEmploymentRepository
                  ON office.supplier_id = employment.supplier_id
                 AND office.id = employment.office_id
               WHERE employment.supplier_id = ? AND employment.employee_id = ?
-              ORDER BY employment.is_primary DESC,
-                       employment.is_legacy_projection DESC,
+              /* Živé vztahy napřed: u člověka se souběhy nebo s historií se jinak
+                 nedá poznat, který vztah je ten stávající. Legacy projekce je
+                 zastřešující obal ze starší agendy — mezi živými patří dozadu,
+                 ne dopředu, jinak odsune skutečné vztahy pod sebe. */
+              ORDER BY (employment.status IN (\'ended\', \'archived\', \'no_show\')) ASC,
+                       employment.is_primary DESC,
+                       employment.is_legacy_projection ASC,
                        employment.start_date ASC,
                        employment.id ASC'
         );

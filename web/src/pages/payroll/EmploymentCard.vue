@@ -56,6 +56,29 @@ const openChecklist = computed(() =>
   props.employment.checklist.filter(item => item.status === 'pending'),
 )
 
+/**
+ * Nesplněné napřed. Karta jich ukazovala deset v pořadí, v jakém je naseedovala
+ * databáze, takže „Doplnit datum nástupu" se schovalo mezi splněnými položkami.
+ */
+const sortedChecklist = computed(() =>
+  [...props.employment.checklist].sort(
+    (a, b) => Number(a.status !== 'pending') - Number(b.status !== 'pending'),
+  ),
+)
+
+/**
+ * Skončený vztah je archiv, ne pracovní plocha — u člověka se souběhy jinak
+ * nedá poznat, který vztah je ten stávající. Sbalí se celý, aktivní zůstává otevřený.
+ */
+const isClosed = computed(() => ['ended', 'archived', 'no_show'].includes(props.employment.status))
+
+const accentClass = computed(() => {
+  if (isClosed.value) return 'border-l-neutral-300'
+  return props.employment.status === 'active' ? 'border-l-success-500' : 'border-l-payroll-500'
+})
+
+const expanded = ref(!isClosed.value)
+
 function relationLabel(): string {
   return t(`payroll.people.relations.${props.employment.relation_type}`)
 }
@@ -297,7 +320,7 @@ const actions = computed<ActionItem[]>(() => [
 </script>
 
 <template>
-  <article class="rounded-lg border border-neutral-200 bg-surface p-3 sm:p-4">
+  <article class="rounded-lg border border-l-4 border-neutral-200 bg-surface p-3 sm:p-4" :class="accentClass">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
@@ -308,17 +331,30 @@ const actions = computed<ActionItem[]>(() => [
           <span v-if="employment.is_primary" class="rounded-full bg-success-50 px-2 py-1 text-xs font-medium text-success-700">
             {{ t('payroll.people.primary') }}
           </span>
+          <!-- Skončený vztah nese datum v hlavičce, jinak by po sbalení nešel rozlišit. -->
+          <span v-if="isClosed && employment.end_date" class="text-xs text-neutral-500">
+            {{ t('payroll.people.end_date') }} {{ formatDate(employment.end_date) }}
+          </span>
         </div>
         <p v-if="employmentCodeLabel(employment.code) || employment.office_name" data-test="employment-code" class="mt-1 text-xs text-neutral-500">{{ employmentCodeLabel(employment.code) }}<template v-if="employment.office_name"><template v-if="employmentCodeLabel(employment.code)"> · </template>{{ employment.office_name }}</template></p>
       </div>
-      <div v-if="canWrite && employment.allowed_transitions.length" class="flex items-center gap-2">
-        <label class="text-xs text-neutral-500">
+      <div class="flex items-center gap-2">
+        <label v-if="canWrite && employment.allowed_transitions.length && expanded" class="text-xs text-neutral-500">
           <span class="sr-only">{{ t('payroll.people.transition_date') }}</span>
           <input v-model="transitionDate" type="date" class="h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm text-neutral-800">
         </label>
+        <button
+          v-if="isClosed"
+          type="button"
+          :class="btnOutlineSm('neutral')"
+          :aria-expanded="expanded"
+          data-test="employment-toggle"
+          @click="expanded = !expanded"
+        >{{ expanded ? t('payroll.people.hide_detail') : t('payroll.people.show_detail') }}</button>
       </div>
     </div>
 
+    <template v-if="expanded">
     <dl class="mt-4 grid grid-cols-2 gap-3 text-xs lg:grid-cols-4">
       <div><dt class="text-neutral-500">{{ t('payroll.people.start_date') }}</dt><dd class="mt-0.5 text-neutral-800">{{ formatDate(employment.start_date) }}</dd></div>
       <div><dt class="text-neutral-500">{{ t('payroll.people.actual_start') }}</dt><dd class="mt-0.5 text-neutral-800">{{ formatDate(employment.actual_start_date) }}</dd></div>
@@ -401,14 +437,28 @@ const actions = computed<ActionItem[]>(() => [
       </div>
     </form>
 
-    <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <section>
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <h4 class="text-sm font-semibold text-neutral-900">{{ t('payroll.people.checklist_title') }}</h4>
-          <span class="text-xs text-neutral-500">{{ t('payroll.people.checklist_open', { count: openChecklist.length }) }}</span>
-        </div>
-        <div class="mt-2 space-y-2">
-          <div v-for="item in employment.checklist" :key="item.id" class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-neutral-50 px-3 py-2 text-xs">
+    <!--
+      Povinnosti i časová osa byly vždycky rozbalené, takže jeden člověk se dvěma
+      vztahy zabral přes čtyřicet řádků evidence, než se dalo něco udělat. Obojí
+      se sbalí; povinnosti se samy otevřou, jen když je co plnit.
+    -->
+    <!-- `items-start`: bez něj se sbalená časová osa roztáhne na výšku otevřených povinností. -->
+    <div class="mt-4 grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+      <details class="group rounded-lg border border-neutral-200 bg-surface" :open="openChecklist.length > 0" data-test="employment-checklist">
+        <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-3 py-2">
+          <span class="flex items-center gap-2 text-sm font-semibold text-neutral-900">
+            <svg class="h-4 w-4 shrink-0 text-neutral-500 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+            {{ t('payroll.people.checklist_title') }}
+          </span>
+          <span
+            class="rounded-full px-2 py-0.5 text-xs font-medium"
+            :class="openChecklist.length > 0 ? 'bg-warning-50 text-warning-700' : 'bg-success-50 text-success-700'"
+          >{{ openChecklist.length > 0
+            ? t('payroll.people.checklist_open', { count: openChecklist.length })
+            : t('payroll.people.checklist_all_done') }}</span>
+        </summary>
+        <div class="space-y-2 border-t border-neutral-200 p-3">
+          <div v-for="item in sortedChecklist" :key="item.id" class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-neutral-50 px-3 py-2 text-xs">
             <div>
               <p class="font-medium text-neutral-800">{{ t(`payroll.people.checklist.${item.item_key}`) }}</p>
               <p class="text-neutral-500">{{ formatDate(item.due_date) }} · {{ t(`payroll.people.checklist_status.${item.status}`) }}</p>
@@ -419,11 +469,17 @@ const actions = computed<ActionItem[]>(() => [
             </div>
           </div>
         </div>
-      </section>
+      </details>
 
-      <section>
-        <h4 class="text-sm font-semibold text-neutral-900">{{ t('payroll.people.timeline_title') }}</h4>
-        <ol class="mt-2 space-y-3 border-l border-payroll-500/30 pl-4">
+      <details class="group rounded-lg border border-neutral-200 bg-surface" data-test="employment-timeline">
+        <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-3 py-2">
+          <span class="flex items-center gap-2 text-sm font-semibold text-neutral-900">
+            <svg class="h-4 w-4 shrink-0 text-neutral-500 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+            {{ t('payroll.people.timeline_title') }}
+          </span>
+          <span class="text-xs text-neutral-500">{{ employment.timeline.length }}</span>
+        </summary>
+        <ol class="m-3 space-y-3 border-l border-payroll-500/30 pl-4">
           <li v-for="event in employment.timeline" :key="event.id" class="relative text-xs">
             <span class="absolute -left-[1.18rem] top-1 h-2 w-2 rounded-full bg-payroll-500"></span>
             <p class="font-medium text-neutral-800">{{ t(`payroll.people.event.${event.event_type}`) }}</p>
@@ -437,7 +493,7 @@ const actions = computed<ActionItem[]>(() => [
             <p v-if="employmentEventNote(event.note)" class="mt-1 text-neutral-600">{{ employmentEventNote(event.note) }}</p>
           </li>
         </ol>
-      </section>
+      </details>
     </div>
 
     <!--
@@ -474,5 +530,6 @@ const actions = computed<ActionItem[]>(() => [
       :employment="employment"
       :can-write="canWriteDocuments === true"
     />
+    </template>
   </article>
 </template>

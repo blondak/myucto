@@ -41,6 +41,17 @@ const masked = computed<Record<PayrollPersonIdentifierType, string | null>>(() =
 function placeholder(type: PayrollPersonIdentifierType): string {
   return masked.value[type] ?? t('payroll.people.quick_edit.not_set')
 }
+
+/**
+ * EČP, VČP a zahraniční identifikátor potřebuje zlomek lidí, ale na kartě zabíraly
+ * celý řádek hned pod jménem. Sbalí se — a samy se otevřou u toho, kdo je má
+ * vyplněné, aby o nich nevěděl jen ten, kdo je zrovna zadává.
+ */
+const hasAlternativeIdentifier = computed(
+  () => masked.value.ecp !== null
+    || masked.value.vcp !== null
+    || masked.value.foreign_tax_identifier !== null,
+)
 </script>
 
 <template>
@@ -89,16 +100,23 @@ function placeholder(type: PayrollPersonIdentifierType): string {
       </label>
     </div>
 
-    <div class="rounded-lg border border-neutral-200 bg-neutral-50 p-3 sm:p-4">
-      <div>
-        <h3 class="text-sm font-medium text-neutral-800">
-          {{ t('payroll.people.quick_edit.alternative_identifiers_title') }}
-        </h3>
-        <p class="mt-1 text-xs text-neutral-500">
-          {{ t('payroll.people.quick_edit.alternative_identifiers_hint') }}
-        </p>
-      </div>
-      <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <details
+      class="group rounded-lg border border-neutral-200 bg-neutral-50"
+      :open="hasAlternativeIdentifier"
+      data-test="alternative-identifiers"
+    >
+      <summary class="flex cursor-pointer list-none items-center gap-2 p-3 sm:p-4">
+        <svg class="h-4 w-4 shrink-0 text-neutral-500 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+        <span class="min-w-0">
+          <span class="block text-sm font-medium text-neutral-800">
+            {{ t('payroll.people.quick_edit.alternative_identifiers_title') }}
+          </span>
+          <span class="mt-1 block text-xs text-neutral-500">
+            {{ t('payroll.people.quick_edit.alternative_identifiers_hint') }}
+          </span>
+        </span>
+      </summary>
+      <div class="grid grid-cols-1 gap-3 border-t border-neutral-200 p-3 sm:grid-cols-3 sm:p-4">
         <label :class="labelClass">
           {{ t('payroll.people.profile.identifier_type.ecp') }}
           <input
@@ -130,6 +148,6 @@ function placeholder(type: PayrollPersonIdentifierType): string {
           >
         </label>
       </div>
-    </div>
+    </details>
   </fieldset>
 </template>
