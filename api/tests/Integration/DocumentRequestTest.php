@@ -183,6 +183,16 @@ final class DocumentRequestTest extends TestCase
         self::assertNotNull($submission);
         self::assertSame('submitted', $submission['status']);
         self::assertSame('not_started', $submission['extraction_status']);
+        $documentStmt = $this->db->pdo()->prepare(
+            'SELECT text_status, thumb_status FROM documents WHERE id = ? AND supplier_id = ?'
+        );
+        $documentStmt->execute([(int) $submission['document_id'], $this->supplierA]);
+        $documentState = $documentStmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($documentState);
+        self::assertSame('none', $documentState['text_status'],
+            'Převzetí originálu nesmí synchronně spouštět paměťově náročný PDF parser.');
+        self::assertSame('none', $documentState['thumb_status'],
+            'Staging nepotřebuje při uploadu generovat odvozený náhled; servíruje originál.');
         self::assertSame($before, (int) $this->db->pdo()->query(
             'SELECT COUNT(*) FROM purchase_invoices WHERE supplier_id = ' . $this->supplierA
         )->fetchColumn(), 'Nezpracované podání je mimo náklady, cashflow i DPH, protože nevytvoří purchase_invoice.');

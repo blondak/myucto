@@ -131,13 +131,12 @@ final class PurchaseInvoiceSubmissionUploadService
             $ownTransaction = !$pdo->inTransaction();
             if ($ownTransaction) $pdo->beginTransaction();
             try {
-                $ingested = $this->ingest->ingestUploadedTemp(
+                $ingested = $this->ingest->ingestOriginalTemp(
                     $tmp,
                     $supplierId,
                     null,
                     $originalName,
                     $userId,
-                    'keep',
                 );
                 $documentId = (int) ($ingested['created_ids'][0] ?? 0);
                 if ($documentId <= 0 || count($ingested['created_ids']) !== 1) {
