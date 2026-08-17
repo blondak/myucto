@@ -1146,6 +1146,12 @@ final class Routes
                 '/submissions/health-notifications/capability',
                 [PayrollHealthNotificationAction::class, 'capability'],
             );
+            // Přehled za období musí stát PŘED variantou s ID vztahu —
+            // jinak by ji router považoval za neúplnou adresu detailu.
+            $g->get(
+                '/submissions/health-notifications/duties',
+                [PayrollHealthNotificationAction::class, 'periodDuties'],
+            );
             $g->get(
                 '/submissions/health-notifications/duties/{employmentId:[0-9]+}',
                 [PayrollHealthNotificationAction::class, 'duties'],

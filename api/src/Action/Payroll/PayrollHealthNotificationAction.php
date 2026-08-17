@@ -84,6 +84,68 @@ final class PayrollHealthNotificationAction
         return Json::ok($response, ['items' => $items]);
     }
 
+    /**
+     * Přehled povinností za mzdové období.
+     *
+     * Filtr i stránka jsou parametry SERVERU. Kdyby se filtrovalo až
+     * v prohlížeči, `total` by popisoval jiný seznam, než účetní vidí, a
+     * „nic k podání" by mohlo znamenat jen „na téhle stránce nic není".
+     */
+    public function periodDuties(
+        Request $request,
+        Response $response,
+    ): Response {
+        if (!$this->guard($request, $response, AccessLevel::READ, $error)) {
+            return $this->guardFailure($error);
+        }
+
+        $query = $request->getQueryParams();
+        try {
+            $result = $this->service->dutiesForPeriod(
+                $this->currentSupplierId($request),
+                'production',
+                $this->period($query),
+                [
+                    'insurer_code' => $this->optionalString(
+                        $query,
+                        'insurer_code',
+                        '/^[0-9]{3}$/D',
+                    ),
+                    'kind' => $this->optionalString(
+                        $query,
+                        'kind',
+                        '/^[a-z_]{1,64}$/D',
+                    ),
+                    'reported' => $this->optionalBool($query, 'reported'),
+                    'undocumented_code_only' => $this->optionalBool(
+                        $query,
+                        'undocumented_code_only',
+                    ) === true,
+                ],
+                (int) ($query['limit']
+                    ?? HealthInsuranceSubmissionService::PERIOD_DEFAULT_LIMIT),
+                (int) ($query['offset'] ?? 0),
+            );
+        } catch (HealthNotificationException $exception) {
+            return Json::error(
+                $response,
+                $exception->errorCode,
+                $exception->getMessage(),
+                422,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $exception->getMessage(),
+                422,
+            );
+        }
+
+        return Json::ok($response, $result)
+            ->withHeader('Cache-Control', 'private, no-store');
+    }
+
     /** @param array{employmentId:string} $args */
     public function registerObligations(
         Request $request,
@@ -177,6 +239,67 @@ final class PayrollHealthNotificationAction
         }
 
         return Json::ok($response, $result);
+    }
+
+    /** @param array<string,mixed> $query */
+    private function period(array $query): string
+    {
+        $value = $query['period'] ?? null;
+        if ($value === null || $value === '') {
+            return (new \DateTimeImmutable(
+                'now',
+                new \DateTimeZone('Europe/Prague'),
+            ))->format('Y-m');
+        }
+        if (!is_string($value)
+            || preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $value) !== 1
+        ) {
+            throw new \InvalidArgumentException(
+                'Parametr period musí mít tvar RRRR-MM.',
+            );
+        }
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $query */
+    private function optionalString(
+        array $query,
+        string $field,
+        string $pattern,
+    ): ?string {
+        $value = $query[$field] ?? null;
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!is_string($value) || preg_match($pattern, $value) !== 1) {
+            throw new \InvalidArgumentException(
+                "Parametr {$field} má neplatnou hodnotu.",
+            );
+        }
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $query */
+    private function optionalBool(array $query, string $field): ?bool
+    {
+        $value = $query[$field] ?? null;
+        if ($value === null || $value === '') {
+            return null;
+        }
+        $parsed = filter_var(
+            $value,
+            FILTER_VALIDATE_BOOL,
+            FILTER_NULL_ON_FAILURE,
+        );
+        if ($parsed === null) {
+            throw new \InvalidArgumentException(
+                "Parametr {$field} musí být true nebo false.",
+            );
+        }
+
+        return $parsed;
     }
 
     private function onDate(Request $request): string
