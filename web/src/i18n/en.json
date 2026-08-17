@@ -3323,7 +3323,8 @@
                 "outside_period": "Outside period",
                 "status": {
                     "ok": "OK",
-                    "blocked": "Blocking"
+                    "blocked": "Blocking",
+                    "pending": "Not filled in yet"
                 },
                 "options": {
                     "business_day_rule": {
@@ -3391,7 +3392,8 @@
                     },
                     "jmhz_certificate": {
                         "ok": "The JMHZ authentication credential is ready.",
-                        "blocked": "JMHZ requires a valid authentication credential."
+                        "blocked": "JMHZ requires a valid authentication credential.",
+                        "pending": "Choose a signing certificate for production submissions (Payroll → Submissions → Certificate). It does not block the setup — live submission is not available yet anyway."
                     },
                     "jmhz_feature_source": {
                         "ok": "The tenant JMHZ activation source is verified.",

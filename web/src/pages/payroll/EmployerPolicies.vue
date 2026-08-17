@@ -21,7 +21,7 @@ const props = defineProps<{
   canWrite: boolean
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const toast = useToast()
 const loading = ref(true)
 const saving = ref(false)
@@ -122,9 +122,15 @@ function normalizeDelivery() {
   }
 }
 
-function statusClass(status: 'ok' | 'blocked'): string {
-  return status === 'ok'
-    ? 'bg-success-50 text-success-700'
+/**
+ * `pending` má vlastní, nenápadný tón: kontrola sice nevyšla, ale nastavení
+ * neblokuje. Varovná barva by z nepovinné připravenosti dělala překážku.
+ */
+function statusClass(status: PayrollSetupCheckItem['status']): string {
+  if (status === 'ok') return 'bg-success-50 text-success-700'
+
+  return status === 'pending'
+    ? 'bg-neutral-100 text-neutral-600'
     : 'bg-warning-50 text-warning-700'
 }
 
@@ -143,10 +149,17 @@ const knownCheckCodes = new Set([
   'jmhz_feature_source',
 ])
 
+/**
+ * Text kontroly skládáme z kódu a stavu, takže ho `check:i18n` staticky
+ * nevidí — chybějící kombinace se pozná až na stránce, kde vyskočí syrový klíč
+ * (přesně to potkalo `jmhz_certificate.pending`). Server přitom posílá vlastní
+ * českou hlášku, tak ji použijeme, kdykoliv překlad chybí: horší než přeložený
+ * text, pořád ale text, ne klíč.
+ */
 function checkMessage(check: PayrollSetupCheckItem): string {
-  return knownCheckCodes.has(check.code)
-    ? t(`payroll.employer.policies.checks.${check.code}.${check.status}`)
-    : check.message
+  const key = `payroll.employer.policies.checks.${check.code}.${check.status}`
+
+  return knownCheckCodes.has(check.code) && te(key) ? t(key) : check.message
 }
 
 function policyIsEffective(policy: PayrollEmployerPolicy): boolean {

@@ -2029,7 +2029,12 @@ export interface PayrollEmploymentAgendaSummary {
 
 export interface PayrollSetupCheckItem {
   code: string
-  status: 'ok' | 'blocked'
+  /**
+   * `pending` = kontrola nevyšla, ale nastavení neblokuje (nepovinná
+   * připravenost). Chyběl tu a stránka pak u takové kontroly vypsala syrový
+   * klíč překladu — viz `PayrollSetupCheckService::addCheck()`.
+   */
+  status: 'ok' | 'blocked' | 'pending'
   message: string
 }
 

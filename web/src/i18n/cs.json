@@ -3323,7 +3323,8 @@
                 "outside_period": "Mimo období",
                 "status": {
                     "ok": "V pořádku",
-                    "blocked": "Blokuje"
+                    "blocked": "Blokuje",
+                    "pending": "Zatím chybí"
                 },
                 "options": {
                     "business_day_rule": {
@@ -3391,7 +3392,8 @@
                     },
                     "jmhz_certificate": {
                         "ok": "Přihlašovací prostředek pro JMHZ je připravený.",
-                        "blocked": "JMHZ vyžaduje platný přihlašovací prostředek."
+                        "blocked": "JMHZ vyžaduje platný přihlašovací prostředek.",
+                        "pending": "Zvolte podpisový certifikát pro produkční podání (Mzdy → Podání → Certifikát). Nastavení to neblokuje — ostré podání zatím stejně není dostupné."
                     },
                     "jmhz_feature_source": {
                         "ok": "Tenantový zdroj aktivace JMHZ je ověřený.",

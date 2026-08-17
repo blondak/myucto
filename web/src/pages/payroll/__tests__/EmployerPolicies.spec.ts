@@ -24,10 +24,16 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
 }))
 
+// `te` říká, jestli klíč existuje; stránka podle něj pozná, že má místo syrového
+// klíče vypsat hlášku ze serveru. Sada klíčů je tu explicitní, ať se dá otestovat
+// i chybějící překlad.
+const missingKeys = new Set<string>()
+
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
+    te: (key: string) => !missingKeys.has(key),
   }),
 }))
 
@@ -119,6 +125,36 @@ describe('EmployerPolicies', () => {
     expect(wrapper.find('table').exists()).toBe(true)
     expect(wrapper.find('[class*="md:hidden"]').exists()).toBe(true)
 
+    wrapper.unmount()
+  })
+
+  /**
+   * Nepovinná kontrola (`pending`) měla vlastní stav i vlastní text, ale ani
+   * jeden nebyl přeložený — stránka pak u certifikátu JMHZ vypsala rovnou klíč
+   * `payroll.employer.policies.checks.jmhz_certificate.pending`. Chybějící
+   * překlad musí spadnout na hlášku ze serveru, ne na klíč.
+   */
+  it('u nepřeložené kontroly vypíše hlášku ze serveru, ne klíč', async () => {
+    missingKeys.add('payroll.employer.policies.checks.jmhz_certificate.pending')
+    m.employerPolicies.mockResolvedValue([policy()])
+    m.payrollSetupCheck.mockResolvedValue({
+      ...setup(),
+      checks: [{
+        code: 'jmhz_certificate',
+        status: 'pending' as const,
+        message: 'Zvolte podpisový certifikát pro produkční prostředí.',
+      }],
+    })
+    const wrapper = mount(EmployerPolicies, { props: { canWrite: true }, attachTo: document.body })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Zvolte podpisový certifikát pro produkční prostředí.')
+    expect(wrapper.text()).not.toContain('checks.jmhz_certificate.pending')
+    // Stav má vlastní popisek i nenápadný tón — nepovinná kontrola není překážka.
+    expect(wrapper.text()).toContain('payroll.employer.policies.status.pending')
+    expect(wrapper.html()).toContain('bg-neutral-100')
+
+    missingKeys.delete('payroll.employer.policies.checks.jmhz_certificate.pending')
     wrapper.unmount()
   })
 
