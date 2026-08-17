@@ -53,6 +53,7 @@ use MyInvoice\Service\Accounting\RetentionPolicy;
  *     ne § 35a odst. 4 zák. č. 582/1991 Sb. — ten o pojistném vůbec nemluví.
  *   • zdravotní pojištění: v zák. č. 592/1992 Sb. žádná uschovávací lhůta není.
  *     Deset let zůstává, ale jako DODANÁ POLITIKA (`ORIGIN_HOUSE_POLICY`).
+ *     Zadavatel to v 8/2026 potvrdil — je to rozhodnutí, ne otevřená otázka.
  *   • evidence pracovní doby: lhůta EXISTUJE (§ 96 věta druhá zák. č. 187/2006
  *     Sb.), takže `UNDETERMINED` byl věcně nesprávný stav.
  *
@@ -92,6 +93,10 @@ use MyInvoice\Service\Accounting\RetentionPolicy;
  * 3. Druhou variantu lhůty u stejnopisů ELDP (běh od roku VYHOTOVENÍ). Katalog ji
  *    nese jako `alternative_basis`, ale posudek počítá nad ROKEM POSLEDNÍ STOPY
  *    osoby, ne nad rokem vyhotovení jednotlivého listu — viz poznámka u kategorie.
+ * 4. Delší, 45letou variantu u dokladů o vzniku a skončení pracovního vztahu,
+ *    kterou by dovolila fikce v § 35a odst. 4 zák. č. 582/1991 Sb. Zvážená
+ *    a zadavatelem v 8/2026 zamítnutá ve prospěch doloženého minima — podrobně
+ *    u kategorie `employment_relation_documents`.
  *
  * ── Účetní lhůtu si katalog NEDRŽÍ ────────────────────────────────────────────
  * Kategorie `accounting_records` nemá vlastní číslo. Lhůtu si bere z
@@ -415,7 +420,16 @@ final class PayrollRetentionCatalog
                 . 'identity sám dokladem není — je to auditní stopa k tomu, komu byl '
                 . 'registrační doklad přiřazen; zároveň mazání blokuje, takže mimo katalog '
                 . 'by osobu držel bez konce. Nesouvisí to s § 313 zákoníku práce, ten '
-                . 'ukládá potvrzení VYDAT, ne uschovat.',
+                . 'ukládá potvrzení VYDAT, ne uschovat. '
+                . 'DELŠÍ VARIANTA BYLA ZVÁŽENÁ A ZAMÍTNUTÁ: fikce v § 35a odst. 4 zákona '
+                . 'č. 582/1991 Sb. jmenuje mezi záznamy pro důchodové pojištění tytéž '
+                . 'doklady o vzniku a skončení pracovního vztahu, což by lhůtu zvedlo '
+                . 'z 10 na 45 let. Doslovné znění ale neurčuje, ke kterému písmenu se ta '
+                . 'věta váže, takže delší lhůta by stála na výkladu, ne na textu. '
+                . 'Zadavatel v 8/2026 rozhodl pro DOLOŽENÉ MINIMUM: kategorie zůstává na '
+                . '10 letech podle § 96 věty druhé zákona č. 187/2006 Sb. Delší lhůtu si '
+                . 'zaměstnavatel může nastavit odchylkou v `payroll_retention_policies`, '
+                . 'protože ty přebíjejí katalog směrem NAHORU.',
         ],
         self::HEALTH_INSURANCE => [
             'label' => 'Záznamy pro zdravotní pojištění',
@@ -437,7 +451,8 @@ final class PayrollRetentionCatalog
                 'payroll_person_health_other_employer_bases',
             ],
             'employment_tables' => [],
-            'note' => 'JEDINÁ DODANÁ LHŮTA V KATALOGU. Fulltext zákona č. 592/1992 Sb. '
+            'note' => 'JEDINÁ DODANÁ LHŮTA V KATALOGU, a zadavatel ji v 8/2026 potvrdil — '
+                . 'nečeká se na rozhodnutí, rozhodnutí padlo. Fulltext zákona č. 592/1992 Sb. '
                 . 'neobsahuje slovo „uschov" ani jednou; § 25 odst. 5 ukládá vést '
                 . 'průkaznou evidenci o platbách pojistného, ale ŽÁDNOU lhůtu nestanoví. '
                 . 'Deset let se v praxi opisuje z § 16 odst. 1 (předepsání dlužného '

@@ -39,18 +39,23 @@ use PDO;
  * než UPDATE. {@see residue()} je proto SPOČÍTÁ a návrh je ukáže dopředu, aby
  * bylo vidět, co po anonymizaci ještě zbývá. Tichá mezera je horší než přiznaná.
  *
- * ── ZNÁMÁ MEZERA: jméno v auditním logu ──────────────────────────────────────
+ * ── ROZHODNUTO: jméno přežívá úplný výmaz v auditní stopě ────────────────────
  * Tahle třída do auditu jméno NEZAPISUJE (payload nese jen počty a neosobní
  * zařazení; hlídá to test `testAuditPayloadCarriesNoPersonalData`). Úplný výmaz
  * ale jde přes {@see PayrollEmployeeDeletionRepository::delete()}, který loguje
- * `full_name` — a `full_name` není mezi `ActivityLogger::REDACT_KEYS`. Po
- * úplném výmazu tedy jméno přežívá v `activity_log`.
+ * `full_name` — a `full_name` záměrně není mezi `ActivityLogger::REDACT_KEYS`.
+ * Po úplném výmazu tedy jméno v `activity_log` zůstává.
  *
- * Vědomě se to tady NEOPRAVUJE: doplnit `full_name` do REDACT_KEYS je zásah do
- * sdíleného auditu celé aplikace (dotkl by se kontaktů, osob i vyživovaných),
- * a ruční smazání omylem založené osoby naopak jméno v logu mít MÁ — jinak by
- * z auditu nešlo poznat, koho se úkon týkal. Rozhodnout, které z těch dvou
- * použití má přednost, je věc zadání, ne úklidu při implementaci retence.
+ * Zadavatel v 8/2026 rozhodl, že to tak MÁ být, a redakce se nepřidává. Úplný
+ * výmaz je nevratný a řádek po něm neexistuje; auditní zápis bez jména by
+ * neřekl, koho se úkon týkal, a nešlo by z něj odlišit omylem založený
+ * duplicitní záznam od skutečného člověka. Typickým důvodem ručního výmazu je
+ * přitom právě omylem založená osoba, u které tam jméno patří. Řádné ukončení
+ * retence jménem neprochází — to je anonymizace, tedy tahle třída.
+ *
+ * Kdo by to chtěl „opravit" jako přehlédnutí: odůvodnění je i u samotného
+ * seznamu {@see \MyInvoice\Service\ActivityLogger}, protože zásah do REDACT_KEYS
+ * by se dotkl sdíleného auditu celé aplikace, ne jen mezd.
  */
 final class PayrollPersonAnonymizationRepository
 {
