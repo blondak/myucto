@@ -17,33 +17,37 @@ use DOMElement;
  *
  * `interniIdentifikacePodaniPodavatele` je volitelné a pojišťovny ho podle
  * podkladů NEVYHODNOCUJÍ. Nesmí se proto použít jako idempotenční klíč;
- * slouží jen k tomu, aby si podání našel podatel sám.
+ * slouží jen k tomu, aby si podání našel podatel sám. Ve schématu stojí
+ * hned za oběma fixními konstantami a před `kodZdravotniPojistovny`.
  *
- * ## Proč se smí serializovat, i když v repu XSD zatím není
+ * ## Struktura je z připnutého XSD, ne z odhadu
  *
- * Namespace, kořen, fixní konstanty a jména prvků `zmenaZamestance`
- * i `udajePlatby` jsou z rešerše doložené. Jména prvků uvnitř
- * `identifikaceZamestnavatele` doložená NEJSOU — rešerše je popisuje česky
- * ({@see self::EMPLOYER_ELEMENTS}). Návrh se ale nikdy nedostane na
- * pojišťovnu bez XSD validace: {@see HealthInsuranceXmlValidator} si vyžádá
- * připnuté schéma a bez něj selže na `zp_schema_bundle_missing`, takže
- * případná chyba v pojmenování spadne hlasitě při zapnutí balíčku a ne tiše
- * v podání.
+ * Pořadí i jména prvků odpovídají `hromadneOznameniZamestnavatele_2025_v8.xsd`
+ * a `prehledPlatbyZamestnavatele_2025_v8.xsd` (revize 08, 8. 12. 2025), které
+ * jsou v `api/xsd/zp/2025-v8/` připnuté otiskem. Dvě místa, kde se schéma liší
+ * od toho, co by čekal čtenář:
+ *
+ * - `identifikaceZamestnavatele` má prvky adresy prefixované
+ *   (`adresaPlatceUlice`, `adresaPlatceCisloPopisneOrientacni`, …), ne holé
+ *   `ulice` a `psc`.
+ * - `adresa` uvnitř `zmenaZamestance` má jen `ulice`, `obec` a `psc` — číslo
+ *   popisné vlastní prvek NEMÁ, takže se připojuje k ulici.
  */
 final readonly class HealthInsuranceXmlSerializer
 {
     /**
-     * Pořadí je z rešerše doložené (IČO plátce, název, ulice, č. p., PSČ,
-     * obec, telefon); přesná jména prvků čekají na připnuté XSD.
+     * Prvky `identifikaceZamestnavateleTyp` v pořadí ze schématu; oba XSD
+     * mají tenhle typ shodný. `adresaPlatceTelefon` je `minOccurs="0"`
+     * a typu `\d{1,30}`, takže se prázdný NEVYPISUJE — prázdný prvek by
+     * schéma shodilo.
      */
     private const EMPLOYER_ELEMENTS = [
         'payer_number' => 'identifikacniCisloPlatce',
-        'name' => 'nazev',
-        'street' => 'ulice',
-        'house_number' => 'cisloPopisne',
-        'postal_code' => 'psc',
-        'city' => 'obec',
-        'phone' => 'telefon',
+        'name' => 'nazevPlatce',
+        'street' => 'adresaPlatceUlice',
+        'house_number' => 'adresaPlatceCisloPopisneOrientacni',
+        'postal_code' => 'adresaPlatcePsc',
+        'city' => 'adresaPlatceObec',
     ];
 
     public function __construct(
@@ -58,7 +62,10 @@ final readonly class HealthInsuranceXmlSerializer
         $manifest = $this->schemas->manifestFor(
             HealthInsuranceSchemaCatalog::HOZ,
         );
-        [$document, $root] = $this->document($manifest);
+        [$document, $root] = $this->document(
+            $manifest,
+            $payload->internalReference,
+        );
 
         $this->text(
             $document,
@@ -91,15 +98,19 @@ final readonly class HealthInsuranceXmlSerializer
         $manifest = $this->schemas->manifestFor(
             HealthInsuranceSchemaCatalog::PPZ,
         );
-        [$document, $root] = $this->document($manifest);
+        [$document, $root] = $this->document(
+            $manifest,
+            $payload->internalReference,
+        );
 
-        $this->text($document, $root, 'typPrehledu', $payload->overviewKind);
+        // Pořadí ze schématu: kód pojišťovny předchází typu přehledu.
         $this->text(
             $document,
             $root,
             'kodZdravotniPojistovny',
             $payload->insurerCode,
         );
+        $this->text($document, $root, 'typPrehledu', $payload->overviewKind);
         $root->appendChild(
             $this->employer($document, $manifest, $payload->employer),
         );
@@ -144,8 +155,10 @@ final readonly class HealthInsuranceXmlSerializer
      * @param array<string,mixed> $manifest
      * @return array{0:DOMDocument,1:DOMElement}
      */
-    private function document(array $manifest): array
-    {
+    private function document(
+        array $manifest,
+        ?string $internalReference = null,
+    ): array {
         $document = new DOMDocument('1.0', 'UTF-8');
         $document->formatOutput = true;
         $root = $document->createElementNS(
@@ -165,6 +178,14 @@ final readonly class HealthInsuranceXmlSerializer
             'identifikacePredmetuPodaniKod',
             (string) $manifest['subject_code'],
         );
+        if ($internalReference !== null && $internalReference !== '') {
+            $this->text(
+                $document,
+                $root,
+                'interniIdentifikacePodaniPodavatele',
+                $internalReference,
+            );
+        }
 
         return [$document, $root];
     }
@@ -183,6 +204,10 @@ final readonly class HealthInsuranceXmlSerializer
         $values = $employer->toArray();
         foreach (self::EMPLOYER_ELEMENTS as $key => $name) {
             $this->text($document, $element, $name, $values[$key]);
+        }
+        $phone = $employer->normalizedPhone();
+        if ($phone !== '') {
+            $this->text($document, $element, 'adresaPlatceTelefon', $phone);
         }
 
         return $element;
@@ -206,16 +231,17 @@ final readonly class HealthInsuranceXmlSerializer
         $this->text($document, $element, 'jmeno', $change->firstName);
         $this->text($document, $element, 'prijmeni', $change->lastName);
         if ($change->address !== null) {
+            // Schéma zná uvnitř `adresa` jen ulice → obec → psc a číslo popisné
+            // vlastní prvek nemá; připojuje se proto k ulici.
             $address = $this->element($document, $manifest, 'adresa');
-            $this->text($document, $address, 'ulice', $change->address->street);
             $this->text(
                 $document,
                 $address,
-                'cisloPopisne',
-                $change->address->houseNumber,
+                'ulice',
+                $change->address->streetLine(),
             );
-            $this->text($document, $address, 'psc', $change->address->postalCode);
             $this->text($document, $address, 'obec', $change->address->city);
+            $this->text($document, $address, 'psc', $change->address->postalCode);
             $element->appendChild($address);
         }
 

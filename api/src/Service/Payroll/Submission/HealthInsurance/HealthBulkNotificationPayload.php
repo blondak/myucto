@@ -36,7 +36,7 @@ final readonly class HealthBulkNotificationPayload
             $change->assertValid($codes);
         }
         if ($this->internalReference !== null
-            && preg_match('/^[0-9A-Za-z._:-]{1,64}$/', $this->internalReference) !== 1
+            && preg_match('/^[0-9A-Za-z._:-]{1,60}$/', $this->internalReference) !== 1
         ) {
             throw new HealthNotificationException(
                 'zp_internal_reference_invalid',

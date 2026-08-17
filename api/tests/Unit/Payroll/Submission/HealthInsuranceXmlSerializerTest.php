@@ -14,6 +14,8 @@ use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationChang
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationCodeCatalog;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationException;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewPayload;
+use DOMDocument;
+use LibXMLError;
 use PHPUnit\Framework\TestCase;
 
 final class HealthInsuranceXmlSerializerTest extends TestCase
@@ -52,7 +54,32 @@ final class HealthInsuranceXmlSerializerTest extends TestCase
         );
     }
 
-    // --- manifest a fail-closed XSD -------------------------------------
+    /**
+     * Ověří větu proti připnutému XSD. Tohle je ta kontrola, kterou bajtový
+     * golden test sám neudělá — potvrzoval by i strukturu, kterou schéma
+     * odmítá.
+     */
+    private function assertValidAgainstPinnedSchema(
+        string $documentType,
+        string $xml,
+    ): void {
+        $schema = $this->schemas->schemaFor($documentType);
+        $document = new DOMDocument();
+        $previous = libxml_use_internal_errors(true);
+        libxml_clear_errors();
+        $loaded = $document->loadXML($xml, LIBXML_NONET);
+        $valid = $loaded && $document->schemaValidate($schema['path']);
+        $errors = libxml_get_errors();
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        self::assertTrue($valid, implode('; ', array_map(
+            static fn (LibXMLError $error): string => trim($error->message),
+            $errors,
+        )));
+    }
+
+    // --- manifest a připnuté XSD ----------------------------------------
 
     public function testManifestPinsBothDocumentsOfTheSharedDataMessage(): void
     {
@@ -87,38 +114,56 @@ final class HealthInsuranceXmlSerializerTest extends TestCase
     }
 
     /**
-     * Balíček XSD v repu není (rešerše ho vědomě nezkopírovala), takže
-     * validace musí selhat pojmenovaně — ne projít.
+     * Obě schémata jsou v repu a otiskem sedí na manifest. Tenhle test hlídá
+     * obojí najednou: jiný bajt v souboru shodí `available` a s ním celou
+     * validační cestu.
      */
-    public function testSchemaLookupIsFailClosedWhileTheBundleIsMissing(): void
+    public function testBothSchemasArePinnedByTheirHash(): void
     {
-        if ($this->schemas->isBundleAvailable()) {
-            self::markTestSkipped(
-                'Připnutý balíček XSD je k dispozici; fail-closed větev neplatí.',
+        self::assertTrue(
+            $this->schemas->isBundleAvailable(),
+            'Připnutá XSD musí být v api/xsd/zp/ a sedět otiskem.',
+        );
+        foreach ($this->schemas->documentTypes() as $documentType) {
+            $schema = $this->schemas->schemaFor($documentType);
+            self::assertFileExists($schema['path']);
+            self::assertSame(
+                HealthInsuranceSchemaCatalog::XSD_VERSION,
+                $schema['xsd_version'],
             );
-        }
-        try {
-            $this->schemas->schemaFor(HealthInsuranceSchemaCatalog::HOZ);
-            self::fail('Bez připnutého XSD nesmí validace projít.');
-        } catch (HealthNotificationException $e) {
-            self::assertSame('zp_schema_bundle_missing', $e->errorCode);
-            self::assertStringContainsString('api/xsd/zp/', $e->getMessage());
         }
     }
 
-    public function testValidationRefusesWhileTheBundleIsMissing(): void
+    /** Věta z jiného zdroje než ze serializéru schématem neprojde. */
+    public function testTamperedDocumentIsRefusedByThePinnedSchema(): void
     {
-        if ($this->schemas->isBundleAvailable()) {
-            self::markTestSkipped('Připnutý balíček XSD je k dispozici.');
-        }
+        $xml = str_replace(
+            '<typPrehledu>radny</typPrehledu>',
+            '<typPrehledu>mimoradny</typPrehledu>',
+            $this->serializer->serializePaymentOverview($this->paymentOverview()),
+        );
+        $document = new DOMDocument();
+        $previous = libxml_use_internal_errors(true);
+        libxml_clear_errors();
+        $document->loadXML($xml, LIBXML_NONET);
+        $valid = $document->schemaValidate(
+            $this->schemas->schemaFor(HealthInsuranceSchemaCatalog::PPZ)['path'],
+        );
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        self::assertFalse($valid, 'Neexistující typ přehledu nesmí projít.');
+    }
+
+    /** Plná validační cesta: doména, bajtová shoda se zdrojem i XSD. */
+    public function testValidatorAcceptsTheSerializedPaymentOverview(): void
+    {
         $payload = $this->paymentOverview();
-        $xml = $this->serializer->serializePaymentOverview($payload);
-        try {
-            $this->validator->validatePaymentOverview($payload, $xml);
-            self::fail('Validace bez XSD nesmí projít.');
-        } catch (HealthNotificationException $e) {
-            self::assertSame('zp_schema_bundle_missing', $e->errorCode);
-        }
+        $this->validator->validatePaymentOverview(
+            $payload,
+            $this->serializer->serializePaymentOverview($payload),
+        );
+        self::assertTrue(true);
     }
 
     public function testUnknownDocumentTypeIsRefused(): void
@@ -170,12 +215,12 @@ final class HealthInsuranceXmlSerializerTest extends TestCase
           <kodZdravotniPojistovny>111</kodZdravotniPojistovny>
           <identifikaceZamestnavatele>
             <identifikacniCisloPlatce>1234567800</identifikacniCisloPlatce>
-            <nazev>Testovací firma s.r.o.</nazev>
-            <ulice>Zkušební</ulice>
-            <cisloPopisne>12</cisloPopisne>
-            <psc>11000</psc>
-            <obec>Praha 1</obec>
-            <telefon>+420111222333</telefon>
+            <nazevPlatce>Testovací firma s.r.o.</nazevPlatce>
+            <adresaPlatceUlice>Zkušební</adresaPlatceUlice>
+            <adresaPlatceCisloPopisneOrientacni>12</adresaPlatceCisloPopisneOrientacni>
+            <adresaPlatcePsc>11000</adresaPlatcePsc>
+            <adresaPlatceObec>Praha 1</adresaPlatceObec>
+            <adresaPlatceTelefon>420111222333</adresaPlatceTelefon>
           </identifikaceZamestnavatele>
           <seznamZmenZamestnancu>
             <zmenaZamestance>
@@ -192,10 +237,9 @@ final class HealthInsuranceXmlSerializerTest extends TestCase
               <jmeno>Eva</jmeno>
               <prijmeni>Dvořáková</prijmeni>
               <adresa>
-                <ulice>Krátká</ulice>
-                <cisloPopisne>3</cisloPopisne>
-                <psc>60200</psc>
+                <ulice>Krátká 3</ulice>
                 <obec>Brno</obec>
+                <psc>60200</psc>
               </adresa>
             </zmenaZamestance>
           </seznamZmenZamestnancu>
@@ -207,6 +251,82 @@ final class HealthInsuranceXmlSerializerTest extends TestCase
         self::assertSame(
             $xml,
             $this->serializer->serializeBulkNotification($payload),
+        );
+        $this->assertValidAgainstPinnedSchema(
+            HealthInsuranceSchemaCatalog::HOZ,
+            $xml,
+        );
+    }
+
+    /**
+     * Volitelná interní identifikace stojí ve schématu za oběma konstantami
+     * a před kódem pojišťovny — ne kdekoli jinde.
+     */
+    public function testInternalReferenceGoesRightAfterTheFixedConstants(): void
+    {
+        $payload = new HealthBulkNotificationPayload(
+            insurerCode: '111',
+            employer: $this->employer(),
+            changes: [
+                new HealthNotificationChange(
+                    changeCode: 'P',
+                    changedOn: '2026-03-01',
+                    insuranceNumber: '9001011234',
+                    firstName: 'Jan',
+                    lastName: 'Novák',
+                ),
+            ],
+            internalReference: 'hoz-2026-03-000123',
+        );
+        $xml = $this->serializer->serializeBulkNotification($payload);
+
+        self::assertStringContainsString(
+            "<identifikacePredmetuPodaniKod>882b97d9-3a41-4552-887b-3942ae92c3ea"
+            . "</identifikacePredmetuPodaniKod>\n"
+            . "  <interniIdentifikacePodaniPodavatele>hoz-2026-03-000123"
+            . "</interniIdentifikacePodaniPodavatele>\n"
+            . '  <kodZdravotniPojistovny>111</kodZdravotniPojistovny>',
+            $xml,
+        );
+        $this->assertValidAgainstPinnedSchema(
+            HealthInsuranceSchemaCatalog::HOZ,
+            $xml,
+        );
+    }
+
+    /**
+     * Telefon je ve schématu `\d{1,30}` a volitelný: oddělovače se odstraní
+     * a firma bez telefonu prvek prostě nemá.
+     */
+    public function testPhoneIsReducedToDigitsAndOmittedWhenEmpty(): void
+    {
+        $payload = new HealthBulkNotificationPayload(
+            insurerCode: '111',
+            employer: new HealthEmployerIdentification(
+                payerNumber: '1234567800',
+                name: 'Testovací firma s.r.o.',
+                street: 'Zkušební',
+                houseNumber: '12',
+                postalCode: '11000',
+                city: 'Praha 1',
+                phone: '',
+            ),
+            changes: [
+                new HealthNotificationChange(
+                    changeCode: 'P',
+                    changedOn: '2026-03-01',
+                    insuranceNumber: '9001011234',
+                    firstName: 'Jan',
+                    lastName: 'Novák',
+                ),
+            ],
+        );
+        $xml = $this->serializer->serializeBulkNotification($payload);
+
+        self::assertStringNotContainsString('adresaPlatceTelefon', $xml);
+        $this->assertValidAgainstPinnedSchema(
+            HealthInsuranceSchemaCatalog::HOZ,
+            $xml,
         );
     }
 
@@ -377,16 +497,16 @@ final class HealthInsuranceXmlSerializerTest extends TestCase
         <prehledPlatbyZamestnavatele xmlns="http://xmlns.vzp.cz/PrehledPlatbyZamestnavatele/v1">
           <identifikacePredmetuPodaniText>Přehled platby zaměstnavatele pro ZP 2026+</identifikacePredmetuPodaniText>
           <identifikacePredmetuPodaniKod>1079e224-84f4-46e4-99e8-6095bd282301</identifikacePredmetuPodaniKod>
-          <typPrehledu>radny</typPrehledu>
           <kodZdravotniPojistovny>111</kodZdravotniPojistovny>
+          <typPrehledu>radny</typPrehledu>
           <identifikaceZamestnavatele>
             <identifikacniCisloPlatce>1234567800</identifikacniCisloPlatce>
-            <nazev>Testovací firma s.r.o.</nazev>
-            <ulice>Zkušební</ulice>
-            <cisloPopisne>12</cisloPopisne>
-            <psc>11000</psc>
-            <obec>Praha 1</obec>
-            <telefon>+420111222333</telefon>
+            <nazevPlatce>Testovací firma s.r.o.</nazevPlatce>
+            <adresaPlatceUlice>Zkušební</adresaPlatceUlice>
+            <adresaPlatceCisloPopisneOrientacni>12</adresaPlatceCisloPopisneOrientacni>
+            <adresaPlatcePsc>11000</adresaPlatcePsc>
+            <adresaPlatceObec>Praha 1</adresaPlatceObec>
+            <adresaPlatceTelefon>420111222333</adresaPlatceTelefon>
           </identifikaceZamestnavatele>
           <udajePlatby>
             <mesicHlaseni>1</mesicHlaseni>
@@ -398,9 +518,13 @@ final class HealthInsuranceXmlSerializerTest extends TestCase
         </prehledPlatbyZamestnavatele>
         XML;
 
-        self::assertSame(
-            $expected,
-            $this->serializer->serializePaymentOverview($this->paymentOverview()),
+        $xml = $this->serializer->serializePaymentOverview(
+            $this->paymentOverview(),
+        );
+        self::assertSame($expected, $xml);
+        $this->assertValidAgainstPinnedSchema(
+            HealthInsuranceSchemaCatalog::PPZ,
+            $xml,
         );
     }
 

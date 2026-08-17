@@ -10,6 +10,11 @@ namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
  * `identifikacniCisloPlatce` je PŘESNĚ deset číslic: osmimístné IČO a za ním
  * dvoumístné číslo účtárny (výchozí `00`). Není to IČO doplněné nulami zleva —
  * doplňuje se zprava a záměna obojího dá číslo jiného plátce.
+ *
+ * Délky a tvary jsou z připnutého XSD: `nazevPlatce` je `string80Typ`, ostatní
+ * textové prvky `string60Typ`, PSČ `\d{5}` a telefon `\d{1,30}`. Telefon je
+ * navíc `minOccurs="0"` — bez něj se podání sestavit smí, se znaky mimo číslice
+ * ne. Normalizuje se proto na číslice a prázdný se do věty nepíše.
  */
 final readonly class HealthEmployerIdentification
 {
@@ -77,7 +82,6 @@ final readonly class HealthEmployerIdentification
             'zp_employer_street_missing' => $this->street,
             'zp_employer_house_number_missing' => $this->houseNumber,
             'zp_employer_city_missing' => $this->city,
-            'zp_employer_phone_missing' => $this->phone,
         ] as $code => $value) {
             if (trim($value) === '') {
                 throw new HealthNotificationException(
@@ -86,6 +90,44 @@ final readonly class HealthEmployerIdentification
                 );
             }
         }
+        foreach ([
+            80 => ['zp_employer_name_too_long' => $this->name],
+            60 => [
+                'zp_employer_street_too_long' => $this->street,
+                'zp_employer_house_number_too_long' => $this->houseNumber,
+                'zp_employer_city_too_long' => $this->city,
+            ],
+        ] as $limit => $values) {
+            foreach ($values as $code => $value) {
+                if (mb_strlen($value) > $limit) {
+                    throw new HealthNotificationException(
+                        $code,
+                        sprintf(
+                            'Údaj identifikace zaměstnavatele přesahuje %d znaků, '
+                            . 'které datová věta dovoluje.',
+                            $limit,
+                        ),
+                    );
+                }
+            }
+        }
+        if (mb_strlen($this->normalizedPhone()) > 30) {
+            throw new HealthNotificationException(
+                'zp_employer_phone_invalid',
+                'Telefon plátce má po odstranění oddělovačů víc než '
+                . 'třicet číslic, které datová věta dovoluje.',
+            );
+        }
+    }
+
+    /**
+     * Telefon jen jako číslice, jak žádá `telefonTyp` (`\d{1,30}`).
+     * Prázdný výsledek znamená „telefon se do věty nepíše" — prvek je
+     * ve schématu volitelný.
+     */
+    public function normalizedPhone(): string
+    {
+        return (string) preg_replace('/\D+/', '', $this->phone);
     }
 
     /** @return array<string,string> */
