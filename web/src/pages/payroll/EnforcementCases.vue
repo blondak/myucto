@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { documentsApi, type DocItem } from '@/api/documents'
+import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 import {
   payrollApi,
   type PayrollInstitutionAccount,
@@ -50,7 +52,13 @@ const total = ref(0)
 const pageSize = 20
 const offset = ref(0)
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
-const employeeFilter = ref<number | null>(null)
+/**
+ * Předvýběr z odkazu na kartě zaměstnance (`/payroll/enforcement?person=7`).
+ *
+ * Sedí do stávajícího filtru osob, takže je zúžení vidět a jde ho zrušit tam,
+ * kde ho uživatel čeká. Neplatné id nic nezúží.
+ */
+const employeeFilter = ref<number | null>(payrollQueryId(useRoute().query, 'person'))
 const statusFilter = ref<EnforcementCaseStatus | ''>('')
 const people = ref<PayrollPersonOption[]>([])
 const detail = ref<EnforcementCaseDetail | null>(null)
@@ -103,7 +111,9 @@ const newCase = ref<{
   employee_id: number | null
   case_kind: EnforcementCaseKind
   effective_from: string
-}>({ employee_id: null, case_kind: 'enforcement', effective_from: today })
+  // Zúžení z odkazu předplní i nový případ — kdo přišel „zavést exekuci
+  // Novákovi", ho nechce vybírat znovu.
+}>({ employee_id: employeeFilter.value, case_kind: 'enforcement', effective_from: today })
 function emptyClaim(): EnforcementClaimPayload {
   return {
     legal_basis: 'statutory',

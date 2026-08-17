@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { payrollApi, type PayrollPersonOption } from '@/api/payroll'
+import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 import {
   deductionAgreementKinds,
   deductionPriorityCeiling,
@@ -32,7 +34,14 @@ const expandedId = ref<number | null>(null)
 const creating = ref(false)
 const formError = ref('')
 const listError = ref('')
-const employeeFilter = ref<number | null>(null)
+/**
+ * Předvýběr z odkazu na kartě zaměstnance (`/payroll/deduction-agreements?person=7`).
+ *
+ * Sedí do stávajícího filtru osob, takže se zúžení hned vidí a jde ho zrušit
+ * tam, kde ho uživatel čeká — v tom samém selectu. Zúžení zároveň předplní
+ * formulář nové dohody (`emptyForm()` čte tenhle ref).
+ */
+const employeeFilter = ref<number | null>(payrollQueryId(useRoute().query, 'person'))
 const statusFilter = ref<DeductionAgreementStatus | ''>('')
 const total = ref(0)
 const pageSize = 20

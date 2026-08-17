@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
@@ -11,6 +12,8 @@ import { localPayrollPeriod } from './payrollComponentsUi'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
+import { payrollQueryId } from './payrollAgendaLinks'
 import { payrollAbsenceApi, type PayrollAbsenceEmployment } from '@/api/payrollAbsences'
 import {
   payrollTravelApi,
@@ -46,6 +49,8 @@ interface MealForm {
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 
 const transportModes: TravelTransportMode[] =
   ['public_transport', 'company_vehicle', 'private_vehicle', 'other']
@@ -103,6 +108,34 @@ const employmentOptions = computed(() => employments.value.map(item => ({
   value: item.id,
   label: `${item.full_name} · ${item.code}`,
 })))
+
+/**
+ * Zúžení na jeden vztah z odkazu na kartě zaměstnance (`?employment=12`).
+ *
+ * Cesty nemá server podle vztahu jak filtrovat (endpoint zná jen období), takže
+ * zúžení dělá prohlížeč. Aby to nebylo zúžení jedné STRÁNKY, načte se při něm
+ * celé období najednou (serverový strop je 100) a stránkování se schová —
+ * jinak by pager sliboval stránky, na kterých po zúžení nic není.
+ */
+const TRAVEL_FOCUS_LIMIT = 100
+const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
+const visibleTrips = computed(() => {
+  if (focusEmploymentId.value === null) return trips.value
+  return trips.value.filter(trip => trip.employment_id === focusEmploymentId.value)
+})
+const focusName = computed(() => {
+  const id = focusEmploymentId.value
+  if (id === null) return null
+  const employment = employments.value.find(item => item.id === id)
+  return employment ? `${employment.full_name} · ${employment.code}` : null
+})
+function clearFocus() {
+  focusEmploymentId.value = null
+  const query = { ...route.query }
+  delete query.employment
+  void router.replace({ query })
+  void load()
+}
 const transportOptions = computed(() => transportModes.map(mode => ({
   value: mode,
   label: t(`payroll_travel.transport.${mode}`),
@@ -149,8 +182,11 @@ function resetForm(trip: TravelTrip | null) {
   formError.value = ''
   preview.value = null
   if (trip === null) {
+    // Prázdný formulář si drží zúžení z odkazu — kdo přišel „zadat cestu Novákovi",
+    // ho nechce vybírat po každém zavření editoru znovu.
     form.employee_id = null
     form.employment_id = null
+    if (focusEmploymentId.value !== null) selectEmployment(focusEmploymentId.value)
     form.country_code = 'CZ'
     form.departure_at = `${period.value}-01T08:00`
     form.arrival_at = `${period.value}-01T16:00`
@@ -257,8 +293,11 @@ async function load() {
   loading.value = true
   loadFailed.value = false
   try {
+    const page = focusEmploymentId.value === null
+      ? { limit: pageSize, offset: offset.value }
+      : { limit: TRAVEL_FOCUS_LIMIT, offset: 0 }
     const [tripPage, context] = await Promise.all([
-      payrollTravelApi.listPage(period.value, { limit: pageSize, offset: offset.value }),
+      payrollTravelApi.listPage(period.value, page),
       employments.value.length === 0
         ? payrollAbsenceApi.context()
         : Promise.resolve(employments.value),
@@ -266,6 +305,11 @@ async function load() {
     trips.value = tripPage.trips
     total.value = tripPage.total
     employments.value = context
+    // Předvybraný vztah se nabídne i v editoru nové cesty — jinak by uživatel
+    // po kliknutí na „Pracovní cesty" u konkrétního člověka vybíral znovu.
+    if (focusEmploymentId.value !== null && form.employment_id === null) {
+      selectEmployment(focusEmploymentId.value)
+    }
   } catch (error: unknown) {
     loadFailed.value = true
     toast.error(apiErrorMessage(error, t('payroll_travel.messages.load_failed')))
@@ -434,8 +478,10 @@ onMounted(load)
     />
 
     <template v-else>
+      <PayrollFocusNotice v-if="focusName" :name="focusName" class="mb-4" @clear="clearFocus" />
+
       <p
-        v-if="trips.length === 0"
+        v-if="visibleTrips.length === 0"
         class="rounded-xl border border-dashed border-neutral-300 p-8 text-center text-sm text-neutral-500"
       >
         {{ t('payroll_travel.empty') }}
@@ -458,7 +504,7 @@ onMounted(load)
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="trip in trips" :key="trip.id" data-test="travel-row">
+              <tr v-for="trip in visibleTrips" :key="trip.id" data-test="travel-row">
                 <td class="px-4 py-3">
                   <div class="font-medium text-neutral-900">{{ trip.employee_name }}</div>
                   <div class="text-xs text-neutral-500">{{ trip.employment_code }}</div>
@@ -529,7 +575,7 @@ onMounted(load)
         <!-- Mobilní karty -->
         <section class="grid gap-4 md:hidden">
           <article
-            v-for="trip in trips"
+            v-for="trip in visibleTrips"
             :key="trip.id"
             data-test="travel-card"
             class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm"
@@ -609,7 +655,9 @@ onMounted(load)
           </article>
         </section>
 
+        <!-- Se zúžením na jednoho člověka se čte celé období najednou; pager by lhal. -->
         <PaginationBar
+          v-if="focusEmploymentId === null"
           data-test="travel-pagination"
           :page="currentPage"
           :per-page="pageSize"

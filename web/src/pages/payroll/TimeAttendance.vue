@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
   type PayrollTimeCategory,
@@ -10,6 +11,8 @@ import {
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
+import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 import PayrollFileDropzone, {
   type PayrollFileRejectReason,
 } from '@/components/payroll/PayrollFileDropzone.vue'
@@ -25,6 +28,8 @@ import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 const period = ref(localPayrollPeriod())
 const incompleteOnly = ref(false)
 const loading = ref(false)
@@ -94,8 +99,35 @@ const canReopen = computed(() => auth.canWrite('payroll.reopen'))
 const selected = computed(() =>
   overview.value?.items.find(item => item.employment.id === employmentId.value) ?? null,
 )
+/**
+ * Zúžení na jeden vztah z odkazu na kartě zaměstnance (`?employment=12`).
+ *
+ * Why: bez toho vedlo tlačítko „Docházka" na docházku celé firmy a uživatel
+ * v ní člověka hledal znovu. Neplatné ani cizí id nic nezúží — odkaz z bookmarku
+ * je slepý, ne rozbitý.
+ */
+const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
+const visibleItems = computed(() => {
+  const items = overview.value?.items ?? []
+  if (focusEmploymentId.value === null) return items
+  const narrowed = items.filter(item => item.employment.id === focusEmploymentId.value)
+  return narrowed.length > 0 ? narrowed : items
+})
+const focusName = computed(() =>
+  focusEmploymentId.value === null || visibleItems.value.length !== 1
+    ? null
+    : visibleItems.value[0].employment.full_name,
+)
+function clearFocus() {
+  focusEmploymentId.value = null
+  const query = { ...route.query }
+  delete query.employment
+  void router.replace({ query })
+}
+// Hromadné schválení pracuje s tím, co je na obrazovce — se zúžením tedy
+// s jedním člověkem, ne se všemi, které schovává filtr.
 const selectableItems = computed(() =>
-  overview.value?.items.filter(item => item.month.status === 'open') ?? [],
+  visibleItems.value.filter(item => item.month.status === 'open'),
 )
 const allSelectableSelected = computed(() =>
   selectableItems.value.length > 0
@@ -133,7 +165,15 @@ async function load() {
   try {
     overview.value = await payrollApi.timeMonth(period.value, incompleteOnly.value)
     selectedEmploymentIds.value = []
-    if (!employmentId.value && overview.value.items.length > 0) {
+    // Předvybraný vztah má přednost před prvním v seznamu — jinak by odkaz
+    // z karty zúžil tabulku, ale editor otevřel někoho jiného.
+    const focused = focusEmploymentId.value !== null
+      && overview.value.items.some(item => item.employment.id === focusEmploymentId.value)
+      ? focusEmploymentId.value
+      : null
+    if (focused !== null) {
+      employmentId.value = focused
+    } else if (!employmentId.value && overview.value.items.length > 0) {
       employmentId.value = overview.value.items[0].employment.id
     }
   } catch (error: any) {
@@ -726,6 +766,8 @@ onMounted(load)
       </div>
     </section>
 
+    <PayrollFocusNotice v-if="focusName" :name="focusName" @clear="clearFocus" />
+
     <div v-if="loading" class="space-y-3">
       <div v-for="index in 4" :key="index" class="h-28 animate-pulse rounded-xl bg-neutral-100" />
     </div>
@@ -762,7 +804,7 @@ onMounted(load)
             <th class="px-4 py-3 text-right">{{ t('payroll.time.columns.actions') }}</th>
           </tr></thead>
           <tbody class="divide-y divide-neutral-100">
-            <template v-for="item in overview.items" :key="item.employment.id">
+            <template v-for="item in visibleItems" :key="item.employment.id">
             <tr>
               <td class="px-4 py-3">
                 <input
@@ -812,7 +854,7 @@ onMounted(load)
         </table>
       </div>
       <div class="space-y-3 p-4 md:hidden">
-        <article v-for="item in overview.items" :key="item.employment.id" class="rounded-lg border border-neutral-200 p-4">
+        <article v-for="item in visibleItems" :key="item.employment.id" class="rounded-lg border border-neutral-200 p-4">
           <div class="flex flex-wrap items-start justify-between gap-2"><div class="flex items-start gap-3"><input v-if="item.month.status === 'open'" type="checkbox" class="mt-1" :checked="selectedEmploymentIds.includes(item.employment.id)" :aria-label="t('payroll.time.bulk.select', { name: item.employment.full_name })" @change="toggleSelection(item.employment.id)"><div><h2 class="font-semibold text-neutral-900">{{ item.employment.full_name }}</h2><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p></div></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.month.status === 'approved' ? 'bg-success-50 text-success-600' : item.summary.incomplete ? 'bg-warning-50 text-warning-700' : 'bg-payroll-50 text-payroll-600'">{{ t(`payroll.time.status.${item.month.status === 'approved' ? 'approved' : item.summary.incomplete ? 'incomplete' : 'open'}`) }}</span></div>
           <dl class="mt-4 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.fund') }}</dt><dd>{{ formatPayrollMinutes(item.summary.fund_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.plan') }}</dt><dd>{{ formatPayrollMinutes(item.summary.planned_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.actual') }}</dt><dd>{{ formatPayrollMinutes(item.summary.actual_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.difference') }}</dt><dd>{{ formatPayrollMinutes(item.summary.difference_minutes) }}</dd></div></dl>
           <div

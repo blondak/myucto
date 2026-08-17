@@ -34,6 +34,12 @@ vi.mock('@/api/payroll', () => ({
   },
 }))
 
+// Rozcestník navazujících agend má vlastní test (EmploymentAgendaPanel.spec.ts).
+// Tady by jen tahal auth store a další požadavek do každého mountu karty.
+vi.mock('@/pages/payroll/EmploymentAgendaPanel.vue', () => ({
+  default: { template: '<div data-test="employment-agendas-stub" />' },
+}))
+
 const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 
 vi.mock('@/composables/useToast', () => ({

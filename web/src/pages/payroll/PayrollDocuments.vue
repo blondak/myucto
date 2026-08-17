@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
   type PayrollDocument,
@@ -17,6 +18,8 @@ import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
+import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -24,13 +27,25 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 const period = ref(localPayrollPeriod())
 const year = ref(Number(period.value.slice(0, 4)))
-const activeTab = ref<'monthly' | 'annual'>('monthly')
+/**
+ * Předvýběr z odkazu na kartě zaměstnance (`?person=7&tab=annual`).
+ *
+ * Roční tab je ten, na kterém se dokumenty za člověka VYSTAVUJÍ (mzdový list,
+ * potvrzení o zdanitelných příjmech), takže na něj odkaz míří rovnou. Zúžení má
+ * vlastní ref, ne `selectedEmployeeId`: ten říká „komu vystavit", ne „koho
+ * vypsat", a přebít jeho význam by změnilo chování i bez odkazu.
+ */
+const requestedTab = payrollQueryValue(route.query, 'tab')
+const activeTab = ref<'monthly' | 'annual'>(requestedTab === 'annual' ? 'annual' : 'monthly')
+const focusPersonId = ref<number | null>(payrollQueryId(route.query, 'person'))
 const data = ref<PayrollDocumentList | null>(null)
 const annualItems = ref<PayrollDocument[]>([])
 const people = ref<PayrollPersonOption[]>([])
-const selectedEmployeeId = ref<number | null>(null)
+const selectedEmployeeId = ref<number | null>(focusPersonId.value)
 const loading = ref(true)
 const generatingRevisionId = ref<number | null>(null)
 type AnnualGenerationKind = 'payroll_sheet' | PayrollTaxCertificateKind
@@ -73,9 +88,25 @@ function reload(): void {
 const canGenerate = computed(() =>
   auth.canWrite('payroll.documents') && (data.value?.revisions.length ?? 0) > 0,
 )
-const visibleItems = computed(() =>
-  activeTab.value === 'monthly' ? data.value?.items ?? [] : annualItems.value,
-)
+const visibleItems = computed(() => {
+  const items = activeTab.value === 'monthly' ? data.value?.items ?? [] : annualItems.value
+  if (focusPersonId.value === null) return items
+  // Server podle osoby nefiltruje (endpoint zná období, resp. rok), takže zúžení
+  // dělá prohlížeč nad načtenou stránkou. Pager proto zůstává na celém seznamu:
+  // schovat ho by zamlčelo, že další dokumenty toho člověka jsou na další straně.
+  return items.filter(item => item.employee_id === focusPersonId.value)
+})
+const focusName = computed(() => {
+  const id = focusPersonId.value
+  if (id === null) return null
+  return people.value.find(person => person.id === id)?.full_name ?? null
+})
+function clearFocus(): void {
+  focusPersonId.value = null
+  const query = { ...route.query }
+  delete query.person
+  void router.replace({ query })
+}
 const employeeOptions = computed(() => people.value.map(person => ({
   value: person.id,
   label: person.full_name,
@@ -211,6 +242,13 @@ async function load(): Promise<void> {
       if (sequence === loadSequence && requestedPeriod === period.value) {
         data.value = loaded
         total.value = loaded.total
+      }
+      // Jmenný seznam se na měsíčním tabu jinak nenačítá, ale zúžení z odkazu
+      // musí umět říct KOHO se týká — bez jména by byl filtr neviditelný.
+      // Dotahuje se proto AŽ po výpisu a jen když zúžení opravdu je: jinak by
+      // se výpis zdržoval o požadavek, který k ničemu není.
+      if (focusPersonId.value !== null && people.value.length === 0) {
+        people.value = await payrollApi.peopleOptions().catch(() => people.value)
       }
     } else {
       const [loaded, loadedPeople] = await Promise.all([
@@ -372,6 +410,8 @@ onMounted(load)
         </template>
       </div>
     </header>
+
+    <PayrollFocusNotice v-if="focusName" :name="focusName" @clear="clearFocus" />
 
     <nav class="flex gap-1 overflow-x-auto border-b border-neutral-200" :aria-label="t('payroll.documents.tabs_label')">
       <button

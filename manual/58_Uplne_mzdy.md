@@ -305,6 +305,20 @@ pozdějšího doplatku. U každé položky je termín a stav **Nesplněno**,
 verze. Pokud jiný uživatel mezitím vztah změnil, starší formulář se neuloží a je
 nutné načíst aktuální verzi.
 
+### 58.8.1 Navazující agendy
+
+Karta vztahu má sekci **Navazující agendy**. Vede z ní jedno kliknutí do každé
+agendy, kde se k tomuto člověku dá něco pořídit — docházka a směny,
+nepřítomnosti, mzdové vstupy, pracovní cesty, opakované složky, průměrný
+výdělek, dohody o srážkách, exekuce, dokumenty a roční zúčtování. Cílová
+obrazovka se otevře už zúžená na daného zaměstnance; zúžení je vidět v horní
+liště a jedním tlačítkem se ruší.
+
+Pod tlačítky je souhrn: u agend, ve kterých něco je, počet záznamů, datum
+posledního a případně částka. Agendy, ve kterých zatím nic není, se jmenují
+jednou nenápadnou větou pod souhrnem. Agenda, na kterou uživatel nemá
+oprávnění, se nenabízí ani nezapočítává.
+
 ## 58.9 Mzdové složky a vstupy
 
 V **Mzdy → Mzdové složky a vstupy** jsou běžnými záložkami oddělené:

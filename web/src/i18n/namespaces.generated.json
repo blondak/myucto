@@ -294,6 +294,7 @@
       "payroll_absence"
     ],
     "payroll-travel": [
+      "payroll",
       "payroll_travel"
     ],
     "payroll-deduction-agreements": [

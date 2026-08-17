@@ -1936,6 +1936,39 @@ export interface PayrollEmploymentDimensionPayload {
   row_version?: number
 }
 
+/**
+ * Navazující agendy karty zaměstnance. Pořadí drží server (repository), aby se
+ * rozcestník i souhrn řadily stejně a nedaly se rozejít.
+ */
+export type PayrollAgendaKey =
+  | 'time'
+  | 'absences'
+  | 'travel'
+  | 'quick_inputs'
+  | 'components'
+  | 'average_earnings'
+  | 'deduction_agreements'
+  | 'enforcement'
+  | 'documents'
+  | 'annual_settlement'
+
+export interface PayrollAgendaSummaryItem {
+  key: PayrollAgendaKey
+  /** Kolik záznamů agenda pro tenhle vztah (resp. osobu) vede. */
+  count: number
+  /** Datum posledního záznamu; `null` = agenda je prázdná. */
+  last_on: string | null
+  /** Souhrnná nebo poslední částka, kde má smysl; jinak `null`. */
+  amount_minor: number | null
+}
+
+export interface PayrollEmploymentAgendaSummary {
+  employment_id: number
+  employee_id: number
+  /** Chybí agendy, na které volající nemá oprávnění — ne nula, která by lhala. */
+  agendas: PayrollAgendaSummaryItem[]
+}
+
 export interface PayrollSetupCheckItem {
   code: string
   status: 'ok' | 'blocked'
@@ -3431,6 +3464,17 @@ export const payrollApi = {
   deletePayrollDimension: (id: number) =>
     api.delete<{ deleted: boolean }>(`/payroll/settings/dimensions/${id}`)
       .then(response => response.data.deleted),
+  /**
+   * Souhrn navazujících agend jednoho vztahu (rozcestník na kartě zaměstnance).
+   *
+   * Jeden dotaz místo deseti: bez něj by karta musela sáhnout do každé agendy
+   * zvlášť a tři z nich vracejí celý měsíc za celou firmu. Agendy, na které
+   * uživatel nemá právo, server do odpovědi vůbec nedá.
+   */
+  employmentAgendaSummary: (employmentId: number) =>
+    api.get<{ summary: PayrollEmploymentAgendaSummary }>(
+      `/payroll/employments/${employmentId}/agenda-summary`,
+    ).then(response => response.data.summary),
   employmentDimensions: (employmentId: number) =>
     api.get<{ dimensions: PayrollEmploymentDimension[] }>(`/payroll/employments/${employmentId}/dimensions`)
       .then(response => response.data.dimensions),

@@ -15,6 +15,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import {
   payrollApi,
   type PayrollAnnualSettlementAnnualClaims,
@@ -32,6 +33,7 @@ import { useToast } from '@/composables/useToast'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -52,6 +54,12 @@ const previewLoading = ref(false)
 const saving = ref(false)
 const settling = ref(false)
 let loadSequence = 0
+/**
+ * Osoba z odkazu na kartě zaměstnance. Uplatní se JEDNOU, po prvním načtení
+ * seznamu — kdyby se držela trvale, přepínání roku by pořád skákalo zpět na
+ * člověka, kterého uživatel dávno opustil.
+ */
+let pendingFocusPersonId: number | null = payrollQueryId(useRoute().query, 'person')
 
 const form = ref({
   request_status: 'unknown' as PayrollAnnualSettlementRequestStatus,
@@ -150,6 +158,15 @@ async function load(): Promise<void> {
     if (sequence !== loadSequence) return
     data.value = response
     loadFailed.value = false
+    // Odkaz z karty zaměstnance (`?person=7`) rozklikne rovnou jeho evidenci.
+    // Kdo v seznamu za daný rok není, se neotevře — odkaz je slepý, ne rozbitý.
+    if (pendingFocusPersonId !== null) {
+      const focused = pendingFocusPersonId
+      pendingFocusPersonId = null
+      if (response.items.some(item => item.employee_id === focused)) {
+        void select(focused)
+      }
+    }
     if (selectedEmployeeId.value !== null
       && !response.items.some(item => item.employee_id === selectedEmployeeId.value)
     ) {

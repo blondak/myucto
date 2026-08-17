@@ -189,6 +189,11 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Ruleset\PayrollRulesetOrigin',
         'payroll.ts::PayrollPeopleFilter'
             => 'const:MyInvoice\Repository\Payroll\PayrollPeopleRepository::LIST_FILTERS',
+        // Navazující agendy karty zaměstnance. Klíč navíc na klientovi = řádek
+        // souhrnu bez popisku, klíč navíc na serveru = agenda, na kterou karta
+        // neumí odkázat.
+        'payroll.ts::PayrollAgendaKey'
+            => 'const:MyInvoice\Repository\Payroll\PayrollEmploymentAgendaSummaryRepository::AGENDA_KEYS',
 
         'payrollTravel.ts::TravelTransportMode' => 'enum:MyInvoice\Service\Payroll\Travel\TravelTransportMode',
         'payrollTravel.ts::TravelVehicleKind'   => 'enum:MyInvoice\Service\Payroll\Travel\TravelVehicleKind',

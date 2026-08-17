@@ -84,6 +84,7 @@ use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollDependantAction;
+use MyInvoice\Action\Payroll\PayrollEmploymentAgendaSummaryAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentDimensionAction;
 use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
@@ -1135,6 +1136,12 @@ final class Routes
             $g->get('/settings/dimensions/{id:[0-9]+}', [PayrollDimensionAction::class, 'detail']);
             $g->put('/settings/dimensions/{id:[0-9]+}', [PayrollDimensionAction::class, 'update']);
             $g->delete('/settings/dimensions/{id:[0-9]+}', [PayrollDimensionAction::class, 'delete']);
+            // Rozcestník karty zaměstnance — kolik toho na vztahu visí v navazujících
+            // agendách. Agendy si akce filtruje podle oprávnění volajícího sama.
+            $g->get(
+                '/employments/{id:[0-9]+}/agenda-summary',
+                [PayrollEmploymentAgendaSummaryAction::class, 'show'],
+            );
             $g->get('/employments/{id:[0-9]+}/dimensions', [PayrollEmploymentDimensionAction::class, 'list']);
             $g->post('/employments/{id:[0-9]+}/dimensions', [PayrollEmploymentDimensionAction::class, 'create']);
             $g->put(

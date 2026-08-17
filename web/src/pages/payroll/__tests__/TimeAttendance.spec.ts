@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const m = vi.hoisted(() => ({
+  routeQuery: {} as Record<string, string | string[]>,
+  routerReplace: vi.fn(),
   timeMonth: vi.fn(),
   previewTimeImport: vi.fn(),
   importTime: vi.fn(),
@@ -9,6 +11,14 @@ const m = vi.hoisted(() => ({
   reopenTimeMonth: vi.fn(),
   canWrite: vi.fn(),
   toastError: vi.fn(),
+}))
+
+// Stránka čte předvýběr z adresy (odkaz z karty zaměstnance), takže potřebuje
+// router. Originál se rozprostře, ať zůstanou i ostatní exporty (RouterLink).
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRoute: () => ({ query: m.routeQuery }),
+  useRouter: () => ({ replace: m.routerReplace }),
 }))
 
 vi.mock('@/api/payroll', () => ({

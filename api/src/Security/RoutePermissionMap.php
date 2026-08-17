@@ -158,6 +158,10 @@ final class RoutePermissionMap
         // Klasifikace zaměstnání ČSÚ je veřejná referenční data, ne data nájemce —
         // stejná úroveň jako sousední našeptávač obcí.
         ['GET', '#^/api/payroll/cz-isco$#', 'payroll', AccessLevel::READ],
+        // Rozcestník karty zaměstnance. Vstupní branou je obecné `payroll` (kdo smí
+        // na kartu, smí vidět, že agendy existují); citlivější agendy uvnitř si
+        // PayrollEmploymentAgendaSummaryAction filtruje po jedné vlastním právem.
+        ['GET', '#^/api/payroll/employments/[0-9]+/agenda-summary$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/employments/[0-9]+/(terms|transitions/[a-z_]+|checklist/[a-z0-9_]+)$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Totéž právo jako založení vztahu (POST /people/{id}/employments výše).
         ['DELETE', '#^/api/payroll/employments/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],

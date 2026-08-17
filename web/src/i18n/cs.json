@@ -587,6 +587,30 @@
         "eshop_currencies": "Měny"
     },
     "payroll": {
+        "agendas": {
+            "title": "Navazující agendy",
+            "subtitle": "Kam u tohoto pracovního vztahu zadat další záznam — odkaz vede na seznam už zúžený na tohoto člověka.",
+            "count": "žádný záznam | 1 záznam | {count} záznamy | {count} záznamů",
+            "last_on": "poslední {date}",
+            "nothing_yet": "Zatím nic: {agendas}.",
+            "load_failed": "Souhrn agend se nepodařilo načíst. Tlačítka fungují dál.",
+            "items": {
+                "time": "Docházka a směny",
+                "absences": "Nepřítomnosti",
+                "quick_inputs": "Mzdové vstupy",
+                "travel": "Pracovní cesty",
+                "components": "Opakované složky",
+                "average_earnings": "Průměrný výdělek",
+                "deduction_agreements": "Dohody o srážkách",
+                "enforcement": "Exekuce",
+                "documents": "Dokumenty",
+                "annual_settlement": "Roční zúčtování"
+            },
+            "focus": {
+                "title": "Seznam je zúžený na {name}.",
+                "clear": "Zrušit zúžení"
+            }
+        },
         "rulesets": {
             "title": "Legislativní pravidla mezd",
             "subtitle": "Sazby, hranice, lhůty a číselníky pro mzdový výpočet. Ověřenou sadu dodáváme účinnou a ručíme za ni — nemusíte nic schvalovat ani odklikávat; u každé domény je vidět, odkud hodnoty jsou. Přepsat je jde a projeví se to bez nasazení nové verze, za upravené hodnoty už ale ručí ten, kdo je zadal. Hodnoty jsou národní a platí pro všechny firmy.",

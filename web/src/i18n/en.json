@@ -587,6 +587,30 @@
         "eshop_currencies": "Currencies"
     },
     "payroll": {
+        "agendas": {
+            "title": "Related agendas",
+            "subtitle": "Where to record more for this employment — the link opens a list already narrowed to this person.",
+            "count": "no records | 1 record | {count} records",
+            "last_on": "last {date}",
+            "nothing_yet": "Nothing yet: {agendas}.",
+            "load_failed": "The agenda summary could not be loaded. The buttons still work.",
+            "items": {
+                "time": "Attendance and shifts",
+                "absences": "Absences",
+                "quick_inputs": "Payroll inputs",
+                "travel": "Business trips",
+                "components": "Recurring components",
+                "average_earnings": "Average earnings",
+                "deduction_agreements": "Deduction agreements",
+                "enforcement": "Enforcements",
+                "documents": "Documents",
+                "annual_settlement": "Annual settlement"
+            },
+            "focus": {
+                "title": "The list is narrowed to {name}.",
+                "clear": "Clear narrowing"
+            }
+        },
         "rulesets": {
             "title": "Payroll legislation rules",
             "subtitle": "Rates, thresholds, deadlines and code lists used by the payroll calculation. The verified set ships effective and we stand behind it — there is nothing to approve or tick off, and every domain shows where its values come from. Overriding is possible and takes effect without a new release, but whoever enters the edited values stands behind them. Values are national and apply to every company.",

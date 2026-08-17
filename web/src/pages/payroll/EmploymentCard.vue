@@ -17,6 +17,7 @@ import { btnOutlineSm } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
+import EmploymentAgendaPanel from './EmploymentAgendaPanel.vue'
 import EmploymentDimensionsPanel from './EmploymentDimensionsPanel.vue'
 import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
 import EmploymentRegistrationPanel from './EmploymentRegistrationPanel.vue'
@@ -552,6 +553,16 @@ const actions = computed<ActionItem[]>(() => [
     </dl>
 
     <ActionBar v-if="actions.some(action => action.show)" :actions="actions" class="mt-4" />
+
+    <!--
+      Rozcestník do navazujících agend patří nad povinnosti a časovou osu:
+      „kam s tímhle člověkem jít dál" je častější potřeba než „co se s vztahem
+      kdy stalo". Načítá se až tady, tedy jen pro rozbalený vztah.
+    -->
+    <EmploymentAgendaPanel
+      :employment-id="employment.id"
+      :employee-id="employment.employee_id"
+    />
 
     <form v-if="editingTerms && termsForm" class="mt-4 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3 sm:p-4" @submit.prevent="saveTerms">
       <h4 class="text-sm font-semibold text-neutral-900">{{ t('payroll.people.new_terms') }}</h4>
