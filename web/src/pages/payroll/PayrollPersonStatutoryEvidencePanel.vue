@@ -9,7 +9,26 @@ import {
   type PayrollStatutoryEvidenceSection,
 } from '@/api/payroll'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import CountrySelect from '@/components/ui/CountrySelect.vue'
 import { useToast } from '@/composables/useToast'
+import { loadDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultInsurer'
+import { healthInsurerOptions } from '@/utils/healthInsurers'
+import {
+  applyFieldChange,
+  CUSTOM_REASON,
+  defaultRow,
+  reasonLabelKey,
+  reasonOptions,
+  rowIssues,
+  sectionIssues,
+  statutoryText,
+  STATUTORY_SECTIONS,
+  visibleFields,
+  type StatutoryFieldSpec,
+  type StatutoryFormContext,
+  type StatutoryIssue,
+  type StatutorySectionSpec,
+} from './statutoryEvidenceForm'
 
 /**
  * Zákonná evidence osoby.
@@ -22,108 +41,22 @@ import { useToast } from '@/composables/useToast'
  * hlásí výpočet.
  *
  * Hodnoty jako `czech_regime_verified` nebo `insurer_status = verified` jsou
- * PRÁVNÍ SKUTEČNOSTI, ne přepínače. Ke každé se proto zadává kanonická
- * reference na doklad; lidské vysvětlení má vlastní pole. Kdo doklad nemá,
- * zvolí variantu „neověřeno" — ta jde uložit taky, jen zůstane vidět jako
- * blokátor.
+ * PRÁVNÍ SKUTEČNOSTI, ne přepínače. Ke každé se proto váže doklad; lidské
+ * vysvětlení má vlastní pole. Kdo doklad nemá, zvolí variantu „neověřeno" —
+ * ta jde uložit taky, jen zůstane vidět jako blokátor.
+ *
+ * Běžný český zaměstnanec ale nemá co vyplňovat: „Přidat záznam" rovnou
+ * nabídne rezidenta CZ, český sociální i zdravotní režim a pojišťovnu, u které
+ * je osoba vedená. Co plyne z jiné odpovědi, se neptáme, a doklad se vybírá
+ * z typických důvodů — kanonickou referenci vygeneruje formulář. Pravidla
+ * (a jejich vazba na serverový validátor) jsou v `statutoryEvidenceForm.ts`.
  */
 const props = defineProps<{
   personId: number
   canWrite: boolean
 }>()
 
-type FieldKind = 'enum' | 'reference' | 'country' | 'date' | 'text'
-
-interface FieldSpec {
-  key: string
-  kind: FieldKind
-  options?: readonly string[]
-}
-
-interface SectionSpec {
-  key: PayrollStatutoryEvidenceSection
-  kind: 'interval' | 'month'
-  fields: readonly FieldSpec[]
-}
-
-/**
- * Popis sekcí zrcadlí `EDITABLE` v `PayrollPersonStatutoryEvidenceRepository`.
- * Výčty se schválně neopisují do vlastních typů — jsou to zákonné hodnoty,
- * jejichž jediným pánem je server; tady slouží jen k vykreslení nabídky.
- */
-const SECTIONS: readonly SectionSpec[] = [
-  {
-    key: 'tax_declarations',
-    kind: 'interval',
-    fields: [
-      { key: 'status', kind: 'enum', options: ['signed', 'not-signed', 'unverified'] },
-      { key: 'evidence_reference', kind: 'reference' },
-    ],
-  },
-  {
-    key: 'tax_residences',
-    kind: 'interval',
-    fields: [
-      { key: 'residence', kind: 'enum', options: ['czech-resident', 'non-resident', 'unverified'] },
-      { key: 'country_code', kind: 'country' },
-      { key: 'evidence_reference', kind: 'reference' },
-    ],
-  },
-  {
-    key: 'social_jurisdictions',
-    kind: 'interval',
-    fields: [
-      {
-        key: 'jurisdiction',
-        kind: 'enum',
-        options: ['czech_regime_verified', 'foreign_regime_verified', 'unverified'],
-      },
-      { key: 'foreign_country_code', kind: 'country' },
-      { key: 'jurisdiction_evidence_reference', kind: 'reference' },
-      { key: 'a1_status', kind: 'enum', options: ['verified', 'unverified', 'not_applicable'] },
-      { key: 'a1_certificate_reference', kind: 'reference' },
-      { key: 'a1_valid_until', kind: 'date' },
-    ],
-  },
-  {
-    key: 'social_discount_claims',
-    kind: 'interval',
-    fields: [
-      { key: 'status', kind: 'enum', options: ['not_claimed', 'verified', 'unverified'] },
-      { key: 'evidence_reference', kind: 'reference' },
-    ],
-  },
-  {
-    key: 'health_coverages',
-    kind: 'interval',
-    fields: [
-      {
-        key: 'jurisdiction',
-        kind: 'enum',
-        options: ['czech_regime_verified', 'foreign_regime_verified', 'unverified'],
-      },
-      { key: 'foreign_country_code', kind: 'country' },
-      { key: 'jurisdiction_evidence_reference', kind: 'reference' },
-      { key: 'insurer_status', kind: 'enum', options: ['verified', 'unverified', 'not_applicable'] },
-      { key: 'insurer_code', kind: 'text' },
-      { key: 'insurer_evidence_reference', kind: 'reference' },
-    ],
-  },
-  {
-    key: 'health_month_evidence',
-    kind: 'month',
-    fields: [
-      {
-        key: 'top_up_responsibility',
-        kind: 'enum',
-        options: ['employee', 'employer_obstacle_verified', 'unverified'],
-      },
-      { key: 'top_up_responsibility_evidence_reference', kind: 'reference' },
-      { key: 'selected_top_up_employer_reference', kind: 'reference' },
-      { key: 'selected_top_up_employer_evidence_reference', kind: 'reference' },
-    ],
-  },
-] as const
+const SECTIONS = STATUTORY_SECTIONS
 
 const { t } = useI18n()
 const toast = useToast()
@@ -135,6 +68,9 @@ const loadError = ref('')
 const saveError = ref('')
 const evidence = ref<PayrollStatutoryEvidence | null>(null)
 const drafts = ref<Record<string, PayrollStatutoryEvidenceRow[]>>({})
+const employerInsurerCode = ref<string | null>(null)
+
+const insurerOptions = healthInsurerOptions()
 
 /** Evidence se vyhodnocuje k měsíci; výchozí je ten, ve kterém uživatel je. */
 const effectiveOn = ref(monthEnd(new Date()))
@@ -153,32 +89,107 @@ const blockers = computed(() => evidence.value?.blockers ?? [])
 const frozenThrough = computed(() => evidence.value?.frozen_through ?? null)
 
 /** Reference na základy u jiného zaměstnavatele — volba plátce doplatku minima. */
-const employerReferences = computed(
-  () => (evidence.value?.other_employer_bases ?? [])
-    .map(row => String(row.employer_reference ?? ''))
-    .filter(value => value !== ''),
-)
+const otherEmployerBases = computed(() => evidence.value?.other_employer_bases ?? [])
 
-function isFrozen(section: SectionSpec, row: PayrollStatutoryEvidenceRow): boolean {
+/**
+ * Zvolit lze jen zaměstnavatele, který má za TENTÝŽ měsíc doložený vyměřovací
+ * základ — jinak zápis odmítne validátor snímku.
+ */
+function employerReferencesFor(row: PayrollStatutoryEvidenceRow): string[] {
+  const period = statutoryText(row, 'period_start')
+  return otherEmployerBases.value
+    .filter(base => period === '' || statutoryText(base, 'period_start') === period)
+    .map(base => statutoryText(base, 'employer_reference'))
+    .filter(reference => reference !== '')
+}
+
+/**
+ * Výchozí pojišťovna pro předvyplnění. Nejdřív ta, u které je osoba vedená —
+ * ta je v už načtené evidenci, takže nestojí ani jeden request navíc. Teprve
+ * když osoba historii nemá, sáhne se po výchozí pojišťovně zaměstnavatele
+ * (načtená nejvýš jednou za běh aplikace, ne na každou kartu).
+ */
+const personInsurerCode = computed(() => {
+  let latest: { from: string; code: string } | null = null
+  for (const row of drafts.value.health_coverages ?? []) {
+    const code = statutoryText(row, 'insurer_code')
+    if (code === '') continue
+    const from = statutoryText(row, 'effective_from')
+    if (latest === null || from >= latest.from) latest = { from, code }
+  }
+  return latest?.code ?? null
+})
+
+const defaultInsurerCode = computed(() => personInsurerCode.value ?? employerInsurerCode.value)
+
+function contextFor(row: PayrollStatutoryEvidenceRow): StatutoryFormContext {
+  return {
+    effectiveOn: effectiveOn.value,
+    defaultInsurerCode: defaultInsurerCode.value,
+    employerReferences: employerReferencesFor(row),
+  }
+}
+
+function isFrozen(section: StatutorySectionSpec, row: PayrollStatutoryEvidenceRow): boolean {
   const start = section.kind === 'month' ? row.period_start : row.effective_from
   return typeof start === 'string'
     && frozenThrough.value !== null
     && start <= frozenThrough.value
 }
 
-function emptyRow(section: SectionSpec): PayrollStatutoryEvidenceRow {
-  const row: PayrollStatutoryEvidenceRow = {}
-  for (const field of section.fields) {
-    row[field.key] = field.kind === 'enum' ? (field.options?.[0] ?? null) : null
-  }
-  row.evidence_note = null
-  if (section.kind === 'month') {
-    row.period_start = monthStart(effectiveOn.value)
-  } else {
-    row.effective_from = monthStart(effectiveOn.value)
-    row.effective_to = null
-  }
-  return row
+function fieldValue(row: PayrollStatutoryEvidenceRow, key: string): string {
+  return statutoryText(row, key)
+}
+
+function setField(
+  section: StatutorySectionSpec,
+  row: PayrollStatutoryEvidenceRow,
+  key: string,
+  next: string,
+) {
+  row[key] = next === '' ? null : next
+  applyFieldChange(section, row, key, contextFor(row))
+}
+
+function onSelect(
+  section: StatutorySectionSpec,
+  row: PayrollStatutoryEvidenceRow,
+  key: string,
+  event: Event,
+) {
+  setField(section, row, key, (event.target as HTMLSelectElement).value)
+}
+
+function onInput(
+  section: StatutorySectionSpec,
+  row: PayrollStatutoryEvidenceRow,
+  key: string,
+  event: Event,
+) {
+  setField(section, row, key, (event.target as HTMLInputElement).value)
+}
+
+/** Vybraný typický důvod, nebo „jiné", když v řádku je vlastní označení. */
+function reasonSelection(
+  section: StatutorySectionSpec,
+  row: PayrollStatutoryEvidenceRow,
+  field: StatutoryFieldSpec,
+): string {
+  const current = statutoryText(row, field.key)
+  return reasonOptions(section.key, field.key, row).includes(current)
+    ? current
+    : CUSTOM_REASON
+}
+
+function onReason(
+  row: PayrollStatutoryEvidenceRow,
+  field: StatutoryFieldSpec,
+  event: Event,
+) {
+  const selected = (event.target as HTMLSelectElement).value
+  // „Jiné" nechá pole prázdné schválně: uživatel má napsat konkrétní číslo
+  // dokladu a dokud ho nenapíše, formulář to hlásí jako chybějící údaj.
+  row[field.key] = selected === CUSTOM_REASON ? null : selected
 }
 
 function hydrate(value: PayrollStatutoryEvidence) {
@@ -190,14 +201,46 @@ function hydrate(value: PayrollStatutoryEvidence) {
   drafts.value = next
 }
 
-function addRow(section: SectionSpec) {
-  drafts.value[section.key] = [...(drafts.value[section.key] ?? []), emptyRow(section)]
+function addRow(section: StatutorySectionSpec) {
+  const rows = drafts.value[section.key] ?? []
+  const row = defaultRow(section, monthStart(effectiveOn.value), {
+    effectiveOn: effectiveOn.value,
+    defaultInsurerCode: defaultInsurerCode.value,
+    employerReferences: [],
+  })
+  drafts.value[section.key] = [...rows, row]
 }
 
-function removeRow(section: SectionSpec, index: number) {
+function removeRow(section: StatutorySectionSpec, index: number) {
   const rows = [...(drafts.value[section.key] ?? [])]
   rows.splice(index, 1)
   drafts.value[section.key] = rows
+}
+
+function issuesFor(
+  section: StatutorySectionSpec,
+  row: PayrollStatutoryEvidenceRow,
+): StatutoryIssue[] {
+  return rowIssues(section, row, contextFor(row))
+}
+
+/** Vše, co formulář umí zachytit dřív, než to odmítne server. */
+const issues = computed<Array<{ section: PayrollStatutoryEvidenceSection; issue: StatutoryIssue }>>(() => {
+  const found: Array<{ section: PayrollStatutoryEvidenceSection; issue: StatutoryIssue }> = []
+  for (const section of SECTIONS) {
+    const rows = drafts.value[section.key] ?? []
+    for (const issue of sectionIssues(section, rows)) found.push({ section: section.key, issue })
+    for (const row of rows) {
+      for (const issue of issuesFor(section, row)) found.push({ section: section.key, issue })
+    }
+  }
+  return found
+})
+
+function issueText(issue: StatutoryIssue): string {
+  const params: Record<string, string> = { ...(issue.params ?? {}) }
+  if (params.label !== undefined) params.label = t(params.label)
+  return t(`payroll.people.statutory_evidence.issue.${issue.key}`, params)
 }
 
 async function load() {
@@ -225,6 +268,12 @@ function cancel() {
 async function save() {
   if (saving.value) return
   saveError.value = ''
+  // Chyby, které formulář zná, nemá smysl posílat na server — ten by z nich
+  // vrátil jednu obecnější a uživatel by hledal, které pole ji způsobilo.
+  if (issues.value.length > 0) {
+    saveError.value = t('payroll.people.statutory_evidence.issues_block_save')
+    return
+  }
   saving.value = true
   try {
     const sections = {} as Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
@@ -251,7 +300,10 @@ async function save() {
 
 watch(() => props.personId, () => { editing.value = false; void load() })
 watch(effectiveOn, () => { editing.value = false; void load() })
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadDefaultHealthInsurerCode().then((code) => { employerInsurerCode.value = code })
+})
 </script>
 
 <template>
@@ -381,48 +433,108 @@ onMounted(load)
                 </template>
 
                 <label
-                  v-for="field in section.fields"
+                  v-for="field in visibleFields(section, row)"
                   :key="field.key"
                   class="block text-xs text-neutral-600"
                 >
                   {{ t(`payroll.people.statutory_evidence.field.${field.key}`) }}
+
                   <select
                     v-if="field.kind === 'enum'"
-                    v-model="row[field.key]"
+                    :value="fieldValue(row, field.key)"
                     :disabled="!editing || saving"
                     :data-test="`${section.key}-${index}-${field.key}`"
                     class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                    @change="onSelect(section, row, field.key, $event)"
                   >
                     <option v-for="option in field.options" :key="option" :value="option">
                       {{ t(`payroll.people.statutory_evidence.option.${field.key}.${option}`) }}
                     </option>
                   </select>
+
+                  <CountrySelect
+                    v-else-if="field.kind === 'country'"
+                    :model-value="fieldValue(row, field.key)"
+                    :disabled="!editing || saving"
+                    :clearable="false"
+                    required
+                    accent="payroll"
+                    class="mt-1 block"
+                    :data-test="`${section.key}-${index}-${field.key}`"
+                    @update:model-value="setField(section, row, field.key, $event)"
+                  />
+
+                  <select
+                    v-else-if="field.kind === 'insurer'"
+                    :value="fieldValue(row, field.key)"
+                    :disabled="!editing || saving"
+                    :data-test="`${section.key}-${index}-${field.key}`"
+                    class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                    @change="onSelect(section, row, field.key, $event)"
+                  >
+                    <option value="">{{ t('payroll.people.statutory_evidence.insurer_unset') }}</option>
+                    <option v-for="insurer in insurerOptions" :key="insurer.value" :value="insurer.value">
+                      {{ insurer.label }}
+                    </option>
+                  </select>
+
+                  <select
+                    v-else-if="field.kind === 'employer'"
+                    :value="fieldValue(row, field.key)"
+                    :disabled="!editing || saving"
+                    :data-test="`${section.key}-${index}-${field.key}`"
+                    class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                    @change="onSelect(section, row, field.key, $event)"
+                  >
+                    <option value="">{{ t('payroll.people.statutory_evidence.employer_none') }}</option>
+                    <option
+                      v-for="reference in employerReferencesFor(row)"
+                      :key="reference"
+                      :value="reference"
+                    >{{ reference }}</option>
+                  </select>
+
                   <input
                     v-else-if="field.kind === 'date'"
-                    v-model="row[field.key]"
+                    :value="fieldValue(row, field.key)"
                     type="date"
                     :disabled="!editing || saving"
                     :data-test="`${section.key}-${index}-${field.key}`"
                     class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                    @change="onInput(section, row, field.key, $event)"
                   >
-                  <input
-                    v-else
-                    v-model="row[field.key]"
-                    type="text"
-                    :list="field.key === 'selected_top_up_employer_reference'
-                      ? 'statutory-evidence-employers'
-                      : undefined"
-                    :disabled="!editing || saving"
-                    :placeholder="field.kind === 'reference'
-                      ? t('payroll.people.statutory_evidence.reference_placeholder')
-                      : ''"
-                    :data-test="`${section.key}-${index}-${field.key}`"
-                    class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
-                  >
-                  <span
-                    v-if="field.kind === 'reference'"
-                    class="mt-0.5 block text-neutral-400"
-                  >{{ t('payroll.people.statutory_evidence.reference_hint') }}</span>
+
+                  <template v-else>
+                    <select
+                      :value="reasonSelection(section, row, field)"
+                      :disabled="!editing || saving"
+                      :data-test="`${section.key}-${index}-${field.key}-reason`"
+                      class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                      @change="onReason(row, field, $event)"
+                    >
+                      <option
+                        v-for="reason in reasonOptions(section.key, field.key, row)"
+                        :key="reason"
+                        :value="reason"
+                      >{{ t(`payroll.people.statutory_evidence.reason.${reasonLabelKey(reason)}`) }}</option>
+                      <option :value="CUSTOM_REASON">
+                        {{ t('payroll.people.statutory_evidence.reason_custom') }}
+                      </option>
+                    </select>
+                    <template v-if="reasonSelection(section, row, field) === CUSTOM_REASON">
+                      <input
+                        v-model="row[field.key]"
+                        type="text"
+                        :disabled="!editing || saving"
+                        :placeholder="t('payroll.people.statutory_evidence.reference_placeholder')"
+                        :data-test="`${section.key}-${index}-${field.key}`"
+                        class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                      >
+                      <span class="mt-0.5 block text-neutral-400">
+                        {{ t('payroll.people.statutory_evidence.reference_hint') }}
+                      </span>
+                    </template>
+                  </template>
                 </label>
 
                 <label class="block text-xs text-neutral-600 sm:col-span-2 lg:col-span-3">
@@ -437,6 +549,16 @@ onMounted(load)
                   >
                 </label>
               </div>
+
+              <ul
+                v-if="issuesFor(section, row).length > 0"
+                class="mt-2 list-disc space-y-0.5 rounded-md border border-warning-500/30 bg-warning-50 py-1.5 pl-6 pr-2 text-xs text-warning-800"
+                :data-test="`issues-${section.key}-${index}`"
+              >
+                <li v-for="issue in issuesFor(section, row)" :key="issue.key">
+                  {{ issueText(issue) }}
+                </li>
+              </ul>
 
               <div class="mt-2 flex items-center justify-between">
                 <span v-if="isFrozen(section, row)" class="text-xs text-neutral-500">
@@ -457,6 +579,13 @@ onMounted(load)
               </div>
             </div>
 
+            <p
+              v-for="issue in sectionIssues(section, drafts[section.key] ?? [])"
+              :key="issue.key"
+              class="mt-2 rounded-md border border-warning-500/30 bg-warning-50 px-2 py-1.5 text-xs text-warning-800"
+              :data-test="`issues-${section.key}`"
+            >{{ issueText(issue) }}</p>
+
             <button
               v-if="editing"
               type="button"
@@ -470,10 +599,6 @@ onMounted(load)
             </button>
           </section>
         </div>
-
-        <datalist id="statutory-evidence-employers">
-          <option v-for="reference in employerReferences" :key="reference" :value="reference" />
-        </datalist>
 
         <p
           v-if="saveError"

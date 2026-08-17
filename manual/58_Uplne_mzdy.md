@@ -241,10 +241,27 @@ chybějících údajů a uvnitř je vyjmenuje pro konkrétní měsíc; datum **K
 dni** určuje, který měsíc se kontroluje.
 
 Ověřené hodnoty (český nebo zahraniční režim, doložená pojišťovna, platný A1)
-jsou právní skutečnosti, takže vyžadují **doklad** — kanonickou referenci do
-mzdové dokumentace (písmena, číslice a znaky `.`, `:`, `/`, `_`, `-`). Lidské
-vysvětlení patří do pole **Poznámka k dokladu**. Kdo doklad nemá, zvolí variantu
-**neověřeno**; ta se uloží, ale zůstane vidět jako důvod ručního posouzení.
+jsou právní skutečnosti, takže vyžadují **doklad**. Ten se ale nepíše ručně —
+u každého dokladu se vybírá **typický důvod** (například „Podepsané prohlášení
+poplatníka (§ 38k)", „Rodné číslo a adresa bydliště v ČR", „Registrace
+u zdravotní pojišťovny") a evidence si z něj sama vytvoří odkaz do mzdové
+dokumentace. Volba **Jiné** odemkne volný text pro konkrétní číslo dokladu
+(písmena, číslice a znaky `.`, `:`, `/`, `_`, `-`). Lidské vysvětlení patří do
+pole **Poznámka k dokladu**. Kdo doklad nemá, zvolí variantu **neověřeno**; ta
+se uloží, ale zůstane vidět jako důvod ručního posouzení.
+
+Tlačítko **Přidat záznam** předvyplní běžný český případ: daňový rezident ČR,
+český sociální i zdravotní režim, formulář A1 se netýká, sleva pracujícího
+důchodce se neuplatňuje a zdravotní pojišťovna je ta, u které je osoba dosud
+vedená (jinak výchozí pojišťovna zaměstnavatele z nastavení mezd). U běžného
+zaměstnance tak není co vyplňovat — stačí zkontrolovat a uložit.
+
+Na co se evidence neptá, to si odvodí: u českého daňového rezidenta je stát vždy
+ČR, u českého sociálního režimu je A1 vždy „netýká se". Tato pole se proto
+nezobrazují a objeví se až po přepnutí na cizí režim — tehdy si evidence vyžádá
+stát (ze seznamu států) a doklad k režimu. Stát i zdravotní pojišťovna se vždy
+vybírají ze seznamu, nepíšou se. Chybí-li něco, co server nepřijme, napíše to
+evidence rovnou u záznamu i s tím, co s tím udělat.
 
 Evidence se zadává **po celých měsících** a záznamy jedné řady musí na sebe
 navazovat den po dni — čtecí cesta vyhodnocuje evidenci k prvnímu dni měsíce,
