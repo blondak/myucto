@@ -258,6 +258,34 @@ final class PayrollHealthNotificationPeriodTest extends TestCase
     }
 
     /**
+     * Souhrn popisuje CELÉ období, `total` filtrovaný seznam. Kdyby souhrn
+     * respektoval filtr, dal by se zúžením filtru schovat propadlý termín —
+     * a to je přesně ta informace, kvůli které se na obrazovku chodí.
+     */
+    public function testSummaryDescribesTheWholePeriodWhileTotalFollowsTheFilter(): void
+    {
+        $this->absence($this->employmentId, 'ppm', '2026-06-15', '2026-06-30', 'approved');
+
+        $unfiltered = $this->service->dutiesForPeriod(
+            $this->supplierId,
+            'production',
+            '2026-06',
+        );
+        $filtered = $this->service->dutiesForPeriod(
+            $this->supplierId,
+            'production',
+            '2026-06',
+            ['kind' => 'maternity_leave_start'],
+        );
+
+        self::assertSame(3, $unfiltered['total']);
+        self::assertSame(1, $filtered['total']);
+        // Souhrn se filtrem NEZMĚNIL.
+        self::assertSame($unfiltered['summary'], $filtered['summary']);
+        self::assertSame(3, $filtered['summary']['total']);
+    }
+
+    /**
      * Vztah bez evidované pojišťovny se z přehledu NEVYPOUŠTÍ — oznámení by
      * nemělo komu odejít, a to je vada k opravě, ne prázdno v seznamu.
      */

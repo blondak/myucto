@@ -150,9 +150,14 @@ final readonly class HealthInsuranceSubmissionService
      * serveru by znamenalo, že `total` popisuje jiný seznam, než uživatel
      * vidí — a že se filtr uplatní jen na právě načtenou stránku.
      *
+     * `total` proto popisuje FILTROVANÝ seznam (ten se stránkuje), zatímco
+     * `summary` popisuje CELÉ OBDOBÍ bez ohledu na filtr. Nejsou to dvě
+     * odpovědi na tutéž otázku: kdyby souhrn respektoval filtr, dal by se
+     * zúžením filtru schovat propadlý termín. UI to musí popsat, ne smíchat.
+     *
      * @param array{
      *   insurer_code?:?string,kind?:?string,reported?:?bool,
-     *   dispatchable_only?:?bool
+     *   undocumented_code_only?:?bool
      * } $filters
      * @return array{
      *   period:string,items:list<array<string,mixed>>,total:int,

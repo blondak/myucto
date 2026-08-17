@@ -4139,10 +4139,11 @@
                 "zp_shared_data_message_acceptance_unconfirmed": "Acceptance of the shared data message could not be evidenced."
             },
             "summary": {
-                "total": "Duties in period",
-                "reported_by_employer": "Reported by employer",
-                "code_undocumented": "Without change code",
-                "overdue": "Past deadline"
+                "total": "Duties in the whole month",
+                "reported_by_employer": "Reported by employer (whole month)",
+                "code_undocumented": "Without change code (whole month)",
+                "overdue": "Past deadline (whole month)",
+                "scope_note": "The tiles count the whole month, not the narrowed selection in the table — a filter cannot hide a missed deadline."
             },
             "unresolved": {
                 "title": "Relationships whose duty cannot be resolved ({count})"

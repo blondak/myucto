@@ -285,6 +285,23 @@ describe('PayrollHealthNotificationPanel', () => {
     })
   })
 
+  /**
+   * Dlaždice počítají celý měsíc, tabulka pod nimi jen filtrovaný výběr.
+   * Bez popisku by to vypadalo, že souhrn filtr ignoruje omylem.
+   */
+  it('při zapnutém filtru řekne, že dlaždice počítají celý měsíc', async () => {
+    const wrapper = mount(PayrollHealthNotificationPanel)
+    await flushPromises()
+    expect(wrapper.find('[data-test="health-notifications-summary-scope"]').exists())
+      .toBe(false)
+
+    await wrapper.find('[data-test="health-notifications-undocumented"]').setValue(true)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="health-notifications-summary-scope"]').exists())
+      .toBe(true)
+  })
+
   it('vztah bez pojišťovny pojmenuje místo vypuštění', async () => {
     m.duties.mockResolvedValue(dutyPage({
       unresolved_employments: [{

@@ -59,7 +59,10 @@ final readonly class PayrollHealthNotificationRepository
      * @return array{
      *   employment_id:int,employee_id:int,relation_type:string,status:string,
      *   participates:bool,insurer_code:?string,start_date:?string,
-     *   end_date:?string,full_name:string
+     *   end_date:?string,full_name:string,
+     *   insurer_changed_on:?string,previous_insurer_code:?string,
+     *   maternity_leave_started_on:?string,parental_leave_started_on:?string,
+     *   maternity_or_parental_leave_ended_on:?string
      * }|null
      */
     public function findNotificationFacts(
@@ -317,6 +320,12 @@ final readonly class PayrollHealthNotificationRepository
         string $from,
         string $to,
     ): array {
+        // Prázdný seznam by vyrobil `IN ()`, což je syntaktická chyba SQL.
+        // Volající to dnes nikdy neudělá, ale invariant si metoda hlídá sama —
+        // implicitní předpoklad se při refaktoru ztratí dřív než guard.
+        if ($employmentIds === []) {
+            return [];
+        }
         $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
         $statement = $this->db->pdo()->prepare(
             'SELECT employment_id,
@@ -371,6 +380,9 @@ final readonly class PayrollHealthNotificationRepository
         string $from,
         string $to,
     ): array {
+        if ($employmentIds === []) {
+            return [];
+        }
         $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
         $statement = $this->db->pdo()->prepare(
             'WITH coverage AS (

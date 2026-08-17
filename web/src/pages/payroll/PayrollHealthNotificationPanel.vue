@@ -431,6 +431,12 @@ onMounted(() => {
       </div>
     </section>
 
+    <!--
+      Dlaždice popisují CELÉ období, ne filtrovanou tabulku pod nimi. Je to
+      záměr: kdyby souhrn respektoval filtr, dalo by se zúžením filtru schovat
+      propadlý termín. Aby to ale nesvádělo k záměně, říká to popisek nahlas —
+      a při zapnutém filtru se to zopakuje ještě jednou pod dlaždicemi.
+    -->
     <dl v-if="summary" class="grid grid-cols-2 gap-3 lg:grid-cols-4" data-test="health-notifications-summary">
       <div
         v-for="entry in (['total', 'reported_by_employer', 'code_undocumented', 'overdue'] as const)"
@@ -450,6 +456,14 @@ onMounted(() => {
         </dd>
       </div>
     </dl>
+
+    <p
+      v-if="summary && filtersActive"
+      class="-mt-2 text-xs text-neutral-500"
+      data-test="health-notifications-summary-scope"
+    >
+      {{ t('payroll.health_notifications.summary.scope_note') }}
+    </p>
 
     <section
       v-if="unresolved.length"

@@ -4139,10 +4139,11 @@
                 "zp_shared_data_message_acceptance_unconfirmed": "Přijetí jednotné datové věty se nepodařilo doložit."
             },
             "summary": {
-                "total": "Povinností v období",
-                "reported_by_employer": "Hlásí zaměstnavatel",
-                "code_undocumented": "Bez kódu změny",
-                "overdue": "Po lhůtě"
+                "total": "Povinností za celý měsíc",
+                "reported_by_employer": "Hlásí zaměstnavatel (celý měsíc)",
+                "code_undocumented": "Bez kódu změny (celý měsíc)",
+                "overdue": "Po lhůtě (celý měsíc)",
+                "scope_note": "Dlaždice počítají celý měsíc, ne zúžený výběr v tabulce — filtrem se propadlý termín schovat nedá."
             },
             "unresolved": {
                 "title": "Vztahy, u kterých povinnost odvodit nelze ({count})"
