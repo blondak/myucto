@@ -29,7 +29,6 @@ if (PHP_SAPI !== 'cli') exit("CLI only.\n");
 require __DIR__ . '/../vendor/autoload.php';
 
 use MyInvoice\Bootstrap;
-use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Repository\DocumentRequestRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Cron\CronRun;
@@ -50,8 +49,6 @@ foreach (array_slice($argv, 1) as $arg) {
 
 $container = Bootstrap::buildContainer();
 
-/** @var Config $config */
-$config = $container->get(Config::class);
 /** @var DocumentRequestRepository $repo */
 $repo = $container->get(DocumentRequestRepository::class);
 /** @var Mailer $mailer */
@@ -60,6 +57,8 @@ $mailer = $container->get(Mailer::class);
 $logger = $container->get(ActivityLogger::class);
 /** @var \MyInvoice\Infrastructure\Database\Connection $conn */
 $conn = $container->get(\MyInvoice\Infrastructure\Database\Connection::class);
+/** @var \MyInvoice\Service\Tenant\TenantUrlResolver $tenantUrls */
+$tenantUrls = $container->get(\MyInvoice\Service\Tenant\TenantUrlResolver::class);
 
 $supplierContext = new SupplierEmailContext($conn);
 
@@ -71,7 +70,6 @@ echo "[" . date('Y-m-d H:i:s') . "] cron-document-request-reminders --days={$day
     . ($dryRun ? ' --dry-run' : '') . " — found " . count($candidates) . " candidates\n";
 
 $report = ['days' => $days, 'cooldown' => $cooldown, 'dry_run' => $dryRun, 'candidates' => count($candidates), 'sent' => 0, 'no_recipients' => 0, 'errors' => 0];
-$appUrl = rtrim((string) $config->get('app.url', ''), '/');
 
 if (empty($candidates)) {
     $ms = (int) ((microtime(true) - $startedAt) * 1000);
@@ -110,7 +108,7 @@ foreach ($candidates as $c) {
             'amount'             => $c['amount'] !== null ? (float) $c['amount'] : null,
             'deadline'           => $c['deadline'],
             'requested_days_ago' => $daysAgo,
-            'portal_link'        => $appUrl !== '' ? "{$appUrl}/portal/document-requests" : '',
+            'portal_link'        => $tenantUrls->forSupplier($supplierId, 'portal', '/portal/document-requests'),
         ];
         $mailer->sendTemplate('document_request_reminder', 'cs', $to, $vars);
         $repo->bumpReminder($id);

@@ -48,7 +48,7 @@ info:
     `403 token_endpoint_forbidden` bez ohledu na scope. Jsou v této dokumentaci
     proto, aby integrátor věděl, že existují a proč je nemá k dispozici:
 
-    - `/api/v1/admin/**` a `/api/v1/settings/{ai-assist,accounting-activation,mode-switch-preview}`
+    - `/api/v1/admin/**` a `/api/v1/settings/{ai-assist,accounting-activation,mode-switch-preview,domains}`
       — konfigurace systému, ne data firmy.
     - `/api/v1/portal/**` a `/api/v1/user/{filters,preferences}` — plocha webového
       rozhraní (klientský portál, uložené filtry a předvolby uživatele).
@@ -279,6 +279,35 @@ paths:
               schema: { $ref: '#/components/schemas/ApiMe' }
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/domain-context:
+    get:
+      tags: [Auth]
+      summary: Kontext aktuálního hostname
+      description: |
+        Pre-auth endpoint pro webové rozhraní. Rozliší canonical `app.url`
+        a aktivní vlastní doménu firmy. Na vlastní doméně je `supplier_id`
+        autoritativní a nelze jej přepsat hlavičkou ani query parametrem.
+        Neznámý nebo neaktivní hostname je odmítnut ještě před akcí.
+      security: []
+      responses:
+        '200':
+          description: Bezpečný kontext aktuálního originu
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DomainContext' }
+        '421':
+          description: Hostname není nakonfigurovaný nebo aktivní
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`); endpoint je určený
+            browserovému pre-auth toku bez bearer identity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/clients:
     get:
@@ -4022,6 +4051,29 @@ paths:
         '200': { description: Návrh odmítnut }
         '404': { description: Návrh neexistuje v aktuální firmě }
         '409': { description: Návrh už není pending }
+
+  /api/v1/settings/domains:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Settings]
+      summary: Vlastní domény aktuální firmy
+      description: |
+        Session-only přehled domén klientského portálu a veřejných odkazů,
+        včetně stavu DNS/HTTPS ověření. Bearer token vrátí
+        `403 forbidden_via_token`; změny se provádějí výhradně z webového UI.
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Seznam domén firmy
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SupplierDomain' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/settings/supplier:
     parameters:
@@ -16539,6 +16591,13 @@ components:
       scheme: bearer
       bearerFormat: mi_pat_
       description: Personal Access Token získaný v Nastavení → API tokeny.
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-myinvoice_session
+      description: |
+        Host-only browserová session webového rozhraní. Název lze v lokálním
+        HTTP vývoji změnit konfigurací; produkční výchozí používá prefix `__Host-`.
 
   parameters:
     SupplierIdHeader:
@@ -18281,6 +18340,72 @@ components:
                 scope: { type: string, enum: [read, read_write] }
                 expires_at: { type: [string, "null"], format: date-time }
             - { type: "null" }
+
+    DomainContext:
+      type: object
+      required:
+        [mode, hostname, origin, locked, supplier_id, purpose,
+         canonical_base_url, canonical_login_url]
+      properties:
+        mode:
+          type: string
+          enum: [canonical, custom]
+        hostname:
+          type: string
+          format: hostname
+        origin:
+          type: string
+          format: uri
+        locked:
+          type: boolean
+          description: Aktivní vlastní doména autoritativně uzamyká tenant firmy.
+        supplier_id:
+          type: [integer, "null"]
+        purpose:
+          type: [string, "null"]
+          enum: [portal, public_links, all, null]
+        canonical_base_url:
+          type: string
+          format: uri
+        canonical_login_url:
+          type: string
+          format: uri
+          description: Canonical origin pro password, TOTP a WebAuthn přihlášení.
+
+    SupplierDomain:
+      type: object
+      required:
+        [id, supplier_id, hostname, purpose, status, is_primary,
+         is_primary_portal, is_primary_public, dns, verification_url,
+         portal_url, public_base_url]
+      properties:
+        id: { type: integer, format: int64 }
+        supplier_id: { type: integer }
+        hostname: { type: string, format: hostname }
+        purpose:
+          type: string
+          enum: [portal, public_links, all]
+        status:
+          type: string
+          enum: [pending, verified, active, disabled, verification_failed]
+        is_primary: { type: boolean }
+        is_primary_portal: { type: boolean }
+        is_primary_public: { type: boolean }
+        verified_at: { type: [string, "null"], format: date-time }
+        last_checked_at: { type: [string, "null"], format: date-time }
+        verification_error: { type: [string, "null"] }
+        dns:
+          type: object
+          required: [type, name, value]
+          properties:
+            type: { type: string, const: TXT }
+            name: { type: string }
+            value: { type: string }
+        verification_url: { type: string, format: uri }
+        portal_url: { type: string, format: uri }
+        public_base_url: { type: string, format: uri }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
 
     SupplierBrief:
       type: object

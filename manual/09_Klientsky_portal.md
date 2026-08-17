@@ -257,3 +257,43 @@ Klient vidí vždy jen požadavky **vlastní aktuálně zvolené firmy** — ste
 fail-closed princip jako zbytek portálu (viz [§ 9.1](#91-kdo-roli-client-dostane-a-jak)).
 Cizí požadavek (jiné firmy) vrátí 404, ne 403, aby se neprozrazovala ani jeho
 existence.
+
+## 9.9 Vlastní doména portálu
+
+Každá firma může vedle výchozí adresy instalace (`app.url`) používat vlastní
+doménu, například `portal.klient.cz`. Nastavuje ji oprávněný správce na kartě
+**Nastavení → Firma → Vlastní domény**. Pokud firma žádnou aktivní doménu nemá,
+portál i veřejné odkazy dál fungují na výchozí adrese beze změny.
+
+Doméně se přiřazuje účel:
+
+- **Klientský portál** — přihlášení a stránky `/portal`;
+- **Veřejné odkazy** — webové faktury, schvalování a výkazy práce;
+- **Portál i veřejné odkazy** — oba předchozí účely.
+
+Firma může mít více aktivních aliasů, ale pro každý účel nejvýše jednu primární
+doménu. Nově odesílané odkazy používají primární doménu; starší canonical odkazy
+na `app.url` zůstávají platné. Deaktivace poslední použitelné domény vrátí nové
+odkazy automaticky na `app.url`.
+
+Aktivní vlastní doména zároveň jednoznačně určuje firmu. Přepínač firem se na ní
+nezobrazuje a firmu nelze podvrhnout hlavičkou, parametrem URL ani API tokenem.
+Uživatel musí mít k určené firmě stále platné přiřazení. Veřejný token jiné firmy
+na této doméně vrátí pouze „nenalezeno"; stejný token na canonical adrese zůstává
+funkční.
+
+### 9.9.1 Přihlášení a passkeys
+
+Přihlášení se bezpečně dokončuje na canonical adrese z `app.url`, kde jsou
+zaregistrované passkeys a WebAuthn RP ID. Po heslu, TOTP nebo passkey se prohlížeč
+vrátí na přesnou vlastní doménu jednorázovým krátkodobým kódem svázaným s PKCE.
+Session token se v URL nepřenáší; cílová doména dostane novou host-only cookie,
+kterou jiná doména nemůže číst.
+
+Stejný centrální tok se použije k odemčení zamčené session. Správa passkeys,
+profil a interní účetní obrazovky zůstávají na canonical adrese; vlastní doména
+je vstupem klientského portálu, nikoli druhým originem celého interního rozhraní.
+
+Neznámý, neověřený, deaktivovaný nebo účelově nekompatibilní hostname nikdy
+nezobrazí data firmy. Postup ověření a aktivace popisuje
+[§ 73.16 Vlastní domény](73_Nastaveni.md#7316-vlastni-domeny-klientskeho-portalu).

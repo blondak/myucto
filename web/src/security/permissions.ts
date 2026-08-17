@@ -28,7 +28,7 @@ export const PERMISSION_KEYS = [
   'stock.take', 'stock.close',
   'eshop', 'eshop.write',
   'logbook', 'logbook.write', 'logbook.import', 'logbook.delete',
-  'settings.company', 'settings.company.write', 'settings.bank_accounts',
+  'settings.company', 'settings.company.write', 'settings.domains', 'settings.bank_accounts',
   'settings.branding', 'settings.ai_provider', 'settings.signing',
   'utilities', 'utilities.export', 'utilities.import', 'utilities.archives',
   'profile', 'profile.tokens',

@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Service\Approval\ApprovalTokenValidator;
 use MyInvoice\Service\WorkReport\WorkReportLinkService;
+use MyInvoice\Service\Tenant\PublicTenantGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -26,6 +27,7 @@ final class PublicWorkReportGetAction
     public function __construct(
         private readonly WorkReportLinkService $service,
         private readonly Config $config,
+        private readonly PublicTenantGuard $tenantGuard,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -39,6 +41,9 @@ final class PublicWorkReportGetAction
         if ($link === null) {
             return Json::error($response, 'token_invalid_or_expired',
                 'Tento odkaz není platný nebo byl zneplatněn.', 404);
+        }
+        if (!$this->tenantGuard->allows($request, (int) $link['supplier_id'])) {
+            return Json::error($response, 'not_found', 'Tento odkaz není platný.', 404);
         }
 
         // Přihlášený interní uživatel (admin/účetní…) vidí náhled rovnou, bez

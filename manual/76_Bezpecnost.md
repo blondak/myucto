@@ -60,6 +60,16 @@ přesný HTTPS origin, například `https://faktury.example.cz`. Klíč je sváz
 s hostname; po změně domény jej na nové doméně nelze použít. Pro lokální vývoj
 je podporované `http://localhost`, nikoli běžný HTTP přístup přes LAN IP.
 
+Vlastní domény klientských portálů se nestávají dalším WebAuthn RP ID. Browser
+se z nich přesměruje na přesný canonical origin z `app.url`, kde proběhne
+passwordless passkey, passkey jako druhý faktor nebo TOTP. Aplikace potom vydá
+jednorázový kód platný 60 sekund, svázaný s PKCE verifierem, uživatelem, firmou
+a přesným cílovým hostnamem. Kód lze spotřebovat jen jednou a skutečný session
+token se v URL nikdy neobjeví. Na cílové doméně vznikne samostatná host-only
+session; správa passkeys a ostatní interní obrazovky zůstávají na canonical
+originu. Stejný centrální tok bezpečně odemyká session zamčenou na vlastní
+doméně.
+
 Přidání a odvolání passkey vyžaduje nové ověření passkey nebo TOTP. U účtu bez
 dosavadního silného faktoru první registrace vyžádá aktuální heslo. Při povinném
 MFA nelze odvolat poslední povolený silný faktor.
@@ -549,8 +559,12 @@ nebo prázdný membership jsou vždy fail-closed.
 
 Každý mutating request (POST / PUT / PATCH / DELETE) musí mít:
 
-1. **Origin header** se shodující s `app.url` v `cfg.php`
+1. **Origin header** se shodující s přesným originem bezpečně rozpoznané domény
 2. **X-CSRF-Token** header se shodující s tokenem v session
+
+Na canonical hostu je očekávaný origin odvozený z `app.url`; na aktivní vlastní
+doméně je to výhradně `https://<její-hostname>`. Jiný port, koncová tečka,
+podvržený `Host`, neaktivní alias ani origin jiné firmy neprojde.
 
 Bez nich → 403 `csrf_failed` / `origin_mismatch`. UI to obsluhuje
 automaticky (token v Pinia store, header v axios interceptoru).

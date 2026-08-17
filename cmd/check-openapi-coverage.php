@@ -122,6 +122,7 @@ $skipPrefixes = [
     '/api/public/',
     '/api/auth/setup',
     '/api/auth/login',
+    '/api/auth/domain-login/',     // jednorázové PKCE browser SSO, interní plumbing
     '/api/auth/logout',
     '/api/auth/me',
     '/api/auth/forgot',

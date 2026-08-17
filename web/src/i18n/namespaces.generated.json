@@ -46,6 +46,8 @@
     "documentCompleteness",
     "document_requests",
     "documents",
+    "domain_login",
+    "domains",
     "electronic_signatures",
     "errors",
     "eshop",
@@ -564,6 +566,7 @@
     "admin-settings": [
       "activation",
       "automation",
+      "domains",
       "settings",
       "stock"
     ],
@@ -759,6 +762,8 @@
       "documentCompleteness",
       "document_requests",
       "documents",
+      "domain_login",
+      "domains",
       "electronic_signatures",
       "errors",
       "eshop",
@@ -804,6 +809,10 @@
       "vat_classifications",
       "vendor",
       "workReportTracking"
+    ],
+    "domain-login-callback": [
+      "app",
+      "domain_login"
     ],
     "setup": [
       "app",

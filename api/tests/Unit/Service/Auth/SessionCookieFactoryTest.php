@@ -32,6 +32,8 @@ final class SessionCookieFactoryTest extends TestCase
 
         self::assertStringContainsString('Max-Age=3600', $cookie);
         self::assertStringContainsString('Expires=Fri, 15 Jan 2027 09:00:00 GMT', $cookie);
+        self::assertStringStartsWith('__Host-myinvoice_session=', $cookie);
+        self::assertStringNotContainsString('Domain=', $cookie);
         self::assertStringEndsWith('SameSite=Lax; Secure', $cookie);
     }
 }

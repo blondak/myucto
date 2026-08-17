@@ -10,7 +10,7 @@ vi.mock('@/i18n', () => ({
   namespacesForRoute: () => [],
 }))
 
-import { authorizationGuard, router } from '../index'
+import { authorizationGuard, canonicalInternalUrl, router } from '../index'
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 
@@ -116,5 +116,30 @@ describe('router guard vynuceného nastavení MFA', () => {
     const result = await authorizationGuard(resolveTarget({ name: 'admin-users' }))
 
     expect(result).toEqual({ name: 'home' })
+  })
+})
+
+describe('oddělení klientské a interní domény', () => {
+  const customContext = {
+    mode: 'custom',
+    hostname: 'portal.example.test',
+    origin: 'https://portal.example.test',
+    locked: true,
+    supplier_id: 7,
+    purpose: 'portal',
+    canonical_base_url: 'https://ucto.example.test/app-path',
+  } as const
+
+  it('nechá klientský portál na vlastní doméně', () => {
+    const target = resolveTarget({ name: 'portal-document-requests', query: { page: '2' } })
+
+    expect(canonicalInternalUrl(target, customContext)).toBeNull()
+  })
+
+  it('přesměruje interní obrazovku na canonical origin a zachová cestu', () => {
+    const target = resolveTarget({ name: 'admin-settings', query: { tab: 'company' }, hash: '#domains' })
+
+    expect(canonicalInternalUrl(target, customContext))
+      .toBe('https://ucto.example.test/admin/settings?tab=company#domains')
   })
 })

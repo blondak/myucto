@@ -11,11 +11,13 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\LicenseMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Repository\PasskeyCredentialRepository;
 use MyInvoice\Security\PermissionCatalog;
 use MyInvoice\Security\PermissionResolver;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionLockPolicy;
+use MyInvoice\Service\Tenant\TenantDomainContext;
 use MyInvoice\Service\License\LicenseService;
 use Psr\Clock\ClockInterface;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -98,6 +100,14 @@ final class MeAction
                 },
             );
         }
+        $domainContext = $request->getAttribute(TenantDomainMiddleware::ATTR_CONTEXT);
+        if ($domainContext instanceof TenantDomainContext && $domainContext->locksSupplier()) {
+            $suppliers = array_values(array_filter(
+                $suppliers,
+                static fn (array $supplier): bool => (int) ($supplier['id'] ?? 0) === $domainContext->supplierId,
+            ));
+        }
+
         foreach ($suppliers as &$s) {
             $s['id']                       = (int) $s['id'];
             $s['is_vat_payer']             = (bool) $s['is_vat_payer'];
@@ -198,6 +208,9 @@ final class MeAction
             'csrf_token'          => $session['csrf_token'] ?? '',
             'current_supplier_id' => $currentSupplierId,
             'suppliers'           => $suppliers,
+            'domain_context'      => $domainContext instanceof TenantDomainContext
+                ? $domainContext->toArray()
+                : null,
             'permissions'         => $effectiveRole->isSuperadmin() ? [] : $effectiveRole->permissions,
             'permission_catalog_version' => PermissionCatalog::VERSION,
             'require_totp'        => $requireTotp,

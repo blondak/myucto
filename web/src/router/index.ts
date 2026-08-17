@@ -6,6 +6,7 @@ import {
   type RouteRecordRaw,
 } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import type { DomainContext } from '@/api/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import type { AccessLevel, PermissionKey } from '@/security/permissions'
@@ -388,6 +389,7 @@ const routes: RouteRecordRaw[] = [
     ],
   },
   { path: '/login',  name: 'login',  component: () => import('@/pages/Login.vue'),          meta: { public: true } },
+  { path: '/domain-login/callback', name: 'domain-login-callback', component: () => import('@/pages/DomainLoginCallback.vue'), meta: { public: true } },
   { path: '/setup',  name: 'setup',  component: () => import('@/pages/Setup.vue'),          meta: { public: true } },
   { path: '/setup-mfa', name: 'setup-mfa', component: () => import('@/pages/ForcedMfaSetup.vue'), meta: { requiresAuth: true, mfaSetupOnly: true } },
   { path: '/setup-totp', name: 'setup-totp', redirect: { path: '/setup-mfa', query: { method: 'totp' } } },
@@ -646,6 +648,20 @@ export async function authorizationGuard(to: RouteLocationNormalized): Promise<b
       return { name: 'login' }
     }
   }
+
+  // Vlastní doména je vstup klientského portálu, ne alternativní origin celého
+  // interního UI. WebAuthn RP ID i interní odkazy tak zůstávají na app.url;
+  // klientská role se z kořene nejdřív pošle na svůj portál.
+  if (auth.isClientRole && to.name === 'home') {
+    return { name: 'portal' }
+  }
+  if (requiresAuth) {
+    const canonicalUrl = canonicalInternalUrl(to, auth.domainContext)
+    if (canonicalUrl !== null) {
+      window.location.replace(canonicalUrl)
+      return false
+    }
+  }
   if (requiresAuth && auth.lockedSession) {
     useSessionSecurityStore().apply(auth.lockedSession)
     return true
@@ -668,10 +684,6 @@ export async function authorizationGuard(to: RouteLocationNormalized): Promise<b
   }
   if (auth.isAuthenticated && !mustSetupMfa && mfaSetupRoute) {
     return { name: 'home' }
-  }
-
-  if (auth.isClientRole && to.name === 'home') {
-    return { name: 'portal' }
   }
 
   const superadminOnly = to.matched.some((r) => r.meta.superadminOnly)
@@ -757,6 +769,23 @@ export async function authorizationGuard(to: RouteLocationNormalized): Promise<b
   }
 
   return true
+}
+
+const customDomainRouteNames = new Set(['portal', 'portal-document-requests'])
+
+/** Vrátí bezpečný canonical cíl jen pro interní routy otevřené na vlastní doméně. */
+export function canonicalInternalUrl(
+  to: RouteLocationNormalized,
+  context: DomainContext | null,
+): string | null {
+  if (!context?.locked || customDomainRouteNames.has(String(to.name))) return null
+  if (!context.canonical_base_url || !to.fullPath.startsWith('/') || to.fullPath.startsWith('//')) return null
+  try {
+    const origin = new URL(context.canonical_base_url).origin
+    return new URL(to.fullPath, `${origin}/`).toString()
+  } catch {
+    return null
+  }
 }
 
 router.beforeEach(authorizationGuard)

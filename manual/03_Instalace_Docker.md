@@ -433,6 +433,44 @@ z `Host` ani proxy hlaviček. Změna `app.url` na jiný hostname proto zneplatn�
 použitelnost dříve registrovaných passkeys; před změnou ověř TOTP nebo jinou
 recovery cestu.
 
+### 3.8.1 Vlastní domény klientských portálů
+
+Vlastní doména firmy **nenahrazuje** `app.url`. Canonical `app.url` zůstává
+stabilní adresou interního rozhraní, resetů hesla a WebAuthn RP ID. Další
+hostname pouze nasměruj na stejnou instanci a následně jej založ v
+**Nastavení → Firma → Vlastní domény**.
+
+Pro každý vlastní hostname musí provozní vrstva zajistit:
+
+1. veřejný A/AAAA nebo CNAME záznam směrovaný na reverse proxy;
+2. důvěryhodný TLS certifikát platný pro přesný hostname;
+3. předání původní hlavičky `Host` a `X-Forwarded-Proto: https` do aplikace;
+4. DNS TXT challenge zobrazenou v administraci;
+5. přidání hostname do seznamu povolených domén Cloudflare Turnstile, pokud je
+   CAPTCHA zapnutá.
+
+Aplikace certifikáty sama nevydává. Doménu aktivuje až po kontrole TXT a po
+HTTPS požadavku na přesný challenge endpoint bez redirectu. Reverse proxy tedy
+musí routing a certifikát připravit **před** stisknutím Ověřit. Caddy může více
+hostname obsloužit jedním blokem a pro každý automaticky získat certifikát:
+
+```caddyfile
+faktury.tvojefirma.cz, portal.klient-a.cz, portal.klient-b.cz {
+    reverse_proxy localhost:8080
+}
+```
+
+U nginx, Traefiku nebo Cloudflare Tunnel platí stejný princip: všechny hostname
+vedou do stejné aplikace, ale `Host` se nesmí přepsat na interní název služby.
+Neznámý nebo neaktivní Host aplikace odmítne; nestačí tedy pouze přidat DNS a
+certifikát. Konfigurace Apache, IIS i nginx v repozitáři posílá SPA fallback
+přes stejnou serverovou kontrolu hostname.
+
+Aktivní vlastní doména používá oddělenou host-only session cookie. Přihlášení
+včetně passkey proběhne na canonical `app.url` a prohlížeč se vrátí jednorázovým
+PKCE tokem; není potřeba a ani správné registrovat novou WebAuthn RP doménu pro
+každého klienta.
+
 Restart stacku: `docker compose -f docker-compose.production.yml restart app`
 (nebo bez `-f` flagu pro Variantu B).
 

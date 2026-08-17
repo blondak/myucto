@@ -2,7 +2,7 @@
 #
 # /api/*        → api/public/index.php (Slim FrontController)
 # statika       → /styles/, /assets/ a PWA soubory napřímo
-# SPA fallback  → web/dist/index.html
+# SPA fallback  → api/public/index.php (host gate, potom web/dist/index.html)
 
 Options -Indexes -MultiViews
 
@@ -42,6 +42,10 @@ Options -Indexes -MultiViews
     # IIS to řeší přes hiddenSegments (web.config), Docker přes .dockerignore.
     RewriteRule (^|/)\.(git|svn|hg|bzr)(/|$) - [F,L]
 
+    # Přímá cesta k SPA entry nesmí obejít hostname gate. Hashed assety pod
+    # web/dist zůstávají statické, ale index i adresářový default jdou přes PHP.
+    RewriteRule ^web/dist(?:/index\.html)?/?$ api/public/index.php [L,QSA]
+
     # 3a) /assets/* → web/dist/assets/* (Vite generuje absolutní URL `/assets/foo.css`,
     # ale skutečné soubory jsou v `web/dist/assets/`. V IIS to řeší alias z web.config,
     # v Apache musíme přepisovat zde.)
@@ -65,7 +69,9 @@ Options -Indexes -MultiViews
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteRule ^api/(.*)$ api/public/index.php [L,QSA]
 
-    # 4) SPA fallback (vše co není reálný soubor a není /api/* → web/dist/index.html).
+    # 4) SPA fallback (vše co není reálný soubor a není /api/* → front controller).
+    # Front controller ověří hostname proti supplier_domains a teprve potom vydá
+    # web/dist/index.html; neznámý Host tak nedostane ani vstupní HTML aplikace.
     # `!-d` schválně NEPOUŽÍVÁME, jinak by `/` (= docroot dir) tímhle pravidlem neprošlo
     # a Apache by hodil 403 (Options -Indexes + chybějící DirectoryIndex). Statické
     # cesty mají `!-f`, takže je rewrite vynechá.
@@ -74,7 +80,7 @@ Options -Indexes -MultiViews
     RewriteCond %{REQUEST_URI} !^/styles/
     RewriteCond %{REQUEST_URI} !^/web/
     RewriteCond %{REQUEST_FILENAME} !-f
-    RewriteRule ^ web/dist/index.html [L]
+    RewriteRule ^ api/public/index.php [L,QSA]
 </IfModule>
 
 # Security headers

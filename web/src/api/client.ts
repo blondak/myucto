@@ -11,9 +11,14 @@ export const api = axios.create({
 
 // CSRF token interceptor — token žije v Pinia auth store
 let csrfToken: string | null = null
+let domainSupplierLock: number | null = null
 let forbiddenPermissionHandler: (() => void | Promise<void>) | null = null
 export function setCsrfToken(token: string | null) {
   csrfToken = token
+}
+export function setDomainSupplierLock(supplierId: number | null) {
+  domainSupplierLock = supplierId && supplierId > 0 ? supplierId : null
+  if (domainSupplierLock !== null) localStorage.removeItem('myinvoice.current_supplier_id')
 }
 export function setForbiddenPermissionHandler(handler: () => void | Promise<void>) {
   forbiddenPermissionHandler = handler
@@ -30,9 +35,13 @@ api.interceptors.request.use((config) => {
 
   // Multi-supplier — aktuální supplier z localStorage (Pinia persist).
   // Server fallbackuje na MIN(supplier.id) když chybí/neplatný.
-  const sid = localStorage.getItem('myinvoice.current_supplier_id')
-  if (sid && /^\d+$/.test(sid) && !config.headers.has('X-Supplier-Id')) {
-    config.headers.set('X-Supplier-Id', sid)
+  if (domainSupplierLock !== null) {
+    config.headers.delete('X-Supplier-Id')
+  } else {
+    const sid = localStorage.getItem('myinvoice.current_supplier_id')
+    if (sid && /^\d+$/.test(sid) && !config.headers.has('X-Supplier-Id')) {
+      config.headers.set('X-Supplier-Id', sid)
+    }
   }
   return config
 })

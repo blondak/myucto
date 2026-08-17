@@ -820,3 +820,48 @@ Záložka je pouze pro čtení: zprávu z ní nelze znovu odeslat ani smazat. St
 **Odesláno** potvrzuje úspěch odesílacího kroku aplikace, nikoli přečtení nebo
 doručení do schránky příjemce. Pro technickou diagnostiku SMTP komunikace
 použij [SMTP log analýzu](#738-smtp-log-analyza).
+
+## 73.16 Vlastní domény klientského portálu
+
+**Cesta: `Nastavení → Firma → Vlastní domény`.** Sekce se zobrazí uživateli
+s oprávněním **Vlastní domény** alespoň pro čtení; založení, ověření, aktivace
+a deaktivace vyžadují zápis. Domény se vždy spravují pro právě vybranou firmu.
+
+Při založení zadej jen hostname bez schématu, portu a cesty, například
+`portal.klient.cz`. Wildcard není podporovaný. Vyber účel **Klientský portál**,
+**Veřejné odkazy** nebo **Portál i veřejné odkazy** a urči, zda má být doména
+po aktivaci primární. Více aliasů je povolených; pro každý účel může být
+primární nejvýše jeden aktivní hostname.
+
+### Ověření a aktivace
+
+Nová doména zobrazí přesný DNS TXT záznam ve tvaru:
+
+```text
+_myucto-challenge.portal.klient.cz TXT myucto-verification=<token>
+```
+
+Současně nasměruj A/AAAA nebo CNAME domény na reverse proxy MyÚčta, zachovej
+původní hlavičku `Host` a připrav důvěryhodný TLS certifikát. Tlačítko
+**Ověřit DNS a HTTPS** kontroluje TXT challenge i HTTPS odpověď z přesné domény.
+Kontrola nepovoluje redirect, privátní cílovou IP ani nedůvěryhodný certifikát.
+Dokud neprojde, hostname obslouží pouze svůj jednorázový ověřovací endpoint,
+nikoli portál nebo firemní data.
+
+Po úspěšném ověření aktivaci potvrď passkey nebo TOTP. Tím se zabrání tomu, aby
+ukradená běžná session přesměrovala klienty na útočníkovu doménu. Aktivace,
+změny challenge, ověření i deaktivace se zapisují do activity logu.
+
+| Stav | Význam |
+|---|---|
+| **Čeká na ověření** | Je nutné publikovat DNS TXT, routing a TLS. |
+| **Ověřeno** | Poslední kontrola DNS a HTTPS prošla; lze aktivovat. |
+| **Aktivní** | Doména smí obsluhovat svůj účel a uzamyká firmu podle hostname. |
+| **Ověření selhalo** | Karta ukáže důvod; po opravě lze kontrolu zopakovat. |
+| **Deaktivováno** | Hostname nevydává firemní data; lze jej znovu ověřit nebo smazat. |
+
+Rotace challenge zneplatní předchozí TXT hodnotu a vrátí neaktivní doménu do
+stavu čekání. Aktivní doménu nejdřív deaktivuj. Deaktivace se projeví okamžitě;
+pokud nezůstane jiný aktivní alias daného účelu, nové odkazy použijí výchozí
+`app.url`. Provozní nastavení proxy, certifikátů a Turnstile popisuje
+[§ 3.8 HTTPS / TLS terminace](03_Instalace_Docker.md#38-https-tls-terminace).

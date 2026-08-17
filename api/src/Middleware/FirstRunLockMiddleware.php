@@ -49,8 +49,7 @@ final class FirstRunLockMiddleware implements MiddlewareInterface
 
         // Normalizovaná cesta (viz RequestPath) — allowlist setupu musí sedět
         // přesně na to, co router doručí.
-        $key = strtoupper($request->getMethod()) . ' ' . RequestPath::normalize($request->getUri()->getPath());
-        if (in_array($key, self::ALLOWED_PATHS, true)) {
+        if ($this->allowsDuringSetup($request->getMethod(), $request->getUri()->getPath())) {
             return $handler->handle($request);
         }
 
@@ -61,6 +60,12 @@ final class FirstRunLockMiddleware implements MiddlewareInterface
             'Aplikace ještě není inicializovaná. Otevřete /setup pro vytvoření admin účtu.',
             423,
         );
+    }
+
+    public function allowsDuringSetup(string $method, string $path): bool
+    {
+        $key = strtoupper($method) . ' ' . RequestPath::normalize($path);
+        return in_array($key, self::ALLOWED_PATHS, true);
     }
 
     public function needsSetup(): bool

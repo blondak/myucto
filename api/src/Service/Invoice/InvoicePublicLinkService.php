@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Service\Tenant\TenantUrlResolver;
 
 /**
  * Jediný vlastník URL formátu web faktury `/invoice/{token}` (vzor
@@ -18,6 +19,7 @@ final class InvoicePublicLinkService
     public function __construct(
         private readonly Config $config,
         private readonly InvoiceRepository $invoices,
+        private readonly ?TenantUrlResolver $tenantUrls = null,
     ) {}
 
     /**
@@ -25,8 +27,11 @@ final class InvoicePublicLinkService
      * UI („kopírovat odkaz") tak vždy něco dostane; e-mailová cesta absolutnost
      * hlídá v ensureUrl().
      */
-    public function url(string $token): string
+    public function url(string $token, int $supplierId = 0): string
     {
+        if ($this->tenantUrls !== null && $supplierId > 0) {
+            return $this->tenantUrls->forSupplier($supplierId, 'public_links', '/invoice/' . $token);
+        }
         return rtrim((string) $this->config->get('app.url', ''), '/') . '/invoice/' . $token;
     }
 
@@ -47,6 +52,6 @@ final class InvoicePublicLinkService
         if ($token === '') {
             $token = $this->invoices->ensurePublicToken((int) $invoice['id']);
         }
-        return $this->url($token);
+        return $this->url($token, (int) ($invoice['supplier_id'] ?? 0));
     }
 }

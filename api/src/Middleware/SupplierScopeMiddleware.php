@@ -49,6 +49,7 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
         if (str_starts_with($path, '/api/auth/webauthn/')
             || str_starts_with($path, '/api/auth/mfa/')
             || str_starts_with($path, '/api/auth/session/')
+            || str_starts_with($path, '/api/auth/domain-login/')
         ) {
             return $handler->handle($request);
         }

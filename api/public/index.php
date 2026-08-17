@@ -5,8 +5,57 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Http\RequestPath;
+use MyInvoice\Middleware\FirstRunLockMiddleware;
+use MyInvoice\Service\Tenant\TenantDomainPolicy;
+use MyInvoice\Service\Tenant\TenantDomainResolver;
+use Slim\Psr7\Factory\ServerRequestFactory;
 
 try {
+    $requestPath = RequestPath::normalize((string) (parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/'));
+    if (!str_starts_with($requestPath, '/api/')) {
+        $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+        if (!in_array($method, ['GET', 'HEAD'], true)) {
+            http_response_code(405);
+            header('Allow: GET, HEAD');
+            exit;
+        }
+
+        // SPA fallback jde přes stejnou host-to-tenant politiku jako API. Webserver
+        // proto nevrátí index.html neznámému nebo neaktivnímu hostname dřív, než
+        // se frontend vůbec dostane k /api/auth/domain-context.
+        $container = Bootstrap::buildContainer();
+        // Před prvním adminem musí wizard zůstat dostupný i přes LAN hostname,
+        // protože app.url se často nastaví až během setupu. API přitom dál omezuje
+        // FirstRunLock na svůj úzký allowlist.
+        if (!$container->get(FirstRunLockMiddleware::class)->needsSetup()) {
+            $request = ServerRequestFactory::createFromGlobals();
+            $context = $container->get(TenantDomainResolver::class)->resolve($request);
+            $denial = $container->get(TenantDomainPolicy::class)->denial($context, $method, $requestPath);
+            if ($denial !== null) {
+                http_response_code($denial['status']);
+                header('Content-Type: application/json; charset=utf-8');
+                header('Cache-Control: no-store');
+                echo json_encode(['error' => [
+                    'code' => $denial['code'],
+                    'message' => $denial['message'],
+                ]], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+        }
+
+        $indexFile = Bootstrap::rootDir() . '/web/dist/index.html';
+        if (!is_file($indexFile)) {
+            throw new \RuntimeException('Frontend build chybí; spusť `cd web && pnpm build`.');
+        }
+        header('Content-Type: text/html; charset=utf-8');
+        header('Cache-Control: no-cache, no-store, must-revalidate');
+        if ($method !== 'HEAD') {
+            readfile($indexFile);
+        }
+        exit;
+    }
+
     $app = Bootstrap::buildApp();
     $app->run();
 } catch (\Throwable $e) {
