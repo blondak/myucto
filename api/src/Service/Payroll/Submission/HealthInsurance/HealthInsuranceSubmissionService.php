@@ -97,7 +97,17 @@ final readonly class HealthInsuranceSubmissionService
                 'total' => count($this->codes->codes()),
                 'narrowing_effective_from' =>
                     HealthNotificationDutyCatalog::NARROWING_EFFECTIVE_FROM,
-                'mapping_from_duty_documented' => false,
+                // Mapování je doložené anotací připnutého XSD, ale jen tam,
+                // kde schéma určuje jediný kód; zbytek zůstává fail-closed.
+                'mapping_from_duty_documented' => array_values(array_filter(
+                    array_map(
+                        fn (HealthNotificationDutyKind $kind): ?string =>
+                            $this->codes->isCodeMappingDocumented($kind)
+                                ? $kind->value
+                                : null,
+                        HealthNotificationDutyKind::cases(),
+                    ),
+                )),
             ],
             'duties' => array_map(
                 static fn (HealthNotificationDutyRule $rule): array =>

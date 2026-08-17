@@ -45,6 +45,15 @@ final readonly class HealthNotificationChange
                 'Věta hromadného oznámení musí mít jméno i příjmení.',
             );
         }
+        if (mb_strlen($this->firstName) > 60
+            || mb_strlen($this->lastName) > 60
+        ) {
+            throw new HealthNotificationException(
+                'zp_change_person_name_too_long',
+                'Jméno ani příjmení nesmí přesáhnout šedesát znaků '
+                . '(`string60Typ` v datové větě).',
+            );
+        }
         $this->address?->assertValid();
     }
 }

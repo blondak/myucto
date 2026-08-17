@@ -221,10 +221,39 @@ final class HealthNotificationDutyTest extends TestCase
         }
     }
 
-    /** Mapování druh povinnosti → písmeno kódu podklady nedokládají. */
-    public function testCodeForDutyKindIsFailClosedBecauseSemanticsAreUndocumented(): void
+    /**
+     * Význam písmen dokládá anotace `kodZmenyZamestnaceTyp` v připnutém HOZ
+     * XSD, takže tyhle druhy povinnosti kód doloženě mají. Kód „M" nese
+     * podle schématu mateřskou i rodičovskou dovolenou.
+     */
+    public function testCodeForDutyKindFollowsThePinnedSchemaAnnotation(): void
     {
-        foreach (HealthNotificationDutyKind::cases() as $kind) {
+        foreach ([
+            HealthNotificationDutyKind::EmploymentStart->value => 'P',
+            HealthNotificationDutyKind::EmploymentEnd->value => 'O',
+            HealthNotificationDutyKind::MaternityLeaveStart->value => 'M',
+            HealthNotificationDutyKind::ParentalLeaveStart->value => 'M',
+            HealthNotificationDutyKind::MaternityOrParentalLeaveEnd->value => 'U',
+        ] as $kindValue => $expected) {
+            $kind = HealthNotificationDutyKind::from($kindValue);
+            self::assertTrue($this->codes->isCodeMappingDocumented($kind));
+            self::assertSame($expected, $this->codes->codeFor($kind));
+            self::assertTrue($this->codes->isKnown($expected));
+        }
+    }
+
+    /**
+     * Kde ani schéma jediný kód neurčuje (opravy podle položky, přestup podle
+     * směru, skutečnosti, které zaměstnavatel nehlásí), zůstává fail-closed.
+     */
+    public function testCodeForDutyKindStaysFailClosedWhereTheSchemaIsAmbiguous(): void
+    {
+        foreach ([
+            HealthNotificationDutyKind::EmployeeDataChange,
+            HealthNotificationDutyKind::InsurerChange,
+            HealthNotificationDutyKind::StateCategoryOther,
+        ] as $kind) {
+            self::assertFalse($this->codes->isCodeMappingDocumented($kind));
             try {
                 $this->codes->codeFor($kind);
                 self::fail('Kód se nesmí odhadnout: ' . $kind->value);
@@ -233,6 +262,7 @@ final class HealthNotificationDutyTest extends TestCase
                     'zp_change_code_mapping_undocumented',
                     $e->errorCode,
                 );
+                self::assertStringContainsString($kind->value, $e->getMessage());
             }
         }
     }

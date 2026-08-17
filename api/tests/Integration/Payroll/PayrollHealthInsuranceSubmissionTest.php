@@ -111,7 +111,16 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         self::assertCount(7, $capability['channels']);
         self::assertFalse($capability['automated_dispatch']['supported']);
         self::assertSame(25, $capability['change_codes']['total']);
-        self::assertFalse(
+        // Mapování druh → kód dokládá anotace připnutého XSD, ale jen tam,
+        // kde schéma určuje jediný kód; opravy a přestup zůstávají otevřené.
+        self::assertSame(
+            [
+                'employment_start',
+                'employment_end',
+                'maternity_leave_start',
+                'parental_leave_start',
+                'maternity_or_parental_leave_end',
+            ],
             $capability['change_codes']['mapping_from_duty_documented'],
         );
         foreach ($capability['channels'] as $code => $channel) {

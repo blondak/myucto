@@ -12,13 +12,11 @@ namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
  * je VZP, namespace je `xmlns.vzp.cz`. Společný ale NENÍ kanál; ten řeší
  * {@see HealthInsurerChannelCatalog}.
  *
- * **Balíček v repu zatím není.** Rešerše ho vědomě nezkopírovala
- * (`private/Mzdy/21-ZP-PODANI-RESERSE.md`, § 11) a stahovat schéma za běhu
- * nepřipadá v úvahu — zdrojové URL ČPZP jsou CDN hashe, které se mohou kdykoli
- * změnit. Katalog proto drží MANIFEST (URL, otisk, namespace, kořen, konstanty)
- * a `schemaFor()` skončí `zp_schema_bundle_missing`, dokud soubory nepřibudou.
- * Otisky pocházejí z rešerše a jsou tím, co se po stažení musí sedět —
- * ne tím, co se dopočítá z toho, co zrovna přijde.
+ * **Balíček je v repu** (`api/xsd/zp/2025-v8/`) a katalog ho pouští jen tehdy,
+ * když soubor sedí na otisk z MANIFESTU. Otisky pocházejí z rešerše, ne
+ * z toho, co zrovna přijde ze sítě: schéma se za běhu záměrně nestahuje
+ * (zdrojové URL ČPZP jsou CDN hashe, které se mohou kdykoli změnit) a soubor
+ * s jiným otiskem skončí `zp_schema_bundle_missing`, ne tichým přijetím.
  */
 final class HealthInsuranceSchemaCatalog
 {
