@@ -253,7 +253,8 @@ const navSections = computed<NavSection[]>(() => {
         title: t('nav.section_documents'),
         accent: 'neutral',
         items: [
-          { to: '/portal/document-requests', label: t('nav.document_requests'), icon: ICONS.requestDoc },
+          { to: '/portal/purchase-invoice-submissions', label: t('nav.submit_documents'), icon: ICONS.documents, permission: 'documents.submit' as PermissionKey },
+          { to: '/portal/document-requests', label: t('nav.document_requests'), icon: ICONS.requestDoc, permission: 'documents.submit' as PermissionKey },
         ],
       },
     ])
@@ -326,6 +327,7 @@ const navSections = computed<NavSection[]>(() => {
       accent: 'warning',
       items: [
         { to: '/purchase-invoices',          label: t('nav.purchase_invoices'),  icon: ICONS.purchase, newTo: '/purchase-invoices/new' },
+        { to: '/purchase-invoices/incoming', label: t('nav.incoming_documents'), icon: ICONS.documents, permission: 'documents.inbox' as PermissionKey },
         // AI import přijaté faktury (§12b) — denní operativa účetní (nahrát PDF → draft PF);
         // nastavení AI brány (klíče, DPA) zůstává v adminu (Firma → AI nastavení).
         // Explicitní permission: scan zrcadlí BE check AiExtractPdfAction; readonly ji nevidí.

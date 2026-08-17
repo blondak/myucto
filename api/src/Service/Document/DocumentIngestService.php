@@ -72,6 +72,36 @@ final class DocumentIngestService
     }
 
     /**
+     * Uloží jediný originál bez synchronní extrakce textu a tvorby náhledu.
+     *
+     * Stagingové workflow potřebuje nejdřív spolehlivě převzít původní
+     * bajty. Odvozená data vzniknou až při navazujícím zpracování.
+     *
+     * @return array{kind:string,created_ids:list<int>,container_id:?int,skipped:list<array{name:string,reason:string}>}
+     * @throws DocumentException
+     */
+    public function ingestOriginalTemp(
+        string $tmpPath,
+        int $supplierId,
+        ?int $folderId,
+        string $originalName,
+        ?int $userId,
+    ): array {
+        $stored = $this->storage->storeFromTemp($tmpPath, $supplierId, $originalName);
+        $id = $this->insertAndProcess(
+            $stored,
+            $supplierId,
+            $folderId,
+            $originalName,
+            $userId,
+            'manual',
+            null,
+            false,
+        );
+        return ['kind' => 'plain', 'created_ids' => [$id], 'container_id' => null, 'skipped' => []];
+    }
+
+    /**
      * Najde-nebo-vytvoří cestu složek z relativních segmentů pod baseFolderId.
      * @param list<string> $segments
      */
@@ -100,6 +130,7 @@ final class DocumentIngestService
         ?int $userId,
         string $source,
         ?int $parentId,
+        bool $createDerivatives = true,
     ): int {
         $id = $this->documents->insert([
             'supplier_id'        => $supplierId,
@@ -148,7 +179,9 @@ final class DocumentIngestService
             ]);
         }
 
-        $this->postProcess($id, $stored, $supplierId);
+        if ($createDerivatives) {
+            $this->postProcess($id, $stored, $supplierId);
+        }
         return $id;
     }
 

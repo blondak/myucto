@@ -506,8 +506,9 @@ final class DocumentRepository
     }
 
     /**
-     * Ref-counting (Epic F7, §4.4): union přes documents + document_files, protože
-     * oba subsystémy A sdílejí `sup-{id}` content-addressed sha strom. Bajt se odpojí
+     * Ref-counting (Epic F7, §4.4): union přes documents + document_files a neměnné
+     * originály klientských podání, protože všechny sdílejí `sup-{id}` content-addressed
+     * sha strom. Bajt se odpojí
      * teprve při součtu 0 — smazání jednoho document_files řádku NESMÍ odpojit bajt
      * referencovaný jiným řádkem/dokumentem. Union je supplier-scoped (NE per-user):
      * bajty jsou sdílené v rámci tenanta bez ohledu na scope company/user.
@@ -552,7 +553,14 @@ final class DocumentRepository
         $params[] = $supplierId;
         $params[] = $sha256;
 
-        $stmt = $this->db->pdo()->prepare("SELECT ($sql1) + ($sql2) + ($sql3)");
+        // Staging podání drží svůj původní SHA nezávisle na aktuálním primary souboru
+        // DMS dokumentu. Účetní tak může k dokumentu spravovat přílohy, ale původní
+        // klientský originál se nesmí orphan-cleanupem fyzicky odpojit.
+        $sql4 = 'SELECT COUNT(*) FROM purchase_invoice_submissions WHERE supplier_id = ? AND document_sha256 = ?';
+        $params[] = $supplierId;
+        $params[] = $sha256;
+
+        $stmt = $this->db->pdo()->prepare("SELECT ($sql1) + ($sql2) + ($sql3) + ($sql4)");
         $stmt->execute($params);
         return (int) $stmt->fetchColumn();
     }

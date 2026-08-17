@@ -8,9 +8,12 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\DocumentRequestRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
-use MyInvoice\Service\Import\AiPdfExtractor;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionException;
+use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionUploadService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\UploadedFileInterface;
@@ -21,25 +24,26 @@ use Psr\Http\Message\UploadedFileInterface;
  *   GET  /api/portal/document-requests               — vlastní požadavky (aktivní firma)
  *   POST /api/portal/document-requests/{id}/upload    — nahrání dokladu, field "file"
  *
- * Upload reuse existující AI extrakce (stejná cesta jako admin import
- * /api/admin/imports/ai-extract-pdf) — vytvoří purchase_invoice draft a spáruje
- * ho s požadavkem (status → uploaded). Supplier scope řeší SupplierScopeMiddleware
+ * Upload ukládá originál do samostatné staging fronty; přijatá faktura vznikne až
+ * při kontrole účetní. Supplier scope řeší SupplierScopeMiddleware
  * (klient bez membershipu = fail-closed 403 v resolveru) — KRITICKÉ pro tenant izolaci,
  * klient nesmí vidět ani ovlivnit požadavky jiné firmy.
  */
 final class PortalDocumentRequestAction
 {
-    private const MAX_PDF_BYTES = 32 * 1024 * 1024;
-
     public function __construct(
         private readonly DocumentRequestRepository $repo,
-        private readonly AiPdfExtractor $extractor,
+        private readonly PurchaseInvoiceSubmissionUploadService $upload,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
     ) {}
 
     public function list(Request $request, Response $response): Response
     {
+        if (!RequestAuthorization::isClientType($request)
+            || !RequestAuthorization::allows($request, 'documents.submit', AccessLevel::READ)) {
+            return Json::error($response, 'forbidden', 'K požadavkům na doklady nemáte oprávnění.', 403);
+        }
         $supplierId = SupplierGuard::currentId($request);
         if ($supplierId <= 0) {
             return Json::error($response, 'no_supplier', 'Žádná firma není dostupná.', 403);
@@ -49,6 +53,10 @@ final class PortalDocumentRequestAction
 
     public function upload(Request $request, Response $response, array $args): Response
     {
+        if (!RequestAuthorization::isClientType($request)
+            || !RequestAuthorization::allows($request, 'documents.submit', AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'K předávání dokladů nemáte oprávnění.', 403);
+        }
         $supplierId = SupplierGuard::currentId($request);
         if ($supplierId <= 0) {
             return Json::error($response, 'no_supplier', 'Žádná firma není dostupná.', 403);
@@ -58,8 +66,8 @@ final class PortalDocumentRequestAction
         if ($item === null) {
             return Json::error($response, 'not_found', 'Požadavek nenalezen.', 404);
         }
-        if ((string) $item['status'] === 'resolved') {
-            return Json::error($response, 'already_resolved', 'Požadavek je už uzavřený.', 409);
+        if ((string) $item['status'] !== 'requested') {
+            return Json::error($response, 'already_uploaded', 'K požadavku už byl doklad předán.', 409);
         }
 
         $uploads = $request->getUploadedFiles();
@@ -67,34 +75,57 @@ final class PortalDocumentRequestAction
         if (!$file instanceof UploadedFileInterface || $file->getError() !== UPLOAD_ERR_OK) {
             return Json::error($response, 'no_file', 'Nahrajte soubor v poli "file".', 400);
         }
-        $size = (int) $file->getSize();
-        if ($size <= 0 || $size > self::MAX_PDF_BYTES) {
-            return Json::error($response, 'file_too_large', 'Soubor musí být <= ' . (int) (self::MAX_PDF_BYTES / 1024 / 1024) . ' MiB.', 413);
-        }
-        $bytes = (string) $file->getStream()->getContents();
-
         $userId = $this->userId($request);
-        $originalName = $file->getClientFilename() ?: null;
-        $result = $this->extractor->extractAndCreate($supplierId, (int) $userId, $bytes, null, $originalName);
-
-        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
-        $this->logger->log('document_request.upload_attempt', $userId, 'document_request', $id, [
-            'ok'     => $result['ok'],
-            'source' => $result['source'] ?? null,
-            'pdf_name' => $originalName,
-        ], $ip, $request->getHeaderLine('User-Agent'), $supplierId);
-
-        if (!$result['ok']) {
-            return Json::error($response, 'extraction_failed', $result['error'] ?? 'Zpracování dokladu selhalo.', 422);
+        $body = (array) ($request->getParsedBody() ?? []);
+        try {
+            $result = $this->upload->submit(
+                $file,
+                $supplierId,
+                $userId,
+                'document_request',
+                isset($body['note']) && trim((string) $body['note']) !== ''
+                    ? (string) $body['note']
+                    : (string) $item['description'],
+                isset($body['document_kind_hint']) ? (string) $body['document_kind_hint'] : null,
+                isset($item['bank_transaction_id']) ? (int) $item['bank_transaction_id'] : null,
+            );
+        } catch (PurchaseInvoiceSubmissionException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
-
-        $purchaseInvoiceId = (int) ($result['purchase_invoice_id'] ?? 0);
-        if ($purchaseInvoiceId > 0) {
-            $this->repo->markUploaded($id, $supplierId, $purchaseInvoiceId);
+        $submission = $result['submission'];
+        $submissionId = (int) $submission['id'];
+        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        $this->logger->log(
+            !empty($result['duplicate']) ? 'purchase_invoice_submission.duplicate' : 'purchase_invoice_submission.created',
+            $userId,
+            'purchase_invoice_submission',
+            $submissionId,
+            [
+                'document_id' => (int) $submission['document_id'],
+                'filename' => (string) $submission['original_name'],
+                'via' => 'document_request',
+                'document_request_id' => $id,
+            ],
+            $ip,
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+        if (!$this->repo->markSubmitted($id, $supplierId, $submissionId)) {
+            return Json::error($response, 'request_state_changed', 'Požadavek se mezitím změnil.', 409);
+        }
+        if ((string) ($submission['status'] ?? '') === 'processed'
+            && (int) ($submission['purchase_invoice_id'] ?? 0) > 0) {
+            $this->repo->markProcessedBySubmission(
+                $submissionId,
+                $supplierId,
+                (int) $submission['purchase_invoice_id'],
+            );
         }
 
         $this->logger->log('document_request.uploaded', $userId, 'document_request', $id, [
-            'purchase_invoice_id' => $purchaseInvoiceId,
+            'submission_id' => $submissionId,
+            'document_id' => (int) $submission['document_id'],
+            'duplicate' => (bool) $result['duplicate'],
         ], $ip, $request->getHeaderLine('User-Agent'), $supplierId);
 
         return Json::ok($response, $this->repo->find($id, $supplierId), 201);

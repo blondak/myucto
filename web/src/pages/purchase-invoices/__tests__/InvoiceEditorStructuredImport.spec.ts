@@ -5,8 +5,12 @@ import { ref } from 'vue'
 
 const m = vi.hoisted(() => ({
   importStructured: vi.fn(),
+  uploadSubmission: vi.fn(),
+  createInvoice: vi.fn(),
   get: vi.fn(),
+  getSubmission: vi.fn(),
   expenseSuggestions: vi.fn(),
+  canWrite: vi.fn(),
 }))
 
 // `locale` musí být v mocku taky: editor ho čte v computed formátování data,
@@ -18,9 +22,21 @@ vi.mock('vue-i18n', () => ({
 vi.mock('@/api/purchaseInvoices', () => ({
   purchaseInvoicesApi: {
     importStructured: m.importStructured,
+    create: m.createInvoice,
     get: m.get,
     expenseSuggestions: m.expenseSuggestions,
     pdfUrl: () => '',
+  },
+}))
+
+vi.mock('@/api/purchaseInvoiceSubmissions', () => ({
+  portalPurchaseInvoiceSubmissionsApi: {
+    upload: m.uploadSubmission,
+  },
+  purchaseInvoiceSubmissionsApi: {
+    get: m.getSubmission,
+    previewUrl: () => '',
+    downloadUrl: () => '',
   },
 }))
 
@@ -52,6 +68,7 @@ vi.mock('@/stores/auth', () => ({
     isClientRole: true,
     hasCommercialFeatures: false,
     isDemo: false,
+    canWrite: m.canWrite,
   }),
 }))
 vi.mock('@/stores/supplier', () => ({
@@ -122,6 +139,20 @@ function importedInvoice() {
   }
 }
 
+async function createEditorRouter() {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/purchase-invoices/new', component: InvoiceEditor },
+      { path: '/purchase-invoices/:id/edit', component: InvoiceEditor },
+      { path: '/portal/purchase-invoice-submissions', component: { render: () => null } },
+    ],
+  })
+  await router.push('/purchase-invoices/new')
+  await router.isReady()
+  return router
+}
+
 describe('InvoiceEditor — strukturovaný import', () => {
   beforeEach(() => {
     m.importStructured.mockReset().mockResolvedValue({
@@ -130,20 +161,21 @@ describe('InvoiceEditor — strukturovaný import', () => {
       source: 'isdoc',
       duplicate: false,
     })
+    m.uploadSubmission.mockReset().mockResolvedValue({
+      items: [{ id: 77 }],
+      created: 1,
+      duplicates: 0,
+      errors: [],
+    })
+    m.createInvoice.mockReset()
     m.get.mockReset().mockResolvedValue(importedInvoice())
+    m.getSubmission.mockReset()
     m.expenseSuggestions.mockReset().mockResolvedValue({ items: {} })
+    m.canWrite.mockReset().mockImplementation((permission: string) => permission === 'documents.submit')
   })
 
   it('po přechodu z /new načte importovaný koncept bez reloadu stránky', async () => {
-    const router = createRouter({
-      history: createMemoryHistory(),
-      routes: [
-        { path: '/purchase-invoices/new', component: InvoiceEditor },
-        { path: '/purchase-invoices/:id/edit', component: InvoiceEditor },
-      ],
-    })
-    await router.push('/purchase-invoices/new')
-    await router.isReady()
+    const router = await createEditorRouter()
 
     const wrapper = shallowMount(InvoiceEditor, {
       global: {
@@ -160,5 +192,58 @@ describe('InvoiceEditor — strukturovaný import', () => {
     expect(router.currentRoute.value.path).toBe('/purchase-invoices/42/edit')
     expect(m.get).toHaveBeenCalledWith(42)
     expect(wrapper.find('input[maxlength="50"]').element).toHaveProperty('value', 'SYNTHETIC-42')
+  })
+
+  it('předá běžné PDF účetní jedním klikem bez založení neúplné faktury', async () => {
+    m.importStructured.mockRejectedValueOnce({
+      response: { data: { error: { code: 'no_embedded_isdoc' } } },
+    })
+    const router = await createEditorRouter()
+    const wrapper = shallowMount(InvoiceEditor, {
+      global: {
+        plugins: [router],
+        directives: { math: {} },
+      },
+    })
+    await flushPromises()
+
+    const file = new File(['%PDF-1.4\n% synthetic plain invoice'], 'plain-invoice.pdf', {
+      type: 'application/pdf',
+    })
+    wrapper.findComponent({ name: 'PdfDropzone' }).vm.$emit('file-dropped', file)
+    await flushPromises()
+
+    const handoff = wrapper.find('[data-testid="handoff-pending-document"]')
+    expect(handoff.exists()).toBe(true)
+    await handoff.trigger('click')
+    await flushPromises()
+
+    expect(m.uploadSubmission).toHaveBeenCalledWith([file], '', 'invoice')
+    expect(m.createInvoice).not.toHaveBeenCalled()
+    expect(router.currentRoute.value.path).toBe('/portal/purchase-invoice-submissions')
+  })
+
+  it('fallback skryje klientovi bez práva předávat doklady', async () => {
+    m.canWrite.mockReturnValue(false)
+    m.importStructured.mockRejectedValueOnce({
+      response: { data: { error: { code: 'no_embedded_isdoc' } } },
+    })
+    const router = await createEditorRouter()
+    const wrapper = shallowMount(InvoiceEditor, {
+      global: {
+        plugins: [router],
+        directives: { math: {} },
+      },
+    })
+    await flushPromises()
+
+    const file = new File(['%PDF-1.4\n% synthetic restricted invoice'], 'restricted.pdf', {
+      type: 'application/pdf',
+    })
+    wrapper.findComponent({ name: 'PdfDropzone' }).vm.$emit('file-dropped', file)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="handoff-pending-document"]').exists()).toBe(false)
+    expect(m.uploadSubmission).not.toHaveBeenCalled()
   })
 })

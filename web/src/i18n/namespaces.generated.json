@@ -71,6 +71,7 @@
     "profile_signing",
     "project",
     "purchase_invoice",
+    "purchase_submissions",
     "recovery_codes",
     "recurring",
     "reports",
@@ -104,11 +105,16 @@
     ],
     "portal": [
       "portal",
+      "purchase_submissions",
       "reports"
     ],
     "portal-document-requests": [
       "document_requests",
       "portal"
+    ],
+    "portal-purchase-invoice-submissions": [
+      "purchase_invoice",
+      "purchase_submissions"
     ],
     "clients": [
       "purchase_invoice"
@@ -204,6 +210,10 @@
       "lock",
       "purchase_invoice"
     ],
+    "purchase-invoice-submissions": [
+      "purchase_invoice",
+      "purchase_submissions"
+    ],
     "purchase-invoices-export": [
       "export",
       "imports",
@@ -232,6 +242,7 @@
       "lock",
       "payment_method",
       "purchase_invoice",
+      "purchase_submissions",
       "vendor"
     ],
     "purchase-invoice-detail": [
@@ -253,6 +264,7 @@
       "lock",
       "payment_method",
       "purchase_invoice",
+      "purchase_submissions",
       "vendor"
     ],
     "documents": [
@@ -785,6 +797,7 @@
       "profile_signing",
       "project",
       "purchase_invoice",
+      "purchase_submissions",
       "recovery_codes",
       "recurring",
       "reports",
