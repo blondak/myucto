@@ -168,6 +168,13 @@ export interface PayrollHealthBreakdown {
     top_up_applied: boolean
     top_up_base_minor: number | null
     top_up_responsibility: string
+    /**
+     * Odkud plátce doplatku pochází: `declared` = někdo ho prohlásil evidencí,
+     * `statutory_default` = odvodil se ze zákona (§ 3 odst. 10 z. č. 592/1992
+     * Sb.), protože evidence nebyla potřeba. Prázdné u revizí spočítaných dřív,
+     * než klíč vznikl — tam se nezobrazuje nic.
+     */
+    top_up_responsibility_source: string
     top_up_employer_selection: string
     top_up_responsibility_evidence_reference: string | null
     selected_top_up_employer_evidence_reference: string | null

@@ -1095,6 +1095,10 @@
                     "employer_obstacle_verified": "The employer pays the top-up — an obstacle on their side is evidenced.",
                     "unverified": "Who pays the top-up is not evidenced."
                 },
+                "top_up_responsibility_source": {
+                    "declared": "evidenced",
+                    "statutory_default": "by law (§ 3(10) of Act No. 592/1992 Coll.)"
+                },
                 "health_minimum_days": "The minimum is prorated to {applicable} calendar days ({excluded} days are not counted); the full monthly minimum is {statutory}.",
                 "health_other_employers": "Other employers evidence a base of {other}, {combined} in total — the minimum is therefore assessed from the sum.",
                 "insurer_split_title": "Split by health insurer",
@@ -2442,7 +2446,7 @@
                     "social_jurisdictions": "Whether the person is subject to Czech social insurance. A foreign regime needs a country and an A1 form.",
                     "social_discount_claims": "Insurance discount for an employee drawing an old-age pension. If it is not claimed, pick “not claimed”.",
                     "health_coverages": "Whether the person is subject to Czech health insurance and which insurer they are registered with.",
-                    "health_month_evidence": "Who tops up to the minimum assessment base for the month. Fill in only when it is relevant."
+                    "health_month_evidence": "Left empty means the employee pays the top-up to the minimum assessment base — that is what the law says. Add a record only for the exception: an obstacle on the employer's side, or the choice of employer when there are several."
                 },
                 "field": {
                     "status": "Status",

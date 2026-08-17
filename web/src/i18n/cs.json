@@ -1095,6 +1095,10 @@
                     "employer_obstacle_verified": "Dopočet hradí zaměstnavatel — je doložena překážka na jeho straně.",
                     "unverified": "Kdo dopočet hradí, není doloženo."
                 },
+                "top_up_responsibility_source": {
+                    "declared": "doloženo evidencí",
+                    "statutory_default": "ze zákona (§ 3 odst. 10 z. č. 592/1992 Sb.)"
+                },
                 "health_minimum_days": "Minimum se krátí na {applicable} kalendářních dnů ({excluded} dnů se nezapočítává); plné měsíční minimum je {statutory}.",
                 "health_other_employers": "U jiných zaměstnavatelů je doložen základ {other}, dohromady tedy {combined} — proto se minimum posuzuje ze součtu.",
                 "insurer_split_title": "Rozpad podle zdravotních pojišťoven",
@@ -2442,7 +2446,7 @@
                     "social_jurisdictions": "Zda osoba podléhá českému sociálnímu pojištění. U cizího režimu je potřeba země a formulář A1.",
                     "social_discount_claims": "Sleva na pojistném u zaměstnance pobírajícího starobní důchod. Neuplatňuje-li se, zvolte „neuplatňuje se“.",
                     "health_coverages": "Zda osoba podléhá českému zdravotnímu pojištění a u které pojišťovny je vedená.",
-                    "health_month_evidence": "Kdo za daný měsíc doplácí do minimálního vyměřovacího základu. Vyplňte, jen když se to řeší."
+                    "health_month_evidence": "Nevyplněno znamená, že dopočet do minimálního vyměřovacího základu hradí zaměstnanec — tak to určuje zákon. Záznam zakládejte jen pro výjimku: překážku na straně zaměstnavatele nebo volbu zaměstnavatele při souběhu."
                 },
                 "field": {
                     "status": "Stav",
