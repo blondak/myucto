@@ -55,17 +55,52 @@ final class JmhzVrepClientTest extends TestCase
         self::assertSame('<GovTalkMessage/>', (string) $request->getBody());
     }
 
-    public function testProductionEndpointIsUnknownAndNothingIsSent(): void
+    /**
+     * Produkční adresy jsou doložené (protokol ČSSZ v1.47, str. 47) a musí být
+     * PŘESNĚ tyhle. Test je tu proto, aby se nedaly tiše změnit: rozdíl proti
+     * testovacímu prostředí je jediný prefix `t-`, takže překlep je pravopisně
+     * neviditelný a odešel by ostré podání na nesprávný cíl.
+     */
+    public function testProductionSubmissionGoesToDocumentedEndpoint(): void
     {
-        $client = $this->client([], 'production');
+        $client = $this->client([
+            new Response(200, ['Content-Type' => 'text/xml'], '<GovTalkMessage/>'),
+        ], 'production');
 
-        try {
-            $client->submit('<GovTalkMessage/>');
-            self::fail('Produkční pokus musí skončit výjimkou.');
-        } catch (JmhzTransportException $e) {
-            self::assertSame('jmhz_vrep_production_endpoint_unknown', $e->errorCode);
-        }
-        self::assertSame([], $this->history);
+        $client->submit('<GovTalkMessage/>');
+
+        self::assertSame(
+            'https://epodani.cssz.cz/VREP/submission',
+            (string) $this->history[0]['request']->getUri(),
+        );
+    }
+
+    public function testProductionPollGoesToDocumentedEndpoint(): void
+    {
+        $client = $this->client([
+            new Response(200, ['Content-Type' => 'text/xml'], '<GovTalkMessage/>'),
+        ], 'production');
+
+        $client->poll('CID0000000001', '<GovTalkMessage>CID0000000001</GovTalkMessage>');
+
+        self::assertSame(
+            'https://epodani.cssz.cz/VREP/poll',
+            (string) $this->history[0]['request']->getUri(),
+        );
+    }
+
+    /** Prostředí se nesmějí prolnout — prefix `t-` je jediný rozdíl. */
+    public function testEnvironmentsDoNotShareHost(): void
+    {
+        $test = $this->client([
+            new Response(200, ['Content-Type' => 'text/xml'], '<GovTalkMessage/>'),
+        ]);
+        $test->submit('<GovTalkMessage/>');
+
+        self::assertStringStartsWith(
+            'https://t-epodani.cssz.cz/',
+            (string) $this->history[0]['request']->getUri(),
+        );
     }
 
     public function testHttpErrorIsMappedWithRemoteStatus(): void
