@@ -87,6 +87,7 @@ use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAgendaSummaryAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentDimensionAction;
 use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
+use MyInvoice\Action\Payroll\PayrollHealthNotificationAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
@@ -1122,6 +1123,22 @@ final class Routes
             $g->get(
                 '/submissions/health-overviews/{revisionId:[0-9]+}/{insurerCode:[0-9]{3}}/download',
                 [PayrollHealthInsuranceOverviewAction::class, 'download'],
+            );
+            $g->get(
+                '/submissions/health-notifications/capability',
+                [PayrollHealthNotificationAction::class, 'capability'],
+            );
+            $g->get(
+                '/submissions/health-notifications/duties/{employmentId:[0-9]+}',
+                [PayrollHealthNotificationAction::class, 'duties'],
+            );
+            $g->post(
+                '/submissions/health-notifications/duties/{employmentId:[0-9]+}/obligations',
+                [PayrollHealthNotificationAction::class, 'registerObligations'],
+            );
+            $g->post(
+                '/submissions/health-notifications/payment-overview/{revisionId:[0-9]+}/{insurerCode:[0-9]{3}}/prepare',
+                [PayrollHealthNotificationAction::class, 'preparePaymentOverview'],
             );
             $g->get('/time/month', [PayrollTimeAction::class, 'month']);
             $g->put('/time/calendars/{employmentId:[0-9]+}', [PayrollTimeAction::class, 'calendar']);

@@ -44,6 +44,13 @@ final class PayrollCalendarYearPinGuardTest extends TestCase
         // neptá na letopočet, ale na existenci zmrazené revize.
         'Service/Payroll/Submission/Eldp/EldpDeadlinePolicy.php' =>
             ['standaloneStatementAllowed'],
+        // Rozsah 2000–2099 je typ `rokHlaseni` z jednotného XSD zdravotních
+        // pojišťoven, tedy kontrola formátu datové věty — ne rok podpory
+        // modulu. Kdyby se neuplatnila tady, spadne stejně na schématu;
+        // rozdíl je jen v tom, jestli uživatel dostane srozumitelnou větu,
+        // nebo hlášku libxml.
+        'Service/Payroll/Submission/HealthInsurance/HealthPaymentOverviewPayload.php' =>
+            ['assertValid'],
     ];
 
     public function testNoCalendarYearLiteralGatesPayrollCalculations(): void
