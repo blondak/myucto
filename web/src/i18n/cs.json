@@ -2348,6 +2348,115 @@
                     "bonus_qualifying_income_minor_units": "Příjem pro bonus"
                 }
             },
+            "statutory_evidence": {
+                "title": "Zákonná evidence osoby",
+                "subtitle": "Prohlášení k dani, daňová rezidence, příslušnost k sociálnímu a zdravotnímu pojištění a sleva pracujícího důchodce.",
+                "blocked_badge": "vše doplněno | 1 chybějící údaj | {count} chybějící údaje | {count} chybějících údajů",
+                "blockers_title": "K tomuto měsíci chybí:",
+                "blockers_consequence": "Dokud tyto údaje chybí, mzdový běh zákonný výpočet této osoby nespočítá a skončí v ručním posouzení.",
+                "complete": "Evidence je k tomuto měsíci úplná — zákonný výpočet má z čeho vycházet.",
+                "effective_on": "Ke kterému dni",
+                "effective_on_hint": "Evidence se vyhodnocuje po celých měsících; datum určuje, který měsíc se kontroluje.",
+                "frozen_hint": "Do {day} je historie uzavřená schválenou mzdou. Starší záznamy nejdou přepsat ani smazat — změna se uloží jako nová verze od dalšího měsíce.",
+                "period_start": "Za měsíc",
+                "effective_from": "Platí od",
+                "effective_to": "Platí do",
+                "evidence_note": "Poznámka k dokladu",
+                "evidence_note_placeholder": "Např. originál v deskách zaměstnance, kopie ve spisu",
+                "reference_hint": "Písmena, číslice a . : / _ -",
+                "reference_placeholder": "např. document:tax-declaration-2026",
+                "empty": "Zatím žádný záznam.",
+                "add_row": "Přidat záznam",
+                "remove_row": "Odebrat",
+                "row_frozen": "Uzavřeno schválenou mzdou",
+                "edit": "Upravit evidenci",
+                "saved": "Zákonná evidence je uložená.",
+                "load_failed": "Zákonnou evidenci se nepodařilo načíst.",
+                "save_failed": "Zákonnou evidenci se nepodařilo uložit.",
+                "blocker": {
+                    "tax_declaration_evidence_missing": "prohlášení poplatníka k dani",
+                    "tax_declaration_evidence_unverified": "prohlášení poplatníka k dani je vedené jako neověřené",
+                    "tax_residence_evidence_missing": "daňová rezidence",
+                    "tax_residence_evidence_unverified": "daňová rezidence je vedená jako neověřená",
+                    "social_jurisdiction_evidence_missing": "příslušnost k sociálnímu pojištění",
+                    "social_jurisdiction_evidence_unverified": "příslušnost k sociálnímu pojištění je vedená jako neověřená",
+                    "working_pensioner_discount_evidence_missing": "sleva pro pracujícího poplatníka v důchodu",
+                    "working_pensioner_discount_evidence_unverified": "sleva pro pracujícího poplatníka v důchodu je vedená jako neověřená",
+                    "health_coverage_evidence_missing": "příslušnost ke zdravotnímu pojištění",
+                    "health_jurisdiction_evidence_unverified": "příslušnost ke zdravotnímu pojištění je vedená jako neověřená",
+                    "health_insurer_evidence_unverified": "zdravotní pojišťovna je vedená jako neověřená",
+                    "statutory_evidence_snapshot_missing_or_mismatched": "evidence je vnitřně rozporná — zkontrolujte, zda se období nepřekrývají"
+                },
+                "section": {
+                    "tax_declarations": "Prohlášení poplatníka k dani",
+                    "tax_residences": "Daňová rezidence",
+                    "social_jurisdictions": "Příslušnost k sociálnímu pojištění",
+                    "social_discount_claims": "Sleva pracujícího důchodce",
+                    "health_coverages": "Příslušnost ke zdravotnímu pojištění",
+                    "health_month_evidence": "Měsíční evidence zdravotního minima"
+                },
+                "section_hint": {
+                    "tax_declarations": "Rozhoduje o tom, zda se uplatní měsíční slevy a zvýhodnění, nebo se sráží daň bez nich.",
+                    "tax_residences": "Nerezident se zdaňuje jinak než rezident; ke každé variantě je potřeba doklad.",
+                    "social_jurisdictions": "Zda osoba podléhá českému sociálnímu pojištění. U cizího režimu je potřeba země a formulář A1.",
+                    "social_discount_claims": "Sleva na pojistném u zaměstnance pobírajícího starobní důchod. Neuplatňuje-li se, zvolte „neuplatňuje se“.",
+                    "health_coverages": "Zda osoba podléhá českému zdravotnímu pojištění a u které pojišťovny je vedená.",
+                    "health_month_evidence": "Kdo za daný měsíc doplácí do minimálního vyměřovacího základu. Vyplňte, jen když se to řeší."
+                },
+                "field": {
+                    "status": "Stav",
+                    "evidence_reference": "Doklad",
+                    "residence": "Rezidence",
+                    "country_code": "Stát",
+                    "jurisdiction": "Režim",
+                    "foreign_country_code": "Zahraniční stát",
+                    "jurisdiction_evidence_reference": "Doklad k režimu",
+                    "a1_status": "Formulář A1",
+                    "a1_certificate_reference": "Doklad k A1",
+                    "a1_valid_until": "A1 platí do",
+                    "insurer_status": "Zdravotní pojišťovna",
+                    "insurer_code": "Kód pojišťovny",
+                    "insurer_evidence_reference": "Doklad k pojišťovně",
+                    "top_up_responsibility": "Doplatek do minima hradí",
+                    "top_up_responsibility_evidence_reference": "Doklad k doplatku",
+                    "selected_top_up_employer_reference": "Zvolený zaměstnavatel",
+                    "selected_top_up_employer_evidence_reference": "Doklad k volbě zaměstnavatele"
+                },
+                "option": {
+                    "status": {
+                        "signed": "Podepsáno",
+                        "not-signed": "Nepodepsáno",
+                        "unverified": "Neověřeno",
+                        "not_claimed": "Neuplatňuje se",
+                        "verified": "Doloženo"
+                    },
+                    "residence": {
+                        "czech-resident": "Český daňový rezident",
+                        "non-resident": "Daňový nerezident",
+                        "unverified": "Neověřeno"
+                    },
+                    "jurisdiction": {
+                        "czech_regime_verified": "Český režim (doloženo)",
+                        "foreign_regime_verified": "Zahraniční režim (doloženo)",
+                        "unverified": "Neověřeno"
+                    },
+                    "a1_status": {
+                        "verified": "Doloženo",
+                        "unverified": "Neověřeno",
+                        "not_applicable": "Netýká se"
+                    },
+                    "insurer_status": {
+                        "verified": "Doloženo",
+                        "unverified": "Neověřeno",
+                        "not_applicable": "Netýká se"
+                    },
+                    "top_up_responsibility": {
+                        "employee": "Zaměstnanec",
+                        "employer_obstacle_verified": "Zaměstnavatel (překážka doložena)",
+                        "unverified": "Neověřeno"
+                    }
+                }
+            },
             "rename_action": "Označení pro import docházky",
             "rename_label": "Označení vztahu",
             "rename_hint": "Používá se jen k párování při importu docházky z CSV. Na úřední výstupy nemá vliv.",

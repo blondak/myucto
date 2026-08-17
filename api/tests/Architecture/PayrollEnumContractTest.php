@@ -102,6 +102,8 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollPayoutMethod'         => 'db:payroll_employee_profiles.payout_method',
         'payroll.ts::PayrollSecureDeliveryChannel' => 'db:payroll_employee_profiles.secure_delivery_channel',
         'payroll.ts::PayrollDependantRelation'    => 'db:payroll_dependants.relation',
+        'payroll.ts::PayrollStatutoryEvidenceSection'
+            => 'const:MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository::EDITABLE_SECTIONS',
         'payroll.ts::PayrollPersonAccountVerificationSource'
             => 'enum:MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationSource',
 

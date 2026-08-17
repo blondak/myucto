@@ -150,6 +150,13 @@ final class RoutePermissionMap
         ['*', '#^/api/payroll/people/[0-9]+/payout-rules(/(apply-defaults|[0-9]+))?$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+/dependants$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/people/[0-9]+/dependants(/[0-9]+(/claims(/[0-9]+)?)?)?$#', 'payroll.person.write', AccessLevel::WRITE],
+        // Zákonná evidence osoby (prohlášení k dani, daňová rezidence, sociální
+        // a zdravotní příslušnost, sleva pracujícího důchodce). Jsou to právní
+        // skutečnosti vedené na OSOBĚ, ne na pracovním vztahu — jedna osoba jich
+        // může mít víc a evidence platí napříč. Proto stejné právo jako profil
+        // a vyživované osoby, ne `payroll.employment.write`.
+        ['GET', '#^/api/payroll/people/[0-9]+/statutory-evidence$#', 'payroll', AccessLevel::READ],
+        ['PUT', '#^/api/payroll/people/[0-9]+/statutory-evidence$#', 'payroll.person.write', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/people/[0-9]+/quick-edit$#', 'payroll.person.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/people/[0-9]+/sensitive-reveal$#', 'payroll.person.read_sensitive', AccessLevel::READ],
         ['POST', '#^/api/payroll/people/[0-9]+/employments$#', 'payroll.employment.write', AccessLevel::WRITE],

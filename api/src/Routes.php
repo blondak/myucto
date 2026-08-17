@@ -108,6 +108,7 @@ use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
 use MyInvoice\Action\Payroll\PayrollPersonQuickEditAction;
 use MyInvoice\Action\Payroll\PayrollOpeningBalanceAction;
 use MyInvoice\Action\Payroll\PayrollPersonSensitiveRevealAction;
+use MyInvoice\Action\Payroll\PayrollPersonStatutoryEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollPostingReconciliationAction;
 use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
 use MyInvoice\Action\Payroll\PayrollRegistrationAction;
@@ -916,6 +917,14 @@ final class Routes
             $g->post(
                 '/people/{id:[0-9]+}/sensitive-reveal',
                 [PayrollPersonSensitiveRevealAction::class, 'post'],
+            );
+            $g->get(
+                '/people/{id:[0-9]+}/statutory-evidence',
+                [PayrollPersonStatutoryEvidenceAction::class, 'show'],
+            );
+            $g->put(
+                '/people/{id:[0-9]+}/statutory-evidence',
+                [PayrollPersonStatutoryEvidenceAction::class, 'save'],
             );
             $g->get(
                 '/people/{id:[0-9]+}/statutory-openings',

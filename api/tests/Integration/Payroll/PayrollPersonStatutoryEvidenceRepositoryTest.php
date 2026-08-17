@@ -35,10 +35,11 @@ final class PayrollPersonStatutoryEvidenceRepositoryTest extends TestCase
         if (!$db->hasTable('payroll_person_social_discount_claims')) {
             $this->markTestSkipped('Migrace 1256 neproběhla.');
         }
-        $this->repository = new PayrollPersonStatutoryEvidenceRepository(
-            $db,
-            new PayrollPersonStatutoryEvidenceValidator(),
-        );
+        $repository = $container->get(PayrollPersonStatutoryEvidenceRepository::class);
+        if (!$repository instanceof PayrollPersonStatutoryEvidenceRepository) {
+            throw new \RuntimeException('Repozitář zákonné evidence není dostupný.');
+        }
+        $this->repository = $repository;
 
         $pdo = $db->pdo();
         $sourceSupplierId = (int) $pdo->query(

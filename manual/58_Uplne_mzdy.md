@@ -220,6 +220,48 @@ a vznikne nová účinná verze od měsíce následujícího, takže historický
 zůstane nedotčený. Ukončení nároku mimo zmrazené období se provede běžnou
 úpravou data „Nárok do".
 
+### 58.4.2 Zákonná evidence osoby
+
+Pod běžnými údaji zaměstnance je sekce **Zákonná evidence osoby**. Vede právní
+skutečnosti, ze kterých vychází zákonný výpočet:
+
+- **prohlášení poplatníka k dani** — rozhoduje, zda se uplatní měsíční slevy
+  a zvýhodnění, nebo se sráží daň bez nich;
+- **daňová rezidence** — rezident, nerezident (se zemí), nebo neověřeno;
+- **příslušnost k sociálnímu pojištění** včetně formuláře A1 u zahraničního
+  režimu;
+- **sleva pro pracujícího poplatníka v důchodu**;
+- **příslušnost ke zdravotnímu pojištění** a zdravotní pojišťovna;
+- **měsíční evidence zdravotního minima** — kdo za daný měsíc doplácí do
+  minimálního vyměřovacího základu.
+
+Chybí-li kterýkoli z prvních pěti údajů, mzdový běh zákonný výpočet této osoby
+nespočítá a skončí v ručním posouzení. Sekce proto v hlavičce ukazuje počet
+chybějících údajů a uvnitř je vyjmenuje pro konkrétní měsíc; datum **Ke kterému
+dni** určuje, který měsíc se kontroluje.
+
+Ověřené hodnoty (český nebo zahraniční režim, doložená pojišťovna, platný A1)
+jsou právní skutečnosti, takže vyžadují **doklad** — kanonickou referenci do
+mzdové dokumentace (písmena, číslice a znaky `.`, `:`, `/`, `_`, `-`). Lidské
+vysvětlení patří do pole **Poznámka k dokladu**. Kdo doklad nemá, zvolí variantu
+**neověřeno**; ta se uloží, ale zůstane vidět jako důvod ručního posouzení.
+
+Evidence se zadává **po celých měsících** a záznamy jedné řady musí na sebe
+navazovat den po dni — čtecí cesta vyhodnocuje evidenci k prvnímu dni měsíce,
+takže změna uprostřed měsíce by se buď ztratila, nebo by pro daný měsíc vznikly
+dvě současně platné verze. Díra v řadě se odmítne už při uložení; jinak by se
+projevila až tím, že mzdový běh za chybějící měsíc spadne do ručního posouzení.
+
+Záznam, který začal před koncem posledního schváleného mzdového období, je
+uzavřený: jeho začátek nejde posunout ani ho smazat. Věcná změna se do něj
+nezapíše — původní záznam se ukončí posledním uzavřeným dnem a nová právní
+skutečnost vznikne jako nový záznam od dalšího měsíce. Doplnit dosud chybějící
+záznam do uzavřeného období naopak jde; nic tím nepřepisuje.
+
+Celá sekce se ukládá jedním tlačítkem **Uložit**. Čtení stačí obecné oprávnění
+pro mzdy, zápis vyžaduje **Spravovat zaměstnance** (`payroll.person.write`) —
+evidence je vedená na osobě, ne na jednotlivém pracovním vztahu.
+
 ## 58.5 Pracovní vztah a předkontace
 
 Jedna osoba může mít více samostatných právních vztahů. Rozlišení je důležité

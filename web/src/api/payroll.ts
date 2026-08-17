@@ -373,6 +373,53 @@ export interface PayrollOpeningBalances {
   locked: boolean
 }
 
+/**
+ * Zákonná evidence osoby — prohlášení k dani, daňová rezidence, sociální
+ * a zdravotní příslušnost, sleva pracujícího důchodce a měsíční evidence
+ * zdravotního minima.
+ *
+ * Řádky jsou časové řady, takže se posílají a vrací jako celé kolekce; server
+ * si z cílového stavu spočítá rozdíl. Hodnoty jsou úmyslně `string | null` —
+ * jde o výčty a reference, jejichž povolené hodnoty hlídá server (a validátor
+ * mzdového snímku), ne prohlížeč.
+ */
+export interface PayrollStatutoryEvidenceRow {
+  id?: number
+  row_version?: number
+  effective_from?: string
+  effective_to?: string | null
+  period_start?: string
+  evidence_note?: string | null
+  [field: string]: string | number | null | undefined
+}
+
+export type PayrollStatutoryEvidenceSection =
+  | 'tax_declarations'
+  | 'tax_residences'
+  | 'social_jurisdictions'
+  | 'social_discount_claims'
+  | 'health_coverages'
+  | 'health_month_evidence'
+
+export interface PayrollStatutoryEvidence {
+  employee_id: number
+  effective_on: string
+  /** Poslední den uzavřený schválenou mzdou; do něj se historie nepřepisuje. */
+  frozen_through: string | null
+  sections: Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
+  other_employer_bases: PayrollStatutoryEvidenceRow[]
+  /**
+   * Důvody, proč by mzdový běh k datu snímku skončil v ručním posouzení.
+   * Klíče jsou tytéž, jaké hlásí `PayrollRunStatutoryInputAssembler`.
+   */
+  blockers: string[]
+}
+
+export interface PayrollStatutoryEvidencePayload {
+  effective_on: string
+  sections: Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
+}
+
 export interface PayrollPersonProfile {
   employee_id: number
   full_name: string
@@ -3002,6 +3049,20 @@ export const payrollApi = {
   personProfile: (id: number) =>
     api.get<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`)
       .then(response => response.data.profile),
+  /** Zákonná evidence osoby k danému dni včetně celé historie a blokátorů běhu. */
+  statutoryEvidence: (employeeId: number, effectiveOn: string) =>
+    api.get<{ evidence: PayrollStatutoryEvidence }>(
+      `/payroll/people/${employeeId}/statutory-evidence`,
+      { params: { effective_on: effectiveOn } },
+    ).then(response => response.data.evidence),
+  saveStatutoryEvidence: (
+    employeeId: number,
+    payload: PayrollStatutoryEvidencePayload,
+  ) =>
+    api.put<{ evidence: PayrollStatutoryEvidence }>(
+      `/payroll/people/${employeeId}/statutory-evidence`,
+      payload,
+    ).then(response => response.data.evidence),
     /** Počáteční stavy zákonných kumulací za rok — úhrny z předchozího zpracování. */
   statutoryOpenings: (employeeId: number, year: number) =>
     api.get<{ openings: PayrollOpeningBalances }>(

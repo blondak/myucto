@@ -143,6 +143,7 @@ function mountPage() {
           template: '<div data-test="quick-edit-stub">{{ personId }}</div>',
         },
         PayrollPersonProfilePanel: true,
+        PayrollPersonStatutoryEvidencePanel: true,
       },
     },
   })

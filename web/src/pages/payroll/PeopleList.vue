@@ -27,6 +27,7 @@ import EmploymentCard from './EmploymentCard.vue'
 import PayrollPersonQuickEdit from './PayrollPersonQuickEdit.vue'
 import PayrollPersonProfilePanel from './PayrollPersonProfilePanel.vue'
 import PayrollPersonDependantsPanel from './PayrollPersonDependantsPanel.vue'
+import PayrollPersonStatutoryEvidencePanel from './PayrollPersonStatutoryEvidencePanel.vue'
 import { todayIso } from './employmentLifecycleUi'
 
 const { t } = useI18n()
@@ -854,6 +855,11 @@ onMounted(async () => {
         :can-write="canQuickEditPerson"
         :can-read-sensitive="auth.canRead('payroll.person.read_sensitive')"
         @saved="updateQuickEdit"
+      />
+
+      <PayrollPersonStatutoryEvidencePanel
+        :person-id="expandedId"
+        :can-write="auth.canWrite('payroll.person.write')"
       />
 
       <details

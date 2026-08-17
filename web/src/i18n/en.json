@@ -2348,6 +2348,115 @@
                     "bonus_qualifying_income_minor_units": "Bonus-qualifying income"
                 }
             },
+            "statutory_evidence": {
+                "title": "Statutory evidence of the person",
+                "subtitle": "Tax declaration, tax residence, social and health insurance jurisdiction and the working pensioner discount.",
+                "blocked_badge": "all filled in | 1 missing item | {count} missing items | {count} missing items",
+                "blockers_title": "Missing for this month:",
+                "blockers_consequence": "Until these are filled in, the payroll run cannot compute the statutory part for this person and ends in manual review.",
+                "complete": "The evidence is complete for this month — the statutory calculation has what it needs.",
+                "effective_on": "As of",
+                "effective_on_hint": "The evidence is evaluated per whole month; the date selects which month is checked.",
+                "frozen_hint": "History up to {day} is closed by approved payroll. Older rows cannot be rewritten or deleted — a change is stored as a new version from the next month.",
+                "period_start": "For month",
+                "effective_from": "Valid from",
+                "effective_to": "Valid to",
+                "evidence_note": "Note about the document",
+                "evidence_note_placeholder": "e.g. original in the employee folder, copy in the file",
+                "reference_hint": "Letters, digits and . : / _ -",
+                "reference_placeholder": "e.g. document:tax-declaration-2026",
+                "empty": "No record yet.",
+                "add_row": "Add record",
+                "remove_row": "Remove",
+                "row_frozen": "Closed by approved payroll",
+                "edit": "Edit evidence",
+                "saved": "The statutory evidence is saved.",
+                "load_failed": "The statutory evidence could not be loaded.",
+                "save_failed": "The statutory evidence could not be saved.",
+                "blocker": {
+                    "tax_declaration_evidence_missing": "taxpayer's tax declaration",
+                    "tax_declaration_evidence_unverified": "the taxpayer's tax declaration is recorded as unverified",
+                    "tax_residence_evidence_missing": "tax residence",
+                    "tax_residence_evidence_unverified": "the tax residence is recorded as unverified",
+                    "social_jurisdiction_evidence_missing": "social insurance jurisdiction",
+                    "social_jurisdiction_evidence_unverified": "the social insurance jurisdiction is recorded as unverified",
+                    "working_pensioner_discount_evidence_missing": "discount for a working old-age pensioner",
+                    "working_pensioner_discount_evidence_unverified": "the discount for a working old-age pensioner is recorded as unverified",
+                    "health_coverage_evidence_missing": "health insurance jurisdiction",
+                    "health_jurisdiction_evidence_unverified": "the health insurance jurisdiction is recorded as unverified",
+                    "health_insurer_evidence_unverified": "the health insurer is recorded as unverified",
+                    "statutory_evidence_snapshot_missing_or_mismatched": "the evidence is internally inconsistent — check whether the periods overlap"
+                },
+                "section": {
+                    "tax_declarations": "Taxpayer's tax declaration",
+                    "tax_residences": "Tax residence",
+                    "social_jurisdictions": "Social insurance jurisdiction",
+                    "social_discount_claims": "Working pensioner discount",
+                    "health_coverages": "Health insurance jurisdiction",
+                    "health_month_evidence": "Monthly evidence of the health minimum"
+                },
+                "section_hint": {
+                    "tax_declarations": "Decides whether monthly credits and allowances apply, or tax is withheld without them.",
+                    "tax_residences": "A non-resident is taxed differently than a resident; each variant needs a document.",
+                    "social_jurisdictions": "Whether the person is subject to Czech social insurance. A foreign regime needs a country and an A1 form.",
+                    "social_discount_claims": "Insurance discount for an employee drawing an old-age pension. If it is not claimed, pick “not claimed”.",
+                    "health_coverages": "Whether the person is subject to Czech health insurance and which insurer they are registered with.",
+                    "health_month_evidence": "Who tops up to the minimum assessment base for the month. Fill in only when it is relevant."
+                },
+                "field": {
+                    "status": "Status",
+                    "evidence_reference": "Document",
+                    "residence": "Residence",
+                    "country_code": "Country",
+                    "jurisdiction": "Regime",
+                    "foreign_country_code": "Foreign country",
+                    "jurisdiction_evidence_reference": "Document for the regime",
+                    "a1_status": "A1 form",
+                    "a1_certificate_reference": "Document for A1",
+                    "a1_valid_until": "A1 valid until",
+                    "insurer_status": "Health insurer",
+                    "insurer_code": "Insurer code",
+                    "insurer_evidence_reference": "Document for the insurer",
+                    "top_up_responsibility": "Minimum top-up paid by",
+                    "top_up_responsibility_evidence_reference": "Document for the top-up",
+                    "selected_top_up_employer_reference": "Selected employer",
+                    "selected_top_up_employer_evidence_reference": "Document for the employer choice"
+                },
+                "option": {
+                    "status": {
+                        "signed": "Signed",
+                        "not-signed": "Not signed",
+                        "unverified": "Unverified",
+                        "not_claimed": "Not claimed",
+                        "verified": "Documented"
+                    },
+                    "residence": {
+                        "czech-resident": "Czech tax resident",
+                        "non-resident": "Tax non-resident",
+                        "unverified": "Unverified"
+                    },
+                    "jurisdiction": {
+                        "czech_regime_verified": "Czech regime (documented)",
+                        "foreign_regime_verified": "Foreign regime (documented)",
+                        "unverified": "Unverified"
+                    },
+                    "a1_status": {
+                        "verified": "Documented",
+                        "unverified": "Unverified",
+                        "not_applicable": "Not applicable"
+                    },
+                    "insurer_status": {
+                        "verified": "Documented",
+                        "unverified": "Unverified",
+                        "not_applicable": "Not applicable"
+                    },
+                    "top_up_responsibility": {
+                        "employee": "Employee",
+                        "employer_obstacle_verified": "Employer (obstacle documented)",
+                        "unverified": "Unverified"
+                    }
+                }
+            },
             "rename_action": "Label for attendance import",
             "rename_label": "Relationship label",
             "rename_hint": "Used only for matching rows when importing attendance from CSV. It has no effect on official filings.",
