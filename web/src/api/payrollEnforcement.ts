@@ -27,6 +27,32 @@ export type EnforcementClaimCategory =
 export const pensionEvidenceValues = ['unknown', 'none', 'verified'] as const
 export type PensionEvidenceValue = typeof pensionEvidenceValues[number]
 
+/**
+ * Proč měsíční exekuční evidence v daném měsíci platí — nebo proč se
+ * nevyžadovala. Zrcadlí PHP enum `EnforcementEvidenceSource`:
+ *
+ *  • `declared` — příznak je v evidenci zapnutý;
+ *  • `missing` — doložit bylo co a nikdo nic nedoložil (blokuje běh);
+ *  • `not_applicable` — v tomto měsíci nebylo co dokládat;
+ *  • `nothing_withheld` — nárok se uplatňuje, ale tento měsíc se nic nesráží.
+ *    Kvůli exekuci se doklad neptá, jenže strop dobrovolné dohody o srážkách
+ *    se podle § 148 odst. 2 zákoníku práce odvozuje z TÉŽE nezabavitelné
+ *    částky, takže nedoložený nárok uzavře kapacitu dohod na nulu.
+ */
+export const enforcementEvidenceSources = [
+  'declared',
+  'missing',
+  'not_applicable',
+  'nothing_withheld',
+] as const
+export type EnforcementEvidenceSourceValue = typeof enforcementEvidenceSources[number]
+
+export interface EnforcementEvidenceScope {
+  claim_register: EnforcementEvidenceSourceValue
+  dependants: EnforcementEvidenceSourceValue
+  spouse: EnforcementEvidenceSourceValue
+}
+
 export interface EnforcementClaim {
   id: number
   case_id: number

@@ -1017,6 +1017,12 @@
                 "deductions_title": "Deductions by order",
                 "priority": "Order {priority}",
                 "unapplied": "Not applied: {value}",
+                "unapplied_unattested": "The protected amount rests on an allowance nobody documented ({claim}). A deduction agreement may not draw on it, so nothing was withheld — this is not a shortage of room in the net pay. Documenting the allowance restores the cap.",
+                "unapplied_unattested_claim": {
+                    "dependants": "dependants",
+                    "spouse": "spouse or partner",
+                    "both": "dependants and spouse or partner"
+                },
                 "no_deductions": "No deduction was applied in this revision.",
                 "allocations_title": "Payout split",
                 "allocations_hint": "The bank destination is shown only as a mask from the frozen revision.",
@@ -3894,6 +3900,12 @@
                 "dependants": "Dependants are verified",
                 "spouse": "Spouse or partner eligibility is verified",
                 "multiple_payers": "Income is paid by multiple payers",
+                "scope": {
+                    "claim_register_idle": "Nothing to document — the person has no active claim and no approved debt relief, so there is nothing to distribute.",
+                    "allowance_not_claimed": "Nothing to document — the allowance is not claimed, so it does not raise the protected amount.",
+                    "allowance_multiple_payers": "Nothing to document — with multiple payers the protected amount is set by a court decision.",
+                    "nothing_withheld": "Nothing is withheld this month, so enforcement does not need the document. Until the allowance is documented, however, a voluntary deduction agreement has nothing to draw on — documenting it restores the cap."
+                },
                 "pension": "Pension condition",
                 "pension_unknown": "Not verified",
                 "pension_none": "Does not receive a pension",

@@ -1017,6 +1017,12 @@
                 "deductions_title": "Srážky podle pořadí",
                 "priority": "Pořadí {priority}",
                 "unapplied": "Neuplatněno: {value}",
+                "unapplied_unattested": "Nezabavitelná částka stojí na nároku, který nikdo nedoložil ({claim}). Dohoda o srážkách z ní čerpat nesmí, proto se nesrazilo nic — nejde o nedostatek místa v čisté mzdě. Doložením nároku se strop obnoví.",
+                "unapplied_unattested_claim": {
+                    "dependants": "vyživované osoby",
+                    "spouse": "manžel nebo partner",
+                    "both": "vyživované osoby i manžel nebo partner"
+                },
                 "no_deductions": "V této revizi se neuplatnila žádná srážka.",
                 "allocations_title": "Rozdělení výplaty",
                 "allocations_hint": "Bankovní cíl se zobrazuje jen jako maska ze zmrazené revize.",
@@ -3894,6 +3900,12 @@
                 "dependants": "Vyživované osoby jsou ověřené",
                 "spouse": "Nárok na manžela nebo partnera je ověřený",
                 "multiple_payers": "Příjem vyplácí více plátců",
+                "scope": {
+                    "claim_register_idle": "Není co dokládat — osoba nemá aktivní pohledávku ani schválené oddlužení, takže není co rozdělovat.",
+                    "allowance_not_claimed": "Není co dokládat — nárok se neuplatňuje, nezabavitelnou částku neposouvá.",
+                    "allowance_multiple_payers": "Není co dokládat — při souběhu plátců určuje nezabavitelnou částku rozhodnutí soudu.",
+                    "nothing_withheld": "Tento měsíc se nesráží nic, takže kvůli exekuci doklad nepotřebujeme. Dokud ale nárok nedoložíte, nemá z čeho čerpat ani dobrovolná dohoda o srážkách — doložením se strop obnoví."
+                },
                 "pension": "Důchodová podmínka",
                 "pension_unknown": "Neověřeno",
                 "pension_none": "Důchod nepobírá",

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Net;
 
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
+use MyInvoice\Service\Payroll\Garnishment\EnforcementEvidenceScope;
 
 /**
  * Výsledkové API čisté mzdy (MZ-13, akceptační kritérium „srozumitelný rozklad
@@ -111,11 +112,57 @@ final class PayrollNetResultQueryService
             'deducted_minor' => self::nonNegativeInt($net, 'deducted_minor_units'),
             'net_payable_minor' => $netPayable,
             'enforcement_withheld_minor' => $netPayable - $payableAfterEnforcement,
+            'enforcement_evidence_source' => self::evidenceSource($personResult),
             'payable_after_enforcement_minor' => $payableAfterEnforcement,
             'allocation_status' => $payout['status'],
             'allocations' => $payout['allocations'],
             'allocations_total_minor' => $payout['total_minor'],
         ];
+    }
+
+    /**
+     * Rozsah exekuční evidence ze zmrazeného snímku výsledku.
+     *
+     * Bez něj stojí nesražená dohoda o srážkách v rozpadu bez důvodu, a přitom
+     * jsou to dva různé případy se dvěma různými nápravami: „nevešlo se to do
+     * nezabavitelné částky" se řeší penězi, kdežto „nezabavitelná částka stojí
+     * na nároku, který nikdo nedoložil" se řeší doložením nároku. V číslech
+     * vypadají stejně — {@see EnforcementEvidenceScope::protectedAmountIsUnattested()}
+     * je od sebe odliší.
+     *
+     * Chybějící klíč = revize spočtená dřív, než se rozsah začal ukládat.
+     * Nedopočítává se: tehdejší kód evidenci vyžadoval bezpodmínečně, takže
+     * o jejím rozsahu netvrdil nic — vrací se null a obrazovka o důvodu mlčí.
+     * Stejný důvod i tvar jako u `top_up_responsibility_source`.
+     *
+     * @param array<string,mixed> $personResult
+     * @return array<string,string>|null
+     */
+    private static function evidenceSource(array $personResult): ?array
+    {
+        $enforcement = $personResult['enforcement'] ?? null;
+        if (!is_array($enforcement) || array_is_list($enforcement)) {
+            return null;
+        }
+        $result = $enforcement['result'] ?? null;
+        if (!is_array($result) || array_is_list($result)) {
+            return null;
+        }
+        if (($result['evidence_source'] ?? null) === null) {
+            return null;
+        }
+
+        /*
+         * Přes hodnotový objekt, ne přímým opsáním klíčů: `fromCanonicalArray()`
+         * ověří, že hodnoty jsou skutečné případy enumu, takže se do odpovědi
+         * nedostane text, kterému obrazovka nebude rozumět.
+         */
+        return EnforcementEvidenceScope::fromCanonicalArray(
+            self::object(
+                $result['evidence_source'],
+                'person.enforcement.result.evidence_source',
+            ),
+        )->toCanonicalArray();
     }
 
     /**

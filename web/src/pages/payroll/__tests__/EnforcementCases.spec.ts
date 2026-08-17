@@ -1,13 +1,20 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
-import type { EnforcementCaseDetail, EnforcementCaseSummary } from '@/api/payrollEnforcement'
+import type {
+  EnforcementCaseDetail,
+  EnforcementCaseSummary,
+  EnforcementDependant,
+  EnforcementMonthEvidence,
+} from '@/api/payrollEnforcement'
 
 const m = vi.hoisted(() => ({
   routeQuery: {} as Record<string, string | string[]>,
   routerReplace: vi.fn(),
   casesPage: vi.fn(),
   detail: vi.fn(),
+  monthEvidence: vi.fn(),
+  dependants: vi.fn(),
   peopleOptions: vi.fn(),
   institutionAccounts: vi.fn(),
   canRead: vi.fn(),
@@ -32,9 +39,9 @@ vi.mock('@/api/payrollEnforcement', () => ({
     addClaim: vi.fn(),
     updateEvidence: vi.fn(),
     transition: vi.fn(),
-    monthEvidence: vi.fn(),
+    monthEvidence: m.monthEvidence,
     saveMonthEvidence: vi.fn(),
-    dependants: vi.fn(),
+    dependants: m.dependants,
     addDependant: vi.fn(),
   },
 }))
@@ -110,8 +117,52 @@ function detailOf(item: EnforcementCaseSummary): EnforcementCaseDetail {
   }
 }
 
+function monthEvidenceOf(
+  overrides: Partial<EnforcementMonthEvidence> = {},
+): EnforcementMonthEvidence {
+  return {
+    id: 5,
+    employee_id: 3,
+    period_start: '2026-06-01',
+    claim_register_evidence_complete: false,
+    dependants_evidence_complete: false,
+    spouse_evidence_complete: false,
+    pension_evidence: 'unknown',
+    has_multiple_payers: false,
+    protected_amount_override_minor_units: null,
+    protected_amount_override_verified: false,
+    insolvency_mode: 'none',
+    insolvency_decision_verified: false,
+    insolvency_recipient_verified: false,
+    court_determined_amount_minor_units: null,
+    row_version: 1,
+    ...overrides,
+  }
+}
+
+function dependantOf(overrides: Partial<EnforcementDependant> = {}): EnforcementDependant {
+  return {
+    id: 1,
+    employee_id: 3,
+    dependant_kind: 'dependant',
+    // Platnost od roku 2020 do odvolání, ať test nezávisí na tom, kdy běží.
+    valid_from: '2020-01-01',
+    valid_to: null,
+    eligibility_verified: true,
+    excluded_for_maintenance: false,
+    row_version: 1,
+    ...overrides,
+  }
+}
+
 function mountPage() {
   return mount(EnforcementCases, { global: { stubs: { RouterLink: true } } })
+}
+
+/** Rozbalí jediný případ v seznamu a počká na doplňkové dotazy panelu. */
+async function expandFirstCase(wrapper: ReturnType<typeof mountPage>) {
+  await wrapper.get('[data-test="enforcement-detail-11"]').trigger('click')
+  await flushPromises()
 }
 
 describe('EnforcementCases', () => {
@@ -123,6 +174,8 @@ describe('EnforcementCases', () => {
     m.detail.mockImplementation(async () => detailOf(summary()))
     m.peopleOptions.mockResolvedValue([{ id: 3, full_name: 'Syntetický Povinný' }])
     m.institutionAccounts.mockResolvedValue([])
+    m.monthEvidence.mockResolvedValue(monthEvidenceOf())
+    m.dependants.mockResolvedValue([])
   })
 
   /*
@@ -242,5 +295,127 @@ describe('EnforcementCases', () => {
     await wrapper.get('[aria-expanded]').trigger('click')
     expect(wrapper.find('[data-test="support-failed"]').exists()).toBe(true)
     wrapper.unmount()
+  })
+
+  /*
+   * Rozsah měsíční evidence zrcadlí GarnishmentCalculator::evidenceScope().
+   * Panel má tři checkboxy, ale ne jedno pravidlo: rejstřík pohledávek se váže
+   * na to, jestli je z čeho srážet, kdežto nároky na to, jestli je někdo
+   * uplatňuje — a při souběhu plátců je určuje soud. Obrazovka o rozsahu
+   * nerozhoduje, jen nesmí pobízet k potvrzení, které nic nedokládá.
+   */
+  describe('rozsah měsíční evidence', () => {
+    it('greys out all three confirmations for a person without a live case', async () => {
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+
+      for (const key of ['claim_register', 'dependants', 'spouse']) {
+        expect(wrapper.get(`[data-test="month-evidence-${key}"]`).attributes('disabled'))
+          .toBeDefined()
+      }
+      expect(wrapper.get('[data-test="month-evidence-claim_register-note"]').text())
+        .toBe('payroll.enforcement.month_evidence.scope.claim_register_idle')
+      expect(wrapper.get('[data-test="month-evidence-dependants-note"]').text())
+        .toBe('payroll.enforcement.month_evidence.scope.allowance_not_claimed')
+      wrapper.unmount()
+    })
+
+    it('keeps all three confirmations live for a person with a withholding case', async () => {
+      const live = summary({
+        status: 'withhold_and_hold',
+        effective_from: '2020-01-01',
+        effective_to: null,
+      })
+      m.casesPage.mockResolvedValue(page([live]))
+      m.detail.mockImplementation(async () => detailOf(live))
+      m.dependants.mockResolvedValue([
+        dependantOf(),
+        dependantOf({ id: 2, dependant_kind: 'spouse_partner' }),
+      ])
+
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+
+      for (const key of ['claim_register', 'dependants', 'spouse']) {
+        expect(wrapper.get(`[data-test="month-evidence-${key}"]`).attributes('disabled'))
+          .toBeUndefined()
+        expect(wrapper.find(`[data-test="month-evidence-${key}-note"]`).exists()).toBe(false)
+      }
+      wrapper.unmount()
+    })
+
+    /*
+     * Uplatněný a nedoložený nárok v měsíci bez srážky je třetí stav, ne „není
+     * co dokládat": nezabavitelná částka drží i strop dobrovolné dohody
+     * o srážkách (§ 148 odst. 2 zákoníku práce), takže tenhle checkbox musí
+     * zůstat k vyplnění — a musí být vidět proč.
+     */
+    it('keeps an undocumented allowance actionable in a month without withholding', async () => {
+      m.dependants.mockResolvedValue([dependantOf()])
+
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+
+      expect(wrapper.get('[data-test="month-evidence-dependants"]').attributes('disabled'))
+        .toBeUndefined()
+      expect(wrapper.get('[data-test="month-evidence-dependants-note"]').text())
+        .toBe('payroll.enforcement.month_evidence.scope.nothing_withheld')
+      // Rejstřík se řídí jiným pravidlem a bez pohledávky dokládat nemá co.
+      expect(wrapper.get('[data-test="month-evidence-claim_register"]').attributes('disabled'))
+        .toBeDefined()
+      wrapper.unmount()
+    })
+
+    // Při souběhu plátců určuje nezabavitelnou částku soud — uplatněný nárok
+    // proto vypadne z rozsahu, ačkoli je uplatněný.
+    it('drops the allowances out of scope when multiple payers pay the income', async () => {
+      m.monthEvidence.mockResolvedValue(monthEvidenceOf({ has_multiple_payers: true }))
+      m.dependants.mockResolvedValue([dependantOf()])
+
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+
+      expect(wrapper.get('[data-test="month-evidence-dependants"]').attributes('disabled'))
+        .toBeDefined()
+      expect(wrapper.get('[data-test="month-evidence-dependants-note"]').text())
+        .toBe('payroll.enforcement.month_evidence.scope.allowance_multiple_payers')
+      wrapper.unmount()
+    })
+
+    /*
+     * Rozsah se váže na VŠECHNY případy osoby, ne na filtrovanou stránku
+     * seznamu — u člověka se dvěma exekucemi by filtr na jeden stav schoval
+     * ten, ze kterého se sráží.
+     */
+    it('asks for the whole person instead of trusting the filtered page', async () => {
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+
+      expect(m.casesPage).toHaveBeenCalledWith({ employee_id: 3, limit: 100, offset: 0 })
+      wrapper.unmount()
+    })
+
+    // Nenačtený seznam případů nesmí nic zešednout: obrazovka by tvrdila, že
+    // není co dokládat, a přitom by o případech osoby nevěděla nic.
+    it('keeps the confirmations live when the person lookup fails', async () => {
+      m.casesPage.mockImplementation(async (params: { employee_id?: number }) =>
+        params?.employee_id ? Promise.reject(new Error('network')) : page([summary()]))
+      m.dependants.mockResolvedValue([dependantOf()])
+
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+
+      expect(wrapper.get('[data-test="month-evidence-claim_register"]').attributes('disabled'))
+        .toBeUndefined()
+      expect(wrapper.get('[data-test="month-evidence-dependants"]').attributes('disabled'))
+        .toBeUndefined()
+      wrapper.unmount()
+    })
   })
 })

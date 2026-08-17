@@ -21,7 +21,10 @@ import {
   type EnforcementClaimPayload,
   type EnforcementDependant,
   type EnforcementMonthEvidence,
+  type EnforcementEvidenceScope,
+  type EnforcementEvidenceSourceValue,
 } from '@/api/payrollEnforcement'
+import { eligibleAllowances, evidenceScope } from '@/pages/payroll/enforcementEvidenceScope'
 import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -92,6 +95,16 @@ const today = localIsoDate()
 const evidencePeriod = ref(today.slice(0, 7))
 const monthEvidence = ref<EnforcementMonthEvidence | null>(null)
 const dependants = ref<EnforcementDependant[]>([])
+/*
+ * Měsíční evidence je vedená na OSOBU, ne na případ, a rozsah rejstříku
+ * pohledávek závisí na tom, jestli má osoba vůbec z čeho srážet. Filtrovaná
+ * stránka seznamu na to neodpoví — u člověka se dvěma exekucemi by při filtru
+ * na jeden stav ukázala jen jednu. Proto vlastní, nefiltrovaný dotaz na případy
+ * té osoby; `personCasesComplete = false` (výpadek nebo useknutý seznam) drží
+ * rozsah otevřený, ať se nezešedne něco, co dokládat je.
+ */
+const personCases = ref<EnforcementCaseSummary[]>([])
+const personCasesComplete = ref(false)
 const protectedOverrideCzk = ref('')
 const courtAmountCzk = ref('')
 const newDependant = ref<{
@@ -282,6 +295,8 @@ function collapseDetail() {
   detail.value = null
   monthEvidence.value = null
   dependants.value = []
+  personCases.value = []
+  personCasesComplete.value = false
 }
 
 // Stránkuje sdílená `PaginationBar` (číslo stránky od jedné); server zná offset.
@@ -304,6 +319,8 @@ async function selectCase(item: EnforcementCaseSummary) {
   maintenanceWeightCzk.value = ''
   monthEvidence.value = null
   dependants.value = []
+  personCases.value = []
+  personCasesComplete.value = false
   expandedId.value = item.id
   detail.value = null
   try {
@@ -321,11 +338,17 @@ async function selectCase(item: EnforcementCaseSummary) {
 async function loadMonthlyEvidence(employeeId: number, sequence = detailRequestSequence) {
   if (!auth.canRead('payroll.insolvency')) return
   try {
-    const [evidence, loadedDependants] = await Promise.all([
+    const [evidence, loadedDependants, loadedCases] = await Promise.all([
       payrollEnforcementApi.monthEvidence(employeeId, evidencePeriod.value),
       payrollEnforcementApi.dependants(employeeId),
+      // Serverový strop je 100; při jeho dosažení se rozsah radši nezužuje.
+      payrollEnforcementApi.casesPage({ employee_id: employeeId, limit: 100, offset: 0 })
+        .catch(() => null),
     ])
     if (sequence !== detailRequestSequence || detail.value?.employee_id !== employeeId) return
+    personCases.value = loadedCases?.cases ?? []
+    personCasesComplete.value = loadedCases !== null
+      && loadedCases.cases.length >= loadedCases.total
     monthEvidence.value = evidence
     protectedOverrideCzk.value = evidence.protected_amount_override_minor_units === null
       ? ''
@@ -339,6 +362,63 @@ async function loadMonthlyEvidence(employeeId: number, sequence = detailRequestS
       toast.error(t('payroll.enforcement.month_evidence_load_failed'))
     }
   }
+}
+
+/*
+ * Tři měsíční potvrzení, tři různá pravidla rozsahu — proto se kreslí smyčkou
+ * nad rozsahem, ne třemi ručně opsanými checkboxy, které by se rozešly.
+ */
+const MONTH_EVIDENCE_ROWS = [
+  { key: 'claim_register', field: 'claim_register_evidence_complete' },
+  { key: 'dependants', field: 'dependants_evidence_complete' },
+  { key: 'spouse', field: 'spouse_evidence_complete' },
+] as const satisfies readonly {
+  key: keyof EnforcementEvidenceScope
+  field: 'claim_register_evidence_complete'
+    | 'dependants_evidence_complete'
+    | 'spouse_evidence_complete'
+}[]
+
+const monthEvidenceAllowances = computed(() =>
+  eligibleAllowances(dependants.value, evidencePeriod.value))
+
+const monthEvidenceScope = computed<EnforcementEvidenceScope | null>(() => {
+  const evidence = monthEvidence.value
+  if (!evidence) return null
+  return evidenceScope({
+    period: evidencePeriod.value,
+    cases: personCases.value,
+    casesComplete: personCasesComplete.value,
+    dependants: dependants.value,
+    evidence,
+  })
+})
+
+/**
+ * Má se checkbox nabízet k vyplnění? Jen `not_applicable` znamená „doklad by
+ * nedokládal nic". `nothing_withheld` zůstává aktivní schválně: doložením se
+ * otevře strop dobrovolné dohody o srážkách, takže tam je co dělat.
+ */
+function evidenceActionable(source: EnforcementEvidenceSourceValue | undefined): boolean {
+  return source !== 'not_applicable'
+}
+
+/**
+ * Věta pod checkboxem. U `declared` i `missing` mlčí — tam stav říká sám
+ * checkbox a další text by jen šuměl.
+ */
+function evidenceScopeNote(key: keyof EnforcementEvidenceScope): string | null {
+  const source = monthEvidenceScope.value?.[key]
+  const prefix = 'payroll.enforcement.month_evidence.scope.'
+  if (source === 'nothing_withheld') return t(`${prefix}nothing_withheld`)
+  if (source !== 'not_applicable') return null
+  if (key === 'claim_register') return t(`${prefix}claim_register_idle`)
+  // Uplatněný nárok, který přebilo rozhodnutí soudu, je jiný důvod než nárok,
+  // který nikdo neuplatnil — náprava se u nich liší.
+  const claimed = key === 'spouse'
+    ? monthEvidenceAllowances.value.spouse
+    : monthEvidenceAllowances.value.dependants > 0
+  return t(`${prefix}${claimed ? 'allowance_multiple_payers' : 'allowance_not_claimed'}`)
 }
 
 async function createCase() {
@@ -794,11 +874,28 @@ onMounted(load)
             </div>
           </div>
           <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <!--
+              Rozsah zrcadlí GarnishmentCalculator::evidenceScope(). Potvrzení,
+              které v tomto měsíci nic nedokládá, se zešedne a vypne — pobízet
+              k němu znamenalo u firmy o tisíci lidech 12 000 zápisů ročně.
+            -->
             <div class="space-y-2 text-sm">
-              <label class="flex items-center gap-2"><input v-model="monthEvidence.claim_register_evidence_complete" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.claim_register') }}</label>
-              <label class="flex items-center gap-2"><input v-model="monthEvidence.dependants_evidence_complete" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.dependants') }}</label>
-              <label class="flex items-center gap-2"><input v-model="monthEvidence.spouse_evidence_complete" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.spouse') }}</label>
-              <label class="flex items-center gap-2"><input v-model="monthEvidence.has_multiple_payers" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.multiple_payers') }}</label>
+              <div v-for="row in MONTH_EVIDENCE_ROWS" :key="row.key">
+                <label class="flex items-center gap-2" :class="evidenceActionable(monthEvidenceScope?.[row.key]) ? '' : 'text-neutral-400'">
+                  <input
+                    v-model="monthEvidence[row.field]"
+                    :disabled="!evidenceActionable(monthEvidenceScope?.[row.key])"
+                    type="checkbox"
+                    class="rounded border-neutral-300 text-payroll-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    :data-test="`month-evidence-${row.key}`"
+                  >
+                  {{ t(`payroll.enforcement.month_evidence.${row.key}`) }}
+                </label>
+                <p v-if="evidenceScopeNote(row.key)" class="mt-0.5 pl-6 text-xs text-neutral-500" :data-test="`month-evidence-${row.key}-note`">
+                  {{ evidenceScopeNote(row.key) }}
+                </p>
+              </div>
+              <label class="flex items-center gap-2"><input v-model="monthEvidence.has_multiple_payers" type="checkbox" class="rounded border-neutral-300 text-payroll-600" data-test="month-evidence-multiple-payers">{{ t('payroll.enforcement.month_evidence.multiple_payers') }}</label>
             </div>
             <div class="space-y-3">
               <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.pension') }}<select v-model="monthEvidence.pension_evidence" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="value in pensionEvidenceValues" :key="value" :value="value">{{ t(`payroll.enforcement.month_evidence.pension_${value === 'verified' ? 'receives' : value}`) }}</option></select></label>

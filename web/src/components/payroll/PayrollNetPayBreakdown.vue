@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { PayrollRunResultPerson } from '@/api/payroll'
 import { payrollDeductionsApi, type NetResultBreakdown } from '@/api/payrollDeductions'
+import { protectedAmountIsUnattested } from '@/pages/payroll/enforcementEvidenceScope'
 
 const props = withDefaults(defineProps<{
   revisionId: number | null
@@ -39,6 +40,30 @@ function money(value: number | null | undefined): string {
     currency: 'CZK',
   }).format((value ?? 0) / 100)
 }
+
+/**
+ * Proč se dohoda o srážkách nesrazila.
+ *
+ * Nesražená částka sama o sobě neřekne, co s tím: „nevešlo se to do
+ * nezabavitelné částky" se řeší penězi (příště bude vyšší mzda), kdežto
+ * „nezabavitelná částka stojí na nároku, který nikdo nedoložil" se řeší
+ * doložením nároku — a do té doby se nesrazí nic, ať je mzda jakákoli.
+ * V číslech vypadají obě situace stejně, proto věta jen u té druhé; u běžného
+ * nedostatku kapacity by obecný komentář jen zopakoval, co je z částky vidět.
+ *
+ * Revize bez uloženého rozsahu (`null`) mlčí — tehdejší kód evidenci vyžadoval
+ * bezpodmínečně, takže o jejím rozsahu netvrdil nic a dopočítat se to nesmí.
+ */
+const unappliedReason = computed<string | null>(() => {
+  const scope = breakdown.value?.enforcement_evidence_source ?? null
+  if (scope === null || !protectedAmountIsUnattested(scope)) return null
+  const claim = scope.dependants === 'nothing_withheld'
+    ? (scope.spouse === 'nothing_withheld' ? 'both' : 'dependants')
+    : 'spouse'
+  return t('payroll.runs.net.unapplied_unattested', {
+    claim: t(`payroll.runs.net.unapplied_unattested_claim.${claim}`),
+  })
+})
 
 async function loadBreakdown(employeeId: number | null) {
   breakdown.value = null
@@ -209,6 +234,13 @@ watch(
               </p>
               <p v-if="deduction.unapplied_minor" class="mt-0.5 text-xs text-warning-700">
                 {{ t('payroll.runs.net.unapplied', { value: money(deduction.unapplied_minor) }) }}
+              </p>
+              <p
+                v-if="deduction.unapplied_minor && unappliedReason"
+                class="mt-0.5 text-xs text-neutral-500"
+                data-test="unapplied-reason"
+              >
+                {{ unappliedReason }}
               </p>
             </div>
             <p class="font-medium tabular-nums sm:self-center">{{ money(deduction.applied_minor) }}</p>
