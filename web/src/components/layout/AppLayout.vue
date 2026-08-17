@@ -448,6 +448,9 @@ const navSections = computed<NavSection[]>(() => {
         // Legislativní pravidla: stránka existovala od commitu 88853785, ale
         // nevedl na ni jediný odkaz — dalo se tam jen ručně napsanou URL.
         { to: '/payroll/rulesets', label: t('nav.payroll_rulesets'), icon: ICONS.codebooks, permission: 'payroll.rulesets' as PermissionKey },
+        // Retenční lhůty patří k nastavení: sáhne se do nich při zavádění
+        // (odchylka firmy) a pak už jen když se někdo ptá, jak dlouho co držíme.
+        { to: '/payroll/retention', label: t('nav.payroll_retention'), icon: ICONS.tax_archive, permission: 'payroll.retention' as PermissionKey },
       ],
     } as NavSection] : []),
   ]

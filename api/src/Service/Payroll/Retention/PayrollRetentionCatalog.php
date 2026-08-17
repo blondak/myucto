@@ -122,6 +122,32 @@ final class PayrollRetentionCatalog
     /** Roky počínající koncem účetního období, kterého se záznam týká. */
     public const BASIS_ACCOUNTING_PERIOD = 'years_after_accounting_period_end';
 
+    /**
+     * Celé domény jako pole, ne jen jednotlivé konstanty.
+     *
+     * Katalog chodí po drátě do UI a každá hodnota tam musí mít větu — původ
+     * lhůty se na obrazovce nesmí ukázat jako `house_policy`. Bez pojmenované
+     * domény by se nová hodnota přidala do RULES a nikdo by nezjistil, že jí
+     * chybí překlad ani že se s ní klientský union rozešel. Kontrakt hlídá
+     * {@see \MyInvoice\Tests\Architecture\PayrollEnumContractTest}.
+     */
+    public const ORIGINS = [
+        self::ORIGIN_STATUTE,
+        self::ORIGIN_HOUSE_POLICY,
+        self::ORIGIN_NONE,
+    ];
+    public const SOURCE_STATUSES = [
+        self::STATUTE_VERIFIED,
+        self::STATUTE_SILENT,
+        self::EXTERNAL_UNVERIFIED,
+        self::UNDETERMINED,
+    ];
+    public const BASES = [
+        self::BASIS_CALENDAR_YEARS,
+        self::BASIS_CALENDAR_YEARS_AFTER_ISSUE,
+        self::BASIS_ACCOUNTING_PERIOD,
+    ];
+
     /** Den, ke kterému byla znění předpisů ověřena. */
     public const VERIFIED_ON = '2026-08-15';
     /** Kde je doklad o ověření (mimo git — viz docblock třídy). */

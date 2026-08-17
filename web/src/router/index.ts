@@ -122,6 +122,10 @@ const routes: RouteRecordRaw[] = [
       { path: 'payroll/annual-settlement', name: 'payroll-annual-settlement', component: () => import('@/pages/payroll/PayrollAnnualSettlement.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/submissions', name: 'payroll-submissions', component: () => import('@/pages/payroll/PayrollSubmissions.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/settings', name: 'payroll-settings', component: () => import('@/pages/payroll/EmployerSettings.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      // Retenční lhůty jsou ČTECÍ pohled na katalog v kódu. Jedou na
+      // `payroll.retention` — stejný klíč hlídá RoutePermissionMap u
+      // /api/payroll/retention, takže menu nesvítí tam, kde API vrátí 403.
+      { path: 'payroll/retention', name: 'payroll-retention', component: () => import('@/pages/payroll/PayrollRetention.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Legislativní rulesety jsou GLOBÁLNÍ číselník (národní sazby a lhůty), ne
       // nastavení firmy — proto bez `requiresPayroll`, stejně jako daňové konstanty.
       { path: 'payroll/rulesets', name: 'payroll-rulesets', component: () => import('@/pages/payroll/PayrollRulesets.vue'), meta: { requiresSupplier: true } },
@@ -450,6 +454,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'payroll-submissions': ['payroll.submissions'],
   'payroll-settings': ['payroll.settings'],
   'payroll-rulesets': ['payroll.rulesets'],
+  'payroll-retention': ['payroll.retention'],
   'accounting-general-ledger': ['accounting'], 'accounting-trial-balance': ['accounting'], 'accounting-account-statement': ['accounting'],
   'accounting-balance-sheet': ['accounting'], 'accounting-income-statement': ['accounting'], 'accounting-income-statement-by-function': ['accounting'], 'accounting-saldo': ['accounting'],
   'accounting-document-completeness': ['accounting'],

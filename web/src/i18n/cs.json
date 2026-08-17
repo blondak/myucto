@@ -433,6 +433,7 @@
         "payroll_deduction_agreements": "Dohody o srážkách",
         "payroll_settings": "Nastavení mezd",
         "payroll_rulesets": "Legislativní pravidla mezd",
+        "payroll_retention": "Retenční lhůty",
         "settings": "Nastavení",
         "branding": "Branding",
         "supplier_current": "Dodavatel",
@@ -4002,6 +4003,94 @@
             "support_failed": "Zaměstnance ani účty příjemců se nepodařilo načíst, takže výběr níže zůstal prázdný. Není to nastavením — zkuste načtení zopakovat.",
             "transition_blocked_document": "Vyberte doklad, o který se přechod opírá. Bez něj by v případu chyběla stopa, odkud změna vzešla.",
             "transition_blocked_reason": "Napište důvod. U tohoto kroku se ukládá do historie případu, takže ho nelze vynechat."
+        },
+        "retention": {
+            "title": "Retenční lhůty mzdové agendy",
+            "subtitle": "Jak dlouho se která skupina mzdových dat drží, od kdy lhůta běží a kde to stojí psané.",
+            "explainer_title": "Uplynulá lhůta je konec povinnosti uchovávat, ne příkaz ke skartaci.",
+            "explainer_body": "Přehled je čistě informativní — nic se odsud nemaže ani nenastavuje. Výmaz osobních údajů je samostatný návrh, který musí někdo schválit, a provede se až druhým krokem. Lhůta se u každé osoby počítá jako nejdelší ze všech kategorií, které se jí týkají.",
+            "verified_stamp": "Znění předpisů ověřeno k {date}.",
+            "load_failed": "Katalog retenčních lhůt se nenačetl",
+            "stale_warning": "Zobrazená data jsou z posledního úspěšného načtení — poslední pokus selhal: {error}",
+            "reset_filters": "Zrušit filtr",
+            "filter_q": "Hledat",
+            "filter_q_placeholder": "Kategorie, zákon, ustanovení nebo tabulka…",
+            "no_match": "Filtru neodpovídá žádná kategorie",
+            "no_match_hint": "Katalog obsahuje kategorie, jen je schoval filtr. Zrušte ho a uvidíte všechny.",
+            "years_count_one": "{years} rok",
+            "years_count_few": "{years} roky",
+            "years_count_many": "{years} let",
+            "years_undetermined": "neurčená",
+            "closing_agenda": "dobíhá",
+            "tables_count": "{count} tabulek",
+            "deviation_extra": "odchylka firmy: +{years} let",
+            "deviation_override": "lhůtu dodala firma: {years} let",
+            "erasure_proposed": "navrhuje se",
+            "erasure_never": "nikdy se nenavrhne",
+            "action_accounting_retention": "Účetní retenční lhůty",
+            "action_accounting_retention_hint": "Lhůty účetních a daňových záznamů podle § 31 a § 32 zákona o účetnictví.",
+            "col": {
+                "category": "Kategorie",
+                "years": "Lhůta",
+                "basis": "Běží od",
+                "origin": "Původ lhůty",
+                "source": "Právní pramen",
+                "status": "Doloženost",
+                "verified_on": "Ověřeno",
+                "erasure": "Výmaz",
+                "tables": "Dotčené tabulky",
+                "accounting": "Účetní záznam"
+            },
+            "origin": {
+                "statute": "Ze zákona",
+                "house_policy": "Dodaná politika",
+                "none": "Bez lhůty"
+            },
+            "origin_hint": {
+                "statute": "Číslo stojí v zákoně a pramen říká kde.",
+                "house_policy": "Číslo dodala aplikace — v žádné sbírce není.",
+                "none": "Doloženo, že předpis lhůtu nestanoví."
+            },
+            "basis": {
+                "calendar_years_after_record_year": "kalendářních roků po roce, kterého se záznam týká",
+                "calendar_years_after_issue_year": "kalendářních roků po roce, ve kterém byl záznam vyhotoven",
+                "years_after_accounting_period_end": "roků od konce účetního období, kterého se záznam týká"
+            },
+            "source_status": {
+                "statute_verified": "ověřeno ve znění předpisu",
+                "statute_silent": "doloženo, že lhůta není",
+                "external_unverified": "nedoloženo",
+                "undetermined": "nedohledáno"
+            },
+            "detail_act": "Předpis",
+            "detail_section": "Ustanovení",
+            "detail_amendment": "Novela, která zavedla dnešní znění",
+            "detail_alternative_basis": "Druhá báze téhož ustanovení",
+            "detail_alternative_basis_hint": "posudek ji neaplikuje, počítá nad rokem poslední stopy osoby",
+            "detail_policy": "Zdůvodnění odchylky firmy",
+            "detail_tables": "Dotčené tabulky",
+            "detail_no_tables": "žádná tabulka",
+            "erasure_title": "Co z lhůt plyne pro výmaz",
+            "as_of": "K datu",
+            "erasure_hint": "Návrh se sestavuje jen z osob, kterým lhůta uplynula a nic je nedrží. Zbytek je vypsaný i s důvodem — návrh, který někoho mlčky vynechá, se nedá zkontrolovat.",
+            "proposable_of": "osob z {total} lze navrhnout k výmazu",
+            "assessment_failed": "Posudek se nenačetl",
+            "assessment_empty": "Zatím není koho posuzovat",
+            "assessment_empty_hint": "Modul nedrží žádného zaměstnance, ke kterému by se retenční lhůta vázala.",
+            "block": {
+                "within_retention": "Běží retenční lhůta",
+                "legal_hold": "Drží zadržení výmazu",
+                "undetermined_retention": "Lhůta není určená",
+                "no_retention_basis": "Chybí základ výpočtu",
+                "already_anonymized": "Už anonymizováno"
+            },
+            "block_hint": {
+                "within_retention": "data se ještě musí uchovávat",
+                "legal_hold": "kontrola, odvolání, spor, exekuce nebo insolvence",
+                "undetermined_retention": "kategorie bez lhůty se k výmazu nenavrhne, dokud lhůtu nedodá firma",
+                "no_retention_basis": "osoba nemá záznam, ze kterého by šlo lhůtu odvodit",
+                "already_anonymized": "osobní údaj už z dat zmizel"
+            }
         },
         "features": {
             "module_shell": "Kostra a dashboard modulu",

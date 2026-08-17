@@ -38,13 +38,17 @@ final class SavedFilterAction
      * Seznam je whitelist i pro `table.*` preference (viz UserPreferenceAction) —
      * stránka volající useTablePrefs() s klíčem, který tu není, dostane na PUT 422
      * a její volba sloupců/hustoty se tiše neuloží. Tak dlouho tiše přicházely
-     * o předvolby předvaha, peněžní deník, pokladní kniha i pohledávky/závazky.
+     * o předvolby předvaha, peněžní deník, pokladní kniha i pohledávky/závazky —
+     * a stejně tak celá mzdová sekce, dokud to nezačal hlídat
+     * {@see \MyInvoice\Tests\Architecture\SavedFilterPageKeyContractTest}.
      */
     public const PAGE_KEYS = ['invoices', 'purchase_invoices', 'journal', 'general_ledger',
         'trial_balance', 'clients', 'assets', 'bank_statements', 'projects', 'recurring', 'documents',
         'cash_documents', 'cash_book', 'cash_journal', 'receivables_payables',
         'bank_posting_suggestions', 'bank_posting_rules', 'automation_feed', 'automation_rules',
-        'stock-items', 'stock-documents', 'stock-purchase-orders'];
+        'stock-items', 'stock-documents', 'stock-purchase-orders',
+        'payroll-documents', 'payroll-payments', 'payroll-quick-inputs',
+        'payroll-recurring-components', 'payroll-retention'];
 
     private const MAX_FILTERS = 30;
 
