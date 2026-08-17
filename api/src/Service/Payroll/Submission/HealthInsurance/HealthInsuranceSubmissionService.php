@@ -206,6 +206,11 @@ final readonly class HealthInsuranceSubmissionService
             }
         }
 
+        // Souhrn se počítá nad CELÝM obdobím, ne nad filtrem ani nad stránkou —
+        // stejně jako u inboxu podání. „Kolik je po lhůtě" nesmí záviset na
+        // tom, jaký filtr má účetní zrovna zapnutý; kdyby závisel, dal by se
+        // zúžením filtru schovat propadlý termín. `total` v odpovědi naopak
+        // popisuje filtrovaný seznam, protože ten stránkuje.
         $summary = [
             'total' => count($all),
             'reported_by_employer' => 0,

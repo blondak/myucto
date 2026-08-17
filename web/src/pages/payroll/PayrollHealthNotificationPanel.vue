@@ -256,24 +256,31 @@ async function prepare() {
  * potřebuje vidět, aby poznala, co se vyrobilo a proč to neprošlo.
  */
 async function downloadArtifact() {
-  if (!prepared.value) return
+  // Výsledek se čte JEDNOU do lokální proměnné. Změna období `prepared`
+  // vynuluje, a kdyby se ref četl znovu až po `await`, spadlo by stahování
+  // na null uprostřed běhu.
+  const result = prepared.value
+  if (!result) return
   downloadError.value = ''
   downloading.value = true
   try {
     const detail: PayrollSubmissionDetail = await payrollApi.submissionDetail(
-      prepared.value.submission_id,
+      result.submission_id,
     )
-    const artifact = detail.artifacts.find(
-      candidate => candidate.id === prepared.value?.artifact_id,
-    ) ?? detail.artifacts.find(
-      candidate => candidate.mime_type === 'application/xml',
-    )
+    // Opakované sestavení téhož přehledu se jen přehraje a `artifact_id`
+    // nevrátí — tam se sáhne po uloženém XML podání, které je totéž.
+    const artifact = (result.artifact_id !== undefined
+      ? detail.artifacts.find(candidate => candidate.id === result.artifact_id)
+      : undefined)
+      ?? detail.artifacts.find(
+        candidate => candidate.mime_type === 'application/xml',
+      )
     if (!artifact) {
       downloadError.value = t('payroll.health_notifications.prepare.artifact_missing')
       return
     }
     await payrollApi.downloadSubmissionArtifact(
-      prepared.value.submission_id,
+      result.submission_id,
       artifact,
     )
   } catch (exception) {
