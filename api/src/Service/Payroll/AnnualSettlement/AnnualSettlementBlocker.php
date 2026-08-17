@@ -87,13 +87,14 @@ enum AnnualSettlementBlocker: string
      * Potvrzení od předchozího plátce sice v evidenci je, ale nenese všechno,
      * co § 38ch odst. 3 vyjmenovává: kromě zúčtované mzdy a sražených záloh
      * také POSKYTNUTÉ MĚSÍČNÍ SLEVY podle § 35ba a 35c a VYPLACENÉ MĚSÍČNÍ
-     * DAŇOVÉ BONUSY. Bez těch dvou položek by roční porovnání bonusů podle
+     * DAŇOVÉ BONUSY. Bez těch položek by roční porovnání bonusů podle
      * § 35d odst. 7 vycházelo z neúplného úhrnu — a vyšel by přeplatek, který
      * poplatníkovi nenáleží.
      *
-     * Datový model `ExternalEmployerTaxCertificate` dnes nese jen základ
-     * a zálohu, takže se se zahraničním… tedy s cizím potvrzením nepočítá
-     * vůbec, místo aby se počítalo špatně.
+     * Které údaje konkrétně chybí, nese stopa výsledku
+     * (`missing_statutory_fields` u každého potvrzení). Prázdné pole se NIKDY
+     * nečte jako nula: `null` je „na potvrzení to není", `0` je „je tam nula".
+     * Padá to i tehdy, chybí-li jediná složka jediného potvrzení.
      */
     case ExternalCertificateIncomplete = 'external_certificate_incomplete';
 

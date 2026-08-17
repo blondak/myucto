@@ -101,6 +101,25 @@ final readonly class AnnualSettlementInput
     }
 
     /**
+     * Potvrzení, která se smějí vzít do úhrnu podle § 38ch odst. 4.
+     *
+     * Doložená (§ 38ch odst. 4 mluví o úhrnu mezd od všech plátců — nedoložené
+     * potvrzení není doklad) a úplná (§ 38ch odst. 3 vyjmenovává, co doklad musí
+     * nést). Neúplné se do úhrnu NEPŘIČÍTÁ ani částečně — z toho by vyšel
+     * přeplatek, který poplatníkovi nenáleží. Místo toho padne překážka.
+     *
+     * @return list<ExternalEmployerTaxCertificate>
+     */
+    public function usableExternalCertificates(): array
+    {
+        return array_values(array_filter(
+            $this->externalCertificates,
+            static fn (ExternalEmployerTaxCertificate $certificate): bool
+                => $certificate->isVerified() && $certificate->isComplete(),
+        ));
+    }
+
+    /**
      * @param list<object> $values
      * @param class-string $expected
      */

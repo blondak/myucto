@@ -849,6 +849,13 @@ final class Routes
                 '/annual-settlements/{year:[0-9]{4}}/people/{employeeId:[0-9]+}/request',
                 [PayrollAnnualSettlementAction::class, 'saveRequest'],
             );
+            // Potvrzení od předchozích plátců (§ 38ch odst. 3). Celý seznam za
+            // rok jedním PUT — doklady dávají smysl jen jako úplná sada od
+            // VŠECH předchozích plátců.
+            $g->put(
+                '/annual-settlements/{year:[0-9]{4}}/people/{employeeId:[0-9]+}/certificates',
+                [PayrollAnnualSettlementAction::class, 'saveCertificates'],
+            );
             $g->post(
                 '/annual-settlements/{year:[0-9]{4}}/people/{employeeId:[0-9]+}/settle',
                 [PayrollAnnualSettlementAction::class, 'settle'],

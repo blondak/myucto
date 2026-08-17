@@ -45,6 +45,26 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxIntegerMath;
  *     Nedoplatek se NESRÁŽÍ.
  *
  * ─────────────────────────────────────────────────────────────────────────────
+ * Potvrzení od předchozích plátců (§ 38ch odst. 3 a 4)
+ * ─────────────────────────────────────────────────────────────────────────────
+ * § 38ch odst. 4 mluví o ÚHRNU mezd „všemi plátci postupně", takže se potvrzení
+ * od předchozích plátců přičítá k vlastním kumulacím — do základu, do úhrnu
+ * sražených záloh, do úhrnu už vyplacených bonusů a do příjmu rozhodného pro
+ * roční nárok na bonus.
+ *
+ * Přičte se ale JEN potvrzení doložené a úplné. § 38ch odst. 3 vyjmenovává čtyři
+ * skupiny údajů a váže na ně slovo „jen"; chybí-li byť jedna, zúčtování se
+ * neprovede. Chybějící údaj se NEDOPOČÍTÁVÁ nulou — u vyplacených bonusů by
+ * nula znamenala, že se porovnání podle § 35d odst. 7 dělá proti nižšímu úhrnu,
+ * rozdíl vyjde kladný a poplatník dostane podruhé to, co už u předchozího plátce
+ * dostal.
+ *
+ * Úhrny poskytnutých měsíčních slev (§ 35ba a § 35c) do aritmetiky nevstupují —
+ * roční sleva se počítá znovu z měsíců nároku, ne z měsíčně poskytnutých částek,
+ * stejně jako u vlastních kumulací. Povinné jsou přesto, protože je § 38ch
+ * odst. 3 jmenuje jako podmínku PROVEDENÍ, ne jako vstup výpočtu.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
  * Co se sem ZÁMĚRNĚ nepočítá
  * ─────────────────────────────────────────────────────────────────────────────
  * Srážková daň podle § 6 odst. 4. Je to samostatný základ daně a do ročního
@@ -76,9 +96,19 @@ final class AnnualTaxSettlementCalculator
             );
         }
 
+        // 0. Úhrn za VŠECHNY plátce (§ 38ch odst. 4). Do téhle chvíle byly
+        //    v `$input` jen vlastní kumulace; potvrzení od předchozích plátců se
+        //    přičítají tady, aby bylo na jednom místě vidět, z čeho se úhrn
+        //    skládá. Sem se dostanou jen potvrzení doložená a úplná — ta ostatní
+        //    už výše shodila výpočet na překážku.
+        $external = $this->externalTotals($input);
+
         // 1. Základ daně (§ 16 odst. 2).
         $roundedBase = $this->floorToMultiple(
-            $input->advanceBaseMinorUnits,
+            TaxIntegerMath::add(
+                $input->advanceBaseMinorUnits,
+                $external['advance_base_minor_units'],
+            ),
             self::TAX_BASE_MULTIPLE_MINOR_UNITS,
         );
 
@@ -158,15 +188,24 @@ final class AnnualTaxSettlementCalculator
 
         // § 35d odst. 6 / § 35c odst. 4: bonus jen při ročním příjmu alespoň
         // v šestinásobku minimální mzdy, a podle § 35c odst. 3 nejméně 100 Kč.
-        $thresholdMet = $input->bonusQualifyingIncomeMinorUnits
-            >= $rates->bonusMinimumIncomeMinorUnits;
+        // Příjem se posuzuje za celý rok, tedy včetně mezd od předchozích plátců
+        // (§ 38ch odst. 4 „z úhrnu mezd … všemi plátci postupně").
+        $qualifyingIncome = TaxIntegerMath::add(
+            $input->bonusQualifyingIncomeMinorUnits,
+            $external['gross_income_minor_units'],
+        );
+        $thresholdMet = $qualifyingIncome >= $rates->bonusMinimumIncomeMinorUnits;
         $annualBonus = ($thresholdMet
             && $bonusCandidate >= AnnualSettlementStatute::ANNUAL_BONUS_MINIMUM_MINOR_UNITS)
             ? $bonusCandidate
             : 0;
 
         // 5. Rozdíl na dani.
-        $taxDifference = $input->advanceTaxMinorUnits - $taxAfterAllCredits;
+        $advanceTax = TaxIntegerMath::add(
+            $input->advanceTaxMinorUnits,
+            $external['advance_tax_minor_units'],
+        );
+        $taxDifference = $advanceTax - $taxAfterAllCredits;
 
         // 6. Rozdíl na daňovém bonusu.
         //
@@ -179,8 +218,17 @@ final class AnnualTaxSettlementCalculator
         // z kvalifikovaného měsíce a nevrací se. Rozdíl je proto nula, ne
         // záporná částka — jinak by se zaměstnanci strhávalo něco, na co mu
         // nárok zůstal.
+        //
+        // Úhrn už vyplacených bonusů zahrnuje i bonusy vyplacené předchozími
+        // plátci (§ 38ch odst. 3 je jmenuje jako povinnou složku dokladu).
+        // Kdyby chyběly, vyšel by rozdíl kladný a poplatník by dostal podruhé
+        // to, co už jednou dostal.
+        $paidBonus = TaxIntegerMath::add(
+            $input->monthlyTaxBonusMinorUnits,
+            $external['tax_bonus_minor_units'],
+        );
         $bonusDifference = $thresholdMet
-            ? $annualBonus - $input->monthlyTaxBonusMinorUnits
+            ? $annualBonus - $paidBonus
             : 0;
 
         // 7. Doplatek ze zúčtování (§ 35d odst. 7 věty třetí a čtvrtá).
@@ -224,6 +272,13 @@ final class AnnualTaxSettlementCalculator
                 'monthly_tax_bonus_minor_units' => $input->monthlyTaxBonusMinorUnits,
                 'bonus_qualifying_income_minor_units' =>
                     $input->bonusQualifyingIncomeMinorUnits,
+                // § 38ch odst. 4 — z čeho se úhrn za všechny plátce skládá.
+                // Vlastní kumulace jsou výše, tohle je příspěvek předchozích
+                // plátců a součty, se kterými se pak počítalo.
+                'external_certificates' => $external,
+                'total_advance_tax_minor_units' => $advanceTax,
+                'total_monthly_tax_bonus_minor_units' => $paidBonus,
+                'total_bonus_qualifying_income_minor_units' => $qualifyingIncome,
                 'withholding_base_minor_units' => $input->withholdingBaseMinorUnits,
                 'withholding_tax_minor_units' => $input->withholdingTaxMinorUnits,
                 'rate_steps' => [
@@ -251,11 +306,20 @@ final class AnnualTaxSettlementCalculator
         if ($input->completedMonths === 0) {
             $blockers[] = AnnualSettlementBlocker::NoApprovedMonths;
         }
-        if ($input->externalCertificates !== []) {
-            // Viz AnnualSettlementBlocker::ExternalCertificateIncomplete —
-            // potvrzení nenese měsíční slevy ani vyplacené bonusy, které
-            // § 38ch odst. 3 vyjmenovává.
-            $blockers[] = AnnualSettlementBlocker::ExternalCertificateIncomplete;
+        foreach ($input->externalCertificates as $certificate) {
+            // § 38ch odst. 4: do úhrnu mezd od všech plátců smí vstoupit jen
+            // doklad, ne nedoložený údaj.
+            if (!$certificate->isVerified()) {
+                $blockers[] = AnnualSettlementBlocker::ExternalCertificateUnverified;
+            }
+            // § 38ch odst. 3: doklad musí nést zúčtovanou mzdu, sražené zálohy,
+            // poskytnuté měsíční slevy podle § 35ba a 35c A vyplacené měsíční
+            // daňové bonusy. Chybí-li BYŤ JEDNA složka, zúčtování se neprovede.
+            // Dopočítat chybějící údaj nulou nelze — vyšel by z toho přeplatek,
+            // který poplatníkovi nenáleží.
+            if (!$certificate->isComplete()) {
+                $blockers[] = AnnualSettlementBlocker::ExternalCertificateIncomplete;
+            }
         }
 
         $unique = [];
@@ -265,6 +329,69 @@ final class AnnualTaxSettlementCalculator
         ksort($unique);
 
         return array_values($unique);
+    }
+
+    /**
+     * Součet potvrzení od předchozích plátců (§ 38ch odst. 3 a 4).
+     *
+     * Sčítají se jen doložená a úplná potvrzení. Ta ostatní se sem nedostanou,
+     * protože už shodila výpočet na překážku — a kdyby se sem přesto dostala,
+     * `usableExternalCertificates()` je vyloučí, aby se ani omylem nedopočítal
+     * chybějící údaj nulou.
+     *
+     * @return array{
+     *   count:int,
+     *   gross_income_minor_units:int,
+     *   advance_base_minor_units:int,
+     *   advance_tax_minor_units:int,
+     *   non_refundable_credit_minor_units:int,
+     *   child_credit_minor_units:int,
+     *   tax_bonus_minor_units:int,
+     *   certificates:list<array<string,mixed>>
+     * }
+     */
+    private function externalTotals(AnnualSettlementInput $input): array
+    {
+        $totals = [
+            'count' => 0,
+            'gross_income_minor_units' => 0,
+            'advance_base_minor_units' => 0,
+            'advance_tax_minor_units' => 0,
+            'non_refundable_credit_minor_units' => 0,
+            'child_credit_minor_units' => 0,
+            'tax_bonus_minor_units' => 0,
+            'certificates' => [],
+        ];
+        foreach ($input->usableExternalCertificates() as $certificate) {
+            ++$totals['count'];
+            $totals['gross_income_minor_units'] = TaxIntegerMath::add(
+                $totals['gross_income_minor_units'],
+                (int) $certificate->grossIncomeMinorUnits,
+            );
+            $totals['advance_base_minor_units'] = TaxIntegerMath::add(
+                $totals['advance_base_minor_units'],
+                (int) $certificate->advanceBaseMinorUnits,
+            );
+            $totals['advance_tax_minor_units'] = TaxIntegerMath::add(
+                $totals['advance_tax_minor_units'],
+                (int) $certificate->advanceTaxMinorUnits,
+            );
+            $totals['non_refundable_credit_minor_units'] = TaxIntegerMath::add(
+                $totals['non_refundable_credit_minor_units'],
+                (int) $certificate->nonRefundableCreditMinorUnits,
+            );
+            $totals['child_credit_minor_units'] = TaxIntegerMath::add(
+                $totals['child_credit_minor_units'],
+                (int) $certificate->childCreditMinorUnits,
+            );
+            $totals['tax_bonus_minor_units'] = TaxIntegerMath::add(
+                $totals['tax_bonus_minor_units'],
+                (int) $certificate->taxBonusMinorUnits,
+            );
+            $totals['certificates'][] = $certificate->jsonSerialize();
+        }
+
+        return $totals;
     }
 
     /** § 16 odst. 2: zaokrouhlení základu daně na celá sta Kč dolů. */
