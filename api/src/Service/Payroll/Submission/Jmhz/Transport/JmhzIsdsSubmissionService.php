@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
+use MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionOutboxService;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
@@ -29,21 +30,25 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
  * jsou jedny a tytéž bez ohledu na kanál.
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * Ruční cesta je dnes ta jediná úplná
+ * Dvě cesty ven, obě přes tutéž frontu
  * ═══════════════════════════════════════════════════════════════════════════
- * Automatický odchod zprávy je fail-closed: `IsdsTransport` je nabindovaný na
- * {@see \MyInvoice\Service\Submission\Channel\Isds\UnavailableIsdsTransport},
- * který odmítá s `isds_transport_unavailable`, protože není rozhodnuté, jak se
- * do ISDS přihlašujeme (viz `private/ISDS-VLASTNI-KLIENT-ROZSAH.md`; doporučená
- * odesílací brána SetConcept není schválená). Vymyslet si přihlašování by
- * znamenalo předat cizí přístupové údaje v rozporu s § 9 odst. 2 zák. 300/2008 Sb.
+ * **Odesílací brána ISDS** ({@see \MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayDispatchService}):
+ * aplikace vloží koncept do perimetru ISDS a odeslání schválí uživatel přímo
+ * tam. Přístupové údaje ke schránce naším serverem neprojdou vůbec, takže
+ * § 9 odst. 2 zák. 300/2008 Sb. je splněn konstrukcí. Podmínkou je, aby
+ * provozovatel bránu zaregistroval a zapnul — dokud to neudělá, hlásí
+ * {@see enqueue()} poctivě `automatic: false`.
  *
- * Ruční cesta tím ale netrpí a je celá průchozí:
+ * **Ruční cesta** zůstává a je celá průchozí:
  *   1. tady se podání zařadí do fronty a dostane příjemce, věc i spisovou značku,
  *   2. uživatel si přílohu stáhne a odešle ze SVÉ datové schránky,
  *   3. `POST /api/submissions/outbox/{id}/mark-sent` zapíše, že odešla,
  *   4. nahraná doručenka (ZFO) podání uzavře; rozhodný den doručení včetně fikce
  *      spočítá {@see \MyInvoice\Service\Submission\DeliveryFictionCalculator}.
+ *
+ * Doručenku je nutné nahrát ručně i po odeslání branou: brána umí JEN odesílat
+ * a schránku číst neumí. Strojový `IsdsTransport` proto zůstává nabindovaný na
+ * {@see \MyInvoice\Service\Submission\Channel\Isds\UnavailableIsdsTransport}.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * Co tahle cesta NEMĚNÍ
@@ -70,6 +75,11 @@ final readonly class JmhzIsdsSubmissionService
         private SubmissionRecipientRepository $recipients,
         private SubmissionOutboxService $outbox,
         private JmhzIsdsMessageBuilder $builder = new JmhzIsdsMessageBuilder(),
+        /**
+         * Volitelně schválně: mzdová větev nesmí spadnout jen proto, že brána
+         * není nastavená. Když chybí, hlásí se poctivě „automaticky to nejde".
+         */
+        private ?IsdsGatewayRegistrationService $gateway = null,
     ) {}
 
     /**
@@ -81,7 +91,7 @@ final readonly class JmhzIsdsSubmissionService
      *   recipient:array{box_id:string,name:string,note:string},
      *   subject:string,sender_ident:string,
      *   attachment:array{filename:string,mime:string,sha256:string,bytes:int},
-     *   transport:array{automatic:bool,reason:?string}
+     *   transport:array{automatic:bool,channel:string,reason:?string}
      * }
      */
     public function enqueue(
@@ -156,10 +166,7 @@ final readonly class JmhzIsdsSubmissionService
                 'sha256' => $message->attachmentSha256(),
                 'bytes' => strlen($message->attachmentBytes),
             ],
-            'transport' => [
-                'automatic' => false,
-                'reason' => 'isds_transport_unavailable',
-            ],
+            'transport' => $this->transportAvailability($environment),
         ];
     }
 
@@ -253,6 +260,35 @@ final readonly class JmhzIsdsSubmissionService
         }
 
         return $row;
+    }
+
+    /**
+     * Jde JMHZ odeslat bez ručního opisování do datové schránky?
+     *
+     * Odpověď je tu, ne natvrdo v UI, protože se v čase mění: dokud
+     * provozovatel nezaregistruje odesílací bránu a nezapne ji, zůstává
+     * jedinou úplnou cestou ruční odeslání. Tvrdit opak by uživatele nechalo
+     * čekat na odeslání, které nepřijde.
+     *
+     * `channel` říká, KTEROU cestou to půjde:
+     *   `gateway`       — koncept vloží aplikace, odeslání schválí uživatel v ISDS,
+     *   `manual_upload` — uživatel stáhne přílohu a odešle ji sám.
+     *
+     * @return array{automatic:bool,channel:string,reason:?string}
+     */
+    private function transportAvailability(string $environment): array
+    {
+        if ($this->gateway !== null && $this->gateway->isUsable($environment)) {
+            return ['automatic' => true, 'channel' => 'gateway', 'reason' => null];
+        }
+
+        return [
+            'automatic' => false,
+            'channel' => 'manual_upload',
+            // Strojový transport `IsdsTransport` nasazený není a odesílací
+            // brána buď není zaregistrovaná, nebo je vypnutá.
+            'reason' => 'isds_transport_unavailable',
+        ];
     }
 
     /** Období pro člověka; do XML nevstupuje, takže je to čistě popisek. */
