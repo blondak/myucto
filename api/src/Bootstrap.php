@@ -46,6 +46,11 @@ final class Bootstrap
         return dirname(__DIR__, 2);
     }
 
+    private static function stringOrNull(mixed $value): ?string
+    {
+        return is_string($value) && trim($value) !== '' ? $value : null;
+    }
+
     /**
      * Postaví JEN DI kontejner — bez rout a bez middleware.
      *
@@ -72,6 +77,16 @@ final class Bootstrap
         }
 
         date_default_timezone_set((string) $config->get('app.timezone', 'Europe/Prague'));
+
+        // Schvalovatel dodaných mzdových legislativních sad = provozovatel TÉHLE
+        // instalace. Sada se sestavuje statickou tovární metodou volanou i mimo
+        // kontejner (CLI, fixtury), takže se hodnota předává jednou tady a dál se
+        // čte staticky; bez tohohle volání platí ENV a pak výchozí hodnota.
+        \MyInvoice\Service\Payroll\Ruleset\VendorRulesetApprover::configure(
+            self::stringOrNull($config->get(
+                \MyInvoice\Service\Payroll\Ruleset\VendorRulesetApprover::CONFIG_KEY,
+            )),
+        );
 
         // PHP error log → log/php-errors.log (jinak by warnings/notices padaly do
         // system php_errors.log, který je mimo repo). Display_errors v dev=on, prod=off.

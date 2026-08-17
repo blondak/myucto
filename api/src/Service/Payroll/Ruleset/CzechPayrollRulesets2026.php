@@ -22,8 +22,19 @@ namespace MyInvoice\Service\Payroll\Ruleset;
  * {@see VendorRulesetManifest}. Za dodané hodnoty ručí dodavatel a doloženy jsou
  * {@see RulesetSource} (odkaz + datum stažení) a {@see RulesetTechnicalReview}.
  *
- * Co tím zatím NEVZNIKÁ: formální záznam o tom, KDO za hodnoty ručí. Technická
- * kontrola není odborné ani právní schválení a `approval` zůstává `null`.
+ * ## Kdo za hodnoty ručí
+ *
+ * Do 8/2026 tu stálo, že formální záznam o tom, KDO za hodnoty ručí, nevzniká,
+ * a `approval` bylo u všech jedenácti verzí `null`. Zadavatel rozhodl, že
+ * schvalovatelem je firma, která instalaci PROVOZUJE — proto sadu podepisuje
+ * {@see VendorRulesetApprover}, a to hodnotou z konfigurace instalace, ne
+ * literálem v kódu. Technická kontrola zůstává tím, čím byla (kontrola zdrojů
+ * a přesných hodnot), a je v podpisu vedená jako `reviewed_by`; odbornou
+ * odpovědnost nese `approved_by`.
+ *
+ * Zákazníka se to nedotkne: schválení není součástí otisku OBSAHU
+ * ({@see PayrollRulesetContent}), takže `content_hash` každé verze i uložené
+ * overridy zůstávají beze změny a sada je dál poznána jako dodaná.
  */
 final class CzechPayrollRulesets2026
 {
@@ -37,13 +48,21 @@ final class CzechPayrollRulesets2026
      * a pin hlídá už jen VÝCHOZÍ sadu z kódu — override z administrace má
      * vlastní `content_hash` a vlastní auditní stopu.
      *
-     * Pozor, tenhle pin je nad PLNÝM snapshotem, tedy VČETNĚ lifecyclu — proto se
-     * posunul při překlopení dodané sady na `active`. Otisk obsahu, podle kterého
-     * se pozná dodaná sada, je v {@see VendorRulesetManifest} a ten se překlopením
-     * nezměnil.
+     * Pin je od 8/2026 vedený nad otiskem OBSAHU ({@see PayrollRulesetContent}),
+     * ne nad plným snapshotem. Dřív byl nad plným snapshotem a hýbal se pokaždé,
+     * když se změnilo něco, co s nezabavitelnými částkami nemá nic společného —
+     * naposledy při překlopení dodané sady na `active`. Rozhodující ale bylo
+     * doplnění schvalovatele: ten je podle {@see VendorRulesetApprover} vlastností
+     * INSTALACE, takže pin nad plným snapshotem by u jiného provozovatele nesedl
+     * a shodil by celý mzdový modul výjimkou o nesouhlasném kontrolním součtu.
+     * Nad obsahem pin hlídá přesně to, co hlídat má: dodané částky a jejich zdroje.
+     *
+     * Je to tedy TÁŽ hodnota, jakou pro doménu exekučních srážek nese
+     * {@see VendorRulesetManifest::CONTENT_HASHES}. Dvě čísla pro jednu věc jsou
+     * riziko, proto jejich shodu hlídá `CzechPayrollRulesets2026Test`.
      */
     public const ENFORCEMENT_DEDUCTIONS_HASH =
-        '2eac7d62318c2d361ad6a00ce6d6d443fc68c78d9fff40f1bf900768302edfbd';
+        'ed148cfae04da4449f38425a3ff641f5c54865d741122735992eadb202d8bd1e';
 
     public static function provider(): PayrollRulesetProvider
     {
@@ -115,7 +134,18 @@ final class CzechPayrollRulesets2026
                 // péče, osvobozený v úhrnu nejvýše 50 000 Kč ročně. Částku píše
                 // zákon číslem, z průměrné mzdy se neodvozuje.
                 'benefit_exemption.old_age_savings.yearly' => PayrollRuleValue::moneyMinor(5_000_000),
+                // § 35d odst. 4 ZDP: „Měsíční daňový bonus lze vyplatit, pokud jeho
+                // výše činí ALESPOŇ 50 Kč." Nerovnost je NEOSTRÁ — přesně 50 Kč se
+                // vyplácí. Sourozeneckým klíčem je `bonus.minimum_amount.yearly`
+                // (§ 35c odst. 3), ne dvanáctinásobek tohohle čísla.
                 'bonus.minimum_amount.monthly' => PayrollRuleValue::moneyMinor(5_000),
+                // § 35c odst. 3 ZDP: „Poplatník může daňový bonus uplatnit, pokud jeho
+                // výše činí ALESPOŇ 100 Kč." Roční hodnota tu stojí VÝSLOVNĚ, protože
+                // 12× měsíční práh by dal 600 Kč — vztah dvanáctiny, který § 35d odst. 2
+                // zakládá pro slevy a daňové zvýhodnění, na prahy výplaty NEDOPADÁ.
+                // Odvozovat ji by byla tichá chyba přesně té třídy, před kterou varuje
+                // {@see \MyInvoice\Service\Payroll\AnnualSettlement\AnnualTaxRates}.
+                'bonus.minimum_amount.yearly' => PayrollRuleValue::moneyMinor(10_000),
                 'bonus.minimum_income.monthly' => PayrollRuleValue::moneyMinor(1_120_000),
                 'bonus.minimum_income.yearly' => PayrollRuleValue::moneyMinor(13_440_000),
                 'credit.child.first.monthly' => PayrollRuleValue::moneyMinor(126_700),
@@ -123,6 +153,19 @@ final class CzechPayrollRulesets2026
                 'credit.child.third_and_next.monthly' => PayrollRuleValue::moneyMinor(232_000),
                 'credit.disability.basic.monthly' => PayrollRuleValue::moneyMinor(21_000),
                 'credit.disability.extended.monthly' => PayrollRuleValue::moneyMinor(42_000),
+                // § 35bb ZDP (od 1. 1. 2024 vyčleněno z § 35ba odst. 1 písm. b), kde
+                // zůstal jen odkaz). Sleva se uplatní AŽ v ročním zúčtování — § 38h
+                // odst. 6 ji vyjmenovává mezi tím, k čemu plátce při výpočtu záloh
+                // nepřihlíží — proto je klíč roční a měsíční protějšek nemá.
+                //
+                // § 35bb odst. 1 věta první: „Výše slevy na manžela činí 24 840 Kč."
+                'credit.spouse.yearly' => PayrollRuleValue::moneyMinor(2_484_000),
+                // § 35bb odst. 1 věta druhá: „Výše slevy se zvyšuje na DVOJNÁSOBEK,
+                // pokud je sleva uplatňována na manžela, kterému je přiznán nárok na
+                // průkaz ZTP/P." Rozhodný je PŘIZNANÝ NÁROK na průkaz, ne jeho držení.
+                // Násobek se veze jako vlastní parametr, ne jako druhá částka, aby
+                // novela základní částky nemohla nechat zdvojnásobenou verzi stát.
+                'credit.spouse.ztp_p_multiplier' => PayrollRuleValue::integer(2),
                 'credit.taxpayer.monthly' => PayrollRuleValue::moneyMinor(257_000),
                 'credit.ztp_p.monthly' => PayrollRuleValue::moneyMinor(134_500),
                 // ROZHODNÁ ČÁSTKA, ne „nejvyšší ještě sražená odměna“. § 6 odst. 4
@@ -149,6 +192,33 @@ final class CzechPayrollRulesets2026
                 // písm. a) z. č. 187/2006 Sb. je 1/10 průměrné mzdy zaokrouhlená dolů
                 // na celých 500 Kč: 48 967 / 10 = 4 896,7 → 4 500 Kč.
                 'other.withholding.threshold' => PayrollRuleValue::moneyMinor(450_000),
+                // § 38ch odst. 5 ZDP: přeplatek z ročního zúčtování plátce vrátí,
+                // „činí-li úhrnná výše tohoto přeplatku VÍCE NEŽ 50 Kč"; § 35d odst. 8
+                // říká totéž o doplatku ze zúčtování u poplatníka s daňovým zvýhodněním.
+                // Nerovnost je OSTRÁ — přesně 50 Kč se nevyplácí.
+                //
+                // Je to JINÉ PRAVIDLO než `bonus.minimum_amount.monthly`, i když je
+                // tam dnes stejné číslo: tamto je práh měsíčního daňového bonusu podle
+                // § 35d odst. 4 a je NEOSTRÝ. Sloučit je by znamenalo, že novela
+                // jednoho tiše změní druhé a navíc obrátí operátor.
+                'settlement.payout_threshold' => PayrollRuleValue::moneyMinor(5_000),
+                // § 35bb odst. 2 písm. b) ZDP: slevu lze uplatnit, jen pokud „manžel
+                // poplatníka nemá vlastní příjem PŘESAHUJÍCÍ za zdaňovací období
+                // 68 000 Kč". Příjem přesně 68 000 Kč nárok neruší.
+                'spouse.income_limit' => PayrollRuleValue::moneyMinor(6_800_000),
+                // Nárok na slevu na manžela aplikace NETVRDÍ. § 35bb odst. 2 písm. a)
+                // přidal od 1. 1. 2024 druhou, KUMULATIVNÍ podmínku: poplatník musí žít
+                // ve společně hospodařící domácnosti s manželem A s vyživovaným dítětem
+                // poplatníka, které nedovršilo věku 3 let (odst. 3 z toho vylučuje vnuka
+                // mimo náhradní péči). Do toho vlastní příjem manžela s taxativním
+                // výčtem sedmi vyňatých plnění (odst. 4) a doložení podle § 38l.
+                // Nic z toho nemá mzdový modul v datech a odhadovat to nebude —
+                // částky výše jsou zákonná čísla, ne příslib, že se sleva spočítá.
+                'credit.spouse.eligibility' => PayrollRuleValue::manualReview(
+                    'Nárok na slevu na manžela závisí na společně hospodařící domácnosti, '
+                    . 'na vyživovaném dítěti do 3 let věku, na vlastním příjmu manžela '
+                    . 'a na doložení podle § 38l — musí ho posoudit mzdová účetní.',
+                ),
                 'withholding.rate' => PayrollRuleValue::rate('0.15'),
             ],
             $technicalReview,
@@ -359,7 +429,7 @@ final class CzechPayrollRulesets2026
             PayrollRulesetCapability::Supported,
             $sources,
             $parameters,
-            null,
+            VendorRulesetApprover::approval($technicalReview),
             $technicalReview,
         );
     }
@@ -483,7 +553,7 @@ final class CzechPayrollRulesets2026
         array $sources,
         array $parameters,
         RulesetTechnicalReview $technicalReview,
-        ?string $expectedHash = null,
+        ?string $expectedContentHash = null,
     ): PayrollRulesetVersion {
         ksort($parameters, SORT_STRING);
 
@@ -497,9 +567,9 @@ final class CzechPayrollRulesets2026
             $capability,
             $sources,
             $parameters,
-            null,
+            VendorRulesetApprover::approval($technicalReview),
             $technicalReview,
-            $expectedHash,
+            $expectedContentHash,
         );
     }
 

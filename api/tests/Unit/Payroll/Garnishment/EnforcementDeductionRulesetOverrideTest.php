@@ -79,9 +79,12 @@ final class EnforcementDeductionRulesetOverrideTest extends TestCase
     {
         $shipped = EnforcementDeductionPolicy2026::shipped();
 
+        // Pin je nad OBSAHEM: lifecycle ani schvalovatel (ten je vlastností
+        // instalace) ho hýbat nesmějí. Identita uložená do výsledku srážky
+        // zůstává plným snapshotem, protože ta má popsat účinnou verzi.
         self::assertSame(
             CzechPayrollRulesets2026::ENFORCEMENT_DEDUCTIONS_HASH,
-            $shipped->rulesetHash(),
+            $shipped->ruleset->contentHash,
         );
         self::assertSame($this->defaultVersion()->canonicalHash, $shipped->rulesetHash());
         self::assertSame(486_000, $shipped->money('life_minimum.monthly'));

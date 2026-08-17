@@ -10,7 +10,9 @@ namespace MyInvoice\Service\Payroll\Ruleset;
  * Otisky jsou počítané z KANONICKÉHO OBSAHU verze ({@see PayrollRulesetContent}) —
  * tedy z identity, účinnosti, zdrojů a parametrů, BEZ lifecyclu a bez schvalovacích
  * podpisů. Přechod `draft → reviewed → approved → active → superseded` proto otisk
- * nemění a totéž číslo platí pro celý život verze.
+ * nemění a totéž číslo platí pro celý život verze. Nemění ho ani schvalovatel, který
+ * je podle {@see VendorRulesetApprover} vlastností instalace — jinak by u jiného
+ * provozovatele přestala být dodaná sada poznána jako dodaná.
  *
  * ## K čemu to je
  *
@@ -54,7 +56,7 @@ final class VendorRulesetManifest
         // cz-payroll-2026.health-insurance.v1
         'e5586a0e158b31570c6c10702d9ecaed9d4cbb636fd6cbe2e164a657e151f00b',
         // cz-payroll-2026.income-tax.v1
-        '05dc147477c3c34d546f4971c7f94c7a30d7984b93a617e726310180d60f0b25',
+        'd66ac9b41964cf58c550e3ebdd302773d7dad429776417f8096c68ec6e1fcc63',
         // cz-payroll-2026.social-insurance.v1
         '8e1a513c37f25a26fef12d38d9328280d9214ad030dcb7a7acdb2c5812166422',
         // cz-payroll-2026.submissions.v1

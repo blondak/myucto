@@ -655,7 +655,7 @@ final class GarnishmentCalculatorTest extends TestCase
 
         self::assertSame(
             CzechPayrollRulesets2026::ENFORCEMENT_DEDUCTIONS_HASH,
-            $policy->rulesetHash(),
+            $policy->ruleset->contentHash,
         );
         self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $policy->rulesetHash());
         self::assertSame(

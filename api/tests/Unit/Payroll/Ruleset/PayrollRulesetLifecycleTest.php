@@ -41,7 +41,9 @@ final class PayrollRulesetLifecycleTest extends TestCase
             ->forDate(PayrollRulesetDomain::IncomeTax, '2026-08-03');
         self::assertSame(PayrollRulesetOrigin::Vendor, $delivered->origin);
         self::assertSame(PayrollRulesetLifecycle::Active, $delivered->lifecycle);
-        self::assertNull($delivered->approval);
+        // Dodaná sada je podepsaná provozovatelem instalace, ale výjimka z toho
+        // NEPLYNE — účinnost bez zákazníkova schválení drží otisk obsahu, ne podpis.
+        self::assertNotNull($delivered->approval);
 
         $parameters = $delivered->parameters;
         $parameters['advance.low_rate'] = PayrollRuleValue::rate('0.16');

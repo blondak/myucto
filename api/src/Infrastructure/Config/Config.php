@@ -224,6 +224,14 @@ final class Config
                 'name'   => 'MyÚčto.cz',
                 'domain' => 'myucto.cz',
             ],
+            // Kdo nese odpovědnost za odbornou správnost DODANÝCH mzdových
+            // legislativních sad v téhle instalaci. Je to vlastnost provozovatele,
+            // ne produktu — viz \MyInvoice\Service\Payroll\Ruleset\VendorRulesetApprover.
+            'payroll' => [
+                'ruleset' => [
+                    'approver' => \MyInvoice\Service\Payroll\Ruleset\VendorRulesetApprover::DEFAULT_NAME,
+                ],
+            ],
             'ares' => [
                 'api'       => 'https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty',
                 'cache_ttl' => 86400,
@@ -337,6 +345,9 @@ final class Config
             'MYINVOICE_VIES_TIMEOUT'   => ['vies.timeout', 'int'],
             'MYINVOICE_CRPDPH_ENDPOINT' => ['crpdph.endpoint', 'string'],
             'MYINVOICE_CRPDPH_TIMEOUT'  => ['crpdph.timeout', 'int'],
+
+            // Mzdy — schvalovatel dodaných legislativních sad (provozovatel instalace)
+            'MYINVOICE_PAYROLL_RULESET_APPROVER' => ['payroll.ruleset.approver', 'string'],
 
             // Logging
             'MYINVOICE_LOG_LEVEL' => ['logging.level', 'string'],
