@@ -1000,6 +1000,11 @@ kontrolní — bez implementovaného důvěryhodného transportu a parseru proto
 nenabízí falešné tlačítko odeslání ani nepovyšuje lokální stav na přijaté
 podání.
 
+Samostatná záložka **ZP — oznámení** řeší oznamovací povinnost vůči zdravotní
+pojišťovně, tedy hlášení nástupů, skončení a dalších skutečností v osmidenní
+lhůtě. Je to jiná povinnost než měsíční přehled o platbě pojistného, a proto
+má vlastní záložku; podrobně ji popisuje kapitola 58.21.
+
 U každého termínu se samostatně zobrazuje jeho aktuální fáze: okno ještě není
 otevřené, otevřeno, blíží se termín, termín je dnes, po termínu, čeká se na
 výsledek, splněno nebo je nutný zásah. Samotný stav **Odesláno** není důkazem
@@ -1196,3 +1201,70 @@ jen osobní údaj.
 
 Lhůty účetních a daňových záznamů firmy jako celku (§ 31 a § 32 zákona
 o účetnictví) mají vlastní přehled na **Účetnictví → Retenční lhůty**.
+
+## 58.21 Podání zdravotním pojišťovnám
+
+Záložka **Mzdy → Podání a hlášení → ZP — oznámení** odpovídá na jedinou
+otázku: co se za zvolený měsíc hlásí zdravotní pojišťovně, komu a do kdy.
+Otevřít ji může role s oprávněním `payroll.submissions`.
+
+### Co modul neumí
+
+Přiznání stojí nahoře, nad seznamem, ne až v chybové hlášce:
+
+- **Aplikace podání neodesílá.** Ani jedna ze sedmi zdravotních pojišťoven
+  nemá veřejně popsanou transportní obálku — endpoint, typ obsahu, název
+  přílohy ani formát odpovědi. Odeslání na odhadnutý cíl by v nejhorším
+  případě znamenalo zmeškanou lhůtu bez povšimnutí.
+- **Doložená cesta je ruční.** Soubor se stáhne a podá se datovou schránkou
+  nebo nahráním do portálu pojišťovny. ID datových schránek a adresy portálů
+  jsou u jednotlivých pojišťoven přímo v panelu.
+- **U tří druhů povinnosti se nevydá kód změny.** U změny údajů, přestupu
+  mezi pojišťovnami a ostatních skutečností, kde je plátcem stát, neurčuje
+  připnuté schéma jediný kód. Řádek proto nese značku **Kód nedoložen** a po
+  najetí ukáže konkrétní důvod — jiný u každého z těch tří.
+
+### Přehled povinností
+
+Tabulka ukazuje za měsíc jednu řádku na každou oznamovanou skutečnost: koho
+se týká, jaký druh oznámení to je, které pojišťovně patří, kdy skutečnost
+nastala a do kdy se hlásí. Filtrovat lze podle pojišťovny, druhu oznámení,
+toho kdo hlásí, a podle chybějícího kódu změny; filtr i stránkování dělá
+server, takže počty nad tabulkou popisují právě ten seznam, který je vidět.
+
+Základní lhůta je osm **dnů** od vzniku skutečnosti podle § 10 zákona
+č. 48/1997 Sb. U dohod (DPP, DPČ) a u mateřské a rodičovské dovolené se místo
+toho uplatní 20. den následujícího měsíce; u těchto výjimek je pramenem
+metodika pojišťovny, ne text zákona, a sloupec **Pramen** to říká.
+
+Od 1. 1. 2026 se oznamovací povinnost zaměstnavatele u kategorií, kde je
+plátcem stát, zúžila na nástup na mateřskou a rodičovskou dovolenou. Ostatní
+skutečnosti hlásí sám pojištěnec. Takové povinnosti se ze seznamu
+**nevypouštějí** — zůstávají označené jako „Zaměstnavateli neběží", protože
+rozdíl mezi „nehlásí se" a „zapomnělo se" je přesně to, kvůli čemu se platí
+penále.
+
+Pracovní vztah, u kterého povinnost odvodit nelze (typicky chybí evidovaná
+zdravotní pojišťovna zaměstnance), se vypíše zvlášť nad tabulkou i s důvodem.
+Oznámení, které nemá komu odejít, je vada k opravě v kartě zaměstnance, ne
+prázdné místo v seznamu.
+
+### Sestavení přehledu o platbě
+
+Spodní panel zmrazí přehled o platbě pojistného za schválenou revizi do
+odesílatelné podoby a ověří ho proti připnutému XSD. Vyber revizi a
+pojišťovnu a stiskni **Sestavit větu**. Výsledek je jeden ze dvou:
+
+- **Věta je platná** — přehled prošel ověřením a podání je připravené
+  k odeslání. Připravené neznamená odeslané; odeslat ho musíš sama.
+- **Věta má blokující výhradu** — soubor vznikl, ale podání zůstalo
+  v konceptu s výhradou ve fázi ověření schématu. Konkrétní důvod je zapsaný
+  u podání v záložce **Zdravotní pojišťovny**.
+
+Tlačítko **Stáhnout XML** je k dispozici v obou případech. Soubor vzniká i
+u zablokovaného podání a právě tam je potřeba vidět, co se vyrobilo a proč to
+neprošlo. Stahuje se přesně ten archivovaný soubor, jehož otisk je u podání
+zapsaný, a každé stažení používá krátkodobé jednorázové oprávnění.
+
+Lhůta přehledu o platbě je 20. den následujícího kalendářního měsíce podle
+§ 25 odst. 3 zákona č. 592/1992 Sb.

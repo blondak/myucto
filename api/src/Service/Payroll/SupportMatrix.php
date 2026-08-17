@@ -83,7 +83,15 @@ final class SupportMatrix
                 // ověřuje ho připnutým XSD a projde s ním celý katalog kontrol
                 // ČSSZ. Neodesílá se — to je `direct_submission` níž.
                 ['key' => 'jmhz_export', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-22'],
-                ['key' => 'health_insurer_export', 'status' => 'supported', 'available' => false, 'min_epic' => 'MZ-23'],
+                // Export pro zdravotní pojišťovny je dostupný: modul vyhodnotí
+                // oznamovací povinnost, sestaví přehled o platbě, ověří ho
+                // připnutým XSD a vydá XML ke stažení — a účetní se k tomu
+                // proklikne (Podání a hlášení → ZP — oznámení). Neodesílá se:
+                // ani jedna ze sedmi pojišťoven nemá doloženou transportní
+                // obálku, což je `direct_submission` níž. Vlajka se překlopila
+                // až s obrazovkou, protože hotové jádro bez cesty k němu je
+                // z pohledu uživatele nedostupná funkce.
+                ['key' => 'health_insurer_export', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-23'],
                 ['key' => 'direct_submission', 'status' => 'not_supported', 'available' => false, 'min_epic' => 'MZ-27'],
             ],
         ];

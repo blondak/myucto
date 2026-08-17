@@ -53,6 +53,54 @@ vi.mock('@/api/payroll', () => ({
   },
 }))
 
+// Panel oznamovací povinnosti si data obstarává sám; tady jde jen o to,
+// že se na něj dá proklikat — vlastní chování má samostatný spec.
+vi.mock('@/api/payrollHealthNotifications', () => ({
+  payrollHealthNotificationApi: {
+    capability: () => Promise.resolve({
+      channels: {},
+      change_codes: {
+        total: 25,
+        narrowing_effective_from: '2026-01-01',
+        mapping_from_duty_documented: [],
+      },
+      documents: {},
+      duties: [],
+      automated_dispatch: { supported: false, reason_code: 'x' },
+      schema_reference: 'payroll-health-submission-capability.v1',
+      shared_data_message_since: '2026-01-01',
+      verification_reference: 'private/Mzdy/21-ZP-PODANI-RESERSE.md',
+    }),
+    duties: () => Promise.resolve({
+      period: '2026-08',
+      environment: 'production',
+      items: [],
+      total: 0,
+      limit: 50,
+      offset: 0,
+      summary: {
+        total: 0,
+        reported_by_employer: 0,
+        reported_by_insured: 0,
+        code_documented: 0,
+        code_undocumented: 0,
+        overdue: 0,
+      },
+      unresolved_employments: [],
+    }),
+    preparePaymentOverview: vi.fn(),
+  },
+}))
+
+vi.mock('@/composables/useUserPrefs', async () => {
+  const { computed } = await import('vue')
+  return {
+    ensurePrefsLoaded: () => Promise.resolve(),
+    getPagePrefs: () => computed(() => ({})),
+    patchPagePrefs: () => {},
+  }
+})
+
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     canWrite: (permission: string) => permission === 'payroll.submissions',
@@ -372,7 +420,7 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(7)
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(8)
     await clickTab(wrapper, 'regzel')
     await flushPromises()
     expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(2)
@@ -453,6 +501,25 @@ describe('PayrollSubmissions', () => {
     expect(wrapper.get('[data-test="regzel-error"]').text()).toContain(
       'Produkční VS nesmí být testovací.',
     )
+  })
+
+  /**
+   * Tohle je důkaz, o který se opírá `health_insurer_export: available = true`
+   * v {@see \MyInvoice\Service\Payroll\SupportMatrix}: účetní se k oznamovací
+   * povinnosti PROKLIKÁ. Hotové jádro bez cesty k němu je z pohledu uživatele
+   * nedostupná funkce, takže kdyby záložka zmizela, musí zhasnout i vlajka.
+   */
+  it('proklikne se na oznamovací povinnost vůči zdravotní pojišťovně', async () => {
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+
+    await clickTab(wrapper, 'health_notifications')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="health-notifications"]').exists()).toBe(true)
+    // Přiznání, co modul neumí, je vidět hned po prokliku — ne až po akci.
+    expect(wrapper.find('[data-test="health-notifications-limits"]').exists())
+      .toBe(true)
   })
 
   it('nabídne interní měsíční přehled zdravotní pojišťovny ke stažení', async () => {

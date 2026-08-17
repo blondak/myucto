@@ -128,7 +128,7 @@ const approvedRunOptions = computed(() =>
     .map(run => ({
       value: run.revision_id as number,
       label: t('payroll.health_notifications.prepare.run_option', {
-        period: run.period,
+        period: run.period_start.slice(0, 7),
         revision: run.revision_no,
       }),
     })),
@@ -366,7 +366,7 @@ onMounted(() => {
     >
       <h3 class="flex items-center gap-2 text-sm font-semibold text-warning-800">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path :d="ICONS.warning" />
+          <path :d="ICONS.bell" />
         </svg>
         {{ t('payroll.health_notifications.limits.title') }}
       </h3>
