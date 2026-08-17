@@ -20,6 +20,12 @@ const props = defineProps<{
   canWrite: boolean
 }>()
 
+/**
+ * Jsou úhrny doplněné? Ptá se na to karta vztahu, aby nad hotovou věcí nevisela
+ * výzva k jejímu doplnění — a aby se kvůli tomu stavy nenačítaly dvakrát.
+ */
+const emit = defineEmits<{ loaded: [filled: boolean] }>()
+
 const { t } = useI18n()
 const toast = useToast()
 
@@ -100,6 +106,7 @@ async function load() {
       drafts.value[row.month] = draft
     }
     if (saved.months.length > 0) sourceReference.value = t('payroll.people.openings.source_default')
+    emit('loaded', hasAnyAmount.value)
   } catch (exception) {
     error.value = apiErrorMessage(exception, t('payroll.people.openings.load_failed'))
   } finally {
@@ -134,6 +141,7 @@ async function save() {
       months: payload,
     })
     locked.value = saved.locked
+    emit('loaded', hasAnyAmount.value)
     toast.success(t('payroll.people.openings.saved'))
   } catch (exception) {
     // Hláška ze serveru jmenuje konkrétní důvod (zamčeno schválenou mzdou,

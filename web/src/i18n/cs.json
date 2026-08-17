@@ -2319,6 +2319,7 @@
             "openings": {
                 "title": "Zaměstnanec nastoupil dřív, než v MyÚčtu vedete mzdy",
                 "hint": "Nástup {start}, mzdy vedete od {period}. Aby vyšel výpočet i roční zúčtování, bude potřeba doplnit úhrny z předchozího zpracování.",
+                "done": "Úhrny z předchozího zpracování jsou doplněné — výpočet i roční zúčtování s nimi počítají. Zkontrolovat nebo opravit je můžete níže.",
                 "panel_title": "Počáteční stavy za rok {year}",
                 "panel_hint": "Úhrny za měsíce, které jste zpracovali jinde. Opište je ze sestavy předchozího programu; částky zadávejte v korunách.",
                 "nothing_to_fill": "Mzdy vedete od ledna, takže není co doplňovat.",

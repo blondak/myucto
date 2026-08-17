@@ -154,6 +154,39 @@ function employment(): PayrollEmployment {
 }
 
 describe('EmploymentCard', () => {
+  /**
+   * Zaměstnanec převzatý z jiného zpracování dostane výzvu k doplnění úhrnů.
+   * Jakmile je někdo doplní, nesmí nad nimi ta výzva viset dál — karta by
+   * úkolovala tím, co je hotové.
+   */
+  it.each([
+    [false, 'payroll.people.openings.hint'],
+    [true, 'payroll.people.openings.done'],
+  ])('u převzatého zaměstnance mluví o úhrnech podle toho, jestli jsou (%s)', async (filled, key) => {
+    const wrapper = mount(EmploymentCard, {
+      props: {
+        employment: { ...employment(), start_date: '2025-04-01' },
+        canWrite: true,
+        payrollStartPeriod: '2026-08-01',
+      },
+      global: {
+        stubs: {
+          // Panel počátečních stavů si data načítá sám; tady jde jen o to,
+          // co kartě ohlásí.
+          PayrollOpeningBalancesPanel: {
+            emits: ['loaded'],
+            template: '<div />',
+            mounted() { this.$emit('loaded', filled) },
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    const notice = wrapper.get('[data-test="opening-balances-needed"]')
+    expect(notice.text()).toContain(key)
+  })
+
   it('read-only uživateli ukáže historii a checklist, ale žádné mutace', () => {
     const wrapper = mount(EmploymentCard, {
       props: { employment: employment(), canWrite: false },

@@ -2319,6 +2319,7 @@
             "openings": {
                 "title": "This employee started before you began running payroll here",
                 "hint": "Started {start}, payroll runs from {period}. To make the calculation and the annual settlement add up, the totals from the previous processing need to be filled in.",
+                "done": "The totals from the previous processing are filled in — the calculation and the annual settlement use them. You can review or correct them below.",
                 "panel_title": "Opening balances for {year}",
                 "panel_hint": "Totals for the months processed elsewhere. Copy them from the previous system's report; enter amounts in whole currency units.",
                 "nothing_to_fill": "Payroll runs from January, so there is nothing to fill in.",

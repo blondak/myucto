@@ -137,6 +137,12 @@ const startsBeforePayroll = computed(() => {
   const start = props.employment.start_date
   return period != null && start !== null && start.slice(0, 7) < period
 })
+/*
+ * Jakmile úhrny někdo doplní, nesmí nad nimi dál viset výzva k jejich doplnění —
+ * karta by úkolovala tím, co je hotové. Stav hlásí panel, který stavy načítá;
+ * karta se na to sama neptá, aby kvůli hlášce nevznikl druhý požadavek.
+ */
+const openingsFilled = ref(false)
 
 const renaming = ref(false)
 const codeDraft = ref('')
@@ -515,16 +521,19 @@ const actions = computed<ActionItem[]>(() => [
     >
       <p class="font-medium text-neutral-900">{{ t('payroll.people.openings.title') }}</p>
       <p class="mt-1">
-        {{ t('payroll.people.openings.hint', {
-          start: formatDate(employment.start_date),
-          period: payrollStartLabel,
-        }) }}
+        {{ openingsFilled
+          ? t('payroll.people.openings.done')
+          : t('payroll.people.openings.hint', {
+            start: formatDate(employment.start_date),
+            period: payrollStartLabel,
+          }) }}
       </p>
       <PayrollOpeningBalancesPanel
         class="mt-3"
         :person-id="employment.employee_id"
         :start-period="payrollStartMonth!"
         :can-write="canWrite"
+        @loaded="openingsFilled = $event"
       />
     </div>
 
