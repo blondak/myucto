@@ -321,6 +321,12 @@ final class PayrollInsuranceBreakdownQueryService
                     || (($employeeTopUp ?? 0) + ($employerTopUp ?? 0)) > 0,
                 'top_up_base_minor' => $topUpStep['input_minor_units'] ?? null,
                 'top_up_responsibility' => (string) ($result['top_up_responsibility'] ?? ''),
+                // Prázdný řetězec = revize spočtená dřív, než se původ hodnoty
+                // začal ukládat. Nedopočítává se: tehdejší kód chybějící
+                // evidenci odmítal, takže o původu netvrdil nic.
+                'top_up_responsibility_source' => (string) (
+                    $result['top_up_responsibility_source'] ?? ''
+                ),
                 'top_up_employer_selection' => (string) ($result['top_up_employer_selection'] ?? ''),
                 'top_up_responsibility_evidence_reference' => self::nullableString(
                     $result,

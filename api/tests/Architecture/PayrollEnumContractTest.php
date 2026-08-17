@@ -364,6 +364,7 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionReason::class,
         \MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpEmployerSelection::class,
         \MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibility::class,
+        \MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibilitySource::class,
         \MyInvoice\Service\Payroll\HealthInsurance\HealthParticipationStatus::class,
         \MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKind::class,
         \MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponentTreatment::class,

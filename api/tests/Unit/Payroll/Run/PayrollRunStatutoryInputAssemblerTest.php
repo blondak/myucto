@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Run;
 
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpEmployerSelection;
+use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibility;
+use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibilitySource;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxCalculator;
 use MyInvoice\Service\Payroll\IncomeTax\OtherWithholdingEligibility;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCalculationStatus;
@@ -175,6 +177,104 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
             static fn ($issue): string => "{$issue->domain}|{$issue->code}",
             $bundle->issues,
         ));
+    }
+
+    /**
+     * Chybějící měsíční evidence zdravotního minima není mezera v podkladech,
+     * ale zákonný výchozí stav podle § 3 odst. 10 zákona č. 592/1992 Sb.:
+     * doplatek hradí zaměstnanec. Ve vstupu je proto vidět, že hodnota je
+     * odvozená, ne prohlášená — a doklad k ní nepatří.
+     */
+    public function testMissingHealthMonthEvidenceMeansTheStatutoryDefault(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['statutory_evidence']['health']['month_evidence']
+            = null;
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame([], array_map(
+            static fn ($issue): string => "{$issue->domain}|{$issue->code}",
+            $bundle->issues,
+        ));
+        self::assertNotNull($bundle->healthInsurance);
+        $person = $bundle->healthInsurance->people[0];
+        self::assertSame(
+            HealthMinimumTopUpResponsibility::Employee,
+            $person->topUpResponsibility,
+        );
+        self::assertSame(
+            HealthMinimumTopUpResponsibilitySource::StatutoryDefault,
+            $person->topUpResponsibilitySource,
+        );
+        self::assertNull($person->topUpResponsibilityEvidenceReference);
+    }
+
+    /**
+     * Zapsaný řádek default přebíjí a zůstává prohlášením uživatele — proto
+     * `declared`. Bez tohohle rozlišení by schválená mzda po letech neuměla
+     * říct, jestli plátce doplatku někdo doložil, nebo se odvodil ze zákona.
+     */
+    public function testDeclaredHealthMonthEvidenceOverridesTheStatutoryDefault(): void
+    {
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble(
+            $this->completeSnapshot(),
+        );
+
+        self::assertNotNull($bundle->healthInsurance);
+        self::assertSame(
+            HealthMinimumTopUpResponsibilitySource::Declared,
+            $bundle->healthInsurance->people[0]->topUpResponsibilitySource,
+        );
+    }
+
+    /**
+     * Prohlásit „nevíme" je pořád možné a pořád to znamená ruční posouzení.
+     * Zjednodušení se týká CHYBĚJÍCÍHO záznamu, ne záznamu, který říká, že
+     * odpověď nikdo nezná.
+     */
+    public function testExplicitlyUnverifiedResponsibilityStillBlocksHealthInputs(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['statutory_evidence']['health']['month_evidence']
+            ['top_up_responsibility'] = 'unverified';
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNull($bundle->healthInsurance);
+        self::assertSame(
+            ['health_insurance|health_minimum_responsibility_unverified'],
+            array_map(
+                static fn ($issue): string => "{$issue->domain}|{$issue->code}",
+                $bundle->issues,
+            ),
+        );
+    }
+
+    /**
+     * Výjimka podle věty třetí § 3 odst. 10 (překážky na straně organizace)
+     * zůstává vázaná na doklad. Bez něj se NESMÍ sesypat na zákonný default —
+     * jinak by šlo přenést doplatek na zaměstnavatele smazáním reference.
+     */
+    public function testEmployerObstacleWithoutEvidenceStillBlocksHealthInputs(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $month = &$snapshot['people'][0]['statutory_evidence']['health']
+            ['month_evidence'];
+        $month['top_up_responsibility'] = 'employer_obstacle_verified';
+        $month['top_up_responsibility_evidence_reference'] = null;
+        unset($month);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNull($bundle->healthInsurance);
+        self::assertSame(
+            ['health_insurance|health_evidence_mapping_failed'],
+            array_map(
+                static fn ($issue): string => "{$issue->domain}|{$issue->code}",
+                $bundle->issues,
+            ),
+        );
     }
 
     /**

@@ -240,6 +240,15 @@ nespočítá a skončí v ručním posouzení. Sekce proto v hlavičce ukazuje p
 chybějících údajů a uvnitř je vyjmenuje pro konkrétní měsíc; datum **Ke kterému
 dni** určuje, který měsíc se kontroluje.
 
+Měsíční evidence zdravotního minima je **nepovinná**. Není-li za měsíc zadaná,
+platí zákonný výchozí stav podle § 3 odst. 10 zákona č. 592/1992 Sb.: doplatek
+do minimálního vyměřovacího základu hradí zaměstnanec. Zadává se tedy jen tehdy,
+když je skutečnost jiná — doplatek jde k tíži zaměstnavatele, protože nižší
+základ způsobily překážky na jeho straně (vyžaduje doklad), nebo si zaměstnanec
+při souběhu zvolil pro doplatek jiného zaměstnavatele. Rozklad pojistného u
+schválené mzdy pak ukazuje i to, jestli hodnota vznikla zápisem, nebo odvozením
+ze zákona. Volba **neověřeno** dál znamená ruční posouzení.
+
 Ověřené hodnoty (český nebo zahraniční režim, doložená pojišťovna, platný A1)
 jsou právní skutečnosti, takže vyžadují **doklad**. Ten se ale nepíše ručně —
 u každého dokladu se vybírá **typický důvod** (například „Podepsané prohlášení

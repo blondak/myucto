@@ -62,6 +62,8 @@ final readonly class HealthPersonMonthResult implements JsonSerializable
         public bool $ppzCounted = false,
         public ?CalculationStep $standardContributionStep = null,
         public ?CalculationStep $minimumTopUpStep = null,
+        public HealthMinimumTopUpResponsibilitySource $topUpResponsibilitySource =
+            HealthMinimumTopUpResponsibilitySource::Declared,
     ) {}
 
     /** @return array<string,mixed> */
@@ -87,6 +89,10 @@ final readonly class HealthPersonMonthResult implements JsonSerializable
                 $this->statutoryMonthlyMinimumMinorUnits,
             'effective_minimum_minor_units' => $this->effectiveMinimumMinorUnits,
             'top_up_responsibility' => $this->topUpResponsibility->value,
+            // Bez tohohle klíče by ze snímku nešlo poznat, jestli je plátce
+            // doplatku doložený prohlášením, nebo odvozený z § 3 odst. 10
+            // z. č. 592/1992 Sb. Viz HealthMinimumTopUpResponsibilitySource.
+            'top_up_responsibility_source' => $this->topUpResponsibilitySource->value,
             'top_up_responsibility_evidence_reference' =>
                 $this->topUpResponsibilityEvidenceReference,
             'selected_top_up_employer_evidence_reference' =>

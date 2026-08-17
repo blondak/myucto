@@ -13,6 +13,7 @@ use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionInterval;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionReason;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpEmployerSelection;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibility;
+use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibilitySource;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthOtherEmployerBase;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthPersonMonthInput;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthRelationshipKindMapper;
@@ -580,35 +581,68 @@ final class PayrollRunStatutoryInputAssembler
             );
         }
 
+        /*
+         * Chybějící měsíční evidence zdravotního minima = zákonný výchozí stav,
+         * ne mezera v podkladech.
+         *
+         * § 3 odst. 10 zákona č. 592/1992 Sb.: „Pokud je vyměřovací základ
+         * zaměstnance nižší než minimální vyměřovací základ, je zaměstnanec
+         * povinen doplatit zdravotní pojišťovně prostřednictvím svého
+         * zaměstnavatele pojistné ve výši 13,5 % z rozdílu těchto základů. […]
+         * Pokud je vyměřovací základ nižší z důvodů překážek na straně
+         * organizace, je tento rozdíl povinen doplatit zaměstnavatel."
+         *
+         * Plátcem je tedy ze zákona ZAMĚSTNANEC a zaměstnavatel je výjimka
+         * vázaná na skutkovou okolnost (překážky na jeho straně), kterou musí
+         * někdo doložit. Vyžadovat řádek i pro pravidlo znamenalo u firmy
+         * s tisícem lidí 12 000 zápisů ročně, které jen opakují text zákona.
+         *
+         * Ptá se, až když to nastane: dopočet vůbec nevznikne, když vyměřovací
+         * základ dosahuje minima nebo se na osobu minimum nevztahuje, a
+         * HealthMinimumResolver hlásí `minimum_top_up_responsibility_unverified`
+         * i `selected_top_up_employer_*` jen při nenulové mezeře. V měsíci bez
+         * dopočtu proto nevznikne ani issue, ani požadavek na vstup.
+         *
+         * Doklad se drží tam, kde má co dokládat: u výjimky
+         * `employer_obstacle_verified` ho vynucuje HealthPersonMonthInput,
+         * u volby jiného zaměstnavatele při souběhu HealthMinimumResolver.
+         * U výchozího stavu žádný není a být nemá.
+         *
+         * Že hodnota vznikla odvozením ze zákona, nese snímek výpočtu vlastním
+         * klíčem — viz HealthMinimumTopUpResponsibilitySource.
+         */
         $monthEvidence = $this->object(
             $healthEvidence['month_evidence'] ?? null,
         );
-        if ($monthEvidence === null) {
-            $this->issue(
-                'health_insurance',
-                'health_minimum_month_evidence_missing',
-                $personReference,
+        $monthEvidenceRow = $monthEvidence ?? [];
+        $responsibility = HealthMinimumTopUpResponsibility::Employee;
+        $responsibilitySource =
+            HealthMinimumTopUpResponsibilitySource::StatutoryDefault;
+        if ($monthEvidence !== null) {
+            $responsibilitySource =
+                HealthMinimumTopUpResponsibilitySource::Declared;
+            $declared = $this->enum(
+                HealthMinimumTopUpResponsibility::class,
+                $monthEvidenceRow['top_up_responsibility'] ?? null,
             );
-            return null;
-        }
-        $responsibility = $this->enum(
-            HealthMinimumTopUpResponsibility::class,
-            $monthEvidence['top_up_responsibility'] ?? null,
-        );
-        if (!$responsibility instanceof HealthMinimumTopUpResponsibility) {
-            $this->issue(
-                'health_insurance',
-                'health_minimum_responsibility_invalid',
-                $personReference,
-            );
-            return null;
-        }
-        if ($responsibility === HealthMinimumTopUpResponsibility::Unverified) {
-            $this->issue(
-                'health_insurance',
-                'health_minimum_responsibility_unverified',
-                $personReference,
-            );
+            if (!$declared instanceof HealthMinimumTopUpResponsibility) {
+                $this->issue(
+                    'health_insurance',
+                    'health_minimum_responsibility_invalid',
+                    $personReference,
+                );
+                return null;
+            }
+            // Explicitní `unverified` je prohlášení „nevíme", ne absence
+            // prohlášení — a to zůstává důvodem k ručnímu posouzení.
+            if ($declared === HealthMinimumTopUpResponsibility::Unverified) {
+                $this->issue(
+                    'health_insurance',
+                    'health_minimum_responsibility_unverified',
+                    $personReference,
+                );
+            }
+            $responsibility = $declared;
         }
 
         $reductions = $this->healthReductions(
@@ -636,7 +670,7 @@ final class PayrollRunStatutoryInputAssembler
             return null;
         }
         $selectedEmployer = $this->nullableString(
-            $monthEvidence['selected_top_up_employer_reference'] ?? null,
+            $monthEvidenceRow['selected_top_up_employer_reference'] ?? null,
         );
         $selection = $selectedEmployer === null
             ? HealthMinimumTopUpEmployerSelection::ThisEmployer
@@ -663,17 +697,18 @@ final class PayrollRunStatutoryInputAssembler
                 $responsibility ===
                     HealthMinimumTopUpResponsibility::EmployerObstacleVerified
                     ? $this->nullableString(
-                        $monthEvidence[
+                        $monthEvidenceRow[
                             'top_up_responsibility_evidence_reference'
                         ] ?? null,
                     )
                     : null,
                 $this->nullableString(
-                    $monthEvidence[
+                    $monthEvidenceRow[
                         'selected_top_up_employer_evidence_reference'
                     ] ?? null,
                 ),
                 $selection,
+                $responsibilitySource,
             );
         } catch (\InvalidArgumentException) {
             $this->issue(
