@@ -141,7 +141,7 @@ describe('PayrollRetention', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="retention-years-payroll_sheet"]').text())
-      .toContain('payroll.retention.years_count:{"years":45}')
+      .toContain('payroll.retention.years_count_many:{"years":45}')
     expect(wrapper.get('[data-test="retention-source-payroll_sheet"]').text())
       .toContain('§ 35a odst. 4 písm. c)')
     expect(wrapper.text()).toContain('payroll.retention.verified_stamp')

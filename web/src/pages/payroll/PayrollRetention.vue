@@ -190,11 +190,17 @@ function toggleRow(category: string) {
   expanded.value = expanded.value === category ? null : category
 }
 
-/** Lhůta po započtení odchylky firmy — číslo, podle kterého se opravdu počítá. */
+/**
+ * Lhůta po započtení odchylky firmy — číslo, podle kterého se opravdu počítá.
+ *
+ * Tvar se skládá ručně ze tří klíčů, ne přes vestavěné množné číslo vue-i18n:
+ * to má napevno anglický dvoutvar, takže by ze stejnopisů ELDP udělalo „3 let".
+ */
 function yearsLabel(c: PayrollRetentionCategory): string {
-  return c.effective_years === null
-    ? t('payroll.retention.years_undetermined')
-    : t('payroll.retention.years_count', { years: c.effective_years })
+  const years = c.effective_years
+  if (years === null) return t('payroll.retention.years_undetermined')
+  const form = years === 1 ? 'one' : years >= 2 && years <= 4 ? 'few' : 'many'
+  return t(`payroll.retention.years_count_${form}`, { years })
 }
 
 /** Odchylka firmy — prodloužení zákonné lhůty, nebo lhůta dodaná tam, kde zákon mlčí. */
