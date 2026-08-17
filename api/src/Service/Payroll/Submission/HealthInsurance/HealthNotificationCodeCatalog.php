@@ -7,12 +7,14 @@ namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
 /**
  * Kódy změny jednotné datové věty HOZ a to, co o nich podklady doloženě říkají.
  *
- * Podklady dokládají DVĚ věci: úplný výčet 25 kódů a jejich rozdělení do tří
- * skupin. Význam jednotlivých písmen NEDOKLÁDAJÍ — v `private/Mzdy/podklady/`
- * není ani datový slovník, ani pokyny k vyplnění HOZ. Katalog to říká nahlas
- * přes {@see self::SEMANTICS_UNDOCUMENTED} a odmítá kód vyrobit; hádat, že
- * „P je přihláška", by znamenalo poslat pojišťovně tvrzení, které nikdo
- * neověřil, a přijatou větu už nelze vzít zpět.
+ * Význam jednotlivých písmen dokládá anotace `xsd:documentation` u typu
+ * `kodZmenyZamestnaceTyp` v připnutém
+ * `api/xsd/zp/2025-v8/hromadneOznameniZamestnavatele_2025_v8.xsd` — dokud
+ * schéma v repu nebylo, katalog kód odmítal vyrobit. Odblokovaly se jen ty
+ * druhy povinnosti, kde schéma určuje JEDINÝ kód
+ * ({@see self::DOCUMENTED_CODE_FOR_DUTY}); tam, kde by kód závisel na
+ * opravované položce nebo na směru přestupu, zůstává metoda fail-closed
+ * i s XSD ({@see self::UNMAPPED_DUTY_REASON}).
  *
  * Co katalog naopak umí i bez významu písmen: **odmítnout kód, který
  * zaměstnavatel po 1. 1. 2026 podat nesmí.** Skupinová příslušnost na to
@@ -21,8 +23,6 @@ namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
  */
 final class HealthNotificationCodeCatalog
 {
-    public const SEMANTICS_UNDOCUMENTED = 'semantics_undocumented';
-
     /** Kódy vzniku, změny a zániku zaměstnání. */
     private const EMPLOYMENT = ['P', 'A', 'E', 'C', 'O', 'Q'];
 
@@ -122,22 +122,81 @@ final class HealthNotificationCodeCatalog
     }
 
     /**
-     * Kód pro daný druh povinnosti. Vždy skončí chybou: mapování druh → kód
-     * není v podkladech doložené u jediného písmene.
+     * Mapování druh povinnosti → kód změny, doložené anotací
+     * `xsd:documentation` u typu `kodZmenyZamestnaceTyp`
+     * v `api/xsd/zp/2025-v8/hromadneOznameniZamestnavatele_2025_v8.xsd`.
      *
-     * Metoda existuje proto, aby se ta mezera dala pojmenovat na jednom místě
-     * a aby ji šlo zavřít doplněním podkladu, ne přepsáním volajících.
+     * Doslovné znění schématu k použitým písmenům:
+     * - `P` — „nástup do zaměstnání",
+     * - `O` — „ukončení zaměstnání (u zaměstnance přihlášeného kódy „P", „A",
+     *   „E" nebo „C")",
+     * - `M` — „nástup zaměstnankyně na mateřskou dovolenou NEBO osoby na
+     *   rodičovskou dovolenou" (schéma obě dovolené vede pod jedním kódem,
+     *   proto sem míří dva druhy povinnosti),
+     * - `U` — „ukončení mateřské nebo rodičovské dovolené".
+     *
+     * @var array<string,string>
      */
-    public function codeFor(HealthNotificationDutyKind $kind): never
+    private const DOCUMENTED_CODE_FOR_DUTY = [
+        HealthNotificationDutyKind::EmploymentStart->value => 'P',
+        HealthNotificationDutyKind::EmploymentEnd->value => 'O',
+        HealthNotificationDutyKind::MaternityLeaveStart->value => 'M',
+        HealthNotificationDutyKind::ParentalLeaveStart->value => 'M',
+        HealthNotificationDutyKind::MaternityOrParentalLeaveEnd->value => 'U',
+    ];
+
+    /**
+     * Zbylé druhy povinnosti kód nedostanou, a to KAŽDÝ z jiného důvodu —
+     * proto se nesmí slít do jedné hlášky.
+     *
+     * @var array<string,string>
+     */
+    private const UNMAPPED_DUTY_REASON = [
+        HealthNotificationDutyKind::EmployeeDataChange->value =>
+            'Opravné kódy „X", „Y" a „Z" schéma váže na KONKRÉTNÍ opravovanou '
+            . 'položku (číslo pojištěnce, datum přihlášení, datum odhlášení). '
+            . 'Druh povinnosti „změna údajů" tuhle položku nenese, takže z něj '
+            . 'jediný kód neplyne.',
+        HealthNotificationDutyKind::InsurerChange->value =>
+            'Přestup mezi pojišťovnami se podle schématu hlásí každé pojišťovně '
+            . 'jinak: odcházející kódem „O" („přestupu k jiné zdravotní '
+            . 'pojišťovně"), přijímající kódem „P" („při přestupu od jiné '
+            . 'zdravotní pojišťovny"). Bez směru přestupu se kód určit nedá.',
+        HealthNotificationDutyKind::StateCategoryOther->value =>
+            'Skutečnosti ze skupiny „plátcem je stát" mimo kódy „M" a „U" '
+            . 'zaměstnavatel od 1. 1. 2026 nehlásí, takže se pro ně kód '
+            . 'nevydává vůbec.',
+    ];
+
+    /**
+     * Kód změny pro daný druh povinnosti.
+     *
+     * Význam písmen dokládá anotace připnutého XSD; u druhů, kde ani schéma
+     * jediný kód neurčuje, metoda dál končí `zp_change_code_mapping_undocumented`
+     * s konkrétním důvodem místo odhadu.
+     */
+    public function codeFor(HealthNotificationDutyKind $kind): string
     {
+        $code = self::DOCUMENTED_CODE_FOR_DUTY[$kind->value] ?? null;
+        if ($code !== null) {
+            return $code;
+        }
+
         throw new HealthNotificationException(
             'zp_change_code_mapping_undocumented',
             sprintf(
-                'Podklady nedokládají, který kód změny odpovídá povinnosti „%s". '
-                . 'Doplňte do private/Mzdy/podklady/ datový slovník nebo pokyny '
-                . 'k vyplnění HOZ; do té doby se kód neodhaduje.',
+                'Kód změny pro povinnost „%s" se neodhaduje. %s',
                 $kind->value,
+                self::UNMAPPED_DUTY_REASON[$kind->value]
+                    ?? 'Schéma pro tenhle druh povinnosti kód nedokládá.',
             ),
         );
+    }
+
+    /** Druhy povinnosti, ke kterým schéma kód doloženě určuje. */
+    public function isCodeMappingDocumented(
+        HealthNotificationDutyKind $kind,
+    ): bool {
+        return isset(self::DOCUMENTED_CODE_FOR_DUTY[$kind->value]);
     }
 }
