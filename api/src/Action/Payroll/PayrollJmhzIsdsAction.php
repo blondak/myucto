@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsRecipientCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSubmissionPrerequisites;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -91,6 +92,13 @@ final class PayrollJmhzIsdsAction
                 'note' => JmhzIsdsRecipientCatalog::generalFallback()->note,
             ],
             'source_url' => 'https://www.cssz.gov.cz/komunikacni-kanaly-e-podani',
+            // Registraci u ČSSZ nesplní software, ale člověk — a typicky týdny
+            // předem. Bez vyslovení by na ni uživatel narazil až odmítnutím
+            // ostrého podání, tedy když už běží lhůta.
+            'prerequisites' => [
+                'isds' => JmhzSubmissionPrerequisites::forChannel('isds'),
+                'vrep_apep' => JmhzSubmissionPrerequisites::forChannel('vrep_apep'),
+            ],
         ]));
     }
 
