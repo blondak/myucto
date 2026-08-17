@@ -112,8 +112,11 @@ final readonly class JmhzIsdsMessageBuilder
     /**
      * Věc zprávy. ČSSZ ji ignoruje, člověk ne — ve schránce je to jediné, podle
      * čeho pozná, které období odešlo.
+     *
+     * Veřejná proto, že věc se musí znát DŘÍV než spisová značka: tu přiděluje
+     * až fronta podání při zařazení, kdežto věc do zařazení vstupuje.
      */
-    private function subject(string $agendaCode, string $periodLabel, string $variableSymbol): string
+    public function subject(string $agendaCode, string $periodLabel, string $variableSymbol): string
     {
         return sprintf(
             '%s - Jednotné měsíční hlášení zaměstnavatele za %s, VS %s',

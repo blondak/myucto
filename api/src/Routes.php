@@ -99,6 +99,7 @@ use MyInvoice\Action\Payroll\PayrollJmhzOrdinaryEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPreparationAction;
 use MyInvoice\Action\Payroll\PayrollJmhzSigningProfileAction;
 use MyInvoice\Action\Payroll\PayrollJmhzSubmissionFreezeAction;
+use MyInvoice\Action\Payroll\PayrollJmhzIsdsAction;
 use MyInvoice\Action\Payroll\PayrollJmhzTransportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
 use MyInvoice\Action\Payroll\PayrollNetResultAction;
@@ -1081,6 +1082,23 @@ final class Routes
             $g->post(
                 '/submissions/jmhz-transport/{attemptId:[0-9]+}/close',
                 [PayrollJmhzTransportAction::class, 'close'],
+            );
+            // Datová schránka je druhý rovnocenný kanál JMHZ vedle VREP, ne
+            // náhradní cesta — ČSSZ pro JMHZ zřídila vlastní schránku iie254d.
+            // `jmhz-isds` jen ZAŘADÍ podání do fronty a vrátí hotovou zprávu;
+            // odesílá se dál obecnou cestou `/api/submissions/outbox/{id}/…`,
+            // aby doručenka a rozhodný den doručení měly jedinou evidenci.
+            $g->get(
+                '/submissions/jmhz-isds/recipients',
+                [PayrollJmhzIsdsAction::class, 'recipients'],
+            );
+            $g->get(
+                '/submissions/jmhz-isds/match-response',
+                [PayrollJmhzIsdsAction::class, 'matchResponse'],
+            );
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/jmhz-isds',
+                [PayrollJmhzIsdsAction::class, 'enqueue'],
             );
             // Storno ruší za období všechno, oprava jen vyjmenované vztahy —
             // rozdíl musí být vidět i v adrese, ne až v těle požadavku.
