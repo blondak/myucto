@@ -54,6 +54,13 @@ export type PayrollRelationType = 'employment' | 'small_scale_employment' | 'dpp
 export type PayrollEmploymentStatus = 'planned' | 'preregistered' | 'active' | 'suspended' | 'ended' | 'archived' | 'no_show'
 export type PayrollInsuranceParticipation = 'automatic' | 'included' | 'excluded' | 'foreign'
 export type PayrollTaxRegime = 'advance' | 'withholding' | 'foreign' | 'manual_review'
+/**
+ * Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP: zakládá vztah účast na
+ * nemocenském pojištění (`ineligible` — vždy zálohová daň), nebo ne (`eligible` —
+ * do rozhodné částky srážková)? Ptáme se jen u vztahů, u kterých to z druhu
+ * poznat nejde: odměna jednatele/člena orgánu, DPČ, práce společníka pro s. r. o.
+ */
+export type PayrollOtherWithholdingEligibility = 'unverified' | 'eligible' | 'ineligible'
 export type PayrollChecklistStatus = 'pending' | 'completed' | 'not_applicable'
 
 /**
@@ -161,6 +168,10 @@ export interface PayrollEmploymentTerms {
   social_insurance_participation: PayrollInsuranceParticipation
   health_insurance_participation: PayrollInsuranceParticipation
   tax_regime: PayrollTaxRegime
+  // Nepovinné schválně: obrazovky, které pole nenabízejí, posílají podmínky bez
+  // něj a server v takovém případě ponechá uloženou hodnotu (jinak by uložení
+  // nesouvisející změny shodilo daňové zařazení jednatele na „neurčeno").
+  other_withholding_eligibility?: PayrollOtherWithholdingEligibility
   foreign_legislation_country_code: string | null
   a1_certificate_until: string | null
   risky_work: boolean

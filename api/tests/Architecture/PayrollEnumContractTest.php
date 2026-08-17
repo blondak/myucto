@@ -84,6 +84,12 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollEmploymentStatus'        => 'db:payroll_employments.status',
         'payroll.ts::PayrollRelationType'            => 'db:payroll_employments.relation_type',
         'payroll.ts::PayrollTaxRegime'               => 'db:payroll_employment_terms.tax_regime',
+        // Doména sloupce je ÚZKO tři hodnoty; PHP enum OtherWithholdingEligibility
+        // má navíc `automatic`, protože to není volba uživatele, ale zařazení,
+        // které si výpočet odvodí z druhu vztahu. Klient tu čtvrtou hodnotu
+        // nesmí nabízet — proto se páruje sloupec, ne enum.
+        'payroll.ts::PayrollOtherWithholdingEligibility'
+            => 'db:payroll_employment_terms.other_withholding_eligibility',
         'payroll.ts::PayrollInsuranceParticipation'  => 'db:payroll_employment_terms.social_insurance_participation',
         'payroll.ts::PayrollChecklistStatus'         => 'db:payroll_employment_checklist_items.status',
         'payroll.ts::PayrollVerifiedTriState'        => 'db:payroll_employment_terms.jmhz_apz_contribution_status',
@@ -273,6 +279,8 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.people.employment_status'    => 'db:payroll_employments.status',
         'payroll.people.relations'            => 'db:payroll_employments.relation_type',
         'payroll.people.tax_regime'           => 'db:payroll_employment_terms.tax_regime',
+        'payroll.people.other_withholding_eligibility'
+            => 'db:payroll_employment_terms.other_withholding_eligibility',
         'payroll.people.insurance_mode'       => 'db:payroll_employment_terms.social_insurance_participation',
         'payroll.people.checklist_status'     => 'db:payroll_employment_checklist_items.status',
         'payroll.people.event'                => 'db:payroll_employment_events.event_type',

@@ -281,6 +281,45 @@ final class PayrollEmploymentValidatorTest extends TestCase
         $this->validator()->terms($unknown);
     }
 
+    /**
+     * Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP se ukládá jen tehdy,
+     * když ho klient poslal. Podmínky se zapisují celé, takže obrazovka, která
+     * o poli neví (rychlá editace, založení vztahu ze seznamu), by ho jinak
+     * shodila na „neurčeno" — a příští mzdový běh by kvůli uložení docela jiné
+     * změny skončil ručním posouzením.
+     */
+    public function testPayerStatementIsCarriedOverWhenTheClientDoesNotSendIt(): void
+    {
+        $terms = $this->terms();
+        self::assertArrayNotHasKey('other_withholding_eligibility', $terms);
+
+        self::assertSame(
+            'eligible',
+            $this->validator()->terms($terms, null, 'eligible')['other_withholding_eligibility'],
+        );
+        self::assertSame(
+            'unverified',
+            $this->validator()->terms($terms)['other_withholding_eligibility'],
+        );
+
+        $explicit = $terms;
+        $explicit['other_withholding_eligibility'] = 'ineligible';
+        self::assertSame(
+            'ineligible',
+            $this->validator()->terms($explicit, null, 'eligible')['other_withholding_eligibility'],
+        );
+    }
+
+    public function testUnsupportedPayerStatementIsRejected(): void
+    {
+        $terms = $this->terms();
+        $terms['other_withholding_eligibility'] = 'automatic';
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('srážkovou daň');
+        $this->validator()->terms($terms);
+    }
+
     private function validator(): PayrollEmploymentValidator
     {
         return new PayrollEmploymentValidator(

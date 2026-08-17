@@ -2302,6 +2302,8 @@
             "social_mode": "Účast na sociálním pojištění",
             "health_mode": "Účast na zdravotním pojištění",
             "tax_regime_label": "Daňový režim",
+            "other_withholding_eligibility_label": "Účast na nemocenském pojištění z odměny",
+            "other_withholding_eligibility_hint": "Rozhoduje o zdanění bez podepsaného prohlášení k dani (§ 6 odst. 4 písm. b) zákona o daních z příjmů). Zakládá-li sjednaná odměna účast na nemocenském pojištění, sráží se zálohová daň vždy. Nezakládá-li ji, daní se měsíce, ve kterých odměna nedosáhne rozhodné částky (v roce 2026 je to 4 500 Kč), srážkovou daní 15 % a ostatní měsíce zálohou. Dokud tu není odpověď, skončí zákonný výpočet ručním posouzením.",
             "foreign_country": "Stát cizích předpisů",
             "a1_certificate_until": "Potvrzení A1 platné do",
             "tax_declaration": "Podepsané prohlášení k dani",
@@ -2388,6 +2390,11 @@
                 "withholding": "Srážková daň",
                 "foreign": "Zdanění v zahraničí",
                 "manual_review": "Ruční posouzení"
+            },
+            "other_withholding_eligibility": {
+                "unverified": "Neurčeno — výpočet skončí ručním posouzením",
+                "eligible": "Nezakládá účast — do rozhodné částky srážková daň",
+                "ineligible": "Zakládá účast — vždy zálohová daň"
             },
             "checklist_status": {
                 "pending": "Nesplněno",

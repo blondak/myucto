@@ -269,6 +269,25 @@ nepřepíše. Historie drží zejména:
   daňový režim a prohlášení k dani;
 - příznak primárního pracovního vztahu a důvod změny.
 
+U odměny člena statutárního orgánu, u dohody o pracovní činnosti a u práce
+společníka pro vlastní společnost přibývá v podmínkách pole **Účast na
+nemocenském pojištění z odměny**. Rozhoduje o tom, jak se odměna zdaní, když
+zaměstnanec nepodepsal prohlášení k dani (§ 6 odst. 4 písm. b) zákona o daních
+z příjmů):
+
+- **Zakládá účast** — sjednaná odměna dosahuje rozhodné částky, takže se sráží
+  zálohová daň v každém měsíci.
+- **Nezakládá účast** — měsíce, ve kterých odměna rozhodné částky nedosáhne
+  (pro rok 2026 je to 4 500 Kč), se daní srážkovou daní 15 % ze samostatného
+  základu; ostatní měsíce zálohou.
+- **Neurčeno** — výchozí stav. Aplikace odpověď neodhaduje, protože za zařazení
+  ručí plátce daně, a zákonný výpočet skončí ručním posouzením, dokud ji někdo
+  nedoplní.
+
+U pracovního poměru, zaměstnání malého rozsahu a dohody o provedení práce se
+pole nenabízí — tam zařazení plyne přímo z druhu vztahu a aplikace si ho odvodí
+sama.
+
 Ve stejné verzi podmínek je skupina **JMHZ – vykonávaná pozice**. Eviduje
 strukturovanou obec pracoviště, kód obce a stát, druh činnosti, bližší určení
 pracovněprávního vztahu, příspěvek a nástroj APZ, funkční požitky a dočasné

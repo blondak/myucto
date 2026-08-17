@@ -56,6 +56,17 @@ const municipalityOptions = ref<PayrollJmhzMunicipalityOption[]>([])
 const municipalitiesLoading = ref(false)
 
 const currentTerms = computed(() => props.employment.terms[0] ?? null)
+
+/**
+ * Zařazení pro srážkovou daň se ptáme jen tam, kde ho z druhu vztahu nejde
+ * odvodit. U pracovního poměru, zaměstnání malého rozsahu a DPP odpověď plyne
+ * ze zákona sama (backend posílá `automatic`), takže by to bylo pole, kterým
+ * uživatel nemůže nic změnit. Zrcadlí
+ * EmploymentRelationshipKind::requiresOtherWithholdingStatement().
+ */
+const needsOtherWithholdingStatement = computed(
+  () => ['dpc', 'partner_dependent', 'statutory_body'].includes(props.employment.relation_type),
+)
 const openChecklist = computed(() =>
   props.employment.checklist.filter(item => item.status === 'pending'),
 )
@@ -230,6 +241,7 @@ async function startTermsEdit() {
     social_insurance_participation: terms.social_insurance_participation,
     health_insurance_participation: terms.health_insurance_participation,
     tax_regime: terms.tax_regime,
+    other_withholding_eligibility: terms.other_withholding_eligibility ?? 'unverified',
     foreign_legislation_country_code: terms.foreign_legislation_country_code,
     a1_certificate_until: terms.a1_certificate_until,
     risky_work: terms.risky_work,
@@ -620,6 +632,7 @@ const actions = computed<ActionItem[]>(() => [
         <label class="text-xs text-neutral-600">{{ t('payroll.people.social_mode') }}<select v-model="termsForm.social_insurance_participation" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option></select></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.health_mode') }}<select v-model="termsForm.health_insurance_participation" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option></select></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.tax_regime_label') }}<select v-model="termsForm.tax_regime" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="mode in ['advance','withholding','foreign','manual_review']" :key="mode" :value="mode">{{ t(`payroll.people.tax_regime.${mode}`) }}</option></select></label>
+        <label v-if="needsOtherWithholdingStatement" class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.other_withholding_eligibility_label') }}<select v-model="termsForm.other_withholding_eligibility" data-test="other-withholding-eligibility" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="state in ['unverified','eligible','ineligible']" :key="state" :value="state">{{ t(`payroll.people.other_withholding_eligibility.${state}`) }}</option></select><span class="mt-1 block text-neutral-500">{{ t('payroll.people.other_withholding_eligibility_hint') }}</span></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.foreign_country') }}<input v-model="termsForm.foreign_legislation_country_code" maxlength="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm uppercase"></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.a1_certificate_until') }}<input v-model="termsForm.a1_certificate_until" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="termsForm.is_primary" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.primary') }}</label>

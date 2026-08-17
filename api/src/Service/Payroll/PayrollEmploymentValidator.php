@@ -30,6 +30,7 @@ namespace MyInvoice\Service\Payroll;
  *   social_insurance_participation:string,
  *   health_insurance_participation:string,
  *   tax_regime:string,
+ *   other_withholding_eligibility:string,
  *   foreign_legislation_country_code:?string,
  *   a1_certificate_until:?string,
  *   risky_work:bool,
@@ -57,6 +58,8 @@ final class PayrollEmploymentValidator
 
     private const INSURANCE_MODES = ['automatic', 'included', 'excluded', 'foreign'];
     private const TAX_REGIMES = ['advance', 'withholding', 'foreign', 'manual_review'];
+    /** Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP — viz migrace 1403. */
+    private const OTHER_WITHHOLDING_ELIGIBILITIES = ['unverified', 'eligible', 'ineligible'];
     private const CHECKLIST_STATUSES = ['pending', 'completed', 'not_applicable'];
     private const VERIFIED_STATES = ['unverified', 'no', 'yes'];
 
@@ -132,10 +135,18 @@ final class PayrollEmploymentValidator
      *        v databázi je. Předává ho zápisová cesta, nikdy klient — je to
      *        jediný důvod, proč smí projít kód mimo číselník (viz
      *        {@see optionalCzIscoCode()}).
+     * @param ?string $storedOtherWithholdingEligibility Prohlášení plátce podle
+     *        § 6 odst. 4 písm. b) ZDP, které u vztahu už platí. Taky ho předává
+     *        zápisová cesta: obrazovky, které o poli nevědí (rychlá editace,
+     *        založení vztahu ze seznamu), posílají podmínky bez něj a nesmí ho
+     *        tím zahodit — viz {@see otherWithholdingEligibility()}.
      * @return TermsInput
      */
-    public function terms(array $input, ?string $storedCzIscoCode = null): array
-    {
+    public function terms(
+        array $input,
+        ?string $storedCzIscoCode = null,
+        ?string $storedOtherWithholdingEligibility = null,
+    ): array {
         $effectiveFrom = $this->requiredDate($input, 'effective_from');
         $plannedStart = $this->requiredDate($input, 'planned_start_on');
         $fixedEnd = $this->optionalDate($input, 'fixed_term_end_on');
@@ -273,6 +284,10 @@ final class PayrollEmploymentValidator
             'social_insurance_participation' => $social,
             'health_insurance_participation' => $health,
             'tax_regime' => $tax,
+            'other_withholding_eligibility' => $this->otherWithholdingEligibility(
+                $input,
+                $storedOtherWithholdingEligibility,
+            ),
             'foreign_legislation_country_code' => $country,
             'a1_certificate_until' => $this->optionalDate($input, 'a1_certificate_until'),
             'risky_work' => $this->requiredBool($input, 'risky_work', false),
@@ -419,6 +434,35 @@ final class PayrollEmploymentValidator
             $value,
             CzIscoCodebook::CLASSIFICATION_VERSION,
         ));
+    }
+
+    /**
+     * Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP.
+     *
+     * Chybějící klíč znamená „na tohle pole nikdo nesahal", ne „vynuluj ho".
+     * Podmínky se ukládají celé, takže obrazovka, která pole nezná, by jinak
+     * daňové zařazení jednatele shodila zpátky na `unverified` — a příští běh
+     * by skončil ručním posouzením kvůli uložení nesouvisející změny. Stejná
+     * úvaha jako u uloženého kódu CZ-ISCO, jen opačným směrem: tam se přebírá,
+     * aby historická hodnota nezablokovala uložení, tady aby se neztratila.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function otherWithholdingEligibility(array $input, ?string $stored): string
+    {
+        if (($input['other_withholding_eligibility'] ?? null) === null) {
+            return in_array($stored, self::OTHER_WITHHOLDING_ELIGIBILITIES, true)
+                ? $stored
+                : 'unverified';
+        }
+        $value = $this->inputString($input['other_withholding_eligibility']);
+        if (!in_array($value, self::OTHER_WITHHOLDING_ELIGIBILITIES, true)) {
+            throw new \InvalidArgumentException(
+                'Zařazení pro srážkovou daň z ostatních příjmů není podporováno.',
+            );
+        }
+
+        return $value;
     }
 
     /** @param array<string,mixed> $input */

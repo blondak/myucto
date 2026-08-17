@@ -2302,6 +2302,8 @@
             "social_mode": "Social insurance participation",
             "health_mode": "Health insurance participation",
             "tax_regime_label": "Tax regime",
+            "other_withholding_eligibility_label": "Sickness insurance participation from this remuneration",
+            "other_withholding_eligibility_hint": "Decides how the income is taxed without a signed tax declaration (Income Tax Act, § 6 (4)(b)). If the agreed remuneration establishes sickness insurance participation, tax advance applies every month. If it does not, months where the remuneration stays below the decisive amount (CZK 4,500 in 2026) are taxed by 15 % withholding tax and the rest by tax advance. Until this is answered, the statutory calculation ends in manual review.",
             "foreign_country": "Foreign legislation country",
             "a1_certificate_until": "A1 certificate valid until",
             "tax_declaration": "Signed tax declaration",
@@ -2388,6 +2390,11 @@
                 "withholding": "Withholding tax",
                 "foreign": "Taxed abroad",
                 "manual_review": "Manual review"
+            },
+            "other_withholding_eligibility": {
+                "unverified": "Not stated — calculation ends in manual review",
+                "eligible": "Does not participate — withholding tax below the decisive amount",
+                "ineligible": "Participates — tax advance every month"
             },
             "checklist_status": {
                 "pending": "Open",

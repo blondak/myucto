@@ -341,26 +341,19 @@ final class MonthlyEmploymentIncomeTaxCalculator
                 'group' => null,
                 'issue' => 'other-withholding-eligibility-unverified',
             ],
-            OtherWithholdingEligibility::Automatic => match ($relationship->kind) {
-                EmploymentRelationshipKind::Employment => [
-                    'group' => null,
-                    'issue' => null,
-                ],
-                EmploymentRelationshipKind::Dpp => [
-                    'group' => 'dpp',
-                    'issue' => null,
-                ],
-                EmploymentRelationshipKind::SmallScaleEmployment => [
-                    'group' => 'other',
-                    'issue' => null,
-                ],
-                EmploymentRelationshipKind::Dpc,
-                EmploymentRelationshipKind::ManagingPartnerDependent,
-                EmploymentRelationshipKind::StatutoryBody => [
-                    'group' => null,
-                    'issue' => 'other-withholding-eligibility-unverified',
-                ],
-            },
+            // `Automatic` = „zařaď to podle druhu vztahu". Kde to podle druhu
+            // vztahu zařadit nejde, je jediná bezpečná odpověď ruční posouzení;
+            // které druhy to jsou, ví enum vztahu, protože se podle toho řídí
+            // i sestavovač vstupů (PayrollRunStatutoryInputAssembler). Kdyby
+            // pravidlo žilo na dvou místech, rozešlo by se: sestavovač by
+            // poslal `Automatic` u vztahu, který vyžaduje prohlášení plátce,
+            // a výpočet by ho zařadil beze slova.
+            OtherWithholdingEligibility::Automatic => [
+                'group' => $relationship->kind->automaticWithholdingGroup(),
+                'issue' => $relationship->kind->requiresOtherWithholdingStatement()
+                    ? 'other-withholding-eligibility-unverified'
+                    : null,
+            ],
         };
     }
 

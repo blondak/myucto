@@ -243,6 +243,28 @@ final class PayrollEmploymentRepository
         return is_string($value) && $value !== '' ? $value : null;
     }
 
+    /**
+     * Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP, které u vztahu právě
+     * platí. Čte ho validátor smluvních podmínek, aby ho neshodila obrazovka,
+     * která o poli neví — viz PayrollEmploymentValidator::otherWithholdingEligibility().
+     */
+    public function currentOtherWithholdingEligibility(
+        int $supplierId,
+        int $employmentId,
+    ): ?string {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT other_withholding_eligibility
+               FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
     /** @param TermsInput $data
      *  @return array<string,mixed>
      */
@@ -671,6 +693,7 @@ final class PayrollEmploymentRepository
                     terms.jmhz_relationship_detail_code,
                     terms.social_insurance_participation,
                     terms.health_insurance_participation, terms.tax_regime,
+                    terms.other_withholding_eligibility,
                     terms.foreign_legislation_country_code,
                     terms.a1_certificate_until, terms.risky_work,
                     terms.tax_declaration_signed, terms.is_primary,
@@ -762,10 +785,11 @@ final class PayrollEmploymentRepository
                  jmhz_functional_benefits_status,
                  jmhz_temporary_assignment_status,
                  social_insurance_participation, health_insurance_participation,
-                 tax_regime, foreign_legislation_country_code,
+                 tax_regime, other_withholding_eligibility,
+                 foreign_legislation_country_code,
                  a1_certificate_until, risky_work, tax_declaration_signed,
                  is_primary, change_reason, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $employmentId,
@@ -793,6 +817,7 @@ final class PayrollEmploymentRepository
             $data['social_insurance_participation'],
             $data['health_insurance_participation'],
             $data['tax_regime'],
+            $data['other_withholding_eligibility'],
             $data['foreign_legislation_country_code'],
             $data['a1_certificate_until'],
             (int) $data['risky_work'],
