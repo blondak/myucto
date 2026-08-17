@@ -45,6 +45,18 @@ final readonly class AnnualSettlementDocumentData
         public int $settlementDifferenceMinorUnits,
         public int $payableMinorUnits,
         public string $outcome,
+        /**
+         * Příspěvek potvrzení od předchozích plátců (§ 38ch odst. 3 a 4).
+         *
+         * Nese se odděleně, protože doklad musí ukázat, z čeho se ÚHRN skládá.
+         * Kdyby se tiskl jen součet, nešlo by z dokladu poznat, že část základu
+         * a část záloh je od jiného zaměstnavatele — a přitom právě to je
+         * podmínka, za které se zúčtování vůbec smělo provést.
+         */
+        public int $externalCertificateCount = 0,
+        public int $externalAdvanceBaseMinorUnits = 0,
+        public int $externalAdvanceTaxMinorUnits = 0,
+        public int $externalTaxBonusMinorUnits = 0,
     ) {
         if (preg_match('/^[a-f0-9]{64}$/D', $sourceSnapshotSha256) !== 1) {
             throw new \InvalidArgumentException(
@@ -91,6 +103,57 @@ final readonly class AnnualSettlementDocumentData
                 'Doplatek ze zúčtování neodpovídá součtu rozdílů.',
             );
         }
+        foreach ([
+            $externalCertificateCount,
+            $externalAdvanceBaseMinorUnits,
+            $externalAdvanceTaxMinorUnits,
+            $externalTaxBonusMinorUnits,
+        ] as $value) {
+            if ($value < 0) {
+                throw new \InvalidArgumentException(
+                    'Příspěvek potvrzení od jiného plátce nesmí být záporný.',
+                );
+            }
+        }
+        // Bez potvrzení nesmí být nenulový příspěvek a naopak — jinak by doklad
+        // tvrdil, že část úhrnu pochází od plátce, který na něm není uvedený.
+        if ($externalCertificateCount === 0
+            && ($externalAdvanceBaseMinorUnits !== 0
+                || $externalAdvanceTaxMinorUnits !== 0
+                || $externalTaxBonusMinorUnits !== 0)
+        ) {
+            throw new \InvalidArgumentException(
+                'Doklad uvádí částky od předchozích plátců, ale žádné potvrzení.',
+            );
+        }
+        // § 35d odst. 7 porovnává daň s ÚHRNEM zálohově sražené daně. Rozdíl na
+        // dani na dokladu proto musí sedět na součet vlastních záloh a záloh
+        // z potvrzení — kdyby ne, doklad by ukazoval čísla, ze kterých ten
+        // rozdíl nevychází.
+        if ($taxDifferenceMinorUnits
+            !== $advanceTaxMinorUnits + $externalAdvanceTaxMinorUnits
+                - $taxAfterAllCreditsMinorUnits
+        ) {
+            throw new \InvalidArgumentException(
+                'Rozdíl na dani neodpovídá úhrnu zálohově sražené daně.',
+            );
+        }
+    }
+
+    /** § 38ch odst. 4 — úhrn za všechny plátce, ne jen za tohoto. */
+    public function totalAdvanceBaseMinorUnits(): int
+    {
+        return $this->advanceBaseMinorUnits + $this->externalAdvanceBaseMinorUnits;
+    }
+
+    public function totalAdvanceTaxMinorUnits(): int
+    {
+        return $this->advanceTaxMinorUnits + $this->externalAdvanceTaxMinorUnits;
+    }
+
+    public function totalMonthlyTaxBonusMinorUnits(): int
+    {
+        return $this->monthlyTaxBonusMinorUnits + $this->externalTaxBonusMinorUnits;
     }
 
     /** @return array<string,mixed> */
@@ -112,6 +175,13 @@ final readonly class AnnualSettlementDocumentData
                 'identifier_value' => $this->personalIdentifierValue,
             ],
             'advance_base_minor_units' => $this->advanceBaseMinorUnits,
+            'external_certificate_count' => $this->externalCertificateCount,
+            'external_advance_base_minor_units' => $this->externalAdvanceBaseMinorUnits,
+            'external_advance_tax_minor_units' => $this->externalAdvanceTaxMinorUnits,
+            'external_tax_bonus_minor_units' => $this->externalTaxBonusMinorUnits,
+            'total_advance_base_minor_units' => $this->totalAdvanceBaseMinorUnits(),
+            'total_advance_tax_minor_units' => $this->totalAdvanceTaxMinorUnits(),
+            'total_monthly_tax_bonus_minor_units' => $this->totalMonthlyTaxBonusMinorUnits(),
             'rounded_tax_base_minor_units' => $this->roundedTaxBaseMinorUnits,
             'tax_before_credits_minor_units' => $this->taxBeforeCreditsMinorUnits,
             'credit_rows' => $this->creditRows,

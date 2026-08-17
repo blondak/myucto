@@ -109,9 +109,22 @@
         <th class="amount">Kč</th>
     </tr>
     <tr>
-        <td>Úhrn základů pro výpočet záloh (§ 38h odst. 1)</td>
+        <td>Úhrn základů pro výpočet záloh u tohoto plátce (§ 38h odst. 1)</td>
         <td class="amount">{{ advance_base_minor_units|minor_money }}</td>
     </tr>
+    {% if external_certificate_count > 0 %}
+        <tr>
+            <td>
+                Z potvrzení od předchozích plátců
+                ({{ external_certificate_count }}&nbsp;ks, § 38ch odst. 3)
+            </td>
+            <td class="amount">{{ external_advance_base_minor_units|minor_money }}</td>
+        </tr>
+        <tr>
+            <td>Úhrn základů za všechny plátce (§ 38ch odst. 4)</td>
+            <td class="amount">{{ total_advance_base_minor_units|minor_money }}</td>
+        </tr>
+    {% endif %}
     <tr>
         <td>Základ daně zaokrouhlený na celá sta Kč dolů (§ 16 odst. 2)</td>
         <td class="amount">{{ rounded_tax_base_minor_units|minor_money }}</td>
@@ -184,16 +197,36 @@
     </tr>
     <tr>
         <td>Úhrn zálohově sražené daně</td>
-        <td class="amount">{{ advance_tax_minor_units|minor_money }}</td>
+        <td class="amount">{{ total_advance_tax_minor_units|minor_money }}</td>
     </tr>
+    {% if external_certificate_count > 0 %}
+        <tr>
+            <td>&nbsp;&nbsp;z toho u tohoto plátce</td>
+            <td class="amount">{{ advance_tax_minor_units|minor_money }}</td>
+        </tr>
+        <tr>
+            <td>&nbsp;&nbsp;z toho podle potvrzení od předchozích plátců</td>
+            <td class="amount">{{ external_advance_tax_minor_units|minor_money }}</td>
+        </tr>
+    {% endif %}
     <tr>
         <td>Rozdíl na dani</td>
         <td class="amount">{{ tax_difference_minor_units|minor_money }}</td>
     </tr>
     <tr>
         <td>Úhrn vyplacených měsíčních daňových bonusů</td>
-        <td class="amount">{{ monthly_tax_bonus_minor_units|minor_money }}</td>
+        <td class="amount">{{ total_monthly_tax_bonus_minor_units|minor_money }}</td>
     </tr>
+    {% if external_certificate_count > 0 %}
+        <tr>
+            <td>&nbsp;&nbsp;z toho u tohoto plátce</td>
+            <td class="amount">{{ monthly_tax_bonus_minor_units|minor_money }}</td>
+        </tr>
+        <tr>
+            <td>&nbsp;&nbsp;z toho podle potvrzení od předchozích plátců</td>
+            <td class="amount">{{ external_tax_bonus_minor_units|minor_money }}</td>
+        </tr>
+    {% endif %}
     <tr>
         <td>Rozdíl na daňovém bonusu</td>
         <td class="amount">{{ bonus_difference_minor_units|minor_money }}</td>

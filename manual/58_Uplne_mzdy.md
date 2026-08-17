@@ -923,7 +923,8 @@ platí „nevíme", zúčtování se neprovádí.
   z karty zaměstnance k 31. prosinci zúčtovávaného roku.
 - **Doklady od předchozích zaměstnavatelů** za tentýž rok jsou doložené,
   nebo zaměstnanec jiného zaměstnavatele neměl. Pozdější doručení než
-  15. února zúčtování zastaví.
+  15. února zúčtování zastaví. Samotné údaje z těch potvrzení se zadávají
+  v sekci níž a musí být úplné.
 - **Zaměstnanec nepodává daňové přiznání.** Kdo přiznání podá nebo je povinen
   ho podat, tomu zaměstnavatel roční zúčtování provést nesmí. Aplikace tuhle
   povinnost neodvozuje — o většině rozhodných skutečností nic neví, a odpověď
@@ -939,6 +940,45 @@ platí „nevíme", zúčtování se neprovádí.
 
 Nesplněné podmínky se vypisují všechny najednou jako věty, ne jako kódy, a
 tlačítko **Provést roční zúčtování** zůstává vidět zašedlé i s vysvětlením.
+
+### Potvrzení od jiného plátce daně
+
+Měl-li zaměstnanec v roce ještě jiného zaměstnavatele, zapiš jeho potvrzení
+v sekci **Potvrzení od jiného plátce daně**. Údaje odpovídají tiskopisu
+*Potvrzení o zdanitelných příjmech ze závislé činnosti* (25 5460, vzor č. 33)
+a zúčtování je bez nich provést nelze — § 38ch odst. 3 říká, že plátce zúčtování
+provede „jen na základě dokladů … o zúčtované nebo vyplacené mzdě, sražených
+zálohách na daň z těchto příjmů, poskytnuté měsíční slevě na dani podle § 35ba
+a 35c a vyplacených měsíčních daňových bonusech".
+
+| Pole v aplikaci | Kde ho najdeš na potvrzení |
+|---|---|
+| Úhrn zúčtovaných příjmů | ř. 1 |
+| Základ daně | ř. 5 |
+| Záloha na daň celkem | ř. 8 |
+| Poskytnuté měsíční slevy podle § 35ba | dopočítá se z ř. 12 a z měsíců prohlášení v záhlaví |
+| Poskytnuté měsíční slevy podle § 35c | dopočítá se z ř. 11 |
+| Vyplacené měsíční daňové bonusy | ř. 9 |
+
+Slevy tiskopis jako částku neuvádí — nese je jako **měsíce nároku** (ř. 11 a 12
+a údaj o prohlášení v záhlaví), protože záloha na ř. 8 je už po nich. Aplikace
+si je proto nedomýšlí a žádá je zadat.
+
+> [!IMPORTANT]
+> **Prázdné pole není nula.** Prázdné pole znamená „na potvrzení ten údaj není"
+> a zúčtování zastaví; nula znamená „na potvrzení je nula" a počítá se s ní.
+> Kdyby se prázdné pole četlo jako nula, porovnal by se celoroční nárok na bonus
+> proti nižšímu úhrnu už vyplacených bonusů a zaměstnanci by vyšel přeplatek,
+> na který nemá nárok. U každého potvrzení je proto vidět, které údaje na něm
+> chybí.
+
+Potvrzení, které je vedené jako **nedoložené**, se do úhrnu nezapočítá — § 38ch
+odst. 4 mluví o úhrnu mezd od všech plátců a do toho úhrnu patří doklad, ne
+nepodložený údaj. Sekci smí zadávat jen ten, kdo smí zúčtování i provést: ta
+čísla jdou přímo do úhrnu, ze kterého vychází přeplatek.
+
+Na výsledném dokladu je úhrn rozepsaný — kolik základu a záloh je od tohoto
+zaměstnavatele a kolik podle potvrzení od předchozích.
 
 Výpočet nic nepřepočítává znovu. Roční úhrny daně a záloh vznikají průběžně při
 schválení každého mzdového běhu; roční zúčtování je jen sečte, porovná s roční

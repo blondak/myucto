@@ -264,9 +264,11 @@ final class AnnualSettlementIntegrationTest extends TestCase
         $container = Bootstrap::buildContainer();
         $connection = $container->get(Connection::class);
         $service = $container->get(AnnualTaxSettlementService::class);
+        $snapshots = $container->get(AnnualSettlementSnapshotBuilder::class);
         $sensitive = $container->get(PayrollSensitiveData::class);
         self::assertInstanceOf(Connection::class, $connection);
         self::assertInstanceOf(AnnualTaxSettlementService::class, $service);
+        self::assertInstanceOf(AnnualSettlementSnapshotBuilder::class, $snapshots);
         self::assertInstanceOf(PayrollSensitiveData::class, $sensitive);
         if (!$connection->hasTable('payroll_annual_settlement_certificates')) {
             $this->markTestSkipped('Migrace potvrzení od jiného plátce neproběhla.');
@@ -364,6 +366,33 @@ final class AnnualSettlementIntegrationTest extends TestCase
             self::assertSame(
                 4_500_00,
                 $complete['result']->trace['external_certificates']['advance_tax_minor_units'],
+            );
+
+            // Doklad musí ukázat, z čeho se úhrn skládá — jinak by z něj nešlo
+            // poznat, že část základu a záloh je od jiného zaměstnavatele.
+            // A hlavně: rozdíl na dani musí sedět na ÚHRN záloh, ne jen na ty
+            // vlastní. To si `AnnualSettlementDocumentData` vynucuje samo.
+            $prepared = $snapshots->build(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+                $complete['result'],
+                $today->format('Y-m-d'),
+                $complete['credit_rows'],
+                $complete['child_rows'],
+                null,
+            );
+            $printed = $prepared['document']->toTemplateData();
+            self::assertSame(1, $printed['external_certificate_count']);
+            self::assertSame(30_000_00, $printed['external_advance_base_minor_units']);
+            self::assertSame(4_500_00, $printed['external_advance_tax_minor_units']);
+            self::assertSame(
+                $printed['advance_base_minor_units'] + 30_000_00,
+                $printed['total_advance_base_minor_units'],
+            );
+            self::assertSame(
+                $printed['advance_tax_minor_units'] + 4_500_00,
+                $printed['total_advance_tax_minor_units'],
             );
 
             // Krok 3 — nedoložené potvrzení do úhrnu nepatří (§ 38ch odst. 4).

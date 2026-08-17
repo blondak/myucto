@@ -190,6 +190,11 @@ final class AnnualSettlementSnapshotBuilder
         $employee = self::object($snapshot['employee'] ?? null, 'employee');
         $result = self::object($snapshot['result'] ?? null, 'result');
         $trace = self::object($result['trace'] ?? null, 'result.trace');
+        // Starší revize klíč nenesly — chybějící příspěvek je nula, protože se
+        // tehdy potvrzení od jiného plátce nepoužilo vůbec.
+        $external = is_array($trace['external_certificates'] ?? null)
+            ? $trace['external_certificates']
+            : [];
 
         return new AnnualSettlementDocumentData(
             $snapshotHash,
@@ -218,6 +223,10 @@ final class AnnualSettlementSnapshotBuilder
             (int) $result['settlement_difference_minor_units'],
             (int) $result['payable_minor_units'],
             (string) $result['outcome'],
+            (int) ($external['count'] ?? 0),
+            (int) ($external['advance_base_minor_units'] ?? 0),
+            (int) ($external['advance_tax_minor_units'] ?? 0),
+            (int) ($external['tax_bonus_minor_units'] ?? 0),
         );
     }
 
