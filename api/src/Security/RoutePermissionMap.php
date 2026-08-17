@@ -87,6 +87,7 @@ final class RoutePermissionMap
         ['*', '#^/api/purchase-invoices(/|$)#', 'purchase_invoices', AccessLevel::WRITE],
 
         ['GET', '#^/api/purchase-invoice-submissions(/|$)#', 'documents.inbox', AccessLevel::READ],
+        ['DELETE', '#^/api/purchase-invoice-submissions/[0-9]+$#', 'documents.inbox.delete', AccessLevel::WRITE],
         ['*', '#^/api/purchase-invoice-submissions(/|$)#', 'documents.inbox', AccessLevel::WRITE],
 
         ['POST', '#^/api/recurring$#', 'recurring.create', AccessLevel::WRITE],

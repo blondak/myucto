@@ -6,7 +6,7 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-08-document-submissions-v1';
+    public const VERSION = '2026-08-document-submissions-v2';
 
     /** @var list<string> */
     private const GROUPS = [
@@ -70,6 +70,7 @@ final class PermissionCatalog
             ['documents.restore', 'documents', 'Obnovit dokument', $staffOnly],
             ['documents.requests', 'documents', 'Požadavky klientovi', $staffOnly],
             ['documents.inbox', 'documents', 'Příchozí doklady', $staffOnly],
+            ['documents.inbox.delete', 'documents', 'Trvale vyřadit z příchozí fronty', $staffOnly],
             ['documents.submit', 'documents', 'Předávat doklady účetní', $clientOnly],
             ['accounting', 'accounting', 'Účetnictví', $staffOnly],
             ['accounting.journal.write', 'accounting', 'Zápisy v deníku', $staffOnly],
@@ -179,6 +180,9 @@ final class PermissionCatalog
     {
         if ($systemKey === 'accountant') {
             $none = [
+                // Neměnný originál je auditní stopa; trvalé vyřazení je zásah pro správce,
+                // který si ho může kterékoli roli přidělit v editoru rolí.
+                'documents.inbox.delete',
                 'accounting.periods.close', 'accounting.periods.manage',
                 'settings.ai_provider', 'settings.bank_accounts', 'settings.branding',
                 'settings.company.write', 'utilities.import',

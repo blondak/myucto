@@ -239,6 +239,29 @@ final class PurchaseInvoiceSubmissionRepository
         return $ids;
     }
 
+    /**
+     * Vyřadí podání z fronty. Zpracované podání se nemaže — na jeho originálu
+     * stojí vazba k existující faktuře; nejdřív musí zmizet ta faktura, což
+     * podání vrátí do fronty. Rozdělané `processing` taky ne, doběhlo by do
+     * prázdna. Vrací smazaný řádek pro navazující úklid a auditní zápis.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function deleteFromQueue(int $id, int $supplierId): ?array
+    {
+        $row = $this->find($id, $supplierId);
+        if ($row === null || !in_array((string) $row['status'], ['submitted', 'needs_information', 'rejected'], true)) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "DELETE FROM purchase_invoice_submissions
+              WHERE id = ? AND supplier_id = ?
+                AND status IN ('submitted','needs_information','rejected')"
+        );
+        $stmt->execute([$id, $supplierId]);
+        return $stmt->rowCount() === 1 ? $row : null;
+    }
+
     private function setReviewStatus(int $id, int $supplierId, string $status, string $reason): bool
     {
         $stmt = $this->db->pdo()->prepare(

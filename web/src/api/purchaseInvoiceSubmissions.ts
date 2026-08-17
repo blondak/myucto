@@ -120,6 +120,13 @@ export const purchaseInvoiceSubmissionsApi = {
     api.get<PurchaseInvoiceSubmissionPage>('/purchase-invoice-submissions', {
       params: status ? { status } : undefined,
     }).then(r => r.data),
+  /** Doklad, který přišel mimo portál (e-mailem, papírově) — účetní ho vloží do fronty sama. */
+  upload: (files: File[], note: string, documentKindHint: PurchaseInvoiceSubmissionKindHint | null) =>
+    api.post<SubmissionUploadResult>(
+      '/purchase-invoice-submissions',
+      uploadForm(files, note, documentKindHint),
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    ).then(r => r.data),
   get: (id: number) =>
     api.get<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}`).then(r => r.data),
   extract: (id: number) =>
@@ -128,6 +135,9 @@ export const purchaseInvoiceSubmissionsApi = {
     api.post<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}/needs-information`, { reason }).then(r => r.data),
   reject: (id: number, reason: string) =>
     api.post<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}/reject`, { reason }).then(r => r.data),
+  /** Vyřadí podání z fronty a originál pošle do koše Dokumentů (documents.inbox.delete). */
+  remove: (id: number) =>
+    api.delete<{ ok: boolean; document_id: number }>(`/purchase-invoice-submissions/${id}`).then(r => r.data),
   previewUrl: (id: number) => fileUrl(`/purchase-invoice-submissions/${id}/preview`),
   downloadUrl: (id: number) => fileUrl(`/purchase-invoice-submissions/${id}/download`),
 }

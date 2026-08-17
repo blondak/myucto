@@ -10,15 +10,26 @@ const props = withDefaults(defineProps<{
   acceptStructured?: boolean
   /** Když true, dropzone zmizí jakmile user začne psát do formuláře (anti-confusion) */
   hideWhenInteracted?: boolean
+  /** Dávka: přijme víc souborů zaráz a vydá je jedním `files-dropped`. */
+  multiple?: boolean
+  /** Další povolené přípony bez tečky (podatelna bere i holé `xml`). */
+  extraExtensions?: string[]
+  /** Přepis druhého řádku o formátech a limitu — výchozí text mluví o 20 MiB. */
+  sizeHint?: string
+  /** Přepis atributu `accept` na file inputu. */
+  accept?: string
 }>(), {
   uploading: false,
   maxSizeBytes: 20 * 1024 * 1024,
   acceptStructured: false,
   hideWhenInteracted: false,
+  multiple: false,
+  extraExtensions: () => [],
 })
 
 const emit = defineEmits<{
   'file-dropped': [file: File]
+  'files-dropped': [files: File[]]
   'error': [code: string, message: string]
 }>()
 
@@ -43,8 +54,7 @@ function onDrop(e: DragEvent) {
   e.preventDefault()
   isDragging.value = false
   if (props.uploading) return
-  const file = e.dataTransfer?.files?.[0]
-  if (file) handleFile(file)
+  handleSelection(Array.from(e.dataTransfer?.files ?? []))
 }
 
 function onPick() {
@@ -54,34 +64,55 @@ function onPick() {
 
 function onFileInput(e: Event) {
   const target = e.target as HTMLInputElement
-  const file = target.files?.[0]
-  if (file) handleFile(file)
+  handleSelection(Array.from(target.files ?? []))
   // reset, aby šlo vybrat ten samý soubor znovu po chybě
   target.value = ''
 }
 
+/**
+ * Jednosouborový režim si bere první soubor (drop víc souborů na editor faktury
+ * je omyl, ne dávka). Dávkový režim vydá všechny, které projdou validací —
+ * jediný špatný soubor tak nezahodí zbytek výběru.
+ */
+function handleSelection(selected: File[]): void {
+  if (selected.length === 0) return
+  if (!props.multiple) {
+    handleFile(selected[0])
+    return
+  }
+  const accepted = selected.filter(file => validate(file))
+  if (accepted.length > 0) emit('files-dropped', accepted)
+}
+
 function handleFile(file: File) {
-  // Klient-side validation; server samozřejmě udělá auto-magic-bytes check znovu.
+  if (validate(file)) emit('file-dropped', file)
+}
+
+/** Klient-side validace; server samozřejmě udělá magic-bytes check znovu. */
+function validate(file: File): boolean {
   if (file.size > props.maxSizeBytes) {
     emit('error', 'file_too_large',
       t('purchase_invoice.pdf.upload_error', { error: `> ${Math.round(props.maxSizeBytes / 1024 / 1024)} MiB` }))
-    return
+    return false
   }
   // PDF/obrázky jsou přílohy. ISDOC/ISDOCX patří jen do editoru NOVÉ faktury,
   // kde se zpracují přes import-structured; na detailu/editaci by je /pdf odmítl.
   // Empty MIME některé browsery posílají i pro běžné soubory, proto rozhoduje i přípona.
   const isStructured = /\.isdocx?$/i.test(file.name)
+  const extraExtension = props.extraExtensions.length > 0
+    && new RegExp('\\.(' + props.extraExtensions.join('|') + ')$', 'i').test(file.name)
   const accepted = file.type === 'application/pdf'
     || file.type.startsWith('image/')
     || /\.(pdf|jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(file.name)
     || (props.acceptStructured && isStructured)
+    || extraExtension
   if (!accepted) {
     emit('error', 'invalid_pdf', t(props.acceptStructured
       ? 'purchase_invoice.pdf.invalid_document'
       : 'purchase_invoice.pdf.invalid_pdf'))
-    return
+    return false
   }
-  emit('file-dropped', file)
+  return true
 }
 
 const cls = computed(() => {
@@ -108,7 +139,8 @@ const cls = computed(() => {
     <input
       ref="fileInput"
       type="file"
-      :accept="acceptStructured ? 'application/pdf,.pdf,image/*,.isdoc,.isdocx' : 'application/pdf,.pdf,image/*'"
+      :accept="accept || (acceptStructured ? 'application/pdf,.pdf,image/*,.isdoc,.isdocx' : 'application/pdf,.pdf,image/*')"
+      :multiple="multiple"
       class="hidden"
       @change="onFileInput"
       :disabled="uploading"
@@ -130,7 +162,7 @@ const cls = computed(() => {
           ? 'purchase_invoice.pdf.dropzone_hint_structured'
           : 'purchase_invoice.pdf.dropzone_hint')) }}
       </p>
-      <p class="text-xs text-neutral-500 mt-1">{{ t(acceptStructured
+      <p class="text-xs text-neutral-500 mt-1">{{ sizeHint || t(acceptStructured
         ? 'purchase_invoice.pdf.max_size_hint_structured'
         : 'purchase_invoice.pdf.max_size_hint') }}</p>
     </div>

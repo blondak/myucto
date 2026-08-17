@@ -10,6 +10,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Action\Portal\PortalDocumentRequestAction;
 use MyInvoice\Action\Portal\PortalPurchaseInvoiceSubmissionAction;
+use MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionAction;
 use MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionFileAction;
 use MyInvoice\Repository\DocumentRequestRepository;
 use MyInvoice\Repository\DocumentRepository;
@@ -20,6 +21,7 @@ use MyInvoice\Service\Document\DocumentStorage;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionCompletionService;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionException;
+use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionProcessingService;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionUploadService;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\Attributes\Group;
@@ -55,6 +57,7 @@ final class DocumentRequestTest extends TestCase
     private PurchaseInvoiceSubmissionRepository $submissions;
     private PurchaseInvoiceSubmissionUploadService $upload;
     private PurchaseInvoiceSubmissionCompletionService $completion;
+    private PurchaseInvoiceSubmissionProcessingService $processing;
     private DocumentStorage $storage;
     private ActivityLogger $activity;
     private IpMatcher $ipMatcher;
@@ -85,6 +88,7 @@ final class DocumentRequestTest extends TestCase
             $this->submissions   = $container->get(PurchaseInvoiceSubmissionRepository::class);
             $this->upload        = $container->get(PurchaseInvoiceSubmissionUploadService::class);
             $this->completion    = $container->get(PurchaseInvoiceSubmissionCompletionService::class);
+            $this->processing    = $container->get(PurchaseInvoiceSubmissionProcessingService::class);
             $this->storage       = $container->get(DocumentStorage::class);
             $this->activity      = $container->get(ActivityLogger::class);
             $this->ipMatcher     = $container->get(IpMatcher::class);
@@ -464,6 +468,137 @@ final class DocumentRequestTest extends TestCase
         $this->trackSubmissionFile($submission);
     }
 
+    /** Doklad mimo portál (e-mail, papír) musí do fronty dostat i účetní sama za sebe. */
+    public function testStaffUploadsOriginalIntoQueueAndClientCannot(): void
+    {
+        $action = $this->buildInboxAction();
+        $responses = new ResponseFactory();
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('POST', '/api/purchase-invoice-submissions')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierA)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withParsedBody(['note' => 'Přišlo e-mailem', 'document_kind_hint' => 'receipt'])
+            ->withUploadedFiles(['file' => [
+                $this->uploadedFile('od-dodavatele.pdf', "%PDF-1.4\n% staff uploaded original"),
+            ]]);
+
+        $response = $action->upload($request, $responses->createResponse());
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $payload = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame(1, $payload['created']);
+
+        $submission = $this->submissions->find((int) $payload['items'][0]['id'], $this->supplierA);
+        self::assertNotNull($submission);
+        $this->trackSubmissionFile($submission);
+        self::assertSame('staff', $submission['submitted_via']);
+        self::assertSame('submitted', $submission['status'], 'Nahraný originál čeká ve frontě, ne v účetnictví.');
+        self::assertSame('receipt', $submission['document_kind_hint']);
+        self::assertSame('Přišlo e-mailem', $submission['note']);
+        self::assertNull($submission['purchase_invoice_id']);
+
+        $queue = $this->submissions->paginate($this->supplierA, 'submitted', 50, 0);
+        self::assertContains(
+            (int) $submission['id'],
+            array_map('intval', array_column($queue['items'], 'id')),
+            'Nahraný doklad se musí objevit ve frontě příchozích dokladů.',
+        );
+
+        $asClient = $action->upload(
+            $request->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'client']),
+            $responses->createResponse(),
+        );
+        self::assertSame(403, $asClient->getStatusCode(), 'Klient má vlastní portálovou cestu, do účetní fronty nesahá.');
+    }
+
+    /**
+     * Odmítnutí je jen stav — originál musí přežít. Trvale ho vyřadí až samostatné
+     * právo, a to jen dokud podání nedrží vazbu na existující fakturu.
+     */
+    public function testRejectKeepsOriginalWhileDeleteRemovesItFromQueue(): void
+    {
+        $action = $this->buildInboxAction();
+        $responses = new ResponseFactory();
+        $created = $this->upload->submit(
+            $this->uploadedFile('omylem.jpg', "\xFF\xD8\xFF synthetic photo " . bin2hex(random_bytes(8))),
+            $this->supplierA,
+            $this->userId,
+            'staff',
+        );
+        $submission = $created['submission'];
+        $submissionId = (int) $submission['id'];
+        $documentId = (int) $submission['document_id'];
+        $this->trackSubmissionFile($submission);
+
+        // Doklad nahrála účetní sama — není komu psát, odmítnutí projde bez zprávy.
+        $rejected = $action->reject(
+            $this->inboxRequest('POST', "/api/purchase-invoice-submissions/{$submissionId}/reject"),
+            $responses->createResponse(),
+            ['id' => (string) $submissionId],
+        );
+        self::assertSame(200, $rejected->getStatusCode(), (string) $rejected->getBody());
+        self::assertSame('rejected', $this->submissions->find($submissionId, $this->supplierA)['status']);
+        self::assertNull(
+            $this->documentDeletedAt($documentId),
+            'Odmítnutí nesmí originál smazat — je součástí auditní stopy.',
+        );
+
+        // Účetní bez práva na trvalé vyřazení narazí, i když frontu jinak obsluhuje.
+        $withoutRight = $action->delete(
+            $this->inboxRequest('DELETE', "/api/purchase-invoice-submissions/{$submissionId}", 'accountant'),
+            $responses->createResponse(),
+            ['id' => (string) $submissionId],
+        );
+        self::assertSame(403, $withoutRight->getStatusCode(), (string) $withoutRight->getBody());
+        self::assertNotNull($this->submissions->find($submissionId, $this->supplierA));
+
+        $deleted = $action->delete(
+            $this->inboxRequest('DELETE', "/api/purchase-invoice-submissions/{$submissionId}"),
+            $responses->createResponse(),
+            ['id' => (string) $submissionId],
+        );
+        self::assertSame(200, $deleted->getStatusCode(), (string) $deleted->getBody());
+        self::assertNull($this->submissions->find($submissionId, $this->supplierA));
+        self::assertNotNull(
+            $this->documentDeletedAt($documentId),
+            'Originál musí skončit v koši Dokumentů, odkud ho vysypání smaže i z disku.',
+        );
+    }
+
+    /** @return string|null `deleted_at` originálu, null když je aktivní */
+    private function documentDeletedAt(int $documentId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT deleted_at FROM documents WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$documentId, $this->supplierA]);
+        $value = $stmt->fetchColumn();
+        return is_string($value) ? $value : null;
+    }
+
+    /** Zpracované podání drží vazbu na fakturu, takže se z fronty vyřadit nedá. */
+    public function testProcessedSubmissionCannotBeDeleted(): void
+    {
+        $created = $this->upload->submit(
+            $this->uploadedFile('zpracovany.pdf', "%PDF-1.4\n% processed " . bin2hex(random_bytes(8))),
+            $this->supplierA,
+            $this->userId,
+            'staff',
+        );
+        $submissionId = (int) $created['submission']['id'];
+        $this->trackSubmissionFile($created['submission']);
+        $invoiceId = $this->createPurchaseInvoiceDraft($this->supplierA, 'DOCREQ-DELETE-GUARD-1');
+        self::assertTrue($this->submissions->claimForManual($submissionId, $this->supplierA));
+        $this->completion->complete($submissionId, $this->supplierA, $invoiceId, $this->userId, 'manual');
+
+        $response = $this->buildInboxAction()->delete(
+            $this->inboxRequest('DELETE', "/api/purchase-invoice-submissions/{$submissionId}"),
+            (new ResponseFactory())->createResponse(),
+            ['id' => (string) $submissionId],
+        );
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        $payload = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('invalid_status', $payload['error']['code'] ?? null);
+        self::assertNotNull($this->submissions->find($submissionId, $this->supplierA));
+    }
+
     public function testPortalNeverServesInternalProcessingDiagnostics(): void
     {
         $created = $this->upload->submit(
@@ -638,6 +773,28 @@ final class DocumentRequestTest extends TestCase
     private function buildPortalAction(): PortalDocumentRequestAction
     {
         return new PortalDocumentRequestAction($this->repo, $this->upload, $this->activity, $this->ipMatcher);
+    }
+
+    private function buildInboxAction(): PurchaseInvoiceSubmissionAction
+    {
+        return new PurchaseInvoiceSubmissionAction(
+            $this->submissions,
+            $this->processing,
+            $this->upload,
+            $this->documents,
+            $this->db,
+            $this->activity,
+            $this->ipMatcher,
+        );
+    }
+
+    /** @return \Psr\Http\Message\ServerRequestInterface */
+    private function inboxRequest(string $method, string $path, string $role = 'admin')
+    {
+        return (new ServerRequestFactory())
+            ->createServerRequest($method, $path)
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierA)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => $role]);
     }
 
     private function uploadRequest(

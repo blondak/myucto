@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Portal;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\SubmitsDocumentOriginals;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceSubmissionRepository;
@@ -16,12 +17,12 @@ use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionException;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionUploadService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
-use Psr\Http\Message\UploadedFileInterface;
 
 /** Klientská strana fronty: přehled, spontánní předání a náhradní originál. */
 final class PortalPurchaseInvoiceSubmissionAction
 {
-    private const MAX_FILES = 20;
+    use SubmitsDocumentOriginals;
+
     private const STATUSES = ['submitted', 'processing', 'needs_information', 'processed', 'rejected'];
 
     /**
@@ -90,42 +91,30 @@ final class PortalPurchaseInvoiceSubmissionAction
         $supplierId = SupplierGuard::currentId($request);
         if ($supplierId <= 0) return Json::error($response, 'no_supplier', 'Žádná firma není dostupná.', 403);
         $body = (array) ($request->getParsedBody() ?? []);
-        $files = $this->files($request);
+        $files = $this->uploadedOriginals($request);
         if ($files === []) return Json::error($response, 'no_file', 'Vyberte alespoň jeden soubor.', 400);
         if ($supersedesId !== null && count($files) !== 1) {
             return Json::error($response, 'single_replacement_required', 'Náhrada musí obsahovat právě jeden soubor.', 400);
         }
-        if (count($files) > self::MAX_FILES) {
+        if (count($files) > self::MAX_ORIGINALS_PER_BATCH) {
             return Json::error($response, 'too_many_files', 'Najednou lze předat nejvýše 20 souborů.', 413);
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
-        $items = [];
-        $errors = [];
-        $firstError = null;
-        foreach ($files as $file) {
-            try {
-                $items[] = $this->upload->submit(
-                    $file,
-                    $supplierId,
-                    $userId > 0 ? $userId : null,
-                    $via,
-                    isset($body['note']) ? (string) $body['note'] : null,
-                    isset($body['document_kind_hint']) ? (string) $body['document_kind_hint'] : null,
-                    null,
-                    $supersedesId,
-                );
-            } catch (PurchaseInvoiceSubmissionException $e) {
-                $firstError ??= $e;
-                $errors[] = [
-                    'filename' => basename(str_replace('\\', '/', (string) $file->getClientFilename())),
-                    'code' => $e->errorCode,
-                    'message' => $e->getMessage(),
-                ];
-            }
-        }
-        if ($items === [] && $firstError instanceof PurchaseInvoiceSubmissionException) {
+        $batch = $this->submitOriginals(
+            $files,
+            $supplierId,
+            $userId > 0 ? $userId : null,
+            $via,
+            isset($body['note']) ? (string) $body['note'] : null,
+            isset($body['document_kind_hint']) ? (string) $body['document_kind_hint'] : null,
+            $supersedesId,
+        );
+        $items = $batch['items'];
+        $errors = $batch['errors'];
+        if ($items === [] && $batch['first_error'] instanceof PurchaseInvoiceSubmissionException) {
+            $firstError = $batch['first_error'];
             return Json::error(
                 $response,
                 $firstError->errorCode,
@@ -155,7 +144,7 @@ final class PortalPurchaseInvoiceSubmissionAction
             );
         }
 
-        $duplicates = count(array_filter($items, static fn(array $item): bool => !empty($item['duplicate'])));
+        $duplicates = $this->duplicateCount($items);
         return Json::ok($response, [
             'items' => array_map(fn(array $item): array => $this->portalView($item['submission']) + [
                 'duplicate' => (bool) $item['duplicate'],
@@ -163,16 +152,7 @@ final class PortalPurchaseInvoiceSubmissionAction
             'created' => count($items) - $duplicates,
             'duplicates' => $duplicates,
             'errors' => $errors,
-        ], $errors !== [] ? 207 : ($duplicates === count($items) ? 200 : 201));
-    }
-
-    /** @return list<UploadedFileInterface> */
-    private function files(Request $request): array
-    {
-        $uploads = $request->getUploadedFiles();
-        $raw = $uploads['file'] ?? $uploads['files'] ?? null;
-        $list = is_array($raw) ? array_values($raw) : ($raw instanceof UploadedFileInterface ? [$raw] : []);
-        return array_values(array_filter($list, static fn(mixed $v): bool => $v instanceof UploadedFileInterface));
+        ], $this->batchStatus($items, $errors, $duplicates));
     }
 
     private function deny(Request $request, Response $response, bool $write = false): ?Response

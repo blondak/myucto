@@ -30,14 +30,32 @@ V hlavním menu **Přijaté faktury**.
 
 Smazat jde **jen koncept**. Pro pozdější stavy použij Stornovat (zachová auditní stopu).
 
-### Příchozí doklady od klientů
+### Příchozí doklady
 
-Originály předané přes klientskou podatelnu čekají v **Nákup → Příchozí doklady**.
-Nejsou to koncepty přijatých faktur: do okamžiku kontroly účetní nevstupují do
-nákladů, závazků, cashflow ani evidence DPH. Účetní má u originálu náhled a může
-jej zpracovat přes ISDOC/AI, přepsat ručně, odmítnout nebo klienta požádat o
-náhradu. Podrobný průchod oběma stranami je v
+Originály čekají na zpracování v **Nákup → Příchozí doklady**. Nejsou to koncepty
+přijatých faktur: do okamžiku kontroly nevstupují do nákladů, závazků, cashflow ani
+evidence DPH. Účetní má u originálu náhled a může jej zpracovat přes ISDOC/AI,
+přepsat ručně, odmítnout nebo klienta požádat o náhradu.
+
+Do fronty vede několik cest:
+
+| Cesta | Kdo ji použije |
+| --- | --- |
+| **Portál → Doklady pro účetní** — dávka až 20 souborů | klient, spontánně |
+| Nahrání dokladu k **vyžádanému požadavku** | klient, jako odpověď účetní |
+| **Uložit a předat účetní** v editoru přijaté faktury | klient, když se doklad nevytěžil sám |
+| **Nahrát do fronty** přímo na stránce Příchozí doklady | účetní u dokladů, které přišly mimo portál (e-mailem, papírově) |
+
+Účetní tak nemusí čekat na klienta: co dostane e-mailem nebo naskenuje, vloží do
+fronty sama a zpracuje to stejným postupem. Podrobný průchod klientskou stranou je v
 [§ 9.8 Klientský portál](09_Klientsky_portal.md#98-vyzadane-doklady-od-klienta).
+
+> **Odmítnutí originál nemaže.** Přepne podání do stavu Odmítnuto a napíše klientovi
+> důvod; samotný soubor zůstává v Dokumentech i v auditní stopě. Uklidit frontu i
+> s originálem (omylem nahraná fotka, spam) jde tlačítkem **Smazat z fronty** — má
+> vlastní oprávnění *Trvale vyřadit z příchozí fronty* a originál posílá do koše
+> Dokumentů, odkud ho z disku odstraní až vysypání koše. U dokladu, který si účetní
+> nahrála sama, se zpráva klientovi nevyžaduje — není komu ji psát.
 
 Po zpracování se neměnný originál z Dokumentů připojí k výsledné faktuře. Faktura
 zůstává pro klienta needitovatelná i ve stavu Koncept; účetní ji může dál opravit

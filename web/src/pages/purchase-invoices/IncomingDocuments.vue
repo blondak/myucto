@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import {
   purchaseInvoiceSubmissionsApi,
   type PurchaseInvoiceSubmission,
+  type PurchaseInvoiceSubmissionKindHint,
   type PurchaseInvoiceSubmissionStatus,
 } from '@/api/purchaseInvoiceSubmissions'
 import { useSupplierStore } from '@/stores/supplier'
@@ -13,6 +14,7 @@ import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -27,10 +29,27 @@ const reason = ref('')
 const loading = ref(true)
 const acting = ref(false)
 const error = ref('')
+const files = ref<File[]>([])
+const note = ref('')
+const kindHint = ref<PurchaseInvoiceSubmissionKindHint | null>(null)
+const uploading = ref(false)
+
+const ALLOWED_FILES = '.pdf,.jpg,.jpeg,.png,.isdoc,.xml,.isdocx,application/pdf,image/jpeg,image/png'
+/** Server bere podle `documents.max_file_bytes`, výchozí 50 MiB; tady jen UX pojistka. */
+const MAX_FILE_BYTES = 50 * 1024 * 1024
 
 const canWrite = computed(() => auth.canWrite('documents.inbox'))
 const canCreateInvoice = computed(() => auth.canWrite('purchase_invoices.create'))
+const canDelete = computed(() => auth.canWrite('documents.inbox.delete'))
 const canPreviewInline = computed(() => selected.value?.doc_type === 'pdf' || selected.value?.doc_type === 'image')
+/** U dokladu, který si účetní nahrála sama, není komu psát „co doplnit". */
+const hasClientToInform = computed(() => selected.value !== null && selected.value.submitted_via !== 'staff')
+const canDeleteSelected = computed(() =>
+  canDelete.value
+  && selected.value !== null
+  && selected.value.status !== 'processed'
+  && selected.value.status !== 'processing',
+)
 
 async function load(keepSelection = true) {
   loading.value = true
@@ -46,6 +65,64 @@ async function load(keepSelection = true) {
     error.value = apiErrorMessage(e)
   } finally {
     loading.value = false
+  }
+}
+
+function selectFiles(event: Event) {
+  files.value = Array.from((event.target as HTMLInputElement).files ?? [])
+}
+
+/** Drag&drop i klik v dropzone plní tentýž výběr, odeslání zůstává na tlačítku. */
+function addDroppedFiles(dropped: File[]) {
+  const known = new Set(files.value.map(f => `${f.name}:${f.size}:${f.lastModified}`))
+  files.value = [
+    ...files.value,
+    ...dropped.filter(f => !known.has(`${f.name}:${f.size}:${f.lastModified}`)),
+  ]
+}
+
+function clearFiles() {
+  files.value = []
+  const input = document.getElementById('inbox-files') as HTMLInputElement | null
+  if (input) input.value = ''
+}
+
+async function upload() {
+  if (uploading.value || files.value.length === 0) return
+  uploading.value = true
+  try {
+    const result = await purchaseInvoiceSubmissionsApi.upload(files.value, note.value, kindHint.value)
+    if (result.errors.length > 0) {
+      toast.warning(t('purchase_submissions.uploaded_partial', {
+        accepted: result.items.length,
+        failed: result.errors.length,
+      }))
+    } else {
+      toast.success(result.duplicates > 0
+        ? t('purchase_submissions.inbox_uploaded_with_duplicates', {
+            created: result.created,
+            duplicates: result.duplicates,
+          })
+        : t('purchase_submissions.inbox_uploaded', { n: result.created }))
+    }
+    clearFiles()
+    note.value = ''
+    kindHint.value = null
+    // Nahraný doklad čeká ve stavu `submitted`. Kdyby účetní zrovna filtrovala jinak,
+    // přepnutím filtru se seznam načte přes watch — jinak ho obnovíme sami.
+    const uploadedId = result.items[0]?.id ?? null
+    if (status.value !== '' && status.value !== 'submitted') {
+      status.value = 'submitted'
+    } else {
+      await load(false)
+      if (uploadedId !== null) {
+        selected.value = items.value.find(i => i.id === uploadedId) ?? selected.value
+      }
+    }
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    uploading.value = false
   }
 }
 
@@ -69,9 +146,26 @@ async function extract() {
   }
 }
 
+async function removeSelected() {
+  const item = selected.value
+  if (!item || acting.value || !canDeleteSelected.value) return
+  if (!confirm(t('purchase_submissions.delete_confirm', { name: item.original_name }))) return
+  acting.value = true
+  try {
+    await purchaseInvoiceSubmissionsApi.remove(item.id)
+    toast.success(t('purchase_submissions.delete_success'))
+    selected.value = null
+    await load(false)
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    acting.value = false
+  }
+}
+
 async function setReviewStatus(target: 'needs_information' | 'rejected') {
   if (!selected.value || acting.value) return
-  if (!reason.value.trim()) {
+  if (!reason.value.trim() && (hasClientToInform.value || target === 'needs_information')) {
     toast.error(t('purchase_submissions.reason_required'))
     return
   }
@@ -142,6 +236,87 @@ watch(() => supplierStore.currentSupplierId, () => { selected.value = null; void
         </select>
       </label>
     </header>
+
+    <section v-if="canWrite" class="bg-surface border border-primary-500/30 rounded-lg shadow-sm p-5 space-y-4">
+      <div class="flex items-start gap-3">
+        <span class="w-10 h-10 rounded-lg bg-primary-50 text-primary-700 flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5a1 1 0 001 1h12a1 1 0 001-1v-5" />
+          </svg>
+        </span>
+        <div>
+          <h2 class="font-semibold text-neutral-800">{{ t('purchase_submissions.inbox_submit_title') }}</h2>
+          <p class="text-sm text-neutral-500">{{ t('purchase_submissions.inbox_submit_hint') }}</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <label class="block text-sm text-neutral-700">
+          <span class="block mb-1">{{ t('purchase_submissions.kind_hint') }}</span>
+          <select v-model="kindHint" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface">
+            <option :value="null">{{ t('purchase_submissions.kind_unknown') }}</option>
+            <option value="invoice">{{ t('purchase_invoice.document_kind.invoice') }}</option>
+            <option value="receipt">{{ t('purchase_invoice.document_kind.receipt') }}</option>
+            <option value="credit_note">{{ t('purchase_invoice.document_kind.credit_note') }}</option>
+            <option value="advance">{{ t('purchase_invoice.document_kind.advance') }}</option>
+            <option value="tax_document">{{ t('purchase_invoice.document_kind.tax_document') }}</option>
+            <option value="other">{{ t('purchase_submissions.kind_other') }}</option>
+          </select>
+        </label>
+        <label class="block text-sm text-neutral-700">
+          <span class="block mb-1">{{ t('purchase_submissions.inbox_note') }}</span>
+          <input v-model="note" maxlength="8000" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface"
+            :placeholder="t('purchase_submissions.inbox_note_placeholder')" />
+        </label>
+      </div>
+
+      <PdfDropzone
+        multiple
+        accept-structured
+        :extra-extensions="['xml']"
+        :accept="ALLOWED_FILES"
+        :uploading="uploading"
+        :max-size-bytes="MAX_FILE_BYTES"
+        :hint="t('purchase_submissions.inbox_dropzone_hint')"
+        :size-hint="t('purchase_submissions.inbox_dropzone_formats')"
+        @files-dropped="addDroppedFiles"
+        @error="(_code, message) => toast.error(message)"
+      />
+
+      <ul v-if="files.length" class="text-sm text-neutral-700 space-y-1">
+        <li v-for="file in files" :key="`${file.name}:${file.size}:${file.lastModified}`"
+          class="flex items-center justify-between gap-3 bg-neutral-50 border border-neutral-200 rounded-md px-3 py-1.5">
+          <span class="truncate">{{ file.name }}</span>
+          <span class="text-xs text-neutral-500 shrink-0">{{ size(file.size) }}</span>
+        </li>
+      </ul>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <label :class="btnOutline('neutral')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5a1 1 0 001 1h12a1 1 0 001-1v-5" />
+          </svg>
+          {{ t('purchase_submissions.choose_files') }}
+          <input id="inbox-files" type="file" multiple :accept="ALLOWED_FILES" class="hidden" @change="selectFiles" />
+        </label>
+        <span v-if="files.length" class="text-sm text-neutral-600">
+          {{ t('purchase_submissions.files_selected', { n: files.length }) }}
+        </span>
+        <button v-if="files.length" type="button" :class="btnOutline('neutral')" :disabled="uploading" @click="clearFiles">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+          {{ t('purchase_submissions.clear_files') }}
+        </button>
+        <button type="button" data-testid="inbox-upload" :disabled="files.length === 0 || uploading"
+          :class="btnFilled('primary')" @click="upload">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 12l4 4L19 6" />
+          </svg>
+          {{ uploading ? t('purchase_submissions.uploading') : t('purchase_submissions.inbox_submit_action') }}
+        </button>
+      </div>
+    </section>
 
     <div v-if="error" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-600">{{ error }}</div>
     <div v-if="loading" class="text-center text-neutral-500 py-10">{{ t('common.loading') }}</div>
@@ -217,24 +392,36 @@ watch(() => supplierStore.currentSupplierId, () => { selected.value = null; void
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4 4-4M5 20h14" /></svg>
               {{ t('purchase_submissions.download') }}
             </a>
+            <button v-if="canDeleteSelected" type="button" data-testid="inbox-delete" :disabled="acting"
+              :class="btnOutline('danger')" @click="removeSelected">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M4 7h16M10 7V4h4v3" /></svg>
+              {{ t('purchase_submissions.delete') }}
+            </button>
           </div>
 
           <div v-if="canWrite && selected.status === 'submitted'" class="space-y-2 pt-2 border-t border-neutral-100">
             <label class="block text-sm text-neutral-700">
-              <span class="block mb-1">{{ t('purchase_submissions.reason') }}</span>
+              <span class="block mb-1">
+                {{ hasClientToInform ? t('purchase_submissions.reason') : t('purchase_submissions.reason_internal') }}
+              </span>
               <textarea v-model="reason" rows="2" maxlength="8000" class="w-full px-3 py-2 border border-neutral-300 rounded-md bg-surface"
-                :placeholder="t('purchase_submissions.reason_placeholder')" />
+                :placeholder="hasClientToInform
+                  ? t('purchase_submissions.reason_placeholder')
+                  : t('purchase_submissions.reason_internal_placeholder')" />
             </label>
             <div class="flex flex-wrap gap-2">
-              <button type="button" :disabled="acting || !reason.trim()" :class="btnOutline('warning')" @click="setReviewStatus('needs_information')">
+              <button v-if="hasClientToInform" type="button" :disabled="acting || !reason.trim()"
+                :class="btnOutline('warning')" @click="setReviewStatus('needs_information')">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3m0 4h.01M10.3 3.4L2.6 17a2 2 0 001.7 3h15.4a2 2 0 001.7-3L13.7 3.4a2 2 0 00-3.4 0z" /></svg>
                 {{ t('purchase_submissions.needs_information') }}
               </button>
-              <button type="button" :disabled="acting || !reason.trim()" :class="btnOutline('danger')" @click="setReviewStatus('rejected')">
+              <button type="button" :disabled="acting || (hasClientToInform && !reason.trim())"
+                :class="btnOutline('danger')" @click="setReviewStatus('rejected')">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                 {{ t('purchase_submissions.reject') }}
               </button>
             </div>
+            <p class="text-xs text-neutral-500">{{ t('purchase_submissions.reject_keeps_original') }}</p>
           </div>
         </div>
 
