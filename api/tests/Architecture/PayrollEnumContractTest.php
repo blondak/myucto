@@ -231,6 +231,12 @@ final class PayrollEnumContractTest extends TestCase
         // neumí odkázat.
         'payroll.ts::PayrollAgendaKey'
             => 'const:MyInvoice\Repository\Payroll\PayrollEmploymentAgendaSummaryRepository::AGENDA_KEYS',
+        // Údaje, které § 38ch odst. 3 žádá po potvrzení od jiného plátce. Klíč
+        // navíc na klientovi = popisek pole, které se nikdy nevypíše; klíč navíc
+        // na serveru = chybějící údaj, ke kterému účetní neuvidí větu, PROČ se
+        // zúčtování neprovedlo.
+        'payroll.ts::PayrollAnnualSettlementCertificateField'
+            => 'const:MyInvoice\Service\Payroll\IncomeTax\ExternalEmployerTaxCertificate::REQUIRED_STATUTORY_FIELDS',
 
         'payrollTravel.ts::TravelTransportMode' => 'enum:MyInvoice\Service\Payroll\Travel\TravelTransportMode',
         'payrollTravel.ts::TravelVehicleKind'   => 'enum:MyInvoice\Service\Payroll\Travel\TravelVehicleKind',

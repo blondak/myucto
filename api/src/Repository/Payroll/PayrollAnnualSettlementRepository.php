@@ -347,6 +347,111 @@ final class PayrollAnnualSettlementRepository
     }
 
     /**
+     * Potvrzení od předchozích plátců daně za daný rok (§ 38ch odst. 3).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function certificatesForYear(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_annual_settlement_certificates
+              WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?
+              ORDER BY certificate_reference, id'
+        );
+        $statement->execute([$supplierId, $employeeId, $taxYear]);
+
+        return array_map(
+            self::castCertificate(...),
+            array_values($statement->fetchAll(PDO::FETCH_ASSOC)),
+        );
+    }
+
+    /**
+     * Přepíše celý seznam potvrzení za rok.
+     *
+     * Celý seznam schválně, ne po řádcích: potvrzení dávají smysl jen jako
+     * úplná sada za rok (§ 38ch odst. 3 mluví o dokladech od VŠECH předchozích
+     * plátců), takže se ukládají jedním úkonem stejně, jako se jedním úkonem
+     * zadávají. Uložení po jednom by dovolilo stav, kdy je půlka roku doložená
+     * a druhá zmizela.
+     *
+     * Volá se uvnitř transakce volajícího — smazání a vložení nesmí být vidět
+     * odděleně.
+     *
+     * @param list<array<string,mixed>> $rows
+     */
+    public function replaceCertificates(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+        array $rows,
+        ?int $actorUserId,
+    ): void {
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) {
+            throw new \LogicException(
+                'Přepis potvrzení od jiných plátců musí běžet v transakci.',
+            );
+        }
+
+        $delete = $pdo->prepare(
+            'DELETE FROM payroll_annual_settlement_certificates
+              WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?'
+        );
+        $delete->execute([$supplierId, $employeeId, $taxYear]);
+
+        if ($rows === []) {
+            return;
+        }
+
+        $insert = $pdo->prepare(
+            'INSERT INTO payroll_annual_settlement_certificates
+                (supplier_id, employee_id, tax_year, certificate_reference,
+                 payer_name, payer_tax_identification, received_on,
+                 gross_income_minor, advance_base_minor, advance_tax_minor,
+                 credit_35ba_minor, credit_35c_minor, tax_bonus_minor,
+                 evidence_status, evidence_reference, note,
+                 created_by, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        foreach ($rows as $row) {
+            try {
+                $insert->execute([
+                    $supplierId,
+                    $employeeId,
+                    $taxYear,
+                    $row['certificate_reference'],
+                    $row['payer_name'] ?? null,
+                    $row['payer_tax_identification'] ?? null,
+                    $row['received_on'] ?? null,
+                    $row['gross_income_minor'] ?? null,
+                    $row['advance_base_minor'] ?? null,
+                    $row['advance_tax_minor'] ?? null,
+                    $row['credit_35ba_minor'] ?? null,
+                    $row['credit_35c_minor'] ?? null,
+                    $row['tax_bonus_minor'] ?? null,
+                    $row['evidence_status'] ?? 'unverified',
+                    $row['evidence_reference'] ?? null,
+                    $row['note'] ?? null,
+                    $actorUserId,
+                    $actorUserId,
+                ]);
+            } catch (PDOException $exception) {
+                if ((int) ($exception->errorInfo[1] ?? 0) === 1062) {
+                    throw new PayrollAnnualSettlementConflictException(
+                        'Potvrzení se stejným označením je v seznamu dvakrát.',
+                        previous: $exception,
+                    );
+                }
+                throw $exception;
+            }
+        }
+    }
+
+    /**
      * Prohlášení k dani a rezidentství účinné k danému dni.
      *
      * @return array{declaration:?string,residence:?string}
@@ -392,6 +497,31 @@ final class PayrollAnnualSettlementRepository
     {
         foreach (['id', 'supplier_id', 'employee_id', 'tax_year', 'row_version'] as $key) {
             if (isset($row[$key])) {
+                $row[$key] = (int) $row[$key];
+            }
+        }
+
+        return $row;
+    }
+
+    /**
+     * Částky zůstávají `null`, když je potvrzení nenese.
+     *
+     * Přetypovat je na nulu by znamenalo, že se chybějící údaj tváří jako
+     * doložená nula — a přesně z toho by vyšel přeplatek, který poplatníkovi
+     * nenáleží. Viz `ExternalEmployerTaxCertificate`.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private static function castCertificate(array $row): array
+    {
+        foreach ([
+            'id', 'supplier_id', 'employee_id', 'tax_year', 'row_version',
+            'gross_income_minor', 'advance_base_minor', 'advance_tax_minor',
+            'credit_35ba_minor', 'credit_35c_minor', 'tax_bonus_minor',
+        ] as $key) {
+            if (array_key_exists($key, $row) && $row[$key] !== null) {
                 $row[$key] = (int) $row[$key];
             }
         }

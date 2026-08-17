@@ -108,7 +108,88 @@ final class PayrollAnnualSettlementAction
             'result' => $preview['result']->jsonSerialize(),
             'credit_rows' => $preview['credit_rows'],
             'child_rows' => $preview['child_rows'],
+            'certificates' => $preview['certificates'],
             'already_settled' => $preview['already_settled'],
+        ]);
+    }
+
+    /**
+     * Zápis potvrzení od předchozích plátců daně (§ 38ch odst. 3).
+     *
+     * Pod `payroll.approve`, ne pod `payroll.documents`. Ta čísla jdou přímo do
+     * úhrnu, ze kterého vychází přeplatek — kdo je smí zadat, ten fakticky
+     * rozhoduje o penězích, stejně jako ten, kdo zúčtování provede. Volněji by
+     * to znamenalo, že zúčtování sice schvaluje jeden člověk, ale podklad pro
+     * jeho výsledek může beze stopy změnit kdokoli s právem na tisk.
+     *
+     * @param array<string,string> $args
+     */
+    public function saveCertificates(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
+            return Json::error(
+                $response,
+                'session_required',
+                'Tento endpoint je dostupný pouze z přihlášené webové session.',
+                403,
+            );
+        }
+        if (!$this->approvalGuard($request, $response, AccessLevel::WRITE, $error)) {
+            return $error;
+        }
+        $year = self::year($args);
+        $employeeId = (int) ($args['employeeId'] ?? 0);
+        $userId = $this->userId($request);
+        if ($year === null || $employeeId <= 0 || $userId === null) {
+            return self::invalid($response);
+        }
+        $body = $request->getParsedBody();
+        $body = is_array($body) ? $body : [];
+        $rows = $body['certificates'] ?? null;
+        if (!is_array($rows)) {
+            return self::invalid($response);
+        }
+        $clean = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                return self::invalid($response);
+            }
+            $clean[] = $row;
+        }
+        $supplierId = $this->currentSupplierId($request);
+
+        try {
+            $saved = $this->settlements->saveCertificates(
+                $supplierId,
+                $employeeId,
+                $year,
+                $clean,
+                $userId,
+            );
+        } catch (PayrollAnnualSettlementConflictException $exception) {
+            return Json::error($response, 'row_version_conflict', $exception->getMessage(), 409);
+        } catch (\DomainException|\InvalidArgumentException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        }
+
+        $this->activity->log(
+            'payroll.annual_settlement_certificates_saved',
+            $userId,
+            'payroll_employee',
+            $employeeId,
+            ['tax_year' => $year, 'count' => count($saved)],
+            $this->ipMatcher->clientIpFromRequest(self::serverParams($request)),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+
+        return Json::ok($response, [
+            'tax_year' => $year,
+            'employee_id' => $employeeId,
+            'certificates' => $saved,
         ]);
     }
 
@@ -225,24 +306,8 @@ final class PayrollAnnualSettlementAction
                 403,
             );
         }
-        if (!$this->requirePermission(
-            $request,
-            $response,
-            'payroll.approve',
-            AccessLevel::WRITE,
-            $error,
-        ) || !$this->requirePayrollEnabled(
-            $request,
-            $response,
-            $this->moduleAccess,
-            $error,
-        )) {
-            return $error ?? Json::error(
-                $response,
-                'forbidden',
-                'Pro tuto akci nemáš oprávnění.',
-                403,
-            );
+        if (!$this->approvalGuard($request, $response, AccessLevel::WRITE, $error)) {
+            return $error;
         }
         $year = self::year($args);
         $employeeId = (int) ($args['employeeId'] ?? 0);
@@ -326,16 +391,39 @@ final class PayrollAnnualSettlementAction
         ], $settled['created'] ? 201 : 200);
     }
 
+    /**
+     * Peněžní rozhodnutí — provedení zúčtování i zadání podkladu, ze kterého
+     * vychází úhrn. Obojí pod `payroll.approve`, ne pod `payroll.documents`.
+     */
+    private function approvalGuard(
+        Request $request,
+        Response $response,
+        AccessLevel $level,
+        ?Response &$error,
+    ): bool {
+        return $this->permissionGuard($request, $response, 'payroll.approve', $level, $error);
+    }
+
     private function guard(
         Request $request,
         Response $response,
         AccessLevel $level,
         ?Response &$error,
     ): bool {
+        return $this->permissionGuard($request, $response, 'payroll.documents', $level, $error);
+    }
+
+    private function permissionGuard(
+        Request $request,
+        Response $response,
+        string $permission,
+        AccessLevel $level,
+        ?Response &$error,
+    ): bool {
         if (!$this->requirePermission(
             $request,
             $response,
-            'payroll.documents',
+            $permission,
             $level,
             $error,
         ) || !$this->requirePayrollEnabled(

@@ -2343,6 +2343,47 @@ export interface PayrollAnnualSettlementChildRow {
   amount_minor_units: number
 }
 
+/**
+ * Kód údaje, který § 38ch odst. 3 žádá a na potvrzení chybí. Klíč do slovníku
+ * `payroll.annual_settlement.certificate.field.*`.
+ */
+export type PayrollAnnualSettlementCertificateField =
+  | 'gross_income'
+  | 'advance_base'
+  | 'advance_tax'
+  | 'credit_35ba'
+  | 'credit_35c'
+  | 'tax_bonus'
+
+/**
+ * Potvrzení od předchozího plátce daně (§ 38ch odst. 3, tiskopis 25 5460).
+ *
+ * Částky jsou `null`, když je potvrzení nenese. `null` NENÍ nula — nula je
+ * doložený údaj, kdežto `null` znamená, že zúčtování provést nelze.
+ */
+export interface PayrollAnnualSettlementCertificate {
+  certificate_reference: string
+  payer_name: string | null
+  payer_tax_identification: string | null
+  /** § 38ch odst. 3 věta druhá — do 15. února po uplynutí období. */
+  received_on: string | null
+  /** ř. 1 tiskopisu — úhrn zúčtovaných příjmů. */
+  gross_income_minor_units: number | null
+  /** ř. 5 tiskopisu — základ daně. */
+  advance_base_minor_units: number | null
+  /** ř. 8 tiskopisu — záloha na daň celkem. */
+  advance_tax_minor_units: number | null
+  /** Úhrn poskytnutých měsíčních slev podle § 35ba. */
+  non_refundable_credit_minor_units: number | null
+  /** Úhrn poskytnutých měsíčních slev podle § 35c. */
+  child_credit_minor_units: number | null
+  /** ř. 9 tiskopisu — úhrn vyplacených měsíčních daňových bonusů. */
+  tax_bonus_minor_units: number | null
+  evidence_status: 'unverified' | 'verified'
+  evidence_reference: string | null
+  missing_statutory_fields: PayrollAnnualSettlementCertificateField[]
+}
+
 export interface PayrollAnnualSettlementPreview {
   tax_year: number
   employee_id: number
@@ -2350,6 +2391,7 @@ export interface PayrollAnnualSettlementPreview {
   result: PayrollAnnualSettlementResult
   credit_rows: PayrollAnnualSettlementCreditRow[]
   child_rows: PayrollAnnualSettlementChildRow[]
+  certificates: PayrollAnnualSettlementCertificate[]
   already_settled: PayrollAnnualSettlementStoredOutcome | null
 }
 
@@ -2376,6 +2418,25 @@ export interface PayrollAnnualSettlementRequestPayload {
   annual_claims_note: string | null
   note: string | null
   row_version?: number
+}
+
+/**
+ * Zápis potvrzení od jiného plátce. Prázdná částka se posílá jako `null`,
+ * ne jako nula — nula je doložený údaj a znamenala by, že se s ní počítá.
+ */
+export interface PayrollAnnualSettlementCertificatePayload {
+  certificate_reference: string
+  payer_name: string | null
+  payer_tax_identification: string | null
+  received_on: string | null
+  gross_income_minor_units: number | null
+  advance_base_minor_units: number | null
+  advance_tax_minor_units: number | null
+  non_refundable_credit_minor_units: number | null
+  child_credit_minor_units: number | null
+  tax_bonus_minor_units: number | null
+  evidence_status: 'unverified' | 'verified'
+  evidence_reference: string | null
 }
 
 export interface PayrollEmploymentExitReadinessItem {
@@ -3593,6 +3654,20 @@ export const payrollApi = {
       `/payroll/annual-settlements/${year}/people/${employeeId}/request`,
       payload,
     ).then(response => response.data.request),
+  /**
+   * Uloží CELÝ seznam potvrzení od předchozích plátců za rok (§ 38ch odst. 3).
+   * Doklady dávají smysl jen jako úplná sada od všech předchozích plátců,
+   * takže se posílají jedním požadavkem, ne po řádcích.
+   */
+  saveAnnualSettlementCertificates: (
+    year: number,
+    employeeId: number,
+    certificates: PayrollAnnualSettlementCertificatePayload[],
+  ) =>
+    api.put<{ certificates: PayrollAnnualSettlementCertificate[] }>(
+      `/payroll/annual-settlements/${year}/people/${employeeId}/certificates`,
+      { certificates },
+    ).then(response => response.data.certificates),
   /**
    * Provede roční zúčtování. Nesplněné podmínky NEJSOU chyba — vrátí se
    * `performed: false` a seznam překážek, které má obrazovka vypsat.
