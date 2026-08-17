@@ -523,6 +523,36 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertNull($this->effectiveStatusAt($employmentId, '2025-03-31'));
     }
 
+    /**
+     * Předkontace na kartě musí být ta, na kterou se mzda opravdu zaúčtuje.
+     *
+     * Firmy si účty přenastavují (typicky celou mzdu na jednu analytiku), jenže
+     * karta ukazovala obecné defaulty z číselníku — u statutárního orgánu tvrdila
+     * „523/366", zatímco běh účtoval podle nastavení zaměstnavatele. Rozdíl se
+     * dal zjistit až v deníku po zaúčtování.
+     */
+    public function testEmploymentCardShowsAccountsTheEmployerActuallyPostsTo(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employer_settings
+                (supplier_id, default_office_id, statutory_gross_debit_account,
+                 statutory_gross_credit_account, employer_insurance_debit_account)
+             VALUES (?, ?, "521.100", "331.100", "524.100")'
+        )->execute([$this->supplierId, $this->officeId]);
+
+        $employment = $this->create($this->employeeId, 'UCTY-1', 'statutory_body', true);
+
+        self::assertSame(
+            ['gross_debit' => '521.100', 'gross_credit' => '331.100'],
+            [
+                'gross_debit' => $employment['accounting']['gross_debit'],
+                'gross_credit' => $employment['accounting']['gross_credit'],
+            ],
+            'Karta nesmí ukazovat 523/366, když firma účtuje jinam.',
+        );
+        self::assertSame('524.100', $employment['accounting']['employer_insurance_debit']);
+    }
+
     private function createdEventDate(int $employmentId): string
     {
         $stmt = $this->db->pdo()->prepare(

@@ -6,6 +6,7 @@ namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\PayrollEmploymentAccountingClassifier;
 use MyInvoice\Service\Payroll\PayrollEmploymentLifecycle;
 use PDO;
@@ -62,7 +63,40 @@ final class PayrollEmploymentRepository
         private readonly PayrollEmploymentAccountingClassifier $accounting,
         private readonly ActivityLogger $activityLogger,
         private readonly PayrollEmploymentDeletionRepository $deletion,
+        private readonly PayrollEmployerSettingsRepository $employerSettings,
     ) {}
+
+    /**
+     * Účty firmy — v rámci jednoho požadavku se nemění, ale karta osoby se ptá
+     * za každý vztah zvlášť.
+     *
+     * @var array<int,array<string,string>>
+     */
+    private array $accountsCache = [];
+
+    /**
+     * Předkontace na kartě musí ukazovat účty, na které se mzda SKUTEČNĚ
+     * zaúčtuje, ne obecné defaulty.
+     *
+     * Klasifikátor umí konfigurované účty přijmout od začátku, jenže mu je nikdo
+     * nepředával — karta pak firmě s vlastním rozvrhem tvrdila „523/366", zatímco
+     * běh účtoval podle nastavení zaměstnavatele (u firem, které si účty
+     * přenastavily, klidně 521.100/331.100). Rozdíl si nikdo nemohl ověřit jinak
+     * než v deníku po zaúčtování.
+     *
+     * @return array<string,string>
+     */
+    private function configuredAccounts(int $supplierId): array
+    {
+        if (!array_key_exists($supplierId, $this->accountsCache)) {
+            $accounts = $this->employerSettings->get($supplierId)['accounts'] ?? null;
+            $this->accountsCache[$supplierId] = is_array($accounts)
+                ? array_map(strval(...), $accounts)
+                : PayrollAccountingDefaults::codes();
+        }
+
+        return $this->accountsCache[$supplierId];
+    }
 
     /** @return list<array<string,mixed>> */
     public function listForEmployee(int $supplierId, int $employeeId): array
@@ -129,7 +163,10 @@ final class PayrollEmploymentRepository
                 'can_delete' => $deletion !== null && $deletion->canDelete,
                 'delete_blocker' => $deletion?->blockerPayload(),
                 'delete_cascade' => $deletion === null ? [] : $deletion->cascade,
-                'accounting' => ($this->accounting)($relationType),
+                'accounting' => ($this->accounting)(
+                    $relationType,
+                    $this->configuredAccounts($supplierId),
+                ),
                 'terms' => $this->terms($supplierId, $employmentId),
                 'checklist' => $this->checklist($supplierId, $employmentId),
                 'timeline' => $this->events($supplierId, $employmentId),
