@@ -128,14 +128,19 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
     }
 
     /**
-     * Automatický odchod je fail-closed a říká to nahlas. Tvrdit opak by
-     * uživatele nechalo čekat na odeslání, které nepřijde.
+     * Bez zaregistrované a zapnuté odesílací brány je automatický odchod
+     * fail-closed a říká to nahlas. Tvrdit opak by uživatele nechalo čekat na
+     * odeslání, které nepřijde.
+     *
+     * Služba se tu staví bez `IsdsGatewayRegistrationService`, což odpovídá
+     * nasazení, kde provozovatel bránu ještě nenastavil.
      */
     public function testAutomaticTransportIsHonestlyReportedAsUnavailable(): void
     {
         $result = $this->enqueue('d');
 
         self::assertFalse($result['transport']['automatic']);
+        self::assertSame('manual_upload', $result['transport']['channel']);
         self::assertSame('isds_transport_unavailable', $result['transport']['reason']);
     }
 

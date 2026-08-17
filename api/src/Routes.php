@@ -1852,6 +1852,13 @@ final class Routes
         $app->post   ('/api/settings/databox',             [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'save']);
         $app->post   ('/api/settings/databox/polling',     [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'setPolling']);
         $app->delete ('/api/settings/databox/{environment:production|test}', [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'delete']);
+        // Registrace odesílací brány je věc PROVOZOVATELE, ne zákazníka:
+        // certifikát je jeden pro celou službu a zákazník k odeslání přes bránu
+        // nepotřebuje nastavit nic.
+        $app->get    ('/api/settings/isds-gateway',        [\MyInvoice\Action\Submission\IsdsGatewayAction::class, 'settings']);
+        $app->post   ('/api/settings/isds-gateway',        [\MyInvoice\Action\Submission\IsdsGatewayAction::class, 'saveSettings']);
+        $app->post   ('/api/settings/isds-gateway/active', [\MyInvoice\Action\Submission\IsdsGatewayAction::class, 'setActive']);
+        $app->delete ('/api/settings/isds-gateway/{environment:production|test}', [\MyInvoice\Action\Submission\IsdsGatewayAction::class, 'deleteSettings']);
         $app->get    ('/api/submissions/recipients',       [\MyInvoice\Action\Submission\SubmissionRecipientAction::class, 'list']);
         $app->post   ('/api/submissions/recipients',       [\MyInvoice\Action\Submission\SubmissionRecipientAction::class, 'save']);
         $app->delete ('/api/submissions/recipients/{id:[0-9]+}', [\MyInvoice\Action\Submission\SubmissionRecipientAction::class, 'delete']);
@@ -1866,6 +1873,14 @@ final class Routes
         // zůstalo navždy v „připraveno".
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/mark-sent', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'markSent']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/receipt',   [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'upload']);
+        // Odesílací brána ISDS (SetConcept): aplikace vloží KONCEPT do perimetru
+        // datové schránky a odeslání schválí uživatel přímo v ISDS. Přihlašovací
+        // údaje ke schránce tudy neprocházejí — zadávají se v ISDS (§ 9 odst. 2
+        // zák. 300/2008 Sb. je tak splněn konstrukcí, ne výkladem).
+        // `callback` je návratové URL registrace; oprávnění drží přihlášená
+        // relace, `appToken` z přesměrování jen dohledává rozpracované podání.
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/gateway',   [\MyInvoice\Action\Submission\IsdsGatewayAction::class, 'start']);
+        $app->post   ('/api/submissions/gateway/callback',             [\MyInvoice\Action\Submission\IsdsGatewayAction::class, 'complete']);
         $app->post   ('/api/submissions/receipts',                     [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'upload']);
         $app->get    ('/api/submissions/receipts/unmatched',           [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'unmatched']);
         $app->get    ('/api/submissions/receipts/{id:[0-9]+}/candidates', [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'candidates']);

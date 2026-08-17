@@ -54,6 +54,17 @@ class ActivityLogger
         'enforcement_case_number', 'insolvency_case_number', 'ciphertext',
         'personal_identifier_ciphertext', 'foreign_tax_id_ciphertext',
         'bank_account_ciphertext', 'monthly_gross', 'gross_minor', 'net_minor',
+        // ─── Odesílací brána ISDS (SetConcept) ───
+        // `timeLimitedId` je HESLO Basic autentizace vůči bráně (uživatel
+        // `ExtWS`), `sessionId` se za něj jednorázově vyměňuje. Ani jedno
+        // nesmí skončit v auditní stopě. `app_token` tajemství není, ale je to
+        // ukazatel na rozpracované podání a v logu není k ničemu. Klíč se
+        // porovnává přesně, proto tu jsou obě obvyklé podoby zápisu.
+        'time_limited_id', 'timelimitedid', 'session_id', 'sessionid',
+        'app_token', 'apptoken', 'certificate', 'certificate_bytes',
+        'certificate_password', 'certificate_passphrase', 'passphrase',
+        'certificate_ciphertext', 'certificate_passphrase_ciphertext',
+        'pfx_ciphertext', 'pkey', 'client_certificate',
     ];
 
     public function __construct(
