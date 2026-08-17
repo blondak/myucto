@@ -57,10 +57,6 @@ final class PayrollSubmissionReachabilityTest extends TestCase
         'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionFlagMatrix' => 'matice příznaků čeká na opravné podání',
         'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidPolicy' => 'politika GUIDů čeká na opravné podání',
         'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzZeroReportProfile' => 'nulové hlášení nemá workflow',
-        // Ověřování potvrzení: seam existuje, produkční cesta ho zatím
-        // vědomě nepoužívá (`importReceipt` se volá bez verifikátoru).
-        'MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifierInterface' => 'seam pro ověření podpisu protokolu se zatím nepoužívá',
-        'MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzReceiptVerifier' => 'seam pro ověření potvrzení se zatím nepoužívá',
         // Registrace staví snapshot přímo builderem: tahle služba váže
         // snapshot na revizi mzdového běhu, která u přihlášky před nástupem
         // z podstaty neexistuje. Zapojit ji znamená rozvázat tu vazbu i v SQL.

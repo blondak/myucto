@@ -56,6 +56,13 @@ final readonly class JmhzDispatchService
         // nezmění stav a datová věta se musí předat ručně.
         private ?JmhzFrozenPayloadReader $frozen = null,
         private ?PayrollSubmissionService $submissions = null,
+        /**
+         * Ověřovatel podpisu protokolu. `null` znamená připnutý certifikát
+         * ČSSZ; podstrčit se dá jen v testech, kde protokol nikdo nepodepíše
+         * klíčem ČSSZ. VYPNOUT ověření nejde — protokol bez ověřeného podpisu
+         * se uloží jako nedůvěryhodná příloha a stav podání nechá být.
+         */
+        private ?JmhzProtocolSignatureVerifierInterface $signatures = null,
     ) {}
 
     /**
@@ -315,8 +322,133 @@ final readonly class JmhzDispatchService
             (int) $attempt['id'],
             (int) $attempt['row_version'],
         );
+        // Teprve tady se podání hne ze stavu `submitted`. Dřív se protokol jen
+        // přečetl a zahodil, takže odeslané hlášení zůstalo navždy „odesláno"
+        // a uživatel se výsledek zpracování z aplikace nedozvěděl.
+        $this->applyReceipt($attempt, $response->body, $correlation, $report, $packageCount);
 
         return new JmhzDispatchOutcome($attempt, null, $report);
+    }
+
+    /**
+     * Dotažený protokol se stane DOKLADEM podání: uloží se jako příloha a —
+     * pokud prošel ověřením podpisu — posune stav podání na výsledek, který
+     * ČSSZ vrátila.
+     *
+     * Fail-closed ve dvou krocích. Napřed se import zkusí S ověřením podpisu;
+     * když ověření neprojde, transakce se zahodí a protokol se uloží ZNOVU,
+     * bez verifieru — tedy jako `unverified` příloha, která stav podání nechá
+     * být a povinnost překlopí do `manual_review`. Neověřený protokol není
+     * chyba běhu, je to jen doklad bez důkazní síly; zahodit ho by znamenalo
+     * ztratit jediné, co o výsledku máme.
+     *
+     * Selhání celého importu NESMÍ přebít výsledek dotazu — ten už je
+     * v ledgeru a ledger je závaznější než odvozený stav.
+     *
+     * ⚠️ Do ledgeru se odsud nezapisuje. Pokus je po `markCompleted()`
+     * uzavřený a jeho strážný trigger přijme už jen uzavírací záznam.
+     *
+     * @param array<string,mixed> $attempt
+     */
+    private function applyReceipt(
+        array $attempt,
+        string $body,
+        string $correlation,
+        JmhzProtocolReport $report,
+        int $packageCount,
+    ): void {
+        $submissions = $this->submissions;
+        if ($submissions === null) {
+            return;
+        }
+        $supplierId = (int) $attempt['supplier_id'];
+        $submissionId = (int) $attempt['submission_id'];
+        $idempotencyKey = 'jmhz-protocol:' . (int) $attempt['id']
+            . ':' . hash('sha256', $body);
+        $declared = $report->status->payrollRemoteStatus();
+        $verifier = new JmhzReceiptVerifier(
+            $this->signatures ?? new JmhzProtocolSignatureVerifier(),
+            $this->protocols,
+            [],
+            $packageCount,
+        );
+
+        try {
+            $this->import(
+                $submissions,
+                $supplierId,
+                $submissionId,
+                $body,
+                $correlation,
+                $declared,
+                $idempotencyKey,
+                $verifier,
+            );
+
+            return;
+        } catch (\Throwable $exception) {
+            $reason = $exception instanceof JmhzTransportException
+                ? $exception->errorCode
+                : 'jmhz_protocol_untrusted';
+        }
+
+        try {
+            $this->import(
+                $submissions,
+                $supplierId,
+                $submissionId,
+                $body,
+                $correlation,
+                $declared,
+                $idempotencyKey,
+                null,
+            );
+            // Bez pojmenovaného důvodu by v podání zůstalo jen obecné
+            // `receipt_unverified` a nikdo by nezjistil, PROČ se protokol
+            // neověřil — jestli chybí podpis, nesedí otisk, nebo podepsal
+            // někdo jiný než ČSSZ.
+            $submissions->recordIssue(
+                $supplierId,
+                $submissionId,
+                (int) $submissions->get($supplierId, $submissionId)['row_version'],
+                null,
+                'error',
+                'remote',
+                $reason,
+            );
+        } catch (\Throwable) {
+            return;
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private function import(
+        PayrollSubmissionService $submissions,
+        int $supplierId,
+        int $submissionId,
+        string $body,
+        string $correlation,
+        string $declaredRemoteStatus,
+        string $idempotencyKey,
+        ?JmhzReceiptVerifier $verifier,
+    ): array {
+        $submission = $submissions->get($supplierId, $submissionId);
+
+        return $submissions->importReceipt(
+            $supplierId,
+            $submissionId,
+            (int) $submission['row_version'],
+            null,
+            $body,
+            $correlation,
+            $correlation,
+            self::SUBMISSION_CLASS,
+            $declaredRemoteStatus,
+            self::CHANNEL,
+            $idempotencyKey,
+            null,
+            $verifier,
+        );
     }
 
     /**

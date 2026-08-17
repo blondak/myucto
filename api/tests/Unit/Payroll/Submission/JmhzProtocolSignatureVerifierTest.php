@@ -6,44 +6,35 @@ namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifier;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
-use MyInvoice\Tests\Support\OpensslConfigTrait;
+use MyInvoice\Tests\Support\JmhzSignedProtocolFactory;
 use PHPUnit\Framework\TestCase;
 
 /**
  * Ověření podepsané časové značky ČSSZ.
  *
- * Podepisuje se **syntetickým** certifikátem vyrobeným v testu; skutečným
- * klíčem ČSSZ nikdo podepsat nemůže a reálný protokol do repozitáře nepatří —
- * jsou v něm identifikátory zaměstnavatele. Ověřuje se proto POSTUP, ne vzorek:
- * kotva se verifieru předá jako testovací a všechno ostatní (kanonizace,
- * vyprázdnění `SignatureValue`, vložený PKCS#7 s otiskem v `eContent`) je
- * shodné s tím, co dělá ČSSZ.
+ * Podepisuje se **syntetickým** certifikátem; skutečným klíčem ČSSZ nikdo
+ * podepsat nemůže a reálný protokol do repozitáře nepatří — jsou v něm
+ * identifikátory zaměstnavatele. Ověřuje se proto POSTUP, ne vzorek: kanonizace
+ * `Message`, vyprázdnění textu `SignatureValue` a vložený PKCS#7 s otiskem
+ * v obsahu jsou shodné s tím, co dělá ČSSZ.
  */
 final class JmhzProtocolSignatureVerifierTest extends TestCase
 {
-    use OpensslConfigTrait;
+    private const FOREIGN = 'Cizi podepisujici';
 
-    private const SHA512 = 'http://www.w3.org/2001/04/xmlenc#sha512';
-
-    /** @var list<string> */
-    private array $tempFiles = [];
+    private ?JmhzSignedProtocolFactory $factory = null;
 
     protected function tearDown(): void
     {
-        foreach ($this->tempFiles as $path) {
-            if (is_file($path)) {
-                @unlink($path);
-            }
-        }
-        $this->tempFiles = [];
+        $this->factory?->cleanUp();
+        $this->factory = null;
     }
 
     public function testSignedProtocolIsVerifiedAndCarriesTheProcessingResult(): void
     {
-        $issuer = $this->issuer();
-        $xml = $this->sign($this->protocol(), $issuer);
+        $xml = $this->protocols()->sign($this->protocol());
 
-        $verified = $this->verifier($issuer)->verifiedProtocolXml($xml, 'test');
+        $verified = $this->verifier()->verifiedProtocolXml($xml, 'test');
 
         self::assertStringContainsString('ProcessingResult', $verified);
         self::assertStringContainsString(JmhzTransportSample::FORM_GUID, $verified);
@@ -51,8 +42,7 @@ final class JmhzProtocolSignatureVerifierTest extends TestCase
 
     public function testTamperedProtocolFailsClosed(): void
     {
-        $issuer = $this->issuer();
-        $xml = $this->sign($this->protocol(), $issuer);
+        $xml = $this->protocols()->sign($this->protocol());
         // Zamítnutá součást se přepíše na přijatou — přesně ta změna, kvůli
         // které se podpis ověřuje.
         $tampered = str_replace('result="ERROR"', 'result="OK"', $xml);
@@ -60,7 +50,7 @@ final class JmhzProtocolSignatureVerifierTest extends TestCase
 
         $this->assertFailsWith(
             'jmhz_protocol_digest_mismatch',
-            fn (): string => $this->verifier($issuer)->verifiedProtocolXml($tampered, 'test'),
+            fn (): string => $this->verifier()->verifiedProtocolXml($tampered, 'test'),
         );
     }
 
@@ -70,50 +60,45 @@ final class JmhzProtocolSignatureVerifierTest extends TestCase
      */
     public function testIndentedProtocolStillVerifies(): void
     {
-        $issuer = $this->issuer();
-        $xml = $this->sign($this->protocol(), $issuer);
+        $xml = $this->protocols()->sign($this->protocol());
         // Odsazuje se jen před otevírací značkou, ať prázdné elementy zůstanou
         // prázdné — přesně tak, jak vypadá protokol od ČSSZ.
         $indented = preg_replace('/>(<[A-Za-z])/', ">\n\t\t$1", $xml) ?? '';
 
-        $verified = $this->verifier($issuer)->verifiedProtocolXml($indented, 'test');
+        $verified = $this->verifier()->verifiedProtocolXml($indented, 'test');
 
         self::assertStringContainsString('ProcessingResult', $verified);
     }
 
     public function testForeignSignerIsRejected(): void
     {
-        $foreign = $this->issuer('Cizi podepisujici');
-        $xml = $this->sign($this->protocol(), $foreign);
+        $xml = $this->protocols()->sign($this->protocol(), self::FOREIGN);
 
         $this->assertFailsWith(
             'jmhz_protocol_signer_untrusted',
-            fn (): string => $this->verifier($this->issuer())
-                ->verifiedProtocolXml($xml, 'test'),
+            fn (): string => $this->verifier()->verifiedProtocolXml($xml, 'test'),
         );
     }
 
     public function testCertificateExpiredAtSigningTimeIsRejected(): void
     {
-        $issuer = $this->issuer();
-        // Certifikát v testu platí ode dneška; protokol se tváří, že vznikl
+        // Syntetický certifikát platí ode dneška; protokol se tváří, že vznikl
         // dávno po jeho konci.
-        $xml = $this->sign($this->protocol(), $issuer, timestamp: '20990101 10:00:00');
+        $xml = $this->protocols()->sign($this->protocol(), timestamp: '20990101 10:00:00');
 
         $this->assertFailsWith(
             'jmhz_protocol_certificate_expired',
-            fn (): string => $this->verifier($issuer)->verifiedProtocolXml($xml, 'test'),
+            fn (): string => $this->verifier()->verifiedProtocolXml($xml, 'test'),
         );
     }
 
     public function testCertificateNotYetValidAtSigningTimeIsRejected(): void
     {
-        $issuer = $this->issuer();
-        $xml = $this->sign($this->protocol(), $issuer, timestamp: '20000101 10:00:00');
+        $xml = $this->protocols()->sign($this->protocol(), timestamp: '20000101 10:00:00');
 
         $this->assertFailsWith(
             'jmhz_protocol_certificate_not_yet_valid',
-            fn (): string => $this->verifier($issuer)->verifiedProtocolXml($xml, 'test'),
+            fn (): string => $this->verifier()->verifiedProtocolXml($xml, 'test'),
         );
     }
 
@@ -121,15 +106,13 @@ final class JmhzProtocolSignatureVerifierTest extends TestCase
     {
         $this->assertFailsWith(
             'jmhz_protocol_signature_missing',
-            fn (): string => $this->verifier($this->issuer())
-                ->verifiedProtocolXml($this->protocol(), 'test'),
+            fn (): string => $this->verifier()->verifiedProtocolXml($this->protocol(), 'test'),
         );
     }
 
     public function testCorruptSignatureValueFailsClosed(): void
     {
-        $issuer = $this->issuer();
-        $xml = $this->sign($this->protocol(), $issuer);
+        $xml = $this->protocols()->sign($this->protocol());
         $broken = preg_replace(
             '#<SignatureValue>[^<]+</SignatureValue>#',
             '<SignatureValue>' . base64_encode('rozbity podpis') . '</SignatureValue>',
@@ -138,14 +121,13 @@ final class JmhzProtocolSignatureVerifierTest extends TestCase
 
         $this->assertFailsWith(
             'jmhz_protocol_signature_unreadable',
-            fn (): string => $this->verifier($issuer)->verifiedProtocolXml($broken, 'test'),
+            fn (): string => $this->verifier()->verifiedProtocolXml($broken, 'test'),
         );
     }
 
     public function testBrokenSignatureBytesFailClosed(): void
     {
-        $issuer = $this->issuer();
-        $xml = $this->sign($this->protocol(), $issuer);
+        $xml = $this->protocols()->sign($this->protocol());
         self::assertSame(
             1,
             preg_match('#<SignatureValue>([^<]+)</SignatureValue>#', $xml, $matches),
@@ -158,37 +140,38 @@ final class JmhzProtocolSignatureVerifierTest extends TestCase
 
         $this->assertFailsWith(
             'jmhz_protocol_signature_invalid',
-            fn (): string => $this->verifier($issuer)->verifiedProtocolXml($broken, 'test'),
+            fn (): string => $this->verifier()->verifiedProtocolXml($broken, 'test'),
         );
     }
 
     public function testDetachedSignatureIsRejected(): void
     {
-        $issuer = $this->issuer();
-        $xml = $this->sign($this->protocol(), $issuer, detached: true);
+        $xml = $this->protocols()->sign($this->protocol(), detached: true);
 
         $this->assertFailsWith(
             'jmhz_protocol_signature_detached',
-            fn (): string => $this->verifier($issuer)->verifiedProtocolXml($xml, 'test'),
+            fn (): string => $this->verifier()->verifiedProtocolXml($xml, 'test'),
         );
     }
 
     public function testUnknownDigestAlgorithmIsRejected(): void
     {
-        $issuer = $this->issuer();
-        $xml = $this->sign($this->protocol(), $issuer);
-        $swapped = str_replace(self::SHA512, 'http://example.invalid/md5', $xml);
+        $xml = $this->protocols()->sign($this->protocol());
+        $swapped = str_replace(
+            JmhzSignedProtocolFactory::SHA512,
+            'http://example.invalid/md5',
+            $xml,
+        );
 
         $this->assertFailsWith(
             'jmhz_protocol_digest_algorithm_unknown',
-            fn (): string => $this->verifier($issuer)->verifiedProtocolXml($swapped, 'test'),
+            fn (): string => $this->verifier()->verifiedProtocolXml($swapped, 'test'),
         );
     }
 
     public function testClassOutsideTheSignatureMustMatchTheSignedContent(): void
     {
-        $issuer = $this->issuer();
-        $xml = $this->sign($this->protocol(), $issuer);
+        $xml = $this->protocols()->sign($this->protocol());
         // `Class` leží v obálce GovTalk, tedy MIMO podpis. Bez křížové kontroly
         // by šlo protokol vydávat za jiný druh podání a podpis by dál platil.
         $retyped = str_replace(
@@ -199,18 +182,17 @@ final class JmhzProtocolSignatureVerifierTest extends TestCase
 
         $this->assertFailsWith(
             'jmhz_protocol_class_unsigned_mismatch',
-            fn (): string => $this->verifier($issuer)->verifiedProtocolXml($retyped, 'test'),
+            fn (): string => $this->verifier()->verifiedProtocolXml($retyped, 'test'),
         );
     }
 
     public function testUnknownEnvironmentIsRejected(): void
     {
-        $issuer = $this->issuer();
-        $xml = $this->sign($this->protocol(), $issuer);
+        $xml = $this->protocols()->sign($this->protocol());
 
         $this->assertFailsWith(
             'jmhz_protocol_environment_unknown',
-            fn (): string => $this->verifier($issuer)->verifiedProtocolXml($xml, 'sandbox'),
+            fn (): string => $this->verifier()->verifiedProtocolXml($xml, 'sandbox'),
         );
     }
 
@@ -218,7 +200,7 @@ final class JmhzProtocolSignatureVerifierTest extends TestCase
     {
         $this->assertFailsWith(
             'jmhz_protocol_unreadable',
-            fn (): string => $this->verifier($this->issuer())->verifiedProtocolXml('   ', 'test'),
+            fn (): string => $this->verifier()->verifiedProtocolXml('   ', 'test'),
         );
     }
 
@@ -233,10 +215,16 @@ final class JmhzProtocolSignatureVerifierTest extends TestCase
         }
     }
 
-    /** @param array{certificate:\OpenSSLCertificate,key:\OpenSSLAsymmetricKey,pem:string} $issuer */
-    private function verifier(array $issuer): JmhzProtocolSignatureVerifier
+    private function verifier(): JmhzProtocolSignatureVerifier
     {
-        return new JmhzProtocolSignatureVerifier(trustAnchorPem: $issuer['pem']);
+        return new JmhzProtocolSignatureVerifier(
+            trustAnchorPem: $this->protocols()->anchorPem(),
+        );
+    }
+
+    private function protocols(): JmhzSignedProtocolFactory
+    {
+        return $this->factory ??= new JmhzSignedProtocolFactory();
     }
 
     private function protocol(): string
@@ -256,110 +244,5 @@ final class JmhzProtocolSignatureVerifierTest extends TestCase
             errNumber: '20118',
             correlationId: 'CID0000000001',
         );
-    }
-
-    /**
-     * Vyrobí protokol podepsaný stejným postupem, jaký předepisuje podací
-     * protokol ČSSZ: kanonizace `Message` s vyprázdněným `SignatureValue`,
-     * otisk, a ten se vloží do PKCS#7 jako obsah.
-     *
-     * @param array{certificate:\OpenSSLCertificate,key:\OpenSSLAsymmetricKey,pem:string} $issuer
-     */
-    private function sign(
-        string $protocolXml,
-        array $issuer,
-        ?string $timestamp = null,
-        bool $detached = false,
-    ): string {
-        // Testovací certifikát platí ode dneška, takže výchozí značka musí být
-        // „teď“ — jinak by každý pozitivní test padal na dosud neplatný podpis.
-        $timestamp ??= gmdate('Ymd H:i:s');
-        [$date, $time] = explode(' ', $timestamp);
-        $signature = '<Signature Version="1.0" xmlns="http://www.cssz.cz/emp/timestamp">'
-            . '<DigestMethod Algorithm="' . self::SHA512 . '" />'
-            . '<TimeStamp><date>' . $date . '</date><time>' . $time . '</time></TimeStamp>'
-            . '<SignatureValue></SignatureValue>'
-            . '</Signature>';
-        $withSignature = str_replace('<Header /><Body>', '<Header>' . $signature . '</Header><Body>', $protocolXml);
-        self::assertNotSame($protocolXml, $withSignature);
-
-        $dom = new \DOMDocument();
-        self::assertTrue($dom->loadXML($withSignature, LIBXML_NONET | LIBXML_NOBLANKS));
-        $xpath = new \DOMXPath($dom);
-        $xpath->registerNamespace('c', 'http://www.cssz.cz/XMLSchema/envelope');
-        $message = $xpath->query('//c:Message')?->item(0);
-        self::assertInstanceOf(\DOMElement::class, $message);
-        $digest = hash('sha512', (string) $message->C14N(), true);
-
-        return str_replace(
-            '<SignatureValue></SignatureValue>',
-            '<SignatureValue>' . base64_encode($this->cms($digest, $issuer, $detached))
-                . '</SignatureValue>',
-            $withSignature,
-        );
-    }
-
-    /** @param array{certificate:\OpenSSLCertificate,key:\OpenSSLAsymmetricKey,pem:string} $issuer */
-    private function cms(string $content, array $issuer, bool $detached): string
-    {
-        $input = $this->tempFile($content);
-        $output = $this->tempFile('');
-        self::assertTrue(openssl_cms_sign(
-            $input,
-            $output,
-            $issuer['certificate'],
-            $issuer['key'],
-            [],
-            $detached ? OPENSSL_CMS_BINARY | OPENSSL_CMS_DETACHED : OPENSSL_CMS_BINARY,
-            OPENSSL_ENCODING_DER,
-        ), self::opensslErrors());
-        $der = file_get_contents($output);
-        self::assertIsString($der);
-        self::assertNotSame('', $der);
-
-        return $der;
-    }
-
-    /** @return array{certificate:\OpenSSLCertificate,key:\OpenSSLAsymmetricKey,pem:string} */
-    private function issuer(string $commonName = 'DIS.CSSZ.TEST'): array
-    {
-        static $cache = [];
-        if (isset($cache[$commonName])) {
-            return $cache[$commonName];
-        }
-        $options = [
-            'private_key_bits' => 2048,
-            'private_key_type' => OPENSSL_KEYTYPE_RSA,
-            'digest_alg' => 'sha256',
-        ] + self::opensslConfigArgs();
-
-        $key = openssl_pkey_new($options);
-        self::assertNotFalse($key, self::opensslErrors());
-        $csr = openssl_csr_new(
-            ['commonName' => $commonName, 'countryName' => 'CZ'],
-            $key,
-            $options,
-        );
-        self::assertNotFalse($csr, self::opensslErrors());
-        $certificate = openssl_csr_sign($csr, null, $key, 3650, $options);
-        self::assertNotFalse($certificate, self::opensslErrors());
-        $pem = '';
-        self::assertTrue(openssl_x509_export($certificate, $pem));
-
-        return $cache[$commonName] = [
-            'certificate' => $certificate,
-            'key' => $key,
-            'pem' => $pem,
-        ];
-    }
-
-    private function tempFile(string $content): string
-    {
-        $path = tempnam(sys_get_temp_dir(), 'jmhz-protocol-test-');
-        self::assertNotFalse($path);
-        file_put_contents($path, $content);
-        $this->tempFiles[] = $path;
-
-        return $path;
     }
 }

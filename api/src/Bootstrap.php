@@ -334,6 +334,10 @@ final class Bootstrap
                     new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolParser(),
                     $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader::class),
                     $c->get(\MyInvoice\Service\Payroll\Submission\PayrollSubmissionService::class),
+                    // Ověření podpisu protokolu proti připnutému certifikátu ČSSZ.
+                    // Bez něj by dotažený protokol skončil jako nedůvěryhodná
+                    // příloha a podání by navždy zůstalo ve stavu `submitted`.
+                    new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifier(),
                 ),
             // § 33a — zřetězení auditní stopy hashem. Druhý argument loggeru je volitelný
             // kvůli testovacím dvojníkům; bez explicitního bindu by se v produkci nic
