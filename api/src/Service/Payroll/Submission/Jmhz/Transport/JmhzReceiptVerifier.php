@@ -19,7 +19,36 @@ use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceipt;
  */
 final readonly class JmhzReceiptVerifier implements PayrollReceiptVerifierInterface
 {
-    private const CHANNEL = 'vrep_apep';
+    /**
+     * Kanály, jejichž protokol umíme ověřit.
+     *
+     * ── Proč tu ISDS přibylo ────────────────────────────────────────────────
+     * Dřív tu stál jediný `vrep_apep` a cokoliv jiného skončilo
+     * `jmhz_protocol_channel_unsupported`. To bylo správně jen do chvíle, než
+     * se ISDS stal plnohodnotným kanálem podání JMHZ — od té chvíle to byl
+     * rozpor: {@see \MyInvoice\Service\Submission\AgendaReceiptCapability::forChannel()}
+     * u dvojice (`isds`, `JMHZ25`) vrací `ProcessingProtocol`, tedy aplikace
+     * uživateli SLIBUJE, že protokol přečte, ale verifier ho odmítal otevřít.
+     *
+     * ── Proč je to bezpečné ─────────────────────────────────────────────────
+     * Podepsaný protokol o zpracování je TENTÝŽ dokument bez ohledu na kanál.
+     * Podávací a dotazovací protokol ČSSZ v1.47 to na straně 47 říká přímo:
+     * „odpověď na podání ve formátu ‚holého‘ XML je zpráva ve formátu GovTalk,
+     * stejně jako na podání ve formátu GovTalk". Kanál je jen doprava; důvěru
+     * nese podpis ČSSZ, ne cesta, kterou dokument přišel.
+     *
+     * Podstatné je, že rozšíření NEOSLABUJE žádnou z ostatních bran. Protokol
+     * pořád musí projít ověřením podpisu proti připnuté kotvě `DIS.CSSZ.2025`
+     * a pořád musí sedět `CorrelationID` na konkrétní podání. Kanál sám o sobě
+     * nikdy nebyl to, co protokol dělá důvěryhodným — kdyby byl, stačilo by
+     * podvrhnout zprávu ve schránce.
+     *
+     * Ostatní kanály zůstávají odmítnuté: `manual_upload`, `pikr`,
+     * `health_portal` ani `other` doložený tvar protokolu nemají a přijmout od
+     * nich stav by znamenalo uzavřít povinnost podle dokumentu, o kterém nevíme,
+     * co je zač.
+     */
+    private const CHANNELS = ['vrep_apep', 'isds'];
 
     /** @param array<string,int> $formPartIds GUID formuláře → id součásti podání */
     public function __construct(
@@ -57,10 +86,10 @@ final readonly class JmhzReceiptVerifier implements PayrollReceiptVerifierInterf
         string $environment,
         ?string $expectedCorrelationReference,
     ): PayrollVerifiedReceipt {
-        if ($channel !== self::CHANNEL) {
+        if (!in_array($channel, self::CHANNELS, true)) {
             throw new JmhzTransportException(
                 'jmhz_protocol_channel_unsupported',
-                'Protokol JMHZ umí ověřit jen kanál VREP/APEP.',
+                'Protokol JMHZ umí ověřit jen kanál VREP/APEP nebo datovou schránku.',
             );
         }
         if ($this->signatures === null) {
