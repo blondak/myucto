@@ -109,6 +109,12 @@ final readonly class IsdsGatewayDispatchService
         // se dál nejde. Chyba nese vlastní kód a uživateli říká, co má udělat.
         $registration = $this->registrations->load($environment);
 
+        // Úklid nejdřív, jinak by relace, ze které se uživatel nevrátil,
+        // zablokovala tohle podání natrvalo (UNIQUE nad živými relacemi).
+        // Dělá se to tady a ne jen cronem, aby nasazení bez zapnutého cronu
+        // nemělo tichou past.
+        $this->sessions->expireStale();
+
         // Dvojí kliknutí: živá relace se neopakuje, uživatel se vrací do té,
         // kterou už má rozpracovanou.
         $existing = $this->sessions->findActiveForOutbox($supplierId, $outboxId);
@@ -137,7 +143,10 @@ final readonly class IsdsGatewayDispatchService
         // kolize s pozdějším zabráním.
         $this->runValidationGate($supplierId, $outboxId, $row);
 
-        $expiresAt = (new \DateTimeImmutable('now'))
+        // V UTC schválně: `started_at` i úklid vypršelých relací se řídí
+        // `UTC_TIMESTAMP()`. Lokální čas by v létě posunul platnost o dvě
+        // hodiny dopředu a relace by nikdy nevypršela.
+        $expiresAt = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
             ->modify('+' . ($registration->conceptTtlSeconds + self::LOGIN_WINDOW_SECONDS) . ' seconds');
 
         $session = $this->sessions->open([

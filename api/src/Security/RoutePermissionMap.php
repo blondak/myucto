@@ -124,8 +124,13 @@ final class RoutePermissionMap
         // smí i odesílat podání — a naopak nikdo jiný.
         // `defect-notices` = výzvy k odstranění vad podle § 74 daňového řádu.
         // Patří sem, protože se týkají osudu odeslaného podání, ne mzdové agendy.
-        ['GET', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices)(/|$)#', 'settings.signing', AccessLevel::READ],
-        ['*', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices)(/|$)#', 'settings.signing', AccessLevel::WRITE],
+        // `gateway` = návrat z odesílací brány ISDS. Je to sice „callback"
+        // adresa, kterou zná ISDS, ale VEŘEJNÁ NENÍ: `appToken` z přesměrování
+        // slouží jen k dohledání rozpracovaného podání a o oprávnění rozhoduje
+        // přihlášená relace. Proto stejné právo jako zbytek fronty — odeslání
+        // datové zprávy je právní úkon a nesmí ho vyvolat kdokoliv s odkazem.
+        ['GET', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices|gateway)(/|$)#', 'settings.signing', AccessLevel::READ],
+        ['*', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices|gateway)(/|$)#', 'settings.signing', AccessLevel::WRITE],
 
         // Retence a výmaz. Dvě různá práva ZÁMĚRNĚ: nastavit lhůtu nebo zadržet
         // výmaz je správa evidence, kdežto schválit a provést výmaz je nevratný
