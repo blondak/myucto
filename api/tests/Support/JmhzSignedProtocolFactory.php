@@ -60,9 +60,11 @@ final class JmhzSignedProtocolFactory
         bool $detached = false,
         string $algorithm = self::SHA512,
     ): string {
-        // Syntetický certifikát platí ode dneška, takže výchozí značka musí
-        // být „teď“ — jinak by ověření padalo na dosud neplatný certifikát.
-        $timestamp ??= gmdate('Ymd H:i:s');
+        // ⚠️ Výchozí značka se odvozuje z PLATNOSTI certifikátu, ne z `now()`.
+        // `openssl_csr_sign()` staví `notBefore` až v okamžiku podpisu, takže
+        // značka vzatá o vteřinu dřív padne na „certifikát ještě neplatil“ —
+        // a padne jen někdy, což je ta nejhorší varianta.
+        $timestamp ??= $this->withinValidity($commonName);
         [$date, $time] = explode(' ', $timestamp);
         $signature = '<Signature Version="1.0" xmlns="http://www.cssz.cz/emp/timestamp">'
             . '<DigestMethod Algorithm="' . $algorithm . '" />'
@@ -92,6 +94,20 @@ final class JmhzSignedProtocolFactory
                 . '</SignatureValue>',
             $withSignature,
         );
+    }
+
+    /** Okamžik bezpečně uvnitř platnosti syntetického certifikátu. */
+    private function withinValidity(string $commonName): string
+    {
+        $parsed = openssl_x509_parse($this->issuer($commonName)['certificate']);
+        $from = is_array($parsed) ? (int) ($parsed['validFrom_time_t'] ?? 0) : 0;
+        if ($from <= 0) {
+            throw new \RuntimeException(
+                'Ze syntetického certifikátu nelze přečíst začátek platnosti.',
+            );
+        }
+
+        return gmdate('Ymd H:i:s', $from + 3600);
     }
 
     private function canonicalMessage(string $xml): string
