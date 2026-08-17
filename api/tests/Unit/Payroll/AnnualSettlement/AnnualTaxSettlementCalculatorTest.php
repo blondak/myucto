@@ -20,6 +20,7 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -394,8 +395,8 @@ final class AnnualTaxSettlementCalculatorTest extends TestCase
 
     /**
      * § 38ch odst. 3 chce od předchozího plátce i poskytnuté měsíční slevy
-     * a vyplacené bonusy. `ExternalEmployerTaxCertificate` je nenese, takže se
-     * s ním nepočítá vůbec — ne špatně.
+     * a vyplacené bonusy. Nese-li potvrzení jen základ a zálohu, nepočítá se
+     * s ním vůbec — ne špatně.
      */
     public function testExternalCertificateStopsTheSettlement(): void
     {
@@ -425,6 +426,247 @@ final class AnnualTaxSettlementCalculatorTest extends TestCase
         self::assertContains(
             AnnualSettlementBlocker::ExternalCertificateIncomplete->value,
             $result->blockerCodes(),
+        );
+    }
+
+    /**
+     * Chybí-li BYŤ JEDNA ze čtyř složek § 38ch odst. 3, zúčtování se neprovede.
+     * Testuje se každá zvlášť, protože nejnebezpečnější je právě ta jediná
+     * chybějící — u úplně prázdného potvrzení si toho všimne kdokoli.
+     */
+    #[DataProvider('incompleteCertificateFieldProvider')]
+    public function testEverySingleMissingStatutoryFieldStopsTheSettlement(
+        string $missingField,
+    ): void {
+        $values = [
+            'gross_income' => 20_000_000,
+            'advance_base' => 10_000_000,
+            'advance_tax' => 1_500_000,
+            'credit_35ba' => 257_000,
+            'credit_35c' => 0,
+            'tax_bonus' => 120_000,
+        ];
+        $values[$missingField] = null;
+
+        $result = (new AnnualTaxSettlementCalculator())->calculate(
+            $this->input(
+                advanceBase: 60_000_000,
+                advanceTax: 5_000_000,
+                appliedCredits: 3_084_000,
+                bonusQualifyingIncome: 60_000_000,
+                creditMonths: [
+                    new AnnualSettlementCreditMonths(TaxCreditKind::Taxpayer, 12),
+                ],
+                externalCertificates: [
+                    new ExternalEmployerTaxCertificate(
+                        'synthetic-certificate',
+                        $values['advance_base'],
+                        $values['advance_tax'],
+                        TaxEvidenceStatus::Verified,
+                        'synthetic-evidence',
+                        $values['gross_income'],
+                        $values['credit_35ba'],
+                        $values['credit_35c'],
+                        $values['tax_bonus'],
+                    ),
+                ],
+            ),
+            $this->rates(),
+        );
+
+        self::assertFalse($result->performed);
+        self::assertContains(
+            AnnualSettlementBlocker::ExternalCertificateIncomplete->value,
+            $result->blockerCodes(),
+        );
+    }
+
+    /** @return iterable<string,array{string}> */
+    public static function incompleteCertificateFieldProvider(): iterable
+    {
+        foreach (ExternalEmployerTaxCertificate::REQUIRED_STATUTORY_FIELDS as $code) {
+            yield $code => [$code];
+        }
+    }
+
+    /**
+     * Nula na potvrzení NENÍ totéž co chybějící údaj. „Bonus nevyplácel"
+     * musí jít doložit, jinak by úplné potvrzení bez bonusů nešlo použít.
+     */
+    public function testExplicitZeroIsNotAMissingField(): void
+    {
+        $certificate = new ExternalEmployerTaxCertificate(
+            'synthetic-certificate',
+            0,
+            0,
+            TaxEvidenceStatus::Verified,
+            'synthetic-evidence',
+            0,
+            0,
+            0,
+            0,
+        );
+
+        self::assertSame([], $certificate->missingStatutoryFields());
+        self::assertTrue($certificate->isComplete());
+    }
+
+    /**
+     * § 38ch odst. 4 mluví o úhrnu mezd od všech plátců — nedoložený údaj do
+     * něj nevstupuje, i když je vyplněný celý.
+     */
+    public function testUnverifiedCertificateStopsTheSettlement(): void
+    {
+        $result = (new AnnualTaxSettlementCalculator())->calculate(
+            $this->input(
+                advanceBase: 60_000_000,
+                advanceTax: 5_000_000,
+                appliedCredits: 3_084_000,
+                bonusQualifyingIncome: 60_000_000,
+                creditMonths: [
+                    new AnnualSettlementCreditMonths(TaxCreditKind::Taxpayer, 12),
+                ],
+                externalCertificates: [
+                    $this->certificate(),
+                ],
+            ),
+            $this->rates(),
+            [],
+        );
+
+        self::assertFalse($result->performed);
+        self::assertContains(
+            AnnualSettlementBlocker::ExternalCertificateUnverified->value,
+            $result->blockerCodes(),
+        );
+    }
+
+    /**
+     * Úplné a doložené potvrzení se přičte do úhrnu — základ, zálohy, už
+     * vyplacené bonusy i příjem rozhodný pro § 35c odst. 4.
+     */
+    public function testCompleteCertificateEntersTheTotals(): void
+    {
+        $calculator = new AnnualTaxSettlementCalculator();
+        $rates = $this->rates();
+        $creditMonths = [new AnnualSettlementCreditMonths(TaxCreditKind::Taxpayer, 12)];
+
+        $withCertificate = $calculator->calculate(
+            $this->input(
+                advanceBase: 40_000_000,
+                advanceTax: 3_000_000,
+                appliedCredits: 3_084_000,
+                bonusQualifyingIncome: 40_000_000,
+                creditMonths: $creditMonths,
+                externalCertificates: [
+                    $this->certificate(verified: true),
+                ],
+            ),
+            $rates,
+        );
+        // Táž situace, jen s údaji potvrzení už započtenými do vlastních
+        // kumulací. Musí vyjít na korunu totéž — jinak by potvrzení znamenalo
+        // jiný výsledek než tentýž příjem u jednoho plátce.
+        $merged = $calculator->calculate(
+            $this->input(
+                advanceBase: 40_000_000 + 10_000_000,
+                advanceTax: 3_000_000 + 1_500_000,
+                appliedCredits: 3_084_000,
+                bonusQualifyingIncome: 40_000_000 + 20_000_000,
+                creditMonths: $creditMonths,
+            ),
+            $rates,
+        );
+
+        self::assertTrue($withCertificate->performed);
+        self::assertSame(
+            $merged->roundedTaxBaseMinorUnits,
+            $withCertificate->roundedTaxBaseMinorUnits,
+        );
+        self::assertSame(
+            $merged->taxDifferenceMinorUnits,
+            $withCertificate->taxDifferenceMinorUnits,
+        );
+        self::assertSame(
+            $merged->settlementDifferenceMinorUnits,
+            $withCertificate->settlementDifferenceMinorUnits,
+        );
+        self::assertSame(
+            10_000_000,
+            $withCertificate->trace['external_certificates']['advance_base_minor_units'],
+        );
+        self::assertSame(
+            1,
+            $withCertificate->trace['external_certificates']['count'],
+        );
+    }
+
+    /**
+     * Nejdražší chyba: bonusy vyplacené předchozím plátcem musí snížit rozdíl
+     * podle § 35d odst. 7. Kdyby se nezapočítaly, poplatník by dostal podruhé
+     * to, co už jednou dostal.
+     */
+    public function testPaidBonusFromCertificateReducesTheBonusDifference(): void
+    {
+        $calculator = new AnnualTaxSettlementCalculator();
+        $rates = $this->rates();
+        $shared = [
+            'advanceBase' => 20_000_000,
+            'advanceTax' => 0,
+            'appliedCredits' => 3_084_000,
+            'bonusQualifyingIncome' => 20_000_000,
+            'creditMonths' => [
+                new AnnualSettlementCreditMonths(TaxCreditKind::Taxpayer, 12),
+            ],
+            'childMonths' => [
+                new AnnualSettlementChildMonths('child-1', 1, 12, 0),
+            ],
+        ];
+
+        $withoutCertificate = $calculator->calculate(
+            $this->input(...$shared),
+            $rates,
+        );
+        $withPaidBonus = $calculator->calculate(
+            $this->input(
+                ...$shared,
+                externalCertificates: [
+                    new ExternalEmployerTaxCertificate(
+                        'synthetic-certificate',
+                        0,
+                        0,
+                        TaxEvidenceStatus::Verified,
+                        'synthetic-evidence',
+                        0,
+                        0,
+                        0,
+                        500_000,
+                    ),
+                ],
+            ),
+            $rates,
+        );
+
+        self::assertTrue($withoutCertificate->performed);
+        self::assertTrue($withPaidBonus->performed);
+        self::assertSame(
+            $withoutCertificate->bonusDifferenceMinorUnits - 500_000,
+            $withPaidBonus->bonusDifferenceMinorUnits,
+        );
+    }
+
+    private function certificate(bool $verified = false): ExternalEmployerTaxCertificate
+    {
+        return new ExternalEmployerTaxCertificate(
+            'synthetic-certificate',
+            10_000_000,
+            1_500_000,
+            $verified ? TaxEvidenceStatus::Verified : TaxEvidenceStatus::Unverified,
+            'synthetic-evidence',
+            20_000_000,
+            257_000,
+            0,
+            0,
         );
     }
 

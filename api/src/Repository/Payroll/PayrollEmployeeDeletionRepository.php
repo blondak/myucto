@@ -144,6 +144,11 @@ final class PayrollEmployeeDeletionRepository
             // Bez osoby nemají smysl a nic navenek neprokazují — na rozdíl od
             // PROVEDENÉHO zúčtování, které mazání blokuje.
             'payroll_annual_settlement_requests',
+            // Potvrzení od předchozích plátců (§ 38ch odst. 3). Je to podklad
+            // k neprovedenému zúčtování téže osoby — bez ní nemá co dokládat.
+            // Provedené zúčtování mazání blokuje dál, takže se tím nemaže nic,
+            // o co by se pak někdo opřel.
+            'payroll_annual_settlement_certificates',
         ],
         'insurance' => [
             'payroll_person_health_coverage_history',

@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   previewAnnualSettlement: vi.fn(),
   saveAnnualSettlementRequest: vi.fn(),
   settleAnnualSettlement: vi.fn(),
+  saveAnnualSettlementCertificates: vi.fn(),
   downloadDocument: vi.fn(),
   warning: vi.fn(),
   error: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('@/api/payroll', () => ({
     previewAnnualSettlement: m.previewAnnualSettlement,
     saveAnnualSettlementRequest: m.saveAnnualSettlementRequest,
     settleAnnualSettlement: m.settleAnnualSettlement,
+    saveAnnualSettlementCertificates: m.saveAnnualSettlementCertificates,
     downloadDocument: m.downloadDocument,
   },
 }))
@@ -151,6 +153,7 @@ function previewResponse(overrides: Record<string, unknown> = {}) {
     result: result(),
     credit_rows: [{ label: 'Základní sleva na poplatníka', amount_minor_units: 3_084_000 }],
     child_rows: [],
+    certificates: [],
     already_settled: null,
     ...overrides,
   }
@@ -319,6 +322,58 @@ describe('Roční zúčtování', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="annual-settlement-already"]').exists()).toBe(true)
+  })
+
+  /**
+   * Nejnebezpečnější místo celé obrazovky: prázdné pole se NESMÍ odeslat jako
+   * nula. Nula je podle § 38ch odst. 3 doložený údaj a počítalo by se s ní —
+   * z toho by vyšel přeplatek, na který zaměstnanec nemá nárok.
+   */
+  it('prázdnou částku na potvrzení posílá jako null, ne jako nulu', async () => {
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      certificates: [{
+        certificate_reference: 'POT-1',
+        payer_name: 'Předchozí plátce',
+        payer_tax_identification: null,
+        received_on: '2027-02-10',
+        gross_income_minor_units: 3_000_000,
+        advance_base_minor_units: 3_000_000,
+        advance_tax_minor_units: 450_000,
+        non_refundable_credit_minor_units: 257_000,
+        child_credit_minor_units: 0,
+        tax_bonus_minor_units: null,
+        evidence_status: 'verified',
+        evidence_reference: 'doklad',
+        missing_statutory_fields: ['tax_bonus'],
+      }],
+    }))
+    m.saveAnnualSettlementCertificates.mockResolvedValue([])
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    // Chybějící údaj je vidět dřív, než se na něj někdo zeptá. (Mock `t`
+    // interpolaci nedělá, takže se ověřuje jen že varování je vypsané.)
+    expect(wrapper.find('[data-test="annual-settlement-certificate-missing"]').text())
+      .toContain('payroll.annual_settlement.certificate_missing')
+    // Nula se do formuláře načte jako „0.00", ne jako prázdno.
+    expect(
+      (wrapper.find('[data-test="annual-settlement-certificate-credit_35c"]')
+        .element as HTMLInputElement).value,
+    ).toBe('0.00')
+    expect(
+      (wrapper.find('[data-test="annual-settlement-certificate-tax_bonus"]')
+        .element as HTMLInputElement).value,
+    ).toBe('')
+
+    await wrapper.find('[data-test="annual-settlement-save-certificates"]').trigger('click')
+    await flushPromises()
+
+    const [, , payload] = m.saveAnnualSettlementCertificates.mock.calls[0]
+    expect(payload[0].tax_bonus_minor_units).toBeNull()
+    expect(payload[0].child_credit_minor_units).toBe(0)
+    expect(payload[0].advance_tax_minor_units).toBe(450_000)
   })
 
   it('uloží podklady s row_version, aby souběžná úprava nepřepsala odpovědi', async () => {

@@ -251,6 +251,164 @@ final class AnnualSettlementIntegrationTest extends TestCase
         }
     }
 
+    /**
+     * Potvrzení od jiného plátce projde celou cestou: uloží se, vrátí se
+     * z náhledu, neúplné zúčtování zastaví a úplné se přičte do úhrnu.
+     *
+     * Nejdůležitější je prostřední krok. Neúplné potvrzení se NESMÍ tiše
+     * dopočítat nulou — z toho by vyšel přeplatek, který poplatníkovi
+     * nenáleží (§ 38ch odst. 3 ve spojení s § 35d odst. 7).
+     */
+    public function testExternalCertificateRoundTripsAndOnlyCountsWhenComplete(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $connection = $container->get(Connection::class);
+        $service = $container->get(AnnualTaxSettlementService::class);
+        $sensitive = $container->get(PayrollSensitiveData::class);
+        self::assertInstanceOf(Connection::class, $connection);
+        self::assertInstanceOf(AnnualTaxSettlementService::class, $service);
+        self::assertInstanceOf(PayrollSensitiveData::class, $sensitive);
+        if (!$connection->hasTable('payroll_annual_settlement_certificates')) {
+            $this->markTestSkipped('Migrace potvrzení od jiného plátce neproběhla.');
+        }
+
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $pdo->query(
+            'SELECT id FROM supplier ORDER BY id LIMIT 1',
+        )->fetchColumn();
+        $today = new DateTimeImmutable(sprintf('%04d-03-10', self::YEAR + 1));
+
+        $pdo->beginTransaction();
+        try {
+            [$supplierId, $employeeId] = $this->fixture(
+                $pdo,
+                $sourceSupplierId,
+                $sensitive,
+            );
+
+            $baseline = $service->preview($supplierId, $employeeId, self::YEAR, $today);
+            self::assertTrue($baseline['result']->performed);
+            self::assertSame([], $baseline['certificates']);
+
+            // Krok 1 — potvrzení bez vyplacených bonusů a bez slev podle § 35c.
+            // Dvě ze čtyř složek § 38ch odst. 3 chybí.
+            $saved = $service->saveCertificates(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+                [[
+                    'certificate_reference' => 'POT-2026-1',
+                    'payer_name' => 'Předchozí plátce',
+                    'received_on' => sprintf('%04d-02-10', self::YEAR + 1),
+                    'gross_income_minor_units' => 30_000_00,
+                    'advance_base_minor_units' => 30_000_00,
+                    'advance_tax_minor_units' => 4_500_00,
+                    'non_refundable_credit_minor_units' => 2_570_00,
+                    'evidence_status' => 'verified',
+                    'evidence_reference' => 'synthetic-certificate-evidence',
+                ]],
+                null,
+            );
+            self::assertCount(1, $saved);
+            self::assertSame(
+                ['credit_35c', 'tax_bonus'],
+                $saved[0]['missing_statutory_fields'],
+            );
+
+            $incomplete = $service->preview($supplierId, $employeeId, self::YEAR, $today);
+            self::assertFalse($incomplete['result']->performed);
+            self::assertContains(
+                AnnualSettlementBlocker::ExternalCertificateIncomplete->value,
+                $incomplete['result']->blockerCodes(),
+            );
+            // Nic se nedopočítalo — ani „aspoň z vlastních měsíců".
+            self::assertSame(0, $incomplete['result']->payableMinorUnits);
+            self::assertCount(1, $incomplete['certificates']);
+
+            // Krok 2 — doplněné obě chybějící složky. Nula je platný údaj.
+            $service->saveCertificates(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+                [[
+                    'certificate_reference' => 'POT-2026-1',
+                    'payer_name' => 'Předchozí plátce',
+                    'received_on' => sprintf('%04d-02-10', self::YEAR + 1),
+                    'gross_income_minor_units' => 30_000_00,
+                    'advance_base_minor_units' => 30_000_00,
+                    'advance_tax_minor_units' => 4_500_00,
+                    'non_refundable_credit_minor_units' => 2_570_00,
+                    'child_credit_minor_units' => 0,
+                    'tax_bonus_minor_units' => 0,
+                    'evidence_status' => 'verified',
+                    'evidence_reference' => 'synthetic-certificate-evidence',
+                ]],
+                null,
+            );
+
+            $complete = $service->preview($supplierId, $employeeId, self::YEAR, $today);
+            self::assertSame([], $complete['result']->blockerCodes());
+            self::assertTrue($complete['result']->performed);
+            self::assertSame([], $complete['certificates'][0]['missing_statutory_fields']);
+
+            // Úhrn se skutečně zvětšil o potvrzení (§ 38ch odst. 4) — základ
+            // vzrostl a nová záloha se promítla do rozdílu na dani.
+            self::assertGreaterThan(
+                $baseline['result']->roundedTaxBaseMinorUnits,
+                $complete['result']->roundedTaxBaseMinorUnits,
+            );
+            self::assertSame(
+                30_000_00,
+                $complete['result']->trace['external_certificates']['advance_base_minor_units'],
+            );
+            self::assertSame(
+                4_500_00,
+                $complete['result']->trace['external_certificates']['advance_tax_minor_units'],
+            );
+
+            // Krok 3 — nedoložené potvrzení do úhrnu nepatří (§ 38ch odst. 4).
+            $service->saveCertificates(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+                [[
+                    'certificate_reference' => 'POT-2026-1',
+                    'gross_income_minor_units' => 30_000_00,
+                    'advance_base_minor_units' => 30_000_00,
+                    'advance_tax_minor_units' => 4_500_00,
+                    'non_refundable_credit_minor_units' => 2_570_00,
+                    'child_credit_minor_units' => 0,
+                    'tax_bonus_minor_units' => 0,
+                    'evidence_status' => 'unverified',
+                ]],
+                null,
+            );
+            $unverified = $service->preview($supplierId, $employeeId, self::YEAR, $today);
+            self::assertFalse($unverified['result']->performed);
+            self::assertContains(
+                AnnualSettlementBlocker::ExternalCertificateUnverified->value,
+                $unverified['result']->blockerCodes(),
+            );
+
+            // Krok 4 — prázdný seznam evidenci uklidí a vrátí výchozí stav.
+            self::assertSame(
+                [],
+                $service->saveCertificates($supplierId, $employeeId, self::YEAR, [], null),
+            );
+            $cleared = $service->preview($supplierId, $employeeId, self::YEAR, $today);
+            self::assertTrue($cleared['result']->performed);
+            self::assertSame(
+                $baseline['result']->settlementDifferenceMinorUnits,
+                $cleared['result']->settlementDifferenceMinorUnits,
+            );
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $connection->close();
+        }
+    }
+
     /** Zaměstnanec bez podepsaného prohlášení — zúčtování se neprovede a řekne proč. */
     public function testUnsignedDeclarationRefusesWithAReason(): void
     {
