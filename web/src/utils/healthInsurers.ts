@@ -9,7 +9,9 @@
  * stránky, aby na něm mohly viset obě a nemohly se rozejít.
  *
  * Zdroj pravdy zůstává backend; tenhle soubor je jeho kopie pro UI. Když se
- * seznam pojišťoven změní, mění se obě strany naráz.
+ * seznam pojišťoven změní, mění se obě strany naráz — a že se to stalo, hlídá
+ * `api/tests/Architecture/HealthInsurerCodebookContractTest.php`. Porovnává
+ * kódy, názvy i pořadí, takže tuhle kopii nejde změnit jednostranně.
  */
 
 export interface HealthInsurer {
