@@ -23,7 +23,10 @@ test('logout clears private state even when the server request fails and isolate
   assert.match(auth, /if \(requestCsrfToken\) setCsrfToken\(requestCsrfToken\)/)
   assert.match(auth, /catch \(error\) \{\s*logoutRetryCsrfToken = requestCsrfToken[\s\S]*throw error/)
   assert.match(auth, /finally \{\s*clearPrivateState\(\)/)
-  assert.match(auth, /clearPrivateState[\s\S]*setCsrfToken\(null\)[\s\S]*setAvailable\(\[\], 0\)/)
+  assert.match(
+    auth,
+    /clearPrivateState[\s\S]*setCsrfToken\(null\)[\s\S]*setAvailable\(\[\], 0, domainContext\.value\?\.locked === true\)/,
+  )
 })
 
 test('logout failures are surfaced by both private layout and forced MFA setup', () => {
@@ -84,7 +87,10 @@ test('a redirect loop between / and /login is broken instead of spinning forever
     login.indexOf('loginRedirectLoopDetected()') < login.indexOf('if (auth.isAuthenticated) {'),
     'kontrola smyčky musí předcházet automatickému redirectu',
   )
-  assert.match(login, /clearLoginBounces\(\)\s*\n\s*router\.push/)
+  assert.match(
+    login,
+    /clearLoginBounces\(\)\s*\n\s*if \(await finishDomainLoginIfNeeded\(\)\) return\s*\n\s*router\.push/,
+  )
 })
 
 // Service worker je vázaný na origin, ne na aplikaci. `http://localhost:8080` běžně
