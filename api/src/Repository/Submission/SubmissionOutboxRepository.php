@@ -393,6 +393,40 @@ final class SubmissionOutboxRepository
     }
 
     /**
+     * Přechod `ready` → `sending` pro ODESÍLACÍ BRÁNU ISDS.
+     *
+     * Volá se AŽ POTÉ, co uživatel koncept v ISDS schválil a brána vrátila
+     * `conceptStatusCode`. Do té doby řádek zůstává `ready` schválně: vložený
+     * koncept ještě není odeslaná zpráva a zamítnutí musí jít bez následků
+     * opakovat — a z `sending` se podle triggeru zpátky na `ready` nedostaneme.
+     *
+     * `dispatch_mode = 'gateway'` vypíná bránu ověření schránky v ISDS
+     * (`chk_submission_outbox_box_verification_gate`, migrace 1413). Odesílací
+     * brána čtení schránky neumí a příjemce místo toho ověřuje samo ISDS
+     * v okamžiku schválení. Trigger dovolí `dispatch_mode` změnit jen dokud je
+     * řádek `ready`, takže se to musí stát právě tady.
+     *
+     * @return array<string,mixed>|null null, když už řádek `ready` není
+     */
+    public function claimForGatewaySending(int $supplierId, int $id, int $confirmedBy): ?array
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE ' . self::TABLE . '
+                SET dispatch_state = \'sending\', dispatch_mode = \'gateway\',
+                    confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(),
+                    row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ? AND dispatch_state = \'ready\''
+        );
+        $stmt->execute([$confirmedBy, $supplierId, $id]);
+        if ($stmt->rowCount() !== 1) {
+            return null;
+        }
+
+        return $this->find($supplierId, $id);
+    }
+
+    /**
      * Zapíše odeslání, které proběhlo mimo aplikaci.
      *
      * Čas odeslání se NEBERE z hodin serveru: u ručního odeslání se zpráva

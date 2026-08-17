@@ -572,6 +572,23 @@ final class Bootstrap
             // neví a vědět nesmí; proto je celý postavený nad `IsdsTransport`.
             \MyInvoice\Service\Submission\Channel\Isds\IsdsTransport::class => fn (ContainerInterface $c)
                 => $c->get(\MyInvoice\Service\Submission\Channel\Isds\UnavailableIsdsTransport::class),
+
+            // Odesílací brána ISDS (`SetConcept`). Vědomě NENÍ implementací
+            // `IsdsTransport` výš: brána umí JEN odesílat, a to s člověkem
+            // uprostřed (dvě přesměrování prohlížeče), kdežto `IsdsTransport`
+            // je synchronní port včetně čtení schránky a doručenek. Čtecí
+            // operace proto dál fail-closed odmítají — brána je neumí a
+            // předstírat to by byla lež. Viz `odesilaci_brana_ISDS.pdf` v. 1.11.
+            //
+            // Klient má poslední parametr jako testovací šev (`$httpDouble`).
+            // Produkce ho musí dostat jako `null`, aby si postavil vlastní cURL
+            // volání s timeouty, TLS 1.2 a klientským certifikátem.
+            \MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayClient::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Submission\Channel\Isds\Gateway\SoapIsdsGatewayClient(
+                    new \MyInvoice\Service\Submission\Channel\Isds\Gateway\SetConceptRequestWriter(),
+                    $c->get(LoggerInterface::class),
+                    null,
+                ),
             \MyInvoice\Service\Submission\Channel\Epo\EpoAttemptStatusReader::class => fn (ContainerInterface $c)
                 => $c->get(\MyInvoice\Service\Submission\Channel\Epo\EpoAttemptStatusRepository::class),
             \MyInvoice\Service\Submission\SubmissionArtifactResolver::class => fn (ContainerInterface $c)
