@@ -64,6 +64,19 @@ export interface SubmissionUploadResult {
   errors: Array<{ filename: string; code: string; message: string }>
 }
 
+/**
+ * Přímá navigace v prohlížeči (iframe/img/`<a href>`) neposílá hlavičku
+ * `X-Supplier-Id` z axios interceptoru — aktivní firma musí jít v query paramu,
+ * jinak server spadne na fallback MIN(supplier.id) a doklad jiné firmy nenajde.
+ */
+function fileUrl(path: string): string {
+  const sid = localStorage.getItem('myinvoice.current_supplier_id')
+  const params = new URLSearchParams()
+  if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
+  const qs = params.toString()
+  return `/api${path}${qs ? '?' + qs : ''}`
+}
+
 function uploadForm(
   files: File[],
   note: string,
@@ -93,8 +106,8 @@ export const portalPurchaseInvoiceSubmissionsApi = {
       uploadForm([file], note, null),
       { headers: { 'Content-Type': 'multipart/form-data' } },
     ).then(r => r.data),
-  previewUrl: (id: number) => `/api/portal/purchase-invoice-submissions/${id}/preview`,
-  downloadUrl: (id: number) => `/api/portal/purchase-invoice-submissions/${id}/download`,
+  previewUrl: (id: number) => fileUrl(`/portal/purchase-invoice-submissions/${id}/preview`),
+  downloadUrl: (id: number) => fileUrl(`/portal/purchase-invoice-submissions/${id}/download`),
 }
 
 export const purchaseInvoiceSubmissionsApi = {
@@ -110,6 +123,6 @@ export const purchaseInvoiceSubmissionsApi = {
     api.post<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}/needs-information`, { reason }).then(r => r.data),
   reject: (id: number, reason: string) =>
     api.post<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}/reject`, { reason }).then(r => r.data),
-  previewUrl: (id: number) => `/api/purchase-invoice-submissions/${id}/preview`,
-  downloadUrl: (id: number) => `/api/purchase-invoice-submissions/${id}/download`,
+  previewUrl: (id: number) => fileUrl(`/purchase-invoice-submissions/${id}/preview`),
+  downloadUrl: (id: number) => fileUrl(`/purchase-invoice-submissions/${id}/download`),
 }
