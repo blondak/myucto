@@ -5389,6 +5389,9 @@
             "enter_gross": "Enter the gross salary — the breakdown is computed automatically.",
             "employer_note": "Employer contributions (on top of the gross salary): social {social} + health {health} = {total}.",
             "idempotent_note": "Posting the same month again overwrites the entry — no duplicate is created.",
+            "module_active_title": "Payroll is handled by the Payroll module",
+            "module_active_hint": "From {period} salaries are calculated and posted in the Payroll module. This recap stays available for earlier periods — from {period} it can no longer post, otherwise the salary would sit in the journal twice.",
+            "module_blocked": "Post the {period} salary in the Payroll module.",
             "remit": {
                 "title": "Contributions to remit",
                 "health": "Health insurance — health insurance company",

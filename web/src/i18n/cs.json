@@ -5389,6 +5389,9 @@
             "enter_gross": "Zadejte hrubou mzdu — rozpad se spočítá automaticky.",
             "employer_note": "Pojistné zaměstnavatele (nad rámec hrubé mzdy): sociální {social} + zdravotní {health} = {total}.",
             "idempotent_note": "Opakované zaúčtování téhož měsíce zápis přepíše — druhý nevznikne.",
+            "module_active_title": "Mzdy zpracovává modul Mzdy",
+            "module_active_hint": "Od {period} se mzdy počítají a účtují v modulu Mzdy. Rekapitulace tady zůstává kvůli starším obdobím — od {period} přes ni účtovat nejde, jinak by mzda seděla v deníku dvakrát.",
+            "module_blocked": "Mzdu za {period} zaúčtujete v modulu Mzdy.",
             "remit": {
                 "title": "Odvody k úhradě",
                 "health": "Zdravotní pojištění — zdravotní pojišťovna",
