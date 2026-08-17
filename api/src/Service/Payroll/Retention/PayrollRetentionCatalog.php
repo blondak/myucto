@@ -195,7 +195,10 @@ final class PayrollRetentionCatalog
             'verified_on' => self::VERIFIED_ON,
             'accounting_relevant' => false,
             'closing_agenda' => true,
-            'employee_tables' => ['payroll_jmhz_eldp_evidence_snapshots'],
+            'employee_tables' => [
+                'payroll_jmhz_eldp_evidence_snapshots',
+                'payroll_eldp_statements',
+            ],
             'employment_tables' => [],
             'note' => 'DOBÍHAJÍCÍ AGENDA: od 1. 1. 2026 se evidenční listy nevedou, '
                 . 'kategorie tedy nikdy nedostane nová data (poslední přibudou za vztahy '
