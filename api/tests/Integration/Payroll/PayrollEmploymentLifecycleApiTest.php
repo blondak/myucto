@@ -10,6 +10,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -471,6 +472,81 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
             'change_reason' => 'Kód z číselníku',
         ]);
         self::assertSame('24111', $accepted['terms'][0]['cz_isco_code']);
+    }
+
+    /**
+     * Zpětně potvrzený nástup nesmí zůstat schovaný pod událostí založení.
+     *
+     * Vztah převzatý z jiného zpracování se do systému zapisuje až po nástupu:
+     * založení nese dnešní datum, nástup se potvrzuje zpětně. Efektivní stav
+     * se přitom čte jako poslední událost podle `effective_on`, takže vztah
+     * dál vycházel jako `planned` — v seznamu lidí svítil aktivní (ten čte
+     * sloupec `status`), ale z rychlých vstupů, docházky i z karet zaměstnanců
+     * na přehledu mezd vypadl.
+     */
+    public function testBackdatedStartMovesCreatedEventSoEmploymentReadsActive(): void
+    {
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                "/api/payroll/people/{$this->employeeId}/employments",
+                [
+                    'code' => 'PREVZATY-1',
+                    'relation_type' => 'statutory_body',
+                    'monthly_gross_minor' => 4500000,
+                    'terms' => [
+                        ...$this->termsPayload(true, '2026-08-16'),
+                        'planned_start_on' => '2025-04-01',
+                        'fixed_term_end_on' => null,
+                    ],
+                ],
+            ),
+            new Response(),
+            ['id' => (string) $this->employeeId],
+        );
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $employment = $this->json($response)['employment'];
+        $employmentId = (int) $employment['id'];
+        self::assertSame('2026-08-16', $this->createdEventDate($employmentId));
+
+        $active = $this->transition($employment, 'active', '2025-04-01');
+        self::assertSame('active', $active['status']);
+        self::assertSame('2025-04-01', $active['actual_start_date']);
+        self::assertSame(
+            '2025-04-01',
+            $this->createdEventDate($employmentId),
+            'Založení musí ustoupit před zpětně datovaný nástup.',
+        );
+        self::assertSame('active', $this->effectiveStatusAt($employmentId, '2026-08-31'));
+        // Před nástupem vztah žádný stav nemá — oprava časové osy nesmí
+        // z minulosti udělat aktivní vztah dřív, než podle evidence začal.
+        self::assertNull($this->effectiveStatusAt($employmentId, '2025-03-31'));
+    }
+
+    private function createdEventDate(int $employmentId): string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT effective_on
+               FROM payroll_employment_events
+              WHERE supplier_id = ? AND employment_id = ? AND event_type = 'created'"
+        );
+        $stmt->execute([$this->supplierId, $employmentId]);
+
+        return (string) $stmt->fetchColumn();
+    }
+
+    /** Stav se čte TOUTÉŽ cestou jako rychlé vstupy, docházka i karty na přehledu. */
+    private function effectiveStatusAt(int $employmentId, string $date): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . PayrollEmploymentLifecycleSql::effectiveStatusAtPlaceholder() . '
+               FROM payroll_employments employment
+              WHERE employment.supplier_id = ? AND employment.id = ?'
+        );
+        $stmt->execute([$date, $this->supplierId, $employmentId]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) ? $value : null;
     }
 
     /** @param array<string,mixed> $employment

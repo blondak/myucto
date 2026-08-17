@@ -508,6 +508,7 @@ final class PayrollEmploymentRepository
                 ['status' => ['from' => $from, 'to' => $target]],
                 $userId,
             );
+            $this->alignCreatedEvent($supplierId, $employmentId, $effectiveOn);
             if ($target === 'ended') {
                 $this->ensureChecklist(
                     $supplierId,
@@ -866,6 +867,29 @@ final class PayrollEmploymentRepository
             json_encode($diff, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             $userId,
         ]);
+    }
+
+    /**
+     * Založení vztahu nesmí v časové ose ležet později než změna jeho stavu.
+     *
+     * Efektivní stav se čte jako poslední událost podle `effective_on`
+     * ({@see PayrollEmploymentLifecycleSql}). Vztah zapsaný dnes, ale s nástupem
+     * loni, měl událost `created → planned` s dnešním datem, takže zpětně
+     * potvrzený nástup (`status_changed → active` k loňskému datu) zůstal pod ní
+     * a vztah se dál tvářil jako plánovaný: v seznamu lidí svítil jako aktivní
+     * (ten čte sloupec `status`), ale z rychlých vstupů, docházky i z karet na
+     * přehledu mezd vypadl. Založení proto ustoupí zpět na datum té změny —
+     * plánovaným vztah byl od chvíle, kdy podle evidence začal, ne od chvíle,
+     * kdy ho někdo naťukal.
+     */
+    private function alignCreatedEvent(int $supplierId, int $employmentId, string $effectiveOn): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employment_events
+                SET effective_on = ?
+              WHERE supplier_id = ? AND employment_id = ?
+                AND event_type = 'created' AND effective_on > ?"
+        )->execute([$effectiveOn, $supplierId, $employmentId, $effectiveOn]);
     }
 
     /**
