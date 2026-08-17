@@ -21,9 +21,14 @@ const effectiveVariant = computed<'client' | 'staff'>(
 )
 
 const inClosedPeriod = computed(() => props.lock.reasons.includes('period_closed'))
+const accountantManaged = computed(() => props.lock.reasons.includes('accountant_managed'))
 
 const clientHint = computed(() =>
-  inClosedPeriod.value ? t('lock.client_hint_period') : t('lock.client_hint'),
+  accountantManaged.value
+    ? t('lock.client_hint_accountant_managed')
+    : inClosedPeriod.value
+      ? t('lock.client_hint_period')
+      : t('lock.client_hint'),
 )
 
 const staffReasons = computed(() =>

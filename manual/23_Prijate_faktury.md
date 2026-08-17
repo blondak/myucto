@@ -30,6 +30,20 @@ V hlavním menu **Přijaté faktury**.
 
 Smazat jde **jen koncept**. Pro pozdější stavy použij Stornovat (zachová auditní stopu).
 
+### Příchozí doklady od klientů
+
+Originály předané přes klientskou podatelnu čekají v **Nákup → Příchozí doklady**.
+Nejsou to koncepty přijatých faktur: do okamžiku kontroly účetní nevstupují do
+nákladů, závazků, cashflow ani evidence DPH. Účetní má u originálu náhled a může
+jej zpracovat přes ISDOC/AI, přepsat ručně, odmítnout nebo klienta požádat o
+náhradu. Podrobný průchod oběma stranami je v
+[§ 9.8 Klientský portál](09_Klientsky_portal.md#98-vyzadane-doklady-od-klienta).
+
+Po zpracování se neměnný originál z Dokumentů připojí k výsledné faktuře. Faktura
+zůstává pro klienta needitovatelná i ve stavu Koncept; účetní ji může dál opravit
+a dokončit běžným stavovým postupem. Pokud účetní výsledný koncept smaže, původní
+podání se bezpečně vrátí do příchozí fronty k novému zpracování.
+
 > ⚠️ **Zaúčtování bez DUZP nejde.** Přechod Přijatá → Zaúčtovaná je zablokovaný, dokud
 > doklad nemá vyplněné DUZP (datum uskutečnění zdanitelného plnění) — bez něj by se
 > doklad dostal do podkladů DPH s nejistým obdobím. Blok platí jen pro NOVÝ přechod;

@@ -42,6 +42,13 @@ final class DocumentDeletionGuard extends ForeignKeyDeletionGuard
     protected static function blockers(): array
     {
         return [
+            'purchase_invoice_submission' => [
+                'message' => 'Doklad je originálem předaným klientem ve frontě příchozích dokladů '
+                    . '(%d vazeb). Originál je součástí auditní stopy a nelze ho odstranit.',
+                'references' => [
+                    ['table' => 'purchase_invoice_submissions', 'column' => 'document_id'],
+                ],
+            ],
             'payroll_document' => [
                 'message' => 'Doklad je v mzdové agendě připojený k vydané výplatní pásce, mzdovému '
                     . 'listu nebo ročnímu potvrzení (%d vazeb). Ty doklady jsou neměnné — odpojte '

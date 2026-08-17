@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Repository\PurchaseInvoiceSubmissionRepository;
 use PDO;
 
 /**
@@ -39,6 +40,7 @@ final class DocumentLockService
         private readonly Connection $db,
         private readonly JournalEntryRepository $journal,
         private readonly AccountingPeriodRepository $periods,
+        private readonly PurchaseInvoiceSubmissionRepository $submissions,
     ) {}
 
     /** @param array<string,mixed> $invoice řádek invoices (id, supplier_id, booked_at, effective_tax_date, issue_date, status) */
@@ -140,6 +142,9 @@ final class DocumentLockService
         $docStmt->execute(array_merge([$supplierId], $ids));
 
         $map = [];
+        $accountantManaged = $sourceType === 'purchase_invoice'
+            ? $this->submissions->accountantManagedMap($supplierId, $ids)
+            : [];
         foreach ($docStmt->fetchAll(PDO::FETCH_ASSOC) as $doc) {
             $id = (int) $doc['id'];
             $bookedAt = self::nullableString($doc['booked_at'] ?? null);
@@ -155,6 +160,7 @@ final class DocumentLockService
                 inClosingPeriod: $closing,
                 periodStatus: $periodStatus,
                 dateLocked: $this->isDateLocked($supplierId, $refDate),
+                accountantManaged: isset($accountantManaged[$id]),
             );
             $map[$id] = $lock;
             $this->cache["{$sourceType}:{$supplierId}:{$id}"] = $lock;
@@ -212,6 +218,8 @@ final class DocumentLockService
             inClosingPeriod: $closing,
             periodStatus: $periodStatus,
             dateLocked: $this->isDateLocked($supplierId, $refDate),
+            accountantManaged: $sourceType === 'purchase_invoice'
+                && $this->submissions->isAccountantManaged($supplierId, $id),
         );
     }
 

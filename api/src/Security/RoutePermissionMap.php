@@ -86,6 +86,9 @@ final class RoutePermissionMap
         ['GET', '#^/api/purchase-invoices(/|$)#', 'purchase_invoices', AccessLevel::READ],
         ['*', '#^/api/purchase-invoices(/|$)#', 'purchase_invoices', AccessLevel::WRITE],
 
+        ['GET', '#^/api/purchase-invoice-submissions(/|$)#', 'documents.inbox', AccessLevel::READ],
+        ['*', '#^/api/purchase-invoice-submissions(/|$)#', 'documents.inbox', AccessLevel::WRITE],
+
         ['POST', '#^/api/recurring$#', 'recurring.create', AccessLevel::WRITE],
         ['POST', '#^/api/recurring/[0-9]+/(run|run-now|generate)$#', 'recurring.run', AccessLevel::WRITE],
         ['POST', '#^/api/recurring/[0-9]+/(pause|resume)$#', 'recurring.pause', AccessLevel::WRITE],
@@ -439,8 +442,11 @@ final class RoutePermissionMap
         ['GET', '#^/api/(suppliers|search|slug)(/|$)#', 'profile', AccessLevel::READ],
         ['GET', '#^/api/branding-profiles$#', 'profile', AccessLevel::READ],
         ['*', '#^/api/user/(filters|preferences)(/|$)#', 'profile', AccessLevel::WRITE],
+        ['GET', '#^/api/portal/purchase-invoice-submissions(/|$)#', 'documents.submit', AccessLevel::READ],
+        ['POST', '#^/api/portal/purchase-invoice-submissions(/|$)#', 'documents.submit', AccessLevel::WRITE],
+        ['GET', '#^/api/portal/document-requests$#', 'documents.submit', AccessLevel::READ],
+        ['POST', '#^/api/portal/document-requests/[0-9]+/upload$#', 'documents.submit', AccessLevel::WRITE],
         ['GET', '#^/api/portal(/|$)#', 'profile', AccessLevel::READ],
-        ['POST', '#^/api/portal/document-requests/[0-9]+/upload$#', 'purchase_invoices.create', AccessLevel::WRITE],
         ['GET', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::READ],
         ['*', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::WRITE],
     ];

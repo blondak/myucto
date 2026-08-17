@@ -12,6 +12,7 @@ export interface DocumentRequest {
   deadline: string | null
   bank_transaction_id: number | null
   purchase_invoice_id: number | null
+  submission_id: number | null
   created_by: number | null
   resolved_by: number | null
   resolved_at: string | null
@@ -27,6 +28,9 @@ export interface DocumentRequest {
   bank_tx_posted_at?: string | null
   created_by_name?: string | null
   resolved_by_name?: string | null
+  submission_status?: 'submitted' | 'processing' | 'needs_information' | 'processed' | 'rejected' | null
+  submission_status_reason?: string | null
+  submission_original_name?: string | null
 }
 
 export interface DocumentRequestCreatePayload {
@@ -54,7 +58,7 @@ export const documentRequestsApi = {
     api.post<DocumentRequest>(`/bank-transactions/${txId}/document-request`, payload ?? {}).then(r => r.data),
 }
 
-/** Klientský portál — vlastní požadavky + upload (reuse AI extrakce). */
+/** Klientský portál — vlastní požadavky + předání originálu do účetní fronty. */
 export const portalDocumentRequestsApi = {
   list: () => api.get<{ items: DocumentRequest[] }>('/portal/document-requests').then(r => r.data.items),
   upload: (id: number, file: File) => {

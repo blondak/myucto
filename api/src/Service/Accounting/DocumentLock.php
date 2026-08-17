@@ -22,14 +22,17 @@ final class DocumentLock
         // Informativní příznak pro UI/účetní — NEmění lockedForClient (na rozdíl od
         // closed/closing období klienta zámkem k datu neváže).
         public readonly bool $dateLocked = false,
+        // Přijatá faktura vzniklá z klientského staging podání patří do správy účetní.
+        public readonly bool $accountantManaged = false,
     ) {}
 
     public function lockedForClient(): bool
     {
-        return $this->booked || $this->posted || $this->inClosedPeriod || $this->inClosingPeriod;
+        return $this->booked || $this->posted || $this->inClosedPeriod
+            || $this->inClosingPeriod || $this->accountantManaged;
     }
 
-    /** @return list<string> 'posted'|'booked'|'period_closed'|'period_closing'|'date_locked' */
+    /** @return list<string> 'posted'|'booked'|'period_closed'|'period_closing'|'date_locked'|'accountant_managed' */
     public function reasons(): array
     {
         $reasons = [];
@@ -48,6 +51,9 @@ final class DocumentLock
         if ($this->dateLocked) {
             $reasons[] = 'date_locked';
         }
+        if ($this->accountantManaged) {
+            $reasons[] = 'accountant_managed';
+        }
         return $reasons;
     }
 
@@ -61,6 +67,7 @@ final class DocumentLock
             'journal_entry_id' => $this->journalEntryId,
             'period_status'    => $this->periodStatus,
             'date_locked'      => $this->dateLocked,
+            'accountant_managed' => $this->accountantManaged,
         ];
     }
 }

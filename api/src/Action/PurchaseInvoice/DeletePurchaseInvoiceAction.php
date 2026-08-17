@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Repository\PurchaseInvoiceSubmissionRepository;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\DocumentJournalSync;
 use MyInvoice\Service\Accounting\DocumentLockService;
@@ -38,6 +39,7 @@ final class DeletePurchaseInvoiceAction
         private readonly DocumentLockService $locks,
         private readonly Connection $db,
         private readonly DocumentJournalSync $journalSync,
+        private readonly PurchaseInvoiceSubmissionRepository $submissions,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -90,6 +92,7 @@ final class DeletePurchaseInvoiceAction
         if ($ownTx) {
             $pdo->beginTransaction();
         }
+        $reopenedSubmissionIds = [];
         try {
             $this->journalSync->onDelete($supplierId, 'purchase_invoice', $id, [
                 'user_id'    => $user['id'] ?? null,
@@ -97,6 +100,7 @@ final class DeletePurchaseInvoiceAction
                 'ip'         => $ip,
                 'user_agent' => $request->getHeaderLine('User-Agent'),
             ]);
+            $reopenedSubmissionIds = $this->submissions->reopenForDeletedInvoice($supplierId, $id);
             $this->repo->delete($id, $supplierId);
             if ($ownTx) {
                 $pdo->commit();
@@ -137,8 +141,24 @@ final class DeletePurchaseInvoiceAction
             ],
             $ip, $request->getHeaderLine('User-Agent'),
         );
+        foreach ($reopenedSubmissionIds as $submissionId) {
+            $this->logger->log(
+                'purchase_invoice_submission.reopened',
+                isset($user['id']) ? (int) $user['id'] : null,
+                'purchase_invoice_submission',
+                $submissionId,
+                ['deleted_purchase_invoice_id' => $id],
+                $ip,
+                $request->getHeaderLine('User-Agent'),
+                $supplierId,
+            );
+        }
 
-        return Json::ok($response, ['ok' => true, 'pdf_deleted' => $pdfDeleted]);
+        return Json::ok($response, [
+            'ok' => true,
+            'pdf_deleted' => $pdfDeleted,
+            'reopened_submission_ids' => $reopenedSubmissionIds,
+        ]);
     }
 
     /**

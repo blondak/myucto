@@ -44,6 +44,22 @@ final class PermissionCatalogTest extends TestCase
         self::assertTrue($checker->allows($client, 'invoices'));
     }
 
+    public function testDocumentSubmissionPermissionsAreRoleSeparated(): void
+    {
+        $catalog = new PermissionCatalog();
+        $definitions = $catalog->all();
+        self::assertSame(['staff'], $definitions['documents.inbox']['role_types']);
+        self::assertSame(['client'], $definitions['documents.submit']['role_types']);
+
+        $checker = new PermissionChecker($catalog);
+        $client = new EffectiveRole(4, 'Klient', 'client', true, $catalog->legacyPreset('client'));
+        $accountant = new EffectiveRole(2, 'Účetní', 'staff', true, $catalog->legacyPreset('accountant'));
+        self::assertTrue($checker->allows($client, 'documents.submit', AccessLevel::WRITE));
+        self::assertFalse($checker->allows($client, 'documents.inbox'));
+        self::assertTrue($checker->allows($accountant, 'documents.inbox', AccessLevel::WRITE));
+        self::assertFalse($checker->allows($accountant, 'documents.submit'));
+    }
+
     public function testSuperadminBypassesMatrix(): void
     {
         $checker = new PermissionChecker(new PermissionCatalog());

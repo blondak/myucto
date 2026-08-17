@@ -10,7 +10,7 @@ export const PERMISSION_KEYS = [
   'recurring', 'recurring.create', 'recurring.run', 'recurring.pause', 'recurring.delete',
   'bank', 'bank.import', 'bank.match', 'bank.post', 'bank.unpost', 'bank.rules',
   'documents', 'documents.upload', 'documents.move', 'documents.delete',
-  'documents.restore', 'documents.requests',
+  'documents.restore', 'documents.requests', 'documents.inbox', 'documents.submit',
   'accounting', 'accounting.journal.write', 'accounting.journal.post',
   'accounting.periods.manage', 'accounting.periods.close', 'accounting.periods.close_override', 'accounting.offsets',
   'accounting.templates',

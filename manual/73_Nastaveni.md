@@ -237,6 +237,12 @@ pro klientský portál; interní účetnictví, banka a globální správa se ji
 nepovolí. Systémová role **Superadmin** je uzamčená, nelze ji deaktivovat,
 smazat ani upravit její matici a jako jediná smí spravovat uživatele a role.
 
+Předávání originálů používá dvě záměrně oddělená práva. Klientské
+**Předávat doklady účetní** dovolí pouze vložit a sledovat vlastní podání aktuální
+firmy. Interní **Příchozí doklady** dovolí účetní frontu číst nebo zpracovávat;
+pro vznik faktury a případnou AI extrakci jsou navíc potřeba jejich vlastní
+oprávnění.
+
 Roli lze duplikovat jako základ nové role. Používanou roli nelze smazat;
 nejprve je nutné přeřadit uživatele a odstranit její přepisy u firem. Používanou
 roli lze deaktivovat, ale její uživatelé tím okamžitě ztratí firemní oprávnění.

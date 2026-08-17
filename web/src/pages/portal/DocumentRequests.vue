@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { portalDocumentRequestsApi, type DocumentRequest } from '@/api/documentRequests'
 import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
+import { useAuthStore } from '@/stores/auth'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { btnFilled } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -11,6 +12,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 const { t } = useI18n()
 const toast = useToast()
 const supplierStore = useSupplierStore()
+const auth = useAuthStore()
 
 const items = ref<DocumentRequest[]>([])
 const loading = ref(true)
@@ -107,14 +109,14 @@ function isOverdue(item: DocumentRequest): boolean {
                 </span>
               </div>
             </div>
-            <label v-if="item.status === 'requested'"
+            <label v-if="item.status === 'requested' && auth.canWrite('documents.submit')"
               class="cursor-pointer min-h-[44px] inline-flex items-center gap-2 px-4 shrink-0"
               :class="btnFilled('primary')">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M7 10l5-5m0 0l5 5m-5-5v12" />
               </svg>
               {{ uploadingId === item.id ? t('portal.document_requests.uploading') : t('portal.document_requests.upload') }}
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/*" class="hidden"
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png,.isdoc,.xml,.isdocx,application/pdf,image/jpeg,image/png" class="hidden"
                 :disabled="uploadingId === item.id" @change="onFileSelected(item, $event)" />
             </label>
             <span v-else-if="item.status === 'uploaded'" class="text-xs text-warning-600 shrink-0 pt-2">

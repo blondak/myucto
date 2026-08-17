@@ -25,12 +25,22 @@ final class DocumentRequestRepository
     {
         $sql = "SELECT dr.*, pi.vendor_invoice_number AS pi_vendor_invoice_number,
                        pi.status AS pi_status, c.company_name AS pi_vendor_name,
-                       bt.amount AS bank_tx_amount, bt.posted_at AS bank_tx_posted_at,
+                       sub.status AS submission_status, sub.status_reason AS submission_status_reason,
+                       d.original_name AS submission_original_name,
+                       CASE WHEN bs.id IS NOT NULL THEN bt.amount ELSE NULL END AS bank_tx_amount,
+                       CASE WHEN bs.id IS NOT NULL THEN bt.posted_at ELSE NULL END AS bank_tx_posted_at,
                        cu.name AS created_by_name, ru.name AS resolved_by_name
                   FROM document_requests dr
-                  LEFT JOIN purchase_invoices pi ON pi.id = dr.purchase_invoice_id
-                  LEFT JOIN clients c ON c.id = pi.vendor_id
+                  LEFT JOIN purchase_invoices pi
+                         ON pi.id = dr.purchase_invoice_id AND pi.supplier_id = dr.supplier_id
+                  LEFT JOIN purchase_invoice_submissions sub
+                         ON sub.id = dr.submission_id AND sub.supplier_id = dr.supplier_id
+                  LEFT JOIN documents d
+                         ON d.id = sub.document_id AND d.supplier_id = dr.supplier_id
+                  LEFT JOIN clients c ON c.id = pi.vendor_id AND c.supplier_id = dr.supplier_id
                   LEFT JOIN bank_transactions bt ON bt.id = dr.bank_transaction_id
+                  LEFT JOIN bank_statements bs
+                         ON bs.id = bt.statement_id AND bs.supplier_id = dr.supplier_id
                   LEFT JOIN users cu ON cu.id = dr.created_by
                   LEFT JOIN users ru ON ru.id = dr.resolved_by
                  WHERE dr.supplier_id = ?";
@@ -52,9 +62,16 @@ final class DocumentRequestRepository
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT dr.*, pi.vendor_invoice_number AS pi_vendor_invoice_number,
-                    pi.status AS pi_status
+                    pi.status AS pi_status, sub.status AS submission_status,
+                    sub.status_reason AS submission_status_reason,
+                    d.original_name AS submission_original_name
                FROM document_requests dr
-               LEFT JOIN purchase_invoices pi ON pi.id = dr.purchase_invoice_id
+               LEFT JOIN purchase_invoices pi
+                      ON pi.id = dr.purchase_invoice_id AND pi.supplier_id = dr.supplier_id
+               LEFT JOIN purchase_invoice_submissions sub
+                      ON sub.id = dr.submission_id AND sub.supplier_id = dr.supplier_id
+               LEFT JOIN documents d
+                      ON d.id = sub.document_id AND d.supplier_id = dr.supplier_id
               WHERE dr.id = ? AND dr.supplier_id = ?"
         );
         $stmt->execute([$id, $supplierId]);
@@ -96,6 +113,44 @@ final class DocumentRequestRepository
         return $stmt->rowCount() > 0;
     }
 
+    /** Klient předal originál do staging fronty; účetní doklad zatím nevzniká. */
+    public function markSubmitted(int $id, int $supplierId, int $submissionId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE document_requests
+                SET status = 'uploaded', submission_id = ?, purchase_invoice_id = NULL
+              WHERE id = ? AND supplier_id = ? AND status = 'requested'"
+        );
+        $stmt->execute([$submissionId, $id, $supplierId]);
+        return $stmt->rowCount() > 0;
+    }
+
+    /** Doplní výslednou fakturu všem požadavkům, které ukazují na dané podání. */
+    public function markProcessedBySubmission(int $submissionId, int $supplierId, int $purchaseInvoiceId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE document_requests
+                SET status = 'uploaded', purchase_invoice_id = ?
+              WHERE submission_id = ? AND supplier_id = ? AND status <> 'resolved'"
+        );
+        $stmt->execute([$purchaseInvoiceId, $submissionId, $supplierId]);
+    }
+
+    /** Přesměruje otevřený pull požadavek na nový originál v řetězci náhrad. */
+    public function replaceSubmissionReference(
+        int $oldSubmissionId,
+        int $newSubmissionId,
+        int $supplierId,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE document_requests
+                SET submission_id = ?, purchase_invoice_id = NULL
+              WHERE submission_id = ? AND supplier_id = ? AND status <> 'resolved'"
+        );
+        $stmt->execute([$newSubmissionId, $oldSubmissionId, $supplierId]);
+        return $stmt->rowCount();
+    }
+
     public function resolve(int $id, int $supplierId, ?int $resolvedBy): bool
     {
         $stmt = $this->db->pdo()->prepare(
@@ -112,7 +167,8 @@ final class DocumentRequestRepository
     {
         $stmt = $this->db->pdo()->prepare(
             "UPDATE document_requests
-                SET status = 'requested', purchase_invoice_id = NULL, resolved_by = NULL, resolved_at = NULL
+                SET status = 'requested', purchase_invoice_id = NULL, submission_id = NULL,
+                    resolved_by = NULL, resolved_at = NULL
               WHERE id = ? AND supplier_id = ?"
         );
         $stmt->execute([$id, $supplierId]);

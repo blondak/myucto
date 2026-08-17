@@ -13,12 +13,17 @@ use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Repository\PurchaseInvoiceSubmissionRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Ares\CrpDphClient;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionCompletionService;
+use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionException;
 use MyInvoice\Service\Report\VatClassificationDefaulter;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
 use MyInvoice\Service\Ai\AiSuggestionService;
@@ -51,6 +56,8 @@ final class CreatePurchaseInvoiceAction
         private readonly AiSuggestionService $aiSuggestions,
         private readonly CnbRateDeviationChecker $rateChecker,
         private readonly TenantReferenceGuard $tenantRefs,
+        private readonly PurchaseInvoiceSubmissionRepository $submissions,
+        private readonly PurchaseInvoiceSubmissionCompletionService $submissionCompletion,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -61,6 +68,25 @@ final class CreatePurchaseInvoiceAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        $submissionId = max(0, (int) ($body['submission_id'] ?? 0));
+        if ($submissionId > 0) {
+            if (RequestAuthorization::isClientType($request)
+                || !RequestAuthorization::allows($request, 'documents.inbox', AccessLevel::WRITE)) {
+                return Json::error(
+                    $response,
+                    'forbidden',
+                    'Podání může na přijatou fakturu převést pouze účetní.',
+                    403,
+                );
+            }
+            $submission = $this->submissions->find($submissionId, $supplierId);
+            if ($submission === null) {
+                return Json::error($response, 'submission_not_found', 'Příchozí podání nebylo nalezeno.', 404);
+            }
+            if ((string) $submission['status'] !== 'submitted') {
+                return Json::error($response, 'invalid_submission_status', 'Podání už nelze ručně zpracovat.', 409);
+            }
+        }
 
         $errors = PurchaseInvoiceValidation::invoice($body, $this->repo->vatRateMap());
         if (!empty($errors)) {
@@ -162,6 +188,13 @@ final class CreatePurchaseInvoiceAction
         $ownTransaction = !$pdo->inTransaction();
         if ($ownTransaction) $pdo->beginTransaction();
         try {
+            if ($submissionId > 0 && !$this->submissions->claimForManual($submissionId, $supplierId)) {
+                throw new PurchaseInvoiceSubmissionException(
+                    'submission_state_changed',
+                    'Stav podání se mezitím změnil.',
+                    409,
+                );
+            }
             $id = $this->repo->createDraft($body, $userId, $supplierId);
             // ZÁMĚRNĚ bezpodmínečně, na rozdíl od PUT ({@see \MyInvoice\Service\Invoice\DocumentItemsPayload}):
             // založení nemá co smazat a vzniká `draft`, kde je doklad bez řádků pracovní
@@ -187,7 +220,19 @@ final class CreatePurchaseInvoiceAction
                 $supplierId,
                 is_array($body['vat_allocations'] ?? null) ? $body['vat_allocations'] : [],
             );
+            if ($submissionId > 0) {
+                $this->submissionCompletion->complete(
+                    $submissionId,
+                    $supplierId,
+                    $id,
+                    $userId,
+                    'manual',
+                );
+            }
             if ($ownTransaction) $pdo->commit();
+        } catch (PurchaseInvoiceSubmissionException $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\InvalidArgumentException $e) {
             if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
             $code = str_contains($e->getMessage(), 'alokac') ? 'invalid_vat_allocations' : 'integrity_violation';
@@ -212,7 +257,20 @@ final class CreatePurchaseInvoiceAction
         $this->logger->log('purchase_invoice.created', $userId, 'purchase_invoice', $id, [
             'vendor_id'    => $body['vendor_id'],
             'document_kind' => $body['document_kind'] ?? 'invoice',
+            'submission_id' => $submissionId > 0 ? $submissionId : null,
         ], $ip, $request->getHeaderLine('User-Agent'));
+        if ($submissionId > 0) {
+            $this->logger->log(
+                'purchase_invoice_submission.processed',
+                $userId,
+                'purchase_invoice_submission',
+                $submissionId,
+                ['purchase_invoice_id' => $id, 'source' => 'manual'],
+                $ip,
+                $request->getHeaderLine('User-Agent'),
+                $supplierId,
+            );
+        }
         try {
             $this->aiSuggestions->enqueuePurchase($supplierId, $id);
         } catch (\Throwable) {

@@ -514,6 +514,8 @@ export interface PurchaseMonthGroup {
 }
 
 export interface PurchaseInvoicePayload {
+  /** Staging originál, který účetní tímto ručním zápisem zpracovává. */
+  submission_id?: number
   vendor_id: number
   vendor_invoice_number: string
   document_kind?: PurchaseDocumentKind

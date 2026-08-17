@@ -136,9 +136,9 @@ pak zůstane zachovaná pro kontrolu úplnosti.
 Stav požadavku má tento význam:
 
 - **Vyžádáno** — podklad ještě nebyl doručen; prošlý termín se v seznamu zvýrazní.
-- **Nahráno** — klient v portálu odevzdal PDF. Aplikace ho zpracuje stejnou AI
-  extrakcí jako běžný import, vytvoří koncept přijaté faktury a zobrazí na něj
-  účetnímu odkaz. Nahrání samo nepotvrzuje správnost vytěžených údajů ani kontace.
+- **Nahráno** — klient v portálu odevzdal PDF, obrázek nebo ISDOC. Originál čeká
+  v **Nákup → Příchozí doklady** mimo účetnictví; odkaz na přijatou fakturu se
+  objeví až po zpracování účetní.
 - **Vyřešeno** — účetní podklad zkontroloval a požadavek ručně uzavřel. Vyřešený
   požadavek lze znovu otevřít, například když klient dodal nesprávný soubor.
 
@@ -146,6 +146,12 @@ Seznam lze filtrovat podle stavu a ukazuje počet otevřených požadavků. Úč
 administrátor může požadavky zakládat, řešit, znovu otevírat a mazat; uživatel jen
 pro čtení je může prohlížet. Klient pracuje pouze se svými požadavky v klientském
 portálu a nemá přístup k účetní správě požadavků.
+
+Klient může stejnou bezpečnou podatelnu použít i bez předchozího požadavku přes
+**Dokumenty → Předat doklady účetní**. Podání ukládá originál jako auditní stopu,
+hlídá přesné duplicity a umožňuje účetní vyžádat náhradní soubor, aniž by se
+původní verze ztratila. Celý postup popisuje
+[§ 9.8 Klientský portál](09_Klientsky_portal.md#98-vyzadane-doklady-od-klienta).
 
 Otevřený požadavek ve stavu **Vyžádáno** se promítá také do
 [fronty K doúčtování](47_Rucni_fronta_doctovani.md). U bankovního pohybu se jeho
