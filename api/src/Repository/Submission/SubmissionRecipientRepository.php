@@ -106,6 +106,34 @@ final class SubmissionRecipientRepository
         return $row !== false ? self::normalize($row) : null;
     }
 
+    /**
+     * Příjemce podle kódu VČETNĚ systémových záznamů.
+     *
+     * {@see findByCode()} vidí jen záznamy firmy, což stačí pro editaci
+     * vlastního číselníku, ale ne pro vyhledání instituce, kterou seedujeme
+     * systémově (schránky e-Podání ČSSZ, pojišťovny). Viditelnost je stejná
+     * jako u {@see findVisible()}.
+     *
+     * Vlastní záznam firmy má přednost před systémovým: firma smí mít vlastní
+     * variantu (typicky místně příslušné pracoviště) a ta nesmí být přebita
+     * sdíleným záznamem.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function findVisibleByCode(int $supplierId, string $code): ?array
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
+              WHERE code = ? AND (supplier_id IS NULL OR supplier_id = ?)
+              ORDER BY supplier_id IS NULL ASC
+              LIMIT 1'
+        );
+        $stmt->execute([$code, $supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false ? self::normalize($row) : null;
+    }
+
     /** Systémové záznamy smazat nejde — patří všem, ne jedné firmě. */
     public function deleteOwn(int $supplierId, int $id): bool
     {

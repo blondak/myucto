@@ -203,25 +203,48 @@ final class SubmissionOutboxInvariantsTest extends TestCase
         )->execute([$this->supplierId]);
     }
 
-    /** Seedují se jen doložené záznamy — a jen ty čtyři pojišťovny. */
+    /**
+     * Seedují se jen doložené záznamy.
+     *
+     * Test dřív vynucoval prefix `zp_`, což byla zástupná kontrola z doby, kdy
+     * byly doložené jedině pojišťovny. Prefix ale není totéž co doklad — od
+     * chvíle, kdy jsou doložené i schránky e-Podání ČSSZ (migrace 1410), by
+     * takový test bránil správnému seedu a povolil špatný, kdyby se jen trefil
+     * do prefixu. Kontroluje se proto přímo to, na čem záleží: každý systémový
+     * záznam má doložený zdroj a je na jmenovitém seznamu.
+     */
     public function testOnlyDocumentedRecipientsAreSeeded(): void
     {
+        // Finanční úřady tu schválně NEJSOU: jejich ID nemáme doložená
+        // v repozitáři a seznam Finanční správy je z roku 2023, takže není
+        // zdrojem pravdy. Seznam se smí rozšířit jen spolu s dokladem.
+        $documented = [
+            'zp_vzp_111', 'zp_cpzp_205', 'zp_ozp_207', 'zp_zpmvcr_211',
+            'cssz_epodani_jmhz', 'cssz_epodani_obecna', 'cssz_epodani_test',
+        ];
+
         $rows = $this->db->pdo()
             ->query("SELECT code, isds_box_id, source_url FROM submission_recipients WHERE supplier_id IS NULL")
             ->fetchAll(PDO::FETCH_ASSOC);
 
-        self::assertNotSame([], $rows, 'Doložené pojišťovny mají být naseedované.');
+        self::assertNotSame([], $rows, 'Doložení příjemci mají být naseedovaní.');
         foreach ($rows as $row) {
             self::assertNotNull($row['source_url'], 'Každé naseedované ID musí mít doložený zdroj.');
             self::assertMatchesRegularExpression('/^[a-z0-9]{7}$/', (string) $row['isds_box_id']);
+            self::assertContains(
+                $row['code'],
+                $documented,
+                'Seedovat se smí jen to, co je doložené.',
+            );
         }
 
-        $codes = array_column($rows, 'code');
-        // Finanční úřady se neseedují: ID nemáme doložená v repozitáři
-        // a seznam Finanční správy je z roku 2023, takže není zdrojem pravdy.
-        foreach ($codes as $code) {
-            self::assertStringStartsWith('zp_', $code, 'Seedovat se smí jen to, co je doložené.');
-        }
+        // Schránka zřízená ČSSZ výslovně pro JMHZ musí sedět na doslovnou
+        // citaci ze stránky komunikačních kanálů — sedm znaků bez kontrolní
+        // číslice se jinak zkontrolovat nedá.
+        $byCode = array_column($rows, 'isds_box_id', 'code');
+        self::assertSame('iie254d', $byCode['cssz_epodani_jmhz'] ?? null);
+        self::assertSame('5ffu6xk', $byCode['cssz_epodani_obecna'] ?? null);
+        self::assertSame('9tsaf6s', $byCode['cssz_epodani_test'] ?? null);
     }
 
     /** Souhlas s vybíráním schránky musí nést, kdo a kdy ho dal (§ 17 odst. 3). */

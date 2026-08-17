@@ -232,7 +232,7 @@ final readonly class JmhzIsdsSubmissionService
             ? self::RECIPIENT_CODE_PRODUCTION
             : self::RECIPIENT_CODE_TEST;
 
-        $row = $this->recipients->findByCode($supplierId, $code);
+        $row = $this->recipients->findVisibleByCode($supplierId, $code);
         if ($row === null) {
             throw new JmhzTransportException(
                 'jmhz_isds_recipient_missing',
