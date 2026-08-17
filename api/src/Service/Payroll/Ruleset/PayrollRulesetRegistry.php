@@ -233,7 +233,14 @@ final class PayrollRulesetRegistry
         $to = self::str($override, 'effective_to')
             ?? ($default === null ? '' : $default->effectiveTo);
 
-        if ($override !== null && $approval === null && self::requiresApproval($lifecycle)) {
+        //
+        // Od 8/2026 nese dodaná sada podpis provozovatele ({@see VendorRulesetApprover}),
+        // takže `$default->approval` už není `null` a override si ho ZDĚDÍ. Ten podpis
+        // ale platí jen pro DODANÝ obsah — zděděné schválení se proto zahazuje spolu
+        // s účinností v okamžiku, kdy se obsah od dodané sady odchýlí. Bez toho by
+        // zákazníkova změna sazby vyšla z registru jako schválená provozovatelem.
+        $inheritedApproval = $approval !== null && $default !== null && $approval === $default->approval;
+        if ($override !== null && ($approval === null || $inheritedApproval) && self::requiresApproval($lifecycle)) {
             $probe = new PayrollRulesetVersion(
                 $id,
                 $versionNumber,
@@ -248,6 +255,7 @@ final class PayrollRulesetRegistry
                 $technicalReview,
             );
             if ($probe->origin !== PayrollRulesetOrigin::Vendor) {
+                $approval = null;
                 $lifecycle = PayrollRulesetLifecycle::Reviewed;
             }
         }

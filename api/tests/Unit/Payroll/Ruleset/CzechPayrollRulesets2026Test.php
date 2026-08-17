@@ -12,6 +12,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetLifecycle;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetOrigin;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
+use MyInvoice\Service\Payroll\Ruleset\VendorRulesetApprover;
 use MyInvoice\Service\Payroll\Ruleset\VendorRulesetManifest;
 use PHPUnit\Framework\TestCase;
 
@@ -41,8 +42,28 @@ final class CzechPayrollRulesets2026Test extends TestCase
      * Počtvrté překlopením dodané sady z `reviewed` na `active`. Lifecycle je
      * součástí PLNÉHO snapshotu, ale ne otisku OBSAHU — hodnoty ani
      * `VendorRulesetManifest::CONTENT_HASHES` se tím tedy nezměnily.
+     *
+     * Pošesté doplněním podpisu provozovatele ({@see VendorRulesetApprover}) a
+     * ročních klíčů daně z příjmů (§ 38ch odst. 5, § 35c odst. 3, § 35bb). Podpis
+     * hýbe JEN tímhle pinem — otisk obsahu je bez schválení, takže se
+     * `CONTENT_HASHES` posunul výhradně u domény daně z příjmů, a to kvůli novým
+     * parametrům, ne kvůli schvalovateli.
+     *
+     * POZOR: tenhle pin je nad PLNÝM snapshotem, tedy včetně jména schvalovatele.
+     * Platí proto pro VÝCHOZÍHO schvalovatele; instalace s jiným provozovatelem má
+     * legitimně jiné číslo. Test si default proto vynutí sám.
      */
-    private const EXPECTED_MANIFEST_SHA256 = '4bdc84dcbbca7426d09b31023f11ac181b29390235d788232c9c0da979de1ddb';
+    private const EXPECTED_MANIFEST_SHA256 = '4f13afff7f9b5dcd9fc69bf65a69e05627fd0245fd40d3faa24ff1be6727057a';
+
+    protected function setUp(): void
+    {
+        VendorRulesetApprover::configure(VendorRulesetApprover::DEFAULT_NAME);
+    }
+
+    protected function tearDown(): void
+    {
+        VendorRulesetApprover::reset();
+    }
 
     public function testCanonicalManifestIsByteStable(): void
     {
@@ -52,6 +73,47 @@ final class CzechPayrollRulesets2026Test extends TestCase
 
         self::assertSame($first, $second);
         self::assertSame(self::EXPECTED_MANIFEST_SHA256, hash('sha256', $first));
+    }
+
+    /**
+     * Schvalovatel je vlastnost INSTALACE, ne produktu. Jiný provozovatel musí
+     * dostat týž obsah pod svým jménem — a hlavně nesmí spadnout na integritním
+     * pinu, který je proto vedený nad obsahem, ne nad plným snapshotem.
+     */
+    public function testApproverComesFromInstallationConfigurationAndDoesNotChangeContent(): void
+    {
+        $ours = CzechPayrollRulesets2026::provider()
+            ->forDate(PayrollRulesetDomain::EnforcementDeductions, '2026-08-03');
+        self::assertNotNull($ours->approval);
+        self::assertSame(VendorRulesetApprover::DEFAULT_NAME, $ours->approval->approvedBy);
+
+        VendorRulesetApprover::configure('Jiný Provozovatel s.r.o.');
+        $theirs = CzechPayrollRulesets2026::provider()
+            ->forDate(PayrollRulesetDomain::EnforcementDeductions, '2026-08-03');
+
+        self::assertSame('Jiný Provozovatel s.r.o.', $theirs->approval?->approvedBy);
+        self::assertSame($ours->contentHash, $theirs->contentHash);
+        self::assertNotSame($ours->canonicalHash, $theirs->canonicalHash);
+        self::assertSame(PayrollRulesetOrigin::Vendor, $theirs->origin);
+        self::assertSame(PayrollRulesetLifecycle::Active, $theirs->lifecycle);
+    }
+
+    /**
+     * Integritní pin nezabavitelných částek a manifest dodané sady nesou totéž
+     * číslo. Dvě čísla pro jednu věc smí koexistovat jen potud, pokud se rozejít
+     * nemůžou — tenhle test je ta podmínka.
+     */
+    public function testEnforcementPinIsTheDeliveredContentHash(): void
+    {
+        self::assertTrue(
+            VendorRulesetManifest::contains(CzechPayrollRulesets2026::ENFORCEMENT_DEDUCTIONS_HASH),
+        );
+        self::assertSame(
+            CzechPayrollRulesets2026::ENFORCEMENT_DEDUCTIONS_HASH,
+            CzechPayrollRulesets2026::provider()
+                ->forDate(PayrollRulesetDomain::EnforcementDeductions, '2026-08-03')
+                ->contentHash,
+        );
     }
 
     public function testAmountsUseMinorUnitsAndRatesUseCanonicalStrings(): void
@@ -94,7 +156,11 @@ final class CzechPayrollRulesets2026Test extends TestCase
         self::assertSame('active', $snapshot['lifecycle']);
         self::assertSame('2026-01-01', $snapshot['effective_from']);
         self::assertSame('2026-12-31', $snapshot['effective_to']);
-        self::assertNull($snapshot['approval']);
+        self::assertIsArray($snapshot['approval']);
+        self::assertSame(
+            VendorRulesetApprover::DEFAULT_NAME,
+            $snapshot['approval']['approved_by'],
+        );
         self::assertNotEmpty($snapshot['technical_review']);
         self::assertNotEmpty($snapshot['sources']);
         self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $ruleset->canonicalHash);
@@ -148,7 +214,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
         foreach ($provider->versions() as $version) {
             self::assertSame(PayrollRulesetLifecycle::Active, $version->lifecycle, $version->id);
             self::assertSame(PayrollRulesetOrigin::Vendor, $version->origin, $version->id);
-            self::assertNull($version->approval, $version->id);
+            self::assertNotNull($version->approval, $version->id);
             self::assertNotNull($version->technicalReview, $version->id);
         }
 
@@ -192,7 +258,10 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'benefit_exemption.non_cash_leisure.yearly' => ['money_minor', 2_448_350],
                 // § 6 odst. 9 písm. p) ZDP — pevná částka ze zákona, ne odvozenina.
                 'benefit_exemption.old_age_savings.yearly' => ['money_minor', 5_000_000],
+                // § 35d odst. 4 „alespoň 50 Kč" versus § 35c odst. 3 „alespoň 100 Kč".
+                // Roční hodnota NENÍ dvanáctinásobek měsíční — proto tu stojí obě.
                 'bonus.minimum_amount.monthly' => ['money_minor', 5_000],
+                'bonus.minimum_amount.yearly' => ['money_minor', 10_000],
                 'bonus.minimum_income.monthly' => ['money_minor', 1_120_000],
                 'bonus.minimum_income.yearly' => ['money_minor', 13_440_000],
                 'credit.child.first.monthly' => ['money_minor', 126_700],
@@ -200,10 +269,18 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'credit.child.third_and_next.monthly' => ['money_minor', 232_000],
                 'credit.disability.basic.monthly' => ['money_minor', 21_000],
                 'credit.disability.extended.monthly' => ['money_minor', 42_000],
+                // § 35bb: roční částka, zdvojnásobení u průkazu ZTP/P a limit
+                // vlastního příjmu manžela. Měsíční protějšek nemají — § 38h odst. 6
+                // k slevě na manžela při zálohách nepřihlíží.
+                'credit.spouse.yearly' => ['money_minor', 2_484_000],
+                'credit.spouse.ztp_p_multiplier' => ['integer', 2],
                 'credit.taxpayer.monthly' => ['money_minor', 257_000],
                 'credit.ztp_p.monthly' => ['money_minor', 134_500],
                 'dpp.withholding.threshold' => ['money_minor', 1_200_000],
                 'other.withholding.threshold' => ['money_minor', 450_000],
+                // § 38ch odst. 5 / § 35d odst. 8 — „více než 50 Kč", tedy OSTŘE.
+                'settlement.payout_threshold' => ['money_minor', 5_000],
+                'spouse.income_limit' => ['money_minor', 6_800_000],
                 'withholding.rate' => ['decimal_rate', '0.15'],
             ],
             'social_insurance' => [
@@ -250,6 +327,15 @@ final class CzechPayrollRulesets2026Test extends TestCase
                     'Příspěvek na stravování je osvobozený do 70 % horní hranice stravného za '
                     . 'pracovní cestu 5 až 12 hodin, a to za každou směnu zvlášť. Roční limit '
                     . 'mzdové složky takový strop nevyjádří a aplikace ho proto netvrdí.',
+                // Částky slevy na manžela v rulesetu JSOU, nárok na ni ale ne:
+                // § 35bb odst. 2 písm. a) žádá od 2024 i vyživované dítě do 3 let
+                // ve společně hospodařící domácnosti. Kdyby se tenhle klíč tiše
+                // stal „supported", zúčtování by slevu přiznalo, aniž by kdokoli
+                // ověřil podmínku, kterou modul v datech nemá.
+                'credit.spouse.eligibility' =>
+                    'Nárok na slevu na manžela závisí na společně hospodařící domácnosti, '
+                    . 'na vyživovaném dítěti do 3 let věku, na vlastním příjmu manžela '
+                    . 'a na doložení podle § 38l — musí ho posoudit mzdová účetní.',
             ],
             'social_insurance' => [
                 'employee.discount.agriculture_dpp' =>

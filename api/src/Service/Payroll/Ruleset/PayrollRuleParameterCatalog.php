@@ -56,6 +56,7 @@ final class PayrollRuleParameterCatalog
             'benefit_exemption.old_age_savings.yearly' =>
                 'Roční limit osvobození příspěvku na produkty spoření na stáří a pojištění dlouhodobé péče',
             'bonus.minimum_amount.monthly' => 'Nejnižší vyplatitelný měsíční daňový bonus',
+            'bonus.minimum_amount.yearly' => 'Nejnižší uplatnitelný roční daňový bonus',
             'bonus.minimum_income.monthly' => 'Minimální měsíční příjem pro nárok na daňový bonus',
             'bonus.minimum_income.yearly' => 'Minimální roční příjem pro nárok na daňový bonus',
             'credit.child.first.monthly' => 'Měsíční daňové zvýhodnění na první dítě',
@@ -63,10 +64,15 @@ final class PayrollRuleParameterCatalog
             'credit.child.third_and_next.monthly' => 'Měsíční daňové zvýhodnění na třetí a další dítě',
             'credit.disability.basic.monthly' => 'Měsíční základní sleva na invaliditu prvního a druhého stupně',
             'credit.disability.extended.monthly' => 'Měsíční rozšířená sleva na invaliditu třetího stupně',
+            'credit.spouse.eligibility' => 'Nárok na slevu na manžela',
+            'credit.spouse.yearly' => 'Roční sleva na manžela',
+            'credit.spouse.ztp_p_multiplier' => 'Násobek slevy na manžela s přiznaným nárokem na průkaz ZTP/P',
             'credit.taxpayer.monthly' => 'Měsíční základní sleva na poplatníka',
             'credit.ztp_p.monthly' => 'Měsíční sleva na držitele průkazu ZTP/P',
             'dpp.withholding.threshold' => 'Rozhodná částka pro srážkovou daň u dohody o provedení práce',
             'other.withholding.threshold' => 'Rozhodná částka pro srážkovou daň u ostatních příjmů ze závislé činnosti',
+            'settlement.payout_threshold' => 'Nejnižší vyplácený přeplatek z ročního zúčtování',
+            'spouse.income_limit' => 'Nejvyšší vlastní příjem manžela pro nárok na slevu',
             'withholding.rate' => 'Sazba srážkové daně',
         ],
         'social_insurance' => [
@@ -228,6 +234,16 @@ final class PayrollRuleParameterCatalog
                     . 'odpracovaných směn v okamžiku zadání složky a nebude si ho domýšlet.',
                 'action' => 'Nic tu nevyplňujte. Denní limit hlídejte při zadávání příspěvku na '
                     . 'stravování; nadlimitní část zadejte jako běžný zdanitelný příjem.',
+            ],
+            'credit.spouse.eligibility' => [
+                'why' => 'Roční sleva na manžela má od 1. 1. 2024 dvě podmínky NAJEDNOU: společně '
+                    . 'hospodařící domácnost s manželem A s vyživovaným dítětem poplatníka, které '
+                    . 'nedovršilo 3 let věku, k tomu vlastní příjem manžela do zákonného limitu '
+                    . 'a doložení podle § 38l. Domácnost, věk dítěte ani příjmy manžela mzdový '
+                    . 'modul v datech nemá — částky vedle jsou zákonná čísla, ne posouzení nároku.',
+                'action' => 'Nic tu nevyplňujte ani neschvalujte. Slevu na manžela uplatněte '
+                    . 'v ročním zúčtování ručně proti doloženým podkladům, nebo ji zaměstnanec '
+                    . 'uplatní v daňovém přiznání.',
             ],
         ],
         'social_insurance' => [

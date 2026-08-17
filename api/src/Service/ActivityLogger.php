@@ -17,6 +17,29 @@ use MyInvoice\Infrastructure\Database\Connection;
  */
 class ActivityLogger
 {
+    /**
+     * Klíče, jejichž hodnota se do `activity_log` nezapíše.
+     *
+     * ── Proč tu NENÍ `full_name` ─────────────────────────────────────────────
+     * Úplný výmaz osoby loguje jméno smazaného
+     * ({@see \MyInvoice\Repository\Payroll\PayrollEmployeeDeletionRepository::delete()})
+     * a redakce se na něj vědomě neuplatňuje. Není to přehlédnutí a neopravovat:
+     *
+     *  - úplný výmaz je NEVRATNÝ a řádek už neexistuje. Auditní zápis „smazán
+     *    zaměstnanec #418" bez jména neříká nic — nedá se z něj poznat, koho se
+     *    úkon týkal, ani rozlišit omylem založený duplicitní záznam od skutečného
+     *    člověka. Auditní stopa, ze které nejde určit předmět úkonu, není stopa;
+     *  - typickým důvodem ručního výmazu je právě omylem založená osoba, u které
+     *    jméno v logu být MÁ. Řádné ukončení retence jménem neprochází: to je
+     *    ANONYMIZACE, a ta do auditu jméno nezapisuje vůbec (hlídá to test
+     *    `testAuditPayloadCarriesNoPersonalData`);
+     *  - `full_name` je navíc klíč sdílený celou aplikací (kontakty, osoby,
+     *    vyživované děti). Doplnit ho sem by ztichlo i tam, kde je jméno
+     *    legitimním předmětem záznamu, a to bez ohledu na mzdovou agendu.
+     *
+     * Citlivější složky identity redaktované jsou i tady: rodné číslo, rodné
+     * příjmení, adresa, kontakt i číslo účtu jsou v seznamu níž.
+     */
     private const REDACT_KEYS = [
         'password', 'password_confirm', 'current_password', 'new_password',
         'token', 'csrf_token', 'cf_turnstile_response', 'secret_key',
