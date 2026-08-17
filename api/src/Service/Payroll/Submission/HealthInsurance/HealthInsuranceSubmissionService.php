@@ -42,6 +42,10 @@ final readonly class HealthInsuranceSubmissionService
     private const SUBJECT_EMPLOYMENT = 'employment';
     private const SUBJECT_RUN = 'payroll_run';
 
+    /** Strop stránky je tvrdý — z URL ho zvednout nejde. */
+    public const PERIOD_MAX_LIMIT = 200;
+    public const PERIOD_DEFAULT_LIMIT = 50;
+
     public function __construct(
         private PayrollHealthNotificationRepository $facts,
         private HealthNotificationDutyResolver $resolver,
@@ -137,6 +141,127 @@ final readonly class HealthInsuranceSubmissionService
             static fn (HealthNotificationDuty $duty): array => $duty->toArray(),
             $duties,
         );
+    }
+
+    /**
+     * Přehled oznamovacích povinností za mzdové období.
+     *
+     * Filtruje i stránkuje SERVER. Filtrovat na klientovi a stránkovat na
+     * serveru by znamenalo, že `total` popisuje jiný seznam, než uživatel
+     * vidí — a že se filtr uplatní jen na právě načtenou stránku.
+     *
+     * `total` proto popisuje FILTROVANÝ seznam (ten se stránkuje), zatímco
+     * `summary` popisuje CELÉ OBDOBÍ bez ohledu na filtr. Nejsou to dvě
+     * odpovědi na tutéž otázku: kdyby souhrn respektoval filtr, dal by se
+     * zúžením filtru schovat propadlý termín. UI to musí popsat, ne smíchat.
+     *
+     * @param array{
+     *   insurer_code?:?string,kind?:?string,reported?:?bool,
+     *   undocumented_code_only?:?bool
+     * } $filters
+     * @return array{
+     *   period:string,items:list<array<string,mixed>>,total:int,
+     *   limit:int,offset:int,summary:array<string,int>,
+     *   unresolved_employments:list<array{employment_id:int,full_name:string,reason_code:string,reason:string}>
+     * }
+     */
+    public function dutiesForPeriod(
+        int $supplierId,
+        string $environment,
+        string $period,
+        array $filters = [],
+        int $limit = self::PERIOD_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        $window = $this->periodBounds($period);
+        $limit = max(1, min(self::PERIOD_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+
+        $rows = $this->facts->listNotificationFacts(
+            $supplierId,
+            $window['from'],
+            $window['to'],
+        );
+
+        $all = [];
+        $unresolved = [];
+        foreach ($rows as $row) {
+            try {
+                $duties = $this->resolver->resolve($this->factsFromRow($row));
+            } catch (HealthNotificationException $exception) {
+                // Vztah, u kterého se povinnost odvodit NELZE, se nesmí tiše
+                // vypustit — chybějící pojišťovna je přesně ta vada, kvůli
+                // které by oznámení nebylo komu poslat. Vrací se pojmenovaně
+                // vedle seznamu, ne jako prázdno v něm.
+                $unresolved[] = [
+                    'employment_id' => $row['employment_id'],
+                    'full_name' => $row['full_name'],
+                    'reason_code' => $exception->errorCode,
+                    'reason' => $exception->getMessage(),
+                ];
+                continue;
+            }
+            foreach ($duties as $duty) {
+                if ($duty->occurredOn < $window['from']
+                    || $duty->occurredOn > $window['to']
+                ) {
+                    continue;
+                }
+                $all[] = $this->periodItem($duty, $row['full_name']);
+            }
+        }
+
+        // Souhrn se počítá nad CELÝM obdobím, ne nad filtrem ani nad stránkou —
+        // stejně jako u inboxu podání. „Kolik je po lhůtě" nesmí záviset na
+        // tom, jaký filtr má účetní zrovna zapnutý; kdyby závisel, dal by se
+        // zúžením filtru schovat propadlý termín. `total` v odpovědi naopak
+        // popisuje filtrovaný seznam, protože ten stránkuje.
+        $summary = [
+            'total' => count($all),
+            'reported_by_employer' => 0,
+            'reported_by_insured' => 0,
+            'code_documented' => 0,
+            'code_undocumented' => 0,
+            'overdue' => 0,
+        ];
+        $today = (new \DateTimeImmutable(
+            'now',
+            new \DateTimeZone('Europe/Prague'),
+        ))->format('Y-m-d');
+        foreach ($all as $item) {
+            $summary[$item['reported_by_employer']
+                ? 'reported_by_employer'
+                : 'reported_by_insured']++;
+            $summary[$item['change_code']['documented']
+                ? 'code_documented'
+                : 'code_undocumented']++;
+            $dueOn = $item['deadline']['due_on'] ?? null;
+            if (is_string($dueOn) && $dueOn < $today) {
+                $summary['overdue']++;
+            }
+        }
+
+        $filtered = array_values(array_filter(
+            $all,
+            fn (array $item): bool => $this->matchesFilters($item, $filters),
+        ));
+        usort(
+            $filtered,
+            static fn (array $a, array $b): int =>
+                [$a['occurred_on'], $a['full_name'], $a['kind']]
+                <=> [$b['occurred_on'], $b['full_name'], $b['kind']],
+        );
+
+        return [
+            'period' => $period,
+            'environment' => $environment,
+            'items' => array_slice($filtered, $offset, $limit),
+            'total' => count($filtered),
+            'limit' => $limit,
+            'offset' => $offset,
+            'summary' => $summary,
+            'unresolved_employments' => $unresolved,
+        ];
     }
 
     /**
@@ -411,7 +536,17 @@ final readonly class HealthInsuranceSubmissionService
         });
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * Jak se soubor dostane k pojišťovně.
+     *
+     * `assertDispatchable()` je `never` — u všech sedmi pojišťoven skončí
+     * výjimkou. Metoda proto vždy vrátí popis nedostupnosti; kdyby katalog
+     * někdy začal odesílání dokládat, přestala by se výjimka házet a tady
+     * by chyběl návrat, takže se `never` vědomě NEobchází a případný doklad
+     * si vyžádá i změnu tady.
+     *
+     * @return array<string,mixed>
+     */
     private function dispatchDescription(string $insurerCode): array
     {
         try {
@@ -426,6 +561,129 @@ final readonly class HealthInsuranceSubmissionService
                     ->toArray(),
             ];
         }
+    }
+
+    /**
+     * Jedna položka přehledu za období: povinnost obohacená o jméno, kanál
+     * a o to, jestli se z ní dá vyrobit kód změny.
+     *
+     * @return array<string,mixed>
+     */
+    private function periodItem(
+        HealthNotificationDuty $duty,
+        string $fullName,
+    ): array {
+        $documented = $this->codes->isCodeMappingDocumented($duty->kind);
+        $code = null;
+        $codeReason = null;
+        try {
+            $code = $this->codes->codeFor($duty->kind);
+        } catch (HealthNotificationException $exception) {
+            // Konkrétní důvod, ne obecné „nepodařilo se" — u každého ze tří
+            // nedoložených druhů je jiný a uživatel podle něj pozná, jestli
+            // chybí doklad, nebo povinnost.
+            $codeReason = $exception->getMessage();
+        }
+        $channel = null;
+        try {
+            $channel = $this->channels->forInsurer($duty->insurerCode)->toArray();
+        } catch (HealthNotificationException $exception) {
+            $channel = [
+                'insurer_code' => $duty->insurerCode,
+                'insurer_name' => null,
+                'undocumented_reason_code' => $exception->errorCode,
+                'note' => $exception->getMessage(),
+            ];
+        }
+
+        return [
+            'id' => $duty->sourceEventReference(),
+            'employment_id' => $duty->employmentId,
+            'employee_id' => $duty->employeeId,
+            'full_name' => $fullName,
+            'kind' => $duty->kind->value,
+            'label' => $duty->rule->label,
+            'insurer_code' => $duty->insurerCode,
+            'occurred_on' => $duty->occurredOn,
+            'reported_by_employer' => $duty->reportedByEmployer,
+            'rule' => $duty->rule->toArray(),
+            'deadline' => $duty->deadline?->toArray(),
+            'change_code' => [
+                'documented' => $documented,
+                'code' => $code,
+                'reason' => $codeReason,
+            ],
+            'channel' => $channel,
+            'dispatch' => $this->dispatchDescription($duty->insurerCode),
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $item
+     * @param array<string,mixed> $filters
+     */
+    private function matchesFilters(array $item, array $filters): bool
+    {
+        $insurer = $filters['insurer_code'] ?? null;
+        if (is_string($insurer) && $insurer !== ''
+            && $item['insurer_code'] !== $insurer
+        ) {
+            return false;
+        }
+        $kind = $filters['kind'] ?? null;
+        if (is_string($kind) && $kind !== '' && $item['kind'] !== $kind) {
+            return false;
+        }
+        $reported = $filters['reported'] ?? null;
+        if (is_bool($reported) && $item['reported_by_employer'] !== $reported) {
+            return false;
+        }
+        $undocumented = $filters['undocumented_code_only'] ?? null;
+        if ($undocumented === true && $item['change_code']['documented']) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /** @return array{from:string,to:string} */
+    private function periodBounds(string $period): array
+    {
+        if (preg_match('/^[0-9]{4}-(0[1-9]|1[0-2])$/D', $period) !== 1) {
+            throw new HealthNotificationException(
+                'zp_period_invalid',
+                'Mzdové období musí mít tvar RRRR-MM.',
+            );
+        }
+        $from = new \DateTimeImmutable(
+            $period . '-01',
+            new \DateTimeZone('Europe/Prague'),
+        );
+
+        return [
+            'from' => $from->format('Y-m-d'),
+            'to' => $from->modify('last day of this month')->format('Y-m-d'),
+        ];
+    }
+
+    /** @param array<string,mixed> $row */
+    private function factsFromRow(array $row): HealthNotificationFacts
+    {
+        return new HealthNotificationFacts(
+            employmentId: (int) $row['employment_id'],
+            employeeId: (int) $row['employee_id'],
+            relationType: (string) $row['relation_type'],
+            participates: (bool) $row['participates'],
+            insurerCode: $row['insurer_code'],
+            startedOn: $row['start_date'],
+            endedOn: $row['end_date'],
+            previousInsurerCode: $row['previous_insurer_code'],
+            insurerChangedOn: $row['insurer_changed_on'],
+            maternityLeaveStartedOn: $row['maternity_leave_started_on'],
+            parentalLeaveStartedOn: $row['parental_leave_started_on'],
+            maternityOrParentalLeaveEndedOn:
+                $row['maternity_or_parental_leave_ended_on'],
+        );
     }
 
     private function payload(
@@ -509,15 +767,7 @@ final readonly class HealthInsuranceSubmissionService
             );
         }
 
-        return new HealthNotificationFacts(
-            employmentId: $row['employment_id'],
-            employeeId: $row['employee_id'],
-            relationType: $row['relation_type'],
-            participates: $row['participates'],
-            insurerCode: $row['insurer_code'],
-            startedOn: $row['start_date'],
-            endedOn: $row['end_date'],
-        );
+        return $this->factsFromRow($row);
     }
 
     /** @return array{submission:string,artifact:string} */

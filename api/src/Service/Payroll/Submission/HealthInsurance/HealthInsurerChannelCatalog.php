@@ -16,9 +16,12 @@ namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
  * transportní obálka — endpoint, MIME, název přílohy, limity ani formát
  * odpovědi. Popis brány Portálu ZP je dostupný jen po dohodě s pojišťovnami,
  * B2B popis ZP MV ČR byl slíben na Q2 2026 a ke dni rešerše nevyšel.
- * `assertDispatchable()` proto skončí vždy a pojmenovaně — stejně jako
- * `jmhz_vrep_production_endpoint_unknown`, který je v repu `null` ze stejného
- * důvodu. Automatické odeslání na hádaný endpoint se nepřipravuje.
+ * `assertDispatchable()` proto skončí vždy a pojmenovaně.
+ *
+ * Měřítkem je JMHZ: tam produkční adresa VREP zůstávala `null` přesně do
+ * chvíle, než ji doložily nezávislé zdroje ({@see JmhzVrepClient}) — a teprve
+ * pak se odesílat začalo. U zdravotních pojišťoven ten doklad zatím není,
+ * takže se odeslání na hádaný endpoint nepřipravuje.
  *
  * Co katalog naopak umožňuje: vyrobit soubor a nechat ho účetní odeslat
  * doloženou cestou — datovou schránkou nebo ručním nahráním do portálu.

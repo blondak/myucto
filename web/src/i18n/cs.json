@@ -2767,6 +2767,7 @@
                 "jmhz": "JMHZ",
                 "eldp": "Evidenční list DP",
                 "health": "Zdravotní pojišťovny",
+                "health_notifications": "ZP — oznámení",
                 "inbox": "Inbox",
                 "certificate": "Certifikát"
             },
@@ -4110,6 +4111,107 @@
             "jmhz_export": "JMHZ export",
             "health_insurer_export": "Podání zdravotním pojišťovnám",
             "direct_submission": "Přímé elektronické podání"
+        },
+        "health_notifications": {
+            "title": "Oznamovací povinnost vůči zdravotní pojišťovně",
+            "subtitle": "Co se za období hlásí, komu a do kdy. Soubor aplikace vyrobí a ověří proti připnutému XSD; odeslat ho musí účetní sama — doloženou cestou žádná ze sedmi pojišťoven nemá.",
+            "load_failed": "Přehled oznamovacích povinností se nepodařilo načíst.",
+            "stale": "Zobrazená data jsou z posledního úspěšného načtení. {message}",
+            "read_only": "K sestavení podání je potřeba právo zápisu do mzdových podání.",
+            "empty_title": "Za zvolené období se nic nehlásí",
+            "empty": "V tomto měsíci nevznikla žádná skutečnost, kterou by zaměstnavatel zdravotní pojišťovně oznamoval. Zkuste jiné období.",
+            "empty_filtered_title": "Filtr nic nenašel",
+            "empty_filtered": "Povinnosti za období existují, jen je schoval filtr.",
+            "code_undocumented": "Kód nedoložen",
+            "source_unverified": "Pramen: publikace pojišťovny, ne text zákona",
+            "data_box": "Datová schránka: {id}",
+            "limits": {
+                "title": "Co modul neumí",
+                "no_transport": "Aplikace podání NEODESÍLÁ. Ani jedna ze sedmi pojišťoven nemá veřejně popsanou transportní obálku — endpoint, MIME, název přílohy ani formát odpovědi. Odeslání na hádaný cíl by v nejhorším případě znamenalo zmeškanou lhůtu bez povšimnutí.",
+                "manual_delivery": "Doložená cesta je stažení souboru a jeho ruční podání: datovou schránkou nebo nahráním do portálu pojišťovny. Odkazy a ID schránek jsou u jednotlivých pojišťoven níž.",
+                "undocumented_codes": "U těchto druhů povinnosti neplyne z připnutého schématu jediný kód změny, takže se nevydá vůbec: {kinds}. Odhadnout ho by znamenalo podat větu s kódem, který neplyne z ničeho.",
+                "capability_failed": "Seznam kanálů pojišťoven se nepodařilo načíst. Omezení výše platí i tak — nezmizela, jen k nim chybí detail."
+            },
+            "reason": {
+                "zp_transport_envelope_undocumented": "Transportní obálka není veřejně popsaná.",
+                "zp_portal_gateway_description_on_request": "Popis komunikační brány Portálu ZP je dostupný jen po dohodě s pojišťovnami.",
+                "zp_b2b_interface_not_published": "B2B rozhraní jede na starém formátu a jeho popis zveřejněný není.",
+                "zp_shared_data_message_acceptance_unconfirmed": "Přijetí jednotné datové věty se nepodařilo doložit."
+            },
+            "summary": {
+                "total": "Povinností za celý měsíc",
+                "reported_by_employer": "Hlásí zaměstnavatel (celý měsíc)",
+                "code_undocumented": "Bez kódu změny (celý měsíc)",
+                "overdue": "Po lhůtě (celý měsíc)",
+                "scope_note": "Dlaždice počítají celý měsíc, ne zúžený výběr v tabulce — filtrem se propadlý termín schovat nedá."
+            },
+            "unresolved": {
+                "title": "Vztahy, u kterých povinnost odvodit nelze ({count})"
+            },
+            "filter": {
+                "period": "Období",
+                "insurer": "Pojišťovna",
+                "kind": "Druh oznámení",
+                "reported": "Kdo hlásí",
+                "reported_all": "Kdokoli",
+                "reported_employer": "Zaměstnavatel",
+                "reported_insured": "Sám pojištěnec",
+                "undocumented_only": "Jen bez kódu změny",
+                "all": "Vše",
+                "reset": "Zrušit filtr"
+            },
+            "table": {
+                "employee": "Zaměstnanec",
+                "duty": "Oznámení",
+                "insurer": "Pojišťovna",
+                "occurred_on": "Skutečnost nastala",
+                "deadline": "Lhůta",
+                "change_code": "Kód změny",
+                "source": "Pramen",
+                "state": "Stav"
+            },
+            "deadline": {
+                "employer": "Běží zaměstnavateli",
+                "none": "Zaměstnavateli neběží"
+            },
+            "state": {
+                "manual_only": "K ručnímu podání"
+            },
+            "kind": {
+                "employment_start": "Nástup do zaměstnání",
+                "employment_end": "Skončení zaměstnání",
+                "employee_data_change": "Změna údajů",
+                "insurer_change": "Přestup mezi pojišťovnami",
+                "maternity_leave_start": "Nástup na mateřskou",
+                "parental_leave_start": "Nástup na rodičovskou",
+                "maternity_or_parental_leave_end": "Ukončení mateřské nebo rodičovské",
+                "state_category_other": "Ostatní skutečnosti, kde je plátcem stát"
+            },
+            "prepare": {
+                "title": "Sestavení přehledu o platbě pojistného",
+                "description": "Zmrazí přehled o platbě za schválenou revizi do odesílatelné podoby a ověří ho proti připnutému XSD. Neodesílá — výsledkem je soubor ke stažení.",
+                "action": "Sestavit větu",
+                "revision": "Schválená revize",
+                "revision_placeholder": "Vyberte revizi",
+                "revision_empty": "Za zvolené období není žádná schválená revize.",
+                "run_option": "{period} — revize č. {revision}",
+                "insurer": "Pojišťovna",
+                "insurer_placeholder": "Vyberte pojišťovnu",
+                "pick_first": "Nejdřív vyberte revizi a pojišťovnu.",
+                "valid": "Věta je platná",
+                "valid_hint": "Přehled pro pojišťovnu {insurer} prošel ověřením proti připnutému XSD. Lhůta k podání je {due}.",
+                "blocked": "Věta má blokující výhradu",
+                "blocked_hint": "Soubor vznikl a lze ho stáhnout, ale podání zůstalo v konceptu s výhradou ve fázi ověření schématu. Konkrétní důvod je zapsaný u podání v záložce Zdravotní pojišťovny.",
+                "status": "Stav podání",
+                "period": "Období",
+                "due_on": "Lhůta",
+                "fingerprint": "Otisk souboru",
+                "download": "Stáhnout XML",
+                "downloading": "Stahuji…",
+                "download_failed": "Artefakt se nepodařilo stáhnout.",
+                "artifact_missing": "K podání není uložený žádný soubor ke stažení.",
+                "failed": "Větu se nepodařilo sestavit."
+            }
         }
     },
     "keyboard_shortcuts": {

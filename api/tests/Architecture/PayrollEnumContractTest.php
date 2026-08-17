@@ -176,6 +176,21 @@ final class PayrollEnumContractTest extends TestCase
         // popisoval právě to, co stránka ukáže.
         'payroll.ts::PayrollSubmissionInboxStatusFilter'
             => 'const:MyInvoice\Repository\Payroll\PayrollSubmissionInboxRepository::STATUS_FILTERS',
+        // Zdravotní pojišťovny. Druh oznamovací povinnosti odchází v odpovědi
+        // od chvíle, kdy vznikl přehled za období — obrazovka podle něj filtruje
+        // i popisuje řádek, takže nová hodnota bez překladu by se projevila
+        // holým klíčem v tabulce.
+        'payrollHealthNotifications.ts::HealthDutyKind'
+            => 'enum:MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyKind',
+        // Důvod, proč aplikace nesmí odeslat sama. Každý má na obrazovce vlastní
+        // větu; nový kód bez věty by se vykreslil jako prázdné místo přesně tam,
+        // kde má stát přiznání, co modul neumí.
+        'payrollHealthNotifications.ts::HealthDispatchReasonCode'
+            => 'consts:MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsurerChannelCatalog',
+        // Jak je pravidlo doložené. Rozdíl mezi textem zákona a publikací
+        // pojišťovny se v tabulce ukazuje, takže se nesmí rozejít.
+        'payrollHealthNotifications.ts::HealthSourceStatus'
+            => 'consts:MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyRule',
 
         // Politiky zaměstnavatele
         'payroll.ts::PayrollBusinessDayRule'     => 'policy:payday_business_day_rule',
@@ -420,7 +435,6 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\SocialInsurance\SocialParticipationStatus::class,
         \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsurerChannelKind::class,
         \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationCodeGroup::class,
-        \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyKind::class,
         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlPassability::class,
         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlScope::class,
         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSystem::class,

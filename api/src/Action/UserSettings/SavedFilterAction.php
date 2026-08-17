@@ -48,7 +48,8 @@ final class SavedFilterAction
         'bank_posting_suggestions', 'bank_posting_rules', 'automation_feed', 'automation_rules',
         'stock-items', 'stock-documents', 'stock-purchase-orders',
         'payroll-documents', 'payroll-payments', 'payroll-quick-inputs',
-        'payroll-recurring-components', 'payroll-retention'];
+        'payroll-recurring-components', 'payroll-retention',
+        'payroll-health-notifications'];
 
     private const MAX_FILTERS = 30;
 
