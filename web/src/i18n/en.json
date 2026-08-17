@@ -2767,6 +2767,7 @@
                 "jmhz": "JMHZ",
                 "eldp": "Pension record sheet",
                 "health": "Health insurers",
+                "health_notifications": "HI — notifications",
                 "inbox": "Inbox",
                 "certificate": "Certificate"
             },
@@ -4110,6 +4111,106 @@
             "jmhz_export": "JMHZ export",
             "health_insurer_export": "Health insurer submissions",
             "direct_submission": "Direct electronic submission"
+        },
+        "health_notifications": {
+            "title": "Health insurer notification duty",
+            "subtitle": "What has to be reported for the period, to whom and by when. The application builds the file and validates it against the pinned XSD; sending it is up to the accountant — none of the seven insurers documents a transport channel.",
+            "load_failed": "The notification duty overview could not be loaded.",
+            "stale": "The data shown comes from the last successful load. {message}",
+            "read_only": "Building a submission requires write access to payroll submissions.",
+            "empty_title": "Nothing to report for the selected period",
+            "empty": "No fact arose this month that the employer would report to a health insurer. Try another period.",
+            "empty_filtered_title": "The filter found nothing",
+            "empty_filtered": "Duties do exist for the period, the filter just hid them.",
+            "code_undocumented": "Code undocumented",
+            "source_unverified": "Source: insurer publication, not statute text",
+            "data_box": "Data box: {id}",
+            "limits": {
+                "title": "What this module cannot do",
+                "no_transport": "The application does NOT send submissions. None of the seven insurers publishes a transport envelope — no endpoint, MIME type, attachment name or response format. Sending to a guessed target could at worst mean a missed deadline nobody notices.",
+                "manual_delivery": "The documented route is to download the file and file it manually: via data box or by uploading it to the insurer portal. Links and data box IDs are listed per insurer below.",
+                "undocumented_codes": "For these duty kinds the pinned schema does not determine a single change code, so none is issued at all: {kinds}. Guessing one would mean filing a record with a code that follows from nothing.",
+                "capability_failed": "The insurer channel list could not be loaded. The limits above still apply — they did not disappear, only their detail is missing."
+            },
+            "reason": {
+                "zp_transport_envelope_undocumented": "The transport envelope is not publicly documented.",
+                "zp_portal_gateway_description_on_request": "The Portál ZP gateway description is available only by agreement with the insurers.",
+                "zp_b2b_interface_not_published": "The B2B interface runs on the old format and its description has not been published.",
+                "zp_shared_data_message_acceptance_unconfirmed": "Acceptance of the shared data message could not be evidenced."
+            },
+            "summary": {
+                "total": "Duties in period",
+                "reported_by_employer": "Reported by employer",
+                "code_undocumented": "Without change code",
+                "overdue": "Past deadline"
+            },
+            "unresolved": {
+                "title": "Relationships whose duty cannot be resolved ({count})"
+            },
+            "filter": {
+                "period": "Period",
+                "insurer": "Insurer",
+                "kind": "Notification kind",
+                "reported": "Reported by",
+                "reported_all": "Anyone",
+                "reported_employer": "Employer",
+                "reported_insured": "The insured person",
+                "undocumented_only": "Without change code only",
+                "all": "All",
+                "reset": "Clear filter"
+            },
+            "table": {
+                "employee": "Employee",
+                "duty": "Notification",
+                "insurer": "Insurer",
+                "occurred_on": "Fact occurred",
+                "deadline": "Deadline",
+                "change_code": "Change code",
+                "source": "Source",
+                "state": "State"
+            },
+            "deadline": {
+                "employer": "Runs for the employer",
+                "none": "Does not run for the employer"
+            },
+            "state": {
+                "manual_only": "For manual filing"
+            },
+            "kind": {
+                "employment_start": "Employment start",
+                "employment_end": "Employment end",
+                "employee_data_change": "Data change",
+                "insurer_change": "Change of insurer",
+                "maternity_leave_start": "Maternity leave start",
+                "parental_leave_start": "Parental leave start",
+                "maternity_or_parental_leave_end": "Maternity or parental leave end",
+                "state_category_other": "Other facts where the state is the payer"
+            },
+            "prepare": {
+                "title": "Build the contribution payment overview",
+                "description": "Freezes the payment overview for an approved revision into a submittable form and validates it against the pinned XSD. It does not send — the result is a downloadable file.",
+                "action": "Build record",
+                "revision": "Approved revision",
+                "revision_placeholder": "Pick a revision",
+                "revision_empty": "There is no approved revision for the selected period.",
+                "run_option": "{period} — revision no. {revision}",
+                "insurer": "Insurer",
+                "insurer_placeholder": "Pick an insurer",
+                "pick_first": "Pick a revision and an insurer first.",
+                "valid": "The record is valid",
+                "valid_hint": "The overview for insurer {insurer} passed validation against the pinned XSD. The filing deadline is {due}.",
+                "blocked": "The record has a blocking issue",
+                "blocked_hint": "The file was produced and can be downloaded, but the submission stayed a draft with an issue at the schema validation stage. The specific reason is recorded on the submission in the Health insurers tab.",
+                "status": "Submission status",
+                "period": "Period",
+                "due_on": "Deadline",
+                "fingerprint": "File fingerprint",
+                "download": "Download XML",
+                "downloading": "Downloading…",
+                "download_failed": "The artifact could not be downloaded.",
+                "artifact_missing": "No downloadable file is stored for this submission.",
+                "failed": "The record could not be built."
+            }
         }
     },
     "keyboard_shortcuts": {

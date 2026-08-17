@@ -14,13 +14,15 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import PayrollEldpPanel from './PayrollEldpPanel.vue'
+import PayrollHealthNotificationPanel from './PayrollHealthNotificationPanel.vue'
 import PayrollSubmissionInboxPanel from './PayrollSubmissionInboxPanel.vue'
 import PayrollSubmissionOverviewPanel from './PayrollSubmissionOverviewPanel.vue'
 import PayrollSigningCertificatePanel from './PayrollSigningCertificatePanel.vue'
 import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
 
 type SubmissionTab =
-  'transport' | 'regzel' | 'jmhz' | 'eldp' | 'health' | 'inbox' | 'certificate'
+  'transport' | 'regzel' | 'jmhz' | 'eldp' | 'health' | 'health_notifications'
+  | 'inbox' | 'certificate'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -33,8 +35,13 @@ const activeTab = ref<SubmissionTab>('transport')
 // ELDP stojí hned za JMHZ: od roku 2026 ho ČSSZ sestavuje z měsíčního
 // hlášení sama, takže samostatný evidenční list je navazující a přechodná
 // agenda, ne konkurenční hlášení.
+// Zdravotní agenda má dvě záložky, protože jde o dvě různé povinnosti:
+// „health" je stav podaných přehledů o platbě, „health_notifications" je
+// oznamovací povinnost z § 10 — ta běží na osm dnů od skutečnosti, ne
+// měsíčně, a slít je do jedné záložky by tenhle rozdíl schovalo.
 const tabs: SubmissionTab[] = [
-  'transport', 'regzel', 'jmhz', 'eldp', 'health', 'inbox', 'certificate',
+  'transport', 'regzel', 'jmhz', 'eldp', 'health', 'health_notifications',
+  'inbox', 'certificate',
 ]
 /*
  * `null` = počet neznáme (načtení odznaku selhalo), ne „nula nevyřízených".
@@ -284,6 +291,12 @@ onMounted(loadInboxBadge)
       profilu, proto stojí mimo společný skeleton.
     -->
     <PayrollEldpPanel v-else-if="activeTab === 'eldp'" />
+
+    <!--
+      Oznamovací povinnost si data obstarává sama a na REGZEL profilu
+      nezávisí, proto stojí mimo společný skeleton.
+    -->
+    <PayrollHealthNotificationPanel v-else-if="activeTab === 'health_notifications'" />
 
     <div v-else-if="loading" class="space-y-4">
       <div class="h-28 animate-pulse rounded-xl bg-neutral-100" />
