@@ -229,8 +229,11 @@ final readonly class HealthInsuranceSubmissionService
             self::AGENDA_PAYMENT_OVERVIEW,
             self::SUBJECT_RUN,
             'payroll_run:' . $overview->runId . ':' . $insurerCode,
+            // Období povinnosti je mzdový měsíc, za který se pojistné platí,
+            // ne okno lhůty. Lhůta má vlastní pole a plést je znamená, že se
+            // přehled zařadí do jiného měsíce, než za který je.
+            $overview->period . '-01',
             $window->earliestSubmissionOn,
-            $window->dueOn,
             'regular',
             self::CHANNEL,
             self::SOURCE_EVENT_OVERVIEW,
@@ -275,7 +278,11 @@ final readonly class HealthInsuranceSubmissionService
                 self::CHANNEL,
                 $sourceHash,
                 $keys['submission'],
-                $overview->revisionId,
+                // Revize se jako zdroj NEVÁŽE: platforma na ní trvá jen tehdy,
+                // když je otisk podání shodný s otiskem výsledku revize. Otisk
+                // přehledu ale váže XML a zdravotní výsledek, ne celý běh —
+                // provázat je by znamenalo tvrdit shodu, která neplatí.
+                null,
                 null,
                 $createdBy,
                 $environment,

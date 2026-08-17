@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Repository\Payroll;
 
-use MyInvoice\Database\Connection;
+use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 
 /**
