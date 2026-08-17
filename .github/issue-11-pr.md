@@ -31,8 +31,8 @@ platnost existujících passkeys. Přechod na vlastní doménu používá krátk
 jednorázový autorizační kód svázaný s PKCE, state, uživatelem, firmou a přesným
 hostname. Session token se nepřenáší v URL; cílová doména vystaví novou host-only
 cookie. Tok kontroluje aktuální membership, expiraci, replay, změnu hostu i
-odvolání použité passkey. Stejný centrální tok obsluhuje login, povinné MFA a
-odemčení session.
+stav uživatele. Stejný centrální tok obsluhuje login, povinné MFA a odemčení
+session.
 
 ## Databáze, API a provoz
 
@@ -43,6 +43,29 @@ odemčení session.
 - aktualizovaný český manuál pro portál, nastavení, Docker/reverse proxy a
   bezpečnost/passkeys;
 - nové texty mají českou i anglickou lokalizaci.
+
+## Shoda s FR a známé mezery
+
+Pro běžné tenantové uživatele implementace pokrývá všech 15 akceptačních
+scénářů z #11. Při doslovném výkladu požadavku na membership je pokryto
+14/15, protože se zachovává existující globální oprávnění systémového
+superadmina. Před sloučením je třeba akceptovat následující odchylky a
+provozní hranice:
+
+| Oblast FR | Stav v tomto PR | Rozdíl a dopad |
+| --- | --- | --- |
+| Membership na vlastní doméně | Částečná odchylka | Non-superadmin bez membershipu dostane `403`. Systémový superadmin je doménou zamčen na její firmu, ale membership nepotřebuje. Striktní požadavek FR by vyžadoval odebrat tuto globální výjimku i v domain-login toku. |
+| Branding přiřazené firmy | Částečně | Veřejné faktury, schvalování a výkazy používají existující branding a portál zobrazuje název firmy. Přihlášený portál ale zatím nepřebírá firemní logo a accent do celého aplikačního layoutu. |
+| Vystavení a obnova TLS | Provozní hranice | Aplikace ověřuje DNS TXT, routing a důvěryhodné HTTPS před aktivací. Certifikát ale nevystavuje a neposkytuje automatický allowlist/control-plane reverznímu proxy; provisioning zůstává na správci dle manuálu. |
+| Platnost ověření domény | Navazující hardening | Aktivace vyžaduje uložený stav `verified`, ale nevyžaduje novou kontrolu bezprostředně před aktivací a aktivní domény se periodicky nerevalidují. |
+| Odmítnutí neznámého hostu | Tenantová data splněna | API a SPA entrypoint vracejí `421`; webserver může přímo vydat statické assety bez tenantových dat. Absolutní odmítnutí každého souboru by vyžadovalo přísnější pravidla přímo v proxy. |
+| Reset hesla | Záměrně canonical | FR jej uvádí jako volitelný. Tento PR jej nechává na `app.url`, aby nevznikl další pre-auth tok a reset fungoval i po deaktivaci domény. |
+| Plný síťový E2E test | Testovací mezera | Jednotlivé guardy, repository a login flow mají unit/integration testy a host policy má HTTP smoke. Chybí jeden automatizovaný scénář se dvěma firmami a doménami přes celý HTTP stack a deterministický test DNS/TLS verifieru. |
+
+Ostatní rozhodnutí otevřená ve FR jsou v PR uzavřena takto: domény mohou
+sloužit portálu, veřejným odkazům nebo oběma účelům, firma může mít aliasy,
+canonical portál zůstává funkční, interní práce účetního zůstává na
+`app.url` a přihlášení na vlastní doménu používá centrální passkey tok.
 
 ## Ověření
 
