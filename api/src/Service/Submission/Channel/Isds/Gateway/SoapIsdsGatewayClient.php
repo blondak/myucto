@@ -32,11 +32,15 @@ use Psr\Log\NullLogger;
  *   - název je náhodný (12 bajtů z `random_bytes`), takže se na něj nedá čekat,
  *   - práva se hned zužují na 0600,
  *   - smazání je ve `finally`, tedy proběhne i když volání skončí výjimkou.
- * Adresář se bere z `sys_get_temp_dir()`. Na Windows/IIS to bývá
- * `C:\Windows\Temp` s benevolentnějším ACL — **provozovatel proto musí app poolu
- * nastavit vlastní `TMP`/`TEMP` s omezeným ACL** (viz `upload_tmp_dir` a proměnné
- * prostředí app poolu). Je to jeden z bodů, které musí udělat ručně, než se brána
- * zapne; sám kód to za něj vynutit nemůže.
+ *
+ * ⚠️ **Na Windows to 0600 nedělá nic.** `chmod()` tam POSIX práva nenastavuje,
+ * mapuje se jen na příznak „jen pro čtení" — přístup jiných účtů neomezí.
+ * Na cílovém nasazení (IIS/Windows) tedy soubor chrání **výhradně ACL adresáře**,
+ * a `sys_get_temp_dir()` tam bývá `C:\Windows\Temp` s benevolentním ACL.
+ * **Provozovatel proto MUSÍ app poolu nastavit vlastní `TMP`/`TEMP` s omezeným
+ * ACL** — na Windows to není zpřísnění navíc, ale jediná skutečná ochrana
+ * soukromého klíče po dobu volání. Je to jeden z bodů, které musí udělat ručně,
+ * než se brána zapne; sám kód to za něj vynutit nemůže.
  */
 final class SoapIsdsGatewayClient implements IsdsGatewayClient
 {
