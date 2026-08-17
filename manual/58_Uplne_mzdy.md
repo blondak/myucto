@@ -775,6 +775,16 @@ výživné, více exekučních příkazů, více plátců, oddlužení a paušá
 nákladů zaměstnavatele. Chybějící měsíční podklady nezastoupí odhadem — výsledek
 označí pro ruční kontrolu.
 
+Měsíční podklady se ale vyžadují jen tam, kde mají co doložit. Zaměstnanec bez
+jediné aktivní pohledávky a bez oddlužení nic zadávat nemusí: rozdělovat není
+co, takže potvrzení rejstříku pohledávek za takový měsíc nechybí — jen se
+nevyžaduje. Potvrzení vyživovaných osob a slevy na manžela se ptá jen tehdy,
+když je nárok uplatněný, protože jen tehdy zvedá nezabavitelnou částku.
+U schválené mzdy je pak z výsledku vidět, jestli byl podklad doložený, nebo
+proč se v tom měsíci nevyžadoval. Uplatněný a nedoložený nárok mzdový běh
+neblokuje, ale do vyčerpání kapacity dobrovolných dohod o srážkách nepustí —
+nezabavitelná částka, ze které se strop dohody počítá, není doložená.
+
 Číslo řízení, bankovní účet příjemce ani právní dokument se do polí případu
 nepřepisují. Patří do zabezpečených dokumentů; agenda srážek pracuje pouze
 s interním identifikátorem a ověřenými skutečnostmi. Odklad a zastavení vyžadují

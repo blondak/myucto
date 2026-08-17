@@ -350,6 +350,7 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\Calculation\HealthMinimumTopUpPayer::class,
         \MyInvoice\Service\Payroll\Calculation\RoundingMode::class,
         \MyInvoice\Service\Payroll\Garnishment\DeductionLegalBasis::class,
+        \MyInvoice\Service\Payroll\Garnishment\EnforcementEvidenceSource::class,
         \MyInvoice\Service\Payroll\Garnishment\GarnishableIncomeKind::class,
         \MyInvoice\Service\Payroll\Garnishment\GarnishmentStatus::class,
         \MyInvoice\Service\Payroll\Garnishment\InsolvencyMode::class,

@@ -31,6 +31,12 @@ final readonly class GarnishmentResult implements JsonSerializable
         public array $roundingTrace,
         public string $rulesetId,
         public string $rulesetHash,
+        /**
+         * `null` je legacy: revize spočítaná kódem, který evidenci vyžadoval
+         * bezpodmínečně, o jejím rozsahu netvrdila nic a dopočítat se to
+         * zpětně NESMÍ. Viz {@see EnforcementEvidenceSource}.
+         */
+        public ?EnforcementEvidenceScope $evidenceSource = null,
     ) {
         if (!preg_match('/^[0-9]{4}-(0[1-9]|1[0-2])$/', $period)) {
             throw new \InvalidArgumentException('Garnishment period must use YYYY-MM.');
@@ -107,6 +113,10 @@ final readonly class GarnishmentResult implements JsonSerializable
             ),
             'employee_payment_minor_units' => $this->employeePaymentMinorUnits,
             'employer_flat_fee_minor_units' => $this->employerFlatFeeMinorUnits,
+            // Bez tohohle klíče by ze snímku nešlo poznat, jestli evidence
+            // chyběla, nebo jestli v tom měsíci neměla co dokládat.
+            // Viz EnforcementEvidenceSource.
+            'evidence_source' => $this->evidenceSource?->toCanonicalArray(),
             'four_enforcement_rule_applied' => $this->fourEnforcementRuleApplied,
             'fully_attachable_excess_minor_units' => $this->fullyAttachableExcessMinorUnits,
             'garnishable_income_minor_units' => $this->garnishableIncomeMinorUnits,
@@ -186,6 +196,12 @@ final readonly class GarnishmentResult implements JsonSerializable
             $validatedTrace,
             self::string($data, 'ruleset_id'),
             self::string($data, 'ruleset_hash'),
+            // Chybějící nebo prázdný klíč = starší revize. Nedopočítává se.
+            ($data['evidence_source'] ?? null) === null
+                ? null
+                : EnforcementEvidenceScope::fromCanonicalArray(
+                    self::row($data['evidence_source'], 'evidence_source'),
+                ),
         );
     }
 

@@ -104,6 +104,12 @@ final class PayrollGarnishmentPortTest extends TestCase
         self::assertTrue($evidence['claim_register_complete']);
     }
 
+    /**
+     * Osoba S aktivní pohledávkou a nedoloženým rejstříkem se automaticky
+     * srazit nesmí. Pohledávka je tu podstatná: rozsah evidence se od commitu
+     * „exekuční evidence se vyžaduje tam, kde je co dokládat" váže na to, jestli
+     * je co srážet — u prázdného rejstříku by tenhle scénář (správně) prošel.
+     */
     public function testIncompleteRepositoryEvidenceCannotCreateAutomaticDeduction(): void
     {
         $source = new class implements EnforcementCaseSource {
@@ -114,7 +120,21 @@ final class PayrollGarnishmentPortTest extends TestCase
                 string $paymentDate,
             ): EnforcementPersonMonthEvidence {
                 return new EnforcementPersonMonthEvidence(
-                    claims: [],
+                    claims: [
+                        new DeductionClaim(
+                            'claim-synthetic',
+                            DeductionLegalBasis::Statutory,
+                            ClaimCategory::NonPriority,
+                            10_000_000,
+                            '2026-01-15',
+                            true,
+                            true,
+                            '2022-01-02',
+                            true,
+                            enforcementOrderId: 'order-synthetic',
+                            dueMonetaryClaimVerified: true,
+                        ),
+                    ],
                     eligibleDependants: 0,
                     dependantsEvidenceComplete: false,
                     eligibleSpouse: false,
