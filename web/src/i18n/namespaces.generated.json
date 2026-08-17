@@ -327,6 +327,9 @@
     "payroll-settings": [
       "payroll"
     ],
+    "payroll-retention": [
+      "payroll"
+    ],
     "payroll-rulesets": [
       "payroll"
     ],

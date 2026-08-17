@@ -1140,3 +1140,59 @@ licencí úplných mezd.
 Nový modul nad společnou kartou pouze doplňuje další údaje. Ochrana období
 zabrání tomu, aby stejnou firmu a měsíc uzavřela legacy rekapitulace i nový
 mzdový běh.
+
+## 58.20 Retenční lhůty mzdové agendy
+
+Mzdový modul drží nejcitlivější osobní údaje v aplikaci a nesmí je držet
+navždy ani je zahodit dřív, než smí. Přehled **Mzdy → Retenční lhůty** ukazuje,
+jak dlouho se která skupina mzdových dat uchovává, od kdy lhůta běží a kde to
+stojí psané. Otevřít ho může role s oprávněním `payroll.retention`.
+
+Nic se odsud nemaže ani nenastavuje. Uplynulá lhůta je konec povinnosti
+uchovávat, ne příkaz ke skartaci.
+
+U každé kategorie je vidět:
+
+- **Lhůta** — počet let, podle kterého se opravdu počítá, tedy včetně
+  případného prodloužení, které si firma sama dohodla.
+- **Běží od** — kalendářní roky po roce, kterého se záznam týká, roky po roce
+  vyhotovení, nebo roky od konce účetního období.
+- **Právní pramen** — konkrétní ustanovení, ne jen číslo zákona, a u lhůt,
+  jejichž číslo se v posledních letech měnilo, i novela, která dnešní znění
+  zavedla.
+- **Ověřeno** — den, ke kterému se citace porovnala s účinným zněním předpisu.
+- **Dotčené tabulky** — čeho přesně se lhůta drží.
+
+### Původ lhůty
+
+Nejdůležitější sloupec není číslo, ale odkud se vzalo. Rozlišují se tři stavy
+a jejich počty stojí jako dlaždice nad tabulkou, takže rozdíl je vidět hned:
+
+- **Ze zákona** — číslo stojí v předpise a pramen říká kde.
+- **Dodaná politika** — číslo dodala aplikace, protože zákon pro tuhle skupinu
+  záznamů uschovávací lhůtu nemá. Týká se to zdravotního pojištění: v zákoně
+  č. 592/1992 Sb. žádná uschovávací lhůta není, deset let je bezpečné
+  rozhodnutí, ne právo, a přehled to říká nahlas.
+- **Bez lhůty** — doloženo, že předpis lhůtu nestanoví. Spis k exekučním
+  srážkám žádnou uschovávací lhůtu nemá: v občanském soudním řádu se
+  uschovávání týká jen prodeje nevyzvednutých movitých věcí a v exekučním řádu
+  je povinnost uložena exekutorovi, ne plátci mzdy.
+
+Kategorie bez lhůty se k výmazu **nikdy** nenavrhne, dokud lhůtu nedodá firma
+vlastní politikou. Sloupec **Výmaz** to u každé kategorie říká přímo.
+
+### Co z lhůt plyne pro výmaz
+
+Spodní panel přepočítá lhůty na konkrétní osoby k zadanému dni: kolik jich lze
+navrhnout k výmazu a — hlavně — proč se ostatní nenavrhly. Rozlišuje běžící
+retenční lhůtu, zadržení výmazu (kontrola, odvolání, spor, exekuce,
+insolvence), neurčenou lhůtu, chybějící základ výpočtu a osoby, které už
+anonymizované jsou. Návrh, který někoho mlčky vynechá, se nedá zkontrolovat.
+
+Samotný výmaz se sestavuje a schvaluje samostatně pod oprávněním
+`payroll.erasure` a provede se až druhým krokem po schválení. Osoba, která má
+účetní stopu, se nemaže, ale anonymizuje: účetní záznam zůstane, zmizí z něj
+jen osobní údaj.
+
+Lhůty účetních a daňových záznamů firmy jako celku (§ 31 a § 32 zákona
+o účetnictví) mají vlastní přehled na **Účetnictví → Retenční lhůty**.

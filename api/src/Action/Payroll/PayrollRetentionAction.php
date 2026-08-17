@@ -80,7 +80,13 @@ final class PayrollRetentionAction
 
         $categories = [];
         foreach (PayrollRetentionCatalog::rules() as $rule) {
+            // Tabulky do payloadu patří, i když je `toArray()` nenese: bez nich se
+            // z obrazovky nedá poznat, ČEHO se lhůta drží, a katalog by tvrdil
+            // lhůtu nad neznámým rozsahem dat. Do auditní stopy naopak nepatří,
+            // proto zůstávají tady a ne v `toArray()`.
             $categories[] = $rule->toArray() + [
+                'employee_tables' => $rule->employeeTables,
+                'employment_tables' => $rule->employmentTables,
                 'effective_years' => $effective[$rule->category] ?? null,
                 'determined' => ($effective[$rule->category] ?? null) !== null,
             ];

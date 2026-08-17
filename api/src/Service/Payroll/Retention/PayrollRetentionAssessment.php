@@ -29,6 +29,20 @@ final readonly class PayrollRetentionAssessment
     public const BLOCK_NO_BASIS = 'no_retention_basis';
 
     /**
+     * Celá doména důvodů, proč se osoba nenavrhla. Obrazovka je vypisuje všechny
+     * i s nulou — důvod, který by se v seznamu neobjevil, protože ho zrovna nikdo
+     * nemá, vypadá jako by neexistoval, a přehled by pak zamlčel, že osoba může
+     * uváznout i takhle.
+     */
+    public const BLOCKS = [
+        self::BLOCK_WITHIN_RETENTION,
+        self::BLOCK_HOLD,
+        self::BLOCK_UNDETERMINED,
+        self::BLOCK_NO_BASIS,
+        self::BLOCK_ALREADY_DONE,
+    ];
+
+    /**
      * @param list<array<string,mixed>> $categories  rozpis lhůt, i těch neurčených
      * @param list<array<string,mixed>> $holds       aktivní zadržení, firemní i osobní
      * @param array<string,int>         $identity    co zmizí

@@ -433,6 +433,7 @@
         "payroll_deduction_agreements": "Deduction agreements",
         "payroll_settings": "Payroll settings",
         "payroll_rulesets": "Payroll legislative rules",
+        "payroll_retention": "Retention periods",
         "settings": "Settings",
         "branding": "Branding",
         "supplier_current": "Supplier",
@@ -4002,6 +4003,92 @@
             "support_failed": "Employees and recipient accounts could not be loaded, so the selection below stayed empty. This is not a configuration problem — try loading again.",
             "transition_blocked_document": "Pick the document the transition rests on. Without it the case would lack any trace of where the change came from.",
             "transition_blocked_reason": "Write a reason. For this step it is stored in the case history, so it cannot be skipped."
+        },
+        "retention": {
+            "title": "Payroll data retention periods",
+            "subtitle": "How long each group of payroll data is kept, when the period starts and where it is written down.",
+            "explainer_title": "An elapsed period ends the duty to keep the data; it is not an order to destroy it.",
+            "explainer_body": "This overview is read-only — nothing is deleted or configured here. Erasure of personal data is a separate proposal that somebody has to approve, and it is carried out in a second step. For each person the longest period across all applicable categories wins.",
+            "verified_stamp": "Statutory wording verified as of {date}.",
+            "load_failed": "The retention catalogue could not be loaded",
+            "stale_warning": "Shown data comes from the last successful load — the latest attempt failed: {error}",
+            "reset_filters": "Clear filter",
+            "filter_q": "Search",
+            "filter_q_placeholder": "Category, act, provision or table…",
+            "no_match": "No category matches the filter",
+            "no_match_hint": "The catalogue is not empty, the filter just hid everything. Clear it to see all categories.",
+            "years_count": "{years} years",
+            "years_undetermined": "undetermined",
+            "closing_agenda": "winding down",
+            "tables_count": "{count} tables",
+            "deviation_extra": "company deviation: +{years} years",
+            "deviation_override": "period supplied by the company: {years} years",
+            "erasure_proposed": "can be proposed",
+            "erasure_never": "never proposed",
+            "action_accounting_retention": "Accounting retention periods",
+            "action_accounting_retention_hint": "Retention of accounting and tax records under sections 31 and 32 of the Accounting Act.",
+            "col": {
+                "category": "Category",
+                "years": "Period",
+                "basis": "Starts from",
+                "origin": "Origin of the period",
+                "source": "Legal source",
+                "status": "Evidence",
+                "verified_on": "Verified",
+                "erasure": "Erasure",
+                "tables": "Affected tables",
+                "accounting": "Accounting record"
+            },
+            "origin": {
+                "statute": "Statutory",
+                "house_policy": "House policy",
+                "none": "No period"
+            },
+            "origin_hint": {
+                "statute": "The number is in the act and the source says where.",
+                "house_policy": "The number was supplied by the application — it is in no statute.",
+                "none": "Proven that the act sets no retention period."
+            },
+            "basis": {
+                "calendar_years_after_record_year": "calendar years after the year the record relates to",
+                "calendar_years_after_issue_year": "calendar years after the year the record was issued",
+                "years_after_accounting_period_end": "years from the end of the accounting period the record relates to"
+            },
+            "source_status": {
+                "statute_verified": "verified against the wording of the act",
+                "statute_silent": "proven that no period exists",
+                "external_unverified": "not evidenced",
+                "undetermined": "not researched"
+            },
+            "detail_act": "Act",
+            "detail_section": "Provision",
+            "detail_amendment": "Amendment that introduced the current wording",
+            "detail_alternative_basis": "Second basis of the same provision",
+            "detail_alternative_basis_hint": "the assessment does not apply it; it counts from the year of the person's last trace",
+            "detail_policy": "Reason for the company deviation",
+            "detail_tables": "Affected tables",
+            "detail_no_tables": "no table",
+            "erasure_title": "What the periods mean for erasure",
+            "as_of": "As of",
+            "erasure_hint": "A proposal is built only from people whose period has elapsed and who are not held back. Everyone else is listed with a reason — a proposal that silently skips someone cannot be checked.",
+            "proposable_of": "of {total} people can be proposed for erasure",
+            "assessment_failed": "The assessment could not be loaded",
+            "assessment_empty": "There is nobody to assess yet",
+            "assessment_empty_hint": "The module holds no employee that a retention period would apply to.",
+            "block": {
+                "within_retention": "Retention period still running",
+                "legal_hold": "Held by a legal hold",
+                "undetermined_retention": "Period is undetermined",
+                "no_retention_basis": "No basis for the calculation",
+                "already_anonymized": "Already anonymised"
+            },
+            "block_hint": {
+                "within_retention": "the data still has to be kept",
+                "legal_hold": "audit, appeal, litigation, enforcement or insolvency",
+                "undetermined_retention": "a category without a period is never proposed until the company supplies one",
+                "no_retention_basis": "the person has no record the period could be derived from",
+                "already_anonymized": "personal data is already gone"
+            }
         },
         "features": {
             "module_shell": "Module shell and dashboard",

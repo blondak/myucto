@@ -143,6 +143,20 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollDimensionType'            => 'db:payroll_dimensions.dimension_type',
         'payroll.ts::PayrollModuleStatus'             => 'db:payroll_module_state.status',
 
+        // Retence. Katalog lhůt žije v kódu, ne v tabulce (lhůta je tvrzení
+        // o právu a musí projít revizí v diffu), takže se páruje s jeho
+        // konstantami. Původ lhůty je z celé sady nejcitlivější: rozejít se
+        // o hodnotu `house_policy` by znamenalo, že se dodaná politika na
+        // obrazovce ukáže jako paragraf.
+        'payrollRetention.ts::RetentionOrigin'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::ORIGINS',
+        'payrollRetention.ts::RetentionSourceStatus'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::SOURCE_STATUSES',
+        'payrollRetention.ts::RetentionBasis'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::BASES',
+        'payrollRetention.ts::PayrollRetentionBlock'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionAssessment::BLOCKS',
+
         // Podání
         'payroll.ts::PayrollSubmissionObligationStatus'     => 'db:payroll_obligations.status',
         'payroll.ts::PayrollSubmissionInboxStatus'          => 'db:payroll_submission_inbox_items.status',
@@ -296,6 +310,22 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.components.calculation'  => 'db:payroll_recurring_components.calculation_kind',
 
         'payroll.documents.kind' => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
+
+        // Retence skládá klíče dynamicky (`t(\`payroll.retention.origin.${origin}\`)`).
+        // Chybějící popisek by na obrazovce vypsal `house_policy` — přesně
+        // u sloupce, který má odlišit zákon od rozhodnutí aplikace.
+        'payroll.retention.origin'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::ORIGINS',
+        'payroll.retention.origin_hint'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::ORIGINS',
+        'payroll.retention.source_status'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::SOURCE_STATUSES',
+        'payroll.retention.basis'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::BASES',
+        'payroll.retention.block'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionAssessment::BLOCKS',
+        'payroll.retention.block_hint'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionAssessment::BLOCKS',
 
         // Roční zúčtování skládá klíče dynamicky z kódu překážky i stavu
         // evidence, takže statická i18n brána na ně nedosáhne. Chybějící věta
