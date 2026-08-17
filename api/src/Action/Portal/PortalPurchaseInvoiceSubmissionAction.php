@@ -24,6 +24,17 @@ final class PortalPurchaseInvoiceSubmissionAction
     private const MAX_FILES = 20;
     private const STATUSES = ['submitted', 'processing', 'needs_information', 'processed', 'rejected'];
 
+    /**
+     * Klient vidí stav svého podání a důvod, proč po něm účetní něco chce
+     * (`status_reason`). Interní diagnostika zpracování už mu nic neříká a
+     * `extraction_error` nese surovou zprávu výjimky — do portálu nepatří.
+     */
+    private const INTERNAL_FIELDS = [
+        'extraction_status', 'extraction_source', 'extraction_error',
+        'document_sha256', 'document_filename', 'thumb_status',
+        'processed_by', 'processed_by_name', 'processing_started_at',
+    ];
+
     public function __construct(
         private readonly PurchaseInvoiceSubmissionRepository $submissions,
         private readonly PurchaseInvoiceSubmissionUploadService $upload,
@@ -40,7 +51,21 @@ final class PortalPurchaseInvoiceSubmissionAction
             ? (string) $q['status'] : null;
         $limit = max(1, min(100, (int) ($q['limit'] ?? 50)));
         $offset = max(0, (int) ($q['offset'] ?? 0));
-        return Json::ok($response, $this->submissions->paginate($supplierId, $status, $limit, $offset));
+        $page = $this->submissions->paginate($supplierId, $status, $limit, $offset);
+        $page['items'] = array_map([$this, 'portalView'], $page['items']);
+        return Json::ok($response, $page);
+    }
+
+    /**
+     * @param array<string,mixed> $submission
+     * @return array<string,mixed>
+     */
+    private function portalView(array $submission): array
+    {
+        foreach (self::INTERNAL_FIELDS as $field) {
+            unset($submission[$field]);
+        }
+        return $submission;
     }
 
     public function upload(Request $request, Response $response): Response
@@ -132,7 +157,7 @@ final class PortalPurchaseInvoiceSubmissionAction
 
         $duplicates = count(array_filter($items, static fn(array $item): bool => !empty($item['duplicate'])));
         return Json::ok($response, [
-            'items' => array_map(static fn(array $item): array => $item['submission'] + [
+            'items' => array_map(fn(array $item): array => $this->portalView($item['submission']) + [
                 'duplicate' => (bool) $item['duplicate'],
             ], $items),
             'created' => count($items) - $duplicates,

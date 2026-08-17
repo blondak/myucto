@@ -26,15 +26,9 @@ export interface PurchaseInvoiceSubmission {
   submitted_via: 'portal' | 'document_request' | 'staff'
   note: string | null
   document_kind_hint: PurchaseInvoiceSubmissionKindHint | null
-  document_sha256: string
   status: PurchaseInvoiceSubmissionStatus
   status_reason: string | null
-  extraction_status: 'not_started' | 'running' | 'succeeded' | 'failed'
-  extraction_source: string | null
-  extraction_error: string | null
   purchase_invoice_id: number | null
-  processed_by: number | null
-  processing_started_at: string | null
   processed_at: string | null
   created_at: string
   updated_at: string
@@ -42,14 +36,25 @@ export interface PurchaseInvoiceSubmission {
   mime_type: string
   doc_type: 'pdf' | 'image' | 'xml' | 'other'
   size_bytes: number
-  thumb_status: string
   submitted_by_name: string | null
-  processed_by_name: string | null
   vendor_invoice_number: string | null
   purchase_invoice_varsymbol: string | null
   vendor_name: string | null
   request_count: number
   duplicate?: boolean
+  /**
+   * Interní diagnostika zpracování — servíruje ji jen účetní fronta.
+   * V odpovědi klientského portálu tyhle klíče nejsou, viz
+   * PortalPurchaseInvoiceSubmissionAction::portalView().
+   */
+  extraction_status?: 'not_started' | 'running' | 'succeeded' | 'failed'
+  extraction_source?: string | null
+  extraction_error?: string | null
+  document_sha256?: string
+  thumb_status?: string
+  processed_by?: number | null
+  processed_by_name?: string | null
+  processing_started_at?: string | null
 }
 
 export interface PurchaseInvoiceSubmissionPage {

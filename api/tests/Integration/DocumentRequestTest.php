@@ -464,6 +464,65 @@ final class DocumentRequestTest extends TestCase
         $this->trackSubmissionFile($submission);
     }
 
+    public function testPortalNeverServesInternalProcessingDiagnostics(): void
+    {
+        $created = $this->upload->submit(
+            $this->uploadedFile('diagnostika.pdf', "%PDF-1.4\n% synthetic portal projection"),
+            $this->supplierA,
+            $this->userId,
+            'portal',
+        );
+        $submission = $created['submission'];
+        $submissionId = (int) $submission['id'];
+        $this->trackSubmissionFile($submission);
+        self::assertTrue($this->submissions->claimForExtraction($submissionId, $this->supplierA));
+        $this->submissions->extractionFailed(
+            $submissionId,
+            $this->supplierA,
+            'ai',
+            'SQLSTATE[HY000]: interní hláška s cestou C:\\inetpub\\storage',
+        );
+        self::assertTrue($this->submissions->needsInformation(
+            $submissionId,
+            $this->supplierA,
+            'Doklad je nečitelný, pošlete ho prosím znovu.',
+        ));
+
+        $action = new PortalPurchaseInvoiceSubmissionAction(
+            $this->submissions,
+            $this->upload,
+            $this->activity,
+            $this->ipMatcher,
+        );
+        $response = $action->list(
+            (new ServerRequestFactory())
+                ->createServerRequest('GET', '/api/portal/purchase-invoice-submissions')
+                ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierA)
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'client']),
+            (new ResponseFactory())->createResponse(),
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $payload = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $row = null;
+        foreach ($payload['items'] as $item) {
+            if ((int) $item['id'] === $submissionId) $row = $item;
+        }
+        self::assertIsArray($row, 'Klient musí své podání ve frontě vidět.');
+        self::assertSame(
+            'Doklad je nečitelný, pošlete ho prosím znovu.',
+            $row['status_reason'],
+            'Důvod, proč po klientovi účetní něco chce, je naopak jediná užitečná zpráva.',
+        );
+        foreach (['extraction_error', 'extraction_source', 'extraction_status',
+            'document_sha256', 'document_filename', 'processed_by_name'] as $field) {
+            self::assertArrayNotHasKey(
+                $field,
+                $row,
+                "Portál nesmí klientovi servírovat interní diagnostiku ($field).",
+            );
+        }
+    }
+
     public function testUploadOnRequestOfOtherSupplierIsNotFound(): void
     {
         // Požadavek patří firmě B; klient přihlášený jako firma A ho nesmí ani vidět, ani ovlivnit.
