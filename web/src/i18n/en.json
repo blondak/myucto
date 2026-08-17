@@ -3948,6 +3948,11 @@
         "editor_origin_title": "Original being processed",
         "editor_origin_hint": "After saving, the original is securely linked to the received invoice and the submission is closed.",
         "editor_origin_unavailable": "This submitted document can no longer be processed manually. Refresh the incoming queue.",
+        "editor_handoff_available": "The document could not be loaded automatically. You can enter it manually or send it to your accountant with one click.",
+        "editor_handoff_hint": "Do not want to retype the details? Save the original to the inbox and send it to your accountant for processing.",
+        "editor_handoff_action": "Save and send to accountant",
+        "editor_handoff_success": "The document was saved and sent to your accountant.",
+        "editor_handoff_duplicate": "This document has already been sent to your accountant.",
         "status": {
             "submitted": "Submitted",
             "processing": "Processing",

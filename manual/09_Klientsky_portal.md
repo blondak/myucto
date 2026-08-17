@@ -131,7 +131,11 @@ kde stačí vybrat soubor; klient nemusí opisovat dodavatele, částky ani DPH.
 rychlé odkazy **Vystavit fakturu**, **Nahrát přijatou fakturu** a **Přidat kontakt**
 zůstávají k dispozici podle oprávnění a vedou na plné editory
 [Faktur](14_Faktury.md), [Přijatých faktur](23_Prijate_faktury.md) a
-[Klientů](18_Klienti.md).
+[Klientů](18_Klienti.md). Když klient v editoru přijaté faktury nahraje běžné PDF
+nebo fotografii, ze kterých se údaje automaticky nenačtou, může je stále vyplnit
+ručně. Druhou možností je jediné tlačítko **Uložit a předat účetní**: formulář se
+nezaloží jako neúplná faktura a původní soubor se přesune do stejné bezpečné
+podatelny jako při rychlé akci.
 
 ## 9.5 Zámek zaúčtovaných dokladů
 

@@ -72,7 +72,9 @@ Nad formulářem je **drag & drop zóna** pro PDF, fotku, ISDOC nebo ISDOCX:
 - Běžné PDF bez vloženého ISDOC nebo fotka se pouze připraví jako příloha. Pole
   vyplníš ručně a originál se po prvním uložení automaticky **archivuje** mimo
   webroot. Pro nestrukturované PDF lze podle oprávnění použít také
-  [AI extrakci](25_AI_extrakce.md).
+  [AI extrakci](25_AI_extrakce.md). Klient s právem předávat doklady může místo
+  opisování kliknout **Uložit a předat účetní**: stejný originál se jedním krokem
+  uloží do podatelny mimo účetnictví a objeví se účetní v Příchozích dokladech.
 - **Strojově čitelný originál (ISDOC/ISDOCX) se uchová jako důkazní stopa.** U faktur importovaných ze strukturovaného zdroje (`.isdoc`, `.isdocx`, nebo ISDOC vložený v PDF/A-3) se vedle vizuálního PDF trvale archivuje i **původní strojový doklad**. Pro audit a kontrolu z finančního úřadu má při 10leté archivační lhůtě vyšší hodnotu než PDF render a umožňuje zpětnou rekonstrukci dat. V detailu faktury ho stáhneš přes badge **„ISDOC"** v hlavičce nebo akci **Zdrojový doklad** v menu. Bajty se ukládají tak, jak přišly — `.isdocx` se nerozbaluje (zachová podpis obálky), embedded ISDOC se uloží jako vytažené XML a originál se nikdy nepřepíše.
 
 > 💡 ISDOC/ISDOCX se importuje při **zakládání nové faktury**. Dropzone na detailu

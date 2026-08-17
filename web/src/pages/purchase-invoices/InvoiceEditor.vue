@@ -18,6 +18,7 @@ import {
   type AiPostingSuggestion,
 } from '@/api/purchaseInvoices'
 import {
+  portalPurchaseInvoiceSubmissionsApi,
   purchaseInvoiceSubmissionsApi,
   type PurchaseInvoiceSubmission,
 } from '@/api/purchaseInvoiceSubmissions'
@@ -47,6 +48,7 @@ import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import PaymentCurrencyBlock from '@/components/purchase/PaymentCurrencyBlock.vue'
 import ExchangeRateInput from '@/components/purchase/ExchangeRateInput.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { btnFilled } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 
@@ -336,6 +338,7 @@ const existingPdf = ref<{ path: string; hash: string; size: number; name: string
 // na očích při kontrole vytěžených dat (viz komentář u `structuredSource` v populate()).
 const pdfPreviewOpen = ref(false)
 const pdfUploading = ref(false)
+const handoffUploading = ref(false)
 const dropzoneVisible = ref(true)
 
 // Náhled PDF/obrázku připraveného k nahrání u NOVÉ faktury (ještě není na serveru).
@@ -344,6 +347,13 @@ const dropzoneVisible = ref(true)
 // jinak by blob zůstal viset v paměti.
 const pendingPdfUrl = ref<string | null>(null)
 const pendingPdfPreviewOpen = ref(false)
+const pendingPdfFile = ref<File | null>(null)
+const canSubmitDocuments = computed(() =>
+  auth.isClientRole && auth.canWrite('documents.submit'),
+)
+const canHandoffPendingDocument = computed(() =>
+  canSubmitDocuments.value && pendingPdfFile.value !== null,
+)
 function setPendingPdfUrl(file: File | null) {
   if (pendingPdfUrl.value) {
     URL.revokeObjectURL(pendingPdfUrl.value)
@@ -1105,7 +1115,9 @@ async function onPdfDropped(file: File) {
       // a nahraj ho jako přílohu až po uložení formuláře.
       if (extension === 'pdf' && e?.response?.data?.error?.code === 'no_embedded_isdoc') {
         queuePendingPdf(file)
-        toast.info(t('purchase_invoice.extraction.no_embedded_isdoc'))
+        toast.info(t(canSubmitDocuments.value
+          ? 'purchase_submissions.editor_handoff_available'
+          : 'purchase_invoice.extraction.no_embedded_isdoc'))
         return
       }
       toast.error(apiErrorMessage(e))
@@ -1132,7 +1144,24 @@ function clearPendingPdf() {
   dropzoneVisible.value = true
 }
 
-const pendingPdfFile = ref<File | null>(null)
+async function handoffPendingDocument() {
+  const file = pendingPdfFile.value
+  if (!file || !canHandoffPendingDocument.value || handoffUploading.value) return
+  if (blockDemoMutation()) return
+  handoffUploading.value = true
+  try {
+    const result = await portalPurchaseInvoiceSubmissionsApi.upload([file], '', 'invoice')
+    clearPendingPdf()
+    toast.success(t(result.duplicates > 0 && result.created === 0
+      ? 'purchase_submissions.editor_handoff_duplicate'
+      : 'purchase_submissions.editor_handoff_success'))
+    await router.push('/portal/purchase-invoice-submissions')
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    handoffUploading.value = false
+  }
+}
 
 async function uploadPdfToInvoice(id: number, file: File) {
   pdfUploading.value = true
@@ -1473,6 +1502,25 @@ function fieldErr(key: string): string | null {
               {{ t('common.remove') }}
             </button>
           </div>
+        </div>
+        <div v-if="canHandoffPendingDocument" class="px-4 py-3 border-t border-success-500/30 bg-surface/70 flex flex-wrap items-center justify-between gap-3">
+          <p class="text-sm text-neutral-700 max-w-2xl">
+            {{ t('purchase_submissions.editor_handoff_hint') }}
+          </p>
+          <button
+            type="button"
+            data-testid="handoff-pending-document"
+            :disabled="handoffUploading"
+            :class="btnFilled('primary')"
+            @click="handoffPendingDocument"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5a1 1 0 001 1h12a1 1 0 001-1v-5" />
+            </svg>
+            {{ handoffUploading
+              ? t('purchase_submissions.uploading')
+              : t('purchase_submissions.editor_handoff_action') }}
+          </button>
         </div>
         <!-- Inline náhled ze souboru v paměti (blob: URL) — faktura ještě není na serveru.
              Obrázek přes <img>, PDF přes <embed> (NE <iframe> ani #view= fragment — Chrome

@@ -3948,6 +3948,11 @@
         "editor_origin_title": "Zpracovávaný originál",
         "editor_origin_hint": "Po uložení se originál bezpečně připojí k přijaté faktuře a předání se uzavře.",
         "editor_origin_unavailable": "Předaný doklad už nelze ručně zpracovat. Obnovte příchozí frontu.",
+        "editor_handoff_available": "Doklad se nepodařilo načíst automaticky. Můžete jej vyplnit ručně, nebo jedním klikem předat účetní.",
+        "editor_handoff_hint": "Nechcete údaje opisovat? Uložte originál do podatelny a předejte jej účetní ke zpracování.",
+        "editor_handoff_action": "Uložit a předat účetní",
+        "editor_handoff_success": "Doklad byl uložen a předán účetní.",
+        "editor_handoff_duplicate": "Tento doklad už byl účetní předán.",
         "status": {
             "submitted": "Předáno",
             "processing": "Zpracovává se",
