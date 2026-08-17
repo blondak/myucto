@@ -94,6 +94,66 @@ final class PayrollPersonStatutoryEvidenceValidatorTest extends TestCase
         }
     }
 
+    /**
+     * Protějšek pravidla „česká sociální jurisdikce ⇒ A1 se netýká“, jen
+     * otočený: pojišťovna je tuzemský protějšek, ne přeshraniční doklad.
+     */
+    public function testRejectsCzechHealthJurisdictionWithInapplicableInsurer(): void
+    {
+        $raw = $this->completeRaw();
+        $raw['health']['coverages'][0] = [
+            ...$raw['health']['coverages'][0],
+            'jurisdiction' => 'czech_regime_verified',
+            'insurer_status' => 'not_applicable',
+            'insurer_code' => null,
+            'insurer_evidence_reference' => null,
+        ];
+
+        $this->expectException(\InvalidArgumentException::class);
+        // Hláška musí říct, co udělat — obě přípustné cesty ven.
+        $this->expectExceptionMessage('nechte jako neověřenou');
+        $this->validator->normalize(42, '2026-06-30', $raw);
+    }
+
+    /**
+     * `unverified` je přiznané „zatím nevíme“, ne protichůdné tvrzení —
+     * rozdělaná karta musí jít uložit. Blokátorem se to stane až u běhu.
+     */
+    public function testAcceptsCzechHealthJurisdictionWithUnverifiedInsurer(): void
+    {
+        $raw = $this->completeRaw();
+        $raw['health']['coverages'][0] = [
+            ...$raw['health']['coverages'][0],
+            'jurisdiction' => 'czech_regime_verified',
+            'insurer_status' => 'unverified',
+            'insurer_code' => null,
+            'insurer_evidence_reference' => null,
+        ];
+
+        $snapshot = $this->validator->normalize(42, '2026-06-30', $raw);
+
+        self::assertSame('unverified', $snapshot['health']['coverage']['insurer_status']);
+    }
+
+    /** Zahraniční režim naopak žádnou českou pojišťovnu nemá — a mít nemusí. */
+    public function testAcceptsForeignHealthJurisdictionWithInapplicableInsurer(): void
+    {
+        $raw = $this->completeRaw();
+        $raw['health']['coverages'][0] = [
+            ...$raw['health']['coverages'][0],
+            'jurisdiction' => 'foreign_regime_verified',
+            'foreign_country_code' => 'SK',
+            'jurisdiction_evidence_reference' => 'document:health-jurisdiction',
+            'insurer_status' => 'not_applicable',
+            'insurer_code' => null,
+            'insurer_evidence_reference' => null,
+        ];
+
+        $snapshot = $this->validator->normalize(42, '2026-06-30', $raw);
+
+        self::assertSame('not_applicable', $snapshot['health']['coverage']['insurer_status']);
+    }
+
     public function testMissingEvidenceRemainsExplicitlyAbsent(): void
     {
         $snapshot = $this->validator->normalize(42, '2026-06-30', [

@@ -469,6 +469,17 @@ export function rowIssues(
     }
   }
 
+  // Protějšek serverového pravidla „ověřená česká zdravotní jurisdikce nemůže
+  // mít pojišťovnu jako nepoužitelnou". Kaskáda v `applyFieldChange` řeší jen
+  // přepnutí JURISDIKCE; `insurer_status` si uživatel může přepnout přímo, a to
+  // je jediná cesta, jak se do zakázané kombinace ve formuláři dostat.
+  if (section.key === 'health_coverages'
+    && text(row, 'jurisdiction') === 'czech_regime_verified'
+    && text(row, 'insurer_status') === 'not_applicable'
+  ) {
+    issues.push({ key: 'insurer_not_applicable_in_czech_regime' })
+  }
+
   if (section.key === 'social_jurisdictions' && text(row, 'a1_status') === 'verified') {
     // Validátor porovnává platnost A1 se dnem snímku i se začátkem účinnosti
     // řádku — rozhoduje ten pozdější z nich.

@@ -2387,6 +2387,7 @@
                     "country_must_be_foreign": "Nerezident musí mít jiný stát než CZ. Je-li to Čech, přepněte volbu na „Český daňový rezident“.",
                     "insurer_required": "Vyberte zdravotní pojišťovnu ze seznamu, nebo přepněte stav na „Neověřeno“.",
                     "insurer_unknown": "Kód pojišťovny {code} v číselníku není — vyberte pojišťovnu ze seznamu.",
+                    "insurer_not_applicable_in_czech_regime": "Kdo podléhá českému veřejnému zdravotnímu pojištění, je vždy u některé pojišťovny. Vyberte ji, nebo — dokud ji nezjistíte — přepněte stav na „Neověřeno“.",
                     "reference_required": "Vyberte typický důvod u pole „{label}“, nebo napište vlastní označení dokladu.",
                     "reference_invalid": "Označení dokladu u pole „{label}“ smí obsahovat jen písmena, číslice a . : / _ - a musí začínat písmenem nebo číslicí.",
                     "employer_unknown": "Zvolený zaměstnavatel nemá za tento měsíc doložený vyměřovací základ — nejdřív ho doplňte.",

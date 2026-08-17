@@ -147,6 +147,51 @@ final class PayrollPersonStatutoryEvidenceRepositoryTest extends TestCase
         );
     }
 
+    /**
+     * Řádek, který vznikl PŘED zpřísněním validátoru, nesmí uzamknout stránku.
+     *
+     * Kombinace „ověřená česká jurisdikce + pojišťovna se netýká“ šla do
+     * databáze uložit (CHECK `chk_pp_health_coverage_insurer` váže stav jen na
+     * kód a doklad, ne na jurisdikci) a validátor ji dnes odmítá. Kdyby ji
+     * `editorView()` pouštěl přes validátor, uživatel by dostal chybu místo
+     * formuláře — a jediný nesmysl v evidenci by nešlo opravit. Čtecí cesta
+     * proto vrací syrovou historii a rozpor hlásí jen jako blokátor.
+     */
+    public function testLegacyConflictingCoverageStillOpensTheEditor(): void
+    {
+        $pdo = $this->db->pdo();
+        $this->insertCompleteEvidence($pdo);
+        $pdo->prepare(
+            'UPDATE payroll_person_health_coverage_history
+                SET insurer_status = "not_applicable",
+                    insurer_code = NULL,
+                    insurer_evidence_reference = NULL
+              WHERE supplier_id = ? AND employee_id = ?'
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        $view = $this->repository->editorView(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-06-30',
+        );
+
+        self::assertNotNull($view);
+        self::assertCount(1, $view['sections']['health_coverages']);
+        self::assertSame(
+            'not_applicable',
+            $view['sections']['health_coverages'][0]['insurer_status'],
+            'Editor musí ukázat i řádek, který validátor odmítá — jinak ho nejde opravit.',
+        );
+        self::assertContains(
+            'statutory_evidence_snapshot_missing_or_mismatched',
+            $view['blockers'],
+        );
+        // Kontrola, že test měří právě ten rozpor: snímek na něm padá.
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('nechte jako neověřenou');
+        $this->repository->snapshot($this->supplierId, $this->employeeId, '2026-06-30');
+    }
+
     private function insertCompleteEvidence(PDO $pdo): void
     {
         $pdo->prepare(

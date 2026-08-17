@@ -138,6 +138,9 @@ function validatorRejection(
     if (status === 'unverified' && evidence !== null) {
       return 'Neověřená zdravotní pojišťovna nesmí nést ověřený důkaz.'
     }
+    if (jurisdiction === 'czech_regime_verified' && status === 'not_applicable') {
+      return 'Ověřená česká zdravotní jurisdikce nemůže mít pojišťovnu označenou jako nepoužitelnou.'
+    }
   }
   if (section === 'health_month_evidence') {
     const responsibility = value('top_up_responsibility')
@@ -458,6 +461,27 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
       (wrapper.get('[data-test="health_coverages-0-insurer_code"]').element as HTMLSelectElement)
         .value,
     ).toBe('205')
+
+    await wrapper.get('[data-test="statutory-evidence-save"]').trigger('click')
+    await flushPromises()
+    expect(validatorRejection('health_coverages', savedRow('health_coverages'))).toBeNull()
+  })
+
+  it('„pojišťovna se netýká“ v českém režimu se pojmenuje dřív, než ji odmítne server', async () => {
+    const wrapper = await startEditing()
+    await wrapper.get('[data-test="add-health_coverages"]').trigger('click')
+    // Kaskáda hlídá jen přepnutí jurisdikce; sem se uživatel dostane přepnutím
+    // samotného stavu pojišťovny — a to je přesně kombinace, kterou server
+    // odmítá (`Ověřená česká zdravotní jurisdikce nemůže mít pojišťovnu…`).
+    await wrapper.get('[data-test="health_coverages-0-insurer_status"]')
+      .setValue('not_applicable')
+
+    expect(wrapper.get('[data-test="issues-health_coverages-0"]').text()).toContain(
+      'payroll.people.statutory_evidence.issue.insurer_not_applicable_in_czech_regime',
+    )
+
+    await wrapper.get('[data-test="health_coverages-0-insurer_status"]').setValue('unverified')
+    expect(wrapper.find('[data-test="issues-health_coverages-0"]').exists()).toBe(false)
 
     await wrapper.get('[data-test="statutory-evidence-save"]').trigger('click')
     await flushPromises()

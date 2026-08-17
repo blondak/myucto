@@ -2387,6 +2387,7 @@
                     "country_must_be_foreign": "A non-resident must have a country other than CZ. For a Czech resident switch the option to “Czech tax resident”.",
                     "insurer_required": "Pick a health insurer from the list, or switch the status to “Unverified”.",
                     "insurer_unknown": "Insurer code {code} is not in the codebook — pick an insurer from the list.",
+                    "insurer_not_applicable_in_czech_regime": "Anyone covered by the Czech public health insurance always has an insurer. Pick one, or — until you find out which — switch the status to “Unverified”.",
                     "reference_required": "Pick a typical reason for “{label}”, or type your own document reference.",
                     "reference_invalid": "The document reference for “{label}” may contain only letters, digits and . : / _ - and must start with a letter or a digit.",
                     "employer_unknown": "The selected employer has no assessment base documented for this month — add it first.",
