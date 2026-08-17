@@ -101,6 +101,9 @@ const focusName = computed(() => {
   if (id === null) return null
   return people.value.find(person => person.id === id)?.full_name ?? null
 })
+// Zúžení běží nad načtenou stránkou, takže při víc stránkách nemusí být na téhle
+// vidět všechno, co ten člověk má. Pager zůstává, ale mlčet o tom nejde.
+const focusTruncated = computed(() => focusPersonId.value !== null && total.value > pageSize)
 function clearFocus(): void {
   focusPersonId.value = null
   const query = { ...route.query }
@@ -411,7 +414,12 @@ onMounted(load)
       </div>
     </header>
 
-    <PayrollFocusNotice v-if="focusName" :name="focusName" @clear="clearFocus" />
+    <PayrollFocusNotice
+      v-if="focusName"
+      :name="focusName"
+      :truncated="focusTruncated"
+      @clear="clearFocus"
+    />
 
     <nav class="flex gap-1 overflow-x-auto border-b border-neutral-200" :aria-label="t('payroll.documents.tabs_label')">
       <button

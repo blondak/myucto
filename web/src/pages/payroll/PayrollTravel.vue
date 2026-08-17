@@ -129,6 +129,11 @@ const focusName = computed(() => {
   const employment = employments.value.find(item => item.id === id)
   return employment ? `${employment.full_name} · ${employment.code}` : null
 })
+// Období může mít víc cest, než se do jedné dávky vejde. Prázdný zúžený výpis by
+// pak tvrdil „žádné cesty", i když jen leží za koncem načtené dávky — o tom musí
+// lišta říct, dokud server neumí filtrovat podle vztahu.
+const focusTruncated = computed(() =>
+  focusEmploymentId.value !== null && total.value > TRAVEL_FOCUS_LIMIT)
 function clearFocus() {
   focusEmploymentId.value = null
   const query = { ...route.query }
@@ -478,7 +483,13 @@ onMounted(load)
     />
 
     <template v-else>
-      <PayrollFocusNotice v-if="focusName" :name="focusName" class="mb-4" @clear="clearFocus" />
+      <PayrollFocusNotice
+        v-if="focusName"
+        :name="focusName"
+        :truncated="focusTruncated"
+        class="mb-4"
+        @clear="clearFocus"
+      />
 
       <p
         v-if="visibleTrips.length === 0"

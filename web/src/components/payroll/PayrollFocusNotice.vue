@@ -13,6 +13,13 @@ import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 defineProps<{
   /** Koho se zúžení týká — jméno, ne id. */
   name: string
+  /**
+   * Zúžení proběhlo až v prohlížeči nad prvními N záznamy období, protože
+   * server filtr podle vztahu nezná. Když je záznamů víc, než se stihlo načíst,
+   * MUSÍ to lišta říct: prázdný výsledek by jinak tvrdil „ten člověk tu nic
+   * nemá", i když jeho záznamy jen leží za koncem načtené dávky.
+   */
+  truncated?: boolean
 }>()
 
 defineEmits<{ clear: [] }>()
@@ -27,6 +34,9 @@ const { t } = useI18n()
   >
     <span class="min-w-0">
       {{ t('payroll.agendas.focus.title', { name }) }}
+      <span v-if="truncated" class="block text-warning-800" data-test="payroll-focus-truncated">
+        {{ t('payroll.agendas.focus.truncated') }}
+      </span>
     </span>
     <button
       type="button"

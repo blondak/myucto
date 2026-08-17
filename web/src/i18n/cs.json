@@ -608,6 +608,8 @@
             },
             "focus": {
                 "title": "Seznam je zúžený na {name}.",
+                "truncated": "Období má víc záznamů, než se do zúžení stihlo načíst — nemusí tu být všechny. Zrušte zúžení a projděte seznam po stránkách.",
+                "unknown_person": "vybraného zaměstnance",
                 "clear": "Zrušit zúžení"
             }
         },

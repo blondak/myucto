@@ -126,6 +126,7 @@ function mountPage() {
 describe('PayrollQuickInputs', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.routeQuery = {}
     m.canWrite.mockReturnValue(true)
     m.load.mockImplementation(async period => ({
       period,
@@ -414,6 +415,26 @@ describe('PayrollQuickInputs', () => {
 
     expect(wrapper.text()).not.toContain('Starý měsíc')
     expect(m.load).toHaveBeenLastCalledWith('2026-07', { limit: 25, offset: 0 })
+  })
+
+  /**
+   * Zúžení z karty zaměstnance filtruje až prohlížeč nad načtenou dávkou období.
+   * Když hledaný vztah v dávce není, nesmí zůstat prázdná tabulka beze slova:
+   * pager je při zúžení schovaný, takže by uživatel neměl jak poznat, že se
+   * dívá na zúžený seznam — ani jak se ze zúžení dostat ven.
+   */
+  it('admits it when narrowing did not see the whole period', async () => {
+    m.routeQuery = { employment: '9999' }
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('Syntetická osoba')
+    const notice = wrapper.find('[data-test="payroll-focus-notice"]')
+    expect(notice.exists()).toBe(true)
+    expect(wrapper.find('[data-test="payroll-focus-truncated"]').exists()).toBe(true)
+    // Období závisí na dnešku, na kontraktu záleží jen ta druhá půlka: při
+    // zúžení se čte celá dávka od začátku, ne stránka.
+    expect(m.load).toHaveBeenLastCalledWith(expect.any(String), { limit: 200, offset: 0 })
   })
 
   it('invalidates old rows when loading a new payroll period fails', async () => {

@@ -92,10 +92,22 @@ const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
  */
 const QUICK_INPUT_FOCUS_LIMIT = 200
 const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
-const focusName = computed(() =>
-  focusEmploymentId.value === null || rows.value.length !== 1
-    ? null
-    : rows.value[0].full_name)
+/** Kolik řádků má celé období — proti tomu se pozná, že zúžení nevidělo všechno. */
+const periodTotal = ref(0)
+/*
+ * Lišta se zúžením musí být vidět i tehdy, když se hledaný člověk mezi načtenými
+ * řádky nenašel. Bez ní zůstane prázdná tabulka se schovaným pagerem a uživatel
+ * nemá jak poznat, že se dívá na zúžený seznam — ani jak se ze zúžení dostat.
+ */
+const focusName = computed(() => {
+  if (focusEmploymentId.value === null) return null
+  return rows.value.length === 1
+    ? rows.value[0].full_name
+    : t('payroll.agendas.focus.unknown_person')
+})
+const focusTruncated = computed(() =>
+  focusEmploymentId.value !== null
+  && (rows.value.length === 0 || periodTotal.value > QUICK_INPUT_FOCUS_LIMIT))
 
 function clearFocus(): void {
   focusEmploymentId.value = null
@@ -354,6 +366,7 @@ async function load(): Promise<void> {
     // Se zúžením je „kolik jich je" počet nalezených řádků, ne celý měsíc —
     // jinak by pager i souhrn mluvily o lidech, které tabulka neukazuje.
     total.value = focused === null ? month.total : items.length
+    periodTotal.value = month.total
     loadedPeriod.value = requestedPeriod
   } catch (error) {
     if (generation === loadGeneration) {
@@ -519,7 +532,12 @@ onMounted(load)
       {{ t('payroll.quick_inputs.validation_summary', { count: invalidFieldCount }) }}
     </div>
 
-    <PayrollFocusNotice v-if="focusName" :name="focusName" @clear="clearFocus" />
+    <PayrollFocusNotice
+      v-if="focusName"
+      :name="focusName"
+      :truncated="focusTruncated"
+      @clear="clearFocus"
+    />
 
     <section class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
       <div v-if="loading" class="p-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
