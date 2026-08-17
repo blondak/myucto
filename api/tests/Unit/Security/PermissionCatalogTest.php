@@ -44,6 +44,43 @@ final class PermissionCatalogTest extends TestCase
         self::assertTrue($checker->allows($client, 'invoices'));
     }
 
+    public function testDocumentSubmissionPermissionsAreRoleSeparated(): void
+    {
+        $catalog = new PermissionCatalog();
+        $definitions = $catalog->all();
+        self::assertSame(['staff'], $definitions['documents.inbox']['role_types']);
+        self::assertSame(['client'], $definitions['documents.submit']['role_types']);
+
+        $checker = new PermissionChecker($catalog);
+        $client = new EffectiveRole(4, 'Klient', 'client', true, $catalog->legacyPreset('client'));
+        $accountant = new EffectiveRole(2, 'Účetní', 'staff', true, $catalog->legacyPreset('accountant'));
+        self::assertTrue($checker->allows($client, 'documents.submit', AccessLevel::WRITE));
+        self::assertFalse($checker->allows($client, 'documents.inbox'));
+        self::assertTrue($checker->allows($accountant, 'documents.inbox', AccessLevel::WRITE));
+        self::assertFalse($checker->allows($accountant, 'documents.submit'));
+    }
+
+    /** Trvalé vyřazení originálu je samostatné právo, ne vlastnost účetní role. */
+    public function testInboxDeleteIsSeparateAndNotGrantedByDefault(): void
+    {
+        $catalog = new PermissionCatalog();
+        self::assertSame(['staff'], $catalog->all()['documents.inbox.delete']['role_types']);
+
+        $checker = new PermissionChecker($catalog);
+        $accountant = new EffectiveRole(2, 'Účetní', 'staff', true, $catalog->legacyPreset('accountant'));
+        $readonly = new EffectiveRole(3, 'Jen čtení', 'staff', true, $catalog->legacyPreset('readonly'));
+        self::assertFalse($checker->allows($accountant, 'documents.inbox.delete'),
+            'Účetní frontu obsluhuje, ale originál sama trvale nevyřazuje — právo jí přidělí správce.');
+        self::assertFalse($checker->allows($readonly, 'documents.inbox.delete'));
+
+        // Role s výslovně přiděleným právem ho má — a jde tedy i zkopírovat do dalších rolí.
+        $custom = new EffectiveRole(9, 'Správce podatelny', 'staff', true, [
+            'documents.inbox' => AccessLevel::WRITE->value,
+            'documents.inbox.delete' => AccessLevel::WRITE->value,
+        ]);
+        self::assertTrue($checker->allows($custom, 'documents.inbox.delete', AccessLevel::WRITE));
+    }
+
     public function testSuperadminBypassesMatrix(): void
     {
         $checker = new PermissionChecker(new PermissionCatalog());

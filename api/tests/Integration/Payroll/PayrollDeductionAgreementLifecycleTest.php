@@ -425,6 +425,65 @@ final class PayrollDeductionAgreementLifecycleTest extends TestCase
         self::assertSame($breakdown['net_payable_minor'], $sum);
     }
 
+    /**
+     * Nesražená dohoda bez důvodu je nečitelná: „nevešlo se to do nezabavitelné
+     * částky" se řeší penězi, kdežto „nezabavitelná částka stojí na nedoloženém
+     * nároku" se řeší doložením nároku. V číslech vypadají obě stejně, takže
+     * rozklad musí nést i rozsah evidence ze zmrazeného snímku.
+     */
+    public function testNetResultCarriesTheFrozenEnforcementEvidenceScope(): void
+    {
+        $agreement = $this->createAgreement('Stravenky', 50_000);
+        $revisionId = $this->approveRevision([
+            $this->personFixture(
+                $this->employeeId,
+                'Synteticka Osoba A',
+                $agreement,
+                50_000,
+                7,
+                evidenceSource: [
+                    'claim_register' => 'not_applicable',
+                    'dependants' => 'nothing_withheld',
+                    'spouse' => 'not_applicable',
+                ],
+            ),
+        ]);
+
+        $breakdown = $this->results->breakdown(
+            $this->supplierId,
+            $revisionId,
+            $this->employeeId,
+        );
+
+        self::assertSame([
+            'claim_register' => 'not_applicable',
+            'dependants' => 'nothing_withheld',
+            'spouse' => 'not_applicable',
+        ], $breakdown['enforcement_evidence_source']);
+    }
+
+    /**
+     * Revizi spočtenou dřív, než se rozsah začal ukládat, se dopočítat NESMÍ:
+     * tehdejší kód evidenci vyžadoval bezpodmínečně, takže o jejím rozsahu
+     * netvrdil nic. Obrazovka o důvodu radši mlčí, než aby si nějaký domyslela.
+     */
+    public function testNetResultLeavesTheScopeUnsetForOlderRevisions(): void
+    {
+        $agreement = $this->createAgreement('Stravenky', 50_000);
+        $revisionId = $this->approveRevision([
+            $this->personFixture($this->employeeId, 'Synteticka Osoba A', $agreement, 50_000, 7),
+        ]);
+
+        $breakdown = $this->results->breakdown(
+            $this->supplierId,
+            $revisionId,
+            $this->employeeId,
+        );
+
+        self::assertArrayHasKey('enforcement_evidence_source', $breakdown);
+        self::assertNull($breakdown['enforcement_evidence_source']);
+    }
+
     public function testNetResultApiRejectsPersonOutsideTheRevision(): void
     {
         $agreement = $this->createAgreement('Stravenky', 50_000);
@@ -467,6 +526,8 @@ final class PayrollDeductionAgreementLifecycleTest extends TestCase
 
     /**
      * @param array<string,mixed> $agreement
+     * @param array<string,string>|null $evidenceSource `null` = starší revize,
+     *        která rozsah exekuční evidence vůbec neukládala.
      * @return array{input:array<string,mixed>,result:array<string,mixed>}
      */
     private function personFixture(
@@ -476,6 +537,7 @@ final class PayrollDeductionAgreementLifecycleTest extends TestCase
         int $requestedMinor,
         int $accountId,
         bool $splitPayout = false,
+        ?array $evidenceSource = null,
     ): array {
         $net = (new PayrollNetCalculator())->calculate(new PayrollNetInput(
             personReference: (string) $employeeId,
@@ -570,7 +632,9 @@ final class PayrollDeductionAgreementLifecycleTest extends TestCase
                     'net_payable_minor_units' => $net->netPayableMinorUnits,
                     'net_pay' => $net->jsonSerialize(),
                 ],
-            ],
+            ] + ($evidenceSource === null ? [] : [
+                'enforcement' => ['result' => ['evidence_source' => $evidenceSource]],
+            ]),
         ];
     }
 

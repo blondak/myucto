@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Accounting;
 use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Service\Accounting\Payroll\PayrollCalculator;
 use MyInvoice\Service\Accounting\Payroll\PayrollPostingService;
 use MyInvoice\Service\IpMatcher;
@@ -39,6 +40,7 @@ final class PayrollAction
         private readonly PayrollPostingService $payroll,
         private readonly Connection $db,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollModuleStateRepository $moduleState,
     ) {}
 
     /** POST /api/accounting/payroll/preview */
@@ -86,6 +88,11 @@ final class PayrollAction
         $input = $this->validate($request, $response, $err);
         if ($input === null) return $err;
 
+        $conflict = $this->payrollModuleConflict($supplierId, $input['year'], $input['month']);
+        if ($conflict !== null) {
+            return Json::error($response, 'payroll_module_active', $conflict, 409);
+        }
+
         $employeeId = $this->parseEmployeeId($request, $supplierId, $response, $err);
         if ($err !== null) return $err;
 
@@ -108,6 +115,43 @@ final class PayrollAction
         }
 
         return Json::ok($response, $result);
+    }
+
+    /**
+     * Měsíc, který už zpracovává modul Mzdy, se přes rekapitulaci účtovat nesmí.
+     *
+     * Obě cesty účtují na tytéž účty (521/331/342/336…) a jedna o druhé neví,
+     * takže by mzda seděla v deníku dvakrát — a idempotence rekapitulace na
+     * RRRRMM proti tomu nepomůže, protože hlídá jen vlastní zápisy. Období
+     * PŘED přechodem zůstávají otevřená: do modulu se přechází uprostřed roku
+     * a starší měsíce se dál opravují tam, kde vznikly.
+     *
+     * Chybějící tabulka = mzdové migrace na téhle databázi neproběhly a modul
+     * neexistuje; rekapitulace pak musí fungovat beze změny.
+     */
+    private function payrollModuleConflict(int $supplierId, int $year, int $month): ?string
+    {
+        if (!$this->db->hasTable('payroll_module_state')) {
+            return null;
+        }
+
+        $state = $this->moduleState->get($supplierId);
+        $start = $state['start_period'];
+        if ($state['status'] !== 'active' || $start === null) {
+            return null;
+        }
+        $period = sprintf('%04d-%02d', $year, $month);
+        if ($period < $start) {
+            return null;
+        }
+
+        return sprintf(
+            'Mzdu za %02d/%d už zpracovává modul Mzdy (od %s). Přes mzdovou rekapitulaci by '
+            . 'se zaúčtovala podruhé — rekapitulace zůstává jen pro období před přechodem.',
+            $month,
+            $year,
+            substr($start, 5, 2) . '/' . substr($start, 0, 4),
+        );
     }
 
     /**

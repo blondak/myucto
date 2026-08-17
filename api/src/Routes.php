@@ -84,6 +84,7 @@ use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollDependantAction;
+use MyInvoice\Action\Payroll\PayrollEmploymentAgendaSummaryAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentDimensionAction;
 use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
@@ -107,6 +108,7 @@ use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
 use MyInvoice\Action\Payroll\PayrollPersonQuickEditAction;
 use MyInvoice\Action\Payroll\PayrollOpeningBalanceAction;
 use MyInvoice\Action\Payroll\PayrollPersonSensitiveRevealAction;
+use MyInvoice\Action\Payroll\PayrollPersonStatutoryEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollPostingReconciliationAction;
 use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
 use MyInvoice\Action\Payroll\PayrollRegistrationAction;
@@ -566,6 +568,16 @@ final class Routes
         // Přijaté faktury (purchase invoices) — fáze 1 integrace forku.
         // Všechny chráněné AuthMiddleware + SupplierScopeMiddleware (skrz globální group).
         // scan-inbox je admin/accountant only (check v Action).
+        $app->get    ('/api/purchase-invoice-submissions', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionAction::class, 'list']);
+        $app->post   ('/api/purchase-invoice-submissions', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionAction::class, 'upload']);
+        $app->get    ('/api/purchase-invoice-submissions/{id:[0-9]+}', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionAction::class, 'get']);
+        $app->get    ('/api/purchase-invoice-submissions/{id:[0-9]+}/preview', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionFileAction::class, 'staffPreview']);
+        $app->get    ('/api/purchase-invoice-submissions/{id:[0-9]+}/download', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionFileAction::class, 'staffDownload']);
+        $app->post   ('/api/purchase-invoice-submissions/{id:[0-9]+}/extract', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionAction::class, 'extract']);
+        $app->post   ('/api/purchase-invoice-submissions/{id:[0-9]+}/needs-information', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionAction::class, 'needsInformation']);
+        $app->post   ('/api/purchase-invoice-submissions/{id:[0-9]+}/reject', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionAction::class, 'reject']);
+        $app->delete ('/api/purchase-invoice-submissions/{id:[0-9]+}', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionAction::class, 'delete']);
+
         $app->post   ('/api/purchase-invoices/scan-inbox',                ScanInboxAction::class);
         $app->post   ('/api/purchase-invoices/import-structured',         ImportStructuredPurchaseInvoiceAction::class);
         $app->get    ('/api/purchase-invoices/export',                     ExportPurchaseInvoicesAction::class);
@@ -922,6 +934,14 @@ final class Routes
                 [PayrollPersonSensitiveRevealAction::class, 'post'],
             );
             $g->get(
+                '/people/{id:[0-9]+}/statutory-evidence',
+                [PayrollPersonStatutoryEvidenceAction::class, 'show'],
+            );
+            $g->put(
+                '/people/{id:[0-9]+}/statutory-evidence',
+                [PayrollPersonStatutoryEvidenceAction::class, 'save'],
+            );
+            $g->get(
                 '/people/{id:[0-9]+}/statutory-openings',
                 [PayrollOpeningBalanceAction::class, 'show'],
             );
@@ -1140,6 +1160,12 @@ final class Routes
             $g->get('/settings/dimensions/{id:[0-9]+}', [PayrollDimensionAction::class, 'detail']);
             $g->put('/settings/dimensions/{id:[0-9]+}', [PayrollDimensionAction::class, 'update']);
             $g->delete('/settings/dimensions/{id:[0-9]+}', [PayrollDimensionAction::class, 'delete']);
+            // Rozcestník karty zaměstnance — kolik toho na vztahu visí v navazujících
+            // agendách. Agendy si akce filtruje podle oprávnění volajícího sama.
+            $g->get(
+                '/employments/{id:[0-9]+}/agenda-summary',
+                [PayrollEmploymentAgendaSummaryAction::class, 'show'],
+            );
             $g->get('/employments/{id:[0-9]+}/dimensions', [PayrollEmploymentDimensionAction::class, 'list']);
             $g->post('/employments/{id:[0-9]+}/dimensions', [PayrollEmploymentDimensionAction::class, 'create']);
             $g->put(
@@ -1591,9 +1617,14 @@ final class Routes
         $app->post   ('/api/document-requests/{id:[0-9]+}/reopen',  [\MyInvoice\Action\Document\DocumentRequestAction::class, 'reopen']);
         $app->delete ('/api/document-requests/{id:[0-9]+}',    [\MyInvoice\Action\Document\DocumentRequestAction::class, 'delete']);
 
-        //   klientský portál — vlastní požadavky + upload (reuse AI extrakce, Epic F6/F7).
+        //   klientský portál — vlastní požadavky + předání originálu do staging fronty.
         $app->get    ('/api/portal/document-requests',                    [\MyInvoice\Action\Portal\PortalDocumentRequestAction::class, 'list']);
         $app->post   ('/api/portal/document-requests/{id:[0-9]+}/upload', [\MyInvoice\Action\Portal\PortalDocumentRequestAction::class, 'upload']);
+        $app->get    ('/api/portal/purchase-invoice-submissions', [\MyInvoice\Action\Portal\PortalPurchaseInvoiceSubmissionAction::class, 'list']);
+        $app->post   ('/api/portal/purchase-invoice-submissions', [\MyInvoice\Action\Portal\PortalPurchaseInvoiceSubmissionAction::class, 'upload']);
+        $app->post   ('/api/portal/purchase-invoice-submissions/{id:[0-9]+}/resubmit', [\MyInvoice\Action\Portal\PortalPurchaseInvoiceSubmissionAction::class, 'resubmit']);
+        $app->get    ('/api/portal/purchase-invoice-submissions/{id:[0-9]+}/preview', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionFileAction::class, 'portalPreview']);
+        $app->get    ('/api/portal/purchase-invoice-submissions/{id:[0-9]+}/download', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionFileAction::class, 'portalDownload']);
 
         // EPO výkazy (fáze 6) — DPH přiznání DPHDP3
         $app->get    ('/api/reports/dphdp3/settings', [DphPriznaniAction::class, 'settings']);

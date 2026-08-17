@@ -54,6 +54,13 @@ export type PayrollRelationType = 'employment' | 'small_scale_employment' | 'dpp
 export type PayrollEmploymentStatus = 'planned' | 'preregistered' | 'active' | 'suspended' | 'ended' | 'archived' | 'no_show'
 export type PayrollInsuranceParticipation = 'automatic' | 'included' | 'excluded' | 'foreign'
 export type PayrollTaxRegime = 'advance' | 'withholding' | 'foreign' | 'manual_review'
+/**
+ * Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP: zakládá vztah účast na
+ * nemocenském pojištění (`ineligible` — vždy zálohová daň), nebo ne (`eligible` —
+ * do rozhodné částky srážková)? Ptáme se jen u vztahů, u kterých to z druhu
+ * poznat nejde: odměna jednatele/člena orgánu, DPČ, práce společníka pro s. r. o.
+ */
+export type PayrollOtherWithholdingEligibility = 'unverified' | 'eligible' | 'ineligible'
 export type PayrollChecklistStatus = 'pending' | 'completed' | 'not_applicable'
 
 /**
@@ -161,6 +168,10 @@ export interface PayrollEmploymentTerms {
   social_insurance_participation: PayrollInsuranceParticipation
   health_insurance_participation: PayrollInsuranceParticipation
   tax_regime: PayrollTaxRegime
+  // Nepovinné schválně: obrazovky, které pole nenabízejí, posílají podmínky bez
+  // něj a server v takovém případě ponechá uloženou hodnotu (jinak by uložení
+  // nesouvisející změny shodilo daňové zařazení jednatele na „neurčeno").
+  other_withholding_eligibility?: PayrollOtherWithholdingEligibility
   foreign_legislation_country_code: string | null
   a1_certificate_until: string | null
   risky_work: boolean
@@ -360,6 +371,53 @@ export interface PayrollOpeningBalances {
   openings: Record<string, number | null>
   /** Po schválené mzdě za daný rok už počáteční stavy měnit nelze. */
   locked: boolean
+}
+
+/**
+ * Zákonná evidence osoby — prohlášení k dani, daňová rezidence, sociální
+ * a zdravotní příslušnost, sleva pracujícího důchodce a měsíční evidence
+ * zdravotního minima.
+ *
+ * Řádky jsou časové řady, takže se posílají a vrací jako celé kolekce; server
+ * si z cílového stavu spočítá rozdíl. Hodnoty jsou úmyslně `string | null` —
+ * jde o výčty a reference, jejichž povolené hodnoty hlídá server (a validátor
+ * mzdového snímku), ne prohlížeč.
+ */
+export interface PayrollStatutoryEvidenceRow {
+  id?: number
+  row_version?: number
+  effective_from?: string
+  effective_to?: string | null
+  period_start?: string
+  evidence_note?: string | null
+  [field: string]: string | number | null | undefined
+}
+
+export type PayrollStatutoryEvidenceSection =
+  | 'tax_declarations'
+  | 'tax_residences'
+  | 'social_jurisdictions'
+  | 'social_discount_claims'
+  | 'health_coverages'
+  | 'health_month_evidence'
+
+export interface PayrollStatutoryEvidence {
+  employee_id: number
+  effective_on: string
+  /** Poslední den uzavřený schválenou mzdou; do něj se historie nepřepisuje. */
+  frozen_through: string | null
+  sections: Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
+  other_employer_bases: PayrollStatutoryEvidenceRow[]
+  /**
+   * Důvody, proč by mzdový běh k datu snímku skončil v ručním posouzení.
+   * Klíče jsou tytéž, jaké hlásí `PayrollRunStatutoryInputAssembler`.
+   */
+  blockers: string[]
+}
+
+export interface PayrollStatutoryEvidencePayload {
+  effective_on: string
+  sections: Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
 }
 
 export interface PayrollPersonProfile {
@@ -1936,9 +1994,47 @@ export interface PayrollEmploymentDimensionPayload {
   row_version?: number
 }
 
+/**
+ * Navazující agendy karty zaměstnance. Pořadí drží server (repository), aby se
+ * rozcestník i souhrn řadily stejně a nedaly se rozejít.
+ */
+export type PayrollAgendaKey =
+  | 'time'
+  | 'absences'
+  | 'travel'
+  | 'quick_inputs'
+  | 'components'
+  | 'average_earnings'
+  | 'deduction_agreements'
+  | 'enforcement'
+  | 'documents'
+  | 'annual_settlement'
+
+export interface PayrollAgendaSummaryItem {
+  key: PayrollAgendaKey
+  /** Kolik záznamů agenda pro tenhle vztah (resp. osobu) vede. */
+  count: number
+  /** Datum posledního záznamu; `null` = agenda je prázdná. */
+  last_on: string | null
+  /** Souhrnná nebo poslední částka, kde má smysl; jinak `null`. */
+  amount_minor: number | null
+}
+
+export interface PayrollEmploymentAgendaSummary {
+  employment_id: number
+  employee_id: number
+  /** Chybí agendy, na které volající nemá oprávnění — ne nula, která by lhala. */
+  agendas: PayrollAgendaSummaryItem[]
+}
+
 export interface PayrollSetupCheckItem {
   code: string
-  status: 'ok' | 'blocked'
+  /**
+   * `pending` = kontrola nevyšla, ale nastavení neblokuje (nepovinná
+   * připravenost). Chyběl tu a stránka pak u takové kontroly vypsala syrový
+   * klíč překladu — viz `PayrollSetupCheckService::addCheck()`.
+   */
+  status: 'ok' | 'blocked' | 'pending'
   message: string
 }
 
@@ -2958,6 +3054,20 @@ export const payrollApi = {
   personProfile: (id: number) =>
     api.get<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`)
       .then(response => response.data.profile),
+  /** Zákonná evidence osoby k danému dni včetně celé historie a blokátorů běhu. */
+  statutoryEvidence: (employeeId: number, effectiveOn: string) =>
+    api.get<{ evidence: PayrollStatutoryEvidence }>(
+      `/payroll/people/${employeeId}/statutory-evidence`,
+      { params: { effective_on: effectiveOn } },
+    ).then(response => response.data.evidence),
+  saveStatutoryEvidence: (
+    employeeId: number,
+    payload: PayrollStatutoryEvidencePayload,
+  ) =>
+    api.put<{ evidence: PayrollStatutoryEvidence }>(
+      `/payroll/people/${employeeId}/statutory-evidence`,
+      payload,
+    ).then(response => response.data.evidence),
     /** Počáteční stavy zákonných kumulací za rok — úhrny z předchozího zpracování. */
   statutoryOpenings: (employeeId: number, year: number) =>
     api.get<{ openings: PayrollOpeningBalances }>(
@@ -3431,6 +3541,17 @@ export const payrollApi = {
   deletePayrollDimension: (id: number) =>
     api.delete<{ deleted: boolean }>(`/payroll/settings/dimensions/${id}`)
       .then(response => response.data.deleted),
+  /**
+   * Souhrn navazujících agend jednoho vztahu (rozcestník na kartě zaměstnance).
+   *
+   * Jeden dotaz místo deseti: bez něj by karta musela sáhnout do každé agendy
+   * zvlášť a tři z nich vracejí celý měsíc za celou firmu. Agendy, na které
+   * uživatel nemá právo, server do odpovědi vůbec nedá.
+   */
+  employmentAgendaSummary: (employmentId: number) =>
+    api.get<{ summary: PayrollEmploymentAgendaSummary }>(
+      `/payroll/employments/${employmentId}/agenda-summary`,
+    ).then(response => response.data.summary),
   employmentDimensions: (employmentId: number) =>
     api.get<{ dimensions: PayrollEmploymentDimension[] }>(`/payroll/employments/${employmentId}/dimensions`)
       .then(response => response.data.dimensions),

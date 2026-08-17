@@ -40,7 +40,7 @@ trait GuardsDocumentLock
                 return Json::error(
                     $response,
                     'document_locked',
-                    'Doklad je zaúčtovaný nebo spadá do uzavřeného období — změny vyřídí vaše účetní.',
+                    'Doklad je uzamčený účetními pravidly — změny vyřídí vaše účetní.',
                     403,
                 );
             }

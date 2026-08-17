@@ -5,7 +5,17 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Run;
 
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpEmployerSelection;
+use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibility;
+use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibilitySource;
+use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxCalculator;
+use MyInvoice\Service\Payroll\IncomeTax\OtherWithholdingEligibility;
+use MyInvoice\Service\Payroll\IncomeTax\TaxCalculationStatus;
+use MyInvoice\Service\Payroll\IncomeTax\TaxRegime;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputAssembler;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class PayrollRunStatutoryInputAssemblerTest extends TestCase
@@ -167,6 +177,242 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
             static fn ($issue): string => "{$issue->domain}|{$issue->code}",
             $bundle->issues,
         ));
+    }
+
+    /**
+     * Chybějící měsíční evidence zdravotního minima není mezera v podkladech,
+     * ale zákonný výchozí stav podle § 3 odst. 10 zákona č. 592/1992 Sb.:
+     * doplatek hradí zaměstnanec. Ve vstupu je proto vidět, že hodnota je
+     * odvozená, ne prohlášená — a doklad k ní nepatří.
+     */
+    public function testMissingHealthMonthEvidenceMeansTheStatutoryDefault(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['statutory_evidence']['health']['month_evidence']
+            = null;
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame([], array_map(
+            static fn ($issue): string => "{$issue->domain}|{$issue->code}",
+            $bundle->issues,
+        ));
+        self::assertNotNull($bundle->healthInsurance);
+        $person = $bundle->healthInsurance->people[0];
+        self::assertSame(
+            HealthMinimumTopUpResponsibility::Employee,
+            $person->topUpResponsibility,
+        );
+        self::assertSame(
+            HealthMinimumTopUpResponsibilitySource::StatutoryDefault,
+            $person->topUpResponsibilitySource,
+        );
+        self::assertNull($person->topUpResponsibilityEvidenceReference);
+    }
+
+    /**
+     * Zapsaný řádek default přebíjí a zůstává prohlášením uživatele — proto
+     * `declared`. Bez tohohle rozlišení by schválená mzda po letech neuměla
+     * říct, jestli plátce doplatku někdo doložil, nebo se odvodil ze zákona.
+     */
+    public function testDeclaredHealthMonthEvidenceOverridesTheStatutoryDefault(): void
+    {
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble(
+            $this->completeSnapshot(),
+        );
+
+        self::assertNotNull($bundle->healthInsurance);
+        self::assertSame(
+            HealthMinimumTopUpResponsibilitySource::Declared,
+            $bundle->healthInsurance->people[0]->topUpResponsibilitySource,
+        );
+    }
+
+    /**
+     * Prohlásit „nevíme" je pořád možné a pořád to znamená ruční posouzení.
+     * Zjednodušení se týká CHYBĚJÍCÍHO záznamu, ne záznamu, který říká, že
+     * odpověď nikdo nezná.
+     */
+    public function testExplicitlyUnverifiedResponsibilityStillBlocksHealthInputs(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['statutory_evidence']['health']['month_evidence']
+            ['top_up_responsibility'] = 'unverified';
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNull($bundle->healthInsurance);
+        self::assertSame(
+            ['health_insurance|health_minimum_responsibility_unverified'],
+            array_map(
+                static fn ($issue): string => "{$issue->domain}|{$issue->code}",
+                $bundle->issues,
+            ),
+        );
+    }
+
+    /**
+     * Výjimka podle věty třetí § 3 odst. 10 (překážky na straně organizace)
+     * zůstává vázaná na doklad. Bez něj se NESMÍ sesypat na zákonný default —
+     * jinak by šlo přenést doplatek na zaměstnavatele smazáním reference.
+     */
+    public function testEmployerObstacleWithoutEvidenceStillBlocksHealthInputs(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $month = &$snapshot['people'][0]['statutory_evidence']['health']
+            ['month_evidence'];
+        $month['top_up_responsibility'] = 'employer_obstacle_verified';
+        $month['top_up_responsibility_evidence_reference'] = null;
+        unset($month);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNull($bundle->healthInsurance);
+        self::assertSame(
+            ['health_insurance|health_evidence_mapping_failed'],
+            array_map(
+                static fn ($issue): string => "{$issue->domain}|{$issue->code}",
+                $bundle->issues,
+            ),
+        );
+    }
+
+    /**
+     * Zařazení podle § 6 odst. 4 písm. b) ZDP se u pracovního poměru, zaměstnání
+     * malého rozsahu a DPP neptá — plyne ze zákona samo, takže výpočet dostane
+     * `automatic` a doklad o zařazení k němu nepatří.
+     */
+    public function testRelationshipsClassifiedByLawKeepAutomaticEligibility(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['employments'][0]['term']
+            ['other_withholding_eligibility'] = 'eligible';
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        $relationship = $bundle->incomeTax[0]->relationships[0];
+        self::assertSame(
+            OtherWithholdingEligibility::Automatic,
+            $relationship->otherWithholdingEligibility,
+        );
+        self::assertNull($relationship->classificationEvidenceReference);
+    }
+
+    /**
+     * Odměna jednatele naopak zařazení ze zákona nemá — nese ho prohlášení
+     * plátce ve smluvních podmínkách. Sestavovač ho posílal natvrdo jako
+     * `automatic`, takže výpočet každého jednatele bez podepsaného prohlášení
+     * odmítl s `other-withholding-eligibility-unverified`, ať uživatel nastavil
+     * cokoli. Doklad o zařazení míří na verzi podmínek, ve které prohlášení je.
+     *
+     * @param array{0:string,1:OtherWithholdingEligibility} $case
+     */
+    #[DataProvider('payerStatements')]
+    public function testStatutoryBodyTakesEligibilityFromEmploymentTerms(
+        string $stored,
+        OtherWithholdingEligibility $expected,
+    ): void {
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble(
+            $this->directorSnapshot($stored),
+        );
+
+        self::assertSame([], $bundle->issues);
+        $relationship = $bundle->incomeTax[0]->relationships[0];
+        self::assertSame($expected, $relationship->otherWithholdingEligibility);
+        self::assertSame(
+            'employment-term:99',
+            $relationship->classificationEvidenceReference,
+        );
+    }
+
+    /** @return iterable<string,array{string,OtherWithholdingEligibility}> */
+    public static function payerStatements(): iterable
+    {
+        yield 'nezakládá účast' => [
+            'eligible',
+            OtherWithholdingEligibility::EligibleVerified,
+        ];
+        yield 'zakládá účast' => [
+            'ineligible',
+            OtherWithholdingEligibility::IneligibleVerified,
+        ];
+    }
+
+    /**
+     * Fail-closed: snapshot bez prohlášení (typicky běh uzamčený před migrací
+     * 1403) se nesmí dopočítat jinak, než jak by ho spočítal tehdejší kód.
+     */
+    public function testMissingPayerStatementFallsBackToUnverified(): void
+    {
+        $snapshot = $this->directorSnapshot('eligible');
+        unset($snapshot['people'][0]['employments'][0]['term']
+            ['other_withholding_eligibility']);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        $relationship = $bundle->incomeTax[0]->relationships[0];
+        self::assertSame(
+            OtherWithholdingEligibility::Unverified,
+            $relationship->otherWithholdingEligibility,
+        );
+        self::assertNull($relationship->classificationEvidenceReference);
+    }
+
+    /**
+     * Celá cesta, kvůli které tahle větev vznikla: jednatel s odměnou 4 500 Kč
+     * bez podepsaného prohlášení. Sestavovač vezme prohlášení plátce ze
+     * smluvních podmínek a výpočet doběhne — dřív skončil ručním posouzením,
+     * které se nedalo přebít, protože to byl issue zákonného balíku, ne
+     * validace řádku.
+     */
+    public function testDirectorAtDecisiveAmountCompletesTheStatutoryCalculation(): void
+    {
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble(
+            $this->directorSnapshot('eligible'),
+        );
+
+        self::assertSame([], $bundle->issues);
+        $result = (new MonthlyEmploymentIncomeTaxCalculator(
+            new PayrollRulesetProvider([
+                CzechPayrollRulesets2026::provider()
+                    ->forDate(PayrollRulesetDomain::IncomeTax, '2026-06-30'),
+            ]),
+        ))->calculate($bundle->incomeTax[0]);
+
+        self::assertSame([], $result->issues);
+        self::assertSame(TaxCalculationStatus::Calculated, $result->status);
+        // 4 500 Kč je sama rozhodná částka, test § 6 odst. 4 ZDP je ostrý —
+        // účast na nemocenském pojištění vzniká a daní se zálohou.
+        self::assertSame(TaxRegime::Advance, $result->relationships[0]->regime);
+        self::assertSame(450_000, $result->advanceTax?->taxableIncomeMinorUnits);
+    }
+
+    /**
+     * Snapshot jednatele s odměnou 4 500 Kč, který u plátce nepodepsal
+     * prohlášení k dani.
+     *
+     * @return array<string,mixed>
+     */
+    private function directorSnapshot(string $eligibility): array
+    {
+        $snapshot = $this->completeSnapshot();
+        $person = &$snapshot['people'][0];
+        $person['statutory_evidence']['income_tax']['declaration']['status'] =
+            'not-signed';
+        $employment = &$person['employments'][0];
+        $employment['employment']['relation_type'] = 'statutory_body';
+        $employment['employment']['monthly_gross_minor'] = 450_000;
+        $employment['term']['tax_declaration_signed'] = false;
+        $employment['term']['other_withholding_eligibility'] = $eligibility;
+        $employment['inputs'][0]['amount_minor'] = 450_000;
+        unset($person, $employment);
+
+        // Sleva na poplatníka se bez podepsaného prohlášení uplatnit nedá;
+        // ponechaný nárok by shodil výpočet na `tax-credit-requires-signed-declaration`
+        // a test by měřil něco jiného, než měřit má.
+        $snapshot['people'][0]['statutory_evidence']['income_tax']['credit_claims'] = [];
+
+        return $snapshot;
     }
 
     /** @return array<string,mixed> */

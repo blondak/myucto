@@ -30,8 +30,9 @@ query parametrem nebo API tokenem a zachovat plnou podporu passkeys.
 ## Implementační kroky
 
 1. **Databáze a doménové jádro**
-   - idempotentní migrace `1403_supplier_domains.sql` pro domény a
-     jednorázové domain-login requesty/kódy;
+   - idempotentní migrace `1405_supplier_domains.sql` pro domény a
+     jednorázové domain-login requesty/kódy a kompatibilní převod původního
+     jediného primárního příznaku v `1406_supplier_domain_primary_flags.sql`;
    - DB unikátnost hostname a primární domény pro každý účel;
    - `HostnameNormalizer`, `SupplierDomainRepository`, cache invalidace a
      `TenantUrlResolver` bez závislosti na aktuální hlavičce `Host`.

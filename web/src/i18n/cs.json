@@ -509,6 +509,8 @@
         "section_documents": "Dokumenty",
         "documents": "Dokumenty",
         "document_requests": "Chybějící doklady",
+        "submit_documents": "Předat doklady účetní",
+        "incoming_documents": "Příchozí doklady",
         "logbook": "Kniha jízd",
         "section_accounting": "Účetnictví",
         "section_accounting_tools": "Účetní nástroje",
@@ -587,6 +589,32 @@
         "eshop_currencies": "Měny"
     },
     "payroll": {
+        "agendas": {
+            "title": "Navazující agendy",
+            "subtitle": "Kam u tohoto pracovního vztahu zadat další záznam — odkaz vede na seznam už zúžený na tohoto člověka.",
+            "count": "žádný záznam | 1 záznam | {count} záznamy | {count} záznamů",
+            "last_on": "poslední {date}",
+            "nothing_yet": "Zatím nic: {agendas}.",
+            "load_failed": "Souhrn agend se nepodařilo načíst. Tlačítka fungují dál.",
+            "items": {
+                "time": "Docházka a směny",
+                "absences": "Nepřítomnosti",
+                "quick_inputs": "Mzdové vstupy",
+                "travel": "Pracovní cesty",
+                "components": "Opakované složky",
+                "average_earnings": "Průměrný výdělek",
+                "deduction_agreements": "Dohody o srážkách",
+                "enforcement": "Exekuce",
+                "documents": "Dokumenty",
+                "annual_settlement": "Roční zúčtování"
+            },
+            "focus": {
+                "title": "Seznam je zúžený na {name}.",
+                "truncated": "Období má víc záznamů, než se do zúžení stihlo načíst — nemusí tu být všechny. Zrušte zúžení a projděte seznam po stránkách.",
+                "unknown_person": "vybraného zaměstnance",
+                "clear": "Zrušit zúžení"
+            }
+        },
         "rulesets": {
             "title": "Legislativní pravidla mezd",
             "subtitle": "Sazby, hranice, lhůty a číselníky pro mzdový výpočet. Ověřenou sadu dodáváme účinnou a ručíme za ni — nemusíte nic schvalovat ani odklikávat; u každé domény je vidět, odkud hodnoty jsou. Přepsat je jde a projeví se to bez nasazení nové verze, za upravené hodnoty už ale ručí ten, kdo je zadal. Hodnoty jsou národní a platí pro všechny firmy.",
@@ -991,6 +1019,12 @@
                 "deductions_title": "Srážky podle pořadí",
                 "priority": "Pořadí {priority}",
                 "unapplied": "Neuplatněno: {value}",
+                "unapplied_unattested": "Nezabavitelná částka stojí na nároku, který nikdo nedoložil ({claim}). Dohoda o srážkách z ní čerpat nesmí, proto se nesrazilo nic — nejde o nedostatek místa v čisté mzdě. Doložením nároku se strop obnoví.",
+                "unapplied_unattested_claim": {
+                    "dependants": "vyživované osoby",
+                    "spouse": "manžel nebo partner",
+                    "both": "vyživované osoby i manžel nebo partner"
+                },
                 "no_deductions": "V této revizi se neuplatnila žádná srážka.",
                 "allocations_title": "Rozdělení výplaty",
                 "allocations_hint": "Bankovní cíl se zobrazuje jen jako maska ze zmrazené revize.",
@@ -1068,6 +1102,10 @@
                     "employee": "Dopočet hradí zaměstnanec.",
                     "employer_obstacle_verified": "Dopočet hradí zaměstnavatel — je doložena překážka na jeho straně.",
                     "unverified": "Kdo dopočet hradí, není doloženo."
+                },
+                "top_up_responsibility_source": {
+                    "declared": "doloženo evidencí",
+                    "statutory_default": "ze zákona (§ 3 odst. 10 z. č. 592/1992 Sb.)"
                 },
                 "health_minimum_days": "Minimum se krátí na {applicable} kalendářních dnů ({excluded} dnů se nezapočítává); plné měsíční minimum je {statutory}.",
                 "health_other_employers": "U jiných zaměstnavatelů je doložen základ {other}, dohromady tedy {combined} — proto se minimum posuzuje ze součtu.",
@@ -2276,6 +2314,8 @@
             "social_mode": "Účast na sociálním pojištění",
             "health_mode": "Účast na zdravotním pojištění",
             "tax_regime_label": "Daňový režim",
+            "other_withholding_eligibility_label": "Účast na nemocenském pojištění z odměny",
+            "other_withholding_eligibility_hint": "Rozhoduje o zdanění bez podepsaného prohlášení k dani (§ 6 odst. 4 písm. b) zákona o daních z příjmů). Zakládá-li sjednaná odměna účast na nemocenském pojištění, sráží se zálohová daň vždy. Nezakládá-li ji, daní se měsíce, ve kterých odměna nedosáhne rozhodné částky (v roce 2026 je to 4 500 Kč), srážkovou daní 15 % a ostatní měsíce zálohou. Dokud tu není odpověď, skončí zákonný výpočet ručním posouzením.",
             "foreign_country": "Stát cizích předpisů",
             "a1_certificate_until": "Potvrzení A1 platné do",
             "tax_declaration": "Podepsané prohlášení k dani",
@@ -2293,6 +2333,7 @@
             "openings": {
                 "title": "Zaměstnanec nastoupil dřív, než v MyÚčtu vedete mzdy",
                 "hint": "Nástup {start}, mzdy vedete od {period}. Aby vyšel výpočet i roční zúčtování, bude potřeba doplnit úhrny z předchozího zpracování.",
+                "done": "Úhrny z předchozího zpracování jsou doplněné — výpočet i roční zúčtování s nimi počítají. Zkontrolovat nebo opravit je můžete níže.",
                 "panel_title": "Počáteční stavy za rok {year}",
                 "panel_hint": "Úhrny za měsíce, které jste zpracovali jinde. Opište je ze sestavy předchozího programu; částky zadávejte v korunách.",
                 "nothing_to_fill": "Mzdy vedete od ledna, takže není co doplňovat.",
@@ -2317,6 +2358,157 @@
                     "applied_child_credit_minor_units": "Daňové zvýhodnění",
                     "tax_bonus_minor_units": "Vyplacený bonus",
                     "bonus_qualifying_income_minor_units": "Příjem pro bonus"
+                }
+            },
+            "statutory_evidence": {
+                "reason_custom": "Jiné — napíšu vlastní označení dokladu",
+                "insurer_unset": "Nevybráno",
+                "employer_none": "Neřeší se",
+                "issues_block_save": "Než půjde uložit, doplňte údaje vypsané u jednotlivých záznamů.",
+                "reason": {
+                    "declaration_38k_signed": "Podepsané prohlášení poplatníka (§ 38k)",
+                    "declaration_38k_not_signed": "Zaměstnanec prohlášení nepodepsal",
+                    "residence_cz_birth_number_address": "Rodné číslo a adresa bydliště v ČR",
+                    "residence_cz_domicile_certificate": "Potvrzení o daňovém domicilu v ČR",
+                    "residence_foreign_domicile_certificate": "Potvrzení o daňovém domicilu jiného státu",
+                    "residence_foreign_tax_authority_confirmation": "Potvrzení zahraničního správce daně",
+                    "social_a1_certificate": "Formulář A1 vydaný jiným státem",
+                    "social_foreign_insurance_confirmation": "Potvrzení o pojištění v jiném státě",
+                    "social_posting_contract": "Smlouva o vyslání do jiného státu",
+                    "a1_certificate_issued": "Vydaný formulář A1",
+                    "pension_award_decision": "Rozhodnutí o přiznání starobního důchodu",
+                    "pension_employee_claim": "Oznámení zaměstnance o uplatnění slevy",
+                    "health_s1_form": "Formulář S1 nebo evropský průkaz pojištěnce",
+                    "health_foreign_insurance_confirmation": "Potvrzení o zdravotním pojištění v jiném státě",
+                    "health_insurer_registration": "Registrace u zdravotní pojišťovny",
+                    "health_insured_card": "Průkaz pojištěnce",
+                    "minimum_employer_obstacle": "Překážka v práci na straně zaměstnavatele",
+                    "minimum_unpaid_leave_agreement": "Dohoda o neplaceném volnu",
+                    "minimum_other_employer_confirmation": "Potvrzení jiného zaměstnavatele o vyměřovacím základu"
+                },
+                "issue": {
+                    "period_required": "Doplňte, od kdy záznam platí.",
+                    "period_month_start": "Evidence se vede po celých měsících — začátek nastavte na {day}.",
+                    "effective_to_before_from": "Konec platnosti předchází jejímu začátku — opravte jedno z dat.",
+                    "effective_to_month_end": "Evidence se vede po celých měsících — konec nastavte na {day}.",
+                    "country_required": "Vyberte „{label}“ ze seznamu států — bez něj server záznam nepřijme.",
+                    "country_must_be_foreign": "Nerezident musí mít jiný stát než CZ. Je-li to Čech, přepněte volbu na „Český daňový rezident“.",
+                    "insurer_required": "Vyberte zdravotní pojišťovnu ze seznamu, nebo přepněte stav na „Neověřeno“.",
+                    "insurer_unknown": "Kód pojišťovny {code} v číselníku není — vyberte pojišťovnu ze seznamu.",
+                    "insurer_not_applicable_in_czech_regime": "Kdo podléhá českému veřejnému zdravotnímu pojištění, je vždy u některé pojišťovny. Vyberte ji, nebo — dokud ji nezjistíte — přepněte stav na „Neověřeno“.",
+                    "reference_required": "Vyberte typický důvod u pole „{label}“, nebo napište vlastní označení dokladu.",
+                    "reference_invalid": "Označení dokladu u pole „{label}“ smí obsahovat jen písmena, číslice a . : / _ - a musí začínat písmenem nebo číslicí.",
+                    "employer_unknown": "Zvolený zaměstnavatel nemá za tento měsíc doložený vyměřovací základ — nejdřív ho doplňte.",
+                    "a1_valid_until_required": "Doložený A1 musí platit alespoň do {day}. Doplňte datum platnosti, nebo přepněte A1 na „Netýká se“.",
+                    "a1_valid_until_too_early": "A1 musí platit alespoň do {day} — k dřívějšímu dni ho výpočet neuzná.",
+                    "multiple_open_rows": "Otevřený zůstat může jen jeden záznam. Staršímu doplňte „Platí do“ (poslední den měsíce)."
+                },
+                "title": "Zákonná evidence osoby",
+                "subtitle": "Prohlášení k dani, daňová rezidence, příslušnost k sociálnímu a zdravotnímu pojištění a sleva pracujícího důchodce.",
+                "blocked_badge": "vše doplněno | 1 chybějící údaj | {count} chybějící údaje | {count} chybějících údajů",
+                "blockers_title": "K tomuto měsíci chybí:",
+                "blockers_consequence": "Dokud tyto údaje chybí, mzdový běh zákonný výpočet této osoby nespočítá a skončí v ručním posouzení.",
+                "complete": "Evidence je k tomuto měsíci úplná — zákonný výpočet má z čeho vycházet.",
+                "effective_on": "Ke kterému dni",
+                "effective_on_hint": "Evidence se vyhodnocuje po celých měsících; datum určuje, který měsíc se kontroluje.",
+                "frozen_hint": "Do {day} je historie uzavřená schválenou mzdou. Starší záznamy nejdou přepsat ani smazat — změna se uloží jako nová verze od dalšího měsíce.",
+                "period_start": "Za měsíc",
+                "effective_from": "Platí od",
+                "effective_to": "Platí do",
+                "evidence_note": "Poznámka k dokladu",
+                "evidence_note_placeholder": "Např. originál v deskách zaměstnance, kopie ve spisu",
+                "reference_hint": "Písmena, číslice a . : / _ -",
+                "reference_placeholder": "např. číslo dokladu 12345/2026",
+                "empty": "Zatím žádný záznam.",
+                "add_row": "Přidat záznam",
+                "remove_row": "Odebrat",
+                "row_frozen": "Uzavřeno schválenou mzdou",
+                "edit": "Upravit evidenci",
+                "saved": "Zákonná evidence je uložená.",
+                "load_failed": "Zákonnou evidenci se nepodařilo načíst.",
+                "save_failed": "Zákonnou evidenci se nepodařilo uložit.",
+                "blocker": {
+                    "tax_declaration_evidence_missing": "prohlášení poplatníka k dani",
+                    "tax_declaration_evidence_unverified": "prohlášení poplatníka k dani je vedené jako neověřené",
+                    "tax_residence_evidence_missing": "daňová rezidence",
+                    "tax_residence_evidence_unverified": "daňová rezidence je vedená jako neověřená",
+                    "social_jurisdiction_evidence_missing": "příslušnost k sociálnímu pojištění",
+                    "social_jurisdiction_evidence_unverified": "příslušnost k sociálnímu pojištění je vedená jako neověřená",
+                    "working_pensioner_discount_evidence_missing": "sleva pro pracujícího poplatníka v důchodu",
+                    "working_pensioner_discount_evidence_unverified": "sleva pro pracujícího poplatníka v důchodu je vedená jako neověřená",
+                    "health_coverage_evidence_missing": "příslušnost ke zdravotnímu pojištění",
+                    "health_jurisdiction_evidence_unverified": "příslušnost ke zdravotnímu pojištění je vedená jako neověřená",
+                    "health_insurer_evidence_unverified": "zdravotní pojišťovna je vedená jako neověřená",
+                    "statutory_evidence_snapshot_missing_or_mismatched": "evidence je vnitřně rozporná — zkontrolujte, zda se období nepřekrývají"
+                },
+                "section": {
+                    "tax_declarations": "Prohlášení poplatníka k dani",
+                    "tax_residences": "Daňová rezidence",
+                    "social_jurisdictions": "Příslušnost k sociálnímu pojištění",
+                    "social_discount_claims": "Sleva pracujícího důchodce",
+                    "health_coverages": "Příslušnost ke zdravotnímu pojištění",
+                    "health_month_evidence": "Měsíční evidence zdravotního minima"
+                },
+                "section_hint": {
+                    "tax_declarations": "Rozhoduje o tom, zda se uplatní měsíční slevy a zvýhodnění, nebo se sráží daň bez nich.",
+                    "tax_residences": "Nerezident se zdaňuje jinak než rezident; ke každé variantě je potřeba doklad.",
+                    "social_jurisdictions": "Zda osoba podléhá českému sociálnímu pojištění. U cizího režimu je potřeba země a formulář A1.",
+                    "social_discount_claims": "Sleva na pojistném u zaměstnance pobírajícího starobní důchod. Neuplatňuje-li se, zvolte „neuplatňuje se“.",
+                    "health_coverages": "Zda osoba podléhá českému zdravotnímu pojištění a u které pojišťovny je vedená.",
+                    "health_month_evidence": "Nevyplněno znamená, že dopočet do minimálního vyměřovacího základu hradí zaměstnanec — tak to určuje zákon. Záznam zakládejte jen pro výjimku: překážku na straně zaměstnavatele nebo volbu zaměstnavatele při souběhu."
+                },
+                "field": {
+                    "status": "Stav",
+                    "evidence_reference": "Doklad",
+                    "residence": "Rezidence",
+                    "country_code": "Stát",
+                    "jurisdiction": "Režim",
+                    "foreign_country_code": "Zahraniční stát",
+                    "jurisdiction_evidence_reference": "Doklad k režimu",
+                    "a1_status": "Formulář A1",
+                    "a1_certificate_reference": "Doklad k A1",
+                    "a1_valid_until": "A1 platí do",
+                    "insurer_status": "Zdravotní pojišťovna",
+                    "insurer_code": "Kód pojišťovny",
+                    "insurer_evidence_reference": "Doklad k pojišťovně",
+                    "top_up_responsibility": "Doplatek do minima hradí",
+                    "top_up_responsibility_evidence_reference": "Doklad k doplatku",
+                    "selected_top_up_employer_reference": "Zvolený zaměstnavatel",
+                    "selected_top_up_employer_evidence_reference": "Doklad k volbě zaměstnavatele"
+                },
+                "option": {
+                    "status": {
+                        "signed": "Podepsáno",
+                        "not-signed": "Nepodepsáno",
+                        "unverified": "Neověřeno",
+                        "not_claimed": "Neuplatňuje se",
+                        "verified": "Doloženo"
+                    },
+                    "residence": {
+                        "czech-resident": "Český daňový rezident",
+                        "non-resident": "Daňový nerezident",
+                        "unverified": "Neověřeno"
+                    },
+                    "jurisdiction": {
+                        "czech_regime_verified": "Český režim (doloženo)",
+                        "foreign_regime_verified": "Zahraniční režim (doloženo)",
+                        "unverified": "Neověřeno"
+                    },
+                    "a1_status": {
+                        "verified": "Doloženo",
+                        "unverified": "Neověřeno",
+                        "not_applicable": "Netýká se"
+                    },
+                    "insurer_status": {
+                        "verified": "Doloženo",
+                        "unverified": "Neověřeno",
+                        "not_applicable": "Netýká se"
+                    },
+                    "top_up_responsibility": {
+                        "employee": "Zaměstnanec",
+                        "employer_obstacle_verified": "Zaměstnavatel (překážka doložena)",
+                        "unverified": "Neověřeno"
+                    }
                 }
             },
             "rename_action": "Označení pro import docházky",
@@ -2361,6 +2553,11 @@
                 "withholding": "Srážková daň",
                 "foreign": "Zdanění v zahraničí",
                 "manual_review": "Ruční posouzení"
+            },
+            "other_withholding_eligibility": {
+                "unverified": "Neurčeno — výpočet skončí ručním posouzením",
+                "eligible": "Nezakládá účast — do rozhodné částky srážková daň",
+                "ineligible": "Zakládá účast — vždy zálohová daň"
             },
             "checklist_status": {
                 "pending": "Nesplněno",
@@ -3180,7 +3377,8 @@
                 "outside_period": "Mimo období",
                 "status": {
                     "ok": "V pořádku",
-                    "blocked": "Blokuje"
+                    "blocked": "Blokuje",
+                    "pending": "Zatím chybí"
                 },
                 "options": {
                     "business_day_rule": {
@@ -3248,7 +3446,8 @@
                     },
                     "jmhz_certificate": {
                         "ok": "Přihlašovací prostředek pro JMHZ je připravený.",
-                        "blocked": "JMHZ vyžaduje platný přihlašovací prostředek."
+                        "blocked": "JMHZ vyžaduje platný přihlašovací prostředek.",
+                        "pending": "Zvolte podpisový certifikát pro produkční podání (Mzdy → Podání → Certifikát). Nastavení to neblokuje — ostré podání zatím stejně není dostupné."
                     },
                     "jmhz_feature_source": {
                         "ok": "Tenantový zdroj aktivace JMHZ je ověřený.",
@@ -3703,6 +3902,12 @@
                 "dependants": "Vyživované osoby jsou ověřené",
                 "spouse": "Nárok na manžela nebo partnera je ověřený",
                 "multiple_payers": "Příjem vyplácí více plátců",
+                "scope": {
+                    "claim_register_idle": "Není co dokládat — osoba nemá aktivní pohledávku ani schválené oddlužení, takže není co rozdělovat.",
+                    "allowance_not_claimed": "Není co dokládat — nárok se neuplatňuje, nezabavitelnou částku neposouvá.",
+                    "allowance_multiple_payers": "Není co dokládat — při souběhu plátců určuje nezabavitelnou částku rozhodnutí soudu.",
+                    "nothing_withheld": "Tento měsíc se nesráží nic, takže kvůli exekuci doklad nepotřebujeme. Dokud ale nárok nedoložíte, nemá z čeho čerpat ani dobrovolná dohoda o srážkách — doložením se strop obnoví."
+                },
                 "pension": "Důchodová podmínka",
                 "pension_unknown": "Neověřeno",
                 "pension_none": "Důchod nepobírá",
@@ -3843,11 +4048,13 @@
         "badge": "Zaúčtováno",
         "column": "Zámek",
         "client_hint": "Doklad je zaúčtovaný — změny a storno vyřídí vaše účetní.",
+        "client_hint_accountant_managed": "Doklad zpracovala účetní z předaného originálu — případné změny vyřídí ona.",
         "client_hint_period": "Doklad spadá do uzavřeného účetního období — změny vyřídí vaše účetní.",
         "staff_period_warning": "Pozor: doklad spadá do uzavřeného období.",
         "reason": {
             "posted": "zaúčtováno v deníku",
             "booked": "označeno jako zaúčtované",
+            "accountant_managed": "zpracováno účetní z předaného dokladu",
             "period_closed": "uzavřené období",
             "period_closing": "probíhá závěrka"
         }
@@ -3887,11 +4094,90 @@
             "empty": "Momentálně nic nechybí — vše je nahrané.",
             "upload": "Nahrát doklad",
             "uploading": "Nahrávám…",
-            "uploaded": "Doklad byl nahrán a zpracován.",
+            "uploaded": "Doklad byl předán účetní ke kontrole.",
             "upload_failed": "Nahrání se nezdařilo. Zkuste to prosím znovu nebo kontaktujte svou účetní.",
             "awaiting_review": "Čeká na kontrolu účetní",
             "deadline_label": "Termín:",
             "resolved_title": "Vyřízené"
+        }
+    },
+    "purchase_submissions": {
+        "portal_title": "Doklady pro účetní",
+        "portal_subtitle": "Předejte účetní faktury a účtenky bez opisování údajů.",
+        "submit_title": "Předat doklad účetní",
+        "submit_hint": "Nahrajte PDF, obrázek nebo ISDOC. Účetní doklad zkontroluje a teprve potom jej zařadí do účetnictví.",
+        "kind_hint": "Typ dokladu (nepovinné)",
+        "kind_unknown": "Nevím / určit automaticky",
+        "kind_other": "Jiný doklad",
+        "kind_provided": "Typ uvedený klientem: {kind}",
+        "note": "Poznámka pro účetní (nepovinné)",
+        "note_placeholder": "Například čeho se náklad týká",
+        "choose_files": "Vybrat soubory",
+        "files_selected": "Vybráno souborů: {n}",
+        "uploading": "Předávám…",
+        "submit_action": "Předat účetní",
+        "uploaded": "Předáno souborů: {n}.",
+        "uploaded_with_duplicates": "Nově předáno: {created}, již evidováno: {duplicates}.",
+        "uploaded_partial": "Přijato souborů: {accepted}, odmítnuto: {failed}. Přehled byl aktualizován.",
+        "replacement_uploaded": "Náhradní doklad byl předán účetní.",
+        "replacement_received": "Nahrazeno novým souborem",
+        "open_title": "Čeká na vyřízení",
+        "empty": "Žádné doklady nečekají na vyřízení.",
+        "preview": "Náhled",
+        "replace": "Nahrát náhradu",
+        "closed_title": "Vyřízené doklady",
+        "open_invoice": "Otevřít fakturu",
+        "inbox_title": "Příchozí doklady",
+        "inbox_subtitle": "Originály čekají mimo účetnictví, dokud je nezpracujete — ať je předal klient, nebo jste je nahráli sami.",
+        "filter_status": "Stav",
+        "inbox_empty": "V této frontě nejsou žádné doklady.",
+        "inbox_submit_title": "Nahrát doklad do fronty",
+        "inbox_submit_hint": "Doklady, které přišly mimo portál — e-mailem, papírově, nebo si je do fronty dáváte sami. Originál zůstane mimo účetnictví, dokud jej nezpracujete.",
+        "inbox_submit_action": "Nahrát do fronty",
+        "inbox_note": "Poznámka k dokladu (nepovinné)",
+        "inbox_note_placeholder": "Například odkud doklad přišel",
+        "inbox_uploaded": "Do fronty přidáno souborů: {n}.",
+        "inbox_uploaded_with_duplicates": "Nově přidáno: {created}, již ve frontě: {duplicates}.",
+        "inbox_dropzone_hint": "Sem přetáhni doklady (nebo klikni pro výběr)",
+        "inbox_dropzone_formats": "PDF, JPG, PNG, ISDOC, XML nebo ISDOCX · až 20 souborů zaráz",
+        "clear_files": "Zrušit výběr",
+        "reason_internal": "Poznámka k odmítnutí (nepovinné)",
+        "reason_internal_placeholder": "Proč doklad do účetnictví nepatří",
+        "reject_keeps_original": "Odmítnutí originál nemaže — zůstane v Dokumentech i v auditní stopě.",
+        "delete": "Smazat z fronty",
+        "delete_confirm": "Smazat „{name}\" z fronty? Podání zmizí a originál se přesune do koše Dokumentů, odkud ho vysypání koše smaže i z disku.",
+        "delete_success": "Doklad byl vyřazen z fronty a originál je v koši Dokumentů.",
+        "submitted_by": "Předal/a: {name}",
+        "processed_success": "Doklad byl zpracován do přijaté faktury.",
+        "linked_requests": "Navázané požadavky: {n}",
+        "linked_bank_transaction": "Bankovní transakce #{id}",
+        "replaces_submission": "Náhrada za podání #{id}",
+        "processing": "Zpracovávám…",
+        "extract": "Vytěžit a vytvořit",
+        "manual": "Přepsat ručně",
+        "download": "Stáhnout originál",
+        "reason": "Zpráva klientovi",
+        "reason_placeholder": "Co je potřeba doplnit nebo proč doklad odmítáte",
+        "needs_information": "Vyžádat náhradu",
+        "reject": "Odmítnout",
+        "reason_required": "Nejprve napište klientovi důvod.",
+        "needs_information_success": "Klient byl požádán o náhradní doklad.",
+        "rejected_success": "Doklad byl odmítnut.",
+        "no_inline_preview": "Tento formát nemá náhled v prohlížeči. Stáhněte si originál.",
+        "editor_origin_title": "Zpracovávaný originál",
+        "editor_origin_hint": "Po uložení se originál bezpečně připojí k přijaté faktuře a předání se uzavře.",
+        "editor_origin_unavailable": "Předaný doklad už nelze ručně zpracovat. Obnovte příchozí frontu.",
+        "editor_handoff_available": "Doklad se nepodařilo načíst automaticky. Můžete jej vyplnit ručně, nebo jedním klikem předat účetní.",
+        "editor_handoff_hint": "Nechcete údaje opisovat? Uložte originál do podatelny a předejte jej účetní ke zpracování.",
+        "editor_handoff_action": "Uložit a předat účetní",
+        "editor_handoff_success": "Doklad byl uložen a předán účetní.",
+        "editor_handoff_duplicate": "Tento doklad už byl účetní předán.",
+        "status": {
+            "submitted": "Předáno",
+            "processing": "Zpracovává se",
+            "needs_information": "Čeká na doplnění",
+            "processed": "Zpracováno",
+            "rejected": "Odmítnuto"
         }
     },
     "portfolio": {
@@ -5389,6 +5675,9 @@
             "enter_gross": "Zadejte hrubou mzdu — rozpad se spočítá automaticky.",
             "employer_note": "Pojistné zaměstnavatele (nad rámec hrubé mzdy): sociální {social} + zdravotní {health} = {total}.",
             "idempotent_note": "Opakované zaúčtování téhož měsíce zápis přepíše — druhý nevznikne.",
+            "module_active_title": "Mzdy zpracovává modul Mzdy",
+            "module_active_hint": "Od {period} se mzdy počítají a účtují v modulu Mzdy. Rekapitulace tady zůstává kvůli starším obdobím — od {period} přes ni účtovat nejde, jinak by mzda seděla v deníku dvakrát.",
+            "module_blocked": "Mzdu za {period} zaúčtujete v modulu Mzdy.",
             "remit": {
                 "title": "Odvody k úhradě",
                 "health": "Zdravotní pojištění — zdravotní pojišťovna",

@@ -4,10 +4,20 @@ import { ref } from 'vue'
 import type { DeductionAgreementDetail, DeductionAgreementSummary } from '@/api/payrollDeductions'
 
 const m = vi.hoisted(() => ({
+  routeQuery: {} as Record<string, string | string[]>,
+  routerReplace: vi.fn(),
   agreementsPage: vi.fn(),
   agreement: vi.fn(),
   peopleOptions: vi.fn(),
   canWrite: vi.fn(),
+}))
+
+// Stránka čte předvýběr z adresy (odkaz z karty zaměstnance), takže potřebuje
+// router. Originál se rozprostře, ať zůstanou i ostatní exporty (RouterLink).
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRoute: () => ({ query: m.routeQuery }),
+  useRouter: () => ({ replace: m.routerReplace }),
 }))
 
 vi.mock('@/api/payrollDeductions', () => ({

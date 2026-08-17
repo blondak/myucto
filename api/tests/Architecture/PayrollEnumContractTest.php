@@ -84,6 +84,12 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollEmploymentStatus'        => 'db:payroll_employments.status',
         'payroll.ts::PayrollRelationType'            => 'db:payroll_employments.relation_type',
         'payroll.ts::PayrollTaxRegime'               => 'db:payroll_employment_terms.tax_regime',
+        // Doména sloupce je ÚZKO tři hodnoty; PHP enum OtherWithholdingEligibility
+        // má navíc `automatic`, protože to není volba uživatele, ale zařazení,
+        // které si výpočet odvodí z druhu vztahu. Klient tu čtvrtou hodnotu
+        // nesmí nabízet — proto se páruje sloupec, ne enum.
+        'payroll.ts::PayrollOtherWithholdingEligibility'
+            => 'db:payroll_employment_terms.other_withholding_eligibility',
         'payroll.ts::PayrollInsuranceParticipation'  => 'db:payroll_employment_terms.social_insurance_participation',
         'payroll.ts::PayrollChecklistStatus'         => 'db:payroll_employment_checklist_items.status',
         'payroll.ts::PayrollVerifiedTriState'        => 'db:payroll_employment_terms.jmhz_apz_contribution_status',
@@ -96,6 +102,8 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollPayoutMethod'         => 'db:payroll_employee_profiles.payout_method',
         'payroll.ts::PayrollSecureDeliveryChannel' => 'db:payroll_employee_profiles.secure_delivery_channel',
         'payroll.ts::PayrollDependantRelation'    => 'db:payroll_dependants.relation',
+        'payroll.ts::PayrollStatutoryEvidenceSection'
+            => 'const:MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository::EDITABLE_SECTIONS',
         'payroll.ts::PayrollPersonAccountVerificationSource'
             => 'enum:MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationSource',
 
@@ -189,6 +197,11 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Ruleset\PayrollRulesetOrigin',
         'payroll.ts::PayrollPeopleFilter'
             => 'const:MyInvoice\Repository\Payroll\PayrollPeopleRepository::LIST_FILTERS',
+        // Navazující agendy karty zaměstnance. Klíč navíc na klientovi = řádek
+        // souhrnu bez popisku, klíč navíc na serveru = agenda, na kterou karta
+        // neumí odkázat.
+        'payroll.ts::PayrollAgendaKey'
+            => 'const:MyInvoice\Repository\Payroll\PayrollEmploymentAgendaSummaryRepository::AGENDA_KEYS',
 
         'payrollTravel.ts::TravelTransportMode' => 'enum:MyInvoice\Service\Payroll\Travel\TravelTransportMode',
         'payrollTravel.ts::TravelVehicleKind'   => 'enum:MyInvoice\Service\Payroll\Travel\TravelVehicleKind',
@@ -268,6 +281,8 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.people.employment_status'    => 'db:payroll_employments.status',
         'payroll.people.relations'            => 'db:payroll_employments.relation_type',
         'payroll.people.tax_regime'           => 'db:payroll_employment_terms.tax_regime',
+        'payroll.people.other_withholding_eligibility'
+            => 'db:payroll_employment_terms.other_withholding_eligibility',
         'payroll.people.insurance_mode'       => 'db:payroll_employment_terms.social_insurance_participation',
         'payroll.people.checklist_status'     => 'db:payroll_employment_checklist_items.status',
         'payroll.people.event'                => 'db:payroll_employment_events.event_type',
@@ -335,6 +350,7 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\Calculation\HealthMinimumTopUpPayer::class,
         \MyInvoice\Service\Payroll\Calculation\RoundingMode::class,
         \MyInvoice\Service\Payroll\Garnishment\DeductionLegalBasis::class,
+        \MyInvoice\Service\Payroll\Garnishment\EnforcementEvidenceSource::class,
         \MyInvoice\Service\Payroll\Garnishment\GarnishableIncomeKind::class,
         \MyInvoice\Service\Payroll\Garnishment\GarnishmentStatus::class,
         \MyInvoice\Service\Payroll\Garnishment\InsolvencyMode::class,
@@ -349,6 +365,7 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionReason::class,
         \MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpEmployerSelection::class,
         \MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibility::class,
+        \MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibilitySource::class,
         \MyInvoice\Service\Payroll\HealthInsurance\HealthParticipationStatus::class,
         \MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKind::class,
         \MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponentTreatment::class,

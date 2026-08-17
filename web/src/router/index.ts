@@ -44,6 +44,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'portal',                 name: 'portal',         component: () => import('@/pages/portal/PortalDashboard.vue'), meta: {  } },
       // Vyžádání chybějících dokladů (Fáze F, audit 2026-07) — klientský portál.
       { path: 'portal/document-requests', name: 'portal-document-requests', component: () => import('@/pages/portal/DocumentRequests.vue'), meta: {  } },
+      { path: 'portal/purchase-invoice-submissions', name: 'portal-purchase-invoice-submissions', component: () => import('@/pages/portal/PurchaseInvoiceSubmissions.vue'), meta: { requiresSupplier: true } },
       { path: 'clients',                name: 'clients',        component: () => import('@/pages/clients/ClientList.vue'), meta: {  } },
       { path: 'clients/new',            name: 'client-new',     component: () => import('@/pages/clients/ClientForm.vue'), meta: { requiresSupplier: true } },
       { path: 'clients/:id(\\d+)',      name: 'client-detail',  component: () => import('@/pages/clients/ClientDetail.vue'), meta: {  } },
@@ -73,6 +74,7 @@ const routes: RouteRecordRaw[] = [
       },
       // Přijaté faktury (fáze 1 integrace forku)
       { path: 'purchase-invoices',                 name: 'purchase-invoices',        component: () => import('@/pages/purchase-invoices/InvoiceList.vue'), meta: {  } },
+      { path: 'purchase-invoices/incoming',        name: 'purchase-invoice-submissions', component: () => import('@/pages/purchase-invoices/IncomingDocuments.vue'), meta: { requiresSupplier: true } },
       // Export/Import přijatých (reorg UX 2026-07) — nav pod Nákup; sdílená stránka
       // DataExchange.vue jen vybere ExportPurchase/ImportPurchase dle props.
       {
@@ -410,7 +412,8 @@ const routes: RouteRecordRaw[] = [
 ]
 
 const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
-  home: ['dashboard'], portal: ['profile'], 'portal-document-requests': ['profile'],
+  home: ['dashboard'], portal: ['profile'], 'portal-document-requests': ['documents.submit'],
+  'portal-purchase-invoice-submissions': ['documents.submit'],
   clients: ['clients'], 'client-new': ['clients.create', 'write'], 'client-detail': ['clients'], 'client-edit': ['clients', 'write'],
   projects: ['projects'], 'project-new': ['projects.create', 'write'], 'project-detail': ['projects'], 'project-edit': ['projects', 'write'],
   invoices: ['invoices'], 'invoice-new': ['invoices.create', 'write'], 'invoice-detail': ['invoices'], 'invoice-edit': ['invoices', 'write'],
@@ -419,6 +422,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // Export/Import vydaných (reorg UX 2026-07) — nav pod Prodej, viz AppLayout.vue.
   'invoices-export': ['invoices'], 'invoices-import': ['invoices'],
   'purchase-invoices': ['purchase_invoices'], 'purchase-invoices-payment-orders': ['purchase_invoices.payment_orders'],
+  'purchase-invoice-submissions': ['documents.inbox'],
   'purchase-invoice-new': ['purchase_invoices.create', 'write'], 'purchase-invoice-detail': ['purchase_invoices'], 'purchase-invoice-edit': ['purchase_invoices', 'write'],
   // Export/Import přijatých (reorg UX 2026-07) — nav pod Nákup, viz AppLayout.vue.
   'purchase-invoices-export': ['purchase_invoices'], 'purchase-invoices-import': ['purchase_invoices'],

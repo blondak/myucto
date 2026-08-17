@@ -90,6 +90,10 @@ final class RoutePermissionMap
         ['GET', '#^/api/purchase-invoices(/|$)#', 'purchase_invoices', AccessLevel::READ],
         ['*', '#^/api/purchase-invoices(/|$)#', 'purchase_invoices', AccessLevel::WRITE],
 
+        ['GET', '#^/api/purchase-invoice-submissions(/|$)#', 'documents.inbox', AccessLevel::READ],
+        ['DELETE', '#^/api/purchase-invoice-submissions/[0-9]+$#', 'documents.inbox.delete', AccessLevel::WRITE],
+        ['*', '#^/api/purchase-invoice-submissions(/|$)#', 'documents.inbox', AccessLevel::WRITE],
+
         ['POST', '#^/api/recurring$#', 'recurring.create', AccessLevel::WRITE],
         ['POST', '#^/api/recurring/[0-9]+/(run|run-now|generate)$#', 'recurring.run', AccessLevel::WRITE],
         ['POST', '#^/api/recurring/[0-9]+/(pause|resume)$#', 'recurring.pause', AccessLevel::WRITE],
@@ -154,6 +158,13 @@ final class RoutePermissionMap
         ['*', '#^/api/payroll/people/[0-9]+/payout-rules(/(apply-defaults|[0-9]+))?$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+/dependants$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/people/[0-9]+/dependants(/[0-9]+(/claims(/[0-9]+)?)?)?$#', 'payroll.person.write', AccessLevel::WRITE],
+        // Zákonná evidence osoby (prohlášení k dani, daňová rezidence, sociální
+        // a zdravotní příslušnost, sleva pracujícího důchodce). Jsou to právní
+        // skutečnosti vedené na OSOBĚ, ne na pracovním vztahu — jedna osoba jich
+        // může mít víc a evidence platí napříč. Proto stejné právo jako profil
+        // a vyživované osoby, ne `payroll.employment.write`.
+        ['GET', '#^/api/payroll/people/[0-9]+/statutory-evidence$#', 'payroll', AccessLevel::READ],
+        ['PUT', '#^/api/payroll/people/[0-9]+/statutory-evidence$#', 'payroll.person.write', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/people/[0-9]+/quick-edit$#', 'payroll.person.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/people/[0-9]+/sensitive-reveal$#', 'payroll.person.read_sensitive', AccessLevel::READ],
         ['POST', '#^/api/payroll/people/[0-9]+/employments$#', 'payroll.employment.write', AccessLevel::WRITE],
@@ -162,6 +173,10 @@ final class RoutePermissionMap
         // Klasifikace zaměstnání ČSÚ je veřejná referenční data, ne data nájemce —
         // stejná úroveň jako sousední našeptávač obcí.
         ['GET', '#^/api/payroll/cz-isco$#', 'payroll', AccessLevel::READ],
+        // Rozcestník karty zaměstnance. Vstupní branou je obecné `payroll` (kdo smí
+        // na kartu, smí vidět, že agendy existují); citlivější agendy uvnitř si
+        // PayrollEmploymentAgendaSummaryAction filtruje po jedné vlastním právem.
+        ['GET', '#^/api/payroll/employments/[0-9]+/agenda-summary$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/employments/[0-9]+/(terms|transitions/[a-z_]+|checklist/[a-z0-9_]+)$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Totéž právo jako založení vztahu (POST /people/{id}/employments výše).
         ['DELETE', '#^/api/payroll/employments/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
@@ -443,8 +458,11 @@ final class RoutePermissionMap
         ['GET', '#^/api/(suppliers|search|slug)(/|$)#', 'profile', AccessLevel::READ],
         ['GET', '#^/api/branding-profiles$#', 'profile', AccessLevel::READ],
         ['*', '#^/api/user/(filters|preferences)(/|$)#', 'profile', AccessLevel::WRITE],
+        ['GET', '#^/api/portal/purchase-invoice-submissions(/|$)#', 'documents.submit', AccessLevel::READ],
+        ['POST', '#^/api/portal/purchase-invoice-submissions(/|$)#', 'documents.submit', AccessLevel::WRITE],
+        ['GET', '#^/api/portal/document-requests$#', 'documents.submit', AccessLevel::READ],
+        ['POST', '#^/api/portal/document-requests/[0-9]+/upload$#', 'documents.submit', AccessLevel::WRITE],
         ['GET', '#^/api/portal(/|$)#', 'profile', AccessLevel::READ],
-        ['POST', '#^/api/portal/document-requests/[0-9]+/upload$#', 'purchase_invoices.create', AccessLevel::WRITE],
         ['GET', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::READ],
         ['*', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::WRITE],
     ];

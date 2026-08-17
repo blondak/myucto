@@ -13,10 +13,12 @@ use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionInterval;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionReason;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpEmployerSelection;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibility;
+use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibilitySource;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthOtherEmployerBase;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthPersonMonthInput;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthRelationshipKindMapper;
 use MyInvoice\Service\Payroll\IncomeTax\AnnualTaxAccumulatorInput;
+use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKind;
 use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKindMapper;
 use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipTaxInput;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxInput;
@@ -579,35 +581,68 @@ final class PayrollRunStatutoryInputAssembler
             );
         }
 
+        /*
+         * Chybějící měsíční evidence zdravotního minima = zákonný výchozí stav,
+         * ne mezera v podkladech.
+         *
+         * § 3 odst. 10 zákona č. 592/1992 Sb.: „Pokud je vyměřovací základ
+         * zaměstnance nižší než minimální vyměřovací základ, je zaměstnanec
+         * povinen doplatit zdravotní pojišťovně prostřednictvím svého
+         * zaměstnavatele pojistné ve výši 13,5 % z rozdílu těchto základů. […]
+         * Pokud je vyměřovací základ nižší z důvodů překážek na straně
+         * organizace, je tento rozdíl povinen doplatit zaměstnavatel."
+         *
+         * Plátcem je tedy ze zákona ZAMĚSTNANEC a zaměstnavatel je výjimka
+         * vázaná na skutkovou okolnost (překážky na jeho straně), kterou musí
+         * někdo doložit. Vyžadovat řádek i pro pravidlo znamenalo u firmy
+         * s tisícem lidí 12 000 zápisů ročně, které jen opakují text zákona.
+         *
+         * Ptá se, až když to nastane: dopočet vůbec nevznikne, když vyměřovací
+         * základ dosahuje minima nebo se na osobu minimum nevztahuje, a
+         * HealthMinimumResolver hlásí `minimum_top_up_responsibility_unverified`
+         * i `selected_top_up_employer_*` jen při nenulové mezeře. V měsíci bez
+         * dopočtu proto nevznikne ani issue, ani požadavek na vstup.
+         *
+         * Doklad se drží tam, kde má co dokládat: u výjimky
+         * `employer_obstacle_verified` ho vynucuje HealthPersonMonthInput,
+         * u volby jiného zaměstnavatele při souběhu HealthMinimumResolver.
+         * U výchozího stavu žádný není a být nemá.
+         *
+         * Že hodnota vznikla odvozením ze zákona, nese snímek výpočtu vlastním
+         * klíčem — viz HealthMinimumTopUpResponsibilitySource.
+         */
         $monthEvidence = $this->object(
             $healthEvidence['month_evidence'] ?? null,
         );
-        if ($monthEvidence === null) {
-            $this->issue(
-                'health_insurance',
-                'health_minimum_month_evidence_missing',
-                $personReference,
+        $monthEvidenceRow = $monthEvidence ?? [];
+        $responsibility = HealthMinimumTopUpResponsibility::Employee;
+        $responsibilitySource =
+            HealthMinimumTopUpResponsibilitySource::StatutoryDefault;
+        if ($monthEvidence !== null) {
+            $responsibilitySource =
+                HealthMinimumTopUpResponsibilitySource::Declared;
+            $declared = $this->enum(
+                HealthMinimumTopUpResponsibility::class,
+                $monthEvidenceRow['top_up_responsibility'] ?? null,
             );
-            return null;
-        }
-        $responsibility = $this->enum(
-            HealthMinimumTopUpResponsibility::class,
-            $monthEvidence['top_up_responsibility'] ?? null,
-        );
-        if (!$responsibility instanceof HealthMinimumTopUpResponsibility) {
-            $this->issue(
-                'health_insurance',
-                'health_minimum_responsibility_invalid',
-                $personReference,
-            );
-            return null;
-        }
-        if ($responsibility === HealthMinimumTopUpResponsibility::Unverified) {
-            $this->issue(
-                'health_insurance',
-                'health_minimum_responsibility_unverified',
-                $personReference,
-            );
+            if (!$declared instanceof HealthMinimumTopUpResponsibility) {
+                $this->issue(
+                    'health_insurance',
+                    'health_minimum_responsibility_invalid',
+                    $personReference,
+                );
+                return null;
+            }
+            // Explicitní `unverified` je prohlášení „nevíme", ne absence
+            // prohlášení — a to zůstává důvodem k ručnímu posouzení.
+            if ($declared === HealthMinimumTopUpResponsibility::Unverified) {
+                $this->issue(
+                    'health_insurance',
+                    'health_minimum_responsibility_unverified',
+                    $personReference,
+                );
+            }
+            $responsibility = $declared;
         }
 
         $reductions = $this->healthReductions(
@@ -635,7 +670,7 @@ final class PayrollRunStatutoryInputAssembler
             return null;
         }
         $selectedEmployer = $this->nullableString(
-            $monthEvidence['selected_top_up_employer_reference'] ?? null,
+            $monthEvidenceRow['selected_top_up_employer_reference'] ?? null,
         );
         $selection = $selectedEmployer === null
             ? HealthMinimumTopUpEmployerSelection::ThisEmployer
@@ -662,17 +697,18 @@ final class PayrollRunStatutoryInputAssembler
                 $responsibility ===
                     HealthMinimumTopUpResponsibility::EmployerObstacleVerified
                     ? $this->nullableString(
-                        $monthEvidence[
+                        $monthEvidenceRow[
                             'top_up_responsibility_evidence_reference'
                         ] ?? null,
                     )
                     : null,
                 $this->nullableString(
-                    $monthEvidence[
+                    $monthEvidenceRow[
                         'selected_top_up_employer_evidence_reference'
                     ] ?? null,
                 ),
                 $selection,
+                $responsibilitySource,
             );
         } catch (\InvalidArgumentException) {
             $this->issue(
@@ -1032,6 +1068,12 @@ final class PayrollRunStatutoryInputAssembler
                 $relationshipReference,
             );
         }
+        // `tax_regime` je override VÝSLEDKU („zdaň to srážkou / v cizině / ručně")
+        // a podporovaná je z něj zatím jen `advance`. Zařazení podle § 6 odst. 4
+        // písm. b) ZDP se proto NEBERE odsud: to je vstupní skutečnost, na kterou
+        // výpočet teprve aplikuje rozhodnou částku, kdežto `tax_regime` by ji
+        // přeskočil a srazil daň i nad ní. Jede vlastním sloupcem — viz
+        // otherWithholdingEligibility().
         if (($term['tax_regime'] ?? null) !== 'advance') {
             $this->issue(
                 'income_tax',
@@ -1071,13 +1113,66 @@ final class PayrollRunStatutoryInputAssembler
             return null;
         }
 
+        [$eligibility, $classificationEvidence] = $this->otherWithholdingEligibility(
+            $kind,
+            $term,
+            $relationshipReference,
+        );
+
         return new EmploymentRelationshipTaxInput(
             $relationshipReference,
             "supplier:{$supplierId}",
             $kind,
             $components,
-            OtherWithholdingEligibility::Automatic,
+            $eligibility,
+            $classificationEvidence,
         );
+    }
+
+    /**
+     * Zařazení vztahu pro § 6 odst. 4 písm. b) ZDP.
+     *
+     * U pracovního poměru, zaměstnání malého rozsahu a DPP plyne odpověď ze
+     * samotného druhu vztahu, takže se posílá `Automatic` a zařadí si ho výpočet.
+     * U odměny jednatele nebo člena statutárního orgánu, u DPČ a u společníka
+     * konajícího práci pro s. r. o. to z druhu vztahu poznat nejde — rozhoduje,
+     * jestli sjednaná odměna dosahuje rozhodné částky pro účast na nemocenském
+     * pojištění — a odpověď proto nese prohlášení plátce ve smluvních podmínkách.
+     *
+     * Neznámá nebo nevyplněná hodnota končí na `Unverified`, tedy ručním
+     * posouzením. Je to fail-closed záměrně: běhy spočítané před migrací 1403
+     * mají snapshot bez tohohle klíče a nesmí se dopočítat jinak, než jak by je
+     * spočítal tehdejší kód.
+     *
+     * @param array<string,mixed> $term
+     * @return array{OtherWithholdingEligibility,?string}
+     */
+    private function otherWithholdingEligibility(
+        EmploymentRelationshipKind $kind,
+        array $term,
+        string $relationshipReference,
+    ): array {
+        if (!$kind->requiresOtherWithholdingStatement()) {
+            return [OtherWithholdingEligibility::Automatic, null];
+        }
+        $eligibility = match ($term['other_withholding_eligibility'] ?? null) {
+            'eligible' => OtherWithholdingEligibility::EligibleVerified,
+            'ineligible' => OtherWithholdingEligibility::IneligibleVerified,
+            default => OtherWithholdingEligibility::Unverified,
+        };
+        if ($eligibility === OtherWithholdingEligibility::Unverified) {
+            return [$eligibility, null];
+        }
+        // Doklad o zařazení je ta verze smluvních podmínek, ve které plátce
+        // prohlášení uložil — je effective-dated a nese autora i důvod změny.
+        $termId = $this->positiveInt($term['id'] ?? null);
+
+        return [
+            $eligibility,
+            $termId === null
+                ? $relationshipReference
+                : "employment-term:{$termId}",
+        ];
     }
 
     /** @param array<string,mixed> $person */

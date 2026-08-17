@@ -220,6 +220,74 @@ a vznikne nová účinná verze od měsíce následujícího, takže historický
 zůstane nedotčený. Ukončení nároku mimo zmrazené období se provede běžnou
 úpravou data „Nárok do".
 
+### 58.4.2 Zákonná evidence osoby
+
+Pod běžnými údaji zaměstnance je sekce **Zákonná evidence osoby**. Vede právní
+skutečnosti, ze kterých vychází zákonný výpočet:
+
+- **prohlášení poplatníka k dani** — rozhoduje, zda se uplatní měsíční slevy
+  a zvýhodnění, nebo se sráží daň bez nich;
+- **daňová rezidence** — rezident, nerezident (se zemí), nebo neověřeno;
+- **příslušnost k sociálnímu pojištění** včetně formuláře A1 u zahraničního
+  režimu;
+- **sleva pro pracujícího poplatníka v důchodu**;
+- **příslušnost ke zdravotnímu pojištění** a zdravotní pojišťovna;
+- **měsíční evidence zdravotního minima** — kdo za daný měsíc doplácí do
+  minimálního vyměřovacího základu.
+
+Chybí-li kterýkoli z prvních pěti údajů, mzdový běh zákonný výpočet této osoby
+nespočítá a skončí v ručním posouzení. Sekce proto v hlavičce ukazuje počet
+chybějících údajů a uvnitř je vyjmenuje pro konkrétní měsíc; datum **Ke kterému
+dni** určuje, který měsíc se kontroluje.
+
+Měsíční evidence zdravotního minima je **nepovinná**. Není-li za měsíc zadaná,
+platí zákonný výchozí stav podle § 3 odst. 10 zákona č. 592/1992 Sb.: doplatek
+do minimálního vyměřovacího základu hradí zaměstnanec. Zadává se tedy jen tehdy,
+když je skutečnost jiná — doplatek jde k tíži zaměstnavatele, protože nižší
+základ způsobily překážky na jeho straně (vyžaduje doklad), nebo si zaměstnanec
+při souběhu zvolil pro doplatek jiného zaměstnavatele. Rozklad pojistného u
+schválené mzdy pak ukazuje i to, jestli hodnota vznikla zápisem, nebo odvozením
+ze zákona. Volba **neověřeno** dál znamená ruční posouzení.
+
+Ověřené hodnoty (český nebo zahraniční režim, doložená pojišťovna, platný A1)
+jsou právní skutečnosti, takže vyžadují **doklad**. Ten se ale nepíše ručně —
+u každého dokladu se vybírá **typický důvod** (například „Podepsané prohlášení
+poplatníka (§ 38k)", „Rodné číslo a adresa bydliště v ČR", „Registrace
+u zdravotní pojišťovny") a evidence si z něj sama vytvoří odkaz do mzdové
+dokumentace. Volba **Jiné** odemkne volný text pro konkrétní číslo dokladu
+(písmena, číslice a znaky `.`, `:`, `/`, `_`, `-`). Lidské vysvětlení patří do
+pole **Poznámka k dokladu**. Kdo doklad nemá, zvolí variantu **neověřeno**; ta
+se uloží, ale zůstane vidět jako důvod ručního posouzení.
+
+Tlačítko **Přidat záznam** předvyplní běžný český případ: daňový rezident ČR,
+český sociální i zdravotní režim, formulář A1 se netýká, sleva pracujícího
+důchodce se neuplatňuje a zdravotní pojišťovna je ta, u které je osoba dosud
+vedená (jinak výchozí pojišťovna zaměstnavatele z nastavení mezd). U běžného
+zaměstnance tak není co vyplňovat — stačí zkontrolovat a uložit.
+
+Na co se evidence neptá, to si odvodí: u českého daňového rezidenta je stát vždy
+ČR, u českého sociálního režimu je A1 vždy „netýká se". Tato pole se proto
+nezobrazují a objeví se až po přepnutí na cizí režim — tehdy si evidence vyžádá
+stát (ze seznamu států) a doklad k režimu. Stát i zdravotní pojišťovna se vždy
+vybírají ze seznamu, nepíšou se. Chybí-li něco, co server nepřijme, napíše to
+evidence rovnou u záznamu i s tím, co s tím udělat.
+
+Evidence se zadává **po celých měsících** a záznamy jedné řady musí na sebe
+navazovat den po dni — čtecí cesta vyhodnocuje evidenci k prvnímu dni měsíce,
+takže změna uprostřed měsíce by se buď ztratila, nebo by pro daný měsíc vznikly
+dvě současně platné verze. Díra v řadě se odmítne už při uložení; jinak by se
+projevila až tím, že mzdový běh za chybějící měsíc spadne do ručního posouzení.
+
+Záznam, který začal před koncem posledního schváleného mzdového období, je
+uzavřený: jeho začátek nejde posunout ani ho smazat. Věcná změna se do něj
+nezapíše — původní záznam se ukončí posledním uzavřeným dnem a nová právní
+skutečnost vznikne jako nový záznam od dalšího měsíce. Doplnit dosud chybějící
+záznam do uzavřeného období naopak jde; nic tím nepřepisuje.
+
+Celá sekce se ukládá jedním tlačítkem **Uložit**. Čtení stačí obecné oprávnění
+pro mzdy, zápis vyžaduje **Spravovat zaměstnance** (`payroll.person.write`) —
+evidence je vedená na osobě, ne na jednotlivém pracovním vztahu.
+
 ## 58.5 Pracovní vztah a předkontace
 
 Jedna osoba může mít více samostatných právních vztahů. Rozlišení je důležité
@@ -269,6 +337,25 @@ nepřepíše. Historie drží zejména:
   daňový režim a prohlášení k dani;
 - příznak primárního pracovního vztahu a důvod změny.
 
+U odměny člena statutárního orgánu, u dohody o pracovní činnosti a u práce
+společníka pro vlastní společnost přibývá v podmínkách pole **Účast na
+nemocenském pojištění z odměny**. Rozhoduje o tom, jak se odměna zdaní, když
+zaměstnanec nepodepsal prohlášení k dani (§ 6 odst. 4 písm. b) zákona o daních
+z příjmů):
+
+- **Zakládá účast** — sjednaná odměna dosahuje rozhodné částky, takže se sráží
+  zálohová daň v každém měsíci.
+- **Nezakládá účast** — měsíce, ve kterých odměna rozhodné částky nedosáhne
+  (pro rok 2026 je to 4 500 Kč), se daní srážkovou daní 15 % ze samostatného
+  základu; ostatní měsíce zálohou.
+- **Neurčeno** — výchozí stav. Aplikace odpověď neodhaduje, protože za zařazení
+  ručí plátce daně, a zákonný výpočet skončí ručním posouzením, dokud ji někdo
+  nedoplní.
+
+U pracovního poměru, zaměstnání malého rozsahu a dohody o provedení práce se
+pole nenabízí — tam zařazení plyne přímo z druhu vztahu a aplikace si ho odvodí
+sama.
+
 Ve stejné verzi podmínek je skupina **JMHZ – vykonávaná pozice**. Eviduje
 strukturovanou obec pracoviště, kód obce a stát, druh činnosti, bližší určení
 pracovněprávního vztahu, příspěvek a nástroj APZ, funkční požitky a dočasné
@@ -304,6 +391,20 @@ pozdějšího doplatku. U každé položky je termín a stav **Nesplněno**,
 Časová osa zachovává stavové přechody, změny checklistu i rozdíl každé smluvní
 verze. Pokud jiný uživatel mezitím vztah změnil, starší formulář se neuloží a je
 nutné načíst aktuální verzi.
+
+### 58.8.1 Navazující agendy
+
+Karta vztahu má sekci **Navazující agendy**. Vede z ní jedno kliknutí do každé
+agendy, kde se k tomuto člověku dá něco pořídit — docházka a směny,
+nepřítomnosti, mzdové vstupy, pracovní cesty, opakované složky, průměrný
+výdělek, dohody o srážkách, exekuce, dokumenty a roční zúčtování. Cílová
+obrazovka se otevře už zúžená na daného zaměstnance; zúžení je vidět v horní
+liště a jedním tlačítkem se ruší.
+
+Pod tlačítky je souhrn: u agend, ve kterých něco je, počet záznamů, datum
+posledního a případně částka. Agendy, ve kterých zatím nic není, se jmenují
+jednou nenápadnou větou pod souhrnem. Agenda, na kterou uživatel nemá
+oprávnění, se nenabízí ani nezapočítává.
 
 ## 58.9 Mzdové složky a vstupy
 
@@ -673,6 +774,16 @@ třetiny, plně zabavitelný zbytek, pořadí přednostních pohledávek, běžn
 výživné, více exekučních příkazů, více plátců, oddlužení a paušální náhradu
 nákladů zaměstnavatele. Chybějící měsíční podklady nezastoupí odhadem — výsledek
 označí pro ruční kontrolu.
+
+Měsíční podklady se ale vyžadují jen tam, kde mají co doložit. Zaměstnanec bez
+jediné aktivní pohledávky a bez oddlužení nic zadávat nemusí: rozdělovat není
+co, takže potvrzení rejstříku pohledávek za takový měsíc nechybí — jen se
+nevyžaduje. Potvrzení vyživovaných osob a slevy na manžela se ptá jen tehdy,
+když je nárok uplatněný, protože jen tehdy zvedá nezabavitelnou částku.
+U schválené mzdy je pak z výsledku vidět, jestli byl podklad doložený, nebo
+proč se v tom měsíci nevyžadoval. Uplatněný a nedoložený nárok mzdový běh
+neblokuje, ale do vyčerpání kapacity dobrovolných dohod o srážkách nepustí —
+nezabavitelná částka, ze které se strop dohody počítá, není doložená.
 
 Číslo řízení, bankovní účet příjemce ani právní dokument se do polí případu
 nepřepisují. Patří do zabezpečených dokumentů; agenda srážek pracuje pouze

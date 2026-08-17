@@ -101,6 +101,13 @@ final class PayrollEmploymentAction
                     // Uložený kód CZ-ISCO smí projít, i když v číselníku není —
                     // hodnotu bere validátor odsud, nikdy z požadavku klienta.
                     $this->employments->currentCzIscoCode($supplierId, $employmentId),
+                    // Zařazení pro srážkovou daň drží klient jen tehdy, když ho
+                    // zná; jinak se přebírá to uložené, ať ho uložení podmínek
+                    // nešoupne zpátky na „neurčeno".
+                    $this->employments->currentOtherWithholdingEligibility(
+                        $supplierId,
+                        $employmentId,
+                    ),
                 ),
                 $this->validator->rowVersion($body),
                 $this->userId($request),

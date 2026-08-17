@@ -34,6 +34,12 @@ vi.mock('@/api/payroll', () => ({
   },
 }))
 
+// Rozcestník navazujících agend má vlastní test (EmploymentAgendaPanel.spec.ts).
+// Tady by jen tahal auth store a další požadavek do každého mountu karty.
+vi.mock('@/pages/payroll/EmploymentAgendaPanel.vue', () => ({
+  default: { template: '<div data-test="employment-agendas-stub" />' },
+}))
+
 const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 
 vi.mock('@/composables/useToast', () => ({
@@ -148,6 +154,39 @@ function employment(): PayrollEmployment {
 }
 
 describe('EmploymentCard', () => {
+  /**
+   * Zaměstnanec převzatý z jiného zpracování dostane výzvu k doplnění úhrnů.
+   * Jakmile je někdo doplní, nesmí nad nimi ta výzva viset dál — karta by
+   * úkolovala tím, co je hotové.
+   */
+  it.each([
+    [false, 'payroll.people.openings.hint'],
+    [true, 'payroll.people.openings.done'],
+  ])('u převzatého zaměstnance mluví o úhrnech podle toho, jestli jsou (%s)', async (filled, key) => {
+    const wrapper = mount(EmploymentCard, {
+      props: {
+        employment: { ...employment(), start_date: '2025-04-01' },
+        canWrite: true,
+        payrollStartPeriod: '2026-08-01',
+      },
+      global: {
+        stubs: {
+          // Panel počátečních stavů si data načítá sám; tady jde jen o to,
+          // co kartě ohlásí.
+          PayrollOpeningBalancesPanel: {
+            emits: ['loaded'],
+            template: '<div />',
+            mounted() { this.$emit('loaded', filled) },
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    const notice = wrapper.get('[data-test="opening-balances-needed"]')
+    expect(notice.text()).toContain(key)
+  })
+
   it('read-only uživateli ukáže historii a checklist, ale žádné mutace', () => {
     const wrapper = mount(EmploymentCard, {
       props: { employment: employment(), canWrite: false },
@@ -195,6 +234,57 @@ describe('EmploymentCard', () => {
     await wrapper.get('[data-test="jmhz-apz-instrument"]').setValue('1')
     await wrapper.get('[data-test="jmhz-apz-status"]').setValue('no')
     expect(wrapper.find('[data-test="jmhz-apz-instrument"]').exists()).toBe(false)
+  })
+
+  /**
+   * Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP se ptá jen tam, kde
+   * zařazení neplyne ze samotného druhu vztahu. U pracovního poměru by to bylo
+   * pole, kterým uživatel nemůže nic změnit — backend u něj posílá `automatic`.
+   */
+  it.each([
+    ['statutory_body', true],
+    ['dpc', true],
+    ['partner_dependent', true],
+    ['employment', false],
+    ['small_scale_employment', false],
+    ['dpp', false],
+  ] as const)('nabídne zařazení pro srážkovou daň jen u %s (%s)', async (relationType, visible) => {
+    const wrapper = mount(EmploymentCard, {
+      props: {
+        employment: { ...employment(), relation_type: relationType },
+        canWrite: true,
+      },
+    })
+    const edit = wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )
+    await edit!.trigger('click')
+    await flushPromises()
+
+    const field = wrapper.find('[data-test="other-withholding-eligibility"]')
+    expect(field.exists()).toBe(visible)
+  })
+
+  /**
+   * Odpověď „neurčeno" je legitimní stav uložených podmínek, ale nesmí se
+   * z formuláře ztratit — jinak by ho uložení shodilo na jinou hodnotu.
+   */
+  it('předvyplní zařazení pro srážkovou daň z uložených podmínek', async () => {
+    const stored = employment()
+    stored.relation_type = 'statutory_body'
+    stored.terms[0]!.other_withholding_eligibility = 'eligible'
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: stored, canWrite: true },
+    })
+    const edit = wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )
+    await edit!.trigger('click')
+    await flushPromises()
+
+    expect(
+      (wrapper.get('[data-test="other-withholding-eligibility"]').element as HTMLSelectElement).value,
+    ).toBe('eligible')
   })
 
   it('vyžádá 10502 jen pro druh činnosti 1 až 9 a při změně jej vyčistí', async () => {

@@ -308,6 +308,8 @@ final class PayrollRunSnapshotBuilder
                     'health_insurance_participation' =>
                         (string) $row['health_insurance_participation'],
                     'tax_regime' => (string) $row['tax_regime'],
+                    'other_withholding_eligibility' =>
+                        (string) $row['other_withholding_eligibility'],
                     'tax_declaration_signed' =>
                         (bool) $row['tax_declaration_signed'],
                     'risky_work' => (bool) $row['risky_work'],
@@ -536,6 +538,7 @@ final class PayrollRunSnapshotBuilder
                     term.social_insurance_participation,
                     term.health_insurance_participation,
                     term.tax_regime,
+                    term.other_withholding_eligibility,
                     term.tax_declaration_signed,
                     term.is_primary AS term_is_primary,
                     term.risky_work,

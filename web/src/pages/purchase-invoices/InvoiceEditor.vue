@@ -17,6 +17,11 @@ import {
   type PurchaseVatAllocation,
   type AiPostingSuggestion,
 } from '@/api/purchaseInvoices'
+import {
+  portalPurchaseInvoiceSubmissionsApi,
+  purchaseInvoiceSubmissionsApi,
+  type PurchaseInvoiceSubmission,
+} from '@/api/purchaseInvoiceSubmissions'
 import { PAYMENT_METHODS, type PaymentMethod } from '@/api/invoices'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { cashApi, type CashRegister } from '@/api/cash'
@@ -43,6 +48,7 @@ import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import PaymentCurrencyBlock from '@/components/purchase/PaymentCurrencyBlock.vue'
 import ExchangeRateInput from '@/components/purchase/ExchangeRateInput.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { btnFilled } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 
@@ -148,6 +154,15 @@ function hydrateStockSelections() {
 
 const isEdit = computed(() => route.params.id !== undefined && route.params.id !== 'new')
 const invoiceId = computed(() => (isEdit.value ? Number(route.params.id) : null))
+const submissionId = computed(() => {
+  if (isEdit.value) return null
+  const value = Number(route.query.submission_id)
+  return Number.isInteger(value) && value > 0 ? value : null
+})
+const submission = ref<PurchaseInvoiceSubmission | null>(null)
+const submissionCanPreviewInline = computed(() =>
+  submission.value?.doc_type === 'pdf' || submission.value?.doc_type === 'image',
+)
 
 const loaded = ref(false)
 const submitting = ref(false)
@@ -323,6 +338,7 @@ const existingPdf = ref<{ path: string; hash: string; size: number; name: string
 // na očích při kontrole vytěžených dat (viz komentář u `structuredSource` v populate()).
 const pdfPreviewOpen = ref(false)
 const pdfUploading = ref(false)
+const handoffUploading = ref(false)
 const dropzoneVisible = ref(true)
 
 // Náhled PDF/obrázku připraveného k nahrání u NOVÉ faktury (ještě není na serveru).
@@ -331,6 +347,13 @@ const dropzoneVisible = ref(true)
 // jinak by blob zůstal viset v paměti.
 const pendingPdfUrl = ref<string | null>(null)
 const pendingPdfPreviewOpen = ref(false)
+const pendingPdfFile = ref<File | null>(null)
+const canSubmitDocuments = computed(() =>
+  auth.isClientRole && auth.canWrite('documents.submit'),
+)
+const canHandoffPendingDocument = computed(() =>
+  canSubmitDocuments.value && pendingPdfFile.value !== null,
+)
 function setPendingPdfUrl(file: File | null) {
   if (pendingPdfUrl.value) {
     URL.revokeObjectURL(pendingPdfUrl.value)
@@ -500,6 +523,26 @@ async function addCurrency() {
   }
 }
 
+async function loadSubmissionOrigin(): Promise<void> {
+  const requestedId = submissionId.value
+  submission.value = null
+  if (!requestedId) return
+  try {
+    const item = await purchaseInvoiceSubmissionsApi.get(requestedId)
+    if (submissionId.value !== requestedId) return
+    if (item.status !== 'submitted' || item.purchase_invoice_id !== null) {
+      error.value = t('purchase_submissions.editor_origin_unavailable')
+      return
+    }
+    submission.value = item
+    if (item.document_kind_hint && item.document_kind_hint !== 'other') {
+      form.value.document_kind = item.document_kind_hint
+    }
+  } catch (e) {
+    if (submissionId.value === requestedId) error.value = apiErrorMessage(e)
+  }
+}
+
 onMounted(async () => {
   await loadCodebooks()
   void loadCashRegisters()
@@ -511,6 +554,7 @@ onMounted(async () => {
       const czk = currencies.value.find(c => c.code === 'CZK')
       if (czk) form.value.currency_id = czk.id
     }
+    await loadSubmissionOrigin()
     // Pre-fill vendor_id z ?vendor_id= (např. klik 'Nová přijatá faktura' v clientDetail)
     const qVendor = Number(route.query.vendor_id)
     if (!isNaN(qVendor) && qVendor > 0) {
@@ -524,6 +568,11 @@ onMounted(async () => {
     }
   }
   loaded.value = true
+})
+
+watch(submissionId, (next, previous) => {
+  if (!loaded.value || isEdit.value || next === previous) return
+  void loadSubmissionOrigin()
 })
 
 async function loadCodebooks() {
@@ -1066,7 +1115,9 @@ async function onPdfDropped(file: File) {
       // a nahraj ho jako přílohu až po uložení formuláře.
       if (extension === 'pdf' && e?.response?.data?.error?.code === 'no_embedded_isdoc') {
         queuePendingPdf(file)
-        toast.info(t('purchase_invoice.extraction.no_embedded_isdoc'))
+        toast.info(t(canSubmitDocuments.value
+          ? 'purchase_submissions.editor_handoff_available'
+          : 'purchase_invoice.extraction.no_embedded_isdoc'))
         return
       }
       toast.error(apiErrorMessage(e))
@@ -1093,7 +1144,24 @@ function clearPendingPdf() {
   dropzoneVisible.value = true
 }
 
-const pendingPdfFile = ref<File | null>(null)
+async function handoffPendingDocument() {
+  const file = pendingPdfFile.value
+  if (!file || !canHandoffPendingDocument.value || handoffUploading.value) return
+  if (blockDemoMutation()) return
+  handoffUploading.value = true
+  try {
+    const result = await portalPurchaseInvoiceSubmissionsApi.upload([file], '', 'invoice')
+    clearPendingPdf()
+    toast.success(t(result.duplicates > 0 && result.created === 0
+      ? 'purchase_submissions.editor_handoff_duplicate'
+      : 'purchase_submissions.editor_handoff_success'))
+    await router.push('/portal/purchase-invoice-submissions')
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    handoffUploading.value = false
+  }
+}
 
 async function uploadPdfToInvoice(id: number, file: File) {
   pdfUploading.value = true
@@ -1148,6 +1216,10 @@ async function onReplacePdf() {
 async function submit() {
   if (blockDemoMutation()) return
   if (submitting.value) return
+  if (submissionId.value && !submission.value) {
+    error.value = t('purchase_submissions.editor_origin_unavailable')
+    return
+  }
   submitting.value = true
   error.value = ''
   fieldErrors.value = {}
@@ -1159,6 +1231,7 @@ async function submit() {
   }
   try {
     const payload: PurchaseInvoicePayload = {
+      ...(submission.value ? { submission_id: submission.value.id } : {}),
       vendor_id: form.value.vendor_id!,
       vendor_invoice_number: form.value.vendor_invoice_number,
       varsymbol: form.value.varsymbol || null,
@@ -1241,7 +1314,7 @@ async function submit() {
       inv = await purchaseInvoicesApi.create(payload)
     }
     // Upload pending PDF pokud byl drop před save
-    if (pendingPdfFile.value) {
+    if (pendingPdfFile.value && !submissionId.value) {
       await uploadPdfToInvoice(inv.id, pendingPdfFile.value)
       pendingPdfFile.value = null
       setPendingPdfUrl(null)
@@ -1336,8 +1409,44 @@ function fieldErr(key: string): string | null {
     <div v-if="!loaded" class="text-center py-12 text-neutral-500">…</div>
 
     <form v-else @submit.prevent="submit" class="space-y-5">
+      <section v-if="submission" class="bg-surface border border-primary-500/30 rounded-lg shadow-sm overflow-hidden">
+        <div class="p-4 flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200">
+          <div class="min-w-0">
+            <h2 class="font-semibold text-sm">{{ t('purchase_submissions.editor_origin_title') }}</h2>
+            <p class="text-sm text-neutral-700 mt-1 truncate">{{ submission.original_name }}</p>
+            <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_submissions.editor_origin_hint') }}</p>
+            <p v-if="submission.note" class="text-sm text-neutral-600 mt-2">{{ submission.note }}</p>
+          </div>
+          <a
+            :href="purchaseInvoiceSubmissionsApi.downloadUrl(submission.id)"
+            target="_blank"
+            rel="noopener"
+            class="cursor-pointer whitespace-nowrap px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4 4-4M5 20h14" /></svg>
+            {{ t('purchase_submissions.download') }}
+          </a>
+        </div>
+        <iframe
+          v-if="submissionCanPreviewInline && submission.doc_type === 'pdf'"
+          :src="purchaseInvoiceSubmissionsApi.previewUrl(submission.id)"
+          class="w-full h-[65vh] min-h-[420px] border-0"
+          :title="submission.original_name"
+        />
+        <div v-else-if="submissionCanPreviewInline" class="bg-neutral-50 p-4 flex justify-center">
+          <img
+            :src="purchaseInvoiceSubmissionsApi.previewUrl(submission.id)"
+            :alt="submission.original_name"
+            class="max-h-[65vh] object-contain"
+          />
+        </div>
+        <div v-else class="bg-neutral-50 px-4 py-8 text-sm text-neutral-500 text-center">
+          {{ t('purchase_submissions.no_inline_preview') }}
+        </div>
+      </section>
+
       <!-- DRAG & DROP PDF (jen nahoře u nové faktury, schovaný po prvním interaction) -->
-      <div v-if="!isEdit && dropzoneVisible" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+      <div v-if="!isEdit && !submissionId && dropzoneVisible" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <PdfDropzone accept-structured :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
         <p class="text-xs text-neutral-500 mt-2">
           {{ t('purchase_invoice.extraction.ai_pending') }}
@@ -1345,7 +1454,7 @@ function fieldErr(key: string): string | null {
       </div>
 
       <!-- Soubor připravený k nahrání u nové faktury (nahraje se po prvním uložení) -->
-      <div v-if="!isEdit && pendingPdfFile" class="bg-success-50 border border-success-500/40 rounded-lg shadow-sm overflow-hidden">
+      <div v-if="!isEdit && !submissionId && pendingPdfFile" class="bg-success-50 border border-success-500/40 rounded-lg shadow-sm overflow-hidden">
         <div class="flex items-center justify-between px-4 py-3 gap-3">
           <div class="flex items-center gap-3 min-w-0">
             <svg class="w-7 h-8 shrink-0" viewBox="0 0 32 36" xmlns="http://www.w3.org/2000/svg">
@@ -1393,6 +1502,25 @@ function fieldErr(key: string): string | null {
               {{ t('common.remove') }}
             </button>
           </div>
+        </div>
+        <div v-if="canHandoffPendingDocument" class="px-4 py-3 border-t border-success-500/30 bg-surface/70 flex flex-wrap items-center justify-between gap-3">
+          <p class="text-sm text-neutral-700 max-w-2xl">
+            {{ t('purchase_submissions.editor_handoff_hint') }}
+          </p>
+          <button
+            type="button"
+            data-testid="handoff-pending-document"
+            :disabled="handoffUploading"
+            :class="btnFilled('primary')"
+            @click="handoffPendingDocument"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5a1 1 0 001 1h12a1 1 0 001-1v-5" />
+            </svg>
+            {{ handoffUploading
+              ? t('purchase_submissions.uploading')
+              : t('purchase_submissions.editor_handoff_action') }}
+          </button>
         </div>
         <!-- Inline náhled ze souboru v paměti (blob: URL) — faktura ještě není na serveru.
              Obrázek přes <img>, PDF přes <embed> (NE <iframe> ani #view= fragment — Chrome

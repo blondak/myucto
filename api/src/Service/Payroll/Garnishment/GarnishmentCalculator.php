@@ -20,6 +20,7 @@ final class GarnishmentCalculator
 
     public function calculate(GarnishmentInput $input): GarnishmentResult
     {
+        $scope = $this->evidenceScope($input);
         $policy = null;
         $rulesetId = null;
         $rulesetHash = null;
@@ -45,19 +46,21 @@ final class GarnishmentCalculator
 
             return $this->manualReview(
                 $input,
-                [...$this->validateInput($input, $shipped), ...$rulesetIssues],
+                [...$this->validateInput($input, $shipped, $scope), ...$rulesetIssues],
                 $rulesetId ?? $shipped->rulesetId(),
                 $rulesetHash ?? $shipped->rulesetHash(),
+                $scope,
             );
         }
 
-        $issues = $this->validateInput($input, $policy);
+        $issues = $this->validateInput($input, $policy, $scope);
         if ($issues !== []) {
             return $this->manualReview(
                 $input,
                 $issues,
                 $policy->rulesetId(),
                 $policy->rulesetHash(),
+                $scope,
             );
         }
 
@@ -117,6 +120,7 @@ final class GarnishmentCalculator
                 $roundingTrace,
                 $policy->rulesetId(),
                 $policy->rulesetHash(),
+                $scope,
             );
         }
 
@@ -134,6 +138,7 @@ final class GarnishmentCalculator
                 ['employer_fee_iteration_did_not_converge'],
                 $policy->rulesetId(),
                 $policy->rulesetHash(),
+                $scope,
             );
         }
 
@@ -171,6 +176,7 @@ final class GarnishmentCalculator
             $roundingTrace,
             $policy->rulesetId(),
             $policy->rulesetHash(),
+            $scope,
         );
     }
 
@@ -182,11 +188,20 @@ final class GarnishmentCalculator
      *
      * Vrací 0, kdykoli výsledek není uzavřený nebo běží schválené oddlužení —
      * fail-closed, protože v takovém případě není jisté, co exekuce ještě vezme.
+     *
+     * A stejnou nulu vrací, když nezabavitelná částka stojí na nedoloženém
+     * nároku na vyživovanou osobu nebo manžela. V měsíci bez exekuce se ten
+     * doklad kvůli výpočtu srážky nevyžaduje (nemá co ovlivnit), jenže strop
+     * dobrovolné dohody se podle § 148 odst. 2 zákoníku práce odvozuje z TÉŽE
+     * nezabavitelné částky. Zúžení evidence proto nesmí dohodě otevřít cestu
+     * k číslu, které předtím nikdo nedoložil: dřív takovou osobu shodilo ruční
+     * posouzení a kapacita byla nula, teď je nula bez blokátoru na celém běhu.
      */
     public function voluntaryDeductionCapacity(GarnishmentResult $result): int
     {
         if ($result->status !== GarnishmentStatus::Supported
             || $result->insolvencyApplied
+            || $result->evidenceSource?->protectedAmountIsUnattested() === true
         ) {
             return 0;
         }
@@ -549,12 +564,64 @@ final class GarnishmentCalculator
         ];
     }
 
+    /**
+     * Kdy má která z měsíčních evidencí co dokládat.
+     *
+     * Dřív se všechny tři vyžadovaly bezpodmínečně, u každé osoby a každý
+     * měsíc. Firma o tisíci lidech tak měla ročně 12 000 zápisů, které
+     * u člověka bez jediné exekuce nedokládaly nic — a bez nich jí každý
+     * mzdový běh skončil nepřebitelným blokátorem `enforcement_manual_review`.
+     *
+     * Rozsah se proto váže na to, co která evidence skutečně ovlivňuje:
+     *
+     *  • rejstřík pohledávek rozhoduje o rozdělení srážky mezi pohledávky.
+     *    Bez aktivní pohledávky a bez insolvence není co rozdělovat. Insolvence
+     *    je uvnitř záměrně, i když si částku určuje sama: souběžná exekuce je
+     *    v tom režimu důvod k ručnímu posouzení, takže vědět o ní je věcné;
+     *  • nárok na vyživovanou osobu a na manžela zvedá nezabavitelnou částku.
+     *    Neuplatněný nárok (počet 0, resp. `false`) ji neposouvá a při souběhu
+     *    plátců ji stejně určuje soudní rozhodnutí — v obou případech není co
+     *    dokládat. Uplatněný a nedoložený nárok v měsíci bez srážky nešíří
+     *    issue, ale uzavře kapacitu dobrovolných dohod; viz
+     *    {@see EnforcementEvidenceSource::NothingWithheld}.
+     *
+     * Ostatní kontroly (pořadí pohledávek, právní titul, duplicitní ID,
+     * rozhodnutí soudu při souběhu plátců, insolvence) se nemění.
+     */
+    private function evidenceScope(GarnishmentInput $input): EnforcementEvidenceScope
+    {
+        $withholdingArises = $this->activeClaims($input->claims) !== []
+            || $input->insolvency->mode !== InsolvencyMode::None;
+        $allowanceScope = static fn (bool $claimed, bool $declared): EnforcementEvidenceSource =>
+            !$claimed || $input->hasMultiplePayers
+                ? EnforcementEvidenceSource::NotApplicable
+                : ($declared
+                    ? EnforcementEvidenceSource::Declared
+                    : ($withholdingArises
+                        ? EnforcementEvidenceSource::Missing
+                        : EnforcementEvidenceSource::NothingWithheld));
+
+        return new EnforcementEvidenceScope(
+            $input->claimRegisterEvidenceComplete
+                ? EnforcementEvidenceSource::Declared
+                : ($withholdingArises
+                    ? EnforcementEvidenceSource::Missing
+                    : EnforcementEvidenceSource::NotApplicable),
+            $allowanceScope(
+                $input->eligibleDependants > 0,
+                $input->dependantsEvidenceComplete,
+            ),
+            $allowanceScope($input->eligibleSpouse, $input->spouseEvidenceComplete),
+        );
+    }
+
     /** @return list<string> */
     private function validateInput(
         GarnishmentInput $input,
         EnforcementDeductionPolicy2026 $policy,
+        EnforcementEvidenceScope $scope,
     ): array {
-        $issues = [];
+        $issues = $scope->issues();
         if (!$this->isPeriod($input->period)) {
             $issues[] = 'invalid_payroll_period';
         }
@@ -585,18 +652,9 @@ final class GarnishmentCalculator
             if ($input->protectedAmountOverrideVerified) {
                 $issues[] = 'protected_amount_decision_verified_without_multiple_payers';
             }
-            if (!$input->dependantsEvidenceComplete) {
-                $issues[] = 'dependants_evidence_incomplete';
-            }
-            if (!$input->spouseEvidenceComplete) {
-                $issues[] = 'spouse_allowance_evidence_incomplete';
-            }
         }
 
         $activeClaims = $this->activeClaims($input->claims);
-        if (!$input->claimRegisterEvidenceComplete) {
-            $issues[] = 'claim_register_evidence_incomplete';
-        }
         $seen = [];
         foreach ($activeClaims as $claim) {
             if (isset($seen[$claim->id])) {
@@ -720,6 +778,7 @@ final class GarnishmentCalculator
         array $issues,
         string $rulesetId,
         string $rulesetHash,
+        EnforcementEvidenceScope $scope,
     ): GarnishmentResult {
         sort($issues, SORT_STRING);
         $income = $input->income->garnishableMinorUnits;
@@ -741,6 +800,7 @@ final class GarnishmentCalculator
             [],
             $rulesetId,
             $rulesetHash,
+            $scope,
         );
     }
 

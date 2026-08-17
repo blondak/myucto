@@ -509,6 +509,8 @@
         "section_documents": "Documents",
         "documents": "Documents",
         "document_requests": "Missing documents",
+        "submit_documents": "Send documents to accountant",
+        "incoming_documents": "Incoming documents",
         "logbook": "Trip logbook",
         "section_accounting": "Accounting",
         "section_accounting_tools": "Accounting tools",
@@ -587,6 +589,32 @@
         "eshop_currencies": "Currencies"
     },
     "payroll": {
+        "agendas": {
+            "title": "Related agendas",
+            "subtitle": "Where to record more for this employment — the link opens a list already narrowed to this person.",
+            "count": "no records | 1 record | {count} records",
+            "last_on": "last {date}",
+            "nothing_yet": "Nothing yet: {agendas}.",
+            "load_failed": "The agenda summary could not be loaded. The buttons still work.",
+            "items": {
+                "time": "Attendance and shifts",
+                "absences": "Absences",
+                "quick_inputs": "Payroll inputs",
+                "travel": "Business trips",
+                "components": "Recurring components",
+                "average_earnings": "Average earnings",
+                "deduction_agreements": "Deduction agreements",
+                "enforcement": "Enforcements",
+                "documents": "Documents",
+                "annual_settlement": "Annual settlement"
+            },
+            "focus": {
+                "title": "The list is narrowed to {name}.",
+                "truncated": "The period holds more records than the narrowing could load — some may be missing. Clear the narrowing and page through the list.",
+                "unknown_person": "the selected employee",
+                "clear": "Clear narrowing"
+            }
+        },
         "rulesets": {
             "title": "Payroll legislation rules",
             "subtitle": "Rates, thresholds, deadlines and code lists used by the payroll calculation. The verified set ships effective and we stand behind it — there is nothing to approve or tick off, and every domain shows where its values come from. Overriding is possible and takes effect without a new release, but whoever enters the edited values stands behind them. Values are national and apply to every company.",
@@ -991,6 +1019,12 @@
                 "deductions_title": "Deductions by order",
                 "priority": "Order {priority}",
                 "unapplied": "Not applied: {value}",
+                "unapplied_unattested": "The protected amount rests on an allowance nobody documented ({claim}). A deduction agreement may not draw on it, so nothing was withheld — this is not a shortage of room in the net pay. Documenting the allowance restores the cap.",
+                "unapplied_unattested_claim": {
+                    "dependants": "dependants",
+                    "spouse": "spouse or partner",
+                    "both": "dependants and spouse or partner"
+                },
                 "no_deductions": "No deduction was applied in this revision.",
                 "allocations_title": "Payout split",
                 "allocations_hint": "The bank destination is shown only as a mask from the frozen revision.",
@@ -1068,6 +1102,10 @@
                     "employee": "The employee pays the top-up.",
                     "employer_obstacle_verified": "The employer pays the top-up — an obstacle on their side is evidenced.",
                     "unverified": "Who pays the top-up is not evidenced."
+                },
+                "top_up_responsibility_source": {
+                    "declared": "evidenced",
+                    "statutory_default": "by law (§ 3(10) of Act No. 592/1992 Coll.)"
                 },
                 "health_minimum_days": "The minimum is prorated to {applicable} calendar days ({excluded} days are not counted); the full monthly minimum is {statutory}.",
                 "health_other_employers": "Other employers evidence a base of {other}, {combined} in total — the minimum is therefore assessed from the sum.",
@@ -2276,6 +2314,8 @@
             "social_mode": "Social insurance participation",
             "health_mode": "Health insurance participation",
             "tax_regime_label": "Tax regime",
+            "other_withholding_eligibility_label": "Sickness insurance participation from this remuneration",
+            "other_withholding_eligibility_hint": "Decides how the income is taxed without a signed tax declaration (Income Tax Act, § 6 (4)(b)). If the agreed remuneration establishes sickness insurance participation, tax advance applies every month. If it does not, months where the remuneration stays below the decisive amount (CZK 4,500 in 2026) are taxed by 15 % withholding tax and the rest by tax advance. Until this is answered, the statutory calculation ends in manual review.",
             "foreign_country": "Foreign legislation country",
             "a1_certificate_until": "A1 certificate valid until",
             "tax_declaration": "Signed tax declaration",
@@ -2293,6 +2333,7 @@
             "openings": {
                 "title": "This employee started before you began running payroll here",
                 "hint": "Started {start}, payroll runs from {period}. To make the calculation and the annual settlement add up, the totals from the previous processing need to be filled in.",
+                "done": "The totals from the previous processing are filled in — the calculation and the annual settlement use them. You can review or correct them below.",
                 "panel_title": "Opening balances for {year}",
                 "panel_hint": "Totals for the months processed elsewhere. Copy them from the previous system's report; enter amounts in whole currency units.",
                 "nothing_to_fill": "Payroll runs from January, so there is nothing to fill in.",
@@ -2317,6 +2358,157 @@
                     "applied_child_credit_minor_units": "Child credit",
                     "tax_bonus_minor_units": "Tax bonus paid",
                     "bonus_qualifying_income_minor_units": "Bonus-qualifying income"
+                }
+            },
+            "statutory_evidence": {
+                "reason_custom": "Other — I will type my own document reference",
+                "insurer_unset": "Not selected",
+                "employer_none": "Not applicable",
+                "issues_block_save": "Before saving, fill in the details listed at the individual records.",
+                "reason": {
+                    "declaration_38k_signed": "Signed taxpayer declaration (§ 38k)",
+                    "declaration_38k_not_signed": "Employee did not sign the declaration",
+                    "residence_cz_birth_number_address": "Birth number and address of residence in CZ",
+                    "residence_cz_domicile_certificate": "Certificate of tax domicile in CZ",
+                    "residence_foreign_domicile_certificate": "Certificate of tax domicile of another state",
+                    "residence_foreign_tax_authority_confirmation": "Confirmation by a foreign tax authority",
+                    "social_a1_certificate": "A1 form issued by another state",
+                    "social_foreign_insurance_confirmation": "Confirmation of insurance in another state",
+                    "social_posting_contract": "Posting agreement to another state",
+                    "a1_certificate_issued": "Issued A1 form",
+                    "pension_award_decision": "Old-age pension award decision",
+                    "pension_employee_claim": "Employee notice claiming the discount",
+                    "health_s1_form": "S1 form or European health insurance card",
+                    "health_foreign_insurance_confirmation": "Confirmation of health insurance in another state",
+                    "health_insurer_registration": "Registration with a health insurer",
+                    "health_insured_card": "Insured person card",
+                    "minimum_employer_obstacle": "Obstacle to work on the employer side",
+                    "minimum_unpaid_leave_agreement": "Unpaid leave agreement",
+                    "minimum_other_employer_confirmation": "Other employer confirmation of the assessment base"
+                },
+                "issue": {
+                    "period_required": "Fill in when the record starts.",
+                    "period_month_start": "Records are kept in whole months — set the start to {day}.",
+                    "effective_to_before_from": "The end precedes the start — fix one of the dates.",
+                    "effective_to_month_end": "Records are kept in whole months — set the end to {day}.",
+                    "country_required": "Pick “{label}” from the list of countries — the server rejects the record without it.",
+                    "country_must_be_foreign": "A non-resident must have a country other than CZ. For a Czech resident switch the option to “Czech tax resident”.",
+                    "insurer_required": "Pick a health insurer from the list, or switch the status to “Unverified”.",
+                    "insurer_unknown": "Insurer code {code} is not in the codebook — pick an insurer from the list.",
+                    "insurer_not_applicable_in_czech_regime": "Anyone covered by the Czech public health insurance always has an insurer. Pick one, or — until you find out which — switch the status to “Unverified”.",
+                    "reference_required": "Pick a typical reason for “{label}”, or type your own document reference.",
+                    "reference_invalid": "The document reference for “{label}” may contain only letters, digits and . : / _ - and must start with a letter or a digit.",
+                    "employer_unknown": "The selected employer has no assessment base documented for this month — add it first.",
+                    "a1_valid_until_required": "A verified A1 must be valid at least until {day}. Fill in the validity date, or switch A1 to “Not applicable”.",
+                    "a1_valid_until_too_early": "A1 must be valid at least until {day} — the calculation does not accept an earlier date.",
+                    "multiple_open_rows": "Only one record may stay open. Fill in “Valid to” (last day of the month) on the older one."
+                },
+                "title": "Statutory evidence of the person",
+                "subtitle": "Tax declaration, tax residence, social and health insurance jurisdiction and the working pensioner discount.",
+                "blocked_badge": "all filled in | 1 missing item | {count} missing items | {count} missing items",
+                "blockers_title": "Missing for this month:",
+                "blockers_consequence": "Until these are filled in, the payroll run cannot compute the statutory part for this person and ends in manual review.",
+                "complete": "The evidence is complete for this month — the statutory calculation has what it needs.",
+                "effective_on": "As of",
+                "effective_on_hint": "The evidence is evaluated per whole month; the date selects which month is checked.",
+                "frozen_hint": "History up to {day} is closed by approved payroll. Older rows cannot be rewritten or deleted — a change is stored as a new version from the next month.",
+                "period_start": "For month",
+                "effective_from": "Valid from",
+                "effective_to": "Valid to",
+                "evidence_note": "Note about the document",
+                "evidence_note_placeholder": "e.g. original in the employee folder, copy in the file",
+                "reference_hint": "Letters, digits and . : / _ -",
+                "reference_placeholder": "e.g. document number 12345/2026",
+                "empty": "No record yet.",
+                "add_row": "Add record",
+                "remove_row": "Remove",
+                "row_frozen": "Closed by approved payroll",
+                "edit": "Edit evidence",
+                "saved": "The statutory evidence is saved.",
+                "load_failed": "The statutory evidence could not be loaded.",
+                "save_failed": "The statutory evidence could not be saved.",
+                "blocker": {
+                    "tax_declaration_evidence_missing": "taxpayer's tax declaration",
+                    "tax_declaration_evidence_unverified": "the taxpayer's tax declaration is recorded as unverified",
+                    "tax_residence_evidence_missing": "tax residence",
+                    "tax_residence_evidence_unverified": "the tax residence is recorded as unverified",
+                    "social_jurisdiction_evidence_missing": "social insurance jurisdiction",
+                    "social_jurisdiction_evidence_unverified": "the social insurance jurisdiction is recorded as unverified",
+                    "working_pensioner_discount_evidence_missing": "discount for a working old-age pensioner",
+                    "working_pensioner_discount_evidence_unverified": "the discount for a working old-age pensioner is recorded as unverified",
+                    "health_coverage_evidence_missing": "health insurance jurisdiction",
+                    "health_jurisdiction_evidence_unverified": "the health insurance jurisdiction is recorded as unverified",
+                    "health_insurer_evidence_unverified": "the health insurer is recorded as unverified",
+                    "statutory_evidence_snapshot_missing_or_mismatched": "the evidence is internally inconsistent — check whether the periods overlap"
+                },
+                "section": {
+                    "tax_declarations": "Taxpayer's tax declaration",
+                    "tax_residences": "Tax residence",
+                    "social_jurisdictions": "Social insurance jurisdiction",
+                    "social_discount_claims": "Working pensioner discount",
+                    "health_coverages": "Health insurance jurisdiction",
+                    "health_month_evidence": "Monthly evidence of the health minimum"
+                },
+                "section_hint": {
+                    "tax_declarations": "Decides whether monthly credits and allowances apply, or tax is withheld without them.",
+                    "tax_residences": "A non-resident is taxed differently than a resident; each variant needs a document.",
+                    "social_jurisdictions": "Whether the person is subject to Czech social insurance. A foreign regime needs a country and an A1 form.",
+                    "social_discount_claims": "Insurance discount for an employee drawing an old-age pension. If it is not claimed, pick “not claimed”.",
+                    "health_coverages": "Whether the person is subject to Czech health insurance and which insurer they are registered with.",
+                    "health_month_evidence": "Left empty means the employee pays the top-up to the minimum assessment base — that is what the law says. Add a record only for the exception: an obstacle on the employer's side, or the choice of employer when there are several."
+                },
+                "field": {
+                    "status": "Status",
+                    "evidence_reference": "Document",
+                    "residence": "Residence",
+                    "country_code": "Country",
+                    "jurisdiction": "Regime",
+                    "foreign_country_code": "Foreign country",
+                    "jurisdiction_evidence_reference": "Document for the regime",
+                    "a1_status": "A1 form",
+                    "a1_certificate_reference": "Document for A1",
+                    "a1_valid_until": "A1 valid until",
+                    "insurer_status": "Health insurer",
+                    "insurer_code": "Insurer code",
+                    "insurer_evidence_reference": "Document for the insurer",
+                    "top_up_responsibility": "Minimum top-up paid by",
+                    "top_up_responsibility_evidence_reference": "Document for the top-up",
+                    "selected_top_up_employer_reference": "Selected employer",
+                    "selected_top_up_employer_evidence_reference": "Document for the employer choice"
+                },
+                "option": {
+                    "status": {
+                        "signed": "Signed",
+                        "not-signed": "Not signed",
+                        "unverified": "Unverified",
+                        "not_claimed": "Not claimed",
+                        "verified": "Documented"
+                    },
+                    "residence": {
+                        "czech-resident": "Czech tax resident",
+                        "non-resident": "Tax non-resident",
+                        "unverified": "Unverified"
+                    },
+                    "jurisdiction": {
+                        "czech_regime_verified": "Czech regime (documented)",
+                        "foreign_regime_verified": "Foreign regime (documented)",
+                        "unverified": "Unverified"
+                    },
+                    "a1_status": {
+                        "verified": "Documented",
+                        "unverified": "Unverified",
+                        "not_applicable": "Not applicable"
+                    },
+                    "insurer_status": {
+                        "verified": "Documented",
+                        "unverified": "Unverified",
+                        "not_applicable": "Not applicable"
+                    },
+                    "top_up_responsibility": {
+                        "employee": "Employee",
+                        "employer_obstacle_verified": "Employer (obstacle documented)",
+                        "unverified": "Unverified"
+                    }
                 }
             },
             "rename_action": "Label for attendance import",
@@ -2361,6 +2553,11 @@
                 "withholding": "Withholding tax",
                 "foreign": "Taxed abroad",
                 "manual_review": "Manual review"
+            },
+            "other_withholding_eligibility": {
+                "unverified": "Not stated — calculation ends in manual review",
+                "eligible": "Does not participate — withholding tax below the decisive amount",
+                "ineligible": "Participates — tax advance every month"
             },
             "checklist_status": {
                 "pending": "Open",
@@ -3180,7 +3377,8 @@
                 "outside_period": "Outside period",
                 "status": {
                     "ok": "OK",
-                    "blocked": "Blocking"
+                    "blocked": "Blocking",
+                    "pending": "Not filled in yet"
                 },
                 "options": {
                     "business_day_rule": {
@@ -3248,7 +3446,8 @@
                     },
                     "jmhz_certificate": {
                         "ok": "The JMHZ authentication credential is ready.",
-                        "blocked": "JMHZ requires a valid authentication credential."
+                        "blocked": "JMHZ requires a valid authentication credential.",
+                        "pending": "Choose a signing certificate for production submissions (Payroll → Submissions → Certificate). It does not block the setup — live submission is not available yet anyway."
                     },
                     "jmhz_feature_source": {
                         "ok": "The tenant JMHZ activation source is verified.",
@@ -3703,6 +3902,12 @@
                 "dependants": "Dependants are verified",
                 "spouse": "Spouse or partner eligibility is verified",
                 "multiple_payers": "Income is paid by multiple payers",
+                "scope": {
+                    "claim_register_idle": "Nothing to document — the person has no active claim and no approved debt relief, so there is nothing to distribute.",
+                    "allowance_not_claimed": "Nothing to document — the allowance is not claimed, so it does not raise the protected amount.",
+                    "allowance_multiple_payers": "Nothing to document — with multiple payers the protected amount is set by a court decision.",
+                    "nothing_withheld": "Nothing is withheld this month, so enforcement does not need the document. Until the allowance is documented, however, a voluntary deduction agreement has nothing to draw on — documenting it restores the cap."
+                },
                 "pension": "Pension condition",
                 "pension_unknown": "Not verified",
                 "pension_none": "Does not receive a pension",
@@ -3843,11 +4048,13 @@
         "badge": "Posted",
         "column": "Lock",
         "client_hint": "This document has been posted — contact your accountant for changes or cancellation.",
+        "client_hint_accountant_managed": "Your accountant processed this document from the submitted original — contact them for any changes.",
         "client_hint_period": "This document falls into a closed accounting period — contact your accountant for changes.",
         "staff_period_warning": "Warning: this document falls into a closed period.",
         "reason": {
             "posted": "posted to journal",
             "booked": "marked as booked",
+            "accountant_managed": "processed by the accountant from a submitted document",
             "period_closed": "closed period",
             "period_closing": "period closing in progress"
         }
@@ -3887,11 +4094,90 @@
             "empty": "Nothing missing right now — everything is uploaded.",
             "upload": "Upload document",
             "uploading": "Uploading…",
-            "uploaded": "Document uploaded and processed.",
+            "uploaded": "Document sent to your accountant for review.",
             "upload_failed": "Upload failed. Please try again or contact your accountant.",
             "awaiting_review": "Awaiting accountant review",
             "deadline_label": "Due:",
             "resolved_title": "Resolved"
+        }
+    },
+    "purchase_submissions": {
+        "portal_title": "Documents for your accountant",
+        "portal_subtitle": "Send invoices and receipts to your accountant without retyping their data.",
+        "submit_title": "Send a document to your accountant",
+        "submit_hint": "Upload a PDF, image, or ISDOC file. Your accountant will review it before it enters the accounts.",
+        "kind_hint": "Document type (optional)",
+        "kind_unknown": "Not sure / detect automatically",
+        "kind_other": "Other document",
+        "kind_provided": "Type supplied by the client: {kind}",
+        "note": "Note for your accountant (optional)",
+        "note_placeholder": "For example, what the expense relates to",
+        "choose_files": "Choose files",
+        "files_selected": "Files selected: {n}",
+        "uploading": "Sending…",
+        "submit_action": "Send to accountant",
+        "uploaded": "Files sent: {n}.",
+        "uploaded_with_duplicates": "Newly sent: {created}, already recorded: {duplicates}.",
+        "uploaded_partial": "Files accepted: {accepted}, rejected: {failed}. The list has been refreshed.",
+        "replacement_uploaded": "The replacement document was sent to your accountant.",
+        "replacement_received": "Replaced with a new file",
+        "open_title": "Awaiting resolution",
+        "empty": "No documents are awaiting resolution.",
+        "preview": "Preview",
+        "replace": "Upload replacement",
+        "closed_title": "Resolved documents",
+        "open_invoice": "Open invoice",
+        "inbox_title": "Incoming documents",
+        "inbox_subtitle": "Originals remain outside the accounts until you process them — whether a client submitted them or you uploaded them yourself.",
+        "filter_status": "Status",
+        "inbox_empty": "There are no documents in this queue.",
+        "inbox_submit_title": "Upload a document to the queue",
+        "inbox_submit_hint": "Documents that arrived outside the portal — by e-mail, on paper, or ones you queue up for yourself. The original stays outside the accounts until you process it.",
+        "inbox_submit_action": "Upload to queue",
+        "inbox_note": "Note about the document (optional)",
+        "inbox_note_placeholder": "For example where the document came from",
+        "inbox_uploaded": "Documents added to the queue: {n}.",
+        "inbox_uploaded_with_duplicates": "Newly added: {created}, already in the queue: {duplicates}.",
+        "inbox_dropzone_hint": "Drop documents here (or click to choose)",
+        "inbox_dropzone_formats": "PDF, JPG, PNG, ISDOC, XML or ISDOCX · up to 20 files at once",
+        "clear_files": "Clear selection",
+        "reason_internal": "Note on the rejection (optional)",
+        "reason_internal_placeholder": "Why the document does not belong in the accounts",
+        "reject_keeps_original": "Rejecting does not delete the original — it stays in Documents and in the audit trail.",
+        "delete": "Delete from queue",
+        "delete_confirm": "Delete \"{name}\" from the queue? The submission disappears and the original moves to the Documents trash, where emptying the trash removes it from disk too.",
+        "delete_success": "The document left the queue and its original is in the Documents trash.",
+        "submitted_by": "Submitted by: {name}",
+        "processed_success": "The document was processed into a received invoice.",
+        "linked_requests": "Linked requests: {n}",
+        "linked_bank_transaction": "Bank transaction #{id}",
+        "replaces_submission": "Replacement for submission #{id}",
+        "processing": "Processing…",
+        "extract": "Extract and create",
+        "manual": "Enter manually",
+        "download": "Download original",
+        "reason": "Message to the client",
+        "reason_placeholder": "What needs to be corrected, or why you are rejecting the document",
+        "needs_information": "Request replacement",
+        "reject": "Reject",
+        "reason_required": "Write a reason for the client first.",
+        "needs_information_success": "The client was asked for a replacement document.",
+        "rejected_success": "The document was rejected.",
+        "no_inline_preview": "This format has no browser preview. Download the original instead.",
+        "editor_origin_title": "Original being processed",
+        "editor_origin_hint": "After saving, the original is securely linked to the received invoice and the submission is closed.",
+        "editor_origin_unavailable": "This submitted document can no longer be processed manually. Refresh the incoming queue.",
+        "editor_handoff_available": "The document could not be loaded automatically. You can enter it manually or send it to your accountant with one click.",
+        "editor_handoff_hint": "Do not want to retype the details? Save the original to the inbox and send it to your accountant for processing.",
+        "editor_handoff_action": "Save and send to accountant",
+        "editor_handoff_success": "The document was saved and sent to your accountant.",
+        "editor_handoff_duplicate": "This document has already been sent to your accountant.",
+        "status": {
+            "submitted": "Submitted",
+            "processing": "Processing",
+            "needs_information": "Awaiting information",
+            "processed": "Processed",
+            "rejected": "Rejected"
         }
     },
     "portfolio": {
@@ -5389,6 +5675,9 @@
             "enter_gross": "Enter the gross salary — the breakdown is computed automatically.",
             "employer_note": "Employer contributions (on top of the gross salary): social {social} + health {health} = {total}.",
             "idempotent_note": "Posting the same month again overwrites the entry — no duplicate is created.",
+            "module_active_title": "Payroll is handled by the Payroll module",
+            "module_active_hint": "From {period} salaries are calculated and posted in the Payroll module. This recap stays available for earlier periods — from {period} it can no longer post, otherwise the salary would sit in the journal twice.",
+            "module_blocked": "Post the {period} salary in the Payroll module.",
             "remit": {
                 "title": "Contributions to remit",
                 "health": "Health insurance — health insurance company",

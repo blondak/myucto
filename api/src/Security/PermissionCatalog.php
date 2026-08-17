@@ -6,7 +6,7 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-08-supplier-domains-v1';
+    public const VERSION = '2026-08-domains-document-submissions-v1';
 
     /** @var list<string> */
     private const GROUPS = [
@@ -25,6 +25,7 @@ final class PermissionCatalog
 
         $staffOnly = ['staff'];
         $both = ['staff', 'client'];
+        $clientOnly = ['client'];
         $rows = [
             ['dashboard', 'dashboard', 'Dashboard', $staffOnly],
             ['dashboard.portfolio', 'dashboard', 'Přehled firem', $staffOnly],
@@ -68,6 +69,9 @@ final class PermissionCatalog
             ['documents.delete', 'documents', 'Smazat dokument', $staffOnly],
             ['documents.restore', 'documents', 'Obnovit dokument', $staffOnly],
             ['documents.requests', 'documents', 'Požadavky klientovi', $staffOnly],
+            ['documents.inbox', 'documents', 'Příchozí doklady', $staffOnly],
+            ['documents.inbox.delete', 'documents', 'Trvale vyřadit z příchozí fronty', $staffOnly],
+            ['documents.submit', 'documents', 'Předávat doklady účetní', $clientOnly],
             ['accounting', 'accounting', 'Účetnictví', $staffOnly],
             ['accounting.journal.write', 'accounting', 'Zápisy v deníku', $staffOnly],
             ['accounting.journal.post', 'accounting', 'Zaúčtovat doklad', $staffOnly],
@@ -177,6 +181,9 @@ final class PermissionCatalog
     {
         if ($systemKey === 'accountant') {
             $none = [
+                // Neměnný originál je auditní stopa; trvalé vyřazení je zásah pro správce,
+                // který si ho může kterékoli roli přidělit v editoru rolí.
+                'documents.inbox.delete',
                 'accounting.periods.close', 'accounting.periods.manage',
                 'settings.ai_provider', 'settings.bank_accounts', 'settings.branding',
                 'settings.company.write', 'settings.domains', 'utilities.import',
@@ -199,7 +206,7 @@ final class PermissionCatalog
         $keys = match ($systemKey) {
             'readonly' => [
                 'dashboard', 'dashboard.portfolio', 'clients', 'projects', 'invoices',
-                'purchase_invoices', 'recurring', 'bank', 'documents', 'documents.requests',
+                'purchase_invoices', 'recurring', 'bank', 'documents', 'documents.requests', 'documents.inbox',
                 'accounting', 'tax_evidence', 'tax_evidence.export', 'reports', 'reports.export',
                 'cash', 'assets', 'stock', 'eshop', 'logbook', 'settings.company', 'utilities',
                 'utilities.export', 'utilities.archives', 'profile', 'profile.tokens',
@@ -209,7 +216,7 @@ final class PermissionCatalog
                 'invoices.issue', 'invoices.send', 'invoices.reminder', 'invoices.mark_paid',
                 'invoices.cancel', 'invoices.clone', 'invoices.delete', 'invoices.approval',
                 'purchase_invoices', 'purchase_invoices.create', 'purchase_invoices.transition',
-                'purchase_invoices.delete', 'recurring', 'recurring.create', 'recurring.run',
+                'purchase_invoices.delete', 'documents.submit', 'recurring', 'recurring.create', 'recurring.run',
                 'recurring.pause', 'recurring.delete', 'settings.company', 'profile',
             ],
             default => [],

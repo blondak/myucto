@@ -36,7 +36,9 @@ session.
 
 ## Databáze, API a provoz
 
-- nová idempotentní migrace `1403_supplier_domains.sql`;
+- idempotentní migrace `1405_supplier_domains.sql` a kompatibilní převod
+  staršího jediného primárního příznaku v
+  `1406_supplier_domain_primary_flags.sql`;
 - nový browserový read-only kontrakt `/api/v1/auth/domain-context` a session-only
   přehled `/api/v1/settings/domains` v OpenAPI;
 - shodný tenant-aware SPA fallback pro Apache, IIS a Docker nginx;
@@ -69,7 +71,8 @@ canonical portál zůstává funkční, interní práce účetního zůstává n
 
 ## Ověření
 
-- [x] čistá MariaDB 11.8: všechny migrace včetně `1403`, následný běh bez pending
+- [x] čistá MariaDB 11.8: všechny migrace včetně `1405` a `1406`,
+  následný běh bez pending
   migrací;
 - [x] integrační doménové/passkey testy: 4 testy, 50 assertions;
 - [x] cílené tenant/security unit testy: 41 testů, 76 assertions;

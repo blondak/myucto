@@ -127,6 +127,9 @@ final class PayrollPersonQuickEditService
             // Rychlá editace mění hlavně mzdu a osobní údaje — historický kód
             // CZ-ISCO mimo číselník ji nesmí zablokovat, dokud na něj nikdo nesáhne.
             $this->employments->currentCzIscoCode($supplierId, $id),
+            // Zařazení pro srážkovou daň rychlá editace vůbec nenabízí, takže
+            // ho nesmí přepsat na „neurčeno" — přebírá se uložené.
+            $this->employments->currentOtherWithholdingEligibility($supplierId, $id),
         );
 
         return [

@@ -120,6 +120,10 @@ const ENUM_FIELDS: Record<string, { prefix: string, values: string[] }> = {
     prefix: 'payroll.people.tax_regime',
     values: ['advance', 'withholding', 'foreign', 'manual_review'],
   },
+  other_withholding_eligibility: {
+    prefix: 'payroll.people.other_withholding_eligibility',
+    values: ['unverified', 'eligible', 'ineligible'],
+  },
   jmhz_apz_contribution_status: {
     prefix: 'payroll.people.jmhz_evidence.state',
     values: ['unverified', 'no', 'yes'],

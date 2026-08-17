@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
   type PayrollQuickInputRef,
@@ -14,6 +14,8 @@ import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
+import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -48,6 +50,8 @@ const MAX_OVERTIME_HOURS_MILLI = 1_000_000
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 const period = ref(localPayrollPeriod())
 const loading = ref(false)
 /*
@@ -76,6 +80,42 @@ const pageSize = 25
 const total = ref(0)
 const offset = ref(0)
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
+
+/**
+ * Zúžení na jeden vztah z odkazu na kartě zaměstnance (`?employment=12`).
+ *
+ * Rychlé vstupy server podle vztahu filtrovat neumí (endpoint zná jen období),
+ * takže se při zúžení načte celý měsíc najednou (serverový strop je 200) a
+ * ponechá se jediný řádek. Musí se filtrovat SAMO `rows`, ne jen výpis:
+ * `payload()` posílá k uložení právě to, co je v `rows`, a uložit při zúžení
+ * i lidi, které uživatel nevidí, by byl tichý zápis mimo obrazovku.
+ */
+const QUICK_INPUT_FOCUS_LIMIT = 200
+const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
+/** Kolik řádků má celé období — proti tomu se pozná, že zúžení nevidělo všechno. */
+const periodTotal = ref(0)
+/*
+ * Lišta se zúžením musí být vidět i tehdy, když se hledaný člověk mezi načtenými
+ * řádky nenašel. Bez ní zůstane prázdná tabulka se schovaným pagerem a uživatel
+ * nemá jak poznat, že se dívá na zúžený seznam — ani jak se ze zúžení dostat.
+ */
+const focusName = computed(() => {
+  if (focusEmploymentId.value === null) return null
+  return rows.value.length === 1
+    ? rows.value[0].full_name
+    : t('payroll.agendas.focus.unknown_person')
+})
+const focusTruncated = computed(() =>
+  focusEmploymentId.value !== null
+  && (rows.value.length === 0 || periodTotal.value > QUICK_INPUT_FOCUS_LIMIT))
+
+function clearFocus(): void {
+  focusEmploymentId.value = null
+  const query = { ...route.query }
+  delete query.employment
+  void router.replace({ query })
+  reload()
+}
 
 function goToPage(nextPage: number): void {
   offset.value = Math.max(0, (nextPage - 1) * pageSize)
@@ -313,14 +353,20 @@ async function load(): Promise<void> {
   saveError.value = null
   saveConflict.value = false
   try {
-    const month = await payrollApi.quickInputs(requestedPeriod, {
-      limit: pageSize,
-      offset: offset.value,
-    })
+    const focused = focusEmploymentId.value
+    const month = await payrollApi.quickInputs(requestedPeriod, focused === null
+      ? { limit: pageSize, offset: offset.value }
+      : { limit: QUICK_INPUT_FOCUS_LIMIT, offset: 0 })
     if (generation !== loadGeneration || period.value !== requestedPeriod
       || month.period !== requestedPeriod) return
-    rows.value = month.items.map(toUi)
-    total.value = month.total
+    const items = focused === null
+      ? month.items
+      : month.items.filter(item => item.employment_id === focused)
+    rows.value = items.map(toUi)
+    // Se zúžením je „kolik jich je" počet nalezených řádků, ne celý měsíc —
+    // jinak by pager i souhrn mluvily o lidech, které tabulka neukazuje.
+    total.value = focused === null ? month.total : items.length
+    periodTotal.value = month.total
     loadedPeriod.value = requestedPeriod
   } catch (error) {
     if (generation === loadGeneration) {
@@ -485,6 +531,13 @@ onMounted(load)
     >
       {{ t('payroll.quick_inputs.validation_summary', { count: invalidFieldCount }) }}
     </div>
+
+    <PayrollFocusNotice
+      v-if="focusName"
+      :name="focusName"
+      :truncated="focusTruncated"
+      @clear="clearFocus"
+    />
 
     <section class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
       <div v-if="loading" class="p-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
@@ -833,7 +886,9 @@ onMounted(load)
           </article>
         </div>
 
+        <!-- Se zúžením na jednoho člověka se čte celý měsíc najednou; pager by lhal. -->
         <PaginationBar
+          v-if="focusEmploymentId === null"
           embedded
           :page="currentPage"
           :per-page="pageSize"

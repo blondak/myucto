@@ -498,8 +498,21 @@ watch(
                   + (health.contribution.employer_top_up_minor ?? 0)),
               }) }}
             </p>
+            <!--
+              Kdo doplatek hradí, a jestli to někdo prohlásil, nebo se to
+              odvodilo ze zákona. Bez toho rozlišení nejde po letech poznat,
+              čím byla schválená mzda podložená. Prázdný původ = revize
+              spočítaná dřív, než klíč vznikl; tam se nedomýšlí nic.
+            -->
             <p class="mt-1 text-xs">
               {{ t(`payroll.runs.insurance.top_up_responsibility.${health.minimum.top_up_responsibility}`) }}
+              <span
+                v-if="health.minimum.top_up_responsibility_source"
+                class="text-neutral-500"
+                data-testid="health-top-up-source"
+              >
+                · {{ t(`payroll.runs.insurance.top_up_responsibility_source.${health.minimum.top_up_responsibility_source}`) }}
+              </span>
             </p>
             <p v-if="health.minimum.applicable_calendar_days !== health.minimum.employment_calendar_days" class="mt-1 text-xs">
               {{ t('payroll.runs.insurance.health_minimum_days', {

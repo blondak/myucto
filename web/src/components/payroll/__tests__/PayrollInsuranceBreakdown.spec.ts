@@ -132,6 +132,7 @@ function fixture(overrides: Partial<PayrollInsuranceBreakdown> = {}): PayrollIns
         top_up_applied: false,
         top_up_base_minor: null,
         top_up_responsibility: 'employee',
+        top_up_responsibility_source: 'statutory_default',
         top_up_employer_selection: 'unverified',
         top_up_responsibility_evidence_reference: null,
         selected_top_up_employer_evidence_reference: null,
@@ -291,6 +292,29 @@ describe('PayrollInsuranceBreakdown', () => {
     const topUp = wrapper.get('[data-testid="health-minimum-top-up"]').text()
     expect(topUp).toContain('payroll.runs.insurance.health_top_up_detail')
     expect(topUp).toContain('payroll.runs.insurance.top_up_responsibility.employee')
+    // Kdo doplatek hradí, je jedna věc; čím je to podložené, druhá. Bez původu
+    // by po letech nešlo poznat, jestli to někdo prohlásil, nebo plyne ze zákona.
+    expect(topUp).toContain(
+      'payroll.runs.insurance.top_up_responsibility_source.statutory_default',
+    )
+  })
+
+  it('u starší revize bez zaznamenaného původu nedomýšlí, čím byl doplatek podložený', async () => {
+    const payload = fixture()
+    if (!payload.health.available) throw new Error('fixture')
+    // Tentýž stav jako v testu výš — jen bez zaznamenaného původu, jak ho mají
+    // revize spočítané dřív, než klíč vznikl.
+    payload.health.minimum = {
+      ...payload.health.minimum,
+      top_up_applied: true,
+      top_up_base_minor: 1_130_000,
+      top_up_responsibility_source: '',
+    }
+    const wrapper = await mountWith(payload)
+
+    const topUp = wrapper.get('[data-testid="health-minimum-top-up"]').text()
+    expect(topUp).toContain('payroll.runs.insurance.top_up_responsibility.employee')
+    expect(wrapper.find('[data-testid="health-top-up-source"]').exists()).toBe(false)
   })
 
   it('splits the health liability across insurers and marks the person’s own', async () => {

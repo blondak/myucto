@@ -25,6 +25,34 @@ describe('PdfDropzone', () => {
     expect(structured.get('input').attributes('accept')).toContain('.isdocx')
   })
 
+  it('v dávkovém režimu vydá všechny platné soubory a jeden špatný zbytek nezahodí', async () => {
+    const wrapper = mount(PdfDropzone, {
+      props: { multiple: true, acceptStructured: true, extraExtensions: ['xml'] },
+    })
+    const pdf = new File(['%PDF-1.7'], 'a.pdf', { type: 'application/pdf' })
+    const isdocXml = new File(['<Invoice/>'], 'b.xml', { type: '' })
+    const rejected = new File(['MZ'], 'c.exe', { type: '' })
+
+    await wrapper.trigger('drop', { dataTransfer: { files: [pdf, isdocXml, rejected] } })
+
+    expect(wrapper.emitted('files-dropped')).toEqual([[[pdf, isdocXml]]])
+    expect(wrapper.emitted('file-dropped')).toBeUndefined()
+    expect(wrapper.emitted('error')?.[0]?.[0]).toBe('invalid_pdf')
+    expect(wrapper.get('input').attributes('multiple')).toBeDefined()
+  })
+
+  it('jednosouborový režim zůstává jednosouborový i po dropu víc souborů', async () => {
+    const wrapper = mount(PdfDropzone)
+    const first = new File(['%PDF-1.7'], 'first.pdf', { type: 'application/pdf' })
+    const second = new File(['%PDF-1.7'], 'second.pdf', { type: 'application/pdf' })
+
+    await wrapper.trigger('drop', { dataTransfer: { files: [first, second] } })
+
+    expect(wrapper.emitted('file-dropped')).toEqual([[first]])
+    expect(wrapper.emitted('files-dropped')).toBeUndefined()
+    expect(wrapper.get('input').attributes('multiple')).toBeUndefined()
+  })
+
   it('ponechá PDF a fotografie dostupné i jako běžné přílohy', async () => {
     const wrapper = mount(PdfDropzone)
     const pdf = new File(['%PDF-1.7'], 'synthetic.pdf', { type: 'application/pdf' })

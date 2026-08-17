@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\PurchaseInvoice;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\DocumentLinkRepository;
@@ -13,6 +14,7 @@ use MyInvoice\Repository\DocumentViewerContext;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -29,12 +31,15 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class PurchaseInvoiceDocumentsAction
 {
+    use GuardsDocumentLock;
+
     public function __construct(
         private readonly PurchaseInvoiceRepository $invoices,
         private readonly DocumentRepository $documents,
         private readonly DocumentLinkRepository $links,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly DocumentLockService $locks,
     ) {}
 
     /** GET /api/purchase-invoices/{id}/documents */
@@ -42,7 +47,8 @@ final class PurchaseInvoiceDocumentsAction
     {
         $sid = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
-        if ($this->invoices->find($id, $sid) === null) {
+        $invoice = $this->invoices->find($id, $sid);
+        if ($invoice === null) {
             return Json::error($response, 'not_found', 'Přijatá faktura nenalezena.', 404);
         }
         // listByEntity aplikuje DMS scope guard — user-scoped doklady cizích uživatelů se nevrátí.
@@ -56,9 +62,18 @@ final class PurchaseInvoiceDocumentsAction
     {
         $sid = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
-        if ($this->invoices->find($id, $sid) === null) {
+        $invoice = $this->invoices->find($id, $sid);
+        if ($invoice === null) {
             return Json::error($response, 'not_found', 'Přijatá faktura nenalezena.', 404);
         }
+        if ($denied = $this->denyIfLocked(
+            $request,
+            $response,
+            $this->locks->forPurchaseInvoice($invoice),
+            'purchase_invoice',
+            $id,
+            true,
+        )) return $denied;
         $body = (array) $request->getParsedBody();
         $documentId = (int) ($body['document_id'] ?? 0);
         if ($documentId <= 0) {
@@ -85,9 +100,18 @@ final class PurchaseInvoiceDocumentsAction
     {
         $sid = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
-        if ($this->invoices->find($id, $sid) === null) {
+        $invoice = $this->invoices->find($id, $sid);
+        if ($invoice === null) {
             return Json::error($response, 'not_found', 'Přijatá faktura nenalezena.', 404);
         }
+        if ($denied = $this->denyIfLocked(
+            $request,
+            $response,
+            $this->locks->forPurchaseInvoice($invoice),
+            'purchase_invoice',
+            $id,
+            true,
+        )) return $denied;
         $body = (array) $request->getParsedBody();
         $q = $request->getQueryParams();
         $documentId = (int) ($body['document_id'] ?? $q['document_id'] ?? 0);
