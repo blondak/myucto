@@ -17,6 +17,7 @@ final class PayrollInputPreviewService
         private readonly PayrollInputRepository $inputs,
         private readonly PayrollComponentDefinitionFactory $factory,
         private readonly PayrollBenefitBasketService $baskets,
+        private readonly PayrollMealShiftEvidenceService $mealEvidence,
     ) {}
 
     /**
@@ -98,8 +99,12 @@ final class PayrollInputPreviewService
      * z prosincového benefitu vyskočí daň a pojistné. Vrací se i pro plnění,
      * které se do koše ještě vejde — smysl má vidět zbytek, ne jen překročení.
      *
+     * U příspěvku na stravování náhled navíc ukáže, KOLIK směn s nárokem za měsíc
+     * eviduje (`shift_entitlements`) a jestli je podklad úplný
+     * (`entitlement`). Bez toho by účetní viděla jen nižší strop a nevěděla proč.
+     *
      * @param array{employee_id:int, period_start:string, amount_minor:int, ...} $input
-     * @return array<string,int|string|bool>|null
+     * @return array<string,mixed>|null
      */
     private function basketSplit(
         int $supplierId,
@@ -111,17 +116,30 @@ final class PayrollInputPreviewService
         }
         $taxYear = (int) substr($input['period_start'], 0, 4);
         try {
-            return $this->baskets->split(
-                $definition->exemptionBasket,
-                $taxYear,
-                $this->inputs->annualBasketTotal(
+            $entitlement = $definition->exemptionBasket->scalesWithShifts()
+                ? $this->mealEvidence->forPeriod(
                     $supplierId,
                     $input['employee_id'],
+                    $input['period_start'],
+                )
+                : null;
+
+            return [
+                ...$this->baskets->split(
                     $definition->exemptionBasket,
-                    $taxYear,
-                ),
-                $input['amount_minor'],
-            )->jsonSerialize();
+                    $input['period_start'],
+                    $this->inputs->basketTotal(
+                        $supplierId,
+                        $input['employee_id'],
+                        $definition->exemptionBasket,
+                        $taxYear,
+                        $input['period_start'],
+                    ),
+                    $input['amount_minor'],
+                    $entitlement?->count() ?? 0,
+                )->jsonSerialize(),
+                'entitlement' => $entitlement?->jsonSerialize(),
+            ];
         } catch (PayrollRulesetException) {
             return null;
         }

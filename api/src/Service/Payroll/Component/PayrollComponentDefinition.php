@@ -63,11 +63,9 @@ final readonly class PayrollComponentDefinition
                 'Podklad osvobození má smysl jen u složky osvobozené od daně.'
             );
         }
-        if ($exemptionBasis === PayrollExemptionBasis::BenefitBasket
-            && $exemptionBasket === null
-        ) {
+        if ($exemptionBasis?->requiresFrozenSplit() === true && $exemptionBasket === null) {
             throw new \InvalidArgumentException(
-                'Podklad ročního koše vyžaduje zařazení složky do zákonného koše.'
+                'Podklad limitovaného osvobození vyžaduje zařazení složky do zákonného koše.'
             );
         }
     }

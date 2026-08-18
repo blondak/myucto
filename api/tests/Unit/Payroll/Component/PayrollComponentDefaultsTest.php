@@ -33,17 +33,24 @@ final class PayrollComponentDefaultsTest extends TestCase
         'REKREACE_VOLNY_CAS' => 'non_cash_leisure',
         // § 6 odst. 9 písm. m) — produkty spoření na stáří, 50 000 Kč ze zákona.
         'PRISPEVEK_PENZE_ZIVOTNI' => 'old_age_savings',
+        // § 6 odst. 9 písm. b) — příspěvek na stravování, limit ZA JEDNU SMĚNU.
+        'PRISPEVEK_STRAVOVANI' => 'meal_per_shift',
+        // § 6 odst. 9 písm. i) — přechodné ubytování, 3 500 Kč MĚSÍČNĚ.
+        'PRECHODNE_UBYTOVANI' => 'temporary_accommodation',
     ];
 
     /**
      * Částky košů, ověřené proti doslovnému znění ZDP účinnému pro rok 2026.
      * Průměrná mzda za zdaňovací období 2026 je 48 967 Kč (§ 21g odst. 2 ZDP
-     * odkazuje na zákon o pojistném na sociální zabezpečení).
+     * odkazuje na zákon o pojistném na sociální zabezpečení). U příspěvku na
+     * stravování je to částka NA JEDNU SMĚNU, tedy 70 % ze 185,00 Kč.
      */
     private const EXPECTED_BASKET_LIMITS = [
         'non_cash_health' => 4_896_700,
         'non_cash_leisure' => 2_448_350,
         'old_age_savings' => 5_000_000,
+        'meal_per_shift' => 12_950,
+        'temporary_accommodation' => 350_000,
     ];
 
     /**
@@ -54,7 +61,6 @@ final class PayrollComponentDefaultsTest extends TestCase
      * @var array<string,string>
      */
     private const DELIBERATELY_WITHOUT_BASKET = [
-        'PRISPEVEK_STRAVOVANI' => '§ 6 odst. 9 písm. b) — limit je za směnu, ne za rok.',
         'SOUKROME_VOZIDLO' => '§ 6 odst. 6 — ocenění příjmu, žádné osvobození s ročním stropem.',
         'VZDELAVANI' => '§ 6 odst. 9 písm. a) — odborný rozvoj je osvobozený bez limitu.',
         'PRISPEVEK_DLOUHODOBA_PECE' => 'Zařazení pod § 6 odst. 9 písm. m) určí až účetní.',
@@ -98,9 +104,10 @@ final class PayrollComponentDefaultsTest extends TestCase
                 $expected,
                 $baskets->limitMinor(
                     PayrollBenefitExemptionBasket::from($basket),
-                    2026,
+                    '2026-01-01',
+                    1,
                 ),
-                "Roční limit koše {$basket} neodpovídá zákonné částce.",
+                "Limit koše {$basket} neodpovídá zákonné částce.",
             );
         }
     }

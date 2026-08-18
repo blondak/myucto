@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Component\PayrollBenefitBasketService;
 use MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket;
 use MyInvoice\Service\Payroll\Component\PayrollComponentDefinitionFactory;
+use MyInvoice\Service\Payroll\Component\PayrollMealShiftEvidenceService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
 use PDOException;
@@ -21,6 +22,7 @@ final class PayrollInputRepository
         private readonly Connection $db,
         private readonly PayrollComponentDefinitionFactory $definitionFactory,
         private readonly PayrollBenefitBasketService $baskets,
+        private readonly PayrollMealShiftEvidenceService $mealEvidence,
     ) {}
 
     /**
@@ -387,24 +389,53 @@ final class PayrollInputRepository
             // Zákonný koš podle § 6 odst. 9 ZDP. Neblokuje: nadlimitní část je
             // běžný zdanitelný příjem a rozpad se zmrazí na vstupu, aby ho
             // výpočet běhu nemusel dopočítávat z historie schvalování.
+            //
+            // Výjimka je jediná a je fail-closed: u příspěvku na stravování stojí
+            // strop na POČTU SMĚN S NÁROKEM, a ten se bez uzavřené docházky
+            // odhadovat nesmí — jinak by se osvobodila i nadlimitní část.
             if ($definition->exemptionBasket !== null) {
+                $periodStart = PayrollTimeValue::string(
+                    $row['period_start'] ?? null,
+                    'period_start',
+                );
+                $entitlements = 0;
                 try {
+                    if ($definition->exemptionBasket->scalesWithShifts()) {
+                        $entitlement = $this->mealEvidence->forPeriod(
+                            $supplierId,
+                            $employeeId,
+                            $periodStart,
+                        );
+                        if (!$entitlement->complete) {
+                            throw new PayrollInputApprovalException(
+                                'meal_shift_evidence_incomplete',
+                                'Osvobozený příspěvek na stravování je podle § 6 odst. 9 '
+                                . 'písm. b) ZDP limitovaný za jednu směnu. Chybí podklad '
+                                . 'o odpracovaných směnách: '
+                                . implode(', ', $entitlement->missing)
+                                . '. Uzavřete docházku období a schvalte vstup znovu.',
+                            );
+                        }
+                        $entitlements = $entitlement->count();
+                    }
                     $split = $this->baskets->split(
                         $definition->exemptionBasket,
-                        $taxYear,
-                        $this->annualBasketTotal(
+                        $periodStart,
+                        $this->basketTotal(
                             $supplierId,
                             $employeeId,
                             $definition->exemptionBasket,
                             $taxYear,
+                            $periodStart,
                         ),
                         $amountMinor,
+                        $entitlements,
                     );
                 } catch (\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException $e) {
                     throw new PayrollInputApprovalException(
                         'benefit_basket_limit_unavailable',
-                        'Roční limit koše osvobození není pro dané zdaňovací období '
-                        . 'k dispozici, rozpad plnění proto nelze určit.',
+                        'Limit koše osvobození není pro rozhodné období k dispozici, '
+                        . 'rozpad plnění proto nelze určit.',
                         previous: $e,
                     );
                 }
@@ -849,6 +880,61 @@ final class PayrollInputRepository
             $stmt->fetchColumn(),
             'annual_basket_total',
         );
+    }
+
+    /**
+     * Úhrn koše za MĚSÍC — protějšek {@see annualBasketTotal()} pro koše, jejichž
+     * rozhodným obdobím je kalendářní měsíc (§ 6 odst. 9 písm. b) a i) ZDP).
+     *
+     * Období se bere z mzdového VSTUPU, ne z akumulátoru: ten nese jen zdaňovací
+     * rok. Zpětný vstup do minulého měsíce se proto poměřuje proti tomu měsíci,
+     * ne proti měsíci, ve kterém se zadával.
+     */
+    public function monthlyBasketTotal(
+        int $supplierId,
+        int $employeeId,
+        PayrollBenefitExemptionBasket $basket,
+        string $periodStart,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COALESCE(SUM(accumulator.amount_minor), 0)
+               FROM payroll_benefit_accumulators accumulator
+               JOIN payroll_inputs input
+                 ON input.supplier_id = accumulator.supplier_id
+                AND input.id = accumulator.input_id
+               JOIN payroll_component_definitions component
+                 ON component.supplier_id = accumulator.supplier_id
+                AND component.id = accumulator.component_id
+              WHERE accumulator.supplier_id = ?
+                AND accumulator.employee_id = ?
+                AND accumulator.status = "active"
+                AND input.period_start = ?
+                AND component.exemption_basket = ?'
+        );
+        $stmt->execute([$supplierId, $employeeId, $periodStart, $basket->value]);
+
+        return PayrollTimeValue::int(
+            $stmt->fetchColumn(),
+            'monthly_basket_total',
+        );
+    }
+
+    /**
+     * Dosud vyčerpaný úhrn koše za jeho ROZHODNÉ OBDOBÍ.
+     *
+     * Které to je, říká samo ustanovení
+     * ({@see PayrollBenefitExemptionBasket::accumulatesPerMonth()}), ne volající.
+     */
+    public function basketTotal(
+        int $supplierId,
+        int $employeeId,
+        PayrollBenefitExemptionBasket $basket,
+        int $year,
+        string $periodStart,
+    ): int {
+        return $basket->accumulatesPerMonth()
+            ? $this->monthlyBasketTotal($supplierId, $employeeId, $basket, $periodStart)
+            : $this->annualBasketTotal($supplierId, $employeeId, $basket, $year);
     }
 
     public function annualBenefitTotal(

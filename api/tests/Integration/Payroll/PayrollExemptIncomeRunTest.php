@@ -10,7 +10,11 @@ use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
+use MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
+use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
+use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -41,8 +45,12 @@ final class PayrollExemptIncomeRunTest extends TestCase
     /** § 6 odst. 9 písm. d) bod 2 ZDP — polovina průměrné mzdy 48 967 Kč. */
     private const LEISURE_LIMIT_MINOR = 2_448_350;
 
+    /** § 6 odst. 9 písm. b) ZDP — 70 % ze 185,00 Kč za jednu směnu. */
+    private const MEAL_LIMIT_MINOR = 12_950;
+
     private Connection $db;
     private PayrollRunCommandService $runs;
+    private \Psr\Container\ContainerInterface $container;
     private PayrollRunRepository $repository;
     private PayrollStatutoryAccumulatorRepository $accumulators;
     private int $supplierId;
@@ -53,6 +61,7 @@ final class PayrollExemptIncomeRunTest extends TestCase
     protected function setUp(): void
     {
         $container = Bootstrap::buildContainer();
+        $this->container = $container;
         $db = $container->get(Connection::class);
         $runs = $container->get(PayrollRunCommandService::class);
         $repository = $container->get(PayrollRunRepository::class);
@@ -244,6 +253,60 @@ final class PayrollExemptIncomeRunTest extends TestCase
     }
 
     /**
+     * Stravenkový paušál musí projít celým během až do SCHVÁLENÉ REVIZE.
+     *
+     * § 6 odst. 9 písm. b) ZDP osvobozuje příspěvek na stravování do 70 % horní
+     * hranice stravného za pracovní cestu 5 až 12 hodin, a to za každou směnu
+     * zvlášť. Dokud aplikace limit neuměla rozpadnout, byla složka na
+     * `manual_review` a měsíc s ní se nedal uzavřít vůbec. Tady jede přes dvě
+     * směny s nárokem (2 × 129,50 Kč) a padesátihaléřový přesah, který se zdaní.
+     */
+    public function testMealStipendReachesAnApprovedRevision(): void
+    {
+        $exempt = 2 * self::MEAL_LIMIT_MINOR;
+        $over = 50;
+        $this->seedInput(
+            'PRISPEVEK_STRAVOVANI_RUN',
+            'Stravenkový paušál',
+            'benefit_meal',
+            [
+                'tax_treatment' => 'exempt',
+                'exemption_basis' => 'periodic_benefit_limit',
+                'exemption_basket' => 'meal_per_shift',
+                'social_treatment' => 'excluded',
+                'social_participation_treatment' => 'excluded',
+                'health_treatment' => 'excluded',
+                'health_participation_treatment' => 'excluded',
+                'average_earning_treatment' => 'excluded',
+                'enforcement_treatment' => 'excluded',
+                'jmhz_treatment' => 'excluded',
+            ],
+            $exempt + $over,
+            [
+                'benefit_basket' => 'meal_per_shift',
+                'benefit_exempt_minor' => $exempt,
+                'benefit_taxable_minor' => $over,
+            ],
+        );
+
+        $approved = $this->runToApprovedRevision();
+        $person = $approved['result']['statutory']['people'][0];
+
+        self::assertSame('approved', $approved['run_status']);
+        self::assertSame('calculated', $approved['result']['statutory']['status']);
+        // Osvobozená část základ daně nezvyšuje, padesátihaléřový přesah ano.
+        self::assertSame(
+            self::REMUNERATION_MINOR + $over,
+            $person['income_tax']['relationships'][0]['taxable_base_minor_units'],
+        );
+        // Vyplatí se ale celý příspěvek — osvobození je o dani, ne o výplatě.
+        self::assertSame(
+            self::REMUNERATION_MINOR + $exempt + $over,
+            $person['net_pay']['cash_income_minor_units'],
+        );
+    }
+
+    /**
      * Fail-closed nesmí zmizet: složka označená za osvobozenou bez jakéhokoli
      * podkladu se dál nesmí tiše osvobodit.
      */
@@ -279,6 +342,69 @@ final class PayrollExemptIncomeRunTest extends TestCase
                 'tax_component_exemption_evidence_missing',
             ),
         ));
+    }
+
+    /**
+     * Běh přes všechny stavy až do schválené revize. Kontrolu i schválení dělá
+     * JINÝ uživatel než kalkulátor — čtyři oči jsou tvrdé pravidlo workflow.
+     *
+     * @return array{result:array<string,mixed>,run_status:string}
+     */
+    private function runToApprovedRevision(): array
+    {
+        // Schválení generuje výplatní pásky do úložiště souborů, a to není
+        // transakční — služba proto odmítne běžet ve vnořené transakci, kterou si
+        // test drží kvůli izolaci. Pásky nejsou předmětem tohohle testu, takže se
+        // schvaluje instancí bez jejich generátoru; zbytek řetězce je tentýž.
+        $approver = new PayrollRunCommandService(
+            $this->db,
+            $this->repository,
+            $this->container->get(PayrollRunSnapshotBuilder::class),
+            $this->container->get(PayrollRunCalculationPipeline::class),
+            $this->container->get(PayrollRunWorkflow::class),
+            $this->container->get(PayrollPeriodOwnershipService::class),
+        );
+        $reviewerId = $this->createActor();
+        $run = $this->runs->createRun(
+            $this->supplierId,
+            '2026-06-01',
+            '2026-07-15',
+            null,
+            $this->actorId,
+        );
+        $locked = $this->runs->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'lock-meal-stipend-run',
+            $this->actorId,
+        );
+        $calculated = $this->runs->calculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $locked->run['row_version'],
+            'calculate-meal-stipend-run',
+            $this->actorId,
+        );
+        $reviewed = $approver->review(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $calculated->run['row_version'],
+            'review-meal-stipend-run',
+            $reviewerId,
+        );
+        $approved = $approver->approve(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $reviewed->run['row_version'],
+            'approve-meal-stipend-run',
+            $reviewerId,
+        );
+
+        return [
+            'result' => $calculated->revision['result_snapshot'],
+            'run_status' => (string) $approved->run['status'],
+        ];
     }
 
     /** @return array{result:array<string,mixed>,validation_codes:list<string>} */

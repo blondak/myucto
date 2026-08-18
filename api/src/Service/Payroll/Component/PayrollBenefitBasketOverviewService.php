@@ -92,8 +92,15 @@ final class PayrollBenefitBasketOverviewService
      */
     private function limitOrNull(PayrollBenefitExemptionBasket $basket, int $taxYear): ?int
     {
+        // Měsíční koš (§ 6 odst. 9 písm. b) a i)) roční limit NEMÁ. Vynásobit ho
+        // dvanácti nebo počtem odpracovaných směn za rok by bylo smyšlené číslo —
+        // přehled proto u takového řádku limit netvrdí a řekne to stavem
+        // `limit_unavailable`. Zmrazená nadlimitní část se ukáže dál.
+        if ($basket->accumulatesPerMonth()) {
+            return null;
+        }
         try {
-            return $this->baskets->limitMinor($basket, $taxYear);
+            return $this->baskets->limitMinor($basket, sprintf('%04d-01-01', $taxYear));
         } catch (PayrollRulesetException) {
             return null;
         }

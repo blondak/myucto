@@ -18,7 +18,7 @@ namespace MyInvoice\Service\Payroll\Component;
  * „písemně" tam nejsou vůbec. Co chybělo, je záznam o tom, o KTEROU
  * konstrukci se nezdanění opírá — a ten aplikace z vlastních dat sestavit umí.
  *
- * Tři hodnoty jsou tři právně různé situace, které se dosud slily do jediného
+ * Hodnoty jsou právně různé situace, které se dosud slily do jediného
  * `exempt`. Rozdíl není kosmetický: na mzdovém listu podle § 38j odst. 2 písm. f)
  * bodu 2 se vykazují „částky osvobozené od daně", a plnění, které předmětem daně
  * vůbec není, mezi ně nepatří.
@@ -54,13 +54,40 @@ enum PayrollExemptionBasis: string
      */
     case BenefitBasket = 'benefit_basket';
 
+    /**
+     * § 6 odst. 9 písm. b) a i) ZDP — osvobozeno do limitu za KRATŠÍ OBDOBÍ než
+     * zdaňovací: za jednu směnu (příspěvek na stravování), resp. za kalendářní
+     * měsíc (přechodné ubytování).
+     *
+     * Proč to není `benefit_basket`, ačkoli se rozpad zmrazuje týmž mechanismem:
+     * u ročního koše plyne strop z ročního úhrnu a jediné, co je k němu potřeba,
+     * je pořadí čerpání. Tady strop plyne z PARAMETRU RULESETU NÁSOBENÉHO POČTEM
+     * SMĚN S NÁROKEM (písm. b)), takže dokladem je navíc evidence docházky — jiná
+     * konstrukce, jiný podklad, a na mzdovém listu i v auditní stopě musí jít
+     * poznat, o kterou z nich šlo. S ročním košem se to NESČÍTÁ: jsou to
+     * samostatná ustanovení s vlastními limity.
+     */
+    case PeriodicBenefitLimit = 'periodic_benefit_limit';
+
     public function statute(): string
     {
         return match ($this) {
             self::NotSubjectToTax => '§ 6 odst. 7 ZDP',
             self::StatutoryExempt => '§ 6 odst. 9 ZDP',
             self::BenefitBasket => '§ 6 odst. 9 písm. d) a m) ZDP',
+            self::PeriodicBenefitLimit => '§ 6 odst. 9 písm. b) a i) ZDP',
         };
+    }
+
+    /**
+     * Stojí osvobození na ZMRAZENÉM ROZPADU koše na mzdovém vstupu?
+     *
+     * Bez rozpadu není u těchhle podkladů známé, kolik z plnění se do limitu
+     * ještě vešlo — osvobodit tedy nelze nic.
+     */
+    public function requiresFrozenSplit(): bool
+    {
+        return $this === self::BenefitBasket || $this === self::PeriodicBenefitLimit;
     }
 
     /**

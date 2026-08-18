@@ -48,13 +48,23 @@ final class PayrollRuleParameterCatalog
             'advance.rounding.base_above_100_czk' => 'Zaokrouhlení základu zálohy nad 100 Kč',
             'advance.rounding.base_up_to_100_czk' => 'Zaokrouhlení základu zálohy do 100 Kč',
             'advance.rounding.result' => 'Zaokrouhlení vypočtené zálohy na daň',
-            'benefit_exemption.meal.per_shift' => 'Osvobozený příspěvek na stravování za směnu',
+            'benefit_exemption.meal.minimum_work_minutes' =>
+                'Nejkratší odpracovaná doba ve směně pro osvobozený příspěvek na stravování',
+            'benefit_exemption.meal.per_shift' => 'Osvobozený příspěvek na stravování za jednu směnu',
+            'benefit_exemption.meal.second_contribution_day_minutes' =>
+                'Odpracovaná doba za den pro druhý osvobozený příspěvek na stravování',
+            'benefit_exemption.meal.second_contribution_shift_minutes' =>
+                'Délka směny včetně přestávky pro druhý osvobozený příspěvek na stravování',
+            'benefit_exemption.meal.shift_rate' =>
+                'Podíl horní hranice stravného za pracovní cestu 5 až 12 hodin',
             'benefit_exemption.non_cash_health.yearly' =>
                 'Roční limit osvobození nepeněžních zdravotnických plnění',
             'benefit_exemption.non_cash_leisure.yearly' =>
                 'Roční limit osvobození nepeněžních volnočasových plnění',
             'benefit_exemption.old_age_savings.yearly' =>
                 'Roční limit osvobození příspěvku na produkty spoření na stáří a pojištění dlouhodobé péče',
+            'benefit_exemption.temporary_accommodation.monthly' =>
+                'Měsíční limit osvobození hodnoty přechodného ubytování',
             'bonus.minimum_amount.monthly' => 'Nejnižší vyplatitelný měsíční daňový bonus',
             'bonus.minimum_amount.yearly' => 'Nejnižší uplatnitelný roční daňový bonus',
             'bonus.minimum_income.monthly' => 'Minimální měsíční příjem pro nárok na daňový bonus',
@@ -238,14 +248,6 @@ final class PayrollRuleParameterCatalog
      */
     private const MANUAL_REVIEW = [
         'income_tax' => [
-            'benefit_exemption.meal.per_shift' => [
-                'why' => 'Osvobození příspěvku na stravování je 70 % horní hranice stravného za '
-                    . 'pracovní cestu 5 až 12 hodin, a platí ZA KAŽDOU SMĚNU zvlášť. Roční limit '
-                    . 'u mzdové složky proto na stravenkový paušál nesedí — aplikace nezná počet '
-                    . 'odpracovaných směn v okamžiku zadání složky a nebude si ho domýšlet.',
-                'action' => 'Nic tu nevyplňujte. Denní limit hlídejte při zadávání příspěvku na '
-                    . 'stravování; nadlimitní část zadejte jako běžný zdanitelný příjem.',
-            ],
             'credit.spouse.eligibility' => [
                 'why' => 'Roční sleva na manžela má od 1. 1. 2024 dvě podmínky NAJEDNOU: společně '
                     . 'hospodařící domácnost s manželem A s vyživovaným dítětem poplatníka, které '

@@ -268,6 +268,7 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'NEPENEZNI_PRIJEM',
             'ODMENA',
             'ODSTUPNE',
+            'PRECHODNE_UBYTOVANI',
             'PREMIE_PRIPLATKY',
             'PRISPEVEK_DLOUHODOBA_PECE',
             'PRISPEVEK_PENZE_ZIVOTNI',

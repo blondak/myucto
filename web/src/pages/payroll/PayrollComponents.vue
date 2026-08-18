@@ -273,15 +273,20 @@ const componentKinds: PayrollComponentKind[] = [
   'base_wage', 'hourly_wage', 'task_wage', 'bonus', 'premium', 'commission',
   'allowance', 'compensation', 'severance', 'competitive_clause', 'backpay',
   'non_cash', 'benefit_meal', 'benefit_vehicle', 'benefit_pension', 'benefit_care',
-  'benefit_education', 'benefit_recreation', 'benefit_health', 'risky_savings',
-  'travel_reimbursement', 'other',
+  'benefit_education', 'benefit_recreation', 'benefit_health', 'benefit_accommodation',
+  'risky_savings', 'travel_reimbursement', 'other',
 ]
 const valueKinds: PayrollComponentValueKind[] = ['monetary', 'non_monetary']
 const frequencies: PayrollComponentFrequency[] = ['regular', 'one_off']
 const taxTreatments: PayrollComponentTaxTreatment[] = ['included', 'exempt', 'withholding_candidate', 'manual_review']
 const inclusionTreatments: PayrollComponentInclusion[] = ['included', 'excluded', 'manual_review']
-const exemptionBaskets: PayrollBenefitExemptionBasket[] = ['non_cash_health', 'non_cash_leisure', 'old_age_savings']
-const exemptionBases: PayrollExemptionBasis[] = ['not_subject_to_tax', 'statutory_exempt', 'benefit_basket']
+const exemptionBaskets: PayrollBenefitExemptionBasket[] = [
+  'non_cash_health', 'non_cash_leisure', 'old_age_savings',
+  'meal_per_shift', 'temporary_accommodation',
+]
+const exemptionBases: PayrollExemptionBasis[] = [
+  'not_subject_to_tax', 'statutory_exempt', 'benefit_basket', 'periodic_benefit_limit',
+]
 const calculationKinds: PayrollRecurringCalculationKind[] = ['fixed_amount', 'employment_gross_basis_points', 'manual_review']
 const allocationRules: PayrollRecurringAllocationRule[] = ['full_month', 'calendar_days', 'working_days', 'hours', 'manual_review']
 
@@ -668,7 +673,10 @@ function componentPayload(): PayrollComponentPayload | null {
   // zjistí tady, ne až při uzávěrce měsíce.
   const basisMissing = componentForm.value.tax_treatment === 'exempt'
     && componentForm.value.exemption_basis === null
-  const basketMissing = componentForm.value.exemption_basis === 'benefit_basket'
+  // Podklad, který stojí na zmrazeném rozpadu koše, bez zařazení do koše nedává
+  // smysl — a backend by ho stejně odmítl.
+  const basketMissing = ['benefit_basket', 'periodic_benefit_limit']
+    .includes(componentForm.value.exemption_basis ?? '')
     && componentForm.value.exemption_basket === null
   if (
     !componentForm.value.code.trim()

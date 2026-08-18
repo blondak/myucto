@@ -102,21 +102,39 @@ final class CzechPayrollRulesets2026
                 'advance.rounding.base_above_100_czk' => PayrollRuleValue::text('ceil-to-100-czk'),
                 'advance.rounding.base_up_to_100_czk' => PayrollRuleValue::text('ceil-to-1-czk'),
                 'advance.rounding.result' => PayrollRuleValue::text('ceil-to-1-czk'),
-                // § 6 odst. 9 písm. b) ZDP — příspěvek na stravování je osvobozený
-                // „v úhrnu do výše 70 % horní hranice stravného, které lze poskytnout
+                // § 6 odst. 9 písm. b) ZDP — příspěvek na stravování „poskytnutého
+                // zaměstnavatelem za jednu směnu …, pokud během této směny
+                // zaměstnanec vykonával práci alespoň 3 hodiny a nevznikl mu během
+                // této směny nárok na stravné v rámci cestovních náhrad …, a to
+                // v úhrnu do výše 70 % horní hranice stravného, které lze poskytnout
                 // zaměstnancům odměňovaným platem při pracovní cestě trvající 5 až
-                // 12 hodin". To je limit NA SMĚNU, ne na rok: 2026 vychází 70 % ze
-                // 185 Kč = 129,50 Kč (`meal_allowance.band_1.tax_exempt_maximum`
-                // v doméně cestovních náhrad). Roční limit mzdové složky
-                // (`payroll_component_definitions.annual_limit_minor`) ho vyjádřit
-                // neumí, protože nezná počet směn — proto tu není částka, ale
-                // vědomé ruční posouzení. Hodnota se tu ZÁMĚRNĚ nepočítá podruhé,
-                // aby nemohla utéct od sazby stravného, ze které plyne.
-                'benefit_exemption.meal.per_shift' => PayrollRuleValue::manualReview(
-                    'Příspěvek na stravování je osvobozený do 70 % horní hranice stravného za '
-                    . 'pracovní cestu 5 až 12 hodin, a to za každou směnu zvlášť. Roční limit '
-                    . 'mzdové složky takový strop nevyjádří a aplikace ho proto netvrdí.',
-                ),
+                // 12 hodin, a v úhrnu do výše 70 % této hranice, je-li příspěvek
+                // poskytnut jako další příspěvek v rámci stejné směny, pokud její
+                // délka v úhrnu s přestávkou v práci povinně poskytovanou
+                // zaměstnavatelem … je delší než 11 hodin".
+                //
+                // Čtyři parametry, protože zákon dává čtyři různá čísla:
+                //   per_shift ....... limit na jednu směnu, tj. 70 % ze 185,00 Kč
+                //                     (`meal_allowance.band_1.tax_exempt_maximum`
+                //                     v doméně cestovních náhrad) = 129,50 Kč.
+                //                     Odvození HLÍDÁ TEST, ať částka nemůže utéct
+                //                     od sazby stravného, ze které plyne.
+                //   shift_rate ...... těch 70 % jako data, ne jako věta v komentáři.
+                //   minimum_work_minutes ......... „alespoň 3 hodiny", NEOSTŘE.
+                //   second_contribution_shift_minutes ... „delší než 11 hodin",
+                //                     OSTŘE, a měří se délka směny V ÚHRNU
+                //                     S PŘESTÁVKOU, tedy hrubý interval směny.
+                //   second_contribution_day_minutes ..... větev pro výkon práce
+                //                     nerozvržený na směny: tam zákon říká
+                //                     „vykonával práci alespoň 11 hodin", tedy
+                //                     NEOSTŘE a o odpracované době, ne o intervalu.
+                'benefit_exemption.meal.minimum_work_minutes' => PayrollRuleValue::integer(180),
+                'benefit_exemption.meal.per_shift' => PayrollRuleValue::moneyMinor(12_950),
+                'benefit_exemption.meal.second_contribution_day_minutes' =>
+                    PayrollRuleValue::integer(660),
+                'benefit_exemption.meal.second_contribution_shift_minutes' =>
+                    PayrollRuleValue::integer(660),
+                'benefit_exemption.meal.shift_rate' => PayrollRuleValue::rate('0.70'),
                 // § 6 odst. 9 písm. d) ZDP — nepeněžní plnění zaměstnanci a jeho
                 // rodinnému příslušníkovi. Od 1. 1. 2025 má dva samostatné roční
                 // ÚHRNNÉ limity odvozené z průměrné mzdy za zdaňovací období
@@ -136,6 +154,16 @@ final class CzechPayrollRulesets2026
                 // zákon číslem, z průměrné mzdy se neodvozuje. Písmeno se posunulo:
                 // do 2023 to bylo p), ve znění účinném pro 2026 je to m).
                 'benefit_exemption.old_age_savings.yearly' => PayrollRuleValue::moneyMinor(5_000_000),
+                // § 6 odst. 9 písm. i) ZDP — „hodnota přechodného ubytování, nejde-li
+                // o ubytování při pracovní cestě, poskytovaná jako nepeněžní plnění
+                // zaměstnavatelem zaměstnancům v souvislosti s výkonem práce, pokud
+                // obec přechodného ubytování není shodná s obcí, kde má zaměstnanec
+                // bydliště, a to maximálně do výše 3 500 Kč měsíčně". Částku píše
+                // zákon číslem a nerovnost je NEOSTRÁ („maximálně do výše"), takže
+                // přesně 3 500 Kč je ještě celé osvobozených. Období je KALENDÁŘNÍ
+                // MĚSÍC, nepřenáší se ani nesčítá do roku.
+                'benefit_exemption.temporary_accommodation.monthly' =>
+                    PayrollRuleValue::moneyMinor(350_000),
                 // § 35d odst. 4 ZDP: „Měsíční daňový bonus lze vyplatit, pokud jeho
                 // výše činí ALESPOŇ 50 Kč." Nerovnost je NEOSTRÁ — přesně 50 Kč se
                 // vyplácí. Sourozeneckým klíčem je `bonus.minimum_amount.yearly`

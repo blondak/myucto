@@ -49,11 +49,9 @@ final readonly class PayrollExemptionEvidence
         if ($basis === null) {
             return null;
         }
-        // Zmrazený rozpad koše je u koše JEDINÝ doklad: bez něj není známé,
-        // kolik z plnění se do ročního úhrnu ještě vešlo.
-        if ($basis === PayrollExemptionBasis::BenefitBasket
-            && ($input['benefit_basket'] ?? null) === null
-        ) {
+        // Zmrazený rozpad koše je u limitovaného osvobození JEDINÝ doklad: bez něj
+        // není známé, kolik z plnění se do úhrnu za období ještě vešlo.
+        if ($basis->requiresFrozenSplit() && ($input['benefit_basket'] ?? null) === null) {
             return null;
         }
         $validFrom = $component['valid_from'] ?? null;
@@ -65,7 +63,7 @@ final readonly class PayrollExemptionEvidence
         if (!is_string($code) || $code === '') {
             return null;
         }
-        $reference = $basis === PayrollExemptionBasis::BenefitBasket
+        $reference = $basis->requiresFrozenSplit()
             ? sprintf(
                 'payroll-input:%s/benefit-basket:%s',
                 (string) ($input['id'] ?? '?'),

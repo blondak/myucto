@@ -19,6 +19,12 @@ final readonly class PayrollBenefitBasketSplit implements \JsonSerializable
         public int $amountMinor,
         public int $exemptMinor,
         public int $taxableMinor,
+        /**
+         * Počet nároků na osvobozený příspěvek na stravování, ze kterých se strop
+         * poskládal. `null` u košů, jejichž limit na směnách nestojí — nula by
+         * tam tvrdila, že se za období nic neodpracovalo.
+         */
+        public ?int $shiftEntitlements = null,
     ) {}
 
     public function usedAfterMinor(): int
@@ -36,12 +42,13 @@ final readonly class PayrollBenefitBasketSplit implements \JsonSerializable
         return $this->taxableMinor > 0;
     }
 
-    /** @return array<string,int|string|bool> */
+    /** @return array<string,int|string|bool|null> */
     public function jsonSerialize(): array
     {
         return [
             'basket' => $this->basket->value,
             'statute' => $this->basket->statute(),
+            'shift_entitlements' => $this->shiftEntitlements,
             'limit_minor' => $this->limitMinor,
             'used_before_minor' => $this->usedBeforeMinor,
             'used_after_minor' => $this->usedAfterMinor(),
