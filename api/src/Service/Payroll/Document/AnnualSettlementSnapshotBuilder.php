@@ -40,6 +40,13 @@ final class AnnualSettlementSnapshotBuilder
     public const PURPOSE = 'annual_settlement_result';
     public const MAPPING_VERSION = 'annual-settlement-mapping.v1';
 
+    /**
+     * Doména klíčovaného otisku snapshotu. Je veřejná proto, že revizi čte
+     * i mzdový list (§ 38j odst. 2 písm. h) a otisk musí ověřovat POD TOUTÉŽ
+     * doménou, pod kterou vznikl — jinak mu žádná skutečná revize neprojde.
+     */
+    public const SNAPSHOT_FINGERPRINT_DOMAIN = 'annual-settlement-snapshot-v1';
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollAnnualDocumentRepository $annualRevisions,
@@ -379,7 +386,7 @@ final class AnnualSettlementSnapshotBuilder
     {
         return $this->sensitiveData->keyedFingerprint(
             $snapshotJson,
-            'annual-settlement-snapshot-v1',
+            self::SNAPSHOT_FINGERPRINT_DOMAIN,
             $supplierId,
         );
     }

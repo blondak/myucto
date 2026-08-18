@@ -441,6 +441,7 @@ final class PayslipExemptIncomeTest extends TestCase
                     'withholding_base_minor_units' => 0,
                     'withholding_tax_minor_units' => 0,
                     'claimed_child_credit_minor_units' => 0,
+                    'applied_child_credit_minor_units' => 0,
                 ],
                 'net_pay' => [
                     'person_reference' => 'employee:' . self::EMPLOYEE_ID,
