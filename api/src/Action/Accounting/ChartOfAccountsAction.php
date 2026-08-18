@@ -8,6 +8,7 @@ use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ChartOfAccountsRepository;
+use MyInvoice\Service\Accounting\ChartAccountUsage;
 use MyInvoice\Service\Accounting\Reports\AccountDetailService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\ActivityLogger;
@@ -36,6 +37,7 @@ final class ChartOfAccountsAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly Connection $db,
+        private readonly ChartAccountUsage $usage,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -127,6 +129,21 @@ final class ChartOfAccountsAction
         if ($parent === null) {
             return Json::error($response, 'not_found', 'Rodičovský účet nenalezen.', 404);
         }
+
+        // Tečkovaný tvar je od migrace 1322 jediný správný zápis analytiky (211.100),
+        // ale ruční založení ho dosud nevynucovalo — vznikla tak 211200 vedle 211.200,
+        // což strojově neporovnáš s hlavní knihou účetní. Kód účtu se navíc později
+        // měnit nedá (visí na něm kontace, pravidla i karty jako TEXT), takže překlep
+        // je nevratný → tečku doplníme rovnou tady.
+        $code = self::withAnalyticDot($code, (string) $parent['account_code']);
+        // Tečka přidává znak, a délka se kontrolovala PŘED normalizací — u desetiznakového
+        // kódu by se výsledek tiše ořízl o poslední číslici (sloupec je varchar(10) a
+        // sql_mode nemusí být striktní), takže by vznikl jiný účet, než uživatel zadal.
+        if (mb_strlen($code) > 10) {
+            return Json::error($response, 'validation_failed',
+                'account_code je po doplnění tečky delší než 10 znaků (' . $code . ') — zkraťte analytiku.', 422);
+        }
+
         if ($this->accounts->findByCode($supplierId, $code) !== null) {
             return Json::error($response, 'duplicate_account', 'Účet s tímto kódem už v osnově existuje.', 409);
         }
@@ -179,6 +196,41 @@ final class ChartOfAccountsAction
         return Json::ok($response, $this->accounts->findById($supplierId, $id));
     }
 
+    /**
+     * Smaže analytiku, na které ještě nic nevisí — oprava chybně zadaného kódu.
+     * Kód účtu totiž nejde přejmenovat (je to textový klíč kontací, pravidel a karet),
+     * takže bez mazání by překlep v osnově zůstal navždy.
+     *
+     * Syntetické účty se nemažou: jsou z šablony osnovy a visí na nich analytiky
+     * i kontace, které aplikace zakládá sama.
+     */
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireWrite($request, $response, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        $id = (int) ($args['id'] ?? 0);
+
+        $account = $this->accounts->findById($supplierId, $id);
+        if ($account === null) {
+            return Json::error($response, 'not_found', 'Účet nenalezen.', 404);
+        }
+        if (!empty($account['is_synthetic'])) {
+            return Json::error($response, 'account_synthetic',
+                'Syntetický účet z osnovy smazat nelze — smazat jde jen analytika bez pohybů.', 422);
+        }
+
+        $usages = $this->usage->usages($supplierId, $id, (string) $account['account_code']);
+        if ($usages !== []) {
+            return Json::error($response, 'account_in_use',
+                'Účet už se používá (' . implode(', ', $usages) . ') — smazat lze jen analytiku bez pohybů. Místo mazání ji deaktivujte.', 409);
+        }
+
+        $this->accounts->delete($supplierId, $id);
+        $this->log($request, 'accounting.account_deleted', $id, ['account_code' => $account['account_code']]);
+        return Json::ok($response, ['deleted' => true]);
+    }
+
     private function log(Request $request, string $action, int $entityId, array $payload): void
     {
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
@@ -193,4 +245,22 @@ final class ChartOfAccountsAction
             $this->currentSupplierId($request),
         );
     }
+
+    /**
+     * Doplní tečku za syntetiku, je-li kód zapsaný bez ní (211200 → 211.200).
+     * Kód s tečkou, nečíselný kód i kód, který se syntetikou rodiče nezačíná,
+     * se nechává být — uživatel může mít vlastní systém značení a přepisovat mu
+     * ho by bylo horší než nejednotnost.
+     */
+    private static function withAnalyticDot(string $code, string $parentCode): string
+    {
+        if (str_contains($code, '.') || preg_match('/^\d{4,}$/', $code) !== 1) {
+            return $code;
+        }
+        if ($parentCode === '' || !str_starts_with($code, $parentCode) || $code === $parentCode) {
+            return $code;
+        }
+        return $parentCode . '.' . substr($code, strlen($parentCode));
+    }
+
 }

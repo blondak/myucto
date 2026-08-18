@@ -1337,6 +1337,9 @@ export const accountingApi = {
     api.post<ChartAccount>('/accounting/accounts', payload).then(r => r.data),
   updateAccount: (id: number, payload: UpdateAccountPayload) =>
     api.patch<ChartAccount>(`/accounting/accounts/${id}`, payload).then(r => r.data),
+  /** Smaže analytiku bez pohybů — kód účtu nejde přejmenovat, tohle je jediná oprava překlepu. */
+  deleteAccount: (id: number) =>
+    api.delete<{ deleted: boolean }>(`/accounting/accounts/${id}`).then(r => r.data),
 
   // Účetní období
   listPeriods: () => api.get<AccountingPeriod[]>('/accounting/periods').then(r => r.data),

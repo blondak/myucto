@@ -638,6 +638,7 @@
     ],
     "tools": [
       "accounting",
+      "cash",
       "codebookTransfer"
     ],
     "admin-integrations": [

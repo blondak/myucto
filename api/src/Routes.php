@@ -1317,6 +1317,7 @@ final class Routes
             // ale před ním nic kolizního není (segment je čistě numerický).
             $g->get   ('/accounts/{id:[0-9]+}', [ChartOfAccountsAction::class, 'detail']);
             $g->patch ('/accounts/{id:[0-9]+}', [ChartOfAccountsAction::class, 'update']);
+            $g->delete('/accounts/{id:[0-9]+}', [ChartOfAccountsAction::class, 'delete']);
             // Účetní období
             $g->get   ('/periods',                    [AccountingPeriodAction::class, 'list']);
             $g->post  ('/periods',                    [AccountingPeriodAction::class, 'create']);
