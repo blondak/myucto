@@ -510,8 +510,13 @@ async function save(post = true) {
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.register') }}</label>
             <select v-model="form.register_id" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
+              <!-- Bez prázdné položky vypadal select s nenačtenými pokladnami jako by
+                   pokladna vybraná byla; odkaz na správu je jediná cesta, jak ji založit. -->
+              <option value="">—</option>
               <option v-for="r in registers" :key="r.id" :value="r.id">{{ r.name }} ({{ r.account_code }})</option>
             </select>
+            <RouterLink v-if="registers.length === 0" to="/accounting/cash"
+              class="text-xs text-primary-600 hover:text-primary-700 mt-1 inline-block">{{ t('cash.registers_manage') }}</RouterLink>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.col.date') }}</label>
@@ -657,7 +662,7 @@ async function save(post = true) {
         <template v-if="isTaxDoc && form.vat_mode === 'vat'">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.col.date') }} (DUZP)</label>
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.col.tax_date') }}</label>
               <input v-model="form.tax_date" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
           </div>
@@ -701,8 +706,8 @@ async function save(post = true) {
             <thead class="text-xs text-neutral-500 uppercase tracking-wide">
               <tr>
                 <th class="text-left font-medium py-1">{{ t('cash.col.number') }}</th>
-                <th class="text-right font-medium py-1 w-24">MD</th>
-                <th class="text-right font-medium py-1 w-24">D</th>
+                <th class="text-right font-medium py-1 w-24">{{ t('cash.col.debit') }}</th>
+                <th class="text-right font-medium py-1 w-24">{{ t('cash.col.credit') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">

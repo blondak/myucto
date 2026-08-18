@@ -4901,7 +4901,11 @@
             "created_at": "Vytvořeno",
             "created_by": "Autor",
             "purpose": "Účel",
-            "entry": "Zápis"
+            "entry": "Zápis",
+            "date_from": "Datum od",
+            "date_to": "Datum do",
+            "debit": "MD",
+            "credit": "D"
         },
         "form": {
             "partner": "Partner",

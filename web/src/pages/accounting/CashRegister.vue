@@ -17,6 +17,7 @@ import CashRegisterManager from '@/components/cash/CashRegisterManager.vue'
 import { ICONS, btnFilled, btnOutline, btnIconSm } from '@/components/ui/buttonStyles'
 import CashDocumentDetail from '@/components/accounting/CashDocumentDetail.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -32,8 +33,6 @@ const page = ref(1)
 const total = ref(0)
 const perPage = ref(50)
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
-const rangeFrom = computed(() => (total.value === 0 ? 0 : (page.value - 1) * perPage.value + 1))
-const rangeTo = computed(() => Math.min(page.value * perPage.value, total.value))
 
 function defaultRange(): { from: string; to: string } {
   const year = new Date().getFullYear()
@@ -379,11 +378,11 @@ async function postDraft(d: CashDocument) {
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div>
-            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.col.date') }}</label>
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.col.date_from') }}</label>
             <input v-model="filters.from" type="date" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div>
-            <label class="block text-xs font-medium text-neutral-500 mb-1">&nbsp;</label>
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.col.date_to') }}</label>
             <input v-model="filters.to" type="date" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div>
@@ -447,7 +446,7 @@ async function postDraft(d: CashDocument) {
               <template v-for="d in documents" :key="d.id">
                 <tr class="hover:bg-neutral-50 cursor-pointer" :class="{ 'opacity-60': d.status === 'reversed' }" @click="toggleExpand(d)">
                   <td class="px-3 py-2 text-neutral-400">
-                    <span class="inline-block transition-transform" :class="{ 'rotate-90': expandedId === d.id }">▸</span>
+                    <span class="inline-block transition-transform" aria-hidden="true" :class="{ 'rotate-90': expandedId === d.id }">▸</span>
                   </td>
                   <td v-if="tbl.isVisible('number')" class="px-3 py-2 font-mono text-xs" :class="{ 'line-through': d.status === 'reversed' }">{{ d.doc_number || '—' }}</td>
                   <td v-if="tbl.isVisible('date')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(d.issue_date) }}</td>
@@ -587,16 +586,8 @@ async function postDraft(d: CashDocument) {
         </div>
       </div>
 
-      <nav v-if="!loading && total > perPage" class="mt-4 flex items-center justify-between gap-3 text-sm">
-        <span class="text-neutral-500">{{ t('common.pagination_range', { from: rangeFrom, to: rangeTo, total }) }}</span>
-        <div class="flex items-center gap-1">
-          <button type="button" :disabled="page <= 1" @click="goToPage(page - 1)"
-            class="cursor-pointer h-8 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed">‹</button>
-          <span class="px-2 text-neutral-600">{{ page }} / {{ totalPages }}</span>
-          <button type="button" :disabled="page >= totalPages" @click="goToPage(page + 1)"
-            class="cursor-pointer h-8 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed">›</button>
-        </div>
-      </nav>
+      <PaginationBar v-if="!loading" class="mt-4" :page="page" :per-page="perPage" :total="total"
+        @update:page="goToPage" />
     </template>
 
     <!-- Modal správy pokladen -->

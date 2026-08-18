@@ -4901,7 +4901,11 @@
             "created_at": "Created",
             "created_by": "Author",
             "purpose": "Purpose",
-            "entry": "Journal entry"
+            "entry": "Journal entry",
+            "date_from": "Date from",
+            "date_to": "Date to",
+            "debit": "Dr",
+            "credit": "Cr"
         },
         "form": {
             "partner": "Partner",

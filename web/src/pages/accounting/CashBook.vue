@@ -11,6 +11,7 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -125,11 +126,11 @@ onMounted(async () => {
           </select>
         </div>
         <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.col.date') }}</label>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.col.date_from') }}</label>
           <input v-model="filters.from" type="date" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1">&nbsp;</label>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.col.date_to') }}</label>
           <input v-model="filters.to" type="date" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
       </div>
@@ -217,12 +218,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <nav v-if="!loading && report && report.total > report.per_page" class="mt-4 flex items-center justify-end gap-1 text-sm">
-      <button type="button" :disabled="page <= 1" @click="goToPage(page - 1)"
-        class="cursor-pointer h-8 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed">‹</button>
-      <span class="px-2 text-neutral-600">{{ page }} / {{ totalPages }}</span>
-      <button type="button" :disabled="page >= totalPages" @click="goToPage(page + 1)"
-        class="cursor-pointer h-8 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed">›</button>
-    </nav>
+    <PaginationBar v-if="!loading && report" class="mt-4" :page="page"
+      :per-page="report.per_page || perPage" :total="report.total" @update:page="goToPage" />
   </div>
 </template>
