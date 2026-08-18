@@ -79,6 +79,13 @@ final class PayrollEnumContractTest extends TestCase
         // vykreslil jako prázdný stav, tedy jako „nic se neděje".
         'payrollBenefitBaskets.ts::BenefitBasketStatus'
             => 'const:MyInvoice\Service\Payroll\Component\PayrollBenefitBasketUsage::STATUSES',
+        // Nálezy porovnání dvou evidencí náhradního volna. Klient, který
+        // některý nezná, by rozpor vykreslil jako prázdno — tedy jako „sedí to".
+        'payroll.ts::PayrollCompensatoryTimeOffFinding'
+            => 'const:MyInvoice\Service\Payroll\Time\Overtime\CompensatoryTimeOffReconciliation::FINDINGS',
+        // Druh nabídky pro serverové hledání v pickeru párování plateb.
+        'payrollPayments.ts::PayrollPaymentOptionKind'
+            => 'const:MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationQueryService::PICKER_KINDS',
         'payroll.ts::PayrollRunStatus'      => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunStatus',
         'payroll.ts::PayrollRunCommand'     => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunCommand',
         'payroll.ts::PayrollRunOutcomeCode' => 'consts:MyInvoice\Service\Payroll\Run\PayrollRunCommandOutcome',
@@ -336,6 +343,11 @@ final class PayrollEnumContractTest extends TestCase
             'Typ hodnoty parametru nese JSON obsahu rulesetu, ne sloupec ani enum.',
         'payrollRulesets.ts::PayrollRulesetDomainStatus' =>
             'Stav domény dopočítává PayrollRulesetAdminService z pokrytí a lifecyclu.',
+        'payroll.ts::PayrollAnnualSettlementListState' =>
+            'Pojmenované zúžení přehledu ročního zúčtování (vše / požádali a nemají '
+            . 'výsledek / bez zúčtování / se zúčtováním). Skládá ho '
+            . 'PayrollAnnualSettlementRepository::LIST_STATES z existence žádosti '
+            . 'a výsledku — uložená hodnota to není a sloupec pro ni neexistuje.',
     ];
 
     /**
@@ -371,6 +383,9 @@ final class PayrollEnumContractTest extends TestCase
         // Koš se v šabloně skládá dynamicky
         // (`t(\`payroll.components.exemption_basket.${basket}\`)`), takže bez
         // věty by účetní u benefitu viděla `non_cash_leisure` místo paragrafu.
+        'payroll.time.overtime.compensatory_check'
+            => 'const:MyInvoice\Service\Payroll\Time\Overtime\CompensatoryTimeOffReconciliation::FINDINGS',
+
         'payroll.components.exemption_basket'
             => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
         'payroll.components.frequency'    => 'enum:MyInvoice\Service\Payroll\Component\PayrollComponentFrequency',

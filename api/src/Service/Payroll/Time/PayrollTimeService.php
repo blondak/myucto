@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Time;
 use MyInvoice\Repository\Payroll\PayrollOvertimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Service\Payroll\Time\Overtime\CompensatoryTimeOffReconciliation;
 use MyInvoice\Service\Payroll\Time\Overtime\OvertimeLimits;
 use MyInvoice\Service\Payroll\Time\Overtime\OvertimeProtectionWindow;
 use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
@@ -40,14 +41,32 @@ final class PayrollTimeService
         bool $incompleteOnly,
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
+        ?int $employmentId = null,
     ): array {
         // Strop se klampuje i tady, ne jen na HTTP hranici: přehled staví na
         // řádek několik dotazů a náhledů, takže „vypiš všechno" nesmí jít
         // objednat ani jiným volajícím než akcí.
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
+        if ($employmentId !== null && $employmentId <= 0) {
+            throw new \InvalidArgumentException('Vztah musí být kladné číslo.');
+        }
         [$periodStart, $periodEnd, $startsAtUtc, $endsAtUtc] = $this->periodBounds($period);
         $employments = $this->repository->employments($supplierId, $periodStart, $periodEnd);
+        // Zúžení na jeden vztah padá STEJNĚ brzy jako „jen nedokončené"
+        // a stránkování — před stavbou řádků. Dokud běželo v prohlížeči nad
+        // načtenou stránkou, vztah z jiné strany se tiše neprojevil: lišta
+        // zmizela a seznam zůstal celý, což vypadá jako prázdný výsledek,
+        // ne jako nefunkční filtr.
+        if ($employmentId !== null) {
+            $employments = array_values(array_filter(
+                $employments,
+                fn (array $employment): bool => PayrollTimeValue::int(
+                    $employment['id'] ?? null,
+                    'id',
+                ) === $employmentId,
+            ));
+        }
         $shifts = $this->groupByEmployment(
             $this->startingInPeriod(
                 $this->repository->shifts($supplierId, $startsAtUtc, $endsAtUtc),
@@ -134,6 +153,16 @@ final class PayrollTimeService
             (new \DateTimeImmutable($periodStart))->modify('-52 weeks')->format('Y-m-d'),
             $periodLastDay,
         );
+        // Náhradní volno se eviduje na dvou místech (viz
+        // CompensatoryTimeOffReconciliation) a jednostranný zápis je tichá
+        // vada. Porovnání proto padne rovnou do přehledu měsíce.
+        $compensatoryReconciliation = $this->overtime
+            ->compensatoryTimeOffReconciliationForMany(
+                $supplierId,
+                $employmentIds,
+                $periodStart,
+                $periodLastDay,
+            );
 
         $items = [];
         foreach ($employments as $employment) {
@@ -276,6 +305,15 @@ final class PayrollTimeService
                 'overtime_consents' => $overtimeConsents[$employmentId] ?? [],
                 'overtime_protections' => $overtimeProtections[$employmentId] ?? [],
                 'overtime_compensations' => $overtimeCompensations[$employmentId] ?? [],
+                'compensatory_time_off_check' => isset(
+                    $compensatoryReconciliation[$employmentId],
+                )
+                    ? CompensatoryTimeOffReconciliation::fromRow(
+                        $employmentId,
+                        $period,
+                        $compensatoryReconciliation[$employmentId],
+                    )->toArray()
+                    : null,
                 'shifts' => $employmentShifts,
                 'entries' => $employmentEntries,
             ];
@@ -285,6 +323,7 @@ final class PayrollTimeService
         return [
             'period' => $period,
             'incomplete_only' => $incompleteOnly,
+            'employment_id' => $employmentId,
             'items' => $items,
             'total' => $total,
             'limit' => $limit,

@@ -20,6 +20,12 @@ defineProps<{
    * nemá", i když jeho záznamy jen leží za koncem načtené dávky.
    */
   truncated?: boolean
+  /**
+   * Server zúžení uplatnil a nezbylo nic. Tichý prázdný seznam je horší než
+   * chyba — vypadá jako „ten člověk tu nic nemá", i když je zúžení jen slepé
+   * (cizí nebo zaniklý vztah). Lišta to proto řekne větou a nabídne zrušení.
+   */
+  missing?: boolean
 }>()
 
 defineEmits<{ clear: [] }>()
@@ -33,7 +39,9 @@ const { t } = useI18n()
     data-test="payroll-focus-notice"
   >
     <span class="min-w-0">
-      {{ t('payroll.agendas.focus.title', { name }) }}
+      {{ missing
+        ? t('payroll.agendas.focus.missing', { name })
+        : t('payroll.agendas.focus.title', { name }) }}
       <span v-if="truncated" class="block text-warning-800" data-test="payroll-focus-truncated">
         {{ t('payroll.agendas.focus.truncated') }}
       </span>

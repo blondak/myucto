@@ -658,9 +658,28 @@ evidované dohody se proti nim poměřuje všechen přesčas.
 > Překročení limitu je vada na straně zaměstnavatele, ne chyba výpočtu.
 > Odpracovaný přesčas se podle § 114 platí i tehdy, když byl nařízen nad
 > zákonný rozsah, proto se nález eviduje jako **upozornění** u revize mzdového
-> běhu a schválení ani výplatu nezastaví. Přesčas kompenzovaný náhradním volnem
-> se z vyrovnávacího období zatím neodečítá (§ 93 odst. 5) — kontrola je tedy na
-> bezpečné straně a může upozornit i tam, kde volno poskytnuto bylo.
+> běhu a schválení ani výplatu nezastaví.
+
+### Náhradní volno za přesčas
+
+Náhradní volno se eviduje na dvou místech, protože každý zápis odpovídá na
+jinou otázku a váže se k jinému dni:
+
+- **Absence druhu „Náhradní volno za přesčas"** v agendě Absence a dovolená je
+  záznam o **dni čerpání** — vstup do docházky a mzdy. Za dobu čerpání mzda
+  nepřísluší (§ 114 odst. 3), protože přesčas se už proplatil a volnem se
+  nahrazuje jen příplatek.
+- **Tlačítko Náhradní volno** v Docházce a směnách zapisuje, **ke kterému dni
+  přesčasu** se volno vztahuje. Podle toho se přesčas vyjímá z vyrovnávacího
+  období (§ 93 odst. 5); z limitů nařízeného přesčasu podle odst. 2 se
+  neodečítá, tam zákon výjimku nemá.
+
+Odvodit jedno z druhého nelze: absence den přesčasu nenese a jeden den čerpání
+může vyrovnávat přesčas z několika dnů. U vztahu proto přibude upozornění,
+když je za měsíc zapsaná jen jedna strana — jednostranný zápis by jinak zůstal
+tichý a projevil by se buď chybějícím vynětím z vyrovnávacího období, nebo
+neodpracovaným dnem bez důvodu. Zápis bez data poskytnutí volna se do měsíce
+nezařazuje a hlásí se zvlášť.
 
 ## 58.11 Mzdové běhy
 
@@ -965,6 +984,12 @@ V **Mzdy → Roční zúčtování** zvol zdaňovací období. Vlevo je seznam z
 se stavem žádosti a výsledkem, vpravo evidence podkladů a výpočet vybrané osoby.
 Rok, který ještě neskončil, se nezúčtovává — stránka proto po otevření nabízí
 uplynulé období.
+
+Seznam se stránkuje na serveru a jde zúžit hledáním jména nebo stavem
+(**Požádali, nezúčtováno** / **Bez zúčtování** / **Zúčtováno**). Zúžení hledá
+v celém roce, ne jen na zobrazené straně, a dá se uložit jako pohled. Sloupce
+se tu nevybírají: vlevo je výběr osoby, ne datová tabulka, a jediná tabulka na
+stránce je pevný výpočet podle § 38ch.
 
 Zúčtování je právní úkon zaměstnavatele podle § 38ch zákona o daních z příjmů,
 ne dopočet. Aplikace ho proto provede jen tehdy, když je zodpovězené všechno

@@ -23,6 +23,7 @@ import {
   type PayrollAnnualSettlementFilingObligation,
   type PayrollAnnualSettlementList,
   type PayrollAnnualSettlementListItem,
+  type PayrollAnnualSettlementListState,
   type PayrollAnnualSettlementPreview,
   type PayrollAnnualSettlementPriorEmployers,
   type PayrollAnnualSettlementRequestStatus,
@@ -34,6 +35,9 @@ import { useToast } from '@/composables/useToast'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
+import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
+import { useSavedFilters } from '@/composables/useSavedFilters'
 import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 
 const { t, locale } = useI18n()
@@ -51,6 +55,24 @@ const preview = ref<PayrollAnnualSettlementPreview | null>(null)
 const document = ref<PayrollDocument | null>(null)
 const loading = ref(true)
 const loadFailed = ref(false)
+/**
+ * Seznam lidí stránkuje SERVER.
+ *
+ * Why: firma se stovkami zaměstnanců dostala v jedné odpovědi všechny a
+ * obrazovka je všechny vykreslila. Zúžení podle jména a stavu proto taky patří
+ * na server — kdyby filtroval prohlížeč, hledal by jen v načtené stránce
+ * a nenalezení by vypadalo jako „ten člověk tu není".
+ *
+ * Sloupcové vybavení tu záměrně NENÍ: levý seznam je výběr osoby (`<ul>`),
+ * ne datová tabulka, a jediná `<table>` na stránce je pevný dvousloupcový
+ * výpočet podle § 38ch — skrýt v něm sloupec znamená skrýt polovinu rovnice.
+ */
+const pageSize = 25
+const total = ref(0)
+const offset = ref(0)
+const search = ref('')
+const state = ref<PayrollAnnualSettlementListState>('all')
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const previewLoading = ref(false)
 const saving = ref(false)
 const settling = ref(false)
@@ -194,24 +216,23 @@ async function load(): Promise<void> {
   const sequence = ++loadSequence
   loading.value = true
   try {
-    const response = await payrollApi.listAnnualSettlements(year.value)
+    const response = await payrollApi.listAnnualSettlements(
+      year.value,
+      { limit: pageSize, offset: offset.value },
+      { search: search.value.trim(), state: state.value },
+    )
     if (sequence !== loadSequence) return
     data.value = response
+    total.value = response.total
     loadFailed.value = false
     // Odkaz z karty zaměstnance (`?person=7`) rozklikne rovnou jeho evidenci.
-    // Kdo v seznamu za daný rok není, se neotevře — odkaz je slepý, ne rozbitý.
+    // Se stránkováním se členství v seznamu neověřuje — člověk může ležet na
+    // jiné straně a zamlčený odkaz by vypadal jako rozbité tlačítko. Neplatné
+    // id skončí na hlášce z náhledu, ne mlčením.
     if (pendingFocusPersonId !== null) {
       const focused = pendingFocusPersonId
       pendingFocusPersonId = null
-      if (response.items.some(item => item.employee_id === focused)) {
-        void select(focused)
-      }
-    }
-    if (selectedEmployeeId.value !== null
-      && !response.items.some(item => item.employee_id === selectedEmployeeId.value)
-    ) {
-      selectedEmployeeId.value = null
-      preview.value = null
+      void select(focused)
     }
   } catch (error) {
     if (sequence !== loadSequence) return
@@ -420,9 +441,49 @@ watch(year, () => {
   preview.value = null
   certificates.value = []
   document.value = null
+  offset.value = 0
   void load()
 })
-onMounted(load)
+
+// Změna zúžení mění obsah seznamu, takže stránka musí na začátek — jinak by
+// uživatel po zúžení skončil na prázdné páté straně.
+function applyFilters(): void {
+  offset.value = 0
+  void load()
+}
+
+function goToPage(nextPage: number): void {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  void load()
+}
+
+/**
+ * Uložené pohledy. Rok do payloadu NEPATŘÍ — pohled „požádali a nemají
+ * zúčtováno" má platit pro rok, který má uživatel otevřený, ne odskočit
+ * o rok zpět pokaždé, když ho použije v dalším období.
+ */
+function buildQuery(): Record<string, string> {
+  const query: Record<string, string> = {}
+  if (search.value.trim() !== '') query.search = search.value.trim()
+  if (state.value !== 'all') query.state = state.value
+  return query
+}
+
+function applyQueryToPage(query: Record<string, string>): void {
+  search.value = query.search ?? ''
+  state.value = (query.state as PayrollAnnualSettlementListState | undefined) ?? 'all'
+  applyFilters()
+}
+
+const saved = useSavedFilters('payroll-annual-settlement', {
+  getQuery: buildQuery,
+  applyQuery: applyQueryToPage,
+})
+
+onMounted(async () => {
+  if (await saved.applyDefaultIfAny()) return
+  await load()
+})
 </script>
 
 <template>
@@ -464,6 +525,44 @@ onMounted(load)
         })
       }}
     </p>
+
+    <div class="rounded-lg border border-neutral-200 bg-surface p-3">
+      <div class="flex flex-wrap items-end gap-3">
+        <label class="min-w-48 flex-1">
+          <span class="mb-1 block text-xs font-medium text-neutral-600">
+            {{ t('payroll.annual_settlement.filter_search') }}
+          </span>
+          <input
+            v-model="search"
+            type="search"
+            data-test="annual-settlement-search"
+            :placeholder="t('payroll.annual_settlement.filter_search_placeholder')"
+            class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"
+            @keyup.enter="applyFilters"
+            @change="applyFilters"
+          >
+        </label>
+        <label class="min-w-44">
+          <span class="mb-1 block text-xs font-medium text-neutral-600">
+            {{ t('payroll.annual_settlement.filter_state') }}
+          </span>
+          <select
+            v-model="state"
+            data-test="annual-settlement-state"
+            class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm"
+            @change="applyFilters"
+          >
+            <option value="all">{{ t('payroll.annual_settlement.states.all') }}</option>
+            <option value="requested">{{ t('payroll.annual_settlement.states.requested') }}</option>
+            <option value="unsettled">{{ t('payroll.annual_settlement.states.unsettled') }}</option>
+            <option value="settled">{{ t('payroll.annual_settlement.states.settled') }}</option>
+          </select>
+        </label>
+        <div class="flex flex-wrap items-center gap-2 pb-0.5">
+          <SavedFiltersMenu :ctrl="saved" />
+        </div>
+      </div>
+    </div>
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
       <section class="rounded-lg border border-neutral-200 bg-surface">
@@ -512,6 +611,14 @@ onMounted(load)
             </button>
           </li>
         </ul>
+        <PaginationBar
+          v-if="!loading"
+          embedded
+          :page="currentPage"
+          :per-page="pageSize"
+          :total="total"
+          @update:page="goToPage"
+        />
       </section>
 
       <section class="space-y-6">

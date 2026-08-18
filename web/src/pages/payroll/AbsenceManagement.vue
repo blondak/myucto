@@ -72,7 +72,7 @@ const textareaClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surfa
 const absenceTypes: AbsenceType[] = [
   'vacation', 'dpn', 'quarantine', 'ocr', 'long_term_care', 'ppm',
   'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
-  'employer_obstacle', 'other',
+  'employer_obstacle', 'compensatory_time_off', 'other',
 ]
 const leaveEntryTypes = ['carryover', 'adjustment', 'shortening', 'overdrawn', 'payout']
 

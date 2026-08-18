@@ -57,11 +57,38 @@ const periodTotals = ref({ amount_minor: 0, allocated_minor: 0, settled_minor: 0
 const runs = ref<PayrollRun[]>([])
 const payerOptions = ref<PayrollPayerOption[]>([])
 const batches = ref<PayrollPaymentBatch[]>([])
+/*
+ * Nabídky pro picker (alokace, bankovní a pokladní důkazy) chodí ze serveru
+ * OŘEZANÉ. Krátký seznam přijde celý a picker pak filtruje v prohlížeči — bez
+ * jediného dalšího volání. Jakmile server přizná oříznutí, přepne se ten
+ * konkrétní picker do serverového hledání a řekne uživateli, že nabídka není
+ * úplná; mlčky oříznutý seznam by tvrdil „nic dalšího neexistuje".
+ */
 const allocations = ref<PayrollPaymentAllocation[]>([])
+const allocationsTruncated = ref(false)
 const paymentMatches = ref<PayrollPaymentMatch[]>([])
 const reversibleMatchOptions = ref<PayrollPaymentMatch[]>([])
 const bankEvidence = ref<PayrollPaymentEvidence[]>([])
+const bankEvidenceTruncated = ref(false)
 const cashEvidence = ref<PayrollPaymentEvidence[]>([])
+const cashEvidenceTruncated = ref(false)
+const allocationSearchResults = ref<PayrollPaymentAllocation[]>([])
+const allocationSearchTruncated = ref(false)
+const allocationSearching = ref(false)
+const matchEvidenceSearchResults = ref<PayrollPaymentEvidence[]>([])
+const matchEvidenceSearchTruncated = ref(false)
+const matchEvidenceSearching = ref(false)
+const reversalEvidenceSearchResults = ref<PayrollPaymentEvidence[]>([])
+const reversalEvidenceSearchTruncated = ref(false)
+const reversalEvidenceSearching = ref(false)
+/*
+ * Vybraná položka se drží jako CELÝ objekt, ne jen id: v serverovém režimu
+ * zmizí z nabídky, jakmile uživatel napíše jiný dotaz, a bez uloženého objektu
+ * by spadly limity částky i popisek vybrané položky.
+ */
+const pickedAllocation = ref<PayrollPaymentAllocation | null>(null)
+const pickedMatchEvidence = ref<PayrollPaymentEvidence | null>(null)
+const pickedReversalEvidence = ref<PayrollPaymentEvidence | null>(null)
 const selectedIds = ref<number[]>([])
 const exportFormat = ref<'abo' | 'sepa' | 'manual' | null>(null)
 const payerReference = ref<string | null>(null)
@@ -213,9 +240,15 @@ const canCreateBatch = computed(() =>
   && exportFormat.value !== null
   && payerReference.value !== null,
 )
+const allocationPool = computed(() => {
+  const pool = new Map<number, PayrollPaymentAllocation>()
+  for (const item of allocations.value) pool.set(item.id, item)
+  for (const item of allocationSearchResults.value) pool.set(item.id, item)
+  if (pickedAllocation.value) pool.set(pickedAllocation.value.id, pickedAllocation.value)
+  return pool
+})
 const selectedAllocation = computed(() =>
-  allocations.value.find(item => item.id === selectedAllocationId.value)
-  ?? null,
+  allocationPool.value.get(selectedAllocationId.value ?? -1) ?? null,
 )
 // Nabídka storna se bere ze serverem vrácené množiny vratných událostí, ne
 // ze zobrazené stránky historie — jinak by šlo stornovat jen to, co má
@@ -227,26 +260,39 @@ const selectedSourceMatch = computed(() =>
   reversibleMatches.value.find(item => item.id === selectedSourceMatchId.value)
   ?? null,
 )
+// Zúžení nabídky důkazů podle měny, směru a použitelnosti je STEJNÉ pravidlo
+// jako v serverovém hledání (`usage`). Tady se uplatní na lokální seznam,
+// tam v dotazu — jinak by ze serverem vybrané dvacítky po klientském filtru
+// zbylo prázdno, které vypadá jako „žádný důkaz neexistuje".
+function matchEvidenceMatches(
+  item: PayrollPaymentEvidence,
+  allocation: PayrollPaymentAllocation,
+): boolean {
+  return item.currency_code === allocation.currency_code
+    && item.direction === allocation.direction
+    && item.available_match_minor > 0
+    && (item.kind !== 'cash' || item.status === 'posted')
+}
+const matchEvidenceRemote = computed(() => selectedAllocation.value?.channel === 'bank'
+  ? bankEvidenceTruncated.value
+  : cashEvidenceTruncated.value)
 const matchEvidenceCandidates = computed(() => {
   const allocation = selectedAllocation.value
   if (!allocation) return []
+  if (matchEvidenceRemote.value) return matchEvidenceSearchResults.value
   const evidence = allocation.channel === 'bank'
     ? bankEvidence.value
     : cashEvidence.value
-  return evidence.filter(item =>
-    item.currency_code === allocation.currency_code
-    && item.direction === allocation.direction
-    && item.available_match_minor > 0
-    && (item.kind !== 'cash' || item.status === 'posted'),
-  )
+  return evidence.filter(item => matchEvidenceMatches(item, allocation))
 })
+const reversalEvidenceRemote = computed(() =>
+  selectedSourceMatch.value?.evidence_kind === 'cash'
+    ? cashEvidenceTruncated.value
+    : bankEvidenceTruncated.value)
 const reversalEvidenceCandidates = computed(() => {
   const match = selectedSourceMatch.value
   if (!match) return []
-  const allocation = allocations.value.find(
-    item => item.id === match.allocation_id,
-  )
-  if (!allocation) return []
+  if (reversalEvidenceRemote.value) return reversalEvidenceSearchResults.value
   if (match.evidence_kind === 'cash') {
     return cashEvidence.value.filter(item =>
       item.cash_document_id === match.cash_document_id
@@ -254,17 +300,19 @@ const reversalEvidenceCandidates = computed(() => {
       && item.available_reversal_minor > 0,
     )
   }
-  const direction = allocation.direction === 'outgoing'
+  const direction = match.allocation_direction === 'outgoing'
     ? 'incoming'
     : 'outgoing'
   return bankEvidence.value.filter(item =>
-    item.currency_code === allocation.currency_code
+    item.currency_code === match.allocation_currency_code
     && item.direction === direction
     && item.available_reversal_minor > 0,
   )
 })
-const allocationSelectOptions = computed(() => allocations.value
-  .filter(item => item.remaining_minor > 0)
+const allocationOptionSource = computed(() => allocationsTruncated.value
+  ? allocationSearchResults.value
+  : allocations.value)
+const allocationSelectOptions = computed(() => allocationOptionSource.value
   .map(item => ({
     value: item.id,
     label: item.employee_name || t('payroll.payments.company'),
@@ -289,15 +337,26 @@ const sourceMatchSelectOptions = computed(() => reversibleMatches.value.map(
 const reversalEvidenceSelectOptions = computed(() =>
   reversalEvidenceCandidates.value.map(evidenceOption),
 )
+// Vybraný důkaz se hledá v nabídce, a když v ní není (server ji mezitím zúžil
+// jiným dotazem), použije se zapamatovaný objekt. Bez toho by po přepsání
+// hledání spadl limit částky na nulu a tlačítko by zšedlo bez důvodu.
 const selectedMatchEvidenceItem = computed(() =>
   matchEvidenceCandidates.value.find(
     item => evidenceKey(item) === selectedMatchEvidence.value,
-  ) ?? null,
+  )
+  ?? (pickedMatchEvidence.value
+    && evidenceKey(pickedMatchEvidence.value) === selectedMatchEvidence.value
+    ? pickedMatchEvidence.value
+    : null),
 )
 const selectedReversalEvidenceItem = computed(() =>
   reversalEvidenceCandidates.value.find(
     item => evidenceKey(item) === selectedReversalEvidence.value,
-  ) ?? null,
+  )
+  ?? (pickedReversalEvidence.value
+    && evidenceKey(pickedReversalEvidence.value) === selectedReversalEvidence.value
+    ? pickedReversalEvidence.value
+    : null),
 )
 const matchLimitMinor = computed(() => Math.min(
   selectedAllocation.value?.remaining_minor ?? 0,
@@ -393,6 +452,86 @@ function evidenceOption(evidence: PayrollPaymentEvidence) {
     secondary: evidence.description
       || evidence.reference
       || t(`payroll.payments.recipient.${evidence.kind}`),
+  }
+}
+
+/**
+ * Serverové hledání v nabídce pickeru.
+ *
+ * Volá se jen tehdy, když server nabídku oříznul. Krátký seznam zůstává
+ * kompletní v prohlížeči, takže výběr v něm nestojí ani jeden dotaz navíc.
+ */
+async function searchAllocationOptions(query: string): Promise<void> {
+  if (!allocationsTruncated.value) return
+  allocationSearching.value = true
+  try {
+    const result = await payrollPaymentsApi.searchOptions({
+      period: period.value,
+      kind: 'allocations',
+      q: query,
+    })
+    allocationSearchResults.value = result.items as PayrollPaymentAllocation[]
+    allocationSearchTruncated.value = result.truncated
+  } catch (error) {
+    allocationSearchResults.value = []
+    allocationSearchTruncated.value = false
+    toast.error(apiErrorMessage(error, t('payroll.payments.options_failed')))
+  } finally {
+    allocationSearching.value = false
+  }
+}
+
+async function searchMatchEvidenceOptions(query: string): Promise<void> {
+  const allocation = selectedAllocation.value
+  if (!allocation || !matchEvidenceRemote.value) return
+  matchEvidenceSearching.value = true
+  try {
+    const result = await payrollPaymentsApi.searchOptions({
+      period: period.value,
+      kind: allocation.channel === 'bank' ? 'bank_evidence' : 'cash_evidence',
+      q: query,
+      currency: allocation.currency_code,
+      direction: allocation.direction,
+      usage: 'match',
+    })
+    matchEvidenceSearchResults.value = result.items as PayrollPaymentEvidence[]
+    matchEvidenceSearchTruncated.value = result.truncated
+  } catch (error) {
+    matchEvidenceSearchResults.value = []
+    matchEvidenceSearchTruncated.value = false
+    toast.error(apiErrorMessage(error, t('payroll.payments.options_failed')))
+  } finally {
+    matchEvidenceSearching.value = false
+  }
+}
+
+async function searchReversalEvidenceOptions(query: string): Promise<void> {
+  const match = selectedSourceMatch.value
+  if (!match || !reversalEvidenceRemote.value) return
+  reversalEvidenceSearching.value = true
+  try {
+    const result = await payrollPaymentsApi.searchOptions({
+      period: period.value,
+      kind: match.evidence_kind === 'cash' ? 'cash_evidence' : 'bank_evidence',
+      q: query,
+      usage: 'reversal',
+      ...(match.evidence_kind === 'cash'
+        ? { cash_document_id: match.cash_document_id ?? 0 }
+        : {
+            currency: match.allocation_currency_code,
+            direction: match.allocation_direction === 'outgoing'
+              ? 'incoming' as const
+              : 'outgoing' as const,
+          }),
+    })
+    reversalEvidenceSearchResults.value = result.items as PayrollPaymentEvidence[]
+    reversalEvidenceSearchTruncated.value = result.truncated
+  } catch (error) {
+    reversalEvidenceSearchResults.value = []
+    reversalEvidenceSearchTruncated.value = false
+    toast.error(apiErrorMessage(error, t('payroll.payments.options_failed')))
+  } finally {
+    reversalEvidenceSearching.value = false
   }
 }
 
@@ -492,15 +631,30 @@ async function load(): Promise<void> {
       payerOptions.value = payerList
       batches.value = batchList.items
       allocations.value = reconciliation.allocations
+      allocationsTruncated.value = reconciliation.allocations_truncated
       paymentMatches.value = reconciliation.matches
       matchTotal.value = reconciliation.matches_total
       reversibleMatchOptions.value = reconciliation.reversible_matches
       bankEvidence.value = reconciliation.bank_evidence
+      bankEvidenceTruncated.value = reconciliation.bank_evidence_truncated
       cashEvidence.value = reconciliation.cash_evidence
-      if (!reconciliation.allocations.some(
-        item => item.id === selectedAllocationId.value,
-      )) {
+      cashEvidenceTruncated.value = reconciliation.cash_evidence_truncated
+      allocationSearchResults.value = []
+      allocationSearchTruncated.value = false
+      matchEvidenceSearchResults.value = []
+      matchEvidenceSearchTruncated.value = false
+      reversalEvidenceSearchResults.value = []
+      reversalEvidenceSearchTruncated.value = false
+      // Výběr se ruší jen tehdy, když nabídka NENÍ oříznutá. U oříznuté je
+      // „není v poslané nabídce" bezcenná informace: alokace může existovat
+      // a jen se do stropu nevešla.
+      if (!reconciliation.allocations_truncated
+        && !reconciliation.allocations.some(
+          item => item.id === selectedAllocationId.value,
+        )
+      ) {
         selectedAllocationId.value = null
+        pickedAllocation.value = null
       }
       if (!reconciliation.reversible_matches.some(
         item => item.id === selectedSourceMatchId.value,
@@ -754,6 +908,50 @@ watch(exportFormat, () => {
   )) {
     payerReference.value = payerSelectOptions.value[0]?.value ?? null
   }
+})
+
+/*
+ * Vybraná položka se v serverovém režimu zapamatuje jako celý objekt: jakmile
+ * uživatel přepíše hledání, zmizí z nabídky, a bez uloženého objektu by spadl
+ * limit částky na nulu a tlačítko by zšedlo bez vysvětlení.
+ */
+watch(selectedAllocationId, (id) => {
+  pickedAllocation.value = id === null
+    ? null
+    : allocationPool.value.get(id) ?? pickedAllocation.value
+  // Nová alokace = jiná měna a směr, takže dosavadní výsledky hledání
+  // důkazů už nemusí platit. Znovu se ptáme prázdným dotazem.
+  matchEvidenceSearchResults.value = []
+  matchEvidenceSearchTruncated.value = false
+  if (matchEvidenceRemote.value) void searchMatchEvidenceOptions('')
+})
+
+watch(selectedMatchEvidence, (key) => {
+  if (key === null) {
+    pickedMatchEvidence.value = null
+    return
+  }
+  const found = matchEvidenceCandidates.value.find(
+    item => evidenceKey(item) === key,
+  )
+  if (found) pickedMatchEvidence.value = found
+})
+
+watch(selectedSourceMatchId, () => {
+  reversalEvidenceSearchResults.value = []
+  reversalEvidenceSearchTruncated.value = false
+  if (reversalEvidenceRemote.value) void searchReversalEvidenceOptions('')
+})
+
+watch(selectedReversalEvidence, (key) => {
+  if (key === null) {
+    pickedReversalEvidence.value = null
+    return
+  }
+  const found = reversalEvidenceCandidates.value.find(
+    item => evidenceKey(item) === key,
+  )
+  if (found) pickedReversalEvidence.value = found
 })
 
 watch([selectedAllocationId, selectedMatchEvidence], () => {
@@ -1329,8 +1527,14 @@ onMounted(load)
                   v-model="selectedAllocationId"
                   :options="allocationSelectOptions"
                   accent="payroll"
+                  :remote="allocationsTruncated"
+                  :loading="allocationSearching"
+                  :truncated="allocationsTruncated && allocationSearchTruncated"
+                  :truncated-label="t('payroll.payments.settlements.options_truncated')"
+                  :loading-label="t('common.loading')"
                   :placeholder="t('payroll.payments.settlements.select_allocation')"
                   :no-results-label="t('payroll.payments.settlements.no_allocations')"
+                  @search="searchAllocationOptions"
                 />
               </label>
               <label class="block sm:col-span-2">
@@ -1341,8 +1545,14 @@ onMounted(load)
                   v-model="selectedMatchEvidence"
                   :options="matchEvidenceSelectOptions"
                   accent="payroll"
+                  :remote="matchEvidenceRemote"
+                  :loading="matchEvidenceSearching"
+                  :truncated="matchEvidenceRemote && matchEvidenceSearchTruncated"
+                  :truncated-label="t('payroll.payments.settlements.options_truncated')"
+                  :loading-label="t('common.loading')"
                   :placeholder="t('payroll.payments.settlements.select_evidence')"
                   :no-results-label="t('payroll.payments.settlements.no_evidence')"
+                  @search="searchMatchEvidenceOptions"
                 />
               </label>
               <label class="block">
@@ -1409,8 +1619,14 @@ onMounted(load)
                   v-model="selectedReversalEvidence"
                   :options="reversalEvidenceSelectOptions"
                   accent="payroll"
+                  :remote="reversalEvidenceRemote"
+                  :loading="reversalEvidenceSearching"
+                  :truncated="reversalEvidenceRemote && reversalEvidenceSearchTruncated"
+                  :truncated-label="t('payroll.payments.settlements.options_truncated')"
+                  :loading-label="t('common.loading')"
                   :placeholder="t('payroll.payments.settlements.select_reversal_evidence')"
                   :no-results-label="t('payroll.payments.settlements.no_reversal_evidence')"
+                  @search="searchReversalEvidenceOptions"
                 />
               </label>
               <label class="block">

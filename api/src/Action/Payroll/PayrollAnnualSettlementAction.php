@@ -53,6 +53,32 @@ final class PayrollAnnualSettlementAction
             return self::invalid($response);
         }
         $supplierId = $this->currentSupplierId($request);
+        $query = $request->getQueryParams();
+        // Strop je tvrdý, ne jen výchozí — z URL ho zvednout nejde.
+        $limit = max(1, min(
+            PayrollAnnualSettlementRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollAnnualSettlementRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
+        $search = is_string($query['search'] ?? null) ? trim($query['search']) : '';
+        $state = is_string($query['state'] ?? null) ? trim($query['state']) : 'all';
+        try {
+            $page = $this->repository->listForYear(
+                $supplierId,
+                $year,
+                $limit,
+                $offset,
+                $search,
+                $state,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $exception->getMessage(),
+                422,
+            );
+        }
 
         return Json::ok($response, [
             'tax_year' => $year,
@@ -64,7 +90,12 @@ final class PayrollAnnualSettlementAction
                 AnnualSettlementStatute::payoutPeriodStart($year)->format('Y-m'),
             'payout_threshold_minor' =>
                 AnnualSettlementStatute::PAYOUT_THRESHOLD_MINOR_UNITS,
-            'items' => $this->repository->listForYear($supplierId, $year),
+            'items' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
+            'search' => $search,
+            'state' => $state,
         ]);
     }
 

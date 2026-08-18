@@ -12,6 +12,27 @@ final class PayrollPaymentReconciliationQueryService
     public const LIST_DEFAULT_LIMIT = 25;
     public const LIST_MAX_LIMIT = 200;
 
+    /**
+     * Kolik nabídky se posílá rovnou s rekonciliací.
+     *
+     * Nabídky pro výběr (alokace, bankovní a pokladní důkazy) se dřív posílaly
+     * CELÉ. Bankovní důkazy přitom sahají od nejstaršího data splatnosti do
+     * dneška, takže u dlouho běžící firmy je to neohraničená odpověď.
+     *
+     * Stránkovat je nešlo — z pickeru by se stalo „vybrat jde jen to, co je na
+     * první straně". Řešením je serverové hledání (viz {@see searchOptions()});
+     * tenhle strop jen říká, kolik se pošle napřed, aby krátký seznam fungoval
+     * bez jediného dalšího dotazu. Že je toho víc, odpověď PŘIZNÁ příznakem
+     * `*_truncated` — uživatel nesmí uvěřit, že vidí všechno.
+     */
+    public const OFFERED_LIMIT = 50;
+
+    public const PICKER_DEFAULT_LIMIT = 20;
+    public const PICKER_MAX_LIMIT = 50;
+
+    public const PICKER_KINDS = ['allocations', 'bank_evidence', 'cash_evidence'];
+    public const PICKER_USAGES = ['match', 'reversal'];
+
     public function __construct(private readonly Connection $db) {}
 
     /** @return array<string,mixed> */
@@ -37,13 +58,43 @@ final class PayrollPaymentReconciliationQueryService
             $to,
         );
 
+        $allocations = $this->trim(
+            $this->allocations($supplierId, $from, $to, [], self::OFFERED_LIMIT + 1),
+            self::OFFERED_LIMIT,
+        );
+        $bankEvidence = $evidenceRange === null
+            ? ['items' => [], 'truncated' => false]
+            : $this->trim(
+                $this->bankEvidence(
+                    $supplierId,
+                    $evidenceRange[0],
+                    $evidenceRange[1],
+                    [],
+                    self::OFFERED_LIMIT + 1,
+                ),
+                self::OFFERED_LIMIT,
+            );
+        $cashEvidence = $evidenceRange === null
+            ? ['items' => [], 'truncated' => false]
+            : $this->trim(
+                $this->cashEvidence(
+                    $supplierId,
+                    $evidenceRange[0],
+                    $evidenceRange[1],
+                    [],
+                    self::OFFERED_LIMIT + 1,
+                ),
+                self::OFFERED_LIMIT,
+            );
+
         return [
             'period' => $period,
-            'allocations' => $this->allocations(
-                $supplierId,
-                $from,
-                $to,
-            ),
+            // Nabídky pro výběr se posílají OŘEZANÉ a ořezání se přiznává.
+            // Kdo se do stropu vejde, má picker kompletní a nepotřebuje jediné
+            // další volání; kdo ne, hledá přes /reconciliation/options.
+            'allocations' => $allocations['items'],
+            'allocations_truncated' => $allocations['truncated'],
+            'offered_limit' => self::OFFERED_LIMIT,
             'matches' => $this->matches(
                 $supplierId,
                 $from,
@@ -68,29 +119,145 @@ final class PayrollPaymentReconciliationQueryService
                 self::LIST_MAX_LIMIT,
                 0,
             ),
-            'bank_evidence' => $evidenceRange === null
-                ? []
-                : $this->bankEvidence(
-                    $supplierId,
-                    $evidenceRange[0],
-                    $evidenceRange[1],
-                ),
-            'cash_evidence' => $evidenceRange === null
-                ? []
-                : $this->cashEvidence(
-                    $supplierId,
-                    $evidenceRange[0],
-                    $evidenceRange[1],
-                ),
+            'bank_evidence' => $bankEvidence['items'],
+            'bank_evidence_truncated' => $bankEvidence['truncated'],
+            'cash_evidence' => $cashEvidence['items'],
+            'cash_evidence_truncated' => $cashEvidence['truncated'],
         ];
     }
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * Serverové hledání v nabídce pickeru.
+     *
+     * Vrací nejvýš `$limit` nejlepších shod a příznak `truncated`, když jich
+     * je víc. Ten příznak je celý smysl téhle metody: seznam oříznutý mlčky
+     * tvrdí „nic dalšího neexistuje", a přesně na tom se v párování plateb dá
+     * přehlédnout hledaná transakce.
+     *
+     * Zúžení podle měny, směru a použitelnosti (`match` / `reversal`) padá
+     * SEM, ne do prohlížeče. Kdyby zůstalo v klientovi, mohlo by dvacet
+     * serverem vybraných řádků po klientském filtru zbýt prázdných — a to
+     * vypadá jako „žádný důkaz neexistuje".
+     *
+     * @param array<string,mixed> $filters
+     * @return array{items:list<array<string,mixed>>,truncated:bool,limit:int}
+     */
+    public function searchOptions(
+        int $supplierId,
+        string $period,
+        string $kind,
+        array $filters = [],
+        int $limit = self::PICKER_DEFAULT_LIMIT,
+    ): array {
+        if ($supplierId <= 0) {
+            throw new \InvalidArgumentException(
+                'Firma párování plateb musí být kladné číslo.',
+            );
+        }
+        if (!in_array($kind, self::PICKER_KINDS, true)) {
+            throw new \InvalidArgumentException(
+                'Druh nabídky párování plateb není platný.',
+            );
+        }
+        $usage = $filters['usage'] ?? 'match';
+        if (!in_array($usage, self::PICKER_USAGES, true)) {
+            throw new \InvalidArgumentException(
+                'Použití důkazu musí být match nebo reversal.',
+            );
+        }
+        $filters['usage'] = $usage;
+        $limit = max(1, min(self::PICKER_MAX_LIMIT, $limit));
+        [$from, $to] = $this->periodRange($period);
+
+        if ($kind === 'allocations') {
+            $page = $this->trim(
+                $this->allocations($supplierId, $from, $to, $filters, $limit + 1),
+                $limit,
+            );
+
+            return $page + ['limit' => $limit];
+        }
+
+        $evidenceRange = $this->evidenceRange($supplierId, $from, $to);
+        if ($evidenceRange === null) {
+            return ['items' => [], 'truncated' => false, 'limit' => $limit];
+        }
+        $page = $kind === 'bank_evidence'
+            ? $this->trim(
+                $this->bankEvidence(
+                    $supplierId,
+                    $evidenceRange[0],
+                    $evidenceRange[1],
+                    $filters,
+                    $limit + 1,
+                ),
+                $limit,
+            )
+            : $this->trim(
+                $this->cashEvidence(
+                    $supplierId,
+                    $evidenceRange[0],
+                    $evidenceRange[1],
+                    $filters,
+                    $limit + 1,
+                ),
+                $limit,
+            );
+
+        return $page + ['limit' => $limit];
+    }
+
+    /**
+     * Oříznutí na strop s poznáním, že se ořezávalo.
+     *
+     * Dotaz si vždy vyžádá `limit + 1` řádek; přebývající řádek je důkaz, že
+     * jich je víc, a nestojí to další COUNT dotaz.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return array{items:list<array<string,mixed>>,truncated:bool}
+     */
+    private function trim(array $rows, int $limit): array
+    {
+        return count($rows) > $limit
+            ? ['items' => array_slice($rows, 0, $limit), 'truncated' => true]
+            : ['items' => $rows, 'truncated' => false];
+    }
+
+    /** Escapování zástupných znaků LIKE — `%` v hledaném textu není wildcard. */
+    private static function likeTerm(string $value): string
+    {
+        return '%' . str_replace(
+            ['\\', '%', '_'],
+            ['\\\\', '\%', '\_'],
+            $value,
+        ) . '%';
+    }
+
+    /**
+     * Nabídka alokací k párování.
+     *
+     * `remaining > 0` je součást DOTAZU, ne pozdější filtr v prohlížeči:
+     * doplacenou alokaci nelze zaplatit znovu, takže do nabídky nepatří,
+     * a kdyby ji odfiltroval až klient, mohl by ze serverem vybrané
+     * dvacítky zbýt prázdný seznam.
+     *
+     * @param array<string,mixed> $filters
+     * @return list<array<string,mixed>>
+     */
     private function allocations(
         int $supplierId,
         string $from,
         string $to,
+        array $filters,
+        int $limit,
     ): array {
+        $search = trim((string) ($filters['search'] ?? ''));
+        $searchClause = $search === ''
+            ? ''
+            : ' AND (employee.full_name LIKE ?
+                     OR payment_item.item_reference LIKE ?
+                     OR payment_batch.batch_reference LIKE ?
+                     OR liability.liability_kind LIKE ?)';
         $statement = $this->db->pdo()->prepare(
             'SELECT allocation.id, allocation.item_id,
                     payment_item.item_reference,
@@ -130,8 +297,9 @@ final class PayrollPaymentReconciliationQueryService
                 AND payment_match.allocation_id = allocation.id
               WHERE allocation.supplier_id = ?
                 AND run.period_start >= ?
-                AND run.period_start < ?
-              GROUP BY allocation.id, allocation.item_id,
+                AND run.period_start < ?'
+            . $searchClause
+            . ' GROUP BY allocation.id, allocation.item_id,
                        payment_item.item_reference, payment_batch.id,
                        payment_batch.batch_reference,
                        payment_batch.channel,
@@ -139,10 +307,24 @@ final class PayrollPaymentReconciliationQueryService
                        liability.id, liability.liability_kind,
                        liability.direction, liability.currency_code,
                        employee.full_name, allocation.amount_minor
+              HAVING allocation.amount_minor
+                     - COALESCE(SUM(payment_match.amount_minor), 0) > 0
               ORDER BY payment_batch.planned_payment_date,
-                       employee.full_name, allocation.id',
+                       employee.full_name, allocation.id
+              LIMIT ?',
         );
-        $statement->execute([$supplierId, $from, $to]);
+        $position = 0;
+        $statement->bindValue(++$position, $supplierId, PDO::PARAM_INT);
+        $statement->bindValue(++$position, $from, PDO::PARAM_STR);
+        $statement->bindValue(++$position, $to, PDO::PARAM_STR);
+        if ($search !== '') {
+            $term = self::likeTerm($search);
+            for ($i = 0; $i < 4; ++$i) {
+                $statement->bindValue(++$position, $term, PDO::PARAM_STR);
+            }
+        }
+        $statement->bindValue(++$position, $limit, PDO::PARAM_INT);
+        $statement->execute();
         $result = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $rawRow) {
             $row = self::row($rawRow, 'platební alokaci');
@@ -254,6 +436,8 @@ final class PayrollPaymentReconciliationQueryService
                     payment_match.created_at,
                     payment_batch.batch_reference,
                     liability.liability_kind,
+                    liability.direction AS allocation_direction,
+                    liability.currency_code AS allocation_currency_code,
                     employee.full_name AS employee_name,
                     CASE
                       WHEN payment_match.event_kind = "matched"
@@ -383,6 +567,18 @@ final class PayrollPaymentReconciliationQueryService
                     $row,
                     'liability_kind',
                 ),
+                // Směr a měna PŘÍSLUŠNÉ ALOKACE jedou s událostí, ne dohledáním
+                // v nabídce alokací: ta je od zavedení stropu jen výsek, takže
+                // by se storno u alokace mimo výsek tiše nedalo nabídnout.
+                'allocation_direction' => self::enum(
+                    $row,
+                    'allocation_direction',
+                    ['outgoing', 'incoming'],
+                ),
+                'allocation_currency_code' => self::currency(
+                    $row,
+                    'allocation_currency_code',
+                ),
                 'employee_name' => self::nullableText(
                     $row,
                     'employee_name',
@@ -395,12 +591,48 @@ final class PayrollPaymentReconciliationQueryService
         return $result;
     }
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * @param array<string,mixed> $filters
+     * @return list<array<string,mixed>>
+     */
     private function bankEvidence(
         int $supplierId,
         string $from,
         string $to,
+        array $filters,
+        int $limit,
     ): array {
+        $search = trim((string) ($filters['search'] ?? ''));
+        $currency = trim((string) ($filters['currency'] ?? ''));
+        $direction = trim((string) ($filters['direction'] ?? ''));
+        $usage = $filters['usage'] ?? null;
+        $where = '';
+        $having = '';
+        if ($currency !== '') {
+            $where .= ' AND COALESCE(bank_transaction.currency,
+                                     bank_statement.currency) = ?';
+        }
+        if ($direction === 'outgoing') {
+            $where .= ' AND bank_transaction.amount < 0';
+        } elseif ($direction === 'incoming') {
+            $where .= ' AND bank_transaction.amount > 0';
+        }
+        if ($search !== '') {
+            $where .= ' AND bank_transaction.description LIKE ?';
+        }
+        // Použitelnost je součást DOTAZU: transakce, ze které už nezbývá co
+        // spárovat (resp. co stornovat), do nabídky nepatří vůbec.
+        if ($usage === 'match') {
+            $having = ' HAVING CAST(ROUND(ABS(bank_transaction.amount) * 100) AS SIGNED)
+                        - COALESCE(SUM(CASE WHEN payroll_match.event_kind = "matched"
+                                            THEN ABS(payroll_match.amount_minor)
+                                            ELSE 0 END), 0) > 0';
+        } elseif ($usage === 'reversal') {
+            $having = ' HAVING CAST(ROUND(ABS(bank_transaction.amount) * 100) AS SIGNED)
+                        - COALESCE(SUM(CASE WHEN payroll_match.event_kind = "reversed"
+                                            THEN ABS(payroll_match.amount_minor)
+                                            ELSE 0 END), 0) > 0';
+        }
         $statement = $this->db->pdo()->prepare(
             'SELECT bank_statement.id AS bank_statement_id,
                     bank_transaction.id AS bank_transaction_id,
@@ -443,17 +675,31 @@ final class PayrollPaymentReconciliationQueryService
                   SELECT 1 FROM payment_matches payment_match
                    WHERE payment_match.bank_transaction_id =
                          bank_transaction.id
-                )
-              GROUP BY bank_statement.id, bank_transaction.id,
+                )'
+            . $where
+            . ' GROUP BY bank_statement.id, bank_transaction.id,
                        bank_transaction.posted_at,
                        bank_transaction.amount,
                        bank_transaction.currency,
                        bank_statement.currency,
-                       bank_transaction.description
-              ORDER BY bank_transaction.posted_at DESC,
-                       bank_transaction.id DESC',
+                       bank_transaction.description'
+            . $having
+            . ' ORDER BY bank_transaction.posted_at DESC,
+                       bank_transaction.id DESC
+              LIMIT ?',
         );
-        $statement->execute([$supplierId, $from, $to]);
+        $position = 0;
+        $statement->bindValue(++$position, $supplierId, PDO::PARAM_INT);
+        $statement->bindValue(++$position, $from, PDO::PARAM_STR);
+        $statement->bindValue(++$position, $to, PDO::PARAM_STR);
+        if ($currency !== '') {
+            $statement->bindValue(++$position, $currency, PDO::PARAM_STR);
+        }
+        if ($search !== '') {
+            $statement->bindValue(++$position, self::likeTerm($search), PDO::PARAM_STR);
+        }
+        $statement->bindValue(++$position, $limit, PDO::PARAM_INT);
+        $statement->execute();
         $result = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $rawRow) {
             $row = self::row($rawRow, 'bankovní důkaz');
@@ -501,12 +747,56 @@ final class PayrollPaymentReconciliationQueryService
         return $result;
     }
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * @param array<string,mixed> $filters
+     * @return list<array<string,mixed>>
+     */
     private function cashEvidence(
         int $supplierId,
         string $from,
         string $to,
+        array $filters,
+        int $limit,
     ): array {
+        $search = trim((string) ($filters['search'] ?? ''));
+        $currency = trim((string) ($filters['currency'] ?? ''));
+        $direction = trim((string) ($filters['direction'] ?? ''));
+        $usage = $filters['usage'] ?? null;
+        $documentId = isset($filters['cash_document_id'])
+            ? (int) $filters['cash_document_id']
+            : 0;
+        $where = '';
+        $having = '';
+        if ($currency !== '') {
+            $where .= ' AND cash_document.currency_code = ?';
+        }
+        if ($direction === 'outgoing') {
+            $where .= ' AND cash_document.doc_type = "out"';
+        } elseif ($direction === 'incoming') {
+            $where .= ' AND cash_document.doc_type <> "out"';
+        }
+        // Storno pokladního dokladu se váže na TENTÝŽ doklad, ne na jiný se
+        // stejnou částkou — proto přesný filtr, ne hledání podle textu.
+        if ($documentId > 0) {
+            $where .= ' AND cash_document.id = ?';
+        }
+        if ($search !== '') {
+            $where .= ' AND (cash_document.doc_number LIKE ?
+                             OR cash_document.description LIKE ?)';
+        }
+        if ($usage === 'match') {
+            $where .= ' AND cash_document.status = "posted"';
+            $having = ' HAVING CAST(ROUND(ABS(cash_document.total_amount) * 100) AS SIGNED)
+                        - COALESCE(SUM(CASE WHEN payroll_match.event_kind = "matched"
+                                            THEN ABS(payroll_match.amount_minor)
+                                            ELSE 0 END), 0) > 0';
+        } elseif ($usage === 'reversal') {
+            $where .= ' AND cash_document.status = "reversed"';
+            $having = ' HAVING CAST(ROUND(ABS(cash_document.total_amount) * 100) AS SIGNED)
+                        - COALESCE(SUM(CASE WHEN payroll_match.event_kind = "reversed"
+                                            THEN ABS(payroll_match.amount_minor)
+                                            ELSE 0 END), 0) > 0';
+        }
         $statement = $this->db->pdo()->prepare(
             'SELECT cash_document.id AS cash_document_id,
                     cash_document.issue_date,
@@ -537,17 +827,36 @@ final class PayrollPaymentReconciliationQueryService
                 AND cash_document.purpose = "other"
                 AND cash_document.invoice_id IS NULL
                 AND cash_document.purchase_invoice_id IS NULL
-                AND cash_document.invoice_payment_id IS NULL
-              GROUP BY cash_document.id, cash_document.issue_date,
+                AND cash_document.invoice_payment_id IS NULL'
+            . $where
+            . ' GROUP BY cash_document.id, cash_document.issue_date,
                        cash_document.total_amount,
                        cash_document.currency_code,
                        cash_document.doc_type, cash_document.status,
                        cash_document.doc_number,
-                       cash_document.description
-              ORDER BY cash_document.issue_date DESC,
-                       cash_document.id DESC',
+                       cash_document.description'
+            . $having
+            . ' ORDER BY cash_document.issue_date DESC,
+                       cash_document.id DESC
+              LIMIT ?',
         );
-        $statement->execute([$supplierId, $from, $to]);
+        $position = 0;
+        $statement->bindValue(++$position, $supplierId, PDO::PARAM_INT);
+        $statement->bindValue(++$position, $from, PDO::PARAM_STR);
+        $statement->bindValue(++$position, $to, PDO::PARAM_STR);
+        if ($currency !== '') {
+            $statement->bindValue(++$position, $currency, PDO::PARAM_STR);
+        }
+        if ($documentId > 0) {
+            $statement->bindValue(++$position, $documentId, PDO::PARAM_INT);
+        }
+        if ($search !== '') {
+            $term = self::likeTerm($search);
+            $statement->bindValue(++$position, $term, PDO::PARAM_STR);
+            $statement->bindValue(++$position, $term, PDO::PARAM_STR);
+        }
+        $statement->bindValue(++$position, $limit, PDO::PARAM_INT);
+        $statement->execute();
         $result = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $rawRow) {
             $row = self::row($rawRow, 'pokladní důkaz');

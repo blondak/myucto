@@ -131,16 +131,22 @@ const selected = computed(() =>
  * Zúžení na jeden vztah z odkazu na kartě zaměstnance (`?employment=12`).
  *
  * Why: bez toho vedlo tlačítko „Docházka" na docházku celé firmy a uživatel
- * v ní člověka hledal znovu. Neplatné ani cizí id nic nezúží — odkaz z bookmarku
- * je slepý, ne rozbitý.
+ * v ní člověka hledal znovu.
+ *
+ * Zúžení dělá SERVER (`employment_id`), ne prohlížeč. Dokud filtroval prohlížeč
+ * nad načtenou stránkou, vztah ležící na jiné straně se tiše neprojevil: seznam
+ * zůstal celý a lišta zmizela, což vypadá jako prázdný výsledek, ne jako
+ * nefunkční filtr. Cizí ani neexistující id teď nedá řádek — a je to vidět
+ * větou, ne prázdnem.
  */
 const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
-const visibleItems = computed(() => {
-  const items = overview.value?.items ?? []
-  if (focusEmploymentId.value === null) return items
-  const narrowed = items.filter(item => item.employment.id === focusEmploymentId.value)
-  return narrowed.length > 0 ? narrowed : items
-})
+const visibleItems = computed(() => overview.value?.items ?? [])
+const focusMissing = computed(() =>
+  focusEmploymentId.value !== null
+  && overview.value !== null
+  && overview.value.employment_id === focusEmploymentId.value
+  && overview.value.total === 0,
+)
 const focusName = computed(() =>
   focusEmploymentId.value === null || visibleItems.value.length !== 1
     ? null
@@ -151,6 +157,8 @@ function clearFocus() {
   const query = { ...route.query }
   delete query.employment
   void router.replace({ query })
+  offset.value = 0
+  void load()
 }
 // Hromadné schválení pracuje s tím, co je na obrazovce — se zúžením tedy
 // s jedním člověkem, ne se všemi, které schovává filtr.
@@ -191,10 +199,12 @@ async function load() {
   loading.value = true
   loadFailed.value = false
   try {
-    overview.value = await payrollApi.timeMonth(period.value, incompleteOnly.value, {
-      limit: pageSize,
-      offset: offset.value,
-    })
+    overview.value = await payrollApi.timeMonth(
+      period.value,
+      incompleteOnly.value,
+      { limit: pageSize, offset: offset.value },
+      focusEmploymentId.value,
+    )
     total.value = overview.value.total
     selectedEmploymentIds.value = []
     // Předvybraný vztah má přednost před prvním v seznamu — jinak by odkaz
@@ -1063,10 +1073,19 @@ onMounted(load)
       </div>
     </section>
 
+    <!--
+      Zúžení dělá server, takže lišta už nemá co „ořezávat" — buď vztah v období
+      docházku má, nebo ho seznam nemá vůbec a řekne to větou.
+    -->
     <PayrollFocusNotice
       v-if="focusName"
       :name="focusName"
-      :truncated="total > pageSize"
+      @clear="clearFocus"
+    />
+    <PayrollFocusNotice
+      v-else-if="focusMissing"
+      :name="String(focusEmploymentId)"
+      missing
       @clear="clearFocus"
     />
 
@@ -1160,6 +1179,17 @@ onMounted(load)
                     class="mt-1 text-xs"
                     :data-test="`overtime-averaging-${item.employment.id}`"
                   >{{ overtimeAveragingSummary(item) }}</p>
+                  <!--
+                    Náhradní volno se eviduje na dvou místech (absence = den
+                    čerpání, kompenzace = den přesčasu). Jednostranný zápis je
+                    tichá vada, tak se pojmenuje místo aby se nechal být.
+                  -->
+                  <p
+                    v-for="code in item.compensatory_time_off_check?.findings ?? []"
+                    :key="code"
+                    class="mt-1 max-w-prose text-xs font-medium leading-snug text-warning-800"
+                    :data-test="`compensatory-time-off-${code}`"
+                  >{{ t(`payroll.time.overtime.compensatory_check.${code}`) }}</p>
                   <div v-if="canWrite" class="mt-2 flex flex-wrap gap-2">
                     <button :class="btnOutline('neutral')" :disabled="saving" @click="openProtection(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.lock" /></svg>{{ t('payroll.time.overtime.protection_action') }}</button>
                     <button :class="btnOutline('neutral')" :disabled="saving" @click="openCompensation(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('payroll.time.overtime.compensation_action') }}</button>

@@ -162,6 +162,72 @@ final class PayrollTimeOverviewPaginationTest extends TestCase
     }
 
     /**
+     * Zúžení na jeden vztah musí platit i pro vztah, který na první stránce není.
+     *
+     * Dokud filtroval prohlížeč nad načtenou stránkou, vypadalo zúžení na
+     * vztah z druhé strany jako prázdný výsledek: lišta zmizela a seznam se
+     * tiše nezúžil. Test proto sáhne na POSLEDNÍ vztah v pořadí a ptá se na
+     * první stránku o dvou řádcích — bez serverového filtru by tam nebyl.
+     */
+    public function testEmploymentNarrowingReachesBeyondTheFirstPage(): void
+    {
+        $seeded = [];
+        for ($i = 0; $i < 5; ++$i) {
+            $seeded[] = $this->seedEmployment();
+        }
+        $all = $this->time->overview($this->supplierId, self::PERIOD, false, 100, 0);
+        $ordered = $this->ids($all);
+        $offPageId = $ordered[count($ordered) - 1];
+
+        $firstPage = $this->time->overview($this->supplierId, self::PERIOD, false, 2, 0);
+        self::assertNotContains(
+            $offPageId,
+            $this->ids($firstPage),
+            'Předpoklad testu: hledaný vztah na první stránce být nesmí.',
+        );
+
+        $narrowed = $this->time->overview(
+            $this->supplierId,
+            self::PERIOD,
+            false,
+            2,
+            0,
+            $offPageId,
+        );
+
+        self::assertSame([$offPageId], $this->ids($narrowed), 'Zúžení musí vrátit hledaný vztah.');
+        self::assertSame(1, $narrowed['total'], 'Total musí být zúžený stejně jako stránka.');
+        self::assertSame($offPageId, $narrowed['employment_id'], 'Odpověď hlásí uplatněné zúžení.');
+        self::assertContains($offPageId, $seeded);
+    }
+
+    /**
+     * Cizí ani neexistující vztah nesmí vrátit celý seznam.
+     *
+     * Prázdný výsledek je poznatelný stav (`total = 0` s ohlášeným zúžením);
+     * tiché zobrazení všech je lež, ze které uživatel usoudí, že filtr nezabral.
+     */
+    public function testUnknownEmploymentNarrowsToNothingInsteadOfEverything(): void
+    {
+        for ($i = 0; $i < 3; ++$i) {
+            $this->seedEmployment();
+        }
+
+        $page = $this->time->overview(
+            $this->supplierId,
+            self::PERIOD,
+            false,
+            100,
+            0,
+            999_000_111,
+        );
+
+        self::assertSame([], $page['items']);
+        self::assertSame(0, $page['total']);
+        self::assertSame(999_000_111, $page['employment_id']);
+    }
+
+    /**
      * @param array<string,mixed> $page
      * @return list<int>
      */

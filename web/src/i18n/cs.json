@@ -614,6 +614,7 @@
             "focus": {
                 "title": "Seznam je zúžený na {name}.",
                 "truncated": "Období má víc záznamů, než se do zúžení stihlo načíst — nemusí tu být všechny. Zrušte zúžení a projděte seznam po stránkách.",
+                "missing": "Zúžení na vztah č. {name} nedalo v tomto období žádný záznam — vztah k firmě nepatří, v období neexistoval, nebo odkaz zestaral.",
                 "unknown_person": "vybraného zaměstnance",
                 "clear": "Zrušit zúžení"
             }
@@ -856,6 +857,7 @@
                 "title": "Platební dávky",
                 "foundation": "Dávky jsou archivované jako neměnné revize s přesným součtem a otiskem exportovaných bajtů. Export se zpřístupní až po doplnění ověřeného plátcovského účtu a bezpečného bankovního formátu."
             },
+            "options_failed": "Nabídku pro výběr se nepodařilo načíst.",
             "settlements": {
                 "title": "Úhrady a párování",
                 "foundation": "Stav úhrady se odvozuje jen z bankovního pohybu nebo zaúčtovaného pokladního dokladu; schválenou mzdu ani závazek nikdy nepřepisuje.",
@@ -863,6 +865,7 @@
                 "new_match_hint": "Vyberte položku platební dávky a dosud nepoužitý bankovní pohyb nebo pokladní doklad.",
                 "allocation": "Položka platební dávky",
                 "select_allocation": "Vyberte neuhrazenou položku",
+                "options_truncated": "Zobrazena jen část shod — upřesněte hledání.",
                 "no_allocations": "Žádná neuhrazená položka",
                 "evidence": "Platební důkaz",
                 "select_evidence": "Vyberte kompatibilní pohyb",
@@ -1686,6 +1689,15 @@
             "state": "Stav žádosti",
             "result": "Výsledek",
             "settled_on": "Provedeno",
+            "filter_search": "Hledat zaměstnance",
+            "filter_search_placeholder": "Jméno nebo jeho část",
+            "filter_state": "Stav",
+            "states": {
+                "all": "Vše",
+                "requested": "Požádali, nezúčtováno",
+                "unsettled": "Bez zúčtování",
+                "settled": "Zúčtováno"
+            },
             "not_settled": "Neprovedeno",
             "detail": "Podrobnosti",
             "select_employee": "Vyberte zaměstnance a doplňte, co doložil.",
@@ -1953,6 +1965,11 @@
                 "prohibition_banner": "Evidovaný přesčas porušuje zákaz práce přesčas. Mzdový běh nepůjde schválit, dokud k nálezu neuvedete ruční výjimku s důvodem.",
                 "averaging_summary": "Vyrovnávací období {weeks} týdnů ({from} – {to}): {used} z {limit}.",
                 "averaging_compensated": "Náhradním volnem vyňato {minutes} (§ 93 odst. 5).",
+                "compensatory_check": {
+                    "absence_without_compensation": "Za tento měsíc je evidované čerpání náhradního volna, ale žádný zápis o přesčasu, který se jím vyrovnal — vynětí podle § 93 odst. 5 se neuplatní.",
+                    "compensation_without_absence": "Za tento měsíc je evidované poskytnuté náhradní volno, ale v docházce k němu není absence — mzda o volnu neví.",
+                    "grant_date_unknown": "U některého náhradního volna chybí datum poskytnutí, takže ho do měsíce zařadit nelze."
+                },
                 "averaging_statutory": "Zákonných 26 týdnů",
                 "averaging_collective": "Prodlouženo kolektivní smlouvou: {reference}.",
                 "averaging_collective_option": "Kolektivní smlouva (až 52 týdnů)",
@@ -15378,6 +15395,7 @@
             "unpaid_leave": "Neplacené volno",
             "employee_obstacle": "Překážka na straně zaměstnance",
             "employer_obstacle": "Překážka na straně zaměstnavatele",
+            "compensatory_time_off": "Náhradní volno za přesčas",
             "other": "Jiná absence"
         },
         "status": {

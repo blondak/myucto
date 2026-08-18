@@ -600,6 +600,108 @@ final class PayrollOvertimeRepository
         return $result;
     }
 
+    /**
+     * Podklad pro porovnání dvou evidencí náhradního volna za jeden měsíc.
+     *
+     * Náhradní volno žije ve dvou tabulkách, protože každá odpovídá na jinou
+     * otázku a je klíčovaná jiným dnem:
+     *
+     *  - `payroll_absences` (typ `compensatory_time_off`) je zdroj pravdy
+     *    o tom, KDY zaměstnanec nepracoval — vstup do docházky a mzdy
+     *    (§ 114 odst. 3: za dobu čerpání mzda nepřísluší);
+     *  - `payroll_overtime_compensations` je zdroj pravdy o tom, KTERÝ PŘESČAS
+     *    se tím vyrovnal — vstup do vyrovnávacího období (§ 93 odst. 4 a 5).
+     *
+     * Odvodit jedno z druhého nejde: absence nenese den přesčasu a jeden den
+     * čerpání může vyrovnat přesčas z několika dnů. Rozpor mezi nimi ale nesmí
+     * zůstat tichý — proto tenhle dotaz vrací OBĚ strany za měsíc naráz.
+     *
+     * `granted_on` je nepovinné; zápis bez něj do měsíce nepatří ani jedním
+     * směrem a vrací se zvlášť, aby se z chybějícího údaje nestal tichý
+     * předpoklad „vybráno v tomhle měsíci".
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,array{granted_minutes:int,granted_rows:int,ungranted_rows:int,absence_rows:int}>
+     */
+    public function compensatoryTimeOffReconciliationForMany(
+        int $supplierId,
+        array $employmentIds,
+        string $monthFrom,
+        string $monthLastDay,
+    ): array {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $result = [];
+        foreach ($employmentIds as $employmentId) {
+            $result[$employmentId] = [
+                'granted_minutes' => 0,
+                'granted_rows' => 0,
+                'ungranted_rows' => 0,
+                'absence_rows' => 0,
+            ];
+        }
+        $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
+
+        $compensations = $this->db->pdo()->prepare(
+            "SELECT employment_id,
+                    COALESCE(SUM(CASE WHEN granted_on BETWEEN ? AND ?
+                                      THEN minutes ELSE 0 END), 0) AS granted_minutes,
+                    SUM(CASE WHEN granted_on BETWEEN ? AND ?
+                             THEN 1 ELSE 0 END) AS granted_rows,
+                    SUM(CASE WHEN granted_on IS NULL THEN 1 ELSE 0 END) AS ungranted_rows
+               FROM payroll_overtime_compensations
+              WHERE supplier_id = ?
+                AND employment_id IN ({$placeholders})
+              GROUP BY employment_id"
+        );
+        $compensations->execute([
+            $monthFrom,
+            $monthLastDay,
+            $monthFrom,
+            $monthLastDay,
+            $supplierId,
+            ...$employmentIds,
+        ]);
+        foreach ($compensations->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $employmentId = (int) $row['employment_id'];
+            if (!isset($result[$employmentId])) {
+                continue;
+            }
+            $result[$employmentId]['granted_minutes'] = (int) $row['granted_minutes'];
+            $result[$employmentId]['granted_rows'] = (int) $row['granted_rows'];
+            $result[$employmentId]['ungranted_rows'] = (int) $row['ungranted_rows'];
+        }
+
+        // Zamítnutá a zrušená absence není čerpání — do porovnání nepatří.
+        $absences = $this->db->pdo()->prepare(
+            "SELECT employment_id, COUNT(*) AS absence_rows
+               FROM payroll_absences
+              WHERE supplier_id = ?
+                AND employment_id IN ({$placeholders})
+                AND absence_type = 'compensatory_time_off'
+                AND status IN ('requested', 'approved')
+                AND date_from <= ?
+                AND date_to >= ?
+              GROUP BY employment_id"
+        );
+        $absences->execute([
+            $supplierId,
+            ...$employmentIds,
+            $monthLastDay,
+            $monthFrom,
+        ]);
+        foreach ($absences->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $employmentId = (int) $row['employment_id'];
+            if (!isset($result[$employmentId])) {
+                continue;
+            }
+            $result[$employmentId]['absence_rows'] = (int) $row['absence_rows'];
+        }
+
+        return $result;
+    }
+
     /** @return array<string,mixed> */
     public function saveCompensation(
         int $supplierId,

@@ -614,6 +614,7 @@
             "focus": {
                 "title": "The list is narrowed to {name}.",
                 "truncated": "The period holds more records than the narrowing could load — some may be missing. Clear the narrowing and page through the list.",
+                "missing": "Narrowing to employment no. {name} returned no record for this period — the employment does not belong to this company, did not exist in the period, or the link is stale.",
                 "unknown_person": "the selected employee",
                 "clear": "Clear narrowing"
             }
@@ -856,6 +857,7 @@
                 "title": "Payment batches",
                 "foundation": "Batches are archived as immutable revisions with an exact total and a hash of exported bytes. Export is enabled only after a verified payer account and a secure bank format are available."
             },
+            "options_failed": "The selection list could not be loaded.",
             "settlements": {
                 "title": "Settlement and matching",
                 "foundation": "Settlement status is derived only from a bank transaction or a posted cash document; it never overwrites approved payroll or its liability.",
@@ -863,6 +865,7 @@
                 "new_match_hint": "Select a payment batch item and an unused bank transaction or cash document.",
                 "allocation": "Payment batch item",
                 "select_allocation": "Select an unsettled item",
+                "options_truncated": "Only some matches are shown — narrow your search.",
                 "no_allocations": "No unsettled item",
                 "evidence": "Payment evidence",
                 "select_evidence": "Select a compatible transaction",
@@ -1686,6 +1689,15 @@
             "state": "Request state",
             "result": "Result",
             "settled_on": "Performed",
+            "filter_search": "Search employees",
+            "filter_search_placeholder": "Name or part of it",
+            "filter_state": "State",
+            "states": {
+                "all": "All",
+                "requested": "Requested, not settled",
+                "unsettled": "Not settled",
+                "settled": "Settled"
+            },
             "not_settled": "Not performed",
             "detail": "Details",
             "select_employee": "Pick an employee and record what they provided.",
@@ -1953,6 +1965,11 @@
                 "prohibition_banner": "The recorded overtime breaches a statutory overtime ban. The payroll run cannot be approved until the finding is overridden with a reason.",
                 "averaging_summary": "Averaging period of {weeks} weeks ({from} – {to}): {used} of {limit}.",
                 "averaging_compensated": "{minutes} excluded as compensatory time off (Section 93(5)).",
+                "compensatory_check": {
+                    "absence_without_compensation": "Compensatory time off is recorded for this month, but no overtime record it offsets — the Section 93(5) exclusion will not apply.",
+                    "compensation_without_absence": "Granted compensatory time off is recorded for this month, but attendance has no matching absence — payroll does not know about the time off.",
+                    "grant_date_unknown": "Some compensatory time off has no grant date, so it cannot be assigned to a month."
+                },
                 "averaging_statutory": "Statutory 26 weeks",
                 "averaging_collective": "Extended by collective agreement: {reference}.",
                 "averaging_collective_option": "Collective agreement (up to 52 weeks)",
@@ -15378,6 +15395,7 @@
             "unpaid_leave": "Unpaid leave",
             "employee_obstacle": "Employee-side obstacle",
             "employer_obstacle": "Employer-side obstacle",
+            "compensatory_time_off": "Compensatory time off for overtime",
             "other": "Other absence"
         },
         "status": {

@@ -574,8 +574,10 @@ final class AnnualSettlementIntegrationTest extends TestCase
                 withRequest: false,
             );
 
-            $items = $settlements->listForYear($supplierId, self::YEAR);
+            $page = $settlements->listForYear($supplierId, self::YEAR, 25, 0);
+            $items = $page['items'];
             self::assertCount(1, $items);
+            self::assertSame(1, $page['total']);
             self::assertSame($employeeId, $items[0]['employee_id']);
             self::assertNull($items[0]['request_status']);
             self::assertNull($items[0]['outcome']);

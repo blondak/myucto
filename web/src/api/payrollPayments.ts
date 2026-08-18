@@ -183,6 +183,13 @@ export interface PayrollPaymentMatch {
   evidence_fact_hash: string
   batch_reference: string
   liability_kind: string
+  /**
+   * Směr a měna PŘÍSLUŠNÉ ALOKACE jedou s událostí. Nabídka alokací je od
+   * zavedení stropu jen výsek, takže dohledávat je v ní by u alokace mimo
+   * výsek tiše znemožnilo storno.
+   */
+  allocation_direction: 'outgoing' | 'incoming'
+  allocation_currency_code: string
   employee_name: string | null
   reversible_minor: number
   created_at: string
@@ -190,7 +197,14 @@ export interface PayrollPaymentMatch {
 
 export interface PayrollPaymentReconciliation {
   period: string
+  /**
+   * Nabídka pro picker, OŘEZANÁ na `offered_limit`. Krátký seznam přijde celý
+   * a picker funguje bez jediného dalšího volání; delší se dohledává přes
+   * `searchOptions` a `*_truncated` říká, že poslané není všechno.
+   */
   allocations: PayrollPaymentAllocation[]
+  allocations_truncated: boolean
+  offered_limit: number
   matches: PayrollPaymentMatch[]
   matches_total: number
   matches_limit: number
@@ -201,7 +215,23 @@ export interface PayrollPaymentReconciliation {
    */
   reversible_matches: PayrollPaymentMatch[]
   bank_evidence: PayrollPaymentEvidence[]
+  bank_evidence_truncated: boolean
   cash_evidence: PayrollPaymentEvidence[]
+  cash_evidence_truncated: boolean
+}
+
+export type PayrollPaymentOptionKind =
+  | 'allocations'
+  | 'bank_evidence'
+  | 'cash_evidence'
+
+export interface PayrollPaymentOptionSearch {
+  kind: PayrollPaymentOptionKind
+  /** Nejlepší shody, nejvýš `limit` kusů. */
+  items: Array<PayrollPaymentAllocation | PayrollPaymentEvidence>
+  /** Shod je víc, než kolik se vešlo — nabídka NENÍ úplná. */
+  truncated: boolean
+  limit: number
 }
 
 export interface PayrollPaymentReconciliationEventResult {
@@ -254,6 +284,27 @@ export const payrollPaymentsApi = {
     api.get<PayrollPaymentReconciliation>(
       '/payroll/payments/reconciliation',
       { params: { period, ...pageParams(page) } },
+    ).then(response => response.data),
+  /**
+   * Serverové hledání v nabídce pickeru.
+   *
+   * Why: nabídky nešlo stránkovat — z pickeru by se stalo „vybrat jde jen to,
+   * co je na první straně". Zúžení podle měny, směru a použitelnosti jde na
+   * server spolu s dotazem, aby ze serverem vybraných shod nezbylo po
+   * klientském filtru prázdno.
+   */
+  searchOptions: (params: {
+    period: string
+    kind: PayrollPaymentOptionKind
+    q?: string
+    currency?: string
+    direction?: 'outgoing' | 'incoming'
+    usage?: 'match' | 'reversal'
+    cash_document_id?: number
+  }) =>
+    api.get<PayrollPaymentOptionSearch>(
+      '/payroll/payments/reconciliation/options',
+      { params },
     ).then(response => response.data),
   match: (payload: {
     allocation_id: number

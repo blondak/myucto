@@ -778,6 +778,7 @@ final class Routes
             $g->put('/rulesets/{rulesetId:[A-Za-z0-9][A-Za-z0-9._-]{0,159}}', [PayrollRulesetAction::class, 'update']);
             $g->delete('/rulesets/{rulesetId:[A-Za-z0-9][A-Za-z0-9._-]{0,159}}', [PayrollRulesetAction::class, 'reset']);
             $g->get('/payments/reconciliation', [PayrollPaymentAction::class, 'listReconciliation']);
+            $g->get('/payments/reconciliation/options', [PayrollPaymentAction::class, 'searchReconciliationOptions']);
             $g->post('/payments/reconciliation/matches', [PayrollPaymentAction::class, 'matchPayment']);
             $g->post('/payments/reconciliation/reversals', [PayrollPaymentAction::class, 'reversePayment']);
             $g->post(
