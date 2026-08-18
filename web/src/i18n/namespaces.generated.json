@@ -457,6 +457,10 @@
       "accounting",
       "cash"
     ],
+    "accounting-cash-edit": [
+      "accounting",
+      "cash"
+    ],
     "accounting-cash-book": [
       "cash"
     ],
