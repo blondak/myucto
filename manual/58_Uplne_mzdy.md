@@ -399,7 +399,11 @@ agendy, kde se k tomuto člověku dá něco pořídit — docházka a směny,
 nepřítomnosti, mzdové vstupy, pracovní cesty, opakované složky, průměrný
 výdělek, dohody o srážkách, exekuce, dokumenty a roční zúčtování. Cílová
 obrazovka se otevře už zúžená na daného zaměstnance; zúžení je vidět v horní
-liště a jedním tlačítkem se ruší.
+liště a jedním tlačítkem se ruší. Zužuje server, ne jen zobrazená stránka —
+hledaný člověk se najde, i kdyby jeho záznamy ležely až na několikáté straně,
+a stránkování i počty mluví o zúženém seznamu. Když zúžení nedá žádný záznam
+(cizí nebo zaniklý vztah, zestaralý odkaz), řekne to lišta větou; prázdná
+tabulka bez vysvětlení se nezobrazí.
 
 Pod tlačítky je souhrn: u agend, ve kterých něco je, počet záznamů, datum
 posledního a případně částka. Agendy, ve kterých zatím nic není, se jmenují

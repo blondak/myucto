@@ -31,6 +31,11 @@ final class PayrollInputRepository
      * tím, že {@see \MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBatchLoader}
      * počítá výhradně `status = "draft"`.
      *
+     * Zúžení na jeden pracovní vztah (`$employmentId`) padá do TÉHOŽ dotazu jako
+     * stránkování. Dokud filtroval prohlížeč nad načtenou stránkou, vztah z jiné
+     * strany se tiše neprojevil: seznam zůstal celý, nebo vyšel prázdný, a obojí
+     * vypadá jako legitimní výsledek.
+     *
      * @return array{items:list<array<string,mixed>>,total:int}
      */
     public function list(
@@ -38,20 +43,30 @@ final class PayrollInputRepository
         string $periodStart,
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
+        ?int $employmentId = null,
     ): array {
         // Strop se klampuje i tady, ne jen na HTTP hranici: repozitář volá
         // i jiný kód než akce a „nekonečný" seznam nesmí jít objednat nikudy.
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
+        if ($employmentId !== null && $employmentId <= 0) {
+            throw new \InvalidArgumentException('Vztah musí být kladné číslo.');
+        }
+
+        $narrowing = $employmentId === null ? '' : ' AND input.employment_id = ?';
+        $filterParams = [$supplierId, $periodStart];
+        if ($employmentId !== null) {
+            $filterParams[] = $employmentId;
+        }
 
         $countStmt = $this->db->pdo()->prepare(
             'SELECT COUNT(*)
                FROM payroll_inputs input
               WHERE input.supplier_id = ?
                 AND input.period_start = ?
-                AND input.status <> "cancelled"'
+                AND input.status <> "cancelled"' . $narrowing
         );
-        $countStmt->execute([$supplierId, $periodStart]);
+        $countStmt->execute($filterParams);
         $total = (int) $countStmt->fetchColumn();
 
         $stmt = $this->db->pdo()->prepare(
@@ -74,14 +89,20 @@ final class PayrollInputRepository
                 AND component.id = input.component_id
               WHERE input.supplier_id = ?
                 AND input.period_start = ?
-                AND input.status <> "cancelled"
-              ORDER BY employee.full_name, employment.code, component.code, input.id
+                AND input.status <> "cancelled"' . $narrowing
+            . ' ORDER BY employee.full_name, employment.code, component.code, input.id
               LIMIT ? OFFSET ?'
         );
-        $stmt->bindValue(1, $supplierId, PDO::PARAM_INT);
-        $stmt->bindValue(2, $periodStart, PDO::PARAM_STR);
-        $stmt->bindValue(3, $limit, PDO::PARAM_INT);
-        $stmt->bindValue(4, $offset, PDO::PARAM_INT);
+        $position = 1;
+        foreach ($filterParams as $param) {
+            $stmt->bindValue(
+                $position++,
+                $param,
+                is_int($param) ? PDO::PARAM_INT : PDO::PARAM_STR,
+            );
+        }
+        $stmt->bindValue($position++, $limit, PDO::PARAM_INT);
+        $stmt->bindValue($position, $offset, PDO::PARAM_INT);
         $stmt->execute();
 
         return [

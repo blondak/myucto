@@ -178,6 +178,85 @@ final class PayrollDocumentListPaginationTest extends TestCase
     }
 
     /**
+     * Zúžení na osobu musí najít i dokument, který na první stránce není.
+     *
+     * Dokud zužoval prohlížeč nad načtenou stránkou, vypadalo zúžení na osobu
+     * z jiné strany jako „ten člověk tu nic nemá". Druhá osoba se jmenuje tak,
+     * aby se v řazení podle jména propadla na konec.
+     */
+    public function testPeriodNarrowingReachesADocumentBeyondTheFirstPage(): void
+    {
+        $this->seedPeriodDocuments(4);
+        $otherEmployeeId = $this->seedEmployee('Zúžený dokladovaný');
+        $offPageId = $this->insertDocument([
+            'run_id' => $this->runId(),
+            'revision_id' => $this->revisionId,
+            'annual_revision_id' => null,
+            'document_kind' => 'payslip',
+            'revision_snapshot_hash' => self::RESULT_HASH,
+        ], $otherEmployeeId);
+
+        $firstPage = $this->listPeriod(['limit' => '2', 'offset' => '0']);
+        self::assertNotContains(
+            $offPageId,
+            $this->ids($firstPage),
+            'Předpoklad testu: hledaný dokument na první stránce být nesmí.',
+        );
+
+        $narrowed = $this->listPeriod([
+            'limit' => '2',
+            'offset' => '0',
+            'employee_id' => (string) $otherEmployeeId,
+        ]);
+
+        self::assertSame([$offPageId], $this->ids($narrowed));
+        self::assertSame(1, $narrowed['total'], 'Total musí být zúžený stejně jako stránka.');
+        self::assertSame($otherEmployeeId, $narrowed['employee_id']);
+    }
+
+    /** Roční záložka zužuje stejně — a taky až za koncem první stránky. */
+    public function testAnnualNarrowingReachesADocumentBeyondTheFirstPage(): void
+    {
+        $this->seedAnnualDocuments(4);
+        $otherEmployeeId = $this->seedEmployee('Zúžený dokladovaný');
+        $offPageId = $this->insertDocument([
+            'run_id' => null,
+            'revision_id' => null,
+            'annual_revision_id' => $this->seedAnnualRevision($otherEmployeeId),
+            'document_kind' => 'payroll_sheet',
+            'revision_snapshot_hash' => self::ANNUAL_HASH,
+        ], $otherEmployeeId);
+
+        $firstPage = $this->listAnnual(['limit' => '2', 'offset' => '0']);
+        self::assertNotContains($offPageId, $this->ids($firstPage));
+
+        $narrowed = $this->listAnnual([
+            'limit' => '2',
+            'offset' => '0',
+            'employee_id' => (string) $otherEmployeeId,
+        ]);
+
+        self::assertSame([$offPageId], $this->ids($narrowed));
+        self::assertSame(1, $narrowed['total']);
+        self::assertSame($otherEmployeeId, $narrowed['employee_id']);
+    }
+
+    /**
+     * Cizí ani neexistující osoba nesmí vrátit celý archiv období.
+     *
+     * Prázdný výsledek je poznatelný stav; tiché zobrazení všech je lež.
+     */
+    public function testUnknownNarrowingReturnsNothingInsteadOfEverything(): void
+    {
+        $this->seedPeriodDocuments(3);
+
+        $payload = $this->listPeriod(['employee_id' => (string) ($this->employeeId + 10_000)]);
+
+        self::assertSame([], $this->ids($payload));
+        self::assertSame(0, $payload['total']);
+    }
+
+    /**
      * @param array<string,mixed> $payload
      * @return list<int>
      */
@@ -276,6 +355,38 @@ final class PayrollDocumentListPaginationTest extends TestCase
         $this->annualRevisionId = (int) $pdo->lastInsertId();
     }
 
+    private function seedEmployee(string $fullName): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, ?, "employee", 1)'
+        )->execute([$this->supplierId, $fullName]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function seedAnnualRevision(int $employeeId): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_annual_document_revisions
+                (supplier_id, employee_id, tax_year, purpose, revision_no,
+                 snapshot_ciphertext, snapshot_hash, source_manifest_json,
+                 source_manifest_hash, approved_at)
+             VALUES (?, ?, 2026, "payroll_sheet", 1, "", ?, "{}", ?,
+                     "2026-12-31 12:00:00")'
+        )->execute([
+            $this->supplierId,
+            $employeeId,
+            self::ANNUAL_HASH,
+            str_repeat('f', 64),
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
     private function seedPeriodDocuments(int $count): void
     {
         for ($i = 0; $i < $count; ++$i) {
@@ -302,8 +413,11 @@ final class PayrollDocumentListPaginationTest extends TestCase
         }
     }
 
-    /** @param array<string,mixed> $anchor */
-    private function insertDocument(array $anchor): void
+    /**
+     * @param array<string,mixed> $anchor
+     * @return int id vloženého dokumentu
+     */
+    private function insertDocument(array $anchor, ?int $employeeId = null): int
     {
         $ordinal = ++$this->documentSequence;
         // `chk_payroll_document_hashes` vyžaduje `storage_key = file_sha256`.
@@ -322,7 +436,7 @@ final class PayrollDocumentListPaginationTest extends TestCase
             $anchor['run_id'],
             $anchor['revision_id'],
             $anchor['annual_revision_id'],
-            $this->employeeId,
+            $employeeId ?? $this->employeeId,
             $anchor['document_kind'],
             $ordinal,
             $anchor['revision_snapshot_hash'],
@@ -332,6 +446,8 @@ final class PayrollDocumentListPaginationTest extends TestCase
             'doklad-' . $ordinal . '.pdf',
             hash('sha256', 'idem-' . $ordinal),
         ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
     }
 
     private function runId(): int

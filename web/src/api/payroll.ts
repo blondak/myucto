@@ -3875,13 +3875,25 @@ export const payrollApi = {
       `/payroll/employments/${employmentId}/dimensions/${assignmentId}`,
       payload,
     ).then(response => response.data.dimension),
-  listDocuments: (period: string, page?: PayrollPageParams) =>
+  /**
+   * `employeeId` zúží seznam na jednu osobu už na serveru. Zužovat načtenou
+   * stránku v prohlížeči nešlo: dokument z jiné strany se tiše neprojevil.
+   */
+  listDocuments: (period: string, page?: PayrollPageParams, employeeId?: number) =>
     api.get<PayrollDocumentList>('/payroll/documents', {
-      params: { period, ...pageParams(page) },
+      params: {
+        period,
+        ...pageParams(page),
+        ...(employeeId ? { employee_id: employeeId } : {}),
+      },
     }).then(response => response.data),
-  listAnnualDocuments: (year: number, page?: PayrollPageParams) =>
+  listAnnualDocuments: (year: number, page?: PayrollPageParams, employeeId?: number) =>
     api.get<PayrollAnnualDocumentList>('/payroll/documents/annual', {
-      params: { year, ...pageParams(page) },
+      params: {
+        year,
+        ...pageParams(page),
+        ...(employeeId ? { employee_id: employeeId } : {}),
+      },
     }).then(response => response.data),
   listAnnualSettlements: (
     year: number,
@@ -4243,17 +4255,37 @@ export const payrollApi = {
       '/payroll/recurring-components/materialize',
       { period },
     ).then(response => response.data.materialization),
-  inputs: (period: string, page?: PayrollPageParams) =>
+  /** `employmentId` zúží seznam na jeden vztah už na serveru, ne až za stránkováním. */
+  inputs: (period: string, page?: PayrollPageParams, employmentId?: number) =>
     api.get<{ inputs: PayrollInput[]; total: number }>('/payroll/inputs', {
-      params: { period, ...pageParams(page) },
+      params: {
+        period,
+        ...pageParams(page),
+        ...(employmentId ? { employment_id: employmentId } : {}),
+      },
     }).then(response => ({ items: response.data.inputs, total: response.data.total })),
-  quickInputs: (period: string, page?: PayrollPageParams) =>
+  quickInputs: (period: string, page?: PayrollPageParams, employmentId?: number) =>
     api.get<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', {
-      params: { period, ...pageParams(page) },
+      params: {
+        period,
+        ...pageParams(page),
+        ...(employmentId ? { employment_id: employmentId } : {}),
+      },
     }).then(response => response.data.month),
-  saveQuickInputs: (payload: PayrollQuickInputSavePayload, page?: PayrollPageParams) =>
+  /**
+   * Zúžení se posílá i při ukládání — odpověď je táž stránka, ze které se
+   * plní formulář, a ta musí zůstat zúžená.
+   */
+  saveQuickInputs: (
+    payload: PayrollQuickInputSavePayload,
+    page?: PayrollPageParams,
+    employmentId?: number,
+  ) =>
     api.put<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', payload, {
-      params: pageParams(page),
+      params: {
+        ...pageParams(page),
+        ...(employmentId ? { employment_id: employmentId } : {}),
+      },
     }).then(response => response.data.month),
   previewInput: (payload: PayrollInputPayload) =>
     api.post<{ preview: PayrollInputPreview }>('/payroll/inputs/preview', payload)
