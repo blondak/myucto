@@ -81,13 +81,19 @@ const closingChecks = ['cash_journal_reviewed', 'non_cash_reviewed', 'fixed_asse
 const closingBalanceKeys = ['fixed_assets', 'cash', 'bank', 'inventory', 'receivables',
   'other_assets', 'liabilities', 'reserves', 'depreciation']
 
-const TABS = ['podklady', 'upravy', 'nahled', 'export'] as const
+// Zálohy a rozhodnutí FÚ mají vlastní záložky — schované v Exportu je nikdo nenašel.
+const TABS = ['podklady', 'upravy', 'nahled', 'export', 'zalohy', 'rozhodnuti'] as const
 type TabKey = typeof TABS[number]
 function normalizeTab(v: unknown): TabKey {
   return TABS.includes(v as TabKey) ? (v as TabKey) : 'podklady'
 }
 const activeTab = ref<TabKey>(normalizeTab(route.query.tab))
 watch(() => route.query.tab, v => { activeTab.value = normalizeTab(v) })
+// Rozhodnutí FÚ o zálohách podle §174 DŘ je jen věc právnických osob.
+const visibleTabs = computed<readonly TabKey[]>(() =>
+  type.value === 'po' ? TABS : TABS.filter(k => k !== 'rozhodnuti'),
+)
+
 function switchTab(tab: TabKey) {
   router.replace({ query: { ...route.query, tab } })
 }
@@ -707,7 +713,7 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
     <template v-if="state && !loading">
       <!-- Taby -->
       <div class="flex gap-1 border-b border-neutral-200 overflow-x-auto overflow-y-hidden mb-4">
-        <button v-for="tk in TABS" :key="tk" type="button" @click="switchTab(tk)"
+        <button v-for="tk in visibleTabs" :key="tk" type="button" @click="switchTab(tk)"
           class="px-4 py-2 text-sm border-b-2 -mb-px whitespace-nowrap"
           :class="activeTab === tk ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-neutral-500 hover:text-neutral-700'">
           {{ tabLabel(tk) }}
@@ -1274,6 +1280,10 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
           </div>
         </div>
 
+      </section>
+
+      <!-- Zálohy na daň a pojistné (E9) — vlastní záložka: v Exportu je nikdo nehledal. -->
+      <section v-show="activeTab === 'zalohy'" class="space-y-4">
         <!-- ── Zálohy na daň a pojistné (E9) ── -->
         <div class="bg-surface border border-neutral-200 rounded-lg p-5">
           <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
@@ -1362,6 +1372,10 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
           </div>
           <EmptyState v-else dense accent="neutral" icon="coin" :title="t('taxReturn.advances_empty')" />
         </div>
+      </section>
+
+      <!-- #46 — rozhodnutí FÚ o zálohách (§174 DŘ): taky vlastní záložka, jen pro PO. -->
+      <section v-show="activeTab === 'rozhodnuti'" class="space-y-4">
 
         <!-- ── #46 — rozhodnutí FÚ o zálohách (§174) + předpis placení záloh NAPŘÍČ ROKY (jen daň §38a, PO) ── -->
         <div v-if="type === 'po'" class="bg-surface border border-neutral-200 rounded-lg p-5">

@@ -5005,6 +5005,8 @@
         "error": {
             "register_not_found": "Pokladna nenalezena.",
             "nothing_to_settle": "Přijatá faktura už je vypořádaná (zálohou nebo jinou úhradou) — není co hradit.",
+                "nothing_to_refund": "Na přijaté faktuře není co vracet — žádná úhrada k ní zatím není zaúčtovaná.",
+                "refund_exceeds_paid": "Vratka nesmí přesáhnout uhrazenou částku.",
             "followup_document_exists": "Z této úhrady zálohy už vznikl navazující doklad — zrušte nejdřív jej, teprve pak pokladní doklad.",
             "register_inactive": "Pokladna je neaktivní.",
             "register_has_documents": "Pokladnu s doklady nelze smazat — deaktivujte ji.",
@@ -14445,6 +14447,8 @@
         "tab_upravy": "Úpravy a odpočty",
         "tab_nahled": "Náhled přiznání",
         "tab_export": "Export",
+        "tab_zalohy": "Zálohy na daň a pojistné",
+        "tab_rozhodnuti": "Rozhodnutí FÚ o zálohách",
         "save": "Uložit",
         "finalize": "Uzamknout (finální)",
         "reopen": "Odemknout",

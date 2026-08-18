@@ -5005,6 +5005,8 @@
         "error": {
             "register_not_found": "Cash register not found.",
             "nothing_to_settle": "The received invoice is already settled (by an advance or another payment) — nothing is left to pay.",
+                "nothing_to_refund": "There is nothing to refund on this received invoice — no payment is posted to it yet.",
+                "refund_exceeds_paid": "The refund cannot exceed the amount already paid.",
             "followup_document_exists": "A follow-up document was already created from this advance payment — cancel it first, then the cash document.",
             "register_inactive": "The cash register is inactive.",
             "register_has_documents": "A cash register with documents cannot be deleted — deactivate it instead.",
@@ -14445,6 +14447,8 @@
         "tab_upravy": "Adjustments & deductions",
         "tab_nahled": "Return preview",
         "tab_export": "Export",
+        "tab_zalohy": "Tax and insurance advances",
+        "tab_rozhodnuti": "Tax office decision on advances",
         "save": "Save",
         "finalize": "Lock (final)",
         "reopen": "Unlock",
