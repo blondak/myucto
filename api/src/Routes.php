@@ -1548,7 +1548,7 @@ final class Routes
             $g->post  ('/journal/transfer',                                     [JournalTransferAction::class, 'transfer']);
             $g->get   ('/reports/tax-base-adjustments',                         [TaxBaseReportAction::class, 'get']);
             $g->get   ('/document-series',                                      [DocumentSeriesAction::class, 'list']);
-            $g->put   ('/document-series/{code:[a-z]+}/{year:[0-9]+}',          [DocumentSeriesAction::class, 'updatePrefix']);
+            $g->put   ('/document-series/{code:[a-z_]+}/{year:[0-9]+}',         [DocumentSeriesAction::class, 'update']);
             $g->get   ('/archive',                                              [ArchiveAction::class, 'list']);
             $g->post  ('/archive/export',                                       [ArchiveAction::class, 'export']);
             $g->get   ('/archive/{id:[0-9]+}/download',                         [ArchiveAction::class, 'download']);

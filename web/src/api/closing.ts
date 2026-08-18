@@ -455,14 +455,27 @@ export interface ArchiveItem {
 }
 
 // ── Číselné řady (R13) ─────────────────────────────────────────────────────
-export type SeriesCode = 'closing' | 'opening' | 'fx' | 'transfer' | 'manual'
+export type SeriesCode =
+  | 'closing' | 'opening' | 'fx' | 'transfer' | 'manual'
+  | 'cash_in' | 'cash_out'
+  | 'stock_in' | 'stock_out' | 'stock_transfer'
+  | 'offset' | 'purchase_order'
 
 export interface DocumentSeries {
   id?: number
   series_code: SeriesCode
   fiscal_year: number
   prefix: string
+  /** Šablona čísla ({PREFIX}/{YYYY}/{YY}/{C+}); null = vestavěné {PREFIX}-{YYYY}-{CCCC}. */
+  number_format: string | null
   next_number: number
+}
+
+/** Aspoň jedna položka; number_format = '' vrátí řadu na vestavěnou šablonu. */
+export interface DocumentSeriesPatch {
+  prefix?: string
+  number_format?: string | null
+  next_number?: number
 }
 
 // ── Převod přes 261 (R14) ──────────────────────────────────────────────────
@@ -662,8 +675,8 @@ export const archiveApi = {
 
 export const seriesApi = {
   list: () => api.get<DocumentSeries[]>('/accounting/document-series').then(r => r.data),
-  updatePrefix: (code: SeriesCode, year: number, prefix: string) =>
-    api.put<DocumentSeries>(`/accounting/document-series/${code}/${year}`, { prefix }).then(r => r.data),
+  update: (code: SeriesCode, year: number, patch: DocumentSeriesPatch) =>
+    api.put<DocumentSeries[]>(`/accounting/document-series/${code}/${year}`, patch).then(r => r.data),
 }
 
 export const transferApi = {

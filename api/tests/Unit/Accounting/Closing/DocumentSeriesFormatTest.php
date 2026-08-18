@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Accounting\Closing;
 
+use MyInvoice\Service\Accounting\Closing\ClosingException;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use PHPUnit\Framework\TestCase;
 
 /**
  * Unit test formátu čísla dokladu číselné řady (Epic F4, §6.1 U13, R13):
- * `{prefix}-{fiscal_year}-{NNNN}` (%04d) — čistá statická funkce bez DB.
+ * vestavěné `{PREFIX}-{YYYY}-{CCCC}` i volitelná šablona per řada (#22) —
+ * čistá statická funkce bez DB.
  */
 final class DocumentSeriesFormatTest extends TestCase
 {
@@ -42,5 +44,58 @@ final class DocumentSeriesFormatTest extends TestCase
             DocumentSeriesService::DEFAULT_PREFIXES,
             'Výchozí prefixy řad dle R13 + pokladní řady (#14) + skladové řady (#16) + zápočty (audit 2026-07 Fáze F) + objednávky dodavatelům.',
         );
+    }
+
+    // ── #22: volitelná šablona čísla řady ────────────────────────────────────
+
+    public function testCustomTemplateRendersPlaceholders(): void
+    {
+        // Přesně případ z #22 — navázání na řadu 26HP00010 z jiného systému.
+        self::assertSame('26HP00011', DocumentSeriesService::format('26HP', 2026, 11, '{PREFIX}{CCCCC}'));
+        self::assertSame('26HP00011', DocumentSeriesService::format('X', 2026, 11, '26HP{CCCCC}'));
+        self::assertSame('PPD/26/007', DocumentSeriesService::format('PPD', 2026, 7, '{PREFIX}/{YY}/{CCC}'));
+        self::assertSame('2026.0042', DocumentSeriesService::format('UZ', 2026, 42, '{YYYY}.{CCCC}'));
+    }
+
+    public function testEmptyTemplateFallsBackToBuiltIn(): void
+    {
+        self::assertSame('UZ-2026-0007', DocumentSeriesService::format('UZ', 2026, 7, null));
+        self::assertSame('UZ-2026-0007', DocumentSeriesService::format('UZ', 2026, 7, ''));
+        self::assertSame('UZ-2026-0007', DocumentSeriesService::format('UZ', 2026, 7, DocumentSeriesService::DEFAULT_TEMPLATE));
+    }
+
+    public function testCustomTemplateDoesNotTruncateOverflow(): void
+    {
+        self::assertSame('26HP100000', DocumentSeriesService::format('26HP', 2026, 100000, '{PREFIX}{CCCCC}'));
+    }
+
+    public function testNormalizeTemplateNullsOutDefaultAndEmpty(): void
+    {
+        self::assertNull(DocumentSeriesService::normalizeTemplate(null));
+        self::assertNull(DocumentSeriesService::normalizeTemplate('   '));
+        self::assertNull(DocumentSeriesService::normalizeTemplate(DocumentSeriesService::DEFAULT_TEMPLATE));
+    }
+
+    public function testNormalizeTemplateUppercasesAndTrims(): void
+    {
+        self::assertSame('26HP{CCCCC}', DocumentSeriesService::normalizeTemplate(' 26hp{ccccc} '));
+    }
+
+    public function testNormalizeTemplateRejectsMissingCounter(): void
+    {
+        $this->expectException(ClosingException::class);
+        DocumentSeriesService::normalizeTemplate('{PREFIX}-{YYYY}');
+    }
+
+    public function testNormalizeTemplateRejectsUnknownCharacters(): void
+    {
+        $this->expectException(ClosingException::class);
+        DocumentSeriesService::normalizeTemplate('{PREFIX} {CCCC}');
+    }
+
+    public function testNormalizeTemplateRejectsTooLongTemplate(): void
+    {
+        $this->expectException(ClosingException::class);
+        DocumentSeriesService::normalizeTemplate(str_repeat('A', 40) . '{CCCC}');
     }
 }

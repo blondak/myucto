@@ -7766,11 +7766,17 @@
                     "stock_in": "Stock receipts (PRI)",
                     "stock_out": "Stock issues (VYD)",
                     "stock_transfer": "Stock transfers (PRE)",
-                    "offset": "Offset agreements (ZAP)"
+                    "offset": "Offset agreements (ZAP)",
+                    "purchase_order": "Purchase orders (OBJ)"
                 },
                 "prefix": "Prefix",
+                "number_format": "Number format",
+                "preview": "Preview",
                 "next_number": "Next number",
-                "prefix_invalid": "The prefix must be 1–10 uppercase letters or digits."
+                "format_hint": "The number format is optional — an empty field means the built-in PREFIX-YYYY-CCCC. Placeholders (always in curly braces): PREFIX series prefix · YYYY 4-digit year · YY 2-digit year · C+ counter, the number of Cs sets the width. For example PREFIX and CCCCC in curly braces with prefix 26HP yields 26HP00011.",
+                "prefix_invalid": "The prefix must be 1–10 uppercase letters or digits.",
+                "format_invalid": "The number format must contain a counter — add e.g. CCCC in curly braces, otherwise numbers would repeat.",
+                "next_number_invalid": "The next number must be an integer between 1 and 999999999."
             },
             "settings": {
                 "title": "Closing & statement settings",

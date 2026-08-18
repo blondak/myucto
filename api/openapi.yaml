@@ -10814,15 +10814,28 @@ paths:
   /api/v1/accounting/document-series/{code}/{year}:
     put:
       tags: [Accounting]
-      summary: Změna prefixu číselné řady
-      description: Účetní/admin. Prefix 1–10 znaků A–Z/0–9; projeví se u dalšího vydaného čísla.
+      summary: Nastavení číselné řady (prefix, tvar čísla, čítač)
+      description: |
+        Účetní/admin. Aspoň jedna položka těla; projeví se u dalšího vydaného čísla.
+        `prefix` 1–10 znaků A–Z/0–9. `number_format` je šablona čísla s placeholdery
+        {PREFIX}, {YYYY}, {YY} a {C+} (počet C = odsazení nulami); prázdná / null vrací
+        řadu na vestavěné `{PREFIX}-{YYYY}-{CCCC}`. `next_number` je číslo PŘÍŠTÍHO
+        vydaného dokladu — umožňuje navázat na řadu převzatou z jiného systému.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: path, name: code, required: true, schema: { type: string, enum: [closing, opening, fx, transfer, manual] } }
+        - { in: path, name: code, required: true, schema: { type: string, enum: [closing, opening, fx, transfer, manual, cash_in, cash_out, stock_in, stock_out, stock_transfer, offset, purchase_order] } }
         - { in: path, name: year, required: true, schema: { type: integer } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [prefix], properties: { prefix: { type: string, pattern: "^[A-Z0-9]{1,10}$" } } } } }
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                prefix: { type: string, pattern: "^[A-Z0-9]{1,10}$" }
+                number_format: { type: string, nullable: true, maxLength: 40, example: "{PREFIX}{CCCCC}" }
+                next_number: { type: integer, minimum: 1, maximum: 999999999 }
       responses:
         '200': { description: OK (aktuální seznam řad), content: { application/json: { schema: { type: array, items: { type: object } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }

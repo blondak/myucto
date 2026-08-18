@@ -124,6 +124,56 @@ final class DocumentSeriesTest extends TestCase
         }
     }
 
+    // ── #22: převzetí řady z jiného systému (čítač + tvar čísla) ─────────────
+
+    public function testSeriesCounterCanBeSetForwardBeforeFirstIssue(): void
+    {
+        // Řádek řady ještě neexistuje — nastavení musí fungovat i tak.
+        self::assertTrue($this->series->updateSeries($this->supplierId, 'cash_in', self::YEAR, ['next_number' => 11]));
+        self::assertSame('PPD-2098-0011', $this->series->next($this->supplierId, 'cash_in', self::YEAR));
+        self::assertSame('PPD-2098-0012', $this->series->next($this->supplierId, 'cash_in', self::YEAR));
+    }
+
+    public function testSeriesCustomFormatContinuesExternalNumbering(): void
+    {
+        // Přesně případ z #22: poslední doklad z jiného systému byl 26HP00010.
+        self::assertTrue($this->series->updateSeries($this->supplierId, 'cash_in', self::YEAR, [
+            'prefix'        => '26HP',
+            'number_format' => '{PREFIX}{CCCCC}',
+            'next_number'   => 11,
+        ]));
+        self::assertSame('26HP00011', $this->series->next($this->supplierId, 'cash_in', self::YEAR));
+        self::assertSame('26HP00012', $this->series->next($this->supplierId, 'cash_in', self::YEAR));
+
+        // Návrat na vestavěnou šablonu; čítač i prefix zůstávají.
+        self::assertTrue($this->series->updateSeries($this->supplierId, 'cash_in', self::YEAR, ['number_format' => null]));
+        self::assertSame('26HP-2098-0013', $this->series->next($this->supplierId, 'cash_in', self::YEAR));
+    }
+
+    public function testSeriesCounterAndFormatAreValidated(): void
+    {
+        try {
+            $this->series->updateSeries($this->supplierId, 'cash_in', self::YEAR, ['next_number' => 0]);
+            self::fail('Očekávána ClosingException invalid_next_number.');
+        } catch (ClosingException $e) {
+            self::assertSame('invalid_next_number', $e->errorCode);
+        }
+
+        try {
+            $this->series->updateSeries($this->supplierId, 'cash_in', self::YEAR, ['number_format' => '{PREFIX}-{YYYY}']);
+            self::fail('Očekávána ClosingException invalid_number_format.');
+        } catch (ClosingException $e) {
+            self::assertSame('invalid_number_format', $e->errorCode);
+        }
+
+        try {
+            $this->series->updateSeries($this->supplierId, 'nesmysl', self::YEAR, ['next_number' => 5]);
+            self::fail('Očekávána ClosingException unknown_series.');
+        } catch (ClosingException $e) {
+            self::assertSame('unknown_series', $e->errorCode);
+        }
+    }
+
     public function testI16SeriesAreTenantScoped(): void
     {
         self::assertSame('UZ-2098-0001', $this->series->next($this->supplierId, 'closing', self::YEAR));

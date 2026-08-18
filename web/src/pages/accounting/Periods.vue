@@ -141,16 +141,19 @@ async function submitStatusDialog() {
 const showSeries = ref(false)
 const series = ref<DocumentSeries[]>([])
 const seriesLoading = ref(false)
-const seriesEdits = reactive<Record<string, string>>({})
+type SeriesEdit = { prefix: string; number_format: string; next_number: string }
+const seriesEdits = reactive<Record<string, SeriesEdit>>({})
 const settings = ref<AccountingClosingSettings | null>(null)
 const settingsSaving = ref(false)
+
+const seriesKey = (s: DocumentSeries) => `${s.series_code}-${s.fiscal_year}`
 
 async function openSeries() {
   showSeries.value = true
   seriesLoading.value = true
   try {
     series.value = await seriesApi.list()
-    for (const s of series.value) seriesEdits[`${s.series_code}-${s.fiscal_year}`] = s.prefix
+    for (const s of series.value) fillSeriesEdit(s)
   } catch (e: any) {
     series.value = []
     toast.error(localizedError(e) || t('common.error'))
@@ -160,14 +163,52 @@ async function openSeries() {
   try { settings.value = await closingSettingsApi.get() } catch { settings.value = null }
 }
 
-async function savePrefix(s: DocumentSeries) {
-  const prefix = (seriesEdits[`${s.series_code}-${s.fiscal_year}`] || '').trim().toUpperCase()
+function fillSeriesEdit(s: DocumentSeries) {
+  seriesEdits[seriesKey(s)] = {
+    prefix: s.prefix,
+    number_format: s.number_format || '',
+    next_number: String(s.next_number),
+  }
+}
+
+/** Náhled čísla dle rozeditované šablony — stejná pravidla jako DocumentSeriesService::format. */
+function seriesPreview(s: DocumentSeries): string {
+  const e = seriesEdits[seriesKey(s)]
+  if (!e) return ''
+  const tpl = (e.number_format.trim() || '{PREFIX}-{YYYY}-{CCCC}').toUpperCase()
+  const n = Math.max(1, Number(e.next_number) || 1)
+  return tpl
+    .replace(/\{PREFIX\}/g, e.prefix.trim().toUpperCase())
+    .replace(/\{YYYY\}/g, String(s.fiscal_year))
+    .replace(/\{YY\}/g, String(s.fiscal_year).slice(-2))
+    .replace(/\{(C+)\}/g, (_m, c: string) => String(n).padStart(c.length, '0'))
+}
+
+async function saveSeries(s: DocumentSeries) {
+  const e = seriesEdits[seriesKey(s)]
+  if (!e) return
+  const prefix = e.prefix.trim().toUpperCase()
   if (!/^[A-Z0-9]{1,10}$/.test(prefix)) {
     toast.warning(t('accounting.closing.series.prefix_invalid'))
     return
   }
+  const format = e.number_format.trim().toUpperCase()
+  if (format !== '' && !/\{C+\}/.test(format)) {
+    toast.warning(t('accounting.closing.series.format_invalid'))
+    return
+  }
+  const next = Number(e.next_number)
+  if (!Number.isInteger(next) || next < 1 || next > 999999999) {
+    toast.warning(t('accounting.closing.series.next_number_invalid'))
+    return
+  }
   try {
-    await seriesApi.updatePrefix(s.series_code, s.fiscal_year, prefix)
+    series.value = await seriesApi.update(s.series_code, s.fiscal_year, {
+      prefix,
+      number_format: format === '' ? null : format,
+      next_number: next,
+    })
+    for (const row of series.value) fillSeriesEdit(row)
     toast.success(t('common.saved'))
   } catch (e: any) {
     toast.error(localizedError(e) || t('common.error'))
@@ -394,18 +435,21 @@ function statusBadge(status: string): string {
 
     <!-- Modal: číselné řady + nastavení uzávěrky -->
     <div v-if="showSeries" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div class="bg-surface rounded-xl shadow-lg max-w-xl w-full p-5 max-h-[85vh] overflow-y-auto">
+      <div class="bg-surface rounded-xl shadow-lg max-w-3xl w-full p-5 max-h-[85vh] overflow-y-auto">
         <h3 class="text-lg font-semibold mb-3">{{ t('accounting.closing.series.title') }}</h3>
-        <p class="text-sm text-neutral-500 mb-3">{{ t('accounting.closing.series.hint') }}</p>
+        <p class="text-sm text-neutral-500 mb-1">{{ t('accounting.closing.series.hint') }}</p>
+        <p class="text-sm text-neutral-500 mb-3">{{ t('accounting.closing.series.format_hint') }}</p>
         <div v-if="seriesLoading" class="text-sm text-neutral-500 py-4">{{ t('common.loading') }}</div>
         <EmptyState v-else-if="!series.length" dense accent="neutral" icon="tag" :title="t('accounting.closing.series.empty')" />
         <table v-else class="w-full text-sm mb-4">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
               <th class="px-3 py-2 text-left font-medium">{{ t('accounting.closing.series.code') }}</th>
-              <th class="px-3 py-2 text-left font-medium w-24">{{ t('common.year') }}</th>
-              <th class="px-3 py-2 text-left font-medium w-32">{{ t('accounting.closing.series.prefix') }}</th>
-              <th class="px-3 py-2 text-right font-medium w-28">{{ t('accounting.closing.series.next_number') }}</th>
+              <th class="px-3 py-2 text-left font-medium w-20">{{ t('common.year') }}</th>
+              <th class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.closing.series.prefix') }}</th>
+              <th class="px-3 py-2 text-left font-medium w-44">{{ t('accounting.closing.series.number_format') }}</th>
+              <th class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.closing.series.next_number') }}</th>
+              <th class="px-3 py-2 text-left font-medium w-40">{{ t('accounting.closing.series.preview') }}</th>
               <th class="px-3 py-2 w-20"></th>
             </tr>
           </thead>
@@ -414,12 +458,21 @@ function statusBadge(status: string): string {
               <td class="px-3 py-2">{{ t(`accounting.closing.series.codes.${s.series_code}`) }}</td>
               <td class="px-3 py-2">{{ s.fiscal_year }}</td>
               <td class="px-3 py-2">
-                <input v-model="seriesEdits[`${s.series_code}-${s.fiscal_year}`]" type="text" maxlength="10"
+                <input v-model="seriesEdits[`${s.series_code}-${s.fiscal_year}`].prefix" type="text" maxlength="10"
                   class="w-full h-8 px-2 border border-neutral-300 rounded-md text-sm font-mono uppercase" />
               </td>
-              <td class="px-3 py-2 text-right font-mono">{{ s.next_number }}</td>
+              <td class="px-3 py-2">
+                <input v-model="seriesEdits[`${s.series_code}-${s.fiscal_year}`].number_format" type="text" maxlength="40"
+                  :placeholder="'{PREFIX}-{YYYY}-{CCCC}'"
+                  class="w-full h-8 px-2 border border-neutral-300 rounded-md text-sm font-mono uppercase" />
+              </td>
+              <td class="px-3 py-2">
+                <input v-model="seriesEdits[`${s.series_code}-${s.fiscal_year}`].next_number" type="number" min="1" step="1"
+                  class="w-full h-8 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right" />
+              </td>
+              <td class="px-3 py-2 font-mono text-xs text-neutral-500">{{ seriesPreview(s) }}</td>
               <td class="px-3 py-2 text-right">
-                <button @click="savePrefix(s)"
+                <button @click="saveSeries(s)"
                   class="cursor-pointer text-xs text-primary-600 hover:text-primary-700 font-medium">
                   {{ t('common.save') }}
                 </button>
