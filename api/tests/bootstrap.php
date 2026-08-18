@@ -184,8 +184,16 @@ if (is_file($__localPath)) {
     $__localCfg = require $__localPath;
     $__localDb  = is_array($__localCfg) ? (string) ($__localCfg['db']['name'] ?? '') : '';
     if ($__localDb !== '' && $__localDb !== $__realDb) {
+        // Hláška MUSÍ jmenovat databázi, nad kterou se poběží doopravdy. Dřív tvrdila
+        // natvrdo `<cfg-db>_test` i tehdy, když MYINVOICE_DB_NAME mířilo jinam —
+        // souběžní agenti pak hledali kontaminaci sdílené DB, kterou nikdo nepoužil.
+        $__envDb = (string) (getenv('MYINVOICE_DB_NAME') ?: '');
+        $__announcedDb = $__envDb !== ''
+            ? "'{$__envDb}' (MYINVOICE_DB_NAME)"
+            : "'{$__realDb}_test' (odvozeno z cfg.php)";
         fwrite(STDERR, "[TEST DB] Pozor: aplikace jede nad '{$__localDb}' (cfg.local.php),"
-            . " ale testy běží nad '{$__realDb}_test' (odvozeno z cfg.php).\n");
+            . " ale testy běží nad {$__announcedDb}.\n");
+        unset($__envDb, $__announcedDb);
     }
     unset($__localCfg, $__localDb);
 }
