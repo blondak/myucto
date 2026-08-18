@@ -16,6 +16,9 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const props = defineProps<{ personId: number; canWrite: boolean }>()
 
@@ -105,6 +108,17 @@ const listActions = computed<ActionItem[]>(() => [{
 
 const labelClass = 'block text-xs text-neutral-600'
 const inputClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm'
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'person', labelKey: 'payroll.people.dependants.columns.person', required: true },
+  { key: 'relation', labelKey: 'payroll.people.dependants.columns.relation' },
+  { key: 'birth_number', labelKey: 'payroll.people.dependants.columns.birth_number', defaultHidden: true },
+  { key: 'existence', labelKey: 'payroll.people.dependants.columns.existence' },
+  { key: 'claims', labelKey: 'payroll.people.dependants.columns.claims' },
+  { key: 'actions', labelKey: 'common.actions', required: true },
+]
+const tbl = useTablePrefs('payroll-person-dependants', COLUMNS)
+const detailColspan = computed(() => COLUMNS.filter(column => tbl.isVisible(column.key)).length)
 
 onMounted(load)
 watch(() => props.personId, load)
@@ -314,41 +328,46 @@ function creditLabel(claim: PayrollDependantClaim): string {
     </p>
 
     <template v-else-if="dependants.length > 0">
-      <div data-layout="desktop" class="hidden overflow-x-auto md:block">
-        <table class="min-w-full divide-y divide-neutral-200 text-sm">
-          <thead>
-            <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-              <th class="px-4 py-3">{{ t('payroll.people.dependants.columns.person') }}</th>
-              <th class="px-4 py-3">{{ t('payroll.people.dependants.columns.relation') }}</th>
-              <th class="px-4 py-3">{{ t('payroll.people.dependants.columns.birth_number') }}</th>
-              <th class="px-4 py-3">{{ t('payroll.people.dependants.columns.existence') }}</th>
-              <th class="px-4 py-3 text-right">{{ t('payroll.people.dependants.columns.claims') }}</th>
-              <th class="px-4 py-3"><span class="sr-only">{{ t('common.actions') }}</span></th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-neutral-100">
-            <template v-for="dependant in dependants" :key="dependant.id">
-              <tr class="align-top">
-                <td class="px-4 py-3 font-medium text-neutral-900">
-                  {{ dependant.full_name }}
-                  <span v-if="dependant.ztp_p" class="ml-2 rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700">ZTP/P</span>
-                  <span v-if="dependant.student" class="ml-2 rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600">{{ t('payroll.people.dependants.student') }}</span>
-                </td>
-                <td class="px-4 py-3 text-neutral-600">{{ relationLabel(dependant.relation) }}</td>
-                <td class="px-4 py-3 text-neutral-600">{{ dependant.birth_number_masked ?? '—' }}</td>
-                <td class="px-4 py-3 text-neutral-600">{{ periodLabel(dependant.existence_from, dependant.existence_to) }}</td>
-                <td class="px-4 py-3 text-right text-neutral-700">{{ dependant.claims.length }}</td>
-                <td class="px-4 py-3 text-right">
-                  <div class="flex flex-wrap justify-end gap-2">
-                    <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :aria-expanded="expandedId === dependant.id" @click="toggleDetail(dependant.id)">
-                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.user" /></svg>
-                      {{ t(expandedId === dependant.id ? 'payroll.people.dependants.hide' : 'payroll.people.dependants.show') }}
-                    </button>
-                  </div>
-                </td>
+      <div data-layout="desktop" class="hidden md:block">
+        <div class="mb-2 flex flex-wrap items-center justify-end gap-2">
+          <ColumnPicker :ctrl="tbl" />
+          <DensityToggle :ctrl="tbl" />
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+            <thead>
+              <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+                <th v-if="tbl.isVisible('person')" class="px-4 py-3">{{ t('payroll.people.dependants.columns.person') }}</th>
+                <th v-if="tbl.isVisible('relation')" class="px-4 py-3">{{ t('payroll.people.dependants.columns.relation') }}</th>
+                <th v-if="tbl.isVisible('birth_number')" class="px-4 py-3">{{ t('payroll.people.dependants.columns.birth_number') }}</th>
+                <th v-if="tbl.isVisible('existence')" class="px-4 py-3">{{ t('payroll.people.dependants.columns.existence') }}</th>
+                <th v-if="tbl.isVisible('claims')" class="px-4 py-3 text-right">{{ t('payroll.people.dependants.columns.claims') }}</th>
+                <th v-if="tbl.isVisible('actions')" class="px-4 py-3"><span class="sr-only">{{ t('common.actions') }}</span></th>
               </tr>
-              <tr v-if="expandedId === dependant.id">
-                <td colspan="6" class="bg-neutral-50 px-4 py-4">
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <template v-for="dependant in dependants" :key="dependant.id">
+                <tr class="align-top">
+                  <td v-if="tbl.isVisible('person')" class="px-4 py-3 font-medium text-neutral-900">
+                    {{ dependant.full_name }}
+                    <span v-if="dependant.ztp_p" class="ml-2 rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700">ZTP/P</span>
+                    <span v-if="dependant.student" class="ml-2 rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600">{{ t('payroll.people.dependants.student') }}</span>
+                  </td>
+                  <td v-if="tbl.isVisible('relation')" class="px-4 py-3 text-neutral-600">{{ relationLabel(dependant.relation) }}</td>
+                  <td v-if="tbl.isVisible('birth_number')" class="px-4 py-3 text-neutral-600">{{ dependant.birth_number_masked ?? '—' }}</td>
+                  <td v-if="tbl.isVisible('existence')" class="px-4 py-3 text-neutral-600">{{ periodLabel(dependant.existence_from, dependant.existence_to) }}</td>
+                  <td v-if="tbl.isVisible('claims')" class="px-4 py-3 text-right text-neutral-700">{{ dependant.claims.length }}</td>
+                  <td v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right">
+                    <div class="flex flex-wrap justify-end gap-2">
+                      <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :aria-expanded="expandedId === dependant.id" @click="toggleDetail(dependant.id)">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.user" /></svg>
+                        {{ t(expandedId === dependant.id ? 'payroll.people.dependants.hide' : 'payroll.people.dependants.show') }}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                <tr v-if="expandedId === dependant.id">
+                  <td :colspan="detailColspan" class="bg-neutral-50 px-4 py-4">
                   <div class="space-y-3">
                     <div class="flex flex-wrap gap-2">
                       <button v-if="canWrite" type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :data-test="`edit-dependant-${dependant.id}`" @click="openDependantEditor(dependant)">
@@ -399,8 +418,9 @@ function creditLabel(claim: PayrollDependantClaim): string {
                 </td>
               </tr>
             </template>
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div data-layout="mobile" class="space-y-3 p-4 md:hidden">

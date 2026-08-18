@@ -14,6 +14,9 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate, formatDateTime } from '@/composables/useFormat'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const emit = defineEmits<{
   /** `null` = počet se nepodařilo zjistit; rodič pak odznak nevykreslí vůbec. */
@@ -34,6 +37,15 @@ const items = ref<PayrollSubmissionInboxItem[]>([])
 const summary = ref({ total: 0, open: 0, acknowledged: 0, snoozed: 0 })
 const acknowledgingId = ref<number | null>(null)
 const actionError = ref('')
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'agenda', labelKey: 'payroll.submissions.inbox.agenda', required: true },
+  { key: 'due_on', labelKey: 'payroll.submissions.inbox.due_on' },
+  { key: 'problem', labelKey: 'payroll.submissions.inbox.problem_label' },
+  { key: 'status', labelKey: 'payroll.submissions.inbox.status_label' },
+  { key: 'actions', labelKey: 'common.actions', required: true },
+]
+const tbl = useTablePrefs('payroll-submission-inbox', COLUMNS)
 
 const pageSize = 25
 const total = ref(0)
@@ -246,75 +258,81 @@ defineExpose({ reload: load })
           {{ t('payroll.submissions.inbox.empty') }}
         </div>
 
-        <div v-else class="hidden overflow-x-auto md:block">
-          <table class="min-w-full divide-y divide-neutral-200 text-sm">
-            <thead>
-              <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th class="px-4 py-3">{{ t('payroll.submissions.inbox.agenda') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.submissions.inbox.due_on') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.submissions.inbox.problem_label') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.submissions.inbox.status_label') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('common.actions') }}</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-neutral-100">
-              <tr v-for="item in items" :key="item.id" data-test="inbox-row">
-                <td class="px-4 py-3">
-                  <span class="block font-medium text-neutral-900">{{ item.agenda_code }}</span>
-                  <span class="block text-xs text-neutral-500">{{ item.subject_reference }}</span>
-                </td>
-                <td class="px-4 py-3 text-neutral-700">{{ formatDate(item.due_on) }}</td>
-                <td class="px-4 py-3">
-                  <span
-                    class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
-                    :class="escalationClass(item)"
-                    data-test="inbox-problem"
-                  >
-                    {{ problemLabel(item) }}
-                  </span>
-                </td>
-                <td class="px-4 py-3">
-                  <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
-                    {{ statusLabel(item.status) }}
-                  </span>
-                  <span v-if="item.status === 'snoozed' && item.snoozed_until" class="mt-1 block text-xs text-neutral-500">
-                    {{ t('payroll.submissions.inbox.snoozed_until_label', { at: formatDateTime(item.snoozed_until) }) }}
-                  </span>
-                </td>
-                <td class="px-4 py-3">
-                  <div v-if="canWrite" class="flex flex-wrap justify-end gap-2">
-                    <button
-                      type="button"
-                      :class="btnOutlineSm('success')"
-                      :disabled="acknowledgingId !== null || item.status === 'acknowledged'"
-                      data-test="inbox-acknowledge"
-                      @click="acknowledge(item)"
+        <template v-else>
+          <div class="hidden items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2 md:flex">
+            <ColumnPicker :ctrl="tbl" />
+            <DensityToggle :ctrl="tbl" />
+          </div>
+          <div class="hidden overflow-x-auto md:block">
+            <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+              <thead>
+                <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+                  <th v-if="tbl.isVisible('agenda')" class="px-4 py-3">{{ t('payroll.submissions.inbox.agenda') }}</th>
+                  <th v-if="tbl.isVisible('due_on')" class="px-4 py-3">{{ t('payroll.submissions.inbox.due_on') }}</th>
+                  <th v-if="tbl.isVisible('problem')" class="px-4 py-3">{{ t('payroll.submissions.inbox.problem_label') }}</th>
+                  <th v-if="tbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.submissions.inbox.status_label') }}</th>
+                  <th v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right">{{ t('common.actions') }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-neutral-100">
+                <tr v-for="item in items" :key="item.id" data-test="inbox-row">
+                  <td v-if="tbl.isVisible('agenda')" class="px-4 py-3">
+                    <span class="block font-medium text-neutral-900">{{ item.agenda_code }}</span>
+                    <span class="block text-xs text-neutral-500">{{ item.subject_reference }}</span>
+                  </td>
+                  <td v-if="tbl.isVisible('due_on')" class="px-4 py-3 text-neutral-700">{{ formatDate(item.due_on) }}</td>
+                  <td v-if="tbl.isVisible('problem')" class="px-4 py-3">
+                    <span
+                      class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
+                      :class="escalationClass(item)"
+                      data-test="inbox-problem"
                     >
-                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path :d="ICONS.checkCircle" />
-                      </svg>
-                      {{ acknowledgingId === item.id
-                        ? t('payroll.submissions.inbox.acknowledging')
-                        : t('payroll.submissions.inbox.acknowledge') }}
-                    </button>
-                    <button
-                      type="button"
-                      :class="btnOutlineSm('warning')"
-                      data-test="inbox-snooze"
-                      @click="openSnooze(item)"
-                    >
-                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path :d="ICONS.pause" />
-                      </svg>
-                      {{ t('payroll.submissions.inbox.snooze') }}
-                    </button>
-                  </div>
-                  <span v-else class="text-xs text-neutral-400">—</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                      {{ problemLabel(item) }}
+                    </span>
+                  </td>
+                  <td v-if="tbl.isVisible('status')" class="px-4 py-3">
+                    <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
+                      {{ statusLabel(item.status) }}
+                    </span>
+                    <span v-if="item.status === 'snoozed' && item.snoozed_until" class="mt-1 block text-xs text-neutral-500">
+                      {{ t('payroll.submissions.inbox.snoozed_until_label', { at: formatDateTime(item.snoozed_until) }) }}
+                    </span>
+                  </td>
+                  <td v-if="tbl.isVisible('actions')" class="px-4 py-3">
+                    <div v-if="canWrite" class="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        :class="btnOutlineSm('success')"
+                        :disabled="acknowledgingId !== null || item.status === 'acknowledged'"
+                        data-test="inbox-acknowledge"
+                        @click="acknowledge(item)"
+                      >
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.checkCircle" />
+                        </svg>
+                        {{ acknowledgingId === item.id
+                          ? t('payroll.submissions.inbox.acknowledging')
+                          : t('payroll.submissions.inbox.acknowledge') }}
+                      </button>
+                      <button
+                        type="button"
+                        :class="btnOutlineSm('warning')"
+                        data-test="inbox-snooze"
+                        @click="openSnooze(item)"
+                      >
+                        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="ICONS.pause" />
+                        </svg>
+                        {{ t('payroll.submissions.inbox.snooze') }}
+                      </button>
+                    </div>
+                    <span v-else class="text-xs text-neutral-400">—</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
 
         <div v-if="items.length" class="grid grid-cols-1 gap-3 p-4 md:hidden">
           <article v-for="item in items" :key="item.id" class="rounded-lg border border-neutral-200 p-4" data-test="inbox-card">

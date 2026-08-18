@@ -14,6 +14,9 @@ import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { healthInsurerName, healthInsurerOptions } from '@/utils/healthInsurers'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 defineProps<{ canWrite: boolean }>()
 
@@ -42,6 +45,16 @@ const institutionTypes: PayrollInstitutionType[] = [
   'statutory_insurance',
   'other_recipient',
 ]
+const COLUMNS: ColumnDef[] = [
+  { key: 'institution_type', labelKey: 'payroll.employer.health_accounts.institution_type' },
+  { key: 'institution', labelKey: 'payroll.employer.health_accounts.institution', required: true },
+  { key: 'account', labelKey: 'payroll.employer.health_accounts.account' },
+  { key: 'variable_symbol', labelKey: 'payroll.employer.health_accounts.variable_symbol', defaultHidden: true },
+  { key: 'validity', labelKey: 'payroll.employer.health_accounts.validity' },
+  { key: 'verification', labelKey: 'payroll.employer.health_accounts.verification', defaultHidden: true },
+  { key: 'actions', labelKey: 'common.actions', required: true },
+]
+const tbl = useTablePrefs('payroll-health-insurer-accounts', COLUMNS)
 const insurerOptions = healthInsurerOptions()
 /**
  * Escape hatch pro kód mimo číselník. Seznam pojišťoven je v kódu, backend
@@ -394,42 +407,48 @@ onMounted(async () => {
         <p class="text-sm text-neutral-500">{{ t('payroll.employer.health_accounts.empty') }}</p>
       </div>
 
-      <div v-if="institutionAccounts.length > 0" class="hidden overflow-x-auto md:block">
-        <table class="min-w-[1080px] divide-y divide-neutral-200 text-sm">
-          <thead>
-            <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-              <th class="px-3 py-2">{{ t('payroll.employer.health_accounts.institution_type') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.employer.health_accounts.institution') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.employer.health_accounts.account') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.employer.health_accounts.variable_symbol') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.employer.health_accounts.validity') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.employer.health_accounts.verification') }}</th>
-              <th class="px-3 py-2"><span class="sr-only">{{ t('common.actions') }}</span></th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-neutral-100">
-            <tr v-for="account in institutionAccounts" :key="account.id">
-              <td class="px-3 py-3 text-neutral-700">{{ institutionTypeLabel(account.institution_type) }}</td>
-              <td class="px-3 py-3">
-                <p class="font-medium text-neutral-900">{{ account.institution_name }}</p>
-                <p class="font-mono text-xs text-neutral-500">{{ account.institution_code }}</p>
-              </td>
-              <td class="px-3 py-3 font-mono text-neutral-700">{{ account.bank_account_masked }} / {{ account.currency_code }}</td>
-              <td class="px-3 py-3 font-mono text-neutral-700">{{ account.variable_symbol || '—' }}</td>
-              <td class="px-3 py-3 text-neutral-700">{{ account.valid_from }} – {{ account.valid_to || t('payroll.employer.health_accounts.open_ended') }}</td>
-              <td class="px-3 py-3">
-                <p class="text-neutral-700">{{ sourceLabel(account.source_kind) }}</p>
-                <p class="text-xs text-neutral-500">{{ account.verified_on }} · {{ account.source_reference }}</p>
-              </td>
-              <td class="px-3 py-3">
-                <button v-if="canWrite" type="button" :class="btnOutlineSm('neutral')" @click="startEdit(account)">
-                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
-                  {{ t('common.edit') }}
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div v-if="institutionAccounts.length > 0" class="hidden md:block">
+        <div class="mb-2 flex flex-wrap items-center justify-end gap-2">
+          <ColumnPicker :ctrl="tbl" />
+          <DensityToggle :ctrl="tbl" />
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-[1080px] divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+            <thead>
+              <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+                <th v-if="tbl.isVisible('institution_type')" class="px-3 py-2">{{ t('payroll.employer.health_accounts.institution_type') }}</th>
+                <th v-if="tbl.isVisible('institution')" class="px-3 py-2">{{ t('payroll.employer.health_accounts.institution') }}</th>
+                <th v-if="tbl.isVisible('account')" class="px-3 py-2">{{ t('payroll.employer.health_accounts.account') }}</th>
+                <th v-if="tbl.isVisible('variable_symbol')" class="px-3 py-2">{{ t('payroll.employer.health_accounts.variable_symbol') }}</th>
+                <th v-if="tbl.isVisible('validity')" class="px-3 py-2">{{ t('payroll.employer.health_accounts.validity') }}</th>
+                <th v-if="tbl.isVisible('verification')" class="px-3 py-2">{{ t('payroll.employer.health_accounts.verification') }}</th>
+                <th v-if="tbl.isVisible('actions')" class="px-3 py-2"><span class="sr-only">{{ t('common.actions') }}</span></th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="account in institutionAccounts" :key="account.id">
+                <td v-if="tbl.isVisible('institution_type')" class="px-3 py-3 text-neutral-700">{{ institutionTypeLabel(account.institution_type) }}</td>
+                <td v-if="tbl.isVisible('institution')" class="px-3 py-3">
+                  <p class="font-medium text-neutral-900">{{ account.institution_name }}</p>
+                  <p class="font-mono text-xs text-neutral-500">{{ account.institution_code }}</p>
+                </td>
+                <td v-if="tbl.isVisible('account')" class="px-3 py-3 font-mono text-neutral-700">{{ account.bank_account_masked }} / {{ account.currency_code }}</td>
+                <td v-if="tbl.isVisible('variable_symbol')" class="px-3 py-3 font-mono text-neutral-700">{{ account.variable_symbol || '—' }}</td>
+                <td v-if="tbl.isVisible('validity')" class="px-3 py-3 text-neutral-700">{{ account.valid_from }} – {{ account.valid_to || t('payroll.employer.health_accounts.open_ended') }}</td>
+                <td v-if="tbl.isVisible('verification')" class="px-3 py-3">
+                  <p class="text-neutral-700">{{ sourceLabel(account.source_kind) }}</p>
+                  <p class="text-xs text-neutral-500">{{ account.verified_on }} · {{ account.source_reference }}</p>
+                </td>
+                <td v-if="tbl.isVisible('actions')" class="px-3 py-3">
+                  <button v-if="canWrite" type="button" :class="btnOutlineSm('neutral')" @click="startEdit(account)">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                    {{ t('common.edit') }}
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div v-if="institutionAccounts.length > 0" class="grid grid-cols-1 gap-3 md:hidden">

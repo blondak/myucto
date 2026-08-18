@@ -49,6 +49,11 @@ final class PayrollTimeAction
                 $this->currentSupplierId($request),
                 $period,
                 $incomplete,
+                max(1, min(
+                    PayrollTimeService::LIST_MAX_LIMIT,
+                    (int) ($query['limit'] ?? PayrollTimeService::LIST_DEFAULT_LIMIT),
+                )),
+                max(0, (int) ($query['offset'] ?? 0)),
             ));
         } catch (\InvalidArgumentException $e) {
             return $this->validation($response, $e);

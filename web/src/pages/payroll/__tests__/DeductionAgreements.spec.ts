@@ -48,6 +48,16 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({ t: (key: string) => key, locale: ref('cs') }),
 }))
 
+// `useTablePrefs` jde přes Pinii a API; v testu stačí prázdné výchozí předvolby.
+vi.mock('@/composables/useUserPrefs', async () => {
+  const { computed } = await import('vue')
+  return {
+    ensurePrefsLoaded: () => Promise.resolve(),
+    getPagePrefs: () => computed(() => ({})),
+    patchPagePrefs: () => {},
+  }
+})
+
 import DeductionAgreements from '@/pages/payroll/DeductionAgreements.vue'
 
 function summary(overrides: Partial<DeductionAgreementSummary> = {}): DeductionAgreementSummary {

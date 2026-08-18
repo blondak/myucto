@@ -59,6 +59,16 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   }),
 }))
 
+// `useTablePrefs` jde přes Pinii a API; v testu stačí prázdné výchozí předvolby.
+vi.mock('@/composables/useUserPrefs', async () => {
+  const { computed } = await import('vue')
+  return {
+    ensurePrefsLoaded: () => Promise.resolve(),
+    getPagePrefs: () => computed(() => ({})),
+    patchPagePrefs: () => {},
+  }
+})
+
 import PeopleList from '@/pages/payroll/PeopleList.vue'
 
 /** Velikost stránky, se kterou obrazovka chodí na server. */

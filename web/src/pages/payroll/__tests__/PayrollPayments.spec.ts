@@ -206,6 +206,12 @@ describe('PayrollPayments', () => {
         remaining_minor: 4_250_000,
       }],
       matches: [],
+      // Historie párování se stránkuje; nabídka storna má vlastní kolekci,
+      // aby nezávisela na tom, kterou stránku historie uživatel čte.
+      matches_total: 0,
+      matches_limit: 25,
+      matches_offset: 0,
+      reversible_matches: [],
       bank_evidence: [{
         kind: 'bank',
         bank_statement_id: 91,
@@ -741,5 +747,79 @@ describe('PayrollPayments', () => {
     expect(readonlyWrapper.text()).not.toContain('payroll.payments.settlements.new_match')
     expect(readonlyWrapper.text()).not.toContain('payroll.payments.settlements.new_reversal')
     expect(readonlyWrapper.text()).toContain('payroll.payments.settlements.history')
+  })
+
+  /**
+   * Historie párování je append-only a roste s každým plněním i stornem, takže
+   * se stránkuje. Nabídka storna se ale NESMÍ brát ze zobrazené stránky —
+   * jinak by šlo stornovat jen to, co má uživatel zrovna na obrazovce.
+   */
+  it('paginates the settlement history without shrinking the reversal offer', async () => {
+    const event = (id: number, name: string) => ({
+      id,
+      allocation_id: 81,
+      event_kind: 'matched' as const,
+      source_match_id: null,
+      amount_minor: 10_000,
+      evidence_kind: 'bank' as const,
+      bank_statement_id: 91,
+      bank_transaction_id: 92,
+      cash_document_id: null,
+      actual_payment_date: '2026-08-15',
+      evidence_amount_minor: 10_000,
+      evidence_currency_code: 'CZK',
+      evidence_fact_hash: 'a'.repeat(64),
+      batch_reference: 'payroll-batch:synthetic',
+      liability_kind: 'net_wage',
+      employee_name: name,
+      reversible_minor: 10_000,
+      created_at: '2026-08-15 10:00:00',
+    })
+    const reversible = [
+      event(101, 'Syntetická osoba A'),
+      event(102, 'Syntetická osoba B'),
+    ]
+    const base = await m.reconciliation()
+    m.reconciliation.mockResolvedValue({
+      ...base,
+      matches: [event(101, 'Syntetická osoba A')],
+      matches_total: 40,
+      matches_limit: 25,
+      matches_offset: 0,
+      reversible_matches: reversible,
+    })
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await wrapper.findAll('nav button')[2].trigger('click')
+
+    expect(m.reconciliation).toHaveBeenLastCalledWith(
+      expect.any(String),
+      { limit: 25, offset: 0 },
+    )
+    expect(wrapper.text()).toContain('Syntetická osoba A')
+    expect(wrapper.text()).not.toContain('Syntetická osoba B')
+
+    m.reconciliation.mockResolvedValue({
+      ...base,
+      matches: [event(102, 'Syntetická osoba B')],
+      matches_total: 40,
+      matches_limit: 25,
+      matches_offset: 25,
+      reversible_matches: reversible,
+    })
+    const next = wrapper.findAll('button')
+      .find(button => button.text().includes('common.next'))
+    expect(next).toBeDefined()
+    await next!.trigger('click')
+    await flushPromises()
+
+    expect(m.reconciliation).toHaveBeenLastCalledWith(
+      expect.any(String),
+      { limit: 25, offset: 25 },
+    )
+    // Nabídka storna zůstává úplná, i když historie ukazuje jinou stránku.
+    const reversalSelect = wrapper.findAllComponents({ name: 'SearchableSelect' })[2]
+    expect(reversalSelect.props('options')).toHaveLength(2)
   })
 })

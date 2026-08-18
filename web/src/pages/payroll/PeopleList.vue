@@ -29,6 +29,9 @@ import PayrollPersonProfilePanel from './PayrollPersonProfilePanel.vue'
 import PayrollPersonDependantsPanel from './PayrollPersonDependantsPanel.vue'
 import PayrollPersonStatutoryEvidencePanel from './PayrollPersonStatutoryEvidencePanel.vue'
 import { todayIso } from './employmentLifecycleUi'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -133,6 +136,15 @@ const selectedPerson = computed<PayrollPersonListItem | null>(
   () => people.value.find(item => item.id === expandedId.value) ?? selectedDetail.value,
 )
 const editing = computed(() => expandedId.value !== null)
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'person', labelKey: 'payroll.people.columns.person', required: true },
+  { key: 'status', labelKey: 'payroll.people.columns.status' },
+  { key: 'relations', labelKey: 'payroll.people.columns.relations' },
+  { key: 'count', labelKey: 'payroll.people.columns.count' },
+  { key: 'detail', labelKey: 'payroll.people.columns.detail', required: true },
+]
+const tbl = useTablePrefs('payroll-people', COLUMNS)
 
 /**
  * Hlavička bere přednostně načtený detail — je čerstvější než řádek seznamu.
@@ -972,30 +984,35 @@ onMounted(async () => {
       </div>
 
       <template v-else>
-        <div class="hidden overflow-x-auto md:block">
-          <table class="min-w-full divide-y divide-neutral-200 text-sm">
+        <div class="hidden md:block">
+          <div class="flex flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2">
+            <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+            <DensityToggle class="hidden md:block" :ctrl="tbl" />
+          </div>
+          <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th class="px-4 py-3">{{ t('payroll.people.columns.person') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.people.columns.status') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.people.columns.relations') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('payroll.people.columns.count') }}</th>
-                <th class="px-4 py-3"><span class="sr-only">{{ t('payroll.people.columns.detail') }}</span></th>
+                <th v-if="tbl.isVisible('person')" class="px-4 py-3">{{ t('payroll.people.columns.person') }}</th>
+                <th v-if="tbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.people.columns.status') }}</th>
+                <th v-if="tbl.isVisible('relations')" class="px-4 py-3">{{ t('payroll.people.columns.relations') }}</th>
+                <th v-if="tbl.isVisible('count')" class="px-4 py-3 text-right">{{ t('payroll.people.columns.count') }}</th>
+                <th v-if="tbl.isVisible('detail')" class="px-4 py-3"><span class="sr-only">{{ t('payroll.people.columns.detail') }}</span></th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <template v-for="person in people" :key="person.id">
                 <tr class="align-top">
-                  <td class="px-4 py-3 font-medium text-neutral-900">{{ person.full_name }}</td>
-                  <td class="px-4 py-3">
+                  <td v-if="tbl.isVisible('person')" class="px-4 py-3 font-medium text-neutral-900">{{ person.full_name }}</td>
+                  <td v-if="tbl.isVisible('status')" class="px-4 py-3">
                     <div class="flex flex-wrap gap-1.5">
                       <span class="rounded-full px-2 py-1 text-xs font-medium" :class="person.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ statusLabel(person.is_active) }}</span>
                       <span v-if="person.needs_setup" class="rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700">{{ t('payroll.people.needs_setup') }}</span>
                     </div>
                   </td>
-                  <td class="px-4 py-3 text-neutral-600">{{ person.relation_types.map(relationLabel).join(', ') }}</td>
-                  <td class="px-4 py-3 text-right text-neutral-700">{{ person.employment_count }}</td>
-                  <td class="px-4 py-3 text-right">
+                  <td v-if="tbl.isVisible('relations')" class="px-4 py-3 text-neutral-600">{{ person.relation_types.map(relationLabel).join(', ') }}</td>
+                  <td v-if="tbl.isVisible('count')" class="px-4 py-3 text-right text-neutral-700">{{ person.employment_count }}</td>
+                  <td v-if="tbl.isVisible('detail')" class="px-4 py-3 text-right">
                     <button :class="btnOutline('neutral')" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
                       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path :d="ICONS.user" />
@@ -1007,6 +1024,7 @@ onMounted(async () => {
               </template>
             </tbody>
           </table>
+          </div>
         </div>
 
         <div class="space-y-3 p-4 md:hidden">

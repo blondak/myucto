@@ -27,6 +27,10 @@ import {
   payrollWallTimeToIso,
 } from '@/pages/payroll/payrollTime'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -44,6 +48,27 @@ const loading = ref(false)
 const loadFailed = ref(false)
 const saving = ref(false)
 const overview = ref<PayrollTimeOverview | null>(null)
+const COLUMNS: ColumnDef[] = [
+  { key: 'select', labelKey: 'payroll.time.bulk.select_all', required: true },
+  { key: 'employee', labelKey: 'payroll.time.columns.employee', required: true },
+  { key: 'fund', labelKey: 'payroll.time.columns.fund' },
+  { key: 'plan', labelKey: 'payroll.time.columns.plan' },
+  { key: 'actual', labelKey: 'payroll.time.columns.actual' },
+  { key: 'difference', labelKey: 'payroll.time.columns.difference' },
+  { key: 'status', labelKey: 'payroll.time.columns.status' },
+  { key: 'actions', labelKey: 'payroll.time.columns.actions', required: true },
+]
+const tbl = useTablePrefs('payroll-time', COLUMNS)
+// Detailní řádek přesčasů se roztahuje pod zbytek tabulky, takže colspan musí
+// dopočítat skryté sloupce — natvrdo zapsané číslo by se po skrytí sloupce
+// rozjelo o buňku.
+const detailColspan = computed(
+  () => COLUMNS.filter(column => column.key !== 'select' && tbl.isVisible(column.key)).length,
+)
+const pageSize = 25
+const total = ref(0)
+const offset = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const editorOpen = ref(false)
 const importOpen = ref(false)
 const recordType = ref<'entry' | 'shift'>('entry')
@@ -166,7 +191,11 @@ async function load() {
   loading.value = true
   loadFailed.value = false
   try {
-    overview.value = await payrollApi.timeMonth(period.value, incompleteOnly.value)
+    overview.value = await payrollApi.timeMonth(period.value, incompleteOnly.value, {
+      limit: pageSize,
+      offset: offset.value,
+    })
+    total.value = overview.value.total
     selectedEmploymentIds.value = []
     // Předvybraný vztah má přednost před prvním v seznamu — jinak by odkaz
     // z karty zúžil tabulku, ale editor otevřel někoho jiného.
@@ -187,6 +216,18 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function goToPage(nextPage: number) {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  void load()
+}
+
+// Změna období nebo zúžení mění obsah seznamu, takže stránka musí na začátek —
+// jinak by se uživatel po přepnutí měsíce ocitl na prázdné páté straně.
+function reload() {
+  offset.value = 0
+  void load()
 }
 
 function setDefaultTimes() {
@@ -874,10 +915,10 @@ onMounted(load)
       <div class="flex flex-wrap items-end gap-4">
         <label class="block">
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.period') }}</span>
-          <input v-model="period" type="month" class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm" @change="load">
+          <input v-model="period" type="month" class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm" @change="reload">
         </label>
         <label class="inline-flex h-9 items-center gap-2 text-sm text-neutral-700">
-          <input v-model="incompleteOnly" type="checkbox" class="rounded border-neutral-300 text-payroll-600" @change="load">
+          <input v-model="incompleteOnly" type="checkbox" class="rounded border-neutral-300 text-payroll-600" @change="reload">
           {{ t('payroll.time.incomplete_only') }}
         </label>
         <button :class="btnOutline('neutral')" :disabled="loading" @click="load">
@@ -1022,7 +1063,12 @@ onMounted(load)
       </div>
     </section>
 
-    <PayrollFocusNotice v-if="focusName" :name="focusName" @clear="clearFocus" />
+    <PayrollFocusNotice
+      v-if="focusName"
+      :name="focusName"
+      :truncated="total > pageSize"
+      @clear="clearFocus"
+    />
 
     <div v-if="loading" class="space-y-3">
       <div v-for="index in 4" :key="index" class="h-28 animate-pulse rounded-xl bg-neutral-100" />
@@ -1040,8 +1086,12 @@ onMounted(load)
       <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.time.empty_hint') }}</p>
     </section>
     <section v-else class="rounded-xl border border-neutral-200 bg-surface shadow-sm">
+      <div class="hidden flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2 md:flex">
+        <ColumnPicker :ctrl="tbl" />
+        <DensityToggle :ctrl="tbl" />
+      </div>
       <div class="hidden overflow-x-auto md:block">
-        <table class="min-w-full divide-y divide-neutral-200 text-sm">
+        <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
           <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
             <th class="w-10 px-4 py-3">
               <input
@@ -1052,11 +1102,11 @@ onMounted(load)
               >
             </th>
             <th class="px-4 py-3">{{ t('payroll.time.columns.employee') }}</th>
-            <th class="px-4 py-3">{{ t('payroll.time.columns.fund') }}</th>
-            <th class="px-4 py-3">{{ t('payroll.time.columns.plan') }}</th>
-            <th class="px-4 py-3">{{ t('payroll.time.columns.actual') }}</th>
-            <th class="px-4 py-3">{{ t('payroll.time.columns.difference') }}</th>
-            <th class="px-4 py-3">{{ t('payroll.time.columns.status') }}</th>
+            <th v-if="tbl.isVisible('fund')" class="px-4 py-3">{{ t('payroll.time.columns.fund') }}</th>
+            <th v-if="tbl.isVisible('plan')" class="px-4 py-3">{{ t('payroll.time.columns.plan') }}</th>
+            <th v-if="tbl.isVisible('actual')" class="px-4 py-3">{{ t('payroll.time.columns.actual') }}</th>
+            <th v-if="tbl.isVisible('difference')" class="px-4 py-3">{{ t('payroll.time.columns.difference') }}</th>
+            <th v-if="tbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.time.columns.status') }}</th>
             <th class="px-4 py-3 text-right">{{ t('payroll.time.columns.actions') }}</th>
           </tr></thead>
           <tbody class="divide-y divide-neutral-100">
@@ -1072,11 +1122,11 @@ onMounted(load)
                 >
               </td>
               <td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employment.full_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p></td>
-              <td class="px-4 py-3">{{ formatPayrollMinutes(item.summary.fund_minutes) }}</td>
-              <td class="px-4 py-3">{{ formatPayrollMinutes(item.summary.planned_minutes) }}</td>
-              <td class="px-4 py-3">{{ formatPayrollMinutes(item.summary.actual_minutes) }}</td>
-              <td class="px-4 py-3" :class="item.summary.difference_minutes === 0 ? 'text-success-600' : 'text-warning-700'">{{ formatPayrollMinutes(item.summary.difference_minutes) }}</td>
-              <td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.month.status === 'approved' ? 'bg-success-50 text-success-600' : item.summary.incomplete ? 'bg-warning-50 text-warning-700' : 'bg-payroll-50 text-payroll-600'">{{ t(`payroll.time.status.${item.month.status === 'approved' ? 'approved' : item.summary.incomplete ? 'incomplete' : 'open'}`) }}</span></td>
+              <td v-if="tbl.isVisible('fund')" class="px-4 py-3">{{ formatPayrollMinutes(item.summary.fund_minutes) }}</td>
+              <td v-if="tbl.isVisible('plan')" class="px-4 py-3">{{ formatPayrollMinutes(item.summary.planned_minutes) }}</td>
+              <td v-if="tbl.isVisible('actual')" class="px-4 py-3">{{ formatPayrollMinutes(item.summary.actual_minutes) }}</td>
+              <td v-if="tbl.isVisible('difference')" class="px-4 py-3" :class="item.summary.difference_minutes === 0 ? 'text-success-600' : 'text-warning-700'">{{ formatPayrollMinutes(item.summary.difference_minutes) }}</td>
+              <td v-if="tbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.month.status === 'approved' ? 'bg-success-50 text-success-600' : item.summary.incomplete ? 'bg-warning-50 text-warning-700' : 'bg-payroll-50 text-payroll-600'">{{ t(`payroll.time.status.${item.month.status === 'approved' ? 'approved' : item.summary.incomplete ? 'incomplete' : 'open'}`) }}</span></td>
               <td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2">
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
@@ -1087,7 +1137,7 @@ onMounted(load)
             </tr>
             <tr v-if="overtimeVisible(item)" :data-test="`overtime-limits-${item.employment.id}`">
               <td />
-              <td colspan="7" class="px-4 pb-4">
+              <td :colspan="detailColspan" class="px-4 pb-4">
                 <div class="rounded-lg border px-3 py-2 text-sm" :class="overtimePanelClass(item)">
                   <p class="text-xs font-semibold uppercase tracking-wide">{{ t('payroll.time.overtime.title') }}</p>
                   <p
@@ -1157,6 +1207,13 @@ onMounted(load)
           </div>
         </article>
       </div>
+      <PaginationBar
+        embedded
+        :page="currentPage"
+        :per-page="pageSize"
+        :total="total"
+        @update:page="goToPage"
+      />
     </section>
 
     <Modal

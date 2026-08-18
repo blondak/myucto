@@ -125,6 +125,10 @@ final class PayrollPaymentApiTest extends TestCase
             'period' => '2026-08',
             'allocations' => [],
             'matches' => [],
+            'matches_total' => 0,
+            'matches_limit' => 25,
+            'matches_offset' => 0,
+            'reversible_matches' => [],
             'bank_evidence' => [],
             'cash_evidence' => [],
         ], $this->json($response));

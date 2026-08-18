@@ -104,6 +104,12 @@ const COLUMNS: ColumnDef[] = [
   { key: 'accounting', labelKey: 'payroll.retention.col.accounting', defaultHidden: true },
 ]
 const tbl = useTablePrefs('payroll-retention', COLUMNS)
+// Rozbalený detail se roztahuje pod celou šířku tabulky, takže colspan musí
+// dopočítat skryté sloupce i sloupec akcí — natvrdo zapsané číslo se po
+// skrytí sloupce rozjelo o buňku.
+const detailColspan = computed(
+  () => COLUMNS.filter(column => tbl.isVisible(column.key)).length + (canWrite.value ? 1 : 0),
+)
 
 async function load() {
   loading.value = true
@@ -675,7 +681,7 @@ onMounted(reloadAll)
                 </td>
               </tr>
               <tr v-if="expanded === c.category">
-                <td :colspan="11" :data-test="`retention-detail-${c.category}`" class="px-4 py-3 bg-neutral-50/60 text-xs text-neutral-700 space-y-2">
+                <td :colspan="detailColspan" :data-test="`retention-detail-${c.category}`" class="px-4 py-3 bg-neutral-50/60 text-xs text-neutral-700 space-y-2">
                   <div>
                     <span class="font-semibold">{{ t('payroll.retention.detail_act') }}:</span> {{ c.act }}
                   </div>

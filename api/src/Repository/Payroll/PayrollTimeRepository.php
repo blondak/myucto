@@ -155,6 +155,49 @@ final class PayrollTimeRepository
         return $rows;
     }
 
+    /**
+     * Vztahy, které mají v období aspoň jednu verzi kalendáře.
+     *
+     * Přehled docházky potřebuje vědět „chybí kalendář?" ještě PŘED tím, než
+     * pro řádek začne počítat fond a náhledy — jinak by se stránkovaný přehled
+     * musel celý postavit, aby se pak zahodil.
+     *
+     * @param list<int> $employmentIds
+     * @return list<int>
+     */
+    public function employmentIdsWithCalendar(
+        int $supplierId,
+        array $employmentIds,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT DISTINCT employment_id
+               FROM payroll_work_calendars
+              WHERE supplier_id = ?
+                AND employment_id IN (' . $placeholders . ')
+                AND valid_from < ?
+                AND (valid_to IS NULL OR valid_to >= ?)'
+        );
+        $stmt->execute([
+            $supplierId,
+            ...array_values($employmentIds),
+            $periodEnd,
+            $periodStart,
+        ]);
+
+        $ids = [];
+        foreach (self::rows($stmt) as $row) {
+            $ids[] = PayrollTimeValue::int($row['employment_id'] ?? null, 'employment_id');
+        }
+
+        return $ids;
+    }
+
     /** @return list<array<string,mixed>> */
     public function calendarDays(
         int $supplierId,

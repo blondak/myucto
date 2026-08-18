@@ -223,10 +223,17 @@ final class PayrollPaymentAction
                 422,
             );
         }
+        $query = $request->getQueryParams();
         try {
             $result = $this->reconciliationQueries->forPeriod(
                 $this->currentSupplierId($request),
                 trim($periodValue),
+                max(1, min(
+                    PayrollPaymentReconciliationQueryService::LIST_MAX_LIMIT,
+                    (int) ($query['limit']
+                        ?? PayrollPaymentReconciliationQueryService::LIST_DEFAULT_LIMIT),
+                )),
+                max(0, (int) ($query['offset'] ?? 0)),
             );
         } catch (\InvalidArgumentException $exception) {
             return Json::error(

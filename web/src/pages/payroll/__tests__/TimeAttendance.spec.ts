@@ -39,20 +39,60 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: vi.fn(), error: m.toastError }),
 }))
 
-vi.mock('vue-i18n', () => ({
+// `useTablePrefs` táhne @/i18n, které volá skutečné `createI18n` — továrna
+// proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string, values?: Record<string, unknown>) =>
       values?.name ? `${key}:${values.name}` : key,
   }),
 }))
 
+// `useTablePrefs` jde přes Pinii a API; v testu stačí prázdné výchozí předvolby.
+vi.mock('@/composables/useUserPrefs', async () => {
+  const { computed, ref } = await import('vue')
+  // Stavová napodobenina: výběr sloupců se ukládá přes patchPagePrefs a musí
+  // se hned projevit v tabulce — mock s neměnným prázdným objektem by test
+  // skrývání sloupce udělal bezzubým.
+  const store = ref<Record<string, unknown>>({})
+  return {
+    ensurePrefsLoaded: () => Promise.resolve(),
+    getPagePrefs: () => computed(() => store.value),
+    patchPagePrefs: (_page: string, patch: Record<string, unknown>) => {
+      store.value = { ...store.value, ...patch }
+    },
+  }
+})
+
 import TimeAttendance from '@/pages/payroll/TimeAttendance.vue'
+
+function row(employmentId: number, fullName: string) {
+  return {
+    employment: {
+      id: employmentId,
+      full_name: fullName,
+      code: `SYN-${employmentId}`,
+      relation_type: 'employment',
+    },
+    month: { status: 'open', row_version: 1 },
+    calendar: null,
+    summary: {
+      fund_minutes: 9_600,
+      planned_minutes: 9_600,
+      actual_minutes: 9_600,
+      difference_minutes: 0,
+      category_minutes: {},
+      incomplete: false,
+    },
+  }
+}
 
 describe('TimeAttendance', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)
-    m.timeMonth.mockResolvedValue({ items: [] })
+    m.timeMonth.mockResolvedValue({ items: [], total: 0, limit: 25, offset: 0 })
     m.previewTimeImport.mockResolvedValue({
       supported: true,
       total_rows: 1,
@@ -64,6 +104,110 @@ describe('TimeAttendance', () => {
     })
     m.reopenTimeMonth.mockResolvedValue({})
     m.approveTimeMonth.mockResolvedValue({})
+  })
+
+  /**
+   * Docházka staví na každý řádek fond kalendáře, náhled JMHZ i limity
+   * přesčasu. Kdyby si stránka brala celý měsíc a zbytek zahodila v prohlížeči,
+   * server by tu práci odvedl pro celou firmu při každém otevření.
+   */
+  it('asks the server for one bounded page and offers the next one', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [row(12, 'Syntetická osoba A')],
+      total: 60,
+      limit: 25,
+      offset: 0,
+    })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+
+    expect(m.timeMonth).toHaveBeenCalledWith(
+      expect.any(String),
+      false,
+      { limit: 25, offset: 0 },
+    )
+
+    m.timeMonth.mockResolvedValue({
+      items: [row(13, 'Syntetická osoba B')],
+      total: 60,
+      limit: 25,
+      offset: 25,
+    })
+    const next = wrapper.findAll('button')
+      .find(button => button.text().includes('common.next'))
+    expect(next).toBeDefined()
+    await next!.trigger('click')
+    await flushPromises()
+
+    expect(m.timeMonth).toHaveBeenLastCalledWith(
+      expect.any(String),
+      false,
+      { limit: 25, offset: 25 },
+    )
+    expect(wrapper.text()).toContain('Syntetická osoba B')
+    expect(wrapper.text()).not.toContain('Syntetická osoba A')
+  })
+
+  /** Zúžení „jen nedokončené" mění obsah, takže musí vrátit stránku na začátek. */
+  it('returns to the first page when the incomplete filter changes', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [row(12, 'Syntetická osoba A')],
+      total: 60,
+      limit: 25,
+      offset: 0,
+    })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+
+    const next = wrapper.findAll('button')
+      .find(button => button.text().includes('common.next'))
+    await next!.trigger('click')
+    await flushPromises()
+    expect(m.timeMonth).toHaveBeenLastCalledWith(
+      expect.any(String),
+      false,
+      { limit: 25, offset: 25 },
+    )
+
+    await wrapper.find('input[type="checkbox"][class*="rounded"]').setValue(true)
+    await flushPromises()
+
+    expect(m.timeMonth).toHaveBeenLastCalledWith(
+      expect.any(String),
+      true,
+      { limit: 25, offset: 0 },
+    )
+  })
+
+  /** Skrytý sloupec zmizí z hlavičky i z buněk, mobilní karta ho drží dál. */
+  it('hides a column from the desktop table without touching the mobile card', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [row(12, 'Syntetická osoba A')],
+      total: 1,
+      limit: 25,
+      offset: 0,
+    })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+
+    expect(wrapper.find('table').text()).toContain('payroll.time.columns.fund')
+
+    const picker = wrapper.findAll('button')
+      .find(button => button.text() === 'common.columns')
+    expect(picker).toBeDefined()
+    await picker!.trigger('click')
+    const fundToggle = wrapper.findAll('label')
+      .find(label => label.text() === 'payroll.time.columns.fund')
+    expect(fundToggle).toBeDefined()
+    await fundToggle!.find('input').trigger('change')
+    await flushPromises()
+
+    expect(wrapper.find('table').text()).not.toContain('payroll.time.columns.fund')
+    // Mobilní karta má vlastní rozvržení a výběr sloupců se jí netýká.
+    const mobile = wrapper.findAll('div')
+      .find(node => node.classes().includes('md:hidden') && node.text() !== '')
+    expect(mobile).toBeDefined()
+    expect(mobile!.text()).toContain('payroll.time.columns.fund')
   })
 
   it('loads attendance CSV through the shared drag-and-drop control', async () => {

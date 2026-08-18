@@ -11,6 +11,9 @@ import {
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const props = defineProps<{
   canWrite: boolean
@@ -32,6 +35,17 @@ const typeFilter = ref<PayrollDimensionType | ''>('')
 const form = ref<PayrollDimensionPayload>(newDimension())
 
 const TYPES: PayrollDimensionType[] = ['cost_center', 'project', 'activity']
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'type', labelKey: 'payroll.employer.dimensions.type' },
+  { key: 'code', labelKey: 'payroll.employer.dimensions.code', required: true },
+  { key: 'name', labelKey: 'payroll.employer.dimensions.name' },
+  { key: 'validity', labelKey: 'payroll.employer.dimensions.validity' },
+  { key: 'account', labelKey: 'payroll.employer.dimensions.account', defaultHidden: true },
+  { key: 'status', labelKey: 'payroll.employer.dimensions.status' },
+  { key: 'actions', labelKey: 'common.actions', required: true },
+]
+const tbl = useTablePrefs('payroll-dimensions', COLUMNS)
 
 function localDate(): string {
   const now = new Date()
@@ -259,63 +273,69 @@ onMounted(load)
         {{ t('payroll.employer.dimensions.empty') }}
       </p>
 
-      <div v-else-if="filteredDimensions.length" class="mt-5 hidden overflow-x-auto md:block">
-        <table class="min-w-full divide-y divide-neutral-200 text-sm">
-          <thead class="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
-            <tr>
-              <th class="px-3 py-2">{{ t('payroll.employer.dimensions.type') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.employer.dimensions.code') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.employer.dimensions.name') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.employer.dimensions.validity') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.employer.dimensions.account') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.employer.dimensions.status') }}</th>
-              <th class="px-3 py-2 text-right">{{ t('common.actions') }}</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-neutral-200">
-            <tr v-for="dimension in filteredDimensions" :key="dimension.id">
-              <td class="px-3 py-3">{{ t(`payroll.employer.dimensions.type_options.${dimension.dimension_type}`) }}</td>
-              <td class="px-3 py-3 font-mono">{{ dimension.code }}</td>
-              <td class="px-3 py-3">{{ dimension.name }}</td>
-              <td class="px-3 py-3">{{ dimension.valid_from }} – {{ dimension.valid_to ?? '∞' }}</td>
-              <td class="px-3 py-3 font-mono text-neutral-600">{{ dimension.default_account_code ?? '—' }}</td>
-              <td class="px-3 py-3">
-                <span
-                  :class="[
-                    'inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
-                    !dimension.is_active
-                      ? 'bg-neutral-100 text-neutral-600'
+      <div v-else-if="filteredDimensions.length" class="mt-5 hidden md:block">
+        <div class="mb-2 flex flex-wrap items-center justify-end gap-2">
+          <ColumnPicker :ctrl="tbl" />
+          <DensityToggle :ctrl="tbl" />
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+            <thead class="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
+              <tr>
+                <th v-if="tbl.isVisible('type')" class="px-3 py-2">{{ t('payroll.employer.dimensions.type') }}</th>
+                <th v-if="tbl.isVisible('code')" class="px-3 py-2">{{ t('payroll.employer.dimensions.code') }}</th>
+                <th v-if="tbl.isVisible('name')" class="px-3 py-2">{{ t('payroll.employer.dimensions.name') }}</th>
+                <th v-if="tbl.isVisible('validity')" class="px-3 py-2">{{ t('payroll.employer.dimensions.validity') }}</th>
+                <th v-if="tbl.isVisible('account')" class="px-3 py-2">{{ t('payroll.employer.dimensions.account') }}</th>
+                <th v-if="tbl.isVisible('status')" class="px-3 py-2">{{ t('payroll.employer.dimensions.status') }}</th>
+                <th v-if="tbl.isVisible('actions')" class="px-3 py-2 text-right">{{ t('common.actions') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-200">
+              <tr v-for="dimension in filteredDimensions" :key="dimension.id">
+                <td v-if="tbl.isVisible('type')" class="px-3 py-3">{{ t(`payroll.employer.dimensions.type_options.${dimension.dimension_type}`) }}</td>
+                <td v-if="tbl.isVisible('code')" class="px-3 py-3 font-mono">{{ dimension.code }}</td>
+                <td v-if="tbl.isVisible('name')" class="px-3 py-3">{{ dimension.name }}</td>
+                <td v-if="tbl.isVisible('validity')" class="px-3 py-3">{{ dimension.valid_from }} – {{ dimension.valid_to ?? '∞' }}</td>
+                <td v-if="tbl.isVisible('account')" class="px-3 py-3 font-mono text-neutral-600">{{ dimension.default_account_code ?? '—' }}</td>
+                <td v-if="tbl.isVisible('status')" class="px-3 py-3">
+                  <span
+                    :class="[
+                      'inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
+                      !dimension.is_active
+                        ? 'bg-neutral-100 text-neutral-600'
+                        : dimensionIsEffective(dimension)
+                          ? 'bg-success-50 text-success-700'
+                          : 'bg-warning-50 text-warning-700',
+                    ]"
+                  >
+                    {{ t(!dimension.is_active
+                      ? 'payroll.employer.dimensions.inactive'
                       : dimensionIsEffective(dimension)
-                        ? 'bg-success-50 text-success-700'
-                        : 'bg-warning-50 text-warning-700',
-                  ]"
-                >
-                  {{ t(!dimension.is_active
-                    ? 'payroll.employer.dimensions.inactive'
-                    : dimensionIsEffective(dimension)
-                      ? 'payroll.employer.dimensions.effective'
-                      : 'payroll.employer.dimensions.outside_period') }}
-                </span>
-              </td>
-              <td class="px-3 py-3 text-right">
-                <div class="flex flex-wrap justify-end gap-2">
-                  <button v-if="canWrite" type="button" :class="btnOutline('neutral')" @click="edit(dimension)">
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                      <path :d="ICONS.edit" />
-                    </svg>
-                    {{ t('common.edit') }}
-                  </button>
-                  <button v-if="canWrite" type="button" :class="btnOutline('danger')" @click="remove(dimension)">
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                      <path :d="ICONS.trash" />
-                    </svg>
-                    {{ t('payroll.employer.dimensions.delete') }}
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                        ? 'payroll.employer.dimensions.effective'
+                        : 'payroll.employer.dimensions.outside_period') }}
+                  </span>
+                </td>
+                <td v-if="tbl.isVisible('actions')" class="px-3 py-3 text-right">
+                  <div class="flex flex-wrap justify-end gap-2">
+                    <button v-if="canWrite" type="button" :class="btnOutline('neutral')" @click="edit(dimension)">
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path :d="ICONS.edit" />
+                      </svg>
+                      {{ t('common.edit') }}
+                    </button>
+                    <button v-if="canWrite" type="button" :class="btnOutline('danger')" @click="remove(dimension)">
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path :d="ICONS.trash" />
+                      </svg>
+                      {{ t('payroll.employer.dimensions.delete') }}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div v-if="filteredDimensions.length" class="mt-5 space-y-3 md:hidden">

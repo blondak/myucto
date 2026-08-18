@@ -125,6 +125,21 @@ const recurringOffset = ref(0)
 const recurringPage = computed(() =>
   Math.floor(recurringOffset.value / recurringPageSize) + 1)
 const inputs = ref<PayrollInput[]>([])
+const INPUT_COLUMNS: ColumnDef[] = [
+  { key: 'employment', labelKey: 'payroll.components.fields.employment', required: true },
+  { key: 'component', labelKey: 'payroll.components.fields.component', required: true },
+  { key: 'amount', labelKey: 'payroll.components.fields.amount', required: true },
+  { key: 'source', labelKey: 'payroll.components.fields.source' },
+  { key: 'status', labelKey: 'payroll.components.fields.status' },
+  { key: 'external_id', labelKey: 'payroll.components.fields.external_id', defaultHidden: true },
+  { key: 'actions', labelKey: 'payroll.components.fields.actions', required: true },
+]
+const inputsTbl = useTablePrefs('payroll-inputs', INPUT_COLUMNS)
+const inputsPageSize = 25
+const inputsTotal = ref(0)
+const inputsOffset = ref(0)
+const inputsPage = computed(() =>
+  Math.floor(inputsOffset.value / inputsPageSize) + 1)
 const employments = ref<PayrollEmploymentOption[]>([])
 /**
  * Zúžení na jeden vztah z odkazu na kartě zaměstnance (`?employment=12`),
@@ -473,14 +488,18 @@ async function load() {
         limit: recurringPageSize,
         offset: recurringOffset.value,
       }),
-      payrollApi.inputs(period.value),
+      payrollApi.inputs(period.value, {
+        limit: inputsPageSize,
+        offset: inputsOffset.value,
+      }),
       loadEmploymentOptions(),
       payrollApi.accountOptions(),
     ])
     components.value = catalog
     recurring.value = recurringItems.recurring_components
     recurringTotal.value = recurringItems.total
-    inputs.value = periodInputs
+    inputs.value = periodInputs.items
+    inputsTotal.value = periodInputs.total
     chartAccounts.value = accounts
   } catch (error: any) {
     // Katalog, opakující se složky ani vstupy se nemažou — po výpadku sítě
@@ -577,8 +596,10 @@ async function reloadPeriod() {
   loading.value = true
   resetImport()
   inputPreview.value = null
+  // Jiné období = jiný seznam, takže stránkování musí zpátky na začátek.
+  inputsOffset.value = 0
   try {
-    inputs.value = await payrollApi.inputs(period.value)
+    await loadInputsPage()
   } catch (error: any) {
     toast.error(apiErrorMessage(error, t('payroll.components.load_failed')))
   } finally {
@@ -749,6 +770,32 @@ async function loadRecurringPage() {
   recurringTotal.value = page.total
 }
 
+async function loadInputsPage() {
+  let page = await payrollApi.inputs(period.value, {
+    limit: inputsPageSize,
+    offset: inputsOffset.value,
+  })
+  // Zrušení posledního vstupu na poslední straně by jinak nechalo uživatele
+  // stát na straně, která už neexistuje — prázdná tabulka a pager bez cesty zpět.
+  if (page.items.length === 0 && page.total > 0 && inputsOffset.value >= page.total) {
+    inputsOffset.value = Math.max(
+      0,
+      (Math.ceil(page.total / inputsPageSize) - 1) * inputsPageSize,
+    )
+    page = await payrollApi.inputs(period.value, {
+      limit: inputsPageSize,
+      offset: inputsOffset.value,
+    })
+  }
+  inputs.value = page.items
+  inputsTotal.value = page.total
+}
+
+function goToInputsPage(nextPage: number) {
+  inputsOffset.value = Math.max(0, (nextPage - 1) * inputsPageSize)
+  void loadInputsPage()
+}
+
 function goToRecurringPage(nextPage: number) {
   recurringOffset.value = Math.max(0, (nextPage - 1) * recurringPageSize)
   void loadRecurringPage()
@@ -788,7 +835,7 @@ async function materializeRecurring() {
       replayed_count: result.replayed_count,
       manual_review_count: result.manual_review_count,
     }))
-    inputs.value = await payrollApi.inputs(period.value)
+    await loadInputsPage()
     activeTab.value = 'inputs'
   } catch (error: any) {
     recurringError.value = apiErrorMessage(error, t('payroll.components.recurring.materialize_failed'))
@@ -848,7 +895,7 @@ async function saveInput() {
     } else {
       await payrollApi.createInput(manualInputPayload.value)
     }
-    inputs.value = await payrollApi.inputs(period.value)
+    await loadInputsPage()
     inputEditorOpen.value = false
     toast.success(t('payroll.components.inputs.saved'))
   } catch (error: any) {
@@ -863,7 +910,7 @@ async function approveInput(input: PayrollInput) {
   saving.value = true
   try {
     await payrollApi.approveInput(input.id, input.row_version)
-    inputs.value = await payrollApi.inputs(period.value)
+    await loadInputsPage()
     toast.success(t('payroll.components.inputs.approved'))
   } catch (error: any) {
     inputError.value = apiErrorMessage(error, t('payroll.components.inputs.approve_failed'))
@@ -878,7 +925,7 @@ async function cancelInput(input: PayrollInput) {
   saving.value = true
   try {
     await payrollApi.cancelInput(input.id, input.row_version)
-    inputs.value = await payrollApi.inputs(period.value)
+    await loadInputsPage()
     if (editingInput.value?.id === input.id) {
       inputEditorOpen.value = false
       editingInput.value = null
@@ -961,7 +1008,7 @@ async function applyImport() {
   try {
     importResult.value = await payrollApi.applyInputImport(importPayload.value)
     toast.success(t('payroll.components.import.applied', importResult.value))
-    inputs.value = await payrollApi.inputs(period.value)
+    await loadInputsPage()
   } catch (error: any) {
     importApiError.value = apiErrorMessage(error, t('payroll.components.import.apply_failed'))
   } finally {
@@ -1212,8 +1259,16 @@ onMounted(load)
         <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">
           <div v-if="visibleInputs.length === 0" class="p-8 text-center"><h3 class="font-semibold text-neutral-900">{{ t('payroll.components.inputs.empty') }}</h3><p class="mt-1 text-sm text-neutral-500">{{ t('payroll.components.inputs.empty_hint') }}</p></div>
           <template v-else>
-            <div data-layout="desktop" class="hidden overflow-x-auto md:block"><table class="min-w-full divide-y divide-neutral-200 text-sm"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="px-4 py-3">{{ t('payroll.components.fields.employment') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.component') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.amount') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.source') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="input in visibleInputs" :key="input.id"><td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ input.employee_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(input.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ input.employment_code }}</p></td><td class="px-4 py-3"><p>{{ input.component_name }}</p><p class="font-mono text-xs text-neutral-500">{{ input.component_code }}</p></td><td class="px-4 py-3 font-medium">{{ formatMoney(input.amount_minor) }}</td><td class="px-4 py-3">{{ t(`payroll.components.source.${input.source_kind}`) }}</td><td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="input.status === 'approved' || input.status === 'locked' ? 'bg-success-50 text-success-600' : input.status === 'cancelled' ? 'bg-neutral-100 text-neutral-500' : 'bg-payroll-50 text-payroll-700'">{{ t(`payroll.components.input_status.${input.status}`) }}</span></td><td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2"><button v-if="canWrite && input.status === 'draft' && input.source_kind === 'manual'" :class="btnOutlineSm('neutral')" @click="editInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button v-if="canWrite && input.status === 'draft' && input.source_kind === 'manual'" data-testid="payroll-input-cancel" :class="btnOutlineSm('danger')" :disabled="saving" @click="cancelInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.inputs.cancel') }}</button><button v-if="canApprove && input.status === 'draft'" :class="btnOutlineSm('success')" :disabled="saving" @click="approveInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.components.inputs.approve') }}</button></div></td></tr></tbody></table></div>
+            <div class="hidden flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2 md:flex"><ColumnPicker :ctrl="inputsTbl" /><DensityToggle :ctrl="inputsTbl" /></div>
+            <div data-layout="desktop" class="hidden overflow-x-auto md:block"><table class="min-w-full divide-y divide-neutral-200 text-sm" :class="inputsTbl.densityClass.value"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="px-4 py-3">{{ t('payroll.components.fields.employment') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.component') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.amount') }}</th><th v-if="inputsTbl.isVisible('source')" class="px-4 py-3">{{ t('payroll.components.fields.source') }}</th><th v-if="inputsTbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th v-if="inputsTbl.isVisible('external_id')" class="px-4 py-3">{{ t('payroll.components.fields.external_id') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="input in visibleInputs" :key="input.id"><td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ input.employee_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(input.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ input.employment_code }}</p></td><td class="px-4 py-3"><p>{{ input.component_name }}</p><p class="font-mono text-xs text-neutral-500">{{ input.component_code }}</p></td><td class="px-4 py-3 font-medium">{{ formatMoney(input.amount_minor) }}</td><td v-if="inputsTbl.isVisible('source')" class="px-4 py-3">{{ t(`payroll.components.source.${input.source_kind}`) }}</td><td v-if="inputsTbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="input.status === 'approved' || input.status === 'locked' ? 'bg-success-50 text-success-600' : input.status === 'cancelled' ? 'bg-neutral-100 text-neutral-500' : 'bg-payroll-50 text-payroll-700'">{{ t(`payroll.components.input_status.${input.status}`) }}</span></td><td v-if="inputsTbl.isVisible('external_id')" class="px-4 py-3 break-all font-mono text-xs text-neutral-500">{{ input.external_id ?? '—' }}</td><td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2"><button v-if="canWrite && input.status === 'draft' && input.source_kind === 'manual'" :class="btnOutlineSm('neutral')" @click="editInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button v-if="canWrite && input.status === 'draft' && input.source_kind === 'manual'" data-testid="payroll-input-cancel" :class="btnOutlineSm('danger')" :disabled="saving" @click="cancelInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.inputs.cancel') }}</button><button v-if="canApprove && input.status === 'draft'" :class="btnOutlineSm('success')" :disabled="saving" @click="approveInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.components.inputs.approve') }}</button></div></td></tr></tbody></table></div>
             <div data-layout="mobile" class="space-y-3 p-4 md:hidden"><article v-for="input in visibleInputs" :key="input.id" class="rounded-lg border border-neutral-200 p-4"><div class="flex flex-wrap items-start justify-between gap-2"><div><h3 class="font-semibold text-neutral-900">{{ input.employee_name }}</h3><p class="text-xs text-neutral-500">{{ relationLabel(input.relation_type) }} · {{ input.component_code }}</p><p class="font-mono text-[11px] text-neutral-400">{{ input.employment_code }}</p></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="input.status === 'approved' || input.status === 'locked' ? 'bg-success-50 text-success-600' : input.status === 'cancelled' ? 'bg-neutral-100 text-neutral-500' : 'bg-payroll-50 text-payroll-700'">{{ t(`payroll.components.input_status.${input.status}`) }}</span></div><dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.component') }}</dt><dd>{{ input.component_name }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.amount') }}</dt><dd class="font-semibold">{{ formatMoney(input.amount_minor) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.source') }}</dt><dd>{{ t(`payroll.components.source.${input.source_kind}`) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.external_id') }}</dt><dd class="break-all font-mono text-xs">{{ input.external_id ?? '—' }}</dd></div></dl><div class="mt-4 flex flex-wrap gap-2"><button v-if="canWrite && input.status === 'draft' && input.source_kind === 'manual'" :class="btnOutlineSm('neutral')" @click="editInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button v-if="canWrite && input.status === 'draft' && input.source_kind === 'manual'" data-testid="payroll-input-cancel" :class="btnOutlineSm('danger')" :disabled="saving" @click="cancelInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.inputs.cancel') }}</button><button v-if="canApprove && input.status === 'draft'" :class="btnOutlineSm('success')" :disabled="saving" @click="approveInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.components.inputs.approve') }}</button></div></article></div>
+            <PaginationBar
+              embedded
+              :page="inputsPage"
+              :per-page="inputsPageSize"
+              :total="inputsTotal"
+              @update:page="goToInputsPage"
+            />
           </template>
         </section>
       </section>

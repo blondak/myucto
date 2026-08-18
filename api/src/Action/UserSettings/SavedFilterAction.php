@@ -49,8 +49,14 @@ final class SavedFilterAction
         'stock-items', 'stock-documents', 'stock-purchase-orders',
         'payroll-documents', 'payroll-payments', 'payroll-quick-inputs',
         'payroll-recurring-components', 'payroll-retention',
-        'payroll-health-notifications',
-        'payroll-benefit-baskets'];
+        'payroll-health-notifications', 'payroll-time', 'payroll-inputs',
+        'payroll-employer-policies', 'payroll-people', 'payroll-travel',
+        'payroll-deduction-agreements', 'payroll-enforcement',
+        'payroll-submissions', 'payroll-submission-overview',
+        'payroll-submission-inbox', 'payroll-erasure-candidates',
+        'payroll-erasure-log', 'payroll-dimensions',
+        'payroll-health-insurer-accounts', 'payroll-person-dependants',
+        'payroll-rulesets', 'payroll-benefit-baskets'];
 
     private const MAX_FILTERS = 30;
 

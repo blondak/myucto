@@ -13,6 +13,9 @@ use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
 
 final class PayrollTimeService
 {
+    public const LIST_DEFAULT_LIMIT = 25;
+    public const LIST_MAX_LIMIT = 200;
+
     private const CATEGORIES = [
         'regular',
         'overtime',
@@ -31,8 +34,18 @@ final class PayrollTimeService
     ) {}
 
     /** @return array<string,mixed> */
-    public function overview(int $supplierId, string $period, bool $incompleteOnly): array
-    {
+    public function overview(
+        int $supplierId,
+        string $period,
+        bool $incompleteOnly,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        // Strop se klampuje i tady, ne jen na HTTP hranici: přehled staví na
+        // řádek několik dotazů a náhledů, takže „vypiš všechno" nesmí jít
+        // objednat ani jiným volajícím než akcí.
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
         [$periodStart, $periodEnd, $startsAtUtc, $endsAtUtc] = $this->periodBounds($period);
         $employments = $this->repository->employments($supplierId, $periodStart, $periodEnd);
         $shifts = $this->groupByEmployment(
@@ -52,9 +65,46 @@ final class PayrollTimeService
             $states[PayrollTimeValue::int($state['employment_id'] ?? null, 'employment_id')] = $state;
         }
 
-        // § 93 zákoníku práce — stav limitů přesčasu se počítá pro CELÝ přehled
-        // jedním dotazem, protože roční i vyrovnávací okno sahá mimo měsíc a
-        // dotaz na vztah by se jinak opakoval pro každý řádek.
+        // Zúžení „jen nedokončené" i stránkování musí padnout PŘED stavbou
+        // řádků: rozpracovanost se pozná z dat, která jsou v paměti stejně
+        // (směny, zápisy) plus jednoho hromadného dotazu na existenci
+        // kalendáře. Kdyby se filtrovalo až nad hotovými řádky, zaplatil by
+        // server fond, náhled JMHZ i limity přesčasu za každý vztah firmy.
+        $allIds = [];
+        foreach ($employments as $employment) {
+            $allIds[] = PayrollTimeValue::int($employment['id'] ?? null, 'id');
+        }
+        $withCalendar = array_fill_keys(
+            $this->repository->employmentIdsWithCalendar(
+                $supplierId,
+                $allIds,
+                $periodStart,
+                $periodEnd,
+            ),
+            true,
+        );
+        $incompleteFlags = [];
+        foreach ($allIds as $id) {
+            $incompleteFlags[$id] = $this->looksIncomplete(
+                isset($withCalendar[$id]),
+                $shifts[$id] ?? [],
+                $entries[$id] ?? [],
+            );
+        }
+        if ($incompleteOnly) {
+            $employments = array_values(array_filter(
+                $employments,
+                fn (array $employment): bool => $incompleteFlags[
+                    PayrollTimeValue::int($employment['id'] ?? null, 'id')
+                ],
+            ));
+        }
+        $total = count($employments);
+        $employments = array_slice($employments, $offset, $limit);
+
+        // § 93 zákoníku práce — stav limitů přesčasu se počítá pro CELOU
+        // stránku jedním dotazem, protože roční i vyrovnávací okno sahá mimo
+        // měsíc a dotaz na vztah by se jinak opakoval pro každý řádek.
         $employmentIds = [];
         $employmentStarts = [];
         foreach ($employments as $employment) {
@@ -155,19 +205,16 @@ final class PayrollTimeService
             $employmentShifts = $shifts[$employmentId] ?? [];
             $employmentEntries = $entries[$employmentId] ?? [];
             $plannedMinutes = 0;
-            $hasDraftShift = false;
             foreach ($employmentShifts as &$shift) {
                 $minutes = $this->netMinutes($shift);
                 $shift['net_minutes'] = $minutes;
                 $shift['starts_at'] = $this->displayInstant($shift, 'starts_at_utc');
                 $shift['ends_at'] = $this->displayInstant($shift, 'ends_at_utc');
                 $plannedMinutes += $minutes;
-                $hasDraftShift = $hasDraftShift || $shift['status'] === 'draft';
             }
             unset($shift);
 
             $categories = array_fill_keys(self::CATEGORIES, 0);
-            $hasDraftEntry = false;
             foreach ($employmentEntries as &$entry) {
                 $minutes = $this->netMinutes($entry);
                 $entry['net_minutes'] = $minutes;
@@ -177,14 +224,10 @@ final class PayrollTimeService
                 if (array_key_exists($category, $categories)) {
                     $categories[$category] += $minutes;
                 }
-                $hasDraftEntry = $hasDraftEntry || $entry['status'] === 'draft';
             }
             unset($entry);
             $actualMinutes = $categories['regular'] + $categories['overtime'];
-            $incomplete = $calendarVersions === []
-                || $hasDraftShift
-                || $hasDraftEntry
-                || ($plannedMinutes > 0 && $actualMinutes === 0);
+            $incomplete = $incompleteFlags[$employmentId];
 
             $state = $states[$employmentId] ?? [
                 'id' => null,
@@ -236,16 +279,55 @@ final class PayrollTimeService
                 'shifts' => $employmentShifts,
                 'entries' => $employmentEntries,
             ];
-            if (!$incompleteOnly || $incomplete) {
-                $items[] = $item;
-            }
+            $items[] = $item;
         }
 
         return [
             'period' => $period,
             'incomplete_only' => $incompleteOnly,
             'items' => $items,
+            'total' => $total,
+            'limit' => $limit,
+            'offset' => $offset,
         ];
+    }
+
+    /**
+     * Rozpracovanost řádku docházky bez stavby řádku.
+     *
+     * Musí odpovídat `summary.incomplete` v přehledu — proto se počítá jednou
+     * a stavěný řádek si výsledek jen převezme.
+     *
+     * @param list<array<string,mixed>> $employmentShifts
+     * @param list<array<string,mixed>> $employmentEntries
+     */
+    private function looksIncomplete(
+        bool $hasCalendar,
+        array $employmentShifts,
+        array $employmentEntries,
+    ): bool {
+        if (!$hasCalendar) {
+            return true;
+        }
+        $plannedMinutes = 0;
+        foreach ($employmentShifts as $shift) {
+            if (($shift['status'] ?? null) === 'draft') {
+                return true;
+            }
+            $plannedMinutes += $this->netMinutes($shift);
+        }
+        $actualMinutes = 0;
+        foreach ($employmentEntries as $entry) {
+            if (($entry['status'] ?? null) === 'draft') {
+                return true;
+            }
+            $category = PayrollTimeValue::string($entry['category'] ?? null, 'category');
+            if ($category === 'regular' || $category === 'overtime') {
+                $actualMinutes += $this->netMinutes($entry);
+            }
+        }
+
+        return $plannedMinutes > 0 && $actualMinutes === 0;
     }
 
     /**

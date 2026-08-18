@@ -34,6 +34,9 @@ import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import Modal from '@/components/ui/Modal.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -68,6 +71,26 @@ const OUTCOME_BADGE: Record<string, string> = {
   skipped_hold: 'bg-warning-100 text-warning-700',
   skipped_changed: 'bg-primary-100 text-primary-700',
 }
+
+const LOG_COLUMNS: ColumnDef[] = [
+  { key: 'number', labelKey: 'payroll.erasure.col.number', required: true },
+  { key: 'as_of', labelKey: 'payroll.erasure.col.as_of' },
+  { key: 'status', labelKey: 'payroll.erasure.col.status' },
+  { key: 'people', labelKey: 'payroll.erasure.col.people' },
+  { key: 'created_at', labelKey: 'payroll.erasure.col.created_at' },
+  { key: 'executed_at', labelKey: 'payroll.erasure.col.executed_at' },
+]
+const logTbl = useTablePrefs('payroll-erasure-log', LOG_COLUMNS)
+
+const CANDIDATE_COLUMNS: ColumnDef[] = [
+  { key: 'person', labelKey: 'payroll.erasure.col.person', required: true },
+  { key: 'action', labelKey: 'payroll.erasure.col.action' },
+  { key: 'source', labelKey: 'payroll.erasure.col.source' },
+  { key: 'retained_until', labelKey: 'payroll.erasure.col.retained_until' },
+  { key: 'impact', labelKey: 'payroll.erasure.col.impact' },
+  { key: 'outcome', labelKey: 'payroll.erasure.col.outcome' },
+]
+const candidatesTbl = useTablePrefs('payroll-erasure-candidates', CANDIDATE_COLUMNS)
 
 async function load() {
   loading.value = true
@@ -300,16 +323,20 @@ onMounted(load)
     />
 
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+      <div class="flex items-center justify-end gap-2 border-b border-neutral-200 px-3 py-2">
+        <ColumnPicker :ctrl="logTbl" />
+        <DensityToggle :ctrl="logTbl" />
+      </div>
       <div class="overflow-x-auto">
-        <table class="w-full text-sm">
+        <table class="w-full text-sm" :class="logTbl.densityClass.value">
           <thead class="bg-neutral-50 text-neutral-500">
             <tr>
-              <th class="px-3 py-2 text-left text-xs font-medium">{{ t('payroll.erasure.col.number') }}</th>
-              <th class="px-3 py-2 text-left text-xs font-medium whitespace-nowrap">{{ t('payroll.erasure.col.as_of') }}</th>
-              <th class="px-3 py-2 text-left text-xs font-medium">{{ t('payroll.erasure.col.status') }}</th>
-              <th class="px-3 py-2 text-left text-xs font-medium">{{ t('payroll.erasure.col.people') }}</th>
-              <th class="px-3 py-2 text-left text-xs font-medium whitespace-nowrap">{{ t('payroll.erasure.col.created_at') }}</th>
-              <th class="px-3 py-2 text-left text-xs font-medium whitespace-nowrap">{{ t('payroll.erasure.col.executed_at') }}</th>
+              <th v-if="logTbl.isVisible('number')" class="px-3 py-2 text-left text-xs font-medium">{{ t('payroll.erasure.col.number') }}</th>
+              <th v-if="logTbl.isVisible('as_of')" class="px-3 py-2 text-left text-xs font-medium whitespace-nowrap">{{ t('payroll.erasure.col.as_of') }}</th>
+              <th v-if="logTbl.isVisible('status')" class="px-3 py-2 text-left text-xs font-medium">{{ t('payroll.erasure.col.status') }}</th>
+              <th v-if="logTbl.isVisible('people')" class="px-3 py-2 text-left text-xs font-medium">{{ t('payroll.erasure.col.people') }}</th>
+              <th v-if="logTbl.isVisible('created_at')" class="px-3 py-2 text-left text-xs font-medium whitespace-nowrap">{{ t('payroll.erasure.col.created_at') }}</th>
+              <th v-if="logTbl.isVisible('executed_at')" class="px-3 py-2 text-left text-xs font-medium whitespace-nowrap">{{ t('payroll.erasure.col.executed_at') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
@@ -321,17 +348,17 @@ onMounted(load)
               :class="selectedId === p.id ? 'bg-primary-50' : ''"
               @click="openDetail(p.id)"
             >
-              <td class="px-3 py-2 font-mono font-semibold">#{{ p.id }}</td>
-              <td class="px-3 py-2 font-mono whitespace-nowrap">{{ fmtDate(p.as_of) }}</td>
-              <td class="px-3 py-2">
+              <td v-if="logTbl.isVisible('number')" class="px-3 py-2 font-mono font-semibold">#{{ p.id }}</td>
+              <td v-if="logTbl.isVisible('as_of')" class="px-3 py-2 font-mono whitespace-nowrap">{{ fmtDate(p.as_of) }}</td>
+              <td v-if="logTbl.isVisible('status')" class="px-3 py-2">
                 <span
                   class="inline-block text-[10px] font-bold px-1.5 py-px rounded whitespace-nowrap"
                   :class="STATUS_BADGE[p.status] ?? 'bg-neutral-200 text-neutral-600'"
                 >{{ t(`payroll.erasure.status.${p.status}`) }}</span>
               </td>
-              <td class="px-3 py-2 font-mono">{{ p.item_count ?? '—' }}</td>
-              <td class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ fmtDate(p.created_at) }}</td>
-              <td class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ fmtDate(p.executed_at) }}</td>
+              <td v-if="logTbl.isVisible('people')" class="px-3 py-2 font-mono">{{ p.item_count ?? '—' }}</td>
+              <td v-if="logTbl.isVisible('created_at')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ fmtDate(p.created_at) }}</td>
+              <td v-if="logTbl.isVisible('executed_at')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ fmtDate(p.executed_at) }}</td>
             </tr>
           </tbody>
         </table>
@@ -412,35 +439,39 @@ onMounted(load)
           </div>
         </div>
 
+        <div class="flex items-center justify-end gap-2">
+          <ColumnPicker :ctrl="candidatesTbl" />
+          <DensityToggle :ctrl="candidatesTbl" />
+        </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-xs">
+          <table class="w-full text-xs" :class="candidatesTbl.densityClass.value">
             <thead class="bg-neutral-50 text-neutral-500">
               <tr>
-                <th class="px-3 py-2 text-left font-medium">{{ t('payroll.erasure.col.person') }}</th>
-                <th class="px-3 py-2 text-left font-medium">{{ t('payroll.erasure.col.action') }}</th>
-                <th class="px-3 py-2 text-left font-medium">{{ t('payroll.erasure.col.source') }}</th>
-                <th class="px-3 py-2 text-left font-medium whitespace-nowrap">{{ t('payroll.erasure.col.retained_until') }}</th>
-                <th class="px-3 py-2 text-left font-medium">{{ t('payroll.erasure.col.impact') }}</th>
-                <th class="px-3 py-2 text-left font-medium">{{ t('payroll.erasure.col.outcome') }}</th>
+                <th v-if="candidatesTbl.isVisible('person')" class="px-3 py-2 text-left font-medium">{{ t('payroll.erasure.col.person') }}</th>
+                <th v-if="candidatesTbl.isVisible('action')" class="px-3 py-2 text-left font-medium">{{ t('payroll.erasure.col.action') }}</th>
+                <th v-if="candidatesTbl.isVisible('source')" class="px-3 py-2 text-left font-medium">{{ t('payroll.erasure.col.source') }}</th>
+                <th v-if="candidatesTbl.isVisible('retained_until')" class="px-3 py-2 text-left font-medium whitespace-nowrap">{{ t('payroll.erasure.col.retained_until') }}</th>
+                <th v-if="candidatesTbl.isVisible('impact')" class="px-3 py-2 text-left font-medium">{{ t('payroll.erasure.col.impact') }}</th>
+                <th v-if="candidatesTbl.isVisible('outcome')" class="px-3 py-2 text-left font-medium">{{ t('payroll.erasure.col.outcome') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="item in items" :key="item.id" :data-test="`erasure-item-${item.employee_id}`">
-                <td class="px-3 py-2">
+                <td v-if="candidatesTbl.isVisible('person')" class="px-3 py-2">
                   <span v-if="item.full_name" class="font-medium">{{ item.full_name }}</span>
                   <!-- Prázdné jméno po provedeném výmazu není chyba: osoba už
                        neexistuje. Musí to ale být napsané, ne jen pomlčka. -->
                   <span v-else class="text-neutral-400 italic">{{ t('payroll.erasure.person_erased') }}</span>
                 </td>
-                <td class="px-3 py-2">
+                <td v-if="candidatesTbl.isVisible('action')" class="px-3 py-2">
                   <span
                     class="inline-block text-[10px] font-bold px-1.5 py-px rounded whitespace-nowrap"
                     :class="item.action === 'erase' ? 'bg-danger-100 text-danger-600' : 'bg-warning-100 text-warning-700'"
                   >{{ t(`payroll.erasure.action_kind.${item.action}`) }}</span>
                 </td>
-                <td class="px-3 py-2">{{ item.governing_source }}</td>
-                <td class="px-3 py-2 font-mono whitespace-nowrap">{{ fmtDate(item.retained_until) }}</td>
-                <td class="px-3 py-2">
+                <td v-if="candidatesTbl.isVisible('source')" class="px-3 py-2">{{ item.governing_source }}</td>
+                <td v-if="candidatesTbl.isVisible('retained_until')" class="px-3 py-2 font-mono whitespace-nowrap">{{ fmtDate(item.retained_until) }}</td>
+                <td v-if="candidatesTbl.isVisible('impact')" class="px-3 py-2">
                   <div v-if="counts(item.cascade_counts?.identity).length === 0" class="text-neutral-400">—</div>
                   <div v-else class="space-y-0.5">
                     <div v-for="[key, n] in counts(item.cascade_counts?.identity)" :key="key">
@@ -458,7 +489,7 @@ onMounted(load)
                     </span>
                   </div>
                 </td>
-                <td class="px-3 py-2">
+                <td v-if="candidatesTbl.isVisible('outcome')" class="px-3 py-2">
                   <span
                     class="inline-block text-[10px] font-bold px-1.5 py-px rounded whitespace-nowrap"
                     :class="OUTCOME_BADGE[item.outcome] ?? 'bg-neutral-200 text-neutral-600'"

@@ -32,6 +32,9 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -79,6 +82,16 @@ const canReadPeople = computed(() => auth.canRead('payroll'))
 const canManageInsolvency = computed(() => auth.canWrite('payroll.insolvency'))
 const canReadPayrollSettings = computed(() => auth.canRead('payroll.settings'))
 const recipientAccounts = ref<PayrollInstitutionAccount[]>([])
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'employee', labelKey: 'payroll.enforcement.employee', required: true },
+  { key: 'status', labelKey: 'payroll.enforcement.status_label' },
+  { key: 'case_kind', labelKey: 'payroll.enforcement.case_kind' },
+  { key: 'claims', labelKey: 'payroll.enforcement.claims', defaultHidden: true },
+  { key: 'balance', labelKey: 'payroll.enforcement.balance' },
+  { key: 'actions', labelKey: 'common.detail', required: true },
+]
+const tbl = useTablePrefs('payroll-enforcement', COLUMNS)
 const recipientOptions = computed(() => {
   const seen = new Map<number, PayrollInstitutionAccount>()
   for (const account of recipientAccounts.value) {
@@ -733,20 +746,26 @@ onMounted(load)
         <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.enforcement.empty_description') }}</p>
       </div>
       <template v-else>
-        <div class="hidden overflow-x-auto md:block">
-          <table class="min-w-full divide-y divide-neutral-200 text-sm">
-            <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="px-4 py-3">{{ t('payroll.enforcement.employee') }}</th><th class="px-4 py-3">{{ t('payroll.enforcement.status_label') }}</th><th class="px-4 py-3">{{ t('payroll.enforcement.case_kind') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.enforcement.claims') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.enforcement.balance') }}</th><th class="px-4 py-3"><span class="sr-only">{{ t('common.detail') }}</span></th></tr></thead>
+        <div class="hidden md:block">
+          <div class="flex flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2">
+            <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+            <DensityToggle class="hidden md:block" :ctrl="tbl" />
+          </div>
+          <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+            <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th v-if="tbl.isVisible('employee')" class="px-4 py-3">{{ t('payroll.enforcement.employee') }}</th><th v-if="tbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.enforcement.status_label') }}</th><th v-if="tbl.isVisible('case_kind')" class="px-4 py-3">{{ t('payroll.enforcement.case_kind') }}</th><th v-if="tbl.isVisible('claims')" class="px-4 py-3 text-right">{{ t('payroll.enforcement.claims') }}</th><th v-if="tbl.isVisible('balance')" class="px-4 py-3 text-right">{{ t('payroll.enforcement.balance') }}</th><th v-if="tbl.isVisible('actions')" class="px-4 py-3"><span class="sr-only">{{ t('common.detail') }}</span></th></tr></thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="item in cases" :key="item.id" :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">
-                <td class="px-4 py-3 font-medium text-neutral-900">{{ item.full_name }}</td>
-                <td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="statusClass(item.status)">{{ t(`payroll.enforcement.status.${item.status}`) }}</span></td>
-                <td class="px-4 py-3 text-neutral-600">{{ t(`payroll.enforcement.kinds.${item.case_kind}`) }}</td>
-                <td class="px-4 py-3 text-right">{{ item.claim_count }}</td>
-                <td class="px-4 py-3 text-right font-medium">{{ money(item.outstanding_minor_units) }}</td>
-                <td class="px-4 py-3 text-right"><button :class="btnOutlineSm('neutral')" :data-test="`enforcement-detail-${item.id}`" @click="selectCase(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t(expandedId === item.id ? 'common.close' : 'common.detail') }}</button></td>
+                <td v-if="tbl.isVisible('employee')" class="px-4 py-3 font-medium text-neutral-900">{{ item.full_name }}</td>
+                <td v-if="tbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="statusClass(item.status)">{{ t(`payroll.enforcement.status.${item.status}`) }}</span></td>
+                <td v-if="tbl.isVisible('case_kind')" class="px-4 py-3 text-neutral-600">{{ t(`payroll.enforcement.kinds.${item.case_kind}`) }}</td>
+                <td v-if="tbl.isVisible('claims')" class="px-4 py-3 text-right">{{ item.claim_count }}</td>
+                <td v-if="tbl.isVisible('balance')" class="px-4 py-3 text-right font-medium">{{ money(item.outstanding_minor_units) }}</td>
+                <td v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right"><button :class="btnOutlineSm('neutral')" :data-test="`enforcement-detail-${item.id}`" @click="selectCase(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t(expandedId === item.id ? 'common.close' : 'common.detail') }}</button></td>
               </tr>
             </tbody>
           </table>
+          </div>
         </div>
         <div class="space-y-3 p-4 md:hidden">
           <article v-for="item in cases" :key="item.id" class="rounded-lg border border-neutral-200 p-4" :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">
