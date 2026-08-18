@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 
 final class JmhzPreparationSnapshotBuilder
 {
@@ -824,23 +825,80 @@ final class JmhzPreparationSnapshotBuilder
                 'Socialni vysledek nepokryva pracovni vztah.',
             );
         }
-        /*
-         * Nárok, který limity § 7a odst. 3 vyloučily, se v podání neuplatňuje —
-         * XML pro něj žádnou položku nenese a hlásit u něj nepodporovaný blok
-         * by bylo falešné.
-         */
-        $discountOutcome = $matched['part_time_employer_discount_outcome'] ?? null;
-        if (($matched['part_time_employer_discount'] ?? null) !== 'not_claimed'
-            && ($discountOutcome === null || $discountOutcome === 'applied')
-        ) {
+        $this->inspectPartTimeDiscount($matched, $employmentId, $issues);
+        return $matched;
+    }
+
+    /**
+     * Uplatněná sleva podle § 7a se v měsíčním hlášení vykazuje třemi
+     * položkami u dotčené součásti: příznakem 10372, rozsahem kratší
+     * pracovní nebo služební doby 10373 a písmenem důvodu 10374. Blokuje se
+     * proto jen to, co skutečně chybí — nárok, který limity § 7a odst. 3
+     * vyloučily, se v podání neuplatňuje a XML pro něj žádnou položku nenese.
+     *
+     * @param array<string,mixed> $relationship
+     * @param list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $issues
+     * @param-out list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $issues
+     */
+    private function inspectPartTimeDiscount(
+        array $relationship,
+        int $employmentId,
+        array &$issues,
+    ): void {
+        $evidence = $relationship['part_time_employer_discount'] ?? null;
+        if ($evidence === 'not_claimed') {
+            return;
+        }
+        if ($evidence !== 'verified') {
             $issues[] = $this->issue(
-                'jmhz_employer_part_time_discount_unsupported',
+                'jmhz_employer_part_time_discount_unverified',
                 'employment',
                 $employmentId,
-                ['10372', '10373', '10374'],
+                ['10372'],
+            );
+            return;
+        }
+        $outcome = $relationship['part_time_employer_discount_outcome'] ?? null;
+        if ($outcome !== null && $outcome !== 'applied') {
+            return;
+        }
+        if ($outcome === null) {
+            $issues[] = $this->issue(
+                'jmhz_employer_part_time_discount_outcome_missing',
+                'employment',
+                $employmentId,
+                ['10372'],
+            );
+            return;
+        }
+        $reason = SocialPartTimeDiscountReason::tryFrom(
+            is_string($relationship['part_time_employer_discount_reason'] ?? null)
+                ? $relationship['part_time_employer_discount_reason']
+                : '',
+        );
+        if ($reason === null) {
+            $issues[] = $this->issue(
+                'jmhz_employer_part_time_discount_reason_missing',
+                'employment',
+                $employmentId,
+                ['10374'],
+            );
+            return;
+        }
+        if (!$reason->requiresShorterWorkingTime()) {
+            return;
+        }
+        // Kontrola 138 ČSSZ žádá 10373 právě u důvodů A až F. Sjednaná týdenní
+        // doba je jediný pramen té hodnoty; bez ní se sleva vykázat nedá.
+        $weekly = $relationship['agreed_weekly_working_millihours'] ?? null;
+        if (!is_int($weekly) || $weekly <= 0 || $weekly % 10 !== 0) {
+            $issues[] = $this->issue(
+                'jmhz_employer_part_time_discount_working_time_missing',
+                'employment',
+                $employmentId,
+                ['10373'],
             );
         }
-        return $matched;
     }
 
     /**

@@ -658,6 +658,56 @@ final class JmhzScenario1XmlSerializer
             $node->appendChild($wrapper);
         }
 
+        // Sleva zaměstnavatele podle § 7a stojí v sekvenci
+        // `pojisteniBezPriznakuType` až za pojistným, a to jen tehdy, když se
+        // uplatňuje: prázdný blok by kontrole 1 ČSSZ přidal zaměstnance, který
+        // v pojistné části slevu nemá. Částka slevy tady NENÍ — § 7c odst. 1 ji
+        // odečítá z pojistného za všechny kategorie § 5a odst. 1 dohromady,
+        // takže ji hlášení vykazuje jednou za zaměstnavatele (10032), ne po
+        // součástech.
+        $discount = $this->object($employment['part_time_discount'] ?? null);
+        if ($discount !== []) {
+            $wrapper = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:slevaZamestnavatele',
+            );
+            $this->text(
+                $dom,
+                $wrapper,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:slevaZamestnavateleEvidovana',
+                'true',
+            );
+            $split = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:slevaZamestnavateleRozpad',
+            );
+            // Kontrola 138: rozsah kratší doby se vyplňuje právě u důvodů
+            // A až F. U písmene G (§ 7a odst. 1 písm. g), zaměstnanec mladší
+            // 21 let) sleva náleží i při plném úvazku a 10373 se uvést NESMÍ.
+            $centihours = $discount['weekly_working_time_centihours'] ?? null;
+            if ($centihours !== null) {
+                $this->text(
+                    $dom,
+                    $split,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:pracovniDobaKratsi',
+                    $this->decimal($centihours, 2, '10373'),
+                );
+            }
+            $this->text(
+                $dom,
+                $split,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:duvodUplatneni',
+                $this->string($discount['reason_code'] ?? null, '10374'),
+            );
+            $wrapper->appendChild($split);
+            $node->appendChild($wrapper);
+        }
+
         return $node;
     }
 

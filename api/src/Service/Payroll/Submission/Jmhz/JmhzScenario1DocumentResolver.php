@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
+
 final class JmhzScenario1DocumentResolver
 {
     public function resolve(
@@ -196,6 +198,12 @@ final class JmhzScenario1DocumentResolver
                     'employment_id' => $employmentId,
                     'social_base' => $this->socialBase(
                         $employment['insurance'] ?? null,
+                        $employmentId,
+                        $blockers,
+                    ),
+                    'part_time_discount' => $this->partTimeDiscount(
+                        $employment['insurance'] ?? null,
+                        $employment['scenario_resolution'] ?? null,
                         $employmentId,
                         $blockers,
                     ),
@@ -479,6 +487,95 @@ final class JmhzScenario1DocumentResolver
         return [
             'assessment_base_czk' => $base,
             'paragraph5_letter' => $letter,
+        ];
+    }
+
+    /**
+     * Uplatněná sleva zaměstnavatele podle § 7a u JEDNÉ součásti: příznak
+     * 10372, rozsah kratší pracovní nebo služební doby 10373 a písmeno důvodu
+     * 10374 podle číselníku `duvod_uplatneni_slevy`.
+     *
+     * Vykazuje se jen sleva, která po posouzení § 7a odst. 3 skutečně náleží.
+     * Doložený nárok, který některá z mezí vyloučila, se v hlášení neuplatňuje
+     * a žádnou položku nenese — kdyby ho podání vykázalo, kontrola 1 ČSSZ by
+     * napočítala víc zaměstnanců se slevou, než kolik jich pojistná část
+     * uvádí, a slevu by nesedělo ani pojistné k úhradě.
+     *
+     * Kontrola 42 ČSSZ pouští slevu jen k druhu činnosti (10239) „1" až „9"
+     * s bližším určením pracovněprávního vztahu (10502) „Žádné" — tedy
+     * k pracovnímu poměru, přesně jak okruh vymezuje § 7a odst. 1. První
+     * profil ani jeden z těch atributů nevykazuje, takže se podmínka musí
+     * vynutit tady, nad rozhodnutím selektoru scénáře; z hotového XML už ji
+     * ověřit nelze.
+     *
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @return array<string,mixed>|null
+     */
+    private function partTimeDiscount(
+        mixed $insurance,
+        mixed $scenarioResolution,
+        ?int $employmentId,
+        array &$blockers,
+    ): ?array {
+        $relationship = $this->object($insurance);
+        if (($relationship['part_time_employer_discount'] ?? null) !== 'verified'
+            || ($relationship['part_time_employer_discount_outcome'] ?? null) !== 'applied'
+        ) {
+            return null;
+        }
+        $reason = SocialPartTimeDiscountReason::tryFrom(
+            is_string($relationship['part_time_employer_discount_reason'] ?? null)
+                ? $relationship['part_time_employer_discount_reason']
+                : '',
+        );
+        if ($reason === null) {
+            $blockers[] = $this->blocker(
+                'jmhz_employer_part_time_discount_reason_missing',
+                'employment',
+                $employmentId,
+                ['10374'],
+            );
+            return null;
+        }
+        $selector = $this->object($scenarioResolution);
+        $activityCode = $selector['activity_code'] ?? null;
+        if (!is_string($activityCode)
+            || preg_match('/^[1-9]$/D', $activityCode) !== 1
+            || ($selector['relationship_detail_code'] ?? null) !== '1'
+        ) {
+            $blockers[] = $this->blocker(
+                'jmhz_employer_part_time_discount_activity_unsupported',
+                'employment',
+                $employmentId,
+                ['10239', '10372', '10502'],
+            );
+            return null;
+        }
+        $weeklyCentihours = null;
+        if ($reason->requiresShorterWorkingTime()) {
+            $millihours = $relationship['agreed_weekly_working_millihours'] ?? null;
+            // 10373 je `cislo4_2Type`, tedy nejvýše 99,99 hodiny na dvě
+            // desetinná místa. Tisícina hodiny se do něj nevejde a zaokrouhlit
+            // ji potichu by znamenalo vykázat jiný úvazek, než jaký je sjednaný.
+            if (!is_int($millihours)
+                || $millihours <= 0
+                || $millihours % 10 !== 0
+                || $millihours > 99990
+            ) {
+                $blockers[] = $this->blocker(
+                    'jmhz_employer_part_time_discount_working_time_unresolved',
+                    'employment',
+                    $employmentId,
+                    ['10373'],
+                );
+                return null;
+            }
+            $weeklyCentihours = intdiv($millihours, 10);
+        }
+
+        return [
+            'reason_code' => strtoupper($reason->paragraph7aLetter()),
+            'weekly_working_time_centihours' => $weeklyCentihours,
         ];
     }
 

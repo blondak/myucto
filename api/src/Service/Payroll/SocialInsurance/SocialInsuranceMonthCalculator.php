@@ -805,6 +805,7 @@ final class SocialInsuranceMonthCalculator
                     $relationship->employerRateCategoryEvidenceReference,
                     $relationship->partTimeEmployerDiscountReason,
                     $discountOutcomes[$relationship->relationshipId] ?? null,
+                    $relationship->agreedWeeklyWorkingMillihours,
                 );
             },
             $facts,

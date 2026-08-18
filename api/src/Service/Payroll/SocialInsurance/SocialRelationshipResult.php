@@ -31,6 +31,7 @@ final readonly class SocialRelationshipResult implements JsonSerializable
         public ?string $employerRateCategoryEvidenceReference = null,
         public ?SocialPartTimeDiscountReason $partTimeEmployerDiscountReason = null,
         public ?SocialPartTimeDiscountOutcome $partTimeEmployerDiscountOutcome = null,
+        public ?int $agreedWeeklyWorkingMillihours = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -63,6 +64,14 @@ final readonly class SocialRelationshipResult implements JsonSerializable
                 $this->partTimeEmployerDiscountReason?->value,
             'part_time_employer_discount_outcome' =>
                 $this->partTimeEmployerDiscountOutcome?->value,
+            /*
+             * Sjednaná týdenní pracovní doba je vstup posouzení § 7a odst. 2,
+             * ale zároveň JEDINÝ zdroj položky 10373 měsíčního hlášení. Bez ní
+             * ve výsledku by se rozsah kratší doby musel při podání dopočítat
+             * z jiného pramene, a to je přesně ten odhad, který kontrola 45
+             * ČSSZ odhalí až na protokolu.
+             */
+            'agreed_weekly_working_millihours' => $this->agreedWeeklyWorkingMillihours,
         ];
     }
 }
