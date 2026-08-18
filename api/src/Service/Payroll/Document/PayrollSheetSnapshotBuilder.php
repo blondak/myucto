@@ -15,7 +15,7 @@ use PDO;
 
 final class PayrollSheetSnapshotBuilder
 {
-    public const SCHEMA_VERSION = 'payroll-sheet-document.v3';
+    public const SCHEMA_VERSION = 'payroll-sheet-document.v4';
     public const PURPOSE = 'payroll_sheet';
 
     /**
@@ -37,12 +37,22 @@ final class PayrollSheetSnapshotBuilder
      * nárok daň převýšil a vznikl bonus, součet „slevy" a bonusu nárok přesáhl
      * a mzdový list se nedal vydat vůbec — spadl na kontrole měsíčního řádku.
      *
+     * Mapování v5 opravuje týmž způsobem slevu podle § 35ba. Bralo se
+     * `advance_tax.non_refundable_credits_minor_units`, což je opět jen NÁROK,
+     * se kterým záloha počítala. Bod 5 ale žádá „měsíční slevu na dani podle
+     * § 35ba", a to je legální zkratka z § 35d odst. 2, kterou § 35d odst. 3
+     * věta první omezuje výší zálohy — poskytnutou slevu, ne nárok. Uplatněnou
+     * částku nese `income_tax.applied_non_refundable_credits_minor_units`.
+     * U mzdy s daní nižší než měsíční sleva doklad dosud vykazoval vyšší slevu,
+     * než jaká se skutečně poskytla, a druhá polovina bodu 5 („záloha snížená
+     * o měsíční slevu") mu z toho vycházela záporná.
+     *
      * Verze je součástí zdrojového manifestu, takže se pro tytéž zdrojové revize
      * NENAJDE dřívější revize a doklad se vydá jako DALŠÍ revize v řetězu.
      * Existující revize ani její archivované PDF se tím nemění — což je jediná
      * přípustná cesta, protože roční revize jsou append-only a kotvené otiskem.
      */
-    public const MAPPING_VERSION = 'payroll-sheet-mapping.v4';
+    public const MAPPING_VERSION = 'payroll-sheet-mapping.v5';
 
     /**
      * Snapshoty vydané pod starším mapováním zůstávají čitelné. Nedopočítávají
@@ -52,10 +62,12 @@ final class PayrollSheetSnapshotBuilder
      */
     private const SCHEMA_VERSION_V1 = 'payroll-sheet-document.v1';
     private const SCHEMA_VERSION_V2 = 'payroll-sheet-document.v2';
+    private const SCHEMA_VERSION_V3 = 'payroll-sheet-document.v3';
 
     private const SUPPORTED_SCHEMA_VERSIONS = [
         self::SCHEMA_VERSION_V1,
         self::SCHEMA_VERSION_V2,
+        self::SCHEMA_VERSION_V3,
         self::SCHEMA_VERSION,
     ];
 
@@ -335,6 +347,7 @@ final class PayrollSheetSnapshotBuilder
                 childEntitlementMinorUnits:
                     $amounts['child_entitlement_minor_units'],
                 childDetailStatus: PayrollSheetMonth::CHILD_DETAIL_RECORDED,
+                creditDetailStatus: PayrollSheetMonth::CREDIT_DETAIL_APPLIED,
             );
         }
         usort(
@@ -523,17 +536,21 @@ final class PayrollSheetSnapshotBuilder
                 $this->nonNegativeInt($tax, 'withholding_base_minor_units'),
             'advance_tax_before_credits_minor_units' =>
                 $advance === [] ? 0 : $this->nonNegativeInt($advance, 'tax_before_credits_minor_units'),
+            // UPLATNĚNÁ sleva podle § 35ba (bod 5). Bod 5 žádá „měsíční slevu
+            // na dani podle § 35ba", a tu § 35d odst. 3 věta první omezuje
+            // výší zálohy: poskytnutou částku, ne nárok.
+            // `advance_tax.non_refundable_credits_minor_units` je vstupní NÁROK,
+            // se kterým záloha počítala — u nízké mzdy je vyšší než daň a doklad
+            // by tvrdil slevu, která se nemohla poskytnout. Bod 5 druhé číslo
+            // nežádá: přebytek nároku nad zálohou nemá u § 35ba kam jít, kdežto
+            // u § 35c končí bonusem, a právě proto bod 6 vypisuje nárok
+            // i uplatnění odděleně.
             'non_refundable_credits_minor_units' =>
-                $advance === [] ? 0 : $this->nonNegativeInt($advance, 'non_refundable_credits_minor_units'),
+                $this->nonNegativeInt($tax, 'applied_non_refundable_credits_minor_units'),
             // § 38j odst. 2 písm. f) bod 6 — vedle UPLATNĚNÉ slevy podle § 35c
             // žádá i samotné měsíční daňové zvýhodnění, tedy NÁROK podle § 35c
             // odst. 1. Bez něj doklad zamlčel nárok, který se nevešel do daně
             // a zároveň na něj nevznikl bonus.
-            //
-            // Nárokovaná a uplatněná sleva podle § 35ba (bod 5) se ZÁMĚRNĚ
-            // nerozlišuje: bod 5 žádá „měsíční slevu na dani podle § 35ba",
-            // tedy tu poskytnutou, a druhé číslo by tam bylo navíc. Bod 6 je
-            // jediné místo, kde zákon nárok a jeho uplatnění jmenuje odděleně.
             'child_entitlement_minor_units' =>
                 $this->nonNegativeInt($tax, 'claimed_child_credit_minor_units'),
             // UPLATNĚNÁ sleva (§ 35c odst. 2) se čte z `applied_child_credit`,
@@ -725,9 +742,22 @@ final class PayrollSheetSnapshotBuilder
         $taxDetail = $schemaVersion === self::SCHEMA_VERSION_V1
             ? PayrollSheetMonth::TAX_DETAIL_NOT_RECORDED
             : PayrollSheetMonth::TAX_DETAIL_RECORDED;
-        $childDetail = $schemaVersion === self::SCHEMA_VERSION
+        // Nárok na zvýhodnění a stav ročního zúčtování přibyly ve v3 a od té
+        // doby ve snapshotu jsou; v4 mění jen zdroj slevy podle § 35ba.
+        $recordedSinceV3 = in_array(
+            $schemaVersion,
+            [self::SCHEMA_VERSION_V3, self::SCHEMA_VERSION],
+            true,
+        );
+        $childDetail = $recordedSinceV3
             ? PayrollSheetMonth::CHILD_DETAIL_RECORDED
             : PayrollSheetMonth::CHILD_DETAIL_NOT_RECORDED;
+        // Do v3 včetně nesla kolonka slevy podle § 35ba NÁROK, ne poskytnutou
+        // slevu. Zpětně se nepřepočítává — zmrazený snapshot je závazný obsah
+        // vydané revize a rozdíl v něm už není z čeho dopočítat.
+        $creditDetail = $schemaVersion === self::SCHEMA_VERSION
+            ? PayrollSheetMonth::CREDIT_DETAIL_APPLIED
+            : PayrollSheetMonth::CREDIT_DETAIL_CLAIMED;
         $employer = $this->object($snapshot['employer'] ?? null, 'employer');
         $employee = $this->object($snapshot['employee'] ?? null, 'employee');
         $months = [];
@@ -772,6 +802,7 @@ final class PayrollSheetSnapshotBuilder
                     ? $this->nonNegativeInt($row, 'child_entitlement_minor_units')
                     : 0,
                 $childDetail,
+                $creditDetail,
             );
         }
         $previousNames = $this->list($employee['previous_names'] ?? null, 'previous_names');
@@ -806,14 +837,14 @@ final class PayrollSheetSnapshotBuilder
             // Starší mapování stav ročního zúčtování nezjišťovalo a zapisovalo
             // natvrdo „neprovedeno". Vydat to slovo znovu by znamenalo tvrdit
             // něco, co revize nikdy neposoudila.
-            $schemaVersion === self::SCHEMA_VERSION
+            $recordedSinceV3
                 ? $this->text($snapshot, 'annual_settlement_status')
                 : PayrollSheetDocumentData::ANNUAL_SETTLEMENT_NOT_RECORDED,
             $employments,
-            $schemaVersion === self::SCHEMA_VERSION
+            $recordedSinceV3
                 ? $this->nullableObject($snapshot['annual_settlement'] ?? null, 'annual_settlement')
                 : null,
-            $schemaVersion === self::SCHEMA_VERSION
+            $recordedSinceV3
                 ? $this->nullableTextMap(
                     $snapshot['annual_settlement_evidence'] ?? null,
                     'annual_settlement_evidence',

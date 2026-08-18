@@ -206,6 +206,22 @@ final readonly class PayrollSheetDocumentData
         return true;
     }
 
+    /**
+     * Nese doklad UPLATNĚNOU slevu podle § 35ba (§ 38j odst. 2 písm. f) bod 5)
+     * za VŠECHNY měsíce? Starší revize do téhle kolonky zapsaly nárok, který
+     * u nízké mzdy zálohu převyšuje — součet přes obojí by nebyl ani nárok,
+     * ani poskytnutá sleva.
+     */
+    public function creditDetailComplete(): bool
+    {
+        foreach ($this->months as $month) {
+            if (!$month->creditDetailApplied()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** @return array<string,int> */
     public function totals(): array
     {
@@ -249,6 +265,7 @@ final readonly class PayrollSheetDocumentData
             'annual_settlement' => $this->annualSettlement,
             'annual_settlement_evidence' => $this->annualSettlementEvidence,
             'child_detail_complete' => $this->childDetailComplete(),
+            'credit_detail_complete' => $this->creditDetailComplete(),
             'employments' => $this->employments,
             'tax_detail_complete' => $this->taxDetailComplete(),
         ];

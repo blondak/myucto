@@ -308,6 +308,14 @@ onMounted(load)
                 <div v-if="row.split_drift" class="text-[11px] text-warning-700 mt-0.5">
                   {{ t('payroll.benefit_baskets.drift_note') }}
                 </div>
+                <!-- Uvolněný koš se musí dát odlišit od koše, který nikdy nečerpal. -->
+                <div
+                  v-if="row.reversed_count > 0"
+                  class="text-[11px] text-neutral-600 mt-0.5"
+                  :data-test="`basket-reversed-${row.employee_id}-${row.basket}`"
+                >
+                  {{ t('payroll.benefit_baskets.reversed_note', { count: row.reversed_count, amount: money(row.reversed_minor) }) }}
+                </div>
               </td>
             </tr>
           </tbody>
@@ -337,6 +345,9 @@ onMounted(load)
           </dl>
           <p v-if="row.unfrozen_count > 0" class="text-[11px] text-warning-700 mt-1">
             {{ t('payroll.benefit_baskets.unfrozen_note', { count: row.unfrozen_count }) }}
+          </p>
+          <p v-if="row.reversed_count > 0" class="text-[11px] text-neutral-600 mt-1">
+            {{ t('payroll.benefit_baskets.reversed_note', { count: row.reversed_count, amount: money(row.reversed_minor) }) }}
           </p>
         </div>
       </div>

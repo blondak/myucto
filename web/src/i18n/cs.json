@@ -4569,6 +4569,7 @@
             "action_components_hint": "Zařazení složky do koše se nastavuje v katalogu mzdových složek.",
             "unfrozen_note": "Bez zmrazeného rozpadu: {count} — údaj je neúplný a nedopočítává se.",
             "drift_note": "Zmrazený rozpad neodpovídá dnešnímu limitu; limit se v pravidlech po schválení změnil.",
+            "reversed_note": "Stornem uvolněno: {count} (celkem {amount}) — do čerpání koše už nevstupuje.",
             "col": {
                 "employee": "Zaměstnanec",
                 "basket": "Koš",

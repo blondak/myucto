@@ -752,10 +752,15 @@ final class PayrollInputRepository
     /**
      * Důkaz pohybu, který zrušení konceptu zakazuje.
      *
-     * Schválení vstupu zakládá akumulátor benefitu, materializace pracovní cesty
-     * a import si drží vazbu na řádek zdroje a schválená revize běhu má vstup
-     * zmrazený ve svém snapshotu. Nic z toho se nesmí utrhnout od záznamu, na
-     * který ukazuje.
+     * Materializace pracovní cesty a import si drží vazbu na řádek zdroje
+     * a schválená revize běhu má vstup zmrazený ve svém snapshotu. Nic z toho
+     * se nesmí utrhnout od záznamu, na který ukazuje.
+     *
+     * Roční akumulátor benefitu se tu NEKONTROLUJE. Vzniká výhradně schválením
+     * ({@see approve()}) a sem se dojde jen u vstupu ve stavu `draft`, takže by
+     * ta větev nemohla nikdy nastat — kontrola, která nemá co chytit, vypadá
+     * jako ochrana a není. Akumulátor hlídá `reverseBenefit()`, kde je jediná
+     * cesta ke schválenému benefitu, a zpět do konceptu se vstup nedostane.
      */
     private function assertNoMovement(
         PDO $pdo,
@@ -763,20 +768,6 @@ final class PayrollInputRepository
         int $id,
         string $periodStart,
     ): void {
-        $benefit = $pdo->prepare(
-            'SELECT 1
-               FROM payroll_benefit_accumulators
-              WHERE supplier_id = ? AND input_id = ?
-              LIMIT 1'
-        );
-        $benefit->execute([$supplierId, $id]);
-        if ($benefit->fetchColumn() !== false) {
-            throw new PayrollInputCancellationException(
-                'input_has_movement',
-                'Vstup je navázaný na roční akumulátor benefitu; zrušit ho nelze.',
-            );
-        }
-
         $travel = $pdo->prepare(
             'SELECT 1
                FROM payroll_travel_compensation_links

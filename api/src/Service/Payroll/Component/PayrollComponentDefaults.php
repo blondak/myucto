@@ -27,6 +27,23 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
  * účinností nové. Historie se nepřepisuje — mzdový vstup schválený loni si drží
  * `component_snapshot_json` a nadále ukazuje na verzi, která tehdy platila.
  *
+ * ── Novou verzi, nebo opravu na místě? ──────────────────────────────────────
+ * Rozhoduje se podle toho, ČÍ chyba se napravuje, ne podle toho, že se mění
+ * hodnota ve sloupci:
+ *
+ *  - **Změnilo se právo od určitého dne** → NOVÁ VERZE s tímto `valid_from`.
+ *    Stará klasifikace pro dřívější období PLATILA a musí zůstat čitelná,
+ *    jinak by se zpětně přepsalo zacházení, které je zmrazené ve schválených
+ *    vstupech a v revizích běhů.
+ *  - **Klasifikace byla od začátku napsaná špatně** → OPRAVA ŘÁDKU NA MÍSTĚ
+ *    v té verzi, kde vznikla. Zakládat novou verzi by tvrdilo, že do jejího
+ *    dne platilo něco jiného — a to je nepravda: platilo totéž, jen to bylo
+ *    v číselníku uvedené chybně. Tak to dělají migrace 1480, 1590 i 1610
+ *    s řádky verze 2026-01-01 a je to správně.
+ *
+ * Oprava na místě je proto **jen pro dosud neúčinnou nebo právě probíhající
+ * vlastní chybu**; jakmile se mění samo právo, verze se přidává.
+ *
  * Zákonné částky se sem NEPÍŠOU a od migrace 1480 se ani nedosazují do složkového
  * stropu. Složka jen řekne, do KTERÉHO zákonného koše patří
  * ({@see PayrollBenefitExemptionBasket}); částku drží ruleset a limituje se ÚHRN

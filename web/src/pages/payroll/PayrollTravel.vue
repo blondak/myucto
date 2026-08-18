@@ -510,12 +510,18 @@ onMounted(load)
         @clear="clearFocus"
       />
 
-      <p
-        v-if="trips.length === 0"
-        class="rounded-xl border border-dashed border-neutral-300 p-8 text-center text-sm text-neutral-500"
-      >
-        {{ t('payroll_travel.empty') }}
-      </p>
+      <!--
+        Prázdno po zúžení pojmenovává už lišta nad seznamem. Generická věta pod
+        ní by totéž řekla podruhé, a ještě obecněji.
+      -->
+      <template v-if="trips.length === 0">
+        <p
+          v-if="!focusMissing"
+          class="rounded-xl border border-dashed border-neutral-300 p-8 text-center text-sm text-neutral-500"
+        >
+          {{ t('payroll_travel.empty') }}
+        </p>
+      </template>
 
       <template v-else>
         <!-- Desktopová tabulka -->

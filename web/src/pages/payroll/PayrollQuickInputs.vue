@@ -539,7 +539,11 @@ onMounted(load)
       @clear="clearFocus"
     />
 
-    <section class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
+    <!--
+      Prázdno po zúžení pojmenovává už lišta nad seznamem. Generický prázdný
+      stav pod ní by totéž řekl podruhé, a ještě obecněji.
+    -->
+    <section v-if="!focusMissing" class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
       <div v-if="loading" class="p-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
       <EmptyState
         v-else-if="loadFailed"

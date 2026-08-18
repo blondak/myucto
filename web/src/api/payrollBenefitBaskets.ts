@@ -49,6 +49,10 @@ export interface BenefitBasketUsage {
   input_count: number
   /** Kolik vstupů nemá zmrazený rozpad — chybějící podklad se nedopočítává. */
   unfrozen_count: number
+  /** Kolik akumulátorů se uvolnilo stornem — do `used_minor` nevstupují. */
+  reversed_count: number
+  /** Úhrn plnění uvolněných stornem. */
+  reversed_minor: number
   status: BenefitBasketStatus
   /** Zmrazený rozpad se rozešel s dnešním limitem (limit se v rulesetu změnil). */
   split_drift: boolean

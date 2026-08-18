@@ -177,27 +177,62 @@ final class PayrollInputCancellationApiTest extends TestCase
         self::assertSame('input_state_conflict', $this->errorCode($response));
     }
 
-    public function testEvidenceOfMovementBlocksCancellation(): void
+    /**
+     * Roční akumulátor benefitu zakládá teprve schválení, a schválený vstup
+     * zrušit nejde. Kontrola akumulátoru ve `assertNoMovement()` proto neměla
+     * co chytit — zrušení stojí o stav dřív, na `input_state_conflict`.
+     */
+    public function testBenefitAccumulatorExistsOnlyForApprovedInputsThatCancelRefusesAnyway(): void
     {
-        $benefit = $this->createInput('with-benefit', 1_000);
-        $benefitId = PayrollTimeValue::int($benefit['id'] ?? null, 'id');
-        $this->db->pdo()->prepare(
-            'INSERT INTO payroll_benefit_accumulators
-                (supplier_id, employee_id, component_id, input_id, tax_year, amount_minor)
-             VALUES (?, ?, ?, ?, 2026, 1000)'
-        )->execute([
-            $this->supplierId,
-            $this->employeeId,
-            $this->componentId,
-            $benefitId,
-        ]);
+        $input = $this->createInput('benefit-one', 1_000);
+        $id = PayrollTimeValue::int($input['id'] ?? null, 'id');
+        self::assertSame(0, $this->accumulatorCount($id));
+
+        // Koncept se stále zruší — nic ho nedrží.
+        $cancelled = $this->cancel(
+            $id,
+            PayrollTimeValue::int($input['row_version'] ?? null, 'row_version'),
+        );
+        self::assertSame(200, $cancelled->getStatusCode(), (string) $cancelled->getBody());
+
+        $second = $this->createInput('benefit-two', 1_000);
+        $secondId = PayrollTimeValue::int($second['id'] ?? null, 'id');
+        $approved = $this->inputs->approve(
+            $this->request('POST', "/api/payroll/inputs/{$secondId}/approve")
+                ->withParsedBody([
+                    'row_version' => PayrollTimeValue::int(
+                        $second['row_version'] ?? null,
+                        'row_version',
+                    ),
+                ]),
+            new Response(),
+            ['id' => (string) $secondId],
+        );
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+        $approvedInput = PayrollTimeValue::row($this->json($approved)['input'] ?? null, 'input');
+
         $blocked = $this->cancel(
-            $benefitId,
-            PayrollTimeValue::int($benefit['row_version'] ?? null, 'row_version'),
+            $secondId,
+            PayrollTimeValue::int($approvedInput['row_version'] ?? null, 'row_version'),
         );
         self::assertSame(409, $blocked->getStatusCode());
-        self::assertSame('input_has_movement', $this->errorCode($blocked));
+        self::assertSame('input_state_conflict', $this->errorCode($blocked));
+    }
 
+    private function accumulatorCount(int $inputId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*)
+               FROM payroll_benefit_accumulators
+              WHERE supplier_id = ? AND input_id = ?'
+        );
+        $stmt->execute([$this->supplierId, $inputId]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    public function testEvidenceOfMovementBlocksCancellation(): void
+    {
         $travel = $this->createInput('with-travel', 2_000);
         $travelId = PayrollTimeValue::int($travel['id'] ?? null, 'id');
         $this->db->pdo()->prepare(
