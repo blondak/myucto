@@ -4967,6 +4967,8 @@
         },
         "warning": {
             "negative_balance": "The cash balance is negative.",
+            "over_cash_limit": "The payment exceeds the CZK 270,000 cash limit (Act No. 254/2004 Coll.) — it must be settled by bank transfer.",
+            "series_gap": "The document was deleted permanently — a gap remains in the number series and the number is not reused.",
             "dic_missing_over_10k": "Sale above CZK 10,000 without a VAT No. — add the customer's VAT No. for Control Statement A.4.",
             "fx_rate_deviation": "The entered rate differs from the CNB daily rate — check the rate on the document."
         },
@@ -4984,6 +4986,8 @@
         },
         "error": {
             "register_not_found": "Cash register not found.",
+            "nothing_to_settle": "The received invoice is already settled (by an advance or another payment) — nothing is left to pay.",
+            "followup_document_exists": "A follow-up document was already created from this advance payment — cancel it first, then the cash document.",
             "register_inactive": "The cash register is inactive.",
             "register_has_documents": "A cash register with documents cannot be deleted — deactivate it instead.",
             "account_invalid": "The cash account must be an active 211 analytical account.",

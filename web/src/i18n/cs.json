@@ -4967,6 +4967,8 @@
         },
         "warning": {
             "negative_balance": "Zůstatek pokladny je záporný.",
+            "over_cash_limit": "Platba přesahuje limit 270 000 Kč pro hotovost (z. 254/2004 Sb.) — takovou úhradu je nutné provést bezhotovostně.",
+            "series_gap": "Doklad byl trvale smazán — v číselné řadě po něm zůstala díra, číslo se znovu nepoužije.",
             "dic_missing_over_10k": "Prodej nad 10 000 Kč bez DIČ — pro Kontrolní hlášení A.4 doplňte DIČ odběratele.",
             "fx_rate_deviation": "Zadaný kurz se liší od denního kurzu ČNB — zkontrolujte kurz na dokladu."
         },
@@ -4984,6 +4986,8 @@
         },
         "error": {
             "register_not_found": "Pokladna nenalezena.",
+            "nothing_to_settle": "Přijatá faktura už je vypořádaná (zálohou nebo jinou úhradou) — není co hradit.",
+            "followup_document_exists": "Z této úhrady zálohy už vznikl navazující doklad — zrušte nejdřív jej, teprve pak pokladní doklad.",
             "register_inactive": "Pokladna je neaktivní.",
             "register_has_documents": "Pokladnu s doklady nelze smazat — deaktivujte ji.",
             "account_invalid": "Účet pokladny musí být aktivní analytika 211.",
