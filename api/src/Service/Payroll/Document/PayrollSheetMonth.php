@@ -16,6 +16,16 @@ final readonly class PayrollSheetMonth
      */
     public const TAX_DETAIL_NOT_RECORDED = 'not_recorded';
 
+    /** Měsíc nese měsíční daňové zvýhodnění podle § 38j odst. 2 písm. f) bodu 6. */
+    public const CHILD_DETAIL_RECORDED = 'recorded';
+
+    /**
+     * Revize vznikla nad mapováním, které rozlišovalo jen UPLATNĚNOU slevu podle
+     * § 35c. Nárok se z něj zpětně nedopočítá — uplatněná část mu je rovna jen
+     * tehdy, když se celý nárok vešel do daně.
+     */
+    public const CHILD_DETAIL_NOT_RECORDED = 'not_recorded';
+
     public function __construct(
         public int $month,
         public int $sourceRevisionCount,
@@ -57,6 +67,20 @@ final readonly class PayrollSheetMonth
          */
         public int $taxExemptIncomeMinorUnits = 0,
         public string $taxDetailStatus = self::TAX_DETAIL_NOT_RECORDED,
+        /**
+         * § 38j odst. 2 písm. f) bod 6 — „měsíční daňové zvýhodnění, měsíční
+         * slevu na dani podle § 35c, měsíční daňový bonus a zálohu sníženou
+         * o měsíční slevu na dani podle § 35ba a 35c".
+         *
+         * Bod 6 vyjmenovává Čtyři údaje, ne tři. „Měsíční daňové zvýhodnění"
+         * je NÁROK podle § 35c odst. 1; „měsíční sleva na dani podle § 35c"
+         * je jen ta jeho část, která se vešla do daně (§ 35c odst. 2), a bonus
+         * je část náležející podle § 35c odst. 3. Když nárok není pokrytý
+         * daní a zároveň není nárok na bonus, nesejdou se — a právě ten rozdíl
+         * doklad bez téhle položky zamlčel.
+         */
+        public int $childEntitlementMinorUnits = 0,
+        public string $childDetailStatus = self::CHILD_DETAIL_NOT_RECORDED,
     ) {
         if ($month < 1 || $month > 12 || $sourceRevisionCount <= 0) {
             throw new \InvalidArgumentException('Měsíční řádek mzdového listu nemá platné období.');
@@ -71,6 +95,30 @@ final readonly class PayrollSheetMonth
             self::TAX_DETAIL_NOT_RECORDED,
         ], true)) {
             throw new \InvalidArgumentException('Stav daňových údajů měsíce není platný.');
+        }
+        if (!in_array($childDetailStatus, [
+            self::CHILD_DETAIL_RECORDED,
+            self::CHILD_DETAIL_NOT_RECORDED,
+        ], true)) {
+            throw new \InvalidArgumentException(
+                'Stav údajů o daňovém zvýhodnění měsíce není platný.',
+            );
+        }
+        if ($childDetailStatus === self::CHILD_DETAIL_NOT_RECORDED
+            && $childEntitlementMinorUnits !== 0
+        ) {
+            throw new \InvalidArgumentException(
+                'Neevidované daňové zvýhodnění měsíce nesmí nést částku.',
+            );
+        }
+        if ($childDetailStatus === self::CHILD_DETAIL_RECORDED
+            && $childEntitlementMinorUnits < $childCreditMinorUnits + $taxBonusMinorUnits
+        ) {
+            // Sleva a bonus jsou ČÁSTI nároku (§ 35c odst. 2 a 3). Kdyby je nárok
+            // nepokryl, doklad by tvrdil, že se uplatnilo víc, než na co byl nárok.
+            throw new \InvalidArgumentException(
+                'Uplatněná sleva a bonus převyšují měsíční daňové zvýhodnění.',
+            );
         }
         if ($taxDetailStatus === self::TAX_DETAIL_NOT_RECORDED
             && ($taxExemptIncomeMinorUnits !== 0 || $withholdingTaxBaseMinorUnits !== 0)
@@ -122,6 +170,7 @@ final readonly class PayrollSheetMonth
             'withholding_tax_base_minor_units' => $this->withholdingTaxBaseMinorUnits,
             'advance_tax_before_credits_minor_units' => $this->advanceTaxBeforeCreditsMinorUnits,
             'non_refundable_credits_minor_units' => $this->nonRefundableCreditsMinorUnits,
+            'child_entitlement_minor_units' => $this->childEntitlementMinorUnits,
             'child_credit_minor_units' => $this->childCreditMinorUnits,
             'advance_tax_minor_units' => $this->advanceTaxMinorUnits,
             'tax_bonus_minor_units' => $this->taxBonusMinorUnits,
@@ -137,6 +186,11 @@ final readonly class PayrollSheetMonth
         return $this->taxDetailStatus === self::TAX_DETAIL_RECORDED;
     }
 
+    public function childDetailRecorded(): bool
+    {
+        return $this->childDetailStatus === self::CHILD_DETAIL_RECORDED;
+    }
+
     /** @return array<string,int|string> */
     public function toTemplateData(): array
     {
@@ -145,6 +199,7 @@ final readonly class PayrollSheetMonth
             'source_revision_count' => $this->sourceRevisionCount,
             ...$this->amounts(),
             'tax_detail_status' => $this->taxDetailStatus,
+            'child_detail_status' => $this->childDetailStatus,
         ];
     }
 }

@@ -30,6 +30,7 @@
     .line-table tr.total td { padding-top: 1.8mm; border-top: 0.5pt solid #98466F; border-bottom: 0; font-weight: bold; }
     .line-table tr.credit td { color: #3E6B54; }
     .line-table tr.muted td { color: #7D6E78; }
+    .statute { color: #7D6E78; font-size: 7.2pt; }
     .net-box { margin: 4mm 0; background: #FAF1F6; border: 0.7pt solid #98466F; padding: 3.5mm 4mm; }
     .net-table { width: 100%; border-collapse: collapse; }
     .net-table td { padding: 0; vertical-align: middle; }
@@ -86,13 +87,21 @@
                 <table class="line-table">
                     {% for line in income_lines %}
                     <tr>
-                        <td>{{ line.label }}</td>
+                        <td>{{ line.label }}{% if line.exemption_statute %}<br><span class="statute">nezdaňuje se podle {{ line.exemption_statute }}{% if line.exempt_part_minor_units != line.amount_minor_units %} v částce {{ line.exempt_part_minor_units|minor_money }} {{ currency }}{% endif %}</span>{% endif %}</td>
                         <td class="amount">{{ line.amount_minor_units|minor_money }} {{ currency }}</td>
                     </tr>
                     {% endfor %}
                     <tr class="total">
                         <td>Hrubá mzda</td>
                         <td class="amount">{{ gross_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    <tr class="muted">
+                        <td>z toho osvobozeno od daně (§ 6 odst. 9 ZDP)</td>
+                        <td class="amount">{{ income_detail_status == 'recorded' ? tax_exempt_income_minor_units|minor_money ~ ' ' ~ currency : 'neevidováno' }}</td>
+                    </tr>
+                    <tr class="muted">
+                        <td>z toho není předmětem daně (§ 6 odst. 7 ZDP)</td>
+                        <td class="amount">{{ income_detail_status == 'recorded' ? not_subject_to_tax_income_minor_units|minor_money ~ ' ' ~ currency : 'neevidováno' }}</td>
                     </tr>
                 </table>
             </div>
@@ -239,7 +248,13 @@
                 {{ accounting.employer_insurance }}. Výplatní páska je informační doklad, samotný
                 účetní zápis vzniká odděleně z uzavřené mzdové revize.<br>
                 <strong>Zaokrouhlení:</strong> výpočet pracuje v haléřích bez plovoucí desetinné
-                aritmetiky. Zaokrouhlovací rozdíl je samostatně uveden a je zahrnut v čisté mzdě.
+                aritmetiky. Zaokrouhlovací rozdíl je samostatně uveden a je zahrnut v čisté mzdě.<br>
+                <strong>Nezdaněné složky:</strong> obě částky „z toho" jsou podmnožinou hrubé mzdy,
+                nepřičítají se. Osvobozená částka je táž, kterou mzdový list uvádí podle § 38j
+                odst. 2 písm. f) bodu 2 ZDP; plnění mimo předmět daně podle § 6 odst. 7 ZDP mezi
+                osvobozené částky nepatří a mzdový list ho tam neuvádí. Údaj „neevidováno" znamená,
+                že páska vznikla nad starším snapshotem běhu, který podklad nezdanění nenesl.
+                Doklad se vydává podle § 142 odst. 6 zákoníku práce.
             </div>
         </td>
     </tr>

@@ -5,11 +5,19 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Document;
 
 use MyInvoice\Service\Payroll\Calculation\Money;
+use MyInvoice\Service\Payroll\Component\PayrollExemptIncomeSplit;
 use MyInvoice\Service\Payroll\Insurance\EmployerSocialInsuranceAllocation;
 
 final class PayslipDocumentSnapshotMapper
 {
-    private const SCHEMA_VERSION = 'payroll-payslip-document.v1';
+    /**
+     * Mapování v2 doplňuje podklad nezdanění u jednotlivých složek mzdy.
+     *
+     * Verze je součástí zmrazeného výsledku osoby, takže nová páska vzniká jen
+     * novým během. Už archivovaná páska se tím nemění: její snapshot zůstává
+     * v1 a hydrátor ho vydá jako neevidovaný údaj, ne jako nulu.
+     */
+    private const SCHEMA_VERSION = 'payroll-payslip-document.v2';
 
     /**
      * @param array<string,mixed> $snapshot
@@ -345,6 +353,7 @@ final class PayslipDocumentSnapshotMapper
                 $this->account($accounts, 'employer_insurance_debit'),
             insuranceLiabilityAccount: $insuranceLiability,
             annualSettlementMinorUnits: $annualSettlement,
+            incomeDetailStatus: PayslipDocumentData::INCOME_DETAIL_RECORDED,
         );
 
         return $this->snapshot($document);
@@ -444,9 +453,19 @@ final class PayslipDocumentSnapshotMapper
                 );
                 $sourceAmount = $this->int($totals, 'source_amount_minor');
                 $cashAmount = $this->int($totals, 'cash_payable_minor');
+                // Tentýž rozpad, ze kterého mzdový list sestavuje § 38j odst. 2
+                // písm. f) bod 2. Sdílený, aby se oba doklady o téže mzdě
+                // nemohly rozejít.
+                $split = PayrollExemptIncomeSplit::fromFrozenInput(
+                    $input,
+                    $sourceAmount,
+                    $inputId,
+                );
                 $incomeLines[] = new PayslipLine(
                     $this->requiredText($component, 'name'),
                     $sourceAmount,
+                    $split->basis,
+                    $split->exemptMinorUnits,
                 );
                 $gross = $gross->add(new Money($sourceAmount));
                 $cash = $cash->add(new Money($cashAmount));
@@ -822,6 +841,7 @@ final class PayslipDocumentSnapshotMapper
             'insurance_expense_account' => $document->insuranceExpenseAccount,
             'insurance_liability_account' => $document->insuranceLiabilityAccount,
             'currency' => $document->currency,
+            'income_detail_status' => $document->incomeDetailStatus,
         ];
     }
 

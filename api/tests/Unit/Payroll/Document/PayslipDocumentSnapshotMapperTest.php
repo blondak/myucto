@@ -17,15 +17,28 @@ final class PayslipDocumentSnapshotMapperTest extends TestCase
         );
 
         $document = $result['people'][0]['payslip_document'];
-        self::assertSame('payroll-payslip-document.v1', $document['schema_version']);
+        self::assertSame('payroll-payslip-document.v2', $document['schema_version']);
         self::assertSame('Syntetická společnost s.r.o.', $document['employer_name']);
         self::assertSame('00000000', $document['employer_identification_number']);
         self::assertSame('Syntetická Osoba', $document['employee_display_name']);
         self::assertSame('Pracovní poměr', $document['employment_label']);
         self::assertSame([
-            ['label' => 'Základní mzda', 'amount_minor_units' => 4_800_000],
-            ['label' => 'Korekce minulého období', 'amount_minor_units' => -10_000],
+            [
+                'label' => 'Základní mzda',
+                'amount_minor_units' => 4_800_000,
+                'exemption_basis' => null,
+                'exemption_statute' => null,
+                'exempt_part_minor_units' => 0,
+            ],
+            [
+                'label' => 'Korekce minulého období',
+                'amount_minor_units' => -10_000,
+                'exemption_basis' => null,
+                'exemption_statute' => null,
+                'exempt_part_minor_units' => 0,
+            ],
         ], $document['income_lines']);
+        self::assertSame('recorded', $document['income_detail_status']);
         self::assertSame(4_790_000, $document['gross_minor_units']);
         self::assertSame(340_100, $document['employee_social_minor_units']);
         self::assertSame(215_600, $document['employee_health_minor_units']);
@@ -34,7 +47,13 @@ final class PayslipDocumentSnapshotMapperTest extends TestCase
         self::assertSame(431_100, $document['employer_health_minor_units']);
         self::assertSame(4_790_100, $document['tax_base_minor_units']);
         self::assertSame([
-            ['label' => 'Syntetická srážka', 'amount_minor_units' => 8_000],
+            [
+                'label' => 'Syntetická srážka',
+                'amount_minor_units' => 8_000,
+                'exemption_basis' => null,
+                'exemption_statute' => null,
+                'exempt_part_minor_units' => 0,
+            ],
         ], $document['other_deduction_lines']);
         self::assertSame(4_276_300, $document['net_minor_units']);
         self::assertSame('521', $document['gross_expense_account']);
@@ -267,10 +286,19 @@ final class PayslipDocumentSnapshotMapperTest extends TestCase
         $document = $attached['people'][0]['payslip_document'];
 
         self::assertSame([
-            ['label' => 'Syntetická srážka', 'amount_minor_units' => 8_000],
+            [
+                'label' => 'Syntetická srážka',
+                'amount_minor_units' => 8_000,
+                'exemption_basis' => null,
+                'exemption_statute' => null,
+                'exempt_part_minor_units' => 0,
+            ],
             [
                 'label' => 'Exekuční a insolvenční srážky',
                 'amount_minor_units' => 100_000,
+                'exemption_basis' => null,
+                'exemption_statute' => null,
+                'exempt_part_minor_units' => 0,
             ],
         ], $document['other_deduction_lines']);
         self::assertSame(4_176_300, $document['net_minor_units']);
