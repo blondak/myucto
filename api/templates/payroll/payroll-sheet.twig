@@ -158,7 +158,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <th class="first">Měsíc</th>
       <th>Zálohový<br>základ</th>
       <th>Daň před<br>slevami</th>
-      <th>Nezdanitelné<br>slevy</th>
+      <th>Uplatněná sleva<br>§ 35ba</th>
       <th>Nárok na<br>zvýhodnění</th>
       <th>Uplatněná sleva<br>§ 35c</th>
       <th>Sražená<br>záloha</th>
@@ -174,7 +174,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <td class="first">{{ names[month.month - 1] }}</td>
       <td>{{ month.advance_tax_base_minor_units|minor_money }}</td>
       <td>{{ month.advance_tax_before_credits_minor_units|minor_money }}</td>
-      <td>{{ month.non_refundable_credits_minor_units|minor_money }}</td>
+      <td>{{ month.non_refundable_credits_minor_units|minor_money }}{{ month.credit_detail_status == 'applied' ? '' : '*' }}</td>
       <td>{{ month.child_detail_status == 'recorded' ? month.child_entitlement_minor_units|minor_money : 'neevidováno' }}</td>
       <td>{{ month.child_credit_minor_units|minor_money }}</td>
       <td>{{ month.advance_tax_minor_units|minor_money }}</td>
@@ -190,7 +190,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <td class="first">Celkem</td>
       <td>{{ totals.advance_tax_base_minor_units|minor_money }}</td>
       <td>{{ totals.advance_tax_before_credits_minor_units|minor_money }}</td>
-      <td>{{ totals.non_refundable_credits_minor_units|minor_money }}</td>
+      <td>{{ totals.non_refundable_credits_minor_units|minor_money }}{{ credit_detail_complete ? '' : '*' }}</td>
       <td>{{ child_detail_complete ? totals.child_entitlement_minor_units|minor_money : 'neúplné' }}</td>
       <td>{{ totals.child_credit_minor_units|minor_money }}</td>
       <td>{{ totals.advance_tax_minor_units|minor_money }}</td>
@@ -270,9 +270,17 @@ doplatek po skončení se v jednom měsíci sčítají; počet zahrnutých reviz
 Roční zúčtování se v tomto dokumentu nedopočítává — hodnoty jsou převzaté ze samostatně
 schválené roční revize, na kterou doklad odkazuje otiskem. Sloupec „nárok na zvýhodnění" je
 měsíční daňové zvýhodnění podle § 35c odst. 1; sleva a bonus vedle něj jsou jeho části podle
-§ 35c odst. 2 a 3, ne další nárok. Sloupec „osvobozeno od daně" je podmnožina hrubého příjmu,
-ne samostatné plnění — do čisté mzdy se nepřičítá. Údaj „neevidováno" znamená, že revize vznikla
-před mapováním, které osvobozené částky a základ srážkové daně zaznamenává; není to nula.
+§ 35c odst. 2 a 3, ne další nárok. Sloupec „uplatněná sleva § 35ba" je sleva poskytnutá podle
+§ 35d odst. 3 věty první, tedy nejvýše do výše zálohy; nárok, který se do zálohy nevešel,
+zákon nikam nepřevádí a bod 5 ho nežádá. Sloupec „osvobozeno od daně" je podmnožina hrubého
+příjmu, ne samostatné plnění — do čisté mzdy se nepřičítá. Údaj „neevidováno" znamená, že revize
+vznikla před mapováním, které daný údaj zaznamenává; není to nula. Týká se osvobozených částek
+a základu srážkové daně, a u revizí vydaných před mapováním v3 také nároku na daňové zvýhodnění
+a stavu ročního zúčtování.
+{% if not credit_detail_complete %}
+Hvězdička u slevy podle § 35ba označuje měsíce z revizí vydaných před mapováním v4, které
+do téhle kolonky zapisovaly nárok, ne poskytnutou slevu; u nízké mzdy je nárok vyšší.
+{% endif %}
 </div>
 <div class="audit">
 Renderer: <span class="mono">{{ renderer_version }}</span> · Chráněný otisk zdroje HMAC-SHA-256:

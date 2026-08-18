@@ -48,6 +48,14 @@ final readonly class PayrollBenefitBasketUsage implements \JsonSerializable
         public int $inputCount,
         public int $unfrozenCount,
         public int $negativeCount,
+        /**
+         * Akumulátory uvolněné stornem
+         * ({@see \MyInvoice\Repository\Payroll\PayrollInputRepository::reverseBenefit()}).
+         * Do `usedMinor` nevstupují — koš už nečerpají. Řádek je nese proto, aby
+         * šlo uvolněný koš odlišit od koše, který se nikdy nečerpal.
+         */
+        public int $reversedCount = 0,
+        public int $reversedMinor = 0,
     ) {}
 
     public function remainingMinor(): ?int
@@ -126,6 +134,8 @@ final readonly class PayrollBenefitBasketUsage implements \JsonSerializable
             'remaining_minor' => $this->remainingMinor(),
             'input_count' => $this->inputCount,
             'unfrozen_count' => $this->unfrozenCount,
+            'reversed_count' => $this->reversedCount,
+            'reversed_minor' => $this->reversedMinor,
             'status' => $this->status(),
             'split_drift' => $this->splitDrift(),
         ];

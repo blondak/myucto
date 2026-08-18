@@ -29,6 +29,14 @@ use PDO;
  * Vstupy schválené dřív, než koše existovaly, mají rozpad NULL. Nedopočítávají
  * se: `unfrozen_count` je vypraví ven jako chybějící podklad a přehled to řekne
  * větou.
+ *
+ * Stornované akumulátory (`status = "reversed"`,
+ * {@see PayrollInputRepository::reverseBenefit()}) do čerpání NEVSTUPUJÍ — koš se
+ * jimi právě uvolnil. Ze součtů jsou proto vyloučené podmíněnou agregací, ale
+ * z přehledu vypadnout nesmějí: jinak by se koš, který se uvolnil, tvářil jako
+ * koš, který se nikdy nečerpal, a účetní by neměla kde ověřit, že storno
+ * proběhlo. Jdou ven jako `reversed_count` a `reversed_minor` a řádek se drží
+ * i tehdy, když po stornu nezůstal jediný aktivní akumulátor.
  */
 final class PayrollBenefitBasketOverviewRepository
 {
@@ -108,6 +116,8 @@ final class PayrollBenefitBasketOverviewRepository
                       totals.input_count,
                       totals.unfrozen_count,
                       totals.negative_count,
+                      totals.reversed_count,
+                      totals.reversed_minor,
                       ' . PayrollPeopleRepository::fullNameExpression() . ' AS employee_name
                  FROM basket_totals totals
                  JOIN payroll_employees employee
@@ -158,6 +168,14 @@ final class PayrollBenefitBasketOverviewRepository
                     $row['negative_count'] ?? null,
                     'negative_count',
                 ),
+                'reversed_count' => PayrollTimeValue::int(
+                    $row['reversed_count'] ?? null,
+                    'reversed_count',
+                ),
+                'reversed_minor' => PayrollTimeValue::int(
+                    $row['reversed_minor'] ?? null,
+                    'reversed_minor',
+                ),
             ];
         }
 
@@ -181,7 +199,7 @@ final class PayrollBenefitBasketOverviewRepository
                  ON component.supplier_id = accumulator.supplier_id
                 AND component.id = accumulator.component_id
               WHERE accumulator.supplier_id = ?
-                AND accumulator.status = "active"
+                AND accumulator.status IN ("active", "reversed")
                 AND component.exemption_basket IN (' . self::ANNUAL_BASKETS . ')
               ORDER BY accumulator.tax_year DESC'
         );
@@ -203,14 +221,26 @@ final class PayrollBenefitBasketOverviewRepository
         return 'WITH basket_totals AS (
                     SELECT accumulator.employee_id AS employee_id,
                            component.exemption_basket AS basket,
-                           SUM(accumulator.amount_minor) AS used_minor,
-                           SUM(COALESCE(input.benefit_exempt_minor, 0)) AS exempt_minor,
-                           SUM(COALESCE(input.benefit_taxable_minor, 0)) AS taxable_minor,
-                           COUNT(*) AS input_count,
-                           SUM(CASE WHEN input.benefit_basket IS NULL THEN 1 ELSE 0 END)
-                               AS unfrozen_count,
-                           SUM(CASE WHEN accumulator.amount_minor < 0 THEN 1 ELSE 0 END)
-                               AS negative_count
+                           SUM(CASE WHEN accumulator.status = "active"
+                                    THEN accumulator.amount_minor ELSE 0 END) AS used_minor,
+                           SUM(CASE WHEN accumulator.status = "active"
+                                    THEN COALESCE(input.benefit_exempt_minor, 0)
+                                    ELSE 0 END) AS exempt_minor,
+                           SUM(CASE WHEN accumulator.status = "active"
+                                    THEN COALESCE(input.benefit_taxable_minor, 0)
+                                    ELSE 0 END) AS taxable_minor,
+                           SUM(CASE WHEN accumulator.status = "active" THEN 1 ELSE 0 END)
+                               AS input_count,
+                           SUM(CASE WHEN accumulator.status = "active"
+                                     AND input.benefit_basket IS NULL
+                                    THEN 1 ELSE 0 END) AS unfrozen_count,
+                           SUM(CASE WHEN accumulator.status = "active"
+                                     AND accumulator.amount_minor < 0
+                                    THEN 1 ELSE 0 END) AS negative_count,
+                           SUM(CASE WHEN accumulator.status = "reversed" THEN 1 ELSE 0 END)
+                               AS reversed_count,
+                           SUM(CASE WHEN accumulator.status = "reversed"
+                                    THEN accumulator.amount_minor ELSE 0 END) AS reversed_minor
                       FROM payroll_benefit_accumulators accumulator
                       JOIN payroll_component_definitions component
                         ON component.supplier_id = accumulator.supplier_id
@@ -220,7 +250,7 @@ final class PayrollBenefitBasketOverviewRepository
                        AND input.id = accumulator.input_id
                      WHERE accumulator.supplier_id = ?
                        AND accumulator.tax_year = ?
-                       AND accumulator.status = "active"
+                       AND accumulator.status IN ("active", "reversed")
                        AND component.exemption_basket IN (' . self::ANNUAL_BASKETS . ')'
                        . $basketClause . '
                      GROUP BY accumulator.employee_id, component.exemption_basket

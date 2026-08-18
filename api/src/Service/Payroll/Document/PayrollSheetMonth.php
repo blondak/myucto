@@ -26,6 +26,19 @@ final readonly class PayrollSheetMonth
      */
     public const CHILD_DETAIL_NOT_RECORDED = 'not_recorded';
 
+    /**
+     * Sleva podle § 35ba je v měsíci UPLATNĚNÁ, tedy omezená výší zálohy podle
+     * § 35d odst. 3 věty první. Jen tak dává bod 5 smysl jako celek.
+     */
+    public const CREDIT_DETAIL_APPLIED = 'applied';
+
+    /**
+     * Revize vznikla nad mapováním, které do dokladu tisklo NÁROKOVANOU slevu
+     * podle § 35ba. U nízké mzdy je vyšší než ta poskytnutá; zpětně se rozdíl
+     * z dokladu nedopočítá, protože nárok nad zálohu nemá kam jít.
+     */
+    public const CREDIT_DETAIL_CLAIMED = 'claimed';
+
     public function __construct(
         public int $month,
         public int $sourceRevisionCount,
@@ -41,6 +54,22 @@ final readonly class PayrollSheetMonth
         public int $healthMinimumTopUpMinorUnits,
         public int $advanceTaxBaseMinorUnits,
         public int $advanceTaxBeforeCreditsMinorUnits,
+        /**
+         * § 38j odst. 2 písm. f) bod 5 — „měsíční slevu na dani podle § 35ba
+         * a zálohu sníženou o měsíční slevu na dani podle § 35ba".
+         *
+         * Je to UPLATNĚNÁ sleva, ne nárok. „Měsíční sleva na dani podle § 35ba"
+         * je legální zkratka zavedená v § 35d odst. 2 a hned v odst. 3 větě
+         * první omezená: plátce ji poskytne „maximálně do výše zálohy na daň
+         * vypočtené podle § 38h odst. 2 a 3". Nárok nad tuhle hranici zákon
+         * nepojmenovává a nikam ho nepřevádí — na rozdíl od § 35c, kde přebytek
+         * nároku končí bonusem, a právě proto bod 6 vypisuje nárok i uplatnění
+         * odděleně, kdežto bod 5 jen jedno číslo.
+         *
+         * Rozhoduje i druhá polovina bodu 5: záloha snížená o tuhle slevu se
+         * musí rovnat sražené záloze. S nárokovanou částkou by u nízké mzdy
+         * vyšla záporná a doklad by si protiřečil sám se sebou.
+         */
         public int $nonRefundableCreditsMinorUnits,
         public int $childCreditMinorUnits,
         public int $advanceTaxMinorUnits,
@@ -81,6 +110,7 @@ final readonly class PayrollSheetMonth
          */
         public int $childEntitlementMinorUnits = 0,
         public string $childDetailStatus = self::CHILD_DETAIL_NOT_RECORDED,
+        public string $creditDetailStatus = self::CREDIT_DETAIL_CLAIMED,
     ) {
         if ($month < 1 || $month > 12 || $sourceRevisionCount <= 0) {
             throw new \InvalidArgumentException('Měsíční řádek mzdového listu nemá platné období.');
@@ -118,6 +148,26 @@ final readonly class PayrollSheetMonth
             // nepokryl, doklad by tvrdil, že se uplatnilo víc, než na co byl nárok.
             throw new \InvalidArgumentException(
                 'Uplatněná sleva a bonus převyšují měsíční daňové zvýhodnění.',
+            );
+        }
+        if (!in_array($creditDetailStatus, [
+            self::CREDIT_DETAIL_APPLIED,
+            self::CREDIT_DETAIL_CLAIMED,
+        ], true)) {
+            throw new \InvalidArgumentException(
+                'Stav údajů o slevě podle § 35ba měsíce není platný.',
+            );
+        }
+        if ($creditDetailStatus === self::CREDIT_DETAIL_APPLIED
+            && $nonRefundableCreditsMinorUnits + $childCreditMinorUnits
+                > $advanceTaxBeforeCreditsMinorUnits
+        ) {
+            // § 35d odst. 3: sleva podle § 35ba se poskytne do výše zálohy
+            // a sleva podle § 35c do výše zálohy o ni snížené. Součet obou
+            // proto zálohu před slevami nikdy nepřevýší; kdyby ano, „záloha
+            // snížená o měsíční slevu" podle bodů 5 a 6 by byla záporná.
+            throw new \InvalidArgumentException(
+                'Uplatněné slevy převyšují zálohu na daň před slevami.',
             );
         }
         if ($taxDetailStatus === self::TAX_DETAIL_NOT_RECORDED
@@ -191,6 +241,11 @@ final readonly class PayrollSheetMonth
         return $this->childDetailStatus === self::CHILD_DETAIL_RECORDED;
     }
 
+    public function creditDetailApplied(): bool
+    {
+        return $this->creditDetailStatus === self::CREDIT_DETAIL_APPLIED;
+    }
+
     /** @return array<string,int|string> */
     public function toTemplateData(): array
     {
@@ -200,6 +255,7 @@ final readonly class PayrollSheetMonth
             ...$this->amounts(),
             'tax_detail_status' => $this->taxDetailStatus,
             'child_detail_status' => $this->childDetailStatus,
+            'credit_detail_status' => $this->creditDetailStatus,
         ];
     }
 }

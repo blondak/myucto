@@ -73,6 +73,8 @@ final class PayrollBenefitBasketOverviewService
                 inputCount: (int) $row['input_count'],
                 unfrozenCount: (int) $row['unfrozen_count'],
                 negativeCount: (int) $row['negative_count'],
+                reversedCount: (int) $row['reversed_count'],
+                reversedMinor: (int) $row['reversed_minor'],
             );
         }
 

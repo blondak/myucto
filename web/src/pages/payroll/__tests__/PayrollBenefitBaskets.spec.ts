@@ -56,6 +56,8 @@ function usage(overrides: Partial<BenefitBasketUsage> = {}): BenefitBasketUsage 
     remaining_minor: 1_448_350,
     input_count: 1,
     unfrozen_count: 0,
+    reversed_count: 0,
+    reversed_minor: 0,
     status: 'ok',
     split_drift: false,
     ...overrides,

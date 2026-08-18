@@ -40,6 +40,8 @@ final class PayrollSheetSnapshotBuilderTest extends TestCase
                         'child_credit_minor_units' => 0,
                     ],
                     'withholding_base_minor_units' => 5_000,
+                    'claimed_non_refundable_credits_minor_units' => 2_570,
+                    'applied_non_refundable_credits_minor_units' => 2_570,
                     'claimed_child_credit_minor_units' => 1_267,
                     'applied_child_credit_minor_units' => 0,
                 ],
@@ -67,5 +69,6 @@ final class PayrollSheetSnapshotBuilderTest extends TestCase
         self::assertSame(1_267, $amounts['child_entitlement_minor_units']);
         self::assertSame(3_000, $amounts['other_deductions_minor_units']);
         self::assertSame(73_570, $amounts['net_payable_minor_units']);
+        self::assertSame(2_570, $amounts['non_refundable_credits_minor_units']);
     }
 }

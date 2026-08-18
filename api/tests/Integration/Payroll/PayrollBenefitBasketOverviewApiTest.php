@@ -478,11 +478,14 @@ final class PayrollBenefitBasketOverviewApiTest extends TestCase
         $reversed = PayrollTimeValue::row($this->json($response)['input'] ?? null, 'input');
         self::assertSame('cancelled', $reversed['status']);
 
-        self::assertSame(
-            [],
-            $this->rows($this->fetch(['year' => '2026'])),
-            'Stornovaný akumulátor už nesmí koš čerpat.',
-        );
+        // Storno koš uvolní, ale z přehledu vypadnout nesmí: uvolněný koš by
+        // se jinak nedal odlišit od koše, který se nikdy nečerpal.
+        $released = $this->rows($this->fetch(['year' => '2026']));
+        self::assertCount(1, $released);
+        self::assertSame(0, $released[0]['used_minor'], 'Stornovaný akumulátor už nesmí koš čerpat.');
+        self::assertSame(0, $released[0]['input_count']);
+        self::assertSame(1, $released[0]['reversed_count']);
+        self::assertSame(900_000, $released[0]['reversed_minor']);
         self::assertSame('reversed', $this->accumulatorStatus($inputId));
         self::assertSame(
             900_000,
@@ -495,6 +498,7 @@ final class PayrollBenefitBasketOverviewApiTest extends TestCase
         $row = $this->rows($this->fetch(['year' => '2026']))[0];
         self::assertSame(self::LEISURE_LIMIT_MINOR, $row['used_minor']);
         self::assertSame(0, $row['taxable_minor']);
+        self::assertSame(1, $row['reversed_count']);
     }
 
     /** Druhé storno už jen vrátí stav — akumulátor se nesmí stornovat dvakrát. */
