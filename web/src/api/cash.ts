@@ -87,6 +87,12 @@ export interface CashBookItem {
   income: number | null; expense: number | null; balance: number
   document_id: number | null; entry_id: number
 }
+/** Filtry pokladní knihy — `q`/`doc_type`/`purpose` zužují jen řádky, zůstatky a obraty zůstávají za období. */
+export interface CashBookFilters {
+  from: string; to: string
+  q?: string; doc_type?: CashDocType | ''; purpose?: CashPurpose | ''
+  page?: number; per_page?: number
+}
 export interface CashBookReport {
   register: CashRegister; opening_balance: number; items: CashBookItem[]
   income_total: number; expense_total: number; closing_balance: number
@@ -128,8 +134,9 @@ export const cashApi = {
   // Zaúčtování draftu (přidělí číslo řady a založí deníkový zápis).
   postDocument: (id: number) =>
     api.post<CashDocumentPostResult>(`/accounting/cash-documents/${id}/post`).then(r => r.data),
+  // Storno vrací varování stejně jako zaúčtování (posunutý protizápis, záporná pokladna).
   reverseDocument: (id: number, reason: string, entryDate?: string) =>
-    api.post<{ reversal_entry_id: number }>(
+    api.post<{ reversal_entry_id: number | null; warnings: string[] }>(
       `/accounting/cash-documents/${id}/reverse`, { reason, entry_date: entryDate }).then(r => r.data),
   // force=1 → smaže doklad i s účetními zápisy (bez force jen draft).
   deleteDocument: (id: number, force = false) =>
@@ -140,8 +147,13 @@ export const cashApi = {
     api.get<UnpaidDocumentOption[]>('/accounting/cash-documents/unpaid',
       { params: { kind, q, limit } }).then(r => r.data),
 
-  getBook: (registerId: number, params: { from: string; to: string; page?: number; per_page?: number }) =>
+  getBook: (registerId: number, params: CashBookFilters) =>
     api.get<CashBookReport>(`/accounting/cash-registers/${registerId}/book`, { params }).then(r => r.data),
-  bookPdfUrl: (registerId: number, from: string, to: string) =>
-    `/api/accounting/cash-registers/${registerId}/book/pdf?from=${from}&to=${to}`,
+  bookPdfUrl: (registerId: number, f: CashBookFilters) => {
+    const qs = new URLSearchParams({ from: f.from, to: f.to })
+    if (f.q) qs.set('q', f.q)
+    if (f.doc_type) qs.set('doc_type', f.doc_type)
+    if (f.purpose) qs.set('purpose', f.purpose)
+    return `/api/accounting/cash-registers/${registerId}/book/pdf?${qs.toString()}`
+  },
 }

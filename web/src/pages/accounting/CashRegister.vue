@@ -226,8 +226,11 @@ async function submitReverse() {
   if (reverseReason.value.trim().length < 3) { reverseError.value = t('cash.validation.reason'); return }
   reverseSaving.value = true
   try {
-    await cashApi.reverseDocument(reverseTarget.value.id, reverseReason.value.trim(), reverseDate.value || undefined)
+    const res = await cashApi.reverseDocument(reverseTarget.value.id, reverseReason.value.trim(), reverseDate.value || undefined)
     toast.success(t('common.saved'))
+    // M-14: storno hlásí posunutý protizápis i zápornou pokladnu — bez tohohle
+    // se o obojím uživatel dozvěděl až z knihy.
+    for (const w of res.warnings ?? []) toast.warning(cashWarningMessage(w, t))
     reverseTarget.value = null
     await loadRegisters()
     await load()

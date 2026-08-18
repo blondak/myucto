@@ -316,7 +316,14 @@ final class CashDocumentService
      * Storno zaúčtovaného dokladu (protizápis + úklid vazeb). `meta.reason` povinný.
      * V daňové evidenci (DE §6) je storno bez protizápisu → `reversal_entry_id` null.
      *
-     * @return array{reversal_entry_id:?int}
+     * M-14: storno vrací `warnings` stejným kanálem jako zaúčtování — dvě situace,
+     * které jinak proběhnou tiše a uživatel je zjistí až v knize:
+     *  - protizápis skončil u JINÉHO data než původní zápis (H-2/H-3: PostingService
+     *    ho posune do otevřeného data, když je původní období zamčené),
+     *  - po stornu je pokladna v mínusu (stornem příjmu se z pokladny odebírají peníze,
+     *    které už mohly být vydané dalšími doklady).
+     *
+     * @return array{reversal_entry_id:?int, warnings:list<string>}
      */
     public function reverse(int $supplierId, int $id, array $meta, ?int $userId): array
     {
@@ -394,10 +401,12 @@ final class CashDocumentService
                 $this->documents->markReversed($id, $reversalId);
             }
 
+            $warnings = $this->collectReversalWarnings($supplierId, $doc, $reversalId);
+
             if ($ownTx) {
                 $pdo->commit();
             }
-            return ['reversal_entry_id' => $reversalId];
+            return ['reversal_entry_id' => $reversalId, 'warnings' => $warnings];
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -768,6 +777,56 @@ final class CashDocumentService
         ) {
             $warnings[] = 'cash.warning.fx_rate_deviation';
         }
+        return $warnings;
+    }
+
+    /**
+     * M-14: varování ke STORNU. Volá se uvnitř transakce po `markReversed*()`, takže
+     * zůstatek už vidí stav po stornu.
+     *
+     * `reversal_date_shifted` je jediná zpětná vazba na chování B8 v
+     * {@see PostingService::reverse()} — protizápis se do otevřeného data posune
+     * potichu a bez tohohle varování se uživatel o rozdílu dozví až z deníku.
+     *
+     * @param array<string,mixed> $doc doklad ve stavu PŘED stornem (z lockForPost)
+     * @return list<string>
+     */
+    private function collectReversalWarnings(int $supplierId, array $doc, ?int $reversalId): array
+    {
+        $warnings = [];
+
+        if ($reversalId !== null && $doc['journal_entry_id'] !== null) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT (SELECT entry_date FROM journal_entries WHERE id = ? AND supplier_id = ?) AS reversal_date,
+                        (SELECT entry_date FROM journal_entries WHERE id = ? AND supplier_id = ?) AS original_date'
+            );
+            $stmt->execute([$reversalId, $supplierId, (int) $doc['journal_entry_id'], $supplierId]);
+            $dates = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+            if (($dates['reversal_date'] ?? null) !== null && ($dates['original_date'] ?? null) !== null
+                && (string) $dates['reversal_date'] !== (string) $dates['original_date']
+            ) {
+                $warnings[] = 'cash.warning.reversal_date_shifted';
+            }
+        }
+
+        // Zůstatek se čte STEJNOU cestou jako u zaúčtování (M-1/L-7 — jedna definice),
+        // k datu původního dokladu: právě odtud se peníze stornem odebírají.
+        // Registr se hledá přes find() (ne requireActiveRegister) — deaktivovaná
+        // pokladna se stornovat smí a varování musí přijít i pro ni.
+        $register = $this->registers->find($supplierId, (int) $doc['register_id']);
+        $balance = $this->supplierAccountingMode($supplierId) === 'tax_evidence'
+            ? $this->cashRegisters->documentsSignedTotal(
+                $supplierId,
+                (int) $doc['register_id'],
+                (string) $doc['issue_date'],
+            )
+            : ($register !== null
+                ? $this->accountBalance($supplierId, (string) $register['account_code'], (string) $doc['issue_date'])
+                : 0.0);
+        if (self::cents($balance) < 0) {
+            $warnings[] = 'cash.warning.negative_balance_after_reverse';
+        }
+
         return $warnings;
     }
 
