@@ -11203,11 +11203,18 @@ paths:
     get:
       tags: [Accounting]
       summary: Pokladní kniha (opening + running balance + join na cash_documents, O8)
+      description: |
+        Filtry `q`/`doc_type`/`purpose` zužují jen vypsané řádky (a `total`).
+        Počáteční a konečný zůstatek i obraty se počítají za CELÉ období, nikdy
+        za výběr — jinak by filtr vyrobil zůstatek, který v knize neplatí.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
         - { in: query, name: from, schema: { type: string, format: date } }
         - { in: query, name: to, schema: { type: string, format: date } }
+        - { in: query, name: q, schema: { type: string }, description: "Fulltext přes popis, partnera a číslo dokladu" }
+        - { in: query, name: doc_type, schema: { type: string, enum: [in, out] } }
+        - { in: query, name: purpose, schema: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] } }
         - { in: query, name: page, schema: { type: integer } }
         - { in: query, name: per_page, schema: { type: integer } }
       responses:
@@ -11218,11 +11225,17 @@ paths:
     get:
       tags: [Accounting]
       summary: PDF pokladní knihy (podvojné účetnictví i daňová evidence)
+      description: |
+        Přijímá tytéž filtry jako `/book`, aby tisk odpovídal obrazovce. Obraty
+        a zůstatky zůstávají i v PDF za celé období.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
         - { in: query, name: from, schema: { type: string, format: date } }
         - { in: query, name: to, schema: { type: string, format: date } }
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: doc_type, schema: { type: string, enum: [in, out] } }
+        - { in: query, name: purpose, schema: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] } }
       responses:
         '200': { description: PDF, content: { application/pdf: { schema: { type: string, format: binary } } } }
 
@@ -11350,6 +11363,10 @@ paths:
         proto stornovat lze. Storno úhrady zálohové faktury, ze které už vznikla
         finální faktura nebo daňový doklad k přijaté platbě, se odmítne s kódem
         `cash.error.followup_document_exists` — navazující doklad je nutné zrušit dřív.
+
+        `warnings` nesou klíče `cash.warning.*`: `reversal_date_shifted` (protizápis
+        skončil u jiného data než původní zápis) a `negative_balance_after_reverse`
+        (pokladna je po stornu v mínusu). Nejsou to chyby — storno proběhlo.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -11357,7 +11374,7 @@ paths:
         required: true
         content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3 }, entry_date: { type: string, format: date, description: "Datum protizápisu; vynechte, ať se použije datum původního zápisu" } } } } }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { reversal_entry_id: { type: integer } } } } } }
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { reversal_entry_id: { type: [integer, "null"] }, warnings: { type: array, items: { type: string } } } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: "Z úhrady zálohy už vznikl navazující doklad (`cash.error.followup_document_exists`), nebo je uzamčené i datum protizápisu (`cash.error.date_locked`)." }
         '422': { $ref: '#/components/responses/ValidationFailed' }

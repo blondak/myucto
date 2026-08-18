@@ -2,7 +2,7 @@
 import { ref, onMounted, reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
-import { cashApi, type CashRegister, type CashBookReport, type CashBookItem } from '@/api/cash'
+import { cashApi, type CashRegister, type CashBookReport, type CashBookItem, type CashPurpose } from '@/api/cash'
 import { cashErrorMessage } from '@/api/cashErrors'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
@@ -32,14 +32,29 @@ function defaultRange(): { from: string; to: string } {
   const year = new Date().getFullYear()
   return { from: `${year}-01-01`, to: new Date().toISOString().slice(0, 10) }
 }
-const filters = reactive({ from: defaultRange().from, to: defaultRange().to })
+const filters = reactive<{ from: string; to: string; q: string; doc_type: '' | 'in' | 'out'; purpose: '' | CashPurpose }>({
+  from: defaultRange().from, to: defaultRange().to, q: '', doc_type: '', purpose: '',
+})
+const PURPOSES: CashPurpose[] = ['sale', 'purchase', 'invoice_payment', 'purchase_payment', 'transfer', 'other']
+const filtersActive = computed(() => filters.q !== '' || filters.doc_type !== '' || filters.purpose !== '')
+
+function resetFilters() {
+  const r = defaultRange()
+  filters.from = r.from; filters.to = r.to
+  filters.q = ''; filters.doc_type = ''; filters.purpose = ''
+  applyFilters()
+}
 
 async function load() {
   if (registerId.value === '') return
   loading.value = true
   try {
     report.value = await cashApi.getBook(Number(registerId.value), {
-      from: filters.from, to: filters.to, page: page.value, per_page: perPage.value,
+      from: filters.from, to: filters.to,
+      q: filters.q || undefined,
+      doc_type: filters.doc_type || undefined,
+      purpose: filters.purpose || undefined,
+      page: page.value, per_page: perPage.value,
     })
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
@@ -82,7 +97,10 @@ const visibleColCount = computed(() => tbl.columns.filter(c => tbl.isVisible(c.k
 
 function openPdf() {
   if (registerId.value === '') return
-  window.open(cashApi.bookPdfUrl(Number(registerId.value), filters.from, filters.to), '_blank', 'noopener')
+  window.open(cashApi.bookPdfUrl(Number(registerId.value), {
+    from: filters.from, to: filters.to,
+    q: filters.q, doc_type: filters.doc_type, purpose: filters.purpose,
+  }), '_blank', 'noopener')
 }
 
 onMounted(async () => {
@@ -118,7 +136,7 @@ onMounted(async () => {
 
     <!-- Filtry -->
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.register') }}</label>
           <select v-model="registerId" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
@@ -133,7 +151,36 @@ onMounted(async () => {
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.col.date_to') }}</label>
           <input v-model="filters.to" type="date" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.col.type') }}</label>
+          <select v-model="filters.doc_type" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('common.all') }}</option>
+            <option value="in">{{ t('cash.type.in_short') }}</option>
+            <option value="out">{{ t('cash.type.out_short') }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.col.purpose') }}</label>
+          <select v-model="filters.purpose" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('common.all') }}</option>
+            <option v-for="p in PURPOSES" :key="p" :value="p">{{ t(`cash.purpose.${p}`) }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.book_search') }}</label>
+          <input v-model="filters.q" type="text" :placeholder="t('cash.book_search_hint')"
+            @keyup.enter="applyFilters" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+        </div>
       </div>
+      <div class="flex flex-wrap items-center justify-end gap-2 mt-2">
+        <button type="button" @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.journal.reset_filters') }}</button>
+      </div>
+    </div>
+
+    <!-- Filtr zužuje jen řádky; počáteční/konečný zůstatek a obraty zůstávají za období. -->
+    <div v-if="report && filtersActive" class="mb-4 px-3 py-2 rounded-md bg-primary-50 text-primary-700 text-sm">
+      {{ t('cash.book_filtered_note') }}
     </div>
 
     <!-- Warning záporný zůstatek -->

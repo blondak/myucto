@@ -34,6 +34,9 @@ final class CashBookAction
     /** PDF tiskne celý rozsah bez stránkování (obraty a KS jsou za celé období). */
     private const PDF_MAX_ROWS = 100000;
 
+    /** Hodnoty `cash_documents.purpose` (migrace 1019) — whitelist filtru knihy. */
+    private const PURPOSES = ['sale', 'purchase', 'invoice_payment', 'purchase_payment', 'transfer', 'other'];
+
     public function __construct(
         private readonly CashRegisterService $registers,
         private readonly AccountStatementService $statement,
@@ -51,12 +54,13 @@ final class CashBookAction
         $to = $this->dateParam($q, 'to', date('Y-m-d'));
         $page = max(1, (int) ($q['page'] ?? 1));
         $perPage = max(1, min(self::MAX_PER_PAGE, (int) ($q['per_page'] ?? 50)));
+        $filters = $this->bookFilters($q);
 
         try {
             $register = $this->registers->get($supplierId, $registerId, $to);
 
             if ($this->isTaxEvidence($supplierId)) {
-                return Json::ok($response, $this->buildTaxEvidenceBook($supplierId, $register, $from, $to, $page, $perPage));
+                return Json::ok($response, $this->buildTaxEvidenceBook($supplierId, $register, $from, $to, $page, $perPage, $filters));
             }
 
             $accountId = $register['account_id'] ?? null;
@@ -64,7 +68,18 @@ final class CashBookAction
                 throw new CashException('account_invalid', 'Analytika pokladny není v osnově firmy.');
             }
 
-            $stmt = $this->statement->build($supplierId, (int) $accountId, $from, $to, $page, $perPage);
+            // L-9: filtry se aplikují až nad hotovými řádky (běžící zůstatek počítá
+            // window funkce nad celým oknem), takže se při filtrování musí načíst
+            // celé okno a stránkovat v PHP. Bez filtru zůstává stránkování v SQL.
+            $filtering = $filters !== [];
+            $stmt = $this->statement->build(
+                $supplierId,
+                (int) $accountId,
+                $from,
+                $to,
+                $filtering ? 1 : $page,
+                $filtering ? self::PDF_MAX_ROWS : $perPage,
+            );
             $docMap = $this->cashDocumentMap($supplierId, $stmt['items']);
 
             $items = [];
@@ -90,17 +105,26 @@ final class CashBookAction
                 ];
             }
 
+            $total = (int) $stmt['total'];
+            if ($filtering) {
+                $items = array_values(array_filter($items, fn (array $it): bool => $this->matchesFilters($it, $filters)));
+                $total = count($items);
+                $items = array_slice($items, ($page - 1) * $perPage, $perPage);
+            }
+
             return Json::ok($response, [
                 'register'         => $register,
+                // Počáteční/konečný zůstatek i obraty jsou VŽDY za období, ne za
+                // výběr — jinak by filtr vyrobil zůstatek, který v knize neplatí.
                 'opening_balance'  => $stmt['opening_balance'],
                 'items'            => $items,
                 'income_total'     => $stmt['turnover_md'],
                 'expense_total'    => $stmt['turnover_d'],
                 'closing_balance'  => $stmt['closing_balance'],
                 'balance_negative' => $negative,
-                'total'            => $stmt['total'],
-                'page'             => $stmt['page'],
-                'per_page'         => $stmt['per_page'],
+                'total'            => $total,
+                'page'             => $filtering ? $page : (int) $stmt['page'],
+                'per_page'         => $filtering ? $perPage : (int) $stmt['per_page'],
             ]);
         } catch (\Throwable $e) {
             if ($e instanceof CashException) {
@@ -119,6 +143,7 @@ final class CashBookAction
 
         $from = $this->dateParam($q, 'from', date('Y') . '-01-01');
         $to = $this->dateParam($q, 'to', date('Y-m-d'));
+        $filters = $this->bookFilters($q);
 
         try {
             $register = $this->registers->get($supplierId, $registerId, $to);
@@ -128,7 +153,7 @@ final class CashBookAction
                 // takže `account_id` je NULL a tisk končil na `account_invalid` — kniha
                 // přitom na obrazovce je. PDF proto staví nad týmiž daty jako `get()`.
                 $data = $this->taxEvidencePdfData(
-                    $this->buildTaxEvidenceBook($supplierId, $register, $from, $to, 1, self::PDF_MAX_ROWS),
+                    $this->buildTaxEvidenceBook($supplierId, $register, $from, $to, 1, self::PDF_MAX_ROWS, $filters),
                     $from,
                     $to,
                 );
@@ -143,6 +168,24 @@ final class CashBookAction
                 $data['account']['name'] = (string) $register['name'];
                 $data['from'] = $from;
                 $data['to'] = $to;
+
+                // L-9: tisk musí ukázat totéž, co je na obrazovce. Obraty a zůstatky
+                // zůstávají za období (jsou spočtené nad nefiltrovaným oknem).
+                if ($filters !== []) {
+                    $docMap = $this->cashDocumentMap($supplierId, $data['items']);
+                    $data['items'] = array_values(array_filter($data['items'], function (array $l) use ($docMap, $filters): bool {
+                        $doc = ((string) $l['source_type'] === 'cash' && $l['source_id'] !== null)
+                            ? ($docMap[(int) $l['source_id']] ?? null) : null;
+                        return $this->matchesFilters([
+                            'doc_type'     => $doc['doc_type'] ?? null,
+                            'purpose'      => $doc['purpose'] ?? null,
+                            'partner_name' => $doc['partner_name'] ?? null,
+                            'description'  => $l['description'],
+                            'document_no'  => $l['document_no'],
+                        ], $filters);
+                    }));
+                    $data['total'] = count($data['items']);
+                }
             }
 
             $bytes = $this->pdf->render($data);
@@ -206,6 +249,61 @@ final class CashBookAction
         ];
     }
 
+    /**
+     * L-9: filtry pokladní knihy (`q` = popis/partner/číslo dokladu, `doc_type`,
+     * `purpose`) — stejná trojice, jakou nabízí seznam dokladů. Prázdné pole =
+     * bez filtru, aby se nemusela nikde načítat celá kniha do paměti.
+     *
+     * @param array<string,mixed> $q
+     * @return array<string,string>
+     */
+    private function bookFilters(array $q): array
+    {
+        $out = [];
+
+        $text = trim((string) ($q['q'] ?? ''));
+        if ($text !== '') {
+            $out['q'] = mb_strtolower($text);
+        }
+
+        $docType = (string) ($q['doc_type'] ?? '');
+        if (in_array($docType, ['in', 'out'], true)) {
+            $out['doc_type'] = $docType;
+        }
+
+        $purpose = (string) ($q['purpose'] ?? '');
+        if (in_array($purpose, self::PURPOSES, true)) {
+            $out['purpose'] = $purpose;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string,mixed> $it řádek knihy (nebo jeho ekvivalent z opisu účtu)
+     * @param array<string,string> $filters
+     */
+    private function matchesFilters(array $it, array $filters): bool
+    {
+        if (isset($filters['doc_type']) && (string) ($it['doc_type'] ?? '') !== $filters['doc_type']) {
+            return false;
+        }
+        if (isset($filters['purpose']) && (string) ($it['purpose'] ?? '') !== $filters['purpose']) {
+            return false;
+        }
+        if (isset($filters['q'])) {
+            $haystack = mb_strtolower(implode(' ', [
+                (string) ($it['description'] ?? ''),
+                (string) ($it['partner_name'] ?? ''),
+                (string) ($it['document_no'] ?? ''),
+            ]));
+            if (!str_contains($haystack, $filters['q'])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** Validované datum z query (i pojistka proti smetí ve filename Content-Disposition). */
     private function dateParam(array $q, string $key, string $default): string
     {
@@ -230,9 +328,10 @@ final class CashBookAction
      * (stránkování mění jen `items`, stejně jako u AccountStatementService::build).
      *
      * @param array<string,mixed> $register
+     * @param array<string,string> $filters
      * @return array<string,mixed>
      */
-    private function buildTaxEvidenceBook(int $supplierId, array $register, string $from, string $to, int $page, int $perPage): array
+    private function buildTaxEvidenceBook(int $supplierId, array $register, string $from, string $to, int $page, int $perPage, array $filters = []): array
     {
         $registerId = (int) $register['id'];
         $dayBeforeFrom = date('Y-m-d', strtotime($from . ' -1 day'));
@@ -278,6 +377,12 @@ final class CashBookAction
                 'document_id'  => (int) $r['id'],
                 'entry_id'     => (int) $r['id'],
             ];
+        }
+
+        // L-9: filtr zužuje jen seznam řádků — obraty, PS i KS se počítají nad celým
+        // oknem výše, takže se výběrem nezkreslí (shodně s podvojnou větví).
+        if ($filters !== []) {
+            $allItems = array_values(array_filter($allItems, fn (array $it): bool => $this->matchesFilters($it, $filters)));
         }
 
         $total = count($allItems);

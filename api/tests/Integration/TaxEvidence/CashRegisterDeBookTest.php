@@ -13,6 +13,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\Cash\CashDocumentService;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -160,6 +161,91 @@ final class CashRegisterDeBookTest extends TestCase
         self::assertEqualsWithDelta(700.00, $detail['balance'], 0.001);
     }
 
+    /**
+     * L-9: filtry knihy (`q`/`doc_type`/`purpose`) musí platit v OBOU větvích stejně,
+     * jinak se čísla mezi účetními režimy rozejdou. Zůstatky a obraty se filtrem
+     * NESMÍ zkreslit — jsou za období, ne za výběr.
+     *
+     * @return array<string, array{0:'te'|'de'}>
+     */
+    public static function bookModes(): array
+    {
+        return [
+            'daňová evidence' => ['te'],
+            'podvojné účetnictví' => ['de'],
+        ];
+    }
+
+    #[DataProvider('bookModes')]
+    public function testBookFiltersNarrowRowsButNotBalances(string $which): void
+    {
+        $supplierId = $which === 'te' ? $this->teSupplierId : $this->deSupplierId;
+        $regId = $this->registers->create($supplierId, ['name' => 'Pokladna', 'account_code' => '211', 'is_default' => true]);
+
+        $this->postSale($supplierId, $regId, 1000.00, self::YEAR . '-06-10');       // popis „Pokladní tržba"
+        $this->postPurchase($supplierId, $regId, 400.00, self::YEAR . '-06-15');    // popis „Nákup materiálu"
+        $this->postSale($supplierId, $regId, 250.00, self::YEAR . '-06-20');
+
+        $from = self::YEAR . '-01-01';
+        $to = self::YEAR . '-12-31';
+
+        $all = $this->call($supplierId, $regId, $from, $to);
+        self::assertSame(200, $all['status']);
+        self::assertCount(3, $all['body']['items']);
+
+        // (a) typ dokladu
+        $income = $this->call($supplierId, $regId, $from, $to, ['doc_type' => 'in']);
+        self::assertCount(2, $income['body']['items']);
+        self::assertSame(2, (int) $income['body']['total']);
+        foreach ($income['body']['items'] as $it) {
+            self::assertSame('in', $it['doc_type']);
+        }
+
+        // (b) účel
+        $purchases = $this->call($supplierId, $regId, $from, $to, ['purpose' => 'purchase']);
+        self::assertCount(1, $purchases['body']['items']);
+        self::assertEqualsWithDelta(400.00, (float) $purchases['body']['items'][0]['expense'], 0.001);
+
+        // (c) fulltext přes popis, case-insensitive
+        $text = $this->call($supplierId, $regId, $from, $to, ['q' => 'nákup']);
+        self::assertCount(1, $text['body']['items']);
+
+        // (d) neshoda = prázdný výběr, ne prázdná kniha
+        $none = $this->call($supplierId, $regId, $from, $to, ['q' => 'tenhle popis nikde není']);
+        self::assertSame([], $none['body']['items']);
+        self::assertSame(0, (int) $none['body']['total']);
+
+        // (e) zůstatky a obraty se filtrem NESMÍ hnout — jsou za období.
+        foreach ([$income, $purchases, $text, $none] as $filtered) {
+            self::assertEqualsWithDelta(
+                (float) $all['body']['opening_balance'],
+                (float) $filtered['body']['opening_balance'],
+                0.001,
+                'Počáteční zůstatek je za období, ne za výběr.',
+            );
+            self::assertEqualsWithDelta((float) $all['body']['closing_balance'], (float) $filtered['body']['closing_balance'], 0.001);
+            self::assertEqualsWithDelta((float) $all['body']['income_total'], (float) $filtered['body']['income_total'], 0.001);
+            self::assertEqualsWithDelta((float) $all['body']['expense_total'], (float) $filtered['body']['expense_total'], 0.001);
+        }
+
+        // (f) běžící zůstatek řádku zůstává zůstatkem KNIHY, ne součtem výběru.
+        self::assertEqualsWithDelta(600.00, (float) $purchases['body']['items'][0]['balance'], 0.001, '1000 − 400 = 600.');
+    }
+
+    /** Neznámá hodnota filtru se ignoruje — nesmí vyprázdnit knihu ani spadnout. */
+    public function testUnknownFilterValueIsIgnored(): void
+    {
+        $regId = $this->registers->create($this->teSupplierId, ['name' => 'Pokladna', 'account_code' => '211', 'is_default' => true]);
+        $this->postSale($this->teSupplierId, $regId, 1000.00, self::YEAR . '-06-10');
+
+        $res = $this->call($this->teSupplierId, $regId, self::YEAR . '-01-01', self::YEAR . '-12-31', [
+            'doc_type' => 'nesmysl', 'purpose' => 'nesmysl', 'q' => '  ',
+        ]);
+
+        self::assertSame(200, $res['status']);
+        self::assertCount(1, $res['body']['items']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private function makeSupplier(string $mode): int
@@ -202,11 +288,11 @@ final class CashRegisterDeBookTest extends TestCase
     }
 
     /** @return array{status:int, body:array<string,mixed>} */
-    private function call(int $supplierId, int $registerId, string $from, string $to): array
+    private function call(int $supplierId, int $registerId, string $from, string $to, array $extraQuery = []): array
     {
         $req = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/accounting/cash-registers/' . $registerId . '/book')
-            ->withQueryParams(['from' => $from, 'to' => $to])
+            ->withQueryParams(array_merge(['from' => $from, 'to' => $to], $extraQuery))
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant']);
 

@@ -168,6 +168,14 @@ DPH vynuceně vypnuté — u úhrady faktury DPH nese už samotná faktura). Po 
 > ručně podle CZK protihodnoty. U prodeje nad 10 000 Kč bez vyplněného DIČ partnera se zobrazí jen informativní
 > upozornění (nejde o blokaci) kvůli evidenci pro kontrolní hlášení.
 
+> [!NOTE]
+> **DIČ protistrany patří do kontrolního hlášení jen v českém tvaru.** Pokladní prodej se
+> zadanou českou sazbou DPH je tuzemské zdanitelné plnění (místo plnění je pult) — to platí
+> i ve valutové pokladně, protože cizí měna sama o sobě daňový režim nemění. Nad prahem
+> 10 000 Kč proto míří do oddílu A.4, kam patří výhradně české DIČ. Zadáte-li cizí VAT ID
+> (např. `DE123456789`), systém na to upozorní; buď je opravte, nebo pole nechte prázdné —
+> doklad pak spadne do sumačního oddílu A.5. Nejde o blokaci.
+
 ### 30.3.4 Částka, popis a náhled zaúčtování
 
 Povinná pole jsou **celková částka včetně DPH** (u úhrady přijaté faktury needitovatelná, viz
@@ -210,7 +218,12 @@ předchozího stavu.
 
 Doklad v **uzamčeném období** stornovat lze — protizápis se automaticky posune do prvního
 otevřeného data. Odmítne se jen tehdy, když zámek zasahuje i aktuální datum; pak je nutné
-nejdřív posunout zámek v nastavení účetnictví.
+nejdřív posunout zámek v nastavení účetnictví. O posunu data protizápisu systém informuje
+upozorněním hned po stornu, aby se rozdíl nezjistil až z deníku.
+
+Druhé upozornění přijde, pokud je pokladna **po stornu v mínusu** — typicky když se stornuje
+příjmový doklad, ze kterého už byly vydané další výdajové doklady. Storno se tím nezastaví,
+ale je to signál, že navazující doklady je potřeba projít.
 
 Storno **úhrady zálohové faktury**, ze které už vznikla finální faktura nebo daňový doklad
 k přijaté platbě, systém odmítne — takový doklad by po sobě zůstal vystavený. Zruš proto
@@ -282,8 +295,16 @@ hotovost.
 
 ### 30.5.1 Filtry a souhrn
 
-Nahoře lze zvolit pokladnu (pokud jich firma má víc) a rozsah data od–do (výchozí je od začátku
-kalendářního roku do dneška). Čtyři souhrnné karty ukazují:
+Nahoře lze zvolit pokladnu (pokud jich firma má víc), rozsah data od–do (výchozí je od začátku
+kalendářního roku do dneška), typ dokladu (příjem/výdej), účel a fulltextové hledání přes popis,
+partnera a číslo dokladu. Tlačítkem **Zrušit filtry** se vrátí výchozí nastavení.
+
+> [!NOTE]
+> Filtry zužují jen **vypsané řádky**. Počáteční a konečný zůstatek i obraty se počítají vždy
+> za celé zvolené období, ne za výběr — jinak by kniha ukazovala zůstatek, který ve skutečnosti
+> nikdy neplatil. Když je nějaký filtr aktivní, připomene to informační pruh nad tabulkou.
+
+Čtyři souhrnné karty ukazují:
 
 - **Počáteční zůstatek** k začátku období,
 - **Příjmy celkem** za období,
@@ -311,7 +332,8 @@ doklady, projeví se v knize s prázdným popisem vazby, ale zůstatek zůstáv�
 ### 30.5.3 Export do PDF
 
 Tlačítko **PDF pokladní knihy** vygeneruje tiskovou sestavu za celý zvolený rozsah data (bez
-stránkování) s hlavičkou pokladny, počátečním a konečným zůstatkem a přehledem příjmů/výdajů —
+stránkování, ale s uplatněnými filtry, aby odpovídala obrazovce) s hlavičkou pokladny,
+počátečním a konečným zůstatkem a přehledem příjmů/výdajů —
 vhodné jako podklad k roční uzávěrce nebo pro kontrolu. Sestava funguje v podvojném účetnictví
 i v daňové evidenci.
 

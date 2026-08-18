@@ -12,6 +12,8 @@ use MyInvoice\Service\Accounting\Cash\CashDocumentService;
 use MyInvoice\Service\Accounting\Cash\CashException;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -36,6 +38,8 @@ final class CashDocumentServiceTest extends TestCase
     private CashRegisterService $registers;
     private JournalEntryRepository $journal;
     private AccountingPeriodRepository $periods;
+    private DocumentLockService $documentLocks;
+    private PostingService $posting;
 
     private int $supplierId = 0;
     private int $currencyId = 0;
@@ -58,6 +62,8 @@ final class CashDocumentServiceTest extends TestCase
             $this->registers = $container->get(CashRegisterService::class);
             $this->journal   = $container->get(JournalEntryRepository::class);
             $this->periods   = $container->get(AccountingPeriodRepository::class);
+            $this->documentLocks = $container->get(DocumentLockService::class);
+            $this->posting   = $container->get(PostingService::class);
             $seeder          = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -711,6 +717,169 @@ final class CashDocumentServiceTest extends TestCase
         $this->service->reverse($this->supplierId, $posted['id'], ['reason' => 'Storno', 'entry_date' => self::YEAR . '-06-30'], $this->userId);
     }
 
+    /**
+     * H-3: doklad v UZAMČENÉM období stornovat LZE — protizápis se posune do prvního
+     * otevřeného data. Kontrola zámku se dělá nad datem PROTIZÁPISU, ne nad datem
+     * původního dokladu.
+     *
+     * Proč vlastní období místo výchozí fixtury: ta běží v roce 2099, a tam scénář
+     * „datum původního dokladu zamčené, datum protizápisu otevřené" NEEXISTUJE —
+     * zámek, který pokryje rok 2099, pokryje nutně i dnešek a `PostingService`
+     * storno odmítne (`date_locked`, zámek zasahuje aktuální datum). Test si proto
+     * staví období v MINULOSTI (tam zámek doklad pokryje) plus období pro aktuální
+     * rok (kam protizápis spadne).
+     */
+    public function testReverseInLockedPeriodShiftsCounterEntryToOpenDate(): void
+    {
+        $today = date('Y-m-d');
+        $currentYear = (int) date('Y');
+        $pastYear = $currentYear - 3;
+
+        $this->periods->create($this->supplierId, $pastYear, $pastYear . '-01-01', $pastYear . '-12-31');
+        $this->periods->create($this->supplierId, $currentYear, $currentYear . '-01-01', $currentYear . '-12-31');
+
+        $reg = $this->makeRegister();
+        $sale = $this->service->create($this->supplierId, $this->doc([
+            'purpose' => 'sale', 'doc_type' => 'in', 'total_amount' => 1000.00,
+            'issue_date' => $pastYear . '-03-15',
+        ], $reg), $this->userId);
+        self::assertSame('posted', $sale['status']);
+
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)'
+        );
+        $stmt->execute([$this->supplierId, $pastYear . '-12-31']);
+        // `locked_until` si `DocumentLockService` i `PostingService` cachují per instanci
+        // (v produkci = per request). Zaúčtování dokladu výše cache naplnilo hodnotou
+        // „bez zámku", takže bez tohohle kroku by test tvrdil, že storno zamčeného
+        // dokladu prochází, i kdyby zámek nikdo nekontroloval. Simuluje se tím stav,
+        // v jakém do storna vstupuje reálný request: zámek už v DB je, cache prázdná.
+        $this->forgetLockCaches();
+
+        $rev = $this->service->reverse(
+            $this->supplierId,
+            $sale['id'],
+            ['reason' => 'Chyba zjištěná až po uzamčení období'],
+            $this->userId,
+        );
+
+        self::assertNotNull($rev['reversal_entry_id'], 'H-3: doklad v zamčeném období musí jít stornovat.');
+        $reversal = $this->journal->find((int) $rev['reversal_entry_id'], $this->supplierId);
+        self::assertSame(
+            $today,
+            substr((string) $reversal['entry_date'], 0, 10),
+            'H-3: protizápis patří do otevřeného data, ne do zamčeného období původního dokladu.',
+        );
+        self::assertSame('reversed', $this->docStatus($sale['id']));
+        self::assertContains(
+            'cash.warning.reversal_date_shifted',
+            $rev['warnings'],
+            'M-14: posun data protizápisu se nesmí odehrát potichu.',
+        );
+    }
+
+    /**
+     * M-14: storno, které pošle pokladnu do mínusu, musí varovat. Vznikne, když se
+     * stornuje příjmový doklad, ze kterého už byly vydané peníze dalším výdajem.
+     */
+    public function testReverseWarnsAboutNegativeBalance(): void
+    {
+        $reg = $this->makeRegister();
+        $income = $this->service->create($this->supplierId, $this->sale($reg, 5000.00), $this->userId);
+        $this->service->create($this->supplierId, $this->doc([
+            'purpose' => 'purchase', 'doc_type' => 'out', 'total_amount' => 4000.00,
+        ], $reg), $this->userId);
+
+        $rev = $this->service->reverse(
+            $this->supplierId,
+            $income['id'],
+            ['reason' => 'Chybně zaevidovaný příjem', 'entry_date' => self::YEAR . '-06-30'],
+            $this->userId,
+        );
+
+        self::assertContains('cash.warning.negative_balance_after_reverse', $rev['warnings']);
+    }
+
+    /** Bez záporného zůstatku a bez posunu data žádné varování nevzniká. */
+    public function testReverseWithoutProblemsHasNoWarnings(): void
+    {
+        $reg = $this->makeRegister();
+        $income = $this->service->create($this->supplierId, $this->sale($reg, 5000.00), $this->userId);
+
+        $rev = $this->service->reverse(
+            $this->supplierId,
+            $income['id'],
+            ['reason' => 'Chybně zaevidovaný příjem', 'entry_date' => self::YEAR . '-06-30'],
+            $this->userId,
+        );
+
+        self::assertSame([], $rev['warnings']);
+    }
+
+    /**
+     * M-9: pokladní prodej s českou sazbou DPH je tuzemské zdanitelné plnění a nad
+     * prahem KH míří do A.4, kam patří jen české DIČ. Cizí VAT ID by se tam osekalo
+     * na číslice a vydávalo za české — varování, ne blokace.
+     */
+    public function testForeignVatIdOnTaxableSaleWarns(): void
+    {
+        $reg = $this->makeRegister();
+
+        $foreign = $this->service->create($this->supplierId, $this->doc([
+            'purpose' => 'sale', 'doc_type' => 'in', 'total_amount' => 121000.00, 'vat_mode' => 'vat',
+            'partner_dic' => 'DE123456789',
+            'vat_lines' => [['vat_rate' => 21, 'base_amount' => 100000.00, 'vat_amount' => 21000.00]],
+        ], $reg), $this->userId);
+        self::assertContains('cash.warning.dic_not_czech', $foreign['warnings']);
+        self::assertNotContains('cash.warning.dic_missing_over_10k', $foreign['warnings']);
+
+        $czech = $this->service->create($this->supplierId, $this->doc([
+            'purpose' => 'sale', 'doc_type' => 'in', 'total_amount' => 121000.00, 'vat_mode' => 'vat',
+            'partner_dic' => 'CZ12345678',
+            'vat_lines' => [['vat_rate' => 21, 'base_amount' => 100000.00, 'vat_amount' => 21000.00]],
+        ], $reg), $this->userId);
+        self::assertNotContains('cash.warning.dic_not_czech', $czech['warnings']);
+    }
+
+    /**
+     * L-2: invariant „částka pokladního dokladu je kladná" (znaménko nese `doc_type`)
+     * drží i DB, ne jen `validateDoc()`. Test jde ZÁMĚRNĚ přímým SQL — služba by
+     * takový řádek nepustila, takže by se constraint vůbec nedostal ke slovu.
+     *
+     * Vratka úhrady přijaté faktury (`in` + `purchase_payment`) tu je schválně: je to
+     * kombinace, kterou `PURPOSE_MATRIX` zakazuje, ale peněžní deník s ní počítá.
+     * Constraint podle matice proto v migraci 1691 NENÍ a tenhle řádek musí projít.
+     */
+    public function testDatabaseRefusesNonPositiveCashAmount(): void
+    {
+        $reg = $this->makeRegister();
+        $pdo = $this->db->pdo();
+
+        $insert = static fn (): \PDOStatement => $pdo->prepare(
+            "INSERT INTO cash_documents
+                (supplier_id, register_id, doc_type, purpose, issue_date, description,
+                 total_amount, currency_code, vat_mode, status)
+             VALUES (?, ?, ?, ?, ?, 'Přímý SQL zápis', ?, 'CZK', 'none', 'draft')"
+        );
+
+        // Savepoint: porušení CHECK zabije jen vnořený blok, ne celou testovací transakci.
+        foreach (['nulová částka' => 0.00, 'záporná částka' => -100.00] as $label => $amount) {
+            $pdo->exec('SAVEPOINT chk_probe');
+            try {
+                $insert()->execute([$this->supplierId, $reg, 'in', 'sale', self::YEAR . '-06-15', $amount]);
+                self::fail('DB musí odmítnout: ' . $label);
+            } catch (\PDOException $e) {
+                self::assertStringContainsString('constraint', strtolower($e->getMessage()), $label);
+            } finally {
+                $pdo->exec('ROLLBACK TO SAVEPOINT chk_probe');
+            }
+        }
+
+        $insert()->execute([$this->supplierId, $reg, 'in', 'purchase_payment', self::YEAR . '-06-15', 100.00]);
+        self::assertSame(1, $this->countDocuments($reg), 'Vratka úhrady PF projít musí.');
+    }
+
     public function testTenantIsolation(): void
     {
         $reg = $this->makeRegister();
@@ -931,6 +1100,23 @@ final class CashDocumentServiceTest extends TestCase
             'INSERT INTO exchange_rates (rate_date, currency_code, rate) VALUES (?, ?, ?)
              ON DUPLICATE KEY UPDATE rate = VALUES(rate)'
         )->execute([$date, strtoupper($code), $rate]);
+    }
+
+    /**
+     * Zahodí per-instance cache `locked_until` v `DocumentLockService` a `PostingService`.
+     * Obě se plní při prvním čtení a v produkci žijí jen po dobu requestu; v testu ale
+     * jedna instance přežije celý scénář, takže by zámek nastavený uprostřed testu
+     * zůstal neviditelný.
+     */
+    private function forgetLockCaches(): void
+    {
+        // `DocumentLockService` cachuje dvakrát: syrové `locked_until` i hotové
+        // `DocumentLock` per (supplier, datum). Vyprázdnit se musí obojí, jinak
+        // se vrátí zámek spočítaný ještě před jeho nastavením.
+        foreach ([[$this->documentLocks, 'lockedUntilCache'], [$this->documentLocks, 'cache'],
+                  [$this->posting, 'lockedUntilCache']] as [$service, $property]) {
+            (new \ReflectionProperty($service, $property))->setValue($service, []);
+        }
     }
 
     private function makeRegister(string $code = '211'): int

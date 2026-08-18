@@ -19,6 +19,7 @@ use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\Invoice\InvoiceMath;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
+use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Vat\VatStatusService;
@@ -187,7 +188,7 @@ final class CashDocumentService
             // Vazba na fakturu: úhradu zrušit dřív, než zmizí sám doklad.
             if ($doc['invoice_payment_id'] !== null) {
                 $this->invoicePayments->deletePayment((int) $doc['invoice_payment_id']);
-                $this->documents->setInvoicePaymentId($id, null);
+                $this->documents->setInvoicePaymentId($supplierId, $id, null);
             }
             if ($doc['purpose'] === 'purchase_payment' && $doc['purchase_invoice_id'] !== null) {
                 // Stejné pravidlo jako u storna: PF zpět do stavu před úhradou dle
@@ -316,7 +317,14 @@ final class CashDocumentService
      * Storno zaúčtovaného dokladu (protizápis + úklid vazeb). `meta.reason` povinný.
      * V daňové evidenci (DE §6) je storno bez protizápisu → `reversal_entry_id` null.
      *
-     * @return array{reversal_entry_id:?int}
+     * M-14: storno vrací `warnings` stejným kanálem jako zaúčtování — dvě situace,
+     * které jinak proběhnou tiše a uživatel je zjistí až v knize:
+     *  - protizápis skončil u JINÉHO data než původní zápis (H-2/H-3: PostingService
+     *    ho posune do otevřeného data, když je původní období zamčené),
+     *  - po stornu je pokladna v mínusu (stornem příjmu se z pokladny odebírají peníze,
+     *    které už mohly být vydané dalšími doklady).
+     *
+     * @return array{reversal_entry_id:?int, warnings:list<string>}
      */
     public function reverse(int $supplierId, int $id, array $meta, ?int $userId): array
     {
@@ -376,7 +384,7 @@ final class CashDocumentService
 
             if ($doc['invoice_payment_id'] !== null) {
                 $this->invoicePayments->deletePayment((int) $doc['invoice_payment_id']);
-                $this->documents->setInvoicePaymentId($id, null);
+                $this->documents->setInvoicePaymentId($supplierId, $id, null);
             }
             if ($doc['purpose'] === 'purchase_payment' && $doc['purchase_invoice_id'] !== null) {
                 // PF vrátit do stavu PŘED úhradou dle tvaru dokladu: zaúčtovaný (journal) byl
@@ -389,15 +397,17 @@ final class CashDocumentService
                 );
             }
             if ($reversalId === null) {
-                $this->documents->markReversedNoJournal($id);
+                $this->documents->markReversedNoJournal($supplierId, $id);
             } else {
-                $this->documents->markReversed($id, $reversalId);
+                $this->documents->markReversed($supplierId, $id, $reversalId);
             }
+
+            $warnings = $this->collectReversalWarnings($supplierId, $doc, $reversalId, $entryDate);
 
             if ($ownTx) {
                 $pdo->commit();
             }
-            return ['reversal_entry_id' => $reversalId];
+            return ['reversal_entry_id' => $reversalId, 'warnings' => $warnings];
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -622,7 +632,7 @@ final class CashDocumentService
         // Side-effecty úhrad FV/PF (anotace pro peněžní deník, noha A) zůstávají shodné.
         if ($taxEvidence) {
             $this->applySideEffects($supplierId, $id, $doc, $docNumber, $userId);
-            $this->documents->markPostedNoJournal($id, $docNumber);
+            $this->documents->markPostedNoJournal($supplierId, $id, $docNumber);
 
             return [
                 'doc_number'       => $docNumber,
@@ -646,7 +656,7 @@ final class CashDocumentService
         ]);
 
         $this->applySideEffects($supplierId, $id, $doc, $docNumber, $userId);
-        $this->documents->markPosted($id, $docNumber, $entryId);
+        $this->documents->markPosted($supplierId, $id, $docNumber, $entryId);
 
         return [
             'doc_number'       => $docNumber,
@@ -688,7 +698,7 @@ final class CashDocumentService
             'posted'        => true,
         ]);
 
-        $this->documents->markPosted($id, (string) $doc['doc_number'], $entryId);
+        $this->documents->markPosted($supplierId, $id, (string) $doc['doc_number'], $entryId);
 
         return ['journal_entry_id' => $entryId, 'already' => false];
     }
@@ -703,7 +713,7 @@ final class CashDocumentService
                 (string) $doc['issue_date'],
                 ['source' => 'cash', 'note' => $docNumber, 'created_by' => $userId],
             );
-            $this->documents->setInvoicePaymentId($id, (int) $res['payment_id']);
+            $this->documents->setInvoicePaymentId($supplierId, $id, (int) $res['payment_id']);
 
             $invoice = $this->invoices->find((int) $doc['invoice_id']);
             if (($invoice['invoice_type'] ?? null) === 'proforma') {
@@ -743,9 +753,17 @@ final class CashDocumentService
         if ($doc['purpose'] === 'sale' && $doc['vat_mode'] === 'vat'
             && self::cents($doc['total_amount']) > self::cents((float) $this->taxConstants
                 ->forYear((int) substr((string) $doc['issue_date'], 0, 4))['kh_item_threshold'])
-            && trim((string) ($doc['partner_dic'] ?? '')) === ''
         ) {
-            $warnings[] = 'cash.warning.dic_missing_over_10k';
+            $dic = trim((string) ($doc['partner_dic'] ?? ''));
+            if ($dic === '') {
+                $warnings[] = 'cash.warning.dic_missing_over_10k';
+            } elseif (!KontrolniHlaseniBuilder::isValidCzechDic($dic)) {
+                // M-9: doklad s českou sazbou DPH je tuzemské zdanitelné plnění (místo
+                // plnění = pult), takže nad prahem míří do KH A.4 — a tam patří jen české
+                // DIČ. Cizí VAT ID by se osekalo na číslice a vydávalo za české. Nebrání
+                // se zaúčtování; doklad je platný a bez DIČ patří do sumační A.5.
+                $warnings[] = 'cash.warning.dic_not_czech';
+            }
         }
         // M-2: zákon č. 254/2004 Sb., o omezení plateb v hotovosti — jedna platba téhož
         // dne mezi týmiž osobami nad 270 000 Kč se musí provést bezhotovostně. Není to
@@ -768,6 +786,62 @@ final class CashDocumentService
         ) {
             $warnings[] = 'cash.warning.fx_rate_deviation';
         }
+        return $warnings;
+    }
+
+    /**
+     * M-14: varování ke STORNU. Volá se uvnitř transakce po `markReversed*()`, takže
+     * zůstatek už vidí stav po stornu.
+     *
+     * `reversal_date_shifted` je jediná zpětná vazba na chování B8 v
+     * {@see PostingService::reverse()} — protizápis se do otevřeného data posune
+     * potichu a bez tohohle varování se uživatel o rozdílu dozví až z deníku.
+     * Hlásí se JEN automatický posun: datum, které uživatel zadal sám, není překvapení.
+     *
+     * @param array<string,mixed> $doc doklad ve stavu PŘED stornem (z lockForPost)
+     * @param ?string $requestedDate datum protizápisu zadané volajícím (null = nechal na enginu)
+     * @return list<string>
+     */
+    private function collectReversalWarnings(int $supplierId, array $doc, ?int $reversalId, ?string $requestedDate): array
+    {
+        $warnings = [];
+        // Zůstatek se posuzuje ke dni, kdy storno reálně mění stav peněz. U journal
+        // dokladu je to datum protizápisu (může být pozdější než doklad), u journal-free
+        // dokladu (daňová evidence) doklad ze součtu vypadne rovnou k datu vystavení.
+        $balanceDate = (string) $doc['issue_date'];
+
+        if ($reversalId !== null && $doc['journal_entry_id'] !== null) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT (SELECT entry_date FROM journal_entries WHERE id = ? AND supplier_id = ?) AS reversal_date,
+                        (SELECT entry_date FROM journal_entries WHERE id = ? AND supplier_id = ?) AS original_date'
+            );
+            $stmt->execute([$reversalId, $supplierId, (int) $doc['journal_entry_id'], $supplierId]);
+            $dates = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+            $reversalDate = $dates['reversal_date'] ?? null;
+            $originalDate = $dates['original_date'] ?? null;
+            if ($reversalDate !== null) {
+                $balanceDate = max($balanceDate, (string) $reversalDate);
+                if ($requestedDate === null && $originalDate !== null
+                    && (string) $reversalDate !== (string) $originalDate
+                ) {
+                    $warnings[] = 'cash.warning.reversal_date_shifted';
+                }
+            }
+        }
+
+        // Zůstatek se čte STEJNOU cestou jako u zaúčtování (M-1/L-7 — jedna definice).
+        // Registr se hledá přes find() (ne requireActiveRegister) — deaktivovaná
+        // pokladna se stornovat smí a varování musí přijít i pro ni.
+        $register = $this->registers->find($supplierId, (int) $doc['register_id']);
+        $balance = $this->supplierAccountingMode($supplierId) === 'tax_evidence'
+            ? $this->cashRegisters->documentsSignedTotal($supplierId, (int) $doc['register_id'], $balanceDate)
+            : ($register !== null
+                ? $this->accountBalance($supplierId, (string) $register['account_code'], $balanceDate)
+                : 0.0);
+        if (self::cents($balance) < 0) {
+            $warnings[] = 'cash.warning.negative_balance_after_reverse';
+        }
+
         return $warnings;
     }
 

@@ -243,7 +243,7 @@ final class CashSettlementService
             'purchase_invoice_id' => $purchaseInvoiceId,
             'post'                => true,
         ], $userId);
-        $this->markAuto((int) $created['id']);
+        $this->markAuto($supplierId, (int) $created['id']);
 
         return self::result(self::CREATED, (int) $created['id'], $created['doc_number'] ?? null);
     }
@@ -321,7 +321,7 @@ final class CashSettlementService
             'invoice_id'   => $invoiceId,
             'post'         => true,
         ], $userId);
-        $this->markAuto((int) $created['id']);
+        $this->markAuto($supplierId, (int) $created['id']);
 
         return self::result(self::CREATED, (int) $created['id'], $created['doc_number'] ?? null);
     }
@@ -491,11 +491,12 @@ final class CashSettlementService
         $this->documents->deleteDocument($supplierId, $cashDocumentId);
     }
 
-    private function markAuto(int $cashDocumentId): void
+    /** L-1: scope na `supplier_id` stejně jako zbytek zápisů nad `cash_documents`. */
+    private function markAuto(int $supplierId, int $cashDocumentId): void
     {
         $this->db->pdo()
-            ->prepare('UPDATE cash_documents SET auto_settlement = 1 WHERE id = ?')
-            ->execute([$cashDocumentId]);
+            ->prepare('UPDATE cash_documents SET auto_settlement = 1 WHERE id = ? AND supplier_id = ?')
+            ->execute([$cashDocumentId, $supplierId]);
     }
 
     /** @param array<string,mixed> $existing */

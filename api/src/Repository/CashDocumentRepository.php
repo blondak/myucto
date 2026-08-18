@@ -183,12 +183,18 @@ final class CashDocumentRepository
         return $row === false ? null : self::cast($row);
     }
 
-    public function markPosted(int $id, string $docNumber, int $journalEntryId): void
+    /**
+     * L-1: zapisovací metody scopují `supplier_id` stejně jako čtecí a mazací.
+     * Dnes sem `id` chodí ze scopovaného `lockForPost()`/`create()`, takže cross-tenant
+     * zápis nehrozí — jenže ta bezpečnost stojí na volajícím, ne na dotazu. První
+     * volání z jiného kontextu (import, CLI, budoucí batch) by z toho udělalo díru.
+     */
+    public function markPosted(int $supplierId, int $id, string $docNumber, int $journalEntryId): void
     {
         $this->db->pdo()->prepare(
             "UPDATE cash_documents SET status = 'posted', doc_number = ?, journal_entry_id = ?
-              WHERE id = ?"
-        )->execute([$docNumber, $journalEntryId, $id]);
+              WHERE id = ? AND supplier_id = ?"
+        )->execute([$docNumber, $journalEntryId, $id, $supplierId]);
     }
 
     /**
@@ -196,36 +202,39 @@ final class CashDocumentRepository
      * Používá se výhradně pro supplier.accounting_mode='tax_evidence' — kasová báze
      * neúčtuje do deníku, zámek řeší invoices.booked_at (R14).
      */
-    public function markPostedNoJournal(int $id, string $docNumber): void
+    public function markPostedNoJournal(int $supplierId, int $id, string $docNumber): void
     {
         $this->db->pdo()->prepare(
             "UPDATE cash_documents SET status = 'posted', doc_number = ?, journal_entry_id = NULL
-              WHERE id = ?"
-        )->execute([$docNumber, $id]);
+              WHERE id = ? AND supplier_id = ?"
+        )->execute([$docNumber, $id, $supplierId]);
     }
 
-    public function markReversed(int $id, int $reversalEntryId): void
+    public function markReversed(int $supplierId, int $id, int $reversalEntryId): void
     {
         $this->db->pdo()->prepare(
-            "UPDATE cash_documents SET status = 'reversed', reversal_entry_id = ? WHERE id = ?"
-        )->execute([$reversalEntryId, $id]);
+            "UPDATE cash_documents SET status = 'reversed', reversal_entry_id = ?
+              WHERE id = ? AND supplier_id = ?"
+        )->execute([$reversalEntryId, $id, $supplierId]);
     }
 
     /**
      * Daňová evidence (Epic DE §6): storno posted dokladu BEZ protizápisu
      * (reversal_entry_id NULL) — v tax_evidence neexistuje posting engine.
      */
-    public function markReversedNoJournal(int $id): void
+    public function markReversedNoJournal(int $supplierId, int $id): void
     {
         $this->db->pdo()->prepare(
-            "UPDATE cash_documents SET status = 'reversed', reversal_entry_id = NULL WHERE id = ?"
-        )->execute([$id]);
+            "UPDATE cash_documents SET status = 'reversed', reversal_entry_id = NULL
+              WHERE id = ? AND supplier_id = ?"
+        )->execute([$id, $supplierId]);
     }
 
-    public function setInvoicePaymentId(int $id, ?int $paymentId): void
+    public function setInvoicePaymentId(int $supplierId, int $id, ?int $paymentId): void
     {
-        $this->db->pdo()->prepare('UPDATE cash_documents SET invoice_payment_id = ? WHERE id = ?')
-            ->execute([$paymentId, $id]);
+        $this->db->pdo()->prepare(
+            'UPDATE cash_documents SET invoice_payment_id = ? WHERE id = ? AND supplier_id = ?'
+        )->execute([$paymentId, $id, $supplierId]);
     }
 
     public function deleteDraft(int $supplierId, int $id): void
