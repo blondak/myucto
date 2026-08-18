@@ -4928,6 +4928,7 @@
             "entry_from_top": "From gross",
             "entry_from_bottom": "From base",
             "pick_invoice": "Select an invoice",
+            "proforma_badge": "advance",
             "remaining": "Remaining",
             "counter_account": "Counter account",
             "counter_account_search": "Search by account number or name",

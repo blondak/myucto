@@ -83,6 +83,11 @@ export interface UnpaidDocumentOption {
   id: number; kind: 'invoice' | 'purchase_invoice'; number: string
   partner_name: string; total: number; paid: number; remaining: number
   currency_code: string; issued_on: string
+  /** Zálohová faktura — úhrada se účtuje jako přijatá záloha (211/324), ne na saldokonto 311. */
+  is_proforma?: boolean
+  invoice_type?: string
+  /** Přijatá faktura: běžná / daňový doklad k záloze (DDKP). */
+  document_kind?: string | null
 }
 
 export interface CashBookItem {

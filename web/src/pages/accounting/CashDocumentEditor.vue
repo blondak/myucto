@@ -620,7 +620,15 @@ async function save(post = true) {
             <ul v-if="unpaidOptions.length" class="absolute z-10 mt-1 w-full bg-surface border border-neutral-200 rounded-md shadow-lg max-h-64 overflow-y-auto">
               <li v-for="o in unpaidOptions" :key="o.id" @click="pickUnpaid(o)"
                 class="cursor-pointer px-3 py-2 text-sm hover:bg-neutral-50 flex items-center justify-between gap-2">
-                <span><span class="font-mono">{{ o.number }}</span> · {{ o.partner_name }}</span>
+                <span>
+                  <span class="font-mono">{{ o.number }}</span> · {{ o.partner_name }}
+                  <!-- Proforma se účtuje jako přijatá záloha (211/324) a spouští navazující
+                       doklad — v nabídce musí jít poznat na první pohled. -->
+                  <span v-if="o.is_proforma"
+                    class="ml-1 text-xs px-1.5 py-0.5 rounded bg-warning-50 text-warning-600 whitespace-nowrap">
+                    {{ t('cash.form.proforma_badge') }}
+                  </span>
+                </span>
                 <span class="text-neutral-500 font-mono">{{ t('cash.form.remaining') }} {{ formatMoney(o.remaining) }}</span>
               </li>
               <li v-if="unpaidTruncated" class="px-3 py-2 text-xs text-neutral-500 border-t border-neutral-100 bg-neutral-50">
