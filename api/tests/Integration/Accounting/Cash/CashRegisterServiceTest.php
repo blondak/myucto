@@ -286,6 +286,61 @@ final class CashRegisterServiceTest extends TestCase
         )->execute([$entryId, $this->supplierId, $accountId, 'debit', 100.00]);
     }
 
+    /**
+     * L-2: `ensureOwnSeries()` běží při KAŽDÉM výdeji čísla. Přes
+     * `updateSeries(next_number => 1)` by existující čítač vrátila na jedničku
+     * (`ON DUPLICATE KEY UPDATE`), takže by dvě souběžná vystavení vydala totéž číslo.
+     */
+    public function testEnsureOwnSeriesNeverResetsExistingCounter(): void
+    {
+        $this->seedAnalytic('211100');
+        $id = $this->service->create($this->supplierId, [
+            'name' => 'Vlastní řada', 'account_code' => '211100', 'own_series' => true,
+        ]);
+
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE accounting_document_series SET next_number = 42
+              WHERE supplier_id = ? AND register_id = ? AND series_code = ? AND fiscal_year = ?'
+        )->execute([$this->supplierId, $id, 'cash_in', (int) date('Y')]);
+
+        $this->service->ensureOwnSeries($this->supplierId, $id, (int) date('Y'));
+
+        $stmt = $pdo->prepare(
+            'SELECT next_number FROM accounting_document_series
+              WHERE supplier_id = ? AND register_id = ? AND series_code = ? AND fiscal_year = ?'
+        );
+        $stmt->execute([$this->supplierId, $id, 'cash_in', (int) date('Y')]);
+        self::assertSame(42, (int) $stmt->fetchColumn());
+    }
+
+    /** L-3: přes přelom roku se dědí prefix i šablona čísla, ne jen prefix. */
+    public function testOwnSeriesInheritsNumberFormatAcrossYears(): void
+    {
+        $this->seedAnalytic('211100');
+        $id = $this->service->create($this->supplierId, [
+            'name' => 'Převzatá řada', 'account_code' => '211100', 'own_series' => true,
+        ]);
+
+        $year = (int) date('Y');
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "UPDATE accounting_document_series SET prefix = 'HP', number_format = '{YY}{PREFIX}{CCCCC}'
+              WHERE supplier_id = ? AND register_id = ? AND fiscal_year = ? AND series_code = 'cash_in'"
+        )->execute([$this->supplierId, $id, $year]);
+
+        $this->service->ensureOwnSeries($this->supplierId, $id, $year + 1);
+
+        $stmt = $pdo->prepare(
+            'SELECT prefix, number_format FROM accounting_document_series
+              WHERE supplier_id = ? AND register_id = ? AND series_code = ? AND fiscal_year = ?'
+        );
+        $stmt->execute([$this->supplierId, $id, 'cash_in', $year + 1]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame('HP', (string) $row['prefix']);
+        self::assertSame('{YY}{PREFIX}{CCCCC}', (string) $row['number_format']);
+    }
+
     private function seedAnalytic(string $code): int
     {
         $parent = $this->accounts->findByCode($this->supplierId, '211');

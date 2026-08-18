@@ -22,13 +22,19 @@ final class DocumentSeriesRepository
      * Lazy založení řádku řady s výchozím prefixem — existující řádek se
      * NEMĚNÍ (INSERT ... ON DUPLICATE KEY UPDATE id=id).
      */
-    public function ensure(int $supplierId, string $seriesCode, int $fiscalYear, string $defaultPrefix, int $registerId = 0): void
-    {
+    public function ensure(
+        int $supplierId,
+        string $seriesCode,
+        int $fiscalYear,
+        string $defaultPrefix,
+        int $registerId = 0,
+        ?string $numberFormat = null,
+    ): void {
         $this->db->pdo()->prepare(
-            'INSERT INTO accounting_document_series (supplier_id, series_code, fiscal_year, register_id, prefix, next_number)
-             VALUES (?, ?, ?, ?, ?, 1)
+            'INSERT INTO accounting_document_series (supplier_id, series_code, fiscal_year, register_id, prefix, number_format, next_number)
+             VALUES (?, ?, ?, ?, ?, ?, 1)
              ON DUPLICATE KEY UPDATE id = id'
-        )->execute([$supplierId, $seriesCode, $fiscalYear, $registerId, $defaultPrefix]);
+        )->execute([$supplierId, $seriesCode, $fiscalYear, $registerId, $defaultPrefix, $numberFormat]);
     }
 
     /**

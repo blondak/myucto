@@ -276,14 +276,4 @@ final class CashDocumentAction
         );
     }
 
-    private function mapCashError(Response $response, \Throwable $e): Response
-    {
-        if ($e instanceof CashException) {
-            // `params` = strojová data hlášky pro i18n na FE (klient si je dosadí do
-            // vlastního překladu; česká `message` je jen fallback).
-            return Json::error($response, 'cash.error.' . $e->errorCode, $e->getMessage(), $e->httpStatus,
-                $e->extra === [] ? [] : ['params' => $e->extra]);
-        }
-        return $this->mapPostingError($response, $e);
-    }
 }
