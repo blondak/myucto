@@ -113,13 +113,16 @@ final class CashJournalRepository
         $legs = [];
 
         // ── Noha A — hotovost (cash_documents posted) ────────────────────────
+        // POZOR: cash_documents.total_amount i cash_document_vat_lines jsou v DB už v CZK
+        // (CashDocumentService::resolveCurrency() / convertVatLinesToCzk() přepočítají
+        // valutový doklad kurzem PŘED uložením, viz migrace 1114). Kurzem se tu proto
+        // NENÁSOBÍ — jinak vznikne dvojí přepočet.
         $legs[] =
             "SELECT 'cash' AS source_type, cd.id AS source_id, cd.issue_date AS movement_date,
-                    cd.doc_type AS direction, ROUND(cd.total_amount * cd.fx_rate, 2) AS amount,
+                    cd.doc_type AS direction, ROUND(cd.total_amount, 2) AS amount,
                     COALESCE(cd.doc_number, '') AS doc_no, COALESCE(cd.partner_name, '') AS partner,
                     COALESCE(cd.description, '') AS description,
                     cd.purpose AS cash_purpose, cav.base_sum AS cash_vat_base, cav.vat_sum AS cash_vat_amount,
-                    cd.fx_rate AS cash_fx_rate,
                     NULL AS bank_class, NULL AS bank_income_base, NULL AS bank_income_exempt,
                     cd.invoice_id AS invoice_id, ci.invoice_type AS inv_type,
                     ci.total_without_vat AS inv_without_vat, ci.total_with_vat AS inv_with_vat,
@@ -195,7 +198,6 @@ final class CashJournalRepository
                         COALESCE(bt.counterparty_name, '') AS partner,
                         COALESCE(bt.description, '') AS description,
                         NULL AS cash_purpose, NULL AS cash_vat_base, NULL AS cash_vat_amount,
-                        NULL AS cash_fx_rate,
                         CASE WHEN binc.btid IS NOT NULL THEN 'income'
                              WHEN bexp.btid IS NOT NULL THEN 'expense'
                              ELSE NULL END AS bank_class,
@@ -282,7 +284,6 @@ final class CashJournalRepository
                     COALESCE(ii.varsymbol, '') AS doc_no, COALESCE(icl.company_name, '') AS partner,
                     COALESCE(ip.note, '') AS description,
                     NULL AS cash_purpose, NULL AS cash_vat_base, NULL AS cash_vat_amount,
-                    NULL AS cash_fx_rate,
                     NULL AS bank_class, NULL AS bank_income_base, NULL AS bank_income_exempt,
                     ip.invoice_id AS invoice_id, ii.invoice_type AS inv_type,
                     ii.total_without_vat AS inv_without_vat, ii.total_with_vat AS inv_with_vat,
@@ -306,7 +307,6 @@ final class CashJournalRepository
                     COALESCE(pi.vendor_invoice_number, '') AS doc_no, COALESCE(pv.company_name, '') AS partner,
                     '' AS description,
                     NULL AS cash_purpose, NULL AS cash_vat_base, NULL AS cash_vat_amount,
-                    NULL AS cash_fx_rate,
                     NULL AS bank_class, NULL AS bank_income_base, NULL AS bank_income_exempt,
                     NULL AS invoice_id, NULL AS inv_type, NULL AS inv_without_vat, NULL AS inv_with_vat,
                     NULL AS inv_exempt, NULL AS inv_status,
@@ -472,7 +472,7 @@ final class CashJournalRepository
         foreach (['invoice_id', 'purchase_invoice_id'] as $k) {
             $r[$k] = ($r[$k] === null) ? null : (int) $r[$k];
         }
-        foreach (['cash_vat_base', 'cash_vat_amount', 'cash_fx_rate', 'inv_without_vat', 'inv_with_vat',
+        foreach (['cash_vat_base', 'cash_vat_amount', 'inv_without_vat', 'inv_with_vat',
                   'pi_without_vat', 'pi_with_vat', 'pi_vat_deduction_percent',
                   'bank_income_base', 'bank_income_exempt'] as $k) {
             $r[$k] = (!array_key_exists($k, $r) || $r[$k] === null) ? null : round((float) $r[$k], 2);

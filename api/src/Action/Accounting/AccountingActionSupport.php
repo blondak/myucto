@@ -62,6 +62,34 @@ trait AccountingActionSupport
         return $this->requirePermission($request, $response, 'accounting.periods.close', AccessLevel::WRITE, $err);
     }
 
+    /**
+     * Pokladní doklady (PPD/VPD). Zrcadlí RoutePermissionMap, která celou rodinu
+     * /api/accounting/cash-documents gatuje na 'cash.document.write' — Action proto
+     * ověřuje TOTÉŽ právo. Na 'accounting' WRITE se ptát nesmí: `EffectiveRole::level()`
+     * je plochý katalog bez hierarchie, takže dedikovaná role „Pokladní" (cash +
+     * cash.document.write) prošla middlewarem a spadla na 403 až v Action.
+     */
+    protected function requireCashDocumentWrite(Request $request, Response $response, ?Response &$err): bool
+    {
+        return $this->requirePermission($request, $response, 'cash.document.write', AccessLevel::WRITE, $err);
+    }
+
+    /** Správa pokladen (číselník) — modul 'cash', shodně s RoutePermissionMap. */
+    protected function requireCashWrite(Request $request, Response $response, ?Response &$err): bool
+    {
+        return $this->requirePermission($request, $response, 'cash', AccessLevel::WRITE, $err);
+    }
+
+    /**
+     * Uzavření/uzamčení pokladny a TVRDÉ smazání zaúčtovaného dokladu (`?force=1`).
+     * Destrukce s účetními dopady (mizí deníkové zápisy, v číselné řadě zůstane díra)
+     * proto nestačí běžné zápisové právo — zrcadlo `accounting.journal.post`.
+     */
+    protected function requireCashClose(Request $request, Response $response, ?Response &$err): bool
+    {
+        return $this->requirePermission($request, $response, 'cash.close', AccessLevel::WRITE, $err);
+    }
+
     protected function requirePermission(Request $request, Response $response, string $permission, AccessLevel $minimum, ?Response &$err): bool
     {
         if (!RequestAuthorization::allows($request, $permission, $minimum)) {

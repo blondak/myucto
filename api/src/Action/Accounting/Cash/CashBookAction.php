@@ -122,16 +122,28 @@ final class CashBookAction
 
         try {
             $register = $this->registers->get($supplierId, $registerId, $to);
-            $accountId = $register['account_id'] ?? null;
-            if ($accountId === null) {
-                throw new CashException('account_invalid', 'Analytika pokladny není v osnově firmy.');
-            }
 
-            $data = $this->statement->build($supplierId, (int) $accountId, $from, $to, 1, self::PDF_MAX_ROWS);
-            // Hlavička registru místo obecného opisu účtu.
-            $data['account']['name'] = (string) $register['name'];
-            $data['from'] = $from;
-            $data['to'] = $to;
+            if ($this->isTaxEvidence($supplierId)) {
+                // M-6: v daňové evidenci pokladna nemá journal ani analytiku v osnově,
+                // takže `account_id` je NULL a tisk končil na `account_invalid` — kniha
+                // přitom na obrazovce je. PDF proto staví nad týmiž daty jako `get()`.
+                $data = $this->taxEvidencePdfData(
+                    $this->buildTaxEvidenceBook($supplierId, $register, $from, $to, 1, self::PDF_MAX_ROWS),
+                    $from,
+                    $to,
+                );
+            } else {
+                $accountId = $register['account_id'] ?? null;
+                if ($accountId === null) {
+                    throw new CashException('account_invalid', 'Analytika pokladny není v osnově firmy.');
+                }
+
+                $data = $this->statement->build($supplierId, (int) $accountId, $from, $to, 1, self::PDF_MAX_ROWS);
+                // Hlavička registru místo obecného opisu účtu.
+                $data['account']['name'] = (string) $register['name'];
+                $data['from'] = $from;
+                $data['to'] = $to;
+            }
 
             $bytes = $this->pdf->render($data);
             $filename = str_replace(['/', '\\', ' '], '-',
@@ -149,6 +161,49 @@ final class CashBookAction
             }
             return $this->mapPostingError($response, $e);
         }
+    }
+
+    /**
+     * M-6: přemapuje knihu daňové evidence na tvar, který čeká
+     * {@see AccountStatementPdfRenderer} (šablona `report/account_statement.twig`) —
+     * `entry_date`/`side`/`amount` místo `date`/`income`/`expense`, obraty jako
+     * `turnover_md`/`turnover_d`. Renderer tak zůstává jeden pro oba účetní režimy.
+     *
+     * @param array<string,mixed> $book
+     * @return array<string,mixed>
+     */
+    private function taxEvidencePdfData(array $book, string $from, string $to): array
+    {
+        $register = (array) $book['register'];
+        $items = [];
+        foreach ((array) $book['items'] as $it) {
+            $isIncome = ($it['income'] ?? null) !== null;
+            $items[] = [
+                'entry_date'  => (string) $it['date'],
+                'document_no' => $it['document_no'],
+                'description' => (string) $it['description'],
+                'side'        => $isIncome ? 'debit' : 'credit',
+                'amount'      => (float) ($isIncome ? $it['income'] : $it['expense']),
+                'balance'     => (float) $it['balance'],
+            ];
+        }
+
+        return [
+            'account' => [
+                'code' => (string) ($register['account_code'] ?? ''),
+                'name' => (string) ($register['name'] ?? ''),
+            ],
+            'opening_balance' => $book['opening_balance'],
+            'items'           => $items,
+            'turnover_md'     => $book['income_total'],
+            'turnover_d'      => $book['expense_total'],
+            'closing_balance' => $book['closing_balance'],
+            'total'           => $book['total'],
+            'page'            => 1,
+            'per_page'        => self::PDF_MAX_ROWS,
+            'from'            => $from,
+            'to'              => $to,
+        ];
     }
 
     /** Validované datum z query (i pojistka proti smetí ve filename Content-Disposition). */

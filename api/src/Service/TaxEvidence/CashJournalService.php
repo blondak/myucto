@@ -482,18 +482,16 @@ final class CashJournalService
                 'unclassified' => false, 'blocking' => false];
         }
 
-        // $amount je už v CZK (total_amount × fx_rate); DPH základ/částka z cash_document_vat_lines
-        // jsou ale v měně dokladu → přepočet tímtéž kurzem (M2), jinak by se u cizoměnové pokladny
-        // míchal EUR základ s CZK amountem.
+        // $amount i DPH základ/částka z cash_document_vat_lines jsou v DB už v CZK —
+        // valutový doklad přepočítá CashDocumentService::resolveCurrency() kurzem PŘED
+        // uložením (migrace 1114). Žádný další přepočet kurzem se tu tedy nedělá.
         $base = $amount;
         $vat  = 0.0;
         $vatBase = $r['cash_vat_base'] ?? null;
         $vatAmount = $r['cash_vat_amount'] ?? null;
         if ($isVatPayer && $vatBase !== null && $vatAmount !== null && (float) $vatBase > 0) {
-            $fx   = (float) ($r['cash_fx_rate'] ?? 1.0);
-            $fx   = $fx > 0.0 ? $fx : 1.0;
-            $base = round((float) $vatBase * $fx, 2);
-            $vat  = round((float) $vatAmount * $fx, 2);
+            $base = round((float) $vatBase, 2);
+            $vat  = round((float) $vatAmount, 2);
         }
         // Zbytek (amount − base − vat, např. zaokrouhlení nebo nepokrytá část) NESMÍ tiše zmizet
         // (M2) — spadne do nedaňového kbelíku (DPH/ostatní složka).

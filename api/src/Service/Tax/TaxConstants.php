@@ -271,6 +271,10 @@ final class TaxConstants
             'vat_quarterly_turnover_limit' => 15000000,
             'vat_rate_reduced'  => 12.0,
             'kh_item_threshold' => 10000,
+            // § 4 z. č. 254/2004 Sb., o omezení plateb v hotovosti — jedna platba téhož dne
+            // mezi týmiž osobami nad tento limit se MUSÍ provést bezhotovostně. Není to
+            // účetní chyba, ale povinnost plátce → v pokladně jen varování, ne blokace.
+            'cash_payment_limit' => 270000,
             'vat_coefficient_full_threshold_pct' => 95,
             // § 8 odst. 3 / § 10i ZDPH — celounijní práh pro zasílání zboží a digitální
             // služby B2C. Je v EUR (ne v Kč) a je společný pro všechny členské státy;
@@ -413,6 +417,10 @@ final class TaxConstants
             'vat_quarterly_turnover_limit' => 15000000,  // základní sazba § 47 ZDPH
             'vat_rate_reduced'  => 12.0,  // snížená sazba (od 2024 jednotná 12 %)
             'kh_item_threshold' => 10000, // limit KH: nad → A.4/B.2 jednotlivě, do → A.5/B.3 sumace
+            // § 4 z. č. 254/2004 Sb., o omezení plateb v hotovosti — jedna platba téhož dne
+            // mezi týmiž osobami nad tento limit se MUSÍ provést bezhotovostně. Není to
+            // účetní chyba, ale povinnost plátce → v pokladně jen varování, ne blokace.
+            'cash_payment_limit' => 270000,
             'vat_coefficient_full_threshold_pct' => 95,
             // § 8 odst. 3 / § 10i ZDPH — celounijní práh pro zasílání zboží a digitální
             // služby B2C. Je v EUR (ne v Kč) a je společný pro všechny členské státy;
@@ -558,6 +566,10 @@ final class TaxConstants
             'vat_quarterly_turnover_limit' => 15000000,
             'vat_rate_reduced'  => 12.0,
             'kh_item_threshold' => 10000,
+            // § 4 z. č. 254/2004 Sb., o omezení plateb v hotovosti — jedna platba téhož dne
+            // mezi týmiž osobami nad tento limit se MUSÍ provést bezhotovostně. Není to
+            // účetní chyba, ale povinnost plátce → v pokladně jen varování, ne blokace.
+            'cash_payment_limit' => 270000,
             'vat_coefficient_full_threshold_pct' => 95,
             // § 8 odst. 3 / § 10i ZDPH — celounijní práh pro zasílání zboží a digitální
             // služby B2C. Je v EUR (ne v Kč) a je společný pro všechny členské státy;

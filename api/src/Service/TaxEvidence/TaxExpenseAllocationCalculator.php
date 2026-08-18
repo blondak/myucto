@@ -114,15 +114,18 @@ final class TaxExpenseAllocationCalculator
 
     public function forCashDocument(int $supplierId, int $cashDocumentId, bool $isVatPayer, int $year): float
     {
+        // total_amount i cash_document_vat_lines jsou v DB už v CZK (valutový doklad
+        // přepočítá CashDocumentService::resolveCurrency() kurzem před uložením, migrace
+        // 1114) — kurzem se tu proto NENÁSOBÍ, jinak vznikne dvojí přepočet.
         $stmt = $this->db->pdo()->prepare(
-            'SELECT total_amount, fx_rate FROM cash_documents WHERE id = ? AND supplier_id = ?'
+            'SELECT total_amount FROM cash_documents WHERE id = ? AND supplier_id = ?'
         );
         $stmt->execute([$cashDocumentId, $supplierId]);
         $document = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($document === false) {
             throw new \RuntimeException('Pokladní doklad nebyl nalezen.');
         }
-        $amount = round((float) $document['total_amount'] * (float) $document['fx_rate'], 2);
+        $amount = round((float) $document['total_amount'], 2);
         if (!$isVatPayer) {
             return $amount;
         }
@@ -136,18 +139,17 @@ final class TaxExpenseAllocationCalculator
         if ($lines === []) {
             return $amount;
         }
-        $fx = (float) $document['fx_rate'];
         $taxable = 0.0;
         foreach ($lines as $line) {
             if ((string) $line['tax_treatment'] !== 'deductible') {
                 continue;
             }
-            $taxable += ((float) $line['base_amount'] + (float) $line['vat_amount'] * (1 - $this->deductionRatio(
+            $taxable += (float) $line['base_amount'] + (float) $line['vat_amount'] * (1 - $this->deductionRatio(
                 $supplierId,
                 (string) $line['vat_deduction'],
                 (float) $line['vat_deduction_percent'],
                 $year,
-            ))) * $fx;
+            ));
         }
         return round(min($amount, max(0.0, $taxable)), 2);
     }

@@ -132,10 +132,13 @@ partnera. Volitelně lze doklad vystavit s DPH (viz § 30.3.3).
 (vyhledávání podle čísla nebo partnera); po výběru dokladu se automaticky předvyplní partner,
 popis a částka. U úhrady vydané faktury lze uhradit i částečnou částku (do výše zbývající k
 úhradě). U úhrady přijaté faktury (VPD) je nutné uhradit **celou zbývající částku najednou** —
-částka je po výběru dokladu needitovatelná (pole je uzamčené). Po zaúčtování se faktura označí
-jako uhrazená. U přijaté hotovostní úhrady zálohové faktury se stejně jako u bankovní platby
-automaticky připraví koncept daňového dokladu k částečné platbě, nebo koncept finální faktury
-při úplném uhrazení zálohy.
+částka je po výběru dokladu needitovatelná (pole je uzamčené). Zbývající částkou se rozumí
+brutto snížené o **už uhrazenou zálohu** a o dřívější úhrady (bankovní i hotovostní); doklad,
+na kterém po záloze nic nezbývá, se v našeptávači vůbec nenabídne. Po zaúčtování se faktura
+označí jako uhrazená. U přijaté hotovostní úhrady zálohové faktury se stejně jako u bankovní
+platby automaticky připraví koncept daňového dokladu k částečné platbě, nebo koncept finální
+faktury při úplném uhrazení zálohy — v našeptávači jsou proto i **zálohové (proforma) faktury**,
+označené jako záloha.
 
 **Převod** — pokladní strana převodu hotovosti mezi bankou a pokladnou (druhá strana — bankovní
 pohyb — se řeší samostatně mimo pokladní doklad).
@@ -184,20 +187,34 @@ Po vyplnění formuláře se doklad ukládá tlačítkem **Uložit** — doklad 
 mezikrok rozpracovaného dokladu, který by bylo nutné dodatečně zaúčtovat). Po uložení se zobrazí
 číslo přiděleného dokladu a případná varování (např. záporný zůstatek pokladny po zaúčtování).
 
+> [!NOTE]
+> **Limit plateb v hotovosti.** U dokladu nad **270 000 Kč** se zobrazí upozornění na zákon
+> č. 254/2004 Sb., o omezení plateb v hotovosti — platbu nad tento limit provedenou mezi
+> týmiž osobami v jeden den je nutné uhradit bezhotovostně. Nejde o blokaci: doklad se uloží
+> i zaúčtuje, upozornění jen připomíná povinnost plátce.
+
 ### 30.3.5 Storno dokladu
 
 Ručně vystavený zaúčtovaný doklad nelze opravit ani smazat — jedinou cestou k opravě je **storno**
-(tlačítko s ikonou zpětné šipky u řádku v seznamu). Jediná výjimka je doklad, který vznikl
-automaticky z faktury (§ 30.3.6) — ten se při zrušení volby v editoru faktury skutečně **smaže**.
-Storno vyžaduje:
+(tlačítko s ikonou zpětné šipky u řádku v seznamu). Storno vyžaduje:
 
 - **Důvod storna** — povinné textové pole (minimálně 3 znaky), vloží se do popisu protizápisu.
-- **Datum storna** — volitelné, výchozí je aktuální datum.
+- **Datum storna** — volitelné. Necháš-li je prázdné, protizápis se zaúčtuje **k datu původního
+  zápisu**, takže oprava zůstane ve stejném období jako doklad. Na dnešní datum se posune jen
+  tehdy, když je původní období uzamčené.
 
 Po potvrzení systém vytvoří zrcadlový protizápis, doklad se označí jako stornovaný (v seznamu
 přeškrtnutý a ztlumený) a číslo dokladu zůstává v řadě obsazené (nedorovnává se). Pokud šlo o
 úhradu faktury, storno zruší i příslušný záznam úhrady a stav faktury/přijaté faktury se vrátí do
 předchozího stavu.
+
+Doklad v **uzamčeném období** stornovat lze — protizápis se automaticky posune do prvního
+otevřeného data. Odmítne se jen tehdy, když zámek zasahuje i aktuální datum; pak je nutné
+nejdřív posunout zámek v nastavení účetnictví.
+
+Storno **úhrady zálohové faktury**, ze které už vznikla finální faktura nebo daňový doklad
+k přijaté platbě, systém odmítne — takový doklad by po sobě zůstal vystavený. Zruš proto
+nejdřív navazující doklad, teprve pak pokladní doklad; hláška uvede jeho číslo.
 
 > [!WARNING]
 > Storno dokladu, který už byl zahrnut do podaného přiznání k DPH nebo kontrolního hlášení, se
@@ -215,14 +232,16 @@ uložení či přijetí) sám vystaví a zaúčtuje PPD nebo VPD s účelem *Úh
 
 Takový doklad se od ručního liší v jediné věci: **řídí ho faktura**.
 
-- Zrušíš-li volbu v editoru faktury, doklad se **smaže i se svým zápisem
-  v deníku** a evidovaná úhrada zmizí. Není to storno protizápisem — doklad
-  prostě přestane existovat. **Číslo v řadě se ale nedorovnává**, takže po něm
-  zůstane díra; to je stejné jako u storna.
-- Změníš-li na faktuře pokladnu, doklad se přesune do nové pokladny a dostane
-  **nové číslo** z její řady. Původní číslo je spotřebované.
+- Zrušíš-li volbu v editoru faktury, doklad se **stornuje protizápisem** a
+  evidovaná úhrada zmizí. Doklad i protizápis zůstávají v evidenci a v pokladní
+  knize, aby číselná řada zůstala souvislá.
+- Změníš-li na faktuře pokladnu, původní doklad se stornuje a v nové pokladně
+  vznikne nový s **novým číslem** z její řady.
 - Změna částky nebo data vystavení faktury se propíše stejně — starý doklad se
-  zruší a vznikne nový.
+  stornuje a vznikne nový.
+- U přijaté faktury se vyrovnává **zbytek k úhradě**, tedy brutto snížené
+  o už uhrazenou zálohu a o dřívější úhrady. Doklad, na kterém po záloze nic
+  nezbývá, se hotovostně nevyrovnává.
 - **Ručně pořízeného dokladu se tenhle mechanismus nikdy nedotkne**, ani když je
   navázaný na tutéž fakturu. Rozlišují se v datech.
 
@@ -293,7 +312,8 @@ doklady, projeví se v knize s prázdným popisem vazby, ale zůstatek zůstáv�
 
 Tlačítko **PDF pokladní knihy** vygeneruje tiskovou sestavu za celý zvolený rozsah data (bez
 stránkování) s hlavičkou pokladny, počátečním a konečným zůstatkem a přehledem příjmů/výdajů —
-vhodné jako podklad k roční uzávěrce nebo pro kontrolu.
+vhodné jako podklad k roční uzávěrce nebo pro kontrolu. Sestava funguje v podvojném účetnictví
+i v daňové evidenci.
 
 ## 30.6 Zaúčtování a vazba na deník
 
@@ -344,8 +364,13 @@ rozpadu DPH; nejde o pouhý evidenční záznam čekající na ruční deník.
 - Převod mezi valutovou pokladnou a bankou nebo jinou pokladnou přes účet 261
   není podporovaný. Různé měny vyžadují doložený kurz a kurzový rozdíl;
   zaúčtuj je ručně v deníku.
-- Úhradu přijaté faktury z pokladny lze provést jen v plné výši; částečné úhrady přijatých
-  faktur hotově systém nepodporuje.
+- Úhradu přijaté faktury z pokladny lze provést jen v plné zbývající výši; částečné úhrady
+  přijatých faktur hotově systém nepodporuje. Zbývající výše je brutto snížené o uhrazenou
+  zálohu a o dřívější úhrady.
+- Trvalé smazání zaúčtovaného dokladu (na rozdíl od storna po sobě nenechá žádnou stopu
+  a v číselné řadě zůstane díra) vyžaduje samostatné právo **Uzavřít pokladnu a trvale
+  mazat doklady**. Běžné právo na pokladní doklady na to nestačí; standardní cestou k opravě
+  je storno.
 - Z korunové pokladny lze uhradit jen korunovou fakturu; z valutové pokladny
   není účel úhrady faktury dostupný ani pro fakturu ve stejné měně.
 - Korunový daňový doklad při nákupu (VPD) formulář blokuje od 10 000 Kč včetně

@@ -502,6 +502,84 @@ final class CashDocumentServiceTest extends TestCase
         self::assertNotContains($ddkp, $ids, 'DDKP není platební cíl — v našeptávači být nesmí.');
     }
 
+    /**
+     * H-1: platebním cílem přijaté faktury kryté zálohou je ZBYTEK (`amount_to_pay`
+     * = brutto − advance_paid_amount), ne brutto. Dřív se porovnávalo proti brutto:
+     * správná částka skončila na `partial_purchase_payment` a přijala se ta, která
+     * na 321 nadělá fantomový debetní zůstatek ve výši zálohy.
+     */
+    public function testPurchasePaymentUsesRemainingAfterAdvance(): void
+    {
+        $reg = $this->makeRegister();
+        $vendor = $this->client('Dodavatel se zalohou s.r.o.', false, true);
+        $pfId = $this->purchaseInvoice('PF-2099-130', $vendor, 121000.00, $this->currencyId);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET advance_paid_amount = 100000.00 WHERE id = ?')
+            ->execute([$pfId]);
+
+        // Našeptávač musí ukázat zbytek 21 000, ne brutto 121 000.
+        $found = $this->service->searchUnpaid($this->supplierId, 'purchase_invoice', 'PF-2099-130');
+        self::assertCount(1, $found);
+        self::assertEqualsWithDelta(21000.00, (float) $found[0]['remaining'], 0.001, 'H-1: zbývá po záloze 21 000.');
+        self::assertEqualsWithDelta(100000.00, (float) $found[0]['paid'], 0.001, 'H-1: `paid` se počítá, nevrací se 0.');
+
+        // Brutto (121 000) je nově chyba — na 321 tolik závazku nikdy nebylo.
+        try {
+            $this->service->create($this->supplierId, $this->doc([
+                'purpose' => 'purchase_payment', 'doc_type' => 'out', 'total_amount' => 121000.00,
+                'purchase_invoice_id' => $pfId,
+            ], $reg), $this->userId);
+            self::fail('Úhrada v plném brutto přes zaplacenou zálohu musí selhat.');
+        } catch (CashException $e) {
+            self::assertSame('partial_purchase_payment', $e->errorCode);
+        }
+
+        // Zbytek 21 000 projde a zaúčtuje se 321 MD / 211 D právě na zbytek.
+        $res = $this->service->create($this->supplierId, $this->doc([
+            'purpose' => 'purchase_payment', 'doc_type' => 'out', 'total_amount' => 21000.00,
+            'purchase_invoice_id' => $pfId,
+        ], $reg), $this->userId);
+        $byAcc = $this->linesByAccountCode($res['journal_entry_id']);
+        self::assertEqualsWithDelta(21000.00, $byAcc['321']['debit'], 0.001);
+        self::assertEqualsWithDelta(21000.00, $byAcc['211']['credit'], 0.001);
+        self::assertSame('paid', $this->purchaseStatus($pfId));
+    }
+
+    /** H-1: faktura plně krytá zálohou (amount_to_pay = 0) se v našeptávači nesmí objevit. */
+    public function testUnpaidSearchExcludesFullyAdvancedPurchaseInvoice(): void
+    {
+        $vendor = $this->client('Dodavatel plne kryty s.r.o.', false, true);
+        $covered = $this->purchaseInvoice('PF-2099-131', $vendor, 12100.00, $this->currencyId);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET advance_paid_amount = 12100.00 WHERE id = ?')
+            ->execute([$covered]);
+
+        $found = $this->service->searchUnpaid($this->supplierId, 'purchase_invoice', 'PF-2099-131');
+
+        self::assertSame([], $found, 'PF na 0 Kč po záloze nemá a nemá mít pokladní úhradu.');
+    }
+
+    /**
+     * H-2: storno bez zadaného data se NESMÍ datovat dneškem. `PostingService::reverse()`
+     * (B8) je stavěný tak, že bez explicitního data použije datum původního zápisu a na
+     * dnešek ho posune až u zamčeného období. Pokladna dosazovala dnešek sama, takže
+     * protizápis k březnovému dokladu padal do listopadu, zatímco DPH se opravila v březnu.
+     */
+    public function testReverseWithoutDateKeepsOriginalEntryDate(): void
+    {
+        $reg = $this->makeRegister();
+        $sale = $this->service->create($this->supplierId, $this->sale($reg, 1500.00), $this->userId);
+        $original = $this->journal->find((int) $sale['journal_entry_id'], $this->supplierId);
+
+        $rev = $this->service->reverse($this->supplierId, $sale['id'], ['reason' => 'Chybny doklad'], $this->userId);
+
+        $reversal = $this->journal->find((int) $rev['reversal_entry_id'], $this->supplierId);
+        self::assertSame(
+            substr((string) $original['entry_date'], 0, 10),
+            substr((string) $reversal['entry_date'], 0, 10),
+            'H-2: protizápis dědí datum původního zápisu, ne dnešek.',
+        );
+        self::assertNotSame(date('Y-m-d'), substr((string) $reversal['entry_date'], 0, 10));
+    }
+
     public function testReverseWithCleanup(): void
     {
         $reg = $this->makeRegister();
