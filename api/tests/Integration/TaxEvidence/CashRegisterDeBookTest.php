@@ -288,6 +288,54 @@ final class CashRegisterDeBookTest extends TestCase
     }
 
     /** @return array{status:int, body:array<string,mixed>} */
+    /**
+     * L-6: kniha stránkuje v SQL, ne `array_slice()` nad celým oknem. Běžící zůstatek
+     * proto musí vzniknout nad CELÝM obdobím — druhá stránka nesmí začít počítat od nuly —
+     * a součty ani `total` se stránkou nesmí hnout.
+     */
+    public function testTaxEvidenceBookPagesInSqlWithoutRestartingRunningBalance(): void
+    {
+        $regId = $this->registers->create($this->teSupplierId, ['name' => 'Pokladna', 'account_code' => '211', 'is_default' => true]);
+
+        foreach ([100.00, 200.00, 300.00, 400.00] as $i => $amount) {
+            $this->postSale($this->teSupplierId, $regId, $amount, self::YEAR . '-06-' . str_pad((string) (10 + $i), 2, '0', STR_PAD_LEFT));
+        }
+
+        $first = $this->call($this->teSupplierId, $regId, self::YEAR . '-01-01', self::YEAR . '-12-31', ['page' => 1, 'per_page' => 2]);
+        self::assertSame(200, $first['status']);
+        self::assertCount(2, $first['body']['items']);
+        self::assertSame(4, (int) $first['body']['total'], 'total je počet řádků výběru, ne délka stránky.');
+        self::assertEqualsWithDelta(300.00, $first['body']['items'][1]['balance'], 0.001, '100 + 200 = 300.');
+
+        $second = $this->call($this->teSupplierId, $regId, self::YEAR . '-01-01', self::YEAR . '-12-31', ['page' => 2, 'per_page' => 2]);
+        self::assertCount(2, $second['body']['items']);
+        self::assertEqualsWithDelta(600.00, $second['body']['items'][0]['balance'], 0.001, 'Zůstatek běží dál přes stránky, nezačíná od 0.');
+        self::assertEqualsWithDelta(1000.00, $second['body']['items'][1]['balance'], 0.001);
+
+        // Obraty a zůstatky jsou za období — na stránce nezáleží.
+        foreach ([$first, $second] as $page) {
+            self::assertEqualsWithDelta(1000.00, $page['body']['income_total'], 0.001);
+            self::assertEqualsWithDelta(0.0, $page['body']['expense_total'], 0.001);
+            self::assertEqualsWithDelta(1000.00, $page['body']['closing_balance'], 0.001);
+        }
+    }
+
+    /**
+     * Zápor se hlídá nad průběhem, ne jen nad koncem období — kniha spadne pod nulu
+     * uprostřed a do konečného zůstatku se vrátí.
+     */
+    public function testTaxEvidenceBookFlagsNegativeDip(): void
+    {
+        $regId = $this->registers->create($this->teSupplierId, ['name' => 'Pokladna', 'account_code' => '211', 'is_default' => true]);
+
+        $this->postPurchase($this->teSupplierId, $regId, 500.00, self::YEAR . '-06-10');
+        $this->postSale($this->teSupplierId, $regId, 900.00, self::YEAR . '-06-20');
+
+        $body = $this->call($this->teSupplierId, $regId, self::YEAR . '-01-01', self::YEAR . '-12-31')['body'];
+        self::assertEqualsWithDelta(400.00, $body['closing_balance'], 0.001);
+        self::assertTrue($body['balance_negative'], 'Propad na -500 uprostřed období se nesmí ztratit.');
+    }
+
     private function call(int $supplierId, int $registerId, string $from, string $to, array $extraQuery = []): array
     {
         $req = (new ServerRequestFactory())

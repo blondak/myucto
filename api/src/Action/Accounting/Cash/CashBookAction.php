@@ -337,33 +337,79 @@ final class CashBookAction
         $dayBeforeFrom = date('Y-m-d', strtotime($from . ' -1 day'));
         $opening = $this->registers->documentsSignedTotal($supplierId, $registerId, $dayBeforeFrom);
 
+        $window = "supplier_id = ? AND register_id = ? AND status = 'posted' AND issue_date BETWEEN ? AND ?";
+        $windowParams = [$supplierId, $registerId, $from, $to];
+
+        // L-6: obraty a extrém běžícího zůstatku počítá DB nad celým oknem — do PHP se
+        // načítá jen jedna stránka. Filtr sem záměrně nevstupuje: PS/KS i obraty jsou
+        // za období, ne za výběr (shodně s podvojnou větví).
         $stmt = $this->db->pdo()->prepare(
-            "SELECT id, doc_type, doc_number, issue_date, tax_date, description, partner_name, purpose, total_amount
-               FROM cash_documents
-              WHERE supplier_id = ? AND register_id = ? AND status = 'posted' AND issue_date BETWEEN ? AND ?
-              ORDER BY issue_date, id"
+            "SELECT COALESCE(SUM(CASE WHEN doc_type = 'in'  THEN total_amount ELSE 0 END), 0) AS income_total,
+                    COALESCE(SUM(CASE WHEN doc_type = 'out' THEN total_amount ELSE 0 END), 0) AS expense_total
+               FROM cash_documents WHERE {$window}"
         );
-        $stmt->execute([$supplierId, $registerId, $from, $to]);
+        $stmt->execute($windowParams);
+        $totals = $stmt->fetch(PDO::FETCH_ASSOC) ?: ['income_total' => 0, 'expense_total' => 0];
+        $incomeTotal  = round((float) $totals['income_total'], 2);
+        $expenseTotal = round((float) $totals['expense_total'], 2);
+        $closing = round($opening + $incomeTotal - $expenseTotal, 2);
+
+        // Zápor se hlídá nad PRŮBĚHEM, ne jen nad koncem — kniha může spadnout pod nulu
+        // uprostřed období a do KS se vrátit (obdoba minRunningDelta u podvojné větve).
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(MIN(t.running_delta), 0) FROM (
+                SELECT SUM(CASE WHEN doc_type = 'in' THEN total_amount ELSE -total_amount END)
+                         OVER (ORDER BY issue_date, id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_delta
+                  FROM cash_documents WHERE {$window}
+             ) t"
+        );
+        $stmt->execute($windowParams);
+        $minDelta = (float) $stmt->fetchColumn();
+        $negative = $opening < 0 || round($opening + $minDelta, 2) < 0;
+
+        // Běžící zůstatek musí vzniknout PŘED filtrem (jinak by řádek ukazoval součet
+        // jen z vybraných dokladů), proto okenní funkce uvnitř a filtr až nad ní.
+        $filterSql = '';
+        $filterParams = [];
+        if (isset($filters['doc_type'])) {
+            $filterSql .= ' AND t.doc_type = ?';
+            $filterParams[] = $filters['doc_type'];
+        }
+        if (isset($filters['purpose'])) {
+            $filterSql .= ' AND t.purpose = ?';
+            $filterParams[] = $filters['purpose'];
+        }
+        if (isset($filters['q'])) {
+            $like = '%' . str_replace(['=', '%', '_'], ['==', '=%', '=_'], $filters['q']) . '%';
+            $filterSql .= " AND (t.description LIKE ? ESCAPE '=' OR t.partner_name LIKE ? ESCAPE '=' OR t.doc_number LIKE ? ESCAPE '=')";
+            array_push($filterParams, $like, $like, $like);
+        }
+
+        $offset = max(0, ($page - 1) * $perPage);
+        $sql = "SELECT t.*, COUNT(*) OVER() AS total_rows FROM (
+                    SELECT id, doc_type, doc_number, issue_date, tax_date, description, partner_name, purpose, total_amount,
+                           SUM(CASE WHEN doc_type = 'in' THEN total_amount ELSE -total_amount END)
+                             OVER (ORDER BY issue_date, id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_delta
+                      FROM cash_documents WHERE {$window}
+                ) t
+                WHERE 1 = 1{$filterSql}
+                ORDER BY t.issue_date, t.id
+                LIMIT ? OFFSET ?";
+        $stmt = $this->db->pdo()->prepare($sql);
+        $idx = 1;
+        foreach (array_merge($windowParams, $filterParams) as $v) {
+            $stmt->bindValue($idx++, $v);
+        }
+        $stmt->bindValue($idx++, $perPage, PDO::PARAM_INT);
+        $stmt->bindValue($idx++, $offset, PDO::PARAM_INT);
+        $stmt->execute();
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-        $running = $opening;
-        $incomeTotal = 0.0;
-        $expenseTotal = 0.0;
-        $negative = $opening < 0;
-        $allItems = [];
+        $items = [];
         foreach ($rows as $r) {
             $amount = round((float) $r['total_amount'], 2);
             $isIncome = (string) $r['doc_type'] === 'in';
-            $running = round($running + ($isIncome ? $amount : -$amount), 2);
-            if ($running < 0) {
-                $negative = true;
-            }
-            if ($isIncome) {
-                $incomeTotal = round($incomeTotal + $amount, 2);
-            } else {
-                $expenseTotal = round($expenseTotal + $amount, 2);
-            }
-            $allItems[] = [
+            $items[] = [
                 'date'         => (string) $r['issue_date'],
                 'document_no'  => $r['doc_number'],
                 'doc_type'     => (string) $r['doc_type'],
@@ -373,30 +419,21 @@ final class CashBookAction
                 'description'  => (string) $r['description'],
                 'income'       => $isIncome ? $amount : null,
                 'expense'      => !$isIncome ? $amount : null,
-                'balance'      => $running,
+                'balance'      => round($opening + (float) $r['running_delta'], 2),
                 'document_id'  => (int) $r['id'],
                 'entry_id'     => (int) $r['id'],
             ];
         }
 
-        // L-9: filtr zužuje jen seznam řádků — obraty, PS i KS se počítají nad celým
-        // oknem výše, takže se výběrem nezkreslí (shodně s podvojnou větví).
-        if ($filters !== []) {
-            $allItems = array_values(array_filter($allItems, fn (array $it): bool => $this->matchesFilters($it, $filters)));
-        }
-
-        $total = count($allItems);
-        $offset = ($page - 1) * $perPage;
-
         return [
             'register'         => $register,
             'opening_balance'  => $opening,
-            'items'            => array_slice($allItems, $offset, $perPage),
+            'items'            => $items,
             'income_total'     => $incomeTotal,
             'expense_total'    => $expenseTotal,
-            'closing_balance'  => $running,
+            'closing_balance'  => $closing,
             'balance_negative' => $negative,
-            'total'            => $total,
+            'total'            => $rows === [] ? 0 : (int) $rows[0]['total_rows'],
             'page'             => $page,
             'per_page'         => $perPage,
         ];
