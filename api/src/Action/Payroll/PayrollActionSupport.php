@@ -27,6 +27,25 @@ trait PayrollActionSupport
         return $id > 0 ? $id : null;
     }
 
+    /**
+     * Zúžení seznamu na jeden vztah / jednu osobu z query stringu.
+     *
+     * Chybějící parametr znamená „bez zúžení". Cokoli jiného se předá dál jako
+     * číslo, i když je nesmyslné — nečíselnou hodnotu odmítne repozitář hláškou
+     * místo aby ji potichu zahodil a vrátil celý seznam. Tiché ignorování zúžení
+     * je horší než chyba: z celého seznamu uživatel usoudí, že filtr nezabral.
+     *
+     * @param array<array-key,mixed> $query
+     */
+    private static function narrowingId(array $query, string $name): ?int
+    {
+        $value = $query[$name] ?? null;
+        if (is_int($value)) {
+            return $value;
+        }
+        return is_string($value) && trim($value) !== '' ? (int) $value : null;
+    }
+
     private function requirePermission(
         Request $request,
         Response $response,

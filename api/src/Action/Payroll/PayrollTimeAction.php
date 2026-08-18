@@ -44,11 +44,7 @@ final class PayrollTimeAction
             $query['incomplete'] ?? false,
             FILTER_VALIDATE_BOOL,
         );
-        $employmentValue = $query['employment_id'] ?? null;
-        $employmentId = (is_string($employmentValue) && trim($employmentValue) !== '')
-            || is_int($employmentValue)
-                ? (int) $employmentValue
-                : null;
+        $employmentId = self::narrowingId($query, 'employment_id');
         try {
             return Json::ok($response, $this->time->overview(
                 $this->currentSupplierId($request),

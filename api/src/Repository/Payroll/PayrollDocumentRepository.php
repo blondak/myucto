@@ -84,6 +84,11 @@ final class PayrollDocumentRepository
     }
 
     /**
+     * Zúžení na jednu osobu (`$employeeId`) padá do TÉHOŽ dotazu jako stránkování.
+     * Dokud filtroval prohlížeč nad načtenou stránkou, dokument z jiné strany se
+     * tiše neprojevil. Hromadný balík měsíce (`monthly_bundle`) nemá osobu, takže
+     * ze zúženého seznamu vypadne — patří běhu, ne konkrétnímu člověku.
+     *
      * @return array{items:list<array<string,mixed>>,total:int}
      */
     public function listForPeriod(
@@ -91,11 +96,15 @@ final class PayrollDocumentRepository
         string $periodStart,
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
+        ?int $employeeId = null,
     ): array {
         // Strop se klampuje i tady, ne jen na HTTP hranici: repozitář volá
         // i jiný kód než akce a „nekonečný" seznam nesmí jít objednat nikudy.
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
+        if ($employeeId !== null && $employeeId <= 0) {
+            throw new \InvalidArgumentException('Osoba musí být kladné číslo.');
+        }
 
         $from = ' FROM payroll_generated_documents document
                JOIN payroll_runs run
@@ -111,10 +120,16 @@ final class PayrollDocumentRepository
                  ON office.supplier_id = run.supplier_id
                 AND office.id = run.office_id
               WHERE document.supplier_id = ?
-                AND run.period_start = ?';
+                AND run.period_start = ?'
+            . ($employeeId === null ? '' : ' AND document.employee_id = ?');
+
+        $filterParams = [$supplierId, $periodStart];
+        if ($employeeId !== null) {
+            $filterParams[] = $employeeId;
+        }
 
         $countStmt = $this->db->pdo()->prepare('SELECT COUNT(*)' . $from);
-        $countStmt->execute([$supplierId, $periodStart]);
+        $countStmt->execute($filterParams);
         $total = (int) $countStmt->fetchColumn();
 
         $stmt = $this->db->pdo()->prepare(
@@ -131,10 +146,16 @@ final class PayrollDocumentRepository
                        document.id DESC
               LIMIT ? OFFSET ?'
         );
-        $stmt->bindValue(1, $supplierId, PDO::PARAM_INT);
-        $stmt->bindValue(2, $periodStart, PDO::PARAM_STR);
-        $stmt->bindValue(3, $limit, PDO::PARAM_INT);
-        $stmt->bindValue(4, $offset, PDO::PARAM_INT);
+        $position = 1;
+        foreach ($filterParams as $param) {
+            $stmt->bindValue(
+                $position++,
+                $param,
+                is_int($param) ? PDO::PARAM_INT : PDO::PARAM_STR,
+            );
+        }
+        $stmt->bindValue($position++, $limit, PDO::PARAM_INT);
+        $stmt->bindValue($position, $offset, PDO::PARAM_INT);
         $stmt->execute();
 
         return [
@@ -386,15 +407,24 @@ final class PayrollDocumentRepository
         return $row === false ? null : self::cast($row);
     }
 
-    /** @return array{items:list<array<string,mixed>>,total:int} */
+    /**
+     * Roční dokumenty; `$employeeId` zúží seznam na jednu osobu ve stejném
+     * dotazu, do kterého padá stránkování.
+     *
+     * @return array{items:list<array<string,mixed>>,total:int}
+     */
     public function listAnnualDocuments(
         int $supplierId,
         int $taxYear,
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
+        ?int $employeeId = null,
     ): array {
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
+        if ($employeeId !== null && $employeeId <= 0) {
+            throw new \InvalidArgumentException('Osoba musí být kladné číslo.');
+        }
 
         $from = ' FROM payroll_generated_documents document
                JOIN payroll_annual_document_revisions annual
@@ -403,10 +433,16 @@ final class PayrollDocumentRepository
                JOIN payroll_employees employee
                  ON employee.supplier_id = document.supplier_id
                 AND employee.id = document.employee_id
-              WHERE document.supplier_id = ? AND annual.tax_year = ?';
+              WHERE document.supplier_id = ? AND annual.tax_year = ?'
+            . ($employeeId === null ? '' : ' AND document.employee_id = ?');
+
+        $filterParams = [$supplierId, $taxYear];
+        if ($employeeId !== null) {
+            $filterParams[] = $employeeId;
+        }
 
         $countStmt = $this->db->pdo()->prepare('SELECT COUNT(*)' . $from);
-        $countStmt->execute([$supplierId, $taxYear]);
+        $countStmt->execute($filterParams);
         $total = (int) $countStmt->fetchColumn();
 
         $stmt = $this->db->pdo()->prepare(
@@ -422,10 +458,12 @@ final class PayrollDocumentRepository
                        document.id DESC
               LIMIT ? OFFSET ?'
         );
-        $stmt->bindValue(1, $supplierId, PDO::PARAM_INT);
-        $stmt->bindValue(2, $taxYear, PDO::PARAM_INT);
-        $stmt->bindValue(3, $limit, PDO::PARAM_INT);
-        $stmt->bindValue(4, $offset, PDO::PARAM_INT);
+        $position = 1;
+        foreach ($filterParams as $param) {
+            $stmt->bindValue($position++, $param, PDO::PARAM_INT);
+        }
+        $stmt->bindValue($position++, $limit, PDO::PARAM_INT);
+        $stmt->bindValue($position, $offset, PDO::PARAM_INT);
         $stmt->execute();
 
         return [

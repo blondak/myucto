@@ -84,30 +84,28 @@ const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 /**
  * Zúžení na jeden vztah z odkazu na kartě zaměstnance (`?employment=12`).
  *
- * Rychlé vstupy server podle vztahu filtrovat neumí (endpoint zná jen období),
- * takže se při zúžení načte celý měsíc najednou (serverový strop je 200) a
- * ponechá se jediný řádek. Musí se filtrovat SAMO `rows`, ne jen výpis:
- * `payload()` posílá k uložení právě to, co je v `rows`, a uložit při zúžení
- * i lidi, které uživatel nevidí, by byl tichý zápis mimo obrazovku.
+ * Zužuje SERVER (`quick-inputs?employment_id=`), a to do téhož dotazu jako
+ * stránkování — dokud filtroval prohlížeč nad načtenou stránkou, vztah z jiné
+ * strany se tiše neprojevil. Ukládání dostává zúžení taky: `payload()` posílá
+ * právě to, co je v `rows`, takže nezúžená odpověď by po uložení nasypala do
+ * formuláře lidi, které uživatel nevidí.
  */
-const QUICK_INPUT_FOCUS_LIMIT = 200
 const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
-/** Kolik řádků má celé období — proti tomu se pozná, že zúžení nevidělo všechno. */
-const periodTotal = ref(0)
 /*
- * Lišta se zúžením musí být vidět i tehdy, když se hledaný člověk mezi načtenými
- * řádky nenašel. Bez ní zůstane prázdná tabulka se schovaným pagerem a uživatel
- * nemá jak poznat, že se dívá na zúžený seznam — ani jak se ze zúžení dostat.
+ * Lišta se zúžením musí být vidět i tehdy, když zúžení nedalo nic. Bez ní zůstane
+ * prázdná tabulka a uživatel nemá jak poznat, že se dívá na zúžený seznam — ani
+ * jak se ze zúžení dostat.
  */
 const focusName = computed(() => {
   if (focusEmploymentId.value === null) return null
-  return rows.value.length === 1
+  return rows.value.length > 0
     ? rows.value[0].full_name
     : t('payroll.agendas.focus.unknown_person')
 })
-const focusTruncated = computed(() =>
-  focusEmploymentId.value !== null
-  && (rows.value.length === 0 || periodTotal.value > QUICK_INPUT_FOCUS_LIMIT))
+/** Server zúžení uplatnil a nezbylo nic — prázdno se musí pojmenovat, ne mlčet. */
+const focusMissing = computed(() =>
+  focusEmploymentId.value !== null && !loading.value && !loadFailed.value
+  && loadedPeriod.value === period.value && rows.value.length === 0)
 
 function clearFocus(): void {
   focusEmploymentId.value = null
@@ -353,20 +351,16 @@ async function load(): Promise<void> {
   saveError.value = null
   saveConflict.value = false
   try {
-    const focused = focusEmploymentId.value
-    const month = await payrollApi.quickInputs(requestedPeriod, focused === null
-      ? { limit: pageSize, offset: offset.value }
-      : { limit: QUICK_INPUT_FOCUS_LIMIT, offset: 0 })
+    const month = await payrollApi.quickInputs(
+      requestedPeriod,
+      { limit: pageSize, offset: offset.value },
+      focusEmploymentId.value ?? undefined,
+    )
     if (generation !== loadGeneration || period.value !== requestedPeriod
       || month.period !== requestedPeriod) return
-    const items = focused === null
-      ? month.items
-      : month.items.filter(item => item.employment_id === focused)
-    rows.value = items.map(toUi)
-    // Se zúžením je „kolik jich je" počet nalezených řádků, ne celý měsíc —
-    // jinak by pager i souhrn mluvily o lidech, které tabulka neukazuje.
-    total.value = focused === null ? month.total : items.length
-    periodTotal.value = month.total
+    rows.value = month.items.map(toUi)
+    // `total` už je zúžené serverem, takže pager mluví o tom, co tabulka ukazuje.
+    total.value = month.total
     loadedPeriod.value = requestedPeriod
   } catch (error) {
     if (generation === loadGeneration) {
@@ -423,10 +417,11 @@ async function save(): Promise<void> {
   saveError.value = null
   saveConflict.value = false
   try {
-    const month = await payrollApi.saveQuickInputs(payload(), {
-      limit: pageSize,
-      offset: offset.value,
-    })
+    const month = await payrollApi.saveQuickInputs(
+      payload(),
+      { limit: pageSize, offset: offset.value },
+      focusEmploymentId.value ?? undefined,
+    )
     if (generation !== loadGeneration || period.value !== requestedPeriod
       || month.period !== requestedPeriod) return
     // Uložení dostalo v query tentýž limit/offset, takže vrací TU stránku,
@@ -533,9 +528,14 @@ onMounted(load)
     </div>
 
     <PayrollFocusNotice
-      v-if="focusName"
+      v-if="focusMissing"
+      :name="String(focusEmploymentId)"
+      missing
+      @clear="clearFocus"
+    />
+    <PayrollFocusNotice
+      v-else-if="focusName"
       :name="focusName"
-      :truncated="focusTruncated"
       @clear="clearFocus"
     />
 
@@ -886,9 +886,8 @@ onMounted(load)
           </article>
         </div>
 
-        <!-- Se zúžením na jednoho člověka se čte celý měsíc najednou; pager by lhal. -->
+        <!-- Zúžení mění i `total`, takže pager mluví o zúženém seznamu. -->
         <PaginationBar
-          v-if="focusEmploymentId === null"
           embedded
           :page="currentPage"
           :per-page="pageSize"

@@ -479,6 +479,7 @@ class PayrollDocumentService
         string $period,
         int $limit = PayrollDocumentRepository::LIST_DEFAULT_LIMIT,
         int $offset = 0,
+        ?int $employeeId = null,
     ): array {
         if (preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $period) !== 1) {
             throw new \InvalidArgumentException('Payroll period must use YYYY-MM.');
@@ -489,6 +490,7 @@ class PayrollDocumentService
             $periodStart,
             $limit,
             $offset,
+            $employeeId,
         );
 
         return [

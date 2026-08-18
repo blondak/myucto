@@ -39,28 +39,33 @@ final class PayrollInputsAction
             return $error;
         }
         $query = $request->getQueryParams();
-        try {
-            $period = $this->period($query['period'] ?? null);
-        } catch (\InvalidArgumentException $e) {
-            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
-        }
         $limit = max(1, min(
             PayrollInputRepository::LIST_MAX_LIMIT,
             (int) ($query['limit'] ?? PayrollInputRepository::LIST_DEFAULT_LIMIT),
         ));
         $offset = max(0, (int) ($query['offset'] ?? 0));
-        $page = $this->inputs->list(
-            $this->currentSupplierId($request),
-            $period,
-            $limit,
-            $offset,
-        );
+        $employmentId = self::narrowingId($query, 'employment_id');
+        try {
+            $period = $this->period($query['period'] ?? null);
+            $page = $this->inputs->list(
+                $this->currentSupplierId($request),
+                $period,
+                $limit,
+                $offset,
+                $employmentId,
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
 
+        // `employment_id` se vrací zpátky, aby prohlížeč poznal zúžený prázdný
+        // seznam od nezúženého — bez toho vypadá obojí stejně.
         return Json::ok($response, [
             'inputs' => $page['items'],
             'total' => $page['total'],
             'limit' => $limit,
             'offset' => $offset,
+            'employment_id' => $employmentId,
         ]);
     }
 

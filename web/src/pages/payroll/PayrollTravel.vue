@@ -127,33 +127,33 @@ const employmentOptions = computed(() => employments.value.map(item => ({
 /**
  * Zúžení na jeden vztah z odkazu na kartě zaměstnance (`?employment=12`).
  *
- * Cesty nemá server podle vztahu jak filtrovat (endpoint zná jen období), takže
- * zúžení dělá prohlížeč. Aby to nebylo zúžení jedné STRÁNKY, načte se při něm
- * celé období najednou (serverový strop je 100) a stránkování se schová —
- * jinak by pager sliboval stránky, na kterých po zúžení nic není.
+ * Zužuje SERVER (`travel/trips?employment_id=`) v témže dotazu jako stránkování.
+ * Dokud filtroval prohlížeč nad načtenou dávkou, cesta z jiné strany se tiše
+ * neprojevila a prázdný výpis tvrdil „žádné cesty".
  */
-const TRAVEL_FOCUS_LIMIT = 100
 const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
-const visibleTrips = computed(() => {
-  if (focusEmploymentId.value === null) return trips.value
-  return trips.value.filter(trip => trip.employment_id === focusEmploymentId.value)
-})
 const focusName = computed(() => {
   const id = focusEmploymentId.value
   if (id === null) return null
   const employment = employments.value.find(item => item.id === id)
-  return employment ? `${employment.full_name} · ${employment.code}` : null
+  return employment
+    ? `${employment.full_name} · ${employment.code}`
+    : t('payroll.agendas.focus.unknown_person')
 })
-// Období může mít víc cest, než se do jedné dávky vejde. Prázdný zúžený výpis by
-// pak tvrdil „žádné cesty", i když jen leží za koncem načtené dávky — o tom musí
-// lišta říct, dokud server neumí filtrovat podle vztahu.
-const focusTruncated = computed(() =>
-  focusEmploymentId.value !== null && total.value > TRAVEL_FOCUS_LIMIT)
+/**
+ * Server zúžení uplatnil a nezbylo nic. Tichá prázdná tabulka by vypadala
+ * stejně jako období bez cest — prázdno se proto pojmenuje větou.
+ */
+const focusMissing = computed(() =>
+  focusEmploymentId.value !== null && !loading.value && !loadFailed.value
+  && trips.value.length === 0)
 function clearFocus() {
   focusEmploymentId.value = null
   const query = { ...route.query }
   delete query.employment
   void router.replace({ query })
+  // Zrušení zúžení mění obsah seznamu, takže stránka musí zpět na začátek.
+  offset.value = 0
   void load()
 }
 const transportOptions = computed(() => transportModes.map(mode => ({
@@ -313,11 +313,9 @@ async function load() {
   loading.value = true
   loadFailed.value = false
   try {
-    const page = focusEmploymentId.value === null
-      ? { limit: pageSize, offset: offset.value }
-      : { limit: TRAVEL_FOCUS_LIMIT, offset: 0 }
+    const page = { limit: pageSize, offset: offset.value }
     const [tripPage, context] = await Promise.all([
-      payrollTravelApi.listPage(period.value, page),
+      payrollTravelApi.listPage(period.value, page, focusEmploymentId.value ?? undefined),
       employments.value.length === 0
         ? payrollAbsenceApi.context()
         : Promise.resolve(employments.value),
@@ -499,15 +497,21 @@ onMounted(load)
 
     <template v-else>
       <PayrollFocusNotice
-        v-if="focusName"
+        v-if="focusMissing"
+        :name="String(focusEmploymentId)"
+        missing
+        class="mb-4"
+        @clear="clearFocus"
+      />
+      <PayrollFocusNotice
+        v-else-if="focusName"
         :name="focusName"
-        :truncated="focusTruncated"
         class="mb-4"
         @clear="clearFocus"
       />
 
       <p
-        v-if="visibleTrips.length === 0"
+        v-if="trips.length === 0"
         class="rounded-xl border border-dashed border-neutral-300 p-8 text-center text-sm text-neutral-500"
       >
         {{ t('payroll_travel.empty') }}
@@ -535,7 +539,7 @@ onMounted(load)
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="trip in visibleTrips" :key="trip.id" data-test="travel-row">
+              <tr v-for="trip in trips" :key="trip.id" data-test="travel-row">
                 <td v-if="tbl.isVisible('employee')" class="px-4 py-3">
                   <div class="font-medium text-neutral-900">{{ trip.employee_name }}</div>
                   <div class="text-xs text-neutral-500">{{ trip.employment_code }}</div>
@@ -607,7 +611,7 @@ onMounted(load)
         <!-- Mobilní karty -->
         <section class="grid gap-4 md:hidden">
           <article
-            v-for="trip in visibleTrips"
+            v-for="trip in trips"
             :key="trip.id"
             data-test="travel-card"
             class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm"
@@ -687,9 +691,8 @@ onMounted(load)
           </article>
         </section>
 
-        <!-- Se zúžením na jednoho člověka se čte celé období najednou; pager by lhal. -->
+        <!-- Zúžení mění i `total`, takže pager mluví o zúženém seznamu. -->
         <PaginationBar
-          v-if="focusEmploymentId === null"
           data-test="travel-pagination"
           :page="currentPage"
           :per-page="pageSize"

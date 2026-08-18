@@ -186,6 +186,108 @@ final class PayrollQuickInputListPaginationTest extends TestCase
     }
 
     /**
+     * Zúžení na jeden vztah musí platit i pro vztah, který na první stránce není.
+     *
+     * Dokud zužoval prohlížeč nad načtenou stránkou, vypadalo zúžení na vztah
+     * z jiné strany jako prázdný výsledek: tabulka nic nenašla a nikdo neřekl,
+     * proč. Test proto sáhne na POSLEDNÍ vztah v pořadí a ptá se na první
+     * stránku o dvou řádcích — bez serverového filtru by tam nebyl.
+     */
+    public function testNarrowingReachesAnEmploymentBeyondTheFirstPage(): void
+    {
+        $this->seedEmployments(5);
+        $offPageId = $this->employmentIds[4];
+
+        $firstPage = (array) $this->list(['limit' => '2', 'offset' => '0'])['month'];
+        self::assertNotContains(
+            $offPageId,
+            $this->ids($firstPage),
+            'Předpoklad testu: hledaný vztah na první stránce být nesmí.',
+        );
+
+        $payload = $this->list([
+            'limit' => '2',
+            'offset' => '0',
+            'employment_id' => (string) $offPageId,
+        ]);
+        $narrowed = (array) $payload['month'];
+
+        self::assertSame([$offPageId], $this->ids($narrowed), 'Zúžení musí vrátit hledaný vztah.');
+        self::assertSame(1, $narrowed['total'], 'Total musí být zúžený stejně jako stránka.');
+        self::assertSame($offPageId, $payload['employment_id'], 'Odpověď hlásí uplatněné zúžení.');
+    }
+
+    /**
+     * Cizí ani neexistující vztah nesmí vrátit celý měsíc.
+     *
+     * Prázdný výsledek je poznatelný stav (`total = 0` s ohlášeným zúžením);
+     * tiché zobrazení všech je lež, ze které uživatel usoudí, že filtr nezabral.
+     */
+    public function testUnknownNarrowingReturnsNothingInsteadOfEverything(): void
+    {
+        $this->seedEmployments(3);
+
+        $payload = $this->list(['employment_id' => (string) ($this->employmentIds[2] + 10_000)]);
+        $month = (array) $payload['month'];
+
+        self::assertSame([], $this->ids($month));
+        self::assertSame(0, $month['total']);
+    }
+
+    /** Nečíselné zúžení se odmítne hláškou, ne tichým vrácením celého měsíce. */
+    public function testGarbageNarrowingIsRefused(): void
+    {
+        $this->seedEmployments(2);
+
+        $response = $this->action->list(
+            $this->request()->withQueryParams([
+                'period' => self::PERIOD,
+                'employment_id' => 'nesmysl',
+            ]),
+            new Response(),
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+    }
+
+    /**
+     * Uložení se zúžením vrací zúženou stránku.
+     *
+     * Odpověď plní formulář a formulář se posílá zpátky k uložení — nezúžená
+     * odpověď by uživateli do rozpracovaného zadání nasypala lidi, které při
+     * zúžení vůbec nevidí.
+     */
+    public function testSaveKeepsTheNarrowing(): void
+    {
+        $this->seedEmployments(4);
+        $employmentId = $this->employmentIds[3];
+
+        $saved = $this->quickInputs->save(
+            $this->supplierId,
+            self::PERIOD,
+            [[
+                'employment_id' => $employmentId,
+                'employment_row_version' => $this->employmentRowVersion($employmentId),
+                'base_amount_minor' => 3_100_000,
+                'overtime_mode' => 'amount',
+                'overtime_hours_milli' => null,
+                'overtime_amount_minor' => null,
+                'bonus_amount_minor' => 0,
+                'overtime_average_snapshot_id' => null,
+                'overtime_average_snapshot_version' => null,
+                'versions' => ['base' => null, 'overtime' => null, 'bonus' => null],
+            ]],
+            $this->userId,
+            25,
+            0,
+            $employmentId,
+        );
+
+        self::assertSame([$employmentId], $this->ids($saved));
+        self::assertSame(1, $saved['total']);
+    }
+
+    /**
      * Cena stránky se neřídí velikostí firmy.
      *
      * Doprovodné dotazy na vstupy a opakující se složky se dřív ptaly na CELÝ

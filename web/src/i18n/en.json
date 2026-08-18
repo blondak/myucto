@@ -613,8 +613,7 @@
             },
             "focus": {
                 "title": "The list is narrowed to {name}.",
-                "truncated": "The period holds more records than the narrowing could load — some may be missing. Clear the narrowing and page through the list.",
-                "missing": "Narrowing to employment no. {name} returned no record for this period — the employment does not belong to this company, did not exist in the period, or the link is stale.",
+                "missing": "Narrowing (no. {name}) returned no record for this selection — the employment or person does not belong to this company, did not exist in the period, or the link is stale.",
                 "unknown_person": "the selected employee",
                 "clear": "Clear narrowing"
             }

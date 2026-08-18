@@ -36,6 +36,12 @@ final class PayrollQuickInputRepository
     /**
      * Jeden měsíc rychlého zadání, stránkovaně.
      *
+     * `$employmentId` zúží měsíc na jeden pracovní vztah. Filtr padá do TÉHOŽ
+     * dotazu jako stránkování — dokud zužoval prohlížeč nad načtenou stránkou,
+     * vztah z jiné strany se tiše neprojevil a zúžený seznam byl prázdný, aniž
+     * by to kdokoli řekl. Zúžení mění i `total`, takže pager mluví o zúženém
+     * seznamu, ne o celém měsíci.
+     *
      * @return array{period:string,items:list<array<string,mixed>>,total:int}
      */
     public function month(
@@ -43,8 +49,12 @@ final class PayrollQuickInputRepository
         string $period,
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
+        ?int $employmentId = null,
     ): array {
-        return $this->collect($supplierId, $period, null, $limit, $offset);
+        if ($employmentId !== null && $employmentId <= 0) {
+            throw new \InvalidArgumentException('Vztah musí být kladné číslo.');
+        }
+        return $this->collect($supplierId, $period, null, $limit, $offset, $employmentId);
     }
 
     /**
@@ -79,6 +89,8 @@ final class PayrollQuickInputRepository
     /**
      * @param list<int>|null $employmentIds `null` = stránka celého měsíce;
      *        u výčtu vztahů se `$limit`/`$offset` neuplatní
+     * @param int|null $focusEmploymentId zúžení stránky měsíce na jeden vztah;
+     *        u výčtu vztahů nedává smysl a neuplatní se
      * @return array{period:string,items:list<array<string,mixed>>,total:int}
      */
     private function collect(
@@ -87,6 +99,7 @@ final class PayrollQuickInputRepository
         ?array $employmentIds,
         int $limit,
         int $offset,
+        ?int $focusEmploymentId = null,
     ): array {
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
@@ -96,8 +109,9 @@ final class PayrollQuickInputRepository
         $year = (int) substr($period, 0, 4);
         $this->components->list($supplierId, $periodStart);
 
+        $focusEmploymentId = $employmentIds === null ? $focusEmploymentId : null;
         $employmentFilter = $employmentIds === null
-            ? ''
+            ? ($focusEmploymentId === null ? '' : ' AND employment.id = ?')
             : ' AND employment.id IN (' . implode(',', array_fill(0, count($employmentIds), '?')) . ')';
 
         $stmt = $this->db->pdo()->prepare(
@@ -185,7 +199,7 @@ final class PayrollQuickInputRepository
             $quarter,
             $periodEnd,
             $periodStart,
-            ...($employmentIds ?? []),
+            ...($employmentIds ?? ($focusEmploymentId === null ? [] : [$focusEmploymentId])),
         ];
         $position = 1;
         foreach ($params as $param) {
@@ -199,7 +213,7 @@ final class PayrollQuickInputRepository
         $rows = PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'quick_employments');
 
         $total = $employmentIds === null
-            ? $this->countMonth($supplierId, $periodStart, $periodEnd)
+            ? $this->countMonth($supplierId, $periodStart, $periodEnd, $focusEmploymentId)
             : count($rows);
 
         // Vstupy i opakující se složky se dotahují JEN pro řádky stránky.
@@ -333,6 +347,7 @@ final class PayrollQuickInputRepository
         int $supplierId,
         string $periodStart,
         string $periodEnd,
+        ?int $focusEmploymentId = null,
     ): int {
         $stmt = $this->db->pdo()->prepare(
             'WITH effective_employment AS (
@@ -355,8 +370,15 @@ final class PayrollQuickInputRepository
                            THEN "1900-01-01" ELSE NULL END
                     ) <= ?
                 AND (employment.end_date IS NULL OR employment.end_date >= ?)'
+            . ($focusEmploymentId === null ? '' : ' AND employment.id = ?')
         );
-        $stmt->execute([$periodEnd, $supplierId, $periodEnd, $periodStart]);
+        $stmt->execute([
+            $periodEnd,
+            $supplierId,
+            $periodEnd,
+            $periodStart,
+            ...($focusEmploymentId === null ? [] : [$focusEmploymentId]),
+        ]);
 
         return (int) $stmt->fetchColumn();
     }
@@ -377,6 +399,7 @@ final class PayrollQuickInputRepository
         ?int $userId,
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
+        ?int $focusEmploymentId = null,
     ): array {
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
@@ -549,9 +572,11 @@ final class PayrollQuickInputRepository
             }
             throw $e;
         }
-        // Po uložení se vrací TÁŽ stránka, na které uživatel byl. Vracet
-        // natvrdo první by ho po každém uložení odhodilo na začátek seznamu.
-        return $this->month($supplierId, $period, $limit, $offset);
+        // Po uložení se vrací TÁŽ stránka, na které uživatel byl, i s TÝMŽ
+        // zúžením. Vracet natvrdo první stránku celého měsíce by ho odhodilo
+        // na začátek a do formuláře nasypalo lidi, které při zúžení nevidí —
+        // a právě obsah formuláře se posílá zpátky k uložení.
+        return $this->month($supplierId, $period, $limit, $offset, $focusEmploymentId);
     }
 
     /**

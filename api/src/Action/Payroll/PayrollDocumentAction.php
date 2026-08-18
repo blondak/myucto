@@ -49,12 +49,14 @@ final class PayrollDocumentAction
         // i s počtem období, takže „limit=99999" z URL nesmí projít.
         $limit = self::pageLimit($query);
         $offset = max(0, (int) ($query['offset'] ?? 0));
+        $employeeId = self::narrowingId($query, 'employee_id');
         try {
             $result = $this->documents->listForPeriod(
                 $this->currentSupplierId($request),
                 $period,
                 $limit,
                 $offset,
+                $employeeId,
             );
         } catch (\InvalidArgumentException $exception) {
             return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
@@ -62,6 +64,8 @@ final class PayrollDocumentAction
 
         // Klíč `items` zůstává, aby stávající volající nespadli; `total`/`limit`/
         // `offset` přibyly vedle něj, protože seznam už nemusí být úplný.
+        // `employee_id` hlásí uplatněné zúžení: bez něj vypadá zúžené prázdno
+        // stejně jako prázdný měsíc.
         return Json::ok($response, [
             'period' => $period,
             'revisions' => $result['revisions'],
@@ -69,6 +73,7 @@ final class PayrollDocumentAction
             'total' => $result['total'],
             'limit' => $limit,
             'offset' => $offset,
+            'employee_id' => $employeeId,
         ]);
     }
 
@@ -91,12 +96,18 @@ final class PayrollDocumentAction
         }
         $limit = self::pageLimit($query);
         $offset = max(0, (int) ($query['offset'] ?? 0));
-        $page = $this->documentRepository->listAnnualDocuments(
-            $this->currentSupplierId($request),
-            $year,
-            $limit,
-            $offset,
-        );
+        $employeeId = self::narrowingId($query, 'employee_id');
+        try {
+            $page = $this->documentRepository->listAnnualDocuments(
+                $this->currentSupplierId($request),
+                $year,
+                $limit,
+                $offset,
+                $employeeId,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        }
 
         return Json::ok($response, [
             'year' => $year,
@@ -104,6 +115,7 @@ final class PayrollDocumentAction
             'total' => $page['total'],
             'limit' => $limit,
             'offset' => $offset,
+            'employee_id' => $employeeId,
         ]);
     }
 

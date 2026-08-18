@@ -613,8 +613,7 @@
             },
             "focus": {
                 "title": "Seznam je zúžený na {name}.",
-                "truncated": "Období má víc záznamů, než se do zúžení stihlo načíst — nemusí tu být všechny. Zrušte zúžení a projděte seznam po stránkách.",
-                "missing": "Zúžení na vztah č. {name} nedalo v tomto období žádný záznam — vztah k firmě nepatří, v období neexistoval, nebo odkaz zestaral.",
+                "missing": "Zúžení (č. {name}) nedalo v tomto výběru žádný záznam — vztah ani osoba k firmě nepatří, v daném období neexistovali, nebo odkaz zestaral.",
                 "unknown_person": "vybraného zaměstnance",
                 "clear": "Zrušit zúžení"
             }

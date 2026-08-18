@@ -105,6 +105,9 @@ import PayrollComponents from '@/pages/payroll/PayrollComponents.vue'
 describe('PayrollComponents', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Zúžení z adresy si nese jen ten test, který ho zadá — jinak by přeteklo
+    // do dalších a ty by měřily něco jiného, než co mají v názvu.
+    m.routeQuery = {}
     m.canWrite.mockReturnValue(true)
     m.components.mockResolvedValue([{
       id: 5,
@@ -280,6 +283,64 @@ describe('PayrollComponents', () => {
       annual_after_minor: null,
       exemption_basket: null,
     })
+  })
+
+  /**
+   * Zúžení z karty zaměstnance musí jít na server u OBOU seznamů — opakovaných
+   * složek i mzdových vstupů. Vstupy dřív zužoval prohlížeč nad načtenou
+   * stránkou, takže vztah z jiné strany se tiše neprojevil.
+   */
+  it('sends the narrowing to the server for both recurring components and inputs', async () => {
+    m.routeQuery = { employment: '12' }
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    expect(m.recurringComponents).toHaveBeenLastCalledWith(12, { limit: 25, offset: 0 })
+    expect(m.inputs).toHaveBeenLastCalledWith(
+      expect.any(String),
+      { limit: 25, offset: 0 },
+      12,
+    )
+    wrapper.unmount()
+  })
+
+  /**
+   * Listování stránkami zúžení neztrácí — jinak se po prvním kliknutí na pager
+   * seznam tiše rozšířil zpátky na celou firmu.
+   */
+  it('keeps the narrowing while paging', async () => {
+    m.routeQuery = { employment: '12' }
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      goToRecurringPage: (page: number) => void
+      goToInputsPage: (page: number) => void
+    }
+
+    vm.goToRecurringPage(2)
+    vm.goToInputsPage(2)
+    await flushPromises()
+
+    expect(m.recurringComponents).toHaveBeenLastCalledWith(12, { limit: 25, offset: 25 })
+    expect(m.inputs).toHaveBeenLastCalledWith(
+      expect.any(String),
+      { limit: 25, offset: 25 },
+      12,
+    )
+    wrapper.unmount()
+  })
+
+  /** Prázdné zúžení se pojmenuje větou, ne tichou prázdnou tabulkou. */
+  it('names an empty narrowing', async () => {
+    m.routeQuery = { employment: '12' }
+    m.inputs.mockResolvedValue({ total: 0, items: [] })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    const notice = wrapper.find('[data-test="payroll-focus-notice"]')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('payroll.agendas.focus.missing')
+    wrapper.unmount()
   })
 
   it('renders matching desktop tables and mobile cards from one API contract', async () => {

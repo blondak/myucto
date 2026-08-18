@@ -48,11 +48,6 @@ final class PayrollTravelAction
         }
         $query = $request->getQueryParams();
         $period = $query['period'] ?? null;
-        try {
-            $periodStart = $period === null || $period === '' ? null : $this->month($period);
-        } catch (\InvalidArgumentException $e) {
-            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
-        }
         // Období je volitelné, takže bez stropu tenhle endpoint četl všechny
         // pracovní cesty firmy od jejího vzniku. Strop je tvrdý (ne jen výchozí),
         // aby ho nešlo obejít parametrem z URL.
@@ -61,21 +56,30 @@ final class PayrollTravelAction
             (int) ($query['limit'] ?? PayrollBusinessTripRepository::LIST_DEFAULT_LIMIT),
         ));
         $offset = max(0, (int) ($query['offset'] ?? 0));
+        $employmentId = self::narrowingId($query, 'employment_id');
 
-        $page = $this->trips->list(
-            $this->currentSupplierId($request),
-            $periodStart,
-            $limit,
-            $offset,
-        );
+        try {
+            $periodStart = $period === null || $period === '' ? null : $this->month($period);
+            $page = $this->trips->list(
+                $this->currentSupplierId($request),
+                $periodStart,
+                $limit,
+                $offset,
+                $employmentId,
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
 
         // Klíč `trips` zůstává, aby stávající volající nespadli; `total`/`limit`/`offset`
-        // přibyly vedle něj, protože seznam už nemusí být úplný.
+        // přibyly vedle něj, protože seznam už nemusí být úplný. `employment_id`
+        // hlásí uplatněné zúžení, aby prohlížeč poznal zúžené prázdno od nezúženého.
         return Json::ok($response, [
             'trips' => $page['items'],
             'total' => $page['total'],
             'limit' => $limit,
             'offset' => $offset,
+            'employment_id' => $employmentId,
         ]);
     }
 

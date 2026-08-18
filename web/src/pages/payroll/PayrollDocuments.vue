@@ -92,27 +92,30 @@ function reload(): void {
 const canGenerate = computed(() =>
   auth.canWrite('payroll.documents') && (data.value?.revisions.length ?? 0) > 0,
 )
-const visibleItems = computed(() => {
-  const items = activeTab.value === 'monthly' ? data.value?.items ?? [] : annualItems.value
-  if (focusPersonId.value === null) return items
-  // Server podle osoby nefiltruje (endpoint zná období, resp. rok), takže zúžení
-  // dělá prohlížeč nad načtenou stránkou. Pager proto zůstává na celém seznamu:
-  // schovat ho by zamlčelo, že další dokumenty toho člověka jsou na další straně.
-  return items.filter(item => item.employee_id === focusPersonId.value)
-})
+// Zúžení podle osoby zná SERVER (`employee_id` na obou výpisech) a padá do téhož
+// dotazu jako stránkování. Dokud filtroval prohlížeč nad načtenou stránkou,
+// dokument z druhé strany se tiše neprojevil a `total` v pageru mluvilo o celém
+// období, ne o tom, co tabulka ukazuje.
+const visibleItems = computed(() =>
+  activeTab.value === 'monthly' ? data.value?.items ?? [] : annualItems.value)
 const focusName = computed(() => {
   const id = focusPersonId.value
   if (id === null) return null
-  return people.value.find(person => person.id === id)?.full_name ?? null
+  return people.value.find(person => person.id === id)?.full_name
+    ?? t('payroll.agendas.focus.unknown_person')
 })
-// Zúžení běží nad načtenou stránkou, takže při víc stránkách nemusí být na téhle
-// vidět všechno, co ten člověk má. Pager zůstává, ale mlčet o tom nejde.
-const focusTruncated = computed(() => focusPersonId.value !== null && total.value > pageSize)
+/**
+ * Server zúžení uplatnil a nezbylo nic. Tichá prázdná tabulka by tvrdila „ten
+ * člověk tu nic nemá", i když je zúžení jen slepé (cizí osoba, zestaralý odkaz).
+ */
+const focusMissing = computed(() =>
+  focusPersonId.value !== null && !loading.value && visibleItems.value.length === 0)
 function clearFocus(): void {
   focusPersonId.value = null
   const query = { ...route.query }
   delete query.person
   void router.replace({ query })
+  reload()
 }
 const employeeOptions = computed(() => people.value.map(person => ({
   value: person.id,
@@ -245,7 +248,11 @@ async function load(): Promise<void> {
   try {
     const page = { limit: pageSize, offset: offset.value }
     if (requestedTab === 'monthly') {
-      const loaded = await payrollApi.listDocuments(requestedPeriod, page)
+      const loaded = await payrollApi.listDocuments(
+        requestedPeriod,
+        page,
+        focusPersonId.value ?? undefined,
+      )
       if (sequence === loadSequence && requestedPeriod === period.value) {
         data.value = loaded
         total.value = loaded.total
@@ -259,7 +266,7 @@ async function load(): Promise<void> {
       }
     } else {
       const [loaded, loadedPeople] = await Promise.all([
-        payrollApi.listAnnualDocuments(requestedYear, page),
+        payrollApi.listAnnualDocuments(requestedYear, page, focusPersonId.value ?? undefined),
         people.value.length ? Promise.resolve(people.value) : payrollApi.peopleOptions(),
       ])
       if (sequence === loadSequence && requestedYear === year.value) {
@@ -504,9 +511,14 @@ onMounted(load)
     </section>
 
     <PayrollFocusNotice
-      v-if="focusName"
+      v-if="focusMissing"
+      :name="String(focusPersonId)"
+      missing
+      @clear="clearFocus"
+    />
+    <PayrollFocusNotice
+      v-else-if="focusName"
       :name="focusName"
-      :truncated="focusTruncated"
       @clear="clearFocus"
     />
 

@@ -40,6 +40,7 @@ final class PayrollQuickInputsAction
         // pracovní vztah, takže seznam roste s velikostí firmy.
         $limit = self::pageLimit($query);
         $offset = max(0, (int) ($query['offset'] ?? 0));
+        $employmentId = self::narrowingId($query, 'employment_id');
         try {
             $period = $this->validator->period($query['period'] ?? null);
             $month = $this->quickInputs->month(
@@ -47,6 +48,7 @@ final class PayrollQuickInputsAction
                 $period,
                 $limit,
                 $offset,
+                $employmentId,
             );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
@@ -54,12 +56,14 @@ final class PayrollQuickInputsAction
 
         // Klíč `month` a jeho `items` zůstávají, aby stávající volající
         // nespadli; `total`/`limit`/`offset` přibyly vedle něj ve stejném
-        // tvaru jako u ostatních stránkovaných seznamů.
+        // tvaru jako u ostatních stránkovaných seznamů. `employment_id` hlásí
+        // uplatněné zúžení, aby prohlížeč poznal zúžené prázdno od nezúženého.
         return Json::ok($response, [
             'month' => $month,
             'total' => $month['total'],
             'limit' => $limit,
             'offset' => $offset,
+            'employment_id' => $employmentId,
         ]);
     }
 
@@ -68,12 +72,14 @@ final class PayrollQuickInputsAction
         if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
             return $error;
         }
-        // Stránka se bere z URL, aby uložení vrátilo TU, na které uživatel byl.
-        // Vracet natvrdo první stránku by ho po každém uložení odhodilo na
-        // začátek seznamu.
+        // Stránka i zúžení se berou z URL, aby uložení vrátilo TU stránku
+        // a TO zúžení, na kterém uživatel byl. Vracet natvrdo první stránku
+        // celého měsíce by ho odhodilo na začátek a do formuláře nasypalo lidi,
+        // které při zúžení nevidí.
         $query = $request->getQueryParams();
         $limit = self::pageLimit($query);
         $offset = max(0, (int) ($query['offset'] ?? 0));
+        $employmentId = self::narrowingId($query, 'employment_id');
         try {
             $body = $request->getParsedBody();
             $data = $this->validator->validate(
@@ -86,6 +92,7 @@ final class PayrollQuickInputsAction
                 $this->userId($request),
                 $limit,
                 $offset,
+                $employmentId,
             );
         } catch (PayrollEmploymentConflictException $e) {
             return Json::error(
@@ -121,6 +128,7 @@ final class PayrollQuickInputsAction
             'total' => $month['total'],
             'limit' => $limit,
             'offset' => $offset,
+            'employment_id' => $employmentId,
         ]);
     }
 

@@ -168,13 +168,21 @@ export const payrollTravelApi = {
    * Stránka seznamu cest. Server strop drží tvrdě (výchozí 50, maximum 100),
    * takže bez `limit` a `offset` dostaneme jen první stránku a o zbytku bychom
    * mlčeli — `total` je jediné, z čeho se pozná, že další cesty existují.
+   *
+   * `employmentId` zúží seznam na jeden vztah už na serveru: zužovat načtenou
+   * stránku v prohlížeči znamenalo, že cesta z jiné strany se tiše neprojevila.
    */
-  listPage: (period?: string, page?: { limit?: number, offset?: number }) =>
+  listPage: (
+    period?: string,
+    page?: { limit?: number, offset?: number },
+    employmentId?: number,
+  ) =>
     api.get<TravelTripsPage>('/payroll/travel/trips', {
       params: {
         ...(period ? { period } : {}),
         ...(page?.limit === undefined ? {} : { limit: page.limit }),
         ...(page?.offset === undefined ? {} : { offset: page.offset }),
+        ...(employmentId ? { employment_id: employmentId } : {}),
       },
     }).then(response => response.data),
   preview: (payload: TravelTripPayload) =>
