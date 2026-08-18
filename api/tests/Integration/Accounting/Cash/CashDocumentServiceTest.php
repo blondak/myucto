@@ -842,6 +842,44 @@ final class CashDocumentServiceTest extends TestCase
         self::assertNotContains('cash.warning.dic_not_czech', $czech['warnings']);
     }
 
+    /**
+     * L-2: invariant „částka pokladního dokladu je kladná" (znaménko nese `doc_type`)
+     * drží i DB, ne jen `validateDoc()`. Test jde ZÁMĚRNĚ přímým SQL — služba by
+     * takový řádek nepustila, takže by se constraint vůbec nedostal ke slovu.
+     *
+     * Vratka úhrady přijaté faktury (`in` + `purchase_payment`) tu je schválně: je to
+     * kombinace, kterou `PURPOSE_MATRIX` zakazuje, ale peněžní deník s ní počítá.
+     * Constraint podle matice proto v migraci 1691 NENÍ a tenhle řádek musí projít.
+     */
+    public function testDatabaseRefusesNonPositiveCashAmount(): void
+    {
+        $reg = $this->makeRegister();
+        $pdo = $this->db->pdo();
+
+        $insert = static fn (): \PDOStatement => $pdo->prepare(
+            "INSERT INTO cash_documents
+                (supplier_id, register_id, doc_type, purpose, issue_date, description,
+                 total_amount, currency_code, vat_mode, status)
+             VALUES (?, ?, ?, ?, ?, 'Přímý SQL zápis', ?, 'CZK', 'none', 'draft')"
+        );
+
+        // Savepoint: porušení CHECK zabije jen vnořený blok, ne celou testovací transakci.
+        foreach (['nulová částka' => 0.00, 'záporná částka' => -100.00] as $label => $amount) {
+            $pdo->exec('SAVEPOINT chk_probe');
+            try {
+                $insert()->execute([$this->supplierId, $reg, 'in', 'sale', self::YEAR . '-06-15', $amount]);
+                self::fail('DB musí odmítnout: ' . $label);
+            } catch (\PDOException $e) {
+                self::assertStringContainsString('constraint', strtolower($e->getMessage()), $label);
+            } finally {
+                $pdo->exec('ROLLBACK TO SAVEPOINT chk_probe');
+            }
+        }
+
+        $insert()->execute([$this->supplierId, $reg, 'in', 'purchase_payment', self::YEAR . '-06-15', 100.00]);
+        self::assertSame(1, $this->countDocuments($reg), 'Vratka úhrady PF projít musí.');
+    }
+
     public function testTenantIsolation(): void
     {
         $reg = $this->makeRegister();

@@ -188,7 +188,7 @@ final class CashDocumentService
             // Vazba na fakturu: úhradu zrušit dřív, než zmizí sám doklad.
             if ($doc['invoice_payment_id'] !== null) {
                 $this->invoicePayments->deletePayment((int) $doc['invoice_payment_id']);
-                $this->documents->setInvoicePaymentId($id, null);
+                $this->documents->setInvoicePaymentId($supplierId, $id, null);
             }
             if ($doc['purpose'] === 'purchase_payment' && $doc['purchase_invoice_id'] !== null) {
                 // Stejné pravidlo jako u storna: PF zpět do stavu před úhradou dle
@@ -384,7 +384,7 @@ final class CashDocumentService
 
             if ($doc['invoice_payment_id'] !== null) {
                 $this->invoicePayments->deletePayment((int) $doc['invoice_payment_id']);
-                $this->documents->setInvoicePaymentId($id, null);
+                $this->documents->setInvoicePaymentId($supplierId, $id, null);
             }
             if ($doc['purpose'] === 'purchase_payment' && $doc['purchase_invoice_id'] !== null) {
                 // PF vrátit do stavu PŘED úhradou dle tvaru dokladu: zaúčtovaný (journal) byl
@@ -397,9 +397,9 @@ final class CashDocumentService
                 );
             }
             if ($reversalId === null) {
-                $this->documents->markReversedNoJournal($id);
+                $this->documents->markReversedNoJournal($supplierId, $id);
             } else {
-                $this->documents->markReversed($id, $reversalId);
+                $this->documents->markReversed($supplierId, $id, $reversalId);
             }
 
             $warnings = $this->collectReversalWarnings($supplierId, $doc, $reversalId, $entryDate);
@@ -632,7 +632,7 @@ final class CashDocumentService
         // Side-effecty úhrad FV/PF (anotace pro peněžní deník, noha A) zůstávají shodné.
         if ($taxEvidence) {
             $this->applySideEffects($supplierId, $id, $doc, $docNumber, $userId);
-            $this->documents->markPostedNoJournal($id, $docNumber);
+            $this->documents->markPostedNoJournal($supplierId, $id, $docNumber);
 
             return [
                 'doc_number'       => $docNumber,
@@ -656,7 +656,7 @@ final class CashDocumentService
         ]);
 
         $this->applySideEffects($supplierId, $id, $doc, $docNumber, $userId);
-        $this->documents->markPosted($id, $docNumber, $entryId);
+        $this->documents->markPosted($supplierId, $id, $docNumber, $entryId);
 
         return [
             'doc_number'       => $docNumber,
@@ -698,7 +698,7 @@ final class CashDocumentService
             'posted'        => true,
         ]);
 
-        $this->documents->markPosted($id, (string) $doc['doc_number'], $entryId);
+        $this->documents->markPosted($supplierId, $id, (string) $doc['doc_number'], $entryId);
 
         return ['journal_entry_id' => $entryId, 'already' => false];
     }
@@ -713,7 +713,7 @@ final class CashDocumentService
                 (string) $doc['issue_date'],
                 ['source' => 'cash', 'note' => $docNumber, 'created_by' => $userId],
             );
-            $this->documents->setInvoicePaymentId($id, (int) $res['payment_id']);
+            $this->documents->setInvoicePaymentId($supplierId, $id, (int) $res['payment_id']);
 
             $invoice = $this->invoices->find((int) $doc['invoice_id']);
             if (($invoice['invoice_type'] ?? null) === 'proforma') {
