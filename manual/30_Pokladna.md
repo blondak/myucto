@@ -162,6 +162,16 @@ DPH vynuceně vypnuté — u úhrady faktury DPH nese už samotná faktura). Po 
 - **Rozpad DPH podle sazeb** — komponenta umožňuje přidat řádky se sazbou (nabízí se aktuální
   sazby > 0 z číselníku sazeb pro daný rok), základem a daní; celková částka rozpadu se musí
   **přesně** rovnat celkové částce dokladu.
+- **Nárok na odpočet DPH a daň z příjmů** — jen u účelu **Nákup**, zadávají se na každý řádek
+  rozpadu zvlášť. „Krácený nárok (poměrný §75)" zpřístupní procento, kterým se odpočet zkrátí;
+  „Krácený koeficientem (§76)" bere roční koeficient nastavený za celou firmu. Volba daně
+  z příjmů (uznatelný / neuznatelný náklad / není náklad) ovlivňuje jen DPFO/DPPO, na DPH nemá
+  vliv. Výchozí stav je plný nárok a daňově uznatelný náklad.
+
+> [!NOTE]
+> **Rozpad DPH ve valutové pokladně se zadává v měně pokladny.** V databázi se ukládá
+> v korunách přepočtený kurzem dokladu, ale formulář ho při otevření rozpracovaného dokladu
+> převede zpět, takže součet vždy sedí na částku v cizí měně.
 
 > [!WARNING]
 > U korunového nákupu (VPD) s DPH formulář z bezpečnostních důvodů blokuje

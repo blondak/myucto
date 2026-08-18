@@ -4946,7 +4946,15 @@
             "fx_rate_hint": "Leave empty to use the CNB rate for the issue date. Fill it in only when the CNB rate is unavailable or you use a fixed rate.",
             "fx_amount_czk": "CZK equivalent",
             "duplicate_vat_hint": "If an invoice exists for the sale, use Invoice payment — otherwise VAT is counted twice.",
-            "transfer_leg_hint": "The other leg of the transfer (bank side via account 261) is created from the bank statement or a manual entry."
+            "transfer_leg_hint": "The other leg of the transfer (bank side via account 261) is created from the bank statement or a manual entry.",
+            "vat_deduction": "VAT deduction entitlement",
+            "tax_treatment": "Income tax",
+            "vat_deduction_hint": "Deduction and tax treatment are set per breakdown line. “Proportional (§75)” enables the percentage the deduction is reduced by; income tax affects only PIT/CIT, not VAT."
+        },
+        "tax_treatment": {
+            "deductible": "Tax-deductible expense",
+            "non_deductible": "Non-deductible expense",
+            "not_expense": "Not an expense (e.g. asset acquisition)"
         },
         "preview": {
             "title": "Posting preview"

@@ -3,7 +3,7 @@ import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import {
-  cashApi, type CashRegister, type CashVatLine, type CashPurpose,
+  cashApi, type CashRegister, type CashVatLine, type CashPurpose, type CashDocument,
   type CashDocType, type CashDocumentStatus, type UnpaidDocumentOption, type CreateCashDocumentPayload,
   type CashRulePreset, UNPAID_PAGE_SIZE,
 } from '@/api/cash'
@@ -193,6 +193,36 @@ onMounted(async () => {
 })
 
 /**
+ * Rozpad DPH z API je v CZK — `convertVatLinesToCzk()` běží před uložením, protože
+ * `cash_document_vat_lines` drží koruny stejně jako u faktury. Formulář ale pracuje
+ * v měně pokladny (`form.total_amount = amount_foreign`), takže bez převodu zpět
+ * stály korunové řádky proti cizoměnovému součtu: `CashVatBreakdown` dorovnává jen
+ * jednořádkový rozpad, u dvou a víc sazeb tedy `matches` zůstalo false a valutový
+ * draft nešlo z UI uložit („rozpad nesedí" u dokladu, který v DB sedí na haléř).
+ *
+ * Zaokrouhlovací zbytek z dělení kurzem padá na poslední řádek, aby Σ dala přesně
+ * `amount_foreign` — stejným pravidlem, jakým rozpad při ukládání vzniká.
+ */
+function vatLinesInDocumentCurrency(doc: CashDocument): CashVatLine[] {
+  const lines = doc.vat_lines ?? []
+  const rate = Number(doc.fx_rate ?? 0)
+  const foreign = doc.amount_foreign ?? null
+  if (lines.length === 0 || foreign === null || !(rate > 0)) return lines
+  const out: CashVatLine[] = lines.map(l => ({
+    ...l,
+    base_amount: Math.round((l.base_amount / rate) * 100) / 100,
+    vat_amount: Math.round((l.vat_amount / rate) * 100) / 100,
+  }))
+  const sumC = out.reduce((s, l) => s + Math.round(l.base_amount * 100) + Math.round(l.vat_amount * 100), 0)
+  const residual = Math.round(Number(foreign) * 100) - sumC
+  if (residual !== 0) {
+    const last = out[out.length - 1]
+    last.vat_amount = Math.round(last.vat_amount * 100 + residual) / 100
+  }
+  return out
+}
+
+/**
  * Naplní formulář z existujícího draftu (režim úprav).
  *
  * `hydrating` vypne reset-watchery na doc_type/register_id/purpose: ty jsou psané
@@ -220,7 +250,7 @@ async function loadDocument(id: number): Promise<void> {
     form.purchase_invoice_id = doc.purchase_invoice_id
     form.rule_key = doc.rule_key ?? ''
     form.counter_account_code = doc.counter_account_code ?? ''
-    vatLines.value = doc.vat_lines ?? []
+    vatLines.value = vatLinesInDocumentCurrency(doc)
     if (doc.status !== 'draft') error.value = t('cash.error.doc_not_draft')
   } catch (e: any) {
     error.value = cashErrorMessage(e, t)
@@ -730,7 +760,7 @@ async function save(post = true) {
             </div>
           </div>
           <CashVatBreakdown v-model="vatLines" :total="Number(form.total_amount) || 0" :rates="availableRates"
-            @update:matches="vatMatches = $event" />
+            :deduction="form.purpose === 'purchase'" @update:matches="vatMatches = $event" />
           <p v-if="form.purpose === 'purchase'" class="text-xs px-3 py-2 rounded-md"
             :class="purchaseOverLimit ? 'bg-danger-50 text-danger-600' : 'bg-neutral-50 text-neutral-500 border border-neutral-200'">
             {{ t('cash.form.purchase_over_10k_hint', { amount: formatMoney(khThreshold) }) }}

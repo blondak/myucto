@@ -459,11 +459,13 @@
     ],
     "accounting-cash-new": [
       "accounting",
-      "cash"
+      "cash",
+      "purchase_invoice"
     ],
     "accounting-cash-edit": [
       "accounting",
-      "cash"
+      "cash",
+      "purchase_invoice"
     ],
     "accounting-cash-book": [
       "accounting",

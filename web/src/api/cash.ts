@@ -5,7 +5,23 @@ export type CashPurpose = 'sale' | 'purchase' | 'invoice_payment'
                         | 'purchase_payment' | 'transfer' | 'other'      // šestihodnotový (O3/C3)
 export type CashDocumentStatus = 'draft' | 'posted' | 'reversed'         // BE kanon (O2/C2)
 
-export interface CashVatLine { vat_rate: number; base_amount: number; vat_amount: number }
+/** Rozsah nároku na odpočet DPH u řádku rozpadu (§ 75 poměrný / § 76 koeficient). */
+export type CashVatDeduction = 'full' | 'none' | 'proportional' | 'reduced'
+/** Uznatelnost pro daň z příjmů (§ 24/25) — na DPH nemá vliv. */
+export type CashTaxTreatment = 'deductible' | 'non_deductible' | 'not_expense'
+
+export interface CashVatLine {
+  vat_rate: number; base_amount: number; vat_amount: number
+  /**
+   * M-7: bez těchhle polí je editor při uložení neposílal a `normalize()` je na
+   * serveru resetoval na `full` / 100 / `deductible` — první uložení draftu z UI
+   * tak zahodilo poměrný odpočet i neuznatelnost, které do dokladu dostal import
+   * nebo API klient.
+   */
+  vat_deduction?: CashVatDeduction
+  vat_deduction_percent?: number
+  tax_treatment?: CashTaxTreatment
+}
 // vat_rate je number — sazby se čtou z API (taxConstants per rok), ŽÁDNÝ hardcode 21|12 (A4)
 
 export interface CashRegister {

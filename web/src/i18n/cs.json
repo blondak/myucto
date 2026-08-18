@@ -4946,7 +4946,15 @@
             "fx_rate_hint": "Prázdné = kurz ČNB k datu vystavení. Vyplňte jen tehdy, když kurz ČNB k datu není k dispozici nebo používáte pevný kurz.",
             "fx_amount_czk": "Korunový ekvivalent",
             "duplicate_vat_hint": "Pokud k prodeji existuje faktura, použijte režim Úhrada faktury — jinak vznikne dvojí DPH.",
-            "transfer_leg_hint": "Druhá noha převodu (bankovní strana přes účet 261) vznikne z bankovního výpisu nebo ručním zápisem."
+            "transfer_leg_hint": "Druhá noha převodu (bankovní strana přes účet 261) vznikne z bankovního výpisu nebo ručním zápisem.",
+            "vat_deduction": "Nárok na odpočet DPH",
+            "tax_treatment": "Daň z příjmů",
+            "vat_deduction_hint": "Odpočet i uznatelnost se zadávají na řádek rozpadu. „Krácený nárok (poměrný §75)“ zpřístupní procento, kterým se odpočet zkrátí; daň z příjmů ovlivňuje jen DPFO/DPPO, ne DPH."
+        },
+        "tax_treatment": {
+            "deductible": "Daňově uznatelný náklad",
+            "non_deductible": "Daňově neuznatelný náklad",
+            "not_expense": "Není náklad (např. pořízení majetku)"
         },
         "preview": {
             "title": "Náhled zaúčtování"
