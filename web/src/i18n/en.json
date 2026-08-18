@@ -4842,6 +4842,10 @@
         "title": "Cash register",
         "book_title": "Cash book",
         "new_document": "New cash document",
+        "edit_document": "Edit cash document",
+        "save_draft": "Save as draft",
+        "post_document": "Post",
+        "post_confirm": "Post document {number}? A series number will be assigned and the document posted.",
         "balance": "Balance",
         "balance_as_of": "balance as of {date}",
         "opening_balance": "Opening balance",
@@ -4860,6 +4864,10 @@
         "register_empty": "No cash register yet",
         "register_delete_confirm": "Really delete cash register \"{name}\"?",
         "register_deactivate_hint": "A cash register with documents cannot be deleted — deactivate it instead.",
+        "register_nothing_to_save": "Nothing to save yet — change a register or fill in a new one.",
+        "register_delete_pending": "To be deleted: {names}. Applied on save.",
+        "register_account_placeholder": "211.500",
+        "register_account_manage": "Manage analytical accounts",
         "print": "Print PDF",
         "book_pdf": "Book PDF",
         "type": {
@@ -4897,7 +4905,11 @@
             "created_at": "Created",
             "created_by": "Author",
             "purpose": "Purpose",
-            "entry": "Journal entry"
+            "entry": "Journal entry",
+            "date_from": "Date from",
+            "date_to": "Date to",
+            "debit": "Dr",
+            "credit": "Cr"
         },
         "form": {
             "partner": "Partner",
@@ -4920,7 +4932,13 @@
             "rule_key_hint": "A preset fills in the counter account from the posting rule. If none fits, pick “Other” and choose an account from the chart.",
             "number_hint": "The number is assigned on save (series PPD-2026-…).",
             "simplified_limit_hint": "Simplified tax document up to CZK 10,000 incl. VAT (§30 VAT Act).",
-            "purchase_over_10k_hint": "From CZK 10,000 record the document as a received invoice and pay it via Invoice payment (§30 VAT Act).",
+            "purchase_over_10k_hint": "From {amount} record the document as a received invoice and pay it via Invoice payment (§30 VAT Act).",
+            "vat_rate_add": "Add rate",
+            "vat_rate_remove": "Remove rate",
+            "vat_mismatch_hint": "The breakdown differs from the total by {amount}. The whole difference would land in the VAT of the last line — fix the base, the rate or the total.",
+            "fx_rate": "Rate",
+            "fx_rate_hint": "Leave empty to use the CNB rate for the issue date. Fill it in only when the CNB rate is unavailable or you use a fixed rate.",
+            "fx_amount_czk": "CZK equivalent",
             "duplicate_vat_hint": "If an invoice exists for the sale, use Invoice payment — otherwise VAT is counted twice.",
             "transfer_leg_hint": "The other leg of the transfer (bank side via account 261) is created from the bank statement or a manual entry."
         },
@@ -4936,6 +4954,7 @@
             "title": "Delete document permanently",
             "warning": "The document and its postings (including any reversing entry) will be deleted irreversibly. Unlike a reversal, no trace remains in the books.",
             "hint": "For documents already covered by a filed return, prefer a reversal. Deletion is only possible in an open and unlocked period.",
+            "draft_warning": "A draft has no series number and no postings — deleting it leaves nothing behind and creates no gap in the number series.",
             "confirm": "Delete"
         },
         "empty": {
@@ -4950,6 +4969,18 @@
             "negative_balance": "The cash balance is negative.",
             "dic_missing_over_10k": "Sale above CZK 10,000 without a VAT No. — add the customer's VAT No. for Control Statement A.4.",
             "fx_rate_deviation": "The entered rate differs from the CNB daily rate — check the rate on the document."
+        },
+        "validation": {
+            "register": "Select the cash register the document belongs to.",
+            "amount": "Enter an amount greater than zero.",
+            "description": "Fill in the document description — it cannot be issued without one.",
+            "date": "Enter a valid issue date.",
+            "tax_date": "Enter a valid date of taxable supply.",
+            "fx_rate": "Enter a rate greater than zero.",
+            "vat_lines": "The sum of bases and VAT must match the document total.",
+            "name": "Fill in the cash register name.",
+            "account": "Select the cash register's analytical account.",
+            "reason": "Enter a reversal reason (at least 3 characters)."
         },
         "error": {
             "register_not_found": "Cash register not found.",
@@ -4975,6 +5006,10 @@
             "purchase_vat_over_10k": "Record a taxable purchase above CZK 10,000 as a received invoice.",
             "counter_account_invalid": "Invalid counter account or posting rule.",
             "reason_required": "A reversal reason is required (min. 3 characters).",
+            "period_not_open": "The document's accounting period is not open — only documents in an open period can be changed or deleted.",
+            "date_locked": "The document date falls into a period closed by the tax lock.",
+            "ddkp_not_payable": "A tax document for a received payment (§ 28) is not paid in cash — pay the advance invoice it originates from.",
+            "has_dependencies": "The document is linked to other records and cannot be deleted — remove the link first.",
             "validation": "Please check the entered data."
         }
     },

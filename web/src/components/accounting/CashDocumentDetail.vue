@@ -24,7 +24,7 @@ const { t } = useI18n()
         <div><span class="text-neutral-500">{{ t('cash.col.link') }}:</span> {{ purposeLabel(doc.purpose) }}</div>
         <div v-if="doc.partner_ic"><span class="text-neutral-500">{{ t('common.ic') }}:</span> {{ doc.partner_ic }}</div>
         <div v-if="doc.partner_dic"><span class="text-neutral-500">{{ t('cash.form.partner_dic') }}:</span> {{ doc.partner_dic }}</div>
-        <div v-if="doc.tax_date"><span class="text-neutral-500">{{ t('cash.col.date') }} (DUZP):</span> {{ formatDate(doc.tax_date) }}</div>
+        <div v-if="doc.tax_date"><span class="text-neutral-500">{{ t('cash.col.tax_date') }}:</span> {{ formatDate(doc.tax_date) }}</div>
         <div v-if="doc.register"><span class="text-neutral-500">{{ t('cash.register') }}:</span> {{ doc.register.name }} ({{ doc.register.account_code }})</div>
       </div>
       <div v-if="doc.vat_mode === 'vat' && doc.vat_lines.length" class="space-y-1">

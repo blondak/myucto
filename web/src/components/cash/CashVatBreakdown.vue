@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatMoney } from '@/composables/useFormat'
+import { ICONS, btnIconSm, btnOutlineSm } from '@/components/ui/buttonStyles'
 import type { CashVatLine } from '@/api/cash'
 
 /**
@@ -14,7 +15,11 @@ const props = defineProps<{
   total: number
   rates: number[]
 }>()
-const emit = defineEmits<{ (e: 'update:modelValue', v: CashVatLine[]): void }>()
+const emit = defineEmits<{
+  (e: 'update:modelValue', v: CashVatLine[]): void
+  /** Sedí SUROVÝ rozpad na celkovou částku? Rodič na tom drží blokaci uložení. */
+  (e: 'update:matches', v: boolean): void
+}>()
 
 const { t } = useI18n()
 
@@ -124,6 +129,11 @@ const rawSumC = computed(() =>
   rows.value.filter(r => r.rate > 0).reduce((s, r) => s + cents(num(r.base)) + cents(num(r.vat)), 0),
 )
 const matches = computed(() => Math.abs(rawSumC.value - cents(props.total)) <= 1)
+// Rozdíl, o který se poslední řádek dorovnává. Dokud byl jen barevný badge, uživatel
+// viděl číslo, které si komponenta domyslela (celý zbytek spadl do DPH posledního
+// řádku), a nedozvěděl se o tom — proto ho ukazujeme i slovy.
+const residual = computed(() => round2((cents(props.total) - rawSumC.value) / 100))
+watch(matches, v => emit('update:matches', v), { immediate: true })
 </script>
 
 <template>
@@ -176,14 +186,22 @@ const matches = computed(() => Math.abs(rawSumC.value - cents(props.total)) <= 1
         </div>
         <div class="col-span-1 flex items-center justify-center h-9">
           <button type="button" @click="removeRow(i)" :disabled="rows.length <= 1"
-            class="cursor-pointer text-danger-500 hover:text-danger-600 disabled:opacity-30 disabled:cursor-not-allowed">✕</button>
+            :title="t('cash.form.vat_rate_remove')" :aria-label="t('cash.form.vat_rate_remove')"
+            :class="btnIconSm('danger')">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+          </button>
         </div>
       </div>
     </div>
 
-    <div class="flex items-center justify-between">
-      <button type="button" @click="addRow" class="cursor-pointer text-xs text-primary-600 hover:text-primary-700 font-medium">
-        + {{ t('cash.form.vat_rate') }}
+    <p v-if="!matches" class="text-xs px-3 py-2 rounded-md bg-warning-50 text-warning-700">
+      {{ t('cash.form.vat_mismatch_hint', { amount: formatMoney(residual) }) }}
+    </p>
+
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <button type="button" @click="addRow" :class="btnOutlineSm('primary')">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+        {{ t('cash.form.vat_rate_add') }}
       </button>
       <div class="text-xs flex items-center gap-3">
         <span class="text-neutral-500">{{ t('cash.form.vat_base') }}: <strong class="font-mono">{{ formatMoney(sumBase) }}</strong></span>

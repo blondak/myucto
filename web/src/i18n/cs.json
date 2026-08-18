@@ -4842,6 +4842,10 @@
         "title": "Pokladna",
         "book_title": "Pokladní kniha",
         "new_document": "Nový pokladní doklad",
+        "edit_document": "Úprava pokladního dokladu",
+        "save_draft": "Uložit jako koncept",
+        "post_document": "Vystavit",
+        "post_confirm": "Vystavit doklad {number}? Přidělí se číslo z řady a doklad se zaúčtuje.",
         "balance": "Zůstatek",
         "balance_as_of": "zůstatek k {date}",
         "opening_balance": "Počáteční zůstatek",
@@ -4860,6 +4864,10 @@
         "register_empty": "Zatím žádná pokladna",
         "register_delete_confirm": "Opravdu smazat pokladnu „{name}\"?",
         "register_deactivate_hint": "Pokladnu s doklady nelze smazat — deaktivujte ji.",
+        "register_nothing_to_save": "Zatím není co uložit — upravte pokladnu nebo vyplňte novou.",
+        "register_delete_pending": "Ke smazání: {names}. Provede se až uložením.",
+        "register_account_placeholder": "211.500",
+        "register_account_manage": "Spravovat analytické účty",
         "print": "Tisk PDF",
         "book_pdf": "PDF knihy",
         "type": {
@@ -4897,7 +4905,11 @@
             "created_at": "Vytvořeno",
             "created_by": "Autor",
             "purpose": "Účel",
-            "entry": "Zápis"
+            "entry": "Zápis",
+            "date_from": "Datum od",
+            "date_to": "Datum do",
+            "debit": "MD",
+            "credit": "D"
         },
         "form": {
             "partner": "Partner",
@@ -4920,7 +4932,13 @@
             "rule_key_hint": "Předvolba doplní protiúčet podle kontace. Nesedí-li nic, zvol „Jiné“ a vyber účet z osnovy.",
             "number_hint": "Číslo se přidělí při uložení (řada PPD-2026-…).",
             "simplified_limit_hint": "Zjednodušený daňový doklad do 10 000 Kč vč. DPH (§30 ZDPH).",
-            "purchase_over_10k_hint": "Od 10 000 Kč doklad zaevidujte jako přijatou fakturu a uhraďte režimem Úhrada faktury (§30 ZDPH).",
+            "purchase_over_10k_hint": "Od {amount} doklad zaevidujte jako přijatou fakturu a uhraďte režimem Úhrada faktury (§30 ZDPH).",
+            "vat_rate_add": "Přidat sazbu",
+            "vat_rate_remove": "Odebrat sazbu",
+            "vat_mismatch_hint": "Rozpad se od celkové částky liší o {amount}. Celý rozdíl by spadl do DPH posledního řádku — oprav základ, sazbu nebo celkovou částku.",
+            "fx_rate": "Kurz",
+            "fx_rate_hint": "Prázdné = kurz ČNB k datu vystavení. Vyplňte jen tehdy, když kurz ČNB k datu není k dispozici nebo používáte pevný kurz.",
+            "fx_amount_czk": "Korunový ekvivalent",
             "duplicate_vat_hint": "Pokud k prodeji existuje faktura, použijte režim Úhrada faktury — jinak vznikne dvojí DPH.",
             "transfer_leg_hint": "Druhá noha převodu (bankovní strana přes účet 261) vznikne z bankovního výpisu nebo ručním zápisem."
         },
@@ -4936,6 +4954,7 @@
             "title": "Trvale smazat doklad",
             "warning": "Doklad i jeho zaúčtování (včetně případného protizápisu) budou nenávratně smazány. Na rozdíl od storna po nich v evidenci nezůstane stopa.",
             "hint": "Pro doklady, které už prošly přiznáním, použijte raději storno. Smazat lze jen doklad v otevřeném a neuzamčeném období.",
+            "draft_warning": "Rozpracovaný doklad nemá přidělené číslo ani zaúčtování — smazáním po něm v evidenci nic nezůstane a v číselné řadě nevznikne díra.",
             "confirm": "Smazat"
         },
         "empty": {
@@ -4950,6 +4969,18 @@
             "negative_balance": "Zůstatek pokladny je záporný.",
             "dic_missing_over_10k": "Prodej nad 10 000 Kč bez DIČ — pro Kontrolní hlášení A.4 doplňte DIČ odběratele.",
             "fx_rate_deviation": "Zadaný kurz se liší od denního kurzu ČNB — zkontrolujte kurz na dokladu."
+        },
+        "validation": {
+            "register": "Vyberte pokladnu, do které doklad patří.",
+            "amount": "Zadejte částku větší než nula.",
+            "description": "Vyplňte popis dokladu — bez něj nelze doklad vystavit.",
+            "date": "Zadejte platné datum vystavení.",
+            "tax_date": "Zadejte platné datum zdanitelného plnění (DUZP).",
+            "fx_rate": "Zadejte kurz větší než nula.",
+            "vat_lines": "Součet základů a daně musí odpovídat celkové částce dokladu.",
+            "name": "Vyplňte název pokladny.",
+            "account": "Vyberte analytický účet pokladny.",
+            "reason": "Uveďte důvod storna (nejméně 3 znaky)."
         },
         "error": {
             "register_not_found": "Pokladna nenalezena.",
@@ -4975,6 +5006,10 @@
             "purchase_vat_over_10k": "Daňový nákup nad 10 000 Kč zaevidujte jako přijatou fakturu.",
             "counter_account_invalid": "Neplatný protiúčet nebo kontace.",
             "reason_required": "Důvod storna je povinný (min. 3 znaky).",
+            "period_not_open": "Účetní období dokladu není otevřené — měnit ani mazat lze jen doklad v otevřeném období.",
+            "date_locked": "Datum dokladu spadá do období uzamčeného daňovým zámkem.",
+            "ddkp_not_payable": "Daňový doklad k přijaté platbě (§ 28) se hotově nehradí — uhraďte zálohovou fakturu, ze které vznikl.",
+            "has_dependencies": "Doklad je navázaný na jiné záznamy a nelze ho smazat — zrušte nejprve vazbu.",
             "validation": "Zkontrolujte zadané údaje."
         }
     },
