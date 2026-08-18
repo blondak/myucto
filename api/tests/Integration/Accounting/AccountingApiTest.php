@@ -195,6 +195,42 @@ final class AccountingApiTest extends TestCase
         self::assertStringContainsString('kontace', (string) $res['body']['error']['message']);
     }
 
+    /**
+     * Regrese: seznam míst, kde visí kód účtu, kopíroval migraci 1322 a chyběl v něm
+     * mj. protiúčet pokladního dokladu — analytiku použitou na dokladu tak šlo smazat
+     * a doklad se pak nedal vystavit.
+     */
+    public function testAnalyticUsedAsCashCounterAccountCannotBeDeleted(): void
+    {
+        $parentId = (int) $this->db->pdo()->query(
+            "SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '518'"
+        )->fetchColumn();
+        $created = $this->call($this->accountsAction, 'create', 'POST', 'accountant', [], [
+            'parent_id' => $parentId, 'account_code' => '518007', 'name' => 'Protiúčet dokladu',
+        ]);
+        $id = (int) $created['body']['id'];
+
+        $regId = (int) $this->db->pdo()->query(
+            "SELECT id FROM cash_registers WHERE supplier_id = {$this->supplierId} ORDER BY id LIMIT 1"
+        )->fetchColumn();
+        if ($regId === 0) {
+            $this->db->pdo()->prepare(
+                "INSERT INTO cash_registers (supplier_id, name, currency_code, account_code, is_default, is_active)
+                 VALUES (?, 'Test', 'CZK', '211', 1, 1)"
+            )->execute([$this->supplierId]);
+            $regId = (int) $this->db->pdo()->lastInsertId();
+        }
+        $this->db->pdo()->prepare(
+            "INSERT INTO cash_documents (supplier_id, register_id, doc_type, purpose, issue_date, tax_date,
+                                         description, total_amount, status, counter_account_code)
+             VALUES (?, ?, 'in', 'sale', '2099-06-15', '2099-06-15', 'Test', 100.00, 'draft', '518.007')"
+        )->execute([$this->supplierId, $regId]);
+
+        $res = $this->call($this->accountsAction, 'delete', 'DELETE', 'accountant', ['id' => (string) $id]);
+        self::assertSame(409, $res['status']);
+        self::assertStringContainsString('pokladní doklady', (string) $res['body']['error']['message']);
+    }
+
     public function testSyntheticAccountCannotBeDeleted(): void
     {
         $id = (int) $this->db->pdo()->query(

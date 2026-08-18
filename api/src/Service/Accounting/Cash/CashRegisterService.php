@@ -310,13 +310,7 @@ final class CashRegisterService
      */
     private function assertSeriesSwitchable(int $supplierId, int $registerId): void
     {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT EXISTS (SELECT 1 FROM cash_documents
-                             WHERE supplier_id = ? AND register_id = ? AND doc_number IS NOT NULL
-                               AND YEAR(issue_date) = ?)"
-        );
-        $stmt->execute([$supplierId, $registerId, (int) date('Y')]);
-        if ((bool) $stmt->fetchColumn()) {
+        if ($this->hasNumberedDocuments($supplierId, $registerId, (int) date('Y'))) {
             throw new CashException(
                 'series_switch_locked',
                 'Číselnou řadu pokladny lze přepnout jen v roce, ve kterém ještě nevydala žádné číslo — přepněte ji od nového účetního roku.',
@@ -336,8 +330,17 @@ final class CashRegisterService
      * který řada ještě založená není (import staršího dokladu, přelom roku), by
      * vyrobil kolizní `PPD-…-0001`.
      */
-    public function ensureOwnSeries(int $supplierId, int $registerId, int $fiscalYear): void
+    public function ensureOwnSeries(int $supplierId, int $registerId, int $fiscalYear): bool
     {
+        // Rozhodnutí padá PER ROK DOKLADU, ne podle „dneška": pokladna přepnutá v lednu
+        // 2027 nesmí zlomit číslování roku 2026, kde už z firemní řady čísla vydala
+        // (doúčtovaný koncept, import staršího dokladu). Pro takový rok zůstává firemní
+        // řada — jinak by kniha toho roku měla dvě různé řady.
+        if (!$this->hasOwnSeriesRow($supplierId, $registerId, $fiscalYear)
+            && $this->hasNumberedDocuments($supplierId, $registerId, $fiscalYear)) {
+            return false;
+        }
+
         $existing = [];
         $prefixByCode = [];
         foreach ($this->series->list($supplierId) as $row) {
@@ -366,6 +369,31 @@ final class CashRegisterService
                 $registerId,
             );
         }
+        return true;
+    }
+
+    /** Má pokladna pro daný rok už založenou vlastní řadu? */
+    private function hasOwnSeriesRow(int $supplierId, int $registerId, int $fiscalYear): bool
+    {
+        foreach ($this->series->list($supplierId) as $row) {
+            if ((int) $row['register_id'] === $registerId
+                && (int) $row['fiscal_year'] === $fiscalYear
+                && in_array((string) $row['series_code'], ['cash_in', 'cash_out'], true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function hasNumberedDocuments(int $supplierId, int $registerId, int $fiscalYear): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT EXISTS (SELECT 1 FROM cash_documents
+                             WHERE supplier_id = ? AND register_id = ? AND doc_number IS NOT NULL
+                               AND YEAR(issue_date) = ?)'
+        );
+        $stmt->execute([$supplierId, $registerId, $fiscalYear]);
+        return (bool) $stmt->fetchColumn();
     }
 
     /**

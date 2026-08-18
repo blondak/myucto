@@ -630,8 +630,11 @@ final class CashDocumentService
             if ($seriesScope > 0) {
                 // Řada pokladny musí pro daný rok existovat s vlastním prefixem — lazy
                 // ensure() uvnitř next() zná jen výchozí PPD/VPD a vyrobil by číslo
-                // kolidující s firemní řadou.
-                $this->cashRegisters->ensureOwnSeries($supplierId, $seriesScope, $fiscalYear);
+                // kolidující s firemní řadou. Pro rok, ve kterém pokladna už čísla
+                // z firemní řady vydala, vlastní řada nevznikne a doklad ji nepoužije.
+                if (!$this->cashRegisters->ensureOwnSeries($supplierId, $seriesScope, $fiscalYear)) {
+                    $seriesScope = 0;
+                }
             }
             $docNumber = $this->series->next($supplierId, $seriesCode, $fiscalYear, $seriesScope);
         }

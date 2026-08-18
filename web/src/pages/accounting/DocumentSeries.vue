@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { seriesApi, SERIES_DEFAULT_PREFIXES, type DocumentSeries, type SeriesCode } from '@/api/closing'
+import { seriesApi, SERIES_DEFAULT_PREFIXES, type DocumentSeries, type DocumentSeriesPatch, type SeriesCode } from '@/api/closing'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
@@ -124,12 +124,15 @@ async function saveAll() {
     for (const s of rows) {
       const e = edits[seriesKey(s)]
       const format = e.number_format.trim().toUpperCase()
-      stored.value = await seriesApi.update(s.series_code, s.fiscal_year, {
-        register_id: s.register_id ?? 0,
-        prefix: e.prefix.trim().toUpperCase(),
-        number_format: format === '' ? null : format,
-        next_number: Number(e.next_number),
-      })
+      // Posílají se JEN skutečně změněná pole. Čítač je živá hodnota — mezi otevřením
+      // stránky a uložením mohl vydat číslo jiný doklad, a přeposláním načtené hodnoty
+      // by se řada vrátila zpět a začala vydávat už použitá čísla.
+      const patch: DocumentSeriesPatch = { register_id: s.register_id ?? 0 }
+      const prefix = e.prefix.trim().toUpperCase()
+      if (prefix !== s.prefix) patch.prefix = prefix
+      if (format !== (s.number_format || '')) patch.number_format = format === '' ? null : format
+      if (Number(e.next_number) !== s.next_number) patch.next_number = Number(e.next_number)
+      stored.value = await seriesApi.update(s.series_code, s.fiscal_year, patch)
     }
     for (const row of stored.value) fillEdit(row)
     toast.success(t('common.saved'))

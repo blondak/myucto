@@ -107,6 +107,19 @@ describe('DocumentSeries', () => {
       number_format: '{PREFIX}{CCCCC}',
       next_number: 11,
     })
+  })
+
+  it('při změně samotného prefixu neposílá čítač — přeposláním by se řada vrátila zpět', async () => {
+    m.list.mockResolvedValue([stored()])
+    m.update.mockResolvedValue([stored({ prefix: '26HP' })])
+    const wrapper = await mountPage()
+
+    const inputs = wrapper.findAll('tbody tr')[0].findAll('input')
+    await inputs[0].setValue('26HP')
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+
+    expect(m.update).toHaveBeenCalledWith('cash_in', YEAR, { register_id: 0, prefix: '26HP' })
     expect(m.toastSuccess).toHaveBeenCalled()
   })
 

@@ -1205,6 +1205,38 @@ final class CashDocumentServiceTest extends TestCase
         $this->documentSeries->updateSeries($this->supplierId, 'cash_in', self::YEAR, ['prefix' => $takenPrefix], $regC);
     }
 
+    /**
+     * Přepnutí na vlastní řadu nesmí zpětně zlomit rok, ve kterém pokladna už čísla
+     * z firemní řady vydala — třeba doúčtováním konceptu z prosince v lednu.
+     */
+    public function testOwnSeriesDoesNotSplitYearAlreadyNumberedFromCompanySeries(): void
+    {
+        $reg = $this->makeRegister('211');
+        $first = $this->service->create($this->supplierId, $this->sale($reg, 100.0), $this->userId);
+        self::assertSame('PPD-' . self::YEAR . '-0001', $first['doc_number']);
+
+        // Zapnutí vlastní řady (guard hlídá jen aktuální rok, fixtura běží v roce 2099).
+        $this->registers->update($this->supplierId, $reg, ['own_series' => true]);
+
+        $second = $this->service->create($this->supplierId, $this->sale($reg, 200.0), $this->userId);
+        self::assertSame(
+            'PPD-' . self::YEAR . '-0002',
+            $second['doc_number'],
+            'Rok s čísly z firemní řady v ní musí pokračovat, jinak má kniha dvě řady.',
+        );
+
+        // Rok bez firemních čísel vlastní řadu naopak dostane (účetní období pro
+        // následující rok fixtura nemá, takže se ptáme rovnou služby).
+        self::assertTrue(
+            $this->registers->ensureOwnSeries($this->supplierId, $reg, self::YEAR + 1),
+            'Rok, ve kterém pokladna ještě nečíslovala, vlastní řadu dostane.',
+        );
+        self::assertFalse(
+            $this->registers->ensureOwnSeries($this->supplierId, $reg, self::YEAR),
+            'Rok s čísly z firemní řady vlastní řadu nedostane ani opakovaným voláním.',
+        );
+    }
+
     /** Přepnout řadu uprostřed roku, ve kterém už pokladna vydala číslo, nejde (§11 ZoÚ). */
     public function testSeriesSwitchIsLockedAfterFirstNumberInYear(): void
     {

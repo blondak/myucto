@@ -25,19 +25,49 @@ final class ChartAccountUsage
      * Zdroj pravdy je migrace 1322 (tytéž sloupce), plus počáteční stavy aktivace.
      */
     private const CODE_COLUMNS = [
-        'posting_rules'                => ['debit_account_code', 'credit_account_code'],
-        'bank_posting_rules'           => ['debit_account_code', 'credit_account_code'],
-        'cash_registers'               => ['account_code'],
-        'assets'                       => ['acquisition_account_code', 'accumulated_account_code', 'asset_account_code'],
-        'expense_classification_rules' => ['target_account_code'],
-        'accounting_opening_balances'  => ['account_code'],
-        'payroll_employer_settings'    => [
+        'posting_rules'                    => ['debit_account_code', 'credit_account_code'],
+        'bank_posting_rules'               => ['debit_account_code', 'credit_account_code'],
+        'bank_posting_suggestions'         => ['debit_account_code', 'credit_account_code'],
+        'cash_registers'                   => ['account_code'],
+        'cash_documents'                   => ['counter_account_code'],
+        'assets'                           => ['acquisition_account_code', 'accumulated_account_code', 'asset_account_code'],
+        'expense_classification_rules'     => ['target_account_code'],
+        'accounting_opening_balances'      => ['account_code'],
+        'accounting_balance_inventory_items' => ['account_code'],
+        'accounting_supplier_settings'     => ['fuel_account_code', 'vehicle_repair_account_code'],
+        'purchase_invoice_vat_allocations' => ['account_code'],
+        'payroll_dimensions'               => ['default_account_code'],
+        'payroll_employees'                => ['net_settlement_account_code'],
+        'payroll_employee_profiles'        => ['partner_settlement_account_code'],
+        'payroll_posting_allocations'      => ['account_code'],
+        'payroll_employer_settings'        => [
             'employment_gross_debit_account', 'employment_gross_credit_account',
             'statutory_gross_debit_account', 'statutory_gross_credit_account',
             'partner_gross_debit_account', 'partner_gross_credit_account',
             'social_insurance_credit_account', 'health_insurance_credit_account',
             'income_tax_credit_account', 'other_deductions_credit_account',
             'employer_insurance_debit_account', 'partner_settlement_credit_account',
+        ],
+    ];
+
+    /**
+     * Tabulky bez vlastního `supplier_id` — firmu drží až rodič. Bez JOINu by
+     * kontrola hlásila použití cizí firmy, nebo naopak žádné.
+     *
+     * @var array<int, array{sql:string, label:string}>
+     */
+    private const JOINED_CHECKS = [
+        [
+            'sql'   => 'SELECT EXISTS (SELECT 1 FROM journal_entry_template_lines l
+                                         JOIN journal_entry_templates t ON t.id = l.template_id
+                                        WHERE t.supplier_id = ? AND l.account_code = ?)',
+            'label' => 'šablony účetních zápisů',
+        ],
+        [
+            'sql'   => 'SELECT EXISTS (SELECT 1 FROM purchase_invoice_items i
+                                         JOIN purchase_invoices p ON p.id = i.purchase_invoice_id
+                                        WHERE p.supplier_id = ? AND i.expense_account_code = ?)',
+            'label' => 'položky přijatých faktur',
         ],
     ];
 
@@ -82,6 +112,14 @@ final class ChartAccountUsage
             }
         }
 
+        foreach (self::JOINED_CHECKS as $check) {
+            $stmt = $pdo->prepare($check['sql']);
+            $stmt->execute([$supplierId, $accountCode]);
+            if ((bool) $stmt->fetchColumn()) {
+                $found[] = $check['label'];
+            }
+        }
+
         return array_values(array_unique($found));
     }
 
@@ -104,7 +142,13 @@ final class ChartAccountUsage
             'assets'                       => 'karty majetku',
             'expense_classification_rules' => 'pravidla klasifikace nákladů',
             'accounting_opening_balances'  => 'počáteční stavy',
-            'payroll_employer_settings'    => 'mzdové nastavení',
+            'payroll_employer_settings', 'payroll_dimensions', 'payroll_employees',
+            'payroll_employee_profiles', 'payroll_posting_allocations' => 'mzdy',
+            'bank_posting_suggestions'     => 'návrhy zaúčtování banky',
+            'cash_documents'               => 'pokladní doklady',
+            'accounting_balance_inventory_items' => 'inventura zůstatků',
+            'accounting_supplier_settings' => 'nastavení účetnictví',
+            'purchase_invoice_vat_allocations' => 'rozpad DPH přijatých faktur',
             default                        => $table,
         };
     }
