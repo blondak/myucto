@@ -9,6 +9,9 @@ use PDO;
 
 final class PayrollEmployerPolicyRepository
 {
+    public const LIST_DEFAULT_LIMIT = 25;
+    public const LIST_MAX_LIMIT = 200;
+
     private const POLICY_COLUMNS = <<<'SQL'
         id, supplier_id, valid_from, valid_to, payday_day,
         payday_month_offset, payday_business_day_rule,
@@ -79,23 +82,50 @@ final class PayrollEmployerPolicyRepository
         return $policy === null ? [] : $this->deletion->decorate($supplierId, [$policy]);
     }
 
-    /** @return list<array<string,mixed>> */
-    public function list(int $supplierId): array
-    {
+    /**
+     * Historie revizí politiky zaměstnavatele, po stránkách.
+     *
+     * @return array{items:list<array<string,mixed>>,total:int}
+     */
+    public function list(
+        int $supplierId,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        // Strop se klampuje i tady, ne jen na HTTP hranici: repozitář volá
+        // i jiný kód než akce a „nekonečný" seznam nesmí jít objednat nikudy.
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+
+        $countStmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*)
+               FROM payroll_employer_policies
+              WHERE supplier_id = ?',
+        );
+        $countStmt->execute([$supplierId]);
+        $total = (int) $countStmt->fetchColumn();
+
         $stmt = $this->db->pdo()->prepare(
             'SELECT ' . self::POLICY_COLUMNS . '
                FROM payroll_employer_policies
               WHERE supplier_id = ?
-              ORDER BY valid_from DESC, id DESC',
+              ORDER BY valid_from DESC, id DESC
+              LIMIT ? OFFSET ?',
         );
-        $stmt->execute([$supplierId]);
+        $stmt->bindValue(1, $supplierId, PDO::PARAM_INT);
+        $stmt->bindValue(2, $limit, PDO::PARAM_INT);
+        $stmt->bindValue(3, $offset, PDO::PARAM_INT);
+        $stmt->execute();
 
         $result = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $result[] = self::hydrate($row);
         }
 
-        return $this->deletion->decorate($supplierId, $result);
+        return [
+            'items' => $this->deletion->decorate($supplierId, $result),
+            'total' => $total,
+        ];
     }
 
     /**

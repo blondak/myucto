@@ -20,6 +20,9 @@ import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate } from '@/composables/useFormat'
 import { localPayrollPeriod } from './payrollComponentsUi'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const props = defineProps<{
   mode: 'jmhz' | 'health'
@@ -63,6 +66,16 @@ const detailLoadingId = ref<number | null>(null)
 const detailError = ref('')
 const downloadingArtifactId = ref<number | null>(null)
 const artifactDownloadError = ref('')
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'agenda', labelKey: 'payroll.submissions.overview.agenda', required: true },
+  { key: 'subject', labelKey: 'payroll.submissions.overview.subject' },
+  { key: 'due_on', labelKey: 'payroll.submissions.overview.due_on' },
+  { key: 'channel', labelKey: 'payroll.submissions.overview.channel_label' },
+  { key: 'status', labelKey: 'payroll.submissions.overview.status_label' },
+  { key: 'actions', labelKey: 'common.actions', required: true },
+]
+const tbl = useTablePrefs('payroll-submission-overview', COLUMNS)
 
 const environmentOptions = computed(() => [
   {
@@ -409,58 +422,64 @@ onMounted(load)
           {{ t('payroll.submissions.overview.empty') }}
         </div>
 
-        <div v-else class="hidden overflow-x-auto md:block">
-          <table class="min-w-full divide-y divide-neutral-200 text-sm">
-            <thead>
-              <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th class="px-4 py-3">{{ t('payroll.submissions.overview.agenda') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.submissions.overview.subject') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.submissions.overview.due_on') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.submissions.overview.channel_label') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.submissions.overview.status_label') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('common.actions') }}</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-neutral-100">
-              <tr v-for="item in items" :key="item.id">
-                <td class="px-4 py-3 font-medium text-neutral-900">{{ item.agenda_code }}</td>
-                <td class="px-4 py-3 text-neutral-700">{{ item.subject_reference }}</td>
-                <td class="px-4 py-3 text-neutral-700">
-                  <span class="block">{{ formatDate(item.due_on) }}</span>
-                  <span
-                    class="mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
-                    :class="deadlineClass(item)"
-                    data-test="submission-deadline-phase"
-                  >
-                    {{ deadlineLabel(item) }}
-                  </span>
-                </td>
-                <td class="px-4 py-3 text-neutral-700">{{ channelLabel(item.preferred_channel) }}</td>
-                <td class="px-4 py-3">
-                  <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
-                    {{ statusLabel(item.status) }}
-                  </span>
-                </td>
-                <td class="px-4 py-3 text-right">
-                  <button
-                    v-if="item.latest_submission"
-                    type="button"
-                    :class="btnOutlineSm('neutral')"
-                    :disabled="detailLoadingId !== null"
-                    data-test="submission-detail-open"
-                    @click="openDetail(item)"
-                  >
-                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                      <path :d="ICONS.doc" />
-                    </svg>
-                    {{ t('payroll.submissions.overview.detail_action') }}
-                  </button>
-                  <span v-else class="text-xs text-neutral-400">—</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <template v-else>
+          <div class="hidden items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2 md:flex">
+            <ColumnPicker :ctrl="tbl" />
+            <DensityToggle :ctrl="tbl" />
+          </div>
+          <div class="hidden overflow-x-auto md:block">
+            <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+              <thead>
+                <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+                  <th v-if="tbl.isVisible('agenda')" class="px-4 py-3">{{ t('payroll.submissions.overview.agenda') }}</th>
+                  <th v-if="tbl.isVisible('subject')" class="px-4 py-3">{{ t('payroll.submissions.overview.subject') }}</th>
+                  <th v-if="tbl.isVisible('due_on')" class="px-4 py-3">{{ t('payroll.submissions.overview.due_on') }}</th>
+                  <th v-if="tbl.isVisible('channel')" class="px-4 py-3">{{ t('payroll.submissions.overview.channel_label') }}</th>
+                  <th v-if="tbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.submissions.overview.status_label') }}</th>
+                  <th v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right">{{ t('common.actions') }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-neutral-100">
+                <tr v-for="item in items" :key="item.id">
+                  <td v-if="tbl.isVisible('agenda')" class="px-4 py-3 font-medium text-neutral-900">{{ item.agenda_code }}</td>
+                  <td v-if="tbl.isVisible('subject')" class="px-4 py-3 text-neutral-700">{{ item.subject_reference }}</td>
+                  <td v-if="tbl.isVisible('due_on')" class="px-4 py-3 text-neutral-700">
+                    <span class="block">{{ formatDate(item.due_on) }}</span>
+                    <span
+                      class="mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
+                      :class="deadlineClass(item)"
+                      data-test="submission-deadline-phase"
+                    >
+                      {{ deadlineLabel(item) }}
+                    </span>
+                  </td>
+                  <td v-if="tbl.isVisible('channel')" class="px-4 py-3 text-neutral-700">{{ channelLabel(item.preferred_channel) }}</td>
+                  <td v-if="tbl.isVisible('status')" class="px-4 py-3">
+                    <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
+                      {{ statusLabel(item.status) }}
+                    </span>
+                  </td>
+                  <td v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right">
+                    <button
+                      v-if="item.latest_submission"
+                      type="button"
+                      :class="btnOutlineSm('neutral')"
+                      :disabled="detailLoadingId !== null"
+                      data-test="submission-detail-open"
+                      @click="openDetail(item)"
+                    >
+                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path :d="ICONS.doc" />
+                      </svg>
+                      {{ t('payroll.submissions.overview.detail_action') }}
+                    </button>
+                    <span v-else class="text-xs text-neutral-400">—</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
 
         <div v-if="items.length" class="grid grid-cols-1 gap-3 p-4 md:hidden">
           <article v-for="item in items" :key="item.id" class="rounded-lg border border-neutral-200 p-4">

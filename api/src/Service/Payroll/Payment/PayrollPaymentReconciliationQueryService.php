@@ -9,16 +9,27 @@ use PDO;
 
 final class PayrollPaymentReconciliationQueryService
 {
+    public const LIST_DEFAULT_LIMIT = 25;
+    public const LIST_MAX_LIMIT = 200;
+
     public function __construct(private readonly Connection $db) {}
 
     /** @return array<string,mixed> */
-    public function forPeriod(int $supplierId, string $period): array
-    {
+    public function forPeriod(
+        int $supplierId,
+        string $period,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException(
                 'Firma párování plateb musí být kladné číslo.',
             );
         }
+        // Strop se klampuje i tady, ne jen na HTTP hranici: službu volá i jiný
+        // kód než akce a „vypiš celou historii" nesmí jít objednat nikudy.
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
         [$from, $to] = $this->periodRange($period);
         $evidenceRange = $this->evidenceRange(
             $supplierId,
@@ -33,7 +44,30 @@ final class PayrollPaymentReconciliationQueryService
                 $from,
                 $to,
             ),
-            'matches' => $this->matches($supplierId, $from, $to),
+            'matches' => $this->matches(
+                $supplierId,
+                $from,
+                $to,
+                false,
+                $limit,
+                $offset,
+            ),
+            'matches_total' => $this->matchCount($supplierId, $from, $to),
+            'matches_limit' => $limit,
+            'matches_offset' => $offset,
+            // Nabídka „co lze stornovat" NENÍ stránka historie: kdyby se brala
+            // z ní, zmizely by z výběru události, které jen leží na jiné straně,
+            // a storno by šlo udělat jen tehdy, když má uživatel štěstí na
+            // stránkování. Vratné události jsou zároveň úzká, samo se
+            // vyprazdňující množina.
+            'reversible_matches' => $this->matches(
+                $supplierId,
+                $from,
+                $to,
+                true,
+                self::LIST_MAX_LIMIT,
+                0,
+            ),
             'bank_evidence' => $evidenceRange === null
                 ? []
                 : $this->bankEvidence(
@@ -167,11 +201,43 @@ final class PayrollPaymentReconciliationQueryService
         return $result;
     }
 
+    private function matchCount(
+        int $supplierId,
+        string $from,
+        string $to,
+    ): int {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*)
+               FROM payroll_payment_matches payment_match
+               JOIN payroll_payment_allocations allocation
+                 ON allocation.supplier_id = payment_match.supplier_id
+                AND allocation.id = payment_match.allocation_id
+               JOIN payroll_payment_liabilities liability
+                 ON liability.supplier_id = allocation.supplier_id
+                AND liability.id = allocation.liability_id
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = liability.supplier_id
+                AND revision.id = liability.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE payment_match.supplier_id = ?
+                AND run.period_start >= ?
+                AND run.period_start < ?',
+        );
+        $statement->execute([$supplierId, $from, $to]);
+
+        return (int) $statement->fetchColumn();
+    }
+
     /** @return list<array<string,mixed>> */
     private function matches(
         int $supplierId,
         string $from,
         string $to,
+        bool $reversibleOnly,
+        int $limit,
+        int $offset,
     ): array {
         $statement = $this->db->pdo()->prepare(
             'SELECT payment_match.id, payment_match.allocation_id,
@@ -225,11 +291,28 @@ final class PayrollPaymentReconciliationQueryService
                 AND employee.id = liability.employee_id
               WHERE payment_match.supplier_id = ?
                 AND run.period_start >= ?
-                AND run.period_start < ?
-              ORDER BY payment_match.actual_payment_date DESC,
-                       payment_match.id DESC',
+                AND run.period_start < ?'
+            . ($reversibleOnly
+                ? ' AND payment_match.event_kind = "matched"
+                    AND payment_match.amount_minor + COALESCE((
+                          SELECT SUM(reversal.amount_minor)
+                            FROM payroll_payment_matches reversal
+                           WHERE reversal.supplier_id =
+                                 payment_match.supplier_id
+                             AND reversal.source_match_id = payment_match.id
+                             AND reversal.event_kind = "reversed"
+                        ), 0) > 0'
+                : '')
+            . ' ORDER BY payment_match.actual_payment_date DESC,
+                        payment_match.id DESC
+               LIMIT ? OFFSET ?',
         );
-        $statement->execute([$supplierId, $from, $to]);
+        $statement->bindValue(1, $supplierId, PDO::PARAM_INT);
+        $statement->bindValue(2, $from, PDO::PARAM_STR);
+        $statement->bindValue(3, $to, PDO::PARAM_STR);
+        $statement->bindValue(4, $limit, PDO::PARAM_INT);
+        $statement->bindValue(5, $offset, PDO::PARAM_INT);
+        $statement->execute();
         $result = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $rawRow) {
             $row = self::row($rawRow, 'spárování platby');

@@ -875,6 +875,9 @@ export interface PayrollTimeOverview {
   period: string
   incomplete_only: boolean
   items: PayrollTimeOverviewItem[]
+  total: number
+  limit: number
+  offset: number
 }
 
 export interface PayrollTimeImportError {
@@ -3703,10 +3706,16 @@ export const payrollApi = {
       URL.revokeObjectURL(objectUrl)
     }
   },
-  employerPolicies: (effectiveOn?: string) =>
-    api.get<{ policies: PayrollEmployerPolicy[] }>('/payroll/settings/policies', {
-      params: effectiveOn ? { effective_on: effectiveOn } : undefined,
-    }).then(response => response.data.policies),
+  employerPolicies: (effectiveOn?: string, page?: PayrollPageParams) =>
+    api.get<{ policies: PayrollEmployerPolicy[]; total: number }>('/payroll/settings/policies', {
+      params: {
+        ...(effectiveOn ? { effective_on: effectiveOn } : {}),
+        ...pageParams(page),
+      },
+    }).then(response => ({
+      items: response.data.policies,
+      total: response.data.total,
+    })),
   createEmployerPolicy: (payload: PayrollEmployerPolicyPayload) =>
     api.post<{ policy: PayrollEmployerPolicy }>('/payroll/settings/policies', payload)
       .then(response => response.data.policy),
@@ -3975,9 +3984,10 @@ export const payrollApi = {
       URL.revokeObjectURL(objectUrl)
     }
   },
-  timeMonth: (period: string, incomplete = false) =>
-    api.get<PayrollTimeOverview>('/payroll/time/month', { params: { period, incomplete: incomplete ? 1 : 0 } })
-      .then(response => response.data),
+  timeMonth: (period: string, incomplete = false, page?: PayrollPageParams) =>
+    api.get<PayrollTimeOverview>('/payroll/time/month', {
+      params: { period, incomplete: incomplete ? 1 : 0, ...pageParams(page) },
+    }).then(response => response.data),
   saveTimeCalendar: (employmentId: number, payload: Record<string, unknown>) =>
     api.put<{ calendar: PayrollWorkCalendar }>(`/payroll/time/calendars/${employmentId}`, payload)
       .then(response => response.data.calendar),
@@ -4116,9 +4126,10 @@ export const payrollApi = {
       '/payroll/recurring-components/materialize',
       { period },
     ).then(response => response.data.materialization),
-  inputs: (period: string) =>
-    api.get<{ inputs: PayrollInput[] }>('/payroll/inputs', { params: { period } })
-      .then(response => response.data.inputs),
+  inputs: (period: string, page?: PayrollPageParams) =>
+    api.get<{ inputs: PayrollInput[]; total: number }>('/payroll/inputs', {
+      params: { period, ...pageParams(page) },
+    }).then(response => ({ items: response.data.inputs, total: response.data.total })),
   quickInputs: (period: string, page?: PayrollPageParams) =>
     api.get<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', {
       params: { period, ...pageParams(page) },

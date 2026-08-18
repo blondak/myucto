@@ -14,6 +14,9 @@ use PDOException;
 
 final class PayrollInputRepository
 {
+    public const LIST_DEFAULT_LIMIT = 25;
+    public const LIST_MAX_LIMIT = 200;
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollComponentDefinitionFactory $definitionFactory,
@@ -28,10 +31,29 @@ final class PayrollInputRepository
      * tím, že {@see \MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBatchLoader}
      * počítá výhradně `status = "draft"`.
      *
-     * @return list<array<string,mixed>>
+     * @return array{items:list<array<string,mixed>>,total:int}
      */
-    public function list(int $supplierId, string $periodStart): array
-    {
+    public function list(
+        int $supplierId,
+        string $periodStart,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        // Strop se klampuje i tady, ne jen na HTTP hranici: repozitář volá
+        // i jiný kód než akce a „nekonečný" seznam nesmí jít objednat nikudy.
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+
+        $countStmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*)
+               FROM payroll_inputs input
+              WHERE input.supplier_id = ?
+                AND input.period_start = ?
+                AND input.status <> "cancelled"'
+        );
+        $countStmt->execute([$supplierId, $periodStart]);
+        $total = (int) $countStmt->fetchColumn();
+
         $stmt = $this->db->pdo()->prepare(
             'SELECT input.*, employee.full_name AS employee_name,
                     employment.code AS employment_code,
@@ -53,17 +75,25 @@ final class PayrollInputRepository
               WHERE input.supplier_id = ?
                 AND input.period_start = ?
                 AND input.status <> "cancelled"
-              ORDER BY employee.full_name, employment.code, component.code, input.id'
+              ORDER BY employee.full_name, employment.code, component.code, input.id
+              LIMIT ? OFFSET ?'
         );
-        $stmt->execute([$supplierId, $periodStart]);
+        $stmt->bindValue(1, $supplierId, PDO::PARAM_INT);
+        $stmt->bindValue(2, $periodStart, PDO::PARAM_STR);
+        $stmt->bindValue(3, $limit, PDO::PARAM_INT);
+        $stmt->bindValue(4, $offset, PDO::PARAM_INT);
+        $stmt->execute();
 
-        return array_map(
-            self::cast(...),
-            PayrollTimeValue::rows(
-                $stmt->fetchAll(PDO::FETCH_ASSOC),
-                'payroll_inputs',
+        return [
+            'items' => array_map(
+                self::cast(...),
+                PayrollTimeValue::rows(
+                    $stmt->fetchAll(PDO::FETCH_ASSOC),
+                    'payroll_inputs',
+                ),
             ),
-        );
+            'total' => $total,
+        ];
     }
 
     /** @return array<string,mixed>|null */

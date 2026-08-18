@@ -140,7 +140,9 @@ describe('PayrollComponents', () => {
       limit: 25,
       offset: 0,
     })
-    m.inputs.mockResolvedValue([{
+    // Seznam ručních vstupů se stránkuje na serveru — klient dostává stránku
+    // plus celkový počet.
+    m.inputs.mockResolvedValue({ total: 1, items: [{
       id: 9,
       supplier_id: 1,
       employee_id: 8,
@@ -168,7 +170,7 @@ describe('PayrollComponents', () => {
       approved_at: null,
       created_at: '2026-06-01 00:00:00',
       updated_at: '2026-06-01 00:00:00',
-    }])
+    }] })
     m.absenceContext.mockResolvedValue([{
       id: 12,
       employee_id: 8,

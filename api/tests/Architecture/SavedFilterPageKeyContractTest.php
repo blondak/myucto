@@ -80,6 +80,43 @@ final class SavedFilterPageKeyContractTest extends TestCase
     }
 
     /**
+     * Opačný směr, ale jen pro mzdové klíče (`payroll-*`).
+     *
+     * Globálně opačný směr netestovatelný je — whitelist legitimně obsahuje
+     * klíče stránek, které teprve vznikají, a klíče používané odjinud než
+     * z `pages/`. Mzdová sekce je ale uzavřená: každý její klíč tu vznikl
+     * kvůli konkrétní obrazovce. Osiřelý klíč proto znamená, že se stránka
+     * přejmenovala nebo zanikla, a uživatelům té obrazovky se tiše přestaly
+     * načítat uložené předvolby — na obrazovce to nevypadá jako chyba, jen
+     * jako by si aplikace nic nepamatovala. Přesně to je důvod pro bránu.
+     */
+    public function testEveryPayrollWhitelistedPageKeyIsUsedByFrontend(): void
+    {
+        $used = self::frontendPageKeys('useTablePrefs')
+            + self::frontendPageKeys('useSavedFilters');
+
+        $payrollKeys = array_values(array_filter(
+            SavedFilterAction::PAGE_KEYS,
+            static fn (string $key): bool => str_starts_with($key, 'payroll-'),
+        ));
+        self::assertNotEmpty($payrollKeys, 'Ve whitelistu nezbyl žádný mzdový page_key.');
+
+        foreach ($payrollKeys as $key) {
+            self::assertArrayHasKey(
+                $key,
+                $used,
+                sprintf(
+                    "Mzdový page_key '%s' je ve whitelistu, ale žádná stránka ve web/src ho "
+                        . 'nepoužívá — buď osiřel po přejmenování obrazovky (a uživatelé té '
+                        . 'obrazovky tiše přišli o uložené sloupce a hustotu), nebo ho někdo '
+                        . 'zaregistroval dopředu a obrazovku nedodělal.',
+                    $key,
+                ),
+            );
+        }
+    }
+
+    /**
      * Literály z `<composable>('<key>', …)` napříč web/src.
      *
      * @return array<string, list<string>> page_key => soubory, které ho používají

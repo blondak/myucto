@@ -44,6 +44,16 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ error: m.toastError, success: m.toastSuccess }),
 }))
 
+// `useTablePrefs` jde přes Pinii a API; v testu stačí prázdné výchozí předvolby.
+vi.mock('@/composables/useUserPrefs', async () => {
+  const { computed } = await import('vue')
+  return {
+    ensurePrefsLoaded: () => Promise.resolve(),
+    getPagePrefs: () => computed(() => ({})),
+    patchPagePrefs: () => {},
+  }
+})
+
 vi.mock('vue-i18n', async (importOriginal) => {
   const { ref } = await import('vue')
   return {

@@ -62,17 +62,36 @@ final class PayrollEmployerPolicyAction
         }
 
         $supplierId = $this->currentSupplierId($request);
+        $query = $request->getQueryParams();
+        $limit = max(1, min(
+            PayrollEmployerPolicyRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollEmployerPolicyRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
         if ($effectiveOn !== null) {
+            // Dotaz „co platí k datu" vrací nejvýš jednu revizi, takže se
+            // nestránkuje — celkový počet je ale v odpovědi taky, aby si
+            // volající nemusel tvar odpovědi hlídat podle parametru.
+            $effective = $this->policies->listEffective(
+                $supplierId,
+                $effectiveOn,
+            );
+
             return Json::ok($response, [
-                'policies' => $this->policies->listEffective(
-                    $supplierId,
-                    $effectiveOn,
-                ),
+                'policies' => $effective,
+                'total' => count($effective),
+                'limit' => $limit,
+                'offset' => 0,
             ]);
         }
 
+        $page = $this->policies->list($supplierId, $limit, $offset);
+
         return Json::ok($response, [
-            'policies' => $this->policies->list($supplierId),
+            'policies' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ]);
     }
 

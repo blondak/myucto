@@ -26,12 +26,25 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: mocks.success, error: mocks.error }),
 }))
 
-vi.mock('vue-i18n', () => ({
+// `useTablePrefs` táhne @/i18n, které volá skutečné `createI18n` — továrna
+// proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string) => key,
     locale: { value: 'cs' },
   }),
 }))
+
+// `useTablePrefs` jde přes Pinii a API; v testu stačí prázdné výchozí předvolby.
+vi.mock('@/composables/useUserPrefs', async () => {
+  const { computed } = await import('vue')
+  return {
+    ensurePrefsLoaded: () => Promise.resolve(),
+    getPagePrefs: () => computed(() => ({})),
+    patchPagePrefs: () => {},
+  }
+})
 
 import PayrollPersonDependantsPanel from '@/pages/payroll/PayrollPersonDependantsPanel.vue'
 
@@ -115,7 +128,7 @@ describe('PayrollPersonDependantsPanel', () => {
     const wrapper = mountPanel()
     await flushPromises()
 
-    await wrapper.find('[aria-expanded]').trigger('click')
+    await wrapper.find('tbody [aria-expanded]').trigger('click')
 
     const blockers = wrapper.find('[data-test="claim-blockers-91"]')
     expect(blockers.exists()).toBe(true)
@@ -129,7 +142,7 @@ describe('PayrollPersonDependantsPanel', () => {
     mocks.createPersonDependantClaim.mockResolvedValue(response())
     const wrapper = mountPanel()
     await flushPromises()
-    await wrapper.find('[aria-expanded]').trigger('click')
+    await wrapper.find('tbody [aria-expanded]').trigger('click')
     await wrapper.find('[data-test="add-claim-7"]').trigger('click')
 
     const editor = wrapper.find('[data-test="dependant-editor"]')
@@ -154,7 +167,7 @@ describe('PayrollPersonDependantsPanel', () => {
     })
     const wrapper = mountPanel()
     await flushPromises()
-    await wrapper.find('[aria-expanded]').trigger('click')
+    await wrapper.find('tbody [aria-expanded]').trigger('click')
     await wrapper.find('[data-test="add-claim-7"]').trigger('click')
     await wrapper.find('[data-test="dependant-editor"]').trigger('submit')
     await flushPromises()
@@ -166,7 +179,7 @@ describe('PayrollPersonDependantsPanel', () => {
   it('hides write actions without permission', async () => {
     const wrapper = mountPanel(false)
     await flushPromises()
-    await wrapper.find('[aria-expanded]').trigger('click')
+    await wrapper.find('tbody [aria-expanded]').trigger('click')
 
     expect(wrapper.find('[data-test="add-claim-7"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="edit-dependant-7"]').exists()).toBe(false)

@@ -21,6 +21,9 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import Modal from '@/components/ui/Modal.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -36,6 +39,15 @@ type RulesetTab = (typeof TABS)[number]
 const tab = ref<RulesetTab>('parameters')
 const reason = ref('')
 const drafts = reactive<Record<string, string>>({})
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'version', labelKey: 'payroll.rulesets.column.version', required: true },
+  { key: 'effective', labelKey: 'payroll.rulesets.column.effective' },
+  { key: 'lifecycle', labelKey: 'payroll.rulesets.column.lifecycle' },
+  { key: 'source', labelKey: 'payroll.rulesets.column.source' },
+  { key: 'actions', labelKey: 'payroll.rulesets.open', required: true },
+]
+const tbl = useTablePrefs('payroll-rulesets', COLUMNS)
 
 const canEdit = computed(() => auth.isSuperadmin)
 
@@ -476,65 +488,71 @@ onMounted(load)
         je srovná; `min-w` drží čitelnost a užší obrazovku řeší vodorovné
         rolování uvnitř karty, ne zúžení sloupců.
       -->
-      <div class="mt-4 hidden overflow-x-auto md:block">
-        <table class="w-full min-w-[42rem] table-fixed divide-y divide-neutral-200 text-sm">
-          <colgroup>
-            <col class="w-[24%]">
-            <col class="w-[26%]">
-            <col class="w-[21%]">
-            <col class="w-[16%]">
-            <col class="w-[13%]">
-          </colgroup>
-          <thead>
-            <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-              <th class="px-3 py-2">{{ t('payroll.rulesets.column.version') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.rulesets.column.effective') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.rulesets.column.lifecycle') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.rulesets.column.source') }}</th>
-              <th class="px-3 py-2" />
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-neutral-100">
-            <tr v-for="version in group.versions" :key="version.ruleset_id">
-              <td class="px-3 py-3">
-                <div class="font-medium text-neutral-900">{{ version.version }}</div>
-                <div class="text-xs break-all text-neutral-500">{{ version.ruleset_id }}</div>
-              </td>
-              <td class="px-3 py-3 whitespace-nowrap text-neutral-600">
-                {{ version.effective_from }} – {{ version.effective_to }}
-              </td>
-              <td class="px-3 py-3">
-                <div class="flex flex-wrap items-center gap-1">
-                  <span
-                    class="rounded-full px-2 py-1 text-xs font-medium"
-                    :class="lifecycleClass[version.lifecycle]"
-                  >
-                    {{ t(`payroll.rulesets.lifecycle.${version.lifecycle}`) }}
-                  </span>
-                  <span
-                    v-if="!version.checksum_valid"
-                    class="rounded-full bg-danger-50 px-2 py-1 text-xs font-medium text-danger-500"
-                  >
-                    {{ t('payroll.rulesets.checksum_invalid') }}
-                  </span>
-                </div>
-              </td>
-              <td class="px-3 py-3 text-neutral-600">
-                {{ t(version.origin === 'customer_override'
-                  ? 'payroll.rulesets.source.override'
-                  : 'payroll.rulesets.source.builtin') }}
-              </td>
-              <td class="px-3 py-3 text-right">
-                <button :class="btnOutlineSm('primary')" @click="open(version)">
-                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path :d="ICONS.edit" />
-                  </svg>
-                  {{ t('payroll.rulesets.open') }}
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="mt-4 hidden md:block">
+        <div class="mb-2 flex flex-wrap items-center justify-end gap-2">
+          <ColumnPicker :ctrl="tbl" />
+          <DensityToggle :ctrl="tbl" />
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[42rem] table-fixed divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+            <colgroup>
+              <col v-if="tbl.isVisible('version')" class="w-[24%]">
+              <col v-if="tbl.isVisible('effective')" class="w-[26%]">
+              <col v-if="tbl.isVisible('lifecycle')" class="w-[21%]">
+              <col v-if="tbl.isVisible('source')" class="w-[16%]">
+              <col v-if="tbl.isVisible('actions')" class="w-[13%]">
+            </colgroup>
+            <thead>
+              <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+                <th v-if="tbl.isVisible('version')" class="px-3 py-2">{{ t('payroll.rulesets.column.version') }}</th>
+                <th v-if="tbl.isVisible('effective')" class="px-3 py-2">{{ t('payroll.rulesets.column.effective') }}</th>
+                <th v-if="tbl.isVisible('lifecycle')" class="px-3 py-2">{{ t('payroll.rulesets.column.lifecycle') }}</th>
+                <th v-if="tbl.isVisible('source')" class="px-3 py-2">{{ t('payroll.rulesets.column.source') }}</th>
+                <th v-if="tbl.isVisible('actions')" class="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="version in group.versions" :key="version.ruleset_id">
+                <td v-if="tbl.isVisible('version')" class="px-3 py-3">
+                  <div class="font-medium text-neutral-900">{{ version.version }}</div>
+                  <div class="text-xs break-all text-neutral-500">{{ version.ruleset_id }}</div>
+                </td>
+                <td v-if="tbl.isVisible('effective')" class="px-3 py-3 whitespace-nowrap text-neutral-600">
+                  {{ version.effective_from }} – {{ version.effective_to }}
+                </td>
+                <td v-if="tbl.isVisible('lifecycle')" class="px-3 py-3">
+                  <div class="flex flex-wrap items-center gap-1">
+                    <span
+                      class="rounded-full px-2 py-1 text-xs font-medium"
+                      :class="lifecycleClass[version.lifecycle]"
+                    >
+                      {{ t(`payroll.rulesets.lifecycle.${version.lifecycle}`) }}
+                    </span>
+                    <span
+                      v-if="!version.checksum_valid"
+                      class="rounded-full bg-danger-50 px-2 py-1 text-xs font-medium text-danger-500"
+                    >
+                      {{ t('payroll.rulesets.checksum_invalid') }}
+                    </span>
+                  </div>
+                </td>
+                <td v-if="tbl.isVisible('source')" class="px-3 py-3 text-neutral-600">
+                  {{ t(version.origin === 'customer_override'
+                    ? 'payroll.rulesets.source.override'
+                    : 'payroll.rulesets.source.builtin') }}
+                </td>
+                <td v-if="tbl.isVisible('actions')" class="px-3 py-3 text-right">
+                  <button :class="btnOutlineSm('primary')" @click="open(version)">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path :d="ICONS.edit" />
+                    </svg>
+                    {{ t('payroll.rulesets.open') }}
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div class="mt-4 grid grid-cols-1 gap-3 md:hidden">

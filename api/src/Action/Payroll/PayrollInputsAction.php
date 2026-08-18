@@ -38,18 +38,29 @@ final class PayrollInputsAction
         if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
             return $error;
         }
+        $query = $request->getQueryParams();
         try {
-            $period = $this->period(
-                $request->getQueryParams()['period'] ?? null,
-            );
+            $period = $this->period($query['period'] ?? null);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
+        $limit = max(1, min(
+            PayrollInputRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollInputRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
+        $page = $this->inputs->list(
+            $this->currentSupplierId($request),
+            $period,
+            $limit,
+            $offset,
+        );
+
         return Json::ok($response, [
-            'inputs' => $this->inputs->list(
-                $this->currentSupplierId($request),
-                $period,
-            ),
+            'inputs' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
         ]);
     }
 

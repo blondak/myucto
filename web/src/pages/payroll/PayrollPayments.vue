@@ -59,6 +59,7 @@ const payerOptions = ref<PayrollPayerOption[]>([])
 const batches = ref<PayrollPaymentBatch[]>([])
 const allocations = ref<PayrollPaymentAllocation[]>([])
 const paymentMatches = ref<PayrollPaymentMatch[]>([])
+const reversibleMatchOptions = ref<PayrollPaymentMatch[]>([])
 const bankEvidence = ref<PayrollPaymentEvidence[]>([])
 const cashEvidence = ref<PayrollPaymentEvidence[]>([])
 const selectedIds = ref<number[]>([])
@@ -97,9 +98,22 @@ function goToPage(nextPage: number): void {
   void load()
 }
 
+// Historie párování má vlastní stránkování — je to jiný seznam než závazky
+// a přepnutí strany v jednom nesmí přehazovat druhý.
+const matchPageSize = 25
+const matchTotal = ref(0)
+const matchOffset = ref(0)
+const matchPage = computed(() => Math.floor(matchOffset.value / matchPageSize) + 1)
+
+function goToMatchPage(nextPage: number): void {
+  matchOffset.value = Math.max(0, (nextPage - 1) * matchPageSize)
+  void load()
+}
+
 /** Změna období mění obsah seznamu, takže stránka musí zpět na začátek. */
 function reload(): void {
   offset.value = 0
+  matchOffset.value = 0
   void load()
 }
 
@@ -203,7 +217,10 @@ const selectedAllocation = computed(() =>
   allocations.value.find(item => item.id === selectedAllocationId.value)
   ?? null,
 )
-const reversibleMatches = computed(() => paymentMatches.value.filter(
+// Nabídka storna se bere ze serverem vrácené množiny vratných událostí, ne
+// ze zobrazené stránky historie — jinak by šlo stornovat jen to, co má
+// uživatel zrovna na obrazovce.
+const reversibleMatches = computed(() => reversibleMatchOptions.value.filter(
   item => item.event_kind === 'matched' && item.reversible_minor > 0,
 ))
 const selectedSourceMatch = computed(() =>
@@ -462,7 +479,10 @@ async function load(): Promise<void> {
       payrollApi.runs(requestedPeriod),
       payrollPaymentsApi.payerOptions(),
       payrollPaymentsApi.batches(requestedPeriod),
-      payrollPaymentsApi.reconciliation(requestedPeriod),
+      payrollPaymentsApi.reconciliation(requestedPeriod, {
+        limit: matchPageSize,
+        offset: matchOffset.value,
+      }),
     ])
     if (sequence === loadSequence && requestedPeriod === period.value) {
       items.value = liabilityList.items
@@ -473,6 +493,8 @@ async function load(): Promise<void> {
       batches.value = batchList.items
       allocations.value = reconciliation.allocations
       paymentMatches.value = reconciliation.matches
+      matchTotal.value = reconciliation.matches_total
+      reversibleMatchOptions.value = reconciliation.reversible_matches
       bankEvidence.value = reconciliation.bank_evidence
       cashEvidence.value = reconciliation.cash_evidence
       if (!reconciliation.allocations.some(
@@ -480,7 +502,7 @@ async function load(): Promise<void> {
       )) {
         selectedAllocationId.value = null
       }
-      if (!reconciliation.matches.some(
+      if (!reconciliation.reversible_matches.some(
         item => item.id === selectedSourceMatchId.value,
       )) {
         selectedSourceMatchId.value = null
@@ -1479,6 +1501,14 @@ onMounted(load)
               </dl>
             </article>
           </div>
+          <PaginationBar
+            v-if="paymentMatches.length"
+            class="mt-4"
+            :page="matchPage"
+            :per-page="matchPageSize"
+            :total="matchTotal"
+            @update:page="goToMatchPage"
+          />
         </section>
       </template>
     </template>

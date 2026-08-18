@@ -29,13 +29,31 @@ vi.mock('@/composables/useToast', () => ({
 // i chybějící překlad.
 const missingKeys = new Set<string>()
 
-vi.mock('vue-i18n', () => ({
+// `useTablePrefs` táhne @/i18n, které volá skutečné `createI18n` — továrna
+// proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
     te: (key: string) => !missingKeys.has(key),
   }),
 }))
+
+// `useTablePrefs` jde přes Pinii a API; v testu stačí prázdné výchozí předvolby.
+vi.mock('@/composables/useUserPrefs', async () => {
+  // Stavová napodobenina: výběr sloupců se ukládá přes patchPagePrefs a musí
+  // se hned projevit v tabulce.
+  const { computed, ref } = await import('vue')
+  const store = ref<Record<string, unknown>>({})
+  return {
+    ensurePrefsLoaded: () => Promise.resolve(),
+    getPagePrefs: () => computed(() => store.value),
+    patchPagePrefs: (_page: string, patch: Record<string, unknown>) => {
+      store.value = { ...store.value, ...patch }
+    },
+  }
+})
 
 import EmployerPolicies from '@/pages/payroll/EmployerPolicies.vue'
 
@@ -89,8 +107,9 @@ function setup(ready = true): PayrollSetupCheck {
   }
 }
 
-async function mountComponent(canWrite = true, policies = [policy()]) {
-  m.employerPolicies.mockResolvedValue(policies)
+async function mountComponent(canWrite = true, policies = [policy()], total = policies.length) {
+  // Historie se stránkuje na serveru — klient dostává stránku plus celkový počet.
+  m.employerPolicies.mockResolvedValue({ items: policies, total })
   m.payrollSetupCheck.mockResolvedValue(setup(policies.length > 0))
   m.createEmployerPolicy.mockImplementation(async payload => policy({
     id: 42,
@@ -115,6 +134,65 @@ describe('EmployerPolicies', () => {
     document.body.innerHTML = ''
   })
 
+  /**
+   * Politika se verzuje při každé změně výplatního termínu i automatizace,
+   * takže historie roste po celou dobu provozu firmy. Klient si proto říká
+   * o jednu ohraničenou stránku a další si dotáhne ze serveru — ořezávat
+   * seznam až v prohlížeči by znamenalo stáhnout celou historii pokaždé.
+   */
+  it('stránkuje historii na serveru, ne v prohlížeči', async () => {
+    const wrapper = await mountComponent(
+      true,
+      [policy({ id: 1, valid_from: '2030-01-01' })],
+      60,
+    )
+
+    expect(m.employerPolicies).toHaveBeenCalledWith(undefined, { limit: 25, offset: 0 })
+    // Celkový počet je vidět, i když se na stránku vejde jen zlomek.
+    expect(wrapper.text()).toContain('common.pagination_range')
+
+    m.employerPolicies.mockResolvedValue({
+      items: [policy({ id: 2, valid_from: '2029-01-01' })],
+      total: 60,
+    })
+    const next = wrapper.findAll('button')
+      .find(button => button.text().includes('common.next'))
+    expect(next).toBeDefined()
+    await next!.trigger('click')
+    await flushPromises()
+
+    expect(m.employerPolicies).toHaveBeenLastCalledWith(undefined, { limit: 25, offset: 25 })
+    expect(wrapper.find('table').text()).toContain('2029-01-01')
+    expect(wrapper.find('table').text()).not.toContain('2030-01-01')
+
+    wrapper.unmount()
+  })
+
+  /** Skrytý sloupec zmizí z hlavičky i z buněk, mobilní karta ho drží dál. */
+  it('skryje sloupec v desktopové tabulce a mobilní kartu nechá být', async () => {
+    const wrapper = await mountComponent()
+
+    expect(wrapper.find('table').text()).toContain('payroll.employer.policies.payday')
+
+    const picker = wrapper.findAll('button')
+      .find(button => button.text() === 'common.columns')
+    expect(picker).toBeDefined()
+    await picker!.trigger('click')
+    const toggle = wrapper.findAll('label')
+      .find(label => label.text() === 'payroll.employer.policies.payday')
+    expect(toggle).toBeDefined()
+    await toggle!.find('input').trigger('change')
+    await flushPromises()
+
+    expect(wrapper.find('table').text()).not.toContain('payroll.employer.policies.payday')
+    const mobile = wrapper.findAll('div')
+      .find(node => node.classes().includes('md:hidden') && node.text() !== '')
+    expect(mobile).toBeDefined()
+    expect(mobile!.text()).toContain('payroll.employer.policies.payday_value')
+
+    wrapper.unmount()
+  })
+
   it('zobrazuje kontrolu připravenosti, desktopovou historii i mobilní karty', async () => {
     const wrapper = await mountComponent()
 
@@ -136,7 +214,7 @@ describe('EmployerPolicies', () => {
    */
   it('u nepřeložené kontroly vypíše hlášku ze serveru, ne klíč', async () => {
     missingKeys.add('payroll.employer.policies.checks.jmhz_certificate.pending')
-    m.employerPolicies.mockResolvedValue([policy()])
+    m.employerPolicies.mockResolvedValue({ items: [policy()], total: 1 })
     m.payrollSetupCheck.mockResolvedValue({
       ...setup(),
       checks: [{
@@ -265,9 +343,10 @@ describe('EmployerPolicies', () => {
     expect(wrapper.text()).toContain('Syntetická novější verze existuje.')
     expect(wrapper.text()).toContain('payroll.employer.policies.reload_current')
 
-    m.employerPolicies.mockResolvedValueOnce([
-      policy({ source_kind: 'migration', row_version: 9 }),
-    ])
+    m.employerPolicies.mockResolvedValueOnce({
+      items: [policy({ source_kind: 'migration', row_version: 9 })],
+      total: 1,
+    })
     const reload = wrapper.findAll('button')
       .find(button => button.text() === 'payroll.employer.policies.reload_current')
     await reload!.trigger('click')

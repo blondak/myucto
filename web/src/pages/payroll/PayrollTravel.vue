@@ -26,6 +26,9 @@ import {
   type TravelTripPayload,
   type TravelVehicleKind,
 } from '@/api/payrollTravel'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 interface ItemForm {
   item_kind: TravelItemKind
@@ -84,6 +87,18 @@ const preview = ref<TravelCalculation | null>(null)
 
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
 const canApprove = computed(() => auth.canWrite('payroll.approve'))
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'employee', labelKey: 'payroll_travel.table.employee', required: true },
+  { key: 'route', labelKey: 'payroll_travel.table.route' },
+  { key: 'interval', labelKey: 'payroll_travel.table.interval' },
+  { key: 'entitlement', labelKey: 'payroll_travel.table.entitlement' },
+  { key: 'exempt', labelKey: 'payroll_travel.table.exempt', defaultHidden: true },
+  { key: 'taxable', labelKey: 'payroll_travel.table.taxable' },
+  { key: 'status', labelKey: 'payroll_travel.table.status' },
+  { key: 'actions', labelKey: 'common.detail', required: true },
+]
+const tbl = useTablePrefs('payroll-travel', COLUMNS)
 
 const form = reactive({
   employee_id: null as number | null,
@@ -500,38 +515,43 @@ onMounted(load)
 
       <template v-else>
         <!-- Desktopová tabulka -->
-        <section class="hidden overflow-x-auto rounded-xl border border-neutral-200 bg-surface shadow-sm md:block">
-          <table class="w-full text-sm">
+        <section class="hidden rounded-xl border border-neutral-200 bg-surface shadow-sm md:block">
+          <div class="flex flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2">
+            <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+            <DensityToggle class="hidden md:block" :ctrl="tbl" />
+          </div>
+          <div class="overflow-x-auto">
+          <table class="w-full text-sm" :class="tbl.densityClass.value">
             <thead class="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
               <tr>
-                <th class="px-4 py-3">{{ t('payroll_travel.table.employee') }}</th>
-                <th class="px-4 py-3">{{ t('payroll_travel.table.route') }}</th>
-                <th class="px-4 py-3">{{ t('payroll_travel.table.interval') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('payroll_travel.table.entitlement') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('payroll_travel.table.exempt') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('payroll_travel.table.taxable') }}</th>
-                <th class="px-4 py-3">{{ t('payroll_travel.table.status') }}</th>
-                <th class="px-4 py-3" />
+                <th v-if="tbl.isVisible('employee')" class="px-4 py-3">{{ t('payroll_travel.table.employee') }}</th>
+                <th v-if="tbl.isVisible('route')" class="px-4 py-3">{{ t('payroll_travel.table.route') }}</th>
+                <th v-if="tbl.isVisible('interval')" class="px-4 py-3">{{ t('payroll_travel.table.interval') }}</th>
+                <th v-if="tbl.isVisible('entitlement')" class="px-4 py-3 text-right">{{ t('payroll_travel.table.entitlement') }}</th>
+                <th v-if="tbl.isVisible('exempt')" class="px-4 py-3 text-right">{{ t('payroll_travel.table.exempt') }}</th>
+                <th v-if="tbl.isVisible('taxable')" class="px-4 py-3 text-right">{{ t('payroll_travel.table.taxable') }}</th>
+                <th v-if="tbl.isVisible('status')" class="px-4 py-3">{{ t('payroll_travel.table.status') }}</th>
+                <th v-if="tbl.isVisible('actions')" class="px-4 py-3" />
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="trip in visibleTrips" :key="trip.id" data-test="travel-row">
-                <td class="px-4 py-3">
+                <td v-if="tbl.isVisible('employee')" class="px-4 py-3">
                   <div class="font-medium text-neutral-900">{{ trip.employee_name }}</div>
                   <div class="text-xs text-neutral-500">{{ trip.employment_code }}</div>
                 </td>
-                <td class="px-4 py-3">
+                <td v-if="tbl.isVisible('route')" class="px-4 py-3">
                   <div class="text-neutral-900">{{ trip.origin_place }} → {{ trip.destination_place }}</div>
                   <div class="text-xs text-neutral-500">{{ trip.purpose }}</div>
                 </td>
-                <td class="px-4 py-3 text-neutral-700">
+                <td v-if="tbl.isVisible('interval')" class="px-4 py-3 text-neutral-700">
                   <div>{{ trip.departure_at.slice(0, 16) }}</div>
                   <div>{{ trip.arrival_at.slice(0, 16) }}</div>
                 </td>
-                <td class="px-4 py-3 text-right font-medium">{{ money(trip.entitlement_total_minor) }}</td>
-                <td class="px-4 py-3 text-right text-success-700">{{ money(trip.exempt_total_minor) }}</td>
-                <td class="px-4 py-3 text-right text-warning-700">{{ money(trip.taxable_total_minor) }}</td>
-                <td class="px-4 py-3">
+                <td v-if="tbl.isVisible('entitlement')" class="px-4 py-3 text-right font-medium">{{ money(trip.entitlement_total_minor) }}</td>
+                <td v-if="tbl.isVisible('exempt')" class="px-4 py-3 text-right text-success-700">{{ money(trip.exempt_total_minor) }}</td>
+                <td v-if="tbl.isVisible('taxable')" class="px-4 py-3 text-right text-warning-700">{{ money(trip.taxable_total_minor) }}</td>
+                <td v-if="tbl.isVisible('status')" class="px-4 py-3">
                   <span
                     class="rounded-full px-2 py-1 text-xs font-medium"
                     :class="{
@@ -544,7 +564,7 @@ onMounted(load)
                     {{ t(`payroll_travel.status.${trip.status}`) }}
                   </span>
                 </td>
-                <td class="px-4 py-3">
+                <td v-if="tbl.isVisible('actions')" class="px-4 py-3">
                   <div class="flex flex-wrap justify-end gap-2">
                     <button
                       v-if="canWrite && trip.status === 'draft'"
@@ -581,6 +601,7 @@ onMounted(load)
               </tr>
             </tbody>
           </table>
+          </div>
         </section>
 
         <!-- Mobilní karty -->

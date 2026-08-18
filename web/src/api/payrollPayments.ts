@@ -192,6 +192,14 @@ export interface PayrollPaymentReconciliation {
   period: string
   allocations: PayrollPaymentAllocation[]
   matches: PayrollPaymentMatch[]
+  matches_total: number
+  matches_limit: number
+  matches_offset: number
+  /**
+   * Vratné události pro výběr storna. Nejde o stránku historie — kdyby se
+   * nabídka brala z ní, zmizely by z výběru události ležící na jiné straně.
+   */
+  reversible_matches: PayrollPaymentMatch[]
   bank_evidence: PayrollPaymentEvidence[]
   cash_evidence: PayrollPaymentEvidence[]
 }
@@ -242,10 +250,10 @@ export const payrollPaymentsApi = {
       '/payroll/payments/batches',
       payload,
     ).then(response => response.data),
-  reconciliation: (period: string) =>
+  reconciliation: (period: string, page?: PayrollPageParams) =>
     api.get<PayrollPaymentReconciliation>(
       '/payroll/payments/reconciliation',
-      { params: { period } },
+      { params: { period, ...pageParams(page) } },
     ).then(response => response.data),
   match: (payload: {
     allocation_id: number
