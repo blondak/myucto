@@ -14,7 +14,7 @@ use Twig\Loader\FilesystemLoader;
 
 final class PayrollSheetPdfRenderer
 {
-    public const VERSION = 'mz-16-payroll-sheet-v1';
+    public const VERSION = 'mz-16-payroll-sheet-v2';
 
     private ?Environment $twig = null;
 

@@ -9,6 +9,8 @@ final readonly class PayrollSheetDocumentData
     /**
      * @param list<string> $previousNames
      * @param list<PayrollSheetMonth> $months
+     * @param list<array{code:string,relation_type:string,start_date:string,
+     *     actual_start_date:?string,end_date:?string}> $employments
      */
     public function __construct(
         public string $sourceSnapshotSha256,
@@ -23,6 +25,12 @@ final readonly class PayrollSheetDocumentData
         public string $employeeAddress,
         public array $months,
         public string $annualSettlementStatus,
+        /**
+         * § 38j odst. 2 písm. e) — den nástupu do zaměstnání. Bere se ze
+         * zmrazených pracovních vztahů zdrojových revizí, ne z dnešní evidence:
+         * doklad nesmí zestárnout jinak než přes novou revizi.
+         */
+        public array $employments = [],
     ) {
         if (preg_match('/^[a-f0-9]{64}$/D', $sourceSnapshotSha256) !== 1) {
             throw new \InvalidArgumentException('Zdrojový otisk mzdového listu není platný.');
@@ -64,6 +72,39 @@ final readonly class PayrollSheetDocumentData
         if (!in_array($annualSettlementStatus, ['not_performed', 'approved'], true)) {
             throw new \InvalidArgumentException('Stav ročního zúčtování není platný.');
         }
+        if (count($employments) > 200) {
+            throw new \InvalidArgumentException('Pracovní vztahy mzdového listu nemají platnou strukturu.');
+        }
+        foreach ($employments as $employment) {
+            foreach (['code', 'relation_type', 'start_date'] as $field) {
+                $value = $employment[$field] ?? null;
+                if (!is_string($value) || trim($value) === '' || mb_strlen($value) > 191) {
+                    throw new \InvalidArgumentException('Pracovní vztah mzdového listu není úplný.');
+                }
+            }
+            foreach (['actual_start_date', 'end_date'] as $field) {
+                $value = $employment[$field] ?? null;
+                if ($value !== null && (!is_string($value) || mb_strlen($value) > 191)) {
+                    throw new \InvalidArgumentException('Pracovní vztah mzdového listu není úplný.');
+                }
+            }
+        }
+    }
+
+    /**
+     * Nese doklad údaje § 38j odst. 2 písm. f) bodů 2 a 3 za VŠECHNY měsíce?
+     *
+     * Roční součet se smí uvést jen tehdy — dílčí součet přes měsíce, které
+     * údaj neevidují, by tvrdil nižší číslo, než jaké ve skutečnosti platí.
+     */
+    public function taxDetailComplete(): bool
+    {
+        foreach ($this->months as $month) {
+            if (!$month->taxDetailRecorded()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** @return array<string,int> */
@@ -106,6 +147,8 @@ final readonly class PayrollSheetDocumentData
             ),
             'totals' => $this->totals(),
             'annual_settlement_status' => $this->annualSettlementStatus,
+            'employments' => $this->employments,
+            'tax_detail_complete' => $this->taxDetailComplete(),
         ];
     }
 
