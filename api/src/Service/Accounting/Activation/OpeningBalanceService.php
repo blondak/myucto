@@ -10,6 +10,7 @@ use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner;
 use MyInvoice\Service\Accounting\Bank\BankAnalyticResolver;
+use MyInvoice\Service\Accounting\Cash\CashRegisterService;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
@@ -39,13 +40,18 @@ final class OpeningBalanceService
         $this->addAmount($rows, '324', (float) ($totals['advances_received_czk'] ?? 0), 'credit', 'Přijaté zálohy k datu přechodu');
         $this->addAmount($rows, '132', (float) ($totals['inventory_czk'] ?? 0), 'debit', 'Zásoby podle přechodového můstku');
 
-        $cashBalance = $this->cashBalance($supplierId, $asOf);
-        $this->addSignedBalance($rows, '211', $cashBalance, 'Stav pokladny k datu přechodu');
+        foreach ($this->cashBalancesByRegister($supplierId, $asOf) as $cash) {
+            $this->addSignedBalance($rows, $cash['account_code'], $cash['amount'], $cash['note']);
+        }
         foreach ($this->bankBalancesByAccount($supplierId, $asOf) as $bank) {
             $this->addSignedBalance($rows, $bank['account_code'], $bank['amount'], $bank['note']);
         }
 
-        $rows = array_values(array_filter($rows, fn (array $row) => $this->accounts->findByCode($supplierId, $row['account_code']) !== null));
+        // Účet mimo osnovu i účet z osnovy VYPNUTÝ shodně vypadnou: replace() by nad
+        // neaktivním účtem hodil 'validation_failed' a shodil celý prefill, takže by
+        // jediné vypnuté 311 zablokovalo aktivaci. Radši řádek chybí, než aby průvodce
+        // přestal jít dokončit — rozvaha se doplňuje ručně a proti 701 zůstane vyrovnaná.
+        $rows = array_values(array_filter($rows, fn (array $row) => $this->isPostableAccount($supplierId, $row['account_code'])));
         return $this->replace($supplierId, $rows, 'transition_report');
     }
 
@@ -279,6 +285,18 @@ final class OpeningBalanceService
         if (abs($amount) >= 0.005) $rows[] = ['account_code' => $code, 'side' => $amount >= 0 ? 'debit' : 'credit', 'amount' => abs($amount), 'note' => $note];
     }
 
+    /**
+     * Plochý souhrn počátečního stavu pokladen přes všechny registry firmy. Rozvaha se
+     * takhle NEúčtuje (knihuje se per analytika pokladny, viz
+     * {@see cashBalancesByRegister()}) — zůstává jako kontrolní součet, symetricky
+     * k {@see bankBalance()}: rozpad musí dát tutéž částku jako souhrn, jinak se při
+     * rozpadu ztratil nebo přibyl doklad.
+     *
+     * `total_amount` je v DB už CZK ekvivalent i u valutové pokladny (migrace 1114 —
+     * cizoměnová částka žije zvlášť v `amount_foreign`), takže se kurzem NEPŘEPOČÍTÁVÁ
+     * podruhé. Tutéž konvenci má
+     * {@see \MyInvoice\Service\Accounting\Cash\CashRegisterService::documentsSignedTotal()}.
+     */
     private function cashBalance(int $supplierId, string $asOf): float
     {
         $stmt = $this->db->pdo()->prepare(
@@ -286,7 +304,98 @@ final class OpeningBalanceService
                FROM cash_documents WHERE supplier_id = ? AND status = 'posted' AND issue_date <= ?"
         );
         $stmt->execute([$supplierId, $asOf]);
-        return (float) $stmt->fetchColumn();
+        return round((float) $stmt->fetchColumn(), 2);
+    }
+
+    /**
+     * Počáteční stav pokladen ROZPADNUTÝ na analytiky jednotlivých pokladen (211.001,
+     * 211.002 …), symetricky k {@see bankBalancesByAccount()}.
+     *
+     * Rozpad je možný, protože zdrojem není jedno souhrnné číslo: každý pokladní doklad
+     * visí na registru (`cash_documents.register_id`) a registr NESE svou analytiku
+     * (`cash_registers.account_code`). Je to TÝŽ účet, na který doklad zaúčtuje běžný
+     * provoz (CashDocumentService) a nad kterým se staví pokladní kniha — proto se tu
+     * analytika nevymýšlí vlastním pravidlem, ale čte se z registru. Kdyby si aktivace
+     * přidělovala čísla po svém, počáteční stav by skončil na jiné analytice než pohyby,
+     * které po něm následují, a pokladní kniha by nesedla s hlavní knihou.
+     *
+     * Doklad, u kterého registr dohledat nejde (smazaná pokladna, registr cizí firmy),
+     * i registr s analytikou, kterou si uživatel v osnově VYPNUL, spadne na syntetiku
+     * 211: replace() by nad neaktivním účtem hodil 'validation_failed' a shodil celý
+     * prefill. Aby to nebyl tichý nesoulad, nese takový řádek v poznámce výzvu k ručnímu
+     * rozúčtování; poznámka je v průvodci aktivací vidět i editovatelná.
+     *
+     * Pokladna bez dokladů se v rozpadu neobjeví vůbec (nulový zůstatek), dvě pokladny
+     * na témž účtu se sečtou do jednoho bucketu — řádek se stejným `account_code` na téže
+     * straně by replace() odmítl jako duplicitu.
+     *
+     * @return list<array{account_code:string, amount:float, note:string}>
+     */
+    private function cashBalancesByRegister(int $supplierId, string $asOf): array
+    {
+        $synthetic = CashRegisterService::CASH_SYNTHETIC;
+        $buckets = [];
+        foreach ($this->cashRowsByRegister($supplierId, $asOf) as $row) {
+            $code = trim((string) ($row['account_code'] ?? ''));
+            if ($code !== '' && !$this->isPostableAccount($supplierId, $code)) {
+                $code = '';
+            }
+            $key = $code !== '' ? $code : $synthetic;
+            if (!isset($buckets[$key])) {
+                $buckets[$key] = ['amount' => 0.0, 'registers' => [], 'unresolved' => false];
+            }
+            $buckets[$key]['amount'] += (float) $row['balance'];
+            $buckets[$key]['unresolved'] = $buckets[$key]['unresolved'] || $code === '';
+            $label = $this->cashRegisterLabel($row);
+            if ($label !== '' && !in_array($label, $buckets[$key]['registers'], true)) {
+                $buckets[$key]['registers'][] = $label;
+            }
+        }
+        ksort($buckets, SORT_STRING);
+
+        $out = [];
+        foreach ($buckets as $code => $bucket) {
+            $registers = implode(', ', $bucket['registers']);
+            $note = $bucket['unresolved']
+                ? 'Stav pokladen k datu přechodu — doklady bez pokladny s vlastní analytikou'
+                    . ($registers !== '' ? ' (' . $registers . ')' : '')
+                    . '; rozúčtujte ručně na analytiky ' . $code . '.xxx'
+                : trim('Stav pokladny ' . $registers) . ' k datu přechodu';
+            $out[] = [
+                'account_code' => (string) $code,
+                'amount' => round($bucket['amount'], 2),
+                'note' => mb_substr($note, 0, 255),
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Zůstatky k datu po pokladnách. LEFT JOIN schválně: doklad bez dohledatelného
+     * registru se NESMÍ ztratit, jinak by rozpad nesedl na {@see cashBalance()}.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function cashRowsByRegister(int $supplierId, string $asOf): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT r.account_code AS account_code,
+                    r.name         AS register_name,
+                    COALESCE(SUM(CASE WHEN cd.doc_type = 'in' THEN cd.total_amount ELSE -cd.total_amount END), 0) AS balance
+               FROM cash_documents cd
+          LEFT JOIN cash_registers r ON r.id = cd.register_id AND r.supplier_id = cd.supplier_id
+              WHERE cd.supplier_id = ? AND cd.status = 'posted' AND cd.issue_date <= ?
+           GROUP BY r.account_code, r.name"
+        );
+        $stmt->execute([$supplierId, $asOf]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** @param array<string,mixed> $row */
+    private function cashRegisterLabel(array $row): string
+    {
+        $name = trim((string) ($row['register_name'] ?? ''));
+        return $name !== '' ? $name : trim((string) ($row['account_code'] ?? ''));
     }
 
     /**
