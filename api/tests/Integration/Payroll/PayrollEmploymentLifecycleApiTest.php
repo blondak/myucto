@@ -553,6 +553,78 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertSame('524.100', $employment['accounting']['employer_insurance_debit']);
     }
 
+    /**
+     * Mzdová účtárna je u vztahu povinná, ale formulář ji nenabízí. Zápisová
+     * cesta ji proto doplní z výchozí účtárny zaměstnavatele — jinak by vztah
+     * bez účtárny prošel až ke kontrolním součtům schválení.
+     */
+    public function testEmploymentWithoutOfficeTakesTheEmployerDefault(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employer_settings
+                (supplier_id, default_office_id, statutory_gross_debit_account,
+                 statutory_gross_credit_account, employer_insurance_debit_account)
+             VALUES (?, ?, "521.100", "331.100", "524.100")'
+        )->execute([$this->supplierId, $this->officeId]);
+
+        $employment = $this->createWithoutOffice('UCT-DEF');
+
+        self::assertSame($this->officeId, $employment['office_id']);
+        self::assertSame($this->officeId, $employment['terms'][0]['office_id']);
+    }
+
+    /**
+     * Když se účtárna nemá odkud vzít, musí to být pojmenovaná překážka při
+     * zakládání vztahu — ne mlčení, které se ozve až uzávěrkou.
+     */
+    public function testEmploymentWithoutAnyOfficeIsRefusedByName(): void
+    {
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                "/api/payroll/people/{$this->employeeId}/employments",
+                [
+                    'code' => 'UCT-NONE',
+                    'relation_type' => 'employment',
+                    'monthly_gross_minor' => 4000000,
+                    'terms' => ['office_id' => null]
+                        + $this->termsPayload(true, '2026-01-01'),
+                ],
+            ),
+            new Response(),
+            ['id' => (string) $this->employeeId],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertStringContainsString(
+            'mzdové účtárny',
+            (string) $response->getBody(),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function createWithoutOffice(string $code): array
+    {
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                "/api/payroll/people/{$this->employeeId}/employments",
+                [
+                    'code' => $code,
+                    'relation_type' => 'employment',
+                    'monthly_gross_minor' => 4000000,
+                    'terms' => ['office_id' => null]
+                        + $this->termsPayload(true, '2026-01-01'),
+                ],
+            ),
+            new Response(),
+            ['id' => (string) $this->employeeId],
+        );
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+
+        return $this->json($response)['employment'];
+    }
+
     private function createdEventDate(int $employmentId): string
     {
         $stmt = $this->db->pdo()->prepare(

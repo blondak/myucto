@@ -80,6 +80,14 @@ final class PayrollPersonQuickEditApiTest extends TestCase
               WHERE id = ?"
         )->execute([$this->supplierId]);
         $pdo->prepare(
+            "INSERT INTO payroll_offices (supplier_id, code, name, is_active)
+             VALUES (?, 'HLAVNI', 'Hlavní účtárna', 1)"
+        )->execute([$this->supplierId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_employer_settings (supplier_id, default_office_id)
+             VALUES (?, ?)'
+        )->execute([$this->supplierId, (int) $pdo->lastInsertId()]);
+        $pdo->prepare(
             'INSERT INTO payroll_employees
                 (supplier_id, full_name, taxpayer_type, employment_type,
                  tax_declaration_signed, tax_credit_taxpayer, child_count,

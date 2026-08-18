@@ -588,6 +588,108 @@ final class PayrollSheetDocumentLifecycleTest extends TestCase
     }
 
     /**
+     * Zvednutá verze rendereru pásky musí vydat DALŠÍ ČLÁNEK ŘETĚZU nad toutéž
+     * revizí — stejně jako to umí roční archiv. Archivovaná páska přitom zůstává
+     * bajt na bajt stejná a opakovaná dávka vrací hotový doklad.
+     */
+    public function testRendererVersionBumpChainsPayslipAndLeavesArchivedPdfIntact(): void
+    {
+        $payslips = $this->container->get(ApprovedRevisionPayslipBatchService::class);
+        self::assertInstanceOf(ApprovedRevisionPayslipBatchService::class, $payslips);
+
+        $may = $this->approvedMonths[5];
+        // Archiv, jak ho zanechala PŘEDCHOZÍ verze rendereru: tentýž zdrojový
+        // otisk, jiná verze šablony a jiný idempotentní klíč. Doklady jsou
+        // neměnné, takže se stav nedá dodělat úpravou — musí se založit.
+        $firstBytes = "%PDF-1.4\nstara paska\n%%EOF\n";
+        $firstId = $this->seedLegacyPayslipDocument(
+            $may['run_id'],
+            $may['revision_id'],
+            $firstBytes,
+        );
+        $firstKey = (string) $this->documentColumn($firstId, 'storage_key');
+
+        $second = $payslips->generate(
+            $this->supplierId,
+            $may['run_id'],
+            $may['revision_id'],
+            $this->actorId,
+        );
+        self::assertCount(1, $second);
+        self::assertNotSame($firstId, (int) $second[0]['id']);
+        self::assertSame(2, (int) $second[0]['document_revision_no']);
+        self::assertSame($firstId, (int) $second[0]['supersedes_document_id']);
+        self::assertSame(
+            $firstBytes,
+            $this->storage->readVerified($this->supplierId, $firstKey),
+        );
+
+        // Další dávka nad touž revizí a touž verzí vrací hotový doklad.
+        $third = $payslips->generate(
+            $this->supplierId,
+            $may['run_id'],
+            $may['revision_id'],
+            $this->actorId,
+        );
+        self::assertSame((int) $second[0]['id'], (int) $third[0]['id']);
+    }
+
+    /**
+     * Pracovní vztah bez mzdové účtárny musí běh zastavit POJMENOVANOU
+     * překážkou u vztahu, ne až hláškou o haléřích při schvalování.
+     */
+    public function testRunWithoutPayrollOfficeIsBlockedByName(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_employments SET office_id = NULL
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $pdo->prepare(
+            'UPDATE payroll_employment_terms SET office_id = NULL
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $this->seedMonthlyInputs(7);
+        $run = $this->runs->createRun(
+            $this->supplierId,
+            sprintf('%04d-07-01', self::YEAR),
+            sprintf('%04d-08-15', self::YEAR),
+            null,
+            $this->actorId,
+        );
+        $locked = $this->runs->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'lock-office-7',
+            $this->actorId,
+        );
+
+        $validations = $this->runRepository->validations(
+            $this->supplierId,
+            (int) $locked->revision['id'],
+        );
+        $blockers = array_values(array_filter(
+            $validations,
+            static fn (array $row): bool
+                => $row['code'] === 'employment_without_office',
+        ));
+        self::assertCount(1, $blockers, CanonicalJson::encode($validations));
+        self::assertSame('blocker', $blockers[0]['severity']);
+        self::assertSame('employment', $blockers[0]['entity_type']);
+        self::assertSame($this->employmentId, (int) $blockers[0]['entity_id']);
+        self::assertStringContainsString(
+            'mzdovou účtárnu',
+            (string) $blockers[0]['message'],
+        );
+        self::assertStringNotContainsString(
+            'haléř',
+            (string) $blockers[0]['message'],
+        );
+    }
+
+    /**
      * `AnnualPayrollSheetService::generate()` vlastní transakci sám. Kdyby se
      * dal zavolat uvnitř cizí, vydal by se doklad, který by cizí rollback tiše
      * zrušil — a soubor by na disku zůstal.
@@ -813,6 +915,69 @@ final class PayrollSheetDocumentLifecycleTest extends TestCase
         ]);
 
         return (int) $statement->fetchColumn();
+    }
+
+    /**
+     * Výplatní páska téže revize archivovaná starší verzí rendereru.
+     */
+    private function seedLegacyPayslipDocument(
+        int $runId,
+        int $revisionId,
+        string $bytes,
+    ): int {
+        $pdo = $this->db->pdo();
+        $revision = $pdo->prepare(
+            'SELECT result_snapshot_hash FROM payroll_run_revisions
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $revision->execute([$this->supplierId, $revisionId]);
+        $revisionHash = (string) $revision->fetchColumn();
+        $person = $pdo->prepare(
+            'SELECT result_hash FROM payroll_run_persons
+              WHERE supplier_id = ? AND revision_id = ? AND employee_id = ?'
+        );
+        $person->execute([$this->supplierId, $revisionId, $this->employeeId]);
+        $sourceHash = (string) $person->fetchColumn();
+        self::assertNotSame('', $revisionHash);
+        self::assertNotSame('', $sourceHash);
+
+        $stored = $this->storage->store($this->supplierId, $bytes);
+        $pdo->prepare(
+            'INSERT INTO payroll_generated_documents
+                (supplier_id, run_id, revision_id, employee_id, document_kind,
+                 document_revision_no, source_snapshot_hash, revision_snapshot_hash,
+                 template_version, renderer_version, file_sha256, size_bytes,
+                 mime_type, storage_key, suggested_filename, idempotency_key_hash,
+                 created_by)
+             VALUES (?, ?, ?, ?, "payslip", 1, ?, ?,
+                     "mz-16-payslip-v0", "mz-16-payslip-v0", ?, ?,
+                     "application/pdf", ?, "payslip-legacy.pdf", UNHEX(?), ?)'
+        )->execute([
+            $this->supplierId,
+            $runId,
+            $revisionId,
+            $this->employeeId,
+            $sourceHash,
+            $revisionHash,
+            $stored['file_sha256'],
+            $stored['size_bytes'],
+            $stored['storage_key'],
+            hash('sha256', 'approved-payslip:predchozi-verze'),
+            $this->actorId,
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function documentColumn(int $documentId, string $column): mixed
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . $column . ' FROM payroll_generated_documents
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$this->supplierId, $documentId]);
+
+        return $stmt->fetchColumn();
     }
 
     private function approveMonth(int $month): void

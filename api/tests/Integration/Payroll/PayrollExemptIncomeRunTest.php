@@ -459,29 +459,36 @@ final class PayrollExemptIncomeRunTest extends TestCase
              VALUES (?, ?, "ready")'
         )->execute([$this->supplierId, $this->employeeId]);
         $pdo->prepare(
+            'INSERT INTO payroll_offices (supplier_id, code, name, is_active)
+             VALUES (?, "OSVOB", "Syntetická účtárna", 1)'
+        )->execute([$this->supplierId]);
+        $officeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
             'INSERT INTO payroll_employments
-                (supplier_id, employee_id, code, relation_type, status,
+                (supplier_id, employee_id, office_id, code, relation_type, status,
                  start_date, actual_start_date, monthly_gross_minor, is_primary)
-             VALUES (?, ?, "SYN-OSVOB", "statutory_body", "active",
+             VALUES (?, ?, ?, "SYN-OSVOB", "statutory_body", "active",
                      "2026-01-01", "2026-01-01", ?, 1)'
         )->execute([
             $this->supplierId,
             $this->employeeId,
+            $officeId,
             self::REMUNERATION_MINOR,
         ]);
         $this->employmentId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             'INSERT INTO payroll_employment_terms
-                (supplier_id, employment_id, effective_from, planned_start_on,
+                (supplier_id, employment_id, office_id, effective_from,
+                 planned_start_on,
                  actual_start_on, weekly_hours, workload_basis_points,
                  social_insurance_participation,
                  health_insurance_participation, tax_regime,
                  other_withholding_eligibility,
                  tax_declaration_signed, is_primary)
-             VALUES (?, ?, "2026-01-01", "2026-01-01", "2026-01-01",
+             VALUES (?, ?, ?, "2026-01-01", "2026-01-01", "2026-01-01",
                      40, 10000, "automatic", "automatic", "advance",
                      "ineligible", 0, 1)'
-        )->execute([$this->supplierId, $this->employmentId]);
+        )->execute([$this->supplierId, $this->employmentId, $officeId]);
     }
 
     private function seedStatutoryEvidence(): void

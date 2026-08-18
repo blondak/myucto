@@ -746,11 +746,16 @@ final class PayrollControlTotalsCalculator
         );
     }
 
+    /**
+     * Identita, ne částka. Vlastní hlášku má proto, že sdílená {@see integer()}
+     * mluví o haléřích — u chybějícího `office_id` z toho vycházelo
+     * „snapshot.employment.office_id musí být přesná částka v celých haléřích",
+     * což nikomu neřeklo, že vztah nemá mzdovou účtárnu.
+     */
     private function positiveInt(mixed $value, string $field): int
     {
-        $value = $this->integer($value, $field);
-        if ($value <= 0) {
-            throw new \DomainException("{$field} musí být kladné.");
+        if (!is_int($value) || $value <= 0) {
+            throw new \DomainException("{$field} musí být kladné celé číslo.");
         }
         return $value;
     }
