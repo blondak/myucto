@@ -15,7 +15,9 @@ use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputAssembler;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialDiscountEvidence;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerRateCategory;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -174,6 +176,97 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
             'kategorizace-praci/2026/17',
             $relationship?->employerRateCategoryEvidenceReference,
         );
+    }
+
+    /**
+     * Sleva podle § 7a se musí dostat ze smluvních podmínek do vstupu výpočtu.
+     * Dokud se nedostávala, byl `partTimeEmployerDiscount` mrtvý vstup: nárok
+     * šlo doložit, ale sleva se neuplatnila nikdy a zaměstnavatel platil o 5 %
+     * vyměřovacího základu víc, než musel.
+     */
+    public function testPartTimeDiscountReachesTheSocialInputFromTheEmploymentTerms(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $term = &$snapshot['people'][0]['employments'][0]['term'];
+        $term['social_part_time_discount_reason'] = 'age_55_plus';
+        $term['social_part_time_discount_evidence'] = 'osobni-spis/2026/42';
+        $term['social_part_time_discount_notified_on'] = '2026-05-20';
+        $term['weekly_hours'] = '20.00';
+        unset($term);
+        $snapshot['people'][0]['employments'][0]['time_month'] = $this->workMonth(90_000, 8_000);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame([], $bundle->issues);
+        $relationship = $bundle->socialInsurance?->people[0]->relationships[0];
+        self::assertSame(SocialDiscountEvidence::Verified, $relationship?->partTimeEmployerDiscount);
+        self::assertSame(
+            SocialPartTimeDiscountReason::Age55Plus,
+            $relationship?->partTimeEmployerDiscountReason,
+        );
+        self::assertSame(
+            'osobni-spis/2026/42',
+            $relationship?->partTimeEmployerDiscountEvidenceReference,
+        );
+        self::assertSame(98_000, $relationship?->partTimeDiscountAssessableMillihours);
+        self::assertSame(20_000, $relationship?->agreedWeeklyWorkingMillihours);
+        self::assertSame(30, $relationship?->partTimeDiscountMonthDays);
+        self::assertSame(30, $relationship?->partTimeDiscountEmploymentDays);
+    }
+
+    /**
+     * § 7a odst. 5 — bez oznámení záměru ČSSZ sleva NENÁLEŽÍ. Chybějící nebo
+     * pozdní datum proto nesmí skončit tichou uplatněnou slevou: podle § 7c
+     * odst. 3 by z ní byl dluh na pojistném.
+     */
+    public function testPartTimeDiscountWithoutTimelyNotificationBecomesUnverified(): void
+    {
+        foreach ([null, '2026-07-01'] as $notifiedOn) {
+            $snapshot = $this->completeSnapshot();
+            $term = &$snapshot['people'][0]['employments'][0]['term'];
+            $term['social_part_time_discount_reason'] = 'age_55_plus';
+            $term['social_part_time_discount_evidence'] = 'osobni-spis/2026/42';
+            $term['social_part_time_discount_notified_on'] = $notifiedOn;
+            $term['weekly_hours'] = '20.00';
+            unset($term);
+
+            $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+            self::assertSame(
+                SocialDiscountEvidence::Unverified,
+                $bundle->socialInsurance?->people[0]->relationships[0]->partTimeEmployerDiscount,
+            );
+        }
+    }
+
+    /**
+     * Zmrazená revize starší než sloupec důvodu klíč vůbec nemá. Čte se jako
+     * neuplatněná sleva — přesně tak, jak se z ní tehdy počítalo.
+     */
+    public function testSnapshotWithoutTheDiscountKeyStaysNotClaimed(): void
+    {
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($this->completeSnapshot());
+
+        self::assertSame(
+            SocialDiscountEvidence::NotClaimed,
+            $bundle->socialInsurance?->people[0]->relationships[0]->partTimeEmployerDiscount,
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function workMonth(int $workedMillihours, int $paidUnworkedMillihours): array
+    {
+        return [
+            'id' => 7,
+            'status' => 'approved',
+            'jmhz_work_summary' => [
+                'derivation_version' => 'jmhz-work-month.v2',
+                'values' => [
+                    'worked_millihours' => $workedMillihours,
+                    'unworked_paid_millihours' => $paidUnworkedMillihours,
+                ],
+            ],
+        ];
     }
 
     /**

@@ -317,6 +317,12 @@ final class PayrollRunSnapshotBuilder
                         (string) $row['social_employer_rate_category'],
                     'social_employer_rate_category_evidence' =>
                         $row['social_employer_rate_category_evidence'],
+                    'social_part_time_discount_reason' =>
+                        (string) $row['social_part_time_discount_reason'],
+                    'social_part_time_discount_evidence' =>
+                        $row['social_part_time_discount_evidence'],
+                    'social_part_time_discount_notified_on' =>
+                        $row['social_part_time_discount_notified_on'],
                     'foreign_legislation_country_code' =>
                         $row['foreign_legislation_country_code'],
                     'a1_certificate_until' => $row['a1_certificate_until'],
@@ -548,6 +554,9 @@ final class PayrollRunSnapshotBuilder
                     term.risky_work,
                     term.social_employer_rate_category,
                     term.social_employer_rate_category_evidence,
+                    term.social_part_time_discount_reason,
+                    term.social_part_time_discount_evidence,
+                    term.social_part_time_discount_notified_on,
                     term.foreign_legislation_country_code,
                     term.a1_certificate_until,
                     average.id AS average_earning_id,

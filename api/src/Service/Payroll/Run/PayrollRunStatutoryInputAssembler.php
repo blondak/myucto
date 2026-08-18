@@ -33,10 +33,12 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
 use MyInvoice\Service\Payroll\IncomeTax\TaxResidenceEvidence;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialDiscountEvidence;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerRateCategory;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialEmploymentKind;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialIncomeAttribution;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceRelationshipInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialJurisdictionEvidence;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPersonMonthInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialRelationshipKindMapper;
 
@@ -495,6 +497,8 @@ final class PayrollRunStatutoryInputAssembler
         }
 
         [$rateCategory, $rateCategoryEvidence] = $this->socialEmployerRateCategory($term);
+        [$discountEvidence, $discountReason, $discountEvidenceReference] =
+            $this->socialPartTimeDiscount($term, $mapping->kind, $periodEnd);
 
         try {
             return new SocialInsuranceRelationshipInput(
@@ -504,9 +508,22 @@ final class PayrollRunStatutoryInputAssembler
                 $active,
                 $attribution,
                 $components,
+                partTimeEmployerDiscount: $discountEvidence,
                 employerRateCategory: $rateCategory,
+                partTimeEmployerDiscountEvidenceReference: $discountEvidenceReference,
                 participationAggregationGroup: $mapping->aggregationGroup,
                 employerRateCategoryEvidenceReference: $rateCategoryEvidence,
+                partTimeEmployerDiscountReason: $discountReason,
+                partTimeDiscountAssessableMillihours:
+                    $this->socialPartTimeDiscountHours($snapshot['time_month'] ?? null),
+                partTimeDiscountEmploymentDays: $this->calendarDaysInPeriod(
+                    $employmentFrom,
+                    $employmentTo,
+                    $periodStart,
+                    $periodEnd,
+                ),
+                partTimeDiscountMonthDays: $this->calendarDaysInMonth($periodStart, $periodEnd),
+                agreedWeeklyWorkingMillihours: $this->weeklyWorkingMillihours($term),
             );
         } catch (\InvalidArgumentException) {
             $this->issue(
@@ -555,6 +572,139 @@ final class PayrollRunStatutoryInputAssembler
         }
 
         return [$category, $evidence];
+    }
+
+    /**
+     * Nárok na slevu zaměstnavatele podle § 7a a jeho doložení.
+     *
+     * Sleva je výhoda ZAMĚSTNAVATELE: § 7c odst. 3 dělá z přeplacené slevy dluh
+     * na pojistném, kdežto z neuplatněné žádný nedoplatek nevzniká. Fail-closed
+     * proto míří na NEUPLATNĚNÍ — chybějící podklad, chybějící nebo pozdní
+     * oznámení ČSSZ i nepodporovaný druh vztahu končí jako nedoložený nárok
+     * (ruční posouzení), nikdy jako tichá uplatněná sleva.
+     *
+     * § 7a odst. 5 podmiňuje nárok tím, že zaměstnavatel „nejpozději
+     * s uplatněním této slevy oznámil České správě sociálního zabezpečení záměr
+     * uplatňovat tuto slevu za tohoto zaměstnance". Datum oznámení musí být
+     * nejpozději posledním dnem období, za které se sleva uplatňuje; pozdější
+     * oznámení může slevu založit až od dalšího měsíce.
+     *
+     * Zmrazená revize starší než sloupec důvodu klíč vůbec nemá — čte se jako
+     * neuplatněná sleva, přesně tak, jak se z ní tehdy počítalo.
+     *
+     * @param array<string,mixed> $term
+     * @return array{0:SocialDiscountEvidence,1:?SocialPartTimeDiscountReason,2:?string}
+     */
+    private function socialPartTimeDiscount(
+        array $term,
+        SocialEmploymentKind $kind,
+        string $periodEnd,
+    ): array {
+        $raw = is_string($term['social_part_time_discount_reason'] ?? null)
+            ? $term['social_part_time_discount_reason']
+            : 'none';
+        if ($raw === 'none') {
+            return [SocialDiscountEvidence::NotClaimed, null, null];
+        }
+        $reason = SocialPartTimeDiscountReason::tryFrom($raw);
+        if ($reason === null || $kind !== SocialEmploymentKind::Employment) {
+            return [SocialDiscountEvidence::Unverified, null, null];
+        }
+        $evidence = is_string($term['social_part_time_discount_evidence'] ?? null)
+            ? trim($term['social_part_time_discount_evidence'])
+            : '';
+        $notifiedOn = is_string($term['social_part_time_discount_notified_on'] ?? null)
+            ? trim($term['social_part_time_discount_notified_on'])
+            : '';
+        if (
+            $evidence === ''
+            || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $notifiedOn) !== 1
+            || $notifiedOn > $periodEnd
+        ) {
+            return [SocialDiscountEvidence::Unverified, null, null];
+        }
+        return [SocialDiscountEvidence::Verified, $reason, $evidence];
+    }
+
+    /**
+     * Hodiny pro § 7a odst. 3 písm. b) a c) — odpracované plus ty, za které
+     * náleží náhrada mzdy nebo platu („za odpracovanou hodinu se považuje též
+     * hodina, za kterou … náleží náhrada mzdy nebo platu").
+     *
+     * Rozpad placených neodpracovaných hodin nese teprve pracovní souhrn JMHZ
+     * verze `jmhz-work-month.v2`. Bez něj nelze úhrn sestavit a hodiny se
+     * nevracejí vůbec — kalkulátor pak nárok neuplatní a měsíc jde na ruční
+     * posouzení.
+     */
+    private function socialPartTimeDiscountHours(mixed $timeMonth): ?int
+    {
+        $month = $this->object($timeMonth);
+        $summary = $this->object($month['jmhz_work_summary'] ?? null);
+        if ($summary === null
+            || ($summary['derivation_version'] ?? null) !== 'jmhz-work-month.v2'
+        ) {
+            return null;
+        }
+        $values = $this->object($summary['values'] ?? null);
+        if ($values === null) {
+            return null;
+        }
+        $worked = $this->nonNegativeInt($values['worked_millihours'] ?? null);
+        $paidUnworked = $this->nonNegativeInt($values['unworked_paid_millihours'] ?? null);
+        if ($worked === null || $paidUnworked === null) {
+            return null;
+        }
+
+        return $worked + $paidUnworked;
+    }
+
+    /** Sjednaná týdenní pracovní doba v tisícinách hodiny (§ 7a odst. 2). */
+    /** @param array<string,mixed> $term */
+    private function weeklyWorkingMillihours(array $term): ?int
+    {
+        $raw = $term['weekly_hours'] ?? null;
+        if (!is_string($raw) && !is_int($raw) && !is_float($raw)) {
+            return null;
+        }
+        if (preg_match('/^\d+(\.\d{1,2})?$/D', (string) $raw) !== 1) {
+            return null;
+        }
+
+        return (int) round(((float) $raw) * 1_000);
+    }
+
+    private function calendarDaysInMonth(string $periodStart, string $periodEnd): ?int
+    {
+        $days = $this->dayDifference($periodStart, $periodEnd);
+
+        return $days === null ? null : $days + 1;
+    }
+
+    private function calendarDaysInPeriod(
+        string $from,
+        ?string $to,
+        string $periodStart,
+        string $periodEnd,
+    ): ?int {
+        $start = max($from, $periodStart);
+        $end = $to === null ? $periodEnd : min($to, $periodEnd);
+        if ($start > $end) {
+            return 0;
+        }
+        $days = $this->dayDifference($start, $end);
+
+        return $days === null ? null : $days + 1;
+    }
+
+    private function dayDifference(string $from, string $to): ?int
+    {
+        $start = \DateTimeImmutable::createFromFormat('!Y-m-d', $from, new \DateTimeZone('UTC'));
+        $end = \DateTimeImmutable::createFromFormat('!Y-m-d', $to, new \DateTimeZone('UTC'));
+        if ($start === false || $end === false) {
+            return null;
+        }
+
+        return (int) $start->diff($end)->days;
     }
 
     /**

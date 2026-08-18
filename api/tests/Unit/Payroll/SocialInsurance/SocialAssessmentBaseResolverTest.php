@@ -63,6 +63,53 @@ final class SocialAssessmentBaseResolverTest extends TestCase
         self::assertSame([], $facts->issues);
     }
 
+    public function testRoundsAssessmentBaseUpToWholeCzkButLeavesParticipationIncomeIntact(): void
+    {
+        $facts = (new SocialAssessmentBaseResolver())->resolve(
+            $this->relationship([
+                $this->included('wage', 1_028_001),
+            ]),
+        );
+
+        self::assertSame(1_028_100, $facts->assessmentBaseMinorUnits);
+        self::assertSame(1_028_001, $facts->participationIncomeMinorUnits);
+    }
+
+    public function testAssessmentBaseAlreadyInWholeCzkIsNotRaised(): void
+    {
+        $facts = (new SocialAssessmentBaseResolver())->resolve(
+            $this->relationship([
+                $this->included('wage', 1_028_000),
+            ]),
+        );
+
+        self::assertSame(1_028_000, $facts->assessmentBaseMinorUnits);
+    }
+
+    public function testSingleHellerAboveWholeCzkAlreadyCostsAWholeCzk(): void
+    {
+        $facts = (new SocialAssessmentBaseResolver())->resolve(
+            $this->relationship([
+                $this->included('wage', 1_028_000),
+                $this->included('benefit', 1),
+            ]),
+        );
+
+        self::assertSame(1_028_100, $facts->assessmentBaseMinorUnits);
+    }
+
+    public function testNegativeCorrectionIsNettedBeforeRounding(): void
+    {
+        $facts = (new SocialAssessmentBaseResolver())->resolve(
+            $this->relationship([
+                $this->included('wage', 1_028_050),
+                $this->included('prior_correction', -50),
+            ]),
+        );
+
+        self::assertSame(1_028_000, $facts->assessmentBaseMinorUnits);
+    }
+
     public function testFailsClosedForNegativeResultAndUnclassifiedComponent(): void
     {
         $facts = (new SocialAssessmentBaseResolver())->resolve(

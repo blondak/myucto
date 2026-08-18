@@ -612,6 +612,10 @@ final class JmhzPvpojPreviewBuilder
                         "Sleva employment:{$employmentId} není ověřená.",
                     );
                 }
+                $discountOutcome = $result['part_time_employer_discount_outcome'] ?? null;
+                if ($discountOutcome !== null && $discountOutcome !== 'applied') {
+                    $discount = 'not_claimed';
+                }
                 if ($discount === 'verified') {
                     if (!is_string(
                         $result['part_time_employer_discount_evidence_reference']

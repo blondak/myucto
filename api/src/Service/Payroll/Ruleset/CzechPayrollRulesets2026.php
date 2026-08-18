@@ -242,6 +242,24 @@ final class CzechPayrollRulesets2026
                 'employee.discount.working_pensioner' => PayrollRuleValue::rate('0.065'),
                 'employee.rate.ordinary' => PayrollRuleValue::rate('0.071'),
                 'employer.discount.part_time' => PayrollRuleValue::rate('0.05'),
+                // § 7a odst. 3 vyjmenovává meze, při jejichž překročení sleva
+                // NENÁLEŽÍ, ačkoli je zaměstnanec v okruhu podle odst. 1: úhrn
+                // vyměřovacích základů nad 1,5násobek průměrné mzdy, základ na
+                // hodinu nad 1,15 % průměrné mzdy a odpracovaná doba nad 138
+                // hodin. § 7a odst. 2 k tomu váže rozsah sjednané kratší doby
+                // 8 až 30 hodin týdně. Průměrná mzda se mění každý rok, a proto
+                // sem patří i ona — sazby ani limity nesmí být v kódu.
+                'employer.discount.part_time.assessment_base_limit_multiple' =>
+                    PayrollRuleValue::rate('1.5'),
+                'employer.discount.part_time.hourly_assessment_base_limit' =>
+                    PayrollRuleValue::rate('0.0115'),
+                'employer.discount.part_time.maximum_monthly_millihours' =>
+                    PayrollRuleValue::integer(138_000),
+                'employer.discount.part_time.maximum_weekly_millihours' =>
+                    PayrollRuleValue::integer(30_000),
+                'employer.discount.part_time.minimum_weekly_millihours' =>
+                    PayrollRuleValue::integer(8_000),
+                'average_wage.monthly' => PayrollRuleValue::moneyMinor(4_896_700),
                 // § 7 odst. 1 zák. č. 589/1992 Sb. dává zaměstnavateli TŘI sazby,
                 // každou z vlastního vyměřovacího základu podle § 5a odst. 1:
                 // písm. a) běžná 24,8 %, písm. b) zdravotničtí záchranáři a HZS

@@ -824,7 +824,15 @@ final class JmhzPreparationSnapshotBuilder
                 'Socialni vysledek nepokryva pracovni vztah.',
             );
         }
-        if (($matched['part_time_employer_discount'] ?? null) !== 'not_claimed') {
+        /*
+         * Nárok, který limity § 7a odst. 3 vyloučily, se v podání neuplatňuje —
+         * XML pro něj žádnou položku nenese a hlásit u něj nepodporovaný blok
+         * by bylo falešné.
+         */
+        $discountOutcome = $matched['part_time_employer_discount_outcome'] ?? null;
+        if (($matched['part_time_employer_discount'] ?? null) !== 'not_claimed'
+            && ($discountOutcome === null || $discountOutcome === 'applied')
+        ) {
             $issues[] = $this->issue(
                 'jmhz_employer_part_time_discount_unsupported',
                 'employment',

@@ -76,10 +76,21 @@ final class PayrollRuleParameterCatalog
             'withholding.rate' => 'Sazba srážkové daně',
         ],
         'social_insurance' => [
+            'average_wage.monthly' => 'Průměrná měsíční mzda pro limity slevy na kratší úvazky',
             'employee.discount.agriculture_dpp' => 'Sleva zaměstnance u zemědělské dohody o provedení práce',
             'employee.discount.working_pensioner' => 'Snížená sazba zaměstnance — pracující starobní důchodce',
             'employee.rate.ordinary' => 'Sazba pojistného zaměstnance',
             'employer.discount.part_time' => 'Sleva zaměstnavatele na kratší pracovní úvazek',
+            'employer.discount.part_time.assessment_base_limit_multiple' =>
+                'Násobek průměrné mzdy, nad který sleva na kratší úvazek nenáleží',
+            'employer.discount.part_time.hourly_assessment_base_limit' =>
+                'Podíl průměrné mzdy jako nejvyšší vyměřovací základ na hodinu',
+            'employer.discount.part_time.maximum_monthly_millihours' =>
+                'Nejvyšší odpracovaná doba za měsíc pro slevu na kratší úvazek (tisíciny hodiny)',
+            'employer.discount.part_time.maximum_weekly_millihours' =>
+                'Nejvyšší sjednaná týdenní doba pro slevu na kratší úvazek (tisíciny hodiny)',
+            'employer.discount.part_time.minimum_weekly_millihours' =>
+                'Nejnižší sjednaná týdenní doba pro slevu na kratší úvazek (tisíciny hodiny)',
             'employer.rate.ordinary' => 'Sazba pojistného zaměstnavatele',
             'employer.rate.rescue_and_company_fire_service' =>
                 'Sazba zaměstnavatele u hasičských záchranných sborů a podnikových hasičů',

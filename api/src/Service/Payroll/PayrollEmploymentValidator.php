@@ -36,6 +36,9 @@ namespace MyInvoice\Service\Payroll;
  *   risky_work:bool,
  *   social_employer_rate_category:string,
  *   social_employer_rate_category_evidence:?string,
+ *   social_part_time_discount_reason:string,
+ *   social_part_time_discount_evidence:?string,
+ *   social_part_time_discount_notified_on:?string,
  *   tax_declaration_signed:bool,
  *   is_primary:bool,
  *   change_reason:?string
@@ -67,6 +70,17 @@ final class PayrollEmploymentValidator
         'ordinary',
         'rescue_and_company_fire_service',
         'risk_employment',
+    ];
+    /** § 7a odst. 1 písm. a) až g) ZPSZ — viz migrace 1550. */
+    private const SOCIAL_PART_TIME_DISCOUNT_REASONS = [
+        'none',
+        'age_55_plus',
+        'child_care_under_10',
+        'dependent_close_person_care',
+        'study_under_26',
+        'retraining_jobseeker',
+        'disabled_person',
+        'under_21',
     ];
     private const CHECKLIST_STATUSES = ['pending', 'completed', 'not_applicable'];
     private const VERIFIED_STATES = ['unverified', 'no', 'yes'];
@@ -250,6 +264,8 @@ final class PayrollEmploymentValidator
         $functionalBenefits = $this->verifiedState($input, 'jmhz_functional_benefits_status');
         $temporaryAssignment = $this->verifiedState($input, 'jmhz_temporary_assignment_status');
         [$rateCategory, $rateCategoryEvidence] = $this->socialEmployerRateCategory($input);
+        [$discountReason, $discountEvidence, $discountNotifiedOn] =
+            $this->socialPartTimeDiscount($input);
         $activityCode = $this->optionalCode($input, 'activity_code', 32);
         $relationshipDetailCode = $this->optionalCode(
             $input,
@@ -302,6 +318,9 @@ final class PayrollEmploymentValidator
             'risky_work' => $rateCategory === 'risk_employment',
             'social_employer_rate_category' => $rateCategory,
             'social_employer_rate_category_evidence' => $rateCategoryEvidence,
+            'social_part_time_discount_reason' => $discountReason,
+            'social_part_time_discount_evidence' => $discountEvidence,
+            'social_part_time_discount_notified_on' => $discountNotifiedOn,
             'tax_declaration_signed' => $this->requiredBool($input, 'tax_declaration_signed', false),
             'is_primary' => $this->requiredBool($input, 'is_primary', false),
             'change_reason' => $this->optionalText($input, 'change_reason', 500),
@@ -415,6 +434,41 @@ final class PayrollEmploymentValidator
         $evidence = $this->optionalText($input, 'social_employer_rate_category_evidence', 190);
 
         return [$category, $category === 'ordinary' ? null : $evidence];
+    }
+
+    /**
+     * Nárok na slevu zaměstnavatele podle § 7a odst. 1 ZPSZ.
+     *
+     * Podklad ani datum oznámení ČSSZ nejsou povinné vstupy: účetní smí důvod
+     * zapsat dřív, než oznámení odešle. Do výpočtu se ale takový vztah
+     * nedostane — bez obojího z něj
+     * {@see \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputAssembler}
+     * udělá nedoložený nárok a měsíc skončí na ručním posouzení. Tichý pád na
+     * uplatněnou slevu by z ní podle § 7c odst. 3 udělal dluh na pojistném.
+     *
+     * @param array<string,mixed> $input
+     * @return array{0:string,1:?string,2:?string}
+     */
+    private function socialPartTimeDiscount(array $input): array
+    {
+        $reason = trim($this->inputString($input['social_part_time_discount_reason'] ?? ''));
+        if ($reason === '') {
+            $reason = 'none';
+        }
+        if (!in_array($reason, self::SOCIAL_PART_TIME_DISCOUNT_REASONS, true)) {
+            throw new \InvalidArgumentException(
+                'Důvod slevy zaměstnavatele na kratší úvazek není podporován.',
+            );
+        }
+        if ($reason === 'none') {
+            return ['none', null, null];
+        }
+
+        return [
+            $reason,
+            $this->optionalText($input, 'social_part_time_discount_evidence', 190),
+            $this->optionalDate($input, 'social_part_time_discount_notified_on'),
+        ];
     }
 
     /** @param array<string,mixed> $input */

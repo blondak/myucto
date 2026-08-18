@@ -184,6 +184,9 @@ export interface PayrollEmploymentTerms {
   risky_work: boolean
   social_employer_rate_category: PayrollSocialEmployerRateCategory
   social_employer_rate_category_evidence: string | null
+  social_part_time_discount_reason: PayrollSocialPartTimeDiscountReason
+  social_part_time_discount_evidence: string | null
+  social_part_time_discount_notified_on: string | null
   tax_declaration_signed: boolean
   is_primary: boolean
   change_reason: string | null
@@ -220,16 +223,34 @@ export interface PayrollEmploymentEvent {
  * na kategorii přeloží. Poslat obojí a nesouhlasně je chyba, ne tichá volba —
  * proto jsou obě strany nepovinné, ne obě povinné.
  */
+export type PayrollSocialPartTimeDiscountReason =
+  | 'none'
+  | 'age_55_plus'
+  | 'child_care_under_10'
+  | 'dependent_close_person_care'
+  | 'study_under_26'
+  | 'retraining_jobseeker'
+  | 'disabled_person'
+  | 'under_21'
+
 export type PayrollEmploymentTermsPayload = Omit<
   PayrollEmploymentTerms,
   'id' | 'office_code' | 'effective_to' | 'jmhz_external_codebook_overlay_key'
     | 'jmhz_external_codebook_manifest_sha256' | 'row_version' | 'created_at'
     | 'risky_work' | 'social_employer_rate_category'
     | 'social_employer_rate_category_evidence'
+    | 'social_part_time_discount_reason' | 'social_part_time_discount_evidence'
+    | 'social_part_time_discount_notified_on'
 > & {
   risky_work?: boolean
   social_employer_rate_category?: PayrollSocialEmployerRateCategory
   social_employer_rate_category_evidence?: string | null
+  // Nárok podle § 7a nabízí jen karta vztahu; obrazovky, které o něm nevědí,
+  // ho neposílají a server je čte jako „sleva se neuplatňuje". Poslat prázdno
+  // je proto v pořádku, poslat nesmysl ne.
+  social_part_time_discount_reason?: PayrollSocialPartTimeDiscountReason
+  social_part_time_discount_evidence?: string | null
+  social_part_time_discount_notified_on?: string | null
 }
 
 export interface PayrollEmploymentCreatePayload {

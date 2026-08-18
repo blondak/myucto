@@ -637,7 +637,10 @@ final class PayrollInsuranceBreakdownQueryService
                         $snapshot,
                         'capped_assessment_base_minor_units',
                     );
-                    if ((string) ($snapshot['part_time_employer_discount'] ?? '') === 'verified') {
+                    $discountOutcome = $snapshot['part_time_employer_discount_outcome'] ?? null;
+                    if ((string) ($snapshot['part_time_employer_discount'] ?? '') === 'verified'
+                        && ($discountOutcome === null || $discountOutcome === 'applied')
+                    ) {
                         $discountBase += $relationshipBase;
                     }
                     $category = (string) ($snapshot['employer_rate_category'] ?? '');
