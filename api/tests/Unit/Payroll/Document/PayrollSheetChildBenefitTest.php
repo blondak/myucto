@@ -135,10 +135,15 @@ final class PayrollSheetChildBenefitTest extends TestCase
                         'rounded_tax_base_minor_units' => 30_000_00,
                         'tax_before_credits_minor_units' => 4_500_00,
                         'non_refundable_credits_minor_units' => 2_570_00,
-                        'child_credit_minor_units' => $appliedChildCredit,
+                        // Záloha si sem odkládá NÁROK, se kterým počítala, ne
+                        // uplatněnou část — viz `MonthlyAdvanceTaxCalculator`.
+                        // Dokud tu stálo uplatněné číslo, unit test potvrzoval
+                        // předpoklad, který v produkci nikdy neplatil.
+                        'child_credit_minor_units' => $claimedChildCredit,
                     ],
                     'withholding_base_minor_units' => 0,
                     'claimed_child_credit_minor_units' => $claimedChildCredit,
+                    'applied_child_credit_minor_units' => $appliedChildCredit,
                 ],
                 'net_pay' => [
                     'cash_income_minor_units' => 30_000_00,

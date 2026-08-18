@@ -331,6 +331,7 @@ final class PayrollSheetTaxExemptIncomeTest extends TestCase
                     'advance_tax' => null,
                     'withholding_base_minor_units' => 0,
                     'claimed_child_credit_minor_units' => 0,
+                    'applied_child_credit_minor_units' => 0,
                 ],
                 'net_pay' => [
                     'cash_income_minor_units' => $gross,

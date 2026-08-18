@@ -18,11 +18,24 @@ final class PayrollSheetPdfRenderer
 
     private ?Environment $twig = null;
 
-    public function render(PayrollSheetDocumentData $data): PayrollArtifact
+    /**
+     * Vysázené tělo dokladu před tiskem do PDF.
+     *
+     * Existuje proto, aby šlo ověřit, CO na dokladu stojí. Z hotového PDF se to
+     * spolehlivě přečíst nedá — mPDF podsazuje fonty s vlastním kódováním —
+     * takže bez tohohle kroku by šlo testovat jen to, že soubor začíná `%PDF-`.
+     */
+    public function renderHtml(PayrollSheetDocumentData $data): string
     {
         $template = $data->toTemplateData();
         $template['renderer_version'] = self::VERSION;
-        $body = $this->twig()->render('payroll-sheet.twig', $template);
+
+        return $this->twig()->render('payroll-sheet.twig', $template);
+    }
+
+    public function render(PayrollSheetDocumentData $data): PayrollArtifact
+    {
+        $body = $this->renderHtml($data);
         $tmpDir = RuntimePaths::storage('cache/mpdf');
         if (!is_dir($tmpDir)) {
             @mkdir($tmpDir, 0755, true);

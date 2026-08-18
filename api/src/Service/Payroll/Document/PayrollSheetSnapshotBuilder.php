@@ -28,12 +28,21 @@ final class PayrollSheetSnapshotBuilder
      * a provedeném ročním zúčtování), které se dosud zapisovalo natvrdo jako
      * „neprovedeno".
      *
+     * Mapování v4 opravuje zdroj UPLATNĚNÉ slevy podle § 35c. Bralo se
+     * `advance_tax.child_credit_minor_units`, jenže to není uplatněná část —
+     * měsíční záloha si tam odkládá CELÝ nárok, se kterým do výpočtu vstoupila
+     * ({@see \MyInvoice\Service\Payroll\Calculation\MonthlyAdvanceTaxCalculator}).
+     * Uplatněná část je `income_tax.applied_child_credit_minor_units`, tedy ta,
+     * která se vešla do daně (§ 35c odst. 2). Rozdíl není kosmetický: jakmile
+     * nárok daň převýšil a vznikl bonus, součet „slevy" a bonusu nárok přesáhl
+     * a mzdový list se nedal vydat vůbec — spadl na kontrole měsíčního řádku.
+     *
      * Verze je součástí zdrojového manifestu, takže se pro tytéž zdrojové revize
      * NENAJDE dřívější revize a doklad se vydá jako DALŠÍ revize v řetězu.
      * Existující revize ani její archivované PDF se tím nemění — což je jediná
      * přípustná cesta, protože roční revize jsou append-only a kotvené otiskem.
      */
-    public const MAPPING_VERSION = 'payroll-sheet-mapping.v3';
+    public const MAPPING_VERSION = 'payroll-sheet-mapping.v4';
 
     /**
      * Snapshoty vydané pod starším mapováním zůstávají čitelné. Nedopočítávají
@@ -51,6 +60,15 @@ final class PayrollSheetSnapshotBuilder
     ];
 
     private const INPUT_SCHEMA_VERSION = 'payroll-run-input.v2';
+
+    /**
+     * Doména klíčovaného otisku podle účelu cizí roční revize. Mzdový list si
+     * cizí revizi jen čte, takže ji musí ověřovat pod doménou jejího vydavatele.
+     */
+    private const ANNUAL_FINGERPRINT_DOMAINS = [
+        AnnualSettlementSnapshotBuilder::PURPOSE =>
+            AnnualSettlementSnapshotBuilder::SNAPSHOT_FINGERPRINT_DOMAIN,
+    ];
 
     public function __construct(
         private readonly Connection $db,
@@ -518,8 +536,13 @@ final class PayrollSheetSnapshotBuilder
             // jediné místo, kde zákon nárok a jeho uplatnění jmenuje odděleně.
             'child_entitlement_minor_units' =>
                 $this->nonNegativeInt($tax, 'claimed_child_credit_minor_units'),
+            // UPLATNĚNÁ sleva (§ 35c odst. 2) se čte z `applied_child_credit`,
+            // ne ze zálohy. `advance_tax.child_credit_minor_units` je vstupní
+            // NÁROK, se kterým měsíční záloha počítala — kdyby se tiskl sem,
+            // doklad by u bonusového měsíce tvrdil, že se uplatnilo víc, než
+            // kolik daň unesla, a součet slevy s bonusem by nárok převýšil.
             'child_credit_minor_units' =>
-                $advance === [] ? 0 : $this->nonNegativeInt($advance, 'child_credit_minor_units'),
+                $this->nonNegativeInt($tax, 'applied_child_credit_minor_units'),
             'advance_tax_minor_units' => $this->nonNegativeInt($net, 'advance_tax_minor_units'),
             'tax_bonus_minor_units' => $this->nonNegativeInt($net, 'tax_bonus_minor_units'),
             'withholding_tax_minor_units' =>
@@ -931,9 +954,19 @@ final class PayrollSheetSnapshotBuilder
             ]),
         );
         $hash = $this->hash($revision, 'snapshot_hash');
+        // Otisk se ověřuje pod doménou toho, KDO revizi vydal. Vlastní doména
+        // mzdového listu sem nepatří — pod ní žádná skutečná revize ročního
+        // zúčtování nevznikla, takže by písm. h) nešlo přečíst nikdy.
         if (!hash_equals(
             $hash,
-            $this->snapshotFingerprint($json, (int) $revision['supplier_id']),
+            $this->sensitiveData->keyedFingerprint(
+                $json,
+                self::ANNUAL_FINGERPRINT_DOMAINS[$purpose]
+                    ?? throw new \DomainException(
+                        "Roční revize {$purpose} nemá známou doménu otisku.",
+                    ),
+                (int) $revision['supplier_id'],
+            ),
         )) {
             throw new \DomainException('Otisk roční revize nesouhlasí s jejím obsahem.');
         }

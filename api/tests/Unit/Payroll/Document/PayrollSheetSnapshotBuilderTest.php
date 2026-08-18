@@ -41,6 +41,7 @@ final class PayrollSheetSnapshotBuilderTest extends TestCase
                     ],
                     'withholding_base_minor_units' => 5_000,
                     'claimed_child_credit_minor_units' => 1_267,
+                    'applied_child_credit_minor_units' => 0,
                 ],
                 'net_pay' => [
                     'cash_income_minor_units' => 100_000,
