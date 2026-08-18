@@ -15,7 +15,7 @@ import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatMoney } from '@/composables/useFormat'
 import CashVatBreakdown from '@/components/cash/CashVatBreakdown.vue'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -49,12 +49,20 @@ const form = reactive({
   description: '',
   vat_mode: 'none' as 'none' | 'vat',
   total_amount: null as number | null,
+  // Valutová pokladna: ruční kurz. Prázdné → backend si vezme denní kurz ČNB.
+  // Bez tohohle pole končil doklad na `fx_rate_unavailable` ve slepé uličce —
+  // hláška říkala „doplňte kurz" a nebylo kam.
+  fx_rate: null as number | null,
   invoice_id: null as number | null,
   purchase_invoice_id: null as number | null,
   counter_account_code: '',
   rule_key: '',
 })
 const vatLines = ref<CashVatLine[]>([])
+// Sedí ručně zadaný rozpad DPH na celkovou částku? Komponenta zbytek sice dorovná
+// do posledního řádku, ale při větším rozdílu tím vyrobí daň neodpovídající sazbě —
+// uložit takový doklad nemá smysl (backend ho stejně přepočítá jinak).
+const vatMatches = ref(true)
 
 const selectedReg = computed<CashRegister | null>(() =>
   form.register_id !== '' ? registers.value.find(r => r.id === form.register_id) ?? null : null,
@@ -77,16 +85,30 @@ const isPayment = computed(() => form.purpose === 'invoice_payment' || form.purp
 const isTransfer = computed(() => form.purpose === 'transfer')
 const isOther = computed(() => form.purpose === 'other')
 
-// Sazby DPH z číselníku pro rok dokladu (jen > 0 — A4/O5c).
-const availableRates = computed<number[]>(() => {
+// Daňové konstanty pro rok dokladu — sazby DPH i práh KH (A4/O5c). Bez záznamu
+// pro daný rok se bere nejnovější dostupný (číselník bývá napřed, ne pozadu).
+const taxEntry = computed<TaxConstantsYear | null>(() => {
   const year = Number((form.tax_date || form.issue_date || '').slice(0, 4))
-  let entry = taxYears.value.find(y => y.year === year)
-  if (!entry && taxYears.value.length) entry = [...taxYears.value].sort((a, b) => b.year - a.year)[0]
+  const exact = taxYears.value.find(y => y.year === year)
+  if (exact) return exact
+  return taxYears.value.length ? [...taxYears.value].sort((a, b) => b.year - a.year)[0] : null
+})
+
+const availableRates = computed<number[]>(() => {
+  const entry = taxEntry.value
   if (!entry) return [21, 12]
   const rates = [entry.data.vat_rate_standard, entry.data.vat_rate_reduced]
     .map(r => Math.round(Number(r) * 100) / 100)
     .filter(r => r > 0)
   return [...new Set(rates)].sort((a, b) => b - a)
+})
+
+// Práh Kontrolního hlášení (A.4/B.2) čte backend z `tax_constants` per rok — FE ho
+// měl natvrdo jako 10000, takže po legislativní změně by UI blokovalo něco, co
+// backend povolí (nebo naopak). 10 000 zůstává jen jako záchrana, než dojede číselník.
+const khThreshold = computed(() => {
+  const value = Number(taxEntry.value?.data.kh_item_threshold ?? 0)
+  return value > 0 ? value : 10000
 })
 
 const counterAccounts = computed(() =>
@@ -202,6 +224,15 @@ function pickUnpaid(o: UnpaidDocumentOption) {
   form.description = t(`cash.purpose.${form.purpose}`) + ' ' + o.number
   form.total_amount = o.remaining
 }
+// Korunový ekvivalent jde ukázat jen u ručního kurzu — kurz ČNB zná až backend.
+const czkEquivalent = computed<number | null>(() => {
+  if (!isForeign.value) return null
+  const rate = Number(form.fx_rate)
+  const amount = Number(form.total_amount)
+  if (!(rate > 0) || !(amount > 0)) return null
+  return Math.round(amount * rate * 100) / 100
+})
+
 // PF: úhrada jen v plné výši (R4) → částka readonly.
 const amountReadonly = computed(() => form.purpose === 'purchase_payment' && selectedUnpaid.value !== null)
 
@@ -210,10 +241,11 @@ const amountReadonly = computed(() => form.purpose === 'purchase_payment' && sel
 // je zadaná částka v cizí měně a FE nezná kurz → práh 10 000 CZK vyhodnotí BE (CZK
 // ekvivalent); klientský hint se pro cizí měnu vypne, ať nesrovnává EUR s 10 000 CZK.
 const purchaseOverLimit = computed(() =>
-  !isForeign.value && form.purpose === 'purchase' && form.vat_mode === 'vat' && Number(form.total_amount) >= 10000,
+  !isForeign.value && form.purpose === 'purchase' && form.vat_mode === 'vat' && Number(form.total_amount) >= khThreshold.value,
 )
 const saleOver10k = computed(() =>
-  !isForeign.value && form.purpose === 'sale' && form.vat_mode === 'vat' && Number(form.total_amount) >= 10000 && !form.partner_dic.trim(),
+  !isForeign.value && form.purpose === 'sale' && form.vat_mode === 'vat'
+    && Number(form.total_amount) >= khThreshold.value && !form.partner_dic.trim(),
 )
 
 // ── Live náhled zaúčtování (MD/D) ────────────────────────────────────────────
@@ -275,16 +307,40 @@ function accountName(code: string): string {
 }
 
 // ── Uložení ──────────────────────────────────────────────────────────────────
+const vatBreakdownVisible = computed(() => isTaxDoc.value && form.vat_mode === 'vat')
+const vatBreakdownInvalid = computed(() => vatBreakdownVisible.value && (!vatMatches.value || vatLines.value.length === 0))
+
 const canSubmit = computed(() =>
-  form.register_id !== '' && Number(form.total_amount) > 0 && form.description.trim() !== '' && !purchaseOverLimit.value && !saving.value,
+  form.register_id !== '' && Number(form.total_amount) > 0 && form.description.trim() !== ''
+  && !purchaseOverLimit.value && !vatBreakdownInvalid.value && !saving.value,
 )
+
+/** Věta pod zašedlým tlačítkem — proč uložit nejde (konvence buttonStyles.ts). */
+const blockedReason = computed<string | null>(() => {
+  if (form.register_id === '') return t('cash.validation.register')
+  if (!(Number(form.total_amount) > 0)) return t('cash.validation.amount')
+  if (!form.description.trim()) return t('cash.validation.description')
+  if (purchaseOverLimit.value) return t('cash.form.purchase_over_10k_hint', { amount: formatMoney(khThreshold.value) })
+  if (vatBreakdownInvalid.value) return t('cash.validation.vat_lines')
+  return null
+})
 
 async function save() {
   error.value = ''
   if (form.register_id === '') { error.value = t('cash.validation.register'); return }
   if (!(Number(form.total_amount) > 0)) { error.value = t('cash.validation.amount'); return }
   if (!form.description.trim()) { error.value = t('cash.validation.description'); return }
-  if (purchaseOverLimit.value) { error.value = t('cash.form.purchase_over_10k_hint'); return }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(form.issue_date)) { error.value = t('cash.validation.date'); return }
+  if (vatBreakdownVisible.value && !/^\d{4}-\d{2}-\d{2}$/.test(form.tax_date || form.issue_date)) {
+    error.value = t('cash.validation.tax_date'); return
+  }
+  if (isForeign.value && form.fx_rate !== null && !(Number(form.fx_rate) > 0)) {
+    error.value = t('cash.validation.fx_rate'); return
+  }
+  if (purchaseOverLimit.value) {
+    error.value = t('cash.form.purchase_over_10k_hint', { amount: formatMoney(khThreshold.value) }); return
+  }
+  if (vatBreakdownInvalid.value) { error.value = t('cash.validation.vat_lines'); return }
 
   const payload: CreateCashDocumentPayload = {
     register_id: Number(form.register_id),
@@ -295,8 +351,12 @@ async function save() {
     total_amount: Number(form.total_amount),
     post: true,
   }
-  // Valutová pokladna: zadaná částka je v měně pokladny; CZK ekvivalent dopočítá BE kurzem ČNB.
-  if (isForeign.value) payload.amount_foreign = Number(form.total_amount)
+  // Valutová pokladna: zadaná částka je v měně pokladny; CZK ekvivalent dopočítá BE
+  // kurzem ČNB, pokud uživatel nezadal vlastní kurz.
+  if (isForeign.value) {
+    payload.amount_foreign = Number(form.total_amount)
+    if (Number(form.fx_rate) > 0) payload.fx_rate = Number(form.fx_rate)
+  }
   if (isTaxDoc.value) {
     payload.partner_name = form.partner_name.trim() || undefined
     payload.partner_ic = form.partner_ic.trim() || undefined
@@ -489,6 +549,24 @@ async function save() {
           </div>
         </div>
 
+        <!-- Valutová pokladna: ruční kurz. Bez tohohle pole byl doklad s chybějícím
+             denním kurzem ČNB nezachranitelný — `fx_rate_unavailable` hlásí „doplňte
+             kurz", ale zadat ho nešlo, takže se doklad nedal dokončit vůbec. -->
+        <div v-if="isForeign" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label for="cash-fx-rate" class="block text-sm font-medium text-neutral-700 mb-1">
+              {{ t('cash.form.fx_rate') }}
+              <span class="font-mono text-primary-600">({{ registerCurrency }}/CZK)</span>
+            </label>
+            <input id="cash-fx-rate" v-model.number="form.fx_rate" type="number" step="0.0001" min="0"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm text-right" />
+            <p v-if="czkEquivalent !== null" class="mt-1 text-xs text-neutral-600 font-mono">
+              {{ t('cash.form.fx_amount_czk') }}: {{ formatMoney(czkEquivalent) }}
+            </p>
+          </div>
+          <p class="text-xs text-neutral-500 self-end pb-2">{{ t('cash.form.fx_rate_hint') }}</p>
+        </div>
+
         <!-- DUZP + DPH rozpad -->
         <template v-if="isTaxDoc && form.vat_mode === 'vat'">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -497,10 +575,11 @@ async function save() {
               <input v-model="form.tax_date" type="date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
           </div>
-          <CashVatBreakdown v-model="vatLines" :total="Number(form.total_amount) || 0" :rates="availableRates" />
+          <CashVatBreakdown v-model="vatLines" :total="Number(form.total_amount) || 0" :rates="availableRates"
+            @update:matches="vatMatches = $event" />
           <p v-if="form.purpose === 'purchase'" class="text-xs px-3 py-2 rounded-md"
             :class="purchaseOverLimit ? 'bg-danger-50 text-danger-600' : 'bg-neutral-50 text-neutral-500 border border-neutral-200'">
-            {{ t('cash.form.purchase_over_10k_hint') }}
+            {{ t('cash.form.purchase_over_10k_hint', { amount: formatMoney(khThreshold) }) }}
           </p>
           <p v-if="saleOver10k" class="text-xs px-3 py-2 rounded-md bg-warning-50 text-warning-600">
             {{ t('cash.warning.dic_missing_over_10k') }}
@@ -510,12 +589,16 @@ async function save() {
 
         <div v-if="error" class="text-sm text-danger-500">{{ error }}</div>
 
-        <div class="flex justify-end gap-2 border-t border-neutral-200 pt-3">
-          <RouterLink to="/accounting/cash" :class="btnOutline('neutral')">{{ t('common.cancel') }}</RouterLink>
-          <button @click="save" :disabled="!canSubmit" :class="btnFilled('primary')">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
-            {{ saving ? t('common.saving') : t('common.save') }}
-          </button>
+        <div class="border-t border-neutral-200 pt-3 flex flex-col items-end gap-1.5">
+          <div class="flex flex-wrap justify-end gap-2">
+            <RouterLink to="/accounting/cash" :class="btnOutline('neutral')">{{ t('common.cancel') }}</RouterLink>
+            <button @click="save" :disabled="!canSubmit" :class="btnFilled('primary')"
+              :title="disabledTitle(!canSubmit, blockedReason)">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+              {{ saving ? t('common.saving') : t('common.save') }}
+            </button>
+          </div>
+          <p v-if="blockedReason" :class="[BTN_DISABLED_NOTE, 'md:text-right']">{{ blockedReason }}</p>
         </div>
       </div>
 

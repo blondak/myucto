@@ -1,0 +1,223 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import type { CashRegister } from '@/api/cash'
+
+const m = vi.hoisted(() => ({
+  listRegisters: vi.fn(),
+  listRulePresets: vi.fn(),
+  createDocument: vi.fn(),
+  listAccounts: vi.fn(),
+  listPostingRules: vi.fn(),
+  taxList: vi.fn(),
+  clientsList: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
+  toastWarning: vi.fn(),
+  push: vi.fn(),
+}))
+
+vi.mock('@/api/cash', () => ({
+  cashApi: {
+    listRegisters: m.listRegisters,
+    listRulePresets: m.listRulePresets,
+    createDocument: m.createDocument,
+  },
+}))
+vi.mock('@/api/accounting', () => ({
+  accountingApi: { listAccounts: m.listAccounts, listPostingRules: m.listPostingRules },
+}))
+vi.mock('@/api/taxConstants', () => ({ taxConstantsApi: { list: m.taxList } }))
+vi.mock('@/api/clients', () => ({ clientsApi: { list: m.clientsList } }))
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ success: m.toastSuccess, error: m.toastError, warning: m.toastWarning }),
+}))
+vi.mock('@/composables/useFormat', () => ({ formatMoney: (v: number) => String(v) }))
+vi.mock('@/stores/supplier', () => ({
+  useSupplierStore: () => ({ currentSupplier: { accounting_mode: 'double_entry' } }),
+}))
+vi.mock('@/components/ui/buttonStyles', () => ({
+  ICONS: { check: 'M0 0', x: 'M0 0', plus: 'M0 0' },
+  btnOutline: () => 'btn-outline',
+  btnFilled: () => 'btn-filled',
+  btnIconSm: () => 'btn-icon-sm',
+  btnOutlineSm: () => 'btn-outline-sm',
+  disabledTitle: (d: boolean, r?: string | null) => (d && r ? r : undefined),
+  BTN_DISABLED_NOTE: 'note',
+}))
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({ t: (key: string, p?: Record<string, unknown>) => (p ? `${key}:${JSON.stringify(p)}` : key) }),
+}))
+vi.mock('vue-router', () => ({
+  RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
+  useRoute: () => ({ query: {} }),
+  useRouter: () => ({ push: m.push }),
+}))
+
+import CashDocumentEditor from '@/pages/accounting/CashDocumentEditor.vue'
+
+function register(overrides: Partial<CashRegister> = {}): CashRegister {
+  return {
+    id: 1, supplier_id: 1, name: 'Hlavní pokladna', currency_code: 'CZK',
+    account_code: '211.100', account_id: 9, account_name: 'Pokladna',
+    is_default: true, is_active: true, documents_count: 0,
+    balance: 0, balance_date: '2093-01-01', created_at: '2093-01-01',
+    ...overrides,
+  } as CashRegister
+}
+
+function taxYear(year: number, khThreshold: number) {
+  return { year, is_override: false, data: { vat_rate_standard: 21, vat_rate_reduced: 12, kh_item_threshold: khThreshold } }
+}
+
+async function mountEditor() {
+  const wrapper = mount(CashDocumentEditor)
+  await flushPromises()
+  return wrapper
+}
+
+describe('CashDocumentEditor.vue', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.listRegisters.mockResolvedValue([register()])
+    m.listRulePresets.mockResolvedValue([])
+    m.listAccounts.mockResolvedValue([])
+    m.listPostingRules.mockResolvedValue({})
+    m.taxList.mockResolvedValue([taxYear(new Date().getFullYear(), 10000)])
+    m.clientsList.mockResolvedValue({ data: [] })
+    m.createDocument.mockResolvedValue({ id: 1, doc_number: 'PPD-1', journal_entry_id: 1, status: 'posted', warnings: [] })
+  })
+
+  // ── H-9: kurz valutového dokladu ──────────────────────────────────────────
+  it('valutová pokladna nabízí pole pro kurz a pošle ho v payloadu', async () => {
+    m.listRegisters.mockResolvedValue([register({ currency_code: 'EUR', account_code: '211.500' })])
+    const wrapper = await mountEditor()
+
+    const rate = wrapper.find('#cash-fx-rate')
+    expect(rate.exists()).toBe(true)
+
+    const vm = wrapper.vm as any
+    vm.form.total_amount = 100
+    vm.form.description = 'Prodej v hotovosti'
+    await rate.setValue('25.5')
+    await flushPromises()
+
+    await vm.save()
+    expect(m.createDocument).toHaveBeenCalledTimes(1)
+    const payload = m.createDocument.mock.calls[0][0]
+    expect(payload.amount_foreign).toBe(100)
+    expect(payload.fx_rate).toBe(25.5)
+  })
+
+  it('prázdný kurz se neposílá — backend si vezme denní kurz ČNB', async () => {
+    m.listRegisters.mockResolvedValue([register({ currency_code: 'EUR', account_code: '211.500' })])
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.total_amount = 100
+    vm.form.description = 'Prodej v hotovosti'
+    await vm.save()
+
+    const payload = m.createDocument.mock.calls[0][0]
+    expect(payload.amount_foreign).toBe(100)
+    expect('fx_rate' in payload).toBe(false)
+  })
+
+  it('korunová pokladna pole pro kurz nemá', async () => {
+    const wrapper = await mountEditor()
+    expect(wrapper.find('#cash-fx-rate').exists()).toBe(false)
+  })
+
+  // ── M-13: práh KH z číselníku, ne natvrdo 10 000 ──────────────────────────
+  it('práh nákupu se bere z tax_constants (15 000 → 12 000 Kč projde)', async () => {
+    m.taxList.mockResolvedValue([taxYear(new Date().getFullYear(), 15000)])
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.purpose = 'purchase'
+    vm.form.doc_type = 'out'
+    vm.form.vat_mode = 'vat'
+    vm.form.total_amount = 12000
+    vm.form.description = 'Nákup materiálu'
+    await flushPromises()
+
+    expect(vm.purchaseOverLimit).toBe(false)
+    await vm.save()
+    expect(m.createDocument).toHaveBeenCalledTimes(1)
+  })
+
+  it('nad prahem z číselníku uložení blokuje', async () => {
+    m.taxList.mockResolvedValue([taxYear(new Date().getFullYear(), 15000)])
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.purpose = 'purchase'
+    vm.form.doc_type = 'out'
+    vm.form.vat_mode = 'vat'
+    vm.form.total_amount = 15000
+    vm.form.description = 'Nákup materiálu'
+    await flushPromises()
+
+    expect(vm.purchaseOverLimit).toBe(true)
+    await vm.save()
+    expect(m.createDocument).not.toHaveBeenCalled()
+  })
+
+  // ── M-11/M-12: nesedící rozpad DPH neprojde tiše ──────────────────────────
+  it('nesedící rozpad DPH blokuje uložení a řekne o kolik', async () => {
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.purpose = 'sale'
+    vm.form.vat_mode = 'vat'
+    vm.form.total_amount = 10000
+    vm.form.description = 'Prodej'
+    await flushPromises()
+
+    // Ruční zásah do rozpadu: základ 100 proti celkové částce 10 000.
+    const breakdown = wrapper.findComponent({ name: 'CashVatBreakdown' })
+    const bvm = breakdown.vm as any
+    bvm.rows[0].gross = 100
+    bvm.rows[0].base = 100
+    bvm.rows[0].vat = 0
+    await flushPromises()
+
+    expect(vm.vatMatches).toBe(false)
+    expect(vm.canSubmit).toBe(false)
+    expect(wrapper.text()).toContain('cash.form.vat_mismatch_hint')
+
+    await vm.save()
+    expect(m.createDocument).not.toHaveBeenCalled()
+  })
+
+  it('sedící rozpad DPH uložit nechá', async () => {
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.purpose = 'sale'
+    vm.form.vat_mode = 'vat'
+    vm.form.total_amount = 12100
+    vm.form.description = 'Prodej'
+    await flushPromises()
+
+    expect(vm.vatMatches).toBe(true)
+    await vm.save()
+    expect(m.createDocument).toHaveBeenCalledTimes(1)
+  })
+
+  // ── H-7/H-8: hlášky místo popisků a konkrétní důvod ze serveru ────────────
+  it('prázdný popis hlásí větu, ne popisek sloupce', async () => {
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.total_amount = 100
+    await vm.save()
+    expect(vm.error).toBe('cash.validation.description')
+    expect(vm.error).not.toBe('cash.col.description')
+  })
+
+  it('catch-all `validation` ukáže konkrétní hlášku backendu', async () => {
+    m.createDocument.mockRejectedValue({
+      response: { data: { error: { code: 'cash.error.validation', message: 'Vazba na fakturu je povolena jen u úhrady FV/PF.' } } },
+    })
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.total_amount = 100
+    vm.form.description = 'Prodej'
+    await vm.save()
+    expect(vm.error).toBe('Vazba na fakturu je povolena jen u úhrady FV/PF.')
+  })
+})
