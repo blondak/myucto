@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Document;
 
 use MyInvoice\Service\Payroll\Calculation\Money;
+use MyInvoice\Service\Payroll\Insurance\EmployerSocialInsuranceAllocation;
 
 final class PayslipDocumentSnapshotMapper
 {
@@ -639,170 +640,13 @@ final class PayslipDocumentSnapshotMapper
             }
             $discountWeights[$employeeId] = $discountBase->minorUnits;
         }
-        $beforeAllocations = $this->allocateByWeights(
+
+        return EmployerSocialInsuranceAllocation::allocate(
             $baseWeights,
-            $beforeDiscount,
-            'pojistné zaměstnavatele',
-        );
-        $discountAllocations = $this->allocateByWeights(
             $discountWeights,
+            $beforeDiscount,
             $discount,
-            'slevu zaměstnavatele',
         );
-        $allocations = [];
-        foreach ($beforeAllocations as $employeeId => $amount) {
-            $allocated = $amount - $discountAllocations[$employeeId];
-            if ($allocated < 0) {
-                throw new \DomainException(
-                    'Sleva zaměstnavatele převyšuje pojistné konkrétní osoby.',
-                );
-            }
-            $allocations[$employeeId] = $allocated;
-        }
-
-        return $allocations;
-    }
-
-    /**
-     * @param array<int,int> $weights
-     * @return array<int,int>
-     */
-    private function allocateByWeights(
-        array $weights,
-        int $total,
-        string $context,
-    ): array {
-        $weightTotal = new Money(0);
-        foreach ($weights as $weight) {
-            $weightTotal = $weightTotal->add(new Money($weight));
-        }
-        if ($total > 0 && $weightTotal->minorUnits === 0) {
-            throw new \DomainException(
-                ucfirst($context)
-                    . ' nelze rozdělit bez příslušných vyměřovacích základů.',
-            );
-        }
-        if ($weightTotal->minorUnits === 0) {
-            return array_fill_keys(array_keys($weights), 0);
-        }
-
-        $allocations = [];
-        $minorRemainders = [];
-        $assigned = 0;
-        foreach ($weights as $employeeId => $weight) {
-            [$quotient, $remainder] = $this->multiplyDivide(
-                $total,
-                $weight,
-                $weightTotal->minorUnits,
-            );
-            $allocations[$employeeId] = $quotient;
-            $minorRemainders[$employeeId] = $remainder;
-            $assigned += $allocations[$employeeId];
-        }
-        $this->distributeRemainder(
-            $allocations,
-            $total - $assigned,
-            $minorRemainders,
-        );
-        ksort($allocations, SORT_NUMERIC);
-
-        return $allocations;
-    }
-
-    /** @return array{0:int,1:int} */
-    private function multiplyDivide(
-        int $amount,
-        int $weight,
-        int $totalWeight,
-    ): array {
-        if ($amount < 0 || $weight < 0 || $totalWeight <= 0 || $weight > $totalWeight) {
-            throw new \InvalidArgumentException(
-                'Poměrné rozdělení pojistného nemá platné hodnoty.',
-            );
-        }
-        $quotient = 0;
-        $remainder = 0;
-        $partQuotient = intdiv($amount, $totalWeight);
-        $partRemainder = $amount % $totalWeight;
-        $multiplier = $weight;
-        while ($multiplier > 0) {
-            if (($multiplier % 2) === 1) {
-                [$quotient, $remainder] = $this->addDivisionParts(
-                    $quotient,
-                    $remainder,
-                    $partQuotient,
-                    $partRemainder,
-                    $totalWeight,
-                );
-            }
-            $multiplier = intdiv($multiplier, 2);
-            if ($multiplier > 0) {
-                [$partQuotient, $partRemainder] = $this->addDivisionParts(
-                    $partQuotient,
-                    $partRemainder,
-                    $partQuotient,
-                    $partRemainder,
-                    $totalWeight,
-                );
-            }
-        }
-
-        return [$quotient, $remainder];
-    }
-
-    /** @return array{0:int,1:int} */
-    private function addDivisionParts(
-        int $leftQuotient,
-        int $leftRemainder,
-        int $rightQuotient,
-        int $rightRemainder,
-        int $denominator,
-    ): array {
-        $boundary = $denominator - $rightRemainder;
-        if ($leftRemainder >= $boundary) {
-            $remainder = $leftRemainder - $boundary;
-            $carry = 1;
-        } else {
-            $remainder = $leftRemainder + $rightRemainder;
-            $carry = 0;
-        }
-        $quotient = $this->addBounded(
-            $this->addBounded($leftQuotient, $rightQuotient),
-            $carry,
-        );
-
-        return [$quotient, $remainder];
-    }
-
-    private function addBounded(int $left, int $right): int
-    {
-        if ($left < 0 || $right < 0 || $right > PHP_INT_MAX - $left) {
-            throw new \OverflowException('Poměrné rozdělení pojistného přeteklo.');
-        }
-
-        return $left + $right;
-    }
-
-    /**
-     * @param array<int,int> $values
-     * @param array<int,int> $remainders
-     */
-    private function distributeRemainder(
-        array &$values,
-        int $remaining,
-        array $remainders,
-    ): void {
-        if ($remaining < 0 || $remaining > count($values)) {
-            throw new \LogicException('Poměrné rozdělení má neplatný zbytek.');
-        }
-        $ids = array_keys($values);
-        usort($ids, static fn (int $left, int $right): int =>
-            ($remainders[$right] <=> $remainders[$left])
-            ?: ($left <=> $right)
-        );
-        for ($index = 0; $index < $remaining; ++$index) {
-            $values[$ids[$index]]++;
-        }
     }
 
     /**

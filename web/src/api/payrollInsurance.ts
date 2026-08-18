@@ -15,6 +15,41 @@ export type PayrollInsuranceUnavailableReason =
   | 'schema_unsupported'
   | 'person_missing'
 
+/**
+ * Odkud pochází sazba zdravotního pojistného.
+ *
+ * `persisted` = mezikrok uložil ten běh, který částku vydal.
+ * `reconstructed` = mezikrok uložený není, ale je DOLOŽENÝ: sazba se vzala ze
+ * sady pravidel zmrazené v té revizi (shoda otisku bajt na bajt) a po
+ * zaokrouhlení dá tutéž uloženou částku. Musí být na obrazovce odlišené od
+ * `persisted` — je to důkaz, ne uložený záznam.
+ * `not_recorded` = mezikrok chybí a doložit ho nejde. Dopočet z dnešní sady
+ * pravidel by popisoval jiný výpočet než ten, který dal uloženou částku.
+ * `not_applicable` = pojistné nevzniklo (bez účasti, cizí režim). Krok chybí
+ * právem; hlásit ho jako chybějící by byl planý poplach.
+ */
+export type PayrollInsuranceRateSource =
+  | 'persisted'
+  | 'reconstructed'
+  | 'not_recorded'
+  | 'not_applicable'
+
+/**
+ * Metoda rozdělení pojistného zaměstnavatele na osobu. `not_allocatable` není
+ * metoda, ale přiznání, že rozdělit nejde — vždy s důvodem.
+ */
+export type PayrollEmployerAllocationMethod =
+  | 'capped_assessment_base_share'
+  | 'not_allocatable'
+
+/** Proč rozdělení pojistného zaměstnavatele nevzniklo. Vždy věta, nikdy prázdno. */
+export type PayrollEmployerAllocationBlocker =
+  | 'amounts_missing'
+  | 'assessment_base_missing'
+  | 'company_total_mismatch'
+  | 'discount_unattributable'
+  | 'discount_exceeds_person_share'
+
 export interface PayrollInsuranceRate {
   decimal: string
   numerator: number
@@ -84,11 +119,15 @@ export interface PayrollSocialBreakdown {
   }
   /**
    * `scope: 'company_month'` — pojistné zaměstnavatele není osobní veličina.
-   * Počítá se ze součtu vyměřovacích základů všech zaměstnanců a zaokrouhluje
-   * se až na tom součtu, takže rozpad na osobu by byl vymyšlený.
+   * Počítá se ze součtu vyměřovacích základů všech zaměstnanců (§ 5a odst. 1
+   * z. č. 589/1992 Sb.) a zaokrouhluje se až na tom součtu.
+   *
+   * `allocation` je proto ROZDĚLENÍ firemní částky, ne zákonná osobní částka —
+   * a tak se to musí i vypsat. `is_statutory_personal_amount` je vždy `false`.
    */
   employer: {
     scope: 'company_month'
+    allocation: PayrollEmployerSocialAllocation
     contribution_step: PayrollInsuranceStep | null
     assessment_base_minor: number | null
     contribution_before_discount_minor: number | null
@@ -99,6 +138,29 @@ export interface PayrollSocialBreakdown {
   }
   relationships: PayrollSocialRelationshipBreakdown[]
   issues: string[]
+}
+
+export interface PayrollEmployerSocialAllocation {
+  method: PayrollEmployerAllocationMethod
+  not_allocatable_reason: PayrollEmployerAllocationBlocker | null
+  residual_rule: string | null
+  is_statutory_personal_amount: false
+  people_count: number
+  company_assessment_base_minor: number
+  company_contribution_minor: number | null
+  person_assessment_base_minor: number | null
+  person_minor: number | null
+}
+
+/** Čím je rekonstruovaná sazba doložená. `null`, když se nic nerekonstruovalo. */
+export interface PayrollInsuranceRateReconstruction {
+  ruleset_id: string
+  ruleset_version: string
+  ruleset_hash: string
+  parameter_key: string
+  proof: string
+  standard_reconstructed: boolean
+  top_up_reconstructed: boolean
 }
 
 export interface PayrollHealthRelationshipBreakdown {
@@ -182,15 +244,9 @@ export interface PayrollHealthBreakdown {
     ppz_counted: boolean
   }
   contribution: {
-    /**
-     * `not_recorded` = revize spočtená dřív, než se sazba a způsob zaokrouhlení
-     * začaly ukládat. Dopočítat je z dnešní sady pravidel nelze — popisovaly by
-     * jiný výpočet než ten, který dal uloženou částku.
-     *
-     * `not_applicable` = pojistné nevzniklo (bez účasti, cizí režim). Krok chybí
-     * právem; hlásit ho jako chybějící by byl planý poplach.
-     */
-    rate_source: 'persisted' | 'not_recorded' | 'not_applicable'
+    /** Viz {@link PayrollInsuranceRateSource} — `reconstructed` se NESMÍ zobrazit jako uložené. */
+    rate_source: PayrollInsuranceRateSource
+    rate_reconstruction: PayrollInsuranceRateReconstruction | null
     standard_step: PayrollInsuranceStep | null
     standard_minor: number | null
     employee_standard_minor: number | null

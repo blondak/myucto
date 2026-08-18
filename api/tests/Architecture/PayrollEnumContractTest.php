@@ -79,6 +79,16 @@ final class PayrollEnumContractTest extends TestCase
         // vlastní větu — nová hodnota bez věty by se projevila prázdnou kartou.
         'payrollInsurance.ts::PayrollInsuranceUnavailableReason' =>
             'const:MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService::UNAVAILABLE_REASONS',
+        // Odkud pochází sazba. `reconstructed` je DOLOŽENÝ dopočet, ne uložený
+        // záznam — klient, který tu hodnotu nezná, by ho vydal za uložený.
+        'payrollInsurance.ts::PayrollInsuranceRateSource' =>
+            'const:MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService::RATE_SOURCES',
+        // Rozdělení pojistného zaměstnavatele na osobu není zákonná částka.
+        // Metoda i důvod, proč rozdělit nejde, musí mít na obrazovce vlastní větu.
+        'payrollInsurance.ts::PayrollEmployerAllocationMethod' =>
+            'const:MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService::EMPLOYER_ALLOCATION_METHODS',
+        'payrollInsurance.ts::PayrollEmployerAllocationBlocker' =>
+            'const:MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService::EMPLOYER_ALLOCATION_BLOCKERS',
 
         // Pracovní vztah a jeho podmínky
         'payroll.ts::PayrollEmploymentStatus'        => 'db:payroll_employments.status',
@@ -331,6 +341,14 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.components.calculation'  => 'db:payroll_recurring_components.calculation_kind',
 
         'payroll.documents.kind' => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
+
+        // Rozklad pojistného skládá klíče dynamicky (`t(\`…allocation_blocker.${reason}\`)`).
+        // Chybějící věta by u rozdělení, které nevzniklo, vypsala syrový kód —
+        // právě tam, kde má být řečeno, PROČ osobní podíl nedostal.
+        'payroll.runs.insurance.allocation_method'
+            => 'const:MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService::EMPLOYER_ALLOCATION_METHODS',
+        'payroll.runs.insurance.allocation_blocker'
+            => 'const:MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService::EMPLOYER_ALLOCATION_BLOCKERS',
 
         // Retence skládá klíče dynamicky (`t(\`payroll.retention.origin.${origin}\`)`).
         // Chybějící popisek by na obrazovce vypsal `house_policy` — přesně

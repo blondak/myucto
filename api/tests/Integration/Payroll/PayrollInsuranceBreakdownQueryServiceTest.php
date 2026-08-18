@@ -31,7 +31,10 @@ use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxResult;
 use MyInvoice\Service\Payroll\IncomeTax\RelationshipTaxResult;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCalculationStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxRegime;
+use MyInvoice\Repository\Payroll\PayrollRulesetRepository;
 use MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService;
+use MyInvoice\Service\Payroll\Insurance\PayrollInsuranceStepReconstructor;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry;
 use MyInvoice\Service\Payroll\Net\NetRelationshipIncome;
 use MyInvoice\Service\Payroll\Net\PayrollNetResult;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -75,6 +78,9 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
     private const HEALTH_RATE = '0.135';
 
     private Connection $db;
+    private PayrollRulesetRegistry $rulesets;
+    private string $healthRulesetId = self::HEALTH_RULESET_ID;
+    private string $healthRulesetHash = self::HEALTH_RULESET_HASH;
     private PayrollRunStatutoryResultPersister $persister;
     private PayrollInsuranceBreakdownQueryService $service;
     private int $supplierId;
@@ -104,9 +110,11 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
         $this->db = $db;
         $repository = new PayrollStatutoryResultRepository($db);
         $this->persister = new PayrollRunStatutoryResultPersister($repository, $db);
+        $this->rulesets = new PayrollRulesetRegistry(new PayrollRulesetRepository($db));
         $this->service = new PayrollInsuranceBreakdownQueryService(
             new PayrollRunRepository($db),
             $repository,
+            new PayrollInsuranceStepReconstructor($this->rulesets),
         );
 
         $pdo = $db->pdo();
@@ -349,41 +357,247 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
         self::assertSame(0, $breakdown['health']['contribution']['total_minor']);
     }
 
+    /**
+     * MZ-11 — revize bez uloženého mezikroku se rozkladu dočká, ale JEN proti
+     * důkazu: sazba se vezme ze sady pravidel zmrazené v té revizi (shoda otisku)
+     * a musí po zaokrouhlení dát tutéž uloženou částku. Původ se hlásí jako
+     * `reconstructed`, nikdy jako `persisted` — jinak by se důkaz vydával za
+     * uložený záznam.
+     */
+    public function testMissingHealthStepIsReconstructedFromTheRulesetFrozenInTheRevision(): void
+    {
+        $this->useFrozenHealthRuleset();
+        $this->persistResults(recordHealthSteps: false);
+
+        $health = $this->service->breakdown(
+            $this->supplierId,
+            $this->revisionId,
+            $this->employeeIds[0],
+        )['health'];
+
+        self::assertSame('reconstructed', $health['contribution']['rate_source']);
+        self::assertNotNull($health['contribution']['standard_step']);
+        self::assertSame(self::HEALTH_RATE, $health['contribution']['standard_step']['rate']['decimal']);
+        // Krok musí vycházet z uloženého základu a dát uloženou částku na haléř.
+        self::assertSame(3_000_000, $health['contribution']['standard_step']['input_minor_units']);
+        self::assertSame(405_000, $health['contribution']['standard_minor']);
+        self::assertSame(405_000, $health['contribution']['standard_step']['output_minor_units']);
+
+        $evidence = $health['contribution']['rate_reconstruction'];
+        self::assertSame($this->healthRulesetId, $evidence['ruleset_id']);
+        self::assertSame($this->healthRulesetHash, $evidence['ruleset_hash']);
+        self::assertSame('ruleset_hash_and_amount_match', $evidence['proof']);
+        self::assertTrue($evidence['standard_reconstructed']);
+        self::assertFalse($evidence['top_up_reconstructed']);
+    }
+
+    /**
+     * Dopočet do minima se rekonstruuje stejným důkazem, takže i jeho základ
+     * přestane být neznámý.
+     */
+    public function testMissingTopUpStepIsReconstructedTogetherWithItsBase(): void
+    {
+        $this->useFrozenHealthRuleset();
+        $this->persistResults(
+            healthBaseMinorUnits: 1_000_000,
+            healthMinimumMinorUnits: 2_130_000,
+            recordHealthSteps: false,
+        );
+
+        $health = $this->service->breakdown(
+            $this->supplierId,
+            $this->revisionId,
+            $this->employeeIds[0],
+        )['health'];
+
+        self::assertSame('reconstructed', $health['contribution']['rate_source']);
+        self::assertSame(1_130_000, $health['minimum']['top_up_base_minor']);
+        self::assertTrue($health['contribution']['rate_reconstruction']['top_up_reconstructed']);
+    }
+
+    /**
+     * Rekonstrukce, která nedá uloženou částku, se ZAHODÍ. Sada pravidel sedí
+     * otiskem, ale výpočet, který částku vydal, byl jiný — a popsat ho dnešní
+     * sazbou by byl odhad vydávaný za doklad.
+     */
+    public function testReconstructionThatDoesNotReproduceTheStoredAmountIsRejected(): void
+    {
+        $this->useFrozenHealthRuleset();
+        // Uložené částky vznikly jinou sazbou, než jakou nese zmrazená sada.
+        $this->persistResults(recordHealthSteps: false, healthRate: '0.12');
+
+        $health = $this->service->breakdown(
+            $this->supplierId,
+            $this->revisionId,
+            $this->employeeIds[0],
+        )['health'];
+
+        self::assertSame('not_recorded', $health['contribution']['rate_source']);
+        self::assertNull($health['contribution']['rate_reconstruction']);
+        self::assertNull($health['contribution']['standard_step']);
+        // Uložená částka platí dál — jen se k ní nedá doložit sazba.
+        self::assertSame(360_000, $health['contribution']['standard_minor']);
+    }
+
+    /**
+     * MZ-11 — pojistné zaměstnavatele na sociální není osobní veličina (§ 5a
+     * odst. 1 z. č. 589/1992 Sb.), takže osobní číslo je ROZDĚLENÍ. Rozdělení
+     * musí být beze zbytku: součet podílů se rovná firemní částce na korunu
+     * i tehdy, když poměr základů nevychází.
+     */
+    public function testEmployerSocialAllocationAddsUpToTheCompanyAmount(): void
+    {
+        // Ošklivý poměr 1 000 000 : 2 000 100 haléřů, aby zbytek po dělení vznikl.
+        $this->persistResults(cappedBasesByIndex: [0 => 1_000_000, 1 => 2_000_100]);
+
+        $allocated = 0;
+        $companyTotal = null;
+        foreach ($this->employeeIds as $employeeId) {
+            $employer = $this->service->breakdown(
+                $this->supplierId,
+                $this->revisionId,
+                $employeeId,
+            )['social']['employer'];
+            $allocation = $employer['allocation'];
+            self::assertSame('capped_assessment_base_share', $allocation['method']);
+            self::assertSame('largest_remainder', $allocation['residual_rule']);
+            self::assertFalse($allocation['is_statutory_personal_amount']);
+            self::assertNull($allocation['not_allocatable_reason']);
+            self::assertSame(3_000_100, $allocation['company_assessment_base_minor']);
+            self::assertSame($employer['contribution_minor'], $allocation['company_contribution_minor']);
+            $companyTotal = $employer['contribution_minor'];
+            $allocated += $allocation['person_minor'];
+        }
+
+        self::assertSame(744_100, $companyTotal);
+        self::assertSame($companyTotal, $allocated);
+    }
+
+    /**
+     * Osoba s nulovým vyměřovacím základem nesmí dostat nic — ani zbytek po
+     * dělení. Celá částka patří tomu, kdo základ má.
+     */
+    public function testPersonWithoutAnAssessmentBaseGetsNothingFromTheAllocation(): void
+    {
+        $this->persistResults(cappedBasesByIndex: [0 => 0, 1 => 3_000_000]);
+
+        $first = $this->service->breakdown(
+            $this->supplierId,
+            $this->revisionId,
+            $this->employeeIds[0],
+        )['social']['employer'];
+        $second = $this->service->breakdown(
+            $this->supplierId,
+            $this->revisionId,
+            $this->employeeIds[1],
+        )['social']['employer'];
+
+        self::assertSame(0, $first['allocation']['person_minor']);
+        self::assertSame(0, $first['allocation']['person_assessment_base_minor']);
+        self::assertSame($second['contribution_minor'], $second['allocation']['person_minor']);
+    }
+
+    /**
+     * Sada pravidel, kterou nejde dohledat, rekonstrukci NEUMOŽNÍ — otisk se
+     * s ničím neshoduje a rozklad zůstane u přiznání, že sazba chybí.
+     */
+    public function testUnknownRulesetLeavesTheRateUnrecorded(): void
+    {
+        $this->persistResults(recordHealthSteps: false);
+
+        $health = $this->service->breakdown(
+            $this->supplierId,
+            $this->revisionId,
+            $this->employeeIds[0],
+        )['health'];
+
+        self::assertSame('not_recorded', $health['contribution']['rate_source']);
+        self::assertNull($health['contribution']['rate_reconstruction']);
+    }
+
+    /**
+     * Přepne revizi na sadu pravidel, kterou registry ZNÁ, aby šlo ověřit
+     * rekonstrukci. Bere se efektivní verze i s jejím otiskem — přesně to, co
+     * by v revizi zmrazil reálný běh.
+     */
+    private function useFrozenHealthRuleset(): void
+    {
+        $entry = $this->rulesets->entry('cz-payroll-2026.health-insurance.v1');
+        if ($entry === null) {
+            $this->markTestSkipped('Sada pravidel zdravotního pojištění není v registru.');
+        }
+        $version = $entry['version'];
+        $this->healthRulesetId = $version->id;
+        $this->healthRulesetHash = $version->canonicalHash;
+        $snapshotJson = CanonicalJson::encode($this->snapshot());
+        $manifestJson = CanonicalJson::encode([
+            'rulesets' => $this->snapshot()['ruleset_manifest'],
+        ]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_run_revisions
+                SET input_snapshot_json = ?, input_snapshot_hash = ?, ruleset_manifest_hash = ?
+              WHERE id = ?',
+        )->execute([
+            $snapshotJson,
+            hash('sha256', $snapshotJson),
+            hash('sha256', $manifestJson),
+            $this->revisionId,
+        ]);
+    }
+
     public function testForeignPersonIsNotPartOfTheRevision(): void
     {
         $this->expectException(\OutOfBoundsException::class);
         $this->service->breakdown($this->supplierId, $this->revisionId, 987_654_321);
     }
 
+    /** @param array<int,int> $cappedBasesByIndex */
     private function persistResults(
         int $cappedBaseMinorUnits = 3_000_000,
         int $yearToDateMinorUnits = 0,
         int $healthBaseMinorUnits = 3_000_000,
         int $healthMinimumMinorUnits = 0,
         bool $recordHealthSteps = true,
+        array $cappedBasesByIndex = [],
+        string $healthRate = self::HEALTH_RATE,
     ): void {
         $this->persister->persist(
             $this->supplierId,
             $this->revisionId,
             null,
             $this->snapshot(),
-            $this->socialResult($cappedBaseMinorUnits, $yearToDateMinorUnits),
-            $this->healthResult($healthBaseMinorUnits, $healthMinimumMinorUnits, $recordHealthSteps),
+            $this->socialResult($cappedBaseMinorUnits, $yearToDateMinorUnits, $cappedBasesByIndex),
+            $this->healthResult(
+                $healthBaseMinorUnits,
+                $healthMinimumMinorUnits,
+                $recordHealthSteps,
+                $healthRate,
+            ),
             $this->taxResults(),
             $this->netResults(),
         );
     }
 
-    private function socialResult(int $cappedBase, int $yearToDate): SocialInsuranceMonthResult
-    {
+    /** @param array<int,int> $cappedBasesByIndex */
+    private function socialResult(
+        int $cappedBase,
+        int $yearToDate,
+        array $cappedBasesByIndex = [],
+    ): SocialInsuranceMonthResult {
         $rate = DecimalRate::fromString(self::SOCIAL_EMPLOYEE_RATE);
         $people = [];
         $employeeTotal = 0;
-        foreach ($this->employeeIds as $employeeId) {
+        $companyBase = 0;
+        $participatingTotal = 0;
+        foreach ($this->employeeIds as $index => $employeeId) {
+            $personBase = $cappedBasesByIndex[$index] ?? $cappedBase;
+            $companyBase += $personBase;
             $relationshipReference = "employment:{$this->employmentByEmployee[$employeeId]}";
+            $participating = max(3_000_000, $personBase);
+            $participatingTotal += $participating;
             $step = CalculationStep::calculate(
                 'monthly-employee-social-insurance',
-                $cappedBase,
+                $personBase,
                 $rate,
                 RoundingMode::Ceil,
             );
@@ -396,8 +610,8 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
                 'evidence:social-a1',
                 null,
                 $yearToDate,
-                3_000_000,
-                $cappedBase,
+                $participating,
+                $personBase,
                 $contribution,
                 0,
                 $contribution,
@@ -414,8 +628,8 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
                         null,
                         ['regular-employment'],
                     ),
-                    3_000_000,
-                    $cappedBase,
+                    $participating,
+                    $personBase,
                     ['BASE'],
                     [],
                     ['BASE'],
@@ -428,7 +642,6 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
                 [],
             );
         }
-        $companyBase = $cappedBase * count($this->employeeIds);
         $employerStep = CalculationStep::calculate(
             'monthly-employer-social-insurance',
             $companyBase,
@@ -440,7 +653,7 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
         return new SocialInsuranceMonthResult(
             '2026-06-30',
             SocialCalculationStatus::Calculated,
-            3_000_000 * count($this->employeeIds),
+            $participatingTotal,
             $companyBase,
             $employeeTotal,
             $employer,
@@ -460,8 +673,9 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
         int $assessmentBase,
         int $minimumBase,
         bool $recordSteps,
+        string $rateDecimal = self::HEALTH_RATE,
     ): HealthInsuranceMonthResult {
-        $rate = DecimalRate::fromString(self::HEALTH_RATE);
+        $rate = DecimalRate::fromString($rateDecimal);
         $insurerCodes = ['111', '201'];
         $people = [];
         $liabilities = [];
@@ -565,8 +779,8 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
             $people,
             $liabilities,
             [],
-            self::HEALTH_RULESET_ID,
-            self::HEALTH_RULESET_HASH,
+            $this->healthRulesetId,
+            $this->healthRulesetHash,
         );
     }
 
@@ -733,7 +947,7 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
             'office_id' => null,
             'ruleset_manifest' => [
                 ['id' => self::SOCIAL_RULESET_ID, 'sha256' => self::SOCIAL_RULESET_HASH],
-                ['id' => self::HEALTH_RULESET_ID, 'sha256' => self::HEALTH_RULESET_HASH],
+                ['id' => $this->healthRulesetId, 'sha256' => $this->healthRulesetHash],
                 ['id' => self::TAX_RULESET_ID, 'sha256' => self::TAX_RULESET_HASH],
             ],
             'people' => $people,

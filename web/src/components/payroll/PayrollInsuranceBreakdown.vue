@@ -61,6 +61,18 @@ const healthNotApplicable = computed(() =>
   health.value?.contribution.rate_source === 'not_applicable',
 )
 
+/**
+ * Sazba se neuložila, ale je DOLOŽENÁ: vzala se ze sady pravidel zmrazené v té
+ * revizi (shoda otisku bajt na bajt) a po zaokrouhlení dá tutéž uloženou částku.
+ * Uživatel to musí vidět — jinak by rekonstrukci četl jako uložený mezikrok.
+ */
+const healthRateReconstructed = computed(() =>
+  health.value?.contribution.rate_source === 'reconstructed',
+)
+
+/** Rozdělení pojistného zaměstnavatele na osobu — alokace, ne zákonná částka. */
+const employerAllocation = computed(() => social.value?.employer.allocation ?? null)
+
 function personLabel(person: PayrollRunResultPerson): string {
   return props.personNames[person.employee_id]
     || t('payroll.runs.insurance.person_fallback', { id: person.employee_id })
@@ -324,6 +336,39 @@ watch(
                 </dd>
               </div>
             </dl>
+
+            <!--
+              Podíl osoby je ALOKACE firemní částky, ne zákonná osobní částka.
+              Proto má vlastní rámeček, vlastní popisek a větu o metodě — vypsat
+              ho mezi ostatní částky by z něj udělal zákonný údaj.
+            -->
+            <div
+              v-if="employerAllocation"
+              class="mt-3 rounded-lg border border-dashed border-neutral-300 bg-surface p-3"
+              data-testid="social-employer-allocation"
+            >
+              <p class="text-sm font-medium text-neutral-800">
+                {{ t('payroll.runs.insurance.allocation_title') }}
+              </p>
+              <template v-if="employerAllocation.method === 'not_allocatable'">
+                <p class="mt-1 text-sm text-warning-900" data-testid="allocation-blocked">
+                  {{ t(`payroll.runs.insurance.allocation_blocker.${employerAllocation.not_allocatable_reason}`) }}
+                </p>
+              </template>
+              <template v-else>
+                <p class="mt-1 text-lg font-semibold tabular-nums text-neutral-900">
+                  {{ moneyOrUnknown(employerAllocation.person_minor) }}
+                </p>
+                <p class="mt-1 text-xs text-neutral-500">
+                  {{ t('payroll.runs.insurance.allocation_note', {
+                    method: t(`payroll.runs.insurance.allocation_method.${employerAllocation.method}`),
+                    personBase: money(employerAllocation.person_assessment_base_minor),
+                    companyBase: money(employerAllocation.company_assessment_base_minor),
+                    people: employerAllocation.people_count,
+                  }) }}
+                </p>
+              </template>
+            </div>
           </div>
 
           <div v-if="showRelationships && social.relationships.length" class="space-y-2">
@@ -435,6 +480,23 @@ watch(
               </dd>
             </div>
           </dl>
+
+          <!--
+            Rekonstruovaná sazba se NESMÍ tvářit jako uložená: věta stojí NAD
+            rozkladem, který z ní vychází, a jmenuje sadu pravidel, ze které je
+            doložená. Rozklad samotný se zobrazí normálně — je dokázaný shodou
+            s uloženou částkou.
+          -->
+          <p
+            v-if="healthRateReconstructed && health.contribution.rate_reconstruction"
+            class="rounded-lg border border-payroll-200 bg-surface p-3 text-sm text-neutral-700"
+            data-testid="health-rate-reconstructed"
+          >
+            {{ t('payroll.runs.insurance.health_rate_reconstructed', {
+              ruleset: health.contribution.rate_reconstruction.ruleset_id,
+              version: health.contribution.rate_reconstruction.ruleset_version,
+            }) }}
+          </p>
 
           <p
             v-if="healthRateMissing"
