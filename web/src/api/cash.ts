@@ -67,6 +67,16 @@ export interface CashDocumentPostResult {
   doc_number: string; journal_entry_id: number | null; warnings: string[]
 }
 
+/**
+ * Odpověď mazání. `doc_number` je vyplněné jen u dokladu, který už číslo dostal —
+ * a jen tehdy backend hlásí `cash.warning.series_gap` (u draftu díra nevzniká).
+ */
+export interface CashDocumentDeleteResult {
+  deleted: boolean; warnings: string[]
+  doc_number?: string | null
+  deleted_entry_ids?: number[]
+}
+
 export interface CashDocumentFilters {
   register_id?: number; doc_type?: CashDocType; purpose?: CashPurpose
   status?: CashDocumentStatus; from?: string; to?: string; q?: string
@@ -150,7 +160,8 @@ export const cashApi = {
       `/accounting/cash-documents/${id}/reverse`, { reason, entry_date: entryDate }).then(r => r.data),
   // force=1 → smaže doklad i s účetními zápisy (bez force jen draft).
   deleteDocument: (id: number, force = false) =>
-    api.delete(`/accounting/cash-documents/${id}`, { params: force ? { force: 1 } : {} }).then(() => true),
+    api.delete<CashDocumentDeleteResult>(`/accounting/cash-documents/${id}`,
+      { params: force ? { force: 1 } : {} }).then(r => r.data),
   documentPdfUrl: (id: number) => `/api/accounting/cash-documents/${id}/pdf`,
 
   /**

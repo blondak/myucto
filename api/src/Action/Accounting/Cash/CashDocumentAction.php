@@ -176,7 +176,12 @@ final class CashDocumentAction
                     'doc_number'        => $result['doc_number'],
                 ]);
                 // Číslo řady se nevrací → v PPD/VPD zůstane díra. Uživatel to musí vidět.
-                $payload['warnings'][] = 'cash.warning.series_gap';
+                // Draft ale číslo nikdy nedostal (`doc_number === null`), takže po něm
+                // žádná díra nezůstane — varovat u něj by protiřečilo hlášce
+                // `cash.delete.draft_warning`, kterou u téhož dokladu ukazuje UI.
+                if ($result['doc_number'] !== null) {
+                    $payload['warnings'][] = 'cash.warning.series_gap';
+                }
                 $payload['doc_number'] = $result['doc_number'];
                 $payload['deleted_entry_ids'] = $result['deleted_entry_ids'];
             } else {
@@ -274,7 +279,10 @@ final class CashDocumentAction
     private function mapCashError(Response $response, \Throwable $e): Response
     {
         if ($e instanceof CashException) {
-            return Json::error($response, 'cash.error.' . $e->errorCode, $e->getMessage(), $e->httpStatus);
+            // `params` = strojová data hlášky pro i18n na FE (klient si je dosadí do
+            // vlastního překladu; česká `message` je jen fallback).
+            return Json::error($response, 'cash.error.' . $e->errorCode, $e->getMessage(), $e->httpStatus,
+                $e->extra === [] ? [] : ['params' => $e->extra]);
         }
         return $this->mapPostingError($response, $e);
     }

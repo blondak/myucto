@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   toastWarning: vi.fn(),
+  canWrite: vi.fn((_permission: string) => true),
 }))
 
 vi.mock('@/api/cash', () => ({
@@ -24,7 +25,7 @@ vi.mock('@/api/cash', () => ({
     documentPdfUrl: (id: number) => `/pdf/${id}`,
   },
 }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: m.canWrite }) }))
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError, warning: m.toastWarning }),
 }))
@@ -110,7 +111,8 @@ describe('CashRegister.vue', () => {
       account_id: 1, account_name: 'Pokladna', is_default: true, is_active: true,
       documents_count: 1, balance: 100, balance_date: '2093-03-01', created_at: '2093-01-01',
     }])
-    m.deleteDocument.mockResolvedValue(true)
+    m.canWrite.mockImplementation((_p: string) => true)
+    m.deleteDocument.mockResolvedValue({ deleted: true, warnings: [] })
     m.postDocument.mockResolvedValue({ doc_number: 'PPD-2093-0002', journal_entry_id: 5, warnings: [] })
   })
 
@@ -179,6 +181,36 @@ describe('CashRegister.vue', () => {
     expect(vm.signedAmount({ doc_type: 'in', total_amount: 100 })).toBe(100)
     expect(vm.signedAmount({ doc_type: 'out', total_amount: 100 })).toBe(-100)
     expect(wrapper.text()).not.toContain('−100')
+  })
+
+  it('varování o díře v číselné řadě se po smazání zobrazí', async () => {
+    // Odpověď mazání se dřív zahazovala (`.then(() => true)`), takže jediný
+    // warning, který server u mazání posílá, se k uživateli nikdy nedostal.
+    m.deleteDocument.mockResolvedValue({
+      deleted: true, warnings: ['cash.warning.series_gap'], doc_number: 'PPD-2093-0001',
+    })
+    const wrapper = await mountList([doc('posted', 1)])
+    const vm = wrapper.vm as any
+    vm.openDelete(doc('posted', 1))
+    await vm.submitDelete()
+    expect(m.toastWarning).toHaveBeenCalledWith('cash.warning.series_gap')
+  })
+
+  it('trvalé smazání se bez práva cash.close nenabízí', async () => {
+    // Server chce na `?force=1` právo `cash.close`; role „Pokladní" (jen
+    // cash.document.write) dřív tlačítko viděla a 403 dostala až po potvrzení.
+    m.canWrite.mockImplementation((p: string) => p !== 'cash.close')
+    const wrapper = await mountList([doc('posted', 1), doc('draft', 2)])
+    const vm = wrapper.vm as any
+    expect(vm.canDelete(doc('posted', 1))).toBe(false)
+    expect(vm.canDelete(doc('draft', 2))).toBe(true)
+  })
+
+  it('správa pokladen je gatovaná na modul cash, ne na doklady', async () => {
+    m.canWrite.mockImplementation((p: string) => p !== 'cash')
+    const wrapper = await mountList([])
+    const actions = (wrapper.vm as any).headerActions as any[]
+    expect(actions.find(a => a.key === 'registers').show).toBe(false)
   })
 
   it('selhání načtení pokladen se nespolkne (prázdný seznam svádí k duplicitní pokladně)', async () => {

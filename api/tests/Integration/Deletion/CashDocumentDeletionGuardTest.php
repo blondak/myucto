@@ -96,6 +96,33 @@ final class CashDocumentDeletionGuardTest extends TestCase
         self::assertSame(0, $this->rowCount($id));
     }
 
+    /** Číslovaný doklad po sobě v řadě nechá díru — o té uživatel vědět musí. */
+    public function testForcedDeleteOfNumberedDocumentWarnsAboutSeriesGap(): void
+    {
+        $id = $this->seedCashDocument($this->db->pdo(), $this->supplierId, $this->registerId, 'gap-posted');
+
+        $response = $this->delete($id, force: true);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(['cash.warning.series_gap'], $this->json($response)['warnings']);
+    }
+
+    /**
+     * Draft číslo nikdy nedostal, takže po něm žádná díra nezůstane. Warning se
+     * dřív přidával bezpodmínečně a protiřečil hlášce `cash.delete.draft_warning`.
+     */
+    public function testForcedDeleteOfNumberlessDraftDoesNotWarnAboutSeriesGap(): void
+    {
+        $pdo = $this->db->pdo();
+        $id = $this->seedCashDocument($pdo, $this->supplierId, $this->registerId, 'gap-draft', 'draft');
+        $pdo->prepare('UPDATE cash_documents SET doc_number = NULL WHERE id = ?')->execute([$id]);
+
+        $response = $this->delete($id, force: true);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame([], $this->json($response)['warnings']);
+    }
+
     public function testDocumentUsedAsPayrollPaymentEvidenceIsRefusedWithExplanation(): void
     {
         $pdo = $this->db->pdo();
