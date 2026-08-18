@@ -926,6 +926,24 @@ export type PayrollComponentFrequency = 'regular' | 'one_off'
 export type PayrollComponentTaxTreatment = 'included' | 'exempt' | 'withholding_candidate' | 'manual_review'
 export type PayrollComponentInclusion = 'included' | 'excluded' | 'manual_review'
 
+/**
+ * Roční koš osvobození nepeněžních benefitů podle § 6 odst. 9 ZDP. Limit platí
+ * na ÚHRN plnění za dané ustanovení, ne na jednu mzdovou složku.
+ */
+export type PayrollBenefitExemptionBasket = 'non_cash_health' | 'non_cash_leisure' | 'old_age_savings'
+
+export interface PayrollBenefitBasketUsage {
+  basket: PayrollBenefitExemptionBasket
+  statute: string
+  limit_minor: number
+  used_before_minor: number
+  used_after_minor: number
+  remaining_minor: number
+  exempt_minor: number
+  taxable_minor: number
+  limit_exceeded: boolean
+}
+
 export interface PayrollComponent {
   id: number
   supplier_id: number
@@ -946,6 +964,7 @@ export interface PayrollComponent {
   accounting_debit_code: string | null
   accounting_credit_code: string | null
   annual_limit_minor: number | null
+  exemption_basket: PayrollBenefitExemptionBasket | null
   valid_from: string
   valid_to: string | null
   is_active: boolean
@@ -1248,6 +1267,7 @@ export interface PayrollInputPreview {
   annual_used_minor: number
   annual_after_minor: number
   annual_limit_exceeded: boolean
+  exemption_basket: PayrollBenefitBasketUsage | null
 }
 
 export interface PayrollRecurringMaterialization {

@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Calculation\Money;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
 
 final class PayrollInputPreviewService
 {
@@ -15,6 +16,7 @@ final class PayrollInputPreviewService
         private readonly PayrollComponentRepository $components,
         private readonly PayrollInputRepository $inputs,
         private readonly PayrollComponentDefinitionFactory $factory,
+        private readonly PayrollBenefitBasketService $baskets,
     ) {}
 
     /**
@@ -85,6 +87,43 @@ final class PayrollInputPreviewService
             'annual_used_minor' => $used,
             'annual_after_minor' => $after,
             'annual_limit_exceeded' => $limit !== null && $after > $limit,
+            'exemption_basket' => $this->basketSplit($supplierId, $definition, $input),
         ];
+    }
+
+    /**
+     * Čerpání zákonného koše osvobození, kdyby se vstup schválil teď.
+     *
+     * Bez tohohle náhledu je koš past: účetní zjistí překročení až tehdy, když
+     * z prosincového benefitu vyskočí daň a pojistné. Vrací se i pro plnění,
+     * které se do koše ještě vejde — smysl má vidět zbytek, ne jen překročení.
+     *
+     * @param array{employee_id:int, period_start:string, amount_minor:int, ...} $input
+     * @return array<string,int|string|bool>|null
+     */
+    private function basketSplit(
+        int $supplierId,
+        PayrollComponentDefinition $definition,
+        array $input,
+    ): ?array {
+        if ($definition->exemptionBasket === null) {
+            return null;
+        }
+        $taxYear = (int) substr($input['period_start'], 0, 4);
+        try {
+            return $this->baskets->split(
+                $definition->exemptionBasket,
+                $taxYear,
+                $this->inputs->annualBasketTotal(
+                    $supplierId,
+                    $input['employee_id'],
+                    $definition->exemptionBasket,
+                    $taxYear,
+                ),
+                $input['amount_minor'],
+            )->jsonSerialize();
+        } catch (PayrollRulesetException) {
+            return null;
+        }
     }
 }

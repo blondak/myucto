@@ -429,6 +429,32 @@ pojištění, průměrného výdělku, exekučního základu, JMHZ, statistiky a
 účetnictví. Schválený vstup si uloží neměnný snapshot této klasifikace; pozdější
 změna katalogu proto nepřepíše již zpracované období.
 
+### Roční koš osvobození benefitů
+
+U nepeněžních benefitů se limit osvobození podle zákona o daních z příjmů
+nevztahuje na jednu mzdovou složku, ale na **úhrn všech plnění daného
+ustanovení za kalendářní rok**. Aplikace to drží jako **zákonný koš**, který se
+u složky vybírá v katalogu:
+
+- **zdravotní plnění** (§ 6 odst. 9 písm. d) bod 1) — do výše průměrné mzdy;
+- **rekreace, sport a kultura** (§ 6 odst. 9 písm. d) bod 2) — do poloviny
+  průměrné mzdy;
+- **spoření na stáří a dlouhodobá péče** (§ 6 odst. 9 písm. m)) — 50 000 Kč.
+
+Koš se sčítá za osobu u zaměstnavatele, tedy i napříč souběžnými pracovními
+vztahy, a částku limitu bere z rulesetu daně z příjmů účinného pro daný rok.
+Náhled mzdového vstupu ukazuje, kolik z koše je po tomto plnění vyčerpáno a
+kolik zbývá — překročení se tedy nezjistí až v prosinci.
+
+Plnění nad limit se **neblokuje**: zákon ho nezakazuje, jen ho zdaňuje.
+Nadlimitní část se při schválení vstupu zmrazí zvlášť a do výpočtu vstupuje jako
+samostatná zdanitelná složka, která se započítá do daně i do vyměřovacích
+základů sociálního a zdravotního pojištění. Částka přesně na limitu je ještě
+celá osvobozená.
+
+Pole **Roční limit** u složky je něco jiného — je to **vlastní strop
+zaměstnavatele** a schválení vstupu nad něj neprojde.
+
 U složky zahrnuté do JMHZ nastav také konkrétní cílový atribut měsíčního
 hlášení. Stav **Chybí mapování** nebrání výpočtu mzdy, ale znamená, že složku
 zatím nelze bezpečně převést do úplného JMHZ. Celkové cíle používej jen pro

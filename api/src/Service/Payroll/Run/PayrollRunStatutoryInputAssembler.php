@@ -1394,7 +1394,7 @@ final class PayrollRunStatutoryInputAssembler
                 continue;
             }
             try {
-                $result[] = $this->components->social($input);
+                array_push($result, ...$this->components->social($input));
             } catch (\InvalidArgumentException|\ValueError|\UnexpectedValueException) {
                 $this->issue(
                     'social_insurance',
@@ -1451,7 +1451,7 @@ final class PayrollRunStatutoryInputAssembler
                 continue;
             }
             try {
-                $result[] = $this->components->health($input, $periodStart);
+                array_push($result, ...$this->components->health($input, $periodStart));
             } catch (\InvalidArgumentException|\ValueError|\UnexpectedValueException) {
                 $this->issue(
                     'health_insurance',
@@ -1484,7 +1484,13 @@ final class PayrollRunStatutoryInputAssembler
             $component = $this->object($input['component'] ?? null);
             $treatment = $component['tax_treatment'] ?? null;
             $usable = true;
-            if ($treatment === 'exempt') {
+            // Osvobození je jinak nedoložené tvrzení a výpočet se u něj zastaví.
+            // Doložit ho umí zákonný koš § 6 odst. 9 ZDP: má-li vstup zmrazený
+            // rozpad, je osvobozená část ohraničená ročním limitem a nadlimitní
+            // část se zdaní jako běžný příjem. Bez rozpadu důkaz pořád chybí.
+            if ($treatment === 'exempt'
+                && ($input['benefit_basket'] ?? null) === null
+            ) {
                 $this->issue(
                     'income_tax',
                     'tax_component_exemption_evidence_missing',
@@ -1515,7 +1521,7 @@ final class PayrollRunStatutoryInputAssembler
                 continue;
             }
             try {
-                $result[] = $this->components->incomeTax($input, $periodStart);
+                array_push($result, ...$this->components->incomeTax($input, $periodStart));
             } catch (\InvalidArgumentException|\ValueError|\UnexpectedValueException) {
                 $this->issue(
                     'income_tax',

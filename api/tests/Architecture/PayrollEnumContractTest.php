@@ -72,6 +72,8 @@ final class PayrollEnumContractTest extends TestCase
      */
     private const UNION_DOMAIN = [
         // Mzdový běh
+        'payroll.ts::PayrollBenefitExemptionBasket'
+            => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
         'payroll.ts::PayrollRunStatus'      => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunStatus',
         'payroll.ts::PayrollRunCommand'     => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunCommand',
         'payroll.ts::PayrollRunOutcomeCode' => 'consts:MyInvoice\Service\Payroll\Run\PayrollRunCommandOutcome',
@@ -353,6 +355,11 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.people.registration.agenda'  => 'db:payroll_registration_identity_snapshots.agenda_code',
 
         'payroll.components.kind'         => 'enum:MyInvoice\Service\Payroll\Component\PayrollComponentKind',
+        // Koš se v šabloně skládá dynamicky
+        // (`t(\`payroll.components.exemption_basket.${basket}\`)`), takže bez
+        // věty by účetní u benefitu viděla `non_cash_leisure` místo paragrafu.
+        'payroll.components.exemption_basket'
+            => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
         'payroll.components.frequency'    => 'enum:MyInvoice\Service\Payroll\Component\PayrollComponentFrequency',
         'payroll.components.source'       => 'db:payroll_inputs.source_kind',
         'payroll.components.input_status' => 'db:payroll_inputs.status',

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Component\PayrollBenefitBasketService;
+use MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket;
 use MyInvoice\Service\Payroll\Component\PayrollComponentDefinitionFactory;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
@@ -15,6 +17,7 @@ final class PayrollInputRepository
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollComponentDefinitionFactory $definitionFactory,
+        private readonly PayrollBenefitBasketService $baskets,
     ) {}
 
     /**
@@ -251,6 +254,7 @@ final class PayrollInputRepository
                         component.accounting_debit_code,
                         component.accounting_credit_code,
                         component.annual_limit_minor,
+                        component.exemption_basket,
                         component.valid_from,
                         component.valid_to,
                         component.row_version AS component_row_version
@@ -298,34 +302,59 @@ final class PayrollInputRepository
                     $e->getMessage(),
                 );
             }
+            $employeeId = PayrollTimeValue::int($row['employee_id'] ?? null, 'employee_id');
+            $componentId = PayrollTimeValue::int($row['component_id'] ?? null, 'component_id');
+            $amountMinor = PayrollTimeValue::int($row['amount_minor'] ?? null, 'amount_minor');
+            $taxYear = (int) substr(
+                PayrollTimeValue::string($row['period_start'] ?? null, 'period_start'),
+                0,
+                4,
+            );
+            $split = null;
+            if ($definition->annualLimitMinor !== null
+                || $definition->exemptionBasket !== null
+            ) {
+                $this->lockEmployee($pdo, $supplierId, $employeeId);
+            }
+            // Vlastní strop zaměstnavatele. NENÍ to daňová hranice: zákon
+            // poskytnutí nad limit nezakazuje, jen ho zdaňuje. Zůstává proto
+            // tvrdou zábranou schválení a hlídá se dál per složka.
             if ($definition->annualLimitMinor !== null) {
-                $this->lockEmployee(
-                    $pdo,
-                    $supplierId,
-                    PayrollTimeValue::int($row['employee_id'] ?? null, 'employee_id'),
-                );
                 $used = $this->annualBenefitTotal(
                     $supplierId,
-                    PayrollTimeValue::int($row['employee_id'] ?? null, 'employee_id'),
-                    PayrollTimeValue::int($row['component_id'] ?? null, 'component_id'),
-                    (int) substr(
-                        PayrollTimeValue::string(
-                            $row['period_start'] ?? null,
-                            'period_start',
-                        ),
-                        0,
-                        4,
-                    ),
+                    $employeeId,
+                    $componentId,
+                    $taxYear,
                 );
-                if ($used + max(
-                    0,
-                    PayrollTimeValue::int($row['amount_minor'] ?? null, 'amount_minor'),
-                )
-                    > $definition->annualLimitMinor
-                ) {
+                if ($used + max(0, $amountMinor) > $definition->annualLimitMinor) {
                     throw new PayrollInputApprovalException(
                         'benefit_limit_exceeded',
                         'Schválením by byl překročen roční limit benefitu.',
+                    );
+                }
+            }
+            // Zákonný koš podle § 6 odst. 9 ZDP. Neblokuje: nadlimitní část je
+            // běžný zdanitelný příjem a rozpad se zmrazí na vstupu, aby ho
+            // výpočet běhu nemusel dopočítávat z historie schvalování.
+            if ($definition->exemptionBasket !== null) {
+                try {
+                    $split = $this->baskets->split(
+                        $definition->exemptionBasket,
+                        $taxYear,
+                        $this->annualBasketTotal(
+                            $supplierId,
+                            $employeeId,
+                            $definition->exemptionBasket,
+                            $taxYear,
+                        ),
+                        $amountMinor,
+                    );
+                } catch (\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException $e) {
+                    throw new PayrollInputApprovalException(
+                        'benefit_basket_limit_unavailable',
+                        'Roční limit koše osvobození není pro dané zdaňovací období '
+                        . 'k dispozici, rozpad plnění proto nelze určit.',
+                        previous: $e,
                     );
                 }
             }
@@ -355,6 +384,9 @@ final class PayrollInputRepository
                     SET status = "approved",
                         component_snapshot_json = ?,
                         component_snapshot_hash = ?,
+                        benefit_basket = ?,
+                        benefit_exempt_minor = ?,
+                        benefit_taxable_minor = ?,
                         approved_by = ?,
                         approved_at = NOW(),
                         row_version = row_version + 1
@@ -364,6 +396,9 @@ final class PayrollInputRepository
             $update->execute([
                 $json,
                 $hash,
+                $split?->basket->value,
+                $split?->exemptMinor,
+                $split?->taxableMinor,
                 $userId,
                 $supplierId,
                 $id,
@@ -380,11 +415,11 @@ final class PayrollInputRepository
                      VALUES (?, ?, ?, ?, YEAR(?), ?)'
                 )->execute([
                     $supplierId,
-                    PayrollTimeValue::int($row['employee_id'] ?? null, 'employee_id'),
-                    PayrollTimeValue::int($row['component_id'] ?? null, 'component_id'),
+                    $employeeId,
+                    $componentId,
                     $id,
                     PayrollTimeValue::string($row['period_start'] ?? null, 'period_start'),
-                    PayrollTimeValue::int($row['amount_minor'] ?? null, 'amount_minor'),
+                    $amountMinor,
                 ]);
             }
             if ($ownsTransaction) {
@@ -574,6 +609,41 @@ final class PayrollInputRepository
         }
     }
 
+    /**
+     * Úhrn zákonného koše osvobození za rok — NAPŘÍČ VŠEMI SLOŽKAMI téhož koše
+     * a napříč všemi vztahy téže osoby u téhož zaměstnavatele.
+     *
+     * Klíč akumulátoru je `employee_id`, ne `employment_id`, takže souběžné
+     * vztahy sdílí koš samy od sebe. Sčítá se HRUBÁ částka plnění, ne jen její
+     * osvobozená část: koš čerpá celé plnění a další plnění se proti němu
+     * poměřuje stejně.
+     */
+    public function annualBasketTotal(
+        int $supplierId,
+        int $employeeId,
+        PayrollBenefitExemptionBasket $basket,
+        int $year,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COALESCE(SUM(accumulator.amount_minor), 0)
+               FROM payroll_benefit_accumulators accumulator
+               JOIN payroll_component_definitions component
+                 ON component.supplier_id = accumulator.supplier_id
+                AND component.id = accumulator.component_id
+              WHERE accumulator.supplier_id = ?
+                AND accumulator.employee_id = ?
+                AND accumulator.tax_year = ?
+                AND accumulator.status = "active"
+                AND component.exemption_basket = ?'
+        );
+        $stmt->execute([$supplierId, $employeeId, $year, $basket->value]);
+
+        return PayrollTimeValue::int(
+            $stmt->fetchColumn(),
+            'annual_basket_total',
+        );
+    }
+
     public function annualBenefitTotal(
         int $supplierId,
         int $employeeId,
@@ -675,6 +745,8 @@ final class PayrollInputRepository
             'row_version',
             'created_by',
             'approved_by',
+            'benefit_exempt_minor',
+            'benefit_taxable_minor',
         ] as $key) {
             if (($row[$key] ?? null) !== null) {
                 $row[$key] = PayrollTimeValue::int($row[$key], $key);

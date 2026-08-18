@@ -1429,7 +1429,9 @@
                 "cancelled": "The monthly input was cancelled.",
                 "cancel_failed": "The monthly input could not be cancelled.",
                 "empty": "There are no payroll inputs in this period",
-                "empty_hint": "Add a one-off input, import a file or materialize recurring assignments."
+                "empty_hint": "Add a one-off input, import a file or materialize recurring assignments.",
+                "basket_usage": "Basket {basket} under {statute}: after this benefit {used} of {limit} is used, {remaining} remains.",
+                "basket_over_limit": "The annual basket limit is exceeded: {exempt} exempt, {taxable} taxable — the excess enters income tax and both insurance assessment bases."
             },
             "import": {
                 "title": "Monthly input import",
@@ -1501,7 +1503,10 @@
                 "quantity": "Quantity",
                 "source_period": "Source period",
                 "external_id": "External identifier",
-                "source": "Source"
+                "source": "Source",
+                "annual_limit_hint": "Employer's own cap — approval above it is refused.",
+                "exemption_basket": "Statutory exemption basket",
+                "exemption_basket_hint": "The annual limit of § 6(9) of the Income Tax Act applies to the total of all components in the basket; the excess is taxed."
             },
             "kind": {
                 "base_wage": "Base monthly wage",
@@ -1573,7 +1578,13 @@
                 "locked": "Locked by run",
                 "cancelled": "Cancelled"
             },
-            "load_failed_hint": "Payroll components did not load. Please try again; an empty catalogue right now does not mean nothing is configured."
+            "load_failed_hint": "Payroll components did not load. Please try again; an empty catalogue right now does not mean nothing is configured.",
+            "exemption_basket": {
+                "none": "No statutory basket",
+                "non_cash_health": "Health benefits (§ 6(9)(d)(1))",
+                "non_cash_leisure": "Recreation, sport and culture (§ 6(9)(d)(2))",
+                "old_age_savings": "Old-age savings and long-term care (§ 6(9)(m))"
+            }
         },
         "documents": {
             "batch_run": "Document batch ({office})",

@@ -124,15 +124,17 @@ final class CzechPayrollRulesets2026
                 //   bod 1 — zdravotnické služby a zdravotnické prostředky … průměrná mzda
                 //   bod 2 — rekreace a zájezd, sport, kultura, tisk, použití
                 //           vzdělávacích a předškolních zařízení … polovina průměrné mzdy
-                // Limit je úhrn za celé písmeno (resp. bod), ne za jednu mzdovou
-                // složku. Složkový `annual_limit_minor` je proto jen strop JEDNÉ
-                // složky — nutná, ne postačující podmínka; viz PayrollComponentDefaults.
+                // Limit je úhrn za bod, ne za jednu mzdovou složku, a nerovnost je
+                // NEOSTRÁ („do výše"). Od migrace 1480 ho drží společný koš
+                // {@see \MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket};
+                // složkový `annual_limit_minor` je jen vlastní strop zaměstnavatele.
                 'benefit_exemption.non_cash_health.yearly' => PayrollRuleValue::moneyMinor(4_896_700),
                 'benefit_exemption.non_cash_leisure.yearly' => PayrollRuleValue::moneyMinor(2_448_350),
-                // § 6 odst. 9 písm. p) ZDP — příspěvek zaměstnavatele na daňově
+                // § 6 odst. 9 písm. m) ZDP — příspěvek zaměstnavatele na daňově
                 // podporované produkty spoření na stáří a na pojištění dlouhodobé
-                // péče, osvobozený v úhrnu nejvýše 50 000 Kč ročně. Částku píše
-                // zákon číslem, z průměrné mzdy se neodvozuje.
+                // péče, osvobozený „do úhrnné výše 50000 Kč ročně". Částku píše
+                // zákon číslem, z průměrné mzdy se neodvozuje. Písmeno se posunulo:
+                // do 2023 to bylo p), ve znění účinném pro 2026 je to m).
                 'benefit_exemption.old_age_savings.yearly' => PayrollRuleValue::moneyMinor(5_000_000),
                 // § 35d odst. 4 ZDP: „Měsíční daňový bonus lze vyplatit, pokud jeho
                 // výše činí ALESPOŇ 50 Kč." Nerovnost je NEOSTRÁ — přesně 50 Kč se

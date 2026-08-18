@@ -9,6 +9,7 @@ import {
   type PayrollComponentJmhzMappingState,
   type PayrollComponentJmhzTarget,
   type PayrollComponentFrequency,
+  type PayrollBenefitExemptionBasket,
   type PayrollComponentInclusion,
   type PayrollComponentKind,
   type PayrollComponentPayload,
@@ -255,6 +256,7 @@ const valueKinds: PayrollComponentValueKind[] = ['monetary', 'non_monetary']
 const frequencies: PayrollComponentFrequency[] = ['regular', 'one_off']
 const taxTreatments: PayrollComponentTaxTreatment[] = ['included', 'exempt', 'withholding_candidate', 'manual_review']
 const inclusionTreatments: PayrollComponentInclusion[] = ['included', 'excluded', 'manual_review']
+const exemptionBaskets: PayrollBenefitExemptionBasket[] = ['non_cash_health', 'non_cash_leisure', 'old_age_savings']
 const calculationKinds: PayrollRecurringCalculationKind[] = ['fixed_amount', 'employment_gross_basis_points', 'manual_review']
 const allocationRules: PayrollRecurringAllocationRule[] = ['full_month', 'calendar_days', 'working_days', 'hours', 'manual_review']
 
@@ -266,6 +268,10 @@ const componentKindOptions = computed(() => selectOptions(componentKinds, 'payro
 const valueKindOptions = computed(() => selectOptions(valueKinds, 'payroll.components.value_kind'))
 const frequencyOptions = computed(() => selectOptions(frequencies, 'payroll.components.frequency'))
 const taxTreatmentOptions = computed(() => selectOptions(taxTreatments, 'payroll.components.tax'))
+const exemptionBasketOptions = computed(() => exemptionBaskets.map(value => ({
+  value,
+  label: t(`payroll.components.exemption_basket.${value}`),
+})))
 const inclusionTreatmentOptions = computed(() => selectOptions(inclusionTreatments, 'payroll.components.inclusion'))
 /*
  * Proč nejde uložit mapování na JMHZ. Obě překážky mají jasné vyústění:
@@ -353,6 +359,7 @@ function newComponentForm(): ComponentForm {
     accounting_debit_code: null,
     accounting_credit_code: null,
     annual_limit: '',
+    exemption_basket: null,
     valid_from: monthStart(period.value),
     valid_to: null,
     is_active: true,
@@ -606,6 +613,7 @@ function editComponent(component: PayrollComponent) {
     accounting_debit_code: component.accounting_debit_code,
     accounting_credit_code: component.accounting_credit_code,
     annual_limit: payrollMinorToInput(component.annual_limit_minor),
+    exemption_basket: component.exemption_basket,
     valid_from: component.valid_from,
     valid_to: component.valid_to,
     is_active: component.is_active,
@@ -645,6 +653,7 @@ function componentPayload(): PayrollComponentPayload | null {
     accounting_debit_code: componentForm.value.accounting_debit_code?.trim() || null,
     accounting_credit_code: componentForm.value.accounting_credit_code?.trim() || null,
     annual_limit_minor: limit,
+    exemption_basket: componentForm.value.exemption_basket,
     valid_from: componentForm.value.valid_from,
     valid_to: componentForm.value.valid_to || null,
     is_active: componentForm.value.is_active,
@@ -1075,7 +1084,8 @@ onMounted(load)
             </label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.debit') }}</span><SearchableSelect data-testid="payroll-component-debit" :model-value="componentForm.accounting_debit_code" :options="debitAccountOptions" :selected-option="selectedAccountOption(componentForm.accounting_debit_code)" :placeholder="t('payroll.components.account_placeholder')" :no-results-label="t('payroll.components.no_results')" accent="payroll" input-class="font-mono" @update:model-value="componentForm.accounting_debit_code = $event" /></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.credit') }}</span><SearchableSelect data-testid="payroll-component-credit" :model-value="componentForm.accounting_credit_code" :options="creditAccountOptions" :selected-option="selectedAccountOption(componentForm.accounting_credit_code)" :placeholder="t('payroll.components.account_placeholder')" :no-results-label="t('payroll.components.no_results')" accent="payroll" input-class="font-mono" @update:model-value="componentForm.accounting_credit_code = $event" /></label>
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.annual_limit') }}</span><input v-model="componentForm.annual_limit" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.annual_limit') }}</span><input v-model="componentForm.annual_limit" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><span class="mt-1 block text-[11px] text-neutral-500">{{ t('payroll.components.fields.annual_limit_hint') }}</span></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.exemption_basket') }}</span><SearchableSelect data-testid="payroll-component-basket" :model-value="componentForm.exemption_basket" :options="exemptionBasketOptions" :placeholder="t('payroll.components.exemption_basket.none')" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="componentForm.exemption_basket = $event" /><span class="mt-1 block text-[11px] text-neutral-500">{{ t('payroll.components.fields.exemption_basket_hint') }}</span></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.valid_from') }}</span><input v-model="componentForm.valid_from" type="date" :disabled="!!editingComponent" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm disabled:bg-neutral-100"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.valid_to') }}</span><input v-model="componentForm.valid_to" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="inline-flex items-center gap-2 self-end text-sm text-neutral-700"><input v-model="componentForm.is_active" type="checkbox" class="rounded border-neutral-300 text-payroll-600"> {{ t('payroll.components.fields.active') }}</label>
@@ -1195,7 +1205,7 @@ onMounted(load)
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.source_period') }}</span><input v-model="inputForm.source_period" type="month" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.external_id') }}</span><input v-model="inputForm.external_id" maxlength="190" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm"></label>
           </div>
-          <div v-if="inputPreview" class="mt-4 rounded-lg border p-4 text-sm" :class="inputPreview.support_status === 'supported' && !inputPreview.annual_limit_exceeded ? 'border-success-500/30 bg-success-50 text-success-700' : 'border-warning-500/40 bg-warning-50 text-warning-700'"><p class="font-medium">{{ t(`payroll.components.inputs.preview_status.${inputPreview.support_status}`) }}</p><p v-if="inputPreview.blocker" class="mt-1">{{ inputPreview.blocker }}</p><p v-if="inputPreview.annual_limit_minor !== null" class="mt-1">{{ t('payroll.components.inputs.annual_limit', { used: formatMoney(inputPreview.annual_used_minor), after: formatMoney(inputPreview.annual_after_minor), limit: formatMoney(inputPreview.annual_limit_minor) }) }}</p></div>
+          <div v-if="inputPreview" class="mt-4 rounded-lg border p-4 text-sm" :class="inputPreview.support_status === 'supported' && !inputPreview.annual_limit_exceeded ? 'border-success-500/30 bg-success-50 text-success-700' : 'border-warning-500/40 bg-warning-50 text-warning-700'"><p class="font-medium">{{ t(`payroll.components.inputs.preview_status.${inputPreview.support_status}`) }}</p><p v-if="inputPreview.blocker" class="mt-1">{{ inputPreview.blocker }}</p><p v-if="inputPreview.annual_limit_minor !== null" class="mt-1">{{ t('payroll.components.inputs.annual_limit', { used: formatMoney(inputPreview.annual_used_minor), after: formatMoney(inputPreview.annual_after_minor), limit: formatMoney(inputPreview.annual_limit_minor) }) }}</p><template v-if="inputPreview.exemption_basket"><p data-testid="payroll-input-basket" class="mt-2 font-medium">{{ t('payroll.components.inputs.basket_usage', { basket: t(`payroll.components.exemption_basket.${inputPreview.exemption_basket.basket}`), statute: inputPreview.exemption_basket.statute, used: formatMoney(inputPreview.exemption_basket.used_after_minor), limit: formatMoney(inputPreview.exemption_basket.limit_minor), remaining: formatMoney(inputPreview.exemption_basket.remaining_minor) }) }}</p><p v-if="inputPreview.exemption_basket.limit_exceeded" data-testid="payroll-input-basket-over" class="mt-1">{{ t('payroll.components.inputs.basket_over_limit', { exempt: formatMoney(inputPreview.exemption_basket.exempt_minor), taxable: formatMoney(inputPreview.exemption_basket.taxable_minor) }) }}</p></template></div>
           <div class="mt-5 flex flex-wrap justify-end gap-2"><button :class="btnOutline('neutral')" :disabled="saving || !manualInputPayload" @click="previewManualInput"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>{{ t('payroll.components.inputs.preview') }}</button><button :class="btnFilled('primary')" :disabled="saving || !canSaveInput" @click="saveInput"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
         </section>
 

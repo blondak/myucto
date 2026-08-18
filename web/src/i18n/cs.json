@@ -1429,7 +1429,9 @@
                 "cancelled": "Měsíční vstup byl zrušen.",
                 "cancel_failed": "Měsíční vstup se nepodařilo zrušit.",
                 "empty": "V tomto období nejsou mzdové vstupy",
-                "empty_hint": "Přidejte jednorázový vstup, importujte soubor nebo materializujte pravidelné předpisy."
+                "empty_hint": "Přidejte jednorázový vstup, importujte soubor nebo materializujte pravidelné předpisy.",
+                "basket_usage": "Koš {basket} podle {statute}: po tomto plnění vyčerpáno {used} z {limit}, zbývá {remaining}.",
+                "basket_over_limit": "Roční limit koše je překročen: osvobozeno {exempt}, zdanitelných {taxable} — nadlimitní část vstupuje do daně i do vyměřovacích základů pojistného."
             },
             "import": {
                 "title": "Import měsíčních vstupů",
@@ -1501,7 +1503,10 @@
                 "quantity": "Množství",
                 "source_period": "Zdrojové období",
                 "external_id": "Externí identifikátor",
-                "source": "Zdroj"
+                "source": "Zdroj",
+                "annual_limit_hint": "Vlastní strop zaměstnavatele — schválení nad něj neprojde.",
+                "exemption_basket": "Zákonný koš osvobození",
+                "exemption_basket_hint": "Roční limit § 6 odst. 9 ZDP platí na úhrn všech složek koše; nadlimitní část se zdaní."
             },
             "kind": {
                 "base_wage": "Základní měsíční mzda",
@@ -1573,7 +1578,13 @@
                 "locked": "Uzamčený během",
                 "cancelled": "Zrušený"
             },
-            "load_failed_hint": "Mzdové složky se nenačetly. Zkuste to prosím znovu; prázdný katalog teď neznamená, že nic není nastavené."
+            "load_failed_hint": "Mzdové složky se nenačetly. Zkuste to prosím znovu; prázdný katalog teď neznamená, že nic není nastavené.",
+            "exemption_basket": {
+                "none": "Bez zákonného koše",
+                "non_cash_health": "Zdravotní plnění (§ 6 odst. 9 písm. d) bod 1)",
+                "non_cash_leisure": "Rekreace, sport a kultura (§ 6 odst. 9 písm. d) bod 2)",
+                "old_age_savings": "Spoření na stáří a dlouhodobá péče (§ 6 odst. 9 písm. m))"
+            }
         },
         "documents": {
             "batch_run": "Dávka dokumentů ({office})",
