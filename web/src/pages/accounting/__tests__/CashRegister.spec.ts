@@ -52,6 +52,10 @@ vi.mock('@/composables/useSavedFilters', () => ({
 }))
 vi.mock('@/components/ui/buttonStyles', () => ({
   ICONS: { edit: 'M0 0', check: 'M0 0', download: 'M0 0', uturn: 'M0 0', trash: 'M0 0', doc: 'M0 0', plus: 'M0 0', x: 'M0 0' },
+  BTN_BASE: 'btn',
+  FILLED: { primary: '', success: '', warning: '', danger: '', neutral: '', accent: '' },
+  OUTLINE: { primary: '', success: '', warning: '', danger: '', neutral: '', accent: '' },
+  MENU_ICON: { primary: '', success: '', warning: '', danger: '', neutral: '', accent: '' },
   btnOutline: () => 'btn-outline',
   btnFilled: () => 'btn-filled',
   btnIconSm: () => 'btn-icon-sm',
@@ -156,6 +160,25 @@ describe('CashRegister.vue', () => {
 
     expect(vm.reverseError).toBe('cash.validation.reason')
     expect(m.reverseDocument).not.toHaveBeenCalled()
+  })
+
+  it('akce hlavičky jdou přes ActionBar a mají tiery i ikony', async () => {
+    const wrapper = await mountList([])
+    const actions = (wrapper.vm as any).headerActions as any[]
+
+    expect(wrapper.findComponent({ name: 'ActionBar' }).exists()).toBe(true)
+    expect(actions.map(a => a.key)).toEqual(['new-in', 'new-out', 'book', 'registers'])
+    expect(actions.every(a => a.icon && a.variant)).toBe(true)
+    // Správa pokladen je utility → patří do „…", ne mezi tlačítka hlavičky.
+    expect(actions.find(a => a.key === 'registers').tier).toBe('overflow')
+  })
+
+  it('znaménko částky nese číslo, ne ručně slepený prefix', async () => {
+    const wrapper = await mountList([doc('posted', 1)])
+    const vm = wrapper.vm as any
+    expect(vm.signedAmount({ doc_type: 'in', total_amount: 100 })).toBe(100)
+    expect(vm.signedAmount({ doc_type: 'out', total_amount: 100 })).toBe(-100)
+    expect(wrapper.text()).not.toContain('−100')
   })
 
   it('selhání načtení pokladen se nespolkne (prázdný seznam svádí k duplicitní pokladně)', async () => {

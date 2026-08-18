@@ -18,6 +18,7 @@ import { ICONS, btnFilled, btnOutline, btnIconSm } from '@/components/ui/buttonS
 import CashDocumentDetail from '@/components/accounting/CashDocumentDetail.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -186,6 +187,16 @@ function toggleExpand(d: CashDocument) {
 
 function purposeLabel(p: string): string { return t(`cash.purpose.${p}`) }
 
+/**
+ * Znaménko se skládalo ručně jako '+' / '−' před `formatMoney` — v locale, kde
+ * znaménko patří jinam (nebo se u záporu používají závorky), to vyjde špatně.
+ * Číslo se proto předá se znaménkem a umístění řeší Intl. Příjem zůstává bez
+ * plusu; směr už nese barva i štítek PPD/VPD.
+ */
+function signedAmount(d: CashDocument): number {
+  return d.doc_type === 'in' ? d.total_amount : -d.total_amount
+}
+
 function linkFor(d: CashDocument): { label: string; to: any } | null {
   if (d.invoice_id) return { label: d.invoice_number || `#${d.invoice_id}`, to: { name: 'invoice-detail', params: { id: d.invoice_id } } }
   if (d.purchase_invoice_id) return { label: d.purchase_invoice_number || `#${d.purchase_invoice_id}`, to: { name: 'purchase-invoice-detail', params: { id: d.purchase_invoice_id } } }
@@ -261,6 +272,37 @@ async function submitDelete() {
 
 function onManagerChanged() { loadRegisters() }
 
+/**
+ * Akce hlavičky přes sdílený ActionBar (konvence UI): dvě plné akce podle
+ * směru dokladu, kniha jako sekundární, správa pokladen jako utility v „…".
+ * Ručně skládaná pětice tlačítek se na mobilu mačkala a pořadí ani tieru
+ * neodpovídala zbytku aplikace.
+ */
+const headerActions = computed<ActionItem[]>(() => {
+  const canWrite = auth.canWrite('cash.document.write')
+  const reg = selectedRegister.value
+  return [
+    {
+      key: 'new-in', tier: 'primary', variant: 'success', icon: 'plus',
+      label: t('cash.type.in_short'), show: canWrite && reg !== null,
+      to: { path: '/accounting/cash/new', query: { doc_type: 'in', register_id: reg?.id } },
+    },
+    {
+      key: 'new-out', tier: 'primary', variant: 'warning', icon: 'plus',
+      label: t('cash.type.out_short'), show: canWrite && reg !== null,
+      to: { path: '/accounting/cash/new', query: { doc_type: 'out', register_id: reg?.id } },
+    },
+    {
+      key: 'book', tier: 'secondary', variant: 'neutral', icon: 'doc',
+      label: t('cash.book_title'), to: '/accounting/cash/book',
+    },
+    {
+      key: 'registers', tier: 'overflow', variant: 'neutral', icon: 'edit',
+      label: t('cash.registers_manage'), show: canWrite, run: () => { managerOpen.value = true },
+    },
+  ]
+})
+
 // ── Vystavení rozpracovaného dokladu ──────────────────────────────────────
 const postingId = ref<number | null>(null)
 
@@ -293,26 +335,7 @@ async function postDraft(d: CashDocument) {
           <option value="">{{ t('common.all') }}</option>
           <option v-for="r in registers" :key="r.id" :value="r.id">{{ r.name }}</option>
         </select>
-        <button v-if="auth.canWrite('cash.document.write')" @click="managerOpen = true" :class="btnOutline('neutral')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
-          {{ t('cash.registers_manage') }}
-        </button>
-        <RouterLink to="/accounting/cash/book" :class="btnOutline('neutral')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
-          {{ t('cash.book_title') }}
-        </RouterLink>
-        <RouterLink v-if="auth.canWrite('cash.document.write') && selectedRegister"
-          :to="{ path: '/accounting/cash/new', query: { doc_type: 'in', register_id: selectedRegister.id } }"
-          :class="btnFilled('success')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-          {{ t('cash.type.in_short') }}
-        </RouterLink>
-        <RouterLink v-if="auth.canWrite('cash.document.write') && selectedRegister"
-          :to="{ path: '/accounting/cash/new', query: { doc_type: 'out', register_id: selectedRegister.id } }"
-          :class="btnFilled('warning')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-          {{ t('cash.type.out_short') }}
-        </RouterLink>
+        <ActionBar :actions="headerActions" />
       </div>
     </div>
 
@@ -460,7 +483,7 @@ async function postDraft(d: CashDocument) {
                   <td v-if="tbl.isVisible('description')" class="px-3 py-2 truncate max-w-[20rem]">{{ d.description }}</td>
                   <td v-if="tbl.isVisible('amount')" class="px-3 py-2 text-right font-mono"
                     :class="d.doc_type === 'in' ? 'text-success-600' : 'text-warning-600'">
-                    {{ d.doc_type === 'in' ? '+' : '−' }}{{ formatMoney(d.total_amount) }}
+                    {{ formatMoney(signedAmount(d)) }}
                   </td>
                   <td v-if="tbl.isVisible('link')" class="px-3 py-2">
                     <RouterLink v-if="linkFor(d)" :to="linkFor(d)!.to" @click.stop
@@ -526,7 +549,7 @@ async function postDraft(d: CashDocument) {
             <div class="flex items-baseline justify-between gap-2">
               <div class="font-mono text-base font-semibold whitespace-nowrap"
                 :class="d.doc_type === 'in' ? 'text-success-600' : 'text-warning-600'">
-                {{ d.doc_type === 'in' ? '+' : '−' }}{{ formatMoney(d.total_amount) }}
+                {{ formatMoney(signedAmount(d)) }}
               </div>
               <div class="flex flex-col items-end gap-1">
                 <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap"
