@@ -1678,11 +1678,11 @@ final class PayrollRunStatutoryInputAssembler
             $treatment = $component['tax_treatment'] ?? null;
             $usable = true;
             // Osvobození je jinak nedoložené tvrzení a výpočet se u něj zastaví.
-            // Doložit ho umí zákonný koš § 6 odst. 9 ZDP: má-li vstup zmrazený
-            // rozpad, je osvobozená část ohraničená ročním limitem a nadlimitní
-            // část se zdaní jako běžný příjem. Bez rozpadu důkaz pořád chybí.
+            // Na otázku, čím je podložené, odpovídá sdílený
+            // {@see PayrollExemptionEvidence} — týž doklad pak mapper vloží do
+            // složky, takže se tahle brána a brána výpočtu daně nemůžou rozejít.
             if ($treatment === 'exempt'
-                && ($input['benefit_basket'] ?? null) === null
+                && PayrollExemptionEvidence::resolve($input) === null
             ) {
                 $this->issue(
                     'income_tax',

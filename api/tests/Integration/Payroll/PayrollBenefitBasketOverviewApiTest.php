@@ -442,6 +442,11 @@ final class PayrollBenefitBasketOverviewApiTest extends TestCase
                 'accounting_credit_code' => null,
                 'annual_limit_minor' => null,
                 'exemption_basket' => $basket,
+                // Osvobození bez podkladu se neuloží — u složky v koši je jím
+                // zmrazený rozpad, mimo koš zákonné osvobození bez limitu.
+                'exemption_basis' => $basket === null
+                    ? 'statutory_exempt'
+                    : 'benefit_basket',
                 'valid_from' => '2026-01-01',
                 'valid_to' => null,
                 'is_active' => true,

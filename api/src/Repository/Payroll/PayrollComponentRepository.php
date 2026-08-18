@@ -104,8 +104,8 @@ final class PayrollComponentRepository
                      enforcement_treatment, jmhz_treatment,
                      statistics_treatment, accounting_debit_code,
                      accounting_credit_code, annual_limit_minor, exemption_basket,
-                     valid_from, valid_to, is_active)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     exemption_basis, valid_from, valid_to, is_active)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
@@ -127,6 +127,7 @@ final class PayrollComponentRepository
                 $data['accounting_credit_code'],
                 $data['annual_limit_minor'],
                 $data['exemption_basket'],
+                $data['exemption_basis'],
                 $data['valid_from'],
                 $data['valid_to'],
                 PayrollTimeValue::bool($data['is_active'] ?? null, 'is_active') ? 1 : 0,
@@ -204,7 +205,7 @@ final class PayrollComponentRepository
                     enforcement_treatment = ?, jmhz_treatment = ?,
                     statistics_treatment = ?, accounting_debit_code = ?,
                     accounting_credit_code = ?, annual_limit_minor = ?,
-                    exemption_basket = ?,
+                    exemption_basket = ?, exemption_basis = ?,
                     valid_from = ?, valid_to = ?, is_active = ?,
                     row_version = row_version + 1
               WHERE supplier_id = ? AND id = ? AND row_version = ?'
@@ -228,6 +229,7 @@ final class PayrollComponentRepository
             $data['accounting_credit_code'],
             $data['annual_limit_minor'],
             $data['exemption_basket'],
+            $data['exemption_basis'],
             $data['valid_from'],
             $data['valid_to'],
             PayrollTimeValue::bool($data['is_active'] ?? null, 'is_active') ? 1 : 0,
@@ -285,8 +287,8 @@ final class PayrollComponentRepository
                  health_participation_treatment, health_treatment,
                  average_earning_treatment,
                  enforcement_treatment, jmhz_treatment, statistics_treatment,
-                 exemption_basket, valid_from)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 exemption_basket, exemption_basis, valid_from)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $closePrevious = $this->db->pdo()->prepare(
             'UPDATE payroll_component_definitions
@@ -322,6 +324,7 @@ final class PayrollComponentRepository
                     $row['jmhz_treatment'],
                     $row['statistics_treatment'],
                     $row['exemption_basket'],
+                    $row['exemption_basis'],
                     $version['valid_from'],
                 ]);
             }

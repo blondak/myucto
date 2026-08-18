@@ -1003,6 +1003,13 @@ export type PayrollComponentInclusion = 'included' | 'excluded' | 'manual_review
  */
 export type PayrollBenefitExemptionBasket = 'non_cash_health' | 'non_cash_leisure' | 'old_age_savings'
 
+/**
+ * Čím je nezdanění složky podložené. `not_subject_to_tax` NENÍ osvobození —
+ * plnění podle § 6 odst. 7 ZDP předmětem daně vůbec není a na mzdovém listu
+ * se mezi osvobozené částky nevykazuje.
+ */
+export type PayrollExemptionBasis = 'not_subject_to_tax' | 'statutory_exempt' | 'benefit_basket'
+
 export interface PayrollBenefitBasketUsage {
   basket: PayrollBenefitExemptionBasket
   statute: string
@@ -1036,6 +1043,7 @@ export interface PayrollComponent {
   accounting_credit_code: string | null
   annual_limit_minor: number | null
   exemption_basket: PayrollBenefitExemptionBasket | null
+  exemption_basis: PayrollExemptionBasis | null
   valid_from: string
   valid_to: string | null
   is_active: boolean

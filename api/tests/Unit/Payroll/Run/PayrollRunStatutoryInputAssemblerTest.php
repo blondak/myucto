@@ -89,6 +89,9 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
                 'health_participation_treatment' => 'excluded',
                 'health_treatment' => 'excluded',
                 'exemption_basket' => 'non_cash_leisure',
+                'exemption_basis' => 'benefit_basket',
+                'valid_from' => '2026-01-01',
+                'valid_to' => null,
             ],
         ];
         unset($person);

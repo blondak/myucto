@@ -46,66 +46,68 @@ final class PayrollComponentDefaults
      *  i vyměřovací základ), 8 průměrný výdělek, 9 exekuční srážky, 10 JMHZ,
      *  11 statistika, 12 zákonný koš osvobození
      *     ({@see PayrollBenefitExemptionBasket}; NULL = složka do žádného koše
-     *     nepatří, důvod je u konkrétního řádku).
+     *     nepatří, důvod je u konkrétního řádku),
+     * 13 podklad osvobození ({@see PayrollExemptionBasis}; vyplněný jen u složky
+     *     s daňovým zacházením `exempt`, jinak NULL).
      *
-     * @var list<array{valid_from:string, rows:list<array{0:string,1:string,2:string,3:string,4:string,5:string,6:string,7:string,8:string,9:string,10:string,11:string,12:?string}>}>
+     * @var list<array{valid_from:string, rows:list<array{0:string,1:string,2:string,3:string,4:string,5:string,6:string,7:string,8:string,9:string,10:string,11:string,12:?string,13:?string}>}>
      */
     private const VERSIONS = [
         [
             'valid_from' => '2026-01-01',
             'rows' => [
-                ['MZDA_MESICNI', 'Základní měsíční mzda', 'base_wage', 'monetary', 'regular', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null],
-                ['MZDA_HODINOVA', 'Základní hodinová mzda', 'hourly_wage', 'monetary', 'regular', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null],
-                ['MZDA_UKOLOVA', 'Úkolová mzda', 'task_wage', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null],
-                ['ODMENA', 'Odměna', 'bonus', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null],
-                ['PREMIE_PRIPLATKY', 'Prémie a příplatky', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null],
-                ['PROVIZE', 'Provize', 'commission', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null],
-                ['NAHRADA_MZDY', 'Náhrada mzdy', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null],
-                ['ODSTUPNE', 'Odstupné', 'severance', 'monetary', 'one_off', 'included', 'excluded', 'excluded', 'excluded', 'included', 'included', 'included', null],
-                ['NAHRADA_KONKURENCNI_DOLOZKA', 'Náhrada za konkurenční doložku', 'competitive_clause', 'monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null],
-                ['DOPLATEK_MZDY', 'Doplatek mzdy za minulé období', 'backpay', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null],
-                ['NEPENEZNI_PRIJEM', 'Nepeněžní příjem', 'non_cash', 'non_monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null],
+                ['MZDA_MESICNI', 'Základní měsíční mzda', 'base_wage', 'monetary', 'regular', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                ['MZDA_HODINOVA', 'Základní hodinová mzda', 'hourly_wage', 'monetary', 'regular', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                ['MZDA_UKOLOVA', 'Úkolová mzda', 'task_wage', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                ['ODMENA', 'Odměna', 'bonus', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                ['PREMIE_PRIPLATKY', 'Prémie a příplatky', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                ['PROVIZE', 'Provize', 'commission', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                ['NAHRADA_MZDY', 'Náhrada mzdy', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
+                ['ODSTUPNE', 'Odstupné', 'severance', 'monetary', 'one_off', 'included', 'excluded', 'excluded', 'excluded', 'included', 'included', 'included', null, null],
+                ['NAHRADA_KONKURENCNI_DOLOZKA', 'Náhrada za konkurenční doložku', 'competitive_clause', 'monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
+                ['DOPLATEK_MZDY', 'Doplatek mzdy za minulé období', 'backpay', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                ['NEPENEZNI_PRIJEM', 'Nepeněžní příjem', 'non_cash', 'non_monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
                 // Limit § 6 odst. 9 písm. b) ZDP je ZA SMĚNU (70 % horní hranice
                 // stravného 5–12 h), ne za rok — roční strop složky ho nevyjádří.
                 // Ruleset to nese jako vědomé ruční posouzení
                 // `benefit_exemption.meal.per_shift`.
-                ['PRISPEVEK_STRAVOVANI', 'Příspěvek na stravování', 'benefit_meal', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null],
+                ['PRISPEVEK_STRAVOVANI', 'Příspěvek na stravování', 'benefit_meal', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
                 // Soukromé užití vozidla je podle § 6 odst. 6 ZDP OCENĚNÍ příjmu
                 // (1 % / 0,5 % / 0,25 % vstupní ceny měsíčně), ne osvobozený
                 // benefit — žádný roční strop osvobození neexistuje.
-                ['SOUKROME_VOZIDLO', 'Soukromé užití vozidla', 'benefit_vehicle', 'non_monetary', 'regular', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null],
-                ['PRISPEVEK_PENZE_ZIVOTNI', 'Příspěvek na penzijní a životní produkty', 'benefit_pension', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'old_age_savings'],
+                ['SOUKROME_VOZIDLO', 'Soukromé užití vozidla', 'benefit_vehicle', 'non_monetary', 'regular', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
+                ['PRISPEVEK_PENZE_ZIVOTNI', 'Příspěvek na penzijní a životní produkty', 'benefit_pension', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'old_age_savings', null],
                 // § 6 odst. 9 písm. m) ZDP sdílí 50 000 Kč s příspěvkem na produkty
                 // spoření na stáří, ale jde-li o jinou formu podpory dlouhodobé péče
                 // než pojištění, spadá jinam. Zařazení tenhle číselník neurčí, takže
                 // limit zůstává prázdný a vyplní ho účetní.
-                ['PRISPEVEK_DLOUHODOBA_PECE', 'Příspěvek na dlouhodobou péči', 'benefit_care', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null],
+                ['PRISPEVEK_DLOUHODOBA_PECE', 'Příspěvek na dlouhodobou péči', 'benefit_care', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
                 // Vzdělávání má DVA různé režimy: odborný rozvoj související
                 // s předmětem činnosti zaměstnavatele je podle § 6 odst. 9 písm. a)
                 // ZDP osvobozený BEZ limitu, ostatní vzdělávání spadá pod strop
                 // § 6 odst. 9 písm. d) bodu 2. Který z nich platí, plyne z náplně
                 // kurzu — proto se tu limit netvrdí; naslepo nasazený strop by
                 // blokoval schválení legitimního školení.
-                ['VZDELAVANI', 'Vzdělávání zaměstnance', 'benefit_education', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null],
-                ['REKREACE_VOLNY_CAS', 'Rekreace a volnočasový benefit', 'benefit_recreation', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'non_cash_leisure'],
-                ['ZDRAVOTNI_BENEFIT', 'Zdravotní benefit', 'benefit_health', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'non_cash_health'],
-                ['PRISPEVEK_RIZIKOVE_SPORENI', 'Povinný příspěvek na spoření u rizikové práce', 'risky_savings', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null],
-                ['CESTOVNI_NAHRADA', 'Cestovní náhrada', 'travel_reimbursement', 'monetary', 'one_off', 'manual_review', 'excluded', 'excluded', 'excluded', 'excluded', 'manual_review', 'included', null],
+                ['VZDELAVANI', 'Vzdělávání zaměstnance', 'benefit_education', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
+                ['REKREACE_VOLNY_CAS', 'Rekreace a volnočasový benefit', 'benefit_recreation', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'non_cash_leisure', null],
+                ['ZDRAVOTNI_BENEFIT', 'Zdravotní benefit', 'benefit_health', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'non_cash_health', null],
+                ['PRISPEVEK_RIZIKOVE_SPORENI', 'Povinný příspěvek na spoření u rizikové práce', 'risky_savings', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
+                ['CESTOVNI_NAHRADA', 'Cestovní náhrada', 'travel_reimbursement', 'monetary', 'one_off', 'manual_review', 'excluded', 'excluded', 'excluded', 'excluded', 'manual_review', 'included', null, null],
                 // MZ-08-W07 — klasifikovaný rozpad vyúčtování pracovní cesty. Do zákonného
                 // limitu (§ 6 odst. 7 písm. a) ZDP) není náhrada předmětem daně, pojistného,
                 // průměrného výdělku ani exekučních srážek; nadlimitní část je běžný
                 // zdanitelný příjem ze závislé činnosti a vstupuje do vyměřovacích základů.
-                ['CESTOVNI_NAHRADA_LIMIT', 'Cestovní náhrada do zákonného limitu', 'travel_reimbursement', 'monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'included', null],
-                ['CESTOVNI_NAHRADA_NADLIMIT', 'Nadlimitní cestovní náhrada', 'travel_reimbursement', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null],
+                ['CESTOVNI_NAHRADA_LIMIT', 'Cestovní náhrada do zákonného limitu', 'travel_reimbursement', 'monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'included', null, 'not_subject_to_tax'],
+                ['CESTOVNI_NAHRADA_NADLIMIT', 'Nadlimitní cestovní náhrada', 'travel_reimbursement', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
             ],
         ],
     ];
 
-    /** @var list<array{valid_from:string, rows:list<array{0:string,1:string,2:string,3:string,4:string,5:string,6:string,7:string,8:string,9:string,10:string,11:string,12:?string}>}> */
+    /** @var list<array{valid_from:string, rows:list<array{0:string,1:string,2:string,3:string,4:string,5:string,6:string,7:string,8:string,9:string,10:string,11:string,12:?string,13:?string}>}> */
     private array $catalog;
 
     /**
-     * @param list<array{valid_from:string, rows:list<array{0:string,1:string,2:string,3:string,4:string,5:string,6:string,7:string,8:string,9:string,10:string,11:string,12:?string}>}>|null $catalog
+     * @param list<array{valid_from:string, rows:list<array{0:string,1:string,2:string,3:string,4:string,5:string,6:string,7:string,8:string,9:string,10:string,11:string,12:?string,13:?string}>}>|null $catalog
      *        Jen pro testy verzování; runtime bere vestavěnou sadu.
      */
     public function __construct(
@@ -146,7 +148,7 @@ final class PayrollComponentDefaults
      *   social_treatment:string, health_treatment:string,
      *   average_earning_treatment:string, enforcement_treatment:string,
      *   jmhz_treatment:string, statistics_treatment:string,
-     *   exemption_basket:?string
+     *   exemption_basket:?string, exemption_basis:?string
      * }>}>
      */
     public function versions(): array
@@ -174,6 +176,7 @@ final class PayrollComponentDefaults
                     'jmhz_treatment' => $row[10],
                     'statistics_treatment' => $row[11],
                     'exemption_basket' => $basket?->value,
+                    'exemption_basis' => $this->basis($row[13] ?? null, $row[5]),
                 ];
             }
             $versions[] = ['valid_from' => $version['valid_from'], 'rows' => $rows];
@@ -184,6 +187,27 @@ final class PayrollComponentDefaults
         );
 
         return $versions;
+    }
+
+    /**
+     * Podklad osvobození ({@see PayrollExemptionBasis}) smí nést jen složka
+     * klasifikovaná jako osvobozená — jinak by číselník tvrdil doklad k něčemu,
+     * co se stejně zdaní.
+     */
+    private function basis(?string $value, string $taxTreatment): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if ($taxTreatment !== PayrollComponentTaxTreatment::EXEMPT->value
+            || PayrollExemptionBasis::tryFrom($value) === null
+        ) {
+            throw new PayrollRulesetException(
+                "Podklad osvobození {$value} nelze pro tuhle složku použít.",
+            );
+        }
+
+        return $value;
     }
 
     /**

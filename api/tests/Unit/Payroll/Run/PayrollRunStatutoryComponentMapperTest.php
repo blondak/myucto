@@ -71,6 +71,71 @@ final class PayrollRunStatutoryComponentMapperTest extends TestCase
     }
 
     /**
+     * Uvedený podklad osvobození je doklad, který výpočet daně hledal.
+     *
+     * Bez něj byla brána `hasVerifiedTreatmentEvidence()` nesplnitelná — pole
+     * `treatment_evidence_*` nenastavoval nikdo — a osvobozený příjem tak
+     * neprošel mzdovým během NIKDY.
+     */
+    public function testStatedExemptionBasisBecomesVerifiedEvidence(): void
+    {
+        $components = (new PayrollRunStatutoryComponentMapper())->incomeTax(
+            $this->input([
+                'tax_treatment' => 'exempt',
+                'exemption_basis' => 'not_subject_to_tax',
+                'valid_from' => '2026-01-01',
+                'valid_to' => null,
+            ]),
+            '2026-08-01',
+        );
+
+        self::assertTrue($components[0]->hasVerifiedTreatmentEvidence('2026-08-01'));
+        self::assertSame(
+            'payroll-component:MZDA_MESICNI@2026-01-01/not_subject_to_tax',
+            $components[0]->treatmentEvidenceReference,
+        );
+    }
+
+    /**
+     * Doklad je sama verze klasifikace. Skončila-li její platnost před počítaným
+     * měsícem, není čím osvobození podložit.
+     */
+    public function testExpiredClassificationVersionStopsBeingEvidence(): void
+    {
+        $components = (new PayrollRunStatutoryComponentMapper())->incomeTax(
+            $this->input([
+                'tax_treatment' => 'exempt',
+                'exemption_basis' => 'statutory_exempt',
+                'valid_from' => '2026-01-01',
+                'valid_to' => '2026-06-30',
+            ]),
+            '2026-08-01',
+        );
+
+        self::assertFalse($components[0]->hasVerifiedTreatmentEvidence('2026-08-01'));
+    }
+
+    /**
+     * U ročního koše je doklad zmrazený rozpad. Bez něj není známé, kolik se do
+     * úhrnu ještě vešlo — samo zařazení do koše tedy nestačí.
+     */
+    public function testBasketBasisWithoutAFrozenSplitStaysUnevidenced(): void
+    {
+        $components = (new PayrollRunStatutoryComponentMapper())->incomeTax(
+            $this->input([
+                'tax_treatment' => 'exempt',
+                'exemption_basis' => 'benefit_basket',
+                'exemption_basket' => 'non_cash_leisure',
+                'valid_from' => '2026-01-01',
+                'valid_to' => null,
+            ]),
+            '2026-08-01',
+        );
+
+        self::assertFalse($components[0]->hasVerifiedTreatmentEvidence('2026-08-01'));
+    }
+
+    /**
      * Nadlimitní část benefitu se rozpadne na vlastní složku výpočtu.
      *
      * Bez toho by zdanitelný přebytek zmizel: složka je klasifikovaná jako

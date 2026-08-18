@@ -68,6 +68,37 @@ final class PayrollSheetTaxExemptIncomeTest extends TestCase
         ]);
     }
 
+    /**
+     * Cestovní náhrada do zákonného limitu PŘEDMĚTEM DANĚ NENÍ (§ 6 odst. 7
+     * písm. a) ZDP), takže mezi „částky osvobozené od daně" podle § 38j odst. 2
+     * písm. f) bodu 2 nepatří — přestože se v úhrnu zúčtovaných mezd objeví.
+     */
+    public function testAmountOutsideTheScopeOfTaxIsNotReportedAsExempt(): void
+    {
+        $months = $this->months([
+            $this->source('2026-04-01', [
+                $this->input(1, 900_00, 'included'),
+                $this->input(2, 100_00, 'exempt', [
+                    'exemption_basis' => 'not_subject_to_tax',
+                ]),
+            ]),
+        ]);
+
+        self::assertSame(0, $months[0]->taxExemptIncomeMinorUnits);
+        self::assertSame(1_000_00, $months[0]->grossMinorUnits);
+    }
+
+    /** Osvobození bez podkladu doklad netvrdí — brána běhu ho nepustila. */
+    public function testExemptComponentWithoutBasisFailsClosed(): void
+    {
+        $this->expectExceptionMessage('Podklad osvobození složky vstupu 1 není uveden.');
+        $this->months([
+            $this->source('2026-04-01', [
+                $this->input(1, 1_000_00, 'exempt', ['exemption_basis' => null]),
+            ]),
+        ]);
+    }
+
     public function testMonthWithoutExemptIncomeReportsZeroNotBlank(): void
     {
         $months = $this->months([
@@ -243,13 +274,23 @@ final class PayrollSheetTaxExemptIncomeTest extends TestCase
      */
     private function input(int $id, int $amountMinor, string $taxTreatment, array $extra = []): array
     {
+        $component = [
+            'code' => 'SLOZKA' . $id,
+            'tax_treatment' => $taxTreatment,
+        ];
+        if ($taxTreatment === 'exempt') {
+            // Osvobození bez uvedeného podkladu se do schválené revize dostat
+            // nemělo; doklad ho proto odmítne vykázat.
+            $component['exemption_basis'] = array_key_exists('exemption_basis', $extra)
+                ? $extra['exemption_basis']
+                : (isset($extra['benefit_basket']) ? 'benefit_basket' : 'statutory_exempt');
+        }
+        unset($extra['exemption_basis']);
+
         return [
             'id' => $id,
             'amount_minor' => $amountMinor,
-            'component' => [
-                'code' => 'SLOZKA' . $id,
-                'tax_treatment' => $taxTreatment,
-            ],
+            'component' => $component,
         ] + $extra;
     }
 

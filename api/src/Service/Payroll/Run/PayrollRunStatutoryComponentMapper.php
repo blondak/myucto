@@ -10,6 +10,7 @@ use MyInvoice\Service\Payroll\HealthInsurance\HealthCorrectionTreatment;
 use MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponent;
 use MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponentTreatment;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCorrectionTreatment;
+use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialAssessmentComponent;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialComponentTreatment;
 
@@ -165,12 +166,24 @@ final class PayrollRunStatutoryComponentMapper
         $correction = $this->isCurrentPeriod($input, $periodStart)
             ? TaxCorrectionTreatment::CurrentMonth
             : TaxCorrectionTreatment::Unverified;
+        // Doklad k osvobození nevzniká tady, ale ve sdíleném
+        // {@see PayrollExemptionEvidence}. Kdyby si ho mapper odvozoval sám,
+        // rozešel by se se sestavovačem zákonných vstupů — a přesně tím
+        // rozporem osvobozená složka nikdy neprošla: sestavovač ji pustil,
+        // výpočet daně ji shodil do ručního posouzení.
+        $evidence = $treatment === IncomeTaxComponentTreatment::Exempt
+            ? PayrollExemptionEvidence::resolve($input)
+            : null;
         $result = [
             new IncomeTaxComponent(
                 $this->reference($input, $component),
                 $overLimit === null ? $amount : $amount - $overLimit,
                 $treatment,
                 $correction,
+                $evidence?->status ?? TaxEvidenceStatus::Unverified,
+                $evidence?->effectiveFrom,
+                $evidence?->effectiveTo,
+                $evidence?->reference,
             ),
         ];
         if ($overLimit !== null) {

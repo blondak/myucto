@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Document;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAnnualDocumentRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Component\PayrollExemptionBasis;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -370,9 +371,12 @@ final class PayrollSheetSnapshotBuilder
      *
      * Sčítá se přes TYTÉŽ vstupy, které tvoří úhrn v bodě 1, takže osvobozená
      * část je jeho podmnožina a nemůže se s ním rozejít. Osvobození se pozná
-     * z daňového zacházení složky, ne z jejího druhu — kromě koše § 6 odst. 9
-     * sem proto spadají i cestovní náhrady do limitu a stravování za směnu,
-     * pokud je tak účetní klasifikovala.
+     * z daňového zacházení složky, ne z jejího druhu.
+     *
+     * Nezdaněné ale není totéž co osvobozené: cestovní náhrada do limitu podle
+     * § 6 odst. 7 písm. a) ZDP PŘEDMĚTEM DANĚ VŮBEC NENÍ a mezi „částky
+     * osvobozené od daně" tedy nepatří. Rozliší je `exemption_basis`
+     * ({@see \MyInvoice\Service\Payroll\Component\PayrollExemptionBasis}).
      *
      * U složky v koši se bere ZMRAZENÝ rozpad (`benefit_exempt_minor`), ne
      * dopočet: koš čerpají všechny složky téhož bodu v pořadí schválení a
@@ -435,6 +439,23 @@ final class PayrollSheetSnapshotBuilder
             );
         }
         if ($treatment !== 'exempt') {
+            return 0;
+        }
+        $basis = PayrollExemptionBasis::tryFrom(
+            is_string($component['exemption_basis'] ?? null)
+                ? $component['exemption_basis']
+                : '',
+        );
+        if ($basis === null) {
+            // Do schválené revize se takový vstup dostat neměl — sestavovač
+            // zákonných vstupů i výpočet daně ho shodí do ručního posouzení.
+            // Vykázat ho jako osvobozený příjem by znamenalo doložit branou
+            // neprošlé tvrzení.
+            throw new \DomainException(
+                "Podklad osvobození složky vstupu {$inputId} není uveden.",
+            );
+        }
+        if (!$basis->isReportedAsExemptIncome()) {
             return 0;
         }
         if (($input['benefit_basket'] ?? null) === null) {
