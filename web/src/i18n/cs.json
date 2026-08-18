@@ -4864,6 +4864,10 @@
         "register_empty": "Zatím žádná pokladna",
         "register_delete_confirm": "Opravdu smazat pokladnu „{name}\"?",
         "register_deactivate_hint": "Pokladnu s doklady nelze smazat — deaktivujte ji.",
+        "register_nothing_to_save": "Zatím není co uložit — upravte pokladnu nebo vyplňte novou.",
+        "register_delete_pending": "Ke smazání: {names}. Provede se až uložením.",
+        "register_account_placeholder": "211.500",
+        "register_account_manage": "Spravovat analytické účty",
         "print": "Tisk PDF",
         "book_pdf": "PDF knihy",
         "type": {

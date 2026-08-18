@@ -4864,6 +4864,10 @@
         "register_empty": "No cash register yet",
         "register_delete_confirm": "Really delete cash register \"{name}\"?",
         "register_deactivate_hint": "A cash register with documents cannot be deleted — deactivate it instead.",
+        "register_nothing_to_save": "Nothing to save yet — change a register or fill in a new one.",
+        "register_delete_pending": "To be deleted: {names}. Applied on save.",
+        "register_account_placeholder": "211.500",
+        "register_account_manage": "Manage analytical accounts",
         "print": "Print PDF",
         "book_pdf": "Book PDF",
         "type": {
