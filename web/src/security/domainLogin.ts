@@ -1,4 +1,5 @@
 import { authApi } from '@/api/auth'
+import { canonicalDomainLoginHandoffPath } from '@/security/clientRoutePolicy'
 
 const TARGET_KEY = 'myinvoice.domain_login.target'
 const CANONICAL_KEY = 'myinvoice.domain_login.canonical'
@@ -13,6 +14,7 @@ interface TargetState {
 interface CanonicalState {
   requestToken: string
   state: string
+  handoffPath: string | null
 }
 
 function base64Url(bytes: Uint8Array): string {
@@ -29,9 +31,9 @@ async function challenge(verifier: string): Promise<string> {
   return base64Url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))))
 }
 
-export async function beginDomainLogin(returnPath = '/portal'): Promise<never> {
+export async function beginDomainLogin(returnPath = '/portal', handoffPath?: string): Promise<never> {
   const verifier = randomToken()
-  const result = await authApi.domainLoginStart(await challenge(verifier), returnPath)
+  const result = await authApi.domainLoginStart(await challenge(verifier), returnPath, handoffPath)
   const target: TargetState = {
     requestToken: result.request_token,
     state: result.state,
@@ -43,19 +45,31 @@ export async function beginDomainLogin(returnPath = '/portal'): Promise<never> {
   return new Promise<never>(() => undefined)
 }
 
-export function captureCanonicalDomainLogin(requestToken: unknown, state: unknown): boolean {
+export function captureCanonicalDomainLogin(
+  requestToken: unknown,
+  state: unknown,
+  handoffPath: unknown = null,
+): boolean {
   if (typeof requestToken !== 'string' || typeof state !== 'string'
       || !/^[A-Za-z0-9_-]{43}$/.test(requestToken)
       || !/^[A-Za-z0-9_-]{43}$/.test(state)) {
     if (requestToken !== undefined || state !== undefined) sessionStorage.removeItem(CANONICAL_KEY)
     return false
   }
-  sessionStorage.setItem(CANONICAL_KEY, JSON.stringify({ requestToken, state } satisfies CanonicalState))
+  sessionStorage.setItem(CANONICAL_KEY, JSON.stringify({
+    requestToken,
+    state,
+    handoffPath: canonicalDomainLoginHandoffPath(handoffPath),
+  } satisfies CanonicalState))
   return true
 }
 
 export function hasPendingCanonicalDomainLogin(): boolean {
   return readCanonical() !== null
+}
+
+export function pendingCanonicalDomainLoginHandoff(): string | null {
+  return readCanonical()?.handoffPath ?? null
 }
 
 export async function authorizePendingDomainLogin(): Promise<boolean> {
@@ -100,8 +114,13 @@ export function clearTargetDomainLogin(): void {
 function readCanonical(): CanonicalState | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(CANONICAL_KEY) || 'null') as CanonicalState | null
-    return value && /^[A-Za-z0-9_-]{43}$/.test(value.requestToken)
-      && /^[A-Za-z0-9_-]{43}$/.test(value.state) ? value : null
+    if (!value || !/^[A-Za-z0-9_-]{43}$/.test(value.requestToken)
+      || !/^[A-Za-z0-9_-]{43}$/.test(value.state)) return null
+    return {
+      requestToken: value.requestToken,
+      state: value.state,
+      handoffPath: canonicalDomainLoginHandoffPath(value.handoffPath),
+    }
   } catch {
     return null
   }

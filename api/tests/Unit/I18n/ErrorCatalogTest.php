@@ -26,6 +26,39 @@ final class ErrorCatalogTest extends TestCase
         );
     }
 
+    public function testCanonicalHostnameConflictHasEnglishTranslation(): void
+    {
+        self::assertSame(
+            'The hostname configured in app.url cannot be used as a company custom domain. Enter a different hostname.',
+            ErrorCatalog::lookup(
+                'Hostname nastavený v app.url nelze použít jako vlastní doménu firmy. Zadejte jiný hostname.',
+                'en',
+            ),
+        );
+    }
+
+    public function testNewDomainBoundaryErrorsHaveEnglishTranslations(): void
+    {
+        $messages = [
+            'Canonical hostname koliduje s vlastní doménou firmy.'
+                => 'The canonical hostname conflicts with a company custom domain.',
+            'Canonical přechod není pro tuto cestu povolený.'
+                => 'Canonical handoff is not allowed for this path.',
+            'DNS nebo HTTPS ověření domény selhalo.'
+                => 'DNS or HTTPS domain verification failed.',
+            'Doména musí mít čerstvě ověřené DNS a HTTPS.'
+                => 'The domain must have freshly verified DNS and HTTPS.',
+            'Doména se během ověření změnila; spusť kontrolu znovu.'
+                => 'The domain changed during verification; run the check again.',
+            'Doména se před ověřením změnila; spusť kontrolu znovu.'
+                => 'The domain changed before verification; run the check again.',
+        ];
+
+        foreach ($messages as $cs => $en) {
+            self::assertSame($en, ErrorCatalog::lookup($cs, 'en'), $cs);
+        }
+    }
+
     public function testEnLocaleReturnsInputForUnknownMessage(): void
     {
         self::assertSame(

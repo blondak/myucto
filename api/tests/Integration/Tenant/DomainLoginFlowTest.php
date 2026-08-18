@@ -47,11 +47,13 @@ final class DomainLoginFlowTest extends TestCase
             $this->sessions = $container->get(SessionManager::class);
             $this->cookies = $container->get(SessionCookieFactory::class);
             $this->ipMatcher = $container->get(IpMatcher::class);
+            // Connection je lazy; ověř ji uvnitř stejného skip guardu, jinak
+            // nedostupná test DB skončí jako šest setup errorů místo explicitního skipu.
+            $pdo = $this->db->pdo();
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nebo DB nejsou dostupné: ' . $e->getMessage());
         }
 
-        $pdo = $this->db->pdo();
         $this->supplierId = (int) ($pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn() ?: 0);
         $clientRoleId = (int) ($pdo->query(
             "SELECT id FROM roles WHERE system_key = 'client' LIMIT 1"
@@ -109,7 +111,11 @@ final class DomainLoginFlowTest extends TestCase
     protected function tearDown(): void
     {
         if (!isset($this->db)) return;
-        $pdo = $this->db->pdo();
+        try {
+            $pdo = $this->db->pdo();
+        } catch (\Throwable) {
+            return;
+        }
         if ($this->domainId > 0) {
             $pdo->prepare('DELETE FROM supplier_domains WHERE id = ?')->execute([$this->domainId]);
         }
@@ -228,7 +234,17 @@ final class DomainLoginFlowTest extends TestCase
     public function testStartRejectsCrossOriginAndInternalReturnPaths(): void
     {
         $challenge = self::pkceChallenge(self::opaqueToken());
-        foreach (['//attacker.example', '/\\attacker.example', '/admin/settings'] as $returnPath) {
+        foreach ([
+            '//attacker.example',
+            '/\\attacker.example',
+            '/admin/settings',
+            '/projects',
+            '/purchase-invoices/payment-orders',
+            '/profile/api-tokens',
+            '/login',
+            '/invoice/' . str_repeat('a', 48),
+            '/manual',
+        ] as $returnPath) {
             try {
                 $this->login->start(
                     $this->customRequest(),
@@ -236,10 +252,103 @@ final class DomainLoginFlowTest extends TestCase
                     $returnPath,
                     '192.0.2.15',
                 );
-                self::fail('Domain login smí pokračovat jen na klientský portál stejného originu.');
+                self::fail('Domain login smí pokračovat jen na klientskou routu stejného originu.');
             } catch (DomainLoginException $e) {
                 self::assertSame('invalid_return_path', $e->errorCode);
                 self::assertSame(400, $e->httpStatus);
+            }
+        }
+    }
+
+    public function testStartAcceptsEveryClientRouteFamilyAndLegacyAlias(): void
+    {
+        foreach ([
+            '/clients/7?role=customer#history',
+            '/invoices/new?type=proforma',
+            '/purchase-invoices/7/edit',
+            '/recurring/7',
+            '/profile/password?tab=totp',
+            '/exchange?tab=export-issued',
+            '/admin/export',
+            '/admin/import?tab=purchase',
+        ] as $returnPath) {
+            $flow = $this->login->start(
+                $this->customRequest(),
+                self::pkceChallenge(self::opaqueToken()),
+                $returnPath,
+                '192.0.2.15',
+            );
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT return_path FROM supplier_domain_login_requests WHERE request_token_hash = ?'
+            );
+            $stmt->execute([hash('sha256', $flow['request_token'])]);
+            self::assertSame($returnPath, $stmt->fetchColumn(), $returnPath);
+        }
+    }
+
+    public function testWebAuthnHandoffUsesCanonicalTargetAndSeparateValidatedCustomReturn(): void
+    {
+        $flow = $this->login->start(
+            $this->customRequest(),
+            self::pkceChallenge(self::opaqueToken()),
+            '/invoices/7',
+            '192.0.2.15',
+            '/profile/password?tab=passkeys',
+        );
+        parse_str((string) parse_url($flow['login_url'], PHP_URL_QUERY), $loginQuery);
+        self::assertSame(
+            '/profile/password?tab=passkeys',
+            $loginQuery['domain_login_handoff'] ?? null,
+        );
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT supplier_id, target_hostname, return_path
+               FROM supplier_domain_login_requests
+              WHERE request_token_hash = ?'
+        );
+        $stmt->execute([hash('sha256', $flow['request_token'])]);
+        $stored = $stmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame($this->supplierId, (int) ($stored['supplier_id'] ?? 0));
+        self::assertSame($this->hostname, $stored['target_hostname'] ?? null);
+        self::assertSame('/invoices/7', $stored['return_path'] ?? null);
+
+        // Kompatibilita se starším klientem: citlivá cesta v return_path se
+        // převede na canonical handoff a custom návrat nesmí vytvořit smyčku.
+        $legacy = $this->login->start(
+            $this->customRequest(),
+            self::pkceChallenge(self::opaqueToken()),
+            '/profile/passkeys',
+            '192.0.2.15',
+        );
+        parse_str((string) parse_url($legacy['login_url'], PHP_URL_QUERY), $legacyQuery);
+        self::assertSame(
+            '/profile/password?tab=passkeys',
+            $legacyQuery['domain_login_handoff'] ?? null,
+        );
+        $stmt->execute([hash('sha256', $legacy['request_token'])]);
+        self::assertSame('/portal', ($stmt->fetch(\PDO::FETCH_ASSOC) ?: [])['return_path'] ?? null);
+    }
+
+    public function testWebAuthnHandoffRejectsUnmanifestedAndCrossOriginDestinations(): void
+    {
+        foreach ([
+            '/profile/password?tab=totp',
+            '/admin/settings',
+            '//attacker.example/profile/passkeys',
+            'https://attacker.example/profile/passkeys',
+        ] as $handoffPath) {
+            try {
+                $this->login->start(
+                    $this->customRequest(),
+                    self::pkceChallenge(self::opaqueToken()),
+                    '/portal',
+                    '192.0.2.15',
+                    $handoffPath,
+                );
+                self::fail('Canonical handoff smí použít jen manifestovaný WebAuthn cíl.');
+            } catch (DomainLoginException $e) {
+                self::assertSame('invalid_handoff_path', $e->errorCode, $handoffPath);
+                self::assertSame(400, $e->httpStatus, $handoffPath);
             }
         }
     }

@@ -10,6 +10,7 @@ final readonly class TenantDomainContext
     public const CUSTOM = 'custom';
     public const VERIFICATION = 'verification';
     public const UNKNOWN = 'unknown';
+    public const CONFIGURATION_ERROR = 'configuration_error';
 
     public function __construct(
         public string $mode,
@@ -20,7 +21,13 @@ final readonly class TenantDomainContext
         public ?string $purpose = null,
         public ?string $status = null,
     ) {
-        if (!in_array($mode, [self::CANONICAL, self::CUSTOM, self::VERIFICATION, self::UNKNOWN], true)) {
+        if (!in_array($mode, [
+            self::CANONICAL,
+            self::CUSTOM,
+            self::VERIFICATION,
+            self::UNKNOWN,
+            self::CONFIGURATION_ERROR,
+        ], true)) {
             throw new \InvalidArgumentException('Neplatný režim tenant domény.');
         }
     }

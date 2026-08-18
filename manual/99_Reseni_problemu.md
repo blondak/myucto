@@ -100,6 +100,78 @@ ověřovací procesy i záložní kódy a invaliduje všechny session. Detail v�
 Docker příkazů je v [§ 76.2.4](76_Bezpecnost.md#7624-obnova-pristupu). Neupravuj
 jen sloupce TOTP ručně v databázi: ponechal bys aktivní další faktory a session.
 
+### Diagnostika `app.url`
+
+V běžném provozu ověřuj canonical adresu přes přesný origin nastavený v
+`app.url`. Například pro `app.url = https://faktury.example.cz`:
+
+```bash
+curl --fail --silent --show-error https://faktury.example.cz/api/v1/health
+```
+
+Pokud whitespace-only nebo jiná neprázdná neplatná hodnota zablokuje běžné
+stránky host gate, lze stejný přesný endpoint dočasně zavolat přes jiný hostname,
+který přijímá reverse proxy, případně ze serveru či kontejneru. Tato recovery
+výjimka neplatí pro žádnou jinou aplikační cestu a neobchází zapnutý IP
+allowlist. Během nedokončeného first-run setupu používej `GET`, protože setup
+allowlist metodu `HEAD` nepovoluje.
+
+Veřejná odpověď obsahuje pouze bezpečný verdikt. Původní `app.url`, hostname,
+přihlašovací údaje, cesta, query ani fragment se do ní nikdy nekopírují:
+
+```json
+{
+  "configuration": {
+    "app_url": {
+      "state": "invalid",
+      "reason_code": "app_url_invalid_origin",
+      "routing_compatible": false,
+      "webauthn_compatible": false
+    }
+  }
+}
+```
+
+| `state` | `reason_code` | Význam |
+|---|---|---|
+| `missing` | `app_url_missing` | Hodnota chybí, je přesně prázdná nebo obsahuje jen whitespace. |
+| `invalid` | `app_url_invalid_origin` | Hodnota není samostatný HTTP(S) origin. Legacy resolver může uznat jen hostname, který z ní ještě bezpečně vyčte; nikdy ne libovolný request host. |
+| `routing_only` | `app_url_webauthn_incompatible` | Běžné routování funguje, WebAuthn ne. |
+| `hostname_conflict` | `app_url_hostname_conflict` | Hostname z `app.url` je současně uložený jako vlastní doména firmy; běžné cesty jsou bezpečně odmítnuté. |
+| `webauthn_ready` | `app_url_valid` | Hodnota vyhovuje routování i WebAuthn. |
+
+`app.url` nastav na přesný origin: schéma `http` nebo `https`, hostname a
+volitelný port. Nesmí obsahovat userinfo (`jmeno:heslo@`), cestu, query ani
+fragment. Běžné rozhraní dál podporuje HTTP a LAN IP adresy. Passkeys mají
+užší pravidlo: vyžadují HTTPS a DNS hostname; jediná HTTP výjimka je
+`http://localhost`.
+
+Při `hostname_conflict` vrať `app.url` na předchozí canonical origin. Potom
+kolidující záznam v **Nastavení → Firma → Vlastní domény** deaktivuj a smaž,
+nebo pro `app.url` zvol jiný hostname. Dokud kolize trvá, aplikace na canonical
+hostname zpřístupní pouze přesné `GET`/`HEAD` healthchecku; hostname ani údaje
+firmy se v diagnostice nevracejí.
+
+Při prvním setupu je chybějící, prázdná nebo whitespace-only hodnota v
+preflightu v pořádku — wizard ji doplní z adresy, přes kterou je otevřený.
+Stejně umí nahradit známý distribuční placeholder. Jinou explicitně neprázdnou
+neplatnou hodnotu preflight označí jako problém a setup ji nepřepíše. Po
+dokončení setupu je chybějící hodnota také problém a musí se opravit ručně v
+`cfg.php`, `cfg.local.php` nebo přes `MYINVOICE_APP_URL`.
+
+Chybějící nebo přesně prázdná hodnota zachovává dosavadní fallback, ve kterém
+se validní request hostname považuje za canonical. Whitespace-only a jiná
+neprázdná neplatná hodnota tento fallback nemá: host gate pro ně přes cizí
+hostname povoluje výhradně přesné `GET`/`HEAD` healthchecku. POST, jiné API,
+přihlášení ani ostatní aplikační cesty výjimku nedostanou. Po opravě monitoruj
+health znovu přes hostname z `app.url`, ne přes recovery adresu.
+
+Stav s `routing_compatible: false` se v serverovém logu hlásí jako
+`configuration.app_url_unusable` pouze se stabilními poli `state` a
+`reason_code`. Log záměrně neobsahuje nastavenou URL ani žádnou její odvozenou
+část. Umístění logu určuje `logging.path`; provozní souhrn je také v
+[§ 76.2.1](76_Bezpecnost.md#provozni-diagnostika-canonical-appurl).
+
 ### Varování `secret_encryption_key` (špatná délka klíče)
 
 Backend vrací v `GET /api/health` pole `warnings[]` a admin vidí

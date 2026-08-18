@@ -17,6 +17,10 @@ import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import Passkeys from '@/pages/Passkeys.vue'
 import KeyboardShortcuts from '@/pages/KeyboardShortcuts.vue'
+import {
+  authorizePendingDomainLogin,
+  hasPendingCanonicalDomainLogin,
+} from '@/security/domainLogin'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -24,6 +28,23 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const sessionSecurity = useSessionSecurityStore()
+const domainReturnPending = ref(hasPendingCanonicalDomainLogin())
+const domainReturnBusy = ref(false)
+const domainReturnError = ref('')
+
+async function returnToClientDomain() {
+  if (!domainReturnPending.value || domainReturnBusy.value) return
+  domainReturnBusy.value = true
+  domainReturnError.value = ''
+  try {
+    await authorizePendingDomainLogin()
+  } catch (e: any) {
+    domainReturnPending.value = false
+    domainReturnError.value = e?.response?.data?.error?.message || t('domain_login.authorize_failed')
+  } finally {
+    domainReturnBusy.value = false
+  }
+}
 
 type Tab = 'password' | 'totp' | 'passkeys' | 'session-lock' | 'shortcuts'
 function tabFromQuery(value: unknown): Tab {
@@ -33,8 +54,7 @@ function tabFromQuery(value: unknown): Tab {
 }
 const tab = ref<Tab>(tabFromQuery(route.query.tab))
 function setTab(next: Tab) {
-  tab.value = next
-  router.replace({ query: { ...route.query, tab: next === 'password' ? undefined : next } })
+  void router.replace({ query: { ...route.query, tab: next === 'password' ? undefined : next } })
 }
 function setTabFromSelect(event: Event) {
   setTab((event.target as HTMLSelectElement).value as Tab)
@@ -213,6 +233,24 @@ onMounted(() => {
       <h1 class="text-2xl font-semibold">{{ t('auth.profile_title') }}</h1>
       <p class="text-sm text-neutral-500 mt-0.5">{{ t('auth.profile_subtitle') }}</p>
     </div>
+
+    <div v-if="domainReturnPending"
+         class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary-300 bg-primary-50 px-4 py-3">
+      <p class="min-w-0 flex-1 text-sm text-primary-800">
+        {{ t('domain_login.canonical_webauthn_notice') }}
+      </p>
+      <button type="button" @click="returnToClientDomain" :disabled="domainReturnBusy"
+              class="inline-flex h-10 items-center gap-2 whitespace-nowrap rounded-md bg-primary-600 px-4 text-sm font-medium text-white hover:bg-primary-700 disabled:bg-neutral-300">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M10 6l-6 6 6 6M4 12h16" />
+        </svg>
+        {{ domainReturnBusy ? t('domain_login.returning') : t('domain_login.return_to_client') }}
+      </button>
+    </div>
+    <p v-if="domainReturnError"
+       class="mb-4 rounded-md border border-danger-500/40 bg-danger-50 px-3 py-2 text-sm text-danger-500">
+      {{ domainReturnError }}
+    </p>
 
     <!-- Tabs: na mobilu a tabletu select, aby se pět názvů nemačkalo ani nescrollovalo -->
     <select :value="tab" @change="setTabFromSelect"

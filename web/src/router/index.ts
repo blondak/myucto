@@ -11,6 +11,12 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import type { AccessLevel, PermissionKey } from '@/security/permissions'
 import { ensureNamespaces, namespacesForRoute } from '@/i18n'
+import {
+  clientDomainCanonicalHandoffPath,
+  clientDomainRedirect,
+  isClientDomainAuthenticatedPath,
+  isClientDomainRouteName,
+} from '@/security/clientRoutePolicy'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -624,7 +630,10 @@ export function clearLoginBounces(): void {
   }
 }
 
-export async function authorizationGuard(to: RouteLocationNormalized): Promise<boolean | RouteLocationRaw> {
+export async function authorizationGuard(
+  to: RouteLocationNormalized,
+  from?: RouteLocationNormalized,
+): Promise<boolean | RouteLocationRaw> {
   const auth = useAuthStore()
 
   if (auth.setupStatus === null) {
@@ -643,28 +652,47 @@ export async function authorizationGuard(to: RouteLocationNormalized): Promise<b
   }
 
   const requiresAuth = to.matched.some((r) => r.meta.requiresAuth)
+  if (requiresAuth && auth.domainContext?.locked) {
+    const redirect = clientDomainRedirect(to.name)
+    if (redirect !== null) return { path: redirect }
+
+    if (clientDomainCanonicalHandoffPath(to.fullPath) !== null) {
+      const returnPath = from
+        && isClientDomainAuthenticatedPath(from.fullPath)
+        && clientDomainCanonicalHandoffPath(from.fullPath) === null
+        ? from.fullPath
+        : '/portal'
+      return {
+        name: 'login',
+        query: {
+          return_to: returnPath,
+          domain_handoff: to.fullPath,
+        },
+      }
+    }
+
+    const canonicalUrl = canonicalInternalUrl(to, auth.domainContext)
+    if (canonicalUrl !== null) {
+      window.location.replace(canonicalUrl)
+      return false
+    }
+  }
   if (requiresAuth && !auth.isAuthenticated) {
     // Rozhoduje stav storu, ne návratová hodnota: refresh() při síťovém výpadku
     // vrací false, ale známou identitu si záměrně drží.
     await auth.refresh()
     if (!auth.isAuthenticated) {
       recordLoginBounce()
-      return { name: 'login' }
+      return auth.domainContext?.locked && isClientDomainAuthenticatedPath(to.fullPath)
+        ? { name: 'login', query: { return_to: to.fullPath } }
+        : { name: 'login' }
     }
   }
 
-  // Vlastní doména je vstup klientského portálu, ne alternativní origin celého
-  // interního UI. WebAuthn RP ID i interní odkazy tak zůstávají na app.url;
-  // klientská role se z kořene nejdřív pošle na svůj portál.
+  // Klientská role se z canonical kořene posílá na svůj přehled. Vlastní doména
+  // řeší stejný vstup výše přes sdílenou route policy i pro staff náhled klienta.
   if (auth.isClientRole && to.name === 'home') {
     return { name: 'portal' }
-  }
-  if (requiresAuth) {
-    const canonicalUrl = canonicalInternalUrl(to, auth.domainContext)
-    if (canonicalUrl !== null) {
-      window.location.replace(canonicalUrl)
-      return false
-    }
   }
   if (requiresAuth && auth.lockedSession) {
     useSessionSecurityStore().apply(auth.lockedSession)
@@ -775,14 +803,12 @@ export async function authorizationGuard(to: RouteLocationNormalized): Promise<b
   return true
 }
 
-const customDomainRouteNames = new Set(['portal', 'portal-document-requests'])
-
-/** Vrátí bezpečný canonical cíl jen pro interní routy otevřené na vlastní doméně. */
+/** Vrátí bezpečný canonical cíl jen pro routy mimo sdílenou klientskou plochu. */
 export function canonicalInternalUrl(
   to: RouteLocationNormalized,
   context: DomainContext | null,
 ): string | null {
-  if (!context?.locked || customDomainRouteNames.has(String(to.name))) return null
+  if (!context?.locked || isClientDomainRouteName(to.name)) return null
   if (!context.canonical_base_url || !to.fullPath.startsWith('/') || to.fullPath.startsWith('//')) return null
   try {
     const origin = new URL(context.canonical_base_url).origin

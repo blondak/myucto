@@ -833,17 +833,37 @@ Záložka je pouze pro čtení: zprávu z ní nelze znovu odeslat ani smazat. St
 doručení do schránky příjemce. Pro technickou diagnostiku SMTP komunikace
 použij [SMTP log analýzu](#738-smtp-log-analyza).
 
-## 73.16 Vlastní domény klientského portálu
+## 73.16 Vlastní domény klientského rozhraní
 
 **Cesta: `Nastavení → Firma → Vlastní domény`.** Sekce se zobrazí uživateli
 s oprávněním **Vlastní domény** alespoň pro čtení; založení, ověření, aktivace
 a deaktivace vyžadují zápis. Domény se vždy spravují pro právě vybranou firmu.
+V hostované instalaci musí vlastní hostname, směrování hlavičky `Host` a TLS
+výslovně podporovat provozovatel služby; samotné oprávnění v aplikaci tuto
+provozní podporu nezajistí.
 
 Při založení zadej jen hostname bez schématu, portu a cesty, například
-`portal.klient.cz`. Wildcard není podporovaný. Vyber účel **Klientský portál**,
-**Veřejné odkazy** nebo **Portál i veřejné odkazy** a urči, zda má být doména
-po aktivaci primární. Více aliasů je povolených; pro každý účel může být
-primární nejvýše jeden aktivní hostname.
+`portal.klient.cz`. Wildcard není podporovaný. Vyber účel **Klientské rozhraní**,
+**Veřejné odkazy** nebo **Klientské rozhraní i veřejné odkazy** a urči, zda má
+být doména po aktivaci primární. Klientské rozhraní zahrnuje přehled, doklady,
+kontakty, pravidelnou fakturaci i osobní profil podle oprávnění role client;
+nejde jen o adresy pod `/portal`. Více aliasů je povolených; pro každý účel může
+být primární nejvýše jeden aktivní hostname. Hostname, který používá výchozí
+`app.url`, nelze současně založit jako vlastní doménu firmy; zadej jiný hostname.
+Pokud správce změní `app.url` až později na už uloženou vlastní doménu, aplikace
+odmítne běžný provoz na tomto hostname a v health diagnostice ohlásí kolizi.
+Obnov původní canonical adresu, kolidující vlastní doménu deaktivuj a smaž,
+nebo nastav jiný canonical hostname.
+
+Přihlášení, správa passkeys a vynucené nastavení MFA používají canonical origin
+z `app.url`, protože WebAuthn RP ID je svázané právě s ním. Při otevření správy
+passkeys nebo nastavení MFA z vlastní domény aplikace provede krátkodobý PKCE
+přechod na canonical adresu a následně vytvoří novou host-only session pro původní
+doménu. Návrat vede jen na serverem ověřenou stránku klientského rozhraní a zachová
+firmu určenou aktivním hostname; vlastní doména sama WebAuthn options ani verify
+endpointy neobsluhuje. Stejná hranice platí pro výpis, přejmenování a odvolání
+passkeys i pro WebAuthn odemčení zamčené session; běžné TOTP operace zůstávají
+samostatné a na WebAuthn originu nezávisí.
 
 ### Ověření a aktivace
 
@@ -858,11 +878,16 @@ původní hlavičku `Host` a připrav důvěryhodný TLS certifikát. Tlačítko
 **Ověřit DNS a HTTPS** kontroluje TXT challenge i HTTPS odpověď z přesné domény.
 Kontrola nepovoluje redirect, privátní cílovou IP ani nedůvěryhodný certifikát.
 Dokud neprojde, hostname obslouží pouze svůj jednorázový ověřovací endpoint,
-nikoli portál nebo firemní data.
+nikoli klientské rozhraní nebo firemní data.
 
-Po úspěšném ověření aktivaci potvrď passkey nebo TOTP. Tím se zabrání tomu, aby
-ukradená běžná session přesměrovala klienty na útočníkovu doménu. Aktivace,
-změny challenge, ověření i deaktivace se zapisují do activity logu.
+Po úspěšném ověření aktivaci potvrď passkey nebo TOTP. Aktivace bezprostředně
+zopakuje DNS i HTTPS kontrolu pro aktuální hostname a challenge; dříve uložený
+stav **Ověřeno** sám nestačí. Pokud se challenge mezitím změnila nebo některá
+kontrola už neprojde, doména zůstane neaktivní a aplikace zobrazí důvod. Po
+opravě proveď ověření a aktivaci znovu. Tím se zabrání tomu, aby ukradená běžná
+session nebo zastaralý výsledek kontroly přesměroval klienty na útočníkovu
+doménu. Aktivace, změny challenge, ověření i deaktivace se zapisují do activity
+logu.
 
 | Stav | Význam |
 |---|---|

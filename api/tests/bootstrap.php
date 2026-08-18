@@ -43,6 +43,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Repository/Payroll/PayrollStatutoryResultRepository.php',
     '*/api/src/Repository/PurchaseInvoiceRepository.php',
     '*/api/src/Repository/SigningProfileRepository.php',
+    '*/api/src/Repository/SupplierDomainRepository.php',
     '*/api/src/Repository/TaxConstantsRepository.php',
     '*/api/src/Repository/TripRepository.php',
     '*/api/src/Repository/UserSupplierRepository.php',
@@ -120,6 +121,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Service/Auth/SecretEncryption.php',
     '*/api/src/Service/Signing/Pdf/PdfSigningService.php',
     '*/api/src/Service/System/EnvironmentCheckService.php',
+    '*/api/src/Service/Tenant/DomainVerificationService.php',
     '*/api/src/Service/Tenant/SupplierAccessResolver.php',
     '*/api/src/Service/Update/VersionService.php',
 ]);

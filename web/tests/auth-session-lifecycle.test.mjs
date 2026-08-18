@@ -51,7 +51,7 @@ test('manual lock is available only for a session with passkey unlock', () => {
 // my zpátky na `/`, guard sem… Celé v JS, bez reloadu — poznat je to jen jako
 // opakující se `Promise.then` v call stacku.
 test('login and the router guard agree on what "authenticated" means', () => {
-  assert.match(router, /if \(requiresAuth && !auth\.isAuthenticated\) \{[\s\S]*?await auth\.refresh\(\)[\s\S]*?if \(!auth\.isAuthenticated\) \{[\s\S]*?return \{ name: 'login' \}/)
+  assert.match(router, /if \(requiresAuth && !auth\.isAuthenticated\) \{[\s\S]*?await auth\.refresh\(\)[\s\S]*?if \(!auth\.isAuthenticated\) \{[\s\S]*?name: 'login'/)
   assert.match(login, /await auth\.refresh\(\)\s*\n\s*if \(auth\.isAuthenticated\) \{/)
   assert.doesNotMatch(login, /const stillAuthed = await auth\.refresh\(\)/)
 })
@@ -75,7 +75,7 @@ test('failed sample data generation is reported as an error, not a passing note'
 // /api/auth/me) smyčku vyrobí i tak. Musí ji utnout pojistka — jinak nainstalovaná
 // PWA zamrzne v okně bez adresního řádku, ze kterého se nedá odejít.
 test('a redirect loop between / and /login is broken instead of spinning forever', () => {
-  assert.match(router, /if \(!auth\.isAuthenticated\) \{\s*\n\s*recordLoginBounce\(\)\s*\n\s*return \{ name: 'login' \}/)
+  assert.match(router, /if \(!auth\.isAuthenticated\) \{\s*\n\s*recordLoginBounce\(\)[\s\S]*?name: 'login'/)
   assert.match(router, /export function loginRedirectLoopDetected\(\)/)
   assert.match(router, /export function clearLoginBounces\(\)/)
   // Počítadlo musí přežít tvrdý window.location redirect z api/client.ts.

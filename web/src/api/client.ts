@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { isClientDomainAuthenticatedPath } from '@/security/clientRoutePolicy'
 
 export const api = axios.create({
   baseURL: '/api',
@@ -61,7 +62,10 @@ api.interceptors.response.use(
     ].includes(code)) {
       const path = window.location.pathname
       if (!path.startsWith('/login') && !path.startsWith('/setup')) {
-        window.location.href = '/login'
+        const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
+        window.location.href = domainSupplierLock !== null && isClientDomainAuthenticatedPath(returnPath)
+          ? `/login?return_to=${encodeURIComponent(returnPath)}`
+          : '/login'
       }
     }
     if (status === 423 && code === 'session_locked') {
@@ -145,12 +149,40 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 }
 
+export type AppUrlConfigurationState =
+  | 'missing'
+  | 'invalid'
+  | 'routing_only'
+  | 'hostname_conflict'
+  | 'webauthn_ready'
+
+export type AppUrlConfigurationReason =
+  | 'app_url_missing'
+  | 'app_url_invalid_origin'
+  | 'app_url_webauthn_incompatible'
+  | 'app_url_hostname_conflict'
+  | 'app_url_valid'
+
+export interface AppUrlConfigurationStatus {
+  state: AppUrlConfigurationState
+  reason_code: AppUrlConfigurationReason
+  routing_compatible: boolean
+  webauthn_compatible: boolean
+}
+
+export interface HealthWarning {
+  code: string
+  message: string
+  reason_code?: string
+}
+
 export interface HealthResponse {
   status: 'ok'
   version: string
   db: boolean
   redis: boolean
-  warnings?: Array<{ code: string; message: string }>
+  configuration: { app_url: AppUrlConfigurationStatus }
+  warnings?: HealthWarning[]
   time: string
 }
 

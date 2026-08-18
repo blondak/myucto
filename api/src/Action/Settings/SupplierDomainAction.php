@@ -15,8 +15,9 @@ use MyInvoice\Service\Auth\MfaStepUpService;
 use MyInvoice\Service\Auth\OneTimeTokenException;
 use MyInvoice\Service\Auth\StepUpOperationException;
 use MyInvoice\Service\IpMatcher;
-use MyInvoice\Service\Tenant\DomainVerificationService;
-use MyInvoice\Service\Tenant\HostnameNormalizer;
+use MyInvoice\Service\Tenant\SupplierDomainHostnameCollisionException;
+use MyInvoice\Service\Tenant\SupplierDomainRegistrationService;
+use MyInvoice\Service\Tenant\SupplierDomainVerificationService;
 use PDOException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -25,8 +26,8 @@ final class SupplierDomainAction
 {
     public function __construct(
         private readonly SupplierDomainRepository $domains,
-        private readonly HostnameNormalizer $hostnames,
-        private readonly DomainVerificationService $verification,
+        private readonly SupplierDomainRegistrationService $registration,
+        private readonly SupplierDomainVerificationService $verification,
         private readonly MfaStepUpService $stepUp,
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
@@ -43,10 +44,9 @@ final class SupplierDomainAction
         if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) return $error;
         $body = (array) ($request->getParsedBody() ?? []);
         try {
-            $hostname = $this->hostnames->normalizeDomain((string) ($body['hostname'] ?? ''));
-            $domain = $this->domains->create(
+            $domain = $this->registration->register(
                 $this->supplierId($request),
-                $hostname,
+                (string) ($body['hostname'] ?? ''),
                 (string) ($body['purpose'] ?? 'all'),
                 $this->userId($request),
             );
@@ -60,10 +60,12 @@ final class SupplierDomainAction
                 );
             }
             $this->log($request, 'supplier_domain.created', (int) $domain['id'], [
-                'hostname' => $hostname,
+                'hostname' => $domain['hostname'],
                 'purpose' => $domain['purpose'],
             ]);
             return Json::ok($response, $this->present($domain), 201);
+        } catch (SupplierDomainHostnameCollisionException $e) {
+            return Json::error($response, 'canonical_hostname_conflict', $e->getMessage(), 409);
         } catch (PDOException $e) {
             if ($e->getCode() === '23000') {
                 return Json::error($response, 'hostname_taken', 'Tento hostname už je přiřazený.', 409);
@@ -121,26 +123,15 @@ final class SupplierDomainAction
         if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) return $error;
         $sid = $this->supplierId($request);
         $id = (int) ($args['id'] ?? 0);
-        $domain = $this->domains->findOwned($sid, $id);
-        if ($domain === null) return Json::error($response, 'not_found', 'Doména nebyla nalezena.', 404);
         try {
-            $result = $this->verification->verify($domain);
-            $this->domains->recordVerification(
-                $sid,
-                $id,
-                $result['verified'],
-                $result['error'],
-                $this->userId($request),
-            );
-            $fresh = $this->domains->findOwned($sid, $id) ?? $domain;
-            $this->log($request, 'supplier_domain.verification_checked', $id, [
-                'verified' => $result['verified'],
-                'dns' => $result['dns'],
-                'https' => $result['https'],
+            $verification = $this->verification->verifyCurrent($sid, $id, $this->userId($request));
+            $this->logVerification($request, $id, $verification['checks']);
+            return Json::ok($response, [
+                'domain' => $this->present($verification['domain']),
+                'checks' => $verification['checks'],
             ]);
-            return Json::ok($response, ['domain' => $this->present($fresh), 'checks' => $result]);
-        } catch (\DomainException $e) {
-            return Json::error($response, 'domain_active', $e->getMessage(), 409);
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
         }
     }
 
@@ -154,6 +145,7 @@ final class SupplierDomainAction
             if ($domain === null) {
                 return Json::error($response, 'not_found', 'Doména nebyla nalezena.', 404);
             }
+            $this->registration->assertNotCanonicalHostname((string) $domain['hostname']);
             if ($domain['status'] !== 'verified' || $domain['verified_at'] === null) {
                 return Json::error(
                     $response,
@@ -168,6 +160,21 @@ final class SupplierDomainAction
                 (string) $request->getAttribute(AuthMiddleware::ATTR_TOKEN, ''),
                 MfaStepUpService::domainActivationOperation($id),
             );
+            $verification = $this->verification->verifyCurrent(
+                $this->supplierId($request),
+                $id,
+                $this->userId($request),
+                $domain,
+            );
+            $this->logVerification($request, $id, $verification['checks']);
+            if (!$verification['checks']['verified']) {
+                return Json::error(
+                    $response,
+                    'domain_not_verified',
+                    $verification['checks']['error'] ?? 'DNS nebo HTTPS ověření domény selhalo.',
+                    409,
+                );
+            }
             $domain = $this->domains->activate(
                 $this->supplierId($request),
                 $id,
@@ -261,11 +268,23 @@ final class SupplierDomainAction
     {
         return match (true) {
             $e instanceof \OutOfBoundsException => Json::error($response, 'not_found', 'Doména nebyla nalezena.', 404),
+            $e instanceof SupplierDomainHostnameCollisionException
+                => Json::error($response, 'canonical_hostname_conflict', $e->getMessage(), 409),
             $e instanceof \DomainException => Json::error($response, 'domain_state_conflict', $e->getMessage(), 409),
             $e instanceof PDOException && $e->getCode() === '23000'
                 => Json::error($response, 'domain_conflict', 'Primární doména pro tento účel už existuje.', 409),
             default => throw $e,
         };
+    }
+
+    /** @param array{verified:bool,dns:bool,https:bool,error:?string} $checks */
+    private function logVerification(Request $request, int $domainId, array $checks): void
+    {
+        $this->log($request, 'supplier_domain.verification_checked', $domainId, [
+            'verified' => $checks['verified'],
+            'dns' => $checks['dns'],
+            'https' => $checks['https'],
+        ]);
     }
 
     /** @param array<string,mixed> $payload */

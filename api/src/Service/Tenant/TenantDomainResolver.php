@@ -50,6 +50,21 @@ final class TenantDomainResolver
             return new TenantDomainContext(TenantDomainContext::UNKNOWN, $requestHost, '');
         }
         if (hash_equals($canonicalHost, $requestHost)) {
+            try {
+                $collidingDomain = $this->domains->findByHostname($requestHost);
+            } catch (\PDOException) {
+                // Při nedostupné DB nech canonical request doběhnout. Health pak
+                // může vrátit db=false; žádná tenantová data bez DB stejně nejdou
+                // načíst a přepsání této diagnostiky 421 by nápravu ztížilo.
+                $collidingDomain = null;
+            }
+            if ($collidingDomain !== null) {
+                return new TenantDomainContext(
+                    TenantDomainContext::CONFIGURATION_ERROR,
+                    $requestHost,
+                    $canonicalOrigin,
+                );
+            }
             return new TenantDomainContext(TenantDomainContext::CANONICAL, $requestHost, $canonicalOrigin);
         }
 

@@ -312,9 +312,11 @@ portál i veřejné odkazy dál fungují na výchozí adrese beze změny.
 
 Doméně se přiřazuje účel:
 
-- **Klientský portál** — přihlášení a stránky `/portal`;
+- **Klientské rozhraní** — celý rozsah stránek, které dovoluje klientská role:
+  přehled, vydané a přijaté faktury, pravidelná fakturace, kontakty, předávání
+  dokladů a osobní profil;
 - **Veřejné odkazy** — webové faktury, schvalování a výkazy práce;
-- **Portál i veřejné odkazy** — oba předchozí účely.
+- **Klientské rozhraní i veřejné odkazy** — oba předchozí účely.
 
 Firma může mít více aktivních aliasů, ale pro každý účel nejvýše jednu primární
 doménu. Nově odesílané odkazy používají primární doménu; starší canonical odkazy
@@ -323,22 +325,45 @@ odkazy automaticky na `app.url`.
 
 Aktivní vlastní doména zároveň jednoznačně určuje firmu. Přepínač firem se na ní
 nezobrazuje a firmu nelze podvrhnout hlavičkou, parametrem URL ani API tokenem.
-Uživatel musí mít k určené firmě stále platné přiřazení. Veřejný token jiné firmy
-na této doméně vrátí pouze „nenalezeno"; stejný token na canonical adrese zůstává
-funkční.
+Uživatel musí mít k určené firmě stále platné přiřazení. Jedinou výjimkou je
+globální superadmin, který může firmu určenou aktivní vlastní doménou otevřít i bez
+tohoto přiřazení. Výjimka obchází pouze kontrolu přiřazení: stav a účel domény,
+vazba hostname na firmu, canonical přihlášení, PKCE a bezpečná návratová cesta se
+ověřují stejně jako u ostatních uživatelů. Veřejný token jiné firmy na této doméně
+vrátí pouze „nenalezeno"; stejný token na canonical adrese zůstává funkční.
+Vlastní doména zpřístupní jen klientské agendy podle skutečných oprávnění uživatele.
+Zakázky, platební příkazy, příchozí fronta účetní, API tokeny, systémová nastavení
+a ostatní interní agendy na ní dostupné nejsou; jejich přímý odkaz se otevře na
+canonical adrese `app.url`. Na canonical adrese se v novém panelu otevírá také
+uživatelský manuál, který není součástí autentizované klientské plochy.
 
 ### 9.9.1 Přihlášení a passkeys
 
 Přihlášení se bezpečně dokončuje na canonical adrese z `app.url`, kde jsou
 zaregistrované passkeys a WebAuthn RP ID. Po heslu, TOTP nebo passkey se prohlížeč
-vrátí na přesnou vlastní doménu jednorázovým krátkodobým kódem svázaným s PKCE.
+vrátí na přesnou původně otevřenou klientskou stránku vlastní domény jednorázovým
+krátkodobým kódem svázaným s PKCE.
 Session token se v URL nepřenáší; cílová doména dostane novou host-only cookie,
 kterou jiná doména nemůže číst.
 
-Stejný centrální tok se použije k odemčení zamčené session. Správa passkeys,
-profil a interní účetní obrazovky zůstávají na canonical adrese; vlastní doména
-je vstupem klientského portálu, nikoli druhým originem celého interního rozhraní.
+Na stejné canonical adrese probíhá také **správa přístupových klíčů** a vynucené
+první nastavení MFA. WebAuthn klíče jsou kryptograficky svázané s RP ID a originem
+z `app.url`, takže vlastní doména tyto obrazovky neotevře s nefunkčním bezpečnostním
+dialogem. Místo toho zahájí stejný jednorázový přechod, na canonical adrese nabídne
+správu klíčů nebo nastavení MFA a po dokončení se vrátí na předchozí bezpečnou
+klientskou stránku vlastní domény. Cílová firma i hostname jsou po celou dobu
+svázané se serverovým požadavkem; nelze je změnit parametrem návratové URL.
+
+Při zamčení session server na vlastní doméně odmítne přímé WebAuthn options i
+verify. Zamykací obrazovka proto zahájí nové ověření na canonical originu a po
+jednorázovém PKCE návratu vytvoří novou host-only session; návrat zachová aktuální
+klientskou stránku. Vlastní doména je originem celého klientského rozhraní, nikoli
+druhým originem interních agend účetní a správce. Povolení se neurčuje podle
+prefixu `/portal`, ale podle stejného katalogu klientských oprávnění, který řídí
+menu, router i API. Staré adresy `/exchange`, `/admin/export` a `/admin/import`
+se nejprve převedou na svůj skutečný klientský cíl; samotný prefix `/admin` jim
+tedy přístup ani nedává, ani nebere.
 
 Neznámý, neověřený, deaktivovaný nebo účelově nekompatibilní hostname nikdy
 nezobrazí data firmy. Postup ověření a aktivace popisuje
-[§ 73.16 Vlastní domény](73_Nastaveni.md#7316-vlastni-domeny-klientskeho-portalu).
+[§ 73.16 Vlastní domény](73_Nastaveni.md#7316-vlastni-domeny-klientskeho-rozhrani).

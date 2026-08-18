@@ -19,6 +19,7 @@ COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN corepack enable && corepack prepare pnpm@latest --activate \
  && pnpm install --frozen-lockfile
 COPY web/ ./
+COPY shared/ /shared/
 RUN pnpm build
 
 # ---------- Stage 2: composer ----------

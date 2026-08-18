@@ -91,7 +91,7 @@ final class SupplierAccessResolverDynamicRolesTest extends TestCase
         self::assertSame(11, $access->supplierId);
     }
 
-    public function testDomainStillRequiresSupplierMembership(): void
+    public function testCustomDomainDeniesOrdinaryUserWithoutSupplierMembership(): void
     {
         $memberships = $this->createStub(UserSupplierRepository::class);
         $memberships->method('assignmentsForUser')->willReturn([12 => null]);
@@ -104,6 +104,69 @@ final class SupplierAccessResolverDynamicRolesTest extends TestCase
 
         self::assertTrue($access->denied);
         self::assertSame(11, $access->supplierId);
+    }
+
+    public function testCustomDomainAllowsSuperadminWithoutSupplierMembership(): void
+    {
+        $memberships = $this->createStub(UserSupplierRepository::class);
+        $memberships->method('assignmentsForUser')->willReturn([]);
+        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships);
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
+            ->withAttribute(AuthMiddleware::ATTR_USER, [
+                'id' => 10,
+                'role_id' => 1,
+                'is_superadmin' => true,
+                'role_summary' => ['system_key' => 'superadmin'],
+            ])
+            ->withAttribute(TenantDomainMiddleware::ATTR_CONTEXT, $this->domain(11));
+
+        $access = $resolver->resolve($request);
+
+        self::assertFalse($access->denied);
+        self::assertSame(11, $access->supplierId);
+        self::assertNull($access->roleIdOverride);
+    }
+
+    public function testCustomDomainSuperadminKeepsGlobalRoleWhenMembershipAlsoExists(): void
+    {
+        $memberships = $this->createStub(UserSupplierRepository::class);
+        $memberships->method('assignmentsForUser')->willReturn([11 => 7]);
+        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships);
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
+            ->withAttribute(AuthMiddleware::ATTR_USER, [
+                'id' => 10,
+                'role_id' => 1,
+                'is_superadmin' => true,
+                'role_summary' => ['system_key' => 'superadmin'],
+            ])
+            ->withAttribute(TenantDomainMiddleware::ATTR_CONTEXT, $this->domain(11));
+
+        $access = $resolver->resolve($request);
+
+        self::assertFalse($access->denied);
+        self::assertSame(11, $access->supplierId);
+        self::assertNull($access->roleIdOverride);
+    }
+
+    public function testSuperadminKeepsBoundTokenAccessOutsideCustomDomain(): void
+    {
+        $memberships = $this->createMock(UserSupplierRepository::class);
+        $memberships->expects(self::never())->method('assignmentsForUser');
+        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships);
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
+            ->withAttribute(AuthMiddleware::ATTR_USER, [
+                'id' => 10,
+                'role_id' => 1,
+                'is_superadmin' => true,
+                'role_summary' => ['system_key' => 'superadmin'],
+            ])
+            ->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['supplier_id' => 11]);
+
+        $access = $resolver->resolve($request);
+
+        self::assertFalse($access->denied);
+        self::assertSame(11, $access->supplierId);
+        self::assertNull($access->roleIdOverride);
     }
 
     public function testDomainSupplierCannotBeOverriddenByBoundPat(): void

@@ -259,10 +259,11 @@ export interface SetupSampleResult {
 export const authApi = {
   domainContext: () => api.get<DomainContext>('/auth/domain-context').then((r) => r.data),
 
-  domainLoginStart: (codeChallenge: string, returnPath: string) =>
+  domainLoginStart: (codeChallenge: string, returnPath: string, handoffPath?: string) =>
     api.post<DomainLoginStart>('/auth/domain-login/start', {
       code_challenge: codeChallenge,
       return_path: returnPath,
+      handoff_path: handoffPath || undefined,
     }).then((r) => r.data),
 
   domainLoginAuthorize: (requestToken: string, state: string) =>

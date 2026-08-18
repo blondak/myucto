@@ -99,6 +99,44 @@ final class SupplierDomainRepositoryTest extends TestCase
         self::assertSame($canonical, $this->urls->publicBaseUrl($this->supplierId));
     }
 
+    public function testVerificationResultCannotBeWrittenAfterChallengeRotation(): void
+    {
+        $domain = $this->domains->create(
+            $this->supplierId,
+            'race-' . $this->suffix . '.example.test',
+            'portal',
+            0,
+        );
+        $id = (int) $domain['id'];
+        $this->domainIds[] = $id;
+
+        $rotated = $this->domains->rotateChallenge($this->supplierId, $id, 0);
+        self::assertNotSame($domain['verification_token'], $rotated['verification_token']);
+
+        try {
+            $this->domains->recordVerification(
+                $this->supplierId,
+                $id,
+                $domain,
+                true,
+                null,
+                0,
+            );
+            self::fail('Výsledek staré challenge se nesmí zapsat k novému snapshotu domény.');
+        } catch (\DomainException $e) {
+            self::assertSame(
+                'Doména se během ověření změnila; spusť kontrolu znovu.',
+                $e->getMessage(),
+            );
+        }
+
+        $current = $this->domains->findOwned($this->supplierId, $id);
+        self::assertNotNull($current);
+        self::assertSame('pending', $current['status']);
+        self::assertNull($current['verified_at']);
+        self::assertSame($rotated['verification_token'], $current['verification_token']);
+    }
+
     private function createVerified(string $prefix, string $purpose): int
     {
         $domain = $this->domains->create(
@@ -109,7 +147,7 @@ final class SupplierDomainRepositoryTest extends TestCase
         );
         $id = (int) $domain['id'];
         $this->domainIds[] = $id;
-        $this->domains->recordVerification($this->supplierId, $id, true, null, 0);
+        $this->domains->recordVerification($this->supplierId, $id, $domain, true, null, 0);
         return $id;
     }
 }

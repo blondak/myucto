@@ -152,18 +152,30 @@ final class SupplierDomainRepository
             ?? throw new \OutOfBoundsException('Doména neexistuje.');
     }
 
+    /** @param array<string,mixed> $expectedDomain */
     public function recordVerification(
         int $supplierId,
         int $domainId,
+        array $expectedDomain,
         bool $verified,
         ?string $error,
         int $userId,
     ): void {
+        $hostname = (string) ($expectedDomain['hostname'] ?? '');
+        $token = (string) ($expectedDomain['verification_token'] ?? '');
+        $status = (string) ($expectedDomain['status'] ?? '');
+        $updatedAt = (string) ($expectedDomain['updated_at'] ?? '');
+        if ($hostname === '' || $token === '' || $status === '' || $updatedAt === '') {
+            throw new \InvalidArgumentException('Chybí snapshot ověřované domény.');
+        }
+
         $stmt = $this->db->pdo()->prepare(
             "UPDATE supplier_domains
                 SET status = ?, verified_at = CASE WHEN ? = 1 THEN UTC_TIMESTAMP(6) ELSE NULL END,
                     last_checked_at = UTC_TIMESTAMP(6), verification_error = ?, updated_by = ?
-              WHERE supplier_id = ? AND id = ? AND status <> 'active'"
+              WHERE supplier_id = ? AND id = ? AND status <> 'active'
+                AND hostname = ? AND verification_token = ?
+                AND status = ? AND updated_at = ?"
         );
         $stmt->execute([
             $verified ? 'verified' : 'verification_failed',
@@ -172,8 +184,19 @@ final class SupplierDomainRepository
             $userId ?: null,
             $supplierId,
             $domainId,
+            $hostname,
+            $token,
+            $status,
+            $updatedAt,
         ]);
-        if ($stmt->rowCount() < 1) throw new \DomainException('Doménu nelze ověřit.');
+        if ($stmt->rowCount() < 1) {
+            $current = $this->findOwned($supplierId, $domainId);
+            if ($current === null) throw new \OutOfBoundsException('Doména neexistuje.');
+            if ($current['status'] === 'active') {
+                throw new \DomainException('Aktivní doménu nelze ověřit.');
+            }
+            throw new \DomainException('Doména se během ověření změnila; spusť kontrolu znovu.');
+        }
     }
 
     /** @return array<string,mixed> */

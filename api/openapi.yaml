@@ -194,24 +194,51 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/health:
+    description: |
+      Veřejná provozní diagnostika, interně přepsaná na přesnou cestu
+      `/api/health`. Běžný monitoring instalace musí volat `GET` nebo `HEAD`
+      přes origin a hostname nakonfigurovaný v `app.url`; recovery volání přes
+      jiný request hostname je určeno jen pro stav, kdy canonical origin není
+      použitelný pro routování.
+
+      Pokud `app.url` obsahuje jen whitespace nebo jinou neprázdnou neplatnou
+      hodnotu, tenant host gate propustí přes cizí hostname výhradně přesné
+      `GET`/`HEAD /api/health`. Ostatní metody a cesty zůstávají odmítnuté.
+      Chybějící nebo přesně prázdná hodnota zachovává legacy fallback, ve kterém
+      se platný request hostname považuje za canonical; tento fallback se
+      nerozšiřuje na whitespace ani na jinou neprázdnou chybnou hodnotu.
+      Health je veřejný jen z hlediska autentizace: neobchází reverse proxy ani
+      zapnutý IP allowlist. Během nedokončeného first-run setupu používej `GET`;
+      setup allowlist metodu `HEAD` nepovoluje.
     get:
       tags: [System]
       summary: Health-check
       security: []
       responses:
         '200':
-          description: OK
+          description: |
+            Endpoint odpověděl. `status` neagreguje stav závislostí; monitor musí
+            samostatně vyhodnotit `db`, podle nasazení `redis` a
+            `configuration.app_url`. Diagnostika canonical URL obsahuje jen
+            stabilní stav, reason code a capability booleany, nikdy původní
+            hodnotu ani její části.
           content:
             application/json:
               schema:
                 type: object
-                required: [status, version, db, redis, time]
+                required: [status, version, db, redis, time, configuration]
                 properties:
                   status: { type: string, enum: [ok] }
                   version: { type: string, example: "4.3.1" }
                   db: { type: boolean }
                   redis: { type: boolean }
                   time: { type: string, format: date-time }
+                  configuration:
+                    type: object
+                    additionalProperties: false
+                    required: [app_url]
+                    properties:
+                      app_url: { $ref: '#/components/schemas/AppUrlConfigurationDiagnostic' }
                   warnings:
                     type: array
                     description: Diagnostika dostupná pouze přihlášenému uživateli.
@@ -228,6 +255,16 @@ paths:
                             - session_lock_configuration
                             - session_lock_without_unlock_method
                         message: { type: string }
+    head:
+      tags: [System]
+      summary: Health-check bez response body
+      description: |
+        Stejná dostupnost a tenant-host pravidla jako u `GET`; response body se
+        pro metodu `HEAD` nepřenáší.
+      security: []
+      responses:
+        '200':
+          description: Health endpoint je dosažitelný; bez response body.
 
   /api/v1/version:
     get:
@@ -286,8 +323,13 @@ paths:
       summary: Kontext aktuálního hostname
       description: |
         Pre-auth endpoint pro webové rozhraní. Rozliší canonical `app.url`
-        a aktivní vlastní doménu firmy. Na vlastní doméně je `supplier_id`
-        autoritativní a nelze jej přepsat hlavičkou ani query parametrem.
+        a aktivní vlastní doménu firmy. Vlastní doména obsluhuje celý rozsah
+        autentizovaných rout povolených klientské roli, ne jen prefix `/portal`.
+        WebAuthn-dependent správa passkeys a vynucené nastavení MFA přecházejí
+        serverem svázaným tokem na canonical origin z `app.url`; WebAuthn API
+        vlastní doména neobsluhuje.
+        `supplier_id` je na ní autoritativní a nelze jej přepsat hlavičkou ani
+        query parametrem.
         Neznámý nebo neaktivní hostname je odmítnut ještě před akcí.
       security: []
       responses:
@@ -16647,6 +16689,61 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    AppUrlConfigurationDiagnostic:
+      type: object
+      additionalProperties: false
+      description: |
+        Veřejná bezpečná klasifikace canonical `app.url`. Neobsahuje původní
+        hodnotu, hostname, userinfo, heslo, cestu, query ani fragment.
+
+        Stav a reason code tvoří pevné páry:
+        * `missing` / `app_url_missing`: klíč chybí, je přesně prázdný nebo
+          obsahuje jen whitespace. Diagnostický stav tyto případy záměrně
+          slučuje, ale tenant routing ne: jen chybějící a přesně prázdná hodnota
+          zachovává legacy request-host fallback; whitespace má pouze úzkou
+          health výjimku.
+        * `invalid` / `app_url_invalid_origin`: neprázdná hodnota není samostatný
+          HTTP(S) origin. Pokud z ní legacy tenant resolver přesto získá platný
+          hostname, může jako canonical uznat pouze request s přesně tímto
+          hostname; nejde o důvěru k libovolnému hostu. Přes jiný hostname je
+          dostupný pouze přesný read-only health endpoint.
+        * `routing_only` / `app_url_webauthn_incompatible`: HTTP(S) origin je
+          použitelný pro běžné routování, včetně HTTP nebo LAN IP, ale ne pro
+          WebAuthn.
+        * `hostname_conflict` / `app_url_hostname_conflict`: hostname originu
+          je současně uložený jako vlastní doména firmy. Aplikace fail-closed
+          odmítne běžné cesty; přesný read-only health endpoint zůstane dostupný
+          pro bezpečnou diagnostiku bez zveřejnění hostname.
+        * `webauthn_ready` / `app_url_valid`: origin vyhovuje routování i
+          WebAuthn. WebAuthn vyžaduje HTTPS DNS origin; jediná HTTP výjimka je
+          `http://localhost`.
+
+        First-run setup může doplnit chybějící, prázdnou nebo whitespace-only
+        hodnotu a známý distribuční placeholder z detekovaného originu.
+        Explicitně neprázdnou neplatnou hodnotu zachová pro diagnostiku a
+        preflight ji označí jako chybu.
+      required: [state, reason_code, routing_compatible, webauthn_compatible]
+      properties:
+        state:
+          type: string
+          enum: [missing, invalid, routing_only, hostname_conflict, webauthn_ready]
+          description: Stabilní třída konfigurace; nikdy neobsahuje část URL.
+        reason_code:
+          type: string
+          description: Stabilní reason code odpovídající hodnotě `state`.
+          enum:
+            - app_url_missing
+            - app_url_invalid_origin
+            - app_url_webauthn_incompatible
+            - app_url_hostname_conflict
+            - app_url_valid
+        routing_compatible:
+          type: boolean
+          description: Zda lze `app.url` použít jako canonical HTTP(S) origin pro routování.
+        webauthn_compatible:
+          type: boolean
+          description: Zda `app.url` splňuje přísnější origin a RP ID podmínky WebAuthn.
+
     StockVendorOfferPatch:
       type: object
       description: >
@@ -18364,13 +18461,14 @@ components:
         purpose:
           type: [string, "null"]
           enum: [portal, public_links, all, null]
+          description: Hodnota `portal` označuje celé klientské rozhraní podle oprávnění role client.
         canonical_base_url:
           type: string
           format: uri
         canonical_login_url:
           type: string
           format: uri
-          description: Canonical origin pro password, TOTP a WebAuthn přihlášení.
+          description: Canonical origin pro přihlášení a RP-bound WebAuthn operace.
 
     SupplierDomain:
       type: object
@@ -18385,6 +18483,7 @@ components:
         purpose:
           type: string
           enum: [portal, public_links, all]
+          description: Hodnota `portal` označuje celé klientské rozhraní podle oprávnění role client.
         status:
           type: string
           enum: [pending, verified, active, disabled, verification_failed]

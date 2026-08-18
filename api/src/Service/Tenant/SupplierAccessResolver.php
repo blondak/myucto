@@ -19,7 +19,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * vynucuje membership z user_suppliers:
  *
  *   - systémový superadmin: na canonical hostu vidí všechny firmy; vlastní host
- *     ho stejně zamkne na firmu domény, aby ani globální role neobešla izolaci
+ *     zachová membership výjimku, ale zamkne ho na firmu ověřené domény
  *   - každý non-superadmin BEZ membership řádků = denied (fail-closed)
  *   - uživatel S membership: explicitní požadavek na cizí firmu → denied
  *     (middleware vrací 403); bez explicitního požadavku fallback na nejnižší
@@ -99,6 +99,13 @@ final class SupplierAccessResolver
         if ($isSuperadmin) {
             return new SupplierAccess($sid, false, null);
         }
+
+        return $this->resolveMemberBound($userId, $sid);
+    }
+
+    /** Membership kontrola pro běžné role nad autoritativně určenou firmou. */
+    private function resolveMemberBound(int $userId, int $sid): SupplierAccess
+    {
         $assignments = $this->assignmentsFor($userId);
         if ($assignments === []) {
             return new SupplierAccess($sid, true, null);

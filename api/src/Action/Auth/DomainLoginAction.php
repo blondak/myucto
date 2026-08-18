@@ -32,6 +32,7 @@ final class DomainLoginAction
                 trim((string) ($body['code_challenge'] ?? '')),
                 (string) ($body['return_path'] ?? '/portal'),
                 $this->ip($request),
+                (string) ($body['handoff_path'] ?? ''),
             ), 201);
         } catch (DomainLoginException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);

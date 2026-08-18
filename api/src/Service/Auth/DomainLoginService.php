@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Security\UserRoleProfile;
+use MyInvoice\Service\Tenant\ClientRoutePolicy;
 use MyInvoice\Service\Tenant\TenantDomainContext;
 use MyInvoice\Service\Tenant\TenantDomainResolver;
 use PDO;
@@ -24,12 +25,19 @@ final class DomainLoginService
         private readonly TenantDomainResolver $domainResolver,
         private readonly UserSupplierRepository $memberships,
         private readonly UserRoleProfile $roles,
+        private readonly ClientRoutePolicy $clientRoutes,
         private readonly SecurityClock $clock,
         private readonly SessionManager $sessions,
     ) {}
 
     /** @return array{request_token:string,state:string,login_url:string,expires_in:int} */
-    public function start(Request $request, string $pkceChallenge, string $returnPath, string $ip): array
+    public function start(
+        Request $request,
+        string $pkceChallenge,
+        string $returnPath,
+        string $ip,
+        string $handoffPath = '',
+    ): array
     {
         $context = self::context($request);
         if ($context->mode !== TenantDomainContext::CUSTOM
@@ -40,7 +48,24 @@ final class DomainLoginService
             throw new DomainLoginException('domain_login_unavailable', 'Přihlášení přes vlastní doménu tu není dostupné.', 404);
         }
         self::assertChallenge($pkceChallenge);
-        $returnPath = self::safeReturnPath($returnPath);
+        $returnPath = $this->safeReturnPath($returnPath);
+        $handoffPath = trim($handoffPath);
+        $canonicalHandoff = $handoffPath !== ''
+            ? $this->clientRoutes->canonicalHandoffPath($handoffPath)
+            : $this->clientRoutes->canonicalHandoffPath($returnPath);
+        if ($handoffPath !== '' && $canonicalHandoff === null) {
+            throw new DomainLoginException(
+                'invalid_handoff_path',
+                'Canonical přechod není pro tuto cestu povolený.',
+                400,
+            );
+        }
+        // Starší klient mohl poslat WebAuthn obrazovku přímo jako návratovou
+        // cestu. Po canonical ceremonii by se na ní znovu spustil handoff a
+        // vznikla smyčka, proto se výsledná custom-domain session vrátí na portál.
+        if ($this->clientRoutes->canonicalHandoffPath($returnPath) !== null) {
+            $returnPath = '/portal';
+        }
         $canonical = $this->domainResolver->canonicalOrigin();
         if ($canonical === '') {
             throw new DomainLoginException('canonical_url_missing', 'Canonical app.url není nastavené.', 503);
@@ -70,11 +95,16 @@ final class DomainLoginService
             mb_substr($request->getHeaderLine('User-Agent'), 0, 255),
         ]);
 
+        $loginUrl = $canonical . '/login?domain_login_request=' . rawurlencode($requestToken)
+            . '&state=' . rawurlencode($state);
+        if ($canonicalHandoff !== null) {
+            $loginUrl .= '&domain_login_handoff=' . rawurlencode($canonicalHandoff);
+        }
+
         return [
             'request_token' => $requestToken,
             'state' => $state,
-            'login_url' => $canonical . '/login?domain_login_request=' . rawurlencode($requestToken)
-                . '&state=' . rawurlencode($state),
+            'login_url' => $loginUrl,
             'expires_in' => self::REQUEST_TTL_MINUTES * 60,
         ];
     }
@@ -127,6 +157,8 @@ final class DomainLoginService
             }
 
             $supplierId = (int) $row['supplier_id'];
+            // Globální superadmin má výjimku pouze z membershipu; platnost
+            // domény, účel a vazbu na supplier už nezávisle ověřily guardy výše.
             if (!$this->roles->isSuperadmin($userId)
                 && !in_array($supplierId, $this->memberships->allowedSupplierIds($userId), true)
             ) {
@@ -240,14 +272,12 @@ final class DomainLoginService
                 throw new DomainLoginException('authentication_expired', 'Uživatel už není aktivní.', 401);
             }
             $userId = (int) $user['id'];
-            if (!$this->roles->isSuperadmin($userId)) {
-                $membership = $pdo->prepare(
-                    'SELECT 1 FROM user_suppliers WHERE user_id = ? AND supplier_id = ? LIMIT 1'
-                );
-                $membership->execute([$userId, $context->supplierId]);
-                if ($membership->fetchColumn() === false) {
-                    throw new DomainLoginException('forbidden_supplier', 'Přístup k firmě byl mezitím odebrán.', 403);
-                }
+            // Roli i membership ověř znovu těsně před session. Výjimka globálního
+            // superadmina nemění vazbu requestu na doménu, firmu, hostname a PKCE.
+            if (!$this->roles->isSuperadmin($userId)
+                && !in_array($context->supplierId, $this->memberships->allowedSupplierIds($userId), true)
+            ) {
+                throw new DomainLoginException('forbidden_supplier', 'Přístup k firmě byl mezitím odebrán.', 403);
             }
 
             $authContext = new SessionAuthContext(
@@ -304,28 +334,11 @@ final class DomainLoginService
         }
     }
 
-    private static function safeReturnPath(string $path): string
+    private function safeReturnPath(string $path): string
     {
         $path = trim($path);
         if ($path === '') return '/portal';
-        if (strlen($path) > 500
-            || $path[0] !== '/'
-            || str_starts_with($path, '//')
-            || str_contains($path, '\\')
-            || preg_match('/[\x00-\x1f\x7f]/', $path) === 1
-        ) {
-            throw new DomainLoginException('invalid_return_path', 'Návratová cesta není bezpečná.', 400);
-        }
-
-        $parts = parse_url($path);
-        $routePath = is_array($parts) ? (string) ($parts['path'] ?? '') : '';
-        if (!is_array($parts)
-            || isset($parts['scheme'])
-            || isset($parts['host'])
-            || isset($parts['user'])
-            || isset($parts['pass'])
-            || ($routePath !== '/portal' && !str_starts_with($routePath, '/portal/'))
-        ) {
+        if (!$this->clientRoutes->allowsReturnPath($path)) {
             throw new DomainLoginException('invalid_return_path', 'Návratová cesta není bezpečná.', 400);
         }
         return $path;

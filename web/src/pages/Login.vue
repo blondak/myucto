@@ -20,7 +20,12 @@ import {
   beginDomainLogin,
   captureCanonicalDomainLogin,
   hasPendingCanonicalDomainLogin,
+  pendingCanonicalDomainLoginHandoff,
 } from '@/security/domainLogin'
+import {
+  clientDomainCanonicalHandoffPath,
+  isClientDomainAuthenticatedPath,
+} from '@/security/clientRoutePolicy'
 
 const router = useRouter()
 const route = useRoute()
@@ -121,7 +126,20 @@ onMounted(async () => {
     return
   }
   if (auth.domainContext?.mode === 'canonical') {
-    captureCanonicalDomainLogin(route.query.domain_login_request, route.query.state)
+    captureCanonicalDomainLogin(
+      route.query.domain_login_request,
+      route.query.state,
+      route.query.domain_login_handoff,
+    )
+  }
+  const domainHandoff = requestedDomainHandoffPath()
+  if (auth.domainContext?.locked && domainHandoff !== null) {
+    try {
+      await beginDomainLogin(requestedDomainReturnPath(), domainHandoff)
+    } catch (e: any) {
+      error.value = e?.response?.data?.error?.message || t('domain_login.start_failed')
+    }
+    return
   }
   // Rozhoduje `isAuthenticated`, NE návratová hodnota refresh() — router guard
   // (router/index.ts) čte taky stav storu, a jakýkoli rozjezd těch dvou podmínek
@@ -129,12 +147,14 @@ onMounted(async () => {
   await auth.refresh()
   if (auth.isAuthenticated) {
     if (await finishDomainLoginIfNeeded()) return
-    router.replace((auth.mustSetupMfa || auth.mustSetupTotp) ? '/setup-mfa' : '/')
+    router.replace((auth.mustSetupMfa || auth.mustSetupTotp)
+      ? '/setup-mfa'
+      : (auth.domainContext?.locked ? requestedDomainReturnPath() : '/'))
     return
   }
   if (auth.domainContext?.locked) {
     try {
-      await beginDomainLogin('/portal')
+      await beginDomainLogin(requestedDomainReturnPath())
     } catch (e: any) {
       error.value = e?.response?.data?.error?.message || t('domain_login.start_failed')
     }
@@ -163,6 +183,18 @@ onMounted(async () => {
   }
 })
 
+function requestedDomainReturnPath(): string {
+  const candidate = route.query.return_to
+  return isClientDomainAuthenticatedPath(candidate) ? candidate : '/portal'
+}
+
+function requestedDomainHandoffPath(): string | null {
+  const candidate = route.query.domain_handoff
+  return typeof candidate === 'string' && clientDomainCanonicalHandoffPath(candidate) !== null
+    ? candidate
+    : null
+}
+
 function demoLoginCanRun(): boolean {
   const key = 'myinvoice.demo_auto_login_attempted'
   if (sessionStorage.getItem(key) === '1') return false
@@ -172,8 +204,13 @@ function demoLoginCanRun(): boolean {
 
 async function finishDomainLoginIfNeeded(): Promise<boolean> {
   if (!hasPendingCanonicalDomainLogin()) return false
+  const handoffPath = pendingCanonicalDomainLoginHandoff()
   if (auth.mustSetupMfa || auth.mustSetupTotp) {
-    await router.replace('/setup-mfa')
+    await router.replace(handoffPath?.startsWith('/setup-mfa') ? handoffPath : '/setup-mfa')
+    return true
+  }
+  if (handoffPath !== null && !handoffPath.startsWith('/setup-mfa')) {
+    await router.replace(handoffPath)
     return true
   }
   try {

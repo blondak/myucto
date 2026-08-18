@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import { isWebAuthnAvailable } from '@/security/webauthn'
 import { beginDomainLogin } from '@/security/domainLogin'
+import { isClientDomainAuthenticatedPath } from '@/security/clientRoutePolicy'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -92,7 +93,7 @@ async function unlock() {
   }
   security.error = ''
   try {
-    await beginDomainLogin(route.fullPath.startsWith('/portal') ? route.fullPath : '/portal')
+    await beginDomainLogin(isClientDomainAuthenticatedPath(route.fullPath) ? route.fullPath : '/portal')
   } catch {
     security.error = 'unlock_failed'
   }

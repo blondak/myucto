@@ -746,6 +746,7 @@
       "support_page"
     ],
     "profile-password": [
+      "domain_login",
       "recovery_codes"
     ],
     "profile-api-tokens": [

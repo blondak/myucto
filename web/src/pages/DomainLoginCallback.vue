@@ -6,6 +6,7 @@ import AppShell from '@/components/layout/AppShell.vue'
 import { authApi } from '@/api/auth'
 import { setCsrfToken } from '@/api/client'
 import { clearTargetDomainLogin, readTargetDomainLogin } from '@/security/domainLogin'
+import { isClientDomainAuthenticatedPath } from '@/security/clientRoutePolicy'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -26,14 +27,10 @@ onMounted(async () => {
     )
     setCsrfToken(result.csrf_token)
     clearTargetDomainLogin()
-    const target = new URL(result.return_path, window.location.origin)
-    if (
-      target.origin !== window.location.origin
-      || (target.pathname !== '/portal' && !target.pathname.startsWith('/portal/'))
-    ) {
+    if (!isClientDomainAuthenticatedPath(result.return_path)) {
       throw new Error('invalid_domain_login_return_path')
     }
-    window.location.replace(`${target.pathname}${target.search}${target.hash}`)
+    window.location.replace(result.return_path)
   } catch (e: any) {
     clearTargetDomainLogin()
     error.value = e?.response?.data?.error?.message || t('domain_login.exchange_failed')
