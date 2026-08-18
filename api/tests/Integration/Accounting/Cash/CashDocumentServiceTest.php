@@ -849,7 +849,7 @@ final class CashDocumentServiceTest extends TestCase
      *
      * Vratka úhrady přijaté faktury (`in` + `purchase_payment`) tu je schválně: je to
      * kombinace, kterou `PURPOSE_MATRIX` zakazuje, ale peněžní deník s ní počítá.
-     * Constraint podle matice proto v migraci 1691 NENÍ a tenhle řádek musí projít.
+     * Constraint podle matice proto v migraci 1505 NENÍ a tenhle řádek musí projít.
      */
     public function testDatabaseRefusesNonPositiveCashAmount(): void
     {
