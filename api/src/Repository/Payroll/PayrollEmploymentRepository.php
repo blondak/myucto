@@ -735,6 +735,9 @@ final class PayrollEmploymentRepository
                     terms.a1_certificate_until, terms.risky_work,
                     terms.social_employer_rate_category,
                     terms.social_employer_rate_category_evidence,
+                    terms.social_part_time_discount_reason,
+                    terms.social_part_time_discount_evidence,
+                    terms.social_part_time_discount_notified_on,
                     terms.tax_declaration_signed, terms.is_primary,
                     terms.change_reason, terms.row_version, terms.created_at
                FROM payroll_employment_terms terms
@@ -828,9 +831,11 @@ final class PayrollEmploymentRepository
                  foreign_legislation_country_code,
                  a1_certificate_until, risky_work,
                  social_employer_rate_category, social_employer_rate_category_evidence,
+                 social_part_time_discount_reason, social_part_time_discount_evidence,
+                 social_part_time_discount_notified_on,
                  tax_declaration_signed,
                  is_primary, change_reason, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $employmentId,
@@ -864,6 +869,9 @@ final class PayrollEmploymentRepository
             (int) $data['risky_work'],
             $data['social_employer_rate_category'],
             $data['social_employer_rate_category_evidence'],
+            $data['social_part_time_discount_reason'],
+            $data['social_part_time_discount_evidence'],
+            $data['social_part_time_discount_notified_on'],
             (int) $data['tax_declaration_signed'],
             (int) $data['is_primary'],
             $data['change_reason'],

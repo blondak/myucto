@@ -676,8 +676,17 @@ final class PayslipDocumentSnapshotMapper
                     $relationship,
                     'capped_assessment_base_minor_units',
                 );
-                if (($relationship['part_time_employer_discount'] ?? null)
-                    === 'verified'
+                /*
+                 * Doložený nárok podle § 7a odst. 1 ještě není uplatněná sleva —
+                 * limity § 7a odst. 3 ji můžou vyloučit. Váhou rozdělení je jen
+                 * skutečně uplatněná sleva; jinak by osoba s nulovou slevou
+                 * ukrojila z rozdělení kus, který jí nepatří. Revize uložené
+                 * dřív, než výsledek `..._outcome` nesl, znaly jen „doložený =
+                 * uplatněný", a tak se z nich čtou dál.
+                 */
+                $discountOutcome = $relationship['part_time_employer_discount_outcome'] ?? null;
+                if (($relationship['part_time_employer_discount'] ?? null) === 'verified'
+                    && ($discountOutcome === null || $discountOutcome === 'applied')
                 ) {
                     $discountBase = $discountBase->add(new Money($relationshipBase));
                 }

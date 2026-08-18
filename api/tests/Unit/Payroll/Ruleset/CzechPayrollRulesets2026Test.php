@@ -53,7 +53,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
      * Platí proto pro VÝCHOZÍHO schvalovatele; instalace s jiným provozovatelem má
      * legitimně jiné číslo. Test si default proto vynutí sám.
      */
-    private const EXPECTED_MANIFEST_SHA256 = 'a44ab7d48e7a8ed355344af7eb7afe3c4e54846d9ebe02e984d26ea25c8cae8d';
+    private const EXPECTED_MANIFEST_SHA256 = '1279457d085f1ff799ba08300ec86d6f816a8ba688732aac9e53e6be6900dc95';
 
     protected function setUp(): void
     {
@@ -284,9 +284,21 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'withholding.rate' => ['decimal_rate', '0.15'],
             ],
             'social_insurance' => [
+                'average_wage.monthly' => ['money_minor', 4_896_700],
                 'employee.discount.working_pensioner' => ['decimal_rate', '0.065'],
                 'employee.rate.ordinary' => ['decimal_rate', '0.071'],
                 'employer.discount.part_time' => ['decimal_rate', '0.05'],
+                // § 7a odst. 2 a odst. 3 — meze, při jejichž překročení sleva
+                // NENÁLEŽÍ: 8 až 30 hodin sjednané týdenní doby, 1,5násobek
+                // průměrné mzdy na úhrn základů, 1,15 % průměrné mzdy na hodinu
+                // a 138 hodin odpracované doby za kalendářní měsíc.
+                'employer.discount.part_time.assessment_base_limit_multiple' =>
+                    ['decimal_rate', '1.5'],
+                'employer.discount.part_time.hourly_assessment_base_limit' =>
+                    ['decimal_rate', '0.0115'],
+                'employer.discount.part_time.maximum_monthly_millihours' => ['integer', 138_000],
+                'employer.discount.part_time.maximum_weekly_millihours' => ['integer', 30_000],
+                'employer.discount.part_time.minimum_weekly_millihours' => ['integer', 8_000],
                 // § 7 odst. 1 písm. a) až c) — tři sazby na tři vyměřovací
                 // základy § 5a odst. 1. Písm. b) a c) se rok od roku zvyšují,
                 // takže tenhle řádek je zároveň pin ročníku sady.

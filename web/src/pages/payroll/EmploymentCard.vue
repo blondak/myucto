@@ -246,6 +246,9 @@ async function startTermsEdit() {
     a1_certificate_until: terms.a1_certificate_until,
     social_employer_rate_category: terms.social_employer_rate_category ?? 'ordinary',
     social_employer_rate_category_evidence: terms.social_employer_rate_category_evidence ?? null,
+    social_part_time_discount_reason: terms.social_part_time_discount_reason ?? 'none',
+    social_part_time_discount_evidence: terms.social_part_time_discount_evidence ?? null,
+    social_part_time_discount_notified_on: terms.social_part_time_discount_notified_on ?? null,
     tax_declaration_signed: terms.tax_declaration_signed,
     is_primary: terms.is_primary,
     change_reason: null,
@@ -646,6 +649,9 @@ const actions = computed<ActionItem[]>(() => [
         -->
         <label class="text-xs text-neutral-600">{{ t('payroll.people.social_employer_rate_category_label') }}<select v-model="termsForm.social_employer_rate_category" data-test="social-employer-rate-category" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="category in ['ordinary','rescue_and_company_fire_service','risk_employment']" :key="category" :value="category">{{ t(`payroll.people.social_employer_rate_category.${category}`) }}</option></select></label>
         <label v-if="termsForm.social_employer_rate_category !== 'ordinary'" class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-3">{{ t('payroll.people.social_employer_rate_category_evidence') }}<input v-model="termsForm.social_employer_rate_category_evidence" maxlength="190" data-test="social-employer-rate-category-evidence" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><span class="mt-1 block text-neutral-500">{{ t('payroll.people.social_employer_rate_category_evidence_hint') }}</span></label>
+        <label class="text-xs text-neutral-600">{{ t('payroll.people.social_part_time_discount_label') }}<select v-model="termsForm.social_part_time_discount_reason" data-test="social-part-time-discount-reason" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="reason in ['none','age_55_plus','child_care_under_10','dependent_close_person_care','study_under_26','retraining_jobseeker','disabled_person','under_21']" :key="reason" :value="reason">{{ t(`payroll.people.social_part_time_discount_reason.${reason}`) }}</option></select></label>
+        <label v-if="termsForm.social_part_time_discount_reason !== 'none'" class="text-xs text-neutral-600">{{ t('payroll.people.social_part_time_discount_notified_on') }}<input v-model="termsForm.social_part_time_discount_notified_on" type="date" data-test="social-part-time-discount-notified-on" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><span class="mt-1 block text-neutral-500">{{ t('payroll.people.social_part_time_discount_notified_on_hint') }}</span></label>
+        <label v-if="termsForm.social_part_time_discount_reason !== 'none'" class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-3">{{ t('payroll.people.social_part_time_discount_evidence') }}<input v-model="termsForm.social_part_time_discount_evidence" maxlength="190" data-test="social-part-time-discount-evidence" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><span class="mt-1 block text-neutral-500">{{ t('payroll.people.social_part_time_discount_evidence_hint') }}</span></label>
         <label class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.change_reason') }}<textarea v-model="termsForm.change_reason" rows="2" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></textarea></label>
       </div>
       <div class="mt-4 flex flex-wrap justify-end gap-2">

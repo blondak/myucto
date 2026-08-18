@@ -6,6 +6,17 @@ namespace MyInvoice\Service\Payroll\HealthInsurance;
 
 use OverflowException;
 
+/**
+ * Vyměřovací základ zaměstnance podle § 3 zák. č. 592/1992 Sb.
+ *
+ * Základ se tu ZÁMĚRNĚ nezaokrouhluje. Zdravotní pojištění nemá obdobu § 5d
+ * zák. č. 589/1992 Sb.: zákon č. 592/1992 Sb. zaokrouhluje nahoru na celé
+ * koruny jen POJISTNÉ (§ 2 odst. 2) a odvozované částky (minimální vyměřovací
+ * základ osoby samostatně výdělečně činné v § 3a odst. 2), nikoli vyměřovací
+ * základ zaměstnance. Doplnit mu zaokrouhlení „pro souměrnost se sociálním"
+ * by znamenalo odvést víc, než zákon ukládá, a rozešlo by se to s předpisy
+ * zdravotních pojišťoven. Ověřeno proti znění účinnému k 1. 1. 2026.
+ */
 final class HealthAssessmentBaseResolver
 {
     public function resolve(HealthInsuranceRelationshipInput $relationship): HealthRelationshipFacts

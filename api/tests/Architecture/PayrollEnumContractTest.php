@@ -113,6 +113,8 @@ final class PayrollEnumContractTest extends TestCase
         // Nabídnout ho v klientovi by znamenalo nabídnout „nevím" jako volbu.
         'payroll.ts::PayrollSocialEmployerRateCategory'
             => 'db:payroll_employment_terms.social_employer_rate_category',
+        'payroll.ts::PayrollSocialPartTimeDiscountReason'
+            => 'db:payroll_employment_terms.social_part_time_discount_reason',
         'payroll.ts::PayrollInsuranceParticipation'  => 'db:payroll_employment_terms.social_insurance_participation',
         'payroll.ts::PayrollChecklistStatus'         => 'db:payroll_employment_checklist_items.status',
         'payroll.ts::PayrollVerifiedTriState'        => 'db:payroll_employment_terms.jmhz_apz_contribution_status',
@@ -499,6 +501,13 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\SocialInsurance\SocialEmploymentKind::class,
         \MyInvoice\Service\Payroll\SocialInsurance\SocialIncomeAttribution::class,
         \MyInvoice\Service\Payroll\SocialInsurance\SocialJurisdictionEvidence::class,
+        // Důvod § 7a odst. 1 se s klientským unionem PÁRUJE přes sloupec, ne
+        // přes tenhle enum: sloupec má navíc `none` (sleva se neuplatňuje),
+        // což není zákonný důvod, ale výchozí stav evidence. Výsledek
+        // posouzení § 7a odst. 3 hranici HTTP nepřekračuje jako volba
+        // uživatele — je to zjištění výpočtu v uloženém výsledku.
+        \MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountOutcome::class,
+        \MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason::class,
         \MyInvoice\Service\Payroll\SocialInsurance\SocialParticipationAggregationGroup::class,
         \MyInvoice\Service\Payroll\SocialInsurance\SocialParticipationStatus::class,
         \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsurerChannelKind::class,

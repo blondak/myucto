@@ -29,6 +29,8 @@ final readonly class SocialRelationshipResult implements JsonSerializable
         public ?int $annualMaximumAllocationOrder,
         public ?string $partTimeEmployerDiscountEvidenceReference,
         public ?string $employerRateCategoryEvidenceReference = null,
+        public ?SocialPartTimeDiscountReason $partTimeEmployerDiscountReason = null,
+        public ?SocialPartTimeDiscountOutcome $partTimeEmployerDiscountOutcome = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -51,6 +53,16 @@ final readonly class SocialRelationshipResult implements JsonSerializable
                 $this->partTimeEmployerDiscountEvidenceReference,
             'employer_rate_category_evidence_reference' =>
                 $this->employerRateCategoryEvidenceReference,
+            /*
+             * Důvod podle § 7a odst. 1 a výsledek posouzení § 7a odst. 3 jsou
+             * dvě různé věci: „nárok doložen" a „sleva náleží". Uplatní se jen
+             * `applied`; ostatní hodnoty popisují, KTERÁ mez slevu vyloučila,
+             * aby tichá nula nevypadala jako chyba výpočtu.
+             */
+            'part_time_employer_discount_reason' =>
+                $this->partTimeEmployerDiscountReason?->value,
+            'part_time_employer_discount_outcome' =>
+                $this->partTimeEmployerDiscountOutcome?->value,
         ];
     }
 }
