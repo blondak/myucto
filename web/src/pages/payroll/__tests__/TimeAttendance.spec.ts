@@ -278,4 +278,71 @@ describe('TimeAttendance', () => {
       }),
     )
   })
+
+  /**
+   * Porušený zákaz práce přesčas nesmí splynout s překročeným limitem: panel se
+   * obarvuje jako chyba, u každého nálezu je vidět ustanovení a přibude věta,
+   * že bez ruční výjimky běh neschválíte.
+   */
+  it('marks a breached overtime ban apart from an exceeded limit', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [{
+        employment: { id: 12, full_name: 'Syntetická osoba', code: 'SYN-HPP' },
+        month: { status: 'open', row_version: 3 },
+        calendar: null,
+        summary: {
+          fund_minutes: 9_600,
+          planned_minutes: 9_600,
+          actual_minutes: 9_720,
+          difference_minutes: 120,
+          category_minutes: {},
+          incomplete: false,
+        },
+        overtime_limits: {
+          employment_id: 12,
+          findings: [{
+            code: 'overtime_prohibited_juvenile',
+            severity: 'warning',
+            message: 'Mladistvému zaměstnanci je evidován přesčas.',
+            actual_minutes: 120,
+            limit_minutes: 0,
+            scope_from: '2026-05-04',
+            scope_to: '2026-05-04',
+            consent_evidenced: false,
+            provision: '§ 245 odst. 1 zákoníku práce',
+            requires_override: true,
+          }],
+          weeks: [],
+          ordered_year_minutes: 120,
+          ordered_year_limit_minutes: 9_000,
+          agreed_year_minutes: 0,
+          averaging_from: '2026-01-05',
+          averaging_to: '2026-05-03',
+          averaging_weeks: 17,
+          averaging_minutes: 120,
+          averaging_limit_minutes: 8_160,
+          averaging_compensated_minutes: 60,
+          averaging_basis: 'collective_agreement',
+          averaging_reference: 'KS/2026',
+          prohibited_minutes: { juvenile: 120 },
+          requires_override: true,
+          consent_evidenced: false,
+          limits_from_ruleset: true,
+        },
+        overtime_consents: [],
+        overtime_protections: [],
+        overtime_compensations: [],
+      }],
+    })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+
+    const panel = wrapper.get('[data-test="overtime-limits-12"]')
+    expect(panel.html()).toContain('border-danger-500/50')
+    expect(wrapper.find('[data-test="overtime-prohibition-banner"]').exists()).toBe(true)
+    expect(panel.find('[data-test="overtime-finding-overtime_prohibited_juvenile"]').text())
+      .toContain('§ 245 odst. 1 zákoníku práce')
+    expect(wrapper.get('[data-test="overtime-averaging-12"]').text())
+      .toContain('payroll.time.overtime.averaging_compensated')
+  })
 })

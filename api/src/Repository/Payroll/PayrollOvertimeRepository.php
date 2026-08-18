@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Time\Overtime\OvertimeCompensation;
 use MyInvoice\Service\Payroll\Time\Overtime\OvertimeConsentWindow;
+use MyInvoice\Service\Payroll\Time\Overtime\OvertimeEmploymentProfile;
+use MyInvoice\Service\Payroll\Time\Overtime\OvertimeProtectionWindow;
 use MyInvoice\Service\Payroll\Time\Overtime\OvertimeSegment;
 use PDO;
 
@@ -252,5 +255,487 @@ final class PayrollOvertimeRepository
         $row['row_version'] = (int) $row['row_version'];
 
         return $row;
+    }
+
+    /**
+     * Vyrovnávací období podle § 93 odst. 4 platné k danému dni.
+     *
+     * Bez nastavení platí zákonných 26 týdnů — a to je i jediné, co se stane,
+     * když firma nastavení nikdy nezaložila. Delší období vrací jen řádek,
+     * který se opírá o kolektivní smlouvu; databázový CHECK jiný ani
+     * nepřipustí.
+     *
+     * @return array{weeks:int,basis:string,reference:?string}|null
+     */
+    public function averagingPeriodFor(int $supplierId, string $date): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT weeks, basis, collective_agreement_reference
+               FROM payroll_overtime_averaging_periods
+              WHERE supplier_id = ?
+                AND valid_from <= ?
+                AND (valid_to IS NULL OR valid_to >= ?)
+              ORDER BY valid_from DESC, id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $date, $date]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'weeks' => (int) $row['weeks'],
+            'basis' => (string) $row['basis'],
+            'reference' => $row['collective_agreement_reference'] === null
+                ? null
+                : (string) $row['collective_agreement_reference'],
+        ];
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function averagingPeriods(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, valid_from, valid_to, weeks, basis,
+                    collective_agreement_reference, note, row_version, created_at
+               FROM payroll_overtime_averaging_periods
+              WHERE supplier_id = ?
+              ORDER BY valid_from DESC, id DESC'
+        );
+        $stmt->execute([$supplierId]);
+
+        return array_values(array_map(
+            static function (array $row): array {
+                $row['id'] = (int) $row['id'];
+                $row['weeks'] = (int) $row['weeks'];
+                $row['row_version'] = (int) $row['row_version'];
+
+                return $row;
+            },
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+        ));
+    }
+
+    /** @return array<string,mixed> */
+    public function saveAveragingPeriod(
+        int $supplierId,
+        ?int $id,
+        string $validFrom,
+        ?string $validTo,
+        int $weeks,
+        string $basis,
+        ?string $reference,
+        ?string $note,
+        int $expectedVersion,
+        ?int $userId,
+    ): array {
+        $pdo = $this->db->pdo();
+        if ($id === null) {
+            $stmt = $pdo->prepare(
+                'INSERT INTO payroll_overtime_averaging_periods
+                    (supplier_id, valid_from, valid_to, weeks, basis,
+                     collective_agreement_reference, note, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->execute([
+                $supplierId,
+                $validFrom,
+                $validTo,
+                $weeks,
+                $basis,
+                $reference,
+                $note,
+                $userId,
+            ]);
+            $id = (int) $pdo->lastInsertId();
+        } else {
+            $stmt = $pdo->prepare(
+                'UPDATE payroll_overtime_averaging_periods
+                    SET valid_from = ?, valid_to = ?, weeks = ?, basis = ?,
+                        collective_agreement_reference = ?, note = ?,
+                        row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?'
+            );
+            $stmt->execute([
+                $validFrom,
+                $validTo,
+                $weeks,
+                $basis,
+                $reference,
+                $note,
+                $supplierId,
+                $id,
+                $expectedVersion,
+            ]);
+            if ($stmt->rowCount() === 0) {
+                throw new \DomainException(
+                    'Vyrovnávací období mezitím změnil někdo jiný, načtěte ho znovu.',
+                );
+            }
+        }
+
+        $loaded = $pdo->prepare(
+            'SELECT id, valid_from, valid_to, weeks, basis,
+                    collective_agreement_reference, note, row_version, created_at
+               FROM payroll_overtime_averaging_periods
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $loaded->execute([$supplierId, $id]);
+        $row = $loaded->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            throw new \RuntimeException('Uložené vyrovnávací období se nepodařilo načíst.');
+        }
+        $row['id'] = (int) $row['id'];
+        $row['weeks'] = (int) $row['weeks'];
+        $row['row_version'] = (int) $row['row_version'];
+
+        return $row;
+    }
+
+    /**
+     * @param list<int> $employmentIds
+     * @return array<int,list<OvertimeProtectionWindow>>
+     */
+    public function protectionsForMany(int $supplierId, array $employmentIds): array
+    {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $result = array_fill_keys($employmentIds, []);
+        $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, employment_id, protection, valid_from, valid_to
+               FROM payroll_overtime_protections
+              WHERE supplier_id = ?
+                AND employment_id IN ({$placeholders})
+              ORDER BY valid_from, id"
+        );
+        $stmt->execute([$supplierId, ...$employmentIds]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $result[(int) $row['employment_id']][] = new OvertimeProtectionWindow(
+                (string) $row['protection'],
+                (string) $row['valid_from'],
+                $row['valid_to'] === null ? null : (string) $row['valid_to'],
+                (int) $row['id'],
+            );
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param list<int> $employmentIds
+     * @return array<int,list<array<string,mixed>>>
+     */
+    public function protectionRowsForMany(int $supplierId, array $employmentIds): array
+    {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $result = array_fill_keys($employmentIds, []);
+        $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, employment_id, protection, valid_from, valid_to,
+                    document_reference, note, row_version, created_at
+               FROM payroll_overtime_protections
+              WHERE supplier_id = ?
+                AND employment_id IN ({$placeholders})
+              ORDER BY valid_from, id"
+        );
+        $stmt->execute([$supplierId, ...$employmentIds]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row['id'] = (int) $row['id'];
+            $row['employment_id'] = (int) $row['employment_id'];
+            $row['row_version'] = (int) $row['row_version'];
+            $result[$row['employment_id']][] = $row;
+        }
+
+        return $result;
+    }
+
+    /** @return array<string,mixed> */
+    public function saveProtection(
+        int $supplierId,
+        int $employmentId,
+        ?int $protectionId,
+        string $protection,
+        string $validFrom,
+        ?string $validTo,
+        ?string $documentReference,
+        ?string $note,
+        int $expectedVersion,
+        ?int $userId,
+    ): array {
+        $pdo = $this->db->pdo();
+        if ($protectionId === null) {
+            $stmt = $pdo->prepare(
+                'INSERT INTO payroll_overtime_protections
+                    (supplier_id, employment_id, protection, valid_from, valid_to,
+                     document_reference, note, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->execute([
+                $supplierId,
+                $employmentId,
+                $protection,
+                $validFrom,
+                $validTo,
+                $documentReference,
+                $note,
+                $userId,
+            ]);
+            $protectionId = (int) $pdo->lastInsertId();
+        } else {
+            $stmt = $pdo->prepare(
+                'UPDATE payroll_overtime_protections
+                    SET protection = ?, valid_from = ?, valid_to = ?,
+                        document_reference = ?, note = ?, row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND employment_id = ?
+                    AND row_version = ?'
+            );
+            $stmt->execute([
+                $protection,
+                $validFrom,
+                $validTo,
+                $documentReference,
+                $note,
+                $supplierId,
+                $protectionId,
+                $employmentId,
+                $expectedVersion,
+            ]);
+            if ($stmt->rowCount() === 0) {
+                throw new \DomainException(
+                    'Ochranu před prací přesčas mezitím změnil někdo jiný, načtěte ji znovu.',
+                );
+            }
+        }
+
+        $loaded = $pdo->prepare(
+            'SELECT id, employment_id, protection, valid_from, valid_to,
+                    document_reference, note, row_version, created_at
+               FROM payroll_overtime_protections
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $loaded->execute([$supplierId, $protectionId]);
+        $row = $loaded->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            throw new \RuntimeException('Uloženou ochranu se nepodařilo načíst.');
+        }
+        $row['id'] = (int) $row['id'];
+        $row['employment_id'] = (int) $row['employment_id'];
+        $row['row_version'] = (int) $row['row_version'];
+
+        return $row;
+    }
+
+    /**
+     * @param list<int> $employmentIds
+     * @return array<int,list<OvertimeCompensation>>
+     */
+    public function compensationsForMany(
+        int $supplierId,
+        array $employmentIds,
+        string $fromDate,
+        string $toDate,
+    ): array {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $result = array_fill_keys($employmentIds, []);
+        $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT employment_id, overtime_date, minutes
+               FROM payroll_overtime_compensations
+              WHERE supplier_id = ?
+                AND employment_id IN ({$placeholders})
+                AND overtime_date BETWEEN ? AND ?
+              ORDER BY overtime_date, id"
+        );
+        $stmt->execute([$supplierId, ...$employmentIds, $fromDate, $toDate]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $result[(int) $row['employment_id']][] = new OvertimeCompensation(
+                (string) $row['overtime_date'],
+                (int) $row['minutes'],
+            );
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param list<int> $employmentIds
+     * @return array<int,list<array<string,mixed>>>
+     */
+    public function compensationRowsForMany(
+        int $supplierId,
+        array $employmentIds,
+        string $fromDate,
+        string $toDate,
+    ): array {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $result = array_fill_keys($employmentIds, []);
+        $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, employment_id, overtime_date, minutes, granted_on,
+                    document_reference, note, row_version, created_at
+               FROM payroll_overtime_compensations
+              WHERE supplier_id = ?
+                AND employment_id IN ({$placeholders})
+                AND overtime_date BETWEEN ? AND ?
+              ORDER BY overtime_date, id"
+        );
+        $stmt->execute([$supplierId, ...$employmentIds, $fromDate, $toDate]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row['id'] = (int) $row['id'];
+            $row['employment_id'] = (int) $row['employment_id'];
+            $row['minutes'] = (int) $row['minutes'];
+            $row['row_version'] = (int) $row['row_version'];
+            $result[$row['employment_id']][] = $row;
+        }
+
+        return $result;
+    }
+
+    /** @return array<string,mixed> */
+    public function saveCompensation(
+        int $supplierId,
+        int $employmentId,
+        ?int $compensationId,
+        string $overtimeDate,
+        int $minutes,
+        ?string $grantedOn,
+        ?string $documentReference,
+        ?string $note,
+        int $expectedVersion,
+        ?int $userId,
+    ): array {
+        $pdo = $this->db->pdo();
+        if ($compensationId === null) {
+            $stmt = $pdo->prepare(
+                'INSERT INTO payroll_overtime_compensations
+                    (supplier_id, employment_id, overtime_date, minutes, granted_on,
+                     document_reference, note, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->execute([
+                $supplierId,
+                $employmentId,
+                $overtimeDate,
+                $minutes,
+                $grantedOn,
+                $documentReference,
+                $note,
+                $userId,
+            ]);
+            $compensationId = (int) $pdo->lastInsertId();
+        } else {
+            $stmt = $pdo->prepare(
+                'UPDATE payroll_overtime_compensations
+                    SET overtime_date = ?, minutes = ?, granted_on = ?,
+                        document_reference = ?, note = ?, row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND employment_id = ?
+                    AND row_version = ?'
+            );
+            $stmt->execute([
+                $overtimeDate,
+                $minutes,
+                $grantedOn,
+                $documentReference,
+                $note,
+                $supplierId,
+                $compensationId,
+                $employmentId,
+                $expectedVersion,
+            ]);
+            if ($stmt->rowCount() === 0) {
+                throw new \DomainException(
+                    'Náhradní volno mezitím změnil někdo jiný, načtěte ho znovu.',
+                );
+            }
+        }
+
+        $loaded = $pdo->prepare(
+            'SELECT id, employment_id, overtime_date, minutes, granted_on,
+                    document_reference, note, row_version, created_at
+               FROM payroll_overtime_compensations
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $loaded->execute([$supplierId, $compensationId]);
+        $row = $loaded->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            throw new \RuntimeException('Uložené náhradní volno se nepodařilo načíst.');
+        }
+        $row['id'] = (int) $row['id'];
+        $row['employment_id'] = (int) $row['employment_id'];
+        $row['minutes'] = (int) $row['minutes'];
+        $row['row_version'] = (int) $row['row_version'];
+
+        return $row;
+    }
+
+    /**
+     * Datum narození a úseky sjednané pracovní doby — podklad pro § 245 odst. 1
+     * a pro § 78 odst. 1 písm. i) větu druhou.
+     *
+     * Úvazek se čte z celé historie `payroll_employment_terms`, protože se
+     * v průběhu vyrovnávacího období mění a zákaz nařizovat přesčas platí ke
+     * dni výkonu práce, ne ke dni posouzení.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,OvertimeEmploymentProfile>
+     */
+    public function profilesForMany(int $supplierId, array $employmentIds): array
+    {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT employment.id AS employment_id, employee.birth_date
+               FROM payroll_employments employment
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = employment.supplier_id
+                AND employee.id = employment.employee_id
+              WHERE employment.supplier_id = ?
+                AND employment.id IN ({$placeholders})"
+        );
+        $stmt->execute([$supplierId, ...$employmentIds]);
+        $birthDates = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $birthDates[(int) $row['employment_id']] = $row['birth_date'] === null
+                ? null
+                : (string) $row['birth_date'];
+        }
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT employment_id, effective_from, effective_to, workload_basis_points
+               FROM payroll_employment_terms
+              WHERE supplier_id = ?
+                AND employment_id IN ({$placeholders})
+              ORDER BY employment_id, effective_from, id"
+        );
+        $stmt->execute([$supplierId, ...$employmentIds]);
+        $workloads = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $workloads[(int) $row['employment_id']][] = [
+                'from' => (string) $row['effective_from'],
+                'to' => $row['effective_to'] === null ? null : (string) $row['effective_to'],
+                'basis_points' => (int) $row['workload_basis_points'],
+            ];
+        }
+
+        $result = [];
+        foreach ($employmentIds as $employmentId) {
+            $result[$employmentId] = new OvertimeEmploymentProfile(
+                $birthDates[$employmentId] ?? null,
+                $workloads[$employmentId] ?? [],
+            );
+        }
+
+        return $result;
     }
 }

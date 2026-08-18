@@ -231,6 +231,163 @@ final class PayrollOvertimeLimitTest extends TestCase
         self::assertSame([], $items[0]['overtime_consents']);
     }
 
+    /**
+     * § 245 odst. 1 — porušený zákaz není totéž co překročený limit. Do běhu
+     * jde jako varování s `requires_override`, takže `approve` neprojde, dokud
+     * se k němu někdo nevyjádří. `blocker` to ale být nesmí: z něj není cesta
+     * ven a mzda zaměstnance, který porušení nezpůsobil, by uvázla natrvalo.
+     */
+    public function testJuvenileProhibitionStopsApprovalUntilItIsExplicitlyOverridden(): void
+    {
+        $juvenileId = $this->employment('2010-06-01', 10_000, 'SYN-JUV');
+        $this->overtime('2026-05-04', 120, employmentId: $juvenileId);
+
+        $findings = $this->of(
+            $this->overtimeValidations($this->build()),
+            OvertimeLimitFinding::CODE_PROHIBITED_JUVENILE,
+        );
+        self::assertCount(1, $findings);
+        self::assertSame('warning', $findings[0]->severity);
+        self::assertTrue($findings[0]->requiresOverride);
+        self::assertSame($juvenileId, $findings[0]->entityId);
+        self::assertStringContainsString('§ 245 odst. 1', $findings[0]->message);
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('nevyřešená varování');
+        (new PayrollRunWorkflow())->transition(
+            PayrollRunStatus::REVIEWED,
+            PayrollRunCommand::APPROVE,
+            new PayrollRunTransitionContext(
+                actorUserId: $this->actorId,
+                calculatedBy: $this->actorId + 1,
+                reviewedBy: $this->actorId + 2,
+                blockerCount: 0,
+                unresolvedOverrideCount: 1,
+                hasImmutableSnapshot: true,
+                hasCalculatedResult: true,
+            ),
+        );
+    }
+
+    /**
+     * § 240 odst. 3 věta druhá — nařídit přesčas nesmí, dohodnout ano. Doplnění
+     * dohody proto nález odstraní, aniž by kdokoli cokoli přebíjel.
+     */
+    public function testChildCareProhibitionIsResolvedByRecordingTheAgreement(): void
+    {
+        $this->overtime('2026-05-04', 120);
+        $this->time->saveOvertimeProtection(
+            $this->supplierId,
+            [
+                'employment_id' => $this->employmentId,
+                'protection' => 'child_under_one',
+                'valid_from' => '2026-01-01',
+                'valid_to' => '2026-12-31',
+                'document_reference' => 'RL/2026/1',
+                'row_version' => 0,
+            ],
+            $this->actorId,
+        );
+
+        $codes = array_map(
+            static fn (PayrollRunValidation $validation): string => $validation->code,
+            $this->overtimeValidations($this->build()),
+        );
+        self::assertContains(OvertimeLimitFinding::CODE_PROHIBITED_CHILD_CARE, $codes);
+
+        $this->time->saveOvertimeConsent(
+            $this->supplierId,
+            [
+                'employment_id' => $this->employmentId,
+                'valid_from' => '2026-01-01',
+                'valid_to' => null,
+                'document_reference' => 'DOHODA/2026/2',
+                'row_version' => 0,
+            ],
+            $this->actorId,
+        );
+        self::assertSame([], $this->overtimeValidations($this->build()));
+    }
+
+    /** § 93 odst. 5 — kompenzovaný přesčas vypadne z vyrovnávacího okna. */
+    public function testCompensatedOvertimeLeavesTheAveragingWindow(): void
+    {
+        $this->time->saveOvertimeConsent(
+            $this->supplierId,
+            [
+                'employment_id' => $this->employmentId,
+                'valid_from' => '2026-01-01',
+                'valid_to' => null,
+                'row_version' => 0,
+            ],
+            $this->actorId,
+        );
+        $this->overtime('2026-05-04', 600);
+
+        $before = $this->time->overview($this->supplierId, '2026-05', false)['items'][0];
+        self::assertSame(600, $before['overtime_limits']['averaging_minutes']);
+
+        $this->time->saveOvertimeCompensation(
+            $this->supplierId,
+            [
+                'employment_id' => $this->employmentId,
+                'overtime_date' => '2026-05-04',
+                'minutes' => 600,
+                'granted_on' => '2026-05-20',
+                'document_reference' => 'NV/2026/1',
+                'row_version' => 0,
+            ],
+            $this->actorId,
+        );
+
+        $after = $this->time->overview($this->supplierId, '2026-05', false)['items'][0];
+        self::assertSame(600, $after['overtime_limits']['averaging_compensated_minutes']);
+        self::assertSame(0, $after['overtime_limits']['averaging_minutes']);
+        self::assertCount(1, $after['overtime_compensations']);
+    }
+
+    /**
+     * § 93 odst. 4 — období nad 26 týdnů smí vymezit „jen kolektivní smlouva".
+     * Nedoložené prodloužení se nesmí uložit ani omylem.
+     */
+    public function testAveragingPeriodOverTwentySixWeeksNeedsADocumentedCollectiveAgreement(): void
+    {
+        try {
+            $this->time->saveOvertimeAveragingPeriod(
+                $this->supplierId,
+                [
+                    'valid_from' => '2026-01-01',
+                    'valid_to' => null,
+                    'weeks' => 52,
+                    'basis' => 'statutory',
+                    'row_version' => 0,
+                ],
+                $this->actorId,
+            );
+            self::fail('Nedoložené prodloužení vyrovnávacího období se nesmí uložit.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('§ 93 odst. 4', $e->getMessage());
+        }
+
+        $this->time->saveOvertimeAveragingPeriod(
+            $this->supplierId,
+            [
+                'valid_from' => '2026-01-01',
+                'valid_to' => null,
+                'weeks' => 52,
+                'basis' => 'collective_agreement',
+                'collective_agreement_reference' => 'KS/2026 čl. 12',
+                'row_version' => 0,
+            ],
+            $this->actorId,
+        );
+
+        $this->overtime('2026-05-04', 120);
+        $limits = $this->time->overview($this->supplierId, '2026-05', false)['items'][0]['overtime_limits'];
+        self::assertSame('collective_agreement', $limits['averaging_basis']);
+        self::assertSame('KS/2026 čl. 12', $limits['averaging_reference']);
+    }
+
     public function testSupersededRevisionOfATimeEntryIsNotCountedTwice(): void
     {
         $this->overtime('2026-05-04', 600, 'superseded');
@@ -268,8 +425,12 @@ final class PayrollOvertimeLimitTest extends TestCase
         ));
     }
 
-    private function overtime(string $date, int $minutes, string $status = 'approved'): void
-    {
+    private function overtime(
+        string $date,
+        int $minutes,
+        string $status = 'approved',
+        ?int $employmentId = null,
+    ): void {
         $start = new \DateTimeImmutable(
             $date . ' 16:00:00',
             new \DateTimeZone('Europe/Prague'),
@@ -285,7 +446,7 @@ final class PayrollOvertimeLimitTest extends TestCase
                      "manual", ?, ?, ?)'
         )->execute([
             $this->supplierId,
-            $this->employmentId,
+            $employmentId ?? $this->employmentId,
             bin2hex(random_bytes(16)),
             $start->setTimezone($utc)->format('Y-m-d H:i:s'),
             $end->setTimezone($utc)->format('Y-m-d H:i:s'),
@@ -295,14 +456,17 @@ final class PayrollOvertimeLimitTest extends TestCase
         ]);
     }
 
-    private function employment(): int
-    {
+    private function employment(
+        string $birthDate = '1990-03-14',
+        int $workloadBasisPoints = 10_000,
+        string $code = 'SYN-OT',
+    ): int {
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO payroll_employees
-                (supplier_id, full_name, taxpayer_type, is_active)
-             VALUES (?, "Syntetický přesčasář", "employee", 1)'
-        )->execute([$this->supplierId]);
+                (supplier_id, full_name, taxpayer_type, is_active, birth_date)
+             VALUES (?, "Syntetický přesčasář", "employee", 1, ?)'
+        )->execute([$this->supplierId, $birthDate]);
         $employeeId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             'INSERT INTO payroll_employee_profiles
@@ -313,9 +477,9 @@ final class PayrollOvertimeLimitTest extends TestCase
             'INSERT INTO payroll_employments
                 (supplier_id, employee_id, code, relation_type, status,
                  start_date, actual_start_date, is_primary)
-             VALUES (?, ?, "SYN-OT", "employment", "active",
+             VALUES (?, ?, ?, "employment", "active",
                      "2026-01-01", "2026-01-01", 1)'
-        )->execute([$this->supplierId, $employeeId]);
+        )->execute([$this->supplierId, $employeeId, $code]);
         $employmentId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             'INSERT INTO payroll_employment_terms
@@ -325,8 +489,8 @@ final class PayrollOvertimeLimitTest extends TestCase
                  health_insurance_participation, tax_regime,
                  tax_declaration_signed, is_primary)
              VALUES (?, ?, "2026-01-01", "2026-01-01", "2026-01-01",
-                     40, 10000, "automatic", "automatic", "advance", 1, 1)'
-        )->execute([$this->supplierId, $employmentId]);
+                     40, ?, "automatic", "automatic", "advance", 1, 1)'
+        )->execute([$this->supplierId, $employmentId, $workloadBasisPoints]);
 
         return $employmentId;
     }

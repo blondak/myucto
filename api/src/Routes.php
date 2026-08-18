@@ -1176,6 +1176,19 @@ final class Routes
             $g->post('/time/shifts', [PayrollTimeAction::class, 'shift']);
             $g->post('/time/entries', [PayrollTimeAction::class, 'entry']);
             $g->post('/time/overtime-consents', [PayrollTimeAction::class, 'overtimeConsent']);
+            $g->post('/time/overtime-protections', [PayrollTimeAction::class, 'overtimeProtection']);
+            $g->post(
+                '/time/overtime-compensations',
+                [PayrollTimeAction::class, 'overtimeCompensation'],
+            );
+            $g->get(
+                '/time/overtime-averaging-periods',
+                [PayrollTimeAction::class, 'overtimeAveragingPeriods'],
+            );
+            $g->post(
+                '/time/overtime-averaging-periods',
+                [PayrollTimeAction::class, 'overtimeAveragingPeriod'],
+            );
             $g->post('/time/imports/preview', [PayrollTimeAction::class, 'previewImport']);
             $g->post('/time/imports', [PayrollTimeAction::class, 'import']);
             $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/approve', [PayrollTimeAction::class, 'approve']);
