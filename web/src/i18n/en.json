@@ -4930,6 +4930,8 @@
             "pick_invoice": "Select an invoice",
             "remaining": "Remaining",
             "counter_account": "Counter account",
+            "counter_account_search": "Search by account number or name",
+            "unpaid_truncated": "Showing the first {count} matches — refine the search, further invoices did not fit.",
             "rule_key": "What is it",
             "rule_key_custom": "Other — I'll pick the counter account myself",
             "rule_key_hint": "A preset fills in the counter account from the posting rule. If none fits, pick “Other” and choose an account from the chart.",

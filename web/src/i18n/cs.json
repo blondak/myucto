@@ -4930,6 +4930,8 @@
             "pick_invoice": "Vyberte fakturu",
             "remaining": "Zbývá",
             "counter_account": "Protiúčet",
+            "counter_account_search": "Hledejte podle čísla nebo názvu účtu",
+            "unpaid_truncated": "Zobrazeno prvních {count} shod — upřesněte hledání, další faktury se do nabídky nešly.",
             "rule_key": "Co to je",
             "rule_key_custom": "Jiné — vyberu protiúčet ručně",
             "rule_key_hint": "Předvolba doplní protiúčet podle kontace. Nesedí-li nic, zvol „Jiné“ a vyber účet z osnovy.",

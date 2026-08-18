@@ -140,12 +140,17 @@ platby automaticky připraví koncept daňového dokladu k částečné platbě,
 faktury při úplném uhrazení zálohy — v našeptávači jsou proto i **zálohové (proforma) faktury**,
 označené jako záloha.
 
+Našeptávač zobrazuje nejvýše 20 shod. Pokud jich odpovídá víc, dá to na konci seznamu vědět
+poznámkou — hledaný doklad tedy může existovat, jen se do nabídky nevešel; upřesněte hledání
+(např. celým číslem dokladu).
+
 **Převod** — pokladní strana převodu hotovosti mezi bankou a pokladnou (druhá strana — bankovní
 pohyb — se řeší samostatně mimo pokladní doklad).
 
 **Ostatní** — volný protiúčet z účtové osnovy (musí být jiný než účet vybrané pokladny) pro
-případy, které nespadají pod žádný z předchozích účelů (např. manko/přebytek pokladny). DPH u
-tohoto účelu není podporována.
+případy, které nespadají pod žádný z předchozích účelů (např. manko/přebytek pokladny). Protiúčet
+se vybírá polem s hledáním — píše se číslo účtu nebo část názvu, takže se rozsáhlá osnova nemusí
+procházet celá. DPH u tohoto účelu není podporována.
 
 ### 30.3.3 DPH na pokladním dokladu
 

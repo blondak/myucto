@@ -5,8 +5,9 @@ import { useRoute, useRouter, RouterLink } from 'vue-router'
 import {
   cashApi, type CashRegister, type CashVatLine, type CashPurpose,
   type CashDocType, type CashDocumentStatus, type UnpaidDocumentOption, type CreateCashDocumentPayload,
-  type CashRulePreset,
+  type CashRulePreset, UNPAID_PAGE_SIZE,
 } from '@/api/cash'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { accountingApi, type ChartAccount, type PostingRuleMap } from '@/api/accounting'
 import { taxConstantsApi, type TaxConstantsYear } from '@/api/taxConstants'
 import { clientsApi, type Client, type ClientRoleFilter } from '@/api/clients'
@@ -123,6 +124,10 @@ const counterAccounts = computed(() =>
   accounts.value
     .filter(a => a.is_active && a.account_code !== registerAccount.value)
     .sort((a, b) => a.account_code.localeCompare(b.account_code)),
+)
+
+const counterAccountOptions = computed(() =>
+  counterAccounts.value.map(a => ({ value: a.account_code, label: `${a.account_code} — ${a.name}` })),
 )
 
 // ── Předvolby „co to je" pro purpose=other ─────────────────────────────────
@@ -251,6 +256,9 @@ watch(() => form.purpose, () => {
 // ── Našeptávač nezaplacených FV/PF ──────────────────────────────────────────
 const unpaidQuery = ref('')
 const unpaidOptions = ref<UnpaidDocumentOption[]>([])
+// L-8: nabídka je oříznutá na UNPAID_PAGE_SIZE — bez téhle informace vypadá
+// oseknutý seznam jako úplný a chybějící faktura jako neexistující.
+const unpaidTruncated = ref(false)
 const unpaidLoading = ref(false)
 const unpaidError = ref('')
 const selectedUnpaid = ref<UnpaidDocumentOption | null>(null)
@@ -263,7 +271,9 @@ function onUnpaidSearch() {
     unpaidLoading.value = true
     unpaidError.value = ''
     try {
-      unpaidOptions.value = await cashApi.searchUnpaid(kind, unpaidQuery.value, 20)
+      const res = await cashApi.searchUnpaid(kind, unpaidQuery.value)
+      unpaidOptions.value = res.items
+      unpaidTruncated.value = res.truncated
     } catch (e: any) {
       // Selhaný dotaz vypadal jako „žádné neuhrazené faktury nejsou" — uživatel pak
       // místo úhrady faktury vystaví hotovostní prodej a DPH se vykáže dvakrát (M-15).
@@ -613,6 +623,9 @@ async function save(post = true) {
                 <span><span class="font-mono">{{ o.number }}</span> · {{ o.partner_name }}</span>
                 <span class="text-neutral-500 font-mono">{{ t('cash.form.remaining') }} {{ formatMoney(o.remaining) }}</span>
               </li>
+              <li v-if="unpaidTruncated" class="px-3 py-2 text-xs text-neutral-500 border-t border-neutral-100 bg-neutral-50">
+                {{ t('cash.form.unpaid_truncated', { count: UNPAID_PAGE_SIZE }) }}
+              </li>
             </ul>
           </div>
         </template>
@@ -637,11 +650,13 @@ async function save(post = true) {
           <!-- Volný protiúčet zůstává pro případy, které kontace nepokrývá. -->
           <div v-if="!form.rule_key">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.form.counter_account') }}</label>
-            <select :value="form.counter_account_code" @change="pickCounterAccount(($event.target as HTMLSelectElement).value)"
-              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
-              <option value="">—</option>
-              <option v-for="a in counterAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
-            </select>
+            <!-- L-8: celá osnova v prostém <select> je u rozsáhlé osnovy nepoužitelná
+                 (stovky položek bez hledání) — stejný vzor jako jinde v aplikaci. -->
+            <SearchableSelect
+              :model-value="form.counter_account_code || null"
+              :options="counterAccountOptions"
+              :placeholder="t('cash.form.counter_account_search')"
+              @update:model-value="pickCounterAccount(($event as string | null) ?? '')" />
           </div>
         </template>
 

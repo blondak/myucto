@@ -10,6 +10,7 @@ const m = vi.hoisted(() => ({
   getDocument: vi.fn(),
   updateDocument: vi.fn(),
   postDocument: vi.fn(),
+  searchUnpaid: vi.fn(),
   listAccounts: vi.fn(),
   listPostingRules: vi.fn(),
   taxList: vi.fn(),
@@ -28,7 +29,9 @@ vi.mock('@/api/cash', () => ({
     getDocument: m.getDocument,
     updateDocument: m.updateDocument,
     postDocument: m.postDocument,
+    searchUnpaid: m.searchUnpaid,
   },
+  UNPAID_PAGE_SIZE: 20,
 }))
 vi.mock('@/api/accounting', () => ({
   accountingApi: { listAccounts: m.listAccounts, listPostingRules: m.listPostingRules },
@@ -93,6 +96,7 @@ describe('CashDocumentEditor.vue', () => {
     m.taxList.mockResolvedValue([taxYear(new Date().getFullYear(), 10000)])
     m.clientsList.mockResolvedValue({ data: [] })
     m.createDocument.mockResolvedValue({ id: 1, doc_number: 'PPD-1', journal_entry_id: 1, status: 'posted', warnings: [] })
+    m.searchUnpaid.mockResolvedValue({ items: [], truncated: false })
   })
 
   // ── H-9: kurz valutového dokladu ──────────────────────────────────────────
@@ -396,5 +400,41 @@ describe('CashDocumentEditor — našeptávač partnera', () => {
     await mountEditor()
 
     expect(m.toastError).toHaveBeenCalled()
+  })
+  // -- L-8: oriznuta nabidka neuhrazenych faktur --------------------------------
+  it('oříznutá nabídka neuhrazených faktur se přizná', async () => {
+    m.searchUnpaid.mockResolvedValue({
+      items: [{ id: 5, kind: 'invoice', number: 'FV-1', partner_name: 'Klient', total: 100, paid: 0, remaining: 100, currency_code: 'CZK', issued_on: '2093-01-01' }],
+      truncated: true,
+    })
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.purpose = 'invoice_payment'
+    await flushPromises()
+
+    vm.onUnpaidSearch()
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+
+    expect(vm.unpaidTruncated).toBe(true)
+    expect(wrapper.html()).toContain('cash.form.unpaid_truncated')
+  })
+
+  it('úplná nabídka se za oříznutou nevydává', async () => {
+    m.searchUnpaid.mockResolvedValue({
+      items: [{ id: 5, kind: 'invoice', number: 'FV-1', partner_name: 'Klient', total: 100, paid: 0, remaining: 100, currency_code: 'CZK', issued_on: '2093-01-01' }],
+      truncated: false,
+    })
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.purpose = 'invoice_payment'
+    await flushPromises()
+
+    vm.onUnpaidSearch()
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+
+    expect(vm.unpaidTruncated).toBe(false)
+    expect(wrapper.html()).not.toContain('cash.form.unpaid_truncated')
   })
 })

@@ -76,6 +76,9 @@ export interface CashDocumentListResponse {
   items: CashDocument[]; total: number; page: number; per_page: number
 }
 
+/** Kolik neuhrazených dokladů našeptávač zobrazí (server umí max. 50). */
+export const UNPAID_PAGE_SIZE = 20
+
 export interface UnpaidDocumentOption {
   id: number; kind: 'invoice' | 'purchase_invoice'; number: string
   partner_name: string; total: number; paid: number; remaining: number
@@ -145,9 +148,16 @@ export const cashApi = {
     api.delete(`/accounting/cash-documents/${id}`, { params: force ? { force: 1 } : {} }).then(() => true),
   documentPdfUrl: (id: number) => `/api/accounting/cash-documents/${id}/pdf`,
 
-  searchUnpaid: (kind: 'invoice' | 'purchase_invoice', q: string, limit = 20) =>
+  /**
+   * L-8: vrací i příznak, že nabídka je oříznutá. Tiše oseknutý seznam tvrdí
+   * „další faktura neexistuje" — uživatel pak místo úhrady vystaví hotovostní
+   * prodej a DPH se vykáže dvakrát. Server se proto ptá o jeden řádek víc, než
+   * kolik se zobrazí; přebytek se zahodí a jen se z něj pozná `truncated`.
+   */
+  searchUnpaid: (kind: 'invoice' | 'purchase_invoice', q: string, limit = UNPAID_PAGE_SIZE) =>
     api.get<UnpaidDocumentOption[]>('/accounting/cash-documents/unpaid',
-      { params: { kind, q, limit } }).then(r => r.data),
+      { params: { kind, q, limit: limit + 1 } })
+      .then(r => ({ items: r.data.slice(0, limit), truncated: r.data.length > limit })),
 
   getBook: (registerId: number, params: CashBookFilters) =>
     api.get<CashBookReport>(`/accounting/cash-registers/${registerId}/book`, { params }).then(r => r.data),
