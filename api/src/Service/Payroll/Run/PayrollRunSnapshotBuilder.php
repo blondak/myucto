@@ -970,7 +970,7 @@ final class PayrollRunSnapshotBuilder
             if (!is_array($component)) {
                 throw new \UnexpectedValueException('Snapshot mzdové složky není objekt.');
             }
-            $result[] = [
+            $entry = [
                 'id' => (int) $row['id'],
                 'amount_minor' => (int) $row['amount_minor'],
                 'quantity_milliunits' => $row['quantity_milliunits'] === null
@@ -982,6 +982,16 @@ final class PayrollRunSnapshotBuilder
                     strtolower((string) $row['component_snapshot_hash']),
                 'component' => $component,
             ];
+            // Rozpad zákonného koše osvobození (§ 6 odst. 9 ZDP) zmrazený při
+            // schválení vstupu. Revize spočtené před migrací 1480 klíče nemají —
+            // čtou se proto jako „vstup do koše nepatří" a přepočítají se stejně
+            // jako dřív.
+            if (($row['benefit_basket'] ?? null) !== null) {
+                $entry['benefit_basket'] = (string) $row['benefit_basket'];
+                $entry['benefit_exempt_minor'] = (int) $row['benefit_exempt_minor'];
+                $entry['benefit_taxable_minor'] = (int) $row['benefit_taxable_minor'];
+            }
+            $result[] = $entry;
         }
         return $result;
     }

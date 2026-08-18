@@ -24,18 +24,17 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
 
 /**
- * MZ-08-W08 b — roční limit osvobození benefitů u VÝCHOZÍCH mzdových složek.
+ * MZ-08 — zákonný koš osvobození u VÝCHOZÍCH mzdových složek.
  *
- * `ensureDefaults()` zakládala složky bez sloupce `annual_limit_minor`, takže
- * u nich zůstal NULL. Kontrola v `PayrollInputPreviewService` i v
- * `PayrollInputRepository::approve()` je přitom podmíněná nenulovým limitem —
- * roční strop se tedy u výchozích benefitních složek nehlídal vůbec a benefit
- * prošel v jakékoli výši.
+ * Předchozí podoba (MZ-08-W08 b) dosazovala zákonnou částku do složkového
+ * `annual_limit_minor`. Bylo to nutné, ne postačující: limit § 6 odst. 9 ZDP
+ * platí na ÚHRN za ustanovení, takže druhá složka téhož bodu ho obešla,
+ * a překročení navíc BLOKOVALO schválení, ačkoli zákon plnění nad limit
+ * nezakazuje — jen ho zdaňuje.
  *
- * Testy proto ukazují ROZDÍL NA ČÁSTCE, ne jen „prošlo to":
- * rekreační benefit 24 484,00 Kč je při stavu PŘED opravou (limit NULL) v pořádku
- * a po opravě je nadlimitní, protože § 6 odst. 9 písm. d) bod 2 ZDP osvobozuje
- * jen polovinu průměrné mzdy, tj. 24 483,50 Kč pro rok 2026.
+ * Výchozí složka proto nově nese `exemption_basket` a žádnou částku;
+ * `annual_limit_minor` zůstal jako vlastní strop zaměstnavatele a jako tvrdá
+ * zábrana schválení dál funguje.
  */
 #[Group('integration')]
 final class PayrollBenefitAnnualLimitDefaultsTest extends TestCase
@@ -121,63 +120,69 @@ final class PayrollBenefitAnnualLimitDefaultsTest extends TestCase
         }
     }
 
-    public function testDefaultBenefitComponentsAreSeededWithTheStatutoryAnnualLimit(): void
+    public function testDefaultBenefitComponentsAreSeededWithTheStatutoryBasket(): void
     {
         $seeded = $this->defaultComponents();
 
-        self::assertSame(
-            self::LEISURE_LIMIT_MINOR,
-            $seeded['REKREACE_VOLNY_CAS']['annual_limit_minor'],
-        );
+        self::assertSame('non_cash_leisure', $seeded['REKREACE_VOLNY_CAS']['exemption_basket']);
         // § 6 odst. 9 písm. d) bod 1 ZDP — celá průměrná mzda.
-        self::assertSame(4_896_700, $seeded['ZDRAVOTNI_BENEFIT']['annual_limit_minor']);
-        // § 6 odst. 9 písm. p) ZDP — 50 000 Kč ročně.
-        self::assertSame(5_000_000, $seeded['PRISPEVEK_PENZE_ZIVOTNI']['annual_limit_minor']);
-        // Stravování má limit za směnu, ne za rok — roční strop tu nesmí vzniknout.
-        self::assertNull($seeded['PRISPEVEK_STRAVOVANI']['annual_limit_minor']);
+        self::assertSame('non_cash_health', $seeded['ZDRAVOTNI_BENEFIT']['exemption_basket']);
+        // § 6 odst. 9 písm. m) ZDP — 50 000 Kč ročně.
+        self::assertSame('old_age_savings', $seeded['PRISPEVEK_PENZE_ZIVOTNI']['exemption_basket']);
+        // Stravování má limit za směnu, ne za rok — koš tu nesmí vzniknout.
+        self::assertNull($seeded['PRISPEVEK_STRAVOVANI']['exemption_basket']);
+
+        // Zákonná částka NESMÍ skončit ve složkovém stropu: ten je tvrdá zábrana
+        // schválení, kdežto zákon nadlimitní plnění zdaňuje, nezakazuje.
+        foreach (['REKREACE_VOLNY_CAS', 'ZDRAVOTNI_BENEFIT', 'PRISPEVEK_PENZE_ZIVOTNI'] as $code) {
+            self::assertNull(
+                $seeded[$code]['annual_limit_minor'],
+                "Složka {$code} znovu dosazuje zákonnou částku do vlastního stropu.",
+            );
+        }
     }
 
     /**
-     * Rozdíl před a po na jedné částce: 24 484,00 Kč rekreačního benefitu.
-     * Se stavem před opravou (limit NULL) je vše v pořádku, s doplněným limitem
-     * je to o 50 haléřů nad § 6 odst. 9 písm. d) bod 2 ZDP.
+     * Rozdíl na 50 haléřích: 24 484,00 Kč rekreačního benefitu je o padesátník
+     * nad polovinou průměrné mzdy. Bez zařazení do koše (stav před migrací 1480)
+     * se o tom uživatel nedozví nic; se zařazením vidí i rozpad.
      */
-    public function testTheSameAmountIsWithinTheLimitBeforeTheFixAndOverItAfter(): void
+    public function testTheBasketSplitsTheAmountFiftyHellersOverTheLimit(): void
     {
         $componentId = $this->defaultComponents()['REKREACE_VOLNY_CAS']['id'];
         $atLimit = self::LEISURE_LIMIT_MINOR;
         $overLimit = self::LEISURE_LIMIT_MINOR + 50;
 
-        $before = $this->previewWithoutLimit($componentId, $overLimit);
-        self::assertNull($before['annual_limit_minor']);
-        self::assertFalse(
-            $before['annual_limit_exceeded'],
-            'Stav před opravou: bez limitu neprojde benefit kontrolou, ale ani ji nespustí.',
+        $before = $this->previewWithoutBasket($componentId, $overLimit);
+        self::assertNull(
+            $before['exemption_basket'],
+            'Bez zařazení do koše se nadlimitní část nedá spočítat.',
         );
 
         $after = $this->preview($componentId, $overLimit);
-        self::assertSame(self::LEISURE_LIMIT_MINOR, $after['annual_limit_minor']);
-        self::assertSame($overLimit, $after['annual_after_minor']);
-        self::assertTrue(
-            $after['annual_limit_exceeded'],
-            '24 484,00 Kč je nad polovinou průměrné mzdy 24 483,50 Kč.',
-        );
+        $basket = PayrollTimeValue::row($after['exemption_basket'] ?? null, 'exemption_basket');
+        self::assertSame('non_cash_leisure', $basket['basket']);
+        self::assertSame(self::LEISURE_LIMIT_MINOR, $basket['limit_minor']);
+        self::assertSame(self::LEISURE_LIMIT_MINOR, $basket['exempt_minor']);
+        self::assertSame(50, $basket['taxable_minor']);
+        self::assertTrue($basket['limit_exceeded']);
 
-        $exactly = $this->preview($componentId, $atLimit);
-        self::assertFalse(
-            $exactly['annual_limit_exceeded'],
-            'Přesně 24 483,50 Kč je poslední osvobozená koruna, ne první nadlimitní.',
+        // Nerovnost je NEOSTRÁ: „osvobozena v úhrnu DO VÝŠE poloviny průměrné mzdy".
+        $exactly = PayrollTimeValue::row(
+            $this->preview($componentId, $atLimit)['exemption_basket'] ?? null,
+            'exemption_basket',
         );
+        self::assertSame(0, $exactly['taxable_minor']);
+        self::assertFalse($exactly['limit_exceeded']);
+        self::assertSame(0, $exactly['remaining_minor']);
     }
 
     /**
-     * Účetní si u výchozí složky rozhodne klasifikaci vlastní verzí a limit si
-     * ponese s sebou. Teprve tam se strop projeví jako tvrdá zábrana schválení —
-     * u výchozí verze blokuje schválení už samo ruční posouzení daně.
+     * Vlastní strop zaměstnavatele zůstal tvrdou zábranou schválení. Je to
+     * vnitřní pravidlo firmy, ne daňová hranice — proto se chová jinak než koš.
      */
-    public function testDecidedVersionOfADefaultBenefitBlocksApprovalOverTheLimit(): void
+    public function testEmployerOwnCapStillBlocksApproval(): void
     {
-        $default = $this->defaultComponents()['REKREACE_VOLNY_CAS'];
         $decided = $this->createComponent([
             'code' => 'REKREACE_VOLNY_CAS',
             'name' => 'Rekreace a volnočasový benefit',
@@ -195,7 +200,8 @@ final class PayrollBenefitAnnualLimitDefaultsTest extends TestCase
             'statistics_treatment' => 'included',
             'accounting_debit_code' => null,
             'accounting_credit_code' => null,
-            'annual_limit_minor' => $default['annual_limit_minor'],
+            'annual_limit_minor' => self::LEISURE_LIMIT_MINOR,
+            'exemption_basket' => null,
             'valid_from' => '2026-07-01',
             'valid_to' => null,
             'is_active' => true,
@@ -257,7 +263,7 @@ final class PayrollBenefitAnnualLimitDefaultsTest extends TestCase
         self::assertSame('2026-07-01', $after[1]['valid_from']);
         self::assertNull($after[1]['valid_to']);
         self::assertSame('Nová klasifikace', $after[1]['name']);
-        self::assertSame(self::LEISURE_LIMIT_MINOR, $after[1]['annual_limit_minor']);
+        self::assertSame('non_cash_leisure', $after[1]['exemption_basket']);
 
         // Opakované založení je no-op: žádná třetí verze ani další zvýšení row_version.
         $versioned->ensureDefaults($this->supplierId);
@@ -302,7 +308,7 @@ final class PayrollBenefitAnnualLimitDefaultsTest extends TestCase
             'included',
             'included',
             'included',
-            'benefit_exemption.non_cash_leisure.yearly',
+            'non_cash_leisure',
         ];
     }
 
@@ -310,7 +316,8 @@ final class PayrollBenefitAnnualLimitDefaultsTest extends TestCase
     private function rowsForCode(string $code): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, name, annual_limit_minor, valid_from, valid_to, row_version
+            'SELECT id, name, annual_limit_minor, exemption_basket, valid_from,
+                    valid_to, row_version
                FROM payroll_component_definitions
               WHERE supplier_id = ? AND code = ?
               ORDER BY valid_from'
@@ -324,6 +331,9 @@ final class PayrollBenefitAnnualLimitDefaultsTest extends TestCase
                 'annual_limit_minor' => $row['annual_limit_minor'] === null
                     ? null
                     : PayrollTimeValue::int($row['annual_limit_minor'], 'annual_limit_minor'),
+                'exemption_basket' => $row['exemption_basket'] === null
+                    ? null
+                    : PayrollTimeValue::string($row['exemption_basket'], 'exemption_basket'),
                 'valid_from' => PayrollTimeValue::string($row['valid_from'], 'valid_from'),
                 'valid_to' => $row['valid_to'] === null
                     ? null
@@ -370,29 +380,29 @@ final class PayrollBenefitAnnualLimitDefaultsTest extends TestCase
     }
 
     /**
-     * Stav PŘED opravou: složka bez ročního limitu. Sloupec se dočasně vynuluje,
-     * aby byl rozdíl měřený na téže složce a téže částce.
+     * Stav PŘED migrací 1480: složka bez zařazení do zákonného koše. Sloupec se
+     * dočasně vynuluje, aby byl rozdíl měřený na téže složce a téže částce.
      *
      * @return array<string,mixed>
      */
-    private function previewWithoutLimit(int $componentId, int $amountMinor): array
+    private function previewWithoutBasket(int $componentId, int $amountMinor): array
     {
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
-            'SELECT annual_limit_minor FROM payroll_component_definitions
+            'SELECT exemption_basket FROM payroll_component_definitions
               WHERE supplier_id = ? AND id = ?'
         );
         $stmt->execute([$this->supplierId, $componentId]);
         $saved = $stmt->fetchColumn();
         $pdo->prepare(
-            'UPDATE payroll_component_definitions SET annual_limit_minor = NULL
+            'UPDATE payroll_component_definitions SET exemption_basket = NULL
               WHERE supplier_id = ? AND id = ?'
         )->execute([$this->supplierId, $componentId]);
         try {
             return $this->preview($componentId, $amountMinor);
         } finally {
             $pdo->prepare(
-                'UPDATE payroll_component_definitions SET annual_limit_minor = ?
+                'UPDATE payroll_component_definitions SET exemption_basket = ?
                   WHERE supplier_id = ? AND id = ?'
             )->execute([$saved, $this->supplierId, $componentId]);
         }

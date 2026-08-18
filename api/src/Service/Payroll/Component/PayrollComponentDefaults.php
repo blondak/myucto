@@ -27,10 +27,14 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
  * účinností nové. Historie se nepřepisuje — mzdový vstup schválený loni si drží
  * `component_snapshot_json` a nadále ukazuje na verzi, která tehdy platila.
  *
- * Zákonné částky se sem NEPÍŠOU. Roční limit se u složky uvádí kanonickým klíčem
- * parametru rulesetu a hodnotu k němu vytáhne {@see limitMinor()} z rulesetu
- * účinného k `valid_from` dané verze klasifikace. Nová průměrná mzda tedy znamená
- * nový ruleset a novou verzi klasifikace, ne editaci čísla v kódu.
+ * Zákonné částky se sem NEPÍŠOU a od migrace 1480 se ani nedosazují do složkového
+ * stropu. Složka jen řekne, do KTERÉHO zákonného koše patří
+ * ({@see PayrollBenefitExemptionBasket}); částku drží ruleset a limituje se ÚHRN
+ * všech složek téhož koše za rok, ne jednotlivá složka. Nová průměrná mzda tedy
+ * znamená nový ruleset, ne editaci čísla v kódu ani novou verzi klasifikace.
+ *
+ * `annual_limit_minor` zůstává výchozím složkám prázdný: je to vlastní strop
+ * zaměstnavatele (tvrdá zábrana schválení), ne daňová hranice.
  */
 final class PayrollComponentDefaults
 {
@@ -40,8 +44,9 @@ final class PayrollComponentDefaults
      *  0 kód, 1 název, 2 druh složky, 3 peněžní/nepeněžní, 4 četnost,
      *  5 daň, 6 sociální (účast i vyměřovací základ), 7 zdravotní (účast
      *  i vyměřovací základ), 8 průměrný výdělek, 9 exekuční srážky, 10 JMHZ,
-     *  11 statistika, 12 kanonický klíč ročního limitu v rulesetu daně z příjmů
-     *     (NULL = složka roční limit nemá; důvod je u konkrétního řádku).
+     *  11 statistika, 12 zákonný koš osvobození
+     *     ({@see PayrollBenefitExemptionBasket}; NULL = složka do žádného koše
+     *     nepatří, důvod je u konkrétního řádku).
      *
      * @var list<array{valid_from:string, rows:list<array{0:string,1:string,2:string,3:string,4:string,5:string,6:string,7:string,8:string,9:string,10:string,11:string,12:?string}>}>
      */
@@ -69,8 +74,8 @@ final class PayrollComponentDefaults
                 // (1 % / 0,5 % / 0,25 % vstupní ceny měsíčně), ne osvobozený
                 // benefit — žádný roční strop osvobození neexistuje.
                 ['SOUKROME_VOZIDLO', 'Soukromé užití vozidla', 'benefit_vehicle', 'non_monetary', 'regular', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null],
-                ['PRISPEVEK_PENZE_ZIVOTNI', 'Příspěvek na penzijní a životní produkty', 'benefit_pension', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'benefit_exemption.old_age_savings.yearly'],
-                // § 6 odst. 9 písm. p) ZDP sdílí 50 000 Kč s příspěvkem na produkty
+                ['PRISPEVEK_PENZE_ZIVOTNI', 'Příspěvek na penzijní a životní produkty', 'benefit_pension', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'old_age_savings'],
+                // § 6 odst. 9 písm. m) ZDP sdílí 50 000 Kč s příspěvkem na produkty
                 // spoření na stáří, ale jde-li o jinou formu podpory dlouhodobé péče
                 // než pojištění, spadá jinam. Zařazení tenhle číselník neurčí, takže
                 // limit zůstává prázdný a vyplní ho účetní.
@@ -82,8 +87,8 @@ final class PayrollComponentDefaults
                 // kurzu — proto se tu limit netvrdí; naslepo nasazený strop by
                 // blokoval schválení legitimního školení.
                 ['VZDELAVANI', 'Vzdělávání zaměstnance', 'benefit_education', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null],
-                ['REKREACE_VOLNY_CAS', 'Rekreace a volnočasový benefit', 'benefit_recreation', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'benefit_exemption.non_cash_leisure.yearly'],
-                ['ZDRAVOTNI_BENEFIT', 'Zdravotní benefit', 'benefit_health', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'benefit_exemption.non_cash_health.yearly'],
+                ['REKREACE_VOLNY_CAS', 'Rekreace a volnočasový benefit', 'benefit_recreation', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'non_cash_leisure'],
+                ['ZDRAVOTNI_BENEFIT', 'Zdravotní benefit', 'benefit_health', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'non_cash_health'],
                 ['PRISPEVEK_RIZIKOVE_SPORENI', 'Povinný příspěvek na spoření u rizikové práce', 'risky_savings', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null],
                 ['CESTOVNI_NAHRADA', 'Cestovní náhrada', 'travel_reimbursement', 'monetary', 'one_off', 'manual_review', 'excluded', 'excluded', 'excluded', 'excluded', 'manual_review', 'included', null],
                 // MZ-08-W07 — klasifikovaný rozpad vyúčtování pracovní cesty. Do zákonného
@@ -128,11 +133,12 @@ final class PayrollComponentDefaults
     }
 
     /**
-     * Verze klasifikace se zákonnými limity už dosazenými z rulesetu.
+     * Verze klasifikace se zákonným košem osvobození u benefitních složek.
      *
-     * Verze, ke které není účinný ruleset daně z příjmů, se PŘESKOČÍ celá. Založit
-     * ji bez limitu by znamenalo tiše vypnout hlídání ročního stropu — přesně vada,
-     * kvůli které tahle třída vznikla. Ostatní verze se založí normálně.
+     * Verze, ke které ruleset daně z příjmů nezná částku koše, se PŘESKOČÍ celá.
+     * Založit složku s košem, jehož limit neexistuje, by znamenalo tiše vypnout
+     * hlídání ročního stropu — přesně vada, kvůli které tahle třída vznikla.
+     * Ostatní verze se založí normálně.
      *
      * @return list<array{valid_from:string, rows:list<array{
      *   code:string, name:string, component_kind:string, value_kind:string,
@@ -140,7 +146,7 @@ final class PayrollComponentDefaults
      *   social_treatment:string, health_treatment:string,
      *   average_earning_treatment:string, enforcement_treatment:string,
      *   jmhz_treatment:string, statistics_treatment:string,
-     *   annual_limit_minor:?int
+     *   exemption_basket:?string
      * }>}>
      */
     public function versions(): array
@@ -150,7 +156,7 @@ final class PayrollComponentDefaults
             $rows = [];
             foreach ($version['rows'] as $row) {
                 try {
-                    $limit = $this->limitMinor($row[12], $version['valid_from']);
+                    $basket = $this->basket($row[12], $version['valid_from']);
                 } catch (PayrollRulesetException) {
                     continue 2;
                 }
@@ -167,7 +173,7 @@ final class PayrollComponentDefaults
                     'enforcement_treatment' => $row[9],
                     'jmhz_treatment' => $row[10],
                     'statistics_treatment' => $row[11],
-                    'annual_limit_minor' => $limit,
+                    'exemption_basket' => $basket?->value,
                 ];
             }
             $versions[] = ['valid_from' => $version['valid_from'], 'rows' => $rows];
@@ -184,22 +190,31 @@ final class PayrollComponentDefaults
      * Ruleset se bere `forDate()`, ne `forCalculation()`: výchozí číselník je
      * jen SEED, který si firma smí přepsat, a nesmí spadnout jen proto, že
      * sada ještě není odborně schválená.
+     *
+     * Částka se z rulesetu jen OVĚŘÍ, do složky se nekopíruje — limit koše se
+     * čte až ve chvíli výpočtu, aby nemohl zestárnout v číselníku.
      */
-    private function limitMinor(?string $key, string $validFrom): ?int
+    private function basket(?string $value, string $validFrom): ?PayrollBenefitExemptionBasket
     {
-        if ($key === null) {
+        if ($value === null) {
             return null;
         }
-        $value = $this->rulesets
-            ->forDate(PayrollRulesetDomain::IncomeTax, $validFrom)
-            ->parameter($key)
-            ->value;
-        if (!is_int($value)) {
+        $basket = PayrollBenefitExemptionBasket::tryFrom($value);
+        if ($basket === null) {
             throw new PayrollRulesetException(
-                "Roční limit {$key} není částka v haléřích.",
+                "Zákonný koš osvobození {$value} neexistuje.",
+            );
+        }
+        $limit = $this->rulesets
+            ->forDate(PayrollRulesetDomain::IncomeTax, $validFrom)
+            ->parameter($basket->rulesetKey())
+            ->value;
+        if (!is_int($limit)) {
+            throw new PayrollRulesetException(
+                "Roční limit {$basket->rulesetKey()} není částka v haléřích.",
             );
         }
 
-        return $value;
+        return $basket;
     }
 }

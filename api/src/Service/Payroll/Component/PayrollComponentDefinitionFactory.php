@@ -53,7 +53,36 @@ final class PayrollComponentDefinitionFactory
                 'accounting_credit_code',
             ),
             annualLimitMinor: $this->nullableInt($row, 'annual_limit_minor'),
+            exemptionBasket: $this->basket($row),
         );
+    }
+
+    /**
+     * Zmrazené snímky složek z doby před migrací 1480 klíč `exemption_basket`
+     * nemají vůbec. Chybějící klíč znamená „složka do zákonného koše nepatří" —
+     * historická revize mzdového běhu se tím nesmí přepočítat jinak.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function basket(array $row): ?PayrollBenefitExemptionBasket
+    {
+        $value = $row['exemption_basket'] ?? null;
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!is_string($value)) {
+            throw new \UnexpectedValueException(
+                'Mzdová složka nemá pole exemption_basket.',
+            );
+        }
+        $basket = PayrollBenefitExemptionBasket::tryFrom($value);
+        if ($basket === null) {
+            throw new \UnexpectedValueException(
+                'Mzdová složka má neznámý zákonný koš osvobození.',
+            );
+        }
+
+        return $basket;
     }
 
     /** @param array<string,mixed> $row */

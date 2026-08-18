@@ -126,6 +126,7 @@ describe('PayrollComponents', () => {
       accounting_debit_code: null,
       accounting_credit_code: null,
       annual_limit_minor: null,
+      exemption_basket: null,
       valid_from: '2026-01-01',
       valid_to: null,
       is_active: true,
@@ -275,6 +276,7 @@ describe('PayrollComponents', () => {
       annual_limit_minor: null,
       annual_used_minor: null,
       annual_after_minor: null,
+      exemption_basket: null,
     })
   })
 
@@ -444,7 +446,7 @@ describe('PayrollComponents', () => {
 
     const editor = wrapper.get('[data-testid="payroll-component-editor"]')
     expect(editor.find('select').exists()).toBe(false)
-    expect(editor.findAll('[role="combobox"]').length).toBe(14)
+    expect(editor.findAll('[role="combobox"]').length).toBe(15)
 
     const debit = editor.get('[data-testid="payroll-component-debit"]')
     await debit.get('input').trigger('focus')
@@ -582,6 +584,51 @@ describe('PayrollComponents', () => {
     expect(m.previewInput).toHaveBeenCalledWith(expect.objectContaining({
       quantity_milliunits: 1750,
     }))
+    wrapper.unmount()
+  })
+
+  // Roční koš osvobození je bez náhledu past: účetní zjistí překročení až
+  // tehdy, když z prosincového benefitu vyskočí daň a pojistné. Náhled proto
+  // musí ukázat vyčerpání koše i rozpad na osvobozenou a zdanitelnou část.
+  it('shows how much of the statutory benefit basket is used and what is taxable', async () => {
+    m.previewInput.mockResolvedValue({
+      support_status: 'supported',
+      blocker: null,
+      annual_limit_exceeded: false,
+      annual_limit_minor: null,
+      annual_used_minor: null,
+      annual_after_minor: null,
+      exemption_basket: {
+        basket: 'non_cash_leisure',
+        statute: '§ 6 odst. 9 písm. d) bod 2 ZDP',
+        limit_minor: 2448350,
+        used_before_minor: 1900000,
+        used_after_minor: 2900000,
+        remaining_minor: 0,
+        exempt_minor: 548350,
+        taxable_minor: 451650,
+        limit_exceeded: true,
+      },
+    })
+
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.inputs')!
+      .trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.add')!
+      .trigger('click')
+    await wrapper.get('[data-testid="payroll-input-amount"]').setValue('10000')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.preview')!
+      .trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="payroll-input-basket"]').text())
+      .toContain('payroll.components.inputs.basket_usage')
+    expect(wrapper.get('[data-testid="payroll-input-basket-over"]').text())
+      .toContain('payroll.components.inputs.basket_over_limit')
     wrapper.unmount()
   })
 

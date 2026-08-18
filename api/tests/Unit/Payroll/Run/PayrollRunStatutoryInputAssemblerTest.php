@@ -58,6 +58,94 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         self::assertSame(5, $tax->annualAccumulator?->completedMonths);
     }
 
+    /**
+     * Osvobozený benefit se zmrazeným rozpadem koše se do výpočtu DOSTANE
+     * a nadlimitní část v něm vystupuje jako vlastní zdanitelná složka, která
+     * vstupuje i do obou vyměřovacích základů.
+     *
+     * Bez rozpadu je osvobození nedoložené tvrzení a výpočet se u něj zastaví —
+     * to se nemění, ověřuje to
+     * {@see self::testExemptBenefitWithoutABasketStaysUnevidenced()}.
+     */
+    public function testOverLimitBenefitEntersTaxAndBothAssessmentBases(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $person = &$snapshot['people'][0];
+        $person['employments'][0]['inputs'][] = [
+            'id' => 421,
+            'amount_minor' => 3_000_000,
+            'source_period_start' => null,
+            'benefit_basket' => 'non_cash_leisure',
+            'benefit_exempt_minor' => 2_448_350,
+            'benefit_taxable_minor' => 551_650,
+            'component' => [
+                'code' => 'REKREACE_VOLNY_CAS',
+                'tax_treatment' => 'exempt',
+                'social_participation_treatment' => 'excluded',
+                'social_treatment' => 'excluded',
+                'health_participation_treatment' => 'excluded',
+                'health_treatment' => 'excluded',
+                'exemption_basket' => 'non_cash_leisure',
+            ],
+        ];
+        unset($person);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame([], $bundle->issues);
+        self::assertNotNull($bundle->socialInsurance);
+        self::assertNotNull($bundle->healthInsurance);
+
+        $social = $bundle->socialInsurance->people[0]->relationships[0]->components;
+        self::assertSame([
+            'input.420.mzda_mesicni',
+            'input.421.rekreace_volny_cas',
+            'input.421.rekreace_volny_cas.nadlimit',
+        ], array_map(static fn ($item): string => $item->code, $social));
+        self::assertSame(551_650, $social[2]->amountMinorUnits);
+
+        $health = $bundle->healthInsurance->people[0]->relationships[0]->components;
+        self::assertSame(
+            'input.421.rekreace_volny_cas.nadlimit',
+            $health[2]->code,
+        );
+        self::assertSame(551_650, $health[2]->amountMinorUnits);
+
+        $tax = $bundle->incomeTax[0]->relationships[0]->components;
+        self::assertSame(
+            'input.421.rekreace_volny_cas.nadlimit',
+            $tax[2]->code,
+        );
+        self::assertSame(551_650, $tax[2]->amountMinorUnits);
+        // Osvobozená část zůstává osvobozená; do základu daně přispívá nulou.
+        self::assertSame(2_448_350, $tax[1]->amountMinorUnits);
+    }
+
+    /** Osvobození bez koše zůstává nedoložené — brána se neuvolnila plošně. */
+    public function testExemptBenefitWithoutABasketStaysUnevidenced(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $person = &$snapshot['people'][0];
+        $person['employments'][0]['inputs'][0]['component']['tax_treatment'] = 'exempt';
+        unset($person);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame([], $bundle->incomeTax);
+        self::assertContains(
+            'income_tax|tax_component_exemption_evidence_missing|employee:42|employment:84',
+            array_map(
+                static fn ($issue): string => implode('|', [
+                    $issue->toArray()['domain'],
+                    $issue->toArray()['code'],
+                    (string) $issue->toArray()['person_reference'],
+                    (string) $issue->toArray()['relationship_reference'],
+                ]),
+                $bundle->issues,
+            ),
+        );
+    }
+
     public function testMissingAnnualAccumulatorsBlockInputsInsteadOfInventingZero(): void
     {
         $snapshot = $this->completeSnapshot();

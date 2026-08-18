@@ -103,9 +103,9 @@ final class PayrollComponentRepository
                      average_earning_treatment,
                      enforcement_treatment, jmhz_treatment,
                      statistics_treatment, accounting_debit_code,
-                     accounting_credit_code, annual_limit_minor, valid_from,
-                     valid_to, is_active)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     accounting_credit_code, annual_limit_minor, exemption_basket,
+                     valid_from, valid_to, is_active)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
@@ -126,6 +126,7 @@ final class PayrollComponentRepository
                 $data['accounting_debit_code'],
                 $data['accounting_credit_code'],
                 $data['annual_limit_minor'],
+                $data['exemption_basket'],
                 $data['valid_from'],
                 $data['valid_to'],
                 PayrollTimeValue::bool($data['is_active'] ?? null, 'is_active') ? 1 : 0,
@@ -203,6 +204,7 @@ final class PayrollComponentRepository
                     enforcement_treatment = ?, jmhz_treatment = ?,
                     statistics_treatment = ?, accounting_debit_code = ?,
                     accounting_credit_code = ?, annual_limit_minor = ?,
+                    exemption_basket = ?,
                     valid_from = ?, valid_to = ?, is_active = ?,
                     row_version = row_version + 1
               WHERE supplier_id = ? AND id = ? AND row_version = ?'
@@ -225,6 +227,7 @@ final class PayrollComponentRepository
             $data['accounting_debit_code'],
             $data['accounting_credit_code'],
             $data['annual_limit_minor'],
+            $data['exemption_basket'],
             $data['valid_from'],
             $data['valid_to'],
             PayrollTimeValue::bool($data['is_active'] ?? null, 'is_active') ? 1 : 0,
@@ -255,7 +258,9 @@ final class PayrollComponentRepository
      *  - `annual_limit_minor` VŮBEC NEBYL mezi vkládanými sloupci, takže výchozí
      *    benefitní složky měly roční limit NULL. `PayrollInputRepository::approve()`
      *    hlídá strop jen u složky s NENULOVÝM limitem, takže se roční limit
-     *    osvobození benefitů u výchozích složek nehlídal vůbec.
+     *    osvobození benefitů u výchozích složek nehlídal vůbec. Od migrace 1480
+     *    zákonnou hranici drží `exemption_basket` a strop na složce zůstal jen
+     *    jako vlastní pravidlo zaměstnavatele — vkládá se proto koš, ne limit.
      *  - `valid_from` bylo natvrdo `'2026-01-01'`, takže legislativní změnu
      *    klasifikace nešlo do existující firmy rozvést: `INSERT IGNORE` narazil na
      *    `uq_payroll_component_version (supplier_id, code, valid_from)` a tiše
@@ -280,7 +285,7 @@ final class PayrollComponentRepository
                  health_participation_treatment, health_treatment,
                  average_earning_treatment,
                  enforcement_treatment, jmhz_treatment, statistics_treatment,
-                 annual_limit_minor, valid_from)
+                 exemption_basket, valid_from)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $closePrevious = $this->db->pdo()->prepare(
@@ -316,7 +321,7 @@ final class PayrollComponentRepository
                     $row['enforcement_treatment'],
                     $row['jmhz_treatment'],
                     $row['statistics_treatment'],
-                    $row['annual_limit_minor'],
+                    $row['exemption_basket'],
                     $version['valid_from'],
                 ]);
             }
