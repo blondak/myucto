@@ -112,9 +112,13 @@ final class ManualPostingQueueServiceTest extends BankPostingTestCase
             self::assertNotSame('Ignorovaný', $item['counterparty']);
         }
 
+        // Počty jsou >= , ne == : test běží nad PRVNÍ double_entry firmou v DB, kterou
+        // sdílí se seedy z bootstrapu (SEED-2095-001 je nezaúčtovaná přijatá faktura,
+        // takže do fronty legitimně patří taky). Že tam JE doklad tohohle testu, hlídají
+        // asserty nad $byId výše — tady jde jen o to, že se typ ve statistice objevil.
         self::assertGreaterThanOrEqual(2, $result['counts']['by_type']['bank_no_suggestion']);
-        self::assertSame(1, $result['counts']['by_type']['purchase_invoice']);
-        self::assertSame(1, $result['counts']['by_type']['sales_invoice']);
+        self::assertGreaterThanOrEqual(1, $result['counts']['by_type']['purchase_invoice']);
+        self::assertGreaterThanOrEqual(1, $result['counts']['by_type']['sales_invoice']);
         self::assertSame(1, $result['counts']['by_type']['document_request']);
     }
 

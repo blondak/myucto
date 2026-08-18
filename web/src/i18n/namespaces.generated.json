@@ -1,5 +1,6 @@
 {
   "core": [
+    "accounting",
     "auth",
     "client",
     "codebooks",
@@ -23,7 +24,6 @@
     "webauthn"
   ],
   "lazy": [
-    "accounting",
     "activation",
     "activity_log",
     "aiGateway",
@@ -153,7 +153,6 @@
       "project"
     ],
     "invoices": [
-      "accounting",
       "lock",
       "oss_rates",
       "payment_method",
@@ -175,7 +174,6 @@
       "stock"
     ],
     "invoice-detail": [
-      "accounting",
       "cash",
       "cash_settlement",
       "documents",
@@ -208,7 +206,6 @@
       "purchase_invoice"
     ],
     "purchase-invoices": [
-      "accounting",
       "lock",
       "purchase_invoice"
     ],
@@ -227,7 +224,6 @@
       "purchase_invoice"
     ],
     "purchase-invoices-payment-orders": [
-      "accounting",
       "payment_method",
       "payment_order",
       "purchase_invoice"
@@ -237,7 +233,6 @@
       "integrations"
     ],
     "purchase-invoice-new": [
-      "accounting",
       "automation",
       "cash",
       "cash_settlement",
@@ -249,7 +244,6 @@
       "vendor"
     ],
     "purchase-invoice-detail": [
-      "accounting",
       "automation",
       "cash",
       "cash_settlement",
@@ -260,7 +254,6 @@
       "stock"
     ],
     "purchase-invoice-edit": [
-      "accounting",
       "automation",
       "cash",
       "cash_settlement",
@@ -344,72 +337,39 @@
       "payroll"
     ],
     "accounting-accounts": [
-      "accounting",
       "codebookTransfer",
       "users"
     ],
-    "accounting-account-detail": [
-      "accounting"
-    ],
-    "accounting-periods": [
-      "accounting"
-    ],
     "accounting-journal": [
-      "accounting",
       "activation",
       "automation",
       "documents"
     ],
-    "accounting-journal-new": [
-      "accounting"
-    ],
-    "accounting-payroll": [
-      "accounting"
-    ],
     "accounting-general-ledger": [
-      "accounting",
       "activation"
     ],
     "accounting-trial-balance": [
-      "accounting",
       "activation"
     ],
-    "accounting-account-statement": [
-      "accounting"
-    ],
     "accounting-balance-sheet": [
-      "accounting",
       "activation",
       "reports"
     ],
     "accounting-income-statement": [
-      "accounting",
       "activation",
       "reports"
-    ],
-    "accounting-income-statement-by-function": [
-      "accounting"
-    ],
-    "accounting-saldo": [
-      "accounting"
     ],
     "accounting-document-completeness": [
       "documentCompleteness"
     ],
     "accounting-balance-inventory": [
-      "accounting",
       "activation"
     ],
     "accounting-section18-statements": [
-      "accounting",
       "activation"
     ],
     "accounting-monthly-check": [
-      "accounting",
       "checks"
-    ],
-    "accounting-tax-base-adjustments": [
-      "accounting"
     ],
     "manual-posting-queue": [
       "manualQueue"
@@ -417,58 +377,27 @@
     "accounting-monthly-report": [
       "monthly_report"
     ],
-    "accounting-offsets": [
-      "accounting"
-    ],
     "accounting-assets": [
-      "accounting",
       "codebookTransfer"
     ],
-    "accounting-asset-new": [
-      "accounting"
-    ],
-    "accounting-asset-detail": [
-      "accounting"
-    ],
-    "accounting-asset-edit": [
-      "accounting"
-    ],
-    "accounting-small-assets": [
-      "accounting"
-    ],
     "accounting-period-closing": [
-      "accounting",
       "checks"
     ],
     "accounting-closing-package": [
-      "accounting",
       "reports"
     ],
-    "accounting-statement-notes": [
-      "accounting"
-    ],
-    "accounting-retention": [
-      "accounting"
-    ],
-    "accounting-transition-report": [
-      "accounting"
-    ],
     "accounting-cash": [
-      "accounting",
       "cash"
     ],
     "accounting-cash-new": [
-      "accounting",
       "cash",
       "purchase_invoice"
     ],
     "accounting-cash-edit": [
-      "accounting",
       "cash",
       "purchase_invoice"
     ],
     "accounting-cash-book": [
-      "accounting",
       "cash"
     ],
     "tax-evidence-cash-journal": [
@@ -554,7 +483,6 @@
       "purchase_invoice"
     ],
     "bank-statements": [
-      "accounting",
       "automation",
       "bank",
       "bank_accounts",
@@ -566,7 +494,6 @@
       "vendor"
     ],
     "bank-detail": [
-      "accounting",
       "automation",
       "bank",
       "document_requests",
@@ -635,7 +562,6 @@
       "bank_template_admin"
     ],
     "templates": [
-      "accounting",
       "automation",
       "bank",
       "purchase_invoice",
@@ -643,7 +569,6 @@
       "vendor"
     ],
     "tools": [
-      "accounting",
       "cash",
       "codebookTransfer"
     ],
@@ -656,7 +581,6 @@
       "portfolio"
     ],
     "automation-cockpit": [
-      "accounting",
       "automation",
       "bank",
       "settings"
@@ -689,7 +613,6 @@
       "reports"
     ],
     "reports-income-tax": [
-      "accounting",
       "taxReturn"
     ],
     "reports-cnb-rate-audit": [
@@ -770,7 +693,6 @@
       "api_tokens"
     ],
     "login": [
-      "accounting",
       "activation",
       "activity_log",
       "aiGateway",
