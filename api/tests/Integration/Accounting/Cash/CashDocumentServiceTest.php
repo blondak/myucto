@@ -10,6 +10,8 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\Cash\CashDocumentService;
 use MyInvoice\Service\Accounting\Cash\CashException;
+use MyInvoice\Service\Accounting\Closing\ClosingException;
+use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\DocumentLockService;
@@ -40,6 +42,7 @@ final class CashDocumentServiceTest extends TestCase
     private AccountingPeriodRepository $periods;
     private DocumentLockService $documentLocks;
     private PostingService $posting;
+    private DocumentSeriesService $documentSeries;
 
     private int $supplierId = 0;
     private int $currencyId = 0;
@@ -64,6 +67,7 @@ final class CashDocumentServiceTest extends TestCase
             $this->periods   = $container->get(AccountingPeriodRepository::class);
             $this->documentLocks = $container->get(DocumentLockService::class);
             $this->posting   = $container->get(PostingService::class);
+            $this->documentSeries = $container->get(DocumentSeriesService::class);
             $seeder          = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -1156,6 +1160,49 @@ final class CashDocumentServiceTest extends TestCase
         // A firemní řada pokračuje, jako by se nic nestalo.
         $next = $this->service->create($this->supplierId, $this->sale($regA, 300.0), $this->userId);
         self::assertSame('PPD-' . self::YEAR . '-0002', $next['doc_number']);
+    }
+
+    /**
+     * Ruční editace prefixu v Nástrojích nesmí dát dvěma pokladním řadám tentýž
+     * prefix — obě začínají od jedničky, takže by vydaly totéž číslo dokladu.
+     */
+    public function testCashSeriesPrefixCannotCollideWithAnotherRegister(): void
+    {
+        $regA = $this->makeRegister('211');
+        $regB = $this->registers->create($this->supplierId, [
+            'name' => 'Vedlejší', 'account_code' => $this->makeCashAnalytic('211.200'), 'own_series' => true,
+        ]);
+        $this->service->create($this->supplierId, $this->sale($regB, 100.0), $this->userId);
+
+        $this->expectException(ClosingException::class);
+        $this->expectExceptionMessageMatches('/patří společné řadě firmy/');
+        $this->documentSeries->updateSeries($this->supplierId, 'cash_in', self::YEAR, ['prefix' => 'PPD'], $regB);
+    }
+
+    /** Táž kontrola platí i proti existující vlastní řadě jiné pokladny. */
+    public function testCashSeriesPrefixCannotCollideWithExistingRegisterSeries(): void
+    {
+        $this->makeRegister('211');
+        $regB = $this->registers->create($this->supplierId, [
+            'name' => 'Vedlejší', 'account_code' => $this->makeCashAnalytic('211.200'), 'own_series' => true,
+        ]);
+        $regC = $this->registers->create($this->supplierId, [
+            'name' => 'Třetí', 'account_code' => $this->makeCashAnalytic('211.300'), 'own_series' => true,
+        ]);
+        $this->service->create($this->supplierId, $this->sale($regB, 100.0), $this->userId);
+        $this->service->create($this->supplierId, $this->sale($regC, 100.0), $this->userId);
+
+        $takenPrefix = null;
+        foreach ($this->documentSeries->list($this->supplierId) as $row) {
+            if ((int) $row['register_id'] === $regB && (string) $row['series_code'] === 'cash_in') {
+                $takenPrefix = (string) $row['prefix'];
+            }
+        }
+        self::assertNotNull($takenPrefix);
+
+        $this->expectException(ClosingException::class);
+        $this->expectExceptionMessageMatches('/už používá jiná pokladní řada/');
+        $this->documentSeries->updateSeries($this->supplierId, 'cash_in', self::YEAR, ['prefix' => $takenPrefix], $regC);
     }
 
     /** Přepnout řadu uprostřed roku, ve kterém už pokladna vydala číslo, nejde (§11 ZoÚ). */
