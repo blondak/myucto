@@ -16,22 +16,47 @@
  *  2. Kód přichází UŽ s prefixem (`cash.error.period_not_open`). Fallback tedy
  *     musí stavět `accounting.error.<zkrácený kód>`, ne `accounting.error.<celý kód>` —
  *     jinak je větev mrtvá a nikdy nic nenajde.
+ *  3. Když server pošle `error.params` (strojová data hlášky), sáhne se nejdřív po
+ *     variantě klíče `…_detail`, která je umí dosadit. Bez toho by konkrétní číslo
+ *     ze serverové zprávy zmizelo — překlad má přednost u všech kódů kromě
+ *     `validation`, takže „…v plné zbývající výši (12 100,00 Kč)" spadlo na obecné
+ *     „…jen v plné výši." a uživatel se nedozvěděl, kolik má zadat.
  */
 
-type Translate = (key: string) => string
+import { formatMoney } from '@/composables/useFormat'
+
+type Translate = (key: string, params?: Record<string, unknown>) => string
 
 const ERROR_PREFIX = 'cash.error.'
 const WARNING_PREFIX = 'cash.warning.'
 
 interface ApiErrorShape {
-  response?: { data?: { error?: { code?: unknown; message?: unknown } } }
+  response?: { data?: { error?: { code?: unknown; message?: unknown; params?: unknown } } }
 }
 
-function readError(e: unknown): { code: string; message: string } {
+/**
+ * Peněžní hodnoty ze serveru chodí jako číslo — do textu hlášky ale patří ve
+ * formátu aplikace (oddělovač tisíců, měna), ne jako `12100`.
+ */
+const MONEY_PARAMS = ['remaining', 'amount', 'limit'] as const
+
+function readError(e: unknown): { code: string; message: string; params: Record<string, unknown> | null } {
   const err = (e as ApiErrorShape)?.response?.data?.error
+  const raw = (err?.params && typeof err.params === 'object' && !Array.isArray(err.params))
+    ? err.params as Record<string, unknown>
+    : null
+  let params: Record<string, unknown> | null = null
+  if (raw !== null) {
+    const currency = typeof raw.currency_code === 'string' ? raw.currency_code : 'CZK'
+    params = { ...raw }
+    for (const key of MONEY_PARAMS) {
+      if (typeof raw[key] === 'number') params[key] = formatMoney(raw[key] as number, currency)
+    }
+  }
   return {
     code: typeof err?.code === 'string' ? err.code : '',
     message: typeof err?.message === 'string' ? err.message.trim() : '',
+    params,
   }
 }
 
@@ -47,11 +72,17 @@ export function cashErrorCode(e: unknown): string {
 
 /** Text chyby pro uživatele — viz pravidla v hlavičce souboru. */
 export function cashErrorMessage(e: unknown, t: Translate): string {
-  const { code, message } = readError(e)
+  const { code, message, params } = readError(e)
   if (code === '') return message || t('common.error')
 
   const short = shortCashErrorCode(code)
   if (short === 'validation' && message !== '') return message
+
+  if (params !== null) {
+    const detailKey = ERROR_PREFIX + short + '_detail'
+    const detail = t(detailKey, params)
+    if (detail !== detailKey) return detail
+  }
 
   const cashKey = ERROR_PREFIX + short
   const localized = t(cashKey)
