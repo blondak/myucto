@@ -1069,7 +1069,21 @@
                 "working_pensioner_discount": "Working pensioner discount",
                 "part_time_discount": "Part-time employment discount",
                 "employer_title": "Employer contribution",
-                "employer_scope_note": "The employer pays from the sum of all employees' assessment bases and the rounding happens on that sum. There is therefore no per-person split — the figure covers the whole company and month.",
+                "employer_scope_note": "The employer pays from the sum of all employees' assessment bases (§ 5a(1) of Act 589/1992 Coll.) and the rounding happens on that sum. The statutory figure therefore covers the whole company and month; the per-person share below is an allocation of that figure, not a statutory personal amount.",
+                "allocation_title": "This person's share (an allocation, not a statutory amount)",
+                "allocation_note": "Allocated by “{method}”: the person's assessment base {personBase} out of the company total {companyBase} ({people} people). The rounding residue goes to the largest remainder, so the shares add up to the company figure to the koruna.",
+                "allocation_method": {
+                    "capped_assessment_base_share": "share of assessment bases",
+                    "not_allocatable": "cannot be allocated"
+                },
+                "allocation_blocker": {
+                    "amounts_missing": "Cannot be allocated — this revision did not store the amounts or assessment bases the allocation needs.",
+                    "assessment_base_missing": "Cannot be allocated — the employer contribution is non-zero but no assessment base is stored for any person to divide it by.",
+                    "company_total_mismatch": "Cannot be allocated — the company contribution before the discount minus the discount does not equal the stored amount after it.",
+                    "discount_unattributable": "Cannot be allocated — the part-time discount is non-zero but is not evidenced on any relationship, so it would be granted to people not entitled to it.",
+                    "discount_exceeds_person_share": "Cannot be allocated — the discount falling on one of the people exceeds their share of the contribution."
+                },
+                "health_rate_reconstructed": "This revision did not store the rate, but it is evidenced: it was taken from the rule set frozen in this revision ({ruleset}, version {version}), whose fingerprint matches the stored one, and after rounding it yields exactly the same stored amount. This is not a stored intermediate step, it is a reconstruction verified by that match.",
                 "relationship_kind": {
                     "employment": "Employment",
                     "dpp": "Agreement to complete a job (DPP)",
@@ -1095,7 +1109,7 @@
                 "health_employee_share": "Employee share (one third)",
                 "health_employer_share": "Employer share (two thirds)",
                 "health_no_contribution": "No health insurance arose at this employer — there was no participation, so there is nothing for the rate to apply to.",
-                "health_rate_not_recorded": "This revision was calculated by an older version of the module that did not store the health insurance rate or rounding. They cannot be reconstructed from today's rules — they would describe a different calculation than the one that produced the stored amount. The stored amounts below still hold; they can be evidenced once the revision is recalculated.",
+                "health_rate_not_recorded": "This revision was calculated by an older version of the module that did not store the health insurance rate or rounding. Reconstruction from the rule set frozen in this revision failed — either the fingerprint does not match or the reconstructed step did not yield the stored amount. The rate cannot be taken from today's rules, it would describe a different calculation. The stored amounts below still hold.",
                 "health_top_up_title": "Top-up to the minimum assessment base",
                 "health_top_up_detail": "The base {base} did not reach the minimum {minimum}, so the difference {difference} is topped up and the contribution rises by {amount}.",
                 "health_top_up_amount_only": "The base did not reach the minimum {minimum} and the contribution rose by {amount}. This revision did not store what exactly the top-up was calculated from — it can be evidenced once the revision is recalculated.",

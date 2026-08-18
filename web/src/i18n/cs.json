@@ -1069,7 +1069,21 @@
                 "working_pensioner_discount": "Sleva pro pracujícího důchodce",
                 "part_time_discount": "Sleva na zkrácený úvazek",
                 "employer_title": "Pojistné zaměstnavatele",
-                "employer_scope_note": "Zaměstnavatel odvádí ze součtu vyměřovacích základů všech zaměstnanců a zaokrouhluje se až tento součet. Rozpad na jednu osobu proto neexistuje — číslo platí za celou firmu a měsíc.",
+                "employer_scope_note": "Zaměstnavatel odvádí ze součtu vyměřovacích základů všech zaměstnanců (§ 5a odst. 1 z. č. 589/1992 Sb.) a zaokrouhluje se až tento součet. Zákonná částka proto platí za celou firmu a měsíc; podíl osoby níže je rozdělení této částky, ne zákonný osobní údaj.",
+                "allocation_title": "Podíl osoby (rozdělení, ne zákonná částka)",
+                "allocation_note": "Rozděleno metodou „{method}“: vyměřovací základ osoby {personBase} z firemního úhrnu {companyBase} ({people} osob). Zbytek po dělení dostává největší zbytek, takže součet podílů sedí na firemní částku na korunu.",
+                "allocation_method": {
+                    "capped_assessment_base_share": "poměr vyměřovacích základů",
+                    "not_allocatable": "nelze rozdělit"
+                },
+                "allocation_blocker": {
+                    "amounts_missing": "Rozdělit nelze — tato revize neuložila částky nebo vyměřovací základy, které jsou k rozdělení potřeba.",
+                    "assessment_base_missing": "Rozdělit nelze — pojistné zaměstnavatele je nenulové, ale u osob není uložený žádný vyměřovací základ, podle kterého by šlo dělit.",
+                    "company_total_mismatch": "Rozdělit nelze — firemní pojistné před slevou minus sleva nedává uloženou částku po slevě.",
+                    "discount_unattributable": "Rozdělit nelze — sleva za částečné úvazky je nenulová, ale k žádnému vztahu není doložená, takže by se přiznala i lidem, kterým nenáleží.",
+                    "discount_exceeds_person_share": "Rozdělit nelze — sleva připadající na některou osobu převyšuje její podíl na pojistném."
+                },
+                "health_rate_reconstructed": "Sazbu si tato revize neuložila, ale je doložená: vzala se ze sady pravidel zmrazené v této revizi ({ruleset}, verze {version}), jejíž otisk se s uloženým shoduje, a po zaokrouhlení dává přesně tutéž uloženou částku. Není to uložený mezikrok, je to rekonstrukce ověřená shodou.",
                 "relationship_kind": {
                     "employment": "Pracovní poměr",
                     "dpp": "Dohoda o provedení práce",
@@ -1095,7 +1109,7 @@
                 "health_employee_share": "Z toho zaměstnanec (třetina)",
                 "health_employer_share": "Z toho zaměstnavatel (dvě třetiny)",
                 "health_no_contribution": "Zdravotní pojistné u tohoto zaměstnavatele nevzniklo — nebyla účast na pojištění, takže není co sazbou násobit.",
-                "health_rate_not_recorded": "Tuto revizi spočetla starší verze modulu, která si sazbu ani způsob zaokrouhlení zdravotního pojistného neukládala. Dopočítat je z dnešních pravidel nelze — popisovaly by jiný výpočet, než jaký dal uloženou částku. Uložené částky pojistného níže platí, doložit se dá až u revize spočtené znovu.",
+                "health_rate_not_recorded": "Tuto revizi spočetla starší verze modulu, která si sazbu ani způsob zaokrouhlení zdravotního pojistného neukládala. Rekonstrukce ze sady pravidel zmrazené v této revizi se nepovedla — buď se otisk sady neshoduje, nebo zrekonstruovaný krok nedal uloženou částku. Dopočítat sazbu z dnešních pravidel nelze, popisovala by jiný výpočet. Uložené částky pojistného níže platí.",
                 "health_top_up_title": "Dopočet do minimálního vyměřovacího základu",
                 "health_top_up_detail": "Základ {base} nedosáhl minima {minimum}, dopočítává se proto rozdíl {difference} a pojistné se zvyšuje o {amount}.",
                 "health_top_up_amount_only": "Základ nedosáhl minima {minimum} a pojistné se zvýšilo o {amount}. Z čeho přesně se dopočet počítal, tato revize neuložila — doložit se to dá až u revize spočtené znovu.",

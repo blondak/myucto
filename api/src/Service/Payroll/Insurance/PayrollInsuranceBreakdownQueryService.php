@@ -29,6 +29,18 @@ use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
  * vrací se `available:false` a důvod větou. Prázdná karta ani dopočet odhadem ne.
  * Zároveň platí kontrolní součet — mezikroky MUSÍ dát tutéž částku jako uložený
  * výsledek, jinak rozklad neprojde vůbec.
+ *
+ * DVĚ VÝJIMKY, obě přiznané v odpovědi:
+ *
+ *  1. Neuložený mezikrok zdravotního pojistného se smí ZREKONSTRUOVAT ze sady
+ *     pravidel zmrazené v té revizi, a to jen proti důkazu shodou — otisk sady
+ *     musí sedět bajt na bajt a zrekonstruovaný krok musí dát tutéž uloženou
+ *     částku ({@see PayrollInsuranceStepReconstructor}). Původ se hlásí jako
+ *     `rate_source: reconstructed`, nikdy jako `persisted`.
+ *  2. Pojistné zaměstnavatele na sociální osobní veličina není (§ 5a odst. 1
+ *     zákona č. 589/1992 Sb.), takže osobní číslo v odpovědi je ROZDĚLENÍ
+ *     firemní částky ({@see EmployerSocialInsuranceAllocation}), pojmenované
+ *     metodou a označené `is_statutory_personal_amount: false`.
  */
 final class PayrollInsuranceBreakdownQueryService
 {
@@ -45,12 +57,53 @@ final class PayrollInsuranceBreakdownQueryService
         'person_missing',
     ];
 
+    /**
+     * Odkud pochází sazba zdravotního pojistného. Taky smluvní číselník
+     * s klientem — `reconstructed` musí být na obrazovce ODLIŠENÉ od `persisted`,
+     * jinak by se doložená rekonstrukce vydávala za uložený mezikrok.
+     *
+     * @var list<string>
+     */
+    public const RATE_SOURCES = [
+        'persisted',
+        'reconstructed',
+        'not_recorded',
+        'not_applicable',
+    ];
+
+    /**
+     * Metoda rozdělení pojistného zaměstnavatele na osobu. `not_allocatable`
+     * není metoda, ale přiznání, že rozdělit nejde — proto k němu vždy patří
+     * důvod z {@see self::EMPLOYER_ALLOCATION_BLOCKERS}.
+     *
+     * @var list<string>
+     */
+    public const EMPLOYER_ALLOCATION_METHODS = [
+        EmployerSocialInsuranceAllocation::METHOD,
+        'not_allocatable',
+    ];
+
+    /**
+     * Proč rozdělení pojistného zaměstnavatele nevzniklo. Každý důvod má na
+     * obrazovce vlastní větu — hodnota bez věty je tichá regrese.
+     *
+     * @var list<string>
+     */
+    public const EMPLOYER_ALLOCATION_BLOCKERS = [
+        'amounts_missing',
+        'assessment_base_missing',
+        'company_total_mismatch',
+        'discount_unattributable',
+        'discount_exceeds_person_share',
+    ];
+
     private const SOCIAL = 'social_insurance';
     private const HEALTH = 'health_insurance';
 
     public function __construct(
         private readonly PayrollRunRepository $runs,
         private readonly PayrollStatutoryResultRepository $results,
+        private readonly PayrollInsuranceStepReconstructor $reconstructor,
     ) {}
 
     /**
@@ -168,13 +221,20 @@ final class PayrollInsuranceBreakdownQueryService
                 'contribution_minor' => $contribution,
             ],
             /*
-             * Pojistné zaměstnavatele NENÍ osobní veličina: počítá se jednou
-             * ze součtu vyměřovacích základů všech zaměstnanců a zaokrouhluje
-             * se až na tomto součtu. Rozpad na osobu by byl vymyšlený, proto se
-             * vydává tak, jak vznikl — za celou firmu a měsíc.
+             * Pojistné zaměstnavatele NENÍ osobní veličina: § 5a odst. 1 zákona
+             * č. 589/1992 Sb. dělá vyměřovacím základem zaměstnavatele „úhrn
+             * vyměřovacích základů jeho zaměstnanců" a § 7 odst. 3 zaokrouhluje
+             * až tenhle jeden součet. Proto se vydává tak, jak vznikl — za celou
+             * firmu a měsíc.
+             *
+             * Účetní můstek a nákladová střediska ale číslo na osobu potřebují,
+             * takže vedle firemní částky je i `allocation`: ROZDĚLENÍ, ne zákonná
+             * částka. Že to zákonná částka není, říká odpověď sama
+             * (`is_statutory_personal_amount: false`) a musí to říct i obrazovka.
              */
             'employer' => [
                 'scope' => 'company_month',
+                'allocation' => $this->employerSocialAllocation($set, $month, $employeeId),
                 'contribution_step' => $employerStep,
                 'assessment_base_minor' => self::optionalNonNegativeInt(
                     $month,
@@ -248,6 +308,21 @@ final class PayrollInsuranceBreakdownQueryService
         $total = self::optionalNonNegativeInt($result, 'total_contribution_minor_units');
         $status = (string) ($person['result_status'] ?? 'manual_review');
 
+        $stepsRecorded = $standardStep !== null || $topUpStep !== null;
+        $reconstruction = null;
+        if ($status === 'calculated' && !$stepsRecorded) {
+            $reconstruction = $this->reconstructHealthSteps(
+                $set,
+                $assessmentBase,
+                $effectiveMinimum,
+                $standard,
+                ($employeeTopUp ?? 0) + ($employerTopUp ?? 0),
+            );
+            $standardStep = $reconstruction['standard_step'] ?? null;
+            $topUpStep = $reconstruction['top_up_step'] ?? null;
+            $reconstruction = $reconstruction['evidence'] ?? null;
+        }
+
         if ($status === 'calculated') {
             $this->assertHealthReconciles(
                 $standardStep,
@@ -260,6 +335,7 @@ final class PayrollInsuranceBreakdownQueryService
                 $employee,
                 $employer,
                 $total,
+                $stepsRecorded,
             );
         }
 
@@ -314,8 +390,9 @@ final class PayrollInsuranceBreakdownQueryService
                 /*
                  * Nesmí se odvozovat jen z existence mezikroku: revize bez
                  * uložených kroků by dopočet ZATAJILA, ačkoli ho v částkách nese.
-                 * Základ dopočtu bez kroku ale neznáme — vrací se null a obrazovka
-                 * o něm mlčí, místo aby ukázala nulu jako by žádný nebyl.
+                 * Základ dopočtu bez kroku se buď doloží rekonstrukcí, nebo
+                 * zůstane null a obrazovka o něm mlčí, místo aby ukázala nulu
+                 * jako by žádný nebyl.
                  */
                 'top_up_applied' => $topUpStep !== null
                     || (($employeeTopUp ?? 0) + ($employerTopUp ?? 0)) > 0,
@@ -344,14 +421,26 @@ final class PayrollInsuranceBreakdownQueryService
             ],
             'contribution' => [
                 /*
-                 * `not_recorded` = revize spočtená dřív, než se sazba a způsob
-                 * zaokrouhlení začaly ukládat. Dopočítat je z dnešní sady pravidel
-                 * nelze — popisovaly by jiný výpočet než ten, který dal částku.
+                 * `reconstructed` = mezikrok se neuložil, ale jde ho DOLOŽIT ze
+                 * sady pravidel zmrazené v té revizi: otisk sady sedí bajt na bajt
+                 * a zrekonstruovaný krok dá po zaokrouhlení tutéž uloženou částku
+                 * ({@see PayrollInsuranceStepReconstructor}). Od `persisted` se
+                 * to musí lišit i na obrazovce — je to důkaz, ne uložený záznam.
+                 *
+                 * `not_recorded` = mezikrok se neuložil a doložit ho nejde.
+                 * Dopočítat ho z DNEŠNÍ sady pravidel nelze — popisovala by jiný
+                 * výpočet než ten, který dal částku.
                  *
                  * `not_applicable` = pojistné nevzniklo (bez účasti, cizí režim).
                  * Krok chybí právem a tvrdit „neuložilo se" by byl planý poplach.
                  */
-                'rate_source' => $this->rateSource($standardStep, $standard, $status),
+                'rate_source' => $this->rateSource(
+                    $standardStep,
+                    $standard,
+                    $status,
+                    $reconstruction !== null,
+                ),
+                'rate_reconstruction' => $reconstruction,
                 'standard_step' => $standardStep,
                 'standard_minor' => $standard,
                 'employee_standard_minor' => $employeeStandard,
@@ -380,14 +469,206 @@ final class PayrollInsuranceBreakdownQueryService
     }
 
     /**
+     * Doložená rekonstrukce mezikroků zdravotního pojistného u revize, která je
+     * neuložila. Přijímá se jen proti důkazu shodou — mechanika a její důvody
+     * jsou v {@see PayrollInsuranceStepReconstructor}.
+     *
+     * Vrací prázdné pole, když doložit nejde nic; `evidence` je v odpovědi
+     * jediné místo, kde se rekonstruovaný původ přizná.
+     *
+     * @param array<string,mixed> $set
+     * @return array{standard_step?:array<string,mixed>,top_up_step?:array<string,mixed>,evidence?:array<string,mixed>}
+     */
+    private function reconstructHealthSteps(
+        array $set,
+        int $assessmentBase,
+        int $effectiveMinimum,
+        ?int $standard,
+        int $topUpTotal,
+    ): array {
+        $rulesetId = (string) ($set['ruleset_id'] ?? '');
+        $rulesetHash = (string) ($set['ruleset_hash'] ?? '');
+        $standardMatch = $this->reconstructor->healthStep(
+            PayrollInsuranceStepReconstructor::HEALTH_STANDARD_LABEL,
+            $rulesetId,
+            $rulesetHash,
+            $assessmentBase,
+            $standard ?? 0,
+        );
+        $topUpMatch = $this->reconstructor->healthStep(
+            PayrollInsuranceStepReconstructor::HEALTH_TOP_UP_LABEL,
+            $rulesetId,
+            $rulesetHash,
+            $effectiveMinimum - $assessmentBase,
+            $topUpTotal,
+        );
+        if ($standardMatch === null && $topUpMatch === null) {
+            return [];
+        }
+        $version = ($standardMatch ?? $topUpMatch)['version'];
+        $reconstructed = [
+            'evidence' => [
+                'ruleset_id' => $version->id,
+                'ruleset_version' => $version->version,
+                'ruleset_hash' => $version->canonicalHash,
+                'parameter_key' => PayrollInsuranceStepReconstructor::HEALTH_RATE_PARAMETER,
+                'proof' => 'ruleset_hash_and_amount_match',
+                'standard_reconstructed' => $standardMatch !== null,
+                'top_up_reconstructed' => $topUpMatch !== null,
+            ],
+        ];
+        if ($standardMatch !== null) {
+            $reconstructed['standard_step'] = self::step(
+                $standardMatch['step'],
+                'health.standard_contribution_step',
+            );
+        }
+        if ($topUpMatch !== null) {
+            $reconstructed['top_up_step'] = self::step(
+                $topUpMatch['step'],
+                'health.minimum_top_up_step',
+            );
+        }
+
+        return $reconstructed;
+    }
+
+    /**
+     * Rozdělení pojistného zaměstnavatele na sociální mezi osoby běhu.
+     *
+     * Metodu i zbytkové pravidlo drží {@see EmployerSocialInsuranceAllocation},
+     * kterou používá i výplatní páska — dvě nezávislá rozdělení téže částky by
+     * se rozešla a účetní by měl na pásce jiné číslo než v rozkladu.
+     *
+     * Rozděluje se ZVLÁŠŤ pojistné před slevou (poměrem vyměřovacích základů)
+     * a sleva za částečné úvazky (poměrem základů vztahů, které ji doloženě
+     * uplatnily). Rozpustit slevu poměrem všech základů by ji přiznala i lidem,
+     * kterým nenáleží.
+     *
+     * @param array<string,mixed> $set
+     * @param array<string,mixed> $month
+     * @return array<string,mixed>
+     */
+    private function employerSocialAllocation(array $set, array $month, int $employeeId): array
+    {
+        $contribution = self::optionalNonNegativeInt($month, 'employer_contribution_minor_units');
+        $beforeDiscount = self::optionalNonNegativeInt(
+            $month,
+            'employer_contribution_before_discount_minor_units',
+        );
+        $discount = self::optionalNonNegativeInt($month, 'part_time_discount_minor_units');
+
+        $cappedBases = [];
+        $discountBases = [];
+        $blocker = null;
+        try {
+            foreach (self::rows($set['people'] ?? [], 'statutory_result.people') as $person) {
+                $id = self::positiveInt($person, 'employee_id');
+                $result = self::object(
+                    $person['result_snapshot'] ?? null,
+                    'social.person.result_snapshot',
+                );
+                $cappedBases[$id] = self::nonNegativeInt(
+                    $result,
+                    'capped_assessment_base_minor_units',
+                );
+                $discountBase = 0;
+                foreach (self::rows($person['relationships'] ?? [], 'social.relationships') as $row) {
+                    $snapshot = self::object(
+                        $row['result_snapshot'] ?? null,
+                        'social.relationship.result_snapshot',
+                    );
+                    if ((string) ($snapshot['part_time_employer_discount'] ?? '') === 'verified') {
+                        $discountBase += self::nonNegativeInt(
+                            $snapshot,
+                            'capped_assessment_base_minor_units',
+                        );
+                    }
+                }
+                $discountBases[$id] = $discountBase;
+            }
+        } catch (\UnexpectedValueException) {
+            /*
+             * Váhy se čtou i za OSTATNÍ osoby běhu. Kdyby na jedné z nich chyběl
+             * vyměřovací základ, shodila by celou kartu i lidem, jejichž data
+             * jsou v pořádku — rozdělení proto v takovém případě jen nevznikne.
+             * Rozklad samotné osoby se čte jinde a fail-closed tam platí dál.
+             */
+            $blocker = 'amounts_missing';
+        }
+        ksort($cappedBases, SORT_NUMERIC);
+        ksort($discountBases, SORT_NUMERIC);
+        $companyBase = array_sum($cappedBases);
+
+        $blocker ??= match (true) {
+            $contribution === null || $beforeDiscount === null || $discount === null
+                => 'amounts_missing',
+            $beforeDiscount - $discount !== $contribution => 'company_total_mismatch',
+            $beforeDiscount > 0 && $companyBase === 0 => 'assessment_base_missing',
+            $discount > 0 && array_sum($discountBases) === 0 => 'discount_unattributable',
+            default => null,
+        };
+
+        $allocations = [];
+        if ($blocker === null) {
+            try {
+                $allocations = EmployerSocialInsuranceAllocation::allocate(
+                    $cappedBases,
+                    $discountBases,
+                    (int) $beforeDiscount,
+                    (int) $discount,
+                );
+            } catch (\DomainException) {
+                $blocker = 'discount_exceeds_person_share';
+            }
+        }
+        if ($blocker !== null) {
+            if (!in_array($blocker, self::EMPLOYER_ALLOCATION_BLOCKERS, true)) {
+                throw new \LogicException('Nepodporovaný důvod, proč rozdělení nevzniklo.');
+            }
+
+            return [
+                'method' => 'not_allocatable',
+                'not_allocatable_reason' => $blocker,
+                'residual_rule' => null,
+                'is_statutory_personal_amount' => false,
+                'people_count' => count($cappedBases),
+                'company_assessment_base_minor' => $companyBase,
+                'company_contribution_minor' => $contribution,
+                'person_assessment_base_minor' => $cappedBases[$employeeId] ?? null,
+                'person_minor' => null,
+            ];
+        }
+
+        return [
+            'method' => EmployerSocialInsuranceAllocation::METHOD,
+            'not_allocatable_reason' => null,
+            'residual_rule' => EmployerSocialInsuranceAllocation::RESIDUAL_RULE,
+            'is_statutory_personal_amount' => false,
+            'people_count' => count($cappedBases),
+            'company_assessment_base_minor' => $companyBase,
+            'company_contribution_minor' => $contribution,
+            'person_assessment_base_minor' => $cappedBases[$employeeId] ?? null,
+            'person_minor' => $allocations[$employeeId] ?? null,
+        ];
+    }
+
+    /**
      * Rozlišuje „krok se neuložil" od „krok nevznikl". Bez toho by osoba bez
      * účasti na pojištění hlásila chybějící sazbu, ačkoli žádná neexistuje —
      * planý poplach, který účetní naučí varování ignorovat.
      *
      * @param array<string,mixed>|null $standardStep
      */
-    private function rateSource(?array $standardStep, ?int $standard, string $status): string
-    {
+    private function rateSource(
+        ?array $standardStep,
+        ?int $standard,
+        string $status,
+        bool $reconstructed,
+    ): string {
+        if ($reconstructed) {
+            return 'reconstructed';
+        }
         if ($standardStep !== null) {
             return 'persisted';
         }
@@ -629,6 +910,7 @@ final class PayrollInsuranceBreakdownQueryService
         ?int $employee,
         ?int $employer,
         ?int $total,
+        bool $stepsRecorded,
     ): void {
         foreach ([
             $standard,
@@ -663,14 +945,21 @@ final class PayrollInsuranceBreakdownQueryService
             self::assertRounding($standardStep, $standard, 'zdravotního');
         } elseif ($standard !== 0) {
             /*
-             * Starší revize krok neuchovala. To se nesmí zamlčet ani dopočítat —
-             * konzument dostane `rate_source: not_recorded` a řekne to větou.
+             * Starší revize krok neuchovala a doložit ho nešlo. To se nesmí
+             * zamlčet ani dopočítat — konzument dostane `rate_source:
+             * not_recorded` a řekne to větou.
              */
             return;
         }
         if ($topUpStep !== null) {
             self::assertRounding($topUpStep, $employeeTopUp + $employerTopUp, 'dopočtu do minima');
-        } elseif ($employeeTopUp + $employerTopUp !== 0) {
+        } elseif ($employeeTopUp + $employerTopUp !== 0 && $stepsRecorded) {
+            /*
+             * Tvrdá podmínka platí jen revizi, která mezikroky ukládala: tam je
+             * chybějící krok u nenulového dopočtu rozpor. Revize, která je
+             * neukládala vůbec, ho po právu nemá a rekonstrukce zdravotní sazby
+             * na ni nesmí uvalit přísnější pravidlo, než platilo předtím.
+             */
             throw new \DomainException(
                 'Dopočet do minimálního vyměřovacího základu bez mezikroku nesmí být nenulový.',
             );
