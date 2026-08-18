@@ -6,6 +6,8 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 const m = vi.hoisted(() => ({
   employmentExitDocuments: vi.fn(),
   generateEmploymentCertificate: vi.fn(),
+  generateAverageEarningsCertificate: vi.fn(),
+  generateAverageEarningsStatement: vi.fn(),
   downloadDocument: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -15,6 +17,8 @@ vi.mock('@/api/payroll', () => ({
   payrollApi: {
     employmentExitDocuments: m.employmentExitDocuments,
     generateEmploymentCertificate: m.generateEmploymentCertificate,
+    generateAverageEarningsCertificate: m.generateAverageEarningsCertificate,
+    generateAverageEarningsStatement: m.generateAverageEarningsStatement,
     downloadDocument: m.downloadDocument,
   },
 }))
@@ -70,7 +74,7 @@ function employment(relationType: PayrollEmployment['relation_type'] = 'employme
   }
 }
 
-function readiness() {
+function readiness(overrides: Record<string, unknown> = {}) {
   return {
     employment_id: 12,
     readiness: {
@@ -85,8 +89,32 @@ function readiness() {
         decisive_year: 2026,
         decisive_quarter: 3,
       },
+      average_earnings_statement: {
+        available: false,
+        readiness_code: 'average_earnings_snapshot_missing',
+        decisive_year: 2026,
+        decisive_quarter: 3,
+      },
+      ...overrides,
     },
     items: [],
+  }
+}
+
+function available() {
+  return {
+    average_earnings_certificate: {
+      available: true,
+      readiness_code: null,
+      decisive_year: 2026,
+      decisive_quarter: 3,
+    },
+    average_earnings_statement: {
+      available: true,
+      readiness_code: null,
+      decisive_year: 2026,
+      decisive_quarter: 3,
+    },
   }
 }
 
@@ -95,6 +123,8 @@ describe('EmploymentExitDocumentsPanel', () => {
     vi.clearAllMocks()
     m.employmentExitDocuments.mockResolvedValue(readiness())
     m.generateEmploymentCertificate.mockResolvedValue({ id: 88 })
+    m.generateAverageEarningsCertificate.mockResolvedValue({ id: 89 })
+    m.generateAverageEarningsStatement.mockResolvedValue({ id: 90 })
     m.downloadDocument.mockResolvedValue(undefined)
   })
 
@@ -146,6 +176,55 @@ describe('EmploymentExitDocumentsPanel', () => {
         dpp_issuance_basis: null,
         correction_reason: null,
       }),
+      expect.stringContaining('employment-exit-12-'),
+    )
+  })
+
+  it('never lets the client type the net amount for the §313(2) certificate', async () => {
+    m.employmentExitDocuments.mockResolvedValue(readiness(available()))
+    const wrapper = mount(EmploymentExitDocumentsPanel, {
+      props: { employment: employment(), canWrite: true },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-test="exit-tab-average"]').trigger('click')
+    await wrapper.get('[data-test="open-average-certificate-form"]').trigger('click')
+    for (const checkbox of wrapper.findAll('[data-test="average-certificate-form"] input[type="checkbox"]')) {
+      await checkbox.setValue(true)
+    }
+    await wrapper.get('[data-test="average-certificate-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('input[type="number"]').exists()).toBe(false)
+    expect(m.generateAverageEarningsCertificate).toHaveBeenCalledWith(
+      12,
+      {
+        termination_assessment_complete: true,
+        termination_reason_kind: 'none',
+        employee_stated_reason: null,
+        pension_insurance_periods: [],
+        correction_reason: null,
+      },
+      expect.stringContaining('employment-exit-12-'),
+    )
+  })
+
+  it('issues the standalone average earnings statement with its stated purpose', async () => {
+    m.employmentExitDocuments.mockResolvedValue(readiness(available()))
+    const wrapper = mount(EmploymentExitDocumentsPanel, {
+      props: { employment: employment(), canWrite: true },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-test="exit-tab-statement"]').trigger('click')
+    await wrapper.get('[data-test="open-average-statement-form"]').trigger('click')
+    await wrapper.get('[data-test="average-statement-form"] input').setValue('Hypoteční úvěr')
+    await wrapper.get('[data-test="average-statement-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.generateAverageEarningsStatement).toHaveBeenCalledWith(
+      12,
+      { requested_purpose: 'Hypoteční úvěr', correction_reason: null },
       expect.stringContaining('employment-exit-12-'),
     )
   })

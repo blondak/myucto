@@ -168,6 +168,126 @@ final class PayrollEmploymentExitRevisionRepository
     }
 
     /**
+     * Pracovní vztahy skončené v období — podklad pro kontrolu dokumentační
+     * úplnosti mzdového měsíce. Bez tohohle seznamu vypadá prázdný archiv
+     * stejně jako měsíc, ve kterém nikdo neodešel.
+     *
+     * @return list<array{
+     *   id:int,
+     *   employee_id:int,
+     *   end_date:string,
+     *   relation_type:string,
+     *   employee_name:?string
+     * }>
+     */
+    public function endedEmploymentsInPeriod(
+        int $supplierId,
+        string $from,
+        string $to,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT employment.id, employment.employee_id,
+                    employment.end_date, employment.relation_type,
+                    (
+                        SELECT identity.full_name
+                          FROM payroll_person_identity_history identity
+                         WHERE identity.supplier_id = employment.supplier_id
+                           AND identity.employee_id = employment.employee_id
+                           AND identity.effective_from <= employment.end_date
+                           AND (
+                               identity.effective_to IS NULL
+                               OR identity.effective_to >= employment.end_date
+                           )
+                         ORDER BY identity.effective_from DESC, identity.id DESC
+                         LIMIT 1
+                    ) AS employee_name
+               FROM payroll_employments employment
+              WHERE employment.supplier_id = ?
+                AND employment.end_date IS NOT NULL
+                AND employment.end_date BETWEEN ? AND ?
+                AND employment.status IN ("ended", "archived")
+              ORDER BY employment.end_date, employment.id',
+        );
+        $statement->execute([$supplierId, $from, $to]);
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $fetched) {
+            $row = self::row($fetched, 'skončeného vztahu');
+            $name = $row['employee_name'] ?? null;
+            $result[] = [
+                'id' => self::positiveInt($row, 'id'),
+                'employee_id' => self::positiveInt($row, 'employee_id'),
+                'end_date' => self::text($row, 'end_date'),
+                'relation_type' => self::text($row, 'relation_type'),
+                'employee_name' => is_string($name) && $name !== ''
+                    ? $name
+                    : null,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Smluvní podmínky platné kdykoli v rozhodném období průměrného výdělku.
+     * § 356 odst. 2 zákoníku práce počítá měsíční průměr z týdenní pracovní
+     * doby UPLATNĚNÉ v rozhodném období, takže jeden řádek ke dni skončení
+     * nestačí — při změně úvazku se váží kalendářními dny.
+     *
+     * @return list<array{
+     *   id:int,
+     *   effective_from:string,
+     *   effective_to:?string,
+     *   weekly_hours:?string,
+     *   tax_regime:string,
+     *   row_version:int
+     * }>
+     */
+    public function lockDecisivePeriodTerms(
+        int $supplierId,
+        int $employmentId,
+        string $decisiveFrom,
+        string $decisiveTo,
+    ): array {
+        $this->requireTransaction();
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, effective_from, effective_to, weekly_hours,
+                    tax_regime, row_version
+               FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY effective_from, id
+              FOR UPDATE',
+        );
+        $statement->execute([
+            $supplierId,
+            $employmentId,
+            $decisiveTo,
+            $decisiveFrom,
+        ]);
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $fetched) {
+            $row = self::row($fetched, 'smluvních podmínek');
+            $effectiveTo = $row['effective_to'] ?? null;
+            $weeklyHours = $row['weekly_hours'] ?? null;
+            $result[] = [
+                'id' => self::positiveInt($row, 'id'),
+                'effective_from' => self::text($row, 'effective_from'),
+                'effective_to' => is_string($effectiveTo) && $effectiveTo !== ''
+                    ? $effectiveTo
+                    : null,
+                'weekly_hours' => $weeklyHours === null
+                    ? null
+                    : (string) $weeklyHours,
+                'tax_regime' => self::text($row, 'tax_regime'),
+                'row_version' => self::positiveInt($row, 'row_version'),
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
      * @return list<array<string,mixed>>
      */
     public function lockContinuingDeductionClaims(

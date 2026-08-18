@@ -254,6 +254,7 @@ class PayrollDocumentService
         if (!in_array($artifact->kind, [
             PayrollDocumentKind::EmploymentCertificate,
             PayrollDocumentKind::AverageEarningsCertificate,
+            PayrollDocumentKind::AverageEarningsStatement,
         ], true)) {
             throw new \InvalidArgumentException(
                 'Tento archiv ukončení vztahu nepodporuje zadaný druh dokumentu.',
