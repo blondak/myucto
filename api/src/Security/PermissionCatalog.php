@@ -188,6 +188,11 @@ final class PermissionCatalog
                 'settings.company.write', 'utilities.import',
                 'payroll.settings', 'payroll.person.read_sensitive', 'payroll.approve',
                 'payroll.reopen', 'payroll.enforcement', 'payroll.insolvency', 'payroll.rulesets',
+                // Výmaz osobních údajů je nevratný a právně významný — patří ke
+                // schválení běhu, ne k běžné mzdové práci. Retenční lhůty naopak
+                // ve výchozím stavu zůstávají: prodloužit lhůtu nebo zadržet výmaz
+                // je konzervativní směr, kterým se nic neztratí.
+                'payroll.erasure',
             ];
             $read = [
                 'dashboard', 'dashboard.portfolio', 'tax_evidence', 'tax_evidence.export',

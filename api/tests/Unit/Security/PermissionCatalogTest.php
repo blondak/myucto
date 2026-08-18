@@ -87,4 +87,32 @@ final class PermissionCatalogTest extends TestCase
         $superadmin = new EffectiveRole(1, 'Superadmin', 'superadmin', true, [], 'superadmin');
         self::assertTrue($checker->allows($superadmin, 'invoices.delete', AccessLevel::WRITE));
     }
+
+    /**
+     * Výmaz osobních údajů je nevratný, proto ho výchozí účetní role NEMÁ —
+     * stejně jako schválení běhu. Retenční lhůty naopak ano: prodloužit lhůtu
+     * nebo zadržet výmaz je konzervativní směr, kterým se žádná data neztratí.
+     */
+    public function testPayrollErasureIsNotInTheDefaultAccountantPreset(): void
+    {
+        $catalog = new PermissionCatalog();
+        $checker = new PermissionChecker($catalog);
+        $accountant = new EffectiveRole(2, 'Účetní', 'staff', true, $catalog->legacyPreset('accountant'));
+
+        self::assertFalse($checker->allows($accountant, 'payroll.erasure'));
+        self::assertTrue($checker->allows($accountant, 'payroll.retention', AccessLevel::WRITE));
+
+        // Vlastní role je fail-closed: bez výslovného přidělení právo nemá.
+        $custom = new EffectiveRole(9, 'Mzdová účetní', 'staff', true, [
+            'payroll' => AccessLevel::WRITE->value,
+            'payroll.retention' => AccessLevel::WRITE->value,
+        ]);
+        self::assertFalse($checker->allows($custom, 'payroll.erasure'));
+
+        $dpo = new EffectiveRole(10, 'Správce osobních údajů', 'staff', true, [
+            'payroll.erasure' => AccessLevel::WRITE->value,
+        ]);
+        self::assertTrue($checker->allows($dpo, 'payroll.erasure', AccessLevel::WRITE));
+        self::assertFalse($checker->allows($dpo, 'payroll.retention'));
+    }
 }

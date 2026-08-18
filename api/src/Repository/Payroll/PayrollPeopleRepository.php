@@ -300,16 +300,22 @@ final class PayrollPeopleRepository
     /**
      * Účinné jméno osoby z historie identit s pádem zpět na `payroll_employees`.
      * Sdílí ho seznam i lehký výběr, aby se obě cesty nemohly rozejít.
+     *
+     * Je VEŘEJNÉ, protože jméno potřebuje i retenční posudek — a pravidlo, které
+     * jde jen opsat, se opíše: seznam osob by po změně příjmení ukazoval nové
+     * jméno a návrh k výmazu staré, přestože mluví o téže osobě. `$alias` je
+     * název tabulky `payroll_employees` v dotazu volajícího, ne uživatelský vstup.
      */
-    private static function fullNameExpression(): string
+    public static function fullNameExpression(string $alias = 'employee'): string
     {
-        return <<<'SQL'
+        return sprintf(
+            <<<'SQL'
             COALESCE(
                        (
                            SELECT identity_history.full_name
                              FROM payroll_person_identity_history identity_history
-                            WHERE identity_history.supplier_id = employee.supplier_id
-                              AND identity_history.employee_id = employee.id
+                            WHERE identity_history.supplier_id = %1$s.supplier_id
+                              AND identity_history.employee_id = %1$s.id
                               AND identity_history.effective_from <= CURRENT_DATE
                               AND (
                                   identity_history.effective_to IS NULL
@@ -319,9 +325,11 @@ final class PayrollPeopleRepository
                                      identity_history.id DESC
                             LIMIT 1
                        ),
-                       employee.full_name
+                       %1$s.full_name
                    )
-            SQL;
+            SQL,
+            $alias,
+        );
     }
 
     /**

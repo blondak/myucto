@@ -214,6 +214,9 @@ const ICONS = {
   coin:             'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
   folderOpen:       'M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z M3 9h18',
   requestDoc:       'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2M12 11v4m-2-2h4',
+  // Výmaz osobních údajů — koš. Odlišný od tax_archive (uschovávání), protože
+  // sousední položka menu dělá pravý opak.
+  erasure:          'M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16',
 }
 
 const navSections = computed<NavSection[]>(() => {
@@ -451,6 +454,9 @@ const navSections = computed<NavSection[]>(() => {
         // Retenční lhůty patří k nastavení: sáhne se do nich při zavádění
         // (odchylka firmy) a pak už jen když se někdo ptá, jak dlouho co držíme.
         { to: '/payroll/retention', label: t('nav.payroll_retention'), icon: ICONS.tax_archive, permission: 'payroll.retention' as PermissionKey },
+        // Výmaz stojí hned za lhůtami — bez nich nedává smysl —, ale má vlastní
+        // právo: číst lhůty smí i ten, kdo nesmí odklepnout nevratné smazání.
+        { to: '/payroll/erasure', label: t('nav.payroll_erasure'), icon: ICONS.erasure, permission: 'payroll.erasure' as PermissionKey },
       ],
     } as NavSection] : []),
   ]

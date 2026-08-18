@@ -154,13 +154,28 @@ final class PayrollErasureProposalRepository
         return is_array($row) ? $row : null;
     }
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * Položky návrhu i se jménem osoby — DOPOJENÝM, ne uloženým.
+     *
+     * Nevratný výmaz nejde schválit podle čísla osoby, takže jméno k položce
+     * patřit musí. Uložit ho do tabulky se ale nesmí (viz komentář u třídy):
+     * doklad o výmazu, který si osobní údaj nechá, výmaz popírá. Join to řeší
+     * sám: dokud osoba existuje, jméno se ukáže; po úplném výmazu zbude `null`
+     * a po anonymizaci anonymizovaná náhrada. Tabulka tím zůstává čistá i po
+     * provedení, i když si někdo návrh otevře zpětně.
+     *
+     * @return list<array<string,mixed>>
+     */
     public function items(int $supplierId, int $proposalId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM payroll_erasure_proposal_items
-              WHERE supplier_id = ? AND proposal_id = ?
-              ORDER BY employee_id'
+            'SELECT item.*, ' . PayrollPeopleRepository::fullNameExpression() . ' AS full_name
+               FROM payroll_erasure_proposal_items item
+               LEFT JOIN payroll_employees employee
+                      ON employee.supplier_id = item.supplier_id
+                     AND employee.id = item.employee_id
+              WHERE item.supplier_id = ? AND item.proposal_id = ?
+              ORDER BY item.employee_id'
         );
         $stmt->execute([$supplierId, $proposalId]);
 

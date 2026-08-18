@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 
 /**
  * § 32 ZoÚ — zadržení záznamů po dobu daňového řízení („legal hold").
@@ -192,16 +193,28 @@ final class RetentionHoldRepository
     /**
      * Mzdové (osobní) holdy pro přehled v mzdovém modulu — protějšek {@see all()}.
      *
+     * Jméno se DOPOJUJE, neukládá: přehled zadržení, ve kterém stojí jen číslo
+     * osoby, se nedá zkontrolovat, ale sama tabulka holdů je sdílená s účetní
+     * stranou a osobní údaj do ní nepatří. Uvolněný hold u mezitím vymazané
+     * osoby proto zůstane bez jména — a to je správně, ne chyba.
+     *
      * @return list<array<string,mixed>>
      */
     public function payrollHolds(int $supplierId, bool $includeReleased = false): array
     {
-        $sql = "SELECT * FROM retention_holds WHERE supplier_id = ?
-                  AND subject_kind = '" . self::SUBJECT_PAYROLL_EMPLOYEE . "'";
+        $sql = 'SELECT hold.*, '
+            . PayrollPeopleRepository::fullNameExpression()
+            . " AS employee_full_name
+                 FROM retention_holds hold
+                 LEFT JOIN payroll_employees employee
+                        ON employee.supplier_id = hold.supplier_id
+                       AND employee.id = hold.subject_id
+                WHERE hold.supplier_id = ?
+                  AND hold.subject_kind = '" . self::SUBJECT_PAYROLL_EMPLOYEE . "'";
         if (!$includeReleased) {
-            $sql .= ' AND released_on IS NULL';
+            $sql .= ' AND hold.released_on IS NULL';
         }
-        $sql .= ' ORDER BY released_on IS NOT NULL, placed_on DESC, id DESC';
+        $sql .= ' ORDER BY hold.released_on IS NOT NULL, hold.placed_on DESC, hold.id DESC';
 
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$supplierId]);

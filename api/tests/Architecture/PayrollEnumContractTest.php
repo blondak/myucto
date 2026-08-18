@@ -166,6 +166,13 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::BASES',
         'payrollRetention.ts::PayrollRetentionBlock'
             => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionAssessment::BLOCKS',
+        // Zadržení a výmaz uložené JSOU, takže se párují se sloupcem. Důvod
+        // zadržení sdílí tabulku s účetní stranou (migrace 1396 ho rozšířila
+        // o exekuci a insolvenci) — kdyby se klient rozešel, mzdová obrazovka
+        // by nabídla důvod, který sloupec nepřijme.
+        'payrollRetention.ts::PayrollRetentionHoldReason' => 'db:retention_holds.reason',
+        'payrollRetention.ts::PayrollErasureStatus'       => 'db:payroll_erasure_proposals.status',
+        'payrollRetention.ts::PayrollErasureOutcome'      => 'db:payroll_erasure_proposal_items.outcome',
 
         // Podání
         'payroll.ts::PayrollSubmissionObligationStatus'     => 'db:payroll_obligations.status',

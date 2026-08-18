@@ -1043,7 +1043,7 @@ podání.
 Samostatná záložka **ZP — oznámení** řeší oznamovací povinnost vůči zdravotní
 pojišťovně, tedy hlášení nástupů, skončení a dalších skutečností v osmidenní
 lhůtě. Je to jiná povinnost než měsíční přehled o platbě pojistného, a proto
-má vlastní záložku; podrobně ji popisuje kapitola 58.21.
+má vlastní záložku; podrobně ji popisuje kapitola 58.22.
 
 U každého termínu se samostatně zobrazuje jeho aktuální fáze: okno ještě není
 otevřené, otevřeno, blíží se termín, termín je dnes, po termínu, čeká se na
@@ -1140,8 +1140,14 @@ Agenda srážek má samostatné oprávnění `payroll.enforcement`; právo pro b
 mzdy ani původní Mzdovou rekapitulaci samo o sobě přístup k těmto údajům
 nedává. Změna měsíčního insolvenčního režimu vyžaduje také
 `payroll.insolvency` a právní přechod s dokumentem oprávnění `documents`.
+Retenční lhůty, odchylka firmy a zadržení výmazu jedou na `payroll.retention`;
+schválení a provedení výmazu na samostatném `payroll.erasure`, které výchozí
+účetní role **nemá** — je nevratné, a proto ho přiděluje správce stejně jako
+schválení mzdového běhu.
 
 Běžný seznam ani detail neposílá rodné číslo, adresu nebo bankovní účet.
+Jméno osoby citlivý identifikátor v tomto smyslu není — ukazuje ho seznam osob
+i posudek retence, aby bylo poznat, o koho jde.
 Citlivé mzdové identifikátory se ukládají kontextově šifrované pro konkrétní
 firmu a osobu; vyhledávací otisk nelze použít ke spojování stejné hodnoty mezi
 firmami. Citlivé hodnoty a mzdové částky se redigují z provozních logů.
@@ -1193,8 +1199,10 @@ navždy ani je zahodit dřív, než smí. Přehled **Mzdy → Retenční lhůty*
 jak dlouho se která skupina mzdových dat uchovává, od kdy lhůta běží a kde to
 stojí psané. Otevřít ho může role s oprávněním `payroll.retention`.
 
-Nic se odsud nemaže ani nenastavuje. Uplynulá lhůta je konec povinnosti
-uchovávat, ne příkaz ke skartaci.
+Odsud se nic nemaže. Uplynulá lhůta je konec povinnosti uchovávat, ne příkaz
+ke skartaci. Nastavit jde dvojí: **odchylka firmy** od katalogové lhůty
+a **zadržení výmazu** konkrétní osoby. Samotný výmaz má vlastní obrazovku
+(viz 58.21).
 
 U každé kategorie je vidět:
 
@@ -1234,15 +1242,97 @@ retenční lhůtu, zadržení výmazu (kontrola, odvolání, spor, exekuce,
 insolvence), neurčenou lhůtu, chybějící základ výpočtu a osoby, které už
 anonymizované jsou. Návrh, který někoho mlčky vynechá, se nedá zkontrolovat.
 
-Samotný výmaz se sestavuje a schvaluje samostatně pod oprávněním
-`payroll.erasure` a provede se až druhým krokem po schválení. Osoba, která má
-účetní stopu, se nemaže, ale anonymizuje: účetní záznam zůstane, zmizí z něj
-jen osobní údaj.
+Panel osoby **jmenuje**, nejen počítá: kdo je na řadě k výmazu a koho drží
+zadržení. Nevratný úkon se podle samotného čísla odklepnout nedá.
 
 Lhůty účetních a daňových záznamů firmy jako celku (§ 31 a § 32 zákona
 o účetnictví) mají vlastní přehled na **Účetnictví → Retenční lhůty**.
 
-## 58.21 Podání zdravotním pojišťovnám
+### Odchylka firmy od katalogové lhůty
+
+Tlačítko **Odchylka firmy** na řádku kategorie otevře jeden formulář s jedním
+tlačítkem Uložit. Zadává se v něm:
+
+- **Prodloužení o (roky)** — přičte se ke lhůtě z katalogu. Použije se, když
+  firmu váže smlouva nebo vnitřní předpis s delší lhůtou.
+- **Dodaná lhůta (roky)** — nabídne se **jen** u kategorií, které lhůtu
+  v katalogu nemají (dnes spis k exekučním srážkám). Dokud ji nikdo nedodá,
+  osoba se k výmazu nikdy nenavrhne.
+- **Zdůvodnění** — povinné. Odchylka od zákonné lhůty musí být doložitelná
+  a ukládá se s ní.
+
+**Lhůtu nelze zkrátit.** Není to omezení formuláře, ale pravidlo aplikace:
+zkrácení pod hodnotu z katalogu — ať už zákonnou, nebo dodanou politikou —
+se odmítne s vysvětlením, které řekne, odkud lhůta pochází. Odchylku jde
+kdykoli zrušit tlačítkem **Zrušit odchylku**; lhůta se tím vrátí na hodnotu
+z katalogu.
+
+### Zadržení výmazu (legal hold)
+
+Zadržení drží data osoby i po uplynutí lhůty — kvůli daňové kontrole,
+odvolání, soudnímu sporu, exekuci nebo insolvenci (§ 32 zákona o účetnictví
+a mzdové důvody). Zadává se tlačítkem **Zadržet výmaz** a vyžaduje osobu,
+důvod, č. j. nebo popis řízení a datum. Bez popisu se neuloží: jinak by
+nešlo doložit, proč se výmaz zadržel.
+
+Dokud zadržení trvá, osoba se k výmazu nenavrhne a už schválený návrh ji
+přeskočí. **Uvolnění** je vědomý úkon a potvrzuje se — výmaz osoby tím zase
+půjde navrhnout a provést. Uvolněný záznam nezmizí, jen dostane datum
+uvolnění; zaškrtnutím **Zobrazit i uvolněná** se zobrazí i historie.
+
+Zadržení zadané na účetní straně (**Účetnictví → Retenční lhůty**) platí na
+celou firmu, a tedy i na mzdy. Opačně to neplatí: zadržení jedné osoby
+nemá co blokovat mazání faktur.
+
+## 58.21 Výmaz osobních údajů
+
+Obrazovka **Mzdy → Výmaz osobních údajů** (oprávnění `payroll.erasure`) je
+jediné místo, odkud se mzdová osobní data mažou. Výmaz je **nevratný** —
+data zpátky nikdo nezadá —, proto je rozdělený do tří kroků, které se dají
+zkontrolovat každý zvlášť.
+
+### 1. Sestavit návrh
+
+Zadá se den, ke kterému se posuzuje, a aplikace sestaví návrh **jen** z osob,
+kterým lhůta uplynula a nic je nedrží. Když k tomu dni není koho navrhnout,
+řekne to a nevytvoří nic — prázdný návrh by se dal schválit a v přehledu by
+vypadal jako provedený výmaz.
+
+### 2. Schválit nebo zamítnout
+
+Detail návrhu jmenuje každou osobu a u ní uvádí:
+
+- **Rozsah** — *úplný výmaz* u osoby bez účetní stopy, jinak *anonymizace*:
+  účetní záznam zůstane, zmizí z něj jen osobní údaj.
+- **Podle ustanovení** — lhůta, o kterou se rozhodnutí opírá, i s tím, jak je
+  doložená.
+- **Dopad** — kolik řádků osobních dat zmizí, po skupinách.
+- **Zbytek** — osobní údaj, který zůstane ve zmrazeném obsahu (vystavená PDF,
+  odeslaná XML). Ten se nepřepisuje a návrh to říká předem, ne až potom.
+
+Zamítnutý návrh zůstává v přehledu jako doklad, ale provést už ho nelze.
+
+### 3. Provést
+
+Provedení je samostatný krok nad **schváleným** návrhem. Neschválený návrh
+aplikace odmítne. Potvrzovací dialog vypíše dotčené osoby a vyžaduje dvojí
+potvrzení — zaškrtnutí, že rozumíte nevratnosti, a opsání čísla návrhu.
+Jedním kliknutím se výmaz spustit nedá.
+
+Každá položka se **před provedením posuzuje znovu**. Co mezi schválením
+a provedením dostalo zadržení nebo se u toho změnil rozsah, se přeskočí
+s uvedeným důvodem místo aby se provedlo podle zastaralého rozhodnutí.
+Výsledek u každé osoby je vidět ve sloupci **Výsledek**.
+
+### Co po výmazu zůstane
+
+Návrh zůstává jako **doklad, že výmaz proběhl**: kdo ho schválil, kdy se
+provedl a podle které lhůty se rozhodovalo. V auditní stopě zůstává i jméno
+osoby — je to vědomé rozhodnutí, aby šlo doložit, o koho šlo. Samotná osobní
+data z evidence zmizí; u úplně vymazané osoby proto zůstane řádek návrhu bez
+jména a obrazovka to napíše.
+
+## 58.22 Podání zdravotním pojišťovnám
 
 Záložka **Mzdy → Podání a hlášení → ZP — oznámení** odpovídá na jedinou
 otázku: co se za zvolený měsíc hlásí zdravotní pojišťovně, komu a do kdy.

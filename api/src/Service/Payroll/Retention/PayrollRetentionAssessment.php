@@ -50,6 +50,16 @@ final readonly class PayrollRetentionAssessment
      */
     public function __construct(
         public int $employeeId,
+        /**
+         * Účinné jméno osoby. Bez něj je panel k výmazu jen počet a schvalující
+         * nevidí, o KOHO jde — a nevratný úkon se nedá odklepnout podle čísla.
+         *
+         * Jméno není citlivý identifikátor ve smyslu `payroll.person.read_sensitive`
+         * (to hlídá rodná čísla, účty, adresy a rodné příjmení); seznam osob ho
+         * vydává už za samotné `payroll`. Do ULOŽENÉHO návrhu výmazu ale nepatří —
+         * tam se dopojuje až při čtení, aby doklad o výmazu osobní údaj nepřežil.
+         */
+        public string $fullName,
         public int $lastRecordYear,
         public array $categories,
         public ?string $governingCategory,
@@ -80,6 +90,7 @@ final readonly class PayrollRetentionAssessment
     {
         return [
             'employee_id' => $this->employeeId,
+            'full_name' => $this->fullName,
             'last_record_year' => $this->lastRecordYear,
             'categories' => $this->categories,
             'governing_category' => $this->governingCategory,
