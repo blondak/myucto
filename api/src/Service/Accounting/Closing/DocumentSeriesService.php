@@ -46,6 +46,15 @@ final class DocumentSeriesService
         'purchase_order' => 'OBJ',
     ];
 
+    /**
+     * Řady vázané na účetní deník — v daňové evidenci deník neexistuje, takže je
+     * firma v DE nevydává ani needituje. Pokladní, skladové a objednávkové řady
+     * naopak DE používá (`CashDocumentService` vydává čísla PPD/VPD bez ohledu na
+     * režim), proto celá routa `/document-series` pro DE zavřená být nesmí —
+     * jinak si firma vlastní řadu pokladny zapne, ale prefix už nespraví.
+     */
+    public const DOUBLE_ENTRY_ONLY_SERIES = ['closing', 'opening', 'fx', 'transfer', 'manual', 'offset'];
+
     /** Vestavěná šablona = dosavadní chování (`UZ-2026-0001`). */
     public const DEFAULT_TEMPLATE = '{PREFIX}-{YYYY}-{CCCC}';
 

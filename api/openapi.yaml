@@ -10803,8 +10803,11 @@ paths:
   /api/v1/accounting/document-series:
     get:
       tags: [Accounting]
-      summary: Číselné řady deníku (UZ/OT/KR/PP/ID per rok)
-      description: Řádek řady vzniká lazy při prvním výdeji čísla.
+      summary: Číselné řady deníku, pokladny a skladu (per rok)
+      description: |
+        Řádek řady vzniká lazy při prvním výdeji čísla. Firmě v daňové evidenci se
+        vracejí jen řady, které umí vydat (pokladní, skladové, objednávkové) —
+        deníkové (`closing`, `opening`, `fx`, `transfer`, `manual`, `offset`) ne.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       responses:
@@ -10821,6 +10824,12 @@ paths:
         {PREFIX}, {YYYY}, {YY} a {C+} (počet C = odsazení nulami); prázdná / null vrací
         řadu na vestavěné `{PREFIX}-{YYYY}-{CCCC}`. `next_number` je číslo PŘÍŠTÍHO
         vydaného dokladu — umožňuje navázat na řadu převzatou z jiného systému.
+        `register_id` > 0 míří na vlastní řadu té pokladny (jen `cash_in` / `cash_out`),
+        0 nebo vynechané na společnou řadu firmy.
+
+        Deníkové řady (`closing`, `opening`, `fx`, `transfer`, `manual`, `offset`) jsou
+        dostupné jen v podvojném účetnictví; v daňové evidenci vrátí `wrong_accounting_mode`
+        (403). Pokladní, skladové a objednávkové řady editují oba režimy.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: code, required: true, schema: { type: string, enum: [closing, opening, fx, transfer, manual, cash_in, cash_out, stock_in, stock_out, stock_transfer, offset, purchase_order] } }
@@ -10836,6 +10845,7 @@ paths:
                 prefix: { type: string, pattern: "^[A-Z0-9]{1,10}$" }
                 number_format: { type: string, nullable: true, maxLength: 40, example: "{PREFIX}{CCCCC}" }
                 next_number: { type: integer, minimum: 1, maximum: 999999999 }
+                register_id: { type: integer, minimum: 0, default: 0, description: "Vlastní řada pokladny (jen cash_in/cash_out); 0 = společná řada firmy" }
       responses:
         '200': { description: OK (aktuální seznam řad), content: { application/json: { schema: { type: array, items: { type: object } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }

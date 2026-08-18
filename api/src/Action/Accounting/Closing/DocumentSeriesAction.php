@@ -27,6 +27,10 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * `register_id` > 0 míří na vlastní řadu té pokladny (L-3), 0 / vynechané na společnou
  * řadu firmy.
  *
+ * Daňová evidence vidí a edituje jen řady, které umí vydat (pokladní, skladové,
+ * objednávkové); deníkové řady ({@see DocumentSeriesService::DOUBLE_ENTRY_ONLY_SERIES})
+ * se jí nenabízejí a PUT na ně skončí `wrong_accounting_mode`.
+ *
  * `number_format` = "" nebo null vrátí řadu na vestavěné `{PREFIX}-{YYYY}-{CCCC}`,
  * `next_number` je číslo PŘÍŠTÍHO vydaného dokladu (#22 — převzetí řady z jiného
  * systému; stejná sémantika jako PUT /settings/supplier/invoice-counter).
@@ -47,20 +51,24 @@ final class DocumentSeriesAction
     public function list(Request $request, Response $response): Response
     {
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
-        return Json::ok($response, $this->series->list($supplierId));
+        return Json::ok($response, $this->visibleSeries($supplierId));
     }
 
     public function update(Request $request, Response $response, array $args): Response
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
 
         $code = (string) ($args['code'] ?? '');
         if (!isset(self::SERIES_CODES[$code])) {
             return Json::error($response, 'validation_failed',
                 'Neznámá řada — povolené: ' . implode(', ', array_keys(self::SERIES_CODES)) . '.', 422);
+        }
+        // Deníkové řady umí vydat číslo jen podvojné účetnictví; pokladní, skladové
+        // a objednávkové řady používá i daňová evidence.
+        if (!$this->seriesAllowedForMode($supplierId, $code)
+            && !$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) {
+            return $err;
         }
         $year = (int) ($args['year'] ?? 0);
         if ($year < 2000 || $year > 2200) {
@@ -107,6 +115,25 @@ final class DocumentSeriesAction
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
 
-        return Json::ok($response, $this->series->list($supplierId));
+        return Json::ok($response, $this->visibleSeries($supplierId));
+    }
+
+    /** Deníkové řady se firmě v daňové evidenci nenabízejí — nemá je z čeho vydat. */
+    private function visibleSeries(int $supplierId): array
+    {
+        $rows = $this->series->list($supplierId);
+        if ($this->accountingModeIs($this->db, $supplierId, 'double_entry')) {
+            return $rows;
+        }
+        return array_values(array_filter(
+            $rows,
+            fn(array $r): bool => !in_array((string) $r['series_code'], DocumentSeriesService::DOUBLE_ENTRY_ONLY_SERIES, true),
+        ));
+    }
+
+    private function seriesAllowedForMode(int $supplierId, string $code): bool
+    {
+        return !in_array($code, DocumentSeriesService::DOUBLE_ENTRY_ONLY_SERIES, true)
+            || $this->accountingModeIs($this->db, $supplierId, 'double_entry');
     }
 }

@@ -108,7 +108,9 @@ z editoru faktury volbou způsobu úhrady „Hotově" (§ 30.3.6).
 - **Pokladna** — výběr z aktivních pokladen firmy.
 - **Datum** — datum vystavení dokladu = datum pokladního pohybu. Číslo dokladu (řada
   `PPD-RRRR-####` / `VPD-RRRR-####`) se přiděluje **až při zaúčtování**, ne při rozepsání
-  formuláře.
+  formuláře. Prefix a tvar čísla se nastavují v **Nástrojích → Číselné řady**, a to
+  v obou účetních režimech — pokladní doklady se z týchž řad číslují i v daňové
+  evidenci (té se naopak nenabízejí řady účetního deníku, které nemá z čeho vydat).
 
 ### 30.3.2 Účel dokladu
 

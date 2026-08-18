@@ -481,6 +481,13 @@ export const SERIES_DEFAULT_PREFIXES: Record<SeriesCode, string> = {
   purchase_order: 'OBJ',
 }
 
+/**
+ * Řady vázané na účetní deník = zrcadlo `DocumentSeriesService::DOUBLE_ENTRY_ONLY_SERIES`.
+ * Daňová evidence je nevydává (a server je pro ni ani nevrací), pokladní / skladové /
+ * objednávkové řady naopak používá.
+ */
+export const SERIES_DOUBLE_ENTRY_ONLY: SeriesCode[] = ['closing', 'opening', 'fx', 'transfer', 'manual', 'offset']
+
 export interface DocumentSeries {
   id?: number
   series_code: SeriesCode

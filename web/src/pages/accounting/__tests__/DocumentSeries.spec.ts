@@ -7,19 +7,25 @@ const m = vi.hoisted(() => ({
   toastError: vi.fn(),
   toastWarning: vi.fn(),
   toastSuccess: vi.fn(),
-  canWrite: vi.fn(() => true),
+  canWrite: vi.fn((_permission: string) => true),
+  accountingMode: 'double_entry' as string,
 }))
 
 vi.mock('@/api/closing', async () => {
   const actual = await vi.importActual<typeof import('@/api/closing')>('@/api/closing')
   return {
     SERIES_DEFAULT_PREFIXES: actual.SERIES_DEFAULT_PREFIXES,
+    SERIES_DOUBLE_ENTRY_ONLY: actual.SERIES_DOUBLE_ENTRY_ONLY,
     seriesApi: { list: m.list, update: m.update },
   }
 })
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: m.canWrite }),
+}))
+
+vi.mock('@/stores/supplier', () => ({
+  useSupplierStore: () => ({ currentSupplier: { accounting_mode: m.accountingMode } }),
 }))
 
 vi.mock('@/composables/useToast', () => ({
@@ -53,7 +59,27 @@ describe('DocumentSeries', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)
+    m.accountingMode = 'double_entry'
     m.list.mockResolvedValue([])
+  })
+
+  it('právo zápisu se ptá na modul accounting, ne na správu období', async () => {
+    // `accounting.periods.manage` má systémová role „účetní" explicitně vyřazenou,
+    // ale API chce jen `accounting` WRITE — účetní tak viděla záložku jen ke čtení.
+    m.canWrite.mockImplementation((p: string) => p === 'accounting')
+    const wrapper = await mountPage()
+    expect(wrapper.find('button').exists()).toBe(true)
+  })
+
+  it('v daňové evidenci nenabízí řady účetního deníku', async () => {
+    m.accountingMode = 'tax_evidence'
+    const wrapper = await mountPage()
+    const rows = wrapper.findAll('tbody tr')
+
+    // 12 řad minus 6 deníkových (closing/opening/fx/transfer/manual/offset)
+    expect(rows).toHaveLength(6)
+    expect(wrapper.text()).toContain('PPD')
+    expect(wrapper.text()).not.toContain('UZ')
   })
 
   it('nabídne i řady, které ještě nevydaly číslo', async () => {
