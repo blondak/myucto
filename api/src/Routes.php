@@ -864,12 +864,18 @@ final class Routes
                 '/runs/{runId:[0-9]+}/revisions/{revisionId:[0-9]+}/documents/monthly-bundle',
                 [PayrollDocumentAction::class, 'generateBundle'],
             );
+            // Dávková orchestrace rendererů nad schválenou revizí: vrací
+            // zprávu o dokumentační úplnosti měsíce, ne jen vytvořená PDF.
+            $g->post(
+                '/runs/{runId:[0-9]+}/revisions/{revisionId:[0-9]+}/documents/batch',
+                [PayrollDocumentAction::class, 'generateBatch'],
+            );
             $g->get(
                 '/employments/{id:[0-9]+}/documents/exit',
                 [PayrollEmploymentExitDocumentAction::class, 'list'],
             );
             $g->post(
-                '/employments/{id:[0-9]+}/documents/exit/{kind:employment-certificate|average-earnings-certificate}',
+                '/employments/{id:[0-9]+}/documents/exit/{kind:employment-certificate|average-earnings-certificate|average-earnings-statement}',
                 [PayrollEmploymentExitDocumentAction::class, 'generate'],
             );
             $g->post(

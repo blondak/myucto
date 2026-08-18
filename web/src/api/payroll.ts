@@ -2118,6 +2118,7 @@ export type PayrollDocumentKind =
   | 'taxable_income_withholding_certificate'
   | 'employment_certificate'
   | 'average_earnings_certificate'
+  | 'average_earnings_statement'
   | 'annual_settlement_result'
   | 'monthly_bundle'
 
@@ -2454,8 +2455,71 @@ export interface PayrollEmploymentExitDocumentList {
       decisive_year: number | null
       decisive_quarter: number | null
     }
+    average_earnings_statement: PayrollEmploymentExitReadinessItem & {
+      decisive_year: number | null
+      decisive_quarter: number | null
+    }
   }
   items: PayrollDocument[]
+}
+
+export type PayrollTerminationReasonKind =
+  | 'none'
+  | 'gross_breach'
+  | 'sickness_regime_breach'
+  | 'organizational'
+  | 'health'
+  | 'employer_breach'
+  | 'employee_unilateral'
+  | 'agreement'
+
+export interface PayrollPensionInsurancePeriod {
+  from: string
+  to: string
+}
+
+/** Oddelene potvrzeni podle § 313 odst. 2 zakoniku prace. */
+export interface PayrollAverageEarningsCertificateEvidence {
+  termination_assessment_complete: boolean
+  termination_reason_kind: PayrollTerminationReasonKind
+  employee_stated_reason: string | null
+  pension_insurance_periods: PayrollPensionInsurancePeriod[]
+  correction_reason: string | null
+}
+
+/** Samostatne potvrzeni o prumernem vydelku podle § 356 odst. 1 a 2. */
+export interface PayrollAverageEarningsStatementEvidence {
+  requested_purpose: string
+  correction_reason: string | null
+}
+
+export interface PayrollDocumentBatchExitDocument {
+  required: boolean
+  archived: boolean
+  document_id: number | null
+  available: boolean
+  readiness_code: string | null
+}
+
+export interface PayrollDocumentBatchExit {
+  employment_id: number
+  employee_id: number
+  employee_name: string | null
+  end_date: string
+  relation_type: string
+  documents: Record<string, PayrollDocumentBatchExitDocument>
+}
+
+export interface PayrollDocumentBatchReport {
+  run_id: number
+  revision_id: number
+  period_start: string
+  period_end: string
+  payslips: { archived: number, document_ids: number[] }
+  monthly_bundle: { document_id: number }
+  employment_exits: PayrollDocumentBatchExit[]
+  missing: string[]
+  complete: boolean
 }
 
 export interface PayrollEmploymentCertificateDeductionEvidence {
@@ -3715,6 +3779,31 @@ export const payrollApi = {
       `/payroll/employments/${employmentId}/documents/exit/employment-certificate`,
       payload,
       { headers: { 'Idempotency-Key': idempotencyKey } },
+    ).then(response => response.data),
+  generateAverageEarningsCertificate: (
+    employmentId: number,
+    payload: PayrollAverageEarningsCertificateEvidence,
+    idempotencyKey: string,
+  ) =>
+    api.post<PayrollDocument>(
+      `/payroll/employments/${employmentId}/documents/exit/average-earnings-certificate`,
+      payload,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    ).then(response => response.data),
+  generateAverageEarningsStatement: (
+    employmentId: number,
+    payload: PayrollAverageEarningsStatementEvidence,
+    idempotencyKey: string,
+  ) =>
+    api.post<PayrollDocument>(
+      `/payroll/employments/${employmentId}/documents/exit/average-earnings-statement`,
+      payload,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    ).then(response => response.data),
+  generateDocumentBatch: (runId: number, revisionId: number) =>
+    api.post<PayrollDocumentBatchReport>(
+      `/payroll/runs/${runId}/revisions/${revisionId}/documents/batch`,
+      {},
     ).then(response => response.data),
   /**
    * Stránka seznamu běhů. `result_snapshot` nese jen `totals` — osobní rozpad

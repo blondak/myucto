@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
+use MyInvoice\Service\Payroll\Document\AverageEarningsSnapshotBuilder;
 use MyInvoice\Service\Payroll\Document\EmploymentExitDocumentService;
 use MyInvoice\Service\Payroll\Document\EmploymentExitReadinessException;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -245,9 +246,11 @@ final class EmploymentExitDocumentServiceTest extends TestCase
         self::assertSame(3, $readiness['decisive_quarter']);
 
         try {
-            $this->service->generateAverageEarningsCertificate(
+            $this->service->generateAverageEarningsDocument(
                 $this->supplierId,
                 $this->employmentId,
+                AverageEarningsSnapshotBuilder::CERTIFICATE_PURPOSE,
+                self::certificateEvidence(),
                 'synthetic-average-exit',
                 $this->userId,
             );
@@ -261,7 +264,7 @@ final class EmploymentExitDocumentServiceTest extends TestCase
         }
     }
 
-    public function testAverageEarningsCertificateBlockedByUnverifiedNetConversionWhenSnapshotApproved(): void
+    public function testAverageEarningsCertificateBlockedWithoutTaxDeclarationEvidence(): void
     {
         $this->insertApprovedAverageEarningSnapshot(2026, 3);
 
@@ -271,27 +274,180 @@ final class EmploymentExitDocumentServiceTest extends TestCase
         )['average_earnings_certificate'];
         self::assertFalse($readiness['available']);
         self::assertSame(
-            'average_earnings_net_conversion_not_verified',
+            'tax_declaration_evidence_missing',
             $readiness['readiness_code'],
         );
 
         try {
-            $this->service->generateAverageEarningsCertificate(
+            $this->service->generateAverageEarningsDocument(
                 $this->supplierId,
                 $this->employmentId,
+                AverageEarningsSnapshotBuilder::CERTIFICATE_PURPOSE,
+                self::certificateEvidence(),
                 'synthetic-average-exit-with-snapshot',
                 $this->userId,
             );
             self::fail(
-                'Potvrzení pro ÚP nesmí vzniknout bez ověřeného přepočtu na čistý výdělek.',
+                'Potvrzení pro ÚP nesmí vzniknout bez doložené evidence daňového prohlášení.',
             );
         } catch (EmploymentExitReadinessException $exception) {
             self::assertSame(
-                'average_earnings_net_conversion_not_verified',
+                'tax_declaration_evidence_missing',
                 $exception->readinessCode,
             );
-            self::assertStringContainsString('2026/Q3', $exception->getMessage());
         }
+        self::assertSame(
+            0,
+            (int) $this->db->pdo()->query(
+                'SELECT COUNT(*) FROM payroll_employment_exit_revisions
+                  WHERE supplier_id = ' . $this->supplierId,
+            )->fetchColumn(),
+        );
+    }
+
+    public function testAverageEarningsCertificateIsIssuedFromApprovedSnapshotAndEvidence(): void
+    {
+        $this->insertApprovedAverageEarningSnapshot(2026, 3);
+        $this->insertTaxDeclaration('signed');
+
+        $readiness = $this->service->readiness(
+            $this->supplierId,
+            $this->employmentId,
+        )['average_earnings_certificate'];
+        self::assertTrue(
+            $readiness['available'],
+            'Blokátor: ' . (string) $readiness['readiness_code'],
+        );
+
+        $document = $this->service->generateAverageEarningsDocument(
+            $this->supplierId,
+            $this->employmentId,
+            AverageEarningsSnapshotBuilder::CERTIFICATE_PURPOSE,
+            self::certificateEvidence(),
+            'synthetic-average-exit-issued',
+            $this->userId,
+        );
+        $replayed = $this->service->generateAverageEarningsDocument(
+            $this->supplierId,
+            $this->employmentId,
+            AverageEarningsSnapshotBuilder::CERTIFICATE_PURPOSE,
+            self::certificateEvidence(),
+            'synthetic-average-exit-issued',
+            $this->userId,
+        );
+
+        self::assertSame($document['id'], $replayed['id']);
+        self::assertSame(
+            'average_earnings_certificate',
+            $document['document_kind'],
+        );
+        self::assertGreaterThan(0, $document['employment_exit_revision_id']);
+
+        $purpose = $this->db->pdo()->query(
+            'SELECT purpose FROM payroll_employment_exit_revisions
+              WHERE id = ' . (int) $document['employment_exit_revision_id'],
+        )->fetchColumn();
+        self::assertSame('average_earnings_certificate', $purpose);
+    }
+
+    public function testAverageEarningsStatementIsIssuedWithoutTaxEvidence(): void
+    {
+        $this->insertApprovedAverageEarningSnapshot(2026, 3);
+
+        $readiness = $this->service->readiness(
+            $this->supplierId,
+            $this->employmentId,
+        );
+        self::assertTrue(
+            $readiness['average_earnings_statement']['available'],
+            'Blokátor: ' . (string) $readiness['average_earnings_statement']['readiness_code'],
+        );
+        self::assertFalse(
+            $readiness['average_earnings_certificate']['available'],
+            'Hrubé potvrzení nesmí odblokovat i čisté potvrzení pro ÚP.',
+        );
+
+        $document = $this->service->generateAverageEarningsDocument(
+            $this->supplierId,
+            $this->employmentId,
+            AverageEarningsSnapshotBuilder::STATEMENT_PURPOSE,
+            ['requested_purpose' => 'Žádost o hypoteční úvěr', 'correction_reason' => null],
+            'synthetic-average-statement',
+            $this->userId,
+        );
+
+        self::assertSame(
+            'average_earnings_statement',
+            $document['document_kind'],
+        );
+    }
+
+    public function testAverageEarningsBlockedWhenWeeklyHoursAreMissing(): void
+    {
+        $this->insertApprovedAverageEarningSnapshot(2026, 3);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET weekly_hours = NULL
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $readiness = $this->service->readiness(
+            $this->supplierId,
+            $this->employmentId,
+        )['average_earnings_statement'];
+        self::assertFalse($readiness['available']);
+        self::assertSame(
+            'weekly_hours_evidence_missing',
+            $readiness['readiness_code'],
+        );
+    }
+
+    public function testAverageEarningsCertificateBlockedByChildTaxCredit(): void
+    {
+        $this->insertApprovedAverageEarningSnapshot(2026, 3);
+        $this->insertTaxDeclaration('signed');
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_tax_child_claims
+                (supplier_id, employee_id, child_reference, child_order, ztp_p,
+                 evidence_status, shared_household_confirmed,
+                 other_claimant_excluded, effective_from, evidence_reference)
+             VALUES (?, ?, "CHILD-1", 1, 0, "verified", 1, 1, "2022-04-01",
+                     "synthetic-child-evidence")',
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        $readiness = $this->service->readiness(
+            $this->supplierId,
+            $this->employmentId,
+        )['average_earnings_certificate'];
+        self::assertFalse($readiness['available']);
+        self::assertSame(
+            'average_earnings_child_credit_not_supported',
+            $readiness['readiness_code'],
+        );
+    }
+
+    private function insertTaxDeclaration(string $status): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_tax_declarations
+                (supplier_id, employee_id, status, effective_from,
+                 evidence_reference)
+             VALUES (?, ?, ?, "2022-04-01", "synthetic-declaration")',
+        )->execute([$this->supplierId, $this->employeeId, $status]);
+    }
+
+    /** @return array<string,mixed> */
+    private static function certificateEvidence(): array
+    {
+        return [
+            'termination_assessment_complete' => true,
+            'termination_reason_kind' => 'organizational',
+            'employee_stated_reason' => null,
+            'pension_insurance_periods' => [
+                ['from' => '2022-04-01', 'to' => '2026-07-31'],
+            ],
+            'correction_reason' => null,
+        ];
     }
 
     private function insertApprovedAverageEarningSnapshot(int $year, int $quarter): void
@@ -306,7 +462,7 @@ final class EmploymentExitDocumentServiceTest extends TestCase
                  support_status, status, ruleset_id, ruleset_hash,
                  input_hash, input_trace, approved_by, approved_at)
              VALUES (?, ?, ?, ?, 1, "actual", "2026-04-01", "2026-06-30",
-                     6000000, 0, 60000, 63, 10000,
+                     6000000, 0, 60000, 63, 25000,
                      "supported", "approved", "cz-2026-average-earning", ?,
                      UNHEX(SHA2("synthetic", 256)), ?, ?, NOW())',
         )->execute([

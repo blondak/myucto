@@ -4,25 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Document;
 
-final readonly class AverageEarningsCertificateDocumentData
+/**
+ * Samostatné potvrzení o průměrném výdělku: hodinový průměr podle § 356 odst. 1
+ * zákoníku práce a z něj odvozený hrubý měsíční průměr podle odst. 2. Žádné
+ * čisté částky — ty patří výhradně na oddělené potvrzení podle § 313 odst. 2.
+ */
+final readonly class AverageEarningsStatementDocumentData
 {
-    public const SCHEMA_VERSION = 'average-earnings-certificate-document.v1';
+    public const SCHEMA_VERSION = 'average-earnings-statement-document.v1';
 
-    /** Doména způsobů skončení, kterou doklad tiskne. */
-    public const TERMINATION_REASONS = [
-        'none',
-        'gross_breach',
-        'sickness_regime_breach',
-        'organizational',
-        'health',
-        'employer_breach',
-        'employee_unilateral',
-        'agreement',
-    ];
-
-    /**
-     * @param list<array{from:string,to:string}> $pensionInsurancePeriods
-     */
     public function __construct(
         public string $sourceSnapshotSha256,
         public string $averageSnapshotSha256,
@@ -33,13 +23,16 @@ final readonly class AverageEarningsCertificateDocumentData
         public string $relationshipKind,
         public string $employmentFrom,
         public string $employmentTo,
-        public array $pensionInsurancePeriods,
         public string $averageKind,
         public int $averageApplicableYear,
         public int $averageApplicableQuarter,
-        public int $averageMonthlyNetMinorUnits,
-        public string $terminationReasonKind,
-        public ?string $employeeStatedReason,
+        public string $decisiveFrom,
+        public string $decisiveTo,
+        public int $averageHourlyMinorUnits,
+        public bool $minimumWageFloorApplied,
+        public int $weeklyHoursMilli,
+        public int $grossMonthlyMinorUnits,
+        public string $requestedPurpose,
         public string $issuedAt,
     ) {
         foreach ([
@@ -55,6 +48,7 @@ final readonly class AverageEarningsCertificateDocumentData
         foreach ([
             'jméno zaměstnance' => [$employeeName, 255],
             'adresa zaměstnance' => [$employeeAddress, 500],
+            'účel potvrzení' => [$requestedPurpose, 255],
         ] as $label => [$value, $maximum]) {
             self::text($value, $label, $maximum);
         }
@@ -68,66 +62,28 @@ final readonly class AverageEarningsCertificateDocumentData
             || $averageApplicableYear > 2100
             || $averageApplicableQuarter < 1
             || $averageApplicableQuarter > 4
-            || $averageMonthlyNetMinorUnits <= 0
-            || $averageMonthlyNetMinorUnits % 100 !== 0
+            || $averageHourlyMinorUnits <= 0
+            || $weeklyHoursMilli <= 0
+            || $grossMonthlyMinorUnits <= 0
         ) {
             throw new \InvalidArgumentException(
-                'Průměrný měsíční čistý výdělek není úplný nebo je v nesprávných jednotkách.',
+                'Průměrný výdělek potvrzení není úplný.',
             );
-        }
-        if (!in_array(
-            $terminationReasonKind,
-            self::TERMINATION_REASONS,
-            true,
-        )) {
-            throw new \InvalidArgumentException(
-                'Důvod skončení pro Úřad práce není podporovaný.',
-            );
-        }
-        if ($employeeStatedReason !== null) {
-            self::text(
-                $employeeStatedReason,
-                'důvod uvedený zaměstnancem',
-                1000,
-            );
-            if (!in_array($terminationReasonKind, [
-                'employee_unilateral',
-                'agreement',
-            ], true)) {
-                throw new \InvalidArgumentException(
-                    'Textový důvod zaměstnance neodpovídá způsobu skončení.',
-                );
-            }
         }
         $birthDate = self::date($employeeBirthDate, 'narození zaměstnance');
         $from = self::date($employmentFrom, 'počátku zaměstnání');
         $to = self::date($employmentTo, 'konce zaměstnání');
+        $decisiveStart = self::date($decisiveFrom, 'počátku rozhodného období');
+        $decisiveEnd = self::date($decisiveTo, 'konce rozhodného období');
         $issued = self::date($issuedAt, 'vydání potvrzení');
-        if ($to < $from || $issued < $to || $birthDate >= $from) {
+        if ($to < $from
+            || $issued < $to
+            || $birthDate >= $from
+            || $decisiveEnd < $decisiveStart
+        ) {
             throw new \InvalidArgumentException(
-                'Data potvrzení pro Úřad práce nejsou v platném pořadí.',
+                'Data potvrzení o průměrném výdělku nejsou v platném pořadí.',
             );
-        }
-        $lastTo = null;
-        foreach ($pensionInsurancePeriods as $period) {
-            $periodFrom = self::date(
-                $period['from'],
-                'počátku důchodového pojištění',
-            );
-            $periodTo = self::date(
-                $period['to'],
-                'konce důchodového pojištění',
-            );
-            if ($periodFrom < $from
-                || $periodTo > $to
-                || $periodTo < $periodFrom
-                || ($lastTo !== null && $periodFrom <= $lastTo)
-            ) {
-                throw new \InvalidArgumentException(
-                    'Intervaly důchodového pojištění se překrývají nebo přesahují zaměstnání.',
-                );
-            }
-            $lastTo = $periodTo;
         }
     }
 
@@ -146,14 +102,16 @@ final readonly class AverageEarningsCertificateDocumentData
             'relationship_kind' => $this->relationshipKind,
             'employment_from' => $this->employmentFrom,
             'employment_to' => $this->employmentTo,
-            'pension_insurance_periods' => $this->pensionInsurancePeriods,
             'average_kind' => $this->averageKind,
             'average_applicable_year' => $this->averageApplicableYear,
             'average_applicable_quarter' => $this->averageApplicableQuarter,
-            'average_monthly_net_minor_units' =>
-                $this->averageMonthlyNetMinorUnits,
-            'termination_reason_kind' => $this->terminationReasonKind,
-            'employee_stated_reason' => $this->employeeStatedReason,
+            'decisive_from' => $this->decisiveFrom,
+            'decisive_to' => $this->decisiveTo,
+            'average_hourly_minor_units' => $this->averageHourlyMinorUnits,
+            'minimum_wage_floor_applied' => $this->minimumWageFloorApplied,
+            'weekly_hours_milli' => $this->weeklyHoursMilli,
+            'gross_monthly_minor_units' => $this->grossMonthlyMinorUnits,
+            'requested_purpose' => $this->requestedPurpose,
             'issued_at' => $this->issuedAt,
         ];
     }
@@ -168,9 +126,7 @@ final readonly class AverageEarningsCertificateDocumentData
             || mb_strlen($value) > $maximum
             || preg_match('/[\x00-\x1F\x7F]/u', $value) === 1
         ) {
-            throw new \InvalidArgumentException(
-                "Pole {$label} není platné.",
-            );
+            throw new \InvalidArgumentException("Pole {$label} není platné.");
         }
     }
 
@@ -180,9 +136,7 @@ final readonly class AverageEarningsCertificateDocumentData
     ): \DateTimeImmutable {
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
         if ($date === false || $date->format('Y-m-d') !== $value) {
-            throw new \InvalidArgumentException(
-                "Datum {$label} není platné.",
-            );
+            throw new \InvalidArgumentException("Datum {$label} není platné.");
         }
 
         return $date;

@@ -10,7 +10,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
 
 final class SupportMatrix
 {
-    public const VERSION = '2026-08-15-v7';
+    public const VERSION = '2026-08-18-v8';
 
     /**
      * Mzdový rok je podporovaný jen tehdy, když ho pokrývají VŠECHNY výpočtově
@@ -78,6 +78,13 @@ final class SupportMatrix
                 ['key' => 'enforcement_deductions', 'status' => 'manual_review', 'available' => true, 'min_epic' => 'MZ-14'],
                 ['key' => 'payroll_runs', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-09'],
                 ['key' => 'payslips', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-16'],
+                // Zápočtový list (§ 313 odst. 1), oddělené potvrzení pro Úřad
+                // práce (§ 313 odst. 2) i samostatné potvrzení o průměrném
+                // výdělku (§ 356 odst. 1 a 2) mají schválený snapshot, renderer
+                // i obrazovku. Zůstává `manual_review`, protože čistý měsíční
+                // průměr se počítá jen tam, kde je celý podklad doložený —
+                // jinak dokument fail-closed odmítne vzniknout.
+                ['key' => 'employment_exit_documents', 'status' => 'manual_review', 'available' => true, 'min_epic' => 'MZ-16'],
                 ['key' => 'automatic_posting', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-18'],
                 // JMHZ export je dostupný: modul staví XML měsíčního hlášení,
                 // ověřuje ho připnutým XSD a projde s ním celý katalog kontrol

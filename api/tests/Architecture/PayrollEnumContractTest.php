@@ -125,6 +125,10 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollInstitutionType'          => 'enum:MyInvoice\Service\Payroll\InstitutionAccountType',
         'payroll.ts::PayrollInstitutionAccountSource' => 'enum:MyInvoice\Service\Payroll\InstitutionAccountSourceKind',
         'payroll.ts::PayrollDocumentKind'             => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
+        // Způsob skončení vztahu na odděleném potvrzení podle § 313 odst. 2
+        // zákoníku práce. Doménu drží doklad, protože právě on ji tiskne.
+        'payroll.ts::PayrollTerminationReasonKind'
+            => 'const:MyInvoice\Service\Payroll\Document\AverageEarningsCertificateDocumentData::TERMINATION_REASONS',
 
         // Roční zúčtování (§ 38ch ZDP). Všech šest hodnot chodí po drátě —
         // stav evidence i důvod odmítnutí musí obrazovka umět vypsat větou.

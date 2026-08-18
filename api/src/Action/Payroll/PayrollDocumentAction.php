@@ -10,6 +10,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
 use MyInvoice\Service\Payroll\Document\AnnualPayrollSheetService;
+use MyInvoice\Service\Payroll\Document\ApprovedRevisionDocumentBatchService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -24,6 +25,7 @@ final class PayrollDocumentAction
         private readonly PayrollDocumentService $documents,
         private readonly PayrollDocumentRepository $documentRepository,
         private readonly AnnualPayrollSheetService $annualPayrollSheets,
+        private readonly ApprovedRevisionDocumentBatchService $batch,
         private readonly PayrollModuleAccess $moduleAccess,
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
@@ -219,6 +221,67 @@ final class PayrollDocumentAction
             $supplierId,
         );
         return Json::ok($response, self::publicDocument($document), 201);
+    }
+
+    /**
+     * Dávková orchestrace rendererů nad schválenou revizí. Odpověď je zpráva
+     * o dokumentační úplnosti měsíce, ne jen seznam vytvořených PDF.
+     *
+     * @param array<string,string> $args
+     */
+    public function generateBatch(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.documents',
+            AccessLevel::WRITE,
+            $error,
+        ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $userId = $this->userId($request);
+        $runId = (int) ($args['runId'] ?? 0);
+        $revisionId = (int) ($args['revisionId'] ?? 0);
+        if ($userId === null || $runId <= 0 || $revisionId <= 0) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Požadavek na dávku dokumentů je neplatný.',
+                422,
+            );
+        }
+        try {
+            $report = $this->batch->generate($supplierId, $runId, $revisionId, $userId);
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        } catch (\Throwable) {
+            return Json::error(
+                $response,
+                'document_batch_failed',
+                'Dávku výstupních dokumentů nelze bezpečně dokončit.',
+                409,
+            );
+        }
+        $this->activity->log(
+            'payroll.document_batch_generated',
+            $userId,
+            'payroll_run_revision',
+            $revisionId,
+            [
+                'run_id' => $runId,
+                'payslips' => $report['payslips']['archived'],
+                'complete' => $report['complete'],
+            ],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+
+        return Json::ok($response, $report, 201)
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
     }
 
     /** @param array<string,string> $args */

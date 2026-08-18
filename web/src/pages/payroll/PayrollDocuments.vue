@@ -5,6 +5,8 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
   type PayrollDocument,
+  type PayrollDocumentBatchExit,
+  type PayrollDocumentBatchReport,
   type PayrollDocumentList,
   type PayrollPersonOption,
   type PayrollTaxCertificateKind,
@@ -48,6 +50,8 @@ const people = ref<PayrollPersonOption[]>([])
 const selectedEmployeeId = ref<number | null>(focusPersonId.value)
 const loading = ref(true)
 const generatingRevisionId = ref<number | null>(null)
+const generatingBatchId = ref<number | null>(null)
+const batchReport = ref<PayrollDocumentBatchReport | null>(null)
 type AnnualGenerationKind = 'payroll_sheet' | PayrollTaxCertificateKind
 const generatingAnnualKind = ref<AnnualGenerationKind | null>(null)
 const pendingCorrectionKind = ref<PayrollTaxCertificateKind | null>(null)
@@ -315,6 +319,27 @@ async function generateTaxCertificate(
   }
 }
 
+async function generateBatch(revision: PayrollDocumentList['revisions'][number]): Promise<void> {
+  if (generatingBatchId.value !== null) return
+  generatingBatchId.value = revision.revision_id
+  try {
+    batchReport.value = await payrollApi.generateDocumentBatch(
+      revision.run_id,
+      revision.revision_id,
+    )
+    toast.success(t(
+      batchReport.value.complete
+        ? 'payroll.documents.batch_complete'
+        : 'payroll.documents.batch_incomplete',
+    ))
+    await load()
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.documents.batch_failed')))
+  } finally {
+    generatingBatchId.value = null
+  }
+}
+
 async function generateBundle(revision: PayrollDocumentList['revisions'][number]): Promise<void> {
   if (generatingRevisionId.value !== null) return
   generatingRevisionId.value = revision.revision_id
@@ -331,6 +356,15 @@ async function generateBundle(revision: PayrollDocumentList['revisions'][number]
   } finally {
     generatingRevisionId.value = null
   }
+}
+
+function batchExitLabel(exit: PayrollDocumentBatchExit): string {
+  const certificate = exit.documents.employment_certificate
+  if (certificate?.archived) return t('payroll.documents.batch_exit_archived')
+  if (certificate?.available) return t('payroll.documents.batch_exit_pending')
+  return t('payroll.documents.batch_exit_blocked', {
+    code: certificate?.readiness_code ?? '',
+  })
 }
 
 async function download(item: PayrollDocument): Promise<void> {
@@ -410,9 +444,64 @@ onMounted(load)
               )
             }}
           </button>
+          <button
+            v-for="revision in canGenerate ? data?.revisions ?? [] : []"
+            :key="`batch-${revision.revision_id}`"
+            type="button"
+            data-test="generate-document-batch"
+            :class="btnOutline('primary')"
+            :disabled="generatingBatchId !== null"
+            @click="generateBatch(revision)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path :d="ICONS.doc" />
+            </svg>
+            {{
+              t(
+                generatingBatchId === revision.revision_id
+                  ? 'payroll.documents.batch_running'
+                  : 'payroll.documents.batch_run',
+                { office: revision.office_name || t('payroll.documents.company') },
+              )
+            }}
+          </button>
         </template>
       </div>
     </header>
+
+    <section
+      v-if="batchReport"
+      class="rounded-lg border p-4"
+      :class="batchReport.complete
+        ? 'border-success-500/30 bg-success-50'
+        : 'border-warning-500/30 bg-warning-50'"
+      data-test="document-batch-report"
+      role="status"
+    >
+      <h2 class="text-sm font-semibold text-neutral-900">
+        {{ t('payroll.documents.batch_title') }}
+      </h2>
+      <p class="mt-1 text-sm text-neutral-700">
+        {{ t('payroll.documents.batch_summary', {
+          payslips: batchReport.payslips.archived,
+          from: batchReport.period_start,
+          to: batchReport.period_end,
+        }) }}
+      </p>
+      <p class="mt-1 text-sm font-medium text-neutral-900">
+        {{ t(batchReport.complete
+          ? 'payroll.documents.batch_complete'
+          : 'payroll.documents.batch_incomplete') }}
+      </p>
+      <ul v-if="batchReport.employment_exits.length" class="mt-3 space-y-1 text-sm text-neutral-700">
+        <li v-for="exit in batchReport.employment_exits" :key="exit.employment_id">
+          {{ exit.employee_name || exit.employment_id }} · {{ exit.end_date }} · {{ batchExitLabel(exit) }}
+        </li>
+      </ul>
+      <p v-else class="mt-3 text-sm text-neutral-600">
+        {{ t('payroll.documents.batch_no_exits') }}
+      </p>
+    </section>
 
     <PayrollFocusNotice
       v-if="focusName"

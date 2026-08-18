@@ -84,7 +84,11 @@ final class EmploymentExitDocumentActionTest extends TestCase
         $request = $this->request('POST', 'session')
             ->withHeader('Idempotency-Key', 'synthetic-average-action')
             ->withParsedBody([
-                'average_monthly_net_minor_units' => 9_999_999,
+                'termination_assessment_complete' => true,
+                'termination_reason_kind' => 'organizational',
+                'employee_stated_reason' => null,
+                'pension_insurance_periods' => [],
+                'correction_reason' => null,
             ]);
         $response = $this->action->generate(
             $request,
@@ -106,6 +110,60 @@ final class EmploymentExitDocumentActionTest extends TestCase
         self::assertSame(
             'private, no-store',
             $response->getHeaderLine('Cache-Control'),
+        );
+    }
+
+    public function testClientSuppliedNetAmountIsRejected(): void
+    {
+        $request = $this->request('POST', 'session')
+            ->withHeader('Idempotency-Key', 'synthetic-average-injection')
+            ->withParsedBody([
+                'termination_assessment_complete' => true,
+                'termination_reason_kind' => 'organizational',
+                'employee_stated_reason' => null,
+                'pension_insurance_periods' => [],
+                'correction_reason' => null,
+                'average_monthly_net_minor_units' => 9_999_999,
+            ]);
+        $response = $this->action->generate(
+            $request,
+            new Response(),
+            [
+                'id' => '1',
+                'kind' => 'average-earnings-certificate',
+            ],
+        );
+
+        // Čistý výdělek se počítá ze schváleného podkladu, klient ho nesmí
+        // podstrčit ani jako „nadbytečné" pole.
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'validation_failed',
+            $this->json($response)['error']['code'] ?? null,
+        );
+    }
+
+    public function testAverageEarningsStatementKindIsRouted(): void
+    {
+        $request = $this->request('POST', 'session')
+            ->withHeader('Idempotency-Key', 'synthetic-statement-action')
+            ->withParsedBody([
+                'requested_purpose' => 'Doložení příjmu bance',
+                'correction_reason' => null,
+            ]);
+        $response = $this->action->generate(
+            $request,
+            new Response(),
+            [
+                'id' => '1',
+                'kind' => 'average-earnings-statement',
+            ],
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'employment_not_found',
+            $this->json($response)['error']['code'] ?? null,
         );
     }
 
