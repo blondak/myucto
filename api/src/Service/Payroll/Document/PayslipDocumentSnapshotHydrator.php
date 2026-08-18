@@ -4,9 +4,21 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Document;
 
+use MyInvoice\Service\Payroll\Component\PayrollExemptionBasis;
+
 final class PayslipDocumentSnapshotHydrator
 {
-    private const SCHEMA_VERSION = 'payroll-payslip-document.v1';
+    /**
+     * Snapshoty v1 zůstávají čitelné. Nedopočítávají se — podklad nezdanění
+     * složky v nich není a zpětně se dá jen hádat, takže se hydratují jako
+     * neevidovaný údaj a doklad ho pojmenuje slovem, ne nulou.
+     */
+    private const SUPPORTED_SCHEMA_VERSIONS = [
+        'payroll-payslip-document.v1',
+        'payroll-payslip-document.v2',
+    ];
+
+    private const DETAIL_SCHEMA_VERSION = 'payroll-payslip-document.v2';
 
     /** @param array<string,mixed> $snapshot */
     public function hydrate(
@@ -15,9 +27,13 @@ final class PayslipDocumentSnapshotHydrator
         string $sourceSnapshotHash,
         string $period,
     ): PayslipDocumentData {
-        if (($snapshot['schema_version'] ?? null) !== self::SCHEMA_VERSION) {
+        $schemaVersion = $snapshot['schema_version'] ?? null;
+        if (!is_string($schemaVersion)
+            || !in_array($schemaVersion, self::SUPPORTED_SCHEMA_VERSIONS, true)
+        ) {
             throw new \DomainException('Výsledek osoby nemá podporovaný snapshot výplatní pásky.');
         }
+        $detailRecorded = $schemaVersion === self::DETAIL_SCHEMA_VERSION;
 
         return new PayslipDocumentData(
             revisionId: $revisionId,
@@ -28,7 +44,7 @@ final class PayslipDocumentSnapshotHydrator
             employeeDisplayName: $this->text($snapshot, 'employee_display_name'),
             period: $period,
             employmentLabel: $this->text($snapshot, 'employment_label'),
-            incomeLines: $this->lines($snapshot, 'income_lines'),
+            incomeLines: $this->lines($snapshot, 'income_lines', $detailRecorded),
             grossMinorUnits: $this->integer($snapshot, 'gross_minor_units'),
             employeeSocialMinorUnits:
                 $this->integer($snapshot, 'employee_social_minor_units'),
@@ -47,7 +63,7 @@ final class PayslipDocumentSnapshotHydrator
             taxAfterCreditsMinorUnits:
                 $this->integer($snapshot, 'tax_after_credits_minor_units'),
             taxBonusMinorUnits: $this->integer($snapshot, 'tax_bonus_minor_units'),
-            otherDeductionLines: $this->lines($snapshot, 'other_deduction_lines'),
+            otherDeductionLines: $this->lines($snapshot, 'other_deduction_lines', false),
             roundingAdjustmentMinorUnits:
                 $this->integer($snapshot, 'rounding_adjustment_minor_units'),
             netMinorUnits: $this->integer($snapshot, 'net_minor_units'),
@@ -68,6 +84,9 @@ final class PayslipDocumentSnapshotHydrator
                 $snapshot + ['annual_settlement_minor_units' => 0],
                 'annual_settlement_minor_units',
             ),
+            incomeDetailStatus: $detailRecorded
+                ? PayslipDocumentData::INCOME_DETAIL_RECORDED
+                : PayslipDocumentData::INCOME_DETAIL_NOT_RECORDED,
         );
     }
 
@@ -105,7 +124,7 @@ final class PayslipDocumentSnapshotHydrator
      * @param array<string,mixed> $snapshot
      * @return list<PayslipLine>
      */
-    private function lines(array $snapshot, string $key): array
+    private function lines(array $snapshot, string $key, bool $detailRecorded): array
     {
         $rows = $snapshot[$key] ?? null;
         if (!is_array($rows) || !array_is_list($rows)) {
@@ -127,9 +146,21 @@ final class PayslipDocumentSnapshotHydrator
                 }
                 $line[$rowKey] = $value;
             }
+            $basis = null;
+            $exemptPart = 0;
+            if ($detailRecorded && ($line['exemption_basis'] ?? null) !== null) {
+                $basis = PayrollExemptionBasis::tryFrom(
+                    is_string($line['exemption_basis']) ? $line['exemption_basis'] : '',
+                ) ?? throw new \DomainException(
+                    "Řádek {$key}.{$index} má neznámý podklad osvobození.",
+                );
+                $exemptPart = $this->integer($line, 'exempt_part_minor_units');
+            }
             $result[] = new PayslipLine(
                 $this->text($line, 'label'),
                 $this->integer($line, 'amount_minor_units'),
+                $basis,
+                $exemptPart,
             );
         }
         return $result;

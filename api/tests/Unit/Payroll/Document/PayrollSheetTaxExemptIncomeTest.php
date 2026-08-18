@@ -330,6 +330,7 @@ final class PayrollSheetTaxExemptIncomeTest extends TestCase
                 'income_tax' => [
                     'advance_tax' => null,
                     'withholding_base_minor_units' => 0,
+                    'claimed_child_credit_minor_units' => 0,
                 ],
                 'net_pay' => [
                     'cash_income_minor_units' => $gross,
@@ -415,6 +416,7 @@ final class PayrollSheetTaxExemptIncomeTest extends TestCase
         if ($withTaxDetail) {
             $month['tax_exempt_income_minor_units'] = 30_00;
             $month['withholding_tax_base_minor_units'] = 20_00;
+            $month['child_entitlement_minor_units'] = 0;
         }
         $snapshot = [
             'schema_version' => $schemaVersion,

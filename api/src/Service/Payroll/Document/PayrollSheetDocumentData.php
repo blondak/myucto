@@ -6,6 +6,49 @@ namespace MyInvoice\Service\Payroll\Document;
 
 final readonly class PayrollSheetDocumentData
 {
+    /** § 38ch — zmrazený výsledek ročního zúčtování za rok existuje. */
+    public const ANNUAL_SETTLEMENT_APPROVED = 'approved';
+
+    /** Za rok není zmrazený výsledek — zúčtování se neprovedlo. */
+    public const ANNUAL_SETTLEMENT_NOT_PERFORMED = 'not_performed';
+
+    /**
+     * Revize vznikla nad mapováním, které stav ročního zúčtování nezjišťovalo
+     * a zapisovalo natvrdo „neprovedeno". Zpětně se to nedopočítá — doklad by
+     * jinak tvrdil, že se zúčtování neprovedlo, i když se provedlo.
+     */
+    public const ANNUAL_SETTLEMENT_NOT_RECORDED = 'not_recorded';
+
+    /**
+     * Co musí doklad o provedeném zúčtování unést, aby písm. h) splnil.
+     *
+     * První skupina je „výpočet daně" (§ 16, § 35ba a § 35c v ročním rozměru),
+     * druhá „provedené roční zúčtování" (§ 35d odst. 7 a 8, § 38ch odst. 5).
+     */
+    private const ANNUAL_SETTLEMENT_FIELDS = [
+        'revision_id',
+        'snapshot_hash',
+        'settled_on',
+        'completed_months',
+        'advance_base_minor_units',
+        'rounded_tax_base_minor_units',
+        'tax_before_credits_minor_units',
+        'annual_credits_minor_units',
+        'applied_credits_minor_units',
+        'child_entitlement_minor_units',
+        'child_credit_minor_units',
+        'annual_tax_bonus_minor_units',
+        'tax_after_all_credits_minor_units',
+        'advance_tax_minor_units',
+        'monthly_tax_bonus_minor_units',
+        'external_certificate_count',
+        'tax_difference_minor_units',
+        'bonus_difference_minor_units',
+        'settlement_difference_minor_units',
+        'payable_minor_units',
+        'outcome',
+    ];
+
     /**
      * @param list<string> $previousNames
      * @param list<PayrollSheetMonth> $months
@@ -31,6 +74,25 @@ final readonly class PayrollSheetDocumentData
          * doklad nesmí zestárnout jinak než přes novou revizi.
          */
         public array $employments = [],
+        /**
+         * § 38j odst. 2 písm. h) — „údaje o výpočtu daně a provedeném ročním
+         * zúčtování záloh a daňového zvýhodnění".
+         *
+         * Neseče se, četě se: hodnoty jsou zmřazené v revizi ročního zúčtování
+         * (`purpose = annual_settlement_result`) a mzdový list je jen přebírá.
+         * `null` už neznamená „nula" — stav výše říká, jestli se zúčtování
+         * neprovedlo, nebo jestli o něm revize nic neví.
+         *
+         * @var ?array<string,mixed>
+         */
+        public ?array $annualSettlement = null,
+        /**
+         * Doloha § 38ch odst. 1 a 3 zapsaná v evidenci žádosti. Zmřazuje se
+         * proto, že „neprovedeno" bez důvodu je prázdné místo, ne údaj.
+         *
+         * @var ?array<string,string>
+         */
+        public ?array $annualSettlementEvidence = null,
     ) {
         if (preg_match('/^[a-f0-9]{64}$/D', $sourceSnapshotSha256) !== 1) {
             throw new \InvalidArgumentException('Zdrojový otisk mzdového listu není platný.');
@@ -69,8 +131,30 @@ final readonly class PayrollSheetDocumentData
             }
             $seen[$month->month] = true;
         }
-        if (!in_array($annualSettlementStatus, ['not_performed', 'approved'], true)) {
+        if (!in_array($annualSettlementStatus, [
+            self::ANNUAL_SETTLEMENT_NOT_RECORDED,
+            self::ANNUAL_SETTLEMENT_NOT_PERFORMED,
+            self::ANNUAL_SETTLEMENT_APPROVED,
+        ], true)) {
             throw new \InvalidArgumentException('Stav ročního zúčtování není platný.');
+        }
+        if (($annualSettlementStatus === self::ANNUAL_SETTLEMENT_APPROVED)
+            !== ($annualSettlement !== null)
+        ) {
+            // Provedené zúčtování bez údajů o výpočtu by písm. h) nesplnilo
+            // a údaje bez provedeného zúčtování by tvrdily úkon, který nenastal.
+            throw new \InvalidArgumentException(
+                'Stav ročního zúčtování nesouhlasí s údaji o jeho výpočtu.',
+            );
+        }
+        if ($annualSettlement !== null) {
+            foreach (self::ANNUAL_SETTLEMENT_FIELDS as $field) {
+                if (!array_key_exists($field, $annualSettlement)) {
+                    throw new \InvalidArgumentException(
+                        "Údaje o ročním zúčtování neobsahují {$field}.",
+                    );
+                }
+            }
         }
         if (count($employments) > 200) {
             throw new \InvalidArgumentException('Pracovní vztahy mzdového listu nemají platnou strukturu.');
@@ -101,6 +185,21 @@ final readonly class PayrollSheetDocumentData
     {
         foreach ($this->months as $month) {
             if (!$month->taxDetailRecorded()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Nese doklad měsíční daňové zvýhodnění (§ 38j odst. 2 písm. f) bod 6)
+     * za VŠECHNY měsíce? Roční součet přes měsíce, které nárok neevidovaly,
+     * by tvrdil nižší číslo, než jaké ve skutečnosti platilo.
+     */
+    public function childDetailComplete(): bool
+    {
+        foreach ($this->months as $month) {
+            if (!$month->childDetailRecorded()) {
                 return false;
             }
         }
@@ -147,6 +246,9 @@ final readonly class PayrollSheetDocumentData
             ),
             'totals' => $this->totals(),
             'annual_settlement_status' => $this->annualSettlementStatus,
+            'annual_settlement' => $this->annualSettlement,
+            'annual_settlement_evidence' => $this->annualSettlementEvidence,
+            'child_detail_complete' => $this->childDetailComplete(),
             'employments' => $this->employments,
             'tax_detail_complete' => $this->taxDetailComplete(),
         ];
