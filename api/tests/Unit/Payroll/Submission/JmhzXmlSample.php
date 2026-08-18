@@ -60,6 +60,64 @@ final class JmhzXmlSample
         );
     }
 
+    /**
+     * Podání s uplatněnou slevou zaměstnavatele podle § 7a. Sleva je 5 %
+     * z vyměřovacího základu 1 000 Kč zaokrouhlených nahoru, tedy 50 Kč,
+     * a o tutéž částku klesá pojistné k úhradě.
+     */
+    public static function withEmployerDiscount(
+        string $reason = 'A',
+        ?string $shorterWorkingTime = '20.00',
+    ): string {
+        return self::document(
+            self::form(
+                '1000000001',
+                '2000000000000000000001',
+                discount: self::discountBlock($reason, $shorterWorkingTime),
+            ),
+            pvpoj: self::discountPvpoj(),
+        );
+    }
+
+    public static function discountPvpoj(int $headcount = 1, int $base = 1_000, int $discount = 50): string
+    {
+        $payable = 319 - $discount;
+
+        return <<<XML
+                <pvpoj:pojistne>
+                  <pvpoj:zakladZamestnavateleA>1000</pvpoj:zakladZamestnavateleA>
+                  <pvpoj:pojistneZamestnavateleA>248</pvpoj:pojistneZamestnavateleA>
+                  <pvpoj:pojistneZamestnavateleCelkem>248</pvpoj:pojistneZamestnavateleCelkem>
+                  <pvpoj:pojistneZamestnance>71</pvpoj:pojistneZamestnance>
+                  <pvpoj:pojistneCelkem>319</pvpoj:pojistneCelkem>
+                </pvpoj:pojistne>
+                <pvpoj:slevaZamestnavatele>
+                  <pvpoj:pocetZamestnancu>{$headcount}</pvpoj:pocetZamestnancu>
+                  <pvpoj:uhrnVymerovacichZakladu>{$base}</pvpoj:uhrnVymerovacichZakladu>
+                  <pvpoj:pojistneSleva>{$discount}</pvpoj:pojistneSleva>
+                </pvpoj:slevaZamestnavatele>
+                <pvpoj:pojistneUhrada>{$payable}</pvpoj:pojistneUhrada>
+            XML;
+    }
+
+    public static function discountBlock(
+        string $reason = 'A',
+        ?string $shorterWorkingTime = '20.00',
+    ): string {
+        $hours = $shorterWorkingTime === null
+            ? ''
+            : "\n                          <form:pracovniDobaKratsi>{$shorterWorkingTime}</form:pracovniDobaKratsi>";
+
+        return <<<XML
+                      <form:slevaZamestnavatele>
+                        <form:slevaZamestnavateleEvidovana>true</form:slevaZamestnavateleEvidovana>
+                        <form:slevaZamestnavateleRozpad>{$hours}
+                          <form:duvodUplatneni>{$reason}</form:duvodUplatneni>
+                        </form:slevaZamestnavateleRozpad>
+                      </form:slevaZamestnavatele>
+            XML;
+    }
+
     public static function defaultPvpoj(): string
     {
         return <<<'XML'
@@ -120,8 +178,10 @@ final class JmhzXmlSample
         string $employmentId,
         bool $primary = true,
         ?string $eldp = null,
+        string $discount = '',
     ): string {
         $primaryFlag = $primary ? 'true' : 'false';
+        $discount = $discount === '' ? '' : "\n{$discount}";
         $eldp ??= <<<'XML'
                       <form:eldp>
                         <form:kod>1++</form:kod>
@@ -185,7 +245,7 @@ final class JmhzXmlSample
                       </form:pojisteniZamestnanec>
                       <form:pojisteniZamestnavatel>
                         <form:socialniPojisteni>248</form:socialniPojisteni>
-                      </form:pojisteniZamestnavatel>
+                      </form:pojisteniZamestnavatel>{$discount}
                     </form:pojisteni>
                     <form:vykonavanaPozice>
                       <form:mistoVykonuPrace>

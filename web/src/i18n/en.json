@@ -3286,7 +3286,13 @@
                     "jmhz_scenario1_annual_fields_unsupported": "Annual attributes are not supported by this profile yet.",
                     "jmhz_scenario1_pvpoj_unavailable": "The insurance part of the submission is missing.",
                     "jmhz_eldp_evidence_missing": "The frozen ELDP evidence is missing.",
-                    "jmhz_work_summary_v2_missing": "The approved monthly work summary is missing."
+                    "jmhz_work_summary_v2_missing": "The approved monthly work summary is missing.",
+                    "jmhz_employer_part_time_discount_unverified": "The part-time employer discount claim is not evidenced.",
+                    "jmhz_employer_part_time_discount_outcome_missing": "The assessment of whether the part-time discount is due is missing.",
+                    "jmhz_employer_part_time_discount_reason_missing": "The statutory reason for the discount under § 7a(1) is missing.",
+                    "jmhz_employer_part_time_discount_working_time_missing": "The agreed shorter weekly working time is missing.",
+                    "jmhz_employer_part_time_discount_working_time_unresolved": "The agreed shorter weekly working time cannot be reported.",
+                    "jmhz_employer_part_time_discount_activity_unsupported": "The part-time discount can only be claimed for an employment relationship."
                 },
                 "health_load_failed": "The monthly health-insurer overviews could not be loaded.",
                 "health_download_failed": "The monthly health-insurer overview could not be downloaded.",

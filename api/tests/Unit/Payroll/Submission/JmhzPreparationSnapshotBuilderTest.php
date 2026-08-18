@@ -320,6 +320,130 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Uplatněná sleva podle § 7a už podání neblokuje: rozpad 10372, 10373
+     * a 10374 se dá vykázat, takže zaměstnavatel s doloženým nárokem měsíční
+     * hlášení podat může.
+     */
+    public function testAppliedPartTimeDiscountNoLongerBlocksPreparation(): void
+    {
+        $codes = $this->readinessCodes($this->sourceWithDiscount([
+            'part_time_employer_discount' => 'verified',
+            'part_time_employer_discount_outcome' => 'applied',
+            'part_time_employer_discount_reason' => 'age_55_plus',
+            'agreed_weekly_working_millihours' => 20_000,
+        ]));
+
+        foreach ($codes as $code) {
+            self::assertStringNotContainsString('part_time_discount', $code);
+        }
+    }
+
+    /**
+     * Zaměstnanci mladšímu 21 let podle § 7a odst. 1 písm. g) sleva náleží
+     * i při plném úvazku, takže sjednanou týdenní dobu vykazovat nemusí.
+     */
+    public function testUnder21DiscountDoesNotRequireAgreedWeeklyWorkingTime(): void
+    {
+        $codes = $this->readinessCodes($this->sourceWithDiscount([
+            'part_time_employer_discount' => 'verified',
+            'part_time_employer_discount_outcome' => 'applied',
+            'part_time_employer_discount_reason' => 'under_21',
+        ]));
+
+        foreach ($codes as $code) {
+            self::assertStringNotContainsString('part_time_discount', $code);
+        }
+    }
+
+    public function testDiscountWithoutAgreedWeeklyWorkingTimeStaysBlocked(): void
+    {
+        $codes = $this->readinessCodes($this->sourceWithDiscount([
+            'part_time_employer_discount' => 'verified',
+            'part_time_employer_discount_outcome' => 'applied',
+            'part_time_employer_discount_reason' => 'age_55_plus',
+        ]));
+
+        self::assertContains(
+            'jmhz_employer_part_time_discount_working_time_missing',
+            $codes,
+        );
+    }
+
+    public function testDiscountWithoutStatutoryReasonStaysBlocked(): void
+    {
+        $codes = $this->readinessCodes($this->sourceWithDiscount([
+            'part_time_employer_discount' => 'verified',
+            'part_time_employer_discount_outcome' => 'applied',
+            'agreed_weekly_working_millihours' => 20_000,
+        ]));
+
+        self::assertContains(
+            'jmhz_employer_part_time_discount_reason_missing',
+            $codes,
+        );
+    }
+
+    /**
+     * Nárok, který limity § 7a odst. 3 vyloučily, se v podání neuplatňuje —
+     * XML pro něj žádnou položku nenese, takže ani blokovat nemá co.
+     */
+    public function testDiscountRefusedByStatutoryLimitsRaisesNoIssue(): void
+    {
+        $codes = $this->readinessCodes($this->sourceWithDiscount([
+            'part_time_employer_discount' => 'verified',
+            'part_time_employer_discount_outcome' => 'assessment_base_above_limit',
+            'part_time_employer_discount_reason' => 'age_55_plus',
+        ]));
+
+        foreach ($codes as $code) {
+            self::assertStringNotContainsString('part_time_discount', $code);
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $source
+     * @return list<string>
+     */
+    private function readinessCodes(array $source): array
+    {
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $source,
+            [],
+            [],
+        );
+        $codes = $snapshot->payload['readiness_issue_codes'];
+        self::assertIsArray($codes);
+
+        return array_values(array_filter($codes, 'is_string'));
+    }
+
+    /**
+     * @param array<string,mixed> $relationship
+     * @return array<string,mixed>
+     */
+    private function sourceWithDiscount(array $relationship): array
+    {
+        $source = $this->source();
+        $result = json_decode(
+            $source['revision']['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($result);
+        $result['people'][0]['statutory']['social_insurance']['relationships'][0]
+            = ['relationship_id' => 'employment:101'] + $relationship;
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['result_snapshot_json'],
+        );
+
+        return $source;
+    }
+
     /** @return array<string,mixed> */
     private function source(bool $tamperedComponent = false): array
     {

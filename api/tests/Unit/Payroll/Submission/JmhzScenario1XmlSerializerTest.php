@@ -264,6 +264,171 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         );
     }
 
+    /**
+     * Uplatněná sleva podle § 7a musí projít až do XML. Bez rozpadu 10372,
+     * 10373 a 10374 se podání zastavilo v přípravě, takže zaměstnavatel, který
+     * měl na slevu nárok, nemohl měsíční hlášení podat vůbec.
+     */
+    public function testAppliedPartTimeDiscountIsSerializedAndValidAgainstSchema(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($this->payloadWithDiscount(), $this->discountPvpoj()),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            <<<'XML'
+                          <form:slevaZamestnavatele>
+                            <form:slevaZamestnavateleEvidovana>true</form:slevaZamestnavateleEvidovana>
+                            <form:slevaZamestnavateleRozpad>
+                              <form:pracovniDobaKratsi>20.00</form:pracovniDobaKratsi>
+                              <form:duvodUplatneni>A</form:duvodUplatneni>
+                            </form:slevaZamestnavateleRozpad>
+                          </form:slevaZamestnavatele>
+                XML,
+            $result['xml'],
+        );
+        // § 7c odst. 1 odečítá slevu z pojistného za všechny kategorie § 5a
+        // dohromady, takže částka patří jen do pojistné části, ne k součásti.
+        self::assertStringNotContainsString('form:pojistneSleva', $result['xml']);
+        self::assertStringContainsString(
+            '<pvpoj:pojistneSleva>50</pvpoj:pojistneSleva>',
+            $result['xml'],
+        );
+    }
+
+    /**
+     * § 7a odst. 2 váže podmínku kratší pracovní doby jen na písmena a) až f).
+     * Zaměstnanci mladšímu 21 let podle písmene g) sleva náleží i při plném
+     * úvazku a kontrola 138 ČSSZ u něj rozsah zakazuje.
+     */
+    public function testUnder21DiscountOmitsShorterWorkingTime(): void
+    {
+        $payload = $this->payloadWithDiscount();
+        $payload['people'][0]['employments'][0]['insurance']
+            ['part_time_employer_discount_reason'] = 'under_21';
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:duvodUplatneni>G</form:duvodUplatneni>',
+            $result['xml'],
+        );
+        self::assertStringNotContainsString('pracovniDobaKratsi', $result['xml']);
+    }
+
+    public function testDiscountWithoutAgreedWeeklyWorkingTimeIsBlocked(): void
+    {
+        $payload = $this->payloadWithDiscount();
+        unset(
+            $payload['people'][0]['employments'][0]['insurance']
+                ['agreed_weekly_working_millihours'],
+        );
+
+        $resolution = $this->resolutionFor($payload);
+
+        self::assertContains(
+            'jmhz_employer_part_time_discount_working_time_unresolved',
+            array_map(
+                static fn (object $blocker): string => $blocker->code,
+                $resolution->blockers,
+            ),
+        );
+    }
+
+    /**
+     * Kontrola 42 ČSSZ pouští slevu jen k druhu činnosti „1" až „9", tedy
+     * k pracovnímu poměru. Dohoda o pracovní činnosti ji uplatnit nesmí
+     * a z hotového XML se to už poznat nedá.
+     */
+    public function testDiscountOutsideEmploymentActivityIsBlocked(): void
+    {
+        $payload = $this->payloadWithDiscount();
+        $payload['people'][0]['employments'][0]['scenario_resolution'] = [
+            'scenario_key' => 'scenario_1',
+            'activity_code' => 'A',
+            'relationship_detail_code' => null,
+        ];
+
+        $resolution = $this->resolutionFor($payload);
+
+        self::assertContains(
+            'jmhz_employer_part_time_discount_activity_unsupported',
+            array_map(
+                static fn (object $blocker): string => $blocker->code,
+                $resolution->blockers,
+            ),
+        );
+    }
+
+    /**
+     * Souběh sazbových kategorií § 5a odst. 1 se slevou: rozpad základu jde
+     * u každé součásti pod jiné písmeno, ale sleva zůstane u té jediné, která
+     * ji uplatňuje.
+     */
+    public function testTwoRateCategoriesWithDiscountStayValidAgainstSchema(): void
+    {
+        $payload = $this->payloadWithDiscount();
+        $second = $payload['people'][0];
+        $second['employee_id'] = 12;
+        $second['employments'][0]['employment_id'] = 102;
+        $second['employments'][0]['identity']['person_external_identifier']['value']
+            = '1000000012';
+        $second['employments'][0]['identity']['jmhz_employment_external_identifier']['value']
+            = '2000000000000000000002';
+        $second['employments'][0]['insurance'] = [
+            'relationship_id' => 'employment:102',
+            'capped_assessment_base_minor_units' => 100_000,
+            'employer_rate_category' => 'risk_employment',
+            'part_time_employer_discount' => 'not_claimed',
+        ];
+        $payload['people'][] = $second;
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            JmhzSubmissionEnvelope::create(
+                '0195e2c4-1a2b-7c3d-8e4f-5a6b7c8d9e0f',
+                [
+                    101 => '0195E2C4-1A2B-7C3D-8E4F-5A6B7C8D9E10',
+                    102 => '0195E2C4-1A2B-7C3D-8E4F-5A6B7C8D9E11',
+                ],
+                '2026-08-05T09:30:00Z',
+                'MyÚčto.cz',
+                '5.6.0',
+            ),
+        );
+
+        self::assertStringContainsString('<form:pismenoA>1000</form:pismenoA>', $result['xml']);
+        self::assertStringContainsString('<form:pismenoC>1000</form:pismenoC>', $result['xml']);
+        self::assertSame(
+            1,
+            substr_count($result['xml'], '<form:slevaZamestnavateleEvidovana>true</form:slevaZamestnavateleEvidovana>'),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function payloadWithDiscount(): array
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['scenario_resolution'] = [
+            'scenario_key' => 'scenario_1',
+            'activity_code' => '1',
+            'relationship_detail_code' => '1',
+        ];
+        $payload['people'][0]['employments'][0]['insurance'] += [
+            'part_time_employer_discount' => 'verified',
+            'part_time_employer_discount_outcome' => 'applied',
+            'part_time_employer_discount_reason' => 'age_55_plus',
+            'part_time_employer_discount_evidence_reference' => 'employment:101:2026-07',
+            'agreed_weekly_working_millihours' => 20_000,
+        ];
+
+        return $payload;
+    }
+
     private function envelope(): JmhzSubmissionEnvelope
     {
         return JmhzSubmissionEnvelope::create(
@@ -283,6 +448,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
     /** @param array<string,mixed> $payload */
     private function resolutionFor(
         array $payload,
+        ?JmhzPvpojPreview $pvpoj = null,
     ): \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Resolution {
         $preparation = new JmhzVerifiedPreparationSnapshot(
             501,
@@ -311,7 +477,39 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
 
         return (new JmhzScenario1DocumentResolver())->resolve(
             $preparation,
-            $this->pvpoj(),
+            $pvpoj ?? $this->pvpoj(),
+        );
+    }
+
+    /**
+     * Pojistná část s uplatněnou slevou: 5 % z vyměřovacího základu 1 000 Kč
+     * zaokrouhlených nahoru je 50 Kč a o tutéž částku klesá pojistné k úhradě.
+     */
+    private function discountPvpoj(): JmhzPvpojPreview
+    {
+        return new JmhzPvpojPreview(
+            7,
+            401,
+            301,
+            1,
+            '2026-07',
+            ['revision_input_hash' => str_repeat('d', 64)],
+            [
+                'pojistne' => [
+                    'zakladZamestnavateleA' => 1_000,
+                    'pojistneZamestnavateleA' => 248,
+                    'pojistneZamestnavateleCelkem' => 248,
+                    'pojistneZamestnance' => 71,
+                    'pojistneCelkem' => 319,
+                ],
+                'slevaZamestnavatele' => [
+                    'pocetZamestnancu' => 1,
+                    'uhrnVymerovacichZakladu' => 1_000,
+                    'pojistneSleva' => 50,
+                ],
+                'pojistneUhrada' => 269,
+            ],
+            [['employee_id' => 11]],
         );
     }
 

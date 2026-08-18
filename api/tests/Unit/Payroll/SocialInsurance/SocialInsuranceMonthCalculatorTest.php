@@ -450,6 +450,23 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
     }
 
     /**
+     * Sjednaná týdenní doba není jen vstup posouzení § 7a odst. 2 — je to
+     * jediný pramen položky 10373 měsíčního hlášení. Když ji výsledek nenese,
+     * musela by ji příprava podání dopočítat odjinud.
+     */
+    public function testResultCarriesTheAgreedWeeklyWorkingTimeForTheReport(): void
+    {
+        $relationship = $this->discountedPerson(1_000_000, weeklyMillihours: 20_000)
+            ->people[0]->relationships[0];
+
+        self::assertSame(20_000, $relationship->agreedWeeklyWorkingMillihours);
+        self::assertSame(
+            20_000,
+            $relationship->jsonSerialize()['agreed_weekly_working_millihours'],
+        );
+    }
+
+    /**
      * § 7a odst. 2 věta druhá a odst. 3 se počítají z ÚHRNU za všechna
      * zaměstnání v pracovním poměru u téhož zaměstnavatele. Druhý vztah proto
      * nárok ovlivní, i když se sleva uplatňuje jen z jednoho z nich.
