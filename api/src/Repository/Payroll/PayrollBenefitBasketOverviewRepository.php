@@ -39,6 +39,13 @@ final class PayrollBenefitBasketOverviewRepository
     /** Znak, kterým se v hledání escapuje `%`, `_` a on sám. */
     private const LIKE_ESCAPE = '!';
 
+    /**
+     * Přehled je ROČNÍ, takže do něj patří jen koše, jejichž rozhodným obdobím je
+     * zdaňovací období. Měsíční koše (§ 6 odst. 9 písm. b) a i)) by tu ukázaly
+     * roční součet proti limitu, který za rok neexistuje — a „zbývá" by lhalo.
+     */
+    private const ANNUAL_BASKETS = '"non_cash_health", "non_cash_leisure", "old_age_savings"';
+
     private const SEARCH_MAX_LENGTH = 100;
 
     public function __construct(private readonly Connection $db) {}
@@ -175,7 +182,7 @@ final class PayrollBenefitBasketOverviewRepository
                 AND component.id = accumulator.component_id
               WHERE accumulator.supplier_id = ?
                 AND accumulator.status = "active"
-                AND component.exemption_basket IS NOT NULL
+                AND component.exemption_basket IN (' . self::ANNUAL_BASKETS . ')
               ORDER BY accumulator.tax_year DESC'
         );
         $stmt->execute([$supplierId]);
@@ -214,7 +221,8 @@ final class PayrollBenefitBasketOverviewRepository
                      WHERE accumulator.supplier_id = ?
                        AND accumulator.tax_year = ?
                        AND accumulator.status = "active"
-                       AND component.exemption_basket IS NOT NULL' . $basketClause . '
+                       AND component.exemption_basket IN (' . self::ANNUAL_BASKETS . ')'
+                       . $basketClause . '
                      GROUP BY accumulator.employee_id, component.exemption_basket
                 ) ';
     }

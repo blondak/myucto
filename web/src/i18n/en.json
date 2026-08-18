@@ -1519,7 +1519,7 @@
                 "source": "Source",
                 "annual_limit_hint": "Employer's own cap — approval above it is refused.",
                 "exemption_basket": "Statutory exemption basket",
-                "exemption_basket_hint": "The annual limit of § 6(9) of the Income Tax Act applies to the total of all components in the basket; the excess is taxed.",
+                "exemption_basket_hint": "The § 6(9) limit applies to the total of all components in the basket over its period — yearly for (d) and (m), monthly for (i), per shift for (b); the excess is taxed.",
                 "exemption_basis": "Basis of the exemption",
                 "exemption_basis_hint": "Without a basis the exemption is an unsupported claim and the payroll run ends in manual review."
             },
@@ -1543,6 +1543,7 @@
                 "benefit_education": "Education",
                 "benefit_recreation": "Recreation and leisure",
                 "benefit_health": "Health benefit",
+                "benefit_accommodation": "Temporary accommodation",
                 "risky_savings": "Risky-work savings",
                 "travel_reimbursement": "Travel reimbursement",
                 "other": "Other component"
@@ -1598,7 +1599,9 @@
                 "none": "No statutory basket",
                 "non_cash_health": "Health benefits (§ 6(9)(d)(1))",
                 "non_cash_leisure": "Recreation, sport and culture (§ 6(9)(d)(2))",
-                "old_age_savings": "Old-age savings and long-term care (§ 6(9)(m))"
+                "old_age_savings": "Old-age savings and long-term care (§ 6(9)(m))",
+                "meal_per_shift": "Meal contribution per shift (§ 6(9)(b))",
+                "temporary_accommodation": "Temporary accommodation per month (§ 6(9)(i))"
             },
             "exemption_basis": {
                 "none": "No basis stated",
@@ -4575,7 +4578,9 @@
             "basket": {
                 "non_cash_health": "Health benefits",
                 "non_cash_leisure": "Recreation, sport and culture",
-                "old_age_savings": "Old-age savings and long-term care"
+                "old_age_savings": "Old-age savings and long-term care",
+                "meal_per_shift": "Meal contribution",
+                "temporary_accommodation": "Temporary accommodation"
             },
             "status": {
                 "ok": "Within limit",

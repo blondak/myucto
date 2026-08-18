@@ -988,6 +988,7 @@ export type PayrollComponentKind =
   | 'benefit_education'
   | 'benefit_recreation'
   | 'benefit_health'
+  | 'benefit_accommodation'
   | 'risky_savings'
   | 'travel_reimbursement'
   | 'other'
@@ -998,21 +999,36 @@ export type PayrollComponentTaxTreatment = 'included' | 'exempt' | 'withholding_
 export type PayrollComponentInclusion = 'included' | 'excluded' | 'manual_review'
 
 /**
- * Roční koš osvobození nepeněžních benefitů podle § 6 odst. 9 ZDP. Limit platí
- * na ÚHRN plnění za dané ustanovení, ne na jednu mzdovou složku.
+ * Koš osvobození plnění podle § 6 odst. 9 ZDP. Limit platí na ÚHRN plnění za dané
+ * ustanovení, ne na jednu mzdovou složku. Rozhodné období je roční u písm. d) a m),
+ * měsíční u písm. i) a za jednu směnu u písm. b).
  */
-export type PayrollBenefitExemptionBasket = 'non_cash_health' | 'non_cash_leisure' | 'old_age_savings'
+export type PayrollBenefitExemptionBasket =
+  | 'non_cash_health'
+  | 'non_cash_leisure'
+  | 'old_age_savings'
+  | 'meal_per_shift'
+  | 'temporary_accommodation'
 
 /**
  * Čím je nezdanění složky podložené. `not_subject_to_tax` NENÍ osvobození —
  * plnění podle § 6 odst. 7 ZDP předmětem daně vůbec není a na mzdovém listu
  * se mezi osvobozené částky nevykazuje.
  */
-export type PayrollExemptionBasis = 'not_subject_to_tax' | 'statutory_exempt' | 'benefit_basket'
+export type PayrollExemptionBasis =
+  | 'not_subject_to_tax'
+  | 'statutory_exempt'
+  | 'benefit_basket'
+  | 'periodic_benefit_limit'
 
 export interface PayrollBenefitBasketUsage {
   basket: PayrollBenefitExemptionBasket
   statute: string
+  /**
+   * Počet směn s nárokem, ze kterých se strop poskládal. `null` u košů, jejichž
+   * limit na směnách nestojí — nula by tvrdila, že se nic neodpracovalo.
+   */
+  shift_entitlements: number | null
   limit_minor: number
   used_before_minor: number
   used_after_minor: number

@@ -1519,7 +1519,7 @@
                 "source": "Zdroj",
                 "annual_limit_hint": "Vlastní strop zaměstnavatele — schválení nad něj neprojde.",
                 "exemption_basket": "Zákonný koš osvobození",
-                "exemption_basket_hint": "Roční limit § 6 odst. 9 ZDP platí na úhrn všech složek koše; nadlimitní část se zdaní.",
+                "exemption_basket_hint": "Limit § 6 odst. 9 ZDP platí na úhrn všech složek koše za rozhodné období — roční u písm. d) a m), měsíční u písm. i), za směnu u písm. b); nadlimitní část se zdaní.",
                 "exemption_basis": "Podklad osvobození",
                 "exemption_basis_hint": "Bez podkladu je osvobození nedoložené tvrzení a mzdový běh na něm skončí v ručním posouzení."
             },
@@ -1543,6 +1543,7 @@
                 "benefit_education": "Vzdělávání",
                 "benefit_recreation": "Rekreace a volný čas",
                 "benefit_health": "Zdravotní benefit",
+                "benefit_accommodation": "Přechodné ubytování",
                 "risky_savings": "Spoření u rizikové práce",
                 "travel_reimbursement": "Cestovní náhrada",
                 "other": "Jiná složka"
@@ -1598,7 +1599,9 @@
                 "none": "Bez zákonného koše",
                 "non_cash_health": "Zdravotní plnění (§ 6 odst. 9 písm. d) bod 1)",
                 "non_cash_leisure": "Rekreace, sport a kultura (§ 6 odst. 9 písm. d) bod 2)",
-                "old_age_savings": "Spoření na stáří a dlouhodobá péče (§ 6 odst. 9 písm. m))"
+                "old_age_savings": "Spoření na stáří a dlouhodobá péče (§ 6 odst. 9 písm. m))",
+                "meal_per_shift": "Příspěvek na stravování za směnu (§ 6 odst. 9 písm. b))",
+                "temporary_accommodation": "Přechodné ubytování měsíčně (§ 6 odst. 9 písm. i))"
             },
             "exemption_basis": {
                 "none": "Bez uvedeného podkladu",
@@ -4575,7 +4578,9 @@
             "basket": {
                 "non_cash_health": "Zdravotní plnění",
                 "non_cash_leisure": "Rekreace, sport a kultura",
-                "old_age_savings": "Spoření na stáří a dlouhodobá péče"
+                "old_age_savings": "Spoření na stáří a dlouhodobá péče",
+                "meal_per_shift": "Příspěvek na stravování",
+                "temporary_accommodation": "Přechodné ubytování"
             },
             "status": {
                 "ok": "V limitu",

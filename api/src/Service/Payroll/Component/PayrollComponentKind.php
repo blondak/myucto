@@ -25,6 +25,7 @@ enum PayrollComponentKind: string
     case BENEFIT_EDUCATION = 'benefit_education';
     case BENEFIT_RECREATION = 'benefit_recreation';
     case BENEFIT_HEALTH = 'benefit_health';
+    case BENEFIT_ACCOMMODATION = 'benefit_accommodation';
     case RISKY_SAVINGS = 'risky_savings';
     case TRAVEL_REIMBURSEMENT = 'travel_reimbursement';
     case OTHER = 'other';

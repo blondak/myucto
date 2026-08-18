@@ -67,11 +67,22 @@ final class PayrollComponentDefaults
                 ['NAHRADA_KONKURENCNI_DOLOZKA', 'Náhrada za konkurenční doložku', 'competitive_clause', 'monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
                 ['DOPLATEK_MZDY', 'Doplatek mzdy za minulé období', 'backpay', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['NEPENEZNI_PRIJEM', 'Nepeněžní příjem', 'non_cash', 'non_monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
-                // Limit § 6 odst. 9 písm. b) ZDP je ZA SMĚNU (70 % horní hranice
-                // stravného 5–12 h), ne za rok — roční strop složky ho nevyjádří.
-                // Ruleset to nese jako vědomé ruční posouzení
-                // `benefit_exemption.meal.per_shift`.
-                ['PRISPEVEK_STRAVOVANI', 'Příspěvek na stravování', 'benefit_meal', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
+                // § 6 odst. 9 písm. b) ZDP. Limit je ZA SMĚNU (70 % horní hranice
+                // stravného za cestu 5 až 12 hodin), ne za rok — roční strop složky
+                // ho nevyjádří, proto ho drží koš `meal_per_shift`: ruleset dá
+                // částku na jednu směnu a počet směn s nárokem dodá evidence
+                // docházky ({@see PayrollMealShiftEvidenceService}). Do limitu se
+                // neodvádí nic; nadlimitní část odbaví samostatná složka
+                // `.nadlimit` ve výpočtu běhu, stejně jako u ročního koše.
+                ['PRISPEVEK_STRAVOVANI', 'Příspěvek na stravování', 'benefit_meal', 'monetary', 'regular', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'included', 'meal_per_shift', 'periodic_benefit_limit'],
+                // § 6 odst. 9 písm. i) ZDP — hodnota přechodného ubytování do
+                // 3 500 Kč měsíčně. Osvobozeno je jen NEPENĚŽNÍ plnění, jen mimo
+                // pracovní cestu a jen tehdy, není-li obec přechodného ubytování
+                // shodná s obcí bydliště zaměstnance. Obec ani účel plnění aplikace
+                // v datech nemá; tyhle podmínky nese ZAŘAZENÍ složky, které volí
+                // účetní, a aplikace hlídá to jediné, co spočítat umí — měsíční
+                // strop.
+                ['PRECHODNE_UBYTOVANI', 'Přechodné ubytování zaměstnance', 'benefit_accommodation', 'non_monetary', 'regular', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'included', 'temporary_accommodation', 'periodic_benefit_limit'],
                 // Soukromé užití vozidla je podle § 6 odst. 6 ZDP OCENĚNÍ příjmu
                 // (1 % / 0,5 % / 0,25 % vstupní ceny měsíčně), ne osvobozený
                 // benefit — žádný roční strop osvobození neexistuje.

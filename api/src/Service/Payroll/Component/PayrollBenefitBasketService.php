@@ -9,7 +9,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 
 /**
- * Roční koše osvobození benefitů — jediná čtecí cesta k limitu a k rozpadu.
+ * Koše osvobození plnění zaměstnanci — jediná čtecí cesta k limitu a k rozpadu.
  *
  * Limit se NEKOPÍRUJE do mzdové složky ani do vstupu: složka nese jen zařazení do
  * koše a částku drží ruleset. Kdyby se kopírovala, změna průměrné mzdy by musela
@@ -23,26 +23,58 @@ final class PayrollBenefitBasketService
     public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
 
     /**
-     * Zákonný limit koše pro dané zdaňovací období.
+     * Zákonný limit koše pro rozhodné období mzdového vstupu.
      *
-     * Datum je konec kalendářního roku: limit je „za zdaňovací období", ne za
-     * měsíc, a zdaňovacím obdobím poplatníka daně z příjmů fyzických osob je
-     * podle § 16b ZDP kalendářní rok. Odečítat ho k měsíci vstupu by znamenalo,
-     * že se koš uprostřed roku sám přeloží.
+     * ROZHODNÝ DEN ČTENÍ RULESETU se liší podle toho, za jaké období zákon limit
+     * dává ({@see PayrollBenefitExemptionBasket::accumulatesPerMonth()}):
+     *
+     *  - roční koš (§ 6 odst. 9 písm. d) a m)) se čte ke KONCI kalendářního roku.
+     *    Limit je „za zdaňovací období" a tím je podle § 16b ZDP kalendářní rok;
+     *    odečítat ho k měsíci vstupu by znamenalo, že se koš uprostřed roku sám
+     *    přeloží.
+     *  - měsíční koš (písm. b) a i)) se čte k MĚSÍCI vstupu — jiný měsíc může
+     *    spadat pod jiný ruleset a zpětně by se nic přepočítávat nemělo.
+     *
+     * U příspěvku na stravování ruleset drží limit NA JEDNU SMĚNU a měsíční strop
+     * je jeho násobek počtem doložených nároků. Nula nároků tedy dává nulový
+     * strop — to není chyba rulesetu, ale výsledek: bez odpracované směny se
+     * podle písm. b) neosvobodí nic.
      */
-    public function limitMinor(PayrollBenefitExemptionBasket $basket, int $taxYear): int
-    {
+    public function limitMinor(
+        PayrollBenefitExemptionBasket $basket,
+        string $periodStart,
+        int $shiftEntitlements = 0,
+    ): int {
         $value = $this->rulesets
-            ->forCalculation(PayrollRulesetDomain::IncomeTax, sprintf('%04d-12-31', $taxYear))
+            ->forCalculation(PayrollRulesetDomain::IncomeTax, $this->effectiveOn($basket, $periodStart))
             ->parameter($basket->rulesetKey())
             ->value;
         if (!is_int($value) || $value <= 0) {
             throw new PayrollRulesetException(
-                "Roční limit {$basket->rulesetKey()} není částka v haléřích.",
+                "Limit koše {$basket->rulesetKey()} není částka v haléřích.",
+            );
+        }
+        if (!$basket->scalesWithShifts()) {
+            return $value;
+        }
+        if ($shiftEntitlements < 0) {
+            throw new PayrollRulesetException(
+                'Počet nároků na příspěvek na stravování nesmí být záporný.',
             );
         }
 
-        return $value;
+        return $value * $shiftEntitlements;
+    }
+
+    private function effectiveOn(
+        PayrollBenefitExemptionBasket $basket,
+        string $periodStart,
+    ): string {
+        if ($basket->accumulatesPerMonth()) {
+            return $periodStart;
+        }
+
+        return substr($periodStart, 0, 4) . '-12-31';
     }
 
     /**
@@ -59,11 +91,12 @@ final class PayrollBenefitBasketService
      */
     public function split(
         PayrollBenefitExemptionBasket $basket,
-        int $taxYear,
+        string $periodStart,
         int $usedBeforeMinor,
         int $amountMinor,
+        int $shiftEntitlements = 0,
     ): PayrollBenefitBasketSplit {
-        $limit = $this->limitMinor($basket, $taxYear);
+        $limit = $this->limitMinor($basket, $periodStart, $shiftEntitlements);
         $amount = max(0, $amountMinor);
         $headroom = max(0, $limit - max(0, $usedBeforeMinor));
         $exempt = min($amount, $headroom);
@@ -75,6 +108,7 @@ final class PayrollBenefitBasketService
             amountMinor: $amount,
             exemptMinor: $exempt,
             taxableMinor: $amount - $exempt,
+            shiftEntitlements: $basket->scalesWithShifts() ? $shiftEntitlements : null,
         );
     }
 }

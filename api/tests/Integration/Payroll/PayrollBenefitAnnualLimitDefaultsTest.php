@@ -129,8 +129,14 @@ final class PayrollBenefitAnnualLimitDefaultsTest extends TestCase
         self::assertSame('non_cash_health', $seeded['ZDRAVOTNI_BENEFIT']['exemption_basket']);
         // § 6 odst. 9 písm. m) ZDP — 50 000 Kč ročně.
         self::assertSame('old_age_savings', $seeded['PRISPEVEK_PENZE_ZIVOTNI']['exemption_basket']);
-        // Stravování má limit za směnu, ne za rok — koš tu nesmí vzniknout.
-        self::assertNull($seeded['PRISPEVEK_STRAVOVANI']['exemption_basket']);
+        // § 6 odst. 9 písm. b) ZDP — limit je za směnu, ne za rok, ale koš to
+        // nese: ruleset drží částku na směnu a počet směn dodá evidence docházky.
+        self::assertSame('meal_per_shift', $seeded['PRISPEVEK_STRAVOVANI']['exemption_basket']);
+        // § 6 odst. 9 písm. i) ZDP — 3 500 Kč měsíčně.
+        self::assertSame(
+            'temporary_accommodation',
+            $seeded['PRECHODNE_UBYTOVANI']['exemption_basket'],
+        );
 
         // Zákonná částka NESMÍ skončit ve složkovém stropu: ten je tvrdá zábrana
         // schválení, kdežto zákon nadlimitní plnění zdaňuje, nezakazuje.

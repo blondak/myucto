@@ -49,11 +49,17 @@ final class CzechPayrollRulesets2026Test extends TestCase
      * `CONTENT_HASHES` posunul výhradně u domény daně z příjmů, a to kvůli novým
      * parametrům, ne kvůli schvalovateli.
      *
+     * Posedmé doplněním limitů § 6 odst. 9 písm. b) a i) ZDP — příspěvku na
+     * stravování za směnu a přechodného ubytování za měsíc. `meal.per_shift`
+     * přitom PŘESTAL být ručním posouzením a stal se částkou: ruční posouzení
+     * má držet jen to, k čemu podklad neexistuje, a počet odpracovaných směn
+     * modul zná z docházky.
+     *
      * POZOR: tenhle pin je nad PLNÝM snapshotem, tedy včetně jména schvalovatele.
      * Platí proto pro VÝCHOZÍHO schvalovatele; instalace s jiným provozovatelem má
      * legitimně jiné číslo. Test si default proto vynutí sám.
      */
-    private const EXPECTED_MANIFEST_SHA256 = '1279457d085f1ff799ba08300ec86d6f816a8ba688732aac9e53e6be6900dc95';
+    private const EXPECTED_MANIFEST_SHA256 = 'c158225f5dee3fda4d1593d1dc5b7a31742145ffa260cdeb3eae407eb0eed679';
 
     protected function setUp(): void
     {
@@ -126,6 +132,41 @@ final class CzechPayrollRulesets2026Test extends TestCase
         self::assertSame('0.135', $health->parameter('total.rate')->value);
         self::assertSame(2_240_000, $employment->parameter('minimum_wage.monthly_40h_week')->value);
         self::assertSame(13_440, $employment->parameter('minimum_wage.hourly_40h_week')->value);
+    }
+
+    /**
+     * § 6 odst. 9 písm. b) ZDP neurčuje částku číslem, ale ODVOZENÍM: „70 %
+     * horní hranice stravného, které lze poskytnout zaměstnancům odměňovaným
+     * platem při pracovní cestě trvající 5 až 12 hodin". Ta hranice bydlí
+     * v doméně cestovních náhrad a mění se vyhláškou každý rok.
+     *
+     * Ruleset nese obojí — sazbu i výslednou částku — protože počítat ji za běhu
+     * přes dvě domény by z limitu udělalo derivát cizí sady. Cenou za to je, že
+     * se čísla můžou rozejít; tenhle test je ta pojistka. Kdyby vyhláška zvedla
+     * stravné a někdo zapomněl na `benefit_exemption.meal.per_shift`, spadne to
+     * tady, ne až na výplatní pásce.
+     */
+    public function testMealExemptionPerShiftFollowsTheTravelMealAllowanceCeiling(): void
+    {
+        $provider = CzechPayrollRulesets2026::provider();
+        $incomeTax = $provider->forDate(PayrollRulesetDomain::IncomeTax, '2026-08-03');
+        $travel = $provider->forDate(PayrollRulesetDomain::TravelAllowances, '2026-08-03');
+
+        $ceiling = $travel->parameter('meal_allowance.band_1.tax_exempt_maximum')->value;
+        $rate = $incomeTax->parameter('benefit_exemption.meal.shift_rate')->value;
+        self::assertIsInt($ceiling);
+        self::assertIsString($rate);
+
+        self::assertSame(
+            (int) round($ceiling * (float) $rate),
+            $incomeTax->parameter('benefit_exemption.meal.per_shift')->value,
+            'Osvobozený příspěvek na stravování za směnu se rozešel se sazbou stravného, '
+            . 'ze které podle § 6 odst. 9 písm. b) ZDP plyne.',
+        );
+        // Pásmo 5 až 12 hodin — kdyby se změnila jeho horní mez v minutách,
+        // odvozovalo by se z jiné sazby, než jakou zákon jmenuje.
+        self::assertSame(300, $travel->parameter('meal_allowance.from_minutes')->value);
+        self::assertSame(720, $travel->parameter('meal_allowance.band_1.to_minutes')->value);
     }
 
     public function testEverySourceHasRetrievalDateAndOfficialHttpsUrl(): void
@@ -251,6 +292,16 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'advance.rounding.base_above_100_czk' => ['text', 'ceil-to-100-czk'],
                 'advance.rounding.base_up_to_100_czk' => ['text', 'ceil-to-1-czk'],
                 'advance.rounding.result' => ['text', 'ceil-to-1-czk'],
+                // § 6 odst. 9 písm. b) ZDP — limit ZA JEDNU SMĚNU, 70 % horní hranice
+                // stravného za cestu 5 až 12 hodin. Meze jsou tři a každá je jinak
+                // ostrá: „alespoň 3 hodiny" práce (neostře), „delší než 11 hodin"
+                // délka směny v úhrnu s přestávkou (ostře) a „alespoň 11 hodin"
+                // odpracované doby ve větvi bez rozvržení na směny (neostře).
+                'benefit_exemption.meal.minimum_work_minutes' => ['integer', 180],
+                'benefit_exemption.meal.per_shift' => ['money_minor', 12_950],
+                'benefit_exemption.meal.second_contribution_day_minutes' => ['integer', 660],
+                'benefit_exemption.meal.second_contribution_shift_minutes' => ['integer', 660],
+                'benefit_exemption.meal.shift_rate' => ['decimal_rate', '0.7'],
                 // § 6 odst. 9 písm. d) ZDP, dva samostatné roční úhrnné limity
                 // z průměrné mzdy 48 967 Kč (§ 21g ZDP): bod 1 zdravotnická plnění
                 // celá průměrná mzda, bod 2 volnočasová plnění její polovina.
@@ -258,6 +309,8 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'benefit_exemption.non_cash_leisure.yearly' => ['money_minor', 2_448_350],
                 // § 6 odst. 9 písm. p) ZDP — pevná částka ze zákona, ne odvozenina.
                 'benefit_exemption.old_age_savings.yearly' => ['money_minor', 5_000_000],
+                // § 6 odst. 9 písm. i) ZDP — „maximálně do výše 3 500 Kč měsíčně".
+                'benefit_exemption.temporary_accommodation.monthly' => ['money_minor', 350_000],
                 // § 35d odst. 4 „alespoň 50 Kč" versus § 35c odst. 3 „alespoň 100 Kč".
                 // Roční hodnota NENÍ dvanáctinásobek měsíční — proto tu stojí obě.
                 'bonus.minimum_amount.monthly' => ['money_minor', 5_000],
@@ -336,14 +389,12 @@ final class CzechPayrollRulesets2026Test extends TestCase
 
         self::assertSame([
             'income_tax' => [
-                // Limit § 6 odst. 9 písm. b) ZDP je za směnu, ne za rok. Musí tu
-                // být VIDĚT jako vědomé ruční posouzení — kdyby se tichým doplněním
-                // částky stal „supported", roční strop mzdové složky by tvrdil
-                // limit, který zákon takhle nestanoví.
-                'benefit_exemption.meal.per_shift' =>
-                    'Příspěvek na stravování je osvobozený do 70 % horní hranice stravného za '
-                    . 'pracovní cestu 5 až 12 hodin, a to za každou směnu zvlášť. Roční limit '
-                    . 'mzdové složky takový strop nevyjádří a aplikace ho proto netvrdí.',
+                // `benefit_exemption.meal.per_shift` tu SCHVÁLNĚ UŽ NENÍ. Byl ručním
+                // posouzením, dokud aplikace neuměla rozpad na směny; od chvíle,
+                // kdy limit stojí na počtu směn z evidence docházky, je to částka
+                // jako každá jiná. Ruční posouzení se drží jen tam, kde podklad
+                // NEEXISTUJE, ne tam, kde ho nikdo nenapsal.
+                //
                 // Částky slevy na manžela v rulesetu JSOU, nárok na ni ale ne:
                 // § 35bb odst. 2 písm. a) žádá od 2024 i vyživované dítě do 3 let
                 // ve společně hospodařící domácnosti. Kdyby se tenhle klíč tiše
