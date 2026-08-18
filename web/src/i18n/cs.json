@@ -7752,8 +7752,9 @@
             },
             "series": {
                 "title": "Číselné řady",
-                "hint": "Číselné řady deníku per rok — prefix lze upravit, čísla se vydávají vzestupně a mezery po smazaných zápisech se nedorovnávají.",
+                "hint": "Číselné řady deníku per rok — prefix, tvar čísla i další číslo lze upravit, čísla se vydávají vzestupně a mezery po smazaných zápisech se nedorovnávají.",
                 "empty": "Zatím žádné číselné řady — vzniknou při prvním výdeji čísla.",
+                "not_issued": "zatím nevydáno",
                 "code": "Řada",
                 "codes": {
                     "closing": "Uzávěrkové zápisy (UZ)",

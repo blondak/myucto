@@ -7752,8 +7752,9 @@
             },
             "series": {
                 "title": "Document series",
-                "hint": "Journal document series per year — the prefix is editable, numbers are issued sequentially and gaps after deleted entries are not reused.",
+                "hint": "Journal document series per year — the prefix, number format and next number are editable, numbers are issued sequentially and gaps after deleted entries are not reused.",
                 "empty": "No document series yet — they are created when the first number is issued.",
+                "not_issued": "not issued yet",
                 "code": "Series",
                 "codes": {
                     "closing": "Closing entries (UZ)",

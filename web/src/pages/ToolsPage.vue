@@ -9,6 +9,7 @@ import FxRateSettings from '@/pages/accounting/FxRateSettings.vue'
 import RepoRates from '@/pages/accounting/RepoRates.vue'
 import AccountingArchive from '@/pages/accounting/AccountingArchive.vue'
 import CostCenters from '@/pages/accounting/CostCenters.vue'
+import DocumentSeries from '@/pages/accounting/DocumentSeries.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -25,9 +26,10 @@ const isDoubleEntry = computed(() => supplierStore.currentSupplier?.accounting_m
 // /invoices/export|import a /purchase-invoices/export|import, zavěšené jako
 // nav položky pod Prodej a Nákup (viz AppLayout.vue) — už tady není záložka.
 // Účetní období (Uzávěrka) se vytáhla do vlastní top-level položky menu
-// /accounting/periods — už tady není záložka.
-type Tab = 'cost-centers' | 'posting-rules' | 'fx-rates' | 'repo-rates' | 'archive'
-const DOUBLE_ENTRY_TABS: Tab[] = ['posting-rules', 'cost-centers', 'fx-rates', 'repo-rates']
+// /accounting/periods — už tady není záložka; číselné řady deníku naopak přišly
+// z modalu Uzávěrky sem jako vlastní záložka (jen podvojné účetnictví).
+type Tab = 'cost-centers' | 'posting-rules' | 'fx-rates' | 'repo-rates' | 'document-series' | 'archive'
+const DOUBLE_ENTRY_TABS: Tab[] = ['posting-rules', 'cost-centers', 'fx-rates', 'repo-rates', 'document-series']
 const visibleTabs = computed<Tab[]>(() => [
   ...(isDoubleEntry.value ? DOUBLE_ENTRY_TABS : []),
   ...((isDoubleEntry.value && isAdmin.value) ? ['archive'] as Tab[] : []),
@@ -60,6 +62,7 @@ function tabLabel(v: Tab): string {
     : v === 'posting-rules' ? t('nav.accounting_rules')
     : v === 'fx-rates' ? t('nav.accounting_fx_rates')
     : v === 'repo-rates' ? t('nav.accounting_repo_rates')
+    : v === 'document-series' ? t('accounting.closing.series.title')
     : t('nav.accounting_archive')
 }
 </script>
@@ -85,6 +88,7 @@ function tabLabel(v: Tab): string {
     <PostingRules         v-else-if="section === 'posting-rules'"   embedded />
     <FxRateSettings       v-else-if="section === 'fx-rates'"        embedded />
     <RepoRates            v-else-if="section === 'repo-rates'"      embedded />
+    <DocumentSeries       v-else-if="section === 'document-series'" embedded />
     <AccountingArchive    v-else-if="section === 'archive'"         embedded />
   </div>
 </template>

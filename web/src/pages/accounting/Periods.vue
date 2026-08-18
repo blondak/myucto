@@ -5,11 +5,9 @@ import { RouterLink } from 'vue-router'
 import { accountingApi } from '@/api/accounting'
 import {
   closingApi,
-  seriesApi,
   closingSettingsApi,
   type ClosingPeriod,
   type ClosingPeriodStatus,
-  type DocumentSeries,
   type AccountingClosingSettings,
 } from '@/api/closing'
 import { useAuthStore } from '@/stores/auth'
@@ -41,7 +39,7 @@ const showForm = ref(false)
 useHotkey('escape', () => {
   if (showForm.value) showForm.value = false
   if (statusDialog.period) statusDialog.period = null
-  if (showSeries.value) showSeries.value = false
+  if (showSettings.value) showSettings.value = false
 })
 
 const currentYear = new Date().getFullYear()
@@ -137,81 +135,22 @@ async function submitStatusDialog() {
   }
 }
 
-// ── Číselné řady (R13) + nastavení uzávěrky ────────────────────────────────
-const showSeries = ref(false)
-const series = ref<DocumentSeries[]>([])
-const seriesLoading = ref(false)
-type SeriesEdit = { prefix: string; number_format: string; next_number: string }
-const seriesEdits = reactive<Record<string, SeriesEdit>>({})
+// ── Nastavení uzávěrky ──────────────────────────────────────────────────────
+// Číselné řady deníku se přesunuly do Nástrojů (/utilities?section=document-series).
+const showSettings = ref(false)
 const settings = ref<AccountingClosingSettings | null>(null)
+const settingsLoading = ref(false)
 const settingsSaving = ref(false)
 
-const seriesKey = (s: DocumentSeries) => `${s.series_code}-${s.fiscal_year}`
-
-async function openSeries() {
-  showSeries.value = true
-  seriesLoading.value = true
-  try {
-    series.value = await seriesApi.list()
-    for (const s of series.value) fillSeriesEdit(s)
-  } catch (e: any) {
-    series.value = []
+async function openSettings() {
+  showSettings.value = true
+  settingsLoading.value = true
+  try { settings.value = await closingSettingsApi.get() }
+  catch (e: any) {
+    settings.value = null
     toast.error(localizedError(e) || t('common.error'))
   } finally {
-    seriesLoading.value = false
-  }
-  try { settings.value = await closingSettingsApi.get() } catch { settings.value = null }
-}
-
-function fillSeriesEdit(s: DocumentSeries) {
-  seriesEdits[seriesKey(s)] = {
-    prefix: s.prefix,
-    number_format: s.number_format || '',
-    next_number: String(s.next_number),
-  }
-}
-
-/** Náhled čísla dle rozeditované šablony — stejná pravidla jako DocumentSeriesService::format. */
-function seriesPreview(s: DocumentSeries): string {
-  const e = seriesEdits[seriesKey(s)]
-  if (!e) return ''
-  const tpl = (e.number_format.trim() || '{PREFIX}-{YYYY}-{CCCC}').toUpperCase()
-  const n = Math.max(1, Number(e.next_number) || 1)
-  return tpl
-    .replace(/\{PREFIX\}/g, e.prefix.trim().toUpperCase())
-    .replace(/\{YYYY\}/g, String(s.fiscal_year))
-    .replace(/\{YY\}/g, String(s.fiscal_year).slice(-2))
-    .replace(/\{(C+)\}/g, (_m, c: string) => String(n).padStart(c.length, '0'))
-}
-
-async function saveSeries(s: DocumentSeries) {
-  const e = seriesEdits[seriesKey(s)]
-  if (!e) return
-  const prefix = e.prefix.trim().toUpperCase()
-  if (!/^[A-Z0-9]{1,10}$/.test(prefix)) {
-    toast.warning(t('accounting.closing.series.prefix_invalid'))
-    return
-  }
-  const format = e.number_format.trim().toUpperCase()
-  if (format !== '' && !/\{C+\}/.test(format)) {
-    toast.warning(t('accounting.closing.series.format_invalid'))
-    return
-  }
-  const next = Number(e.next_number)
-  if (!Number.isInteger(next) || next < 1 || next > 999999999) {
-    toast.warning(t('accounting.closing.series.next_number_invalid'))
-    return
-  }
-  try {
-    series.value = await seriesApi.update(s.series_code, s.fiscal_year, {
-      prefix,
-      number_format: format === '' ? null : format,
-      next_number: next,
-    })
-    for (const row of series.value) fillSeriesEdit(row)
-    toast.success(t('common.saved'))
-  } catch (e: any) {
-    toast.error(localizedError(e) || t('common.error'))
+    settingsLoading.value = false
   }
 }
 
@@ -260,9 +199,9 @@ function statusBadge(status: string): string {
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.periods.subtitle') }}</p>
       </div>
       <div class="flex items-center gap-2">
-        <button v-if="auth.canWrite('accounting.periods.manage')" @click="openSeries" :class="btnOutline('neutral')">
+        <button v-if="auth.canWrite('accounting.periods.manage')" @click="openSettings" :class="btnOutline('neutral')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
-          {{ t('accounting.closing.series.title') }}
+          {{ t('accounting.closing.settings.title') }}
         </button>
         <button v-if="auth.canWrite('accounting.periods.manage')" @click="openCreate" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
@@ -433,56 +372,12 @@ function statusBadge(status: string): string {
       </div>
     </div>
 
-    <!-- Modal: číselné řady + nastavení uzávěrky -->
-    <div v-if="showSeries" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div class="bg-surface rounded-xl shadow-lg max-w-3xl w-full p-5 max-h-[85vh] overflow-y-auto">
-        <h3 class="text-lg font-semibold mb-3">{{ t('accounting.closing.series.title') }}</h3>
-        <p class="text-sm text-neutral-500 mb-1">{{ t('accounting.closing.series.hint') }}</p>
-        <p class="text-sm text-neutral-500 mb-3">{{ t('accounting.closing.series.format_hint') }}</p>
-        <div v-if="seriesLoading" class="text-sm text-neutral-500 py-4">{{ t('common.loading') }}</div>
-        <EmptyState v-else-if="!series.length" dense accent="neutral" icon="tag" :title="t('accounting.closing.series.empty')" />
-        <table v-else class="w-full text-sm mb-4">
-          <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
-            <tr>
-              <th class="px-3 py-2 text-left font-medium">{{ t('accounting.closing.series.code') }}</th>
-              <th class="px-3 py-2 text-left font-medium w-20">{{ t('common.year') }}</th>
-              <th class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.closing.series.prefix') }}</th>
-              <th class="px-3 py-2 text-left font-medium w-44">{{ t('accounting.closing.series.number_format') }}</th>
-              <th class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.closing.series.next_number') }}</th>
-              <th class="px-3 py-2 text-left font-medium w-40">{{ t('accounting.closing.series.preview') }}</th>
-              <th class="px-3 py-2 w-20"></th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-neutral-100">
-            <tr v-for="s in series" :key="`${s.series_code}-${s.fiscal_year}`">
-              <td class="px-3 py-2">{{ t(`accounting.closing.series.codes.${s.series_code}`) }}</td>
-              <td class="px-3 py-2">{{ s.fiscal_year }}</td>
-              <td class="px-3 py-2">
-                <input v-model="seriesEdits[`${s.series_code}-${s.fiscal_year}`].prefix" type="text" maxlength="10"
-                  class="w-full h-8 px-2 border border-neutral-300 rounded-md text-sm font-mono uppercase" />
-              </td>
-              <td class="px-3 py-2">
-                <input v-model="seriesEdits[`${s.series_code}-${s.fiscal_year}`].number_format" type="text" maxlength="40"
-                  :placeholder="'{PREFIX}-{YYYY}-{CCCC}'"
-                  class="w-full h-8 px-2 border border-neutral-300 rounded-md text-sm font-mono uppercase" />
-              </td>
-              <td class="px-3 py-2">
-                <input v-model="seriesEdits[`${s.series_code}-${s.fiscal_year}`].next_number" type="number" min="1" step="1"
-                  class="w-full h-8 px-2 border border-neutral-300 rounded-md text-sm font-mono text-right" />
-              </td>
-              <td class="px-3 py-2 font-mono text-xs text-neutral-500">{{ seriesPreview(s) }}</td>
-              <td class="px-3 py-2 text-right">
-                <button @click="saveSeries(s)"
-                  class="cursor-pointer text-xs text-primary-600 hover:text-primary-700 font-medium">
-                  {{ t('common.save') }}
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        <template v-if="settings">
-          <h4 class="text-sm font-semibold mb-2 border-t border-neutral-200 pt-3">{{ t('accounting.closing.settings.title') }}</h4>
+    <!-- Modal: nastavení uzávěrky -->
+    <div v-if="showSettings" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div class="bg-surface rounded-xl shadow-lg max-w-xl w-full p-5 max-h-[85vh] overflow-y-auto">
+        <h3 class="text-lg font-semibold mb-3">{{ t('accounting.closing.settings.title') }}</h3>
+        <div v-if="settingsLoading" class="text-sm text-neutral-500 py-4">{{ t('common.loading') }}</div>
+        <template v-else-if="settings">
           <div class="space-y-2 mb-3">
             <label class="flex items-start gap-2 text-sm cursor-pointer">
               <input type="checkbox" v-model="settings.statutory_audit" class="mt-0.5" />
@@ -522,7 +417,7 @@ function statusBadge(status: string): string {
         </template>
 
         <div class="flex justify-end pt-3">
-          <button @click="showSeries = false" :class="btnOutline('neutral')">
+          <button @click="showSettings = false" :class="btnOutline('neutral')">
             {{ t('common.close') }}
           </button>
         </div>

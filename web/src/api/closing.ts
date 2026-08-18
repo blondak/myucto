@@ -461,6 +461,26 @@ export type SeriesCode =
   | 'stock_in' | 'stock_out' | 'stock_transfer'
   | 'offset' | 'purchase_order'
 
+/**
+ * Výchozí prefixy řad = zrcadlo DocumentSeriesService::DEFAULT_PREFIXES. Řádek řady
+ * v DB vzniká lazy až prvním výdejem čísla, takže UI z nich skládá dosud neexistující
+ * řady, aby šly nastavit dopředu (převzetí řady z jiného systému).
+ */
+export const SERIES_DEFAULT_PREFIXES: Record<SeriesCode, string> = {
+  closing: 'UZ',
+  opening: 'OT',
+  fx: 'KR',
+  transfer: 'PP',
+  manual: 'ID',
+  cash_in: 'PPD',
+  cash_out: 'VPD',
+  stock_in: 'PRI',
+  stock_out: 'VYD',
+  stock_transfer: 'PRE',
+  offset: 'ZAP',
+  purchase_order: 'OBJ',
+}
+
 export interface DocumentSeries {
   id?: number
   series_code: SeriesCode

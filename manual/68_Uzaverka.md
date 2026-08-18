@@ -427,10 +427,9 @@ a administrátor ho může vzít zpět.
 
 ## 68.5 Číselné řady dokladů uzávěrky
 
-Tlačítkem **„Číselné řady"** na stránce Účetní období (jen administrátor) otevřeš
-modální okno se dvěma částmi:
-
-**Číselné řady** — tabulka řad dokladů per účetní rok:
+Číselné řady se spravují v **Nástrojích** na záložce **„Číselné řady"**
+(`/utilities?section=document-series`, jen podvojné účetnictví). Tabulka drží řady
+dokladů per účetní rok:
 
 | Řada | Kód | Výchozí prefix |
 |---|---|---|
@@ -464,7 +463,10 @@ vystavený v MyÚčtu pak bude `26HP00011` a řada zůstane spojitá. Čítač l
 jedinečnost čísla ale hlídá databáze, takže kolize s už existujícím dokladem skončí
 chybou uložení, ne tichým duplikátem.
 
-**Nastavení uzávěrky a výkazů** — firemní výchozí hodnoty:
+### Nastavení uzávěrky a výkazů
+
+Tlačítkem **„Nastavení uzávěrky"** na stránce Účetní období otevřeš firemní výchozí
+hodnoty:
 
 - **Podléhá povinnému auditu (§20 ZoÚ)** — auditovaná jednotka pak sestavuje výkazy
   vždy v plném rozsahu (§3a vyhl. 500/2002 Sb.).
