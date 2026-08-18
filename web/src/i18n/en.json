@@ -1065,6 +1065,11 @@
                 "annual_maximum_applied": "The annual maximum assessment base applied: {ytd} has already been assessed this year, so this month's base was reduced by {reduction} to {capped}.",
                 "employee_rate": "Employee rate",
                 "employer_rate": "Employer rate",
+                "employer_rate_category": {
+                    "ordinary": "Employer rate — § 5a(1)(a)",
+                    "rescue_and_company_fire_service": "Employer rate — § 5a(1)(b) rescuers and company fire brigades",
+                    "risk_employment": "Employer rate — § 5a(1)(c) risk-category employment"
+                },
                 "step_sentence": "{base} × {rate} = {raw}, rounded up to whole crowns {rounded}",
                 "step_not_recorded": "This revision did not record the intermediate step.",
                 "working_pensioner_discount": "Working pensioner discount",
@@ -2366,6 +2371,14 @@
             "a1_certificate_until": "A1 certificate valid until",
             "tax_declaration": "Signed tax declaration",
             "risky_work": "Risk-category work",
+            "social_employer_rate_category_label": "Employer social insurance rate (§ 5a(1))",
+            "social_employer_rate_category": {
+                "ordinary": "Ordinary rate — point a)",
+                "rescue_and_company_fire_service": "Medical rescuer or company fire brigade — point b)",
+                "risk_employment": "Risk-category employment — point c)"
+            },
+            "social_employer_rate_category_evidence": "Evidence reference for the classification",
+            "social_employer_rate_category_evidence_hint": "The higher rate applies only to a documented classification. State where the evidence is (for example the work categorisation decision number). Without it the payroll calculation stops for manual review — it does not fall back to the ordinary rate.",
             "change_reason": "Reason for change",
             "checklist_title": "Duties",
             "checklist_open": "Open: {count}",

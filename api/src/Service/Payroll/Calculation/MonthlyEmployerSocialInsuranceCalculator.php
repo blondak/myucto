@@ -10,6 +10,18 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
 use OverflowException;
 use UnexpectedValueException;
 
+/**
+ * Souhrnné pojistné zaměstnavatele JEDINOU sazbou — běžnou podle § 7 odst. 1
+ * písm. a).
+ *
+ * Firemní částku z něj brát NELZE, jakmile má zaměstnavatel v měsíci i jinou
+ * kategorii § 5a odst. 1: písm. b) a c) mají vlastní sazbu i vlastní
+ * zaokrouhlení a rozpad počítá
+ * {@see \MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthCalculator}.
+ * Tady zůstává výpočet ročního maxima po osobách — ten je na kategorii nezávislý
+ * a měsíční kalkulátor si o něj opírá kontrolu, že se obě cesty k vyměřovacímu
+ * základu po stropu shodly.
+ */
 final class MonthlyEmployerSocialInsuranceCalculator
 {
     public function __construct(private readonly PayrollRulesetProvider $rulesets) {}

@@ -31,6 +31,7 @@ final readonly class SocialInsuranceRelationshipInput
         public ?int $annualMaximumAllocationOrder = null,
         public ?string $partTimeEmployerDiscountEvidenceReference = null,
         ?SocialParticipationAggregationGroup $participationAggregationGroup = null,
+        public ?string $employerRateCategoryEvidenceReference = null,
     ) {
         if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/D', $relationshipId) !== 1) {
             throw new InvalidArgumentException('Social insurance relationship ID is not canonical.');
@@ -76,6 +77,41 @@ final readonly class SocialInsuranceRelationshipInput
             $partTimeEmployerDiscountEvidenceReference,
             'Part-time employer discount',
         );
+        /*
+         * Zvýšená sazba podle § 5a odst. 1 písm. b) a c) stojí na věcném
+         * zařazení zaměstnance, které se dokládá (rizikové zaměstnání podle
+         * § 37d odst. 2 zákona o důchodovém pojištění vzniká z kategorizace
+         * prací, ne z políčka ve mzdovém listu). Vstup ho proto bez odkazu na
+         * podklad nepřijme; běžná sazba naopak žádný podklad nemá a mít nesmí.
+         */
+        if (
+            !in_array(
+                $employerRateCategory,
+                [SocialEmployerRateCategory::Ordinary, SocialEmployerRateCategory::Unverified],
+                true,
+            )
+            && ($employerRateCategoryEvidenceReference === null
+                || preg_match(
+                    '/^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/D',
+                    $employerRateCategoryEvidenceReference,
+                ) !== 1)
+        ) {
+            throw new InvalidArgumentException(
+                'Employer rate category above the ordinary rate requires an evidence reference.',
+            );
+        }
+        if (
+            in_array(
+                $employerRateCategory,
+                [SocialEmployerRateCategory::Ordinary, SocialEmployerRateCategory::Unverified],
+                true,
+            )
+            && $employerRateCategoryEvidenceReference !== null
+        ) {
+            throw new InvalidArgumentException(
+                'Employer rate category evidence reference is only allowed above the ordinary rate.',
+            );
+        }
         $resolvedAggregationGroup = $participationAggregationGroup ?? match ($kind) {
             SocialEmploymentKind::Employment =>
                 SocialParticipationAggregationGroup::RegularRelationship,

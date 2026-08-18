@@ -255,20 +255,6 @@ final class PayrollRuleParameterCatalog
                     . 'sezónní pracovníky v zemědělství na dohodu o provedení práce, uplatněte '
                     . 'slevu ručně a splnění podmínek doložte.',
             ],
-            'employer.rate.rescue_and_company_fire_service' => [
-                'why' => 'Sazba 29,8 % je oficiální, ale platí jen pro zaměstnance zařazené '
-                    . 'u hasičských záchranných sborů a podnikových hasičů. Zařazení je věcné '
-                    . 'rozhodnutí zaměstnavatele, ne údaj ze mzdového listu.',
-                'action' => 'Nemáte-li takové zaměstnance, nic nedělejte — počítá se běžnou sazbou '
-                    . 'zaměstnavatele. Máte-li je, zadejte jim vyšší sazbu ručně.',
-            ],
-            'employer.rate.risk_employment' => [
-                'why' => 'Sazba 27,8 % je oficiální, ale platí jen pro rizikové práce zařazené podle '
-                    . 'zákona o ochraně veřejného zdraví. Zařazení práce do kategorie aplikace '
-                    . 'nezná.',
-                'action' => 'Nemáte-li rizikové práce, nic nedělejte — počítá se běžnou sazbou '
-                    . 'zaměstnavatele. Máte-li je, zadejte jim vyšší sazbu ručně.',
-            ],
         ],
         'compensation_averages' => [
             'wage_compensation.manual_review' => [

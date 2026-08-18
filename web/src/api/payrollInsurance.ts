@@ -93,6 +93,14 @@ export interface PayrollSocialRelationshipBreakdown {
   annual_maximum_allocation_order: number | null
 }
 
+export interface PayrollEmployerSocialCategory {
+  category: string
+  paragraph5a_letter: string
+  assessment_base_minor: number
+  contribution_minor: number
+  contribution_step: PayrollInsuranceStep | null
+}
+
 export interface PayrollSocialBreakdown {
   available: true
   unavailable_reason: null
@@ -120,14 +128,22 @@ export interface PayrollSocialBreakdown {
   /**
    * `scope: 'company_month'` — pojistné zaměstnavatele není osobní veličina.
    * Počítá se ze součtu vyměřovacích základů všech zaměstnanců (§ 5a odst. 1
-   * z. č. 589/1992 Sb.) a zaokrouhluje se až na tom součtu.
+   * z. č. 589/1992 Sb.).
    *
-   * `allocation` je proto ROZDĚLENÍ firemní částky, ne zákonná osobní částka —
+   * Ty součty jsou TŘI — písm. a) ostatní, písm. b) zdravotničtí záchranáři
+   * a členové jednotky HZS podniku, písm. c) rizikové zaměstnání — a každý má
+   * vlastní sazbu podle § 7 odst. 1 i vlastní zaokrouhlení podle § 7 odst. 3.
+   * `categories` je jejich rozpad; `contribution_step` proto zůstane `null`,
+   * jakmile kategorie není jediná, protože jedním krokem částka nevznikla.
+   * Revize uložené dřív, než rozpad existoval, mají `categories: []`.
+   *
+   * `allocation` je ROZDĚLENÍ firemní částky, ne zákonná osobní částka —
    * a tak se to musí i vypsat. `is_statutory_personal_amount` je vždy `false`.
    */
   employer: {
     scope: 'company_month'
     allocation: PayrollEmployerSocialAllocation
+    categories: PayrollEmployerSocialCategory[]
     contribution_step: PayrollInsuranceStep | null
     assessment_base_minor: number | null
     contribution_before_discount_minor: number | null

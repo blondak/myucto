@@ -240,14 +240,20 @@ final class CzechPayrollRulesets2026
                 'employee.discount.working_pensioner' => PayrollRuleValue::rate('0.065'),
                 'employee.rate.ordinary' => PayrollRuleValue::rate('0.071'),
                 'employer.discount.part_time' => PayrollRuleValue::rate('0.05'),
+                // § 7 odst. 1 zák. č. 589/1992 Sb. dává zaměstnavateli TŘI sazby,
+                // každou z vlastního vyměřovacího základu podle § 5a odst. 1:
+                // písm. a) běžná 24,8 %, písm. b) zdravotničtí záchranáři a HZS
+                // podniku „počínaje rokem 2026" 29,8 %, písm. c) rizikové
+                // zaměstnání „v roce 2026" 27,8 %. Sazby b) a c) rostou po letech,
+                // takže patří do ročního rulesetu, ne do kódu.
+                //
+                // Zařazení zaměstnance ke kategorii ruleset NEROZHODUJE — to je
+                // údaj o konkrétním člověku a nese ho pracovní vztah spolu
+                // s odkazem na podklad. Bez doloženého zařazení skončí výpočet
+                // na `manual_review` ve vstupu, ne tady na chybějící sazbě.
                 'employer.rate.ordinary' => PayrollRuleValue::rate('0.248'),
-                'employer.rate.rescue_and_company_fire_service' => PayrollRuleValue::manualReview(
-                    'Sazba 29,8 % je oficiální, ale zařazení zaměstnance k hasičskému záchrannému '
-                    . 'sboru nebo mezi podnikové hasiče musí posoudit člověk.',
-                ),
-                'employer.rate.risk_employment' => PayrollRuleValue::manualReview(
-                    'Sazba 27,8 % je oficiální, ale zařazení práce mezi rizikové musí posoudit člověk.',
-                ),
+                'employer.rate.rescue_and_company_fire_service' => PayrollRuleValue::rate('0.298'),
+                'employer.rate.risk_employment' => PayrollRuleValue::rate('0.278'),
                 'maximum_assessment_base.yearly' => PayrollRuleValue::moneyMinor(235_041_600),
                 'participation.dpp.minimum' => PayrollRuleValue::moneyMinor(1_200_000),
                 'participation.small_scale.minimum' => PayrollRuleValue::moneyMinor(450_000),

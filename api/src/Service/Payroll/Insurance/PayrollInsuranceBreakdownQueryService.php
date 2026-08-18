@@ -223,9 +223,16 @@ final class PayrollInsuranceBreakdownQueryService
             /*
              * Pojistné zaměstnavatele NENÍ osobní veličina: § 5a odst. 1 zákona
              * č. 589/1992 Sb. dělá vyměřovacím základem zaměstnavatele „úhrn
-             * vyměřovacích základů jeho zaměstnanců" a § 7 odst. 3 zaokrouhluje
-             * až tenhle jeden součet. Proto se vydává tak, jak vznikl — za celou
-             * firmu a měsíc.
+             * vyměřovacích základů jeho zaměstnanců". Proto se vydává tak, jak
+             * vznikl — za celou firmu a měsíc.
+             *
+             * Ty úhrny jsou tři: písm. a) ostatní, písm. b) zdravotničtí
+             * záchranáři a jednotky HZS podniku, písm. c) rizikové zaměstnání,
+             * každý s vlastní sazbou podle § 7 odst. 1 a vlastním zaokrouhlením
+             * podle § 7 odst. 3. `categories` je proto rozpad, ze kterého se dá
+             * firemní částka přepočítat; `contribution_step` zůstane prázdný,
+             * jakmile kategorie není jediná, protože jedním krokem se ta částka
+             * nespočítala.
              *
              * Účetní můstek a nákladová střediska ale číslo na osobu potřebují,
              * takže vedle firemní částky je i `allocation`: ROZDĚLENÍ, ne zákonná
@@ -235,6 +242,7 @@ final class PayrollInsuranceBreakdownQueryService
             'employer' => [
                 'scope' => 'company_month',
                 'allocation' => $this->employerSocialAllocation($set, $month, $employeeId),
+                'categories' => $this->employerSocialCategories($month),
                 'contribution_step' => $employerStep,
                 'assessment_base_minor' => self::optionalNonNegativeInt(
                     $month,
@@ -545,6 +553,43 @@ final class PayrollInsuranceBreakdownQueryService
      * uplatnily). Rozpustit slevu poměrem všech základů by ji přiznala i lidem,
      * kterým nenáleží.
      *
+     * Pojistné před slevou se dělí UVNITŘ kategorie § 5a odst. 1: každá vznikla
+     * jinou sazbou, takže její podíl smí dostat jen ten, kdo do ní vstoupil.
+     */
+
+    /**
+     * Rozpad firemního pojistného po písmenech § 5a odst. 1.
+     *
+     * Starší uložené revize kategorie nenesou — tam je seznam prázdný a karta
+     * ukáže jediný krok tak jako dřív. Dopočítat rozpad zpětně nejde: kategorie
+     * se ve zmrazeném vstupu nevyskytovala a odhad písmene by byl odhad sazby.
+     *
+     * @param array<string,mixed> $month
+     * @return list<array<string,mixed>>
+     */
+    private function employerSocialCategories(array $month): array
+    {
+        $categories = [];
+        foreach (self::rows($month['employer_categories'] ?? [], 'social.employer_categories') as $row) {
+            $categories[] = [
+                'category' => (string) ($row['category'] ?? ''),
+                'paragraph5a_letter' => (string) ($row['paragraph5a_letter'] ?? ''),
+                'assessment_base_minor' => self::nonNegativeInt(
+                    $row,
+                    'assessment_base_minor_units',
+                ),
+                'contribution_minor' => self::nonNegativeInt($row, 'contribution_minor_units'),
+                'contribution_step' => self::step(
+                    $row['contribution_step'] ?? null,
+                    'social.employer_categories.contribution_step',
+                ),
+            ];
+        }
+
+        return $categories;
+    }
+
+    /**
      * @param array<string,mixed> $set
      * @param array<string,mixed> $month
      * @return array<string,mixed>
@@ -558,8 +603,15 @@ final class PayrollInsuranceBreakdownQueryService
         );
         $discount = self::optionalNonNegativeInt($month, 'part_time_discount_minor_units');
 
+        $categoryAmounts = [];
+        foreach (self::rows($month['employer_categories'] ?? [], 'social.employer_categories') as $row) {
+            $categoryAmounts[(string) ($row['category'] ?? '')] =
+                self::nonNegativeInt($row, 'contribution_minor_units');
+        }
+
         $cappedBases = [];
         $discountBases = [];
+        $categoryBases = array_fill_keys(array_keys($categoryAmounts), []);
         $blocker = null;
         try {
             foreach (self::rows($set['people'] ?? [], 'statutory_result.people') as $person) {
@@ -573,15 +625,27 @@ final class PayrollInsuranceBreakdownQueryService
                     'capped_assessment_base_minor_units',
                 );
                 $discountBase = 0;
+                foreach ($categoryBases as $category => $unused) {
+                    $categoryBases[$category][$id] = 0;
+                }
                 foreach (self::rows($person['relationships'] ?? [], 'social.relationships') as $row) {
                     $snapshot = self::object(
                         $row['result_snapshot'] ?? null,
                         'social.relationship.result_snapshot',
                     );
+                    $relationshipBase = self::nonNegativeInt(
+                        $snapshot,
+                        'capped_assessment_base_minor_units',
+                    );
                     if ((string) ($snapshot['part_time_employer_discount'] ?? '') === 'verified') {
-                        $discountBase += self::nonNegativeInt(
-                            $snapshot,
-                            'capped_assessment_base_minor_units',
+                        $discountBase += $relationshipBase;
+                    }
+                    $category = (string) ($snapshot['employer_rate_category'] ?? '');
+                    if (array_key_exists($category, $categoryBases)) {
+                        $categoryBases[$category][$id] += $relationshipBase;
+                    } elseif ($categoryAmounts !== []) {
+                        throw new \UnexpectedValueException(
+                            'Vztah spadá do kategorie, kterou firemní výsledek nezná.',
                         );
                     }
                 }
@@ -598,12 +662,18 @@ final class PayrollInsuranceBreakdownQueryService
         }
         ksort($cappedBases, SORT_NUMERIC);
         ksort($discountBases, SORT_NUMERIC);
+        foreach ($categoryBases as $category => $weights) {
+            ksort($weights, SORT_NUMERIC);
+            $categoryBases[$category] = $weights;
+        }
         $companyBase = array_sum($cappedBases);
 
         $blocker ??= match (true) {
             $contribution === null || $beforeDiscount === null || $discount === null
                 => 'amounts_missing',
             $beforeDiscount - $discount !== $contribution => 'company_total_mismatch',
+            $categoryAmounts !== [] && array_sum($categoryAmounts) !== $beforeDiscount
+                => 'company_total_mismatch',
             $beforeDiscount > 0 && $companyBase === 0 => 'assessment_base_missing',
             $discount > 0 && array_sum($discountBases) === 0 => 'discount_unattributable',
             default => null,
@@ -612,14 +682,29 @@ final class PayrollInsuranceBreakdownQueryService
         $allocations = [];
         if ($blocker === null) {
             try {
-                $allocations = EmployerSocialInsuranceAllocation::allocate(
-                    $cappedBases,
-                    $discountBases,
-                    (int) $beforeDiscount,
-                    (int) $discount,
-                );
+                /*
+                 * Revize uložené dřív, než výsledek nesl kategorie, žádné nemají.
+                 * Tam se dělí po staru — jedinou kategorií, kterou tehdy uměly,
+                 * byla běžná sazba, takže se poměr nemění a starý rozklad se
+                 * čte dál stejně jako v den, kdy vznikl.
+                 */
+                $allocations = $categoryAmounts === []
+                    ? EmployerSocialInsuranceAllocation::allocate(
+                        $cappedBases,
+                        $discountBases,
+                        (int) $beforeDiscount,
+                        (int) $discount,
+                    )
+                    : EmployerSocialInsuranceAllocation::allocateByCategory(
+                        $categoryBases,
+                        $categoryAmounts,
+                        $discountBases,
+                        (int) $discount,
+                    );
             } catch (\DomainException) {
                 $blocker = 'discount_exceeds_person_share';
+            } catch (\InvalidArgumentException) {
+                $blocker = 'amounts_missing';
             }
         }
         if ($blocker !== null) {

@@ -124,6 +124,10 @@ const ENUM_FIELDS: Record<string, { prefix: string, values: string[] }> = {
     prefix: 'payroll.people.other_withholding_eligibility',
     values: ['unverified', 'eligible', 'ineligible'],
   },
+  social_employer_rate_category: {
+    prefix: 'payroll.people.social_employer_rate_category',
+    values: ['ordinary', 'rescue_and_company_fire_service', 'risk_employment'],
+  },
   jmhz_apz_contribution_status: {
     prefix: 'payroll.people.jmhz_evidence.state',
     values: ['unverified', 'no', 'yes'],

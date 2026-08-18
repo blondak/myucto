@@ -89,7 +89,14 @@ final class CsszInsuranceRatesPinTest extends TestCase
         );
     }
 
-    public function testManualReviewRatesStillQuoteTheOfficialPercentage(): void
+    /**
+     * Sazby podle § 5a odst. 1 písm. b) a c) rostou po letech — písm. b) 26,8 →
+     * 27,8 → 28,8 a počínaje rokem 2026 29,8, písm. c) startuje v roce 2025 na
+     * 26,8 a v roce 2026 je na 27,8. Přepsat ročník sady bez přepsání sazby by
+     * odvedlo staré procento z nového základu, takže se obě pinují na otevřená
+     * data ČSSZ stejně jako běžná sazba — ne na text v poznámce.
+     */
+    public function testSpecialEmployerRatesMatchTheOfficialDataset(): void
     {
         $rows = self::rows();
         $ruleset = CzechPayrollRulesets2026::provider()
@@ -102,14 +109,14 @@ final class CsszInsuranceRatesPinTest extends TestCase
             $parameter = $ruleset->parameters[$key] ?? null;
             self::assertNotNull($parameter, "Dodaná sada nemá parametr {$key}.");
             self::assertSame(
-                PayrollRulesetCapability::ManualReview,
+                PayrollRulesetCapability::Supported,
                 $parameter->capability,
-                "Parametr {$key} má zůstat ručním posouzením — zařazení posuzuje člověk.",
+                "Parametr {$key} musí být počitatelný — zařazení dokládá vztah, ne ruleset.",
             );
-            self::assertStringContainsString(
-                self::percentLabel($rows, 'Celková sazba', $column),
-                (string) $parameter->note,
-                "Odůvodnění parametru {$key} cituje jinou sazbu, než publikuje ČSSZ.",
+            self::assertSame(
+                self::rate($rows, 'Celková sazba', $column),
+                $parameter->value,
+                "Sazba {$key} neodpovídá otevřeným datům ČSSZ.",
             );
         }
     }

@@ -313,6 +313,10 @@ final class PayrollRunSnapshotBuilder
                     'tax_declaration_signed' =>
                         (bool) $row['tax_declaration_signed'],
                     'risky_work' => (bool) $row['risky_work'],
+                    'social_employer_rate_category' =>
+                        (string) $row['social_employer_rate_category'],
+                    'social_employer_rate_category_evidence' =>
+                        $row['social_employer_rate_category_evidence'],
                     'foreign_legislation_country_code' =>
                         $row['foreign_legislation_country_code'],
                     'a1_certificate_until' => $row['a1_certificate_until'],
@@ -542,6 +546,8 @@ final class PayrollRunSnapshotBuilder
                     term.tax_declaration_signed,
                     term.is_primary AS term_is_primary,
                     term.risky_work,
+                    term.social_employer_rate_category,
+                    term.social_employer_rate_category_evidence,
                     term.foreign_legislation_country_code,
                     term.a1_certificate_until,
                     average.id AS average_earning_id,

@@ -100,6 +100,12 @@ final class PayrollEnumContractTest extends TestCase
         // nesmí nabízet — proto se páruje sloupec, ne enum.
         'payroll.ts::PayrollOtherWithholdingEligibility'
             => 'db:payroll_employment_terms.other_withholding_eligibility',
+        // Stejný důvod jako výše: PHP enum SocialEmployerRateCategory má navíc
+        // `unverified`, což není čtvrtá zákonná kategorie § 5a odst. 1, ale stav
+        // evidence — vzniká až ve vstupu výpočtu, když k zařazení chybí podklad.
+        // Nabídnout ho v klientovi by znamenalo nabídnout „nevím" jako volbu.
+        'payroll.ts::PayrollSocialEmployerRateCategory'
+            => 'db:payroll_employment_terms.social_employer_rate_category',
         'payroll.ts::PayrollInsuranceParticipation'  => 'db:payroll_employment_terms.social_insurance_participation',
         'payroll.ts::PayrollChecklistStatus'         => 'db:payroll_employment_checklist_items.status',
         'payroll.ts::PayrollVerifiedTriState'        => 'db:payroll_employment_terms.jmhz_apz_contribution_status',

@@ -53,7 +53,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
      * Platí proto pro VÝCHOZÍHO schvalovatele; instalace s jiným provozovatelem má
      * legitimně jiné číslo. Test si default proto vynutí sám.
      */
-    private const EXPECTED_MANIFEST_SHA256 = '4f13afff7f9b5dcd9fc69bf65a69e05627fd0245fd40d3faa24ff1be6727057a';
+    private const EXPECTED_MANIFEST_SHA256 = 'a44ab7d48e7a8ed355344af7eb7afe3c4e54846d9ebe02e984d26ea25c8cae8d';
 
     protected function setUp(): void
     {
@@ -287,7 +287,12 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'employee.discount.working_pensioner' => ['decimal_rate', '0.065'],
                 'employee.rate.ordinary' => ['decimal_rate', '0.071'],
                 'employer.discount.part_time' => ['decimal_rate', '0.05'],
+                // § 7 odst. 1 písm. a) až c) — tři sazby na tři vyměřovací
+                // základy § 5a odst. 1. Písm. b) a c) se rok od roku zvyšují,
+                // takže tenhle řádek je zároveň pin ročníku sady.
                 'employer.rate.ordinary' => ['decimal_rate', '0.248'],
+                'employer.rate.rescue_and_company_fire_service' => ['decimal_rate', '0.298'],
+                'employer.rate.risk_employment' => ['decimal_rate', '0.278'],
                 'maximum_assessment_base.yearly' => ['money_minor', 235_041_600],
                 'participation.dpp.minimum' => ['money_minor', 1_200_000],
                 'participation.small_scale.minimum' => ['money_minor', 450_000],
@@ -341,11 +346,13 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'employee.discount.agriculture_dpp' =>
                     'Nárok na slevu závisí na zákonných podmínkách sezónní zemědělské činnosti '
                     . 'a musí ho posoudit člověk.',
-                'employer.rate.rescue_and_company_fire_service' =>
-                    'Sazba 29,8 % je oficiální, ale zařazení zaměstnance k hasičskému záchrannému '
-                    . 'sboru nebo mezi podnikové hasiče musí posoudit člověk.',
-                'employer.rate.risk_employment' =>
-                    'Sazba 27,8 % je oficiální, ale zařazení práce mezi rizikové musí posoudit člověk.',
+                // Sazby § 5a odst. 1 písm. b) a c) tu ZÁMĚRNĚ nejsou. Ruleset
+                // je publikovaná zákonná sazba a tou vždycky byly; ruční
+                // posouzení potřebuje ZAŘAZENÍ konkrétního zaměstnance, a to
+                // je údaj pracovního vztahu s odkazem na podklad. Držet ho
+                // v rulesetu znamenalo, že se nedoložené zařazení nikdy
+                // nedostalo do vstupu — a vztah označený jako rizikový se
+                // tiše spočítal běžnou sazbou.
             ],
             'health_insurance' => [],
             'employment_thresholds' => [],

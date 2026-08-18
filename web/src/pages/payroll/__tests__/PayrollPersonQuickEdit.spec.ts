@@ -105,6 +105,8 @@ function employment(overrides: Partial<PayrollEmployment> = {}): PayrollEmployme
       foreign_legislation_country_code: null,
       a1_certificate_until: null,
       risky_work: false,
+      social_employer_rate_category: 'ordinary',
+      social_employer_rate_category_evidence: null,
       tax_declaration_signed: true,
       is_primary: true,
       change_reason: 'Počáteční podmínky',

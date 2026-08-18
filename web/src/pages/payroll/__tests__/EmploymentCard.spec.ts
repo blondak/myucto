@@ -124,6 +124,8 @@ function employment(): PayrollEmployment {
       foreign_legislation_country_code: null,
       a1_certificate_until: null,
       risky_work: false,
+      social_employer_rate_category: 'ordinary',
+      social_employer_rate_category_evidence: null,
       tax_declaration_signed: false,
       is_primary: true,
       change_reason: 'Initial',
@@ -285,6 +287,32 @@ describe('EmploymentCard', () => {
     expect(
       (wrapper.get('[data-test="other-withholding-eligibility"]').element as HTMLSelectElement).value,
     ).toBe('eligible')
+  })
+
+  /**
+   * Zvýšená sazba § 5a odst. 1 písm. b) a c) platí jen doloženému zařazení.
+   * Na podklad se karta proto ptá teprve tehdy, když si kategorii někdo
+   * vybral — u běžné sazby by chtěla doklad, který neexistuje.
+   */
+  it('u zvýšené sazby zaměstnavatele se doptá na podklad, u běžné ne', async () => {
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+    })
+    const edit = wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )
+    await edit!.trigger('click')
+    await flushPromises()
+
+    const category = wrapper.get('[data-test="social-employer-rate-category"]')
+    expect((category.element as HTMLSelectElement).value).toBe('ordinary')
+    expect(wrapper.find('[data-test="social-employer-rate-category-evidence"]').exists()).toBe(false)
+
+    await category.setValue('risk_employment')
+    expect(wrapper.find('[data-test="social-employer-rate-category-evidence"]').exists()).toBe(true)
+
+    await category.setValue('ordinary')
+    expect(wrapper.find('[data-test="social-employer-rate-category-evidence"]').exists()).toBe(false)
   })
 
   it('vyžádá 10502 jen pro druh činnosti 1 až 9 a při změně jej vyčistí', async () => {

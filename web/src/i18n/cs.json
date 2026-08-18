@@ -1065,6 +1065,11 @@
                 "annual_maximum_applied": "Uplatnil se maximální vyměřovací základ: od začátku roku už bylo odvedeno z {ytd}, proto se základ tohoto měsíce snížil o {reduction} na {capped}.",
                 "employee_rate": "Sazba zaměstnance",
                 "employer_rate": "Sazba zaměstnavatele",
+                "employer_rate_category": {
+                    "ordinary": "Sazba zaměstnavatele — § 5a odst. 1 písm. a)",
+                    "rescue_and_company_fire_service": "Sazba zaměstnavatele — § 5a odst. 1 písm. b) záchranáři a hasiči podniku",
+                    "risk_employment": "Sazba zaměstnavatele — § 5a odst. 1 písm. c) rizikové zaměstnání"
+                },
                 "step_sentence": "{base} × {rate} = {raw}, po zaokrouhlení nahoru na celé koruny {rounded}",
                 "step_not_recorded": "Mezikrok tato revize neuchovala.",
                 "working_pensioner_discount": "Sleva pro pracujícího důchodce",
@@ -2366,6 +2371,14 @@
             "a1_certificate_until": "Potvrzení A1 platné do",
             "tax_declaration": "Podepsané prohlášení k dani",
             "risky_work": "Riziková práce",
+            "social_employer_rate_category_label": "Sazba zaměstnavatele na sociální (§ 5a odst. 1)",
+            "social_employer_rate_category": {
+                "ordinary": "Běžná sazba — písm. a)",
+                "rescue_and_company_fire_service": "Zdravotnický záchranář nebo hasič podniku — písm. b)",
+                "risk_employment": "Rizikové zaměstnání — písm. c)"
+            },
+            "social_employer_rate_category_evidence": "Odkaz na podklad k zařazení",
+            "social_employer_rate_category_evidence_hint": "Zvýšená sazba platí jen doloženému zařazení. Uveďte, kde je podklad (například číslo rozhodnutí o kategorizaci prací). Bez něj skončí mzdový výpočet ručním posouzením — nespočítá se běžnou sazbou.",
             "change_reason": "Důvod změny",
             "checklist_title": "Povinnosti",
             "checklist_open": "Nesplněno: {count}",
