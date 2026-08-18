@@ -287,6 +287,30 @@ final class CashRegisterServiceTest extends TestCase
     }
 
     /**
+     * L-9: osnova doplní tečku sama (`211200` → `211.200`), formulář pokladny ne —
+     * kdo zadal totéž číslo na obou místech, dostal `account_invalid` u účtu,
+     * který v osnově existuje.
+     */
+    public function testAccountCodeWithoutDotResolvesToDottedAnalytic(): void
+    {
+        $this->seedAnalytic('211.200');
+
+        $id = $this->service->create($this->supplierId, ['name' => 'Bez tečky', 'account_code' => '211200']);
+
+        self::assertSame('211.200', $this->service->get($this->supplierId, $id)['account_code']);
+    }
+
+    /** Legacy netečkovaný účet v osnově zůstává platný — normalizace ho nepřepíše. */
+    public function testLegacyUndottedAccountStillWins(): void
+    {
+        $this->seedAnalytic('211300');
+
+        $id = $this->service->create($this->supplierId, ['name' => 'Legacy', 'account_code' => '211300']);
+
+        self::assertSame('211300', $this->service->get($this->supplierId, $id)['account_code']);
+    }
+
+    /**
      * L-2: `ensureOwnSeries()` běží při KAŽDÉM výdeji čísla. Přes
      * `updateSeries(next_number => 1)` by existující čítač vrátila na jedničku
      * (`ON DUPLICATE KEY UPDATE`), takže by dvě souběžná vystavení vydala totéž číslo.

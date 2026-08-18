@@ -8265,7 +8265,10 @@ paths:
     patch:
       tags: [Accounting]
       summary: Přejmenování / deaktivace účtu
-      description: Účetní/admin. Účty se nemažou, jen deaktivují (is_active=false).
+      description: |
+        Účetní/admin. Běžná cesta je deaktivace (`is_active=false`) — kód účtu visí
+        jako TEXT na kontacích, pravidlech i kartách, takže se nemění. Analytiku
+        BEZ jediného použití lze i smazat (viz DELETE níž).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -8286,6 +8289,23 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [Accounting]
+      summary: Smazání nepoužité analytiky — účetní|admin, jen podvojné účetnictví
+      description: |
+        Smazat jde POUZE analytika, kterou nic nepoužívá — ani deník, ani doklady,
+        kontace, karty majetku či mzdové nastavení. Syntetický účet z osnovy se
+        smazat nedá (`account_synthetic`), použitá analytika vrátí `account_in_use`
+        se seznamem míst; místo mazání ji deaktivujte přes PATCH.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: "OK — `{deleted: true}`", content: { application/json: { schema: { type: object } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: "Účet se používá (`account_in_use`) — hláška vyjmenuje agendy, které na něj odkazují." }
+        '422': { description: "Syntetický účet (`account_synthetic`) smazat nelze." }
 
   /api/v1/accounting/periods:
     get:
@@ -11167,7 +11187,7 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [name, account_code], properties: { name: { type: string }, account_code: { type: string }, currency_code: { type: string, default: CZK }, is_default: { type: boolean } } } } }
+        content: { application/json: { schema: { type: object, required: [name, account_code], properties: { name: { type: string }, account_code: { type: string, description: "Analytika 211; tvar bez tečky (211200) se dohledá jako 211.200" }, currency_code: { type: string, default: CZK }, is_default: { type: boolean }, own_series: { type: boolean, default: false, description: "Vlastní číselná řada PPD/VPD pokladny místo společné řady firmy" } } } } }
       responses:
         '201': { description: Detail nové pokladny, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -11187,12 +11207,12 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     put:
       tags: [Accounting]
-      summary: Úprava pokladny (název/analytika/výchozí/aktivní) — účetní|admin
+      summary: Úprava pokladny (název/analytika/výchozí/aktivní/vlastní řada) — účetní|admin
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
       requestBody:
-        content: { application/json: { schema: { type: object, properties: { name: { type: string }, account_code: { type: string }, is_default: { type: boolean }, is_active: { type: boolean } } } } }
+        content: { application/json: { schema: { type: object, properties: { name: { type: string }, account_code: { type: string, description: "Analytika 211; tvar bez tečky (211200) se dohledá jako 211.200" }, is_default: { type: boolean }, is_active: { type: boolean }, own_series: { type: boolean, description: "Přepnutí vlastní řady; roky, ve kterých pokladna už vydala číslo, se odmítnou (`series_switch_locked`)" } } } } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -11276,7 +11296,7 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [register_id, doc_type, purpose, issue_date, description, total_amount], properties: { register_id: { type: integer }, doc_type: { type: string, enum: [in, out] }, purpose: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] }, issue_date: { type: string, format: date }, tax_date: { type: string, format: date }, partner_name: { type: string }, partner_ic: { type: string }, partner_dic: { type: string }, description: { type: string }, vat_mode: { type: string, enum: [none, vat] }, total_amount: { type: number }, vat_lines: { type: array, items: { type: object, properties: { vat_rate: { type: number }, base_amount: { type: number }, vat_amount: { type: number }, vat_deduction: { type: string, enum: [full, none, proportional, reduced], default: full, description: "Rozsah nároku na odpočet DPH řádku (§ 75/76)" }, vat_deduction_percent: { type: number, default: 100, description: "Poměrný / skutečný roční koeficient odpočtu v procentech (0–100)" }, tax_treatment: { type: string, enum: [deductible, non_deductible, not_expense], default: deductible, description: "Uznatelnost řádku pro daň z příjmů (§ 24/25), nezávislá na DPH" } } } }, invoice_id: { type: integer }, purchase_invoice_id: { type: integer }, rule_key: { type: string }, counter_account_code: { type: string }, post: { type: boolean, default: true } } } } }
+        content: { application/json: { schema: { type: object, required: [register_id, doc_type, purpose, issue_date, description, total_amount], properties: { register_id: { type: integer }, doc_type: { type: string, enum: [in, out] }, purpose: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] }, issue_date: { type: string, format: date }, tax_date: { type: string, format: date }, partner_name: { type: string }, partner_ic: { type: string }, partner_dic: { type: string }, description: { type: string }, vat_mode: { type: string, enum: [none, vat] }, total_amount: { type: number }, amount_foreign: { type: number, nullable: true, description: "Částka v měně pokladny u valutové pokladny (§11); CZK ekvivalent do total_amount dopočítá server" }, fx_rate: { type: number, description: "Ruční kurz; vynechte, ať se použije kurz ČNB k datu vystavení" }, vat_lines: { type: array, items: { type: object, properties: { vat_rate: { type: number }, base_amount: { type: number }, vat_amount: { type: number }, vat_deduction: { type: string, enum: [full, none, proportional, reduced], default: full, description: "Rozsah nároku na odpočet DPH řádku (§ 75/76)" }, vat_deduction_percent: { type: number, default: 100, description: "Poměrný / skutečný roční koeficient odpočtu v procentech (0–100)" }, tax_treatment: { type: string, enum: [deductible, non_deductible, not_expense], default: deductible, description: "Uznatelnost řádku pro daň z příjmů (§ 24/25), nezávislá na DPH" } } } }, invoice_id: { type: integer }, purchase_invoice_id: { type: integer }, rule_key: { type: string }, counter_account_code: { type: string }, post: { type: boolean, default: true } } } } }
       responses:
         '201': { description: Vytvořeno, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }

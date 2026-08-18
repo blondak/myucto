@@ -101,6 +101,23 @@ final class DocumentSeriesModeAccessTest extends TestCase
         self::assertSame('wrong_accounting_mode', $this->json($response)['error']['code']);
     }
 
+    /** L-10: bez FK by `register_id` na cizí/neexistující pokladnu založil osiřelý řádek řady. */
+    public function testUnknownRegisterIdIsRejected(): void
+    {
+        $response = $this->action->update(
+            $this->request()->withParsedBody(['prefix' => 'PPD9', 'register_id' => 999999]),
+            new Response(),
+            ['code' => 'cash_in', 'year' => (string) date('Y')],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM accounting_document_series WHERE supplier_id = ? AND register_id = ?'
+        );
+        $stmt->execute([$this->deSupplierId, 999999]);
+        self::assertSame(0, (int) $stmt->fetchColumn());
+    }
+
     public function testListInTaxEvidenceHidesJournalSeries(): void
     {
         // Řádek deníkové řady může existovat z doby, kdy firma jela podvojně.

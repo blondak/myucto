@@ -97,6 +97,13 @@ final class DocumentSeriesAction
             return Json::error($response, 'validation_failed',
                 'Vlastní řadu má jen pokladna — register_id lze zadat u cash_in / cash_out.', 422);
         }
+        // `accounting_document_series.register_id` nemá FK (0 = společná řada firmy),
+        // takže bez téhle kontroly vznikne osiřelý řádek řady na neexistující (nebo
+        // cizí) pokladnu — v Nástrojích pak svítí řada, kterou nikdo nikdy nevydá.
+        if ($registerId > 0 && !$this->registerExists($supplierId, $registerId)) {
+            return Json::error($response, 'validation_failed',
+                'Pokladna register_id=' . $registerId . ' u této firmy neexistuje.', 422);
+        }
 
         if (array_key_exists('next_number', $body) && trim((string) $body['next_number']) !== '') {
             if (!is_numeric($body['next_number'])) {
@@ -129,6 +136,13 @@ final class DocumentSeriesAction
             $rows,
             fn(array $r): bool => !in_array((string) $r['series_code'], DocumentSeriesService::DOUBLE_ENTRY_ONLY_SERIES, true),
         ));
+    }
+
+    private function registerExists(int $supplierId, int $registerId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT EXISTS (SELECT 1 FROM cash_registers WHERE id = ? AND supplier_id = ?)');
+        $stmt->execute([$registerId, $supplierId]);
+        return (bool) $stmt->fetchColumn();
     }
 
     private function seriesAllowedForMode(int $supplierId, string $code): bool

@@ -290,7 +290,9 @@ final class OpeningBalanceService
      * takhle NEúčtuje (knihuje se per analytika pokladny, viz
      * {@see cashBalancesByRegister()}) — zůstává jako kontrolní součet, symetricky
      * k {@see bankBalance()}: rozpad musí dát tutéž částku jako souhrn, jinak se při
-     * rozpadu ztratil nebo přibyl doklad.
+     * rozpadu ztratil nebo přibyl doklad. Tu kontrolu počítá
+     * `AccountingActivationTest::testCashSplitSumsToFlatBalance()` — produkční volající
+     * metoda ZÁMĚRNĚ nemá, je to nezávislý orákl rozpadu.
      *
      * `total_amount` je v DB už CZK ekvivalent i u valutové pokladny (migrace 1114 —
      * cizoměnová částka žije zvlášť v `amount_foreign`), takže se kurzem NEPŘEPOČÍTÁVÁ

@@ -75,7 +75,7 @@ final class CashRegisterService
         if ($currency === '' || preg_match('/^[A-Z]{3}$/', $currency) !== 1) {
             throw new CashException('validation', 'Kód měny musí být trojznakový (CZK, EUR, USD…).');
         }
-        $accountCode = trim((string) ($data['account_code'] ?? ''));
+        $accountCode = $this->resolveAccountCode($supplierId, trim((string) ($data['account_code'] ?? '')));
         $isForeign = $currency !== 'CZK';
         $taxEvidence = $this->supplierAccountingMode($supplierId) === 'tax_evidence';
 
@@ -158,7 +158,7 @@ final class CashRegisterService
             $patch['name'] = $name;
         }
         if (array_key_exists('account_code', $data)) {
-            $newCode = trim((string) $data['account_code']);
+            $newCode = $this->resolveAccountCode($supplierId, trim((string) $data['account_code']));
             if ($newCode !== (string) $register['account_code']) {
                 if ($this->registers->hasPostedDocuments($supplierId, $id)) {
                     throw new CashException('account_locked', 'Analytiku pokladny nelze změnit — existuje zaúčtovaný doklad.');
@@ -529,6 +529,31 @@ final class CashRegisterService
         );
         $stmt->execute([$supplierId, $accountId]);
         return (bool) $stmt->fetchColumn();
+    }
+
+    /**
+     * L-9: osnova ukládá analytiku tečkovaně (`ChartOfAccountsAction::withAnalyticDot`
+     * doplní tečku i tomu, kdo zadá `211200`), formulář pokladny ale kód nenormalizoval.
+     * Účetní, která totéž číslo zadala na obou místech, tedy dostala `account_invalid`
+     * u účtu, který v osnově existuje. Kód se proto bere nejdřív tak, jak přišel
+     * (legacy netečkované účty zůstávají platné), a teprve když v osnově není, zkusí
+     * se jeho tečkovaný protějšek. `nextFreeCashAnalytic()` obsazenost na obou tvarech
+     * kontroluje už dávno.
+     */
+    private function resolveAccountCode(int $supplierId, string $accountCode): string
+    {
+        $synthetic = self::CASH_SYNTHETIC;
+        if ($accountCode === ''
+            || str_contains($accountCode, '.')
+            || preg_match('/^' . $synthetic . '\d+$/', $accountCode) !== 1
+        ) {
+            return $accountCode;
+        }
+        if ($this->accounts->findByCode($supplierId, $accountCode) !== null) {
+            return $accountCode;
+        }
+        $dotted = $synthetic . '.' . substr($accountCode, strlen($synthetic));
+        return $this->accounts->findByCode($supplierId, $dotted) !== null ? $dotted : $accountCode;
     }
 
     /** Ověří, že account_code je platná aktivní analytika 211 a není obsazená jinou pokladnou. */
