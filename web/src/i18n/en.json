@@ -435,6 +435,7 @@
         "payroll_rulesets": "Payroll legislative rules",
         "payroll_retention": "Retention periods",
         "payroll_erasure": "Erasure of personal data",
+        "payroll_benefit_baskets": "Annual benefit baskets",
         "settings": "Settings",
         "branding": "Branding",
         "supplier_current": "Supplier",
@@ -4481,6 +4482,48 @@
                 "download_failed": "The artifact could not be downloaded.",
                 "artifact_missing": "No downloadable file is stored for this submission.",
                 "failed": "The record could not be built."
+            }
+        },
+        "benefit_baskets": {
+            "title": "Annual benefit exemption baskets",
+            "subtitle": "How much of the annual limit under Section 6(9) of the Income Tax Act each employee has used up this year, and how much of it has already been taxed.",
+            "explainer_title": "The limit is a shared basket, not a cap on one component",
+            "explainer_body": "The act exempts benefits up to the limit in aggregate for the whole provision. The basket therefore adds up per person and employer — across concurrent employment relationships and across payroll components of the same basket. Benefits above the limit are not forbidden; only the excess is taxed and subject to contributions.",
+            "explainer_frozen": "The exempt and above-limit parts are read frozen from the moment the input was approved, so they match the payslip. This overview does not recalculate them against today's rules.",
+            "filter_year": "Tax period",
+            "filter_q": "Employee",
+            "filter_q_placeholder": "Search by name",
+            "reset_filters": "Reset filters",
+            "load_failed": "The basket usage overview could not be loaded.",
+            "stale_warning": "The data shown comes from the last successful load. {error}",
+            "no_match": "Nobody used a basket in the selected period",
+            "no_match_hint": "Try another year, or clear the basket and name filters.",
+            "action_components": "Payroll components",
+            "action_components_hint": "A component is assigned to a basket in the payroll component catalogue.",
+            "unfrozen_note": "Without a frozen split: {count} — the figure is incomplete and is not recalculated.",
+            "drift_note": "The frozen split does not match today's limit; the limit changed in the rules after approval.",
+            "col": {
+                "employee": "Employee",
+                "basket": "Basket",
+                "statute": "Provision",
+                "used": "Used",
+                "limit": "Limit",
+                "remaining": "Remaining",
+                "taxable": "Taxed above limit",
+                "inputs": "Inputs",
+                "status": "Status"
+            },
+            "basket": {
+                "non_cash_health": "Health benefits",
+                "non_cash_leisure": "Recreation, sport and culture",
+                "old_age_savings": "Old-age savings and long-term care"
+            },
+            "status": {
+                "ok": "Within limit",
+                "approaching": "Approaching limit",
+                "exceeded": "Above limit",
+                "incomplete": "Incomplete data",
+                "limit_unavailable": "Limit unavailable"
             }
         }
     },

@@ -445,6 +445,10 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/payroll/people', label: t('nav.payroll_people'), icon: ICONS.clients, permission: 'payroll' as PermissionKey, dividerBefore: true },
         { to: '/payroll/deduction-agreements', label: t('nav.payroll_deduction_agreements'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },
         { to: '/payroll/enforcement', label: t('nav.payroll_enforcement'), icon: ICONS.coin, permission: 'payroll.enforcement' as PermissionKey },
+        // Roční koše osvobození benefitů se sledují průběžně, ne v měsíčním
+        // taktu: kdo se dozví o překročení až u prosincového vstupu, dozví se to
+        // pozdě.
+        { to: '/payroll/benefit-baskets', label: t('nav.payroll_benefit_baskets'), icon: ICONS.stats, permission: 'payroll' as PermissionKey },
         // 3) Jednorázové nastavení — sáhne se do něj při zavádění a pak výjimečně.
         { to: '/payroll/settings', label: t('nav.payroll_settings'), icon: ICONS.settings, permission: 'payroll.settings' as PermissionKey, dividerBefore: true },
         { to: '/payroll/components', label: t('nav.payroll_components'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },

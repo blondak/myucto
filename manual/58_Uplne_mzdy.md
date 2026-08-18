@@ -455,6 +455,34 @@ celá osvobozená.
 Pole **Roční limit** u složky je něco jiného — je to **vlastní strop
 zaměstnavatele** a schválení vstupu nad něj neprojde.
 
+#### Přehled čerpání košů za firmu
+
+Náhled vstupu ukáže koš jen tomu, kdo ten vstup zrovna zadává. Souhrn za celou
+firmu je v **Mzdy → Roční koše benefitů**: jeden řádek na zaměstnance a koš,
+s vyčerpanou částkou, limitem, zbytkem a s tím, kolik se už zdanilo jako
+nadlimitní. Filtruje se podle zdaňovacího období, koše a jména; sloupce a hustotu
+tabulky si každý uživatel nastaví sám.
+
+Řádky se sčítají za osobu u zaměstnavatele, tedy i napříč souběžnými pracovními
+vztahy a napříč mzdovými složkami téhož koše — stejně, jako to počítá náhled
+vstupu. Stav řádku říká, jestli je osoba v limitu, blíží se mu (od 80 % koše),
+nebo je nad ním.
+
+Přehled **nic nepřepočítává**: osvobozenou i nadlimitní část čte zmrazenou
+z okamžiku schválení vstupu, takže sedí s výplatní páskou. Proto se u některých
+řádků objeví místo čísla přiznání, že podklad chybí:
+
+- **Neúplný podklad** — část vstupů je z doby, kdy se koše ještě nezmrazovaly.
+  Chybějící rozpad se nedopočítá, jen se přizná počet takových vstupů.
+- **Limit není k dispozici** — pro zvolený rok není schválená sada legislativních
+  pravidel, takže se netvrdí ani limit, ani zbývající částka.
+- Poznámka o **rozporu se zmrazeným rozpadem** znamená, že se limit v pravidlech
+  po schválení vstupů změnil. Zobrazená čísla zůstávají zmrazená; přepsat je
+  dnešním limitem by přehled rozešlo s už vyplacenými mzdami.
+
+Přehled je čtecí a jede na oprávnění `payroll`, tedy stejné, jaké má seznam
+mzdových vstupů — je to jejich součet za osobu a rok, ne nová třída údajů.
+
 U složky zahrnuté do JMHZ nastav také konkrétní cílový atribut měsíčního
 hlášení. Stav **Chybí mapování** nebrání výpočtu mzdy, ale znamená, že složku
 zatím nelze bezpečně převést do úplného JMHZ. Celkové cíle používej jen pro
@@ -1155,6 +1183,9 @@ jen z přihlášené webové relace, ne přes běžný bearer token.
 Zakládání vztahů, nové verze podmínek, stavové přechody a checklist vyžadují
 `payroll.employment.write`; bez něj je detail pouze pro čtení.
 Změna osobní karty a ověření výplatního účtu vyžadují `payroll.person.write`.
+Přehled čerpání ročních košů benefitů jede na `payroll` jako čtení: je to součet
+týchž mzdových vstupů, které seznam vstupů ukazuje po jednom. Samostatné právo by
+nechalo otevřený seznam po řádcích a zamklo jen jeho součet.
 Archiv dokumentů vyžaduje `payroll.documents`; bez práva zápisu nelze vytvořit
 měsíční balíček.
 Platební závazky, dávky a párování vyžadují samostatné oprávnění
