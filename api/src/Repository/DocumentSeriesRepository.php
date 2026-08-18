@@ -34,12 +34,12 @@ final class DocumentSeriesRepository
      * Zamkne řádek řady pro výdej čísla — MUSÍ běžet uvnitř transakce
      * (FOR UPDATE mimo transakci zámek okamžitě pouští).
      *
-     * @return array{id:int, prefix:string, next_number:int}|null
+     * @return array{id:int, prefix:string, number_format:string|null, next_number:int}|null
      */
     public function lockRow(int $supplierId, string $seriesCode, int $fiscalYear): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, prefix, next_number
+            'SELECT id, prefix, number_format, next_number
                FROM accounting_document_series
               WHERE supplier_id = ? AND series_code = ? AND fiscal_year = ?
               FOR UPDATE'
@@ -50,9 +50,10 @@ final class DocumentSeriesRepository
             return null;
         }
         return [
-            'id'          => (int) $row['id'],
-            'prefix'      => (string) $row['prefix'],
-            'next_number' => (int) $row['next_number'],
+            'id'            => (int) $row['id'],
+            'prefix'        => (string) $row['prefix'],
+            'number_format' => $row['number_format'] !== null ? (string) $row['number_format'] : null,
+            'next_number'   => (int) $row['next_number'],
         ];
     }
 
@@ -74,7 +75,7 @@ final class DocumentSeriesRepository
     public function list(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, supplier_id, series_code, fiscal_year, prefix, next_number, created_at, updated_at
+            'SELECT id, supplier_id, series_code, fiscal_year, prefix, number_format, next_number, created_at, updated_at
                FROM accounting_document_series
               WHERE supplier_id = ?
               ORDER BY fiscal_year DESC, series_code'
@@ -90,17 +91,42 @@ final class DocumentSeriesRepository
     }
 
     /**
-     * Nastaví prefix řady; řádek případně lazy založí (edit prefixu smí
-     * předcházet prvnímu výdeji čísla). Čítač se NEMĚNÍ.
+     * Nastaví prefix / šablonu čísla / čítač řady; řádek případně lazy založí
+     * (edit smí předcházet prvnímu výdeji čísla). Přepisují se jen klíče
+     * přítomné v $patch — ostatní sloupce zůstávají.
+     *
+     * @param array{prefix?:string, number_format?:string|null, next_number?:int} $patch
      */
-    public function upsertPrefix(int $supplierId, string $seriesCode, int $fiscalYear, string $prefix): bool
-    {
+    public function upsert(
+        int $supplierId,
+        string $seriesCode,
+        int $fiscalYear,
+        string $defaultPrefix,
+        array $patch,
+    ): bool {
+        $updates = [];
+        foreach (['prefix', 'number_format', 'next_number'] as $col) {
+            if (array_key_exists($col, $patch)) {
+                $updates[] = $col . ' = VALUES(' . $col . ')';
+            }
+        }
+        if ($updates === []) {
+            return false;
+        }
+
         $stmt = $this->db->pdo()->prepare(
-            'INSERT INTO accounting_document_series (supplier_id, series_code, fiscal_year, prefix, next_number)
-             VALUES (?, ?, ?, ?, 1)
-             ON DUPLICATE KEY UPDATE prefix = VALUES(prefix)'
+            'INSERT INTO accounting_document_series (supplier_id, series_code, fiscal_year, prefix, number_format, next_number)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE ' . implode(', ', $updates)
         );
-        $stmt->execute([$supplierId, $seriesCode, $fiscalYear, $prefix]);
-        return $stmt->rowCount() > 0;
+        $stmt->execute([
+            $supplierId,
+            $seriesCode,
+            $fiscalYear,
+            $patch['prefix'] ?? $defaultPrefix,
+            $patch['number_format'] ?? null,
+            $patch['next_number'] ?? 1,
+        ]);
+        return true;
     }
 }

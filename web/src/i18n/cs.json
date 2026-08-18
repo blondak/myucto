@@ -7766,11 +7766,17 @@
                     "stock_in": "Skladové příjemky (PRI)",
                     "stock_out": "Skladové výdejky (VYD)",
                     "stock_transfer": "Skladové převodky (PRE)",
-                    "offset": "Zápočty (ZAP)"
+                    "offset": "Zápočty (ZAP)",
+                    "purchase_order": "Objednávky dodavatelům (OBJ)"
                 },
                 "prefix": "Prefix",
+                "number_format": "Tvar čísla",
+                "preview": "Náhled",
                 "next_number": "Další číslo",
-                "prefix_invalid": "Prefix musí být 1–10 velkých písmen nebo číslic."
+                "format_hint": "Tvar čísla je volitelný — prázdné pole znamená výchozí PREFIX-YYYY-CCCC. Placeholdery (vždy ve složených závorkách): PREFIX prefix řady · YYYY rok 4-místně · YY rok 2-místně · C+ čítač, počet C určuje šířku. Např. PREFIX a CCCCC ve složených závorkách s prefixem 26HP dá 26HP00011.",
+                "prefix_invalid": "Prefix musí být 1–10 velkých písmen nebo číslic.",
+                "format_invalid": "Tvar čísla musí obsahovat čítač — vlož např. CCCC ve složených závorkách, jinak by se čísla opakovala.",
+                "next_number_invalid": "Další číslo musí být celé číslo 1–999999999."
             },
             "settings": {
                 "title": "Nastavení uzávěrky a výkazů",
