@@ -2397,7 +2397,10 @@ export interface PayrollAnnualSettlementStoredOutcome {
   settlement_difference_minor: number
   payable_minor: number
   settled_on: string
-  payroll_input_id: number | null
+  /** Běh, revize a období, ve kterých se doplatek vyplatil (§ 38ch odst. 5). */
+  payout_run_id: number | null
+  payout_revision_id: number | null
+  payout_period_start: string | null
 }
 
 export interface PayrollAnnualSettlementListItem {
@@ -2416,7 +2419,9 @@ export interface PayrollAnnualSettlementListItem {
   settlement_difference_minor: number | null
   payable_minor: number | null
   settled_on: string | null
-  payroll_input_id: number | null
+  payout_run_id: number | null
+  payout_revision_id: number | null
+  payout_period_start: string | null
   annual_revision_id: number | null
 }
 

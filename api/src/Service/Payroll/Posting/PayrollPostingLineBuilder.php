@@ -282,6 +282,10 @@ final class PayrollPostingLineBuilder
                 $net,
                 'deducted_minor_units',
             );
+            $annualSettlement = $this->nonNegativeInt(
+                $net + ['annual_settlement_minor_units' => 0],
+                'annual_settlement_minor_units',
+            );
             $netPayable = $this->nonNegativeInt(
                 $net,
                 'net_payable_minor_units',
@@ -373,6 +377,17 @@ final class PayrollPostingLineBuilder
                 $accounts['income_tax_credit'],
                 "employee:{$employeeId}:tax-bonus",
             );
+            // § 38ch odst. 5 a § 35d odst. 9: vyplacený doplatek ze zúčtování
+            // je vrácená záloha na daň, takže snižuje závazek vůči správci
+            // daně stejně jako měsíční bonus. Nákladem není.
+            $this->addEmployeeBonus(
+                $allocations,
+                $buckets[$employeeId],
+                $annualSettlement,
+                $accounts['income_tax_credit'],
+                "employee:{$employeeId}:annual-settlement",
+                'Doplatek z ročního zúčtování záloh',
+            );
             $this->addEmployeeCharge(
                 $allocations,
                 $buckets[$employeeId],
@@ -393,6 +408,7 @@ final class PayrollPostingLineBuilder
                 $expectedNet = $this->subtract($expectedNet, $charge);
             }
             $expectedNet = $this->add($expectedNet, $taxBonus);
+            $expectedNet = $this->add($expectedNet, $annualSettlement);
             if ($expectedNet !== $netPayable) {
                 throw new \DomainException(
                     "Účetní předpis employee:{$employeeId} nesouhlasí s čistou mzdou.",
@@ -693,11 +709,11 @@ final class PayrollPostingLineBuilder
         int $amount,
         string $taxAccount,
         string $baseKey,
+        string $description = 'Daňový bonus zaměstnance',
     ): void {
         if ($amount === 0) {
             return;
         }
-        $description = 'Daňový bonus zaměstnance';
         $this->addAllocation(
             $allocations,
             "{$baseKey}:tax",

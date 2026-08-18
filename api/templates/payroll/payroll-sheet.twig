@@ -129,6 +129,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <th>Sražená<br>záloha</th>
       <th>Daňový<br>bonus</th>
       <th>Srážková<br>daň</th>
+      <th>Doplatek<br>ze zúčtování</th>
     </tr>
   </thead>
   <tbody>
@@ -142,6 +143,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <td>{{ month.advance_tax_minor_units|minor_money }}</td>
       <td>{{ month.tax_bonus_minor_units|minor_money }}</td>
       <td>{{ month.withholding_tax_minor_units|minor_money }}</td>
+      <td>{{ month.annual_settlement_minor_units|minor_money }}</td>
     </tr>
   {% endfor %}
   </tbody>
@@ -155,6 +157,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <td>{{ totals.advance_tax_minor_units|minor_money }}</td>
       <td>{{ totals.tax_bonus_minor_units|minor_money }}</td>
       <td>{{ totals.withholding_tax_minor_units|minor_money }}</td>
+      <td>{{ totals.annual_settlement_minor_units|minor_money }}</td>
     </tr>
   </tfoot>
 </table>

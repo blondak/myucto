@@ -23,6 +23,12 @@ final readonly class PayrollNetInput
         public int $correctionMinorUnits,
         public int $voluntaryDeductionCapacityMinorUnits,
         public array $deductions,
+        /**
+         * Doplatek ze zúčtování podle § 35d odst. 8. Vyplácí se s výplatou, ale
+         * mzdou není — proto stojí mimo čistou mzdu před srážkami, ze které se
+         * počítá kapacita srážek i základ podle § 277 odst. 1 OSŘ.
+         */
+        public int $annualSettlementMinorUnits = 0,
     ) {
         if ($personReference === '' || $relationships === []) {
             throw new \InvalidArgumentException('Čistá mzda vyžaduje osobu a alespoň jeden vztah.');
@@ -38,6 +44,13 @@ final readonly class PayrollNetInput
             if ($amount < 0) {
                 throw new \InvalidArgumentException('Odvody, daň, bonus ani kapacita nesmí být záporné.');
             }
+        }
+        // § 38ch odst. 5 věta poslední: „Případný nedoplatek … se poplatníkovi
+        // nesráží." Záporná částka by z vrácení udělala srážku.
+        if ($annualSettlementMinorUnits < 0) {
+            throw new \InvalidArgumentException(
+                'Doplatek ze zúčtování se nesráží, a nesmí být proto záporný.',
+            );
         }
         $this->assertUniqueReferences($relationships, $deductions);
         $cash = new Money(0);

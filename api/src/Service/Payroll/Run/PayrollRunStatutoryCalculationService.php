@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Run;
 
+use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementPayoutService;
 use MyInvoice\Service\Payroll\Calculation\Money;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthCalculationStatus;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthInsuranceMonthCalculator;
@@ -32,6 +33,7 @@ final class PayrollRunStatutoryCalculationService
         private readonly PayrollRulesetProvider $rulesets,
         private readonly PayrollRunStatutoryInputAssembler $inputs,
         private readonly PayrollRunStatutoryResultPersister $persister,
+        private readonly ?AnnualSettlementPayoutService $annualSettlements = null,
     ) {
         $this->social = new SocialInsuranceMonthCalculator($rulesets);
         $this->health = new HealthInsuranceMonthCalculator($rulesets);
@@ -85,6 +87,17 @@ final class PayrollRunStatutoryCalculationService
             sort($inactive, SORT_STRING);
             return $this->blockedEnvelope($inactive);
         }
+
+        $periodStart = self::string($period, 'period_start');
+        // § 38ch odst. 5 a § 35d odst. 8: doplatky ze zúčtování, které se
+        // vyplácejí s touhle mzdou. Nejsou vstupem výpočtu — nevstupují do
+        // žádného základu — ale musí být v běhu, jinak by se přeplatek
+        // zaměstnanci nikdy nevrátil a odvod záloh by se o něj nesnížil.
+        $annualSettlements = $this->annualSettlements?->payoutsForRevision(
+            $supplierId,
+            $revisionId,
+            $periodStart,
+        ) ?? [];
 
         $bundle = $this->inputs->assemble($snapshot);
         if ($bundle->issues !== []
@@ -212,6 +225,7 @@ final class PayrollRunStatutoryCalculationService
                     0,
                     min($capacity, $netBeforeDeductions[$employeeId]),
                     $entry['deductions'],
+                    $annualSettlements[$employeeId] ?? 0,
                 ),
             );
             if ($netResult->netBeforeDeductionsMinorUnits
@@ -235,6 +249,22 @@ final class PayrollRunStatutoryCalculationService
             $health,
             $taxByEmployee,
             $netByEmployee,
+        );
+        // Vazba se zapisuje až po uložení výsledku a jen na to, co se do
+        // výsledku opravdu dostalo. Osoba, která z běhu vypadla na ruční
+        // kontrolu, nic vyplacené nemá.
+        $this->annualSettlements?->recordPayouts(
+            $supplierId,
+            $revisionId,
+            $periodStart,
+            array_intersect_key(
+                $annualSettlements,
+                array_filter(
+                    $netByEmployee,
+                    static fn ($result): bool
+                        => !$result instanceof PayrollStatutoryBlockedPerson,
+                ),
+            ),
         );
         $status = $social->status === SocialCalculationStatus::Calculated
             && $health->status === HealthCalculationStatus::Calculated

@@ -217,22 +217,91 @@ final class PayrollAnnualSettlementRepository
         return ['outcome' => $outcome, 'created' => true];
     }
 
-    /** Naváže mzdový vstup, kterým se přeplatek vrací (§ 38ch odst. 5). */
-    public function linkPayrollInput(
+    /**
+     * Co se v daném mzdovém období vyplácí (§ 38ch odst. 5, § 35d odst. 8).
+     *
+     * Okno je dané zákonem z obou stran: dřív než v měsíci provedení zúčtování
+     * vyplácet není co, a „nejpozději při zúčtování mzdy za březen po uplynutí
+     * zdaňovacího období" je poslední možnost. Výsledek navázaný na JINÝ běh se
+     * nevrací — jinak by se přeplatek vyplatil dvakrát. Vlastní běh se vrací
+     * dál, aby přepočet revize dal totéž číslo.
+     *
+     * @return array<int,int> employee_id => částka v haléřích
+     */
+    public function payableOutcomesForPeriod(
         int $supplierId,
-        int $outcomeId,
-        int $payrollInputId,
-    ): void {
+        int $runId,
+        string $periodStart,
+    ): array {
         $statement = $this->db->pdo()->prepare(
-            'UPDATE payroll_annual_settlement_outcomes
-                SET payroll_input_id = ?
-              WHERE supplier_id = ? AND id = ? AND payroll_input_id IS NULL'
+            'SELECT employee_id, SUM(payable_minor) AS payable_minor
+               FROM payroll_annual_settlement_outcomes
+              WHERE supplier_id = ?
+                AND payable_minor > 0
+                AND (payout_run_id IS NULL OR payout_run_id = ?)
+                AND ? >= DATE_FORMAT(settled_on, \'%Y-%m-01\')
+                AND ? <= CONCAT(tax_year + 1, \'-03-01\')
+              GROUP BY employee_id'
         );
-        $statement->execute([$payrollInputId, $supplierId, $outcomeId]);
-        if ($statement->rowCount() === 0) {
-            throw new PayrollAnnualSettlementConflictException(
-                'Výplata přeplatku už je navázaná na jiný mzdový vstup.',
-            );
+        $statement->execute([$supplierId, $runId, $periodStart, $periodStart]);
+        $payouts = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $payouts[(int) $row['employee_id']] = (int) $row['payable_minor'];
+        }
+        ksort($payouts, SORT_NUMERIC);
+
+        return $payouts;
+    }
+
+    /**
+     * Zapíše, kterou revizí se doplatek ze zúčtování vyplatil.
+     *
+     * Nejdřív se vazby toho běhu uvolní. Přepočet revize může seznam zúžit
+     * (zaměstnanec z běhu vypadl) a zůstalá vazba by tvrdila, že se vyplatilo
+     * něco, co ve výsledku není.
+     *
+     * @param array<int,int> $payouts employee_id => částka v haléřích
+     */
+    public function linkPayout(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+        string $periodStart,
+        array $payouts,
+    ): void {
+        $release = $this->db->pdo()->prepare(
+            'UPDATE payroll_annual_settlement_outcomes
+                SET payout_run_id = NULL,
+                    payout_revision_id = NULL,
+                    payout_period_start = NULL
+              WHERE supplier_id = ? AND payout_run_id = ?'
+        );
+        $release->execute([$supplierId, $runId]);
+        if ($payouts === []) {
+            return;
+        }
+        $link = $this->db->pdo()->prepare(
+            'UPDATE payroll_annual_settlement_outcomes
+                SET payout_run_id = ?,
+                    payout_revision_id = ?,
+                    payout_period_start = ?
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND payable_minor > 0
+                AND payout_run_id IS NULL
+                AND ? >= DATE_FORMAT(settled_on, \'%Y-%m-01\')
+                AND ? <= CONCAT(tax_year + 1, \'-03-01\')'
+        );
+        foreach (array_keys($payouts) as $employeeId) {
+            $link->execute([
+                $runId,
+                $revisionId,
+                $periodStart,
+                $supplierId,
+                $employeeId,
+                $periodStart,
+                $periodStart,
+            ]);
         }
     }
 
@@ -262,7 +331,9 @@ final class PayrollAnnualSettlementRepository
                     outcome.settlement_difference_minor,
                     outcome.payable_minor,
                     outcome.settled_on,
-                    outcome.payroll_input_id,
+                    outcome.payout_run_id,
+                    outcome.payout_revision_id,
+                    outcome.payout_period_start,
                     outcome.annual_revision_id
                FROM payroll_employees employee
                LEFT JOIN payroll_annual_settlement_requests request
@@ -539,7 +610,7 @@ final class PayrollAnnualSettlementRepository
             'id', 'supplier_id', 'employee_id', 'tax_year', 'annual_revision_id',
             'tax_difference_minor', 'bonus_difference_minor',
             'settlement_difference_minor', 'payable_minor',
-            'payout_threshold_minor', 'payroll_input_id',
+            'payout_threshold_minor', 'payout_run_id', 'payout_revision_id',
         ] as $key) {
             if (array_key_exists($key, $row) && $row[$key] !== null) {
                 $row[$key] = (int) $row[$key];
@@ -558,7 +629,8 @@ final class PayrollAnnualSettlementRepository
         foreach ([
             'employee_id', 'row_version', 'outcome_id', 'annual_revision_id',
             'tax_difference_minor', 'bonus_difference_minor',
-            'settlement_difference_minor', 'payable_minor', 'payroll_input_id',
+            'settlement_difference_minor', 'payable_minor',
+            'payout_run_id', 'payout_revision_id',
         ] as $key) {
             if (array_key_exists($key, $row) && $row[$key] !== null) {
                 $row[$key] = (int) $row[$key];

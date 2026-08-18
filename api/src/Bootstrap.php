@@ -234,6 +234,23 @@ final class Bootstrap
             \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator::class =>
                 static fn (): \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator
                     => \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator::create(),
+            // Volitelný class-parametr PHP-DI neautowiruje — bez tohohle bindu
+            // by se doplatek z ročního zúčtování do mzdového běhu nikdy
+            // nedostal a přeplatek by se zaměstnanci nevrátil.
+            \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryCalculationService::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryCalculationService(
+                        $c->get(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class),
+                        $c->get(
+                            \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputAssembler::class,
+                        ),
+                        $c->get(
+                            \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryResultPersister::class,
+                        ),
+                        $c->get(
+                            \MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementPayoutService::class,
+                        ),
+                    ),
             \MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline::class =>
                 fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline(
                     $c->get(\MyInvoice\Service\Payroll\Run\PayrollRunCalculator::class),
