@@ -256,6 +256,96 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         );
     }
 
+    /**
+     * Jakmile snapshot nese evidenci záměrů, rozhoduje ONA — ne ručně opsané
+     * datum. Chybějící přijatý záměr slevu zavře, i kdyby bylo
+     * `social_part_time_discount_notified_on` vyplněné a v termínu; § 7a odst. 5
+     * váže nárok na doručení oznámení ČSSZ, které z ručního políčka neplyne.
+     */
+    public function testDiscountNeedsAnAcceptedIntentOnceTheSnapshotCarriesEvidence(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $term = &$snapshot['people'][0]['employments'][0]['term'];
+        $term['social_part_time_discount_reason'] = 'age_55_plus';
+        $term['social_part_time_discount_evidence'] = 'osobni-spis/2026/42';
+        $term['social_part_time_discount_notified_on'] = '2026-05-20';
+        $term['social_part_time_discount_intent'] = null;
+        $term['weekly_hours'] = '20.00';
+        unset($term);
+        $snapshot['people'][0]['employments'][0]['time_month'] =
+            $this->workMonth(90_000, 8_000);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame(
+            SocialDiscountEvidence::Unverified,
+            $bundle->socialInsurance?->people[0]->relationships[0]->partTimeEmployerDiscount,
+        );
+    }
+
+    /**
+     * A naopak: přijatý záměr pokrývající období slevu uplatní i bez ručního
+     * data. Tohle je celý smysl přesunu — doložení je podání, ne políčko.
+     */
+    public function testAcceptedIntentAloneVerifiesTheDiscount(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $term = &$snapshot['people'][0]['employments'][0]['term'];
+        $term['social_part_time_discount_reason'] = 'age_55_plus';
+        $term['social_part_time_discount_evidence'] = 'osobni-spis/2026/42';
+        $term['social_part_time_discount_notified_on'] = null;
+        $term['social_part_time_discount_intent'] = [
+            'status' => 'accepted',
+            'intent_from' => '2026-01-01',
+            'intent_to' => null,
+            'accepted_on' => '2025-12-15',
+        ];
+        $term['weekly_hours'] = '20.00';
+        unset($term);
+        $snapshot['people'][0]['employments'][0]['time_month'] =
+            $this->workMonth(90_000, 8_000);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        $relationship = $bundle->socialInsurance?->people[0]->relationships[0];
+        self::assertSame(
+            SocialDiscountEvidence::Verified,
+            $relationship?->partTimeEmployerDiscount,
+        );
+        self::assertSame(
+            SocialPartTimeDiscountReason::Age55Plus,
+            $relationship?->partTimeEmployerDiscountReason,
+        );
+    }
+
+    /**
+     * Záměr ukončený uprostřed vykazovaného měsíce ho už nepokrývá
+     * (§ 7b odst. 4 a kontrola 291 bod 1).
+     */
+    public function testIntentEndedInsideThePeriodClosesTheDiscount(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $term = &$snapshot['people'][0]['employments'][0]['term'];
+        $term['social_part_time_discount_reason'] = 'age_55_plus';
+        $term['social_part_time_discount_evidence'] = 'osobni-spis/2026/42';
+        $term['social_part_time_discount_notified_on'] = '2026-05-20';
+        $term['social_part_time_discount_intent'] = [
+            'status' => 'ended',
+            'intent_from' => '2026-01-01',
+            'intent_to' => '2026-06-15',
+            'accepted_on' => '2025-12-15',
+        ];
+        $term['weekly_hours'] = '20.00';
+        unset($term);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame(
+            SocialDiscountEvidence::Unverified,
+            $bundle->socialInsurance?->people[0]->relationships[0]->partTimeEmployerDiscount,
+        );
+    }
+
     /** @return array<string,mixed> */
     private function workMonth(int $workedMillihours, int $paidUnworkedMillihours): array
     {

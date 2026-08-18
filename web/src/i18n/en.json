@@ -2489,8 +2489,8 @@
             },
             "social_part_time_discount_evidence": "Evidence reference for the claim",
             "social_part_time_discount_evidence_hint": "State how the claim is evidenced (for example a disability decision or a certificate of study). Without evidence the discount is not applied and the month stops for manual review.",
-            "social_part_time_discount_notified_on": "Intent notified to CSSA on",
-            "social_part_time_discount_notified_on_hint": "Under § 7a(5) the discount is due only if the intent to claim it was notified to the Czech Social Security Administration no later than the claim itself. Without the date the discount is not applied.",
+            "social_part_time_discount_notified_on": "Intent notified to CSSA on (historical)",
+            "social_part_time_discount_notified_on_hint": "Under Section 7a(5) the discount is only due if the intent to apply it was notified to the Czech Social Security Administration no later than when it is applied. This field no longer establishes the entitlement - since the intent register was introduced (Filings → Discount intent) the accepted OZUSPOJ notification decides. It remains only for periods calculated earlier.",
             "change_reason": "Reason for change",
             "checklist_title": "Duties",
             "checklist_open": "Open: {count}",
@@ -2974,6 +2974,7 @@
                 "transport": "Submission status",
                 "regzel": "Employer registration",
                 "jmhz": "JMHZ",
+                "discount_intents": "Discount intent",
                 "eldp": "Pension record sheet",
                 "health": "Health insurers",
                 "health_notifications": "HI — notifications",
@@ -4593,6 +4594,69 @@
                 "exceeded": "Above limit",
                 "incomplete": "Incomplete data",
                 "limit_unavailable": "Limit unavailable"
+            }
+        },
+        "discountIntents": {
+            "title": "Insurance discount intent",
+            "intro": "The employer discount for short working hours is reported in the monthly report, but the entitlement comes from a different filing: the notification of intent (OZUSPOJ). Without it the Czech Social Security Administration will not recognise the discount and the deducted premium becomes a debt. The discount is applied only once the intent carries the delivery date from the CSSA protocol.",
+            "legalBasis": "Sections 7a(5), 7c and 23d-23f of Act No. 589/1992 Coll.; OZUSPOJ23 data message.",
+            "person": "Person",
+            "employment": "Employment",
+            "intentFrom": "Discount applies from",
+            "intentTo": "Application ended on",
+            "acceptedOn": "Delivered to CSSA",
+            "acceptedOnInput": "Delivery date from the protocol",
+            "endOnInput": "Last day of application",
+            "rejectionReason": "Rejection reason from the protocol",
+            "dueOn": "Notify no later than",
+            "employeeInformedOn": "Employee informed in writing",
+            "employeeInformedHint": "Section 23d(2) requires informing the employee in writing before the discount is first applied.",
+            "empty": "No discount intent has been recorded yet.",
+            "notEvidenced": "This intent does not evidence the discount yet, so it is not applied in the payroll calculation.",
+            "transitionalWarning": "The discount for January to March 2026 had to be reported in the monthly report by 30 June 2026. After that date the CSSA will not recognise it (control 333) and the deducted premium becomes a debt under Section 7c(3).",
+            "created": "The intent has been created. Prepare the notification and send it from Dispatch status.",
+            "prepared": "The notification is prepared. You can send it from Dispatch status.",
+            "accepted": "Acceptance recorded; the discount applies from the given date.",
+            "rejected": "Rejection recorded. The discount will not be applied.",
+            "endRequested": "End date recorded. Prepare the end notification.",
+            "ended": "The end of the discount application has been recorded.",
+            "actions": {
+                "create": "Create intent",
+                "preview": "Show XML",
+                "prepare": "Prepare notification",
+                "accept": "Record acceptance",
+                "reject": "Record rejection",
+                "end": "Set end date",
+                "prepareEnd": "Prepare end notification",
+                "confirmEnd": "Record the end",
+                "cancel": "Prepare cancellation"
+            },
+            "hints": {
+                "createRequirements": "First select the employment and the day the discount applies from.",
+                "acceptedOnRequired": "First copy the delivery date from the CSSA protocol - the entitlement rests on it.",
+                "rejectionReasonRequired": "First copy the rejection reason from the CSSA protocol.",
+                "endOnRequired": "First enter the last day the discount is applied."
+            },
+            "statuses": {
+                "draft": "Draft",
+                "submitted": "Submitted",
+                "accepted": "Accepted",
+                "rejected": "Rejected",
+                "ended": "Ended",
+                "cancelled": "Cancelled"
+            },
+            "reasons": {
+                "age_55_plus": "Aged 55 or over",
+                "child_care_under_10": "Caring for a child under 10",
+                "dependent_close_person_care": "Caring for a dependent close person",
+                "study_under_26": "Studying and under 26",
+                "retraining_jobseeker": "Jobseeker retraining",
+                "disabled_person": "Person with a disability",
+                "under_21": "Under 21"
+            },
+            "errors": {
+                "loadFailed": "The intents could not be loaded.",
+                "actionFailed": "The action could not be completed."
             }
         }
     },

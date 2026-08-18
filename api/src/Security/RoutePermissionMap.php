@@ -239,6 +239,13 @@ final class RoutePermissionMap
         // by se v praxi vždy přidělovaly společně.
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
+        // Záměr uplatňovat slevu na pojistném (OZUSPOJ). Zápis výsledku od ČSSZ
+        // je WRITE stejně jako příprava podání — mění doloženost nároku, tedy
+        // i výši odvedeného pojistného.
+        ['GET', '#^/api/payroll/submissions/discount-intents$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/discount-intents$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/discount-intents/[0-9]+/preview$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/discount-intents/[0-9]+/(?:prepare|end|receipt)$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::READ],
         ['*', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/jmhz-transport$#', 'payroll.submissions', AccessLevel::READ],

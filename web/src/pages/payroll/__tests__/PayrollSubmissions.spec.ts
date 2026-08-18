@@ -420,7 +420,9 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(8)
+    // Devět od chvíle, kdy má vlastní záložku i záměr uplatňovat slevu
+    // (OZUSPOJ) — je to podmínka nároku, ne součást měsíčního hlášení.
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(9)
     await clickTab(wrapper, 'regzel')
     await flushPromises()
     expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(2)

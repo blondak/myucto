@@ -64,7 +64,8 @@ enum AgendaReceiptCapability: string
         return match (strtoupper(trim($agendaCode))) {
             // ČSSZ přes VREP/APEP vrací protokol o zpracování s doloženým XSD.
             'JMHZ', 'JMHZ25', 'REGZEC', 'REGZEC25', 'PREZEC', 'PREZEC26',
-            'REGZEL', 'REGZEL26', 'REGZELDOPL25', 'DZMH' => self::ProcessingProtocol,
+            'REGZEL', 'REGZEL26', 'REGZELDOPL25', 'DZMH',
+            'OZUSPOJ', 'OZUSPOJ23' => self::ProcessingProtocol,
             // EPO vrací potvrzení s podacím číslem — ale jen když jde přes EPO.
             // Totéž podání odeslané datovkou takové potvrzení nedostane.
             'DPHDP3', 'DPHKH1', 'DPHSHV', 'DPPDP9', 'DPFDP5', 'DPFDP7',

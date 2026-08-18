@@ -247,6 +247,15 @@ final class PayrollEnumContractTest extends TestCase
         // pojišťovny se v tabulce ukazuje, takže se nesmí rozejít.
         'payrollHealthNotifications.ts::HealthSourceStatus'
             => 'consts:MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyRule',
+        // Záměr uplatňovat slevu na pojistném (OZUSPOJ). Stav rozhoduje o tom,
+        // jestli se sleva vůbec uplatní, a obrazovka podle něj nabízí akce —
+        // nová hodnota bez překladu by nechala řádek bez toho, co s ním dělat.
+        'payrollDiscountIntents.ts::PayrollDiscountIntentStatus'
+            => 'enum:MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojIntentStatus',
+        // Druh oznámení (`zamer/typPodani`). Hodnotou enumu je slovo, ne číslo
+        // z XSD — `2` v požadavku by nikdo nepřečetl jako „ukončit záměr".
+        'payrollDiscountIntents.ts::PayrollDiscountIntentSubmissionKind'
+            => 'enum:MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojSubmissionKind',
 
         // Politiky zaměstnavatele
         'payroll.ts::PayrollBusinessDayRule'     => 'policy:payday_business_day_rule',
@@ -533,6 +542,10 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\SocialInsurance\SocialParticipationStatus::class,
         \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsurerChannelKind::class,
         \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationCodeGroup::class,
+        // Výsledek posouzení záměru (kontrola 291) je zjištění výpočtu, ne
+        // volba uživatele — do klienta odchází jen jako `evidences_discount`
+        // a věta, ne jako kód, který by šlo poslat zpátky.
+        \MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojEligibilityOutcome::class,
         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlPassability::class,
         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlScope::class,
         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSystem::class,

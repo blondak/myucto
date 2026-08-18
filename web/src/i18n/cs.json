@@ -2489,8 +2489,8 @@
             },
             "social_part_time_discount_evidence": "Odkaz na podklad k nároku",
             "social_part_time_discount_evidence_hint": "Uveďte, čím je nárok doložen (například číslo rozhodnutí o invaliditě nebo potvrzení o studiu). Bez podkladu se sleva neuplatní a měsíc skončí ručním posouzením.",
-            "social_part_time_discount_notified_on": "Záměr oznámen ČSSZ dne",
-            "social_part_time_discount_notified_on_hint": "Podle § 7a odst. 5 sleva náleží, jen pokud byl záměr ji uplatňovat oznámen České správě sociálního zabezpečení nejpozději s jejím uplatněním. Bez data se sleva neuplatní.",
+            "social_part_time_discount_notified_on": "Záměr oznámen ČSSZ dne (historické)",
+            "social_part_time_discount_notified_on_hint": "Podle § 7a odst. 5 sleva náleží, jen pokud byl záměr ji uplatňovat oznámen České správě sociálního zabezpečení nejpozději s jejím uplatněním. Tohle pole už nárok NEZAKLÁDÁ — od zavedení evidence záměrů (Podání → Záměr slevy) o něm rozhoduje přijaté oznámení OZUSPOJ. Zůstává jen kvůli obdobím spočítaným dřív.",
             "change_reason": "Důvod změny",
             "checklist_title": "Povinnosti",
             "checklist_open": "Nesplněno: {count}",
@@ -2974,6 +2974,7 @@
                 "transport": "Stav odeslání",
                 "regzel": "Registrace zaměstnavatele",
                 "jmhz": "JMHZ",
+                "discount_intents": "Záměr slevy",
                 "eldp": "Evidenční list DP",
                 "health": "Zdravotní pojišťovny",
                 "health_notifications": "ZP — oznámení",
@@ -4593,6 +4594,69 @@
                 "exceeded": "Nad limitem",
                 "incomplete": "Neúplný podklad",
                 "limit_unavailable": "Limit není k dispozici"
+            }
+        },
+        "discountIntents": {
+            "title": "Záměr uplatňovat slevu na pojistném",
+            "intro": "Sleva zaměstnavatele za kratší úvazky se vykazuje v měsíčním hlášení, ale nárok na ni zakládá jiné podání: oznámení záměru (OZUSPOJ). Bez něj Česká správa sociálního zabezpečení slevu neuzná a odečtené pojistné se stane dluhem. Sleva se ve výpočtu uplatní teprve u záměru, u kterého je zapsaný den doručení z protokolu ČSSZ.",
+            "legalBasis": "§ 7a odst. 5, § 7c a § 23d až 23f zákona č. 589/1992 Sb.; datová věta OZUSPOJ23.",
+            "person": "Osoba",
+            "employment": "Pracovní vztah",
+            "intentFrom": "Sleva se uplatní od",
+            "intentTo": "Uplatňování ukončeno k",
+            "acceptedOn": "Doručeno ČSSZ",
+            "acceptedOnInput": "Den doručení z protokolu",
+            "endOnInput": "Poslední den uplatňování",
+            "rejectionReason": "Důvod odmítnutí z protokolu",
+            "dueOn": "Oznámit nejpozději",
+            "employeeInformedOn": "Zaměstnanec písemně informován",
+            "employeeInformedHint": "§ 23d odst. 2 ukládá informovat zaměstnance písemně před prvním uplatněním slevy.",
+            "empty": "Zatím není evidovaný žádný záměr uplatňovat slevu.",
+            "notEvidenced": "Tenhle záměr slevu zatím nedokládá, takže se ve mzdovém výpočtu neuplatní.",
+            "transitionalWarning": "Slevu za leden až březen 2026 bylo nutné vykázat v měsíčním hlášení do 30. 6. 2026. Po tomhle dni ji ČSSZ neuzná (kontrola 333) a odečtené pojistné se stane dluhem podle § 7c odst. 3.",
+            "created": "Záměr je založený. Připravte oznámení a odešlete ho ve Stavu odeslání.",
+            "prepared": "Oznámení je připravené. Odeslat ho můžete ve Stavu odeslání.",
+            "accepted": "Přijetí záměru je zapsané, sleva se od uvedeného dne uplatní.",
+            "rejected": "Odmítnutí je zapsané. Sleva se neuplatní.",
+            "endRequested": "Den skončení je zapsaný. Připravte oznámení o skončení.",
+            "ended": "Skončení uplatňování slevy je zapsané.",
+            "actions": {
+                "create": "Založit záměr",
+                "preview": "Zobrazit XML",
+                "prepare": "Připravit oznámení",
+                "accept": "Zapsat přijetí",
+                "reject": "Zapsat odmítnutí",
+                "end": "Zadat den skončení",
+                "prepareEnd": "Připravit oznámení o skončení",
+                "confirmEnd": "Zapsat skončení",
+                "cancel": "Připravit storno"
+            },
+            "hints": {
+                "createRequirements": "Nejdřív vyberte pracovní vztah a den, od kterého se sleva uplatní.",
+                "acceptedOnRequired": "Nejdřív opište den doručení z protokolu ČSSZ — na něm stojí nárok na slevu.",
+                "rejectionReasonRequired": "Nejdřív opište důvod odmítnutí z protokolu ČSSZ.",
+                "endOnRequired": "Nejdřív zadejte poslední den, ke kterému se sleva uplatňuje."
+            },
+            "statuses": {
+                "draft": "Rozpracováno",
+                "submitted": "Podáno",
+                "accepted": "Přijato",
+                "rejected": "Odmítnuto",
+                "ended": "Ukončeno",
+                "cancelled": "Stornováno"
+            },
+            "reasons": {
+                "age_55_plus": "Věk alespoň 55 let",
+                "child_care_under_10": "Péče o dítě mladší 10 let",
+                "dependent_close_person_care": "Péče o závislou osobu blízkou",
+                "study_under_26": "Studium a věk do 26 let",
+                "retraining_jobseeker": "Rekvalifikace uchazeče o zaměstnání",
+                "disabled_person": "Osoba se zdravotním postižením",
+                "under_21": "Věk do 21 let"
+            },
+            "errors": {
+                "loadFailed": "Záměry se nepodařilo načíst.",
+                "actionFailed": "Akci se nepodařilo provést."
             }
         }
     },
