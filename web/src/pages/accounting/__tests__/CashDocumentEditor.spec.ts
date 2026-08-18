@@ -3,9 +3,13 @@ import { mount, flushPromises } from '@vue/test-utils'
 import type { CashRegister } from '@/api/cash'
 
 const m = vi.hoisted(() => ({
+  routeParams: {} as Record<string, string>,
   listRegisters: vi.fn(),
   listRulePresets: vi.fn(),
   createDocument: vi.fn(),
+  getDocument: vi.fn(),
+  updateDocument: vi.fn(),
+  postDocument: vi.fn(),
   listAccounts: vi.fn(),
   listPostingRules: vi.fn(),
   taxList: vi.fn(),
@@ -21,6 +25,9 @@ vi.mock('@/api/cash', () => ({
     listRegisters: m.listRegisters,
     listRulePresets: m.listRulePresets,
     createDocument: m.createDocument,
+    getDocument: m.getDocument,
+    updateDocument: m.updateDocument,
+    postDocument: m.postDocument,
   },
 }))
 vi.mock('@/api/accounting', () => ({
@@ -49,7 +56,7 @@ vi.mock('vue-i18n', () => ({
 }))
 vi.mock('vue-router', () => ({
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
-  useRoute: () => ({ query: {} }),
+  useRoute: () => ({ query: {}, params: m.routeParams }),
   useRouter: () => ({ push: m.push }),
 }))
 
@@ -78,6 +85,7 @@ async function mountEditor() {
 describe('CashDocumentEditor.vue', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    for (const key of Object.keys(m.routeParams)) delete m.routeParams[key]
     m.listRegisters.mockResolvedValue([register()])
     m.listRulePresets.mockResolvedValue([])
     m.listAccounts.mockResolvedValue([])
@@ -197,6 +205,89 @@ describe('CashDocumentEditor.vue', () => {
     expect(vm.vatMatches).toBe(true)
     await vm.save()
     expect(m.createDocument).toHaveBeenCalledTimes(1)
+  })
+
+  // ── M-16: koncept / PUT / post jsou z UI dosažitelné ──────────────────────
+  it('„Uložit jako koncept" pošle post:false', async () => {
+    m.createDocument.mockResolvedValue({ id: 7, doc_number: null, journal_entry_id: null, status: 'draft', warnings: [] })
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.total_amount = 100
+    vm.form.description = 'Koncept'
+    await vm.save(false)
+
+    expect(m.createDocument.mock.calls[0][0].post).toBe(false)
+  })
+
+  it('výchozí vystavení pořád posílá post:true', async () => {
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.total_amount = 100
+    vm.form.description = 'Prodej'
+    await vm.save(true)
+
+    expect(m.createDocument.mock.calls[0][0].post).toBe(true)
+  })
+
+  it('editace draftu načte doklad a uloží ho přes PUT bez zaúčtování', async () => {
+    m.routeParams.id = '42'
+    m.getDocument.mockResolvedValue({
+      id: 42, register_id: 1, doc_type: 'out', purpose: 'other', doc_number: null,
+      issue_date: '2093-03-01', tax_date: null, partner_name: 'Dodavatel', partner_ic: null, partner_dic: null,
+      description: 'Poštovné', total_amount: 250, currency_code: 'CZK', vat_mode: 'none', vat_lines: [],
+      invoice_id: null, purchase_invoice_id: null, rule_key: null, counter_account_code: '518',
+      status: 'draft', journal_entry_id: null, reversal_entry_id: null, created_by: null, created_at: '2093-03-01',
+    })
+    m.updateDocument.mockResolvedValue({})
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+
+    expect(vm.form.description).toBe('Poštovné')
+    // Reset-watchery nesmí při plnění formuláře vymazat protiúčet ani účel.
+    expect(vm.form.purpose).toBe('other')
+    expect(vm.form.counter_account_code).toBe('518')
+
+    await vm.save(false)
+    expect(m.updateDocument).toHaveBeenCalledWith(42, expect.objectContaining({ post: false }))
+    expect(m.postDocument).not.toHaveBeenCalled()
+    expect(m.createDocument).not.toHaveBeenCalled()
+  })
+
+  it('vystavení draftu z editace udělá PUT a pak /post', async () => {
+    m.routeParams.id = '42'
+    m.getDocument.mockResolvedValue({
+      id: 42, register_id: 1, doc_type: 'in', purpose: 'sale', doc_number: null,
+      issue_date: '2093-03-01', tax_date: null, partner_name: null, partner_ic: null, partner_dic: null,
+      description: 'Prodej', total_amount: 500, currency_code: 'CZK', vat_mode: 'none', vat_lines: [],
+      invoice_id: null, purchase_invoice_id: null, rule_key: null, counter_account_code: null,
+      status: 'draft', journal_entry_id: null, reversal_entry_id: null, created_by: null, created_at: '2093-03-01',
+    })
+    m.updateDocument.mockResolvedValue({})
+    m.postDocument.mockResolvedValue({ doc_number: 'PPD-2093-0001', journal_entry_id: 3, warnings: ['cash.warning.negative_balance'] })
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+
+    await vm.save(true)
+    expect(m.updateDocument).toHaveBeenCalledTimes(1)
+    expect(m.postDocument).toHaveBeenCalledWith(42)
+    expect(m.toastWarning).toHaveBeenCalledWith('cash.warning.negative_balance')
+  })
+
+  it('vystavený doklad se přes editaci uložit nedá', async () => {
+    m.routeParams.id = '42'
+    m.getDocument.mockResolvedValue({
+      id: 42, register_id: 1, doc_type: 'in', purpose: 'sale', doc_number: 'PPD-1',
+      issue_date: '2093-03-01', tax_date: null, partner_name: null, partner_ic: null, partner_dic: null,
+      description: 'Prodej', total_amount: 500, currency_code: 'CZK', vat_mode: 'none', vat_lines: [],
+      invoice_id: null, purchase_invoice_id: null, rule_key: null, counter_account_code: null,
+      status: 'posted', journal_entry_id: 9, reversal_entry_id: null, created_by: null, created_at: '2093-03-01',
+    })
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+
+    expect(vm.error).toBe('cash.error.doc_not_draft')
+    await vm.save(false)
+    expect(m.updateDocument).not.toHaveBeenCalled()
   })
 
   // ── H-7/H-8: hlášky místo popisků a konkrétní důvod ze serveru ────────────

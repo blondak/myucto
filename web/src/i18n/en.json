@@ -4842,6 +4842,10 @@
         "title": "Cash register",
         "book_title": "Cash book",
         "new_document": "New cash document",
+        "edit_document": "Edit cash document",
+        "save_draft": "Save as draft",
+        "post_document": "Post",
+        "post_confirm": "Post document {number}? A series number will be assigned and the document posted.",
         "balance": "Balance",
         "balance_as_of": "balance as of {date}",
         "opening_balance": "Opening balance",
@@ -4942,6 +4946,7 @@
             "title": "Delete document permanently",
             "warning": "The document and its postings (including any reversing entry) will be deleted irreversibly. Unlike a reversal, no trace remains in the books.",
             "hint": "For documents already covered by a filed return, prefer a reversal. Deletion is only possible in an open and unlocked period.",
+            "draft_warning": "A draft has no series number and no postings — deleting it leaves nothing behind and creates no gap in the number series.",
             "confirm": "Delete"
         },
         "empty": {

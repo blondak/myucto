@@ -61,6 +61,10 @@ export interface CashDocumentCreateResult {
   status: CashDocumentStatus; warnings: string[]
 }
 
+export interface CashDocumentPostResult {
+  doc_number: string; journal_entry_id: number | null; warnings: string[]
+}
+
 export interface CashDocumentFilters {
   register_id?: number; doc_type?: CashDocType; purpose?: CashPurpose
   status?: CashDocumentStatus; from?: string; to?: string; q?: string
@@ -114,8 +118,16 @@ export const cashApi = {
 
   listDocuments: (f: CashDocumentFilters) =>
     api.get<CashDocumentListResponse>('/accounting/cash-documents', { params: f }).then(r => r.data),
+  getDocument: (id: number) =>
+    api.get<CashDocument>(`/accounting/cash-documents/${id}`).then(r => r.data),
   createDocument: (p: CreateCashDocumentPayload) =>
     api.post<CashDocumentCreateResult>('/accounting/cash-documents', p).then(r => r.data),
+  // Úprava jen rozpracovaného (draft) dokladu — vystavený se opravuje stornem.
+  updateDocument: (id: number, p: CreateCashDocumentPayload) =>
+    api.put<CashDocument>(`/accounting/cash-documents/${id}`, p).then(r => r.data),
+  // Zaúčtování draftu (přidělí číslo řady a založí deníkový zápis).
+  postDocument: (id: number) =>
+    api.post<CashDocumentPostResult>(`/accounting/cash-documents/${id}/post`).then(r => r.data),
   reverseDocument: (id: number, reason: string, entryDate?: string) =>
     api.post<{ reversal_entry_id: number }>(
       `/accounting/cash-documents/${id}/reverse`, { reason, entry_date: entryDate }).then(r => r.data),

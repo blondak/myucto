@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import {
   cashApi, type CashRegister, type CashVatLine, type CashPurpose,
-  type CashDocType, type UnpaidDocumentOption, type CreateCashDocumentPayload,
+  type CashDocType, type CashDocumentStatus, type UnpaidDocumentOption, type CreateCashDocumentPayload,
   type CashRulePreset,
 } from '@/api/cash'
 import { accountingApi, type ChartAccount, type PostingRuleMap } from '@/api/accounting'
@@ -36,6 +36,15 @@ const taxYears = ref<TaxConstantsYear[]>([])
 const clients = ref<Client[]>([])
 const saving = ref(false)
 const error = ref('')
+
+// Režim úprav rozpracovaného dokladu (routa /accounting/cash/:id/edit). Vystavený
+// doklad backend přes PUT odmítne (`doc_not_draft`) — opravuje se stornem.
+const editId = computed(() => Number(route.params.id ?? 0) || 0)
+const isEdit = computed(() => editId.value > 0)
+const loadedStatus = ref<CashDocumentStatus | null>(null)
+const isDraft = computed(() => !isEdit.value || loadedStatus.value === 'draft')
+// Plnění formuláře z API nesmí spustit reset-watchery určené pro ruční přepnutí.
+const hydrating = ref(false)
 
 const form = reactive({
   register_id: '' as number | '',
@@ -168,15 +177,65 @@ onMounted(async () => {
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   }
-  // Výběr pokladny z query, jinak výchozí.
-  const qReg = Number(route.query.register_id || 0)
-  if (qReg > 0 && registers.value.some(r => r.id === qReg)) form.register_id = qReg
-  else form.register_id = (registers.value.find(r => r.is_default) ?? registers.value[0])?.id ?? ''
-  try { clients.value = (await clientsApi.list({ per_page: 100 })).data } catch { clients.value = [] }
+  if (editId.value > 0) {
+    await loadDocument(editId.value)
+  } else {
+    // Výběr pokladny z query, jinak výchozí.
+    const qReg = Number(route.query.register_id || 0)
+    if (qReg > 0 && registers.value.some(r => r.id === qReg)) form.register_id = qReg
+    else form.register_id = (registers.value.find(r => r.is_default) ?? registers.value[0])?.id ?? ''
+  }
+  // Prázdný našeptávač partnerů je k nerozeznání od „žádní klienti nejsou" —
+  // selhání se proto hlásí, ne polyká (M-15).
+  try {
+    clients.value = (await clientsApi.list({ per_page: 100 })).data
+  } catch (e: any) {
+    clients.value = []
+    toast.error(cashErrorMessage(e, t))
+  }
 })
+
+/**
+ * Naplní formulář z existujícího draftu (režim úprav).
+ *
+ * `hydrating` vypne reset-watchery na doc_type/register_id/purpose: ty jsou psané
+ * pro ruční přepnutí uživatelem a při plnění formuláře by vzápětí vymazaly vazbu
+ * na fakturu, kontaci i protiúčet, které se právě načetly.
+ */
+async function loadDocument(id: number): Promise<void> {
+  hydrating.value = true
+  try {
+    const doc = await cashApi.getDocument(id)
+    loadedStatus.value = doc.status
+    form.register_id = doc.register_id
+    form.doc_type = doc.doc_type
+    form.purpose = doc.purpose
+    form.issue_date = doc.issue_date
+    form.tax_date = doc.tax_date || doc.issue_date
+    form.partner_name = doc.partner_name ?? ''
+    form.partner_ic = doc.partner_ic ?? ''
+    form.partner_dic = doc.partner_dic ?? ''
+    form.description = doc.description
+    form.vat_mode = doc.vat_mode
+    form.total_amount = doc.amount_foreign ?? doc.total_amount
+    form.fx_rate = doc.fx_rate ?? null
+    form.invoice_id = doc.invoice_id
+    form.purchase_invoice_id = doc.purchase_invoice_id
+    form.rule_key = doc.rule_key ?? ''
+    form.counter_account_code = doc.counter_account_code ?? ''
+    vatLines.value = doc.vat_lines ?? []
+    if (doc.status !== 'draft') error.value = t('cash.error.doc_not_draft')
+  } catch (e: any) {
+    error.value = cashErrorMessage(e, t)
+  } finally {
+    await nextTick()
+    hydrating.value = false
+  }
+}
 
 // Přepínač typu / pokladny → resetuj účel na první platný (valutová pokladna nabízí méně účelů).
 watch([() => form.doc_type, () => form.register_id], () => {
+  if (hydrating.value) return
   if (!purposeOptions.value.includes(form.purpose)) form.purpose = purposeOptions.value[0]
   // Předvolby jsou směrové (211 na MD = příjem, na D = výdej) — po přepnutí
   // PPD/VPD by zvolená kontace mířila na opačnou stranu.
@@ -186,6 +245,7 @@ watch([() => form.doc_type, () => form.register_id], () => {
 // Účel bez DPH → vynuť vat_mode none; při KAŽDÉ změně účelu vyčisti výběr úhrady
 // (přepnutí FV→PF by jinak drželo starou fakturu a zamčenou částku).
 watch(() => form.purpose, () => {
+  if (hydrating.value) return
   if (!isTaxDoc.value) form.vat_mode = 'none'
   form.rule_key = ''
   form.counter_account_code = ''
@@ -200,6 +260,7 @@ watch(() => form.purpose, () => {
 const unpaidQuery = ref('')
 const unpaidOptions = ref<UnpaidDocumentOption[]>([])
 const unpaidLoading = ref(false)
+const unpaidError = ref('')
 const selectedUnpaid = ref<UnpaidDocumentOption | null>(null)
 let unpaidTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -208,9 +269,15 @@ function onUnpaidSearch() {
   unpaidTimer = setTimeout(async () => {
     const kind = form.purpose === 'invoice_payment' ? 'invoice' : 'purchase_invoice'
     unpaidLoading.value = true
-    try { unpaidOptions.value = await cashApi.searchUnpaid(kind, unpaidQuery.value, 20) }
-    catch { unpaidOptions.value = [] }
-    finally { unpaidLoading.value = false }
+    unpaidError.value = ''
+    try {
+      unpaidOptions.value = await cashApi.searchUnpaid(kind, unpaidQuery.value, 20)
+    } catch (e: any) {
+      // Selhaný dotaz vypadal jako „žádné neuhrazené faktury nejsou" — uživatel pak
+      // místo úhrady faktury vystaví hotovostní prodej a DPH se vykáže dvakrát (M-15).
+      unpaidOptions.value = []
+      unpaidError.value = cashErrorMessage(e, t)
+    } finally { unpaidLoading.value = false }
   }, 300)
 }
 
@@ -325,8 +392,15 @@ const blockedReason = computed<string | null>(() => {
   return null
 })
 
-async function save() {
+/**
+ * `post = false` → doklad zůstane rozpracovaný (draft): číslo řady se nepřidělí
+ * a nic se nezaúčtuje. Do audit 2026-08 byl `post: true` natvrdo, takže cesta
+ * „uložit a dodělat později" i editace existujícího draftu byly z UI nedosažitelné,
+ * přestože je backend umí (POST … {post:false}, PUT {id}, POST {id}/post).
+ */
+async function save(post = true) {
   error.value = ''
+  if (isEdit.value && !isDraft.value) { error.value = t('cash.error.doc_not_draft'); return }
   if (form.register_id === '') { error.value = t('cash.validation.register'); return }
   if (!(Number(form.total_amount) > 0)) { error.value = t('cash.validation.amount'); return }
   if (!form.description.trim()) { error.value = t('cash.validation.description'); return }
@@ -349,7 +423,7 @@ async function save() {
     issue_date: form.issue_date,
     description: form.description.trim(),
     total_amount: Number(form.total_amount),
-    post: true,
+    post,
   }
   // Valutová pokladna: zadaná částka je v měně pokladny; CZK ekvivalent dopočítá BE
   // kurzem ČNB, pokud uživatel nezadal vlastní kurz.
@@ -376,9 +450,20 @@ async function save() {
 
   saving.value = true
   try {
-    const res = await cashApi.createDocument(payload)
-    toast.success(t('cash.new_document') + ' ' + (res.doc_number ?? ''))
-    for (const w of res.warnings) toast.warning(cashWarningMessage(w, t))
+    if (isEdit.value) {
+      await cashApi.updateDocument(editId.value, payload)
+      if (post) {
+        const res = await cashApi.postDocument(editId.value)
+        toast.success(t('cash.new_document') + ' ' + res.doc_number)
+        for (const w of res.warnings) toast.warning(cashWarningMessage(w, t))
+      } else {
+        toast.success(t('common.saved'))
+      }
+    } else {
+      const res = await cashApi.createDocument(payload)
+      toast.success(post ? t('cash.new_document') + ' ' + (res.doc_number ?? '') : t('common.saved'))
+      for (const w of res.warnings) toast.warning(cashWarningMessage(w, t))
+    }
     router.push('/accounting/cash')
   } catch (e: any) {
     error.value = cashErrorMessage(e, t)
@@ -392,7 +477,7 @@ async function save() {
   <div>
     <div class="flex items-center justify-between mb-4">
       <div>
-        <h1 class="text-2xl font-semibold">{{ t('cash.new_document') }}</h1>
+        <h1 class="text-2xl font-semibold">{{ isEdit ? t('cash.edit_document') : t('cash.new_document') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ form.doc_type === 'in' ? t('cash.type.in') : t('cash.type.out') }}</p>
       </div>
       <RouterLink to="/accounting/cash" class="text-sm text-neutral-500 hover:text-neutral-700">{{ t('common.back') }}</RouterLink>
@@ -476,6 +561,7 @@ async function save() {
             <input v-model="unpaidQuery" @input="onUnpaidSearch" type="text"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             <div v-if="unpaidLoading" class="text-xs text-neutral-400 mt-1">{{ t('common.loading') }}</div>
+            <p v-else-if="unpaidError" class="text-xs text-danger-500 mt-1">{{ unpaidError }}</p>
             <ul v-if="unpaidOptions.length" class="absolute z-10 mt-1 w-full bg-surface border border-neutral-200 rounded-md shadow-lg max-h-64 overflow-y-auto">
               <li v-for="o in unpaidOptions" :key="o.id" @click="pickUnpaid(o)"
                 class="cursor-pointer px-3 py-2 text-sm hover:bg-neutral-50 flex items-center justify-between gap-2">
@@ -592,10 +678,15 @@ async function save() {
         <div class="border-t border-neutral-200 pt-3 flex flex-col items-end gap-1.5">
           <div class="flex flex-wrap justify-end gap-2">
             <RouterLink to="/accounting/cash" :class="btnOutline('neutral')">{{ t('common.cancel') }}</RouterLink>
-            <button @click="save" :disabled="!canSubmit" :class="btnFilled('primary')"
+            <button @click="save(false)" :disabled="!canSubmit" :class="btnOutline('neutral')"
+              :title="disabledTitle(!canSubmit, blockedReason)">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+              {{ t('cash.save_draft') }}
+            </button>
+            <button @click="save(true)" :disabled="!canSubmit" :class="btnFilled('primary')"
               :title="disabledTitle(!canSubmit, blockedReason)">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
-              {{ saving ? t('common.saving') : t('common.save') }}
+              {{ saving ? t('common.saving') : t('cash.post_document') }}
             </button>
           </div>
           <p v-if="blockedReason" :class="[BTN_DISABLED_NOTE, 'md:text-right']">{{ blockedReason }}</p>

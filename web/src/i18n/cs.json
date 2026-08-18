@@ -4842,6 +4842,10 @@
         "title": "Pokladna",
         "book_title": "Pokladní kniha",
         "new_document": "Nový pokladní doklad",
+        "edit_document": "Úprava pokladního dokladu",
+        "save_draft": "Uložit jako koncept",
+        "post_document": "Vystavit",
+        "post_confirm": "Vystavit doklad {number}? Přidělí se číslo z řady a doklad se zaúčtuje.",
         "balance": "Zůstatek",
         "balance_as_of": "zůstatek k {date}",
         "opening_balance": "Počáteční zůstatek",
@@ -4942,6 +4946,7 @@
             "title": "Trvale smazat doklad",
             "warning": "Doklad i jeho zaúčtování (včetně případného protizápisu) budou nenávratně smazány. Na rozdíl od storna po nich v evidenci nezůstane stopa.",
             "hint": "Pro doklady, které už prošly přiznáním, použijte raději storno. Smazat lze jen doklad v otevřeném a neuzamčeném období.",
+            "draft_warning": "Rozpracovaný doklad nemá přidělené číslo ani zaúčtování — smazáním po něm v evidenci nic nezůstane a v číselné řadě nevznikne díra.",
             "confirm": "Smazat"
         },
         "empty": {

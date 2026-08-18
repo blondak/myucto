@@ -3,6 +3,7 @@ import { ref, onMounted, reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { cashApi, type CashRegister, type CashBookReport, type CashBookItem } from '@/api/cash'
+import { cashErrorMessage } from '@/api/cashErrors'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
@@ -84,7 +85,13 @@ function openPdf() {
 }
 
 onMounted(async () => {
-  try { registers.value = await cashApi.listRegisters(true) } catch { registers.value = [] }
+  // Prázdný select po síťové chybě je k nerozeznání od „žádná pokladna není" (M-15).
+  try {
+    registers.value = await cashApi.listRegisters(true)
+  } catch (e: any) {
+    registers.value = []
+    toast.error(cashErrorMessage(e, t))
+  }
   const first = registers.value.find(r => r.is_default) ?? registers.value[0]
   if (first) { registerId.value = first.id; await load() }
 })

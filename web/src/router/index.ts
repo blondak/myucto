@@ -207,6 +207,8 @@ const routes: RouteRecordRaw[] = [
       // povolí double_entry i tax_evidence; ostatní /accounting/* zůstávají double_entry-only.
       { path: 'accounting/cash',      name: 'accounting-cash',      component: () => import('@/pages/accounting/CashRegister.vue'),       meta: { requiresCashMode: true } },
       { path: 'accounting/cash/new',  name: 'accounting-cash-new',  component: () => import('@/pages/accounting/CashDocumentEditor.vue'), meta: { requiresCashMode: true, requiresSupplier: true } },
+      // Úprava rozpracovaného (draft) dokladu — vystavený se opravuje stornem, PUT ho odmítne.
+      { path: 'accounting/cash/:id(\\d+)/edit', name: 'accounting-cash-edit', component: () => import('@/pages/accounting/CashDocumentEditor.vue'), meta: { requiresCashMode: true, requiresSupplier: true } },
       { path: 'accounting/cash/book', name: 'accounting-cash-book', component: () => import('@/pages/accounting/CashBook.vue'),           meta: { requiresCashMode: true } },
       // Daňová evidence (Epic DE) — jen supplier.accounting_mode === 'tax_evidence' (zrcadlo requiresDoubleEntry)
       { path: 'tax-evidence/cash-journal',         name: 'tax-evidence-cash-journal',         component: () => import('@/pages/tax-evidence/CashJournal.vue'),         meta: { requiresTaxEvidence: true } },
@@ -480,7 +482,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // lookahead vylučuje jen `assets`, ne `small-assets`). Jiný klíč tady = menu svítí,
   // ale API vrátí 403.
   'accounting-small-assets': ['accounting'],
-  'accounting-period-closing': ['accounting.periods.close'], 'accounting-closing-package': ['reports.export'], 'accounting-statement-notes': ['accounting'], 'accounting-retention': ['accounting'], 'accounting-transition-report': ['tax_evidence'], 'accounting-cash': ['cash'], 'accounting-cash-new': ['cash.document.write', 'write'], 'accounting-cash-book': ['cash'],
+  'accounting-period-closing': ['accounting.periods.close'], 'accounting-closing-package': ['reports.export'], 'accounting-statement-notes': ['accounting'], 'accounting-retention': ['accounting'], 'accounting-transition-report': ['tax_evidence'], 'accounting-cash': ['cash'], 'accounting-cash-new': ['cash.document.write', 'write'], 'accounting-cash-edit': ['cash.document.write', 'write'], 'accounting-cash-book': ['cash'],
   'tax-evidence-cash-journal': ['tax_evidence'], 'tax-evidence-receivables-payables': ['tax_evidence'],
   'stock-items': ['stock'], 'stock-item-new': ['stock.items.write', 'write'], 'stock-item-detail': ['stock'], 'stock-item-edit': ['stock.items.write', 'write'],
   'stock-documents': ['stock'], 'stock-document-new': ['stock.documents.write', 'write'], 'stock-document-detail': ['stock'],

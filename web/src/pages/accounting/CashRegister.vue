@@ -2,8 +2,8 @@
 import { ref, onMounted, reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
-import { cashApi, type CashRegister, type CashDocument } from '@/api/cash'
-import { cashErrorMessage } from '@/api/cashErrors'
+import { cashApi, type CashRegister, type CashDocument, type CashDocumentStatus } from '@/api/cash'
+import { cashErrorMessage, cashWarningMessage } from '@/api/cashErrors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
@@ -44,7 +44,7 @@ const filters = reactive({
   register_id: '' as number | '',
   doc_type: '' as '' | 'in' | 'out',
   purpose: '' as '' | 'sale' | 'purchase' | 'invoice_payment' | 'purchase_payment' | 'transfer' | 'other',
-  status: '' as '' | 'posted' | 'reversed',
+  status: '' as '' | CashDocumentStatus,
   from: defaultRange().from,
   to: defaultRange().to,
   q: '',
@@ -56,8 +56,15 @@ const selectedRegister = computed<CashRegister | null>(() => {
   return registers.value.find(r => r.is_default) ?? registers.value[0]
 })
 
+// Tichý catch tady vykresloval prázdný stav „Nejprve založte pokladnu" i po síťové
+// chybě a sváděl k založení duplicitní pokladny — proto se selhání hlásí (M-15).
 async function loadRegisters() {
-  try { registers.value = await cashApi.listRegisters() } catch { registers.value = [] }
+  try {
+    registers.value = await cashApi.listRegisters()
+  } catch (e: any) {
+    registers.value = []
+    toast.error(cashErrorMessage(e, t))
+  }
 }
 
 async function load() {
@@ -117,7 +124,8 @@ function applyQueryToPage(q: Record<string, string>) {
   filters.doc_type = (q.doc_type === 'in' || q.doc_type === 'out') ? q.doc_type : ''
   filters.purpose = ['sale', 'purchase', 'invoice_payment', 'purchase_payment', 'transfer', 'other'].includes(q.purpose ?? '')
     ? (q.purpose as typeof filters.purpose) : ''
-  filters.status = (q.status === 'posted' || q.status === 'reversed') ? q.status : ''
+  filters.status = (['draft', 'posted', 'reversed'] as const).includes(q.status as CashDocumentStatus)
+    ? (q.status as CashDocumentStatus) : ''
   filters.from = q.from ?? defaultRange().from
   filters.to = q.to ?? defaultRange().to
   filters.q = q.q ?? ''
@@ -230,11 +238,17 @@ function openDelete(d: CashDocument) {
   deleteError.value = ''
 }
 
+/**
+ * `force=1` maže doklad VČETNĚ deníkových zápisů a nechává trvalou díru v číselné
+ * řadě. U rozpracovaného dokladu žádné zápisy ani číslo neexistují, takže tam
+ * stačí měkké smazání draftu — posílat force vždy (jak to UI dělalo) je zbytečně
+ * destruktivní cesta i pro případ, který ji nepotřebuje.
+ */
 async function submitDelete() {
   if (!deleteTarget.value) return
   deleteSaving.value = true
   try {
-    await cashApi.deleteDocument(deleteTarget.value.id, true)
+    await cashApi.deleteDocument(deleteTarget.value.id, deleteTarget.value.status !== 'draft')
     toast.success(t('common.deleted'))
     deleteTarget.value = null
     await loadRegisters()
@@ -247,6 +261,24 @@ async function submitDelete() {
 }
 
 function onManagerChanged() { loadRegisters() }
+
+// ── Vystavení rozpracovaného dokladu ──────────────────────────────────────
+const postingId = ref<number | null>(null)
+
+async function postDraft(d: CashDocument) {
+  postingId.value = d.id
+  try {
+    const res = await cashApi.postDocument(d.id)
+    toast.success(t('cash.new_document') + ' ' + res.doc_number)
+    for (const w of res.warnings) toast.warning(cashWarningMessage(w, t))
+    await loadRegisters()
+    await load()
+  } catch (e: any) {
+    toast.error(cashErrorMessage(e, t))
+  } finally {
+    postingId.value = null
+  }
+}
 </script>
 
 <template>
@@ -363,9 +395,10 @@ function onManagerChanged() { loadRegisters() }
             </select>
           </div>
           <div>
-            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.status.posted') }}</label>
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.col.status') }}</label>
             <select v-model="filters.status" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
               <option value="">{{ t('common.all') }}</option>
+              <option value="draft">{{ t('cash.status.draft') }}</option>
               <option value="posted">{{ t('cash.status.posted') }}</option>
               <option value="reversed">{{ t('cash.status.reversed') }}</option>
             </select>
@@ -437,22 +470,42 @@ function onManagerChanged() { loadRegisters() }
                   </td>
                   <td v-if="tbl.isVisible('status')" class="px-3 py-2 text-center">
                     <span class="text-xs px-2 py-0.5 rounded font-medium"
-                      :class="d.status === 'posted' ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-500'">
+                      :class="d.status === 'posted' ? 'bg-success-50 text-success-600'
+                        : d.status === 'draft' ? 'bg-warning-50 text-warning-600' : 'bg-neutral-100 text-neutral-500'">
                       {{ t(`cash.status.${d.status}`) }}
                     </span>
                   </td>
                   <td v-if="tbl.isVisible('tax_date')" class="px-3 py-2 whitespace-nowrap">{{ d.tax_date ? formatDate(d.tax_date) : '—' }}</td>
                   <td v-if="tbl.isVisible('created_at')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(d.created_at) }}</td>
                   <td v-if="tbl.isVisible('created_by')" class="px-3 py-2 truncate max-w-[10rem]">{{ d.created_by_name || '—' }}</td>
+                  <!-- Stejné akce, stejné komponenty jako mobilní karta níž. Dřív tu
+                       byly textové glyfy ⭳ / ⟲ bez aria-labelu, zatímco mobil měl
+                       btnIconSm + ICONS — dvě reprezentace téže akce. -->
                   <td class="px-3 py-2 text-right whitespace-nowrap" @click.stop>
-                    <button type="button" @click="openPdf(d)" :title="t('cash.print')"
-                      class="cursor-pointer text-neutral-400 hover:text-primary-600 px-1">⭳</button>
-                    <button v-if="auth.canWrite('cash.document.write') && d.status === 'posted'" type="button" @click="openReverse(d)" :title="t('cash.reverse.title')"
-                      class="cursor-pointer text-neutral-400 hover:text-danger-500 px-1">⟲</button>
-                    <button v-if="auth.canWrite('cash.document.write')" type="button" @click="openDelete(d)" :title="t('cash.delete.title')"
-                      class="cursor-pointer text-neutral-400 hover:text-danger-600 px-1 align-middle">
-                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
-                    </button>
+                    <div class="inline-flex items-center gap-1.5">
+                      <RouterLink v-if="auth.canWrite('cash.document.write') && d.status === 'draft'"
+                        :to="{ name: 'accounting-cash-edit', params: { id: d.id } }"
+                        :title="t('common.edit')" :aria-label="t('common.edit')" :class="btnIconSm('neutral')">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+                      </RouterLink>
+                      <button v-if="auth.canWrite('cash.document.write') && d.status === 'draft'" type="button"
+                        @click="postDraft(d)" :disabled="postingId === d.id"
+                        :title="t('cash.post_document')" :aria-label="t('cash.post_document')" :class="btnIconSm('success')">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                      </button>
+                      <button v-if="d.status !== 'draft'" type="button" @click="openPdf(d)"
+                        :title="t('cash.print')" :aria-label="t('cash.print')" :class="btnIconSm('neutral')">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+                      </button>
+                      <button v-if="auth.canWrite('cash.document.write') && d.status === 'posted'" type="button"
+                        @click="openReverse(d)" :title="t('cash.reverse.title')" :aria-label="t('cash.reverse.title')" :class="btnIconSm('warning')">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
+                      </button>
+                      <button v-if="auth.canWrite('cash.document.write')" type="button" @click="openDelete(d)"
+                        :title="t('cash.delete.title')" :aria-label="t('cash.delete.title')" :class="btnIconSm('danger')">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+                      </button>
+                    </div>
                   </td>
                 </tr>
                 <!-- Detail -->
@@ -504,8 +557,18 @@ function onManagerChanged() { loadRegisters() }
             <CashDocumentDetail v-if="expandedId === d.id" :doc="d" :purpose-label="purposeLabel"
               class="pt-2 border-t border-neutral-100" />
 
-            <div class="flex items-center justify-end gap-1.5 pt-1" @click.stop>
-              <button type="button" @click="openPdf(d)" :title="t('cash.print')" :aria-label="t('cash.print')"
+            <div class="flex flex-wrap items-center justify-end gap-1.5 pt-1" @click.stop>
+              <RouterLink v-if="auth.canWrite('cash.document.write') && d.status === 'draft'"
+                :to="{ name: 'accounting-cash-edit', params: { id: d.id } }"
+                :title="t('common.edit')" :aria-label="t('common.edit')" :class="btnIconSm('neutral')">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+              </RouterLink>
+              <button v-if="auth.canWrite('cash.document.write') && d.status === 'draft'" type="button"
+                @click="postDraft(d)" :disabled="postingId === d.id"
+                :title="t('cash.post_document')" :aria-label="t('cash.post_document')" :class="btnIconSm('success')">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+              </button>
+              <button v-if="d.status !== 'draft'" type="button" @click="openPdf(d)" :title="t('cash.print')" :aria-label="t('cash.print')"
                 :class="btnIconSm('neutral')">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
               </button>
@@ -570,10 +633,15 @@ function onManagerChanged() { loadRegisters() }
     <div v-if="deleteTarget" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" @click.self="deleteTarget = null">
       <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
         <h3 class="text-lg font-semibold mb-1">{{ t('cash.delete.title') }}</h3>
-        <p class="text-sm text-neutral-500 mb-3">{{ deleteTarget.doc_number }}</p>
+        <p class="text-sm text-neutral-500 mb-3">{{ deleteTarget.doc_number || t('cash.status.draft') }}</p>
         <div class="space-y-3">
-          <p class="text-sm text-neutral-700">{{ t('cash.delete.warning') }}</p>
-          <p class="text-xs text-neutral-500">{{ t('cash.delete.hint') }}</p>
+          <template v-if="deleteTarget.status === 'draft'">
+            <p class="text-sm text-neutral-700">{{ t('cash.delete.draft_warning') }}</p>
+          </template>
+          <template v-else>
+            <p class="text-sm text-neutral-700">{{ t('cash.delete.warning') }}</p>
+            <p class="text-xs text-neutral-500">{{ t('cash.delete.hint') }}</p>
+          </template>
           <div v-if="deleteError" class="text-sm text-danger-500">{{ deleteError }}</div>
           <div class="flex justify-end gap-2 pt-1">
             <button @click="deleteTarget = null" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
