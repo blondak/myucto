@@ -419,6 +419,11 @@ final class RoutePermissionMap
 
         ['GET', '#^/api/accounting/cash-(documents|registers)(/|$)#', 'cash', AccessLevel::READ],
         ['*', '#^/api/accounting/cash-documents(/|$)#', 'cash.document.write', AccessLevel::WRITE],
+        // M-8: routa uzavření/uzamčení pokladny (inventarizace § 29–30 ZoÚ) zatím
+        // NEEXISTUJE — pravidlo je připravené pro ni. Právo `cash.close` samo mrtvé
+        // není: gatuje tvrdé smazání zaúčtovaného dokladu (`DELETE …?force=1`, H-4),
+        // které se kontroluje v CashDocumentAction — cesta je totiž shodná s běžným
+        // mazáním draftu, takže se od sebe podle URL odlišit nedají.
         ['*', '#^/api/accounting/cash-registers/[0-9]+/(close|lock)$#', 'cash.close', AccessLevel::WRITE],
         ['*', '#^/api/accounting/cash-(documents|registers)(/|$)#', 'cash', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/assets(/|$)#', 'assets', AccessLevel::READ],

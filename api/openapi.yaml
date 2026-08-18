@@ -11204,10 +11204,12 @@ paths:
   /api/v1/accounting/cash-registers/{id}/book/pdf:
     get:
       tags: [Accounting]
-      summary: PDF pokladní knihy (doplní PDF stage)
+      summary: PDF pokladní knihy (podvojné účetnictví i daňová evidence)
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: from, schema: { type: string, format: date } }
+        - { in: query, name: to, schema: { type: string, format: date } }
       responses:
         '200': { description: PDF, content: { application/pdf: { schema: { type: string, format: binary } } } }
 
@@ -11235,7 +11237,7 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [register_id, doc_type, purpose, issue_date, description, total_amount], properties: { register_id: { type: integer }, doc_type: { type: string, enum: [in, out] }, purpose: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] }, issue_date: { type: string, format: date }, tax_date: { type: string, format: date }, partner_name: { type: string }, partner_ic: { type: string }, partner_dic: { type: string }, description: { type: string }, vat_mode: { type: string, enum: [none, vat] }, total_amount: { type: number }, vat_lines: { type: array, items: { type: object, properties: { vat_rate: { type: number }, base_amount: { type: number }, vat_amount: { type: number } } } }, invoice_id: { type: integer }, purchase_invoice_id: { type: integer }, rule_key: { type: string }, counter_account_code: { type: string }, post: { type: boolean, default: true } } } } }
+        content: { application/json: { schema: { type: object, required: [register_id, doc_type, purpose, issue_date, description, total_amount], properties: { register_id: { type: integer }, doc_type: { type: string, enum: [in, out] }, purpose: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] }, issue_date: { type: string, format: date }, tax_date: { type: string, format: date }, partner_name: { type: string }, partner_ic: { type: string }, partner_dic: { type: string }, description: { type: string }, vat_mode: { type: string, enum: [none, vat] }, total_amount: { type: number }, vat_lines: { type: array, items: { type: object, properties: { vat_rate: { type: number }, base_amount: { type: number }, vat_amount: { type: number }, vat_deduction: { type: string, enum: [full, none, proportional, reduced], default: full, description: "Rozsah nároku na odpočet DPH řádku (§ 75/76)" }, vat_deduction_percent: { type: number, default: 100, description: "Poměrný / skutečný roční koeficient odpočtu v procentech (0–100)" }, tax_treatment: { type: string, enum: [deductible, non_deductible, not_expense], default: deductible, description: "Uznatelnost řádku pro daň z příjmů (§ 24/25), nezávislá na DPH" } } } }, invoice_id: { type: integer }, purchase_invoice_id: { type: integer }, rule_key: { type: string }, counter_account_code: { type: string }, post: { type: boolean, default: true } } } } }
       responses:
         '201': { description: Vytvořeno, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -11245,13 +11247,21 @@ paths:
     get:
       tags: [Accounting]
       summary: Našeptávač nezaplacených FV/PF (jen CZK) pro úhradu hotově
+      description: |
+        Vrací doklady, na kterých ještě něco zbývá k úhradě. `remaining` je zbytek,
+        ne brutto: u přijaté faktury se odečítá uhrazená záloha (`amount_to_pay`)
+        i už zaúčtované úhrady (bankovní i hotovostní), takže doklad krytý zálohou
+        se nenabízí vůbec. U vydaných faktur je v seznamu i zálohová faktura
+        (`invoice_type = proforma`, příznak `is_proforma`) — hotově se hradit smí,
+        ale úhrada spustí vystavení finálního dokladu nebo daňového dokladu
+        k přijaté platbě. Platební kalendář se nenabízí.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: kind, required: true, schema: { type: string, enum: [invoice, purchase_invoice] } }
         - { in: query, name: q, schema: { type: string } }
         - { in: query, name: limit, schema: { type: integer, default: 20 } }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: array, items: { type: object } } } } }
+        '200': { description: "OK — položky {id, kind, number, partner_name, total, paid, remaining, currency_code, issued_on} + `invoice_type`/`is_proforma` (FV) nebo `document_kind` (PF)", content: { application/json: { schema: { type: array, items: { type: object } } } } }
 
   /api/v1/accounting/cash-documents/rule-presets:
     get:
@@ -11288,15 +11298,21 @@ paths:
         '422': { $ref: '#/components/responses/ValidationFailed' }
     delete:
       tags: [Accounting]
-      summary: Smazání draftu (s `?force=1` i zaúčtovaného dokladu) — účetní|admin
+      summary: Smazání draftu (s `?force=1` i zaúčtovaného dokladu) — `cash.document.write`, force navíc `cash.close`
+      description: |
+        Bez `force` smaže jen rozpracovaný (draft) doklad. `?force=1` smaže i zaúčtovaný
+        doklad včetně deníkových zápisů — nevratně a bez protizápisu. Vydané číslo řady
+        se nevrací, takže v řadě PPD/VPD zůstane trvalá díra; odpověď proto vrací
+        `doc_number`, `deleted_entry_ids` a varování `cash.warning.series_gap`.
+        Preferovanou cestou je storno (`/reverse`), které auditní stopu zachová.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
-        - { in: query, name: force, required: false, schema: { type: string, enum: ['1'] }, description: "Tvrdé smazání dokladu i s účetními zápisy" }
+        - { in: query, name: force, required: false, schema: { type: string, enum: ['1'] }, description: "Tvrdé smazání dokladu i s účetními zápisy; vyžaduje právo `cash.close`" }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object } } } }
+        '200': { description: "OK — `{deleted, warnings}`; s `?force=1` navíc `doc_number` a `deleted_entry_ids`", content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: "Doklad má živou vazbu z jiné agendy (kód `cash.error.has_dependencies`, `error.blocked_by` uvádí počty po druzích) — typicky je použit jako doklad o vyplacení mezd." }
+        '409': { description: "Doklad má živou vazbu z jiné agendy (kód `cash.error.has_dependencies`, `error.blocked_by` uvádí počty po druzích) — typicky je použit jako doklad o vyplacení mezd. Nebo z úhrady zálohy už vznikl navazující doklad (`cash.error.followup_document_exists`) a je potřeba zrušit nejdřív ten." }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/cash-documents/{id}/post:
@@ -11314,16 +11330,23 @@ paths:
   /api/v1/accounting/cash-documents/{id}/reverse:
     post:
       tags: [Accounting]
-      summary: Storno pokladního dokladu (povinný reason) — účetní|admin
+      summary: Storno pokladního dokladu (povinný reason) — `cash.document.write`
+      description: |
+        Bez `entry_date` se protizápis datuje datem PŮVODNÍHO zápisu; na dnešek ho
+        posune až tehdy, když je původní datum uzamčené. Doklad v uzamčeném období
+        proto stornovat lze. Storno úhrady zálohové faktury, ze které už vznikla
+        finální faktura nebo daňový doklad k přijaté platbě, se odmítne s kódem
+        `cash.error.followup_document_exists` — navazující doklad je nutné zrušit dřív.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3 }, entry_date: { type: string, format: date } } } } }
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3 }, entry_date: { type: string, format: date, description: "Datum protizápisu; vynechte, ať se použije datum původního zápisu" } } } } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object, properties: { reversal_entry_id: { type: integer } } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: "Z úhrady zálohy už vznikl navazující doklad (`cash.error.followup_document_exists`), nebo je uzamčené i datum protizápisu (`cash.error.date_locked`)." }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/cash-documents/{id}/pdf:

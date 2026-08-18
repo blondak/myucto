@@ -111,7 +111,7 @@ final class PermissionCatalog
             ['payroll.erasure', 'payroll', 'Schválit a provést výmaz osobních údajů', $staffOnly],
             ['cash', 'cash', 'Pokladna', $staffOnly],
             ['cash.document.write', 'cash', 'Pokladní doklady', $staffOnly],
-            ['cash.close', 'cash', 'Uzavřít pokladnu', $staffOnly],
+            ['cash.close', 'cash', 'Uzavřít pokladnu a trvale mazat doklady', $staffOnly],
             ['assets', 'assets', 'Majetek', $staffOnly],
             ['assets.write', 'assets', 'Spravovat majetek', $staffOnly],
             ['assets.depreciation', 'assets', 'Odpisy', $staffOnly],

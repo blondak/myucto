@@ -104,7 +104,12 @@ final class CashDocumentRepository
     /**
      * Nahradí DPH rozpad dokladu (smaž + vlož). Prázdné pole = smazat vše (vat_mode=none).
      *
-     * @param list<array{vat_rate:float, base_amount:float, vat_amount:float, vat_classification_code?:?string}> $lines
+     * M-7: zapisuje i `vat_deduction` / `vat_deduction_percent` / `tax_treatment`
+     * (migrace 1120). Bez nich se rozpad při každé úpravě draftu přepsal na default
+     * (`full`/100/`deductible`), takže hotovostní nákup byl v daňové evidenci vždy
+     * plně daňový s plným nárokem na odpočet a poměrný odpočet nešlo zaznamenat.
+     *
+     * @param list<array{vat_rate:float, base_amount:float, vat_amount:float, vat_classification_code?:?string, vat_deduction?:string, vat_deduction_percent?:float, tax_treatment?:string}> $lines
      */
     public function replaceVatLines(int $cashDocumentId, array $lines): void
     {
@@ -116,8 +121,9 @@ final class CashDocumentRepository
         }
         $stmt = $pdo->prepare(
             'INSERT INTO cash_document_vat_lines
-                (cash_document_id, vat_rate, base_amount, vat_amount, vat_classification_code)
-             VALUES (?, ?, ?, ?, ?)'
+                (cash_document_id, vat_rate, base_amount, vat_amount, vat_classification_code,
+                 vat_deduction, vat_deduction_percent, tax_treatment)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($lines as $l) {
             $stmt->execute([
@@ -126,17 +132,21 @@ final class CashDocumentRepository
                 (float) $l['base_amount'],
                 (float) $l['vat_amount'],
                 $l['vat_classification_code'] ?? null,
+                (string) ($l['vat_deduction'] ?? 'full'),
+                (float) ($l['vat_deduction_percent'] ?? 100.0),
+                (string) ($l['tax_treatment'] ?? 'deductible'),
             ]);
         }
     }
 
     /**
-     * @return list<array{vat_rate:float, base_amount:float, vat_amount:float, vat_classification_code:?string}>
+     * @return list<array{vat_rate:float, base_amount:float, vat_amount:float, vat_classification_code:?string, vat_deduction:string, vat_deduction_percent:float, tax_treatment:string}>
      */
     public function vatLinesFor(int $cashDocumentId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT vat_rate, base_amount, vat_amount, vat_classification_code
+            'SELECT vat_rate, base_amount, vat_amount, vat_classification_code,
+                    vat_deduction, vat_deduction_percent, tax_treatment
                FROM cash_document_vat_lines WHERE cash_document_id = ? ORDER BY id'
         );
         $stmt->execute([$cashDocumentId]);
@@ -145,6 +155,9 @@ final class CashDocumentRepository
             'base_amount'             => (float) $r['base_amount'],
             'vat_amount'              => (float) $r['vat_amount'],
             'vat_classification_code' => $r['vat_classification_code'] !== null ? (string) $r['vat_classification_code'] : null,
+            'vat_deduction'           => (string) $r['vat_deduction'],
+            'vat_deduction_percent'   => (float) $r['vat_deduction_percent'],
+            'tax_treatment'           => (string) $r['tax_treatment'],
         ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
