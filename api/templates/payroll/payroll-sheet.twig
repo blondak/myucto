@@ -59,6 +59,37 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
   </tr>
 </table>
 
+<div class="section">Pracovní vztahy a den nástupu</div>
+<table class="book">
+  <thead>
+    <tr>
+      <th class="first">Vztah</th>
+      <th class="first">Druh</th>
+      <th class="first">Den nástupu</th>
+      <th class="first">Skutečný nástup</th>
+      <th class="first">Den skončení</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% set relation_labels = {
+    'employment': 'Pracovní poměr',
+    'agreement_work': 'Dohoda o provedení práce',
+    'agreement_activity': 'Dohoda o pracovní činnosti'
+  } %}
+  {% for employment in employments %}
+    <tr>
+      <td class="first">{{ employment.code }}</td>
+      <td class="first">{{ relation_labels[employment.relation_type]|default(employment.relation_type) }}</td>
+      <td class="first">{{ employment.start_date }}</td>
+      <td class="first">{{ employment.actual_start_date is null ? '—' : employment.actual_start_date }}</td>
+      <td class="first">{{ employment.end_date is null ? '—' : employment.end_date }}</td>
+    </tr>
+  {% else %}
+    <tr><td class="first" colspan="5">Neevidováno v revizi, ze které doklad vznikl.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
 <div class="section">Příjmy, pojistné a čistá mzda</div>
 <table class="book">
   <thead>
@@ -67,6 +98,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <th>Hrubý<br>příjem</th>
       <th>Peněžní<br>příjem</th>
       <th>Nepeněžní<br>příjem</th>
+      <th>Osvobozeno<br>od daně</th>
       <th>Základ<br>SP</th>
       <th>SP<br>zaměstnanec</th>
       <th>SP<br>zaměstnavatel</th>
@@ -86,6 +118,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <td>{{ month.gross_minor_units|minor_money }}</td>
       <td>{{ month.cash_income_minor_units|minor_money }}</td>
       <td>{{ month.non_cash_income_minor_units|minor_money }}</td>
+      <td>{{ month.tax_detail_status == 'recorded' ? month.tax_exempt_income_minor_units|minor_money : 'neevidováno' }}</td>
       <td>{{ month.social_assessment_base_minor_units|minor_money }}</td>
       <td>{{ month.employee_social_minor_units|minor_money }}</td>
       <td>{{ month.employer_social_minor_units|minor_money }}</td>
@@ -104,6 +137,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <td>{{ totals.gross_minor_units|minor_money }}</td>
       <td>{{ totals.cash_income_minor_units|minor_money }}</td>
       <td>{{ totals.non_cash_income_minor_units|minor_money }}</td>
+      <td>{{ tax_detail_complete ? totals.tax_exempt_income_minor_units|minor_money : 'neúplné' }}</td>
       <td>{{ totals.social_assessment_base_minor_units|minor_money }}</td>
       <td>{{ totals.employee_social_minor_units|minor_money }}</td>
       <td>{{ totals.employer_social_minor_units|minor_money }}</td>
@@ -128,6 +162,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <th>Zvýhodnění<br>na děti</th>
       <th>Sražená<br>záloha</th>
       <th>Daňový<br>bonus</th>
+      <th>Základ<br>srážkové daně</th>
       <th>Srážková<br>daň</th>
       <th>Doplatek<br>ze zúčtování</th>
     </tr>
@@ -142,6 +177,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <td>{{ month.child_credit_minor_units|minor_money }}</td>
       <td>{{ month.advance_tax_minor_units|minor_money }}</td>
       <td>{{ month.tax_bonus_minor_units|minor_money }}</td>
+      <td>{{ month.tax_detail_status == 'recorded' ? month.withholding_tax_base_minor_units|minor_money : 'neevidováno' }}</td>
       <td>{{ month.withholding_tax_minor_units|minor_money }}</td>
       <td>{{ month.annual_settlement_minor_units|minor_money }}</td>
     </tr>
@@ -156,6 +192,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <td>{{ totals.child_credit_minor_units|minor_money }}</td>
       <td>{{ totals.advance_tax_minor_units|minor_money }}</td>
       <td>{{ totals.tax_bonus_minor_units|minor_money }}</td>
+      <td>{{ tax_detail_complete ? totals.withholding_tax_base_minor_units|minor_money : 'neúplné' }}</td>
       <td>{{ totals.withholding_tax_minor_units|minor_money }}</td>
       <td>{{ totals.annual_settlement_minor_units|minor_money }}</td>
     </tr>
@@ -163,10 +200,22 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
 </table>
 
 <div class="note">
+<strong>Údaje § 38j odst. 2 ZDP, které tento doklad nenese.</strong>
+Písm. d) — jméno a rodné číslo osoby, na kterou se uplatňuje sleva podle § 35ba a daňové
+zvýhodnění, a rozpis nezdanitelných částek podle § 15 a slev podle § 35 odst. 4 a § 35ba
+s důvodem uznání: doklad uvádí jen měsíční úhrny uplatněných slev, nikoli osoby a důvody.
+Písm. f) bod 8 — nabytí podílu v obchodní korporaci nebo opce podle § 6 odst. 3 věty třetí:
+modul takové plnění neeviduje. Věta za bodem 8 — oddělené uvedení odměny člena orgánu
+právnické osoby u daňového nerezidenta: doklad se pro nerezidenta nevydává vůbec, protože
+nemá rozšířenou identitu podle písm. b). Prázdné místo v těchto údajích proto neznamená nulu.
+</div>
+<div class="note">
 Částky jsou uvedeny v Kč a vznikly součtem schválených měsíčních výsledků. Více účtáren nebo
 doplatek po skončení se v jednom měsíci sčítají; počet zahrnutých revizí je uveden u názvu měsíce.
 Roční zúčtování se v tomto dokumentu nedopočítává. Zobrazí se pouze tehdy, pokud existuje jeho
-samostatně schválený roční výsledek.
+samostatně schválený roční výsledek. Sloupec „osvobozeno od daně" je podmnožina hrubého příjmu,
+ne samostatné plnění — do čisté mzdy se nepřičítá. Údaj „neevidováno" znamená, že revize vznikla
+před mapováním, které osvobozené částky a základ srážkové daně zaznamenává; není to nula.
 </div>
 <div class="audit">
 Renderer: <span class="mono">{{ renderer_version }}</span> · Chráněný otisk zdroje HMAC-SHA-256:

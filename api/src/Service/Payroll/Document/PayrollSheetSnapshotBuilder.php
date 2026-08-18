@@ -14,9 +14,33 @@ use PDO;
 
 final class PayrollSheetSnapshotBuilder
 {
-    public const SCHEMA_VERSION = 'payroll-sheet-document.v1';
+    public const SCHEMA_VERSION = 'payroll-sheet-document.v2';
     public const PURPOSE = 'payroll_sheet';
-    public const MAPPING_VERSION = 'payroll-sheet-mapping.v1';
+
+    /**
+     * Mapování v2 doplňuje § 38j odst. 2 písm. e) (den nástupu), písm. f) bod 2
+     * (částky osvobozené od daně) a chybějící polovinu bodu 3 (základ daně
+     * podle zvláštní sazby).
+     *
+     * Verze je součástí zdrojového manifestu, takže se pro tytéž zdrojové revize
+     * NENAJDE dřívější revize a doklad se vydá jako DALŠÍ revize v řetězu.
+     * Existující revize ani její archivované PDF se tím nemění — což je jediná
+     * přípustná cesta, protože roční revize jsou append-only a kotvené otiskem.
+     */
+    public const MAPPING_VERSION = 'payroll-sheet-mapping.v2';
+
+    /**
+     * Snapshoty vydané pod mapováním v1 zůstávají čitelné. Nedopočítávají se —
+     * zdrojové vstupní revize v nich nejsou, takže osvobozené částky by šlo jen
+     * hádat. Hydratují se proto jako `TAX_DETAIL_NOT_RECORDED` a doklad ten údaj
+     * pojmenuje jako neevidovaný, ne jako nulu.
+     */
+    private const SUPPORTED_SCHEMA_VERSIONS = [
+        'payroll-sheet-document.v1',
+        self::SCHEMA_VERSION,
+    ];
+
+    private const INPUT_SCHEMA_VERSION = 'payroll-run-input.v2';
 
     public function __construct(
         private readonly Connection $db,
@@ -53,7 +77,7 @@ final class PayrollSheetSnapshotBuilder
         }
         $profile = $this->profileSnapshot($supplierId, $employeeId, $taxYear);
         $employer = $this->employerSnapshot($supplierId);
-        [$months, $manifestSources] = $this->months($sources, $employeeId);
+        [$months, $manifestSources, $employments] = $this->months($sources, $employeeId);
 
         $profileHash = $this->sensitiveData->keyedFingerprint(
             CanonicalJson::encode($profile),
@@ -83,6 +107,7 @@ final class PayrollSheetSnapshotBuilder
             'tax_year' => $taxYear,
             'employer' => $employer,
             'employee' => $profile,
+            'employments' => $employments,
             'months' => array_map(
                 static fn (PayrollSheetMonth $month): array => $month->toTemplateData(),
                 $months,
@@ -150,12 +175,17 @@ final class PayrollSheetSnapshotBuilder
 
     /**
      * @param list<array<string,mixed>> $sources
-     * @return array{0:list<PayrollSheetMonth>,1:list<array<string,mixed>>}
+     * @return array{
+     *     0:list<PayrollSheetMonth>,
+     *     1:list<array<string,mixed>>,
+     *     2:list<array<string,mixed>>
+     * }
      */
     private function months(array $sources, int $employeeId): array
     {
         $months = [];
         $manifest = [];
+        $employments = [];
         foreach ($sources as $source) {
             $inputJson = $this->text($source, 'input_snapshot_json');
             $resultJson = $this->text($source, 'result_snapshot_json');
@@ -193,7 +223,16 @@ final class PayrollSheetSnapshotBuilder
                 throw new \DomainException('Zdroj mzdového listu má neplatné období.');
             }
             $monthNumber = (int) substr($periodStart, 5, 2);
+            $frozenInputs = $this->frozenPersonInputs(
+                $this->decodeObject($inputJson, 'Vstup schválené revize'),
+                $employeeId,
+                $employments,
+            );
             $amounts = $this->personAmounts($storedPerson);
+            $amounts['tax_exempt_income_minor_units'] = $this->taxExemptIncome(
+                $storedPerson,
+                $frozenInputs,
+            );
             if (!isset($months[$monthNumber])) {
                 $months[$monthNumber] = [
                     'source_revision_count' => 0,
@@ -243,9 +282,172 @@ final class PayrollSheetSnapshotBuilder
                 netPayableMinorUnits: $amounts['net_payable_minor_units'],
                 annualSettlementMinorUnits:
                     $amounts['annual_settlement_minor_units'],
+                withholdingTaxBaseMinorUnits:
+                    $amounts['withholding_tax_base_minor_units'],
+                taxExemptIncomeMinorUnits:
+                    $amounts['tax_exempt_income_minor_units'],
+                taxDetailStatus: PayrollSheetMonth::TAX_DETAIL_RECORDED,
             );
         }
-        return [$result, $manifest];
+        usort(
+            $employments,
+            static fn (array $left, array $right): int =>
+                [$left['start_date'], $left['code']]
+                <=> [$right['start_date'], $right['code']],
+        );
+        return [$result, $manifest, array_values($employments)];
+    }
+
+    /**
+     * Zmrazené mzdové vstupy zaměstnance z JEDNÉ zdrojové revize, klíčované
+     * `employment_id` a `input_id`.
+     *
+     * Vstupní snapshot je jediné místo, kde je zapsané daňové zacházení složky
+     * a rozpad koše osvobození (§ 6 odst. 9 ZDP) tak, jak platily v okamžiku
+     * schválení. Výsledek běhu nese jen částky, takže z něj osvobozenou část
+     * poznat nelze.
+     *
+     * Průběžně plní i `$employments` — § 38j odst. 2 písm. e) chce den nástupu
+     * a ten je ve zmrazeném vztahu, ne v dnešní evidenci.
+     *
+     * @param array<string,mixed> $inputRoot
+     * @param array<int,array<string,mixed>> $employments
+     * @return array<int,array<int,array<string,mixed>>>
+     */
+    private function frozenPersonInputs(
+        array $inputRoot,
+        int $employeeId,
+        array &$employments,
+    ): array {
+        if (($inputRoot['schema_version'] ?? null) !== self::INPUT_SCHEMA_VERSION) {
+            throw new \DomainException(
+                'Mzdový list vyžaduje zdrojový vstup ' . self::INPUT_SCHEMA_VERSION . '.',
+            );
+        }
+        $person = null;
+        foreach ($this->list($inputRoot['people'] ?? null, 'input.people') as $candidate) {
+            $candidate = $this->object($candidate, 'input.people[]');
+            $employee = $this->object($candidate['employee'] ?? null, 'input.people[].employee');
+            if ($this->positiveInt($employee, 'id') === $employeeId) {
+                if ($person !== null) {
+                    throw new \DomainException('Zmrazený vstup obsahuje zaměstnance vícekrát.');
+                }
+                $person = $candidate;
+            }
+        }
+        if ($person === null) {
+            throw new \DomainException('Zmrazený vstup revize zaměstnance neobsahuje.');
+        }
+        $result = [];
+        foreach ($this->list($person['employments'] ?? null, 'input.employments') as $row) {
+            $row = $this->object($row, 'input.employments[]');
+            $employment = $this->object($row['employment'] ?? null, 'input.employment');
+            $employmentId = $this->positiveInt($employment, 'id');
+            $employments[$employmentId] ??= [
+                'code' => $this->text($employment, 'code'),
+                'relation_type' => $this->text($employment, 'relation_type'),
+                'start_date' => $this->text($employment, 'start_date'),
+                'actual_start_date' => $this->nullableText($employment, 'actual_start_date'),
+                'end_date' => $this->nullableText($employment, 'end_date'),
+            ];
+            $inputs = [];
+            foreach ($this->list($row['inputs'] ?? null, 'input.inputs') as $input) {
+                $input = $this->object($input, 'input.inputs[]');
+                $inputId = $this->positiveInt($input, 'id');
+                if (isset($inputs[$inputId])) {
+                    throw new \DomainException('Zmrazené mzdové vstupy nejsou jednoznačné.');
+                }
+                $inputs[$inputId] = $input;
+            }
+            $result[$employmentId] = $inputs;
+        }
+        return $result;
+    }
+
+    /**
+     * § 38j odst. 2 písm. f) bod 2 — částky osvobozené od daně z úhrnu
+     * zúčtovaných mezd.
+     *
+     * Sčítá se přes TYTÉŽ vstupy, které tvoří úhrn v bodě 1, takže osvobozená
+     * část je jeho podmnožina a nemůže se s ním rozejít. Osvobození se pozná
+     * z daňového zacházení složky, ne z jejího druhu — kromě koše § 6 odst. 9
+     * sem proto spadají i cestovní náhrady do limitu a stravování za směnu,
+     * pokud je tak účetní klasifikovala.
+     *
+     * U složky v koši se bere ZMRAZENÝ rozpad (`benefit_exempt_minor`), ne
+     * dopočet: koš čerpají všechny složky téhož bodu v pořadí schválení a
+     * pozdější přepočet by dal jiné dělení než výplatní páska.
+     *
+     * @param array<string,mixed> $person
+     * @param array<int,array<int,array<string,mixed>>> $frozenInputs
+     */
+    private function taxExemptIncome(array $person, array $frozenInputs): int
+    {
+        $total = 0;
+        foreach ($this->list($person['employments'] ?? null, 'result.employments') as $row) {
+            $row = $this->object($row, 'result.employments[]');
+            $employmentId = $this->positiveInt($row, 'employment_id');
+            $inputs = $frozenInputs[$employmentId] ?? null;
+            if ($inputs === null) {
+                throw new \DomainException(
+                    "Výsledek odkazuje na nezmrazený vztah {$employmentId}.",
+                );
+            }
+            foreach ($this->list($row['inputs'] ?? null, 'result.inputs') as $inputResult) {
+                $inputResult = $this->object($inputResult, 'result.inputs[]');
+                $inputId = $this->positiveInt($inputResult, 'input_id');
+                $input = $inputs[$inputId] ?? null;
+                if ($input === null) {
+                    throw new \DomainException(
+                        "Výsledek odkazuje na nezmrazený vstup {$inputId}.",
+                    );
+                }
+                $totals = $this->object($inputResult['totals'] ?? null, 'result.inputs[].totals');
+                // Oprava minulého období vstupuje jako ZÁPORNÁ složka. Znaménko
+                // se tu nesmí useknout — záporný úhrn za měsíc má spadnout až na
+                // kontrole měsíčního řádku, ne se tiše proměnit v nulu.
+                $sourceAmount = $this->integer($totals, 'source_amount_minor');
+                if ($sourceAmount !== $this->integer($input, 'amount_minor')) {
+                    throw new \DomainException(
+                        "Zmrazená částka vstupu {$inputId} nesouhlasí s výsledkem běhu.",
+                    );
+                }
+                $total = $this->add($total, $this->exemptPart($input, $sourceAmount, $inputId));
+            }
+        }
+        return $total;
+    }
+
+    /**
+     * @param array<string,mixed> $input
+     */
+    private function exemptPart(array $input, int $sourceAmount, int $inputId): int
+    {
+        $component = $this->object($input['component'] ?? null, 'input.component');
+        $treatment = $this->text($component, 'tax_treatment');
+        if (!in_array($treatment, ['included', 'withholding_candidate', 'exempt'], true)) {
+            // Nezaklasifikovaná složka nesmí projít jako nula. Do schválené
+            // revize se dostat neměla — výpočet daně na ni vrací
+            // `income-component-tax-treatment-unverified` a osoba skončí
+            // v ručním posouzení — ale doklad to tvrdit nebude.
+            throw new \DomainException(
+                "Daňové zacházení složky vstupu {$inputId} není uzavřené.",
+            );
+        }
+        if ($treatment !== 'exempt') {
+            return 0;
+        }
+        if (($input['benefit_basket'] ?? null) === null) {
+            return $sourceAmount;
+        }
+        $exempt = $this->nonNegativeInt($input, 'benefit_exempt_minor');
+        $taxable = $this->nonNegativeInt($input, 'benefit_taxable_minor');
+        if ($exempt + $taxable !== $sourceAmount) {
+            throw new \DomainException(
+                "Zmrazený rozpad koše osvobození vstupu {$inputId} nedává částku vstupu.",
+            );
+        }
+        return $exempt;
     }
 
     /**
@@ -292,6 +494,10 @@ final class PayrollSheetSnapshotBuilder
             'health_minimum_top_up_minor_units' => $healthTopUp,
             'advance_tax_base_minor_units' =>
                 $advance === [] ? 0 : $this->nonNegativeInt($advance, 'rounded_tax_base_minor_units'),
+            // Druhá polovina § 38j odst. 2 písm. f) bodu 3. Bez ní doklad
+            // u srážkové daně vykazoval daň bez základu, ze kterého vznikla.
+            'withholding_tax_base_minor_units' =>
+                $this->nonNegativeInt($tax, 'withholding_base_minor_units'),
             'advance_tax_before_credits_minor_units' =>
                 $advance === [] ? 0 : $this->nonNegativeInt($advance, 'tax_before_credits_minor_units'),
             'non_refundable_credits_minor_units' =>
@@ -471,9 +677,15 @@ final class PayrollSheetSnapshotBuilder
     /** @param array<string,mixed> $snapshot */
     private function hydrate(array $snapshot, string $snapshotHash): PayrollSheetDocumentData
     {
-        if (($snapshot['schema_version'] ?? null) !== self::SCHEMA_VERSION) {
+        $schemaVersion = $snapshot['schema_version'] ?? null;
+        if (!is_string($schemaVersion)
+            || !in_array($schemaVersion, self::SUPPORTED_SCHEMA_VERSIONS, true)
+        ) {
             throw new \DomainException('Roční mzdový snapshot má nepodporované schéma.');
         }
+        $taxDetail = $schemaVersion === self::SCHEMA_VERSION
+            ? PayrollSheetMonth::TAX_DETAIL_RECORDED
+            : PayrollSheetMonth::TAX_DETAIL_NOT_RECORDED;
         $employer = $this->object($snapshot['employer'] ?? null, 'employer');
         $employee = $this->object($snapshot['employee'] ?? null, 'employee');
         $months = [];
@@ -507,6 +719,13 @@ final class PayrollSheetSnapshotBuilder
                     $row + ['annual_settlement_minor_units' => 0],
                     'annual_settlement_minor_units',
                 ),
+                $taxDetail === PayrollSheetMonth::TAX_DETAIL_RECORDED
+                    ? $this->nonNegativeInt($row, 'withholding_tax_base_minor_units')
+                    : 0,
+                $taxDetail === PayrollSheetMonth::TAX_DETAIL_RECORDED
+                    ? $this->nonNegativeInt($row, 'tax_exempt_income_minor_units')
+                    : 0,
+                $taxDetail,
             );
         }
         $previousNames = $this->list($employee['previous_names'] ?? null, 'previous_names');
@@ -514,6 +733,17 @@ final class PayrollSheetSnapshotBuilder
             if (!is_string($name)) {
                 throw new \DomainException('Dřívější jméno v ročním snapshotu není text.');
             }
+        }
+        $employments = [];
+        foreach ($this->list($snapshot['employments'] ?? [], 'employments') as $row) {
+            $row = $this->object($row, 'employments[]');
+            $employments[] = [
+                'code' => $this->text($row, 'code'),
+                'relation_type' => $this->text($row, 'relation_type'),
+                'start_date' => $this->text($row, 'start_date'),
+                'actual_start_date' => $this->nullableText($row, 'actual_start_date'),
+                'end_date' => $this->nullableText($row, 'end_date'),
+            ];
         }
         return new PayrollSheetDocumentData(
             $snapshotHash,
@@ -528,6 +758,7 @@ final class PayrollSheetSnapshotBuilder
             $this->text($employee, 'address'),
             $months,
             $this->text($snapshot, 'annual_settlement_status'),
+            $employments,
         );
     }
 
@@ -588,6 +819,32 @@ final class PayrollSheetSnapshotBuilder
         $value = $row[$field] ?? null;
         if (!is_string($value) || trim($value) === '') {
             throw new \DomainException("Chybí textové pole {$field}.");
+        }
+        return $value;
+    }
+
+    /** @param array<string,mixed> $row */
+    private function integer(array $row, string $field): int
+    {
+        $value = $row[$field] ?? null;
+        if (is_int($value)) {
+            return $value;
+        }
+        if (is_string($value) && preg_match('/^-?\d+$/D', $value) === 1) {
+            return (int) $value;
+        }
+        throw new \DomainException("Pole {$field} není celé číslo.");
+    }
+
+    /** @param array<string,mixed> $row */
+    private function nullableText(array $row, string $field): ?string
+    {
+        $value = $row[$field] ?? null;
+        if ($value === null) {
+            return null;
+        }
+        if (!is_string($value) || trim($value) === '') {
+            throw new \DomainException("Pole {$field} není text ani prázdná hodnota.");
         }
         return $value;
     }
