@@ -28,6 +28,12 @@ final readonly class PayrollSheetMonth
         public int $withholdingTaxMinorUnits,
         public int $otherDeductionsMinorUnits,
         public int $netPayableMinorUnits,
+        /**
+         * Doplatek ze zúčtování vyplacený v tomhle měsíci (§ 35d odst. 8).
+         * Mzdový list ho vede odděleně — § 38j odst. 2 písm. h) žádá údaje
+         * o provedeném ročním zúčtování, a do úhrnu mezd doplatek nepatří.
+         */
+        public int $annualSettlementMinorUnits = 0,
     ) {
         if ($month < 1 || $month > 12 || $sourceRevisionCount <= 0) {
             throw new \InvalidArgumentException('Měsíční řádek mzdového listu nemá platné období.');
@@ -47,7 +53,8 @@ final readonly class PayrollSheetMonth
             - $advanceTaxMinorUnits
             - $withholdingTaxMinorUnits
             - $otherDeductionsMinorUnits
-            + $taxBonusMinorUnits;
+            + $taxBonusMinorUnits
+            + $annualSettlementMinorUnits;
         if ($expectedNet !== $netPayableMinorUnits) {
             throw new \InvalidArgumentException(
                 'Čistá výplata nesouhlasí s příjmem, odvody, daní, bonusem a srážkami.',
@@ -77,6 +84,7 @@ final readonly class PayrollSheetMonth
             'tax_bonus_minor_units' => $this->taxBonusMinorUnits,
             'withholding_tax_minor_units' => $this->withholdingTaxMinorUnits,
             'other_deductions_minor_units' => $this->otherDeductionsMinorUnits,
+            'annual_settlement_minor_units' => $this->annualSettlementMinorUnits,
             'net_payable_minor_units' => $this->netPayableMinorUnits,
         ];
     }

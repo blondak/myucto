@@ -186,6 +186,12 @@
                         <td>Zaokrouhlovací rozdíl</td>
                         <td class="amount">{{ rounding_adjustment_minor_units|minor_money }} {{ currency }}</td>
                     </tr>
+                    {% if annual_settlement_minor_units != 0 %}
+                    <tr>
+                        <td>Doplatek z ročního zúčtování záloh</td>
+                        <td class="amount">{{ annual_settlement_minor_units|minor_money }} {{ currency }}</td>
+                    </tr>
+                    {% endif %}
                     <tr class="total">
                         <td>Srážky celkem</td>
                         <td class="amount">{{ total_other_deductions_minor_units|minor_money }} {{ currency }}</td>

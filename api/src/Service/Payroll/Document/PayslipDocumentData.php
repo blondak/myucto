@@ -43,6 +43,11 @@ final readonly class PayslipDocumentData
         public string $insuranceExpenseAccount,
         public string $insuranceLiabilityAccount,
         public string $currency = 'CZK',
+        /**
+         * Doplatek ze zúčtování vyplacený s touto mzdou (§ 35d odst. 8).
+         * Není mzdou ani srážkou — připočítává se až k výplatě.
+         */
+        public int $annualSettlementMinorUnits = 0,
     ) {
         $this->assertText($revisionId, 'Revision ID');
         $this->assertText($employerName, 'Employer name');
@@ -83,6 +88,7 @@ final readonly class PayslipDocumentData
             $netMinorUnits,
             $employerSocialMinorUnits,
             $employerHealthMinorUnits,
+            $annualSettlementMinorUnits,
         ] as $amountMinorUnits) {
             if ($amountMinorUnits < 0 || $amountMinorUnits > self::MAX_MINOR_UNITS) {
                 throw new \InvalidArgumentException('Payslip amounts other than the rounding adjustment must not be negative.');
@@ -130,6 +136,7 @@ final readonly class PayslipDocumentData
             -$this->sumLines($otherDeductionLines),
             $taxBonusMinorUnits,
             $roundingAdjustmentMinorUnits,
+            $annualSettlementMinorUnits,
         ]);
 
         if ($netMinorUnits !== $expectedNet) {
@@ -254,6 +261,7 @@ final readonly class PayslipDocumentData
             'total_other_deductions_minor_units' => $this->totalOtherDeductionsMinorUnits(),
             'total_employee_deductions_minor_units' => $this->totalEmployeeDeductionsMinorUnits(),
             'rounding_adjustment_minor_units' => $this->roundingAdjustmentMinorUnits,
+            'annual_settlement_minor_units' => $this->annualSettlementMinorUnits,
             'net_minor_units' => $this->netMinorUnits,
             'employer_social_minor_units' => $this->employerSocialMinorUnits,
             'employer_health_minor_units' => $this->employerHealthMinorUnits,

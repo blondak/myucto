@@ -36,7 +36,12 @@ final class PayrollNetCalculator
         foreach ($deductions as $deduction) {
             $deducted = $deducted->add(new Money($deduction->appliedMinorUnits));
         }
-        $netPayable = $netBeforeDeductions->subtract($deducted);
+        // Doplatek ze zúčtování se připočítá až za srážkami. Je to vrácená
+        // záloha na daň, ne mzda (§ 35d odst. 8), takže do základu srážek podle
+        // § 277 odst. 1 OSŘ ani do kapacity dobrovolných srážek nepatří.
+        $netPayable = $netBeforeDeductions
+            ->subtract($deducted)
+            ->add(new Money($input->annualSettlementMinorUnits));
 
         return new PayrollNetResult(
             $input->personReference,
@@ -53,6 +58,7 @@ final class PayrollNetCalculator
             $deducted->minorUnits,
             $netPayable->minorUnits,
             $deductions,
+            $input->annualSettlementMinorUnits,
         );
     }
 }

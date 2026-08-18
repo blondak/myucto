@@ -27,6 +27,7 @@ final readonly class PayrollNetResult implements JsonSerializable
         public int $deductedMinorUnits,
         public int $netPayableMinorUnits,
         public array $deductions,
+        public int $annualSettlementMinorUnits = 0,
     ) {}
 
     /** @return array<string,mixed> */
@@ -47,6 +48,7 @@ final readonly class PayrollNetResult implements JsonSerializable
             'withholding_tax_minor_units' => $this->withholdingTaxMinorUnits,
             'tax_bonus_minor_units' => $this->taxBonusMinorUnits,
             'correction_minor_units' => $this->correctionMinorUnits,
+            'annual_settlement_minor_units' => $this->annualSettlementMinorUnits,
             'net_before_deductions_minor_units' => $this->netBeforeDeductionsMinorUnits,
             'deducted_minor_units' => $this->deductedMinorUnits,
             'net_payable_minor_units' => $this->netPayableMinorUnits,

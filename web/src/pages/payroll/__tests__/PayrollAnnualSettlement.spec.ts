@@ -102,7 +102,9 @@ function person(overrides: Record<string, unknown> = {}) {
     settlement_difference_minor: null,
     payable_minor: null,
     settled_on: null,
-    payroll_input_id: null,
+    payout_run_id: null,
+    payout_revision_id: null,
+    payout_period_start: null,
     annual_revision_id: null,
     ...overrides,
   }
@@ -313,7 +315,9 @@ describe('Roční zúčtování', () => {
         settlement_difference_minor: 120_000,
         payable_minor: 120_000,
         settled_on: '2027-03-10',
-        payroll_input_id: null,
+        payout_run_id: null,
+        payout_revision_id: null,
+        payout_period_start: null,
       },
     }))
     const wrapper = mountPage()

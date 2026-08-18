@@ -241,6 +241,8 @@ final class PayrollSheetSnapshotBuilder
                 withholdingTaxMinorUnits: $amounts['withholding_tax_minor_units'],
                 otherDeductionsMinorUnits: $amounts['other_deductions_minor_units'],
                 netPayableMinorUnits: $amounts['net_payable_minor_units'],
+                annualSettlementMinorUnits:
+                    $amounts['annual_settlement_minor_units'],
             );
         }
         return [$result, $manifest];
@@ -303,6 +305,10 @@ final class PayrollSheetSnapshotBuilder
             'other_deductions_minor_units' => $this->add(
                 $this->nonNegativeInt($net, 'deducted_minor_units'),
                 $this->nonNegativeInt($enforcementResult, 'total_withheld_minor_units'),
+            ),
+            'annual_settlement_minor_units' => $this->nonNegativeInt(
+                $net + ['annual_settlement_minor_units' => 0],
+                'annual_settlement_minor_units',
             ),
             'net_payable_minor_units' =>
                 $this->nonNegativeInt($person, 'payable_after_enforcement_minor'),
@@ -495,6 +501,12 @@ final class PayrollSheetSnapshotBuilder
                 $this->nonNegativeInt($row, 'withholding_tax_minor_units'),
                 $this->nonNegativeInt($row, 'other_deductions_minor_units'),
                 $this->nonNegativeInt($row, 'net_payable_minor_units'),
+                // Starší zmrazené mzdové listy klíč nemají — vznikly dřív, než
+                // se doplatek ze zúčtování vyplácel.
+                $this->nonNegativeInt(
+                    $row + ['annual_settlement_minor_units' => 0],
+                    'annual_settlement_minor_units',
+                ),
             );
         }
         $previousNames = $this->list($employee['previous_names'] ?? null, 'previous_names');

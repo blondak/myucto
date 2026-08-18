@@ -264,6 +264,10 @@ final class PayslipDocumentSnapshotMapper
             $nonCash,
         );
         $correction = $this->int($net, 'correction_minor_units');
+        $annualSettlement = $this->nonNegativeInt(
+            $net + ['annual_settlement_minor_units' => 0],
+            'annual_settlement_minor_units',
+        );
         $netBeforeEnforcement = $this->nonNegativeInt(
             $net,
             'net_payable_minor_units',
@@ -339,6 +343,7 @@ final class PayslipDocumentSnapshotMapper
             insuranceExpenseAccount:
                 $this->account($accounts, 'employer_insurance_debit'),
             insuranceLiabilityAccount: $insuranceLiability,
+            annualSettlementMinorUnits: $annualSettlement,
         );
 
         return $this->snapshot($document);
@@ -742,6 +747,8 @@ final class PayslipDocumentSnapshotMapper
             ),
             'rounding_adjustment_minor_units' =>
                 $document->roundingAdjustmentMinorUnits,
+            'annual_settlement_minor_units' =>
+                $document->annualSettlementMinorUnits,
             'net_minor_units' => $document->netMinorUnits,
             'employer_social_minor_units' => $document->employerSocialMinorUnits,
             'employer_health_minor_units' => $document->employerHealthMinorUnits,

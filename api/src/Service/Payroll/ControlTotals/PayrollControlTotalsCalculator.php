@@ -92,6 +92,11 @@ final class PayrollControlTotalsCalculator
             'withholding_tax',
         ], 0);
         $employeeSocial = 0;
+        // § 35d odst. 5 a 9 a § 38ch odst. 5: vyplacené měsíční bonusy
+        // a doplatky ze zúčtování snižují odvod záloh správci daně. Sčítají se
+        // za celou firmu a odečtou se až z firemního odvodu — po jednotlivci
+        // by mohl vyjít záporný odvod u člověka, který zálohu vůbec neplatí.
+        $advanceTaxOffset = 0;
         $seenEmployees = [];
 
         foreach ($resultPeople as $person) {
@@ -195,6 +200,10 @@ final class PayrollControlTotalsCalculator
                 $employeeSocial,
                 $statutory['employee_social'],
             );
+            $advanceTaxOffset = $this->add(
+                $advanceTaxOffset,
+                $statutory['advance_tax_offset'],
+            );
             foreach ($statutory['liabilities'] as $kind => $amount) {
                 $liabilityMap[$kind] = $this->add(
                     $liabilityMap[$kind],
@@ -237,6 +246,17 @@ final class PayrollControlTotalsCalculator
         $liabilityMap['social_insurance'] = $this->add(
             $employeeSocial,
             $employerSocial,
+        );
+        // § 35d odst. 5: „O vyplacený měsíční daňový bonus plátce daně sníží
+        // odvod záloh na daň za příslušný kalendářní měsíc." Totéž říká
+        // § 35d odst. 9 o doplatku na bonusu z ročního zúčtování a § 38ch
+        // odst. 5 o vráceném přeplatku. Odvod nemůže klesnout pod nulu —
+        // zbytek se podle týchž ustanovení řeší buď snížením odvodů
+        // v následujících měsících, nebo žádostí správci daně; obojí je úkon
+        // plátce, ne výpočet, a modul za něj nerozhoduje.
+        $liabilityMap['advance_tax'] = max(
+            0,
+            $this->subtract($liabilityMap['advance_tax'], $advanceTaxOffset),
         );
 
         ksort($officeMaps, SORT_NUMERIC);
@@ -352,6 +372,7 @@ final class PayrollControlTotalsCalculator
      * @param array<int,array{cash:int,non_cash:int}> $employmentCash
      * @return array{
      *   employee_social:int,
+     *   advance_tax_offset:int,
      *   liabilities:array<string,int>
      * }
      */
@@ -544,18 +565,23 @@ final class PayrollControlTotalsCalculator
         ] as $deduction) {
             $before = $this->subtract($before, $deduction);
         }
-        $before = $this->add(
-            $before,
-            $this->nonNegativeInt(
-                $net['tax_bonus_minor_units'] ?? null,
-                'net.tax_bonus_minor_units',
-            ),
+        $taxBonus = $this->nonNegativeInt(
+            $net['tax_bonus_minor_units'] ?? null,
+            'net.tax_bonus_minor_units',
+        );
+        $before = $this->add($before, $taxBonus);
+        // Doplatek ze zúčtování stojí za srážkami (§ 35d odst. 8) — do čisté
+        // mzdy před srážkami nepatří, do výplaty ano.
+        $annualSettlement = $this->nonNegativeInt(
+            $net['annual_settlement_minor_units'] ?? 0,
+            'net.annual_settlement_minor_units',
         );
         if ($before !== $this->nonNegativeInt(
             $net['net_before_deductions_minor_units'] ?? null,
             'net.net_before_deductions_minor_units',
         )
-            || $this->subtract($before, $netDeducted) !== $netPayable
+            || $this->add($this->subtract($before, $netDeducted), $annualSettlement)
+                !== $netPayable
         ) {
             throw new \DomainException(
                 "Čistá mzda osoby {$employeeId} nemá přesný kontrolní součet.",
@@ -564,6 +590,7 @@ final class PayrollControlTotalsCalculator
 
         return [
             'employee_social' => $employeeSocial,
+            'advance_tax_offset' => $this->add($taxBonus, $annualSettlement),
             'liabilities' => [
                 'advance_tax' => $advanceTax,
                 'health_insurance' => $healthTotal,

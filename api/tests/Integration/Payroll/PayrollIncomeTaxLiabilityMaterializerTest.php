@@ -221,6 +221,91 @@ final class PayrollIncomeTaxLiabilityMaterializerTest extends TestCase
         }
     }
 
+    /**
+     * § 35d odst. 5: „O vyplacený měsíční daňový bonus plátce daně sníží odvod
+     * záloh na daň za příslušný kalendářní měsíc." § 38ch odst. 5 a § 35d
+     * odst. 9 říkají totéž o doplatku z ročního zúčtování. Bez toho by
+     * zaměstnavatel vyplatil bonus i doplatek zaměstnanci a TÝŽ peníze poslal
+     * ještě jednou finančnímu úřadu.
+     */
+    public function testAdvanceLevyIsReducedByBonusAndAnnualSettlement(): void
+    {
+        $revisionId = $this->createRevision(
+            1,
+            'regular',
+            null,
+            12_500,
+            3_000,
+            taxBonus: 2_000,
+            annualSettlement: 1_500,
+        );
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+
+        $rows = array_map($this->liability(...), $result['liability_ids']);
+        self::assertSame(
+            ['advance_tax', 'withholding_tax'],
+            array_column($rows, 'liability_kind'),
+        );
+        self::assertSame([9_000, 3_000], array_map(
+            fn (array $row): int => $this->integer($row, 'amount_minor'),
+            $rows,
+        ));
+        $source = $this->object(json_decode(
+            $this->string($rows[0], 'source_snapshot_json'),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        ));
+        self::assertSame(3_500, $source['advance_tax_offset_minor']);
+        self::assertSame(0, $source['advance_tax_offset_unapplied_minor']);
+        self::assertArrayNotHasKey(
+            'advance_tax_offset_minor',
+            $this->object(json_decode(
+                $this->string($rows[1], 'source_snapshot_json'),
+                true,
+                flags: JSON_THROW_ON_ERROR,
+            )),
+        );
+    }
+
+    /**
+     * Odvod nemůže být záporný. Nevyčerpaný zbytek se podle § 35d odst. 5 a 9
+     * buď odečte z odvodů v dalších měsících, nebo si o něj plátce požádá
+     * správce daně — obojí je jeho úkon, takže se jen pojmenuje.
+     */
+    public function testAdvanceLevyStopsAtZeroAndNamesTheUnappliedRemainder(): void
+    {
+        $revisionId = $this->createRevision(
+            1,
+            'regular',
+            null,
+            1_000,
+            3_000,
+            taxBonus: 2_500,
+            annualSettlement: 900,
+        );
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+
+        $rows = array_map($this->liability(...), $result['liability_ids']);
+        self::assertSame(
+            ['withholding_tax'],
+            array_column($rows, 'liability_kind'),
+        );
+        self::assertSame([3_000], array_map(
+            fn (array $row): int => $this->integer($row, 'amount_minor'),
+            $rows,
+        ));
+    }
+
     public function testCorrectionCreatesIndependentSignedDeltas(): void
     {
         $regularRevision = $this->createRevision(
@@ -393,6 +478,8 @@ final class PayrollIncomeTaxLiabilityMaterializerTest extends TestCase
         ?int $rootAdvance = null,
         bool $storeStatutory = true,
         ?array $statutoryInput = null,
+        int $taxBonus = 0,
+        int $annualSettlement = 0,
     ): int {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -452,10 +539,39 @@ final class PayrollIncomeTaxLiabilityMaterializerTest extends TestCase
             'payer_reference' => "supplier:{$this->supplierId}",
             'advance_tax' => [
                 'tax_after_credits_minor_units' => $advance,
-                'tax_bonus_minor_units' => 0,
+                'tax_bonus_minor_units' => $taxBonus,
             ],
             'withholding_tax_minor_units' => $withholding,
         ];
+        $netResult = [
+            'person_reference' => "employee:{$this->employeeId}",
+            'annual_settlement_minor_units' => $annualSettlement,
+        ];
+        (new PayrollStatutoryResultRepository($this->db))->store(
+            $this->supplierId,
+            $revisionId,
+            'net_pay',
+            'payroll-net-result.v1',
+            'calculated',
+            'cz-net-pay-2026',
+            str_repeat('b', 64),
+            $statutoryInput ?? ['schema_version' => 'payroll-run-input.v2'],
+            [
+                'net_payable_minor_units' => 0,
+                'people' => ["employee:{$this->employeeId}"],
+                'policy_hash' => str_repeat('c', 64),
+                'policy_id' => 'cz-net-pay-policy-2026',
+                'status' => 'calculated',
+            ],
+            [[
+                'employee_id' => $this->employeeId,
+                'input_snapshot' => ['synthetic' => true],
+                'relationships' => [],
+                'result_snapshot' => $netResult,
+                'result_status' => 'calculated',
+            ]],
+            $this->actorId,
+        );
         if ($storeStatutory) {
             (new PayrollStatutoryResultRepository($this->db))->store(
                 $this->supplierId,
@@ -475,7 +591,7 @@ final class PayrollIncomeTaxLiabilityMaterializerTest extends TestCase
                     'ruleset_hash' => str_repeat('b', 64),
                     'ruleset_id' => 'cz-income-tax-2026',
                     'status' => 'calculated',
-                    'tax_bonus_minor_units' => 0,
+                    'tax_bonus_minor_units' => $taxBonus,
                     'withholding_tax_minor_units' => $withholding,
                 ],
                 [[

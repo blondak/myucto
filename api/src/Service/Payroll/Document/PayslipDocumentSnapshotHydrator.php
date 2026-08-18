@@ -62,6 +62,12 @@ final class PayslipDocumentSnapshotHydrator
             insuranceLiabilityAccount:
                 $this->text($snapshot, 'insurance_liability_account'),
             currency: $this->text($snapshot, 'currency'),
+            // Starší archivované pásky klíč nemají a mít nemohou — vznikly
+            // dřív, než se doplatek ze zúčtování vyplácel.
+            annualSettlementMinorUnits: $this->integer(
+                $snapshot + ['annual_settlement_minor_units' => 0],
+                'annual_settlement_minor_units',
+            ),
         );
     }
 

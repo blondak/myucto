@@ -929,8 +929,10 @@ final class PayrollRunStatutoryResultPersister
             );
         }
         if ($deducted !== $result->deductedMinorUnits
-            || $this->subtractMinorUnits($netBeforeDeductions, $deducted)
-                !== $result->netPayableMinorUnits
+            || $this->addMinorUnits(
+                $this->subtractMinorUnits($netBeforeDeductions, $deducted),
+                $result->annualSettlementMinorUnits,
+            ) !== $result->netPayableMinorUnits
         ) {
             throw new \DomainException(
                 "Čistá mzda {$result->personReference} nesouhlasí se srážkami.",

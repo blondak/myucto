@@ -990,6 +990,23 @@ onMounted(load)
                 }) }}
               </p>
 
+              <p
+                v-if="preview?.already_settled?.payout_period_start"
+                class="mt-1 text-sm text-neutral-600"
+                data-test="annual-settlement-paid-out"
+              >
+                {{ t('payroll.annual_settlement.paid_out_note', {
+                  period: formatMonth(String(preview.already_settled.payout_period_start).slice(0, 7)),
+                }) }}
+              </p>
+              <p
+                v-else-if="preview?.already_settled && preview.already_settled.payable_minor > 0"
+                class="mt-1 text-sm text-neutral-600"
+                data-test="annual-settlement-pending-payout"
+              >
+                {{ t('payroll.annual_settlement.pending_payout_note') }}
+              </p>
+
               <button
                 v-if="document"
                 type="button"
