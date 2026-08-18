@@ -9,7 +9,7 @@ import {
 } from '@/api/cash'
 import { accountingApi, type ChartAccount, type PostingRuleMap } from '@/api/accounting'
 import { taxConstantsApi, type TaxConstantsYear } from '@/api/taxConstants'
-import { clientsApi, type Client } from '@/api/clients'
+import { clientsApi, type Client, type ClientRoleFilter } from '@/api/clients'
 import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatMoney } from '@/composables/useFormat'
@@ -32,7 +32,6 @@ const registers = ref<CashRegister[]>([])
 const accounts = ref<ChartAccount[]>([])
 const rules = ref<PostingRuleMap>({})
 const taxYears = ref<TaxConstantsYear[]>([])
-const clients = ref<Client[]>([])
 const saving = ref(false)
 const error = ref('')
 
@@ -149,7 +148,7 @@ onMounted(async () => {
   const qReg = Number(route.query.register_id || 0)
   if (qReg > 0 && registers.value.some(r => r.id === qReg)) form.register_id = qReg
   else form.register_id = (registers.value.find(r => r.is_default) ?? registers.value[0])?.id ?? ''
-  try { clients.value = (await clientsApi.list({ per_page: 100 })).data } catch { clients.value = [] }
+  await loadPartners('')
 })
 
 // Přepínač typu / pokladny → resetuj účel na první platný (valutová pokladna nabízí méně účelů).
@@ -203,6 +202,54 @@ function pickUnpaid(o: UnpaidDocumentOption) {
 }
 // PF: úhrada jen v plné výši (R4) → částka readonly.
 const amountReadonly = computed(() => form.purpose === 'purchase_payment' && selectedUnpaid.value !== null)
+
+// ── Našeptávač partnera z číselníku klientů ─────────────────────────────────
+// Hledá se na serveru přes `q` (stejně jako InvoiceEditor / VendorPicker) — pevný
+// strop by při stovkách klientů většinu z nich z nabídky vyhodil. Partner zůstává
+// volný text (§11/1/b, bez FK na clients); z vybraného klienta jen předvyplníme
+// IČO a DIČ, které formulář sám hlídá kvůli A.4 kontrolního hlášení.
+const clients = ref<Client[]>([])
+const partnersFailed = ref(false)
+let partnerTimer: ReturnType<typeof setTimeout> | null = null
+let matchedPartner = ''
+
+// Nákup = dodavatel, ostatní účely (prodej) = odběratel.
+const partnerRole = computed<ClientRoleFilter>(() => (form.purpose === 'purchase' ? 'vendors' : 'customers'))
+
+async function loadPartners(q: string) {
+  try {
+    const res = await clientsApi.list({ q: q || undefined, role: partnerRole.value, archived: false, per_page: 50 })
+    clients.value = res.data
+    partnersFailed.value = false
+    applyPartnerMatch()
+  } catch (e: any) {
+    clients.value = []
+    // Prázdná nabídka po chybě je k nerozeznání od „klient neexistuje“ → řekni to jednou.
+    if (!partnersFailed.value) toast.error(e?.response?.data?.error?.message || t('common.error'))
+    partnersFailed.value = true
+  }
+}
+
+function onPartnerSearch() {
+  applyPartnerMatch()
+  if (partnerTimer) clearTimeout(partnerTimer)
+  partnerTimer = setTimeout(() => loadPartners(form.partner_name.trim()), 300)
+}
+
+// Datalist nemá vlastní „select“ událost — shodu poznáme podle přesného názvu.
+// Doplňujeme jen při změně shody, ať to nepřepisuje ruční úpravu IČO/DIČ.
+function applyPartnerMatch() {
+  const name = form.partner_name.trim().toLocaleLowerCase()
+  if (!name || name === matchedPartner) return
+  const hit = clients.value.find(c => c.company_name.trim().toLocaleLowerCase() === name)
+  if (!hit) return
+  matchedPartner = name
+  form.partner_ic = hit.ic ?? ''
+  form.partner_dic = hit.dic ?? ''
+}
+
+// Přepnutí prodej ↔ nákup mění roli (odběratelé/dodavatelé) → načti nabídku znovu.
+watch(partnerRole, () => { loadPartners(form.partner_name.trim()) })
 
 // ── Klientský hint / validace ───────────────────────────────────────────────
 // Práh KH je inkluzivní (>= 10 000 → A.4/B.2), proto >= i tady. U valutové pokladny
@@ -353,7 +400,7 @@ async function save() {
     </div>
 
     <datalist id="cash-partners">
-      <option v-for="c in clients" :key="c.id" :value="c.company_name" />
+      <option v-for="c in clients" :key="c.id" :value="c.company_name">{{ c.ic || '' }}</option>
     </datalist>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -406,7 +453,7 @@ async function save() {
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div class="sm:col-span-1">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.form.partner') }}</label>
-              <input v-model="form.partner_name" list="cash-partners" type="text"
+              <input v-model="form.partner_name" @input="onPartnerSearch" list="cash-partners" type="text"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
             <div>
