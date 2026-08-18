@@ -587,11 +587,7 @@ class PayrollDocumentService
             $employeeId,
             $artifact->kind->value,
         );
-        if (
-            $supersedesDocumentId === null
-            && $latest !== null
-            && (int) $latest['revision_id'] !== $revisionId
-        ) {
+        if ($supersedesDocumentId === null && $latest !== null) {
             $supersedesDocumentId = (int) $latest['id'];
         }
         $documentRevisionNo = 1;
@@ -608,8 +604,28 @@ class PayrollDocumentService
                 throw new \RuntimeException('Superseded payroll document is incompatible.');
             }
             $sameRevision = (int) $previous['revision_id'] === $revisionId;
+            // Táž revize se smí vydat znovu jen jako DALŠÍ ČLÁNEK ŘETĚZU, a jen
+            // z týchž podkladů — přesně jako u ročního archivu
+            // ({@see archiveAnnualPdf()}). Sada je jinak beze změny: shodná verze
+            // šablony i rendereru vrací hotový doklad, jiná zakládá další verzi
+            // a archivované PDF zůstává bajt na bajt stejné. Měsíční svazek se
+            // řídí vlastním otiskem obsahu, který se mění s každou přibylou
+            // páskou, takže se na shodu otisku neváže.
             if ($sameRevision && $artifact->kind !== PayrollDocumentKind::MonthlyBundle) {
-                throw new \RuntimeException('Superseded payroll document is incompatible.');
+                if (!hash_equals(
+                    (string) $previous['source_snapshot_hash'],
+                    $artifact->sourceSnapshotHash,
+                )) {
+                    throw new \RuntimeException(
+                        'Mzdová revize již má doklad s jiným zdrojovým otiskem.',
+                    );
+                }
+                if (
+                    $previous['template_version'] === $artifact->templateVersion
+                    && $previous['renderer_version'] === $artifact->rendererVersion
+                ) {
+                    return $previous;
+                }
             }
             if (!$sameRevision) {
                 $previousRevision = $this->requireApprovedRevision(

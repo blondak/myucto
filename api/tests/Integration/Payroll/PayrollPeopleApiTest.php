@@ -97,6 +97,15 @@ final class PayrollPeopleApiTest extends TestCase
         $this->otherEmployeeId = (int) $pdo->lastInsertId();
 
         $pdo->prepare(
+            "INSERT INTO payroll_offices (supplier_id, code, name, is_active)
+             VALUES (?, 'HLAVNI', 'Hlavní účtárna', 1)"
+        )->execute([$this->supplierId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_employer_settings (supplier_id, default_office_id)
+             VALUES (?, ?)'
+        )->execute([$this->supplierId, (int) $pdo->lastInsertId()]);
+
+        $pdo->prepare(
             "INSERT INTO payroll_employee_profiles (supplier_id, employee_id, profile_status)
              VALUES (?, ?, 'legacy')"
         )->execute([$this->supplierId, $this->employeeId]);

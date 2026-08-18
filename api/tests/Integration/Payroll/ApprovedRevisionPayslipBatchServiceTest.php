@@ -215,9 +215,11 @@ final class ApprovedRevisionPayslipBatchServiceTest extends TestCase
             );
             self::fail('Konfliktní druhá páska musí zrušit celou dávku.');
         } catch (\RuntimeException $exception) {
-            self::assertStringContainsString('conflict', strtolower(
+            // Pojmenované odmítnutí, ne syrová `PDOException` z unikátního klíče.
+            self::assertStringContainsString(
+                'jiným zdrojovým otiskem',
                 $exception->getMessage(),
-            ));
+            );
         }
 
         self::assertSame(1, $this->documentCount());
@@ -232,6 +234,56 @@ final class ApprovedRevisionPayslipBatchServiceTest extends TestCase
             $this->storedFileCount(),
             'Rollback dávky nesmí ponechat osiřelý PDF soubor první osoby.',
         );
+    }
+
+    /**
+     * Kolize na `uq_payroll_document_revision` musí skončit pojmenovaným
+     * odmítnutím, ne syrovou `PDOException` z databáze.
+     */
+    public function testDuplicateDocumentRevisionEndsAsNamedRefusal(): void
+    {
+        $revisionHash = (string) $this->query(
+            $this->db->pdo(),
+            'SELECT result_snapshot_hash
+               FROM payroll_run_revisions
+              WHERE id = ' . $this->revisionId
+        )->fetchColumn();
+        $record = function (string $idempotencyKey) use ($revisionHash): array {
+            $stored = $this->storage->store(
+                $this->supplierId,
+                '%PDF-1.4 ' . $idempotencyKey,
+            );
+
+            return [
+                'supplier_id' => $this->supplierId,
+                'run_id' => $this->runId,
+                'revision_id' => $this->revisionId,
+                'employee_id' => $this->employeeIds[0],
+                'document_kind' => PayrollDocumentKind::Payslip->value,
+                'document_revision_no' => 1,
+                'supersedes_document_id' => null,
+                'source_snapshot_hash' => str_repeat('e', 64),
+                'revision_snapshot_hash' => $revisionHash,
+                'template_version' => 'synthetic-v1',
+                'renderer_version' => 'synthetic-v1',
+                'file_sha256' => $stored['file_sha256'],
+                'size_bytes' => $stored['size_bytes'],
+                'mime_type' => 'application/pdf',
+                'storage_key' => $stored['storage_key'],
+                'suggested_filename' => 'synthetic.pdf',
+                'manifest_json' => null,
+                'idempotency_key_hash' => hash('sha256', $idempotencyKey),
+                'created_by' => null,
+            ];
+        };
+
+        $this->documents->insertOrGet($record('prvni'));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage(
+            'Generated payroll document conflicts with an existing artifact.',
+        );
+        $this->documents->insertOrGet($record('druha'));
     }
 
     public function testDocumentBatchReportsCompleteMonthWithoutEndedEmployments(): void

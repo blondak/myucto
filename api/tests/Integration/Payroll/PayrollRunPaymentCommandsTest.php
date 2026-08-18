@@ -1053,23 +1053,29 @@ final class PayrollRunPaymentCommandsTest extends TestCase
              VALUES (?, ?, "ready")',
         )->execute([$this->supplierId, $employeeId]);
         $pdo->prepare(
+            'INSERT INTO payroll_offices (supplier_id, code, name, is_active)
+             VALUES (?, "W08", "Syntetická účtárna", 1)',
+        )->execute([$this->supplierId]);
+        $officeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
             'INSERT INTO payroll_employments
-                (supplier_id, employee_id, code, relation_type, status,
+                (supplier_id, employee_id, office_id, code, relation_type, status,
                  start_date, actual_start_date, is_primary)
-             VALUES (?, ?, "SYN-W08", "employment", "active",
+             VALUES (?, ?, ?, "SYN-W08", "employment", "active",
                      "2026-01-01", "2026-01-01", 1)',
-        )->execute([$this->supplierId, $employeeId]);
+        )->execute([$this->supplierId, $employeeId, $officeId]);
         $employmentId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             'INSERT INTO payroll_employment_terms
-                (supplier_id, employment_id, effective_from, planned_start_on,
+                (supplier_id, employment_id, office_id, effective_from,
+                 planned_start_on,
                  actual_start_on, weekly_hours, workload_basis_points,
                  social_insurance_participation,
                  health_insurance_participation, tax_regime,
                  tax_declaration_signed, is_primary)
-             VALUES (?, ?, "2026-01-01", "2026-01-01", "2026-01-01",
+             VALUES (?, ?, ?, "2026-01-01", "2026-01-01", "2026-01-01",
                      40, 10000, "automatic", "automatic", "advance", 1, 1)',
-        )->execute([$this->supplierId, $employmentId]);
+        )->execute([$this->supplierId, $employmentId, $officeId]);
 
         return [$employeeId, $employmentId];
     }

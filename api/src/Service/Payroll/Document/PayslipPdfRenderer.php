@@ -15,22 +15,21 @@ use Twig\Loader\FilesystemLoader;
 final class PayslipPdfRenderer
 {
     /**
-     * ZÁMĚRNĚ se nezvyšuje spolu se šablonou, na rozdíl od mzdového listu.
+     * Zvyšuje se spolu se šablonou, stejně jako u mzdového listu.
      *
-     * Páska je vázaná na běh, ne na roční revizi, a její archiv klíčuje
-     * idempotenci mimo jiné touhle konstantou. Roční archiv umí pro tutéž
-     * revizi vydat další verzi dokumentu ({@see PayrollDocumentService::
-     * archiveAnnualPdf}), běhový ne — tam by jiná verze při opakovaném
-     * spuštění dávky narazila na `uq_payroll_document_revision` a skončila
-     * chybou místo vrácení už archivovaného dokladu.
+     * Dřív se zvyšovat nesměla: běhový archiv uměl pro tutéž revizi vydat jen
+     * jeden doklad, takže jiná verze při opakovaném spuštění dávky narazila na
+     * `uq_payroll_document_revision`. Od té doby se {@see PayrollDocumentService
+     * ::archive()} chová jako roční archiv — táž revize s jinou verzí šablony
+     * nebo rendereru vydá DALŠÍ ČLÁNEK ŘETĚZU (`supersedes`,
+     * `document_revision_no + 1`), shodná verze vrátí hotový doklad a
+     * archivované PDF zůstává bajt na bajt stejné, protože se z uloženého
+     * souboru jen vydává.
      *
-     * Obsahová verze pásky proto žije tam, kde skutečně je: ve snapshotu
-     * `payroll-payslip-document.v2`, který je součástí zmrazeného výsledku
-     * osoby, a tedy i otisku revize běhu. Nová páska vzniká novým během;
-     * archivovaná zůstává bajt na bajt stejná, protože se z uloženého PDF
-     * jen vydává.
+     * v2: páska tiskne podklad nezdanění (osvobozeno / není předmětem daně)
+     * a dva podsoučty.
      */
-    public const VERSION = 'mz-16-payslip-v1';
+    public const VERSION = 'mz-16-payslip-v2';
 
     private ?Environment $twig = null;
 

@@ -201,6 +201,25 @@ final class PayrollRunSnapshotBuilder
                     "/payroll/employees/{$employeeId}",
                 );
             }
+            // Mzdová účtárna je u vztahu POVINNÁ. Variabilní symbol
+            // zaměstnavatele pro sociální pojistné vychází výhradně
+            // z `payroll_offices`, takže odvod za vztah bez účtárny není čím
+            // vykázat, a běh zúžený na účtárnu by takový vztah navíc tiše
+            // vynechal. Zápisová cesta ji od migrace 1680 doplňuje z výchozí
+            // účtárny zaměstnavatele; tohle je pojistka pro data, která
+            // vznikla dřív nebo mimo ni — musí se ozvat tady, dokud se dá
+            // vztah opravit, ne až kontrolními součty při schvalování.
+            if ($row['office_id'] === null) {
+                $validations[] = new PayrollRunValidation(
+                    'blocker',
+                    'employment_without_office',
+                    'employment',
+                    $employmentId,
+                    'Pracovní vztah nemá mzdovou účtárnu. Bez ní nelze vykázat'
+                    . ' odvod sociálního pojistného.',
+                    "/payroll/employees/{$employeeId}",
+                );
+            }
             $timeMonth = isset($timeMonthRows[$employmentId])
                 ? $this->timeMonth($timeMonthRows[$employmentId])
                 : null;

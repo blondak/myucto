@@ -195,7 +195,10 @@ final class PayrollEmploymentRepository
             $userAgent,
         ): array {
             $this->lockEmployee($supplierId, $employeeId);
-            $this->assertOffice($supplierId, $data['terms']['office_id']);
+            $data['terms']['office_id'] = $this->resolveOffice(
+                $supplierId,
+                $data['terms']['office_id'],
+            );
             $this->assertPrimaryAvailable($supplierId, $employeeId, $data['terms']['is_primary'], null);
             if ($data['code'] === '') {
                 $data['code'] = $this->nextEmploymentCode($supplierId, $employeeId);
@@ -349,7 +352,15 @@ final class PayrollEmploymentRepository
                 $data['actual_start_on'] = $actualStart;
             }
             $this->lockEmployee($supplierId, $employeeId);
-            $this->assertOffice($supplierId, $data['office_id']);
+            // Obrazovky, které účtárnu nenabízejí, posílají null — nesmí tím
+            // shodit tu, kterou vztah drží (viz {@see resolveOffice()}).
+            $data['office_id'] = $this->resolveOffice(
+                $supplierId,
+                $data['office_id'],
+                $employment['office_id'] === null
+                    ? null
+                    : (int) $employment['office_id'],
+            );
             $this->assertPrimaryAvailable($supplierId, $employeeId, $data['is_primary'], $employmentId);
 
             $previous = $this->latestTermsForUpdate($supplierId, $employmentId);
@@ -1077,7 +1088,8 @@ final class PayrollEmploymentRepository
         ?int $expectedVersion,
     ): array {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, employee_id, code, relation_type, status, is_primary, start_date,
+            'SELECT id, employee_id, office_id, code, relation_type, status, is_primary,
+                    start_date,
                     actual_start_date, end_date, monthly_gross_minor, row_version
                FROM payroll_employments
               WHERE supplier_id = ? AND id = ?
@@ -1095,10 +1107,29 @@ final class PayrollEmploymentRepository
         return $row;
     }
 
-    private function assertOffice(int $supplierId, ?int $officeId): void
-    {
+    /**
+     * Mzdová účtárna vztahu je POVINNÁ, ale uživatel ji nezadává.
+     *
+     * Variabilní symbol zaměstnavatele pro sociální pojistné vychází výhradně
+     * z `payroll_offices`, takže vztah bez účtárny nejde odvést; běh zúžený na
+     * účtárnu by ho navíc tiše vynechal. Formulář vztahu přitom účtárnu vůbec
+     * nenabízí a rychlá editace o poli neví — kdyby byla povinná na vstupu,
+     * nebylo by ji kde vyplnit. Doplňuje se proto tady: co drží vztah dnes,
+     * pak výchozí účtárna zaměstnavatele (`default_office_id` je NOT NULL).
+     * Když ani ta není, je to pojmenovaná překážka při zakládání vztahu, tedy
+     * v okamžiku, kdy se dá napravit.
+     */
+    private function resolveOffice(
+        int $supplierId,
+        ?int $officeId,
+        ?int $currentOfficeId = null,
+    ): int {
+        $officeId ??= $currentOfficeId ?? $this->defaultOffice($supplierId);
         if ($officeId === null) {
-            return;
+            throw new \InvalidArgumentException(
+                'Pracovní vztah nelze vést bez mzdové účtárny —'
+                . ' nejdřív ji nastavte u zaměstnavatele.',
+            );
         }
         $stmt = $this->db->pdo()->prepare(
             'SELECT id
@@ -1109,6 +1140,27 @@ final class PayrollEmploymentRepository
         if ($stmt->fetchColumn() === false) {
             throw new \InvalidArgumentException('Mzdová účtárna neexistuje nebo není aktivní.');
         }
+
+        return $officeId;
+    }
+
+    private function defaultOffice(int $supplierId): ?int
+    {
+        if (!$this->db->hasTable('payroll_employer_settings')) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT settings.default_office_id
+               FROM payroll_employer_settings settings
+               JOIN payroll_offices office
+                 ON office.supplier_id = settings.supplier_id
+                AND office.id = settings.default_office_id
+              WHERE settings.supplier_id = ? AND office.is_active = 1'
+        );
+        $stmt->execute([$supplierId]);
+        $value = $stmt->fetchColumn();
+
+        return $value === false || $value === null ? null : (int) $value;
     }
 
     private function assertPrimaryAvailable(
