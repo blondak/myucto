@@ -468,6 +468,149 @@ final class PayrollInputRepository
     }
 
     /**
+     * Storno SCHVÁLENÉHO benefitního vstupu a uvolnění ročního koše.
+     *
+     * ── Proč to musí jít ────────────────────────────────────────────────────────
+     * Schválením benefitu vzniká řádek `payroll_benefit_accumulators`, který navždy
+     * čerpá roční koš osvobození podle § 6 odst. 9 ZDP. Když účetní zjistí, že
+     * plnění bylo jiné nebo že nebylo vůbec, musí jít koš vrátit — jinak se
+     * zaměstnanci až do konce roku nesprávně zdaňuje všechno další plnění.
+     * `status = 'reversed'` byl v enumu od migrace 1210, ale nikdo ho nenastavoval:
+     * `cancel()` bere jen koncept a jiná cesta neexistovala.
+     *
+     * ── Co se NEPŘEPOČÍTÁVÁ ─────────────────────────────────────────────────────
+     * Zmrazený rozpad (`benefit_basket`, `benefit_exempt_minor`,
+     * `benefit_taxable_minor`) i `amount_minor` akumulátoru zůstávají beze změny.
+     * Storno je stavový přechod, ne oprava historie — dřív schválené vstupy se
+     * zpětně nepřepočítávají a nikdy nesmějí. Opravné plnění je NOVÝ vstup
+     * s vlastním rozpadem proti koši, který se právě uvolnil.
+     *
+     * ── Co blokuje ──────────────────────────────────────────────────────────────
+     * Vstup zmrazený ve schválené revizi mzdového běhu. Ten už je na výplatní
+     * pásce, v zákonných výsledcích i v účetní dávce; uvolnit jeho koš by
+     * rozhodilo zdanění měsíce, který je hotový. Oprava takového plnění patří do
+     * opravné revize běhu, ne do storna vstupu.
+     *
+     * Operace je idempotentní: druhé storno už jen vrátí stav.
+     *
+     * @return array<string,mixed>|null null, když vstup neexistuje
+     */
+    public function reverseBenefit(
+        int $supplierId,
+        int $id,
+        int $expectedVersion,
+        int $userId,
+        string $reason,
+    ): ?array {
+        $reason = trim($reason);
+        if ($reason === '' || mb_strlen($reason) > 190) {
+            throw new \InvalidArgumentException(
+                'Důvod storna benefitu musí mít 1 až 190 znaků.',
+            );
+        }
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT id, status, row_version, period_start
+                   FROM payroll_inputs
+                  WHERE supplier_id = ? AND id = ?
+                  FOR UPDATE'
+            );
+            $stmt->execute([$supplierId, $id]);
+            $raw = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($raw === false) {
+                if ($ownsTransaction) {
+                    $pdo->rollBack();
+                }
+                return null;
+            }
+            $row = PayrollTimeValue::row($raw, 'payroll_benefit_reversal');
+            $status = PayrollTimeValue::string($row['status'] ?? null, 'status');
+            $currentVersion = PayrollTimeValue::int(
+                $row['row_version'] ?? null,
+                'row_version',
+            );
+            if ($status === 'cancelled' && !$this->hasActiveBenefit($pdo, $supplierId, $id)) {
+                if ($ownsTransaction) {
+                    $pdo->commit();
+                }
+                return $this->find($supplierId, $id);
+            }
+            if ($currentVersion !== $expectedVersion) {
+                throw new PayrollInputConflictException($currentVersion);
+            }
+            if ($status !== 'approved') {
+                throw new PayrollInputCancellationException(
+                    'input_state_conflict',
+                    'Stornovat lze jen schválený mzdový vstup.',
+                );
+            }
+            if (!$this->hasActiveBenefit($pdo, $supplierId, $id)) {
+                throw new PayrollInputCancellationException(
+                    'input_state_conflict',
+                    'Vstup nečerpá roční koš osvobození; není co stornovat.',
+                );
+            }
+            $this->assertNotFrozenInApprovedRevision(
+                $pdo,
+                $supplierId,
+                $id,
+                PayrollTimeValue::string($row['period_start'] ?? null, 'period_start'),
+            );
+            $update = $pdo->prepare(
+                'UPDATE payroll_inputs
+                    SET status = "cancelled", row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?
+                    AND status = "approved"'
+            );
+            $update->execute([$supplierId, $id, $expectedVersion]);
+            if ($update->rowCount() !== 1) {
+                throw new PayrollInputConflictException($currentVersion);
+            }
+            $reverse = $pdo->prepare(
+                'UPDATE payroll_benefit_accumulators
+                    SET status = "reversed",
+                        reversed_at = NOW(),
+                        reversed_by = ?,
+                        reversal_reason = ?
+                  WHERE supplier_id = ? AND input_id = ? AND status = "active"'
+            );
+            $reverse->execute([$userId, $reason, $supplierId, $id]);
+            if ($reverse->rowCount() !== 1) {
+                throw new PayrollInputConflictException($currentVersion);
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $this->find($supplierId, $id);
+    }
+
+    private function hasActiveBenefit(PDO $pdo, int $supplierId, int $id): bool
+    {
+        $stmt = $pdo->prepare(
+            'SELECT 1
+               FROM payroll_benefit_accumulators
+              WHERE supplier_id = ? AND input_id = ? AND status = "active"
+              LIMIT 1
+              FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $id]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
      * Zrušení vlastního konceptu mzdového vstupu.
      *
      * Jde cestou `status = "cancelled"`, ne tvrdého DELETE — schéma pro to bylo
@@ -610,6 +753,19 @@ final class PayrollInputRepository
             );
         }
 
+        $this->assertNotFrozenInApprovedRevision($pdo, $supplierId, $id, $periodStart);
+    }
+
+    /**
+     * Vstup zmrazený v revizi mzdového běhu se nesmí utrhnout od snapshotu,
+     * který na něj ukazuje — ani zrušením konceptu, ani stornem benefitu.
+     */
+    private function assertNotFrozenInApprovedRevision(
+        PDO $pdo,
+        int $supplierId,
+        int $id,
+        string $periodStart,
+    ): void {
         $frozen = $pdo->prepare(
             'SELECT 1
                FROM payroll_run_revisions revision

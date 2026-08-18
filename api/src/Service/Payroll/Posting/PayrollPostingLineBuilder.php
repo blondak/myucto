@@ -58,6 +58,10 @@ final class PayrollPostingLineBuilder
         $cashByEmployee = [];
         /** @var array<int,list<string>> $relationTypesByEmployee */
         $relationTypesByEmployee = [];
+        /** @var array<int,?string> $costCenterByEmployment */
+        $costCenterByEmployment = [];
+        /** @var array<int,list<int>> $employmentsByEmployee */
+        $employmentsByEmployee = [];
         foreach ($resultPeople as $employeeId => $personResult) {
             $personSnapshot = $snapshotPeople[$employeeId];
             $employmentResults = $this->resultEmployments($personResult);
@@ -84,6 +88,9 @@ final class PayrollPostingLineBuilder
                     $accounts,
                 );
                 $dimensionDebit = $this->dimensionCostAccount($employmentSnapshot);
+                $costCenter = $this->dimensionCostCenter($employmentSnapshot);
+                $costCenterByEmployment[$employmentId] = $costCenter;
+                $employmentsByEmployee[$employeeId][] = $employmentId;
                 $inputResults = $this->resultInputs($employmentResult);
                 if (array_keys($employmentSnapshot['inputs'])
                     !== array_keys($inputResults)
@@ -157,6 +164,7 @@ final class PayrollPostingLineBuilder
                             $credit,
                             $sourceMinor,
                             $description,
+                            $costCenter,
                         );
                     } else {
                         if ($sourceMinor !== $cashMinor) {
@@ -177,6 +185,7 @@ final class PayrollPostingLineBuilder
                             $credit,
                             $cashMinor,
                             $description,
+                            $costCenter,
                         );
                     }
                     if ($cashMinor > 0) {
@@ -232,21 +241,43 @@ final class PayrollPostingLineBuilder
             $sets['health_insurance']['root'],
             'employer_contribution_minor_units',
         );
-        $this->addPair(
+        $splitEmployerInsurance = array_filter(
+            $costCenterByEmployment,
+            static fn (?string $code): bool => $code !== null,
+        ) !== [];
+        $this->addEmployerInsurance(
             $allocations,
             'employer-insurance:social',
             $accounts['employer_insurance_debit'],
             $accounts['social_insurance_credit'],
             $socialEmployer,
             'Sociální pojištění hrazené zaměstnavatelem',
+            $splitEmployerInsurance
+                ? PayrollEmployerInsuranceCostAllocation::social(
+                    $sets['social_insurance']['root'],
+                    $this->flattenRelationships(
+                        $sets['social_insurance']['relationships'],
+                    ),
+                    $socialEmployer,
+                )
+                : null,
+            $costCenterByEmployment,
         );
-        $this->addPair(
+        $this->addEmployerInsurance(
             $allocations,
             'employer-insurance:health',
             $accounts['employer_insurance_debit'],
             $accounts['health_insurance_credit'],
             $healthEmployer,
             'Zdravotní pojištění hrazené zaměstnavatelem',
+            $splitEmployerInsurance
+                ? PayrollEmployerInsuranceCostAllocation::health(
+                    $this->healthEmployerPersonTotals($sets['health_insurance']),
+                    $this->healthEmployerWeights($sets['health_insurance']),
+                    $healthEmployer,
+                )
+                : null,
+            $costCenterByEmployment,
         );
 
         foreach ($resultPeople as $employeeId => $personResult) {
@@ -610,6 +641,7 @@ final class PayrollPostingLineBuilder
         string $credit,
         int $amount,
         string $description,
+        ?string $costCenter = null,
     ): void {
         if ($amount === 0) {
             return;
@@ -620,6 +652,7 @@ final class PayrollPostingLineBuilder
             $debit,
             $amount,
             $description,
+            $costCenter,
         );
         $this->addAllocation(
             $allocations,
@@ -644,16 +677,24 @@ final class PayrollPostingLineBuilder
         string $account,
         int $signedMinor,
         string $description,
+        ?string $costCenter = null,
     ): void {
         if ($signedMinor === 0) {
             return;
         }
-        $allocations[] = [
+        $allocation = [
             'allocation_key' => $key,
             'account_code' => $this->account($account, $key),
             'signed_minor' => $signedMinor,
             'description' => $description,
         ];
+        // Klíč se přidává jen tam, kde středisko opravdu je. Alokace revizí bez
+        // dimenzí tak zůstávají BYTE-IDENTICKÉ včetně `target_hash`, takže se
+        // zaúčtované revize nezačnou hlásit jiným cílovým otiskem.
+        if ($costCenter !== null) {
+            $allocation['cost_center'] = $costCenter;
+        }
+        $allocations[] = $allocation;
     }
 
     /**
@@ -849,9 +890,8 @@ final class PayrollPostingLineBuilder
             }
             $source = $current[$key] ?? $before[$key];
             $side = $delta > 0 ? 'debit' : 'credit';
-            $costCenter = $this->deductionDimension(
-                $source['allocation_key'],
-            );
+            $costCenter = $source['cost_center']
+                ?? $this->deductionDimension($source['allocation_key']);
             $group = $source['account_code']
                 . "\0" . $side
                 . "\0" . ($costCenter ?? '');
@@ -882,7 +922,8 @@ final class PayrollPostingLineBuilder
      *   account_code:string,
      *   signed_minor:int,
      *   description:string,
-     *   allocation_key:string
+     *   allocation_key:string,
+     *   cost_center:?string
      * }>
      */
     private function allocationVector(array $allocations, string $context): array
@@ -913,6 +954,14 @@ final class PayrollPostingLineBuilder
                     "{$context} obsahují duplicitní klíč {$key}.",
                 );
             }
+            $costCenter = $allocation['cost_center'] ?? null;
+            if ($costCenter !== null
+                && (!is_string($costCenter) || $costCenter === '')
+            ) {
+                throw new \InvalidArgumentException(
+                    "{$context} nemají platný formát.",
+                );
+            }
             $seenKeys[$key] = true;
             $vectorKey = $key . "\0" . $account;
             $result[$vectorKey] = [
@@ -920,6 +969,7 @@ final class PayrollPostingLineBuilder
                 'signed_minor' => $signed,
                 'description' => $description,
                 'allocation_key' => $key,
+                'cost_center' => $costCenter,
             ];
         }
 
@@ -1143,7 +1193,8 @@ final class PayrollPostingLineBuilder
      * @param list<int> $employeeIds
      * @return array<string,array{
      *   root:array<string,mixed>,
-     *   people:array<int,array<string,mixed>>
+     *   people:array<int,array<string,mixed>>,
+     *   relationships:array<int,array<int,array<string,mixed>>>
      * }>
      */
     private function sets(array $sets, array $employeeIds): array
@@ -1171,6 +1222,7 @@ final class PayrollPostingLineBuilder
                 "{$kind}.result_snapshot",
             );
             $people = [];
+            $relationships = [];
             foreach ($this->rows($set['people'] ?? null, "{$kind}.people") as $person) {
                 $employeeId = $this->positiveInt($person, 'employee_id');
                 if (isset($people[$employeeId])) {
@@ -1187,17 +1239,191 @@ final class PayrollPostingLineBuilder
                     $person['result_snapshot'] ?? null,
                     "{$kind}.person.result_snapshot",
                 );
+                $relationships[$employeeId] = $this->setRelationships(
+                    $person,
+                    $kind,
+                    $employeeId,
+                );
             }
             ksort($people, SORT_NUMERIC);
+            ksort($relationships, SORT_NUMERIC);
             if (array_keys($people) !== $employeeIds) {
                 throw new \DomainException(
                     "Výsledek {$kind} nepokrývá přesně osoby revize.",
                 );
             }
-            $result[$kind] = ['root' => $root, 'people' => $people];
+            $result[$kind] = [
+                'root' => $root,
+                'people' => $people,
+                'relationships' => $relationships,
+            ];
         }
 
         return $result;
+    }
+
+    /**
+     * Výsledky jednotlivých vztahů osoby, klíčované pracovním vztahem.
+     *
+     * Revize zmrazené dřív, než se výsledky vztahů ukládaly, klíč nemají —
+     * prázdné pole znamená „rozpad na vztahy není doložený" a rozdělení
+     * zaměstnavatelského pojistného na střediska se pro ně neudělá.
+     *
+     * @param array<string,mixed> $person
+     * @return array<int,array<string,mixed>>
+     */
+    private function setRelationships(array $person, string $kind, int $employeeId): array
+    {
+        $rows = $person['relationships'] ?? null;
+        if (!is_array($rows) || !array_is_list($rows)) {
+            return [];
+        }
+        $result = [];
+        foreach ($this->rows($rows, "{$kind}.relationships") as $relationship) {
+            $employmentId = $this->positiveInt($relationship, 'employment_id');
+            if (isset($result[$employmentId])) {
+                throw new \DomainException(
+                    "Výsledek {$kind} obsahuje employment:{$employmentId} vícekrát.",
+                );
+            }
+            if (($relationship['result_status'] ?? null) !== 'calculated') {
+                return [];
+            }
+            $result[$employmentId] = $this->object(
+                $relationship['result_snapshot'] ?? null,
+                "{$kind}.relationship.result_snapshot",
+            );
+        }
+        ksort($result, SORT_NUMERIC);
+
+        return $result;
+    }
+
+    /**
+     * @param array<int,array<int,array<string,mixed>>> $relationships
+     * @return array<int,array<string,mixed>> employment_id → výsledek vztahu
+     */
+    private function flattenRelationships(array $relationships): array
+    {
+        $result = [];
+        foreach ($relationships as $perEmployee) {
+            if ($perEmployee === []) {
+                // Chybí-li rozpad u jediné osoby, nelze rozdělit firemní částku
+                // na korunu — rozpad se pak neudělá vůbec.
+                return [];
+            }
+            foreach ($perEmployee as $employmentId => $relationship) {
+                if (isset($result[$employmentId])) {
+                    return [];
+                }
+                $result[$employmentId] = $relationship;
+            }
+        }
+        ksort($result, SORT_NUMERIC);
+
+        return $result;
+    }
+
+    /**
+     * @param array{people:array<int,array<string,mixed>>} $set
+     * @return array<int,int> employee_id → pojistné zaměstnavatele osoby
+     */
+    private function healthEmployerPersonTotals(array $set): array
+    {
+        $totals = [];
+        foreach ($set['people'] as $employeeId => $person) {
+            $value = $person['employer_contribution_minor_units'] ?? null;
+            if (!is_int($value) || $value < 0) {
+                return [];
+            }
+            $totals[$employeeId] = $value;
+        }
+
+        return $totals;
+    }
+
+    /**
+     * @param array{relationships:array<int,array<int,array<string,mixed>>>} $set
+     * @return array<int,array<int,int>> employee_id → employment_id → základ
+     */
+    private function healthEmployerWeights(array $set): array
+    {
+        $weights = [];
+        foreach ($set['relationships'] as $employeeId => $perEmployee) {
+            $weights[$employeeId] = [];
+            foreach ($perEmployee as $employmentId => $relationship) {
+                $base = $relationship['participating_assessment_base_minor_units']
+                    ?? null;
+                if (!is_int($base) || $base < 0) {
+                    return [];
+                }
+                $weights[$employeeId][$employmentId] = $base;
+            }
+        }
+
+        return $weights;
+    }
+
+    /**
+     * Zaměstnavatelské pojistné zaúčtované po nákladových střediscích.
+     *
+     * Závazek (336) zůstává JEDNOU částkou — dluží se jako celek a rozdělovat
+     * ho podle středisek by z alokace udělalo tvrzení o zákonné částce osoby.
+     * Rozděluje se jen NÁKLAD (524), a to na pracovní vztahy, protože středisko
+     * visí na vztahu. Součet rozdělených debetů se rovná kreditu na korunu,
+     * jinak {@see PayrollEmployerInsuranceCostAllocation} rozdělení odmítne
+     * a účtuje se jednou řádkou jako dřív.
+     *
+     * @param list<array{
+     *   allocation_key:string,
+     *   account_code:string,
+     *   signed_minor:int,
+     *   description:string
+     * }> $allocations
+     * @param array<int,int>|null $shares employment_id → částka
+     * @param array<int,?string> $costCenters employment_id → středisko
+     */
+    private function addEmployerInsurance(
+        array &$allocations,
+        string $baseKey,
+        string $debitAccount,
+        string $creditAccount,
+        int $amount,
+        string $description,
+        ?array $shares,
+        array $costCenters,
+    ): void {
+        if ($amount === 0) {
+            return;
+        }
+        if ($shares === null) {
+            $this->addPair(
+                $allocations,
+                $baseKey,
+                $debitAccount,
+                $creditAccount,
+                $amount,
+                $description,
+            );
+            return;
+        }
+        foreach ($shares as $employmentId => $share) {
+            $this->addAllocation(
+                $allocations,
+                "{$baseKey}:employment:{$employmentId}:debit",
+                $debitAccount,
+                $share,
+                $description,
+                $costCenters[$employmentId] ?? null,
+            );
+        }
+        $this->addAllocation(
+            $allocations,
+            "{$baseKey}:credit",
+            $creditAccount,
+            -$amount,
+            $description,
+        );
     }
 
     /**
@@ -1303,6 +1529,45 @@ final class PayrollPostingLineBuilder
             if (isset($byType[$type])) {
                 return $byType[$type];
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * Kód nákladového střediska pracovního vztahu, nebo `null`.
+     *
+     * Je to jiná věc než {@see self::dimensionCostAccount()}: ten mění ÚČET,
+     * tohle plní analytický sloupec `journal_entry_lines.cost_center`. Středisko
+     * bez vlastního účtu tak přestává být neviditelné — dosud se mzda takového
+     * střediska zaúčtovala na výchozí 521 bez jakékoli stopy po tom, čí náklad to
+     * je, a `04-UCETNI-MUSTEK.md` přitom analytiku podle střediska slibuje.
+     *
+     * Bere se výhradně dimenze typu `cost_center`. Zakázka ani činnost sem
+     * nepatří: sloupec je jeden a nacpat do něj podle nálady jednou zakázku
+     * a jindy středisko by z něj udělal nečitelnou směs.
+     *
+     * @param array<string,mixed> $employmentSnapshot zmrazený pracovní vztah
+     */
+    private function dimensionCostCenter(array $employmentSnapshot): ?string
+    {
+        $dimensions = $employmentSnapshot['dimensions'] ?? null;
+        if (!is_array($dimensions) || !array_is_list($dimensions)) {
+            return null;
+        }
+        foreach ($dimensions as $index => $dimension) {
+            $dimension = $this->object($dimension, "employment.dimensions.{$index}");
+            if (($dimension['type'] ?? null) !== 'cost_center') {
+                continue;
+            }
+            $code = $dimension['code'] ?? null;
+            if (!is_string($code) || $code === '' || strlen($code) > 50) {
+                throw new \DomainException(
+                    "Kód střediska employment.dimensions.{$index} není platný.",
+                );
+            }
+
+            return $code;
         }
 
         return null;

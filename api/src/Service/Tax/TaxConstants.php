@@ -171,6 +171,25 @@ final class TaxConstants
      *    (§38h odst. 2 ZDP). Vyšší sazbou se daní jen ČÁST základu nad měsíční hranicí
      *    `advance_tax_high_threshold`, ne celý základ. Hranice je měsíční (3× průměrná
      *    mzda), proto sedí v {@see self::TABLE} u konkrétního roku, ne tady.
+     *
+     * ── Proč tu `employer_social` zůstává, když je totéž v mzdovém rulesetu ─────
+     * Konzumentem téhle sady je JEDINĚ {@see \MyInvoice\Service\Accounting\Payroll\PayrollCalculator},
+     * tedy starší modul mzdové rekapitulace (§ 6 ZDP) mimo modul Mzdy. Ten počítá
+     * jednu mzdu jednou sazbou a víc kategorií zaměstnavatele podle § 5a odst. 1
+     * z. č. 589/1992 Sb. neumí ani zadat: nemá zaměstnance, nemá vztahy, nemá
+     * evidenci zařazení. `employer_social` je proto sazba PÍSMENE a) — ostatní
+     * zaměstnanci — a nic jiného.
+     *
+     * Přesměrovat ji na mzdový ruleset by nebyla konsolidace, ale změna výpočtu
+     * v modulu, který účtuje a jehož výsledky jsou uzavřené proti reálnému deníku
+     * účetní. Sazba 29,8 % (písm. b) ani 27,8 % (písm. c) se sem stejně dostat
+     * nemůže — modul nemá čím kategorii doložit a hádat ji je horší než ji neznat
+     * ({@see \MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerRateCategory::Unverified}).
+     * Kdo potřebuje kategorie, slevu § 7a nebo strop § 15a per zaměstnanec, musí
+     * použít modul Mzdy; tahle sazba na to není a nikdy nebyla.
+     *
+     * Co se hlídat MUSÍ, je rozejití obou zdrojů u té jedné společné sazby —
+     * to dělá `TaxConstantsPayrollRatesMatchRulesetTest`.
      */
     private const PAYROLL_2024_PLUS = [
         'employee_social' => 0.071,

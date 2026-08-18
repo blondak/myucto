@@ -122,9 +122,6 @@ final class TaxConstantsUsageGuardTest extends TestCase
         $webSrc = dirname(__DIR__, 3) . '/web/src';
         self::assertDirectoryExists($webSrc, 'web/src zmizel — guard by nekontroloval nic.');
 
-        // Číselné literály, které patří výhradně do TaxConstants.
-        $forbidden = ['2_000_000', '2_536_500', '2000000', '2536500'];
-
         // Soubory, kde totéž číslo znamená NĚCO JINÉHO. `AssetEditor` používá 2 000 000
         // jako limit odpisů vozidla M1 (§ 30e ZDP, konstanta `m1_depreciation_limit`),
         // ne jako registrační limit DPH — shoda hodnoty je náhoda. Je to ale taky
@@ -146,24 +143,9 @@ final class TaxConstantsUsageGuardTest extends TestCase
             }
             $lines = explode("\n", (string) file_get_contents($file->getPathname()));
 
-            foreach ($lines as $i => $line) {
-                $trimmed = ltrim($line);
-                // Komentáře i fallback vedle `vat_registration_limits` jsou v pořádku.
-                // Komentáře jsou v pořádku. Stejně tak řádek, který hodnotu ČTE
-                // z konstant a literál nese jen jako fallback pro staré API —
-                // poznáme ho podle názvu klíče na témž řádku.
-                if (str_starts_with($trimmed, '//') || str_starts_with($trimmed, '*')
-                    || str_starts_with($trimmed, '/*')
-                    || str_contains($line, 'vat_registration_limits')
-                    || str_contains($line, 'vat_limit_low')
-                    || str_contains($line, 'vat_limit_high')) {
-                    continue;
-                }
-                foreach ($forbidden as $needle) {
-                    if (str_contains($line, $needle) && !$this->isInFallbackBlock($lines, $i)) {
-                        $offenders[] = sprintf('web/src/%s:%d — %s', $rel, $i + 1, trim($line));
-                        break;
-                    }
+            foreach (array_keys($lines) as $i) {
+                if ($this->isHardcodedVatLimit($lines, $i)) {
+                    $offenders[] = sprintf('web/src/%s:%d — %s', $rel, $i + 1, trim($lines[$i]));
                 }
             }
         }
@@ -173,6 +155,114 @@ final class TaxConstantsUsageGuardTest extends TestCase
                 . 'Ber ho ze `summary.vat_registration_limits` — limity jsou ročníkové '
                 . 'a natvrdo zapsané lžou nad staršími daty.',
             implode("\n  ", $offenders),
+        ));
+    }
+
+    /**
+     * Je na řádku registrační limit DPH natvrdo?
+     *
+     * ── Proč to není prosté `str_contains($line, '2000000')` ────────────────────
+     * Tak to bylo napsané a hlásilo to KAŽDÝ výskyt dvou milionů kdekoli ve
+     * `web/src` — tedy i `amount_minor: 2000000` v testovací fixtuře, kde ta
+     * hodnota s DPH nemá nic společného. Guard, který pravidelně hlásí nesmysl,
+     * se přestane číst a příště propustí i skutečný nález.
+     *
+     * Rozlišuje se proto podle hodnoty:
+     *   - 2 536 500 Kč je horní limit § 4a odst. 3 ZDPH a jinou roli v aplikaci
+     *     nemá — hlásí se kdekoli;
+     *   - 2 000 000 Kč je běžné číslo (limit odpisů M1 § 30e, částky ve
+     *     fixturách, ceny) — hlásí se jen v kontextu DPH.
+     *
+     * `str_contains` navíc chytal i podřetězce: `12000000` a `20000000` obsahují
+     * `2000000`. Proto regulární výraz s hranicemi.
+     *
+     * @param list<string> $lines
+     */
+    private function isHardcodedVatLimit(array $lines, int $index): bool
+    {
+        $line = (string) ($lines[$index] ?? '');
+        $trimmed = ltrim($line);
+        // Komentáře i fallback vedle `vat_registration_limits` jsou v pořádku.
+        // Stejně tak řádek, který hodnotu ČTE z konstant a literál nese jen jako
+        // fallback pro staré API — poznáme ho podle názvu klíče na témž řádku.
+        if (str_starts_with($trimmed, '//') || str_starts_with($trimmed, '*')
+            || str_starts_with($trimmed, '/*')
+            || str_contains($line, 'vat_registration_limits')
+            || str_contains($line, 'vat_limit_low')
+            || str_contains($line, 'vat_limit_high')) {
+            return false;
+        }
+        if ($this->isInFallbackBlock($lines, $index)) {
+            return false;
+        }
+        if (preg_match('/(?<![\d_])2_?536_?500(?![\d_])/', $line) === 1) {
+            return true;
+        }
+        if (preg_match('/(?<![\d_])2_?000_?000(?![\d_])/', $line) !== 1) {
+            return false;
+        }
+
+        return $this->hasVatContext($lines, $index);
+    }
+
+    /**
+     * Mluví řádek (nebo jeho bezprostřední okolí) o DPH?
+     *
+     * Okolí je potřeba kvůli deklaracím rozepsaným na víc řádků — literál sedí
+     * na `low: 2_000_000,` a slovo `vat` je o dva řádky výš u názvu konstanty.
+     *
+     * @param list<string> $lines
+     */
+    private function hasVatContext(array $lines, int $index): bool
+    {
+        for ($i = max(0, $index - 3); $i <= $index; $i++) {
+            if (preg_match(
+                '/(vat|dph|registrac|obrat|turnover)/i',
+                (string) ($lines[$i] ?? ''),
+            ) === 1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Guard sám musí být hlídaný: kdyby zúžení kontextu zašlo moc daleko,
+     * přestal by chytat to, kvůli čemu vznikl.
+     */
+    public function testGuardStillCatchesHardcodedVatRegistrationLimits(): void
+    {
+        self::assertTrue($this->isHardcodedVatLimit(
+            ['const isVatPayer = turnover > 2_000_000'],
+            0,
+        ));
+        self::assertTrue($this->isHardcodedVatLimit(
+            ['const upper = 2536500'],
+            0,
+        ), 'Horní limit § 4a odst. 3 nemá v aplikaci jinou roli — hlásí se kdekoli.');
+        self::assertTrue($this->isHardcodedVatLimit(
+            ['const vatThresholds = {', '  low: 2_000_000,'],
+            1,
+        ), 'Literál na dalším řádku deklarace je pořád tentýž nález.');
+    }
+
+    /**
+     * Přesně ta falešná hlášení, kvůli kterým se guard přestal číst.
+     */
+    public function testGuardIgnoresTwoMillionOutsideVatContext(): void
+    {
+        self::assertFalse($this->isHardcodedVatLimit(
+            ['const fixture = { amount_minor: 2000000 }'],
+            0,
+        ), 'Dva miliony ve fixtuře nejsou registrační limit DPH.');
+        self::assertFalse($this->isHardcodedVatLimit(
+            ['const price = 12000000'],
+            0,
+        ), '12 000 000 obsahuje 2000000 jako podřetězec, ale je to jiné číslo.');
+        self::assertFalse($this->isHardcodedVatLimit(
+            ['const price = 20000000'],
+            0,
         ));
     }
 
