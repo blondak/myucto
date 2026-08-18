@@ -30,8 +30,12 @@ const isDoubleEntry = computed(() => supplierStore.currentSupplier?.accounting_m
 // z modalu Uzávěrky sem jako vlastní záložka (jen podvojné účetnictví).
 type Tab = 'cost-centers' | 'posting-rules' | 'fx-rates' | 'repo-rates' | 'document-series' | 'archive'
 const DOUBLE_ENTRY_TABS: Tab[] = ['posting-rules', 'cost-centers', 'fx-rates', 'repo-rates', 'document-series']
+// Číselné řady používá i daňová evidence: pokladní doklady se v ní číslují z týchž
+// řad, takže bez téhle záložky si firma vlastní řadu pokladny zapne, ale prefix už
+// nespraví — a `series_prefix_unavailable` ji přitom posílá právě sem.
+const TAX_EVIDENCE_TABS: Tab[] = ['document-series']
 const visibleTabs = computed<Tab[]>(() => [
-  ...(isDoubleEntry.value ? DOUBLE_ENTRY_TABS : []),
+  ...(isDoubleEntry.value ? DOUBLE_ENTRY_TABS : TAX_EVIDENCE_TABS),
   ...((isDoubleEntry.value && isAdmin.value) ? ['archive'] as Tab[] : []),
 ])
 
@@ -45,7 +49,11 @@ watch([() => route.query.section, () => supplierStore.currentSupplier?.accountin
     void router.replace({ name: 'reports-submissions' })
     return
   }
-  if (String(q ?? '') === 'monthly-export' || (accountingMode && accountingMode !== 'double_entry')) {
+  // V daňové evidenci zůstává jedna použitelná záložka (číselné řady); na měsíční
+  // export se přesměrovává jen tehdy, když si o něj uživatel řekl, nebo když by
+  // stránka zůstala prázdná.
+  if (String(q ?? '') === 'monthly-export'
+    || (accountingMode && accountingMode !== 'double_entry' && visibleTabs.value.length === 0)) {
     void router.replace({ name: 'reports-monthly-export' })
     return
   }

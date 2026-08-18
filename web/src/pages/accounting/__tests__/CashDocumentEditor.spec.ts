@@ -277,6 +277,63 @@ describe('CashDocumentEditor.vue', () => {
     expect(m.toastWarning).toHaveBeenCalledWith('cash.warning.negative_balance')
   })
 
+  // ── M1: valutový draft s víc sazbami DPH musí jít upravit ─────────────────
+  it('rozpad valutového draftu se při načtení převede zpět do měny pokladny', async () => {
+    m.listRegisters.mockResolvedValue([register({ currency_code: 'EUR', account_code: '211.500' })])
+    m.routeParams.id = '42'
+    // V DB je rozpad v CZK (kurz 25); doklad je na 200 EUR = 5 000 Kč.
+    m.getDocument.mockResolvedValue({
+      id: 42, register_id: 1, doc_type: 'in', purpose: 'sale', doc_number: null,
+      issue_date: '2093-03-01', tax_date: '2093-03-01', partner_name: null, partner_ic: null, partner_dic: null,
+      description: 'Prodej v EUR', total_amount: 5000, currency_code: 'EUR',
+      fx_rate: 25, amount_foreign: 200, vat_mode: 'vat',
+      vat_lines: [
+        { vat_rate: 21, base_amount: 2066.12, vat_amount: 433.88 },
+        { vat_rate: 12, base_amount: 2232.14, vat_amount: 267.86 },
+      ],
+      invoice_id: null, purchase_invoice_id: null, rule_key: null, counter_account_code: null,
+      status: 'draft', journal_entry_id: null, reversal_entry_id: null, created_by: null, created_at: '2093-03-01',
+    })
+    m.updateDocument.mockResolvedValue({})
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+
+    // Součet rozpadu musí sedět na cizoměnovou částku, jinak `vatMatches` blokuje uložení.
+    const sum = vm.vatLines.reduce((s: number, l: any) => s + l.base_amount + l.vat_amount, 0)
+    expect(Math.round(sum * 100)).toBe(20000)
+    expect(vm.form.total_amount).toBe(200)
+    expect(vm.vatMatches).toBe(true)
+
+    await vm.save(false)
+    expect(vm.error).toBe('')
+    expect(m.updateDocument).toHaveBeenCalledTimes(1)
+  })
+
+  // ── M7: poměrný odpočet a uznatelnost přežijí kolečko UI ──────────────────
+  it('poměrný odpočet z draftu se uložením nezahodí na serverové defaulty', async () => {
+    m.routeParams.id = '42'
+    m.getDocument.mockResolvedValue({
+      id: 42, register_id: 1, doc_type: 'out', purpose: 'purchase', doc_number: null,
+      issue_date: '2093-03-01', tax_date: '2093-03-01', partner_name: 'Dodavatel', partner_ic: null, partner_dic: null,
+      description: 'Nákup PHM', total_amount: 1210, currency_code: 'CZK', vat_mode: 'vat',
+      vat_lines: [{
+        vat_rate: 21, base_amount: 1000, vat_amount: 210,
+        vat_deduction: 'proportional', vat_deduction_percent: 70, tax_treatment: 'non_deductible',
+      }],
+      invoice_id: null, purchase_invoice_id: null, rule_key: null, counter_account_code: null,
+      status: 'draft', journal_entry_id: null, reversal_entry_id: null, created_by: null, created_at: '2093-03-01',
+    })
+    m.updateDocument.mockResolvedValue({})
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+
+    await vm.save(false)
+    const payload = m.updateDocument.mock.calls[0][1]
+    expect(payload.vat_lines[0]).toMatchObject({
+      vat_deduction: 'proportional', vat_deduction_percent: 70, tax_treatment: 'non_deductible',
+    })
+  })
+
   it('vystavený doklad se přes editaci uložit nedá', async () => {
     m.routeParams.id = '42'
     m.getDocument.mockResolvedValue({

@@ -34,6 +34,24 @@ final class CashBookAction
     /** PDF tiskne celý rozsah bez stránkování (obraty a KS jsou za celé období). */
     private const PDF_MAX_ROWS = 100000;
 
+    /** Kolik id se vejde do jednoho `IN (…)` — nativní prepare zvládne 65 535 parametrů. */
+    private const ID_CHUNK = 1000;
+
+    /**
+     * Skládání diakritiky pro fulltext knihy — zrcadlí chování `utf8mb4_unicode_ci`,
+     * nad kterým hledá SQL větev (DE). Stejný vzor jako `EpoOkecCodebook`.
+     */
+    private const DIACRITICS = [
+        'á' => 'a', 'ä' => 'a', 'č' => 'c', 'ď' => 'd', 'é' => 'e', 'ě' => 'e', 'ë' => 'e',
+        'í' => 'i', 'ĺ' => 'l', 'ľ' => 'l', 'ň' => 'n', 'ó' => 'o', 'ô' => 'o', 'ö' => 'o',
+        'ŕ' => 'r', 'ř' => 'r', 'š' => 's', 'ť' => 't', 'ú' => 'u', 'ů' => 'u', 'ü' => 'u',
+        'ý' => 'y', 'ž' => 'z',
+        'Á' => 'A', 'Ä' => 'A', 'Č' => 'C', 'Ď' => 'D', 'É' => 'E', 'Ě' => 'E', 'Ë' => 'E',
+        'Í' => 'I', 'Ĺ' => 'L', 'Ľ' => 'L', 'Ň' => 'N', 'Ó' => 'O', 'Ô' => 'O', 'Ö' => 'O',
+        'Ŕ' => 'R', 'Ř' => 'R', 'Š' => 'S', 'Ť' => 'T', 'Ú' => 'U', 'Ů' => 'U', 'Ü' => 'U',
+        'Ý' => 'Y', 'Ž' => 'Z',
+    ];
+
     /** Hodnoty `cash_documents.purpose` (migrace 1019) — whitelist filtru knihy. */
     private const PURPOSES = ['sale', 'purchase', 'invoice_payment', 'purchase_payment', 'transfer', 'other'];
 
@@ -106,7 +124,12 @@ final class CashBookAction
             }
 
             $total = (int) $stmt['total'];
+            // Filtrované okno se načítá do PHP nejvýš po PDF_MAX_ROWS řádcích. Delší
+            // období se tedy usekne — tiše by to znamenalo knihu, která zamlčí pohyby;
+            // proto se to hlásí a UI vyzve k zúžení období (obdoba `truncated` u našeptávače).
+            $truncated = false;
             if ($filtering) {
+                $truncated = $total > self::PDF_MAX_ROWS;
                 $items = array_values(array_filter($items, fn (array $it): bool => $this->matchesFilters($it, $filters)));
                 $total = count($items);
                 $items = array_slice($items, ($page - 1) * $perPage, $perPage);
@@ -123,6 +146,7 @@ final class CashBookAction
                 'closing_balance'  => $stmt['closing_balance'],
                 'balance_negative' => $negative,
                 'total'            => $total,
+                'truncated'        => $truncated,
                 'page'             => $filtering ? $page : (int) $stmt['page'],
                 'per_page'         => $filtering ? $perPage : (int) $stmt['per_page'],
             ]);
@@ -292,16 +316,29 @@ final class CashBookAction
             return false;
         }
         if (isset($filters['q'])) {
-            $haystack = mb_strtolower(implode(' ', [
+            $haystack = self::foldForSearch(implode(' ', [
                 (string) ($it['description'] ?? ''),
                 (string) ($it['partner_name'] ?? ''),
                 (string) ($it['document_no'] ?? ''),
             ]));
-            if (!str_contains($haystack, $filters['q'])) {
+            if (!str_contains($haystack, self::foldForSearch($filters['q']))) {
                 return false;
             }
         }
         return true;
+    }
+
+    /**
+     * Skládání textu pro hledání — bez diakritiky a bez ohledu na velikost písmen.
+     *
+     * DE větev knihy hledá SQL `LIKE` nad `utf8mb4_unicode_ci`, které diakritiku
+     * ignoruje; podvojná větev filtruje v PHP. Bez tohohle složení najde „frantisek"
+     * jméno „František" jen v daňové evidenci a stejný dotaz dá v obou režimech
+     * jiné výsledky.
+     */
+    private static function foldForSearch(string $text): string
+    {
+        return mb_strtolower(strtr($text, self::DIACRITICS));
     }
 
     /** Validované datum z query (i pojistka proti smetí ve filename Content-Disposition). */
@@ -385,8 +422,20 @@ final class CashBookAction
             array_push($filterParams, $like, $like, $like);
         }
 
+        // `COUNT(*) OVER()` se dá přečíst jen z vráceného řádku, takže na stránce mimo
+        // rozsah (typicky po smazání dokladů) hlásilo `total = 0` a uživateli zmizela
+        // stránkovací tlačítka, kterými by se vrátil zpátky. Počet proto vlastním dotazem.
+        $countStmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM (
+                SELECT id, doc_type, doc_number, description, partner_name, purpose
+                  FROM cash_documents WHERE {$window}
+             ) t WHERE 1 = 1{$filterSql}"
+        );
+        $countStmt->execute(array_merge($windowParams, $filterParams));
+        $total = (int) $countStmt->fetchColumn();
+
         $offset = max(0, ($page - 1) * $perPage);
-        $sql = "SELECT t.*, COUNT(*) OVER() AS total_rows FROM (
+        $sql = "SELECT t.* FROM (
                     SELECT id, doc_type, doc_number, issue_date, tax_date, description, partner_name, purpose, total_amount,
                            SUM(CASE WHEN doc_type = 'in' THEN total_amount ELSE -total_amount END)
                              OVER (ORDER BY issue_date, id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_delta
@@ -433,7 +482,9 @@ final class CashBookAction
             'expense_total'    => $expenseTotal,
             'closing_balance'  => $closing,
             'balance_negative' => $negative,
-            'total'            => $rows === [] ? 0 : (int) $rows[0]['total_rows'],
+            'total'            => $total,
+            // DE větev stránkuje i filtruje v SQL, takže se nikdy neusekne.
+            'truncated'        => false,
             'page'             => $page,
             'per_page'         => $perPage,
         ];
@@ -487,21 +538,25 @@ final class CashBookAction
         if ($ids === []) {
             return [];
         }
-        $ids = array_keys($ids);
-        $place = implode(',', array_fill(0, count($ids), '?'));
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT id, doc_type, purpose, tax_date, partner_name FROM cash_documents
-              WHERE supplier_id = ? AND id IN ($place)"
-        );
-        $stmt->execute(array_merge([$supplierId], $ids));
         $out = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
-            $out[(int) $r['id']] = [
-                'doc_type'     => (string) $r['doc_type'],
-                'purpose'      => (string) $r['purpose'],
-                'tax_date'     => $r['tax_date'] !== null ? (string) $r['tax_date'] : null,
-                'partner_name' => $r['partner_name'] !== null ? (string) $r['partner_name'] : null,
-            ];
+        // Jeden placeholder na řádek: nad ~65 k pohybů (PDF a filtrovaná kniha čtou
+        // až PDF_MAX_ROWS řádků) by nativní prepare narazil na strop 65 535 parametrů
+        // a celá kniha by spadla. Proto po dávkách.
+        foreach (array_chunk(array_keys($ids), self::ID_CHUNK) as $chunk) {
+            $place = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT id, doc_type, purpose, tax_date, partner_name FROM cash_documents
+                  WHERE supplier_id = ? AND id IN ($place)"
+            );
+            $stmt->execute(array_merge([$supplierId], $chunk));
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+                $out[(int) $r['id']] = [
+                    'doc_type'     => (string) $r['doc_type'],
+                    'purpose'      => (string) $r['purpose'],
+                    'tax_date'     => $r['tax_date'] !== null ? (string) $r['tax_date'] : null,
+                    'partner_name' => $r['partner_name'] !== null ? (string) $r['partner_name'] : null,
+                ];
+            }
         }
         return $out;
     }

@@ -164,6 +164,7 @@
       "integrations"
     ],
     "invoice-new": [
+      "cash",
       "cash_settlement",
       "errors",
       "lock",
@@ -186,6 +187,7 @@
       "stock"
     ],
     "invoice-edit": [
+      "cash",
       "cash_settlement",
       "errors",
       "lock",
@@ -237,6 +239,7 @@
     "purchase-invoice-new": [
       "accounting",
       "automation",
+      "cash",
       "cash_settlement",
       "errors",
       "lock",
@@ -259,6 +262,7 @@
     "purchase-invoice-edit": [
       "accounting",
       "automation",
+      "cash",
       "cash_settlement",
       "errors",
       "lock",
@@ -455,11 +459,13 @@
     ],
     "accounting-cash-new": [
       "accounting",
-      "cash"
+      "cash",
+      "purchase_invoice"
     ],
     "accounting-cash-edit": [
       "accounting",
-      "cash"
+      "cash",
+      "purchase_invoice"
     ],
     "accounting-cash-book": [
       "accounting",

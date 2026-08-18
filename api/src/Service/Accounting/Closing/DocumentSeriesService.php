@@ -46,6 +46,15 @@ final class DocumentSeriesService
         'purchase_order' => 'OBJ',
     ];
 
+    /**
+     * Řady vázané na účetní deník — v daňové evidenci deník neexistuje, takže je
+     * firma v DE nevydává ani needituje. Pokladní, skladové a objednávkové řady
+     * naopak DE používá (`CashDocumentService` vydává čísla PPD/VPD bez ohledu na
+     * režim), proto celá routa `/document-series` pro DE zavřená být nesmí —
+     * jinak si firma vlastní řadu pokladny zapne, ale prefix už nespraví.
+     */
+    public const DOUBLE_ENTRY_ONLY_SERIES = ['closing', 'opening', 'fx', 'transfer', 'manual', 'offset'];
+
     /** Vestavěná šablona = dosavadní chování (`UZ-2026-0001`). */
     public const DEFAULT_TEMPLATE = '{PREFIX}-{YYYY}-{CCCC}';
 
@@ -153,6 +162,45 @@ final class DocumentSeriesService
      *
      * @param array{prefix?:string, number_format?:string|null, next_number?:int} $changes
      */
+    /**
+     * Založí řádek řady s daným prefixem a šablonou, pokud pro rok ještě není;
+     * existující řádek nechá BEZE ZMĚNY, čítač včetně.
+     *
+     * Proti `updateSeries(['next_number' => 1])`, které se tady používalo: to jede
+     * přes `ON DUPLICATE KEY UPDATE next_number = VALUES(next_number)`, takže dvě
+     * souběžná vystavení dokladu skončila tak, že B po commitu A vrátilo čítač na 1
+     * a obě transakce vydaly totéž číslo (spadne na `uq_cashdoc_supplier_number`).
+     */
+    public function ensureSeriesRow(
+        int $supplierId,
+        string $seriesCode,
+        int $fiscalYear,
+        string $prefix,
+        ?string $numberFormat = null,
+        int $registerId = 0,
+    ): void {
+        if (!isset(self::DEFAULT_PREFIXES[$seriesCode])) {
+            throw new ClosingException('unknown_series', 'Neznámá číselná řada "' . $seriesCode . '".');
+        }
+        if (preg_match(self::PREFIX_PATTERN, $prefix) !== 1) {
+            throw new ClosingException(
+                'invalid_prefix',
+                'Prefix řady musí být 1–10 znaků A–Z/0–9 (zadáno "' . $prefix . '").',
+            );
+        }
+        if (in_array($seriesCode, ['cash_in', 'cash_out'], true)) {
+            $this->assertCashPrefixFree($supplierId, $prefix, $seriesCode, $registerId);
+        }
+        $this->series->ensure(
+            $supplierId,
+            $seriesCode,
+            $fiscalYear,
+            $prefix,
+            $registerId,
+            self::normalizeTemplate($numberFormat),
+        );
+    }
+
     public function updateSeries(int $supplierId, string $seriesCode, int $fiscalYear, array $changes, int $registerId = 0): bool
     {
         if (!isset(self::DEFAULT_PREFIXES[$seriesCode])) {

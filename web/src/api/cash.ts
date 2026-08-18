@@ -5,7 +5,23 @@ export type CashPurpose = 'sale' | 'purchase' | 'invoice_payment'
                         | 'purchase_payment' | 'transfer' | 'other'      // šestihodnotový (O3/C3)
 export type CashDocumentStatus = 'draft' | 'posted' | 'reversed'         // BE kanon (O2/C2)
 
-export interface CashVatLine { vat_rate: number; base_amount: number; vat_amount: number }
+/** Rozsah nároku na odpočet DPH u řádku rozpadu (§ 75 poměrný / § 76 koeficient). */
+export type CashVatDeduction = 'full' | 'none' | 'proportional' | 'reduced'
+/** Uznatelnost pro daň z příjmů (§ 24/25) — na DPH nemá vliv. */
+export type CashTaxTreatment = 'deductible' | 'non_deductible' | 'not_expense'
+
+export interface CashVatLine {
+  vat_rate: number; base_amount: number; vat_amount: number
+  /**
+   * M-7: bez těchhle polí je editor při uložení neposílal a `normalize()` je na
+   * serveru resetoval na `full` / 100 / `deductible` — první uložení draftu z UI
+   * tak zahodilo poměrný odpočet i neuznatelnost, které do dokladu dostal import
+   * nebo API klient.
+   */
+  vat_deduction?: CashVatDeduction
+  vat_deduction_percent?: number
+  tax_treatment?: CashTaxTreatment
+}
 // vat_rate je number — sazby se čtou z API (taxConstants per rok), ŽÁDNÝ hardcode 21|12 (A4)
 
 export interface CashRegister {
@@ -67,6 +83,16 @@ export interface CashDocumentPostResult {
   doc_number: string; journal_entry_id: number | null; warnings: string[]
 }
 
+/**
+ * Odpověď mazání. `doc_number` je vyplněné jen u dokladu, který už číslo dostal —
+ * a jen tehdy backend hlásí `cash.warning.series_gap` (u draftu díra nevzniká).
+ */
+export interface CashDocumentDeleteResult {
+  deleted: boolean; warnings: string[]
+  doc_number?: string | null
+  deleted_entry_ids?: number[]
+}
+
 export interface CashDocumentFilters {
   register_id?: number; doc_type?: CashDocType; purpose?: CashPurpose
   status?: CashDocumentStatus; from?: string; to?: string; q?: string
@@ -107,6 +133,8 @@ export interface CashBookReport {
   register: CashRegister; opening_balance: number; items: CashBookItem[]
   income_total: number; expense_total: number; closing_balance: number
   balance_negative: boolean; total: number; page: number; per_page: number
+  /** Filtrované okno se v podvojné větvi načítá do PHP po dávkách — nad limit se usekne. */
+  truncated?: boolean
 }
 
 /** Předvolba „co to je" pro purpose=other — kontace s nohou na 211. */
@@ -150,7 +178,8 @@ export const cashApi = {
       `/accounting/cash-documents/${id}/reverse`, { reason, entry_date: entryDate }).then(r => r.data),
   // force=1 → smaže doklad i s účetními zápisy (bez force jen draft).
   deleteDocument: (id: number, force = false) =>
-    api.delete(`/accounting/cash-documents/${id}`, { params: force ? { force: 1 } : {} }).then(() => true),
+    api.delete<CashDocumentDeleteResult>(`/accounting/cash-documents/${id}`,
+      { params: force ? { force: 1 } : {} }).then(r => r.data),
   documentPdfUrl: (id: number) => `/api/accounting/cash-documents/${id}/pdf`,
 
   /**

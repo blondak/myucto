@@ -252,6 +252,18 @@ function openDelete(d: CashDocument) {
 }
 
 /**
+ * Draft se maže měkce (`cash.document.write`), vystavený doklad ale jde přes
+ * `?force=1`, na které server chce `cash.close`. Bez rozlišení viděla dedikovaná
+ * role „Pokladní" tlačítko a 403 dostala až po potvrzení dialogu.
+ */
+function canDelete(d: CashDocument): boolean {
+  return auth.canWrite(d.status === 'draft' ? 'cash.document.write' : 'cash.close')
+}
+
+/** Číselník pokladen gatuje `CashRegisterAction` na modul `cash`, ne na doklady. */
+const canManageRegisters = computed(() => auth.canWrite('cash'))
+
+/**
  * `force=1` maže doklad VČETNĚ deníkových zápisů a nechává trvalou díru v číselné
  * řadě. U rozpracovaného dokladu žádné zápisy ani číslo neexistují, takže tam
  * stačí měkké smazání draftu — posílat force vždy (jak to UI dělalo) je zbytečně
@@ -261,8 +273,12 @@ async function submitDelete() {
   if (!deleteTarget.value) return
   deleteSaving.value = true
   try {
-    await cashApi.deleteDocument(deleteTarget.value.id, deleteTarget.value.status !== 'draft')
+    const res = await cashApi.deleteDocument(deleteTarget.value.id, deleteTarget.value.status !== 'draft')
     toast.success(t('common.deleted'))
+    // Díru v číselné řadě (`cash.warning.series_gap`) hlásí server jen u dokladu,
+    // který číslo měl. Bez tohohle se odpověď zahodila a uživatel se o díře
+    // nedozvěděl — přestože právě kvůli tomu warning vznikl.
+    for (const w of res?.warnings ?? []) toast.warning(cashWarningMessage(w, t))
     deleteTarget.value = null
     await loadRegisters()
     await load()
@@ -301,7 +317,7 @@ const headerActions = computed<ActionItem[]>(() => {
     },
     {
       key: 'registers', tier: 'overflow', variant: 'neutral', icon: 'edit',
-      label: t('cash.registers_manage'), show: canWrite, run: () => { managerOpen.value = true },
+      label: t('cash.registers_manage'), show: canManageRegisters.value, run: () => { managerOpen.value = true },
     },
   ]
 })
@@ -359,7 +375,7 @@ async function postDraft(d: CashDocument) {
     <!-- Bez pokladny -->
     <EmptyState v-if="!loading && registers.length === 0" boxed accent="neutral" icon="coin"
       :title="t('cash.empty.registers')"
-      :cta="auth.canWrite('cash.document.write') ? t('cash.register_create') : undefined"
+      :cta="canManageRegisters ? t('cash.register_create') : undefined"
       @action="managerOpen = true" />
 
     <template v-else>
@@ -526,7 +542,7 @@ async function postDraft(d: CashDocument) {
                         @click="openReverse(d)" :title="t('cash.reverse.title')" :aria-label="t('cash.reverse.title')" :class="btnIconSm('warning')">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
                       </button>
-                      <button v-if="auth.canWrite('cash.document.write')" type="button" @click="openDelete(d)"
+                      <button v-if="canDelete(d)" type="button" @click="openDelete(d)"
                         :title="t('cash.delete.title')" :aria-label="t('cash.delete.title')" :class="btnIconSm('danger')">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
                       </button>
@@ -602,7 +618,7 @@ async function postDraft(d: CashDocument) {
                 :class="btnIconSm('warning')">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
               </button>
-              <button v-if="auth.canWrite('cash.document.write')" type="button"
+              <button v-if="canDelete(d)" type="button"
                 @click="openDelete(d)" :title="t('cash.delete.title')" :aria-label="t('cash.delete.title')"
                 :class="btnIconSm('danger')">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>

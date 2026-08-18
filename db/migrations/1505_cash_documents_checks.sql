@@ -20,6 +20,32 @@
 
 SET NAMES utf8mb4;
 
+-- MariaDB constraint VALIDUJE existující řádky, takže by migrace na ostrých datech
+-- s legacy nulovou/zápornou částkou spadla hláškou o porušeném constraintu a nikdo
+-- by z ní nevyčetl, KTERÝCH dokladů se to týká. Data se tu opravovat nesmí (znaménko
+-- nese `doc_type`, ne částka — obrátit ho naslepo znamená přehodit příjem na výdej),
+-- proto se běh zastaví s adresnou hláškou včetně počtu vadných řádků.
+DELIMITER //
+
+DROP PROCEDURE IF EXISTS migrate_cash_amount_guard_1505//
+
+CREATE PROCEDURE migrate_cash_amount_guard_1505()
+BEGIN
+  DECLARE bad_rows BIGINT DEFAULT 0;
+
+  SELECT COUNT(*) INTO bad_rows FROM cash_documents WHERE total_amount <= 0;
+
+  IF bad_rows > 0 THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Migrace 1505: cash_documents obsahuje doklady s nulovou nebo zápornou částkou. Opravte je (znaménko pohybu nese doc_type, ne total_amount) a migraci spusťte znovu: SELECT id, doc_number, doc_type, total_amount FROM cash_documents WHERE total_amount <= 0;';
+  END IF;
+END//
+
+CALL migrate_cash_amount_guard_1505()//
+DROP PROCEDURE IF EXISTS migrate_cash_amount_guard_1505//
+
+DELIMITER ;
+
 ALTER TABLE cash_documents DROP CONSTRAINT IF EXISTS chk_cashdoc_amount_positive;
 ALTER TABLE cash_documents
   ADD CONSTRAINT chk_cashdoc_amount_positive CHECK (total_amount > 0);

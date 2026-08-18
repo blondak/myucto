@@ -1231,6 +1231,10 @@ final class CashDocumentService
             throw new CashException(
                 'partial_purchase_payment',
                 sprintf('Přijatou fakturu lze hotově uhradit jen v plné zbývající výši (%.2f Kč).', $remaining / 100),
+                422,
+                // Zbytek musí projít i do `error.params` — FE u tohohle kódu zobrazuje
+                // překlad, ne serverovou zprávu, takže bez toho se částka ztratí.
+                ['remaining' => round($remaining / 100, 2)],
             );
         }
     }

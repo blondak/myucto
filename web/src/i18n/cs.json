@@ -4873,6 +4873,7 @@
         "book_search": "Hledat",
         "book_search_hint": "Popis, partner nebo číslo dokladu",
         "book_filtered_note": "Zobrazené řádky jsou zúžené filtrem. Počáteční a konečný zůstatek i obraty zůstávají za celé období.",
+        "book_truncated_note": "Filtrovat lze jen omezený počet pohybů, takže výběr není úplný — zužte prosím období. Zůstatky a obraty platí za celé období dál.",
         "type": {
             "in": "Příjmový pokladní doklad",
             "out": "Výdajový pokladní doklad",
@@ -4946,7 +4947,15 @@
             "fx_rate_hint": "Prázdné = kurz ČNB k datu vystavení. Vyplňte jen tehdy, když kurz ČNB k datu není k dispozici nebo používáte pevný kurz.",
             "fx_amount_czk": "Korunový ekvivalent",
             "duplicate_vat_hint": "Pokud k prodeji existuje faktura, použijte režim Úhrada faktury — jinak vznikne dvojí DPH.",
-            "transfer_leg_hint": "Druhá noha převodu (bankovní strana přes účet 261) vznikne z bankovního výpisu nebo ručním zápisem."
+            "transfer_leg_hint": "Druhá noha převodu (bankovní strana přes účet 261) vznikne z bankovního výpisu nebo ručním zápisem.",
+            "vat_deduction": "Nárok na odpočet DPH",
+            "tax_treatment": "Daň z příjmů",
+            "vat_deduction_hint": "Odpočet i uznatelnost se zadávají na řádek rozpadu. „Krácený nárok (poměrný §75)“ zpřístupní procento, kterým se odpočet zkrátí; daň z příjmů ovlivňuje jen DPFO/DPPO, ne DPH."
+        },
+        "tax_treatment": {
+            "deductible": "Daňově uznatelný náklad",
+            "non_deductible": "Daňově neuznatelný náklad",
+            "not_expense": "Není náklad (např. pořízení majetku)"
         },
         "preview": {
             "title": "Náhled zaúčtování"
@@ -5010,7 +5019,8 @@
             "invoice_not_found": "Faktura nenalezena.",
             "invoice_invalid_status": "Fakturu v tomto stavu nelze hradit hotově.",
             "amount_exceeds_remaining": "Částka převyšuje zbývající úhradu faktury.",
-            "partial_purchase_payment": "Přijatou fakturu lze hotově uhradit jen v plné výši.",
+            "partial_purchase_payment": "Přijatou fakturu lze hotově uhradit jen v plné zbývající výši.",
+            "partial_purchase_payment_detail": "Přijatou fakturu lze hotově uhradit jen v plné zbývající výši ({remaining}).",
             "foreign_currency_invoice": "Úhrada cizoměnové faktury z pokladny zatím není podporována.",
             "foreign_register_purpose_unsupported": "Valutová pokladna zatím podporuje jen prodej, nákup a ostatní pohyb — úhrady faktur a převody veďte v korunové pokladně.",
             "fx_rate_unavailable": "Kurz ČNB pro měnu pokladny k datu dokladu není k dispozici — doplňte kurz.",

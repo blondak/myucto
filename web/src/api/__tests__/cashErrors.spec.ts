@@ -5,16 +5,18 @@ import { cashErrorCode, cashErrorMessage, cashWarningMessage } from '@/api/cashE
 
 /** Minimální náhrada `t()`: vrátí překlad z cs.json, nebo klíč (jako vue-i18n). */
 function translator(dict: Record<string, any>) {
-  return (key: string): string => {
+  return (key: string, params?: Record<string, unknown>): string => {
     const value = key.split('.').reduce<any>((node, part) => (node == null ? undefined : node[part]), dict)
-    return typeof value === 'string' ? value : key
+    if (typeof value !== 'string') return key
+    if (!params) return value
+    return value.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m))
   }
 }
 const t = translator(cs as Record<string, any>)
 const tEn = translator(en as Record<string, any>)
 
-function apiError(code: string | undefined, message?: string) {
-  return { response: { data: { error: { code, message } } } }
+function apiError(code: string | undefined, message?: string, params?: Record<string, unknown>) {
+  return { response: { data: { error: { code, message, params } } } }
 }
 
 describe('cashErrorMessage', () => {
@@ -42,6 +44,23 @@ describe('cashErrorMessage', () => {
 
   it('neznámý kód bez překladu vrátí zprávu serveru', () => {
     expect(cashErrorMessage(apiError('cash.error.zcela_neznamy', 'Konkrétní důvod.'), t)).toBe('Konkrétní důvod.')
+  })
+
+  it('zbývající částku ze serveru dosadí do lokalizované hlášky', () => {
+    // Bez varianty `_detail` vyhrál obecný překlad a uživatel se nedozvěděl,
+    // kolik má u faktury kryté zálohou vlastně zadat.
+    const e = apiError('cash.error.partial_purchase_payment',
+      'Přijatou fakturu lze hotově uhradit jen v plné zbývající výši (12100.00 Kč).',
+      { remaining: 12100 })
+    const msg = cashErrorMessage(e, t)
+    expect(msg).toContain('12')
+    expect(msg).not.toBe(t('cash.error.partial_purchase_payment'))
+    expect(cashErrorMessage(e, tEn)).not.toBe(tEn('cash.error.partial_purchase_payment'))
+  })
+
+  it('bez `params` zůstane obecný překlad (starší server)', () => {
+    expect(cashErrorMessage(apiError('cash.error.partial_purchase_payment', 'x'), t))
+      .toBe(t('cash.error.partial_purchase_payment'))
   })
 
   it('chyba bez kódu i bez zprávy skončí na common.error', () => {

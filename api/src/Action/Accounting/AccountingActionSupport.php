@@ -9,6 +9,8 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Cash\CashException;
+use MyInvoice\Service\Accounting\Closing\ClosingException;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\UnbalancedEntryException;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -132,5 +134,28 @@ trait AccountingActionSupport
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
         throw $e;
+    }
+
+    /**
+     * Chyby pokladny (Action pokladny i pokladních dokladů) — jedno mapování na obou
+     * místech, aby se větve nerozešly.
+     *
+     * `ClosingException` sem patří proto, že `CashRegisterService::ensureOwnSeries()`
+     * volá `DocumentSeriesService::updateSeries()`: `series_prefix_taken` /
+     * `invalid_prefix` je validační chyba pokladny, ale bez téhle větve propadla
+     * do `mapPostingError()` a uživatel dostal HTTP 500 místo 422.
+     */
+    protected function mapCashError(Response $response, \Throwable $e): Response
+    {
+        if ($e instanceof CashException) {
+            // `params` = strojová data hlášky pro i18n na FE (klient si je dosadí do
+            // vlastního překladu; česká `message` je jen fallback).
+            return Json::error($response, 'cash.error.' . $e->errorCode, $e->getMessage(), $e->httpStatus,
+                $e->extra === [] ? [] : ['params' => $e->extra]);
+        }
+        if ($e instanceof ClosingException) {
+            return Json::error($response, 'cash.error.' . $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        return $this->mapPostingError($response, $e);
     }
 }

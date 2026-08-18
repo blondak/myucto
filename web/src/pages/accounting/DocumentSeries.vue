@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { seriesApi, SERIES_DEFAULT_PREFIXES, type DocumentSeries, type DocumentSeriesPatch, type SeriesCode } from '@/api/closing'
+import { seriesApi, SERIES_DEFAULT_PREFIXES, SERIES_DOUBLE_ENTRY_ONLY, type DocumentSeries, type DocumentSeriesPatch, type SeriesCode } from '@/api/closing'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
 
@@ -11,7 +12,16 @@ defineProps<{ embedded?: boolean }>()
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const supplierStore = useSupplierStore()
 const toast = useToast()
+
+// Daňová evidence deník nemá — deníkové řady jí server nevrací a UI je nesmí
+// dofabrikovat z výchozích prefixů, jinak by nabízela k editaci řadu, kterou
+// firma nikdy nevydá.
+const isDoubleEntry = computed(() => supplierStore.currentSupplier?.accounting_mode === 'double_entry')
+const editableCodes = computed<SeriesCode[]>(() =>
+  (Object.keys(SERIES_DEFAULT_PREFIXES) as SeriesCode[])
+    .filter(c => isDoubleEntry.value || !SERIES_DOUBLE_ENTRY_ONLY.includes(c)))
 
 const DEFAULT_TEMPLATE = '{PREFIX}-{YYYY}-{CCCC}'
 
@@ -19,7 +29,10 @@ const stored = ref<DocumentSeries[]>([])
 const loading = ref(false)
 const year = ref(new Date().getFullYear())
 const saving = ref(false)
-const canWrite = computed(() => auth.canWrite('accounting.periods.manage'))
+// `DocumentSeriesAction::update` chce jen `accounting` WRITE. Gate na
+// `accounting.periods.manage` byl přísnější než API a systémová role „účetní" ho
+// má explicitně vyřazený — běžná účetní tak viděla záložku jen ke čtení.
+const canWrite = computed(() => auth.canWrite('accounting'))
 
 type SeriesEdit = { prefix: string; number_format: string; next_number: string }
 const edits = reactive<Record<string, SeriesEdit>>({})
@@ -42,7 +55,7 @@ function fillEdit(s: DocumentSeries) {
 const series = computed<DocumentSeries[]>(() => {
   const rows = [...stored.value]
   const have = new Set(rows.map(seriesKey))
-  for (const code of Object.keys(SERIES_DEFAULT_PREFIXES) as SeriesCode[]) {
+  for (const code of editableCodes.value) {
     const key = `${code}-${year.value}-0`
     if (have.has(key)) continue
     rows.push({ series_code: code, fiscal_year: year.value, register_id: 0, prefix: SERIES_DEFAULT_PREFIXES[code], number_format: null, next_number: 1 })

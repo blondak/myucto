@@ -4873,6 +4873,7 @@
         "book_search": "Search",
         "book_search_hint": "Description, partner or document number",
         "book_filtered_note": "The listed rows are narrowed by the filter. Opening and closing balance and turnovers still cover the whole period.",
+        "book_truncated_note": "Only a limited number of movements can be filtered, so the selection is incomplete — please narrow the period. Balances and turnovers still cover the whole period.",
         "type": {
             "in": "Cash receipt (incoming)",
             "out": "Cash payment (outgoing)",
@@ -4946,7 +4947,15 @@
             "fx_rate_hint": "Leave empty to use the CNB rate for the issue date. Fill it in only when the CNB rate is unavailable or you use a fixed rate.",
             "fx_amount_czk": "CZK equivalent",
             "duplicate_vat_hint": "If an invoice exists for the sale, use Invoice payment — otherwise VAT is counted twice.",
-            "transfer_leg_hint": "The other leg of the transfer (bank side via account 261) is created from the bank statement or a manual entry."
+            "transfer_leg_hint": "The other leg of the transfer (bank side via account 261) is created from the bank statement or a manual entry.",
+            "vat_deduction": "VAT deduction entitlement",
+            "tax_treatment": "Income tax",
+            "vat_deduction_hint": "Deduction and tax treatment are set per breakdown line. “Proportional (§75)” enables the percentage the deduction is reduced by; income tax affects only PIT/CIT, not VAT."
+        },
+        "tax_treatment": {
+            "deductible": "Tax-deductible expense",
+            "non_deductible": "Non-deductible expense",
+            "not_expense": "Not an expense (e.g. asset acquisition)"
         },
         "preview": {
             "title": "Posting preview"
@@ -5010,7 +5019,8 @@
             "invoice_not_found": "Invoice not found.",
             "invoice_invalid_status": "An invoice in this status cannot be paid in cash.",
             "amount_exceeds_remaining": "The amount exceeds the invoice's remaining balance.",
-            "partial_purchase_payment": "A received invoice can only be paid in cash in full.",
+            "partial_purchase_payment": "A received invoice can only be paid in cash in the full remaining amount.",
+            "partial_purchase_payment_detail": "A received invoice can only be paid in cash in the full remaining amount ({remaining}).",
             "foreign_currency_invoice": "Paying a foreign-currency invoice from the cash register is not supported yet.",
             "foreign_register_purpose_unsupported": "A foreign-currency register currently supports only sale, purchase and other movements — keep invoice payments and transfers in a CZK register.",
             "fx_rate_unavailable": "The CNB rate for the register currency at the document date is unavailable — please add the rate.",

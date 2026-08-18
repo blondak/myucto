@@ -494,6 +494,12 @@ const navSections = computed<NavSection[]>(() => {
         // Přechodový můstek § 7b → § 24 — jen u firem na DE (chystaný/probíhající přechod);
         // firmě, co už podvojné vede, se v menu neukazuje (stránka zůstává na URL).
         { to: '/accounting/transition-report', label: t('nav.accounting_transition_report'), icon: ICONS.reports },
+        // Číselné řady: pokladní doklady se v daňové evidenci číslují z týchž řad jako
+        // v podvojném, takže prefix a tvar čísla musí jít nastavit i tady. Bez odkazu
+        // si firma vlastní řadu pokladny zapnula, ale opravit ji neměla kde — a hláška
+        // `series_prefix_unavailable` ji přitom posílá právě sem. Stránka Nástrojů
+        // v tomhle režimu nabízí jen tuhle jednu záložku, proto konkrétní popisek.
+        { to: '/utilities', label: t('accounting.closing.series.title'), icon: ICONS.codebooks },
         // Pokladna (PPD/VPD) je v sekci Peníze hned za Bankovní účty (jako u podvojného).
         // Export/Import vydaných/přijaté faktury jsou nezávisle na účetním režimu pod Prodej/Nákup.
         // Šablony (předkontace, pravidla nákladů a zaúčtování banky) tu ZÁMĚRNĚ nejsou:
