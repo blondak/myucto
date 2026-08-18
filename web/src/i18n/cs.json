@@ -4873,6 +4873,7 @@
         "book_search": "Hledat",
         "book_search_hint": "Popis, partner nebo číslo dokladu",
         "book_filtered_note": "Zobrazené řádky jsou zúžené filtrem. Počáteční a konečný zůstatek i obraty zůstávají za celé období.",
+        "book_truncated_note": "Filtrovat lze jen omezený počet pohybů, takže výběr není úplný — zužte prosím období. Zůstatky a obraty platí za celé období dál.",
         "type": {
             "in": "Příjmový pokladní doklad",
             "out": "Výdajový pokladní doklad",

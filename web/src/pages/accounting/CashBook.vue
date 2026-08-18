@@ -183,6 +183,11 @@ onMounted(async () => {
       {{ t('cash.book_filtered_note') }}
     </div>
 
+    <!-- Filtrované okno se useklo na limitu — tichá kniha bez části pohybů by lhala. -->
+    <div v-if="report?.truncated" class="mb-4 px-3 py-2 rounded-md bg-warning-50 text-warning-700 text-sm">
+      {{ t('cash.book_truncated_note') }}
+    </div>
+
     <!-- Warning záporný zůstatek -->
     <div v-if="report && report.balance_negative" class="mb-4 px-3 py-2 rounded-md bg-danger-50 text-danger-600 text-sm">
       {{ t('cash.warning.negative_balance') }}

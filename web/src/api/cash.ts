@@ -133,6 +133,8 @@ export interface CashBookReport {
   register: CashRegister; opening_balance: number; items: CashBookItem[]
   income_total: number; expense_total: number; closing_balance: number
   balance_negative: boolean; total: number; page: number; per_page: number
+  /** Filtrované okno se v podvojné větvi načítá do PHP po dávkách — nad limit se usekne. */
+  truncated?: boolean
 }
 
 /** Předvolba „co to je" pro purpose=other — kontace s nohou na 211. */

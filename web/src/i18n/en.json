@@ -4873,6 +4873,7 @@
         "book_search": "Search",
         "book_search_hint": "Description, partner or document number",
         "book_filtered_note": "The listed rows are narrowed by the filter. Opening and closing balance and turnovers still cover the whole period.",
+        "book_truncated_note": "Only a limited number of movements can be filtered, so the selection is incomplete — please narrow the period. Balances and turnovers still cover the whole period.",
         "type": {
             "in": "Cash receipt (incoming)",
             "out": "Cash payment (outgoing)",

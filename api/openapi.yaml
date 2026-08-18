@@ -11217,12 +11217,15 @@ paths:
         Filtry `q`/`doc_type`/`purpose` zužují jen vypsané řádky (a `total`).
         Počáteční a konečný zůstatek i obraty se počítají za CELÉ období, nikdy
         za výběr — jinak by filtr vyrobil zůstatek, který v knize neplatí.
+
+        `truncated: true` znamená, že filtrované okno bylo delší, než kolik se dá
+        prohledat najednou, a výběr proto není úplný — je potřeba zúžit období.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
         - { in: query, name: from, schema: { type: string, format: date } }
         - { in: query, name: to, schema: { type: string, format: date } }
-        - { in: query, name: q, schema: { type: string }, description: "Fulltext přes popis, partnera a číslo dokladu" }
+        - { in: query, name: q, schema: { type: string }, description: "Fulltext přes popis, partnera a číslo dokladu; diakritiku ignoruje" }
         - { in: query, name: doc_type, schema: { type: string, enum: [in, out] } }
         - { in: query, name: purpose, schema: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] } }
         - { in: query, name: page, schema: { type: integer } }

@@ -336,6 +336,43 @@ final class CashRegisterDeBookTest extends TestCase
         self::assertTrue($body['balance_negative'], 'Propad na -500 uprostřed období se nesmí ztratit.');
     }
 
+    /**
+     * L-4: `total` se čte z `COUNT(*) OVER()`, tedy z vráceného řádku — na stránce
+     * mimo rozsah (po smazání dokladů) spadl na 0 a uživateli zmizela stránkovací
+     * tlačítka, kterými by se vrátil zpátky.
+     */
+    public function testTaxEvidenceBookKeepsTotalOnPageBeyondRange(): void
+    {
+        $regId = $this->registers->create($this->teSupplierId, ['name' => 'Pokladna', 'account_code' => '211', 'is_default' => true]);
+        $this->postSale($this->teSupplierId, $regId, 100.00, self::YEAR . '-06-10');
+
+        $res = $this->call($this->teSupplierId, $regId, self::YEAR . '-01-01', self::YEAR . '-12-31', ['page' => 5, 'per_page' => 50]);
+
+        self::assertSame(200, $res['status']);
+        self::assertSame([], $res['body']['items']);
+        self::assertSame(1, (int) $res['body']['total'], 'Prázdná stránka nesmí tvrdit, že kniha je prázdná.');
+    }
+
+    /**
+     * L-6: DE větev hledá SQL `LIKE` nad `utf8mb4_unicode_ci` (bez ohledu na diakritiku),
+     * podvojná filtrovala v PHP přes `str_contains` — stejný dotaz tedy dával v obou
+     * režimech jiné výsledky.
+     */
+    #[DataProvider('bookModes')]
+    public function testFulltextIgnoresDiacriticsInBothModes(string $which): void
+    {
+        $supplierId = $which === 'te' ? $this->teSupplierId : $this->deSupplierId;
+        $regId = $this->registers->create($supplierId, ['name' => 'Pokladna', 'account_code' => '211', 'is_default' => true]);
+        $this->postPurchase($supplierId, $regId, 400.00, self::YEAR . '-06-15');   // popis „Nákup materiálu"
+
+        $from = self::YEAR . '-01-01';
+        $to = self::YEAR . '-12-31';
+
+        self::assertCount(1, $this->call($supplierId, $regId, $from, $to, ['q' => 'nákup'])['body']['items']);
+        self::assertCount(1, $this->call($supplierId, $regId, $from, $to, ['q' => 'nakup'])['body']['items'],
+            'Dotaz bez diakritiky musí najít totéž v obou účetních režimech.');
+    }
+
     private function call(int $supplierId, int $registerId, string $from, string $to, array $extraQuery = []): array
     {
         $req = (new ServerRequestFactory())
