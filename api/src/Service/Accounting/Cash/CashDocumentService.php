@@ -9,7 +9,6 @@ use MyInvoice\Repository\CashDocumentRepository;
 use MyInvoice\Repository\CashRegisterRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\InvoiceRepository;
-use MyInvoice\Repository\LedgerReportRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
@@ -57,7 +56,6 @@ final class CashDocumentService
         private readonly InvoiceRepository $invoices,
         private readonly ChartOfAccountsRepository $accounts,
         private readonly TaxConstantsRepository $taxConstants,
-        private readonly LedgerReportRepository $ledger,
         private readonly CashRegisterRepository $registers,
         private readonly CashDocumentRepository $documents,
         private readonly CashRegisterService $cashRegisters,
@@ -159,7 +157,11 @@ final class CashDocumentService
      * doklad i protizápis v evidenci) zmizí doklad i jeho účetní zápisy beze stopy.
      * Použitelné jen v otevřeném a neuzamčeném období; audit stopu drží activity log.
      *
-     * @return array{deleted_entry_ids:list<int>}
+     * Vydané číslo řady se NEVRACÍ (`DocumentSeriesService` dekrement nemá a mít nemá —
+     * souběžný výdej by čísla kolidoval), takže po smazání zůstane v řadě PPD/VPD trvalá
+     * díra. Volající to musí uživateli ohlásit (`doc_number` ve výsledku, H-4).
+     *
+     * @return array{deleted_entry_ids:list<int>, doc_number:?string}
      */
     public function deleteDocument(int $supplierId, int $id): array
     {
@@ -203,12 +205,13 @@ final class CashDocumentService
                 $entryIds[] = $entryId;
             }
 
+            $docNumber = self::nullableString($doc['doc_number'] ?? null);
             $this->documents->deleteDocument($supplierId, $id);
 
             if ($ownTx) {
                 $pdo->commit();
             }
-            return ['deleted_entry_ids' => $entryIds];
+            return ['deleted_entry_ids' => $entryIds, 'doc_number' => $docNumber];
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -337,13 +340,26 @@ final class CashDocumentService
             if ($doc['status'] !== 'posted') {
                 throw new CashException('doc_not_posted', 'Stornovat lze jen zaúčtovaný doklad.');
             }
-            $this->assertTaxDateUnlocked($supplierId, (string) ($doc['tax_date'] ?? $doc['issue_date']));
+            // H-3: zámek se posuzuje nad datem PROTIZÁPISU, ne nad datem původního dokladu.
+            // Doklad v uzamčeném období stornovat LZE — PostingService::reverse() (B8) je na to
+            // stavěný a protizápis si sám posune do otevřeného data. Kontrolou nad původním
+            // `tax_date` se tahle schopnost vypínala a jedinou cestou zůstávalo tvrdé smazání.
+            // U journal-free dokladu (daňová evidence) posting engine neběží, takže kontrolu
+            // musíme udělat tady — pro obě větve nad týmž datem.
             $hasJournal = $doc['journal_entry_id'] !== null;
+            if (!$hasJournal) {
+                $this->assertTaxDateUnlocked($supplierId, $entryDate ?? date('Y-m-d'));
+            }
 
+            // H-2: `entry_date` se předává TAK, JAK přišlo (tedy i null). PostingService pak
+            // protizápis datuje datem původního zápisu a na dnešek ho posune až tehdy, když
+            // je původní datum zamčené (B8). Dosazením dneška se tenhle návrh vypínal a storno
+            // březnového dokladu padalo do listopadu, zatímco DPH se opravila v březnu.
+            //
             // Protizápis jen když byl doklad zaúčtován do deníku; jinak storno bez posting enginu.
             $reversalId = $hasJournal
                 ? $this->posting->reverse($supplierId, (int) $doc['journal_entry_id'], [
-                    'entry_date'  => $entryDate ?? date('Y-m-d'),
+                    'entry_date'  => $entryDate,
                     'description' => 'Storno ' . $doc['doc_number'] . ': ' . $reason,
                     'user_id'     => $userId,
                     'posted_by'   => $userId,
@@ -484,6 +500,12 @@ final class CashDocumentService
         if ($kind === 'purchase_invoice') {
             $stmt = $pdo->prepare(
                 "SELECT pi.id, pi.vendor_invoice_number, pi.varsymbol, pi.issue_date, pi.total_with_vat,
+                        pi.amount_to_pay
+                          - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
+                                       WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id), 0)
+                          - COALESCE((SELECT SUM(cd.total_amount) FROM cash_documents cd
+                                       WHERE cd.supplier_id = pi.supplier_id AND cd.purchase_invoice_id = pi.id
+                                         AND cd.status = 'posted'), 0) AS remaining,
                         cur.code AS currency, c.company_name AS partner_name
                    FROM purchase_invoices pi
                    JOIN currencies cur ON cur.id = pi.currency_id
@@ -491,6 +513,15 @@ final class CashDocumentService
                   WHERE pi.supplier_id = ?
                     AND pi.status IN ('received','booked')
                     AND cur.code = 'CZK'
+                    -- H-1: doklad krytý zálohou (amount_to_pay = brutto − advance_paid_amount)
+                    -- nebo už uhrazený nemá co nabízet; zrcadlo guardu v
+                    -- PurchaseInvoiceRepository (příkaz k úhradě / unmatched).
+                    AND pi.amount_to_pay
+                          - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
+                                       WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id), 0)
+                          - COALESCE((SELECT SUM(cd.total_amount) FROM cash_documents cd
+                                       WHERE cd.supplier_id = pi.supplier_id AND cd.purchase_invoice_id = pi.id
+                                         AND cd.status = 'posted'), 0) > 0.005
                     -- DDKP (§ 28 ZDPH) není platební cíl: peníze odešly už na zálohové
                     -- faktuře, doklad jen nese nárok na odpočet DPH (343/314) a závazek
                     -- na 321 nikdy nezaložil. Bez filtru by ho našeptávač nabídl k úhradě
@@ -504,15 +535,18 @@ final class CashDocumentService
             );
             $stmt->execute([$supplierId, $like, $like, $like]);
             return array_map(static function (array $r): array {
+                // M-10/H-1: `remaining` se počítá (zbytek po záloze a už zaúčtovaných
+                // úhradách), `paid` z něj plyne — dřív se obojí vracelo napevno z brutto.
                 $total = (float) $r['total_with_vat'];
+                $remaining = round((float) $r['remaining'], 2);
                 return [
                     'id'            => (int) $r['id'],
                     'kind'          => 'purchase_invoice',
                     'number'        => (string) ($r['vendor_invoice_number'] ?? $r['varsymbol'] ?? ''),
                     'partner_name'  => (string) ($r['partner_name'] ?? ''),
                     'total'         => round($total, 2),
-                    'paid'          => 0.0,
-                    'remaining'     => round($total, 2),
+                    'paid'          => round($total - $remaining, 2),
+                    'remaining'     => $remaining,
                     'currency_code' => (string) $r['currency'],
                     'issued_on'     => (string) $r['issue_date'],
                 ];
@@ -1019,6 +1053,12 @@ final class CashDocumentService
 
     private function validateInvoicePayment(int $supplierId, int $invoiceId, float $amount): void
     {
+        // FOR UPDATE (M-5): bez zámku hlavičky vidí dvě souběžné hotovostní úhrady téže
+        // faktury tentýž `remaining` a obě projdou → faktura se přeplatí. Zamyká se
+        // SAMOSTATNĚ jen řádek `invoices` (MariaDB neumí `FOR UPDATE OF t`, join na
+        // sdílený číselník `currencies` by zamykal i jeho řádky). Transakce už běží
+        // (create/post), zámek se drží do jejího konce.
+        $this->lockRow('invoices', $invoiceId, $supplierId);
         $stmt = $this->db->pdo()->prepare(
             'SELECT i.status, i.invoice_type, i.amount_to_pay, i.paid_total, cur.code AS currency
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
@@ -1050,6 +1090,8 @@ final class CashDocumentService
 
     private function validatePurchasePayment(int $supplierId, int $purchaseInvoiceId, float $amount): void
     {
+        // FOR UPDATE (M-5) — viz komentář ve validateInvoicePayment().
+        $this->lockRow('purchase_invoices', $purchaseInvoiceId, $supplierId);
         $pf = $this->purchaseInvoices->find($purchaseInvoiceId, $supplierId);
         if ($pf === null) {
             throw new CashException('invoice_not_found', 'Přijatá faktura nenalezena.', 404);
@@ -1060,9 +1102,66 @@ final class CashDocumentService
         if (!in_array((string) $pf['status'], ['received', 'booked'], true)) {
             throw new CashException('invoice_invalid_status', 'Přijatou fakturu v tomto stavu nelze hradit hotově.');
         }
-        if (self::cents($amount) !== self::cents($pf['total_with_vat'])) {
-            throw new CashException('partial_purchase_payment', 'Přijatou fakturu lze hotově uhradit jen v plné výši.');
+        // H-1: platebním cílem je ZBYTEK (`amount_to_pay` = brutto − uhrazená záloha,
+        // generovaný sloupec migrace 0026, mínus už zaúčtované úhrady), ne brutto. Proti
+        // brutto by faktura krytá zálohou odmítla správnou částku a přijala tu, která
+        // na 321 nadělá fantomový debetní zůstatek ve výši zálohy.
+        $remaining = self::cents($this->purchaseRemaining($supplierId, $purchaseInvoiceId));
+        if ($remaining <= 0) {
+            throw new CashException(
+                'nothing_to_settle',
+                'Přijatá faktura už je vypořádaná (zálohou nebo jinou úhradou) — není co hradit.',
+            );
         }
+        if (self::cents($amount) !== $remaining) {
+            throw new CashException(
+                'partial_purchase_payment',
+                sprintf('Přijatou fakturu lze hotově uhradit jen v plné zbývající výši (%.2f Kč).', $remaining / 100),
+            );
+        }
+    }
+
+    /**
+     * SSOT zbytku k hotovostní úhradě PŘIJATÉ faktury — používá ho našeptávač
+     * ({@see searchUnpaid()}), validace ({@see validatePurchasePayment()}) i hotovostní
+     * vyrovnání ({@see CashSettlementService::syncPurchase()}).
+     *
+     * `amount_to_pay` je generovaný sloupec `total_with_vat − advance_paid_amount`, takže
+     * záloha je odečtená už v něm; navíc se odečtou zaúčtované úhrady — bankovní
+     * (`payment_matches`) i hotovostní (`cash_documents` ve stavu 'posted').
+     * `$excludeCashDocumentId` vynechá vlastní doklad, aby reconcile vyrovnání nepočítal
+     * svou vlastní úhradu proti sobě.
+     */
+    public function purchaseRemaining(int $supplierId, int $purchaseInvoiceId, ?int $excludeCashDocumentId = null): float
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT pi.amount_to_pay
+                    - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
+                                 WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id), 0)
+                    - COALESCE((SELECT SUM(cd.total_amount) FROM cash_documents cd
+                                 WHERE cd.supplier_id = pi.supplier_id AND cd.purchase_invoice_id = pi.id
+                                   AND cd.status = ? AND cd.id <> ?), 0) AS remaining
+               FROM purchase_invoices pi
+              WHERE pi.id = ? AND pi.supplier_id = ?'
+        );
+        $stmt->execute(['posted', $excludeCashDocumentId ?? 0, $purchaseInvoiceId, $supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? 0.0 : round((float) $row['remaining'], 2);
+    }
+
+    /**
+     * Zamkne jediný řádek tabulky pro zbytek transakce (`SELECT id … FOR UPDATE`).
+     * Samostatný dotaz bez joinů — MariaDB nemá `FOR UPDATE OF t`, takže join na
+     * číselník by zamykal i jeho řádky. Název tabulky je vždy interní literál.
+     */
+    private function lockRow(string $table, int $id, int $supplierId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id FROM {$table} WHERE id = ? AND supplier_id = ? FOR UPDATE"
+        );
+        $stmt->execute([$id, $supplierId]);
+        $stmt->fetchAll();
     }
 
     /**
@@ -1157,14 +1256,16 @@ final class CashDocumentService
         return $register;
     }
 
+    /**
+     * M-1/L-7: zůstatek pokladny má JEDNU definici — {@see CashRegisterService::balance()}.
+     * Dřív tu byl duplikát, který volal `accountOpening()` BEZ `excludeClosing`, takže
+     * v uzavřeném roce započítal i uzávěrkový převod 211 → 702 a k rozvahovému dni vyšel
+     * na 0 Kč. Varování `cash.warning.negative_balance` pak nikdy nevyskočilo, ačkoli
+     * banner v pokladní knize (`CashBookAction::minRunningDelta`) zápor hlásil.
+     */
     private function accountBalance(int $supplierId, string $accountCode, string $date): float
     {
-        $account = $this->accounts->findByCode($supplierId, $accountCode);
-        if ($account === null) {
-            return 0.0;
-        }
-        $dayAfter = date('Y-m-d', strtotime($date . ' +1 day'));
-        return $this->ledger->accountOpening($supplierId, (int) $account['id'], $dayAfter, $dayAfter);
+        return $this->cashRegisters->balance($supplierId, $accountCode, $date);
     }
 
     /**

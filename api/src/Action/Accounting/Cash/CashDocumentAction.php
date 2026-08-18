@@ -109,7 +109,7 @@ final class CashDocumentAction
 
     public function create(Request $request, Response $response): Response
     {
-        if (!$this->requireWrite($request, $response, $err)) {
+        if (!$this->requireCashDocumentWrite($request, $response, $err)) {
             return $err;
         }
         $supplierId = $this->currentSupplierId($request);
@@ -126,7 +126,7 @@ final class CashDocumentAction
 
     public function update(Request $request, Response $response, array $args): Response
     {
-        if (!$this->requireWrite($request, $response, $err)) {
+        if (!$this->requireCashDocumentWrite($request, $response, $err)) {
             return $err;
         }
         $supplierId = $this->currentSupplierId($request);
@@ -143,13 +143,19 @@ final class CashDocumentAction
 
     public function delete(Request $request, Response $response, array $args): Response
     {
-        if (!$this->requireWrite($request, $response, $err)) {
+        if (!$this->requireCashDocumentWrite($request, $response, $err)) {
             return $err;
         }
         $supplierId = $this->currentSupplierId($request);
         $id = (int) $args['id'];
         // ?force=1 → tvrdé smazání dokladu i s účetními zápisy (jinak jen draft).
         $force = ((string) (($request->getQueryParams()['force'] ?? '')) === '1');
+        // H-4: tvrdé smazání maže i deníkové zápisy (vč. protizápisu) a v číselné řadě
+        // po sobě nechá trvalou díru (§ 11 ZoÚ) — na běžné zápisové právo to patřit nemůže.
+        // Vyžaduje proto samostatné `cash.close`, obdobně jako ruční deník `accounting.journal.post`.
+        if ($force && !$this->requireCashClose($request, $response, $err)) {
+            return $err;
+        }
 
         // Kontrola PŘEDEM — obě větve, protože rozhodovat musí existence vazby,
         // ne stav dokladu. Scopovaná na tenanta, aby cizí id skončilo na 404
@@ -161,17 +167,23 @@ final class CashDocumentAction
         }
 
         try {
+            $payload = ['deleted' => true, 'warnings' => []];
             if ($force) {
                 $result = $this->service->deleteDocument($supplierId, $id);
                 $this->log($request, 'cash.document_deleted', $id, [
                     'hard'              => true,
                     'deleted_entry_ids' => $result['deleted_entry_ids'],
+                    'doc_number'        => $result['doc_number'],
                 ]);
+                // Číslo řady se nevrací → v PPD/VPD zůstane díra. Uživatel to musí vidět.
+                $payload['warnings'][] = 'cash.warning.series_gap';
+                $payload['doc_number'] = $result['doc_number'];
+                $payload['deleted_entry_ids'] = $result['deleted_entry_ids'];
             } else {
                 $this->service->deleteDraft($supplierId, $id);
                 $this->log($request, 'cash.document_deleted', $id, []);
             }
-            return Json::ok($response, ['deleted' => true]);
+            return Json::ok($response, $payload);
         } catch (\PDOException $e) {
             // Druhá půlka pojistky: vazba vznikla mezi kontrolou a mazáním, nebo
             // ukazuje z tabulky, která v registru chybí. `mapCashError()` by
@@ -188,7 +200,7 @@ final class CashDocumentAction
 
     public function post(Request $request, Response $response, array $args): Response
     {
-        if (!$this->requireWrite($request, $response, $err)) {
+        if (!$this->requireCashDocumentWrite($request, $response, $err)) {
             return $err;
         }
         $supplierId = $this->currentSupplierId($request);
@@ -204,7 +216,7 @@ final class CashDocumentAction
 
     public function reverse(Request $request, Response $response, array $args): Response
     {
-        if (!$this->requireWrite($request, $response, $err)) {
+        if (!$this->requireCashDocumentWrite($request, $response, $err)) {
             return $err;
         }
         $supplierId = $this->currentSupplierId($request);

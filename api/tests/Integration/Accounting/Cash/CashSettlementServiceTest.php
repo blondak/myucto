@@ -139,13 +139,18 @@ final class CashSettlementServiceTest extends TestCase
         $created = $this->settlement->syncPurchase($this->supplierId, $pfId, $this->userId);
         $entryId = $this->entryOf((int) $created['cash_document_id']);
 
-        // Uživatel volbu odebral → doklad, jeho zápis i „zaplaceno" zmizí beze stopy.
+        // Uživatel volbu odebral → vyrovnání se zruší. H-6: doklad s VYDANÝM číslem se
+        // stornuje (protizápis, doklad zůstane v evidenci), aby v číselné řadě nevznikla
+        // díra; „zaplaceno" i tak zmizí.
         $this->chooseRegister('purchase_invoices', $pfId, null);
         $removed = $this->settlement->syncPurchase($this->supplierId, $pfId, $this->userId);
 
         self::assertSame(CashSettlementService::REMOVED, $removed['status']);
-        self::assertSame(0, $this->cashDocCount('purchase_invoice_id', $pfId));
-        self::assertNull($this->journal->find($entryId, $this->supplierId));
+        self::assertSame(0, $this->postedCashDocCount('purchase_invoice_id', $pfId), 'Aktivní (posted) doklad nezůstává.');
+        self::assertSame(1, $this->cashDocCount('purchase_invoice_id', $pfId), 'Stornovaný doklad zůstává v evidenci (§ 11 ZoÚ).');
+        self::assertSame('reversed', $this->cashDocStatus((int) $created['cash_document_id']));
+        self::assertNotNull($this->journal->find($entryId, $this->supplierId), 'Původní zápis zůstává, doplní se protizápis.');
+        self::assertNotNull($this->reversalEntryOf((int) $created['cash_document_id']));
         self::assertSame('booked', $this->purchaseStatus($pfId));
     }
 
@@ -162,7 +167,9 @@ final class CashSettlementServiceTest extends TestCase
         $moved = $this->settlement->syncPurchase($this->supplierId, $pfId, $this->userId);
 
         self::assertSame(CashSettlementService::CREATED, $moved['status']);
-        self::assertSame(1, $this->cashDocCount('purchase_invoice_id', $pfId));
+        // H-6: starý doklad se stornuje (zůstává v řadě), aktivní je právě jeden.
+        self::assertSame(1, $this->postedCashDocCount('purchase_invoice_id', $pfId));
+        self::assertSame(2, $this->cashDocCount('purchase_invoice_id', $pfId));
         $byAcc = $this->linesByAccountCode($this->entryOf((int) $moved['cash_document_id']));
         self::assertEqualsWithDelta(500.00, $byAcc['211.200']['credit'], 0.001);
     }
@@ -255,8 +262,12 @@ final class CashSettlementServiceTest extends TestCase
         $removed = $this->settlement->syncInvoice($this->supplierId, $invoiceId, $this->userId);
 
         self::assertSame(CashSettlementService::REMOVED, $removed['status']);
-        self::assertSame(0, $this->cashDocCount('invoice_id', $invoiceId));
-        self::assertNull($this->journal->find($entryId, $this->supplierId));
+        // H-6: storno místo smazání — aktivní doklad žádný, stornovaný v evidenci zůstává.
+        self::assertSame(0, $this->postedCashDocCount('invoice_id', $invoiceId));
+        self::assertSame(1, $this->cashDocCount('invoice_id', $invoiceId));
+        self::assertSame('reversed', $this->cashDocStatus((int) $created['cash_document_id']));
+        self::assertNotNull($this->journal->find($entryId, $this->supplierId));
+        self::assertNotNull($this->reversalEntryOf((int) $created['cash_document_id']));
         self::assertSame([], $this->paymentRows($invoiceId));
         self::assertEqualsWithDelta(0.0, (float) $this->invoiceRow($invoiceId)['paid_total'], 0.001);
     }
@@ -294,9 +305,10 @@ final class CashSettlementServiceTest extends TestCase
         $this->chooseRegister('invoices', $invoiceId, $register);
         $this->settlement->syncInvoice($this->supplierId, $invoiceId, $this->userId);
 
-        // Volba na dokladu zůstává, přesto storno faktury vyrovnání zruší.
+        // Volba na dokladu zůstává, přesto storno faktury vyrovnání zruší (H-6: stornem).
         self::assertTrue($this->settlement->detach($this->supplierId, 'invoice', $invoiceId));
-        self::assertSame(0, $this->cashDocCount('invoice_id', $invoiceId));
+        self::assertSame(0, $this->postedCashDocCount('invoice_id', $invoiceId));
+        self::assertSame(1, $this->cashDocCount('invoice_id', $invoiceId));
         self::assertFalse($this->settlement->detach($this->supplierId, 'invoice', $invoiceId));
     }
 
@@ -344,6 +356,23 @@ final class CashSettlementServiceTest extends TestCase
         );
         $stmt->execute([$this->supplierId, $documentId]);
         return (int) $stmt->fetchColumn();
+    }
+
+    private function cashDocStatus(int $cashDocumentId): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT status FROM cash_documents WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$cashDocumentId, $this->supplierId]);
+        return (string) $stmt->fetchColumn();
+    }
+
+    private function reversalEntryOf(int $cashDocumentId): ?int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT reversal_entry_id FROM cash_documents WHERE id = ? AND supplier_id = ?'
+        );
+        $stmt->execute([$cashDocumentId, $this->supplierId]);
+        $v = $stmt->fetchColumn();
+        return ($v === false || $v === null) ? null : (int) $v;
     }
 
     private function postedCashDocCount(string $column, int $documentId): int
