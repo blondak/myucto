@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { cashApi, type CashRegister } from '@/api/cash'
+import { cashErrorCode, cashErrorMessage } from '@/api/cashErrors'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
@@ -64,19 +65,13 @@ async function load() {
 onMounted(load)
 
 function mapError(e: any): string {
-  const code = e?.response?.data?.error?.code
-  if (code) {
-    const key = code.startsWith('cash.error.') ? code : `cash.error.${code}`
-    const localized = t(key)
-    if (localized !== key) return localized
-  }
-  return e?.response?.data?.error?.message || t('common.error')
+  return cashErrorMessage(e, t)
 }
 
 async function create() {
   error.value = ''
-  if (!form.value.name.trim()) { error.value = t('cash.register_name'); return }
-  if (!isTaxEvidence.value && !isForeignForm.value && !form.value.account_code) { error.value = t('cash.register_account'); return }
+  if (!form.value.name.trim()) { error.value = t('cash.validation.name'); return }
+  if (!isTaxEvidence.value && !isForeignForm.value && !form.value.account_code) { error.value = t('cash.validation.account'); return }
   saving.value = true
   try {
     await cashApi.createRegister({
@@ -124,8 +119,7 @@ async function remove(r: CashRegister) {
     await load()
     emit('changed')
   } catch (e: any) {
-    const code = e?.response?.data?.error?.code
-    if (code === 'register_has_documents' || code === 'cash.error.register_has_documents') {
+    if (cashErrorCode(e) === 'register_has_documents') {
       toast.warning(t('cash.register_deactivate_hint'))
     } else {
       toast.error(mapError(e))

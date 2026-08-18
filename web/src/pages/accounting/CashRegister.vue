@@ -3,6 +3,7 @@ import { ref, onMounted, reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
 import { cashApi, type CashRegister, type CashDocument } from '@/api/cash'
+import { cashErrorMessage } from '@/api/cashErrors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
@@ -204,7 +205,7 @@ function openReverse(d: CashDocument) {
 
 async function submitReverse() {
   if (!reverseTarget.value) return
-  if (reverseReason.value.trim().length < 3) { reverseError.value = t('cash.reverse.reason'); return }
+  if (reverseReason.value.trim().length < 3) { reverseError.value = t('cash.validation.reason'); return }
   reverseSaving.value = true
   try {
     await cashApi.reverseDocument(reverseTarget.value.id, reverseReason.value.trim(), reverseDate.value || undefined)
@@ -213,14 +214,7 @@ async function submitReverse() {
     await loadRegisters()
     await load()
   } catch (e: any) {
-    const code = e?.response?.data?.error?.code
-    if (code) {
-      const key = code.startsWith('cash.') ? code : `cash.error.${code}`
-      const localized = t(key)
-      reverseError.value = localized !== key ? localized : (e?.response?.data?.error?.message || t('common.error'))
-    } else {
-      reverseError.value = e?.response?.data?.error?.message || t('common.error')
-    }
+    reverseError.value = cashErrorMessage(e, t)
   } finally {
     reverseSaving.value = false
   }
@@ -246,14 +240,7 @@ async function submitDelete() {
     await loadRegisters()
     await load()
   } catch (e: any) {
-    const code = e?.response?.data?.error?.code
-    if (code) {
-      const key = code.startsWith('cash.') ? code : `cash.error.${code}`
-      const localized = t(key)
-      deleteError.value = localized !== key ? localized : (e?.response?.data?.error?.message || t('common.error'))
-    } else {
-      deleteError.value = e?.response?.data?.error?.message || t('common.error')
-    }
+    deleteError.value = cashErrorMessage(e, t)
   } finally {
     deleteSaving.value = false
   }

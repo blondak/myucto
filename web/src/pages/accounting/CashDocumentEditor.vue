@@ -10,6 +10,7 @@ import {
 import { accountingApi, type ChartAccount, type PostingRuleMap } from '@/api/accounting'
 import { taxConstantsApi, type TaxConstantsYear } from '@/api/taxConstants'
 import { clientsApi, type Client } from '@/api/clients'
+import { cashErrorMessage, cashWarningMessage } from '@/api/cashErrors'
 import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatMoney } from '@/composables/useFormat'
@@ -280,9 +281,9 @@ const canSubmit = computed(() =>
 
 async function save() {
   error.value = ''
-  if (form.register_id === '') { error.value = t('cash.empty.registers'); return }
-  if (!(Number(form.total_amount) > 0)) { error.value = t('cash.col.amount'); return }
-  if (!form.description.trim()) { error.value = t('cash.col.description'); return }
+  if (form.register_id === '') { error.value = t('cash.validation.register'); return }
+  if (!(Number(form.total_amount) > 0)) { error.value = t('cash.validation.amount'); return }
+  if (!form.description.trim()) { error.value = t('cash.validation.description'); return }
   if (purchaseOverLimit.value) { error.value = t('cash.form.purchase_over_10k_hint'); return }
 
   const payload: CreateCashDocumentPayload = {
@@ -317,25 +318,10 @@ async function save() {
   try {
     const res = await cashApi.createDocument(payload)
     toast.success(t('cash.new_document') + ' ' + (res.doc_number ?? ''))
-    for (const w of res.warnings) {
-      const key = w.startsWith('cash.') ? w : `cash.warning.${w}`
-      const localized = t(key)
-      toast.warning(localized !== key ? localized : w)
-    }
+    for (const w of res.warnings) toast.warning(cashWarningMessage(w, t))
     router.push('/accounting/cash')
   } catch (e: any) {
-    const code = e?.response?.data?.error?.code
-    if (code) {
-      const key = code.startsWith('cash.') ? code : `cash.error.${code}`
-      const localized = t(key)
-      if (localized !== key) { error.value = localized }
-      else {
-        const acc = t(`accounting.error.${code}`)
-        error.value = acc !== `accounting.error.${code}` ? acc : (e?.response?.data?.error?.message || t('common.error'))
-      }
-    } else {
-      error.value = e?.response?.data?.error?.message || t('common.error')
-    }
+    error.value = cashErrorMessage(e, t)
   } finally {
     saving.value = false
   }
