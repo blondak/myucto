@@ -163,10 +163,13 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         );
         // Horní mez: dávka má 500 ID, takže do 500 osob nepřibude ani jeden dotaz.
         // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
+        // 82 od chvíle, kdy snapshot dotahuje i doložené záměry uplatňovat
+        // slevu (OZUSPOJ). Je to JEDNA dávka na celý běh, ne dotaz ve smyčce;
+        // rovnost počtů výš to hlídá.
         self::assertLessThanOrEqual(
-            80,
+            82,
             $counts[100],
-            'Snapshot sta osob se musí vejít do 80 round-tripů.',
+            'Snapshot sta osob se musí vejít do 82 round-tripů.',
         );
     }
 

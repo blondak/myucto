@@ -31,7 +31,7 @@ final class PayrollSubmissionRepository
              WHEN UPPER(TRIM(obligation.agenda_code))
                   REGEXP "^(HEALTH[_-])?(HOZ|PPZ)([_-]|$)" THEN "health"
              WHEN UPPER(TRIM(obligation.agenda_code))
-                  REGEXP "^(JMHZ?|REGZEL(DOPL)?|PREZAM|PREZEC|REGZEC|DZMH|OREZAM|ZREZAM)([_-]|$)"
+                  REGEXP "^(JMHZ?|REGZEL(DOPL)?|PREZAM|PREZEC|REGZEC|DZMH|OREZAM|ZREZAM|OZUSPOJ)([_-]|$)"
                   THEN "jmhz"
              ELSE "other"
          END';

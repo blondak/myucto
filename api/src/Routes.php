@@ -77,6 +77,7 @@ use MyInvoice\Action\Payroll\PayrollComponentJmhzMappingsAction;
 use MyInvoice\Action\Payroll\PayrollCzIscoAction;
 use MyInvoice\Action\Payroll\PayrollDeductionAgreementAction;
 use MyInvoice\Action\Payroll\PayrollDimensionAction;
+use MyInvoice\Action\Payroll\PayrollDiscountIntentAction;
 use MyInvoice\Action\Payroll\PayrollDocumentAction;
 use MyInvoice\Action\Payroll\PayrollEldpAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentExitDocumentAction;
@@ -1077,6 +1078,33 @@ final class Routes
             $g->post(
                 '/submissions/registration/{employmentId:[0-9]+}',
                 [PayrollRegistrationAction::class, 'prepare'],
+            );
+            // Oznámení záměru uplatňovat slevu na pojistném (OZUSPOJ).
+            // Vlastní podání s vlastní lhůtou: sleva podle § 7a bez doručeného
+            // záměru nenáleží, i když se v měsíčním hlášení vykáže.
+            $g->get(
+                '/submissions/discount-intents',
+                [PayrollDiscountIntentAction::class, 'list'],
+            );
+            $g->post(
+                '/submissions/discount-intents',
+                [PayrollDiscountIntentAction::class, 'create'],
+            );
+            $g->get(
+                '/submissions/discount-intents/{intentId:[0-9]+}/preview',
+                [PayrollDiscountIntentAction::class, 'preview'],
+            );
+            $g->post(
+                '/submissions/discount-intents/{intentId:[0-9]+}/prepare',
+                [PayrollDiscountIntentAction::class, 'prepare'],
+            );
+            $g->post(
+                '/submissions/discount-intents/{intentId:[0-9]+}/end',
+                [PayrollDiscountIntentAction::class, 'end'],
+            );
+            $g->post(
+                '/submissions/discount-intents/{intentId:[0-9]+}/receipt',
+                [PayrollDiscountIntentAction::class, 'receipt'],
             );
             $g->get(
                 '/submissions/signing-profile',

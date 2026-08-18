@@ -41,6 +41,9 @@ use MyInvoice\Service\Payroll\SocialInsurance\SocialJurisdictionEvidence;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPersonMonthInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialRelationshipKindMapper;
+use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojClaimDeadlinePolicy;
+use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojDiscountEligibility;
+use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojIntentEvidence;
 
 final class PayrollRunStatutoryInputAssembler
 {
@@ -51,17 +54,21 @@ final class PayrollRunStatutoryInputAssembler
     private readonly SocialRelationshipKindMapper $socialKinds;
     private readonly HealthRelationshipKindMapper $healthKinds;
     private readonly EmploymentRelationshipKindMapper $taxKinds;
+    private readonly OzuspojDiscountEligibility $discountEligibility;
 
     public function __construct(
         ?PayrollRunStatutoryComponentMapper $components = null,
         ?SocialRelationshipKindMapper $socialKinds = null,
         ?HealthRelationshipKindMapper $healthKinds = null,
         ?EmploymentRelationshipKindMapper $taxKinds = null,
+        ?OzuspojDiscountEligibility $discountEligibility = null,
     ) {
         $this->components = $components ?? new PayrollRunStatutoryComponentMapper();
         $this->socialKinds = $socialKinds ?? new SocialRelationshipKindMapper();
         $this->healthKinds = $healthKinds ?? new HealthRelationshipKindMapper();
         $this->taxKinds = $taxKinds ?? new EmploymentRelationshipKindMapper();
+        $this->discountEligibility = $discountEligibility
+            ?? new OzuspojDiscountEligibility(new OzuspojClaimDeadlinePolicy());
     }
 
     /** @param array<string,mixed> $snapshot */
@@ -498,7 +505,14 @@ final class PayrollRunStatutoryInputAssembler
 
         [$rateCategory, $rateCategoryEvidence] = $this->socialEmployerRateCategory($term);
         [$discountEvidence, $discountReason, $discountEvidenceReference] =
-            $this->socialPartTimeDiscount($term, $mapping->kind, $periodEnd);
+            $this->socialPartTimeDiscount(
+                $term,
+                $mapping->kind,
+                $periodStart,
+                $periodEnd,
+                $employmentFrom,
+                $employmentTo,
+            );
 
         try {
             return new SocialInsuranceRelationshipInput(
@@ -585,12 +599,33 @@ final class PayrollRunStatutoryInputAssembler
      *
      * § 7a odst. 5 podmiňuje nárok tím, že zaměstnavatel „nejpozději
      * s uplatněním této slevy oznámil České správě sociálního zabezpečení záměr
-     * uplatňovat tuto slevu za tohoto zaměstnance". Datum oznámení musí být
-     * nejpozději posledním dnem období, za které se sleva uplatňuje; pozdější
-     * oznámení může slevu založit až od dalšího měsíce.
+     * uplatňovat tuto slevu za tohoto zaměstnance; oznámením tohoto záměru se
+     * rozumí okamžik jeho DORUČENÍ České správě sociálního zabezpečení".
      *
-     * Zmrazená revize starší než sloupec důvodu klíč vůbec nemá — čte se jako
-     * neuplatněná sleva, přesně tak, jak se z ní tehdy počítalo.
+     * Do 18. 8. 2026 se tahle podmínka posuzovala z jediného ručně opsaného
+     * data na kartě vztahu (`social_part_time_discount_notified_on`) a
+     * porovnávala se s koncem období. Bylo to špatně ve dvou směrech naráz:
+     *
+     *   * PŘÍSNĚ — oznámení doručené 5. dne následujícího měsíce je podle
+     *     § 7c odst. 2 pořád včas (sleva se uplatňuje až hlášením do splatnosti
+     *     pojistného), ale porovnání s koncem období ho zahodilo;
+     *   * BENEVOLENTNĚ — datum nikdo neověřoval a nešlo z něj poznat, NA JAKÉ
+     *     OBDOBÍ je záměr oznámen ani jestli mezitím neskončil. Kontrola 291
+     *     katalogu kontrol MH je přitom propustná, takže by se nesoulad projevil
+     *     až protokolem, kdy je pojistné odvedené ponížené a § 7c odst. 3 z toho
+     *     dělá dluh.
+     *
+     * Nárok se proto odvozuje z EVIDENCE ZÁMĚRŮ (podání OZUSPOJ, § 23e), která
+     * drží den doručení odděleně od období platnosti a od stavu přijetí. Ručně
+     * opsané datum už nárok nezakládá — zůstává jen ve zmrazených revizích,
+     * které vznikly dřív.
+     *
+     * Zmrazená revize starší než sloupec důvodu klíč `social_part_time_discount_reason`
+     * vůbec nemá — čte se jako neuplatněná sleva, přesně tak, jak se z ní tehdy
+     * počítalo. Revize, která důvod má, ale klíč `social_part_time_discount_intent`
+     * ne, pochází z doby před evidencí záměrů; přepočítat ji dnešním pravidlem
+     * by přepsalo historii, takže si podrží tehdejší posouzení podle ručně
+     * zadaného data.
      *
      * @param array<string,mixed> $term
      * @return array{0:SocialDiscountEvidence,1:?SocialPartTimeDiscountReason,2:?string}
@@ -598,7 +633,10 @@ final class PayrollRunStatutoryInputAssembler
     private function socialPartTimeDiscount(
         array $term,
         SocialEmploymentKind $kind,
+        string $periodStart,
         string $periodEnd,
+        string $employmentFrom,
+        ?string $employmentTo,
     ): array {
         $raw = is_string($term['social_part_time_discount_reason'] ?? null)
             ? $term['social_part_time_discount_reason']
@@ -613,16 +651,56 @@ final class PayrollRunStatutoryInputAssembler
         $evidence = is_string($term['social_part_time_discount_evidence'] ?? null)
             ? trim($term['social_part_time_discount_evidence'])
             : '';
+        if ($evidence === '') {
+            return [SocialDiscountEvidence::Unverified, null, null];
+        }
+        if (!array_key_exists('social_part_time_discount_intent', $term)) {
+            return $this->legacySocialPartTimeDiscount(
+                $term,
+                $reason,
+                $evidence,
+                $periodEnd,
+            );
+        }
+        $intent = OzuspojIntentEvidence::fromRow(
+            $this->object($term['social_part_time_discount_intent'] ?? null) ?? [],
+        );
+        $verdict = $this->discountEligibility->assess(
+            $intent,
+            $periodStart,
+            $periodEnd,
+            $employmentFrom,
+            $employmentTo,
+        );
+        if (!$verdict->allowsDiscount()) {
+            return [SocialDiscountEvidence::Unverified, null, null];
+        }
+
+        return [SocialDiscountEvidence::Verified, $reason, $evidence];
+    }
+
+    /**
+     * Posouzení revizí zmrazených před zavedením evidence záměrů. Beze změny
+     * proti stavu do 18. 8. 2026, aby přepočet staré revize dal totéž co tehdy.
+     *
+     * @param array<string,mixed> $term
+     * @return array{0:SocialDiscountEvidence,1:?SocialPartTimeDiscountReason,2:?string}
+     */
+    private function legacySocialPartTimeDiscount(
+        array $term,
+        SocialPartTimeDiscountReason $reason,
+        string $evidence,
+        string $periodEnd,
+    ): array {
         $notifiedOn = is_string($term['social_part_time_discount_notified_on'] ?? null)
             ? trim($term['social_part_time_discount_notified_on'])
             : '';
-        if (
-            $evidence === ''
-            || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $notifiedOn) !== 1
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/D', $notifiedOn) !== 1
             || $notifiedOn > $periodEnd
         ) {
             return [SocialDiscountEvidence::Unverified, null, null];
         }
+
         return [SocialDiscountEvidence::Verified, $reason, $evidence];
     }
 

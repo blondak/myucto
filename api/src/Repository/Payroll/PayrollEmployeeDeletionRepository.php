@@ -71,6 +71,16 @@ final class PayrollEmployeeDeletionRepository
             'message' => 'Zaměstnanec má přidělený identifikátor z registrace u ČSSZ nebo MPSV. '
                 . 'Ten úkon už proběhl navenek, takže osobu smazat nelze.',
         ],
+        // Záměr uplatňovat slevu na pojistném je evidence úkonu vůči ČSSZ
+        // (§ 23e) a zároveň jediný doklad o tom, proč se pojistné odvedlo
+        // ponížené. Smazat osobu i s ním by ten doklad odstranilo, přestože
+        // podle § 7c odst. 3 může být předmětem doměření.
+        'discount_intent' => [
+            'tables' => ['payroll_discount_intents'],
+            'code' => 'payroll_employee_has_discount_intent',
+            'message' => 'Za zaměstnance je evidovaný záměr uplatňovat slevu na pojistném '
+                . '(OZUSPOJ). Je to doklad k odvedenému pojistnému, takže osobu smazat nelze.',
+        ],
         'calculation' => [
             'tables' => ['payroll_net_results', 'payroll_statutory_accumulator_openings'],
             'code' => 'payroll_employee_has_calculation',

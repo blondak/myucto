@@ -14,6 +14,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import PayrollEldpPanel from './PayrollEldpPanel.vue'
+import PayrollDiscountIntentsPanel from './PayrollDiscountIntentsPanel.vue'
 import PayrollHealthNotificationPanel from './PayrollHealthNotificationPanel.vue'
 import PayrollSubmissionInboxPanel from './PayrollSubmissionInboxPanel.vue'
 import PayrollSubmissionOverviewPanel from './PayrollSubmissionOverviewPanel.vue'
@@ -24,8 +25,8 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 type SubmissionTab =
-  'transport' | 'regzel' | 'jmhz' | 'eldp' | 'health' | 'health_notifications'
-  | 'inbox' | 'certificate'
+  'transport' | 'regzel' | 'jmhz' | 'discount_intents' | 'eldp' | 'health'
+  | 'health_notifications' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -42,9 +43,11 @@ const activeTab = ref<SubmissionTab>('transport')
 // „health" je stav podaných přehledů o platbě, „health_notifications" je
 // oznamovací povinnost z § 10 — ta běží na osm dnů od skutečnosti, ne
 // měsíčně, a slít je do jedné záložky by tenhle rozdíl schovalo.
+// Záměr uplatňovat slevu stojí hned za JMHZ, protože je jeho podmínkou: sleva
+// se sice vykazuje v měsíčním hlášení, ale nárok na ni zakládá tohle podání.
 const tabs: SubmissionTab[] = [
-  'transport', 'regzel', 'jmhz', 'eldp', 'health', 'health_notifications',
-  'inbox', 'certificate',
+  'transport', 'regzel', 'jmhz', 'discount_intents', 'eldp', 'health',
+  'health_notifications', 'inbox', 'certificate',
 ]
 /*
  * `null` = počet neznáme (načtení odznaku selhalo), ne „nula nevyřízených".
@@ -302,6 +305,12 @@ onMounted(loadInboxBadge)
       Evidenční list si data obstarává sám a nepotřebuje načtení REGZEL
       profilu, proto stojí mimo společný skeleton.
     -->
+    <!--
+      Záměr uplatňovat slevu si data obstarává sám a na REGZEL profilu
+      nezávisí, proto stojí mimo společný skeleton.
+    -->
+    <PayrollDiscountIntentsPanel v-else-if="activeTab === 'discount_intents'" />
+
     <PayrollEldpPanel v-else-if="activeTab === 'eldp'" />
 
     <!--

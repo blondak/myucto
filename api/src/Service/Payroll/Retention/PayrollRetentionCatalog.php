@@ -360,7 +360,10 @@ final class PayrollRetentionCatalog
             'accounting_relevant' => true,
             'closing_agenda' => false,
             'employee_tables' => ['payroll_person_social_discount_claims'],
-            'employment_tables' => [],
+            // Oznámený záměr uplatňovat slevu (OZUSPOJ, § 23e) je doklad ke
+            // stanovení slevy stejně jako podklady podle § 23d odst. 1 a váže
+            // se na pracovní vztah, ze kterého se sleva uplatňuje.
+            'employment_tables' => ['payroll_discount_intents'],
             'note' => 'Věta druhá § 22c má vlastní předmět — doklady potřebné ke stanovení '
                 . 'SLEVY na pojistném (u nás nárok pracujícího důchodce a další režimy '
                 . 'podle § 7a zákona č. 589/1992 Sb.). Doklad ke slevě není záznamem pro '
