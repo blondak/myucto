@@ -15,9 +15,11 @@
  * rozhodli", takže se ukazuje jako sloupec a jako dlaždice nad tabulkou,
  * ne jako poznámka schovaná v rozbaleném detailu.
  *
- * Nic se odsud nemaže a ani nenastavuje. Uplynulá lhůta je konec povinnosti
- * uchovávat, ne příkaz ke skartaci; výmaz je samostatný návrh ke schválení
- * (oprávnění `payroll.erasure`) a stránka o něm jen referuje.
+ * Nic se odsud NEMAŽE. Nastavit jde ale dvojí, protože obojí je vstup výpočtu
+ * a bez UI se dalo změnit jen přes API: ODCHYLKA FIRMY od katalogové lhůty
+ * (jen nahoru — zkrácení odmítá doména, ne formulář) a ZADRŽENÍ VÝMAZU konkrétní
+ * osoby. Samotný výmaz je samostatný návrh ke schválení na vlastní obrazovce
+ * (oprávnění `payroll.erasure`); stránka na ni odkazuje a referuje o dopadu.
  *
  * Filtrování i řazení běží na klientovi nad celým katalogem (deset kategorií),
  * takže se nestránkuje vůbec — půlka na klientovi a půlka na serveru by
@@ -27,16 +29,22 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   payrollRetentionApi,
+  PAYROLL_RETENTION_HOLD_REASONS,
   type PayrollRetentionCategory,
   type PayrollRetentionPolicy,
   type PayrollRetentionAssessment,
+  type PayrollRetentionAssessmentItem,
   type PayrollRetentionBlock,
+  type PayrollRetentionHold,
+  type PayrollRetentionHoldReason,
   type RetentionOrigin,
 } from '@/api/payrollRetention'
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
+import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import Modal from '@/components/ui/Modal.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
@@ -44,6 +52,10 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
+const toast = useToast()
+
+/** Odchylku i zadržení pouští TÁŽ brána jako API (`payroll.retention` zápis). */
+const canWrite = computed(() => auth.canWrite('payroll.retention'))
 
 const categories = ref<PayrollRetentionCategory[]>([])
 const policies = ref<PayrollRetentionPolicy[]>([])
@@ -125,9 +137,24 @@ async function loadAssessment() {
   }
 }
 
+// ── Zadržení výmazu (§ 32 ZoÚ + mzdové důvody) ──────────────────────────────
+const holds = ref<PayrollRetentionHold[]>([])
+const holdsIncludeReleased = ref(false)
+const holdsError = ref('')
+
+async function loadHolds() {
+  holdsError.value = ''
+  try {
+    holds.value = await payrollRetentionApi.holds(holdsIncludeReleased.value)
+  } catch (e) {
+    holdsError.value = apiErrorMessage(e)
+  }
+}
+
 function reloadAll() {
   void load()
   void loadAssessment()
+  void loadHolds()
 }
 
 const policyByCategory = computed<Record<string, PayrollRetentionPolicy>>(() => {
@@ -233,6 +260,161 @@ const blockCounts = computed<Record<string, number>>(() => {
   return out
 })
 
+/**
+ * Osoby, kterým lhůta uplynula a nic je nedrží — JMENOVITĚ.
+ *
+ * Souhrn „3 osoby k výmazu" se nedá zkontrolovat: schvalující nevidí, jestli
+ * mezi nimi není někdo, o kom ví něco, co v datech není. Proto seznam jmen,
+ * ne jen číslo.
+ */
+const proposablePeople = computed<PayrollRetentionAssessmentItem[]>(() =>
+  (assessment.value?.items ?? []).filter(i => i.proposable),
+)
+
+/** Osoby držené zadržením — druhá polovina téhož: kdo je zadržený a proč. */
+const heldPeople = computed<PayrollRetentionAssessmentItem[]>(() =>
+  (assessment.value?.items ?? []).filter(i => i.blocked_by === 'legal_hold'),
+)
+
+// ── Odchylka firmy od katalogové lhůty ──────────────────────────────────────
+// Jeden formulář = jedno Uložit. Zkrácení pod zákonné minimum se tu ani
+// nevaliduje: je to doménová invarianta, kterou drží server, a duplikát
+// pravidla ve formuláři by se s ní časem rozešel. Formulář jen nenabídne
+// vlastní lhůtu tam, kde ji katalog má — server by ji stejně odmítl.
+const policyForm = reactive({
+  open: false,
+  saving: false,
+  category: '',
+  label: '',
+  determined: true,
+  statutoryYears: null as number | null,
+  extraYears: 0,
+  overrideYears: null as number | null,
+  reason: '',
+  existing: false,
+})
+
+function openPolicy(c: PayrollRetentionCategory) {
+  const p = policyByCategory.value[c.category]
+  policyForm.open = true
+  policyForm.saving = false
+  policyForm.category = c.category
+  policyForm.label = c.label
+  policyForm.determined = c.retention_years !== null
+  policyForm.statutoryYears = c.retention_years
+  policyForm.extraYears = p?.extra_years ?? 0
+  policyForm.overrideYears = p?.override_years ?? null
+  policyForm.reason = p?.reason ?? ''
+  policyForm.existing = p !== undefined
+}
+
+async function savePolicy() {
+  policyForm.saving = true
+  try {
+    await payrollRetentionApi.putPolicy(policyForm.category, {
+      extra_years: Number(policyForm.extraYears) || 0,
+      override_years: policyForm.determined ? null : policyForm.overrideYears,
+      reason: policyForm.reason,
+    })
+    policyForm.open = false
+    toast.success(t('payroll.retention.policy_saved'))
+    await load()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    policyForm.saving = false
+  }
+}
+
+async function deletePolicy() {
+  if (!confirm(t('payroll.retention.policy_delete_confirm'))) return
+  policyForm.saving = true
+  try {
+    await payrollRetentionApi.deletePolicy(policyForm.category)
+    policyForm.open = false
+    toast.success(t('payroll.retention.policy_deleted'))
+    await load()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    policyForm.saving = false
+  }
+}
+
+// ── Zadržení konkrétní osoby ────────────────────────────────────────────────
+const holdForm = reactive({
+  open: false,
+  saving: false,
+  employeeId: 0,
+  reason: 'enforcement' as PayrollRetentionHoldReason,
+  description: '',
+  placedOn: new Date().toISOString().slice(0, 10),
+})
+
+function openHold(employeeId = 0) {
+  holdForm.open = true
+  holdForm.saving = false
+  holdForm.employeeId = employeeId
+  holdForm.reason = 'enforcement'
+  holdForm.description = ''
+  holdForm.placedOn = new Date().toISOString().slice(0, 10)
+}
+
+async function saveHold() {
+  if (holdForm.employeeId <= 0) {
+    toast.error(t('payroll.retention.hold_person_required'))
+    return
+  }
+  if (holdForm.description.trim() === '') {
+    toast.error(t('payroll.retention.hold_description_required'))
+    return
+  }
+  holdForm.saving = true
+  try {
+    await payrollRetentionApi.placeHold({
+      employee_id: holdForm.employeeId,
+      reason: holdForm.reason,
+      description: holdForm.description.trim(),
+      placed_on: holdForm.placedOn,
+    })
+    holdForm.open = false
+    toast.success(t('payroll.retention.hold_placed'))
+    await Promise.all([loadHolds(), loadAssessment()])
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    holdForm.saving = false
+  }
+}
+
+/**
+ * Uvolnění výmaz zase PUSTÍ — proto se potvrzuje. Není to úklid seznamu,
+ * ale rozhodnutí, že důvod zadržení pominul.
+ */
+async function releaseHold(hold: PayrollRetentionHold) {
+  if (!confirm(t('payroll.retention.hold_release_confirm'))) return
+  try {
+    await payrollRetentionApi.releaseHold(hold.id)
+    toast.success(t('payroll.retention.hold_released'))
+    await Promise.all([loadHolds(), loadAssessment()])
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  }
+}
+
+async function toggleReleased() {
+  holdsIncludeReleased.value = !holdsIncludeReleased.value
+  await loadHolds()
+}
+
+/** Osoby do výběru zadržení — z posudku, ne ze seznamu osob: posudek stojí
+ *  na `payroll.retention`, takže výběr nevyžaduje druhé oprávnění. */
+const holdCandidates = computed<PayrollRetentionAssessmentItem[]>(() =>
+  [...(assessment.value?.items ?? [])].sort(
+    (a, b) => a.full_name.localeCompare(b.full_name, locale.value === 'en' ? 'en' : 'cs'),
+  ),
+)
+
 function fmtDate(iso: string | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -251,10 +433,31 @@ const actions = computed<ActionItem[]>(() => [
     run: reloadAll,
   },
   {
+    key: 'erasure',
+    label: t('nav.payroll_erasure'),
+    icon: 'trash',
+    tier: 'secondary',
+    variant: 'danger',
+    show: auth.canRead('payroll.erasure'),
+    title: t('payroll.retention.action_erasure_hint'),
+    to: '/payroll/erasure',
+  },
+  {
+    key: 'hold',
+    label: t('payroll.retention.action_hold'),
+    icon: 'lock',
+    tier: 'secondary',
+    variant: 'warning',
+    show: canWrite.value,
+    disabled: assessmentLoading.value,
+    title: t('payroll.retention.action_hold_hint'),
+    run: () => openHold(),
+  },
+  {
     key: 'people',
     label: t('nav.payroll_people'),
     icon: 'user',
-    tier: 'secondary',
+    tier: 'overflow',
     variant: 'neutral',
     show: auth.canRead('payroll'),
     to: '/payroll/people',
@@ -411,6 +614,7 @@ onMounted(reloadAll)
               <th v-if="tbl.isVisible('erasure')" class="px-3 py-2 text-left text-xs uppercase tracking-wide font-medium text-neutral-500">{{ t('payroll.retention.col.erasure') }}</th>
               <th v-if="tbl.isVisible('tables')" class="px-3 py-2 text-left text-xs uppercase tracking-wide font-medium text-neutral-500">{{ t('payroll.retention.col.tables') }}</th>
               <th v-if="tbl.isVisible('accounting')" class="px-3 py-2 text-left text-xs uppercase tracking-wide font-medium text-neutral-500">{{ t('payroll.retention.col.accounting') }}</th>
+              <th v-if="canWrite" class="px-3 py-2 w-28"></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
@@ -461,9 +665,17 @@ onMounted(reloadAll)
                 <td v-if="tbl.isVisible('accounting')" class="px-3 py-2 text-xs">
                   {{ c.accounting_relevant ? t('common.yes') : t('common.no') }}
                 </td>
+                <td v-if="canWrite" class="px-3 py-2 text-right">
+                  <button
+                    type="button"
+                    class="cursor-pointer whitespace-nowrap text-[11px] text-primary-700 hover:underline"
+                    :data-test="`retention-policy-edit-${c.category}`"
+                    @click.stop="openPolicy(c)"
+                  >{{ t('payroll.retention.action_policy') }}</button>
+                </td>
               </tr>
               <tr v-if="expanded === c.category">
-                <td :colspan="10" :data-test="`retention-detail-${c.category}`" class="px-4 py-3 bg-neutral-50/60 text-xs text-neutral-700 space-y-2">
+                <td :colspan="11" :data-test="`retention-detail-${c.category}`" class="px-4 py-3 bg-neutral-50/60 text-xs text-neutral-700 space-y-2">
                   <div>
                     <span class="font-semibold">{{ t('payroll.retention.detail_act') }}:</span> {{ c.act }}
                   </div>
@@ -579,7 +791,287 @@ onMounted(reloadAll)
             <span class="font-mono shrink-0" :data-test="`retention-block-count-${b}`" :class="blockCounts[b] ? '' : 'text-neutral-400'">{{ blockCounts[b] }}</span>
           </li>
         </ul>
+
+        <!-- Souhrn nestačí: podle čísla „3 osoby" se nevratný úkon odklepnout
+             nedá. Kdo přesně je na řadě a koho drží zadržení, musí být vidět. -->
+        <div v-if="proposablePeople.length > 0" data-test="retention-proposable-people">
+          <div class="text-xs font-semibold text-neutral-600 mb-1">
+            {{ t('payroll.retention.proposable_people') }}
+          </div>
+          <ul class="text-xs divide-y divide-neutral-100 border border-warning-500/40 rounded-md">
+            <li
+              v-for="p in proposablePeople"
+              :key="p.employee_id"
+              :data-test="`retention-proposable-${p.employee_id}`"
+              class="flex items-center justify-between gap-3 px-3 py-1.5 flex-wrap"
+            >
+              <span>
+                <span class="font-medium">{{ p.full_name }}</span>
+                <span class="text-neutral-500">
+                  — {{ t(`payroll.retention.action_kind.${p.action ?? 'anonymize'}`) }},
+                  {{ t('payroll.retention.retained_until_label') }} {{ fmtDate(p.retained_until) }}
+                </span>
+              </span>
+              <button
+                v-if="canWrite"
+                type="button"
+                class="cursor-pointer whitespace-nowrap text-[11px] text-warning-700 hover:underline"
+                @click="openHold(p.employee_id)"
+              >{{ t('payroll.retention.action_hold_person') }}</button>
+            </li>
+          </ul>
+        </div>
+
+        <div v-if="heldPeople.length > 0" data-test="retention-held-people" class="text-xs text-neutral-600">
+          <span class="font-semibold">{{ t('payroll.retention.held_people') }}:</span>
+          {{ heldPeople.map(p => p.full_name).join(', ') }}
+        </div>
       </div>
     </div>
+
+    <!-- Zadržení výmazu. Sdílí tabulku s účetní stranou (§ 32 ZoÚ), ale rozsah
+         je osoba — firemní zadržení se zadává v Účetnictví a padá i sem. -->
+    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mt-4">
+      <div class="px-4 py-2 bg-neutral-50 border-b border-neutral-200 flex items-center justify-between gap-2 flex-wrap">
+        <h2 class="text-sm font-semibold">{{ t('payroll.retention.holds_title') }}</h2>
+        <div class="flex items-center gap-3 flex-wrap">
+          <label class="flex items-center gap-1.5 text-xs text-neutral-500 cursor-pointer">
+            <input
+              type="checkbox"
+              data-test="retention-holds-released"
+              :checked="holdsIncludeReleased"
+              class="h-3.5 w-3.5 rounded border-neutral-300 text-primary-600"
+              @change="toggleReleased"
+            />
+            {{ t('payroll.retention.show_released') }}
+          </label>
+          <button
+            v-if="canWrite"
+            type="button"
+            data-test="retention-hold-new"
+            class="cursor-pointer whitespace-nowrap text-xs text-warning-700 hover:underline"
+            @click="openHold()"
+          >{{ t('payroll.retention.action_hold') }}</button>
+        </div>
+      </div>
+
+      <div v-if="holdsError" class="px-3 py-2 bg-danger-50 border-b border-danger-500/40 text-xs text-danger-600">
+        {{ holdsError }}
+      </div>
+
+      <EmptyState
+        v-if="holds.length === 0"
+        dense
+        accent="neutral"
+        icon="lock"
+        :title="t('payroll.retention.no_holds')"
+        :message="t('payroll.retention.no_holds_hint')"
+      />
+      <div v-else class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="bg-neutral-50 text-neutral-500">
+            <tr>
+              <th class="px-3 py-2 text-left font-medium">{{ t('payroll.retention.col.person') }}</th>
+              <th class="px-3 py-2 text-left font-medium">{{ t('payroll.retention.col.reason') }}</th>
+              <th class="px-3 py-2 text-left font-medium">{{ t('payroll.retention.col.description') }}</th>
+              <th class="px-3 py-2 text-left font-medium whitespace-nowrap">{{ t('payroll.retention.col.placed_on') }}</th>
+              <th class="px-3 py-2 text-left font-medium whitespace-nowrap">{{ t('payroll.retention.col.released_on') }}</th>
+              <th class="px-3 py-2 w-24"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-neutral-100">
+            <tr v-for="h in holds" :key="h.id" :data-test="`retention-hold-${h.id}`" :class="{ 'opacity-60': h.released_on }">
+              <td class="px-3 py-2 font-medium">
+                {{ h.employee_full_name || t('payroll.retention.person_gone') }}
+              </td>
+              <td class="px-3 py-2">
+                <span class="inline-block text-[10px] font-bold px-1.5 py-px rounded bg-warning-100 text-warning-700 whitespace-nowrap">
+                  {{ t(`payroll.retention.hold_reason.${h.reason}`) }}
+                </span>
+              </td>
+              <td class="px-3 py-2">{{ h.description }}</td>
+              <td class="px-3 py-2 font-mono whitespace-nowrap">{{ fmtDate(h.placed_on) }}</td>
+              <td class="px-3 py-2 font-mono whitespace-nowrap">{{ fmtDate(h.released_on) }}</td>
+              <td class="px-3 py-2 text-right">
+                <button
+                  v-if="canWrite && !h.released_on"
+                  type="button"
+                  :data-test="`retention-hold-release-${h.id}`"
+                  class="cursor-pointer whitespace-nowrap text-[11px] text-danger-600 hover:underline"
+                  @click="releaseHold(h)"
+                >{{ t('payroll.retention.action_release') }}</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Odchylka firmy: jeden formulář, jedno Uložit. -->
+    <Modal
+      v-if="policyForm.open"
+      :title="t('payroll.retention.policy_title', { label: policyForm.label })"
+      width-class="max-w-lg"
+      @close="policyForm.open = false"
+    >
+      <div class="space-y-3 text-sm">
+        <p class="text-xs text-neutral-500">{{ t('payroll.retention.policy_hint') }}</p>
+
+        <div v-if="policyForm.determined" class="bg-neutral-50 border border-neutral-200 rounded-md p-2 text-xs">
+          {{ t('payroll.retention.policy_statutory', { years: policyForm.statutoryYears }) }}
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1" for="policy-extra">
+            {{ t('payroll.retention.policy_extra_years') }}
+          </label>
+          <input
+            id="policy-extra"
+            v-model.number="policyForm.extraYears"
+            type="number"
+            min="0"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
+          />
+        </div>
+
+        <div v-if="!policyForm.determined">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" for="policy-override">
+            {{ t('payroll.retention.policy_override_years') }}
+          </label>
+          <input
+            id="policy-override"
+            v-model.number="policyForm.overrideYears"
+            type="number"
+            min="1"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
+          />
+          <p class="text-[11px] text-neutral-500 mt-1">{{ t('payroll.retention.policy_override_hint') }}</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1" for="policy-reason">
+            {{ t('payroll.retention.policy_reason') }}
+          </label>
+          <textarea
+            id="policy-reason"
+            v-model="policyForm.reason"
+            rows="3"
+            maxlength="500"
+            :placeholder="t('payroll.retention.policy_reason_placeholder')"
+            class="w-full px-2 py-1.5 border border-neutral-300 rounded-md text-sm bg-surface"
+          ></textarea>
+        </div>
+
+        <div class="flex justify-between gap-2 pt-2 flex-wrap">
+          <button
+            v-if="policyForm.existing"
+            type="button"
+            data-test="retention-policy-delete"
+            class="cursor-pointer h-9 px-4 border border-danger-500/50 text-danger-500 rounded-md text-sm hover:bg-danger-50"
+            :disabled="policyForm.saving"
+            @click="deletePolicy"
+          >{{ t('payroll.retention.policy_delete') }}</button>
+          <span v-else></span>
+          <div class="flex gap-2 flex-wrap">
+            <button
+              type="button"
+              class="cursor-pointer h-9 px-4 border border-neutral-300 rounded-md text-sm"
+              @click="policyForm.open = false"
+            >{{ t('common.cancel') }}</button>
+            <button
+              type="button"
+              data-test="retention-policy-save"
+              class="cursor-pointer h-9 px-4 bg-primary-600 hover:bg-primary-700 text-white rounded-md text-sm disabled:opacity-50"
+              :disabled="policyForm.saving"
+              @click="savePolicy"
+            >{{ policyForm.saving ? t('common.saving') : t('common.save') }}</button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+
+    <!-- Zadržení osoby -->
+    <Modal
+      v-if="holdForm.open"
+      :title="t('payroll.retention.hold_title')"
+      width-class="max-w-lg"
+      @close="holdForm.open = false"
+    >
+      <div class="space-y-3 text-sm">
+        <p class="text-xs text-neutral-500">{{ t('payroll.retention.hold_hint') }}</p>
+
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1" for="hold-person">
+            {{ t('payroll.retention.col.person') }}
+          </label>
+          <select
+            id="hold-person"
+            v-model.number="holdForm.employeeId"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
+          >
+            <option :value="0">{{ t('payroll.retention.hold_person_pick') }}</option>
+            <option v-for="p in holdCandidates" :key="p.employee_id" :value="p.employee_id">
+              {{ p.full_name }}
+            </option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1" for="hold-reason">
+            {{ t('payroll.retention.col.reason') }}
+          </label>
+          <select
+            id="hold-reason"
+            v-model="holdForm.reason"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
+          >
+            <option v-for="r in PAYROLL_RETENTION_HOLD_REASONS" :key="r" :value="r">
+              {{ t(`payroll.retention.hold_reason.${r}`) }}
+            </option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1" for="hold-description">
+            {{ t('payroll.retention.col.description') }}
+          </label>
+          <textarea
+            id="hold-description"
+            v-model="holdForm.description"
+            rows="2"
+            maxlength="255"
+            :placeholder="t('payroll.retention.hold_description_placeholder')"
+            class="w-full px-2 py-1.5 border border-neutral-300 rounded-md text-sm bg-surface"
+          ></textarea>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-neutral-500 mb-1" for="hold-placed">
+            {{ t('payroll.retention.col.placed_on') }}
+          </label>
+          <input
+            id="hold-placed"
+            v-model="holdForm.placedOn"
+            type="date"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
+          />
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2 flex-wrap">
+          <button
+            type="button"
+            class="cursor-pointer h-9 px-4 border border-neutral-300 rounded-md text-sm"
+            @click="holdForm.open = false"
+          >{{ t('common.cancel') }}</button>
+          <button
+            type="button"
+            data-test="retention-hold-save"
+            class="cursor-pointer h-9 px-4 bg-warning-500 hover:bg-warning-600 text-white rounded-md text-sm disabled:opacity-50"
+            :disabled="holdForm.saving"
+            @click="saveHold"
+          >{{ holdForm.saving ? t('common.saving') : t('payroll.retention.action_hold') }}</button>
+        </div>
+      </div>
+    </Modal>
   </div>
 </template>
