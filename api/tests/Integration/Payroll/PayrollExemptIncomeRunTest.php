@@ -230,8 +230,14 @@ final class PayrollExemptIncomeRunTest extends TestCase
         );
         // Do pojistného vstupuje celé plnění — § 6 odst. 9 ZDP je osvobození od
         // DANĚ, o vyměřovacích základech rozhoduje klasifikace složky zvlášť.
+        //
+        // Limit koše je půlka průměrné mzdy, tedy 24 483,50 Kč — základ z něj vyjde
+        // na padesátník. § 5d zák. č. 589/1992 Sb. ale žádá vyměřovací základ
+        // v celých korunách nahoru, takže se zaokrouhlí. Daňová strana výše
+        // zaokrouhlená není: § 5d mluví o vyměřovacím základu, ne o základu daně.
+        $rawSocialBase = self::REMUNERATION_MINOR + self::LEISURE_LIMIT_MINOR + $over;
         self::assertSame(
-            self::REMUNERATION_MINOR + self::LEISURE_LIMIT_MINOR + $over,
+            (int) (ceil($rawSocialBase / 100) * 100),
             $person['social_insurance']['relationships'][0]
                 ['assessment_base_minor_units'],
         );
