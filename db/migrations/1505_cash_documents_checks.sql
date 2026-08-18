@@ -6,14 +6,18 @@
 -- ruční SQL zásah při opravě dat). Znaménko pohybu nese `doc_type` (in/out),
 -- nikdy částka; záporné `total_amount` by se v knize i v deníku sečetlo obráceně.
 --
--- CHECK na kombinaci `purpose` × `doc_type` (zrcadlo `PURPOSE_MATRIX`) tu ZÁMĚRNĚ
--- NENÍ. Matice ve službě je přísnější než zbytek systému: peněžní deník počítá
--- s VRATKOU úhrady přijaté faktury, tedy s `doc_type='in'` a
--- `purpose='purchase_payment'` (viz `TaxExpenseAllocationCalculator` a
--- `CashJournalScenariosTest::testPurchaseRefundDecreasesTaxExpense`). Constraint
--- podle matice by takový řádek zakázal na úrovni DB a zavřel dveře scénáři, který
--- daňová evidence umí vyhodnotit. Buď se sjednotí matice se službou, nebo tenhle
--- CHECK nemá vzniknout — hádat mezi tím na úrovni schématu je to horší z obojího.
+-- CHECK na kombinaci `purpose` × `doc_type` (zrcadlo `PURPOSE_MATRIX`) tu NENÍ.
+-- Rozpor, kvůli kterému tenhle odstavec vznikl, je mezitím vyřešený: matice
+-- povoluje `doc_type='in'` u `purpose='purchase_payment'` (VRATKA úhrady přijaté
+-- faktury), tedy přesně scénář, se kterým peněžní deník odjakživa počítal
+-- (`TaxExpenseAllocationCalculator`, `CashJournalScenariosTest::testPurchaseRefundDecreasesTaxExpense`)
+-- a který teď jde vystavit i z aplikace.
+--
+-- Constraint přesto nepřidáváme: matice je součást účetní logiky, která se s každým
+-- novým účelem dokladu mění (a v cizí měně se navíc zužuje), takže její kopie ve
+-- schématu by se rozešla při první změně — a rozejít se smí jen jedním směrem:
+-- DB by tiše zakázala doklad, který služba považuje za platný. Kladná částka je
+-- naopak invariant, který se nemění, proto ji constraint hlídat smí.
 --
 -- Idempotence: MariaDB neumí `ADD CONSTRAINT IF NOT EXISTS` u CHECK, takže se
 -- constraint nejdřív zahodí (`DROP CONSTRAINT IF EXISTS`) a založí znovu.

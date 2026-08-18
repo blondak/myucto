@@ -118,7 +118,7 @@ Nabídka účelů se liší podle typu dokladu:
 
 | Typ | Dostupné účely |
 |---|---|
-| Příjem (PPD) | Prodej (tržba), Úhrada faktury, Převod, Ostatní |
+| Příjem (PPD) | Prodej (tržba), Úhrada faktury, Úhrada přijaté faktury (= **vratka**), Převod, Ostatní |
 | Výdej (VPD) | Nákup, Úhrada přijaté faktury, Převod, Ostatní |
 
 U **valutové pokladny** jsou záměrně dostupné jen účely, které lze bezpečně
@@ -365,7 +365,8 @@ dokladu:
 | Prodej (PPD) | MD Pokladna (211) / D Tržby (602) + DPH na **343.200** (výstup) |
 | Nákup (VPD) | MD Náklad (501) + DPH na **343.100** (vstup) / D Pokladna (211) |
 | Úhrada vydané faktury | MD Pokladna (211) / D Pohledávky (311) |
-| Úhrada přijaté faktury | MD Závazky (321) / D Pokladna (211) |
+| Úhrada přijaté faktury (VPD) | MD Závazky (321) / D Pokladna (211) |
+| Vratka úhrady přijaté faktury (PPD) | MD Pokladna (211) / D Závazky (321) |
 | Převod — příjem z banky | MD Pokladna (211) / D Převody mezi účty (261) |
 | Převod — odvod do banky | MD Převody mezi účty (261) / D Pokladna (211) |
 | Ostatní | volný protiúčet podle zvoleného účtu |
@@ -388,6 +389,14 @@ Nákup a Ostatní se zaúčtují automaticky stejně jako korunové doklady, vč
 rozpadu DPH; nejde o pouhý evidenční záznam čekající na ruční deník.
 
 > [!NOTE]
+> **Vratka úhrady.** Účel **Úhrada přijaté faktury** na *příjmovém* dokladu (PPD) znamená,
+> že dodavatel vrací hotovost — za vrácené zboží nebo přeplatek. Účtuje se opačným směrem
+> (MD 211 / D 321, u zálohové faktury MD 211 / D 314), vrací se **libovolná část** (na rozdíl
+> od úhrady, která musí být v plné výši) a nesmí přesáhnout to, co je na faktuře zaplaceno —
+> jinak by na účtu 321 vznikl debetní zůstatek. Našeptávač v tomhle režimu nabízí faktury,
+> na kterých už úhrada visí, ne ty nezaplacené. Pokud vratka odkryje neuhrazenou část,
+> faktura se vrátí ze stavu *uhrazena*; v peněžním deníku vratka **snižuje daňový výdaj**.
+
 > **Zálohová přijatá faktura.** Pokud u účelu **Úhrada přijaté faktury** vybereš zálohovou
 > (proforma) přijatou fakturu, zaúčtuje se místo saldokonta 321 jako **poskytnutá záloha —
 > MD 314 Poskytnuté zálohy / D 211 Pokladna**. Když později zaúčtuješ vyúčtovací fakturu
