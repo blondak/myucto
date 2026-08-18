@@ -273,31 +273,60 @@ final class CashJournalDedupFxTest extends CashJournalTestCase
         self::assertSame(0, $this->countRows($res, 'purchase_invoice'), 'Stornovaná PF se v deníku neobjeví.');
     }
 
-    // ── M2: cash VAT base FX-converted + remainder not lost ─────────────────
+    // ── M2/C-1: cash amounts are already CZK in DB — no second FX conversion ─
 
-    /** M2: EUR hotovostní prodej (kurz 24,50) → základ přepočten do CZK, nic nezmizí. */
+    /**
+     * M2 + C-1 (audit pokladny 2026-08): EUR hotovostní prodej 1 000 EUR, kurz 24,50.
+     * V DB je doklad uložen UŽ V CZK — `total_amount` = CZK ekvivalent a řádky DPH
+     * převedl `CashDocumentService::convertVatLinesToCzk()` (migrace 1114). Deník
+     * proto NESMÍ kurzem násobit podruhé (dřív dával 24,5× nadhodnocený příjem).
+     */
     public function testForeignCashSaleVatBaseInCzk(): void
     {
         $pdo = $this->db->pdo();
-        // EUR pokladní prodej: total 1 000 EUR, kurz 24,50; DPH základ 826,45 + DPH 173,55 (EUR).
+        // Tvar řádku přesně tak, jak ho ukládá CashDocumentService: CZK základ 20 248,03
+        // + CZK daň 4 251,98 = total_amount 24 500,01 CZK, amount_foreign 1 000 EUR.
         $pdo->prepare(
             "INSERT INTO cash_documents
                 (supplier_id, register_id, doc_type, purpose, doc_number, issue_date, partner_name,
-                 description, vat_mode, total_amount, currency_code, fx_rate, status, created_by)
-             VALUES (?, ?, 'in', 'sale', ?, ?, 'Zákazník', 'EUR prodej', 'vat', 1000.00, 'EUR', 24.50, 'posted', ?)"
+                 description, vat_mode, total_amount, currency_code, fx_rate, amount_foreign, status, created_by)
+             VALUES (?, ?, 'in', 'sale', ?, ?, 'Zákazník', 'EUR prodej', 'vat', 24500.01, 'EUR', 24.50, 1000.00, 'posted', ?)"
         )->execute([$this->supplierId, $this->registerId, self::nextDocNumber('PPD-EUR'), self::YEAR . '-06-15', $this->userId]);
         $cd = (int) $pdo->lastInsertId();
         $pdo->prepare(
             'INSERT INTO cash_document_vat_lines (cash_document_id, vat_rate, base_amount, vat_amount)
-             VALUES (?, 21.00, 826.45, 173.55)'
+             VALUES (?, 21.00, 20248.03, 4251.98)'
         )->execute([$cd]);
 
         $res = $this->fullYear($this->supplierId);
 
-        self::assertEqualsWithDelta(20248.03, $res['totals']['prijem_danovy'], 0.05, 'Základ 826,45 × 24,50 ≈ 20 248 CZK.');
-        // Nic nezmizí: základ + nedaňová (DPH) složka = celé brutto v CZK (1 000 × 24,50 = 24 500).
+        self::assertEqualsWithDelta(20248.03, $res['totals']['prijem_danovy'], 0.05,
+            'C-1: základ se bere z DB v CZK 1:1, NESMÍ se znovu násobit kurzem (dalo by ≈ 496 077 Kč).');
+        // Nic nezmizí: základ + nedaňová (DPH) složka = celé brutto v CZK.
         $sum = $res['totals']['prijem_danovy'] + $res['totals']['prijem_nedanovy'];
-        self::assertEqualsWithDelta(24500.0, $sum, 0.02, 'Základ + zbytek = 24 500 CZK (nic nevymizí, M2).');
+        self::assertEqualsWithDelta(24500.01, $sum, 0.02, 'Základ + zbytek = celé CZK brutto dokladu (M2).');
+    }
+
+    /**
+     * C-1: valutový hotovostní VÝDAJ bez DPH rozpadu (neplátcovská větev i větev
+     * `TaxExpenseAllocationCalculator::forCashDocument`) — daňový výdaj = `total_amount`
+     * v CZK, bez druhého přepočtu kurzem.
+     */
+    public function testForeignCashPurchaseExpenseNotConvertedTwice(): void
+    {
+        $pdo = $this->db->pdo();
+        // 400 EUR × 24,50 = 9 800 CZK; režim 'none' → žádné řádky DPH.
+        $pdo->prepare(
+            "INSERT INTO cash_documents
+                (supplier_id, register_id, doc_type, purpose, doc_number, issue_date, partner_name,
+                 description, vat_mode, total_amount, currency_code, fx_rate, amount_foreign, status, created_by)
+             VALUES (?, ?, 'out', 'purchase', ?, ?, 'Dodavatel', 'EUR nákup', 'none', 9800.00, 'EUR', 24.50, 400.00, 'posted', ?)"
+        )->execute([$this->supplierId, $this->registerId, self::nextDocNumber('VPD-EUR'), self::YEAR . '-06-16', $this->userId]);
+
+        $res = $this->fullYear($this->supplierId);
+
+        self::assertEqualsWithDelta(9800.0, $res['totals']['vydaj_danovy'], 0.02,
+            'C-1: výdaj v CZK 1:1 z total_amount (dvojí přepočet by dal 240 100 Kč).');
     }
 
     // ── M3: bank-fee heuristic restricted to description ────────────────────
