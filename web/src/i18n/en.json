@@ -4973,6 +4973,7 @@
             "reversal_date_shifted": "The original period is locked, so the reversing entry is dated to the nearest open date — not to the original document date.",
             "negative_balance_after_reverse": "The cash register is negative after the reversal — check the subsequent documents.",
             "dic_missing_over_10k": "Sale above CZK 10,000 without a VAT No. — add the customer's VAT No. for Control Statement A.4.",
+            "dic_not_czech": "The partner VAT number is not in Czech format — only Czech VAT numbers belong in the control statement (A.4). Either fix it or leave the field empty (the document then falls into the A.5 summary).",
             "fx_rate_deviation": "The entered rate differs from the CNB daily rate — check the rate on the document."
         },
         "validation": {

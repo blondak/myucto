@@ -4973,6 +4973,7 @@
             "reversal_date_shifted": "Původní období je uzamčené, proto je protizápis datovaný do nejbližšího otevřeného data — ne dnem původního dokladu.",
             "negative_balance_after_reverse": "Po stornu je pokladna v mínusu — zkontrolujte následné doklady.",
             "dic_missing_over_10k": "Prodej nad 10 000 Kč bez DIČ — pro Kontrolní hlášení A.4 doplňte DIČ odběratele.",
+            "dic_not_czech": "DIČ protistrany není v českém tvaru — do kontrolního hlášení (A.4) patří jen české DIČ. Buď jej opravte, nebo pole nechte prázdné (doklad pak spadne do sumace A.5).",
             "fx_rate_deviation": "Zadaný kurz se liší od denního kurzu ČNB — zkontrolujte kurz na dokladu."
         },
         "validation": {

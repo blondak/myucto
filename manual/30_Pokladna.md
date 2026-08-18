@@ -168,6 +168,14 @@ DPH vynuceně vypnuté — u úhrady faktury DPH nese už samotná faktura). Po 
 > ručně podle CZK protihodnoty. U prodeje nad 10 000 Kč bez vyplněného DIČ partnera se zobrazí jen informativní
 > upozornění (nejde o blokaci) kvůli evidenci pro kontrolní hlášení.
 
+> [!NOTE]
+> **DIČ protistrany patří do kontrolního hlášení jen v českém tvaru.** Pokladní prodej se
+> zadanou českou sazbou DPH je tuzemské zdanitelné plnění (místo plnění je pult) — to platí
+> i ve valutové pokladně, protože cizí měna sama o sobě daňový režim nemění. Nad prahem
+> 10 000 Kč proto míří do oddílu A.4, kam patří výhradně české DIČ. Zadáte-li cizí VAT ID
+> (např. `DE123456789`), systém na to upozorní; buď je opravte, nebo pole nechte prázdné —
+> doklad pak spadne do sumačního oddílu A.5. Nejde o blokaci.
+
 ### 30.3.4 Částka, popis a náhled zaúčtování
 
 Povinná pole jsou **celková částka včetně DPH** (u úhrady přijaté faktury needitovatelná, viz
