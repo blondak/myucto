@@ -188,9 +188,10 @@ export const cashApi = {
    * prodej a DPH se vykáže dvakrát. Server se proto ptá o jeden řádek víc, než
    * kolik se zobrazí; přebytek se zahodí a jen se z něj pozná `truncated`.
    */
-  searchUnpaid: (kind: 'invoice' | 'purchase_invoice', q: string, limit = UNPAID_PAGE_SIZE) =>
+  /** `refundable` = vratka úhrady: nabídnou se faktury, na kterých už úhrada visí. */
+  searchUnpaid: (kind: 'invoice' | 'purchase_invoice', q: string, limit = UNPAID_PAGE_SIZE, refundable = false) =>
     api.get<UnpaidDocumentOption[]>('/accounting/cash-documents/unpaid',
-      { params: { kind, q, limit: limit + 1 } })
+      { params: { kind, q, limit: limit + 1, refundable: refundable ? 1 : undefined } })
       .then(r => ({ items: r.data.slice(0, limit), truncated: r.data.length > limit })),
 
   getBook: (registerId: number, params: CashBookFilters) =>

@@ -40,7 +40,10 @@ final class CashDocumentService
         'sale'             => ['in'],
         'purchase'         => ['out'],
         'invoice_payment'  => ['in'],
-        'purchase_payment' => ['out'],
+        // `in` = VRATKA úhrady (vrácené zboží, přeplatek): peněžní deník s ní počítá
+        // (snižuje daňový výdaj) a bez ní nemá vrácená hotovost jak vzniknout s vazbou
+        // na fakturu — jako „ostatní pohyb" by se párování ztratilo.
+        'purchase_payment' => ['out', 'in'],
         'transfer'         => ['in', 'out'],
         'other'            => ['in', 'out'],
     ];
@@ -475,7 +478,7 @@ final class CashDocumentService
      *
      * @return list<array<string,mixed>>
      */
-    public function searchUnpaid(int $supplierId, string $kind, string $q, int $limit = 20): array
+    public function searchUnpaid(int $supplierId, string $kind, string $q, int $limit = 20, bool $refundable = false): array
     {
         $limit = max(1, min(50, $limit));
         $like = '%' . addcslashes(trim($q), '%_\\') . '%';
@@ -526,12 +529,31 @@ final class CashDocumentService
         }
 
         if ($kind === 'purchase_invoice') {
+            // Vratka úhrady míří na fakturu, která JE zaplacená — běžný filtr „zbývá
+            // uhradit" by ji vyfiltroval. Pro vratku se proto nabízí to, na čem už
+            // nějaká úhrada visí; H-1 filtr platí jen pro úhradu.
+            $settlementFilter = $refundable
+                ? "AND pi.amount_to_pay
+                          - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
+                                       WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id), 0)
+                          - COALESCE((SELECT SUM(CASE WHEN cd.doc_type = 'out' THEN cd.total_amount ELSE -cd.total_amount END)
+                                        FROM cash_documents cd
+                                       WHERE cd.supplier_id = pi.supplier_id AND cd.purchase_invoice_id = pi.id
+                                         AND cd.status = 'posted'), 0) < pi.amount_to_pay - 0.005"
+                : "AND pi.amount_to_pay
+                          - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
+                                       WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id), 0)
+                          - COALESCE((SELECT SUM(CASE WHEN cd.doc_type = 'out' THEN cd.total_amount ELSE -cd.total_amount END)
+                                        FROM cash_documents cd
+                                       WHERE cd.supplier_id = pi.supplier_id AND cd.purchase_invoice_id = pi.id
+                                         AND cd.status = 'posted'), 0) > 0.005";
             $stmt = $pdo->prepare(
                 "SELECT pi.id, pi.vendor_invoice_number, pi.varsymbol, pi.issue_date, pi.total_with_vat,
                         pi.amount_to_pay
                           - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
                                        WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id), 0)
-                          - COALESCE((SELECT SUM(cd.total_amount) FROM cash_documents cd
+                          - COALESCE((SELECT SUM(CASE WHEN cd.doc_type = 'out' THEN cd.total_amount ELSE -cd.total_amount END)
+                                        FROM cash_documents cd
                                        WHERE cd.supplier_id = pi.supplier_id AND cd.purchase_invoice_id = pi.id
                                          AND cd.status = 'posted'), 0) AS remaining,
                         pi.document_kind, cur.code AS currency, c.company_name AS partner_name
@@ -545,18 +567,10 @@ final class CashDocumentService
                   -- drží BankPostingService (protiúčet) i PurchaseInvoiceRepository
                   -- (příkaz k úhradě). Zálohová PF ('advance') se hotově platit SMÍ.
                   WHERE pi.supplier_id = ?
-                    AND pi.status IN ('received','booked')
+                    AND pi.status IN ('received','booked','paid')
                     AND pi.document_kind <> 'tax_document'
                     AND cur.code = 'CZK'
-                    -- H-1: doklad krytý zálohou (amount_to_pay = brutto − advance_paid_amount)
-                    -- nebo už uhrazený nemá co nabízet; zrcadlo guardu v
-                    -- PurchaseInvoiceRepository (příkaz k úhradě / unmatched).
-                    AND pi.amount_to_pay
-                          - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
-                                       WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id), 0)
-                          - COALESCE((SELECT SUM(cd.total_amount) FROM cash_documents cd
-                                       WHERE cd.supplier_id = pi.supplier_id AND cd.purchase_invoice_id = pi.id
-                                         AND cd.status = 'posted'), 0) > 0.005
+                    " . $settlementFilter . "
                     AND (pi.vendor_invoice_number LIKE ? OR pi.varsymbol LIKE ? OR c.company_name LIKE ?)
                   ORDER BY pi.issue_date DESC, pi.id DESC
                   LIMIT " . $limit
@@ -744,7 +758,24 @@ final class CashDocumentService
                 }
             }
         } elseif ($doc['purpose'] === 'purchase_payment' && $doc['purchase_invoice_id'] !== null) {
-            $this->purchaseInvoices->setStatus((int) $doc['purchase_invoice_id'], 'paid', $supplierId, (string) $doc['issue_date']);
+            $pfId = (int) $doc['purchase_invoice_id'];
+            if ($doc['doc_type'] === 'in') {
+                // Vratka: faktura přestala být uhrazená v plné výši. Doklad v tuhle chvíli
+                // ještě nemusí být v DB označený jako posted, takže se jeho vliv přičte
+                // ručně — zbytek bez něj PLUS vrácená částka.
+                $remaining = self::cents($this->purchaseRemaining($supplierId, $pfId, $id))
+                    + self::cents((float) $doc['total_amount']);
+                if ($remaining > 0) {
+                    $this->purchaseInvoices->setStatus(
+                        $pfId,
+                        $doc['journal_entry_id'] !== null ? 'booked' : 'received',
+                        $supplierId,
+                        null,
+                    );
+                }
+            } else {
+                $this->purchaseInvoices->setStatus($pfId, 'paid', $supplierId, (string) $doc['issue_date']);
+            }
         }
     }
 
@@ -967,18 +998,34 @@ final class CashDocumentService
                     . 'zálohovou fakturu (document_kind=advance), ke které DDKP patří.',
             );
         }
+        // Vratka úhrady (příjmový doklad) je týž zápis opačným směrem: peníze se vracejí
+        // do pokladny a závazek (resp. poskytnutá záloha) se o vrácenou částku obnoví.
+        $refund = $doc['doc_type'] === 'in';
+
         // Samostatný DDKP (bez zálohové faktury) vlastní úhradu naopak MÁ — platí se jako
         // záloha na 314. Zrcadlo bankovní větve.
         if ($kind === 'advance' || $kind === 'tax_document_standalone') {
-            return [
-                $this->line($this->ruleAccount($supplierId, 'advance.paid.payment', 'debit', '314'), 'debit', $total),
+            $advance = $this->ruleAccount($supplierId, 'advance.paid.payment', 'debit', '314');
+            return $refund
+                ? [
+                    $this->line($cashAccount, 'debit', $total),
+                    $this->line($advance, 'credit', $total),
+                ]
+                : [
+                    $this->line($advance, 'debit', $total),
+                    $this->line($cashAccount, 'credit', $total),
+                ];
+        }
+        $payable = $this->ruleAccount($supplierId, 'payment.payable.cash', 'debit', '321');
+        return $refund
+            ? [
+                $this->line($cashAccount, 'debit', $total),
+                $this->line($payable, 'credit', $total),
+            ]
+            : [
+                $this->line($payable, 'debit', $total),
                 $this->line($cashAccount, 'credit', $total),
             ];
-        }
-        return [
-            $this->line($this->ruleAccount($supplierId, 'payment.payable.cash', 'debit', '321'), 'debit', $total),
-            $this->line($cashAccount, 'credit', $total),
-        ];
     }
 
     private function invoiceType(int $supplierId, int $invoiceId): string
@@ -1131,7 +1178,11 @@ final class CashDocumentService
             if ($doc['purchase_invoice_id'] === null || $doc['invoice_id'] !== null) {
                 throw new CashException('validation', 'Úhrada PF vyžaduje právě jedno purchase_invoice_id.');
             }
-            $this->validatePurchasePayment($supplierId, (int) $doc['purchase_invoice_id'], (float) $doc['total_amount']);
+            if ($doc['doc_type'] === 'in') {
+                $this->validatePurchaseRefund($supplierId, (int) $doc['purchase_invoice_id'], (float) $doc['total_amount']);
+            } else {
+                $this->validatePurchasePayment($supplierId, (int) $doc['purchase_invoice_id'], (float) $doc['total_amount']);
+            }
         } else {
             if ($doc['invoice_id'] !== null || $doc['purchase_invoice_id'] !== null) {
                 throw new CashException('validation', 'Vazba na fakturu je povolena jen u úhrady FV/PF.');
@@ -1250,17 +1301,56 @@ final class CashDocumentService
      * `$excludeCashDocumentId` vynechá vlastní doklad, aby reconcile vyrovnání nepočítal
      * svou vlastní úhradu proti sobě.
      */
+    /**
+     * Vratka úhrady přijaté faktury (příjmový doklad s účelem `purchase_payment`):
+     * dodavatel vrací hotovost za vrácené zboží nebo přeplatek.
+     *
+     * Na rozdíl od úhrady se NEVYŽADUJE plná výše — vrací se, co se vrací — ale nesmí
+     * přesáhnout to, co je na faktuře zaplaceno. Jinak by na 321 vznikl debetní
+     * zůstatek a v peněžním deníku záporný výdaj bez podkladu.
+     */
+    private function validatePurchaseRefund(int $supplierId, int $purchaseInvoiceId, float $amount, ?int $excludeCashDocumentId = null): void
+    {
+        $this->lockRow('purchase_invoices', $purchaseInvoiceId, $supplierId);
+        $pf = $this->purchaseInvoices->find($purchaseInvoiceId, $supplierId);
+        if ($pf === null) {
+            throw new CashException('invoice_not_found', 'Přijatá faktura nenalezena.', 404);
+        }
+        if ((string) $pf['currency'] !== 'CZK') {
+            throw new CashException('foreign_currency_invoice', 'Úhrada cizoměnové faktury z pokladny zatím není podporována.');
+        }
+
+        $paid = self::cents((float) $pf['amount_to_pay'])
+            - self::cents($this->purchaseRemaining($supplierId, $purchaseInvoiceId, $excludeCashDocumentId));
+        if ($paid <= 0) {
+            throw new CashException(
+                'nothing_to_refund',
+                'Na přijaté faktuře není co vracet — žádná úhrada k ní zatím není zaúčtovaná.',
+            );
+        }
+        if (self::cents($amount) > $paid) {
+            throw new CashException(
+                'refund_exceeds_paid',
+                sprintf('Vratka nesmí přesáhnout uhrazenou částku (%.2f Kč).', $paid / 100),
+                422,
+                ['paid' => round($paid / 100, 2)],
+            );
+        }
+    }
+
     public function purchaseRemaining(int $supplierId, int $purchaseInvoiceId, ?int $excludeCashDocumentId = null): float
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT pi.amount_to_pay
+            "SELECT pi.amount_to_pay
                     - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
                                  WHERE pm.supplier_id = pi.supplier_id AND pm.purchase_invoice_id = pi.id), 0)
-                    - COALESCE((SELECT SUM(cd.total_amount) FROM cash_documents cd
+                    -- Vratka (doc_type='in') zbytek k úhradě naopak ZVYŠUJE.
+                    - COALESCE((SELECT SUM(CASE WHEN cd.doc_type = 'out' THEN cd.total_amount ELSE -cd.total_amount END)
+                                  FROM cash_documents cd
                                  WHERE cd.supplier_id = pi.supplier_id AND cd.purchase_invoice_id = pi.id
                                    AND cd.status = ? AND cd.id <> ?), 0) AS remaining
                FROM purchase_invoices pi
-              WHERE pi.id = ? AND pi.supplier_id = ?'
+              WHERE pi.id = ? AND pi.supplier_id = ?"
         );
         $stmt->execute(['posted', $excludeCashDocumentId ?? 0, $purchaseInvoiceId, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);

@@ -90,6 +90,8 @@ final class CashDocumentAction
                 (string) ($q['kind'] ?? ''),
                 (string) ($q['q'] ?? ''),
                 (int) ($q['limit'] ?? 20),
+                // Vratka úhrady: nabídnout faktury, na kterých už úhrada visí.
+                ((string) ($q['refundable'] ?? '')) === '1',
             );
             return Json::ok($response, $result);
         } catch (\Throwable $e) {

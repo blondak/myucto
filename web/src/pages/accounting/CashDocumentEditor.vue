@@ -85,7 +85,9 @@ const purposeOptions = computed<CashPurpose[]>(() => {
   // Valutová pokladna v1: jen prodej/nákup/ostatní (úhrady faktur a převody = korunová pokladna).
   if (isForeign.value) return form.doc_type === 'in' ? ['sale', 'other'] : ['purchase', 'other']
   return form.doc_type === 'in'
-    ? ['sale', 'invoice_payment', 'transfer', 'other']
+    // `purchase_payment` na příjmovém dokladu = VRATKA úhrady přijaté faktury
+    // (vrácené zboží, přeplatek) — účtuje se opačným směrem a snižuje daňový výdaj.
+    ? ['sale', 'invoice_payment', 'purchase_payment', 'transfer', 'other']
     : ['purchase', 'purchase_payment', 'transfer', 'other']
 })
 
@@ -298,10 +300,11 @@ function onUnpaidSearch() {
   if (unpaidTimer) clearTimeout(unpaidTimer)
   unpaidTimer = setTimeout(async () => {
     const kind = form.purpose === 'invoice_payment' ? 'invoice' : 'purchase_invoice'
+    // Vratka míří na fakturu, která JE zaplacená — běžná nabídka „zbývá uhradit" je prázdná.
     unpaidLoading.value = true
     unpaidError.value = ''
     try {
-      const res = await cashApi.searchUnpaid(kind, unpaidQuery.value)
+      const res = await cashApi.searchUnpaid(kind, unpaidQuery.value, 20, isPurchaseRefund.value)
       unpaidOptions.value = res.items
       unpaidTruncated.value = res.truncated
     } catch (e: any) {
@@ -321,7 +324,8 @@ function pickUnpaid(o: UnpaidDocumentOption) {
   else { form.purchase_invoice_id = o.id; form.invoice_id = null }
   form.partner_name = o.partner_name
   form.description = t(`cash.purpose.${form.purpose}`) + ' ' + o.number
-  form.total_amount = o.remaining
+  // U vratky nabídni jako výchozí částku to, co je uhrazeno; jinak zbytek k úhradě.
+  form.total_amount = isPurchaseRefund.value ? o.paid : o.remaining
 }
 // Korunový ekvivalent jde ukázat jen u ručního kurzu — kurz ČNB zná až backend.
 const czkEquivalent = computed<number | null>(() => {
@@ -332,8 +336,14 @@ const czkEquivalent = computed<number | null>(() => {
   return Math.round(amount * rate * 100) / 100
 })
 
-// PF: úhrada jen v plné výši (R4) → částka readonly.
-const amountReadonly = computed(() => form.purpose === 'purchase_payment' && selectedUnpaid.value !== null)
+/** Vratka úhrady přijaté faktury — příjmový doklad s účelem `purchase_payment`. */
+const isPurchaseRefund = computed(() => form.purpose === 'purchase_payment' && form.doc_type === 'in')
+
+// PF: úhrada jen v plné výši (R4) → částka readonly. U vratky se naopak vrací
+// libovolná část, takže částka zůstává editovatelná.
+const amountReadonly = computed(() =>
+  form.purpose === 'purchase_payment' && !isPurchaseRefund.value && selectedUnpaid.value !== null,
+)
 
 // ── Našeptávač partnera z číselníku klientů ─────────────────────────────────
 // Hledá se na serveru přes `q` (stejně jako InvoiceEditor / VendorPicker) — pevný
@@ -420,8 +430,13 @@ const previewLines = computed<PreviewLine[]>(() => {
       push(ruleAccount('payment.receivable.cash', 'credit', '311'), 'credit', total)
       break
     case 'purchase_payment':
-      push(ruleAccount('payment.payable.cash', 'debit', '321'), 'debit', total)
-      push(cash, 'credit', total)
+      if (isPurchaseRefund.value) {
+        push(cash, 'debit', total)
+        push(ruleAccount('payment.payable.cash', 'debit', '321'), 'credit', total)
+      } else {
+        push(ruleAccount('payment.payable.cash', 'debit', '321'), 'debit', total)
+        push(cash, 'credit', total)
+      }
       break
     case 'transfer':
       if (form.doc_type === 'in') {

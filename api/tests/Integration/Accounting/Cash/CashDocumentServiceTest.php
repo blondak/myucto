@@ -1255,6 +1255,52 @@ final class CashDocumentServiceTest extends TestCase
     }
 
     /** Aktivní analytika 211 v osnově — druhá pokladna nemůže sdílet účet s první. */
+    /**
+     * Vratka úhrady přijaté faktury: příjmový doklad s účelem `purchase_payment`.
+     * Peněžní deník s tímhle scénářem počítal odjakživa (snižuje daňový výdaj), ale
+     * PURPOSE_MATRIX ho zakazovala, takže vzniknout mohl jen mimo aplikaci.
+     */
+    public function testPurchaseRefundIsPostedInReverseAndReopensInvoice(): void
+    {
+        $reg = $this->makeRegister('211');
+        $pf = $this->purchaseInvoice('PF-2099-900', $this->client('Dodavatel vratka a.s.', false, true), 5000.00, $this->currencyId);
+
+        $payment = $this->service->create($this->supplierId, $this->doc([
+            'purpose' => 'purchase_payment', 'doc_type' => 'out', 'total_amount' => 5000.0,
+            'purchase_invoice_id' => $pf,
+        ], $reg), $this->userId);
+        self::assertSame('posted', $payment['status']);
+        self::assertSame('paid', $this->purchaseStatus($pf));
+
+        $refund = $this->service->create($this->supplierId, $this->doc([
+            'purpose' => 'purchase_payment', 'doc_type' => 'in', 'total_amount' => 2000.0,
+            'purchase_invoice_id' => $pf, 'issue_date' => self::YEAR . '-06-25',
+        ], $reg), $this->userId);
+
+        $byAcc = $this->linesByAccountCode($refund['journal_entry_id']);
+        self::assertEqualsWithDelta(2000.00, $byAcc['211']['debit'], 0.001, 'Vrácená hotovost jde do pokladny.');
+        self::assertEqualsWithDelta(2000.00, $byAcc['321']['credit'], 0.001, 'Závazek se o vrácenou částku obnoví.');
+        self::assertNotSame('paid', $this->purchaseStatus($pf), 'Po vratce už faktura není uhrazená v plné výši.');
+    }
+
+    /** Vrátit nelze víc, než kolik je na faktuře zaplaceno. */
+    public function testPurchaseRefundCannotExceedPaidAmount(): void
+    {
+        $reg = $this->makeRegister('211');
+        $pf = $this->purchaseInvoice('PF-2099-901', $this->client('Dodavatel vratka 2 a.s.', false, true), 5000.00, $this->currencyId);
+        $this->service->create($this->supplierId, $this->doc([
+            'purpose' => 'purchase_payment', 'doc_type' => 'out', 'total_amount' => 5000.0,
+            'purchase_invoice_id' => $pf,
+        ], $reg), $this->userId);
+
+        $this->expectException(CashException::class);
+        $this->expectExceptionMessageMatches('/nesmí přesáhnout uhrazenou částku/');
+        $this->service->create($this->supplierId, $this->doc([
+            'purpose' => 'purchase_payment', 'doc_type' => 'in', 'total_amount' => 5001.0,
+            'purchase_invoice_id' => $pf, 'issue_date' => self::YEAR . '-06-25',
+        ], $reg), $this->userId);
+    }
+
     private function makeCashAnalytic(string $code): string
     {
         $this->db->pdo()->prepare(
