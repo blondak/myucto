@@ -91,6 +91,7 @@ final class SocialInsuranceMonthCalculator
                 null,
                 null,
                 null,
+                [],
                 $people,
                 $issues,
                 $ruleset->id,
@@ -103,6 +104,7 @@ final class SocialInsuranceMonthCalculator
         $employeeContribution = 0;
         $partTimeDiscountBase = 0;
         $employerInputs = [];
+        $categoryBases = [];
         foreach ($people as $person) {
             $participatingBase = $this->add(
                 $participatingBase,
@@ -128,6 +130,19 @@ final class SocialInsuranceMonthCalculator
                         $relationship->cappedAssessmentBaseMinorUnits,
                     );
                 }
+                /*
+                 * § 5a odst. 1 dělí vyměřovací základ zaměstnavatele podle
+                 * kategorie ZAMĚSTNANCE, ale rozhodující je vztah: jeden
+                 * člověk může mít u téhož zaměstnavatele rizikový i běžný
+                 * vztah a každý spadne pod jiné písmeno. Sčítá se proto
+                 * vztahový podíl základu po ročním maximu — přesně ta částka,
+                 * kterou podání vykazuje pod 10478/10479/10480.
+                 */
+                $categoryValue = $relationship->employerRateCategory->value;
+                $categoryBases[$categoryValue] = $this->add(
+                    $categoryBases[$categoryValue] ?? 0,
+                    $relationship->cappedAssessmentBaseMinorUnits,
+                );
             }
 
             $employerInputs[] = new MonthlyEmployerSocialInsuranceEmployeeInput(
@@ -147,6 +162,27 @@ final class SocialInsuranceMonthCalculator
                 'Employee and employer annual-maximum allocations must have the same total.',
             );
         }
+        [$employerCategories, $employerBeforeDiscount] = $this->employerCategoryResults(
+            $ruleset,
+            $categoryBases,
+            $cappedBase,
+        );
+        /*
+         * Souběh kategorií mění firemní částku, jedna kategorie ne. Když je
+         * v měsíci jen běžná sazba, MUSÍ kategoriální výpočet vyjít na haléř
+         * stejně jako souhrnný kalkulátor zaměstnavatele — jinak se dvě cesty
+         * k témuž číslu rozešly a nikdo by si toho nevšiml.
+         */
+        $onlyOrdinary = array_filter(
+            $employerCategories,
+            static fn (SocialEmployerCategoryResult $category): bool =>
+                $category->category !== SocialEmployerRateCategory::Ordinary,
+        ) === [];
+        if ($onlyOrdinary && $employerBeforeDiscount !== $employer->contributionBeforeDiscountMinorUnits) {
+            throw new LogicException(
+                'Ordinary-only employer contribution must match the aggregate calculator.',
+            );
+        }
 
         $discountStep = null;
         $discount = 0;
@@ -157,8 +193,13 @@ final class SocialInsuranceMonthCalculator
                 $this->rateParameter($ruleset, 'employer.discount.part_time'),
                 RoundingMode::Ceil,
             );
+            /*
+             * § 7c odst. 1: slevu zaměstnavatel odečte „z částky pojistného
+             * stanoveného podle § 5a a § 7 odst. 1 písm. a) až c)" — tedy
+             * z celkového pojistného za všechny kategorie, ne uvnitř jedné.
+             */
             $discount = min(
-                $employer->contributionBeforeDiscountMinorUnits,
+                $employerBeforeDiscount,
                 PayrollRounding::ceilToCzk($discountStep->outputMinorUnits),
             );
         }
@@ -169,17 +210,83 @@ final class SocialInsuranceMonthCalculator
             $participatingBase,
             $cappedBase,
             $employeeContribution,
-            $employer->contributionBeforeDiscountMinorUnits,
+            $employerBeforeDiscount,
             $partTimeDiscountBase,
             $discount,
-            $employer->contributionBeforeDiscountMinorUnits - $discount,
-            $employer->contributionStep,
+            $employerBeforeDiscount - $discount,
+            count($employerCategories) === 1 ? $employerCategories[0]->contributionStep : null,
             $discountStep,
+            $employerCategories,
             $people,
             [],
             $ruleset->id,
             $ruleset->canonicalHash,
         );
+    }
+
+    /**
+     * Vyměřovací základy a pojistné zaměstnavatele po kategoriích § 5a odst. 1.
+     *
+     * Zaokrouhluje se PO KATEGORII, ne až ze součtu: § 7 odst. 1 dává každému
+     * ze tří základů vlastní sazbu a § 7 odst. 3 pak zaokrouhluje pojistné
+     * nahoru na celé koruny. Sečíst pojistné a zaokrouhlit jednou by u firmy
+     * se dvěma kategoriemi dalo jinou částku, než jakou ČSSZ počítá
+     * v kontrolách 8, 10 a 167 nad JMHZ (10024 ze 10023, 10026 ze 10025,
+     * 10484 ze 10483, a teprve 10027 je jejich součet).
+     *
+     * Dílčí základ se tu ZÁMĚRNĚ nezaokrouhluje. § 5d sice zaokrouhluje nahoru
+     * vyměřovací základy podle § 5 až 5c včetně § 5a, jenže modul ho neuplatňuje
+     * ani o řád výš — základ zaměstnance podle § 5 taky zůstává v haléřích.
+     * Zaokrouhlit ho jen tady by rozdělení kategorií tiše změnilo i firmy, které
+     * mají jedinou kategorii, a rozešlo by ho se souhrnným kalkulátorem.
+     * § 5d patří na obě místa najednou, ne na jedno.
+     *
+     * @param array<string,int> $categoryBases
+     * @return array{0:list<SocialEmployerCategoryResult>,1:int}
+     */
+    private function employerCategoryResults(
+        PayrollRulesetVersion $ruleset,
+        array $categoryBases,
+        int $cappedBase,
+    ): array {
+        if (array_sum($categoryBases) !== $cappedBase) {
+            throw new LogicException(
+                'Employer rate categories must partition the capped assessment base.',
+            );
+        }
+        $statutory = array_map(
+            static fn (SocialEmployerRateCategory $category): string => $category->value,
+            SocialEmployerRateCategory::statutoryOrder(),
+        );
+        if (array_diff(array_keys($categoryBases), $statutory) !== []) {
+            throw new LogicException(
+                'A calculated month cannot carry an unverified employer rate category.',
+            );
+        }
+        $categories = [];
+        $total = 0;
+        foreach (SocialEmployerRateCategory::statutoryOrder() as $category) {
+            if (!array_key_exists($category->value, $categoryBases)) {
+                continue;
+            }
+            $base = $categoryBases[$category->value];
+            $step = CalculationStep::calculate(
+                "monthly-employer-social-insurance-{$category->value}",
+                $base,
+                $this->rateParameter($ruleset, $category->rateParameter()),
+                RoundingMode::Ceil,
+            );
+            $contribution = PayrollRounding::ceilToCzk($step->outputMinorUnits);
+            $total = $this->add($total, $contribution);
+            $categories[] = new SocialEmployerCategoryResult(
+                $category,
+                $base,
+                $contribution,
+                $step,
+            );
+        }
+
+        return [$categories, $total];
     }
 
     private function calculatePerson(
@@ -232,9 +339,16 @@ final class SocialInsuranceMonthCalculator
                         "relationship:{$relationship->relationshipId}:part_time_discount_relationship_kind_unsupported";
                 }
             }
-            if ($relationship->employerRateCategory !== SocialEmployerRateCategory::Ordinary) {
+            /*
+             * Doložená kategorie § 5a odst. 1 se počítá vlastní sazbou; ruční
+             * posouzení si vynutí jen NEDOLOŽENÉ zařazení. Dřív blokovalo běh
+             * každé písmeno mimo a) — jenže tím se nikdy neodvedlo správně,
+             * a hlavně: zařazení, které do vstupu nikdy nedoteklo, se tvářilo
+             * jako běžná sazba a odvedlo o 3 procentní body míň.
+             */
+            if ($relationship->employerRateCategory === SocialEmployerRateCategory::Unverified) {
                 $issues[] =
-                    "relationship:{$relationship->relationshipId}:employer_rate_category_requires_manual_review";
+                    "relationship:{$relationship->relationshipId}:employer_rate_category_unverified";
             }
             if ($relationship->agricultureDppEmployeeDiscountRequested) {
                 $issues[] =
@@ -472,6 +586,7 @@ final class SocialInsuranceMonthCalculator
                     $relationship->employerRateCategory,
                     $relationship->annualMaximumAllocationOrder,
                     $relationship->partTimeEmployerDiscountEvidenceReference,
+                    $relationship->employerRateCategoryEvidenceReference,
                 );
             },
             $facts,

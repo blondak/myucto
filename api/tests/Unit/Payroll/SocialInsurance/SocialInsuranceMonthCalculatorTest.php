@@ -374,7 +374,156 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
         );
     }
 
-    public function testFailsClosedForUnverifiedDiscountAndSpecialEmployerRate(): void
+    /**
+     * Firma se dvěma kategoriemi § 5a odst. 1 současně.
+     *
+     * Dokud byl vyměřovací základ zaměstnavatele jeden, dala tahle firma
+     * 24,8 % z celého úhrnu. Zákon ale říká 24,8 % z písm. a) a 27,8 %
+     * z písm. c) — na téhle sestavě je to rozdíl 2 700 Kč.
+     */
+    public function testTwoRateCategoriesInOneMonthAreAssessedAndChargedSeparately(): void
+    {
+        $result = $this->calculate([
+            $this->person('person-1', [
+                $this->relationship('hpp', SocialEmploymentKind::Employment, 4_500_000, 4_000_000),
+            ]),
+            $this->person('person-2', [
+                $this->relationship(
+                    'risk-hpp',
+                    SocialEmploymentKind::Employment,
+                    4_500_000,
+                    9_000_000,
+                    employerRate: SocialEmployerRateCategory::RiskEmployment,
+                ),
+            ]),
+        ]);
+
+        self::assertSame(SocialCalculationStatus::Calculated, $result->status);
+        self::assertSame(13_000_000, $result->cappedAssessmentBaseMinorUnits);
+        self::assertSame(
+            [
+                ['ordinary', 4_000_000, 992_000],
+                ['risk_employment', 9_000_000, 2_502_000],
+            ],
+            array_map(
+                static fn (object $category): array => [
+                    $category->category->value,
+                    $category->assessmentBaseMinorUnits,
+                    $category->contributionMinorUnits,
+                ],
+                $result->employerCategories,
+            ),
+        );
+        self::assertSame(3_494_000, $result->employerContributionBeforeDiscountMinorUnits);
+        // Jediná sazba z celého úhrnu: 24,8 % ze 130 000 Kč = 32 240 Kč.
+        self::assertNotSame(3_224_000, $result->employerContributionBeforeDiscountMinorUnits);
+        // Jeden krok pro dvě sazby neexistuje a nesmí se předstírat.
+        self::assertNull($result->employerContributionStep);
+    }
+
+    /**
+     * § 7 odst. 3 zaokrouhluje nahoru pojistné — a to je podle § 7 odst. 1
+     * částka Z KATEGORIE, ne jedna za firmu. Obě kategorie tu mají zlomek
+     * haléřů, takže se nahoru zaokrouhlí dvakrát; kdyby se sčítalo před
+     * zaokrouhlením, vyšla by o korunu nižší částka, než jakou ČSSZ počítá
+     * kontrolami 8 a 167 nad JMHZ.
+     */
+    public function testEachRateCategoryIsRoundedUpOnItsOwn(): void
+    {
+        $result = $this->calculate([
+            $this->person('person-1', [
+                $this->relationship('hpp', SocialEmploymentKind::Employment, 4_500_000, 1_000_100),
+            ]),
+            $this->person('person-2', [
+                $this->relationship(
+                    'risk-hpp',
+                    SocialEmploymentKind::Employment,
+                    4_500_000,
+                    1_000_100,
+                    employerRate: SocialEmployerRateCategory::RiskEmployment,
+                ),
+            ]),
+        ]);
+
+        // 24,8 % z 10 001,00 Kč = 2 480,25 → 2 481 Kč; 27,8 % = 2 780,28 → 2 781 Kč.
+        self::assertSame(
+            [248_100, 278_100],
+            array_map(
+                static fn (object $category): int => $category->contributionMinorUnits,
+                $result->employerCategories,
+            ),
+        );
+        self::assertSame(526_200, $result->employerContributionBeforeDiscountMinorUnits);
+        // Zaokrouhlení až ze součtu: 52 % z 10 001 Kč = 5 260,52 → 5 261 Kč.
+        self::assertNotSame(526_100, $result->employerContributionBeforeDiscountMinorUnits);
+    }
+
+    /**
+     * Kategorie, do které v měsíci nespadl žádný vztah, se nevykazuje vůbec —
+     * ne jako nulový řádek. Nulový základ by v podání ČSSZ znamenal, že
+     * zaměstnavatel takové zaměstnance má a nic za ně neodvedl.
+     */
+    public function testCategoryWithoutAnyRelationshipIsNotReportedAtAll(): void
+    {
+        $result = $this->calculate([
+            $this->person('person-1', [
+                $this->relationship(
+                    'rescue-hpp',
+                    SocialEmploymentKind::Employment,
+                    4_500_000,
+                    5_000_000,
+                    employerRate: SocialEmployerRateCategory::RescueAndCompanyFireService,
+                ),
+            ]),
+        ]);
+
+        self::assertCount(1, $result->employerCategories);
+        self::assertSame(
+            SocialEmployerRateCategory::RescueAndCompanyFireService,
+            $result->employerCategories[0]->category,
+        );
+        self::assertSame('b', $result->employerCategories[0]->jsonSerialize()['paragraph5a_letter']);
+        // 29,8 % z 50 000 Kč — sazba písm. b) počínaje rokem 2026.
+        self::assertSame(1_490_000, $result->employerContributionBeforeDiscountMinorUnits);
+    }
+
+    /**
+     * Jedna osoba, dva vztahy, dvě kategorie. § 5a rozlišuje podle vztahu, ne
+     * podle osoby: osobní úhrn by celou částku hodil do jedné sazby.
+     */
+    public function testOnePersonSplitsAcrossCategoriesByRelationship(): void
+    {
+        $result = $this->calculate([
+            $this->person('person-1', [
+                $this->relationship('hpp', SocialEmploymentKind::Employment, 4_500_000, 3_000_000),
+                $this->relationship(
+                    'risk-hpp',
+                    SocialEmploymentKind::Employment,
+                    4_500_000,
+                    2_000_000,
+                    employerRate: SocialEmployerRateCategory::RiskEmployment,
+                ),
+            ]),
+        ]);
+
+        self::assertSame(
+            ['ordinary' => 3_000_000, 'risk_employment' => 2_000_000],
+            array_column(
+                array_map(
+                    static fn (object $category): array => [
+                        $category->category->value,
+                        $category->assessmentBaseMinorUnits,
+                    ],
+                    $result->employerCategories,
+                ),
+                1,
+                0,
+            ),
+        );
+        self::assertSame(744_000 + 556_000, $result->employerContributionBeforeDiscountMinorUnits);
+    }
+
+    public function testFailsClosedForUnverifiedDiscountAndUnverifiedEmployerRateCategory(): void
     {
         $result = $this->calculate([
             $this->person(
@@ -386,7 +535,7 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
                         450_000,
                         1_000_000,
                         partTimeDiscount: SocialDiscountEvidence::Unverified,
-                        employerRate: SocialEmployerRateCategory::RiskEmployment,
+                        employerRate: SocialEmployerRateCategory::Unverified,
                     ),
                 ],
                 workingPensioner: SocialDiscountEvidence::Unverified,
@@ -399,7 +548,7 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
             $result->issues,
         );
         self::assertContains(
-            'person:person-1:relationship:risk-hpp:employer_rate_category_requires_manual_review',
+            'person:person-1:relationship:risk-hpp:employer_rate_category_unverified',
             $result->issues,
         );
         self::assertContains(
@@ -639,6 +788,13 @@ final class SocialInsuranceMonthCalculatorTest extends TestCase
                 ? "synthetic:part-time:{$id}"
                 : null,
             $aggregationGroup,
+            in_array(
+                $employerRate,
+                [SocialEmployerRateCategory::Ordinary, SocialEmployerRateCategory::Unverified],
+                true,
+            )
+                ? null
+                : "synthetic:rate-category:{$id}",
         );
     }
 

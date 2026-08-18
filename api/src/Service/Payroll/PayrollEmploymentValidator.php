@@ -34,6 +34,8 @@ namespace MyInvoice\Service\Payroll;
  *   foreign_legislation_country_code:?string,
  *   a1_certificate_until:?string,
  *   risky_work:bool,
+ *   social_employer_rate_category:string,
+ *   social_employer_rate_category_evidence:?string,
  *   tax_declaration_signed:bool,
  *   is_primary:bool,
  *   change_reason:?string
@@ -60,6 +62,12 @@ final class PayrollEmploymentValidator
     private const TAX_REGIMES = ['advance', 'withholding', 'foreign', 'manual_review'];
     /** Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP — viz migrace 1403. */
     private const OTHER_WITHHOLDING_ELIGIBILITIES = ['unverified', 'eligible', 'ineligible'];
+    /** § 5a odst. 1 písm. a) až c) ZPSZ — viz migrace 1510. */
+    private const SOCIAL_EMPLOYER_RATE_CATEGORIES = [
+        'ordinary',
+        'rescue_and_company_fire_service',
+        'risk_employment',
+    ];
     private const CHECKLIST_STATUSES = ['pending', 'completed', 'not_applicable'];
     private const VERIFIED_STATES = ['unverified', 'no', 'yes'];
 
@@ -241,6 +249,7 @@ final class PayrollEmploymentValidator
         }
         $functionalBenefits = $this->verifiedState($input, 'jmhz_functional_benefits_status');
         $temporaryAssignment = $this->verifiedState($input, 'jmhz_temporary_assignment_status');
+        [$rateCategory, $rateCategoryEvidence] = $this->socialEmployerRateCategory($input);
         $activityCode = $this->optionalCode($input, 'activity_code', 32);
         $relationshipDetailCode = $this->optionalCode(
             $input,
@@ -290,7 +299,9 @@ final class PayrollEmploymentValidator
             ),
             'foreign_legislation_country_code' => $country,
             'a1_certificate_until' => $this->optionalDate($input, 'a1_certificate_until'),
-            'risky_work' => $this->requiredBool($input, 'risky_work', false),
+            'risky_work' => $rateCategory === 'risk_employment',
+            'social_employer_rate_category' => $rateCategory,
+            'social_employer_rate_category_evidence' => $rateCategoryEvidence,
             'tax_declaration_signed' => $this->requiredBool($input, 'tax_declaration_signed', false),
             'is_primary' => $this->requiredBool($input, 'is_primary', false),
             'change_reason' => $this->optionalText($input, 'change_reason', 500),
@@ -361,6 +372,49 @@ final class PayrollEmploymentValidator
             throw new \InvalidArgumentException("Pole {$key} musí být datum YYYY-MM-DD.");
         }
         return $value;
+    }
+
+    /**
+     * Sazbová kategorie zaměstnavatele podle § 5a odst. 1 ZPSZ a odkaz na podklad.
+     *
+     * Kategorie je zdroj pravdy a `risky_work` se z ní odvozuje, ne naopak —
+     * dva zapisovatelné údaje o téže věci by se rozešly. Starší klient, který
+     * kategorii ještě neposílá, se pozná podle prázdné hodnoty a jeho boolean
+     * se na kategorii přeloží; pošle-li obojí a odporují si, je to chyba, ne
+     * tichá volba jednoho z nich.
+     *
+     * Podklad je nepovinný ZÁMĚRNĚ: účetní smí zaměstnance zařadit dřív, než
+     * má doklad po ruce. Do výpočtu se ale takový vztah nedostane — bez
+     * podkladu z něj {@see \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputAssembler}
+     * udělá nedoložené zařazení a mzdový běh skončí na ručním posouzení.
+     *
+     * @param array<string,mixed> $input
+     * @return array{0:string,1:?string}
+     */
+    private function socialEmployerRateCategory(array $input): array
+    {
+        $category = trim($this->inputString($input['social_employer_rate_category'] ?? ''));
+        if ($category === '') {
+            $category = $this->requiredBool($input, 'risky_work', false)
+                ? 'risk_employment'
+                : 'ordinary';
+        } elseif (
+            array_key_exists('risky_work', $input)
+            && $this->requiredBool($input, 'risky_work', false)
+                !== ($category === 'risk_employment')
+        ) {
+            throw new \InvalidArgumentException(
+                'Riziková práce a sazbová kategorie zaměstnavatele si odporují.',
+            );
+        }
+        if (!in_array($category, self::SOCIAL_EMPLOYER_RATE_CATEGORIES, true)) {
+            throw new \InvalidArgumentException(
+                'Sazbová kategorie zaměstnavatele není podporována.',
+            );
+        }
+        $evidence = $this->optionalText($input, 'social_employer_rate_category_evidence', 190);
+
+        return [$category, $category === 'ordinary' ? null : $evidence];
     }
 
     /** @param array<string,mixed> $input */

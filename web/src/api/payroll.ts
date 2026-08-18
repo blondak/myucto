@@ -54,6 +54,11 @@ export type PayrollRelationType = 'employment' | 'small_scale_employment' | 'dpp
 export type PayrollEmploymentStatus = 'planned' | 'preregistered' | 'active' | 'suspended' | 'ended' | 'archived' | 'no_show'
 export type PayrollInsuranceParticipation = 'automatic' | 'included' | 'excluded' | 'foreign'
 export type PayrollTaxRegime = 'advance' | 'withholding' | 'foreign' | 'manual_review'
+/** § 5a odst. 1 písm. a) až c) zák. č. 589/1992 Sb. — tři sazby zaměstnavatele. */
+export type PayrollSocialEmployerRateCategory =
+  | 'ordinary'
+  | 'rescue_and_company_fire_service'
+  | 'risk_employment'
 /**
  * Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP: zakládá vztah účast na
  * nemocenském pojištění (`ineligible` — vždy zálohová daň), nebo ne (`eligible` —
@@ -174,7 +179,11 @@ export interface PayrollEmploymentTerms {
   other_withholding_eligibility?: PayrollOtherWithholdingEligibility
   foreign_legislation_country_code: string | null
   a1_certificate_until: string | null
+  // Odvozený příznak, ne samostatné pole: server ho drží v souladu se sazbovou
+  // kategorií (§ 5a odst. 1 písm. c) je riziková práce). JMHZ ho čte dál.
   risky_work: boolean
+  social_employer_rate_category: PayrollSocialEmployerRateCategory
+  social_employer_rate_category_evidence: string | null
   tax_declaration_signed: boolean
   is_primary: boolean
   change_reason: string | null
@@ -204,11 +213,24 @@ export interface PayrollEmploymentEvent {
   created_at: string
 }
 
+/**
+ * `risky_work` a sazbová kategorie § 5a odst. 1 popisují TUTÉŽ věc, takže se
+ * posílá jedno z nich, ne obojí: obrazovka s výběrem kategorie pošle kategorii
+ * a server z ní boolean dopočítá, starší obrazovka pošle boolean a server ho
+ * na kategorii přeloží. Poslat obojí a nesouhlasně je chyba, ne tichá volba —
+ * proto jsou obě strany nepovinné, ne obě povinné.
+ */
 export type PayrollEmploymentTermsPayload = Omit<
   PayrollEmploymentTerms,
   'id' | 'office_code' | 'effective_to' | 'jmhz_external_codebook_overlay_key'
     | 'jmhz_external_codebook_manifest_sha256' | 'row_version' | 'created_at'
->
+    | 'risky_work' | 'social_employer_rate_category'
+    | 'social_employer_rate_category_evidence'
+> & {
+  risky_work?: boolean
+  social_employer_rate_category?: PayrollSocialEmployerRateCategory
+  social_employer_rate_category_evidence?: string | null
+}
 
 export interface PayrollEmploymentCreatePayload {
   code: string

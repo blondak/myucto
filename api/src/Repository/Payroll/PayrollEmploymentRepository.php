@@ -733,6 +733,8 @@ final class PayrollEmploymentRepository
                     terms.other_withholding_eligibility,
                     terms.foreign_legislation_country_code,
                     terms.a1_certificate_until, terms.risky_work,
+                    terms.social_employer_rate_category,
+                    terms.social_employer_rate_category_evidence,
                     terms.tax_declaration_signed, terms.is_primary,
                     terms.change_reason, terms.row_version, terms.created_at
                FROM payroll_employment_terms terms
@@ -824,9 +826,11 @@ final class PayrollEmploymentRepository
                  social_insurance_participation, health_insurance_participation,
                  tax_regime, other_withholding_eligibility,
                  foreign_legislation_country_code,
-                 a1_certificate_until, risky_work, tax_declaration_signed,
+                 a1_certificate_until, risky_work,
+                 social_employer_rate_category, social_employer_rate_category_evidence,
+                 tax_declaration_signed,
                  is_primary, change_reason, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $employmentId,
@@ -858,6 +862,8 @@ final class PayrollEmploymentRepository
             $data['foreign_legislation_country_code'],
             $data['a1_certificate_until'],
             (int) $data['risky_work'],
+            $data['social_employer_rate_category'],
+            $data['social_employer_rate_category_evidence'],
             (int) $data['tax_declaration_signed'],
             (int) $data['is_primary'],
             $data['change_reason'],

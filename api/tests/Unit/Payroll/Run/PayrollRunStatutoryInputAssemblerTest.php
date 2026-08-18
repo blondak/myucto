@@ -15,6 +15,7 @@ use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputAssembler;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerRateCategory;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -143,6 +144,77 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
                 ]),
                 $bundle->issues,
             ),
+        );
+    }
+
+    /**
+     * Sazbová kategorie § 5a odst. 1 se musí dostat ze smluvních podmínek do
+     * vstupu výpočtu. Dokud se nedostávala, měl vztah označený jako rizikový
+     * ve vstupu běžnou sazbu a mzdový běh mu spočítal 24,8 % místo 27,8 % —
+     * o rozdílu se uživatel nedozvěděl, protože zaškrtnuté políčko na kartě
+     * vztahu vypadalo, že se uplatnilo.
+     */
+    public function testEmployerRateCategoryReachesTheSocialInputFromTheEmploymentTerms(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['employments'][0]['term']['social_employer_rate_category'] =
+            'risk_employment';
+        $snapshot['people'][0]['employments'][0]['term']['social_employer_rate_category_evidence'] =
+            'kategorizace-praci/2026/17';
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame([], $bundle->issues);
+        $relationship = $bundle->socialInsurance?->people[0]->relationships[0];
+        self::assertSame(
+            SocialEmployerRateCategory::RiskEmployment,
+            $relationship?->employerRateCategory,
+        );
+        self::assertSame(
+            'kategorizace-praci/2026/17',
+            $relationship?->employerRateCategoryEvidenceReference,
+        );
+    }
+
+    /**
+     * Zařazení nad běžnou sazbu se dokládá. Bez podkladu vstup kategorii
+     * nedostane — a hlavně nespadne zpět na běžnou sazbu, protože nižší sazba
+     * je pro zaměstnavatele levnější a tichý default by mířil vždy tím směrem.
+     */
+    public function testRateCategoryWithoutEvidenceBecomesUnverifiedInsteadOfOrdinary(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['employments'][0]['term']['social_employer_rate_category'] =
+            'rescue_and_company_fire_service';
+        $snapshot['people'][0]['employments'][0]['term']['social_employer_rate_category_evidence'] =
+            '   ';
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame(
+            SocialEmployerRateCategory::Unverified,
+            $bundle->socialInsurance?->people[0]->relationships[0]->employerRateCategory,
+        );
+    }
+
+    /**
+     * Revize zmrazená dřív, než sloupec kategorie existoval, klíč vůbec nemá.
+     * Ta se čte jako běžná sazba — tak se z ní tehdy počítalo a dosadit do ní
+     * dnešní fail-closed by přepsalo hotovou historii.
+     */
+    public function testSnapshotFrozenBeforeTheCategoryColumnStaysOrdinary(): void
+    {
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble(
+            $this->completeSnapshot(),
+        );
+
+        self::assertSame(
+            SocialEmployerRateCategory::Ordinary,
+            $bundle->socialInsurance?->people[0]->relationships[0]->employerRateCategory,
+        );
+        self::assertNull(
+            $bundle->socialInsurance?->people[0]->relationships[0]
+                ->employerRateCategoryEvidenceReference,
         );
     }
 

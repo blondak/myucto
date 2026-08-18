@@ -444,6 +444,7 @@ final class PayrollRunStatutoryResultPersisterTest extends TestCase
             $rootStatus === SocialCalculationStatus::Calculated ? 24_800 : null,
             null,
             null,
+            [],
             [$person],
             $rootStatus === SocialCalculationStatus::Calculated
                 ? []

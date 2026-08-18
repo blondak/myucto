@@ -28,6 +28,7 @@ final readonly class SocialRelationshipResult implements JsonSerializable
         public SocialEmployerRateCategory $employerRateCategory,
         public ?int $annualMaximumAllocationOrder,
         public ?string $partTimeEmployerDiscountEvidenceReference,
+        public ?string $employerRateCategoryEvidenceReference = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -48,6 +49,8 @@ final readonly class SocialRelationshipResult implements JsonSerializable
             'annual_maximum_allocation_order' => $this->annualMaximumAllocationOrder,
             'part_time_employer_discount_evidence_reference' =>
                 $this->partTimeEmployerDiscountEvidenceReference,
+            'employer_rate_category_evidence_reference' =>
+                $this->employerRateCategoryEvidenceReference,
         ];
     }
 }

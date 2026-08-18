@@ -11,8 +11,17 @@ use MyInvoice\Service\Payroll\Calculation\Money;
  *
  * Pojistné zaměstnavatele NENÍ osobní veličina: § 5a odst. 1 zákona č. 589/1992
  * Sb. říká, že vyměřovacím základem zaměstnavatele je „částka odpovídající úhrnu
- * vyměřovacích základů jeho zaměstnanců", a § 7 odst. 3 zaokrouhluje až tenhle
- * jeden součet. Přepočet po osobách by proto dal jiný úhrn než zákonná částka.
+ * vyměřovacích základů jeho zaměstnanců". Přepočet po osobách by proto dal jiný
+ * úhrn než zákonná částka.
+ *
+ * Ty úhrny jsou ale TŘI, ne jeden: § 5a odst. 1 je vyjmenovává pod písmeny a),
+ * b) a c) a § 7 odst. 1 na každý pouští vlastní sazbu, kterou § 7 odst. 3
+ * zaokrouhlí nahoru. Rozdělovat proto jde jen UVNITŘ kategorie — kdo rozpustí
+ * firemní součet poměrem všech základů, přisoudí zaměstnanci se sazbou 24,8 %
+ * kus pojistného, které vzniklo sazbou 29,8 %. Pro to je
+ * {@see self::allocateByCategory()}; {@see self::allocate()} je jeho zvláštní
+ * případ pro měsíc s jedinou kategorií (a pro revize uložené dřív, než výsledek
+ * kategorie vůbec nesl).
  *
  * Cokoli per osobu je tedy ROZDĚLENÍ firemního čísla, ne zákonná částka — a musí
  * se tak i jmenovat všude, kam doteče. Metoda je poměr vyměřovacích základů;
@@ -21,7 +30,8 @@ use MyInvoice\Service\Payroll\Calculation\Money;
  *
  * Sleva za částečné úvazky (§ 7a) se rozděluje ZVLÁŠŤ a jen mezi vztahy, které
  * ji doloženě uplatnily — rozpustit ji poměrem všech základů by ji přiznala
- * i lidem, kterým nenáleží.
+ * i lidem, kterým nenáleží. Kategorii nesleduje: § 7c odst. 1 ji odečítá
+ * z pojistného stanoveného podle § 7 odst. 1 písm. a) až c) dohromady.
  *
  * Třída vznikla vyjmutím počítající části z {@see \MyInvoice\Service\Payroll\Document\PayslipDocumentSnapshotMapper},
  * který rozdělení dělal jako jediný. Rozklad pojistného ho počítat musí taky
@@ -68,6 +78,66 @@ final class EmployerSocialInsuranceAllocation
             }
             $allocations[$employeeId] = $allocated;
         }
+
+        return $allocations;
+    }
+
+    /**
+     * Rozdělení firemního pojistného po kategoriích § 5a odst. 1.
+     *
+     * Každá kategorie se dělí VLASTNÍ vahou — základem, kterým do ní osoba
+     * vstoupila — a teprve podíly se sečtou. Sleva podle § 7a se odečítá až
+     * z tohoto součtu, protože ji tak odečítá i § 7c odst. 1.
+     *
+     * @param array<string,array<int,int>> $categoryBases   kategorie → employee_id → základ
+     * @param array<string,int>            $categoryAmounts kategorie → pojistné před slevou
+     * @param array<int,int>               $discountBases   employee_id → základ vztahů se slevou
+     * @return array<int,int> employee_id → pojistné zaměstnavatele po slevě
+     */
+    public static function allocateByCategory(
+        array $categoryBases,
+        array $categoryAmounts,
+        array $discountBases,
+        int $discount,
+    ): array {
+        if (array_keys($categoryBases) !== array_keys($categoryAmounts)) {
+            throw new \InvalidArgumentException(
+                'Rozdělení po kategoriích potřebuje ke každému základu i jeho pojistné.',
+            );
+        }
+        $employeeIds = array_keys($discountBases);
+        $beforeAllocations = array_fill_keys($employeeIds, 0);
+        foreach ($categoryBases as $category => $weights) {
+            if (array_keys($weights) !== $employeeIds) {
+                throw new \InvalidArgumentException(
+                    'Rozdělení po kategoriích potřebuje váhy pro tytéž osoby jako sleva.',
+                );
+            }
+            $allocated = self::allocateByWeights(
+                $weights,
+                $categoryAmounts[$category],
+                "pojistné zaměstnavatele kategorie {$category}",
+            );
+            foreach ($allocated as $employeeId => $amount) {
+                $beforeAllocations[$employeeId] += $amount;
+            }
+        }
+        $discountAllocations = self::allocateByWeights(
+            $discountBases,
+            $discount,
+            'slevu zaměstnavatele',
+        );
+        $allocations = [];
+        foreach ($beforeAllocations as $employeeId => $amount) {
+            $allocated = $amount - $discountAllocations[$employeeId];
+            if ($allocated < 0) {
+                throw new \DomainException(
+                    'Sleva zaměstnavatele převyšuje pojistné konkrétní osoby.',
+                );
+            }
+            $allocations[$employeeId] = $allocated;
+        }
+        ksort($allocations, SORT_NUMERIC);
 
         return $allocations;
     }

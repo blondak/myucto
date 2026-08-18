@@ -80,6 +80,7 @@ final class PayslipDocumentSnapshotMapper
             $resultPeople,
             $employerSocialBeforeDiscount,
             $employerSocialDiscount,
+            $this->employerSocialCategoryAmounts($statutory, $employerSocialBeforeDiscount),
         );
         $attached = [];
         foreach ($people as $personResult) {
@@ -598,17 +599,53 @@ final class PayslipDocumentSnapshotMapper
     }
 
     /**
+     * Pojistné zaměstnavatele po kategoriích § 5a odst. 1 ZPSZ.
+     *
+     * Zákonný výsledek zmrazený dřív, než rozpad existoval, žádný nenese —
+     * tehdy uměl modul jen běžnou sazbu, takže prázdný seznam znamená „jedna
+     * kategorie" a páska se rozdělí po staru. Neúplný rozpad (součet nesedí na
+     * firemní částku) je naopak vada a nesmí se dopočítat zbytkem.
+     *
+     * @param array<string,mixed> $statutory
+     * @return array<string,int>
+     */
+    private function employerSocialCategoryAmounts(array $statutory, int $beforeDiscount): array
+    {
+        $amounts = [];
+        foreach ($this->rows(
+            $statutory['employer_social_categories'] ?? [],
+            'kategorie pojistného zaměstnavatele',
+        ) as $row) {
+            $category = $row['category'] ?? null;
+            if (!is_string($category) || $category === '') {
+                throw new \DomainException('Kategorie pojistného zaměstnavatele nemá název.');
+            }
+            $amounts[$category] = $this->nonNegativeInt($row, 'contribution_minor_units');
+        }
+        if ($amounts !== [] && array_sum($amounts) !== $beforeDiscount) {
+            throw new \DomainException(
+                'Rozpad pojistného zaměstnavatele nedává firemní částku před slevou.',
+            );
+        }
+
+        return $amounts;
+    }
+
+    /**
      * @param array<int,array<string,mixed>> $people
+     * @param array<string,int> $categoryAmounts
      * @return array<int,int>
      */
     private function allocateEmployerSocial(
         array $people,
         int $beforeDiscount,
         int $discount,
+        array $categoryAmounts,
     ): array
     {
         $baseWeights = [];
         $discountWeights = [];
+        $categoryWeights = array_fill_keys(array_keys($categoryAmounts), []);
         foreach ($people as $employeeId => $person) {
             $statutory = $this->object(
                 $person['statutory'] ?? null,
@@ -623,28 +660,47 @@ final class PayslipDocumentSnapshotMapper
                 'capped_assessment_base_minor_units',
             );
             $discountBase = new Money(0);
+            foreach ($categoryWeights as $category => $unused) {
+                $categoryWeights[$category][$employeeId] = 0;
+            }
             foreach ($this->rows(
                 $social['relationships'] ?? null,
                 "vztahy sociálního pojištění osoby {$employeeId}",
             ) as $relationship) {
+                $relationshipBase = $this->nonNegativeInt(
+                    $relationship,
+                    'capped_assessment_base_minor_units',
+                );
                 if (($relationship['part_time_employer_discount'] ?? null)
                     === 'verified'
                 ) {
-                    $discountBase = $discountBase->add(new Money(
-                        $this->nonNegativeInt(
-                            $relationship,
-                            'capped_assessment_base_minor_units',
-                        ),
-                    ));
+                    $discountBase = $discountBase->add(new Money($relationshipBase));
+                }
+                $category = $relationship['employer_rate_category'] ?? null;
+                if (is_string($category) && array_key_exists($category, $categoryWeights)) {
+                    $categoryWeights[$category][$employeeId] += $relationshipBase;
+                } elseif ($categoryAmounts !== []) {
+                    throw new \DomainException(
+                        "Vztah osoby {$employeeId} spadá do kategorie, kterou firemní výsledek nezná.",
+                    );
                 }
             }
             $discountWeights[$employeeId] = $discountBase->minorUnits;
         }
 
-        return EmployerSocialInsuranceAllocation::allocate(
-            $baseWeights,
+        if ($categoryAmounts === []) {
+            return EmployerSocialInsuranceAllocation::allocate(
+                $baseWeights,
+                $discountWeights,
+                $beforeDiscount,
+                $discount,
+            );
+        }
+
+        return EmployerSocialInsuranceAllocation::allocateByCategory(
+            $categoryWeights,
+            $categoryAmounts,
             $discountWeights,
-            $beforeDiscount,
             $discount,
         );
     }

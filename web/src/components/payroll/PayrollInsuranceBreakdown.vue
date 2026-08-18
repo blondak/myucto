@@ -73,6 +73,9 @@ const healthRateReconstructed = computed(() =>
 /** Rozdělení pojistného zaměstnavatele na osobu — alokace, ne zákonná částka. */
 const employerAllocation = computed(() => social.value?.employer.allocation ?? null)
 
+/** Rozpad firemního pojistného po písmenech § 5a odst. 1 — a), b), c). */
+const employerCategories = computed(() => social.value?.employer.categories ?? [])
+
 function personLabel(person: PayrollRunResultPerson): string {
   return props.personNames[person.employee_id]
     || t('payroll.runs.insurance.person_fallback', { id: person.employee_id })
@@ -312,7 +315,30 @@ watch(
             </p>
             <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.runs.insurance.employer_scope_note') }}</p>
             <dl class="mt-2 space-y-1 text-sm">
-              <div class="flex flex-wrap justify-between gap-2">
+              <!--
+                Sazby jsou podle § 7 odst. 1 tři, každá z vlastního vyměřovacího
+                základu podle § 5a odst. 1. Má-li firma v měsíci jedinou
+                kategorii, je to jedna věta jako dřív; jakmile jich má víc,
+                musí být vidět všechny — jinak by účetní hledala, proč částka
+                neodpovídá „té" sazbě. Prázdný rozpad má jen revize uložená
+                dřív, než rozpad existoval.
+              -->
+              <div
+                v-for="category in employerCategories"
+                :key="category.category"
+                class="flex flex-wrap justify-between gap-2"
+                data-testid="social-employer-category"
+              >
+                <dt class="text-neutral-600">
+                  {{ t(`payroll.runs.insurance.employer_rate_category.${category.category}`) }}
+                </dt>
+                <dd class="text-right font-medium tabular-nums">
+                  {{ category.contribution_step
+                    ? stepSentence(category.contribution_step, category.contribution_minor)
+                    : t('payroll.runs.insurance.step_not_recorded') }}
+                </dd>
+              </div>
+              <div v-if="employerCategories.length === 0" class="flex flex-wrap justify-between gap-2">
                 <dt class="text-neutral-600">{{ t('payroll.runs.insurance.employer_rate') }}</dt>
                 <dd class="text-right font-medium tabular-nums">
                   {{ social.employer.contribution_step

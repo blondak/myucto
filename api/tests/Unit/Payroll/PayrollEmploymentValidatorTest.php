@@ -258,6 +258,78 @@ final class PayrollEmploymentValidatorTest extends TestCase
         ];
     }
 
+    /**
+     * Sazbová kategorie § 5a odst. 1 je zdroj pravdy a `risky_work` se z ní
+     * odvozuje. Dva zapisovatelné údaje o téže věci by se rozešly — a rozešly
+     * by se tiše, protože jeden z nich čte mzdový výpočet a druhý JMHZ.
+     */
+    public function testRateCategoryDrivesTheLegacyRiskyWorkFlag(): void
+    {
+        $input = $this->terms();
+        $input['social_employer_rate_category'] = 'risk_employment';
+        $input['social_employer_rate_category_evidence'] = 'kategorizace-praci/2026/17';
+        unset($input['risky_work']);
+
+        $validated = $this->validator()->terms($input);
+
+        self::assertSame('risk_employment', $validated['social_employer_rate_category']);
+        self::assertTrue($validated['risky_work']);
+        self::assertSame(
+            'kategorizace-praci/2026/17',
+            $validated['social_employer_rate_category_evidence'],
+        );
+    }
+
+    /**
+     * Starší obrazovka kategorii neposílá, jen boolean. Ten se přeloží na
+     * písm. c) — jinak by uložení nesouvisející změny shodilo zařazení
+     * rizikové práce na běžnou sazbu.
+     */
+    public function testLegacyRiskyWorkFlagAloneStillMeansRiskEmployment(): void
+    {
+        $input = $this->terms();
+        $input['risky_work'] = true;
+
+        $validated = $this->validator()->terms($input);
+
+        self::assertSame('risk_employment', $validated['social_employer_rate_category']);
+        self::assertTrue($validated['risky_work']);
+    }
+
+    public function testContradictoryRiskyWorkFlagAndRateCategoryIsRejected(): void
+    {
+        $input = $this->terms();
+        $input['risky_work'] = true;
+        $input['social_employer_rate_category'] = 'ordinary';
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('si odporují');
+        $this->validator()->terms($input);
+    }
+
+    /** U běžné sazby žádný podklad neexistuje, takže se ani neukládá. */
+    public function testOrdinaryCategoryNeverKeepsAnEvidenceReference(): void
+    {
+        $input = $this->terms();
+        $input['social_employer_rate_category'] = 'ordinary';
+        $input['social_employer_rate_category_evidence'] = 'nesmysl';
+
+        $validated = $this->validator()->terms($input);
+
+        self::assertNull($validated['social_employer_rate_category_evidence']);
+    }
+
+    public function testUnknownRateCategoryIsRejected(): void
+    {
+        $input = $this->terms();
+        $input['social_employer_rate_category'] = 'unverified';
+        unset($input['risky_work']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Sazbová kategorie zaměstnavatele');
+        $this->validator()->terms($input);
+    }
+
     public function testRelationshipDetailRequiresPinnedCodeAndApplicableActivity(): void
     {
         $valid = $this->terms();

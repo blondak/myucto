@@ -115,7 +115,7 @@ final class PayrollRulesetProviderTest extends TestCase
 
         $this->expectException(PayrollRulesetException::class);
         $this->expectExceptionMessage('requires manual review');
-        $ruleset->parameter('employer.rate.risk_employment');
+        $ruleset->parameter('employee.discount.agriculture_dpp');
     }
 
     public function testMissingRequiredParameterFailsClosed(): void

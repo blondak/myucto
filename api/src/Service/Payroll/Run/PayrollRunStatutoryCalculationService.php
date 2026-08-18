@@ -17,6 +17,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetLifecycle;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialCalculationStatus;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerCategoryResult;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthCalculator;
 
 final class PayrollRunStatutoryCalculationService
@@ -294,6 +295,18 @@ final class PayrollRunStatutoryCalculationService
                         'Vypočtený zákonný výsledek nemá pojistné zaměstnavatele.',
                     ))
                 : null,
+            /*
+             * Rozpad podle § 5a odst. 1 písm. a) až c). Výplatní páska z něj
+             * rozděluje firemní částku na osoby a dělit smí jen UVNITŘ
+             * kategorie — každá vznikla jinou sazbou podle § 7 odst. 1.
+             */
+            'employer_social_categories' => $status === 'calculated'
+                ? array_map(
+                    static fn (SocialEmployerCategoryResult $category): array =>
+                        $category->jsonSerialize(),
+                    $social->employerCategories,
+                )
+                : [],
             'result_set_ids' => $ids,
             'people' => $people,
         ];
@@ -364,6 +377,7 @@ final class PayrollRunStatutoryCalculationService
             'employer_social_before_discount_minor_units' => null,
             'employer_social_part_time_discount_minor_units' => null,
             'employer_social_minor_units' => null,
+            'employer_social_categories' => [],
             'result_set_ids' => [],
             'people' => [],
         ];

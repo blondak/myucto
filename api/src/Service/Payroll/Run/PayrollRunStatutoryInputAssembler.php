@@ -32,6 +32,7 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
 use MyInvoice\Service\Payroll\IncomeTax\TaxResidenceEvidence;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialDiscountEvidence;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerRateCategory;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialIncomeAttribution;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceRelationshipInput;
@@ -493,6 +494,8 @@ final class PayrollRunStatutoryInputAssembler
             return null;
         }
 
+        [$rateCategory, $rateCategoryEvidence] = $this->socialEmployerRateCategory($term);
+
         try {
             return new SocialInsuranceRelationshipInput(
                 $relationshipReference,
@@ -501,7 +504,9 @@ final class PayrollRunStatutoryInputAssembler
                 $active,
                 $attribution,
                 $components,
+                employerRateCategory: $rateCategory,
                 participationAggregationGroup: $mapping->aggregationGroup,
+                employerRateCategoryEvidenceReference: $rateCategoryEvidence,
             );
         } catch (\InvalidArgumentException) {
             $this->issue(
@@ -512,6 +517,44 @@ final class PayrollRunStatutoryInputAssembler
             );
             return null;
         }
+    }
+
+    /**
+     * Sazbová kategorie zaměstnavatele podle § 5a odst. 1 a odkaz na podklad.
+     *
+     * Zmrazená revize starší než sloupec kategorie klíč vůbec nemá. Takový
+     * snapshot se čte jako běžná sazba — přesně to, co se z něj počítalo
+     * v době, kdy vznikl; dosadit dnešní fail-closed by přepsalo historii.
+     * Hodnota, která JE, ale kategorii nepojmenovává, je naopak neznámé
+     * zařazení a končí ručním posouzením.
+     *
+     * @param array<string,mixed> $term
+     * @return array{0:SocialEmployerRateCategory,1:?string}
+     */
+    private function socialEmployerRateCategory(array $term): array
+    {
+        if (!array_key_exists('social_employer_rate_category', $term)) {
+            return [SocialEmployerRateCategory::Ordinary, null];
+        }
+        $category = SocialEmployerRateCategory::tryFrom(
+            is_string($term['social_employer_rate_category'] ?? null)
+                ? $term['social_employer_rate_category']
+                : '',
+        );
+        if ($category === null || $category === SocialEmployerRateCategory::Unverified) {
+            return [SocialEmployerRateCategory::Unverified, null];
+        }
+        if ($category === SocialEmployerRateCategory::Ordinary) {
+            return [$category, null];
+        }
+        $evidence = is_string($term['social_employer_rate_category_evidence'] ?? null)
+            ? trim($term['social_employer_rate_category_evidence'])
+            : '';
+        if ($evidence === '') {
+            return [SocialEmployerRateCategory::Unverified, null];
+        }
+
+        return [$category, $evidence];
     }
 
     /**

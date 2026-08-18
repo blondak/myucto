@@ -81,6 +81,21 @@ function fixture(overrides: Partial<PayrollInsuranceBreakdown> = {}): PayrollIns
           person_assessment_base_minor: 3_000_000,
           person_minor: 372_000,
         },
+        categories: [{
+          category: 'ordinary',
+          paragraph5a_letter: 'a',
+          assessment_base_minor: 3_000_000,
+          contribution_minor: 744_000,
+          contribution_step: {
+            label: 'monthly-employer-social-insurance-ordinary',
+            input_minor_units: 3_000_000,
+            rate: { decimal: '0.248', numerator: 248, denominator: 1000, scale: 3 },
+            unrounded_numerator: 744_000_000,
+            unrounded_denominator: 1000,
+            rounding_mode: 'ceil',
+            output_minor_units: 744_000,
+          },
+        }],
         contribution_step: {
           label: 'monthly-employer-social-insurance',
           input_minor_units: 3_000_000,

@@ -58,7 +58,7 @@ final class VendorRulesetManifest
         // cz-payroll-2026.income-tax.v1
         'd66ac9b41964cf58c550e3ebdd302773d7dad429776417f8096c68ec6e1fcc63',
         // cz-payroll-2026.social-insurance.v1
-        '8e1a513c37f25a26fef12d38d9328280d9214ad030dcb7a7acdb2c5812166422',
+        'ed35a7bdbc35c666dca05e182f1fe2e09014ee54632ee0f03264d6698785897d',
         // cz-payroll-2026.submissions.v1
         '5d4150f71b70da998f465b1ef5f5d396b3a457ff373cce434230a476854cf377',
         // cz-payroll-2026.travel-allowances.v1

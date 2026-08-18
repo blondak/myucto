@@ -41,6 +41,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatutoryResultPersister;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialCalculationStatus;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialDiscountEvidence;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerCategoryResult;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerRateCategory;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialEmploymentKind;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthResult;
@@ -75,6 +76,12 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
         'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
     private const SOCIAL_EMPLOYEE_RATE = '0.071';
     private const SOCIAL_EMPLOYER_RATE = '0.248';
+    /** Sazby § 7 odst. 1 písm. a) až c) pro rok 2026. */
+    private const EMPLOYER_RATES = [
+        'ordinary' => '0.248',
+        'rescue_and_company_fire_service' => '0.298',
+        'risk_employment' => '0.278',
+    ];
     private const HEALTH_RATE = '0.135';
 
     private Connection $db;
@@ -474,6 +481,94 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
     }
 
     /**
+     * Firma se dvěma sazbovými kategoriemi § 5a odst. 1 současně.
+     *
+     * Rozdělit firemní součet poměrem VŠECH základů by osobě s běžnou sazbou
+     * přisoudilo kus pojistného, které vzniklo sazbou pro rizikové práce.
+     * Podíl proto vzniká uvnitř kategorie a rovná se přesně jejímu pojistnému,
+     * protože v každé je právě jeden člověk.
+     */
+    public function testEmployerAllocationStaysInsideItsRateCategory(): void
+    {
+        $this->persistResults(
+            cappedBasesByIndex: [0 => 4_000_000, 1 => 6_000_000],
+            rateCategoriesByIndex: [1 => SocialEmployerRateCategory::RiskEmployment],
+        );
+
+        $first = $this->service->breakdown(
+            $this->supplierId,
+            $this->revisionId,
+            $this->employeeIds[0],
+        )['social']['employer'];
+        $second = $this->service->breakdown(
+            $this->supplierId,
+            $this->revisionId,
+            $this->employeeIds[1],
+        )['social']['employer'];
+
+        // 24,8 % ze 40 000 Kč = 9 920 Kč; 27,8 % ze 60 000 Kč = 16 680 Kč.
+        self::assertSame(2_660_000, $first['contribution_minor']);
+        self::assertSame(992_000, $first['allocation']['person_minor']);
+        self::assertSame(1_668_000, $second['allocation']['person_minor']);
+        // Poměr všech základů 40:60 by dal 1 064 000 a 1 596 000.
+        self::assertNotSame(1_064_000, $first['allocation']['person_minor']);
+
+        self::assertSame(
+            [
+                ['ordinary', 'a', 4_000_000, 992_000],
+                ['risk_employment', 'c', 6_000_000, 1_668_000],
+            ],
+            array_map(
+                static fn (array $category): array => [
+                    $category['category'],
+                    $category['paragraph5a_letter'],
+                    $category['assessment_base_minor'],
+                    $category['contribution_minor'],
+                ],
+                $first['categories'],
+            ),
+        );
+        // Jeden krok pro dvě sazby neexistuje; vysvětlení nese rozpad.
+        self::assertNull($first['contribution_step']);
+    }
+
+    /**
+     * Výsledek uložený dřív, než rozpad § 5a vůbec existoval, klíč
+     * `employer_categories` nemá. Rozklad ho musí přečíst tak, jak vznikl —
+     * odmítnout ho jako neúplný by účetní vzalo vysvětlení k uzavřeným
+     * měsícům, které přitom byly spočítané správně (tehdy uměl modul jedinou
+     * kategorii, takže se poměr rozdělení nemění).
+     */
+    public function testResultStoredBeforeRateCategoriesExistedIsStillReadable(): void
+    {
+        $this->persistResults(
+            cappedBasesByIndex: [0 => 1_000_000, 1 => 2_000_100],
+            withoutRateCategories: true,
+        );
+
+        $allocated = 0;
+        $companyTotal = null;
+        foreach ($this->employeeIds as $employeeId) {
+            $employer = $this->service->breakdown(
+                $this->supplierId,
+                $this->revisionId,
+                $employeeId,
+            )['social']['employer'];
+            self::assertSame([], $employer['categories']);
+            self::assertNull($employer['allocation']['not_allocatable_reason']);
+            self::assertSame(
+                'capped_assessment_base_share',
+                $employer['allocation']['method'],
+            );
+            $companyTotal = $employer['contribution_minor'];
+            $allocated += $employer['allocation']['person_minor'];
+        }
+
+        self::assertSame(744_100, $companyTotal);
+        self::assertSame($companyTotal, $allocated);
+    }
+
+    /**
      * Osoba s nulovým vyměřovacím základem nesmí dostat nic — ani zbytek po
      * dělení. Celá částka patří tomu, kdo základ má.
      */
@@ -560,13 +655,21 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
         bool $recordHealthSteps = true,
         array $cappedBasesByIndex = [],
         string $healthRate = self::HEALTH_RATE,
+        array $rateCategoriesByIndex = [],
+        bool $withoutRateCategories = false,
     ): void {
         $this->persister->persist(
             $this->supplierId,
             $this->revisionId,
             null,
             $this->snapshot(),
-            $this->socialResult($cappedBaseMinorUnits, $yearToDateMinorUnits, $cappedBasesByIndex),
+            $this->socialResult(
+                $cappedBaseMinorUnits,
+                $yearToDateMinorUnits,
+                $cappedBasesByIndex,
+                $rateCategoriesByIndex,
+                $withoutRateCategories,
+            ),
             $this->healthResult(
                 $healthBaseMinorUnits,
                 $healthMinimumMinorUnits,
@@ -578,11 +681,16 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
         );
     }
 
-    /** @param array<int,int> $cappedBasesByIndex */
+    /**
+     * @param array<int,int> $cappedBasesByIndex
+     * @param array<int,SocialEmployerRateCategory> $rateCategoriesByIndex
+     */
     private function socialResult(
         int $cappedBase,
         int $yearToDate,
         array $cappedBasesByIndex = [],
+        array $rateCategoriesByIndex = [],
+        bool $withoutRateCategories = false,
     ): SocialInsuranceMonthResult {
         $rate = DecimalRate::fromString(self::SOCIAL_EMPLOYEE_RATE);
         $people = [];
@@ -635,20 +743,74 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
                     ['BASE'],
                     ['MEAL_ALLOWANCE'],
                     SocialDiscountEvidence::NotClaimed,
-                    SocialEmployerRateCategory::Ordinary,
+                    $rateCategoriesByIndex[$index] ?? SocialEmployerRateCategory::Ordinary,
                     1,
                     null,
                 )],
                 [],
             );
         }
-        $employerStep = CalculationStep::calculate(
-            'monthly-employer-social-insurance',
-            $companyBase,
-            DecimalRate::fromString(self::SOCIAL_EMPLOYER_RATE),
-            RoundingMode::Ceil,
-        );
-        $employer = PayrollRounding::ceilToCzk($employerStep->outputMinorUnits);
+        $categoryBases = [];
+        foreach (array_keys($this->employeeIds) as $index) {
+            $category = ($rateCategoriesByIndex[$index] ?? SocialEmployerRateCategory::Ordinary)
+                ->value;
+            $categoryBases[$category] = ($categoryBases[$category] ?? 0)
+                + ($cappedBasesByIndex[$index] ?? $cappedBase);
+        }
+        $categories = [];
+        $employer = 0;
+        foreach (SocialEmployerRateCategory::statutoryOrder() as $category) {
+            if (!array_key_exists($category->value, $categoryBases)) {
+                continue;
+            }
+            $step = CalculationStep::calculate(
+                "monthly-employer-social-insurance-{$category->value}",
+                $categoryBases[$category->value],
+                DecimalRate::fromString(self::EMPLOYER_RATES[$category->value]),
+                RoundingMode::Ceil,
+            );
+            $amount = PayrollRounding::ceilToCzk($step->outputMinorUnits);
+            $employer += $amount;
+            $categories[] = new SocialEmployerCategoryResult(
+                $category,
+                $categoryBases[$category->value],
+                $amount,
+                $step,
+            );
+        }
+        /*
+         * Tvar výsledku uloženého dřív, než rozpad § 5a existoval: prázdný
+         * seznam kategorií a jediný krok zaměstnavatele. Prázdný seznam se
+         * čte stejně jako úplně chybějící klíč, takže jím jde nasimulovat
+         * revize z doby před migrací, aniž by se sahalo na neměnný záznam.
+         */
+        if ($withoutRateCategories) {
+            $legacyStep = CalculationStep::calculate(
+                'monthly-employer-social-insurance',
+                $companyBase,
+                DecimalRate::fromString(self::SOCIAL_EMPLOYER_RATE),
+                RoundingMode::Ceil,
+            );
+
+            return new SocialInsuranceMonthResult(
+                '2026-06-30',
+                SocialCalculationStatus::Calculated,
+                $participatingTotal,
+                $companyBase,
+                $employeeTotal,
+                PayrollRounding::ceilToCzk($legacyStep->outputMinorUnits),
+                0,
+                0,
+                PayrollRounding::ceilToCzk($legacyStep->outputMinorUnits),
+                $legacyStep,
+                null,
+                [],
+                $people,
+                [],
+                self::SOCIAL_RULESET_ID,
+                self::SOCIAL_RULESET_HASH,
+            );
+        }
 
         return new SocialInsuranceMonthResult(
             '2026-06-30',
@@ -660,8 +822,9 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
             0,
             0,
             $employer,
-            $employerStep,
+            count($categories) === 1 ? $categories[0]->contributionStep : null,
             null,
+            $categories,
             $people,
             [],
             self::SOCIAL_RULESET_ID,
