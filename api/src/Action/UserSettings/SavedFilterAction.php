@@ -49,7 +49,8 @@ final class SavedFilterAction
         'stock-items', 'stock-documents', 'stock-purchase-orders',
         'payroll-documents', 'payroll-payments', 'payroll-quick-inputs',
         'payroll-recurring-components', 'payroll-retention',
-        'payroll-health-notifications'];
+        'payroll-health-notifications',
+        'payroll-benefit-baskets'];
 
     private const MAX_FILTERS = 30;
 

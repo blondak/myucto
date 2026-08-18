@@ -110,6 +110,10 @@ const routes: RouteRecordRaw[] = [
       { path: 'payroll/people', name: 'payroll-people', component: () => import('@/pages/payroll/PeopleList.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/quick-inputs', name: 'payroll-quick-inputs', component: () => import('@/pages/payroll/PayrollQuickInputs.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/components', name: 'payroll-components', component: () => import('@/pages/payroll/PayrollComponents.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      // Přehled čerpání ročních košů osvobození (§ 6 odst. 9 ZDP) za firmu. Jede
+      // na `payroll` READ stejně jako seznam mzdových vstupů — je to jejich
+      // součet za osobu a rok, ne nová třída údajů.
+      { path: 'payroll/benefit-baskets', name: 'payroll-benefit-baskets', component: () => import('@/pages/payroll/PayrollBenefitBaskets.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/time', name: 'payroll-time', component: () => import('@/pages/payroll/TimeAttendance.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/absences', name: 'payroll-absences', component: () => import('@/pages/payroll/AbsenceManagement.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/travel', name: 'payroll-travel', component: () => import('@/pages/payroll/PayrollTravel.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
@@ -448,6 +452,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'payroll-people': ['payroll'],
   'payroll-quick-inputs': ['payroll'],
   'payroll-components': ['payroll'],
+  'payroll-benefit-baskets': ['payroll'],
   'payroll-time': ['payroll'],
   'payroll-absences': ['payroll'],
   'payroll-travel': ['payroll'],

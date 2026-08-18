@@ -74,6 +74,11 @@ final class PayrollEnumContractTest extends TestCase
         // Mzdový běh
         'payroll.ts::PayrollBenefitExemptionBasket'
             => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
+        // Stav řádku v přehledu čerpání košů. `incomplete` a `limit_unavailable`
+        // jsou přiznání chybějícího podkladu — klient, který je nezná, by je
+        // vykreslil jako prázdný stav, tedy jako „nic se neděje".
+        'payrollBenefitBaskets.ts::BenefitBasketStatus'
+            => 'const:MyInvoice\Service\Payroll\Component\PayrollBenefitBasketUsage::STATUSES',
         'payroll.ts::PayrollRunStatus'      => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunStatus',
         'payroll.ts::PayrollRunCommand'     => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunCommand',
         'payroll.ts::PayrollRunOutcomeCode' => 'consts:MyInvoice\Service\Payroll\Run\PayrollRunCommandOutcome',
@@ -364,6 +369,14 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.components.source'       => 'db:payroll_inputs.source_kind',
         'payroll.components.input_status' => 'db:payroll_inputs.status',
         'payroll.components.calculation'  => 'db:payroll_recurring_components.calculation_kind',
+
+        // Přehled čerpání košů skládá oba klíče dynamicky. Bez věty by se místo
+        // stavu vypsalo `limit_unavailable` — právě tam, kde má být řečeno, že
+        // se limit netvrdí, ne že je nula.
+        'payroll.benefit_baskets.basket'
+            => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
+        'payroll.benefit_baskets.status'
+            => 'const:MyInvoice\Service\Payroll\Component\PayrollBenefitBasketUsage::STATUSES',
 
         'payroll.documents.kind' => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
 

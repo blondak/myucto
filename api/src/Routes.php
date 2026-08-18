@@ -70,6 +70,7 @@ use MyInvoice\Action\Payroll\PayrollAnnualSettlementAction;
 use MyInvoice\Action\Payroll\PayrollActivationAction;
 use MyInvoice\Action\Payroll\PayrollAccountOptionsAction;
 use MyInvoice\Action\Payroll\PayrollAbsenceAction;
+use MyInvoice\Action\Payroll\PayrollBenefitBasketOverviewAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollComponentsAction;
 use MyInvoice\Action\Payroll\PayrollComponentJmhzMappingsAction;
@@ -725,6 +726,10 @@ final class Routes
             $g->get(
                 '/enforcement/people/{employeeId:[0-9]+}/dependants',
                 [PayrollEnforcementAction::class, 'dependants'],
+            );
+            $g->get(
+                '/benefit-baskets',
+                [PayrollBenefitBasketOverviewAction::class, 'list'],
             );
             $g->get('/inputs', [PayrollInputsAction::class, 'list']);
             $g->post('/inputs/preview', [PayrollInputsAction::class, 'preview']);

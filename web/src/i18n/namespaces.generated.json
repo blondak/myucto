@@ -298,6 +298,9 @@
     "payroll-components": [
       "payroll"
     ],
+    "payroll-benefit-baskets": [
+      "payroll"
+    ],
     "payroll-time": [
       "payroll"
     ],
@@ -328,6 +331,9 @@
       "payroll"
     ],
     "payroll-retention": [
+      "payroll"
+    ],
+    "payroll-erasure": [
       "payroll"
     ],
     "payroll-rulesets": [
