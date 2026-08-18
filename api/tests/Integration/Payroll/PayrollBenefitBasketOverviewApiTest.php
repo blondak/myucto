@@ -454,12 +454,196 @@ final class PayrollBenefitBasketOverviewApiTest extends TestCase
         return PayrollTimeValue::int($component['id'] ?? null, 'component_id');
     }
 
+    /**
+     * Storno akumulátoru — hodnota `reversed` byla v enumu od migrace 1210, ale
+     * nikdo ji nenastavoval: schválený vstup se zrušit nedal a jiná cesta ke
+     * stornu neexistovala. Koš tak zůstal vyčerpaný napořád i tehdy, když
+     * plnění vůbec nebylo.
+     */
+    public function testReversingABenefitReleasesTheAnnualBasket(): void
+    {
+        $component = $this->createBasketComponent('PREH_STORNO_A', 'non_cash_leisure');
+        $input = $this->approve($component, 900_000, $this->employmentId, 'p-rev-a');
+        $inputId = PayrollTimeValue::int($input['id'] ?? null, 'input_id');
+
+        self::assertSame(900_000, $this->rows($this->fetch(['year' => '2026']))[0]['used_minor']);
+
+        $response = $this->reverse($inputId, $this->rowVersion($inputId), 'plnění nebylo poskytnuto');
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $reversed = PayrollTimeValue::row($this->json($response)['input'] ?? null, 'input');
+        self::assertSame('cancelled', $reversed['status']);
+
+        self::assertSame(
+            [],
+            $this->rows($this->fetch(['year' => '2026'])),
+            'Stornovaný akumulátor už nesmí koš čerpat.',
+        );
+        self::assertSame('reversed', $this->accumulatorStatus($inputId));
+        self::assertSame(
+            900_000,
+            $this->accumulatorAmount($inputId),
+            'Zmrazená částka se stornem nepřepočítává — mění se jen stav.',
+        );
+
+        // Uvolněný koš musí jít znovu vyčerpat celý, jinak by storno nebylo storno.
+        $this->approve($component, self::LEISURE_LIMIT_MINOR, $this->secondEmploymentId, 'p-rev-b');
+        $row = $this->rows($this->fetch(['year' => '2026']))[0];
+        self::assertSame(self::LEISURE_LIMIT_MINOR, $row['used_minor']);
+        self::assertSame(0, $row['taxable_minor']);
+    }
+
+    /** Druhé storno už jen vrátí stav — akumulátor se nesmí stornovat dvakrát. */
+    public function testBenefitReversalIsIdempotent(): void
+    {
+        $component = $this->createBasketComponent('PREH_STORNO_B', 'non_cash_leisure');
+        $input = $this->approve($component, 100_000, $this->employmentId, 'p-rev-c');
+        $inputId = PayrollTimeValue::int($input['id'] ?? null, 'input_id');
+
+        $first = $this->reverse($inputId, $this->rowVersion($inputId), 'omyl');
+        self::assertSame(200, $first->getStatusCode(), (string) $first->getBody());
+        $version = $this->rowVersion($inputId);
+
+        $again = $this->reverse($inputId, $version, 'omyl');
+        self::assertSame(200, $again->getStatusCode(), (string) $again->getBody());
+        self::assertSame($version, $this->rowVersion($inputId));
+    }
+
+    /**
+     * Vstup zmrazený ve schválené revizi je už na pásce, v zákonných výsledcích
+     * i v účetní dávce. Uvolnit jeho koš by rozhodilo zdanění hotového měsíce —
+     * oprava patří do opravné revize běhu.
+     */
+    public function testReversalRefusesAnInputFrozenInARunRevision(): void
+    {
+        $component = $this->createBasketComponent('PREH_STORNO_C', 'non_cash_leisure');
+        $input = $this->approve($component, 100_000, $this->employmentId, 'p-rev-d');
+        $inputId = PayrollTimeValue::int($input['id'] ?? null, 'input_id');
+        $this->freezeInRunRevision($inputId);
+
+        $response = $this->reverse($inputId, $this->rowVersion($inputId), 'omyl');
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('input_has_movement', $this->errorCode($response));
+        self::assertSame('active', $this->accumulatorStatus($inputId));
+    }
+
+    /** Bez důvodu by z auditní stopy nešlo poznat, proč se koš uvolnil. */
+    public function testReversalRequiresAReason(): void
+    {
+        $component = $this->createBasketComponent('PREH_STORNO_D', 'non_cash_leisure');
+        $input = $this->approve($component, 100_000, $this->employmentId, 'p-rev-e');
+        $inputId = PayrollTimeValue::int($input['id'] ?? null, 'input_id');
+
+        $response = $this->reverse($inputId, $this->rowVersion($inputId), '   ');
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame('validation_failed', $this->errorCode($response));
+        self::assertSame('active', $this->accumulatorStatus($inputId));
+    }
+
+    /** Nebenefitní vstup žádný koš nečerpá — není co stornovat. */
+    public function testReversalRefusesAnInputWithoutABenefitAccumulator(): void
+    {
+        $component = $this->createBasketComponent('PREH_STORNO_E', null);
+        $input = $this->approve($component, 100_000, $this->employmentId, 'p-rev-f');
+        $inputId = PayrollTimeValue::int($input['id'] ?? null, 'input_id');
+        $this->db->pdo()
+            ->prepare('DELETE FROM payroll_benefit_accumulators WHERE supplier_id = ? AND input_id = ?')
+            ->execute([$this->supplierId, $inputId]);
+
+        $response = $this->reverse($inputId, $this->rowVersion($inputId), 'omyl');
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('input_state_conflict', $this->errorCode($response));
+    }
+
+    private function reverse(int $inputId, int $rowVersion, string $reason): ResponseInterface
+    {
+        return $this->inputs->reverseBenefit(
+            $this->request([], 'POST', "/api/payroll/inputs/{$inputId}/reverse-benefit")
+                ->withParsedBody(['row_version' => $rowVersion, 'reason' => $reason]),
+            new Response(),
+            ['id' => (string) $inputId],
+        );
+    }
+
+    private function rowVersion(int $inputId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT row_version FROM payroll_inputs WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$this->supplierId, $inputId]);
+
+        return PayrollTimeValue::int($stmt->fetchColumn(), 'row_version');
+    }
+
+    private function accumulatorStatus(int $inputId): string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT status FROM payroll_benefit_accumulators
+              WHERE supplier_id = ? AND input_id = ?'
+        );
+        $stmt->execute([$this->supplierId, $inputId]);
+
+        return PayrollTimeValue::string($stmt->fetchColumn(), 'accumulator.status');
+    }
+
+    private function accumulatorAmount(int $inputId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT amount_minor FROM payroll_benefit_accumulators
+              WHERE supplier_id = ? AND input_id = ?'
+        );
+        $stmt->execute([$this->supplierId, $inputId]);
+
+        return PayrollTimeValue::int($stmt->fetchColumn(), 'accumulator.amount_minor');
+    }
+
+    private function errorCode(ResponseInterface $response): string
+    {
+        $error = PayrollTimeValue::row($this->json($response)['error'] ?? null, 'error');
+
+        return PayrollTimeValue::string($error['code'] ?? null, 'error.code');
+    }
+
+    private function freezeInRunRevision(int $inputId): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_runs
+                (supplier_id, period_start, payment_date, status, current_revision_no)
+             VALUES (?, "2026-07-01", "2026-08-10", "calculated", 1)'
+        )->execute([$this->supplierId]);
+        $runId = (int) $pdo->lastInsertId();
+        $snapshot = \MyInvoice\Service\Payroll\Ruleset\CanonicalJson::encode([
+            'schema_version' => 'payroll-run-input.v2',
+            'people' => [[
+                'employments' => [[
+                    'inputs' => [['id' => $inputId]],
+                ]],
+            ]],
+        ]);
+        $pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, revision_kind, status,
+                 schema_version, ruleset_manifest_hash, input_snapshot_json,
+                 input_snapshot_hash, idempotency_key_hash)
+             VALUES (?, ?, 1, "regular", "calculated", "payroll-run-input.v2",
+                     SHA2(?, 256), ?, SHA2(?, 256), UNHEX(SHA2(?, 256)))'
+        )->execute([
+            $this->supplierId,
+            $runId,
+            'manifest-' . $inputId,
+            $snapshot,
+            $snapshot,
+            'idempotency-' . $inputId,
+        ]);
+    }
+
+    /** @return array<string,mixed> */
     private function approve(
         int $componentId,
         int $amountMinor,
         int $employmentId,
         string $externalId,
-    ): void {
+    ): array {
         $payload = [
             'employee_id' => $this->employeeId,
             'employment_id' => $employmentId,
@@ -491,6 +675,8 @@ final class PayrollBenefitBasketOverviewApiTest extends TestCase
             ['id' => (string) $inputId],
         );
         self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+
+        return PayrollTimeValue::row($this->json($approved)['input'] ?? null, 'input');
     }
 
     private function firstId(PDO $pdo, string $table): int

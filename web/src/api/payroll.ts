@@ -1180,6 +1180,10 @@ export interface PayrollInput {
   recurring_component_id?: number | null
   status: PayrollInputStatus
   component_snapshot_json: string | null
+  /** Zmrazený koš osvobození § 6 odst. 9 ZDP — vyplní se až schválením vstupu. */
+  benefit_basket?: string | null
+  benefit_exempt_minor?: number | null
+  benefit_taxable_minor?: number | null
   row_version: number
   created_by: number | null
   approved_by: number | null
@@ -4183,6 +4187,11 @@ export const payrollApi = {
   cancelInput: (id: number, rowVersion: number) =>
     api.post<{ input: PayrollInput }>(`/payroll/inputs/${id}/cancel`, {
       row_version: rowVersion,
+    }).then(response => response.data.input),
+  reverseBenefitInput: (id: number, rowVersion: number, reason: string) =>
+    api.post<{ input: PayrollInput }>(`/payroll/inputs/${id}/reverse-benefit`, {
+      row_version: rowVersion,
+      reason,
     }).then(response => response.data.input),
   previewInputImport: (payload: PayrollInputImportPayload) =>
     api.post<{ preview: PayrollInputImportPreview }>('/payroll/input-imports/preview', payload)

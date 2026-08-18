@@ -737,6 +737,10 @@ final class Routes
             $g->put('/inputs/{id:[0-9]+}', [PayrollInputsAction::class, 'update']);
             $g->post('/inputs/{id:[0-9]+}/approve', [PayrollInputsAction::class, 'approve']);
             $g->post('/inputs/{id:[0-9]+}/cancel', [PayrollInputsAction::class, 'cancel']);
+            $g->post(
+                '/inputs/{id:[0-9]+}/reverse-benefit',
+                [PayrollInputsAction::class, 'reverseBenefit'],
+            );
             $g->get('/quick-inputs', [PayrollQuickInputsAction::class, 'list']);
             $g->put('/quick-inputs', [PayrollQuickInputsAction::class, 'save']);
             $g->get('/recurring-components', [PayrollRecurringComponentsAction::class, 'list']);
