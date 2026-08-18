@@ -125,6 +125,7 @@ describe('TimeAttendance', () => {
       expect.any(String),
       false,
       { limit: 25, offset: 0 },
+      null,
     )
 
     m.timeMonth.mockResolvedValue({
@@ -143,6 +144,7 @@ describe('TimeAttendance', () => {
       expect.any(String),
       false,
       { limit: 25, offset: 25 },
+      null,
     )
     expect(wrapper.text()).toContain('Syntetická osoba B')
     expect(wrapper.text()).not.toContain('Syntetická osoba A')
@@ -167,6 +169,7 @@ describe('TimeAttendance', () => {
       expect.any(String),
       false,
       { limit: 25, offset: 25 },
+      null,
     )
 
     await wrapper.find('input[type="checkbox"][class*="rounded"]').setValue(true)
@@ -176,6 +179,7 @@ describe('TimeAttendance', () => {
       expect.any(String),
       true,
       { limit: 25, offset: 0 },
+      null,
     )
   })
 
@@ -488,5 +492,53 @@ describe('TimeAttendance', () => {
       .toContain('§ 245 odst. 1 zákoníku práce')
     expect(wrapper.get('[data-test="overtime-averaging-12"]').text())
       .toContain('payroll.time.overtime.averaging_compensated')
+  })
+  /**
+   * Zúžení na jeden vztah musí odejít NA SERVER.
+   *
+   * Dokud filtroval prohlížeč nad načtenou stránkou, vztah ležící na jiné
+   * straně se tiše neprojevil: seznam zůstal celý a lišta zmizela. Test proto
+   * hlídá, že se `employment_id` posílá do dotazu, a že když server nic
+   * nevrátí, řekne to obrazovka větou místo prázdna.
+   */
+  it('sends the employment narrowing to the server', async () => {
+    m.routeQuery = { employment: '77' }
+    m.timeMonth.mockResolvedValue({
+      items: [row(77, 'Syntetická osoba Z')],
+      total: 1,
+      limit: 25,
+      offset: 0,
+      employment_id: 77,
+    })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+
+    expect(m.timeMonth).toHaveBeenCalledWith(
+      expect.any(String),
+      false,
+      { limit: 25, offset: 0 },
+      77,
+    )
+    expect(wrapper.find('[data-test="payroll-focus-notice"]').exists()).toBe(true)
+    m.routeQuery = {}
+  })
+
+  /** Server zúžení uplatnil a nezbylo nic — obrazovka to musí říct, ne mlčet. */
+  it('names an empty narrowing instead of showing an empty list', async () => {
+    m.routeQuery = { employment: '404' }
+    m.timeMonth.mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 25,
+      offset: 0,
+      employment_id: 404,
+    })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+
+    const notice = wrapper.find('[data-test="payroll-focus-notice"]')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('payroll.agendas.focus.missing')
+    m.routeQuery = {}
   })
 })

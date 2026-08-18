@@ -14,7 +14,7 @@ final class PayrollAbsenceValidator
     private const TYPES = [
         'vacation', 'dpn', 'quarantine', 'ocr', 'long_term_care', 'ppm',
         'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
-        'employer_obstacle', 'other',
+        'employer_obstacle', 'compensatory_time_off', 'other',
     ];
 
     private const DOMAIN = PayrollRulesetDomain::CompensationAverages;
@@ -46,6 +46,10 @@ final class PayrollAbsenceValidator
             'dpn', 'quarantine' => 'dpn',
             'vacation' => 'average_100',
             'employee_obstacle', 'employer_obstacle' => 'statutory_manual_review',
+            // Náhradní volno: za dobu jeho čerpání mzda nepřísluší
+            // (§ 114 odst. 3 zákoníku práce) — přesčas se už zaplatil mzdou,
+            // volnem se nahrazuje jen příplatek. Proto `none`, ne přehlédnutí.
+            'compensatory_time_off' => 'none',
             default => 'none',
         };
         if (in_array($policy, ['average_100', 'statutory_manual_review'], true)

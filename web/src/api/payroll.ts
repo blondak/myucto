@@ -889,13 +889,38 @@ export interface PayrollTimeOverviewItem {
   overtime_consents: PayrollOvertimeConsent[]
   overtime_protections: PayrollOvertimeProtection[]
   overtime_compensations: PayrollOvertimeCompensation[]
+  /**
+   * Porovnání dvou evidencí náhradního volna za měsíc: absence typu
+   * `compensatory_time_off` (den čerpání) proti `payroll_overtime_compensations`
+   * (den přesčasu). Sjednotit je nejde — mají jiný klíč — ale rozpor mezi nimi
+   * nesmí zůstat tichý.
+   */
+  compensatory_time_off_check: PayrollCompensatoryTimeOffCheck | null
   shifts: PayrollShift[]
   entries: PayrollTimeEntry[]
+}
+
+export type PayrollCompensatoryTimeOffFinding =
+  | 'absence_without_compensation'
+  | 'compensation_without_absence'
+  | 'grant_date_unknown'
+
+export interface PayrollCompensatoryTimeOffCheck {
+  employment_id: number
+  period: string
+  status: 'ok' | PayrollCompensatoryTimeOffFinding
+  findings: PayrollCompensatoryTimeOffFinding[]
+  absence_rows: number
+  granted_rows: number
+  granted_minutes: number
+  ungranted_rows: number
 }
 
 export interface PayrollTimeOverview {
   period: string
   incomplete_only: boolean
+  /** Zúžení na jeden vztah, které server SKUTEČNĚ uplatnil (§ zúžení z karty). */
+  employment_id: number | null
   items: PayrollTimeOverviewItem[]
   total: number
   limit: number
@@ -2435,7 +2460,20 @@ export interface PayrollAnnualSettlementList {
   payout_period: string
   payout_threshold_minor: number
   items: PayrollAnnualSettlementListItem[]
+  /** Počet lidí v CELÉM zúžení, ne na načtené stránce. */
+  total: number
+  limit: number
+  offset: number
+  search: string
+  state: PayrollAnnualSettlementListState
 }
+
+/** Pojmenované zúžení přehledu, ne dopočet ze stránky. */
+export type PayrollAnnualSettlementListState =
+  | 'all'
+  | 'requested'
+  | 'settled'
+  | 'unsettled'
 
 export interface PayrollAnnualSettlementCreditRow {
   label: string
@@ -3812,9 +3850,18 @@ export const payrollApi = {
     api.get<PayrollAnnualDocumentList>('/payroll/documents/annual', {
       params: { year, ...pageParams(page) },
     }).then(response => response.data),
-  listAnnualSettlements: (year: number) =>
-    api.get<PayrollAnnualSettlementList>(`/payroll/annual-settlements/${year}`)
-      .then(response => response.data),
+  listAnnualSettlements: (
+    year: number,
+    page?: PayrollPageParams,
+    filters?: { search?: string; state?: PayrollAnnualSettlementListState },
+  ) =>
+    api.get<PayrollAnnualSettlementList>(`/payroll/annual-settlements/${year}`, {
+      params: {
+        ...pageParams(page),
+        ...(filters?.search ? { search: filters.search } : {}),
+        ...(filters?.state && filters.state !== 'all' ? { state: filters.state } : {}),
+      },
+    }).then(response => response.data),
   previewAnnualSettlement: (year: number, employeeId: number) =>
     api.get<PayrollAnnualSettlementPreview>(
       `/payroll/annual-settlements/${year}/people/${employeeId}`,
@@ -4011,9 +4058,19 @@ export const payrollApi = {
       URL.revokeObjectURL(objectUrl)
     }
   },
-  timeMonth: (period: string, incomplete = false, page?: PayrollPageParams) =>
+  timeMonth: (
+    period: string,
+    incomplete = false,
+    page?: PayrollPageParams,
+    employmentId?: number | null,
+  ) =>
     api.get<PayrollTimeOverview>('/payroll/time/month', {
-      params: { period, incomplete: incomplete ? 1 : 0, ...pageParams(page) },
+      params: {
+        period,
+        incomplete: incomplete ? 1 : 0,
+        ...pageParams(page),
+        ...(employmentId ? { employment_id: employmentId } : {}),
+      },
     }).then(response => response.data),
   saveTimeCalendar: (employmentId: number, payload: Record<string, unknown>) =>
     api.put<{ calendar: PayrollWorkCalendar }>(`/payroll/time/calendars/${employmentId}`, payload)

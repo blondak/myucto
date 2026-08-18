@@ -11,6 +11,7 @@ const m = vi.hoisted(() => ({
   createDownloadGrant: vi.fn(),
   downloadExport: vi.fn(),
   reconciliation: vi.fn(),
+  searchOptions: vi.fn(),
   match: vi.fn(),
   reverse: vi.fn(),
   runs: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock('@/api/payrollPayments', () => ({
     createDownloadGrant: m.createDownloadGrant,
     downloadExport: m.downloadExport,
     reconciliation: m.reconciliation,
+    searchOptions: m.searchOptions,
     match: m.match,
     reverse: m.reverse,
   },
@@ -821,5 +823,73 @@ describe('PayrollPayments', () => {
     // Nabídka storna zůstává úplná, i když historie ukazuje jinou stránku.
     const reversalSelect = wrapper.findAllComponents({ name: 'SearchableSelect' })[2]
     expect(reversalSelect.props('options')).toHaveLength(2)
+  })
+  /**
+   * Nabídka důkazů se posílá oříznutá. Mlčky oříznutý picker je nejdražší
+   * možná lež: uživatel z chybějící transakce usoudí, že platba neproběhla.
+   * Test hlídá obojí — že se hledá NA SERVERU a že se oříznutí přizná větou.
+   */
+  it('searches truncated pickers on the server and admits the cut', async () => {
+    const base = await m.reconciliation()
+    m.reconciliation.mockResolvedValue({
+      ...base,
+      bank_evidence_truncated: true,
+    })
+    m.searchOptions.mockResolvedValue({
+      kind: 'bank_evidence',
+      items: [{
+        kind: 'bank',
+        bank_statement_id: 91,
+        bank_transaction_id: 999,
+        cash_document_id: null,
+        date: '2026-08-02',
+        amount_minor: 4_250_000,
+        currency_code: 'CZK',
+        direction: 'outgoing',
+        description: 'Jehla v kupce sena',
+        reference: null,
+        available_match_minor: 4_250_000,
+        available_reversal_minor: 4_250_000,
+      }],
+      truncated: true,
+      limit: 20,
+    })
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await wrapper.findAll('nav button')[2].trigger('click')
+    await flushPromises()
+
+    const selects = wrapper.findAllComponents({ name: 'SearchableSelect' })
+    await selects[0].vm.$emit('update:modelValue', 81)
+    await flushPromises()
+
+    expect(m.searchOptions).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'bank_evidence',
+      usage: 'match',
+      currency: 'CZK',
+      direction: 'outgoing',
+    }))
+
+    const evidenceSelect = wrapper.findAllComponents({ name: 'SearchableSelect' })
+      .find(select => select.props('remote') === true)
+    expect(evidenceSelect).toBeDefined()
+    await evidenceSelect!.find('input').trigger('focus')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="searchable-select-truncated"]').text())
+      .toContain('payroll.payments.settlements.options_truncated')
+    expect(wrapper.text()).toContain('Jehla v kupce sena')
+  })
+
+  /** Krátká nabídka zůstává v prohlížeči — picker ji nesmí objednávat znovu. */
+  it('keeps short pickers local and asks the server for nothing', async () => {
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await wrapper.findAll('nav button')[2].trigger('click')
+    await flushPromises()
+
+    expect(m.searchOptions).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="searchable-select-truncated"]').exists()).toBe(false)
   })
 })

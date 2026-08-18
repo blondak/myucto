@@ -34,6 +34,31 @@ vi.mock('@/api/payroll', () => ({
   },
 }))
 
+// Uložené pohledy jdou přes Pinii a API; v testu stačí prázdná sada bez
+// výchozího pohledu, ať se obrazovka nezastaví na načítání předvoleb.
+vi.mock('@/composables/useSavedFilters', async () => {
+  const { computed, ref } = await import('vue')
+  return {
+    useSavedFilters: (_key: string, opts: {
+      getQuery: () => Record<string, string>
+      applyQuery: (q: Record<string, string>) => void
+    }) => ({
+      filters: ref([]),
+      activeId: computed(() => null),
+      ready: ref(true),
+      getQuery: opts.getQuery,
+      saveCurrent: vi.fn(),
+      overwrite: vi.fn(),
+      apply: vi.fn(),
+      clearActive: () => opts.applyQuery({}),
+      rename: vi.fn(),
+      setDefault: vi.fn(),
+      remove: vi.fn(),
+      applyDefaultIfAny: () => Promise.resolve(false),
+    }),
+  }
+})
+
 vi.mock('@/api/errors', () => ({
   apiErrorMessage: (_error: unknown, fallback: string) => fallback,
 }))
@@ -74,7 +99,7 @@ const emptyStateStub = {
   template: '<div data-test="empty-state" :data-variant="variant">{{ title }}</div>',
 }
 
-function listResponse(items: unknown[]) {
+function listResponse(items: unknown[], overrides: Record<string, unknown> = {}) {
   return {
     tax_year: 2026,
     request_deadline: '2027-02-15',
@@ -82,6 +107,12 @@ function listResponse(items: unknown[]) {
     payout_period: '2027-03',
     payout_threshold_minor: 5000,
     items,
+    total: items.length,
+    limit: 25,
+    offset: 0,
+    search: '',
+    state: 'all',
+    ...overrides,
   }
 }
 
@@ -173,6 +204,7 @@ function mountPage() {
       stubs: {
         ActionBar: actionBarStub,
         EmptyState: emptyStateStub,
+        SavedFiltersMenu: true,
       },
     },
   })
@@ -393,6 +425,78 @@ describe('Roční zúčtování', () => {
       defaultYear,
       7,
       expect.objectContaining({ row_version: 1, request_status: 'requested' }),
+    )
+  })
+  /**
+   * Seznam lidí nestránkoval vůbec — server posílal všechny zaměstnance firmy
+   * a obrazovka je všechny vykreslila. Test hlídá, že stránka dotazuje
+   * ohraničený výsek a že další stránku umí objednat.
+   */
+  it('žádá server o ohraničenou stránku a umí přejít na další', async () => {
+    m.listAnnualSettlements.mockResolvedValue(
+      listResponse([person()], { total: 60 }),
+    )
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.listAnnualSettlements).toHaveBeenCalledWith(
+      defaultYear,
+      { limit: 25, offset: 0 },
+      { search: '', state: 'all' },
+    )
+
+    m.listAnnualSettlements.mockResolvedValue(
+      listResponse([person({ employee_id: 9, employee_name: 'Syntetická osoba B' })], {
+        total: 60,
+        offset: 25,
+      }),
+    )
+    const next = wrapper.findAll('button')
+      .find(button => button.text().includes('common.next'))
+    expect(next).toBeDefined()
+    await next!.trigger('click')
+    await flushPromises()
+
+    expect(m.listAnnualSettlements).toHaveBeenLastCalledWith(
+      defaultYear,
+      { limit: 25, offset: 25 },
+      { search: '', state: 'all' },
+    )
+    expect(wrapper.text()).toContain('Syntetická osoba B')
+  })
+
+  /** Zúžení hledá na serveru a vrací stránku na začátek. */
+  it('posílá zúžení na server a vrací se na první stránku', async () => {
+    m.listAnnualSettlements.mockResolvedValue(
+      listResponse([person()], { total: 60 }),
+    )
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const next = wrapper.findAll('button')
+      .find(button => button.text().includes('common.next'))
+    await next!.trigger('click')
+    await flushPromises()
+
+    const search = wrapper.get('[data-test="annual-settlement-search"]')
+    await search.setValue('Novak')
+    await search.trigger('change')
+    await flushPromises()
+
+    expect(m.listAnnualSettlements).toHaveBeenLastCalledWith(
+      defaultYear,
+      { limit: 25, offset: 0 },
+      { search: 'Novak', state: 'all' },
+    )
+
+    const state = wrapper.get('[data-test="annual-settlement-state"]')
+    await state.setValue('requested')
+    await flushPromises()
+
+    expect(m.listAnnualSettlements).toHaveBeenLastCalledWith(
+      defaultYear,
+      { limit: 25, offset: 0 },
+      { search: 'Novak', state: 'requested' },
     )
   })
 })

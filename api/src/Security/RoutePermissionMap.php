@@ -206,6 +206,9 @@ final class RoutePermissionMap
         ['DELETE', '#^/api/payroll/runs/[0-9]+/validations/[0-9]+/override$#', 'payroll.approve', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/payments/liabilities$#', 'payroll.payments', AccessLevel::READ],
         ['GET', '#^/api/payroll/payments/(payer-options|batches|reconciliation)$#', 'payroll.payments', AccessLevel::READ],
+        // Nabídka pickeru je týž obsah jako `reconciliation`, jen zúžený —
+        // samostatné právo by zamklo hledání a nechalo otevřený celý seznam.
+        ['GET', '#^/api/payroll/payments/reconciliation/options$#', 'payroll.payments', AccessLevel::READ],
         ['POST', '#^/api/payroll/payments/batches$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/reconciliation/(matches|reversals)$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/batches/[0-9]+/exports$#', 'payroll.payments', AccessLevel::WRITE],

@@ -249,6 +249,99 @@ final class PayrollPaymentAction
             ->withHeader('Pragma', 'no-cache');
     }
 
+    /**
+     * Serverové hledání v nabídce pickeru párování plateb.
+     *
+     * Nabídky se dřív posílaly celé, protože stránkovat je nešlo — z pickeru
+     * by se stalo „vybrat jde jen to, co je na první straně". Tady se místo
+     * stránky vrací nejvýš `limit` nejlepších shod a `truncated` říká, že jich
+     * je víc. Bez toho příznaku by uživatel oříznutou nabídku četl jako úplnou.
+     *
+     * @param array<string,string> $args
+     */
+    public function searchReconciliationOptions(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize(
+            $request,
+            $response,
+            'payroll.payments',
+            AccessLevel::READ,
+            $error,
+        )) {
+            return $this->errorResponse($error);
+        }
+        $query = $request->getQueryParams();
+        $periodValue = $query['period'] ?? null;
+        $kindValue = $query['kind'] ?? null;
+        if (!is_string($periodValue) || !is_string($kindValue)) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Nabídka párování vyžaduje období a druh.',
+                422,
+            );
+        }
+        $filters = [
+            'search' => is_string($query['q'] ?? null) ? trim($query['q']) : '',
+            'currency' => is_string($query['currency'] ?? null)
+                ? strtoupper(trim($query['currency']))
+                : '',
+            'direction' => is_string($query['direction'] ?? null)
+                ? trim($query['direction'])
+                : '',
+            'usage' => is_string($query['usage'] ?? null) ? trim($query['usage']) : 'match',
+            'cash_document_id' => (int) ($query['cash_document_id'] ?? 0),
+        ];
+        if ($filters['currency'] !== ''
+            && preg_match('/^[A-Z]{3}$/D', $filters['currency']) !== 1
+        ) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Měna musí být třípísmenný kód.',
+                422,
+            );
+        }
+        if ($filters['direction'] !== ''
+            && !in_array($filters['direction'], ['outgoing', 'incoming'], true)
+        ) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Směr platby musí být outgoing nebo incoming.',
+                422,
+            );
+        }
+        try {
+            $result = $this->reconciliationQueries->searchOptions(
+                $this->currentSupplierId($request),
+                trim($periodValue),
+                trim($kindValue),
+                $filters,
+                // Strop je tvrdý, ne jen výchozí — z URL ho zvednout nejde.
+                max(1, min(
+                    PayrollPaymentReconciliationQueryService::PICKER_MAX_LIMIT,
+                    (int) ($query['limit']
+                        ?? PayrollPaymentReconciliationQueryService::PICKER_DEFAULT_LIMIT),
+                )),
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $exception->getMessage(),
+                422,
+            );
+        }
+
+        return Json::ok($response, $result + ['kind' => trim($kindValue)])
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
     /** @param array<string,string> $args */
     public function matchPayment(
         Request $request,

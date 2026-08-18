@@ -17,6 +17,12 @@ use PDOException;
  */
 final class PayrollAnnualSettlementRepository
 {
+    public const LIST_DEFAULT_LIMIT = 25;
+    // Strop se klampuje i tady, ne jen na HTTP hranici: repozitář volá i jiný
+    // kód než akce a „vypiš všechny lidi firmy" nesmí jít objednat nikudy.
+    public const LIST_MAX_LIMIT = 200;
+    public const LIST_STATES = ['all', 'requested', 'settled', 'unsettled'];
+
     public function __construct(private readonly Connection $db) {}
 
     /** @return array<string,mixed>|null */
@@ -311,10 +317,61 @@ final class PayrollAnnualSettlementRepository
      * Zaměstnanec BEZ žádosti v seznamu zůstává — prázdný stav je informace
      * („nikdo nepožádal"), ne důvod ho schovat.
      *
-     * @return list<array<string,mixed>>
+     * Stránkuje SERVER. Firma se stovkou lidí posílala celý seznam najednou
+     * a obrazovka z něj zobrazila všechno — u ročního zúčtování je to navíc
+     * seznam, ve kterém se pracuje adresně (kdo požádal, komu co chybí),
+     * takže zúžení a stránka jsou tu užitečnější než úplný výpis.
+     *
+     * `state` je pojmenované zúžení, ne odvozený součet:
+     *  - `requested`   — požádal podle § 38ch odst. 1 a nemá výsledek
+     *  - `settled`     — zúčtování je provedené (existuje výsledek)
+     *  - `unsettled`   — výsledek neexistuje, ať už požádal, nebo ne
+     *
+     * @return array{items:list<array<string,mixed>>,total:int}
      */
-    public function listForYear(int $supplierId, int $taxYear): array
-    {
+    public function listForYear(
+        int $supplierId,
+        int $taxYear,
+        int $limit,
+        int $offset,
+        string $search = '',
+        string $state = 'all',
+    ): array {
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+        $search = trim($search);
+        if (!in_array($state, self::LIST_STATES, true)) {
+            throw new \InvalidArgumentException('Zúžení přehledu ročního zúčtování není platné.');
+        }
+        $conditions = '';
+        $filterParams = [];
+        if ($search !== '') {
+            $conditions .= ' AND employee.full_name LIKE ?';
+            $filterParams[] = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $search) . '%';
+        }
+        $conditions .= match ($state) {
+            'requested' => ' AND request.request_status = "requested" AND outcome.id IS NULL',
+            'settled' => ' AND outcome.id IS NOT NULL',
+            'unsettled' => ' AND outcome.id IS NULL',
+            default => '',
+        };
+
+        $joins =
+            '  FROM payroll_employees employee
+               LEFT JOIN payroll_annual_settlement_requests request
+                 ON request.supplier_id = employee.supplier_id
+                AND request.employee_id = employee.id
+                AND request.tax_year = ?
+               LEFT JOIN payroll_annual_settlement_outcomes outcome
+                 ON outcome.supplier_id = employee.supplier_id
+                AND outcome.employee_id = employee.id
+                AND outcome.tax_year = ?
+              WHERE employee.supplier_id = ?' . $conditions;
+
+        $countStatement = $this->db->pdo()->prepare('SELECT COUNT(*) ' . $joins);
+        $countStatement->execute([$taxYear, $taxYear, $supplierId, ...$filterParams]);
+        $total = (int) $countStatement->fetchColumn();
+
         $statement = $this->db->pdo()->prepare(
             'SELECT employee.id AS employee_id,
                     employee.full_name AS employee_name,
@@ -335,24 +392,28 @@ final class PayrollAnnualSettlementRepository
                     outcome.payout_revision_id,
                     outcome.payout_period_start,
                     outcome.annual_revision_id
-               FROM payroll_employees employee
-               LEFT JOIN payroll_annual_settlement_requests request
-                 ON request.supplier_id = employee.supplier_id
-                AND request.employee_id = employee.id
-                AND request.tax_year = ?
-               LEFT JOIN payroll_annual_settlement_outcomes outcome
-                 ON outcome.supplier_id = employee.supplier_id
-                AND outcome.employee_id = employee.id
-                AND outcome.tax_year = ?
-              WHERE employee.supplier_id = ?
-              ORDER BY employee.full_name, employee.id'
+             ' . $joins . '
+              ORDER BY employee.full_name, employee.id
+              LIMIT ? OFFSET ?'
         );
-        $statement->execute([$taxYear, $taxYear, $supplierId]);
+        $position = 0;
+        foreach ([$taxYear, $taxYear, $supplierId] as $value) {
+            $statement->bindValue(++$position, $value, PDO::PARAM_INT);
+        }
+        foreach ($filterParams as $value) {
+            $statement->bindValue(++$position, $value, PDO::PARAM_STR);
+        }
+        $statement->bindValue(++$position, $limit, PDO::PARAM_INT);
+        $statement->bindValue(++$position, $offset, PDO::PARAM_INT);
+        $statement->execute();
 
-        return array_values(array_map(
-            self::castListRow(...),
-            $statement->fetchAll(PDO::FETCH_ASSOC),
-        ));
+        return [
+            'items' => array_values(array_map(
+                self::castListRow(...),
+                $statement->fetchAll(PDO::FETCH_ASSOC),
+            )),
+            'total' => $total,
+        ];
     }
 
     /**

@@ -56,7 +56,8 @@ final class SavedFilterAction
         'payroll-submission-inbox', 'payroll-erasure-candidates',
         'payroll-erasure-log', 'payroll-dimensions',
         'payroll-health-insurer-accounts', 'payroll-person-dependants',
-        'payroll-rulesets', 'payroll-benefit-baskets'];
+        'payroll-rulesets', 'payroll-benefit-baskets',
+        'payroll-annual-settlement'];
 
     private const MAX_FILTERS = 30;
 
