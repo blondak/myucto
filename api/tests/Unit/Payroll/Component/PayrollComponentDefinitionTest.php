@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\Component\PayrollComponentInclusion;
 use MyInvoice\Service\Payroll\Component\PayrollComponentKind;
 use MyInvoice\Service\Payroll\Component\PayrollComponentTaxTreatment;
 use MyInvoice\Service\Payroll\Component\PayrollComponentValueKind;
+use MyInvoice\Service\Payroll\Component\PayrollExemptionBasis;
 use PHPUnit\Framework\TestCase;
 
 final class PayrollComponentDefinitionTest extends TestCase
@@ -107,6 +108,39 @@ final class PayrollComponentDefinitionTest extends TestCase
         );
     }
 
+    /**
+     * Podklad osvobození u složky, která se stejně zdaní, by tvrdil doklad
+     * k něčemu, co osvobozené není.
+     */
+    public function testExemptionBasisRequiresAnExemptClassification(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->definition(
+            tax: PayrollComponentTaxTreatment::INCLUDED,
+            exemptionBasis: PayrollExemptionBasis::StatutoryExempt,
+        );
+    }
+
+    /** Bez zařazení do koše není co rozpadnout, takže ani co doložit. */
+    public function testBasketBasisRequiresABasket(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->definition(
+            tax: PayrollComponentTaxTreatment::EXEMPT,
+            exemptionBasis: PayrollExemptionBasis::BenefitBasket,
+        );
+    }
+
+    public function testExemptionBasisReachesTheFrozenSnapshot(): void
+    {
+        $snapshot = $this->definition(
+            tax: PayrollComponentTaxTreatment::EXEMPT,
+            exemptionBasis: PayrollExemptionBasis::NotSubjectToTax,
+        )->snapshot();
+
+        self::assertSame('not_subject_to_tax', $snapshot['exemption_basis']);
+    }
+
     private function definition(
         PayrollComponentKind $kind = PayrollComponentKind::BENEFIT_MEAL,
         PayrollComponentValueKind $valueKind = PayrollComponentValueKind::MONETARY,
@@ -119,6 +153,7 @@ final class PayrollComponentDefinitionTest extends TestCase
         PayrollComponentInclusion $enforcement = PayrollComponentInclusion::INCLUDED,
         PayrollComponentInclusion $jmhz = PayrollComponentInclusion::INCLUDED,
         ?int $annualLimitMinor = null,
+        ?PayrollExemptionBasis $exemptionBasis = null,
     ): PayrollComponentDefinition {
         return new PayrollComponentDefinition(
             code: 'SYNTHETIC',
@@ -136,6 +171,7 @@ final class PayrollComponentDefinitionTest extends TestCase
             jmhzTreatment: $jmhz,
             statisticsTreatment: PayrollComponentInclusion::INCLUDED,
             annualLimitMinor: $annualLimitMinor,
+            exemptionBasis: $exemptionBasis,
         );
     }
 }

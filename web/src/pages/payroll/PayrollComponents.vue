@@ -10,6 +10,7 @@ import {
   type PayrollComponentJmhzTarget,
   type PayrollComponentFrequency,
   type PayrollBenefitExemptionBasket,
+  type PayrollExemptionBasis,
   type PayrollComponentInclusion,
   type PayrollComponentKind,
   type PayrollComponentPayload,
@@ -272,6 +273,7 @@ const frequencies: PayrollComponentFrequency[] = ['regular', 'one_off']
 const taxTreatments: PayrollComponentTaxTreatment[] = ['included', 'exempt', 'withholding_candidate', 'manual_review']
 const inclusionTreatments: PayrollComponentInclusion[] = ['included', 'excluded', 'manual_review']
 const exemptionBaskets: PayrollBenefitExemptionBasket[] = ['non_cash_health', 'non_cash_leisure', 'old_age_savings']
+const exemptionBases: PayrollExemptionBasis[] = ['not_subject_to_tax', 'statutory_exempt', 'benefit_basket']
 const calculationKinds: PayrollRecurringCalculationKind[] = ['fixed_amount', 'employment_gross_basis_points', 'manual_review']
 const allocationRules: PayrollRecurringAllocationRule[] = ['full_month', 'calendar_days', 'working_days', 'hours', 'manual_review']
 
@@ -286,6 +288,10 @@ const taxTreatmentOptions = computed(() => selectOptions(taxTreatments, 'payroll
 const exemptionBasketOptions = computed(() => exemptionBaskets.map(value => ({
   value,
   label: t(`payroll.components.exemption_basket.${value}`),
+})))
+const exemptionBasisOptions = computed(() => exemptionBases.map(value => ({
+  value,
+  label: t(`payroll.components.exemption_basis.${value}`),
 })))
 const inclusionTreatmentOptions = computed(() => selectOptions(inclusionTreatments, 'payroll.components.inclusion'))
 /*
@@ -375,6 +381,7 @@ function newComponentForm(): ComponentForm {
     accounting_credit_code: null,
     annual_limit: '',
     exemption_basket: null,
+    exemption_basis: null,
     valid_from: monthStart(period.value),
     valid_to: null,
     is_active: true,
@@ -635,6 +642,7 @@ function editComponent(component: PayrollComponent) {
     accounting_credit_code: component.accounting_credit_code,
     annual_limit: payrollMinorToInput(component.annual_limit_minor),
     exemption_basket: component.exemption_basket,
+    exemption_basis: component.exemption_basis,
     valid_from: component.valid_from,
     valid_to: component.valid_to,
     is_active: component.is_active,
@@ -647,10 +655,18 @@ function componentPayload(): PayrollComponentPayload | null {
   const limit = componentForm.value.annual_limit === ''
     ? null
     : parsePayrollAmountToMinor(componentForm.value.annual_limit)
+  // Osvobození bez uvedeného podkladu neprojde mzdovým během — ať to uživatel
+  // zjistí tady, ne až při uzávěrce měsíce.
+  const basisMissing = componentForm.value.tax_treatment === 'exempt'
+    && componentForm.value.exemption_basis === null
+  const basketMissing = componentForm.value.exemption_basis === 'benefit_basket'
+    && componentForm.value.exemption_basket === null
   if (
     !componentForm.value.code.trim()
     || !componentForm.value.name.trim()
     || componentForm.value.annual_limit !== '' && (limit === null || limit <= 0)
+    || basisMissing
+    || basketMissing
   ) {
     return null
   }
@@ -675,6 +691,9 @@ function componentPayload(): PayrollComponentPayload | null {
     accounting_credit_code: componentForm.value.accounting_credit_code?.trim() || null,
     annual_limit_minor: limit,
     exemption_basket: componentForm.value.exemption_basket,
+    exemption_basis: componentForm.value.tax_treatment === 'exempt'
+      ? componentForm.value.exemption_basis
+      : null,
     valid_from: componentForm.value.valid_from,
     valid_to: componentForm.value.valid_to || null,
     is_active: componentForm.value.is_active,
@@ -1133,6 +1152,7 @@ onMounted(load)
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.credit') }}</span><SearchableSelect data-testid="payroll-component-credit" :model-value="componentForm.accounting_credit_code" :options="creditAccountOptions" :selected-option="selectedAccountOption(componentForm.accounting_credit_code)" :placeholder="t('payroll.components.account_placeholder')" :no-results-label="t('payroll.components.no_results')" accent="payroll" input-class="font-mono" @update:model-value="componentForm.accounting_credit_code = $event" /></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.annual_limit') }}</span><input v-model="componentForm.annual_limit" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><span class="mt-1 block text-[11px] text-neutral-500">{{ t('payroll.components.fields.annual_limit_hint') }}</span></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.exemption_basket') }}</span><SearchableSelect data-testid="payroll-component-basket" :model-value="componentForm.exemption_basket" :options="exemptionBasketOptions" :placeholder="t('payroll.components.exemption_basket.none')" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="componentForm.exemption_basket = $event" /><span class="mt-1 block text-[11px] text-neutral-500">{{ t('payroll.components.fields.exemption_basket_hint') }}</span></label>
+            <label v-if="componentForm.tax_treatment === 'exempt'" class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.exemption_basis') }}</span><SearchableSelect data-testid="payroll-component-exemption-basis" :model-value="componentForm.exemption_basis" :options="exemptionBasisOptions" :placeholder="t('payroll.components.exemption_basis.none')" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="componentForm.exemption_basis = $event" /><span class="mt-1 block text-[11px] text-neutral-500">{{ t('payroll.components.fields.exemption_basis_hint') }}</span></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.valid_from') }}</span><input v-model="componentForm.valid_from" type="date" :disabled="!!editingComponent" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm disabled:bg-neutral-100"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.valid_to') }}</span><input v-model="componentForm.valid_to" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="inline-flex items-center gap-2 self-end text-sm text-neutral-700"><input v-model="componentForm.is_active" type="checkbox" class="rounded border-neutral-300 text-payroll-600"> {{ t('payroll.components.fields.active') }}</label>

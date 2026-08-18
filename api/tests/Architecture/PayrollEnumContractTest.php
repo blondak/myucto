@@ -74,6 +74,12 @@ final class PayrollEnumContractTest extends TestCase
         // Mzdový běh
         'payroll.ts::PayrollBenefitExemptionBasket'
             => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
+        // Čím je nezdanění složky podložené. Klient hodnotu vybírá ve formuláři
+        // složky a `not_subject_to_tax` musí umět odlišit od osvobození — na
+        // mzdovém listu totiž znamená pravý opak: plnění mimo předmět daně se
+        // mezi osvobozené částky nevykazuje.
+        'payroll.ts::PayrollExemptionBasis'
+            => 'enum:MyInvoice\Service\Payroll\Component\PayrollExemptionBasis',
         // Stav řádku v přehledu čerpání košů. `incomplete` a `limit_unavailable`
         // jsou přiznání chybějícího podkladu — klient, který je nezná, by je
         // vykreslil jako prázdný stav, tedy jako „nic se neděje".

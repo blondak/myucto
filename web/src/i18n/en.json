@@ -1512,7 +1512,9 @@
                 "source": "Source",
                 "annual_limit_hint": "Employer's own cap — approval above it is refused.",
                 "exemption_basket": "Statutory exemption basket",
-                "exemption_basket_hint": "The annual limit of § 6(9) of the Income Tax Act applies to the total of all components in the basket; the excess is taxed."
+                "exemption_basket_hint": "The annual limit of § 6(9) of the Income Tax Act applies to the total of all components in the basket; the excess is taxed.",
+                "exemption_basis": "Basis of the exemption",
+                "exemption_basis_hint": "Without a basis the exemption is an unsupported claim and the payroll run ends in manual review."
             },
             "kind": {
                 "base_wage": "Base monthly wage",
@@ -1590,6 +1592,12 @@
                 "non_cash_health": "Health benefits (§ 6(9)(d)(1))",
                 "non_cash_leisure": "Recreation, sport and culture (§ 6(9)(d)(2))",
                 "old_age_savings": "Old-age savings and long-term care (§ 6(9)(m))"
+            },
+            "exemption_basis": {
+                "none": "No basis stated",
+                "not_subject_to_tax": "Not subject to tax (§ 6(7))",
+                "statutory_exempt": "Exempt without a limit (§ 6(9))",
+                "benefit_basket": "Annual exemption basket (§ 6(9)(d) and (m))"
             }
         },
         "documents": {

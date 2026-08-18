@@ -1512,7 +1512,9 @@
                 "source": "Zdroj",
                 "annual_limit_hint": "Vlastní strop zaměstnavatele — schválení nad něj neprojde.",
                 "exemption_basket": "Zákonný koš osvobození",
-                "exemption_basket_hint": "Roční limit § 6 odst. 9 ZDP platí na úhrn všech složek koše; nadlimitní část se zdaní."
+                "exemption_basket_hint": "Roční limit § 6 odst. 9 ZDP platí na úhrn všech složek koše; nadlimitní část se zdaní.",
+                "exemption_basis": "Podklad osvobození",
+                "exemption_basis_hint": "Bez podkladu je osvobození nedoložené tvrzení a mzdový běh na něm skončí v ručním posouzení."
             },
             "kind": {
                 "base_wage": "Základní měsíční mzda",
@@ -1590,6 +1592,12 @@
                 "non_cash_health": "Zdravotní plnění (§ 6 odst. 9 písm. d) bod 1)",
                 "non_cash_leisure": "Rekreace, sport a kultura (§ 6 odst. 9 písm. d) bod 2)",
                 "old_age_savings": "Spoření na stáří a dlouhodobá péče (§ 6 odst. 9 písm. m))"
+            },
+            "exemption_basis": {
+                "none": "Bez uvedeného podkladu",
+                "not_subject_to_tax": "Není předmětem daně (§ 6 odst. 7 ZDP)",
+                "statutory_exempt": "Osvobozeno bez limitu (§ 6 odst. 9 ZDP)",
+                "benefit_basket": "Roční koš osvobození (§ 6 odst. 9 písm. d) a m))"
             }
         },
         "documents": {

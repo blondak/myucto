@@ -54,7 +54,38 @@ final class PayrollComponentDefinitionFactory
             ),
             annualLimitMinor: $this->nullableInt($row, 'annual_limit_minor'),
             exemptionBasket: $this->basket($row),
+            exemptionBasis: $this->basis($row),
         );
+    }
+
+    /**
+     * Zmrazené snímky složek z doby před migrací 1590 klíč `exemption_basis`
+     * nemají. Chybějící klíč znamená „podklad osvobození není uveden" a složka
+     * dál neprojde branou {@see \MyInvoice\Service\Payroll\Run\PayrollExemptionEvidence}
+     * — historická revize mzdového běhu se tím nepřepočítá jinak, osvobozená
+     * složka v ní neprošla tak jako tak.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function basis(array $row): ?PayrollExemptionBasis
+    {
+        $value = $row['exemption_basis'] ?? null;
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!is_string($value)) {
+            throw new \UnexpectedValueException(
+                'Mzdová složka nemá pole exemption_basis.',
+            );
+        }
+        $basis = PayrollExemptionBasis::tryFrom($value);
+        if ($basis === null) {
+            throw new \UnexpectedValueException(
+                'Mzdová složka má neznámý podklad osvobození.',
+            );
+        }
+
+        return $basis;
     }
 
     /**

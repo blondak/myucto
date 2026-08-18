@@ -27,6 +27,7 @@ final readonly class PayrollComponentDefinition
         public ?string $accountingCreditCode = null,
         public ?int $annualLimitMinor = null,
         public ?PayrollBenefitExemptionBasket $exemptionBasket = null,
+        public ?PayrollExemptionBasis $exemptionBasis = null,
     ) {
         if (preg_match('/^[A-Z0-9][A-Z0-9._-]{0,63}$/D', $code) !== 1) {
             throw new \InvalidArgumentException('Kód mzdové složky není platný.');
@@ -53,6 +54,20 @@ final readonly class PayrollComponentDefinition
         if ($exemptionBasket !== null && !$kind->isBenefit()) {
             throw new \InvalidArgumentException(
                 'Zákonný koš osvobození lze nastavit jen pro benefitní složku.'
+            );
+        }
+        if ($exemptionBasis !== null
+            && $taxTreatment !== PayrollComponentTaxTreatment::EXEMPT
+        ) {
+            throw new \InvalidArgumentException(
+                'Podklad osvobození má smysl jen u složky osvobozené od daně.'
+            );
+        }
+        if ($exemptionBasis === PayrollExemptionBasis::BenefitBasket
+            && $exemptionBasket === null
+        ) {
+            throw new \InvalidArgumentException(
+                'Podklad ročního koše vyžaduje zařazení složky do zákonného koše.'
             );
         }
     }
@@ -111,6 +126,7 @@ final readonly class PayrollComponentDefinition
             'accounting_credit_code' => $this->accountingCreditCode,
             'annual_limit_minor' => $this->annualLimitMinor,
             'exemption_basket' => $this->exemptionBasket?->value,
+            'exemption_basis' => $this->exemptionBasis?->value,
         ];
     }
 

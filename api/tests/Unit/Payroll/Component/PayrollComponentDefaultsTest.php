@@ -133,6 +133,28 @@ final class PayrollComponentDefaultsTest extends TestCase
         }
     }
 
+    /**
+     * Osvobozená složka bez uvedeného podkladu neprojde mzdovým během. Kdyby ji
+     * číselník takhle založil, byl by měsíc s ní neuzavíratelný — přesně stav,
+     * ve kterém CESTOVNI_NAHRADA_LIMIT byla.
+     */
+    public function testEveryExemptDefaultStatesItsExemptionBasis(): void
+    {
+        foreach ($this->rowsByCode('2026-01-01') as $code => $row) {
+            if ($row['tax_treatment'] !== 'exempt') {
+                self::assertNull(
+                    $row['exemption_basis'],
+                    "Složka {$code} tvrdí podklad osvobození, ale osvobozená není.",
+                );
+                continue;
+            }
+            self::assertNotNull(
+                $row['exemption_basis'],
+                "Osvobozená složka {$code} neuvádí, čím je osvobození podložené.",
+            );
+        }
+    }
+
     public function testEveryDefaultCodeIsKnownToTheDeletionGuard(): void
     {
         $codes = PayrollComponentDefaults::codes();
