@@ -21,8 +21,11 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET /api/accounting/document-series               — seznam řad firmy
  *   PUT /api/accounting/document-series/{code}/{year} — prefix / number_format / next_number — účetní|admin
  *
- * Body PUT (aspoň jedna položka):
- *   { "prefix": "26HP", "number_format": "{PREFIX}{CCCCC}", "next_number": 11 }
+ * Body PUT (aspoň jedna položka + volitelný scope):
+ *   { "prefix": "26HP", "number_format": "{PREFIX}{CCCCC}", "next_number": 11, "register_id": 0 }
+ *
+ * `register_id` > 0 míří na vlastní řadu té pokladny (L-3), 0 / vynechané na společnou
+ * řadu firmy.
  *
  * `number_format` = "" nebo null vrátí řadu na vestavěné `{PREFIX}-{YYYY}-{CCCC}`,
  * `next_number` je číslo PŘÍŠTÍHO vydaného dokladu (#22 — převzetí řady z jiného
@@ -73,6 +76,20 @@ final class DocumentSeriesAction
         if (array_key_exists('number_format', $body)) {
             $changes['number_format'] = $body['number_format'];
         }
+        // L-3: řada pokladny (register_id > 0) je samostatný řádek — bez scope by se
+        // editace vlastní řady propsala do společné řady firmy.
+        $registerId = 0;
+        if (array_key_exists('register_id', $body) && trim((string) $body['register_id']) !== '') {
+            if (!is_numeric($body['register_id']) || (int) $body['register_id'] < 0) {
+                return Json::error($response, 'validation_failed', 'register_id musí být nezáporné celé číslo.', 422);
+            }
+            $registerId = (int) $body['register_id'];
+        }
+        if ($registerId > 0 && !in_array($code, ['cash_in', 'cash_out'], true)) {
+            return Json::error($response, 'validation_failed',
+                'Vlastní řadu má jen pokladna — register_id lze zadat u cash_in / cash_out.', 422);
+        }
+
         if (array_key_exists('next_number', $body) && trim((string) $body['next_number']) !== '') {
             if (!is_numeric($body['next_number'])) {
                 return Json::error($response, 'validation_failed', 'next_number musí být celé číslo.', 422);
@@ -85,7 +102,7 @@ final class DocumentSeriesAction
         }
 
         try {
-            $this->series->updateSeries($supplierId, $code, $year, $changes);
+            $this->series->updateSeries($supplierId, $code, $year, $changes, $registerId);
         } catch (ClosingException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }

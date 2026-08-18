@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Cash;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Repository\CashRegisterRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\LedgerReportRepository;
@@ -27,6 +28,7 @@ final class CashRegisterService
         private readonly CashRegisterRepository $registers,
         private readonly ChartOfAccountsRepository $accounts,
         private readonly LedgerReportRepository $ledger,
+        private readonly DocumentSeriesService $series,
     ) {}
 
     /**
@@ -111,13 +113,18 @@ final class CashRegisterService
             if ($wantsDefault) {
                 $this->registers->clearDefault($supplierId);
             }
+            $ownSeries = !empty($data['own_series']);
             $id = $this->registers->create($supplierId, [
                 'name'          => $name,
                 'currency_code' => $currency,
                 'account_code'  => $accountCode,
                 'is_default'    => $wantsDefault,
+                'own_series'    => $ownSeries,
                 'is_active'     => true,
             ]);
+            if ($ownSeries) {
+                $this->ensureOwnSeries($supplierId, $id, (int) date('Y'));
+            }
             if ($ownTx) {
                 $pdo->commit();
             }
@@ -166,6 +173,11 @@ final class CashRegisterService
         if (array_key_exists('is_active', $data)) {
             $patch['is_active'] = (bool) $data['is_active'];
         }
+        $wantsOwnSeries = array_key_exists('own_series', $data) ? (bool) $data['own_series'] : null;
+        if ($wantsOwnSeries !== null && $wantsOwnSeries !== (bool) ($register['own_series'] ?? false)) {
+            $this->assertSeriesSwitchable($supplierId, $id);
+            $patch['own_series'] = $wantsOwnSeries;
+        }
 
         $wantsDefault = array_key_exists('is_default', $data) ? (bool) $data['is_default'] : null;
 
@@ -183,6 +195,9 @@ final class CashRegisterService
             }
             if ($patch !== []) {
                 $this->registers->update($supplierId, $id, $patch);
+            }
+            if (!empty($patch['own_series'])) {
+                $this->ensureOwnSeries($supplierId, $id, (int) date('Y'));
             }
             if ($ownTx) {
                 $pdo->commit();
@@ -285,6 +300,102 @@ final class CashRegisterService
         );
         $stmt->execute([$supplierId, $registerId, $asOf]);
         return round((float) $stmt->fetchColumn(), 2);
+    }
+
+    /**
+     * L-3: přepnutí pokladny na vlastní řadu (a zpět) smí projít jen tehdy, když
+     * pokladna v AKTUÁLNÍM roce ještě žádné číslo nevydala. Uprostřed roku by se
+     * jinak číselná řada té knihy zlomila — část dokladů z firemní řady, zbytek
+     * z vlastní — a §11 ZoÚ chce souvislé označení dokladů.
+     */
+    private function assertSeriesSwitchable(int $supplierId, int $registerId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT EXISTS (SELECT 1 FROM cash_documents
+                             WHERE supplier_id = ? AND register_id = ? AND doc_number IS NOT NULL
+                               AND YEAR(issue_date) = ?)"
+        );
+        $stmt->execute([$supplierId, $registerId, (int) date('Y')]);
+        if ((bool) $stmt->fetchColumn()) {
+            throw new CashException(
+                'series_switch_locked',
+                'Číselnou řadu pokladny lze přepnout jen v roce, ve kterém ještě nevydala žádné číslo — přepněte ji od nového účetního roku.',
+            );
+        }
+    }
+
+    /**
+     * Založí pokladně vlastní řady PPD/VPD pro daný rok s prefixem, který zatím nikdo
+     * nepoužívá (PPD2, PPD3 …) — ale jen pokud řádek řady ještě neexistuje; nastavení
+     * od uživatele se nepřepisuje.
+     *
+     * Vlastní řada začíná od jedničky, takže s VÝCHOZÍM prefixem by hned kolidovala
+     * s doklady firemní řady (`uq_cashdoc_supplier_number`). Proto se volá i před
+     * každým výdejem čísla, ne jen při zapnutí volby: lazy `ensure()` v
+     * {@see DocumentSeriesService::next()} zná jen výchozí prefix, takže v roce, pro
+     * který řada ještě založená není (import staršího dokladu, přelom roku), by
+     * vyrobil kolizní `PPD-…-0001`.
+     */
+    public function ensureOwnSeries(int $supplierId, int $registerId, int $fiscalYear): void
+    {
+        $existing = [];
+        $prefixByCode = [];
+        foreach ($this->series->list($supplierId) as $row) {
+            if ((int) $row['register_id'] !== $registerId) {
+                continue;
+            }
+            $code = (string) $row['series_code'];
+            if ((int) $row['fiscal_year'] === $fiscalYear) {
+                $existing[$code] = true;
+            }
+            // Prefix pokladny se přes roky nemění — účetní ho zná a řada by jinak
+            // každý leden vypadala jako řada jiné pokladny.
+            $prefixByCode[$code] ??= (string) $row['prefix'];
+        }
+        foreach (['cash_in', 'cash_out'] as $seriesCode) {
+            if (isset($existing[$seriesCode])) {
+                continue;
+            }
+            $prefix = $prefixByCode[$seriesCode]
+                ?? $this->freeSeriesPrefix($supplierId, DocumentSeriesService::DEFAULT_PREFIXES[$seriesCode]);
+            $this->series->updateSeries(
+                $supplierId,
+                $seriesCode,
+                $fiscalYear,
+                ['prefix' => $prefix, 'next_number' => 1],
+                $registerId,
+            );
+        }
+    }
+
+    /**
+     * Prefix, který nedrží jiná řada firmy ani žádné už vystavené číslo dokladu.
+     * Kontrola nad `doc_number` je podstatná: řada mohla být mezitím přejmenovaná,
+     * ale její čísla v dokladech zůstala.
+     */
+    private function freeSeriesPrefix(int $supplierId, string $base): string
+    {
+        $pdo = $this->db->pdo();
+        for ($ordinal = 2; $ordinal <= 99; $ordinal++) {
+            $candidate = $base . $ordinal;
+            if (mb_strlen($candidate) > 10) {
+                break;
+            }
+            $stmt = $pdo->prepare('SELECT EXISTS (SELECT 1 FROM accounting_document_series WHERE supplier_id = ? AND prefix = ?)');
+            $stmt->execute([$supplierId, $candidate]);
+            if ((bool) $stmt->fetchColumn()) {
+                continue;
+            }
+            $stmt = $pdo->prepare("SELECT EXISTS (SELECT 1 FROM cash_documents WHERE supplier_id = ? AND doc_number LIKE ?)");
+            $stmt->execute([$supplierId, $candidate . '%']);
+            if (!(bool) $stmt->fetchColumn()) {
+                return $candidate;
+            }
+        }
+        throw new CashException(
+            'series_prefix_unavailable',
+            'Nepodařilo se najít volný prefix pro vlastní řadu pokladny — nastavte jej ručně v Nástrojích → Číselné řady.',
+        );
     }
 
     /**

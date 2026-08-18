@@ -19,6 +19,11 @@ use MyInvoice\Repository\DocumentSeriesRepository;
  * Tvar čísla je per firma × řada × rok volitelný (#22 — přechod z jiného
  * systému): `number_format` se stejnými placeholdery jako u faktur, NULL =
  * vestavěný `{PREFIX}-{YYYY}-{CCCC}` (tedy `UZ-2026-0001` jako dosud).
+ *
+ * `$registerId` rozlišuje řadu pokladny od společné řady firmy (L-3, migrace 1506):
+ * 0 = společná řada (výchozí a jediná, pokud si to firma nepřepne), >0 = vlastní řada
+ * pokladny s tímhle id. Používá se jen u `cash_in`/`cash_out`; ostatní řady jsou vždy
+ * firemní, protože jiný doklad než pokladní k pokladně nepatří.
  */
 final class DocumentSeriesService
 {
@@ -68,7 +73,7 @@ final class DocumentSeriesService
      * Vydá další číslo řady, např. `UZ-2026-0001`. Vyžaduje transakci
      * volajícího — atomicita výdeje s INSERTem zápisu (R13).
      */
-    public function next(int $supplierId, string $seriesCode, int $fiscalYear): string
+    public function next(int $supplierId, string $seriesCode, int $fiscalYear, int $registerId = 0): string
     {
         $defaultPrefix = self::DEFAULT_PREFIXES[$seriesCode]
             ?? throw new ClosingException('unknown_series', 'Neznámá číselná řada "' . $seriesCode . '".');
@@ -80,8 +85,8 @@ final class DocumentSeriesService
             );
         }
 
-        $this->series->ensure($supplierId, $seriesCode, $fiscalYear, $defaultPrefix);
-        $row = $this->series->lockRow($supplierId, $seriesCode, $fiscalYear);
+        $this->series->ensure($supplierId, $seriesCode, $fiscalYear, $defaultPrefix, $registerId);
+        $row = $this->series->lockRow($supplierId, $seriesCode, $fiscalYear, $registerId);
         if ($row === null) {
             throw new ClosingException(
                 'operation_failed',
@@ -148,7 +153,7 @@ final class DocumentSeriesService
      *
      * @param array{prefix?:string, number_format?:string|null, next_number?:int} $changes
      */
-    public function updateSeries(int $supplierId, string $seriesCode, int $fiscalYear, array $changes): bool
+    public function updateSeries(int $supplierId, string $seriesCode, int $fiscalYear, array $changes, int $registerId = 0): bool
     {
         if (!isset(self::DEFAULT_PREFIXES[$seriesCode])) {
             throw new ClosingException('unknown_series', 'Neznámá číselná řada "' . $seriesCode . '".');
@@ -192,6 +197,7 @@ final class DocumentSeriesService
             $fiscalYear,
             self::DEFAULT_PREFIXES[$seriesCode],
             $patch,
+            $registerId,
         );
     }
 

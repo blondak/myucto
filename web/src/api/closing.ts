@@ -484,6 +484,10 @@ export const SERIES_DEFAULT_PREFIXES: Record<SeriesCode, string> = {
 export interface DocumentSeries {
   id?: number
   series_code: SeriesCode
+  /** L-3: 0 = společná řada firmy, >0 = vlastní řada té pokladny. */
+  register_id?: number
+  /** Název pokladny u vlastní řady — jen pro zobrazení (BE dopočítává). */
+  register_name?: string | null
   fiscal_year: number
   prefix: string
   /** Šablona čísla ({PREFIX}/{YYYY}/{YY}/{C+}); null = vestavěné {PREFIX}-{YYYY}-{CCCC}. */
@@ -493,6 +497,7 @@ export interface DocumentSeries {
 
 /** Aspoň jedna položka; number_format = '' vrátí řadu na vestavěnou šablonu. */
 export interface DocumentSeriesPatch {
+  register_id?: number
   prefix?: string
   number_format?: string | null
   next_number?: number

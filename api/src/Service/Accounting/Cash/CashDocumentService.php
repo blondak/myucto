@@ -624,7 +624,16 @@ final class CashDocumentService
         if ($docNumber === null) {
             $seriesCode = $doc['doc_type'] === 'in' ? 'cash_in' : 'cash_out';
             $fiscalYear = (int) substr((string) $doc['issue_date'], 0, 4);
-            $docNumber = $this->series->next($supplierId, $seriesCode, $fiscalYear);
+            // L-3: pokladna s vlastní řadou čerpá číslo ze své řady (register_id > 0),
+            // ostatní z jedné společné řady firmy (0) — dosavadní chování.
+            $seriesScope = !empty($register['own_series']) ? (int) $register['id'] : 0;
+            if ($seriesScope > 0) {
+                // Řada pokladny musí pro daný rok existovat s vlastním prefixem — lazy
+                // ensure() uvnitř next() zná jen výchozí PPD/VPD a vyrobil by číslo
+                // kolidující s firemní řadou.
+                $this->cashRegisters->ensureOwnSeries($supplierId, $seriesScope, $fiscalYear);
+            }
+            $docNumber = $this->series->next($supplierId, $seriesCode, $fiscalYear, $seriesScope);
         }
 
         // Daňová evidence (DE §6, R6): posted doklad BEZ journalu a BEZ posting enginu /

@@ -11,7 +11,8 @@ use PDO;
  * Repository pro accounting_document_series — číselné řady deníku (Epic F4,
  * R13). Řádek řady vzniká lazy při prvním výdeji čísla (ensure); výdej drží
  * zámek SELECT ... FOR UPDATE v transakci volajícího (DocumentSeriesService).
- * UNIQUE (supplier_id, series_code, fiscal_year).
+ * UNIQUE (supplier_id, series_code, fiscal_year, register_id), kde register_id = 0
+ * je společná řada firmy a >0 vlastní řada pokladny (L-3, migrace 1506).
  */
 final class DocumentSeriesRepository
 {
@@ -21,13 +22,13 @@ final class DocumentSeriesRepository
      * Lazy založení řádku řady s výchozím prefixem — existující řádek se
      * NEMĚNÍ (INSERT ... ON DUPLICATE KEY UPDATE id=id).
      */
-    public function ensure(int $supplierId, string $seriesCode, int $fiscalYear, string $defaultPrefix): void
+    public function ensure(int $supplierId, string $seriesCode, int $fiscalYear, string $defaultPrefix, int $registerId = 0): void
     {
         $this->db->pdo()->prepare(
-            'INSERT INTO accounting_document_series (supplier_id, series_code, fiscal_year, prefix, next_number)
-             VALUES (?, ?, ?, ?, 1)
+            'INSERT INTO accounting_document_series (supplier_id, series_code, fiscal_year, register_id, prefix, next_number)
+             VALUES (?, ?, ?, ?, ?, 1)
              ON DUPLICATE KEY UPDATE id = id'
-        )->execute([$supplierId, $seriesCode, $fiscalYear, $defaultPrefix]);
+        )->execute([$supplierId, $seriesCode, $fiscalYear, $registerId, $defaultPrefix]);
     }
 
     /**
@@ -36,15 +37,15 @@ final class DocumentSeriesRepository
      *
      * @return array{id:int, prefix:string, number_format:string|null, next_number:int}|null
      */
-    public function lockRow(int $supplierId, string $seriesCode, int $fiscalYear): ?array
+    public function lockRow(int $supplierId, string $seriesCode, int $fiscalYear, int $registerId = 0): ?array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, prefix, number_format, next_number
                FROM accounting_document_series
-              WHERE supplier_id = ? AND series_code = ? AND fiscal_year = ?
+              WHERE supplier_id = ? AND series_code = ? AND fiscal_year = ? AND register_id = ?
               FOR UPDATE'
         );
-        $stmt->execute([$supplierId, $seriesCode, $fiscalYear]);
+        $stmt->execute([$supplierId, $seriesCode, $fiscalYear, $registerId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) {
             return null;
@@ -75,15 +76,18 @@ final class DocumentSeriesRepository
     public function list(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, supplier_id, series_code, fiscal_year, prefix, number_format, next_number, created_at, updated_at
-               FROM accounting_document_series
-              WHERE supplier_id = ?
-              ORDER BY fiscal_year DESC, series_code'
+            'SELECT s.id, s.supplier_id, s.series_code, s.register_id, s.fiscal_year, s.prefix,
+                    s.number_format, s.next_number, s.created_at, s.updated_at, r.name AS register_name
+               FROM accounting_document_series s
+          LEFT JOIN cash_registers r ON r.id = s.register_id AND r.supplier_id = s.supplier_id
+              WHERE s.supplier_id = ?
+              ORDER BY s.fiscal_year DESC, s.series_code, s.register_id'
         );
         $stmt->execute([$supplierId]);
         return array_map(static function (array $r): array {
             $r['id'] = (int) $r['id'];
             $r['supplier_id'] = (int) $r['supplier_id'];
+            $r['register_id'] = (int) $r['register_id'];
             $r['fiscal_year'] = (int) $r['fiscal_year'];
             $r['next_number'] = (int) $r['next_number'];
             return $r;
@@ -103,6 +107,7 @@ final class DocumentSeriesRepository
         int $fiscalYear,
         string $defaultPrefix,
         array $patch,
+        int $registerId = 0,
     ): bool {
         $updates = [];
         foreach (['prefix', 'number_format', 'next_number'] as $col) {
@@ -115,14 +120,15 @@ final class DocumentSeriesRepository
         }
 
         $stmt = $this->db->pdo()->prepare(
-            'INSERT INTO accounting_document_series (supplier_id, series_code, fiscal_year, prefix, number_format, next_number)
-             VALUES (?, ?, ?, ?, ?, ?)
+            'INSERT INTO accounting_document_series (supplier_id, series_code, fiscal_year, register_id, prefix, number_format, next_number)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE ' . implode(', ', $updates)
         );
         $stmt->execute([
             $supplierId,
             $seriesCode,
             $fiscalYear,
+            $registerId,
             $patch['prefix'] ?? $defaultPrefix,
             $patch['number_format'] ?? null,
             $patch['next_number'] ?? 1,

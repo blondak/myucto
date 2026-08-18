@@ -21,7 +21,7 @@ final class CashRegisterRepository
      */
     public function listForTenant(int $supplierId, bool $includeInactive = false): array
     {
-        $sql = 'SELECT id, supplier_id, name, currency_code, account_code, is_default, is_active,
+        $sql = 'SELECT id, supplier_id, name, currency_code, account_code, is_default, own_series, is_active,
                        created_at, updated_at
                   FROM cash_registers
                  WHERE supplier_id = ?';
@@ -37,7 +37,7 @@ final class CashRegisterRepository
     public function find(int $supplierId, int $id): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, supplier_id, name, currency_code, account_code, is_default, is_active,
+            'SELECT id, supplier_id, name, currency_code, account_code, is_default, own_series, is_active,
                     created_at, updated_at
                FROM cash_registers
               WHERE supplier_id = ? AND id = ?'
@@ -50,7 +50,7 @@ final class CashRegisterRepository
     public function findByAccountCode(int $supplierId, string $accountCode): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, supplier_id, name, currency_code, account_code, is_default, is_active,
+            'SELECT id, supplier_id, name, currency_code, account_code, is_default, own_series, is_active,
                     created_at, updated_at
                FROM cash_registers
               WHERE supplier_id = ? AND account_code = ?'
@@ -61,29 +61,30 @@ final class CashRegisterRepository
     }
 
     /**
-     * @param array{name:string, currency_code:string, account_code:string, is_default?:bool, is_active?:bool} $data
+     * @param array{name:string, currency_code:string, account_code:string, is_default?:bool, own_series?:bool, is_active?:bool} $data
      */
     public function create(int $supplierId, array $data): int
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
-            'INSERT INTO cash_registers (supplier_id, name, currency_code, account_code, is_default, is_active)
-             VALUES (?, ?, ?, ?, ?, ?)'
+            'INSERT INTO cash_registers (supplier_id, name, currency_code, account_code, is_default, own_series, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $data['name'],
             $data['currency_code'],
             $data['account_code'],
             (int) ($data['is_default'] ?? false),
+            (int) ($data['own_series'] ?? false),
             (int) ($data['is_active'] ?? true),
         ]);
         return (int) $pdo->lastInsertId();
     }
 
     /**
-     * Aktualizuje povolená pole (name/account_code/is_default/is_active).
+     * Aktualizuje povolená pole (name/account_code/is_default/own_series/is_active).
      *
-     * @param array{name?:string, account_code?:string, is_default?:bool, is_active?:bool} $data
+     * @param array{name?:string, account_code?:string, is_default?:bool, own_series?:bool, is_active?:bool} $data
      */
     public function update(int $supplierId, int $id, array $data): bool
     {
@@ -95,7 +96,7 @@ final class CashRegisterRepository
                 $params[] = $data[$key];
             }
         }
-        foreach (['is_default', 'is_active'] as $key) {
+        foreach (['is_default', 'own_series', 'is_active'] as $key) {
             if (array_key_exists($key, $data)) {
                 $sets[] = "$key = ?";
                 $params[] = (int) $data[$key];
@@ -180,6 +181,7 @@ final class CashRegisterRepository
         $r['id'] = (int) $r['id'];
         $r['supplier_id'] = (int) $r['supplier_id'];
         $r['is_default'] = (bool) $r['is_default'];
+        $r['own_series'] = (bool) ($r['own_series'] ?? false);
         $r['is_active'] = (bool) $r['is_active'];
         return $r;
     }

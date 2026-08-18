@@ -101,6 +101,8 @@ describe('DocumentSeries', () => {
 
     expect(m.update).toHaveBeenCalledTimes(1)
     expect(m.update).toHaveBeenCalledWith('cash_in', YEAR, {
+      // L-3: scope řady — 0 = společná řada firmy, >0 by mířilo na vlastní řadu pokladny.
+      register_id: 0,
       prefix: '26HP',
       number_format: '{PREFIX}{CCCCC}',
       next_number: 11,

@@ -24,7 +24,9 @@ const canWrite = computed(() => auth.canWrite('accounting.periods.manage'))
 type SeriesEdit = { prefix: string; number_format: string; next_number: string }
 const edits = reactive<Record<string, SeriesEdit>>({})
 
-const seriesKey = (s: DocumentSeries) => `${s.series_code}-${s.fiscal_year}`
+// Klíč musí nést i pokladnu: vlastní řada pokladny (register_id > 0) je samostatný
+// řádek vedle společné řady firmy, jinak by se editace obou slily do jedné.
+const seriesKey = (s: DocumentSeries) => `${s.series_code}-${s.fiscal_year}-${s.register_id ?? 0}`
 
 function fillEdit(s: DocumentSeries) {
   edits[seriesKey(s)] = {
@@ -41,11 +43,14 @@ const series = computed<DocumentSeries[]>(() => {
   const rows = [...stored.value]
   const have = new Set(rows.map(seriesKey))
   for (const code of Object.keys(SERIES_DEFAULT_PREFIXES) as SeriesCode[]) {
-    const key = `${code}-${year.value}`
+    const key = `${code}-${year.value}-0`
     if (have.has(key)) continue
-    rows.push({ series_code: code, fiscal_year: year.value, prefix: SERIES_DEFAULT_PREFIXES[code], number_format: null, next_number: 1 })
+    rows.push({ series_code: code, fiscal_year: year.value, register_id: 0, prefix: SERIES_DEFAULT_PREFIXES[code], number_format: null, next_number: 1 })
   }
-  return rows.sort((a, b) => b.fiscal_year - a.fiscal_year || a.series_code.localeCompare(b.series_code))
+  return rows.sort((a, b) =>
+    b.fiscal_year - a.fiscal_year
+    || a.series_code.localeCompare(b.series_code)
+    || (a.register_id ?? 0) - (b.register_id ?? 0))
 })
 
 /** Řada zatím nevydala číslo — uloží se až se změnou (řádek vznikne lazy na serveru). */
@@ -120,6 +125,7 @@ async function saveAll() {
       const e = edits[seriesKey(s)]
       const format = e.number_format.trim().toUpperCase()
       stored.value = await seriesApi.update(s.series_code, s.fiscal_year, {
+        register_id: s.register_id ?? 0,
         prefix: e.prefix.trim().toUpperCase(),
         number_format: format === '' ? null : format,
         next_number: Number(e.next_number),
@@ -167,6 +173,9 @@ async function saveAll() {
           <tr v-for="s in series" :key="seriesKey(s)">
             <td class="px-3 py-2">
               {{ t(`accounting.closing.series.codes.${s.series_code}`) }}
+              <span v-if="(s.register_id ?? 0) > 0" class="ml-2 text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 whitespace-nowrap">
+                {{ s.register_name || t('cash.register') }}
+              </span>
               <span v-if="isNew(s)" class="ml-2 text-xs text-neutral-400 whitespace-nowrap">{{ t('accounting.closing.series.not_issued') }}</span>
             </td>
             <td class="px-3 py-2 whitespace-nowrap">{{ s.fiscal_year }}</td>

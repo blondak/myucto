@@ -1119,6 +1119,73 @@ final class CashDocumentServiceTest extends TestCase
         }
     }
 
+    /**
+     * L-3: dvě pokladny sdílejí jednu firemní řadu — dokud si jedna z nich vlastní
+     * řadu nezapne. Výchozí stav se nesmí změnit nikomu, kdo o to nepožádal.
+     */
+    public function testRegistersShareCompanySeriesByDefault(): void
+    {
+        $regA = $this->makeRegister('211');
+        $regB = $this->registers->create($this->supplierId, ['name' => 'Vedlejší', 'account_code' => $this->makeCashAnalytic('211.200')]);
+
+        $first  = $this->service->create($this->supplierId, $this->sale($regA, 100.0), $this->userId);
+        $second = $this->service->create($this->supplierId, $this->sale($regB, 200.0), $this->userId);
+
+        self::assertSame('PPD-' . self::YEAR . '-0001', $first['doc_number']);
+        self::assertSame('PPD-' . self::YEAR . '-0002', $second['doc_number'], 'Bez vlastní řady čerpají obě pokladny z jedné firemní.');
+    }
+
+    /**
+     * Pokladna s vlastní řadou čerpá čísla ze své řady a dostane volný prefix, aby
+     * nekolidovala s doklady firemní řady (uq_cashdoc_supplier_number).
+     */
+    public function testOwnSeriesNumbersRegisterSeparately(): void
+    {
+        $regA = $this->makeRegister('211');
+        $regB = $this->registers->create($this->supplierId, [
+            'name' => 'Vedlejší', 'account_code' => $this->makeCashAnalytic('211.200'), 'own_series' => true,
+        ]);
+
+        $shared = $this->service->create($this->supplierId, $this->sale($regA, 100.0), $this->userId);
+        $own    = $this->service->create($this->supplierId, $this->sale($regB, 200.0), $this->userId);
+
+        self::assertSame('PPD-' . self::YEAR . '-0001', $shared['doc_number']);
+        self::assertStringStartsWith('PPD2-', (string) $own['doc_number'], 'Vlastní řada musí mít volný prefix, ne PPD.');
+        self::assertStringEndsWith('-0001', (string) $own['doc_number'], 'Vlastní řada začíná od jedničky.');
+
+        // A firemní řada pokračuje, jako by se nic nestalo.
+        $next = $this->service->create($this->supplierId, $this->sale($regA, 300.0), $this->userId);
+        self::assertSame('PPD-' . self::YEAR . '-0002', $next['doc_number']);
+    }
+
+    /** Přepnout řadu uprostřed roku, ve kterém už pokladna vydala číslo, nejde (§11 ZoÚ). */
+    public function testSeriesSwitchIsLockedAfterFirstNumberInYear(): void
+    {
+        $reg = $this->makeRegister('211');
+        // Doklad rovnou do DB: guard se ptá na AKTUÁLNÍ rok, pro který fixtura nemá
+        // účetní období, takže přes službu by ho zaúčtovat nešlo.
+        $this->db->pdo()->prepare(
+            "INSERT INTO cash_documents (supplier_id, register_id, doc_type, purpose, issue_date, tax_date,
+                                         description, doc_number, total_amount, status, created_by)
+             VALUES (?, ?, 'in', 'sale', ?, ?, 'Loňský doklad', 'PPD-TEST-0001', 100.00, 'posted', ?)"
+        )->execute([$this->supplierId, $reg, date('Y') . '-06-15', date('Y') . '-06-15', $this->userId]);
+
+        $this->expectException(CashException::class);
+        $this->expectExceptionMessageMatches('/přepnout jen v roce/');
+        $this->registers->update($this->supplierId, $reg, ['own_series' => true]);
+    }
+
+    /** Aktivní analytika 211 v osnově — druhá pokladna nemůže sdílet účet s první. */
+    private function makeCashAnalytic(string $code): string
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type, normal_side, is_synthetic, is_active)
+             VALUES (?, ?, 'Pokladna vedlejší', 'asset', 'debit', 0, 1)
+             ON DUPLICATE KEY UPDATE is_active = 1"
+        )->execute([$this->supplierId, $code]);
+        return $code;
+    }
+
     private function makeRegister(string $code = '211'): int
     {
         return $this->registers->create($this->supplierId, ['name' => 'Pokladna ' . $code, 'account_code' => $code, 'is_default' => true]);

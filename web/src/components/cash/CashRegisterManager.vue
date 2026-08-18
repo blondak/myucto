@@ -36,6 +36,7 @@ interface RegisterRow {
   name: string
   account_code: string
   is_default: boolean
+  own_series: boolean
   is_active: boolean
   remove: boolean
 }
@@ -53,7 +54,7 @@ const cashAccounts = computed(() =>
     .sort((a, b) => a.account_code.localeCompare(b.account_code)),
 )
 
-const form = ref({ name: '', account_code: '', currency_code: 'CZK', is_default: false })
+const form = ref({ name: '', account_code: '', currency_code: 'CZK', is_default: false, own_series: false })
 // Valutová pokladna (§11): u cizí měny je analytika volitelná (BE ji přidělí/dohraje automaticky).
 const isForeignForm = computed(() => form.value.currency_code !== 'CZK')
 const creating = computed(() => form.value.name.trim() !== '')
@@ -64,6 +65,7 @@ function toRow(r: CashRegister): RegisterRow {
     name: r.name,
     account_code: r.account_code,
     is_default: r.is_default,
+    own_series: r.own_series === true,
     is_active: r.is_active,
     remove: false,
   }
@@ -107,6 +109,7 @@ function rowChanged(r: RegisterRow): boolean {
     || r.name.trim() !== r.source.name
     || r.account_code !== r.source.account_code
     || r.is_default !== r.source.is_default
+    || r.own_series !== (r.source.own_series === true)
     || r.is_active !== r.source.is_active
 }
 const changedRows = computed(() => rows.value.filter(rowChanged))
@@ -148,6 +151,7 @@ async function saveAll() {
         name: r.name.trim(),
         account_code: r.account_code,
         is_default: r.is_default,
+        own_series: r.own_series,
         is_active: r.is_active,
       })
     }
@@ -157,8 +161,9 @@ async function saveAll() {
         account_code: form.value.account_code,
         currency_code: form.value.currency_code,
         is_default: form.value.is_default,
+        own_series: form.value.own_series,
       })
-      form.value = { name: '', account_code: cashAccounts.value[0]?.account_code ?? '', currency_code: 'CZK', is_default: false }
+      form.value = { name: '', account_code: cashAccounts.value[0]?.account_code ?? '', currency_code: 'CZK', is_default: false, own_series: false }
     }
     toast.success(t('common.saved'))
     await load()
@@ -197,6 +202,7 @@ async function saveAll() {
                 <th class="px-3 py-2 text-left font-medium">{{ t('cash.register_account') }}</th>
                 <th class="px-3 py-2 text-right font-medium">{{ t('cash.balance') }}</th>
                 <th class="px-3 py-2 text-center font-medium">{{ t('cash.register_default') }}</th>
+                <th class="px-3 py-2 text-center font-medium">{{ t('cash.register_own_series') }}</th>
                 <th class="px-3 py-2 text-center font-medium">{{ t('common.active') }}</th>
                 <th class="px-3 py-2"></th>
               </tr>
@@ -224,6 +230,11 @@ async function saveAll() {
                   <input type="radio" :checked="r.is_default" :disabled="r.remove || !r.is_active"
                     :aria-label="t('cash.register_default')"
                     @change="pickDefault(r)" class="cursor-pointer" />
+                </td>
+                <td class="px-3 py-2 text-center">
+                  <input type="checkbox" v-model="r.own_series" :disabled="r.remove"
+                    :aria-label="t('cash.register_own_series')" :title="t('cash.register_own_series_hint')"
+                    class="cursor-pointer" />
                 </td>
                 <td class="px-3 py-2 text-center">
                   <input type="checkbox" v-model="r.is_active" :disabled="r.remove"
@@ -285,6 +296,11 @@ async function saveAll() {
             <input type="checkbox" :checked="form.is_default"
               @change="pickNewDefault(($event.target as HTMLInputElement).checked)" class="cursor-pointer" />
             {{ t('cash.register_default') }}
+          </label>
+          <label class="flex items-start gap-2 mt-2 text-sm text-neutral-700 cursor-pointer">
+            <input type="checkbox" v-model="form.own_series" class="mt-0.5 cursor-pointer" />
+            <span>{{ t('cash.register_own_series') }}
+              <span class="block text-xs text-neutral-500">{{ t('cash.register_own_series_hint') }}</span></span>
           </label>
         </div>
       </div>
