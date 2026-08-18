@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Payroll\Time;
 use MyInvoice\Repository\Payroll\PayrollOvertimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Service\Payroll\Time\Overtime\OvertimeLimits;
+use MyInvoice\Service\Payroll\Time\Overtime\OvertimeProtectionWindow;
 use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
 
 final class PayrollTimeService
@@ -72,6 +74,16 @@ final class PayrollTimeService
             $employmentStarts,
         );
         $overtimeConsents = $this->overtime->consentRowsForMany($supplierId, $employmentIds);
+        $overtimeProtections = $this->overtime->protectionRowsForMany($supplierId, $employmentIds);
+        // Náhradní volno se ukazuje za celé vyrovnávací okno, ne jen za měsíc —
+        // z okna se odečítá podle dne PŘESČASU (§ 93 odst. 5) a účetní musí
+        // vidět i zápis, který do zobrazeného měsíce nespadá.
+        $overtimeCompensations = $this->overtime->compensationRowsForMany(
+            $supplierId,
+            $employmentIds,
+            (new \DateTimeImmutable($periodStart))->modify('-52 weeks')->format('Y-m-d'),
+            $periodLastDay,
+        );
 
         $items = [];
         foreach ($employments as $employment) {
@@ -219,6 +231,8 @@ final class PayrollTimeService
                     ? $overtimeLimits[$employmentId]->toArray()
                     : null,
                 'overtime_consents' => $overtimeConsents[$employmentId] ?? [],
+                'overtime_protections' => $overtimeProtections[$employmentId] ?? [],
+                'overtime_compensations' => $overtimeCompensations[$employmentId] ?? [],
                 'shifts' => $employmentShifts,
                 'entries' => $employmentEntries,
             ];
@@ -453,6 +467,152 @@ final class PayrollTimeService
             $validFrom,
             $validTo,
             $this->nullableString($input['document_reference'] ?? null, 191),
+            $this->nullableString($input['note'] ?? null, 500),
+            $this->nonNegativeInt($input, 'row_version'),
+            $userId,
+        );
+    }
+
+    /**
+     * Zákaz práce přesčas u chráněné skupiny (§ 240 odst. 3 zákoníku práce).
+     *
+     * Mladistvost se sem nezapisuje — plyne z data narození zaměstnance
+     * (§ 350 odst. 2) a druhý zdroj pravdy by se s prvním jen rozešel.
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public function saveOvertimeProtection(
+        int $supplierId,
+        array $input,
+        ?int $userId,
+    ): array {
+        $validFrom = $this->date($input['valid_from'] ?? null, 'valid_from');
+        $validTo = $this->nullableDate($input['valid_to'] ?? null, 'valid_to');
+        if ($validTo !== null && $validTo < $validFrom) {
+            throw new \InvalidArgumentException(
+                'Konec ochrany nesmí předcházet jejímu začátku.',
+            );
+        }
+
+        return $this->overtime->saveProtection(
+            $supplierId,
+            $this->positiveInt($input, 'employment_id'),
+            $this->nullablePositiveInt($input, 'id'),
+            $this->enum($input, 'protection', OvertimeProtectionWindow::KINDS),
+            $validFrom,
+            $validTo,
+            $this->nullableString($input['document_reference'] ?? null, 191),
+            $this->nullableString($input['note'] ?? null, 500),
+            $this->nonNegativeInt($input, 'row_version'),
+            $userId,
+        );
+    }
+
+    /**
+     * Náhradní volno za práci přesčas (§ 93 odst. 5 zákoníku práce).
+     *
+     * Rozhodné je datum PŘESČASU, ne datum čerpání volna — vyjímá se „práce
+     * přesčas, za kterou bylo poskytnuto náhradní volno".
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public function saveOvertimeCompensation(
+        int $supplierId,
+        array $input,
+        ?int $userId,
+    ): array {
+        $overtimeDate = $this->date($input['overtime_date'] ?? null, 'overtime_date');
+        $grantedOn = $this->nullableDate($input['granted_on'] ?? null, 'granted_on');
+        if ($grantedOn !== null && $grantedOn < $overtimeDate) {
+            throw new \InvalidArgumentException(
+                'Náhradní volno nelze vybrat dřív, než byl přesčas odpracován.',
+            );
+        }
+        $minutes = $this->positiveInt($input, 'minutes');
+        if ($minutes > 1440) {
+            throw new \InvalidArgumentException(
+                'Náhradní volno za jeden den nesmí přesáhnout 24 hodin.',
+            );
+        }
+
+        return $this->overtime->saveCompensation(
+            $supplierId,
+            $this->positiveInt($input, 'employment_id'),
+            $this->nullablePositiveInt($input, 'id'),
+            $overtimeDate,
+            $minutes,
+            $grantedOn,
+            $this->nullableString($input['document_reference'] ?? null, 191),
+            $this->nullableString($input['note'] ?? null, 500),
+            $this->nonNegativeInt($input, 'row_version'),
+            $userId,
+        );
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function overtimeAveragingPeriods(int $supplierId): array
+    {
+        return $this->overtime->averagingPeriods($supplierId);
+    }
+
+    /**
+     * Vyrovnávací období podle § 93 odst. 4.
+     *
+     * Delší období než zákonných 26 týdnů smí vymezit „jen kolektivní
+     * smlouva", proto se bez odkazu na ni neuloží — a to už tady, aby uživatel
+     * dostal větu, ne hlášku o porušení databázového omezení.
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public function saveOvertimeAveragingPeriod(
+        int $supplierId,
+        array $input,
+        ?int $userId,
+    ): array {
+        $validFrom = $this->date($input['valid_from'] ?? null, 'valid_from');
+        $validTo = $this->nullableDate($input['valid_to'] ?? null, 'valid_to');
+        if ($validTo !== null && $validTo < $validFrom) {
+            throw new \InvalidArgumentException(
+                'Konec platnosti vyrovnávacího období nesmí předcházet jeho začátku.',
+            );
+        }
+        $basis = $this->enum($input, 'basis', OvertimeLimits::BASES);
+        $weeks = $this->positiveInt($input, 'weeks');
+        $reference = $this->nullableString($input['collective_agreement_reference'] ?? null, 255);
+        if ($basis === OvertimeLimits::BASIS_STATUTORY) {
+            if ($weeks > 26) {
+                throw new \InvalidArgumentException(
+                    'Bez kolektivní smlouvy smí vyrovnávací období činit nejvýše '
+                    . '26 týdnů po sobě jdoucích (§ 93 odst. 4 zákoníku práce).',
+                );
+            }
+            $reference = null;
+        } else {
+            if ($weeks > 52) {
+                throw new \InvalidArgumentException(
+                    'Ani kolektivní smlouva nesmí vymezit vyrovnávací období delší '
+                    . 'než 52 týdnů po sobě jdoucích (§ 93 odst. 4 zákoníku práce).',
+                );
+            }
+            if ($reference === null) {
+                throw new \InvalidArgumentException(
+                    'Vyrovnávací období delší než zákonné musí odkazovat na kolektivní '
+                    . 'smlouvu, která ho vymezuje (§ 93 odst. 4 zákoníku práce).',
+                );
+            }
+        }
+
+        return $this->overtime->saveAveragingPeriod(
+            $supplierId,
+            $this->nullablePositiveInt($input, 'id'),
+            $validFrom,
+            $validTo,
+            $weeks,
+            $basis,
+            $reference,
             $this->nullableString($input['note'] ?? null, 500),
             $this->nonNegativeInt($input, 'row_version'),
             $userId,

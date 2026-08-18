@@ -4,6 +4,9 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
+  type PayrollOvertimeAveragingBasis,
+  type PayrollOvertimeAveragingPeriod,
+  type PayrollOvertimeProtectionKind,
   type PayrollTimeCategory,
   type PayrollTimeImportPreview,
   type PayrollTimeOverview,
@@ -327,12 +330,55 @@ function overtimeWarnings(item: PayrollTimeOverviewItem) {
   return item.overtime_limits?.findings.filter(finding => finding.severity === 'warning') ?? []
 }
 
+/*
+ * Porušený zákaz (mladistvý, těhotenství, péče o dítě do 1 roku, kratší
+ * pracovní doba) není totéž co překročený limit — bez ruční výjimky se běh
+ * neschválí, takže se panel obarvuje jinak než u pouhého varování.
+ */
+function overtimeProhibitions(item: PayrollTimeOverviewItem) {
+  return item.overtime_limits?.findings.filter(finding => finding.requires_override) ?? []
+}
+
+function overtimePanelClass(item: PayrollTimeOverviewItem): string {
+  if (overtimeProhibitions(item).length) {
+    return 'border-danger-500/50 bg-danger-50 text-danger-700'
+  }
+  if (overtimeWarnings(item).length) {
+    return 'border-warning-500/40 bg-warning-50 text-warning-700'
+  }
+  return 'border-neutral-200 bg-neutral-50 text-neutral-600'
+}
+
 function overtimeVisible(item: PayrollTimeOverviewItem): boolean {
   const limits = item.overtime_limits
   if (!limits) return false
   return limits.findings.length > 0
     || limits.ordered_year_minutes > 0
     || limits.agreed_year_minutes > 0
+}
+
+/** § 93 odst. 4 a 5 — stav klouzavého okna včetně vyňatého náhradního volna. */
+function overtimeAveragingSummary(item: PayrollTimeOverviewItem): string {
+  const limits = item.overtime_limits
+  if (!limits || limits.averaging_from === null || limits.averaging_to === null) return ''
+  const parts = [t('payroll.time.overtime.averaging_summary', {
+    weeks: limits.averaging_weeks,
+    from: limits.averaging_from,
+    to: limits.averaging_to,
+    used: formatPayrollMinutes(limits.averaging_minutes),
+    limit: formatPayrollMinutes(limits.averaging_limit_minutes),
+  })]
+  if (limits.averaging_compensated_minutes > 0) {
+    parts.push(t('payroll.time.overtime.averaging_compensated', {
+      minutes: formatPayrollMinutes(limits.averaging_compensated_minutes),
+    }))
+  }
+  parts.push(limits.averaging_basis === 'collective_agreement'
+    ? t('payroll.time.overtime.averaging_collective', {
+      reference: limits.averaging_reference ?? '',
+    })
+    : t('payroll.time.overtime.averaging_statutory'))
+  return parts.join(' ')
 }
 
 function overtimeYearSummary(item: PayrollTimeOverviewItem): string {
@@ -390,6 +436,212 @@ async function saveConsent() {
   } catch (error: any) {
     consentError.value = error?.response?.data?.error?.message
       || t('payroll.time.overtime.consent_failed')
+  } finally {
+    saving.value = false
+  }
+}
+
+/*
+ * ─── Zákazy práce přesčas (§ 240 odst. 3) ───────────────────────────────────
+ *
+ * Mladistvost se nezapisuje — plyne z data narození (§ 350 odst. 2). Zapisuje
+ * se jen to, co modul odjinud nezná: těhotenství a péče o dítě mladší 1 roku.
+ */
+const protectionItem = ref<PayrollTimeOverviewItem | null>(null)
+const protectionKind = ref<PayrollOvertimeProtectionKind>('pregnancy')
+const protectionValidFrom = ref('')
+const protectionValidTo = ref('')
+const protectionReference = ref('')
+const protectionNote = ref('')
+const protectionError = ref('')
+
+const protectionBlockedReason = computed<string | null>(() =>
+  protectionValidFrom.value === '' ? t('payroll.time.overtime.protection_blocked_no_date') : null,
+)
+
+function openProtection(item: PayrollTimeOverviewItem) {
+  protectionItem.value = item
+  protectionKind.value = 'pregnancy'
+  protectionValidFrom.value = `${period.value}-01`
+  protectionValidTo.value = ''
+  protectionReference.value = ''
+  protectionNote.value = ''
+  protectionError.value = ''
+}
+
+function closeProtection() {
+  protectionItem.value = null
+  protectionError.value = ''
+}
+
+async function saveProtection() {
+  const item = protectionItem.value
+  if (!item || protectionBlockedReason.value) return
+  saving.value = true
+  protectionError.value = ''
+  try {
+    await payrollApi.saveOvertimeProtection({
+      employment_id: item.employment.id,
+      protection: protectionKind.value,
+      valid_from: protectionValidFrom.value,
+      valid_to: protectionValidTo.value === '' ? null : protectionValidTo.value,
+      document_reference: protectionReference.value.trim() === '' ? null : protectionReference.value.trim(),
+      note: protectionNote.value.trim() === '' ? null : protectionNote.value.trim(),
+      row_version: 0,
+    })
+    toast.success(t('payroll.time.overtime.protection_saved'))
+    closeProtection()
+    await load()
+  } catch (error: any) {
+    protectionError.value = error?.response?.data?.error?.message
+      || t('payroll.time.overtime.protection_failed')
+  } finally {
+    saving.value = false
+  }
+}
+
+/*
+ * ─── Náhradní volno za přesčas (§ 93 odst. 5) ───────────────────────────────
+ *
+ * Klíčem je den PŘESČASU, ne den čerpání volna — z vyrovnávacího okna vypadává
+ * odpracovaný přesčas, ne volno.
+ */
+const compensationItem = ref<PayrollTimeOverviewItem | null>(null)
+const compensationDate = ref('')
+const compensationMinutes = ref('')
+const compensationGrantedOn = ref('')
+const compensationReference = ref('')
+const compensationNote = ref('')
+const compensationError = ref('')
+
+const compensationBlockedReason = computed<string | null>(() => {
+  if (compensationDate.value === '') return t('payroll.time.overtime.compensation_blocked_no_date')
+  const minutes = Number(compensationMinutes.value)
+  if (!Number.isInteger(minutes) || minutes <= 0) {
+    return t('payroll.time.overtime.compensation_blocked_no_minutes')
+  }
+  return null
+})
+
+function openCompensation(item: PayrollTimeOverviewItem) {
+  compensationItem.value = item
+  compensationDate.value = `${period.value}-01`
+  compensationMinutes.value = ''
+  compensationGrantedOn.value = ''
+  compensationReference.value = ''
+  compensationNote.value = ''
+  compensationError.value = ''
+}
+
+function closeCompensation() {
+  compensationItem.value = null
+  compensationError.value = ''
+}
+
+async function saveCompensation() {
+  const item = compensationItem.value
+  if (!item || compensationBlockedReason.value) return
+  saving.value = true
+  compensationError.value = ''
+  try {
+    await payrollApi.saveOvertimeCompensation({
+      employment_id: item.employment.id,
+      overtime_date: compensationDate.value,
+      minutes: Number(compensationMinutes.value),
+      granted_on: compensationGrantedOn.value === '' ? null : compensationGrantedOn.value,
+      document_reference: compensationReference.value.trim() === '' ? null : compensationReference.value.trim(),
+      note: compensationNote.value.trim() === '' ? null : compensationNote.value.trim(),
+      row_version: 0,
+    })
+    toast.success(t('payroll.time.overtime.compensation_saved'))
+    closeCompensation()
+    await load()
+  } catch (error: any) {
+    compensationError.value = error?.response?.data?.error?.message
+      || t('payroll.time.overtime.compensation_failed')
+  } finally {
+    saving.value = false
+  }
+}
+
+/*
+ * ─── Vyrovnávací období (§ 93 odst. 4) ──────────────────────────────────────
+ *
+ * Firemní údaj, ne konstanta: nad 26 týdnů se smí jít „jen kolektivní
+ * smlouvou", proto se u prodloužení vyžaduje odkaz na ni.
+ */
+const averagingOpen = ref(false)
+const averagingPeriods = ref<PayrollOvertimeAveragingPeriod[]>([])
+const averagingValidFrom = ref('')
+const averagingValidTo = ref('')
+const averagingWeeks = ref('26')
+const averagingBasis = ref<PayrollOvertimeAveragingBasis>('statutory')
+const averagingReference = ref('')
+const averagingNote = ref('')
+const averagingError = ref('')
+
+const averagingBlockedReason = computed<string | null>(() => {
+  if (averagingValidFrom.value === '') return t('payroll.time.overtime.averaging_blocked_no_date')
+  const weeks = Number(averagingWeeks.value)
+  if (!Number.isInteger(weeks) || weeks < 1) {
+    return t('payroll.time.overtime.averaging_blocked_no_weeks')
+  }
+  if (averagingBasis.value === 'statutory' && weeks > 26) {
+    return t('payroll.time.overtime.averaging_blocked_statutory_max')
+  }
+  if (averagingBasis.value === 'collective_agreement') {
+    if (weeks > 52) return t('payroll.time.overtime.averaging_blocked_collective_max')
+    if (averagingReference.value.trim() === '') {
+      return t('payroll.time.overtime.averaging_blocked_no_reference')
+    }
+  }
+  return null
+})
+
+async function openAveraging() {
+  averagingOpen.value = true
+  averagingError.value = ''
+  averagingValidFrom.value = `${period.value}-01`
+  averagingValidTo.value = ''
+  averagingWeeks.value = '26'
+  averagingBasis.value = 'statutory'
+  averagingReference.value = ''
+  averagingNote.value = ''
+  try {
+    averagingPeriods.value = await payrollApi.listOvertimeAveragingPeriods()
+  } catch {
+    averagingPeriods.value = []
+    averagingError.value = t('payroll.time.overtime.averaging_load_failed')
+  }
+}
+
+function closeAveraging() {
+  averagingOpen.value = false
+  averagingError.value = ''
+}
+
+async function saveAveraging() {
+  if (averagingBlockedReason.value) return
+  saving.value = true
+  averagingError.value = ''
+  try {
+    await payrollApi.saveOvertimeAveragingPeriod({
+      valid_from: averagingValidFrom.value,
+      valid_to: averagingValidTo.value === '' ? null : averagingValidTo.value,
+      weeks: Number(averagingWeeks.value),
+      basis: averagingBasis.value,
+      collective_agreement_reference: averagingBasis.value === 'collective_agreement'
+        ? averagingReference.value.trim()
+        : null,
+      note: averagingNote.value.trim() === '' ? null : averagingNote.value.trim(),
+      row_version: 0,
+    })
+    toast.success(t('payroll.time.overtime.averaging_saved'))
+    closeAveraging()
+    await load()
+  } catch (error: any) {
+    averagingError.value = error?.response?.data?.error?.message
+      || t('payroll.time.overtime.averaging_failed')
   } finally {
     saving.value = false
   }
@@ -603,6 +855,10 @@ onMounted(load)
         <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.time.subtitle') }}</p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
+        <button v-if="canWrite" data-test="overtime-averaging-open" :class="btnOutline('neutral')" @click="openAveraging()">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>
+          {{ t('payroll.time.overtime.averaging_action') }}
+        </button>
         <button v-if="canWrite" :class="btnOutline('neutral')" @click="importOpen = !importOpen">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.upload" /></svg>
           {{ t('payroll.time.import.button') }}
@@ -832,20 +1088,32 @@ onMounted(load)
             <tr v-if="overtimeVisible(item)" :data-test="`overtime-limits-${item.employment.id}`">
               <td />
               <td colspan="7" class="px-4 pb-4">
-                <div
-                  class="rounded-lg border px-3 py-2 text-sm"
-                  :class="overtimeWarnings(item).length
-                    ? 'border-warning-500/40 bg-warning-50 text-warning-700'
-                    : 'border-neutral-200 bg-neutral-50 text-neutral-600'"
-                >
+                <div class="rounded-lg border px-3 py-2 text-sm" :class="overtimePanelClass(item)">
                   <p class="text-xs font-semibold uppercase tracking-wide">{{ t('payroll.time.overtime.title') }}</p>
+                  <p
+                    v-if="overtimeProhibitions(item).length"
+                    data-test="overtime-prohibition-banner"
+                    class="mt-1 max-w-prose text-xs font-semibold leading-snug"
+                  >{{ t('payroll.time.overtime.prohibition_banner') }}</p>
                   <p
                     v-for="finding in item.overtime_limits?.findings ?? []"
                     :key="finding.code + finding.scope_from"
                     class="mt-1 max-w-prose leading-snug"
                     :data-test="`overtime-finding-${finding.code}`"
-                  >{{ finding.message }}</p>
+                  >
+                    <span class="mr-2 rounded bg-white/70 px-1.5 py-0.5 text-[11px] font-medium">{{ finding.provision }}</span>
+                    {{ finding.message }}
+                  </p>
                   <p class="mt-1 text-xs">{{ overtimeYearSummary(item) }} {{ overtimeConsentSummary(item) }}</p>
+                  <p
+                    v-if="overtimeAveragingSummary(item)"
+                    class="mt-1 text-xs"
+                    :data-test="`overtime-averaging-${item.employment.id}`"
+                  >{{ overtimeAveragingSummary(item) }}</p>
+                  <div v-if="canWrite" class="mt-2 flex flex-wrap gap-2">
+                    <button :class="btnOutline('neutral')" :disabled="saving" @click="openProtection(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.lock" /></svg>{{ t('payroll.time.overtime.protection_action') }}</button>
+                    <button :class="btnOutline('neutral')" :disabled="saving" @click="openCompensation(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('payroll.time.overtime.compensation_action') }}</button>
+                  </div>
                 </div>
               </td>
             </tr>
@@ -860,20 +1128,28 @@ onMounted(load)
           <div
             v-if="overtimeVisible(item)"
             class="mt-4 rounded-lg border px-3 py-2 text-sm"
-            :class="overtimeWarnings(item).length
-              ? 'border-warning-500/40 bg-warning-50 text-warning-700'
-              : 'border-neutral-200 bg-neutral-50 text-neutral-600'"
+            :class="overtimePanelClass(item)"
           >
             <p class="text-xs font-semibold uppercase tracking-wide">{{ t('payroll.time.overtime.title') }}</p>
+            <p
+              v-if="overtimeProhibitions(item).length"
+              class="mt-1 text-xs font-semibold leading-snug"
+            >{{ t('payroll.time.overtime.prohibition_banner') }}</p>
             <p
               v-for="finding in item.overtime_limits?.findings ?? []"
               :key="finding.code + finding.scope_from"
               class="mt-1 leading-snug"
-            >{{ finding.message }}</p>
+            >
+              <span class="mr-2 rounded bg-white/70 px-1.5 py-0.5 text-[11px] font-medium">{{ finding.provision }}</span>
+              {{ finding.message }}
+            </p>
             <p class="mt-1 text-xs">{{ overtimeYearSummary(item) }} {{ overtimeConsentSummary(item) }}</p>
+            <p v-if="overtimeAveragingSummary(item)" class="mt-1 text-xs">{{ overtimeAveragingSummary(item) }}</p>
           </div>
           <div class="mt-4 flex flex-wrap gap-2">
             <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openConsent(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t('payroll.time.overtime.consent_action') }}</button>
+            <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openProtection(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.lock" /></svg>{{ t('payroll.time.overtime.protection_action') }}</button>
+            <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openCompensation(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('payroll.time.overtime.compensation_action') }}</button>
             <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
             <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
             <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" @click="openApproval(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
@@ -1069,6 +1345,205 @@ onMounted(load)
           </div>
           <p v-if="consentBlockedReason" :class="BTN_DISABLED_NOTE" data-test="overtime-consent-save-blocked">
             {{ consentBlockedReason }}
+          </p>
+        </form>
+      </div>
+    </Modal>
+
+    <Modal
+      v-if="protectionItem"
+      :title="t('payroll.time.overtime.protection_title')"
+      width-class="max-w-lg"
+      @close="closeProtection"
+    >
+      <div data-test="overtime-protection-modal">
+        <p class="mb-2 text-sm text-neutral-600">
+          {{ protectionItem.employment.full_name }} · {{ protectionItem.employment.code }}
+        </p>
+        <p class="mb-4 max-w-prose text-sm text-neutral-600">
+          {{ t('payroll.time.overtime.protection_hint') }}
+        </p>
+        <form data-test="overtime-protection-form" class="space-y-4" @submit.prevent="saveProtection">
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.protection_kind') }}</span>
+            <select v-model="protectionKind" data-test="overtime-protection-kind" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+              <option value="pregnancy">{{ t('payroll.time.overtime.protection_pregnancy') }}</option>
+              <option value="child_under_one">{{ t('payroll.time.overtime.protection_child_under_one') }}</option>
+            </select>
+          </label>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="block">
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_from') }}</span>
+              <input v-model="protectionValidFrom" data-test="overtime-protection-valid-from" type="date" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_to') }}</span>
+              <input v-model="protectionValidTo" data-test="overtime-protection-valid-to" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+            </label>
+          </div>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_reference') }}</span>
+            <input v-model="protectionReference" data-test="overtime-protection-reference" maxlength="191" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_note') }}</span>
+            <textarea v-model="protectionNote" data-test="overtime-protection-note" maxlength="500" rows="3" class="w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
+          </label>
+          <p v-if="protectionError" data-test="overtime-protection-error" class="text-sm text-danger-500">{{ protectionError }}</p>
+          <div class="flex flex-wrap justify-end gap-2">
+            <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="closeProtection">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              type="submit"
+              data-test="overtime-protection-save"
+              :class="btnFilled('primary')"
+              :disabled="saving || Boolean(protectionBlockedReason)"
+              :title="disabledTitle(Boolean(protectionBlockedReason), protectionBlockedReason)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+              {{ t('common.save') }}
+            </button>
+          </div>
+          <p v-if="protectionBlockedReason" :class="BTN_DISABLED_NOTE" data-test="overtime-protection-save-blocked">
+            {{ protectionBlockedReason }}
+          </p>
+        </form>
+      </div>
+    </Modal>
+
+    <Modal
+      v-if="compensationItem"
+      :title="t('payroll.time.overtime.compensation_title')"
+      width-class="max-w-lg"
+      @close="closeCompensation"
+    >
+      <div data-test="overtime-compensation-modal">
+        <p class="mb-2 text-sm text-neutral-600">
+          {{ compensationItem.employment.full_name }} · {{ compensationItem.employment.code }}
+        </p>
+        <p class="mb-4 max-w-prose text-sm text-neutral-600">
+          {{ t('payroll.time.overtime.compensation_hint') }}
+        </p>
+        <form data-test="overtime-compensation-form" class="space-y-4" @submit.prevent="saveCompensation">
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="block">
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.compensation_overtime_date') }}</span>
+              <input v-model="compensationDate" data-test="overtime-compensation-date" type="date" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.compensation_minutes') }}</span>
+              <input v-model="compensationMinutes" data-test="overtime-compensation-minutes" type="number" min="1" max="1440" step="1" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+            </label>
+          </div>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.compensation_granted_on') }}</span>
+            <input v-model="compensationGrantedOn" data-test="overtime-compensation-granted-on" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_reference') }}</span>
+            <input v-model="compensationReference" data-test="overtime-compensation-reference" maxlength="191" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_note') }}</span>
+            <textarea v-model="compensationNote" data-test="overtime-compensation-note" maxlength="500" rows="3" class="w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
+          </label>
+          <p v-if="compensationError" data-test="overtime-compensation-error" class="text-sm text-danger-500">{{ compensationError }}</p>
+          <div class="flex flex-wrap justify-end gap-2">
+            <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="closeCompensation">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              type="submit"
+              data-test="overtime-compensation-save"
+              :class="btnFilled('primary')"
+              :disabled="saving || Boolean(compensationBlockedReason)"
+              :title="disabledTitle(Boolean(compensationBlockedReason), compensationBlockedReason)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+              {{ t('common.save') }}
+            </button>
+          </div>
+          <p v-if="compensationBlockedReason" :class="BTN_DISABLED_NOTE" data-test="overtime-compensation-save-blocked">
+            {{ compensationBlockedReason }}
+          </p>
+        </form>
+      </div>
+    </Modal>
+
+    <Modal
+      v-if="averagingOpen"
+      :title="t('payroll.time.overtime.averaging_title')"
+      width-class="max-w-2xl"
+      @close="closeAveraging"
+    >
+      <div data-test="overtime-averaging-modal">
+        <p class="mb-4 max-w-prose text-sm text-neutral-600">
+          {{ t('payroll.time.overtime.averaging_hint') }}
+        </p>
+        <ul v-if="averagingPeriods.length" class="mb-4 space-y-1 text-sm text-neutral-600" data-test="overtime-averaging-list">
+          <li v-for="row in averagingPeriods" :key="row.id">
+            {{ t('payroll.time.overtime.averaging_row', {
+              from: row.valid_from,
+              to: row.valid_to ?? '—',
+              weeks: row.weeks,
+              basis: row.basis === 'collective_agreement'
+                ? (row.collective_agreement_reference ?? '')
+                : t('payroll.time.overtime.averaging_statutory'),
+            }) }}
+          </li>
+        </ul>
+        <form data-test="overtime-averaging-form" class="space-y-4" @submit.prevent="saveAveraging">
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="block">
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_from') }}</span>
+              <input v-model="averagingValidFrom" data-test="overtime-averaging-valid-from" type="date" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_to') }}</span>
+              <input v-model="averagingValidTo" data-test="overtime-averaging-valid-to" type="date" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.averaging_weeks') }}</span>
+              <input v-model="averagingWeeks" data-test="overtime-averaging-weeks" type="number" min="1" max="52" step="1" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+            </label>
+            <label class="block">
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.averaging_basis') }}</span>
+              <select v-model="averagingBasis" data-test="overtime-averaging-basis" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+                <option value="statutory">{{ t('payroll.time.overtime.averaging_statutory') }}</option>
+                <option value="collective_agreement">{{ t('payroll.time.overtime.averaging_collective_option') }}</option>
+              </select>
+            </label>
+          </div>
+          <label v-if="averagingBasis === 'collective_agreement'" class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.averaging_reference') }}</span>
+            <input v-model="averagingReference" data-test="overtime-averaging-reference" maxlength="255" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_note') }}</span>
+            <textarea v-model="averagingNote" data-test="overtime-averaging-note" maxlength="500" rows="3" class="w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
+          </label>
+          <p v-if="averagingError" data-test="overtime-averaging-error" class="text-sm text-danger-500">{{ averagingError }}</p>
+          <div class="flex flex-wrap justify-end gap-2">
+            <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="closeAveraging">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+              {{ t('common.cancel') }}
+            </button>
+            <button
+              type="submit"
+              data-test="overtime-averaging-save"
+              :class="btnFilled('primary')"
+              :disabled="saving || Boolean(averagingBlockedReason)"
+              :title="disabledTitle(Boolean(averagingBlockedReason), averagingBlockedReason)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+              {{ t('common.save') }}
+            </button>
+          </div>
+          <p v-if="averagingBlockedReason" :class="BTN_DISABLED_NOTE" data-test="overtime-averaging-save-blocked">
+            {{ averagingBlockedReason }}
           </p>
         </form>
       </div>

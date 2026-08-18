@@ -756,7 +756,13 @@ export interface PayrollOvertimeLimitFinding {
   scope_from: string
   scope_to: string
   consent_evidenced: boolean
+  /** Ustanovení, o které se nález opírá — zobrazuje se jako štítek u věty. */
+  provision: string
+  /** Porušený zákaz, ne překročený limit: bez ruční výjimky běh neschválíte. */
+  requires_override: boolean
 }
+
+export type PayrollOvertimeAveragingBasis = 'statutory' | 'collective_agreement'
 
 export interface PayrollOvertimeLimits {
   employment_id: number
@@ -770,6 +776,11 @@ export interface PayrollOvertimeLimits {
   averaging_weeks: number
   averaging_minutes: number
   averaging_limit_minutes: number
+  averaging_compensated_minutes: number
+  averaging_basis: PayrollOvertimeAveragingBasis
+  averaging_reference: string | null
+  prohibited_minutes: Partial<Record<'juvenile' | 'pregnancy' | 'child_under_one' | 'part_time', number>>
+  requires_override: boolean
   consent_evidenced: boolean
   limits_from_ruleset: boolean
 }
@@ -781,6 +792,47 @@ export interface PayrollOvertimeConsent {
   valid_from: string
   valid_to: string | null
   document_reference: string | null
+  note: string | null
+  row_version: number
+  created_at: string
+}
+
+export type PayrollOvertimeProtectionKind = 'pregnancy' | 'child_under_one'
+
+/** Zákaz práce přesčas u chráněné skupiny (§ 240 odst. 3). */
+export interface PayrollOvertimeProtection {
+  id: number
+  employment_id: number
+  protection: PayrollOvertimeProtectionKind
+  valid_from: string
+  valid_to: string | null
+  document_reference: string | null
+  note: string | null
+  row_version: number
+  created_at: string
+}
+
+/** Náhradní volno za práci přesčas (§ 93 odst. 5). */
+export interface PayrollOvertimeCompensation {
+  id: number
+  employment_id: number
+  overtime_date: string
+  minutes: number
+  granted_on: string | null
+  document_reference: string | null
+  note: string | null
+  row_version: number
+  created_at: string
+}
+
+/** Vyrovnávací období podle § 93 odst. 4 — firemní údaj, ne konstanta. */
+export interface PayrollOvertimeAveragingPeriod {
+  id: number
+  valid_from: string
+  valid_to: string | null
+  weeks: number
+  basis: PayrollOvertimeAveragingBasis
+  collective_agreement_reference: string | null
   note: string | null
   row_version: number
   created_at: string
@@ -813,6 +865,8 @@ export interface PayrollTimeOverviewItem {
   }
   overtime_limits: PayrollOvertimeLimits | null
   overtime_consents: PayrollOvertimeConsent[]
+  overtime_protections: PayrollOvertimeProtection[]
+  overtime_compensations: PayrollOvertimeCompensation[]
   shifts: PayrollShift[]
   entries: PayrollTimeEntry[]
 }
@@ -3924,6 +3978,45 @@ export const payrollApi = {
   }) =>
     api.post<{ consent: PayrollOvertimeConsent }>('/payroll/time/overtime-consents', payload)
       .then(response => response.data.consent),
+  saveOvertimeProtection: (payload: {
+    employment_id: number
+    id?: number | null
+    protection: PayrollOvertimeProtectionKind
+    valid_from: string
+    valid_to: string | null
+    document_reference: string | null
+    note: string | null
+    row_version: number
+  }) =>
+    api.post<{ protection: PayrollOvertimeProtection }>('/payroll/time/overtime-protections', payload)
+      .then(response => response.data.protection),
+  saveOvertimeCompensation: (payload: {
+    employment_id: number
+    id?: number | null
+    overtime_date: string
+    minutes: number
+    granted_on: string | null
+    document_reference: string | null
+    note: string | null
+    row_version: number
+  }) =>
+    api.post<{ compensation: PayrollOvertimeCompensation }>('/payroll/time/overtime-compensations', payload)
+      .then(response => response.data.compensation),
+  listOvertimeAveragingPeriods: () =>
+    api.get<{ periods: PayrollOvertimeAveragingPeriod[] }>('/payroll/time/overtime-averaging-periods')
+      .then(response => response.data.periods),
+  saveOvertimeAveragingPeriod: (payload: {
+    id?: number | null
+    valid_from: string
+    valid_to: string | null
+    weeks: number
+    basis: PayrollOvertimeAveragingBasis
+    collective_agreement_reference: string | null
+    note: string | null
+    row_version: number
+  }) =>
+    api.post<{ period: PayrollOvertimeAveragingPeriod }>('/payroll/time/overtime-averaging-periods', payload)
+      .then(response => response.data.period),
   previewTimeImport: (payload: { period: string; format: 'csv' | 'xlsx'; original_name: string; content: string }) =>
     api.post<{ preview: PayrollTimeImportPreview }>('/payroll/time/imports/preview', payload)
       .then(response => response.data.preview),
