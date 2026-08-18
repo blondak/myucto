@@ -205,6 +205,60 @@ final class PayrollPersonProfileApiTest extends TestCase
         self::assertStringNotContainsString('1000000005', (string) $account['bank_account_ciphertext']);
     }
 
+    /**
+     * Formulář „Běžné údaje zaměstnance“ posílá e-mail i telefon jako NÁHRADU vždy,
+     * když je pole vyplněné — i s nezměněnou hodnotou. Starý řádek se přitom
+     * deaktivuje a zakládá se nový, jenže `uq_payroll_contact_value` je nad
+     * (supplier, employee, contact_type, hash) a `is_active` v něm není, takže
+     * druhý řádek s touž hodnotou skončil na 23000 a karta nešla uložit vůbec.
+     */
+    public function testResavingUnchangedContactRecyclesRowInsteadOfDuplicating(): void
+    {
+        self::assertSame(200, $this->put($this->supplierId, $this->employeeId, $this->completePayload())->getStatusCode());
+        $profile = $this->json($this->get($this->supplierId, $this->employeeId))['profile'];
+        self::assertCount(1, $profile['contacts']);
+        $contactId = (int) $profile['contacts'][0]['id'];
+
+        $payload = $this->completePayload();
+        $payload['row_version'] = (int) $profile['row_version'];
+        // Přesně tvar z formuláře: stávající řádek na neaktivní, k tomu nový se STEJNOU hodnotou.
+        $payload['contacts'] = [
+            ['id' => $contactId, 'contact_type' => 'email', 'is_primary' => false, 'is_active' => false],
+            ['contact_type' => 'email', 'value' => 'jana.testovaci@example.invalid', 'is_primary' => true, 'is_active' => true],
+        ];
+        $payload['identity_history'] = array_map(static fn (array $row): array => [
+            'id' => $row['id'], 'full_name' => $row['full_name'], 'first_name' => $row['first_name'],
+            'last_name' => $row['last_name'], 'effective_from' => $row['effective_from'], 'effective_to' => $row['effective_to'],
+        ], $profile['identity_history']);
+        $payload['addresses'] = array_map(static fn (array $row): array => [
+            'id' => $row['id'], 'address_type' => $row['address_type'],
+            'effective_from' => $row['effective_from'], 'effective_to' => $row['effective_to'],
+        ], $profile['addresses']);
+        $payload['identifiers'] = array_map(static fn (array $row): array => [
+            'id' => $row['id'], 'identifier_type' => $row['identifier_type'],
+        ], $profile['identifiers']);
+        $payload['accounts'] = array_map(static fn (array $row): array => [
+            'id' => $row['id'], 'label' => $row['label'],
+            'allocation_basis_points' => $row['allocation_basis_points'],
+            'effective_from' => $row['effective_from'], 'effective_to' => $row['effective_to'],
+            'is_active' => $row['is_active'],
+        ], $profile['accounts']);
+
+        $response = $this->put($this->supplierId, $this->employeeId, $payload);
+        self::assertSame(
+            200,
+            $response->getStatusCode(),
+            'Uložení nezměněného kontaktu nesmí spadnout na duplicitu: ' . (string) $response->getBody(),
+        );
+
+        $saved = $this->json($response)['profile'];
+        $emails = array_values(array_filter($saved['contacts'], static fn (array $c): bool => $c['contact_type'] === 'email'));
+        self::assertCount(1, $emails, 'Řádek se stejnou hodnotou se recykluje, nezakládá se druhý.');
+        self::assertSame($contactId, (int) $emails[0]['id']);
+        self::assertTrue((bool) $emails[0]['is_active']);
+        self::assertTrue((bool) $emails[0]['is_primary']);
+    }
+
     public function testExistingSecretsCanBePreservedWithoutRevealOrPlaintextRoundTrip(): void
     {
         $created = $this->json($this->put(
