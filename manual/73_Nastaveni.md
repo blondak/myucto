@@ -835,6 +835,18 @@ použij [SMTP log analýzu](#738-smtp-log-analyza).
 
 ## 73.16 Vlastní domény klientského rozhraní
 
+> **Funkce je volitelná a ve výchozím stavu vypnutá.** Zapíná ji správce serveru
+> v `cfg.php` (`'domains' => ['enabled' => true]`, případně ENV
+> `MYINVOICE_DOMAINS_ENABLED=1`). Dokud je vypnutá, sekce s doménami se v
+> Nastavení vůbec nenabízí a instalace se chová jako bez ní: na aplikaci se
+> dostaneš přes libovolný hostname, který na ni webserver nasměruje.
+>
+> Po zapnutí se hostname stává hranicí firmy — a tím i tvrdým filtrem. Jakýkoli
+> host, který není hostname z `app.url` ani aktivní doména některé firmy, dostane
+> `421`. To zahrnuje i variantu s `www` a bez `www`, přístup přes IP adresu nebo
+> staging jméno. Zapínej proto až ve chvíli, kdy reverse proxy posílá na aplikaci
+> jen hostnames, o kterých víš.
+
 **Cesta: `Nastavení → Firma → Vlastní domény`.** Sekce se zobrazí uživateli
 s oprávněním **Vlastní domény** alespoň pro čtení; založení, ověření, aktivace
 a deaktivace vyžadují zápis. Domény se vždy spravují pro právě vybranou firmu.

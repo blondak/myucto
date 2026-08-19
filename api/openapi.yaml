@@ -18529,12 +18529,17 @@ components:
     DomainContext:
       type: object
       required:
-        [mode, hostname, origin, locked, supplier_id, purpose,
+        [mode, hostname, origin, locked, supplier_id, purpose, feature_enabled,
          canonical_base_url, canonical_login_url]
       properties:
         mode:
           type: string
           enum: [canonical, custom]
+        feature_enabled:
+          type: boolean
+          description: >-
+            Vlastní domény jsou opt-in (`domains.enabled` v cfg.php). Vypnuté =
+            každý hostname je canonical a správa domén se vůbec nenabízí.
         hostname:
           type: string
           format: hostname

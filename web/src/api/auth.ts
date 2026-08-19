@@ -88,6 +88,8 @@ export interface DomainContext {
   locked: boolean
   supplier_id: number | null
   purpose: 'portal' | 'public_links' | 'all' | null
+  /** Vlastní domény jsou opt-in v cfg.php; vypnuté = správa domén se nenabízí. */
+  feature_enabled?: boolean
   canonical_base_url?: string
   canonical_login_url?: string
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Http\RequestPath;
 use MyInvoice\Middleware\FirstRunLockMiddleware;
 use MyInvoice\Service\Tenant\TenantDomainPolicy;
@@ -24,11 +25,22 @@ try {
         // SPA fallback jde přes stejnou host-to-tenant politiku jako API. Webserver
         // proto nevrátí index.html neznámému nebo neaktivnímu hostname dřív, než
         // se frontend vůbec dostane k /api/auth/domain-context.
-        $container = Bootstrap::buildContainer();
+        //
+        // S vypnutými doménami (default) je celý gate no-op, takže se vyhneme
+        // i sestavení kontejneru a dotazu do DB. Každé načtení stránky by jinak
+        // platilo boot aplikace za rozhodnutí, které je předem známé.
+        $domainsEnabled = false;
+        try {
+            $domainsEnabled = Config::load(Bootstrap::rootDir())->get('domains.enabled', false) === true;
+        } catch (\Throwable) {
+            // Nečitelná konfigurace se řeší níž v plné aplikaci s pořádnou hláškou.
+            $domainsEnabled = false;
+        }
+        $container = $domainsEnabled ? Bootstrap::buildContainer() : null;
         // Před prvním adminem musí wizard zůstat dostupný i přes LAN hostname,
         // protože app.url se často nastaví až během setupu. API přitom dál omezuje
         // FirstRunLock na svůj úzký allowlist.
-        if (!$container->get(FirstRunLockMiddleware::class)->needsSetup()) {
+        if ($container !== null && !$container->get(FirstRunLockMiddleware::class)->needsSetup()) {
             $request = ServerRequestFactory::createFromGlobals();
             $context = $container->get(TenantDomainResolver::class)->resolve($request);
             $denial = $container->get(TenantDomainPolicy::class)->denial($context, $method, $requestPath);

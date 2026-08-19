@@ -18,6 +18,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Tenant\SupplierDomainHostnameCollisionException;
 use MyInvoice\Service\Tenant\SupplierDomainRegistrationService;
 use MyInvoice\Service\Tenant\SupplierDomainVerificationService;
+use MyInvoice\Service\Tenant\TenantDomainFeature;
 use PDOException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -31,6 +32,7 @@ final class SupplierDomainAction
         private readonly MfaStepUpService $stepUp,
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
+        private readonly TenantDomainFeature $feature,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -223,6 +225,11 @@ final class SupplierDomainAction
 
     private function authorize(Request $request, Response $response, AccessLevel $level): ?Response
     {
+        // Vypnutá featura nesmí jít obejít přímým voláním API. Odpověď je 404,
+        // ne 403 — s vypnutými doménami tahle plocha prostě neexistuje.
+        if (!$this->feature->isEnabled()) {
+            return Json::error($response, 'not_found', 'Vlastní domény nejsou v této instalaci zapnuté.', 404);
+        }
         if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
             return Json::error($response, 'forbidden_via_token', 'Domény lze spravovat jen z webového rozhraní.', 403);
         }

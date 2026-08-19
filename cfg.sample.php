@@ -48,6 +48,18 @@ return [
         // SHA-256 otiskem povinná. Bez otisku zůstane testovací dodejka neověřená.
         'test_receipt_signer_fingerprints_sha256' => [],
     ],
+    // Vlastní domény firem (#11) — klientský portál a veřejné odkazy na doméně
+    // zákazníka. VYPNUTÉ (výchozí) = instalace se chová jako bez téhle featury:
+    // každý hostname vede na aplikaci a správa domén se v Nastavení nenabízí.
+    // ZAPNUTÉ = hostname je autoritativní tenantová hranice. Pak ale jakýkoli
+    // host, který není hostname z `app.url` ani aktivní doména firmy, dostane
+    // 421 — včetně www/bez-www varianty, LAN IP nebo staging jména. Zapínat až
+    // s reverse proxy, která na aplikaci routuje jen známé hostnames.
+    // ENV varianta: MYINVOICE_DOMAINS_ENABLED=1
+    'domains' => [
+        'enabled' => false,
+    ],
+
     // Licencování a aktivace (E4). Ed25519 podepsané tokeny se ověřují zabudovaným
     // veřejným klíčem a jednou denně se obnovují u licenčního serveru.
     'license' => [

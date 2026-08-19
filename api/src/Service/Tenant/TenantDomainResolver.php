@@ -14,11 +14,22 @@ final class TenantDomainResolver
         private readonly Config $config,
         private readonly HostnameNormalizer $normalizer,
         private readonly SupplierDomainRepository $domains,
+        private readonly TenantDomainFeature $feature,
     ) {}
 
     public function resolve(Request $request): TenantDomainContext
     {
         $rawHost = $request->getUri()->getHost();
+        // Vypnutá featura = stav před zavedením domén: každý hostname je
+        // canonical, nic se nedohledává v DB a nic se neodmítá. Origin zůstává
+        // `app.url` (i prázdné), aby CSRF kontrola porovnávala přesně to co dřív.
+        if (!$this->feature->isEnabled()) {
+            return new TenantDomainContext(
+                TenantDomainContext::CANONICAL,
+                $this->bestEffortHost($rawHost),
+                $this->canonicalOrigin(),
+            );
+        }
         if ($rawHost === '') {
             $authority = trim($request->getHeaderLine('Host'));
             $parsed = $authority !== '' ? parse_url('http://' . $authority, PHP_URL_HOST) : null;
@@ -90,5 +101,15 @@ final class TenantDomainResolver
     public function canonicalOrigin(): string
     {
         return rtrim((string) $this->config->get('app.url', ''), '/');
+    }
+
+    /** Hostname jen pro informaci — s vypnutou featurou na něm nic nezávisí. */
+    private function bestEffortHost(string $rawHost): string
+    {
+        try {
+            return $this->normalizer->normalizeRequestHost($rawHost);
+        } catch (\InvalidArgumentException) {
+            return '';
+        }
     }
 }

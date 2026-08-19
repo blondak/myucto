@@ -14,6 +14,7 @@ use MyInvoice\Service\Auth\MfaStepUpService;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Tenant\DomainVerificationService;
 use MyInvoice\Service\Tenant\HostnameNormalizer;
+use MyInvoice\Service\Tenant\TenantDomainFeature;
 use MyInvoice\Service\Tenant\SupplierDomainRegistrationService;
 use MyInvoice\Service\Tenant\SupplierDomainVerificationService;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -141,6 +142,7 @@ final class SupplierDomainCreationTest extends TestCase
             $this->createStub(MfaStepUpService::class),
             $activity,
             $this->createStub(IpMatcher::class),
+            new TenantDomainFeature(new Config(['domains' => ['enabled' => true]])),
         );
     }
 

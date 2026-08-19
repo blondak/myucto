@@ -310,6 +310,11 @@ doménu, například `portal.klient.cz`. Nastavuje ji oprávněný správce na k
 **Nastavení → Firma → Vlastní domény**. Pokud firma žádnou aktivní doménu nemá,
 portál i veřejné odkazy dál fungují na výchozí adrese beze změny.
 
+Funkci musí nejdřív zapnout správce serveru v `cfg.php`
+(`'domains' => ['enabled' => true]`) — dokud je vypnutá, karta s doménami se
+vůbec nenabízí a instalace se chová jako bez ní. Provozní důsledky zapnutí
+popisuje kapitola *Nastavení → Vlastní domény klientského rozhraní*.
+
 Doméně se přiřazuje účel:
 
 - **Klientské rozhraní** — celý rozsah stránek, které dovoluje klientská role:

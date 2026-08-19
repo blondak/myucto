@@ -224,6 +224,12 @@ final class Config
                 'name'   => 'MyÚčto.cz',
                 'domain' => 'myucto.cz',
             ],
+            // Vlastní domény firem (#11) jsou opt-in a defaultně VYPNUTÉ.
+            // Zapnutí mění hostname na tenantovou hranici: jiný host než ten
+            // z `app.url` (a než registrovaná doména firmy) dostane 421.
+            'domains' => [
+                'enabled' => false,
+            ],
             // Kdo nese odpovědnost za odbornou správnost DODANÝCH mzdových
             // legislativních sad v téhle instalaci. Je to vlastnost provozovatele,
             // ne produktu — viz \MyInvoice\Service\Payroll\Ruleset\VendorRulesetApprover.
@@ -271,6 +277,7 @@ final class Config
             'MYINVOICE_APP_ENV'     => ['app.env', 'string'],
             'MYINVOICE_APP_DEBUG'   => ['app.debug', 'bool'],
             'MYINVOICE_APP_URL'     => ['app.url', 'string'],
+            'MYINVOICE_DOMAINS_ENABLED' => ['domains.enabled', 'bool'],
             'MYINVOICE_PEPPER'      => ['app.pepper', 'string'],
             'MYINVOICE_SECRET_KEY'  => ['app.secret_encryption_key', 'string'],
             'MYINVOICE_PAYROLL_HASH_KEY' => ['app.payroll_hash_key', 'string'],

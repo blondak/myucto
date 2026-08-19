@@ -12,6 +12,7 @@ use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Repository\SupplierDomainRepository;
 use MyInvoice\Service\System\AppUrlConfiguration;
 use MyInvoice\Service\Tenant\HostnameNormalizer;
+use MyInvoice\Service\Tenant\TenantDomainFeature;
 use MyInvoice\Service\Tenant\TenantDomainPolicy;
 use MyInvoice\Service\Tenant\TenantDomainResolver;
 use PHPUnit\Framework\TestCase;
@@ -84,6 +85,7 @@ final class TenantDomainMiddlewareTest extends TestCase
                 $config,
                 new HostnameNormalizer(),
                 new SupplierDomainRepository($connection, EntityCache::disabled()),
+                new TenantDomainFeature(new Config(['domains' => ['enabled' => true]])),
             );
             $firstRun = $this->createStub(FirstRunLockMiddleware::class);
             $firstRun->method('needsSetup')->willReturn(false);
@@ -296,6 +298,7 @@ final class TenantDomainMiddlewareTest extends TestCase
             new Config(['app' => ['url' => 'https://app.example.test']]),
             new HostnameNormalizer(),
             $domains,
+            new TenantDomainFeature(new Config(['domains' => ['enabled' => true]])),
         );
         $firstRun = $this->createStub(FirstRunLockMiddleware::class);
         $firstRun->method('needsSetup')->willReturn(false);
@@ -327,6 +330,7 @@ final class TenantDomainMiddlewareTest extends TestCase
             new Config(['app' => ['url' => $canonicalUrl]]),
             new HostnameNormalizer(),
             $domains,
+            new TenantDomainFeature(new Config(['domains' => ['enabled' => true]])),
         );
     }
 

@@ -31,6 +31,11 @@ export const useAuthStore = defineStore('auth', () => {
   const mustSetupMfa = computed(() => user.value?.must_setup_mfa === true)
   const hasCommercialFeatures = computed(() => license.value?.commercial_features !== false)
 
+  // Vlastní domény jsou opt-in v cfg.php. Než dorazí domain-context, tváříme
+  // se jako vypnuté — plocha se raději objeví pozdě než nabídne to, co
+  // backend stejně odmítne 404.
+  const domainsFeatureEnabled = computed(() => domainContext.value?.feature_enabled === true)
+
   const isSuperadmin = computed(() => user.value?.is_superadmin === true)
   const isClientRole = computed(() => user.value?.role?.type === 'client')
   // Systémová role „účetní" — mění jen výchozí pořadí sekcí v menu, ne oprávnění.
@@ -225,6 +230,7 @@ export const useAuthStore = defineStore('auth', () => {
     lockedSession,
     profileHydrated,
     domainContext,
+    domainsFeatureEnabled,
     isAuthenticated,
     needsSetup,
     isDemo,

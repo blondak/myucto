@@ -18,6 +18,7 @@ use MyInvoice\Service\Auth\SecurityTime;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Tenant\ClientRoutePolicy;
 use MyInvoice\Service\Tenant\HostnameNormalizer;
+use MyInvoice\Service\Tenant\TenantDomainFeature;
 use MyInvoice\Service\Tenant\TenantDomainContext;
 use MyInvoice\Service\Tenant\TenantDomainResolver;
 use PDO;
@@ -239,6 +240,7 @@ final class DomainLoginMembershipTest extends TestCase
                 new Config([]),
                 new HostnameNormalizer(),
                 new SupplierDomainRepository($db, EntityCache::disabled()),
+                new TenantDomainFeature(new Config(['domains' => ['enabled' => true]])),
             ),
             $memberships,
             $roles,

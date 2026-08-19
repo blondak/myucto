@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Repository\SupplierDomainRepository;
 use MyInvoice\Service\Tenant\HostnameNormalizer;
+use MyInvoice\Service\Tenant\TenantDomainFeature;
 use MyInvoice\Service\Tenant\PublicTenantGuard;
 use MyInvoice\Service\Tenant\TenantDomainContext;
 use MyInvoice\Service\Tenant\TenantDomainResolver;
@@ -46,6 +47,7 @@ final class PublicTenantGuardTest extends TestCase
             new Config(['app' => ['url' => 'https://app.example.test']]),
             new HostnameNormalizer(),
             $domains,
+            new TenantDomainFeature(new Config(['domains' => ['enabled' => true]])),
         ));
     }
 
