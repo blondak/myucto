@@ -248,7 +248,18 @@ final class VatLedgerService
                    -- RAW kurz (bez COALESCE ...,1) — normalize() rozliší chybějící kurz
                    -- od CZK a nastaví příznak exchange_rate_missing (issue #238).
                    i.exchange_rate AS exchange_rate, COALESCE(cur.code, 'CZK') AS currency,
-                   i.total_with_vat AS inv_total, i.reverse_charge AS rc_flag,
+                   -- Vydaný dobropis snižuje daň na výstupu → do DPH evidence musí vstoupit
+                   -- záporně. Naše vlastní vystavení i ruční pořízení ho ukládají záporně,
+                   -- ale import z cizího systému (Fakturoid/iDoklad/ISDOC) může přinést
+                   -- kladné částky a InvoiceAmountPolicy kladný dobropis nezakazuje —
+                   -- na konvenci se tedy spolehnout nedá a kladně vzatý opravný doklad by
+                   -- daň místo snížení NAVÝŠIL (ř. 1/2 + kladná věta KH A.4).
+                   --
+                   -- Normalizuje se CELÝ DOKLAD jedním znaménkem podle jeho součtu, ne každá
+                   -- položka zvlášť — zdůvodnění a precedent viz tentýž výraz ve fetchPurchases().
+                   (CASE WHEN i.invoice_type = 'credit_note' AND i.total_with_vat > 0
+                         THEN -1 ELSE 1 END) * i.total_with_vat AS inv_total,
+                   i.reverse_charge AS rc_flag,
                    c.company_name AS counterparty_name, {$dicExpr} AS counterparty_dic,
                    co.iso2 AS country_iso2, COALESCE(co.is_eu, 0) AS country_is_eu,
                    0 AS is_fixed_asset,
@@ -273,8 +284,11 @@ final class VatLedgerService
                    ) AS code,
                    ii.vat_rate_snapshot AS vat_rate,
                    ii.description AS description,
-                   COALESCE(ii.total_without_vat, 0) AS base,
-                   COALESCE(ii.total_vat, 0) AS vat
+                   -- Totéž dokladové znaménko jako u inv_total výše (viz komentář tam).
+                   (CASE WHEN i.invoice_type = 'credit_note' AND i.total_with_vat > 0
+                         THEN -1 ELSE 1 END) * COALESCE(ii.total_without_vat, 0) AS base,
+                   (CASE WHEN i.invoice_type = 'credit_note' AND i.total_with_vat > 0
+                         THEN -1 ELSE 1 END) * COALESCE(ii.total_vat, 0) AS vat
               FROM invoices i
               JOIN clients c ON c.id = i.client_id
          LEFT JOIN countries co ON co.id = c.country_id
@@ -978,7 +992,7 @@ final class VatLedgerService
                    COALESCE(cd.tax_date, cd.issue_date) AS tax_date, cd.issue_date,
                    1 AS exchange_rate, 'CZK' AS currency,
                    cd.total_amount AS inv_total, 0 AS rc_flag,
-                   'full' AS vat_deduction, 100 AS vat_deduction_percent,
+                   cl.vat_deduction, cl.vat_deduction_percent,
                    COALESCE(cd.partner_name, '') AS counterparty_name, cd.partner_dic AS counterparty_dic,
                    'CZ' AS country_iso2, 0 AS country_is_eu, 0 AS is_fixed_asset,
                    COALESCE(cl.vat_classification_code,
@@ -992,6 +1006,14 @@ final class VatLedgerService
              WHERE cd.supplier_id = ?
                AND cd.vat_mode = 'vat'
                AND cd.invoice_id IS NULL AND cd.purchase_invoice_id IS NULL
+               -- Rozsah nároku na odpočet (migrace 1120) platí i pro pokladnu: VPD za
+               -- reprezentaci označený jako bez nároku na odpočet nesmí do evidence, jinak by si uživatel
+               -- odečetl daň, kterou u téhož dokladu v podobě přijaté faktury nedostane
+               -- (tentýž filtr má fetchPurchases). Výdejka = přijaté plnění (doc_type='out');
+               -- u příjmového dokladu je to tržba a nárok na odpočet se na ni nevztahuje.
+               -- Výjimka pro reverse charge tu není potřeba: hotovostní doklad je
+               -- z konstrukce tuzemské zdanitelné plnění (rc_flag = 0, viz komentář výše).
+               AND (cd.doc_type = 'in' OR cl.vat_deduction <> 'none')
                AND {$statusFilter}
                AND COALESCE(cd.tax_date, cd.issue_date) BETWEEN ? AND ?
           ORDER BY COALESCE(cd.tax_date, cd.issue_date), cd.id, cl.id
