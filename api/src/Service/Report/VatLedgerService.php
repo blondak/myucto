@@ -240,7 +240,9 @@ final class VatLedgerService
             : '';
         // Práh základní/snížená sazba pro fallback klasifikaci — per rok období
         // (číselník daňových konstant, ne natvrdo 20.5).
-        $bucket = $this->taxConstants->vatBucketThreshold((int) substr($start, 0, 4));
+        // ZÁKLADNÍ sazba, ne práh mezi buckety: fallback rozhoduje, jestli je sazba česká
+        // základní. Práh (21+12)/2 = 16,5 by za základní prohlásil i německých 19 %.
+        $standardRate = $this->taxConstants->vatRateStandard((int) substr($start, 0, 4));
         $stmt = $this->db->pdo()->prepare("
             SELECT i.id AS invoice_id, i.varsymbol AS doc_number, i.varsymbol AS vendor_invoice_number,
                    i.invoice_type AS document_kind, i.status,
@@ -277,8 +279,12 @@ final class VatLedgerService
                            WHEN i.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ' THEN '26'
                            -- Tuzemský odběratel + RC = přenesená daň. povinnost §92 → ř.25 (pln_rez_pren), KH A.1.
                            WHEN i.reverse_charge = 1 THEN '25s'
-                           WHEN ii.vat_rate_snapshot >= ?    THEN '1'
-                           WHEN ii.vat_rate_snapshot > 0     THEN '2'
+                           WHEN ii.vat_rate_snapshot >= ? - 0.5 THEN '1'
+                           -- Jen ČESKÁ snížená sazba (12 %, historicky 10/15). Pásmo 16 %
+                           -- až pod základní sazbu se NEMAPUJE: cizí sazba (DE 19 %) není
+                           -- česká DPH a kód '2' by ji poslal na ř. 2 jako tuzemské plnění.
+                           -- Shodně s InvoiceRepository::defaultSaleClassificationCode().
+                           WHEN ii.vat_rate_snapshot BETWEEN 5 AND 15 THEN '2'
                            ELSE NULL
                        END
                    ) AS code,
@@ -301,7 +307,7 @@ final class VatLedgerService
                AND i.effective_tax_date BETWEEN ? AND ?
           ORDER BY i.effective_tax_date, i.id, ii.id
         ");
-        $stmt->execute([$bucket, $supplierId, $start, $end]);
+        $stmt->execute([$standardRate, $supplierId, $start, $end]);
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
@@ -500,7 +506,8 @@ final class VatLedgerService
     {
         $statusFilter = $includeDrafts ? "pi.status != 'cancelled'" : "pi.status NOT IN ('draft', 'cancelled')";
         // Práh základní/snížená sazba pro fallback klasifikaci — per rok období.
-        $bucket = $this->taxConstants->vatBucketThreshold((int) substr($start, 0, 4));
+        // Viz fetchSales — rozhoduje ZÁKLADNÍ sazba, ne práh mezi buckety.
+        $standardRate = $this->taxConstants->vatRateStandard((int) substr($start, 0, 4));
 
         // § 72 filtr plátcovství k DUZP dokladu (viz komentář ve WHERE). Fallback 1
         // (firmy bez historie) i chybějící tabulka (SQLite unit schémata) = beze změny.
@@ -597,8 +604,14 @@ final class VatLedgerService
                                 AND COALESCE(co.is_eu, 0) = 1 THEN '24e'
                            WHEN pi.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ' THEN '24'
                            WHEN pi.reverse_charge = 1 THEN '5'
-                           WHEN pii.vat_rate_snapshot >= ?    THEN '40'
-                           WHEN pii.vat_rate_snapshot > 0     THEN '41'
+                           WHEN pii.vat_rate_snapshot >= ? - 0.5 THEN '40'
+                           -- Jen ČESKÁ snížená sazba (12 %, historicky 10/15). Nenamapovaná
+                           -- cizí sazba (DE 19 %) tudy dřív dostala '41' → ř. 41 + KH B.3,
+                           -- tedy ODPOČET NĚMECKÉ DANĚ. SSOT
+                           -- (PurchaseInvoiceRepository::defaultClassificationCode) tohle
+                           -- pásmo vědomě nemapuje a fallback ho nesmí přebít; doklad bez
+                           -- kódu pojmenuje varování missing_vat_classification.
+                           WHEN pii.vat_rate_snapshot BETWEEN 5 AND 15 THEN '41'
                            ELSE NULL
                        END
                    ) AS code,
@@ -672,7 +685,7 @@ final class VatLedgerService
                AND {$periodExpr} BETWEEN ? AND ?
           ORDER BY {$periodExpr}, pi.id, pii.id
         ");
-        $stmt->execute([$bucket, $supplierId, $start, $end]);
+        $stmt->execute([$standardRate, $supplierId, $start, $end]);
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 

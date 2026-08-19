@@ -46,6 +46,8 @@ final class VatLedgerSignAndCashDeductionTest extends TestCase
     private array $invoiceIds = [];
     /** @var int[] */
     private array $cashIds = [];
+    /** @var int[] */
+    private array $purchaseIds = [];
     private bool $ownRegister = false;
     private ?array $origVatFlags = null;
 
@@ -101,6 +103,10 @@ final class VatLedgerSignAndCashDeductionTest extends TestCase
         foreach ($this->invoiceIds as $id) {
             $pdo->prepare('DELETE FROM invoice_items WHERE invoice_id = ?')->execute([$id]);
             $pdo->prepare('DELETE FROM invoices WHERE id = ?')->execute([$id]);
+        }
+        foreach ($this->purchaseIds as $id) {
+            $pdo->prepare('DELETE FROM purchase_invoice_items WHERE purchase_invoice_id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM purchase_invoices WHERE id = ?')->execute([$id]);
         }
         foreach ($this->cashIds as $id) {
             $pdo->prepare('DELETE FROM cash_document_vat_lines WHERE cash_document_id = ?')->execute([$id]);
@@ -208,6 +214,36 @@ final class VatLedgerSignAndCashDeductionTest extends TestCase
         $this->assertSame(1470.0, (float) $line40['vat'], 'odpočet krácen na 70 %');
     }
 
+    /**
+     * C-3: sazba, kterou český číselník nezná (DE 19 %), se nesmí přes SQL fallback
+     * proměnit v tuzemský odpočet. Fallback dřív bral všechno mezi 0 a základní sazbou
+     * jako '41' → ř. 41 + KH B.3, tedy ODPOČET NĚMECKÉ DANĚ. SSOT tohle pásmo vědomě
+     * nemapuje a fallback ho nesmí přebít.
+     */
+    public function testForeignRateWithoutClassificationDoesNotBecomeDomesticDeduction(): void
+    {
+        $vendor = $this->client('Německý dodavatel', 'DE123456789');
+        // Řádek bez klasifikace se sazbou 19 % (snapshot je autoritativní pro výkazy).
+        $this->purchaseWithRateSnapshot('P-DE-19', $vendor, $this->d(10, 5), 10000, 1900, 19.0);
+
+        $result = $this->dph->build($this->supplierId, self::YEAR, 10, 'monthly');
+
+        // Řádek do evidence vůbec nevstoupí, takže klíč v souhrnu klidně chybí.
+        $this->assertSame(0.0, (float) ($result['summary']['lines']['41']['vat'] ?? 0), 'cizí daň nesmí na ř. 41');
+        $this->assertSame(0.0, (float) ($result['summary']['lines']['40']['vat'] ?? 0), 'ani na ř. 40');
+    }
+
+    /** Kontrolní protipól: česká snížená sazba fallbackem projde dál. */
+    public function testDomesticReducedRateStillFallsBackToLine41(): void
+    {
+        $vendor = $this->client('Tuzemský dodavatel 12 %', 'CZ29200002');
+        $this->purchaseWithRateSnapshot('P-CZ-12', $vendor, $this->d(11, 5), 10000, 1200, 12.0);
+
+        $result = $this->dph->build($this->supplierId, self::YEAR, 11, 'monthly');
+
+        $this->assertSame(1200.0, (float) ($result['summary']['lines']['41']['vat'] ?? 0));
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     /** Pokladna tenanta; když žádná není, založí testovací (úklid v tearDown). */
@@ -226,6 +262,43 @@ final class VatLedgerSignAndCashDeductionTest extends TestCase
         )->execute([$this->supplierId]);
         $this->ownRegister = true;
         return (int) $pdo->lastInsertId();
+    }
+
+    /**
+     * Přijatá faktura s jedním řádkem BEZ klasifikace a s daným snapshotem sazby.
+     * `vat_rate_id` míří na 21% sazbu (FK), rozhoduje ale `vat_rate_snapshot` — přesně
+     * tak vzniká doklad s cizí sazbou po importu, který ji neuměl namapovat.
+     */
+    private function purchaseWithRateSnapshot(
+        string $number,
+        int $vendorId,
+        string $date,
+        float $base,
+        float $vat,
+        float $rateSnapshot,
+    ): void {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO purchase_invoices
+                (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date,
+                 due_date, received_at, currency_id, exchange_rate, reverse_charge, vendor_snapshot,
+                 total_without_vat, total_vat, total_with_vat, status, vat_classification_code,
+                 vat_deduction, created_by)
+             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, ?, 1, 0, "{}", ?, ?, ?, "received", NULL, "full", ?)'
+        );
+        $stmt->execute([
+            $this->supplierId, $vendorId, $number, $date, $date, $date, $date,
+            $this->currencyId, $base, $vat, $base + $vat, $this->userId,
+        ]);
+        $id = (int) $this->db->pdo()->lastInsertId();
+        $this->purchaseIds[] = $id;
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO purchase_invoice_items
+                (purchase_invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
+                 vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index,
+                 vat_classification_code)
+             VALUES (?, "Test položka", 1, "ks", ?, ?, ?, ?, ?, ?, 0, NULL)'
+        )->execute([$id, $base, $this->vatRateId, $rateSnapshot, $base, $vat, $base + $vat]);
     }
 
     private function d(int $month, int $day): string
