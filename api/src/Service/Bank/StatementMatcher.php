@@ -42,13 +42,9 @@ final class StatementMatcher
     /** Tolerance pro auto_exact match — pokrývá DPH zaokrouhlení (±2-4 haléře typicky). */
     private const EXACT_MATCH_TOLERANCE = 0.05;
     /** Tolerance pro auto_partial — vyšší rozdíly už se ručně rozeznají (splátka / přeplatek). */
-    private const PARTIAL_MATCH_TOLERANCE = 1.0;
+    private const PARTIAL_MATCH_TOLERANCE = FxPaymentSettlement::AMOUNT_TOLERANCE;
     /** Účetní (tuzemská) měna — base částky, na kterou přepočítáváme cizoměnové faktury. */
-    private const LOCAL_CURRENCY = 'CZK';
-    /** Relativní tolerance pro cross-currency shodu (tuzemská platba cizoměnové faktury).
-     *  Banka si na převodu bere spread klidně ~2 % a kurz se za pár dní pohne — 4 %
-     *  dává rezervu, aby přepočet přes kurz faktury reálně sednul. */
-    private const FX_MATCH_TOLERANCE_PCT = 0.04;
+    private const LOCAL_CURRENCY = FxPaymentSettlement::LOCAL_CURRENCY;
     /** Síla shody VS ve sloupci `vs_match_rank`: 2 = doslovná shoda čísla dokladu,
      *  1 = shoda až po normalizaci na číslice (viz preferExactVsMatches). */
     private const VS_RANK_EXACT = 2;
@@ -141,8 +137,10 @@ final class StatementMatcher
         // Relativní tolerance kvůli kurzovému driftu; partial tier zde nemá smysl (= exact).
         if (strtoupper($txCurrency) === self::LOCAL_CURRENCY) {
             $r = $rate > 0 ? $rate : 1.0;
-            $czk = $invoiceAmount * $r;
-            $tol = max($exact, $czk * self::FX_MATCH_TOLERANCE_PCT);
+            // Bankovní pohyb je na haléře; nezaokrouhlený mezivýsledek nesmí
+            // na hraně tolerance rozhodnout jinak než skutečná peněžní částka.
+            $czk = FxPaymentSettlement::expectedLocalAmount($invoiceAmount, $r);
+            $tol = FxPaymentSettlement::matchTolerance($czk, $exact);
             return ['expected' => $czk, 'exact' => $tol, 'partial' => $tol];
         }
         // Cizoměnový účet × jiná měna faktury (např. EUR výpis × CZK/USD faktura) — skip.
@@ -466,7 +464,8 @@ final class StatementMatcher
 
         $diff = abs($amount - $m['expected']);
         // Exact = doplacení v toleranci; drobný přeplatek do partial tier (≤ 1 Kč)
-        // bereme taky jako úhradu (zaeviduje se reálná částka, payment_status to ukáže).
+        // bereme taky jako úhradu. Ve stejné měně evidujeme skutečnou částku;
+        // cross-currency exact vypořádá celý zbytek v měně faktury.
         $isExact = $diff <= $m['exact']
             || (!$alreadyPaid && $amount > $m['expected'] && $diff <= $m['partial']);
         if ($isExact) {
@@ -482,6 +481,7 @@ final class StatementMatcher
                             $inv,
                             $txCurrency,
                             $remaining,
+                            settleRemaining: true,
                         );
                         if ($paymentAmount > $remaining && $remaining > 0.0) {
                             $paymentAmount = $remaining;
@@ -611,21 +611,27 @@ final class StatementMatcher
 
     /**
      * Částka transakce vyjádřená v měně faktury (pro záznam do invoice_payments).
-     * Stejná/neznámá měna → přímo; CZK platba cizoměnové faktury → děleno kurzem
-     * faktury (zrcadlí expectedMatch); jinak $fallback (typicky zbývající částka).
+     * Stejná/neznámá měna → přímo. U přijaté úplné FX úhrady ukládáme
+     * celý zbytek v měně faktury; skutečná CZK částka zůstává na bankovní transakci.
+     * Částečná CZK platba se nadále přepočítá kurzem faktury. Jiná nepřevoditelná
+     * kombinace měn použije $fallback.
      */
-    private function txAmountInInvoiceCurrency(float $txAmount, array $inv, ?string $txCurrency, float $fallback): float
+    private function txAmountInInvoiceCurrency(
+        float $txAmount,
+        array $inv,
+        ?string $txCurrency,
+        float $fallback,
+        bool $settleRemaining = false,
+    ): float
     {
-        $invCcy = strtoupper((string) $inv['currency']);
-        if ($txCurrency === null || strtoupper($txCurrency) === $invCcy) {
-            return round($txAmount, 2);
-        }
-        if (strtoupper($txCurrency) === self::LOCAL_CURRENCY) {
-            $r = (float) ($inv['exchange_rate'] ?: 0);
-            $r = $r > 0 ? $r : 1.0;
-            return round($txAmount / $r, 2);
-        }
-        return round($fallback, 2);
+        return FxPaymentSettlement::amountInInvoiceCurrency(
+            $txAmount,
+            (string) $inv['currency'],
+            (float) ($inv['exchange_rate'] ?: 0),
+            $txCurrency,
+            $fallback,
+            $settleRemaining,
+        );
     }
 
     /**

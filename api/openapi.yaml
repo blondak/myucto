@@ -2781,11 +2781,14 @@ paths:
         schema: { type: integer, format: int64 }
     post:
       tags: [Bank]
-      summary: Ručně přiřadí transakci k faktuře (a označí ji paid)
+      summary: Ručně přiřadí transakci k faktuře a zaeviduje úhradu
       description: |
         Použij když automatický matching nezachytil platbu (variabilní symbol
-        chybí nebo neodpovídá). Označí transakci jako `matched`, fakturu jako
-        `paid` s `paid_at = transaction.posted_at`.
+        chybí nebo neodpovídá). Zaeviduje platbu v měně faktury; plné pokrytí
+        ji označí jako `paid` s `paid_at = transaction.posted_at`, nižší platba
+        zůstane částečnou úhradou. U CZK platby cizoměnové faktury odpovídající
+        celému zbytku se v platbě uloží celý zbytek v měně faktury; přesná CZK
+        částka zůstává na bankovní transakci.
 
         Doklad se vybírá právě jedním ze čtyř způsobů (v tomto pořadí priority):
 
@@ -19953,7 +19956,7 @@ components:
         id: { type: integer, format: int64 }
         invoice_id: { type: integer, format: int64 }
         paid_on: { type: string, format: date }
-        amount: { type: number, format: float, description: "Částka v měně faktury (> 0)" }
+        amount: { type: number, format: float, description: "Částka v měně faktury (> 0). U úplné FX úhrady jde o vypořádaný zbytek faktury; skutečnou částku a měnu bankovního pohybu nese navázaná BankTransaction." }
         currency: { type: string, example: CZK, description: "Denormalizovaný kód měny faktury v okamžiku platby" }
         variable_symbol: { type: [string, "null"] }
         bank_reference: { type: [string, "null"] }

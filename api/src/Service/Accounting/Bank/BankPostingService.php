@@ -23,6 +23,7 @@ use MyInvoice\Service\Accounting\Learning\CorrectionRecorder;
 use MyInvoice\Service\Accounting\Learning\RulePromotionService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Currency\FixedExchangeRateService;
@@ -510,6 +511,27 @@ final class BankPostingService
         $bankAcc = $rule['debit_account_code'] ?? '221';
         $receivable = $rule['credit_account_code'] ?? '311';
 
+        // CZK pohyb proti jedné cizoměnové vydané faktuře má dvě peněžní
+        // hodnoty: skutečnou CZK částku banky a alokaci v měně faktury.
+        // Saldokonto proto odúčtujeme kurzem předpisu a rozdíl vedeme na 563/663.
+        if (count($allocations) === 1 && $purchaseRefundAllocations === []) {
+            $invoiceId = (int) $allocations[0]['invoice_id'];
+            $invoice = $this->loadInvoice($supplierId, $invoiceId);
+            if ($invoice !== null && FxPaymentSettlement::isCzkPaymentOfForeignInvoice(
+                $this->effectiveCurrency($tx),
+                (string) $invoice['currency'],
+            )) {
+                return $this->buildIncomingCzkFx(
+                    $supplierId,
+                    $tx,
+                    $invoiceId,
+                    (float) $allocations[0]['amount'],
+                    (string) $receivable,
+                    (string) $bankAcc,
+                );
+            }
+        }
+
         $lines = [$this->line($bankAcc, 'debit', $absAmount)];
         $allocSum = 0.0;
         foreach ($allocations as $a) {
@@ -528,6 +550,52 @@ final class BankPostingService
         }
 
         $this->appendRounding($lines, $absAmount - round($allocSum, 2));
+        return ['lines' => $lines];
+    }
+
+    /**
+     * CZK úhrada jedné cizoměnové vydané faktury. Bankovní noha zůstává
+     * ve skutečné CZK částce, zatímco 311 se odúčtuje v CZK hodnotě alokace
+     * podle kurzu předpisu. Rozdíl je realizovaný kurzový výsledek 563/663.
+     *
+     * @return array{lines:list<array<string,mixed>>}
+     */
+    private function buildIncomingCzkFx(
+        int $supplierId,
+        array $tx,
+        int $invoiceId,
+        float $foreignAmount,
+        string $receivable,
+        string $bankAcc,
+    ): array {
+        $invoice = $this->loadInvoice($supplierId, $invoiceId);
+        if ($invoice === null
+            || (string) $invoice['currency'] === FxPaymentSettlement::LOCAL_CURRENCY
+            || (string) $invoice['invoice_type'] === 'proforma'
+            || $foreignAmount <= 0.0
+        ) {
+            throw new PostingException('fx_not_supported', 'Křížovou měnu této vydané faktury nelze automaticky zaúčtovat.');
+        }
+
+        $entry = $this->journal->findBySource($supplierId, 'invoice', $invoiceId);
+        if ($entry === null || ($entry['reversed_by'] ?? null) !== null) {
+            throw new PostingException('document_not_posted', 'Vydaná faktura #' . $invoiceId . ' nemá zaúčtovaný předpis.');
+        }
+        $rate = $this->predpisFxRate($supplierId, (int) $entry['id'], $invoice);
+        $foreign = round($foreignAmount, 2);
+        $predpisCzk = FxPaymentSettlement::expectedLocalAmount($foreign, $rate);
+        $bankCzk = round(abs((float) $tx['amount']), 2);
+
+        $lines = [
+            $this->line($bankAcc, 'debit', $bankCzk),
+            $this->withFxTrace(
+                $this->line($receivable, 'credit', $predpisCzk),
+                (string) $invoice['currency'],
+                $rate,
+                $foreign,
+            ),
+        ];
+        $this->appendFxDifference($lines, $supplierId, 0.0, true);
         return ['lines' => $lines];
     }
 
@@ -3076,14 +3144,16 @@ final class BankPostingService
         $sameCurrency = $txCurrency !== '' && $txCurrency === $invoiceCurrency;
         $sameCurrencyFull = $sameCurrency
             && ($manualMatch || $confidence >= 70)
-            && abs($txAmount - $invoiceAmount) <= 1.0;
-        $expectedCzk = round($invoiceAmount * (float) ($row['exchange_rate'] ?? 0), 2);
+            && abs($txAmount - $invoiceAmount) <= FxPaymentSettlement::AMOUNT_TOLERANCE;
+        $invoiceRate = (float) ($row['exchange_rate'] ?? 0);
+        $expectedCzk = $invoiceRate > 0.0
+            ? FxPaymentSettlement::expectedLocalAmount($invoiceAmount, $invoiceRate)
+            : 0.0;
         $crossCurrencyFull = !$sameCurrency
-            && $txCurrency === 'CZK'
-            && $invoiceCurrency !== 'CZK'
+            && FxPaymentSettlement::isCzkPaymentOfForeignInvoice($txCurrency, $invoiceCurrency)
             && ($manualMatch || $confidence >= 60)
             && $expectedCzk > 0.0
-            && abs($txAmount - $expectedCzk) <= max(1.0, $expectedCzk * 0.04);
+            && abs($txAmount - $expectedCzk) <= FxPaymentSettlement::matchTolerance($expectedCzk);
         if ((string) $row['source'] !== 'statement'
             || (float) $row['amount'] >= 0.0
             // auto_exact patří do seznamu taky: rozdíl do EXACT_MATCH_TOLERANCE (0,05) sice

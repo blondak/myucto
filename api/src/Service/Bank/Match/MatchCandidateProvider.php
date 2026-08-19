@@ -6,14 +6,14 @@ namespace MyInvoice\Service\Bank\Match;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Bank\BankMessageNormalizer;
+use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use PDO;
 
 final class MatchCandidateProvider
 {
-    private const LOCAL_CURRENCY = 'CZK';
-    private const AMOUNT_TOLERANCE = 1.0;
-    private const FX_TOLERANCE_PCT = 0.04;
+    private const LOCAL_CURRENCY = FxPaymentSettlement::LOCAL_CURRENCY;
+    private const AMOUNT_TOLERANCE = FxPaymentSettlement::AMOUNT_TOLERANCE;
     private const DAY_WINDOW = 14;
     private const FALLBACK_DAY_WINDOW = 90;
     private const SPLIT_POOL_PER_CLIENT = 14;
@@ -124,7 +124,9 @@ final class MatchCandidateProvider
         if ($converted === null) return null;
         $converted = round($converted, 2);
         $fx = $invoiceCurrency !== $txCurrency;
-        $tol = max(self::AMOUNT_TOLERANCE, $fx ? $amount * self::FX_TOLERANCE_PCT : 0.0);
+        $tol = $fx
+            ? FxPaymentSettlement::matchTolerance($converted, self::AMOUNT_TOLERANCE)
+            : self::AMOUNT_TOLERANCE;
         $signals = [];
         $flags = $fx ? ['currency_mismatch'] : [];
         $vs = VariableSymbolNormalizer::forMatching((string) ($tx['variable_symbol'] ?? ''));
@@ -297,7 +299,9 @@ final class MatchCandidateProvider
     private function toTransactionCurrency(float $remaining, string $invoiceCurrency, float $rate, string $txCurrency): ?float
     {
         if ($invoiceCurrency === $txCurrency) return $remaining;
-        if ($txCurrency === self::LOCAL_CURRENCY && $rate > 0.0) return $remaining * $rate;
+        if ($txCurrency === self::LOCAL_CURRENCY && $rate > 0.0) {
+            return FxPaymentSettlement::expectedLocalAmount($remaining, $rate);
+        }
         return null;
     }
 
