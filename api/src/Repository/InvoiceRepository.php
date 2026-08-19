@@ -1772,7 +1772,7 @@ final class InvoiceRepository
      *     0%  → '22' (poskytnutí služby do EU, B2B reverse charge — nejčastější CZ IT use case)
      *     21%/12% → tuzemsko sazby (B2C nebo CZ klient s EU adresou)
      *   Non-EU klient:
-     *     0%  → '26' (vývoz do 3. země)
+     *     0%  → '26' (vývoz zboží, ř. 22) nebo '26s' (služba mimo tuzemsko, ř. 26)
      *     jinak tuzemsko sazby
      *
      * Pro dodávky zboží do EU (kód '20') vs služby ('22') rozhoduje měrná jednotka
@@ -1800,13 +1800,18 @@ final class InvoiceRepository
         $isEu = in_array($iso, $euCountries, true);
         $isForeign = $iso !== 'CZ' && $iso !== '';
 
-        // Zahraniční klient + nulová sazba → EU služby/zboží nebo vývoz do 3. země
+        // Zahraniční klient + nulová sazba → EU služby/zboží nebo plnění do 3. země.
+        // Zboží od služby rozliší měrná jednotka položky (sdílená heuristika).
         if ($isForeign && $r === 0) {
-            if (!$isEu) return '26';
-            // EU: dodání zboží ('20') vs poskytnutí služby ('22') dle měrné jednotky.
-            return \MyInvoice\Service\Report\VatClassificationDefaulter::classifyUnitsGoodsVsServices(
+            $isGoods = \MyInvoice\Service\Report\VatClassificationDefaulter::classifyUnitsGoodsVsServices(
                 $unit !== null && $unit !== '' ? [$unit] : []
-            ) === 'goods' ? '20' : '22';
+            ) === 'goods';
+            // 3. země: vývoz ZBOŽÍ je '26' (§ 66, ř. 22 pln_vyvoz), ale SLUŽBA je plnění
+            // s místem plnění mimo tuzemsko s nárokem na odpočet — '26s', ř. 26 (pln_ost).
+            // Dřív dostalo '26' i poradenství pro US klienta, tedy vývoz zboží (migrace 1509).
+            if (!$isEu) return $isGoods ? '26' : '26s';
+            // EU: dodání zboží ('20', ř. 20) vs poskytnutí služby ('22', ř. 21).
+            return $isGoods ? '20' : '22';
         }
         // Tuzemský odběratel v režimu přenesené povinnosti (§ 92a — stavební práce, odpad,
         // zlato) → ř. 25 (pln_rez_pren) + věta KH A.1. Doklad se vystavuje bez daně, takže

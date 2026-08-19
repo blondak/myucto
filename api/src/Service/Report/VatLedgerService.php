@@ -48,6 +48,9 @@ use MyInvoice\Service\Accounting\PostingException;
  */
 final class VatLedgerService
 {
+    /** Cache SQL seznamu RC kódů přijaté strany (per instance). */
+    private ?string $rcPurchaseCodesSql = null;
+
     public function __construct(
         private readonly Connection $db,
         private readonly TaxConstantsRepository $taxConstants,
@@ -487,6 +490,45 @@ final class VatLedgerService
     }
 
     /**
+     * Klasifikační kódy PŘIJATÉ strany v režimu samovyměření, jako SQL seznam
+     * (`'5','23','24','24e','25'`). Čte se z číselníku (`is_reverse_charge = 1`), ne
+     * z natvrdo zapsaného výčtu: seed přibývá (§ 92c odpad, § 92d nemovitost — migrace
+     * 1510) a tenant si smí v Číselnících přidat vlastní. Zapomenutý kód by doklad
+     * vyhodil z evidence DPH úplně (filtr „bez nároku na odpočet" i § 72 plátcovství
+     * pouštějí samovyměření právě přes tenhle seznam).
+     *
+     * Kódy jdou do SQL literálem, ne přes bind (jsou uvnitř složeného výrazu sdíleného
+     * dvěma dotazy), takže se propouští jen bezpečný tvar — cokoli jiného se ignoruje.
+     * Prázdný výsledek by seznam degradoval na „nic", proto fallback na seed.
+     */
+    private function reverseChargePurchaseCodesSql(): string
+    {
+        if ($this->rcPurchaseCodesSql !== null) {
+            return $this->rcPurchaseCodesSql;
+        }
+        $codes = [];
+        try {
+            $rows = $this->db->pdo()->query(
+                "SELECT DISTINCT code FROM vat_classifications
+                  WHERE is_reverse_charge = 1
+                    AND direction IN ('purchase', 'both')
+                    AND archived = 0"
+            )->fetchAll(\PDO::FETCH_COLUMN) ?: [];
+            foreach ($rows as $code) {
+                if (preg_match('/^[A-Za-z0-9_-]{1,8}$/', (string) $code) === 1) {
+                    $codes[] = (string) $code;
+                }
+            }
+        } catch (\Throwable) {
+            // Chybějící tabulka (unit schémata nad SQLite) — fallback níž.
+        }
+        if ($codes === []) {
+            $codes = ['5', '23', '24', '24e', '25'];
+        }
+        return $this->rcPurchaseCodesSql = "'" . implode("','", $codes) . "'";
+    }
+
+    /**
      * Pozn. k odpočtu DPH na vstupu:
      *  - `vat_deduction = 'none'` (bez nároku — reprezentace, osobní spotřeba…) → do DPH
      *    evidence se VŮBEC nezahrnuje (ani Kniha DPH, ani DPHDP3, ani KH), jen účetní náklad.
@@ -511,6 +553,7 @@ final class VatLedgerService
 
         // § 72 filtr plátcovství k DUZP dokladu (viz komentář ve WHERE). Fallback 1
         // (firmy bez historie) i chybějící tabulka (SQLite unit schémata) = beze změny.
+        $rcCodes = $this->reverseChargePurchaseCodesSql();
         $payerFilter = '';
         if ($this->db->hasTable('supplier_vat_status_history')) {
             $payerAtDuzp = \MyInvoice\Service\Vat\VatStatusService::payerAtExpr(
@@ -519,7 +562,7 @@ final class VatLedgerService
             $payerFilter = "AND ({$payerAtDuzp} = 1
                     OR (COALESCE(pii.total_vat, 0) = 0
                         AND (pi.reverse_charge = 1
-                             OR COALESCE(pii.vat_classification_code, pi.vat_classification_code) IN ('5','23','24','24e','25'))))";
+                             OR COALESCE(pii.vat_classification_code, pi.vat_classification_code) IN ({$rcCodes}))))";
         }
 
         // Období odpočtu (tuzemská plnění). Zákonně rozhoduje datum, kdy plátce doklad
@@ -672,7 +715,7 @@ final class VatLedgerService
                AND (COALESCE(pii.vat_deduction, pi.vat_deduction) <> 'none'
                     OR (COALESCE(pii.total_vat, 0) = 0
                         AND (pi.reverse_charge = 1
-                             OR COALESCE(pii.vat_classification_code, pi.vat_classification_code) IN ('5','23','24','24e','25'))))
+                             OR COALESCE(pii.vat_classification_code, pi.vat_classification_code) IN ({$rcCodes}))))
                -- § 72: nárok na odpočet jen z plnění přijatých v době plátcovství. Doklad
                -- s DUZP mimo plátcovství (před registrací / po zrušení) do odpočtu nepatří —
                -- majetek při registraci řeší § 79 vlastní agendou (ř. 45). Samovyměření

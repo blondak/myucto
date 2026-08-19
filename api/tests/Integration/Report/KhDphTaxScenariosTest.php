@@ -1343,6 +1343,42 @@ final class KhDphTaxScenariosTest extends TestCase
     }
 
     /**
+     * Audit VAT klasifikací 2026-08 (H-5): doklad se dvěma režimy § 92 musí dát DVĚ věty
+     * B.1 — XSD chce větu per kód předmětu plnění. Dřív se agregovalo za celý doklad
+     * a `kod_pred_pl` přepsala POSLEDNÍ neprázdná hodnota, takže stavební práce i odpad
+     * odešly pod jedním kódem a protistrana hlásila něco jiného.
+     */
+    public function testTwoSection92RegimesOnOneDocumentSplitIntoTwoB1Rows(): void
+    {
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        $vend = $this->client('Dodavatel dvou režimů', $this->czId, 'CZ22222239', vendor: true);
+
+        // Jeden doklad, dva řádky: stavební práce (kód 5 → kod_pred_pl 4)
+        // a odpad/šrot (kód 5c → kod_pred_pl 5, migrace 1510).
+        $id = $this->purchase('P-2099-92MIX', $vend, null, false, 'invoice', $d(11), $d(11),
+            [[9000, 0, 21], [4000, 0, 21]]);
+        $items = $this->db->pdo()->prepare(
+            'SELECT id FROM purchase_invoice_items WHERE purchase_invoice_id = ? ORDER BY order_index'
+        );
+        $items->execute([$id]);
+        [$firstItem, $secondItem] = $items->fetchAll(\PDO::FETCH_COLUMN);
+        $upd = $this->db->pdo()->prepare('UPDATE purchase_invoice_items SET vat_classification_code = ? WHERE id = ?');
+        $upd->execute(['5', $firstItem]);
+        $upd->execute(['5c', $secondItem]);
+
+        $kh = new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']);
+        $rows = $kh->DPHKH1->VetaB1;
+
+        $this->assertCount(2, $rows, 'každý režim § 92 má vlastní větu B.1');
+        $byCode = [];
+        foreach ($rows as $row) {
+            $byCode[(string) $row['kod_pred_pl']] = (string) $row['zakl_dane1'];
+        }
+        $this->assertSame('9000.00', $byCode['4'] ?? null, 'stavební práce § 92e');
+        $this->assertSame('4000.00', $byCode['5'] ?? null, 'odpad a šrot § 92c');
+    }
+
+    /**
      * Audit 2026-07 (fix 7) + issue #238: Souhrnné hlášení — Řecko se vykazuje DPH
      * kódem 'EL', ne ISO 'GR' (VIES používá 'EL'). Kód země patří do k_stat; c_vat
      * nese DIČ BEZ prefixu země.

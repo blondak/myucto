@@ -52,11 +52,19 @@ final class SaleClassificationCodeTest extends TestCase
         self::assertSame('22', InvoiceRepository::defaultSaleClassificationCode(0.0, true, 'SK'));
     }
 
-    public function testReverseChargeOutsideEuZeroRateGoesToExport(): void
+    public function testZeroRateOutsideEuSplitsGoodsFromServices(): void
     {
-        // Reverse charge / dodání MIMO EU, nulová sazba → '26' (vývoz).
-        self::assertSame('26', InvoiceRepository::defaultSaleClassificationCode(0.0, true, 'US'));
-        self::assertSame('26', InvoiceRepository::defaultSaleClassificationCode(0.0, false, 'CH'));
+        // Vývoz ZBOŽÍ do 3. země → '26' (§ 66, ř. 22 pln_vyvoz).
+        self::assertSame('26', InvoiceRepository::defaultSaleClassificationCode(0.0, true, 'US', 'kg'));
+        self::assertSame('26', InvoiceRepository::defaultSaleClassificationCode(0.0, false, 'CH', 'paleta'));
+        // SLUŽBA pro klienta ze 3. země žádný vývoz zboží není — je to plnění s místem
+        // plnění mimo tuzemsko s nárokem na odpočet, tedy '26s' → ř. 26 (pln_ost).
+        self::assertSame('26s', InvoiceRepository::defaultSaleClassificationCode(0.0, false, 'US', 'h'));
+        self::assertSame('26s', InvoiceRepository::defaultSaleClassificationCode(0.0, true, 'CH', 'měsíc'));
+        // Bez signálu ('ks' je defaultní hodnota sloupce, nic neříká) platí týž statistický
+        // default jako u EU větve — služba. U typického uživatele (IT, poradenství) jsou
+        // přeshraniční služby častější než vývoz zboží (audit VAT klasifikací, H-3).
+        self::assertSame('26s', InvoiceRepository::defaultSaleClassificationCode(0.0, false, 'US', 'ks'));
     }
 
     public function testDomesticReverseChargeGoesToSection92a(): void

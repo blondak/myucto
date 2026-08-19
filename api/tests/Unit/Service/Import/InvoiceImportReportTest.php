@@ -116,15 +116,18 @@ final class InvoiceImportReportTest extends TestCase
     }
 
     /**
-     * Vývoz do třetí země ('26') se souhrnného hlášení netýká, takže omezení na DIČ tam
-     * nemá co dělat — bez země by vývoz zůstal úplně bez klasifikace.
+     * Plnění do třetí země se souhrnného hlášení netýká, takže omezení na DIČ tam nemá co
+     * dělat — bez země by zůstalo úplně bez klasifikace. Povahu plnění pod zemí rozliší
+     * měrná jednotka: vývoz zboží '26' (ř. 22), služba '26s' (ř. 26) — audit H-3.
      */
-    public function testZeroRateOutsideEuAlwaysGetsTheExportCode(): void
+    public function testZeroRateOutsideEuAlwaysGetsAThirdCountryCode(): void
     {
         $country = $this->call('classificationCountry', new OssClientContext('US', false, null), 0.0);
 
         self::assertSame('US', $country);
-        self::assertSame('26', InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'ks'));
+        self::assertSame('26', InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'kg'));
+        self::assertSame('26s', InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'h'));
+        self::assertSame('26s', InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'ks'));
     }
 
     /** Neznámá země se nedomýšlí ani tady — `defaultSaleClassificationCode` má vlastní default. */
