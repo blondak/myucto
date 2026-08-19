@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Import;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
+use MyInvoice\Service\Oss\OssItemPlanner;
 
 /**
  * Mapper z ISDOC normalized array (z IsdocParser) na purchase_invoice draft.
@@ -32,6 +33,7 @@ final class IsdocToPurchaseInvoiceMapper
         private readonly PurchaseInvoiceCalculator $calc,
         private readonly ClientResolver $clientResolver,
         private readonly PurchaseInvoiceCnbApplier $cnbApplier,
+        private readonly OssItemPlanner $planner,
     ) {}
 
     /**
@@ -61,13 +63,22 @@ final class IsdocToPurchaseInvoiceMapper
 
         // Build payload pro createDraft. Klíčové: currency_id lookup, items mapping.
         $currencyId = $this->resolveCurrencyId((string) ($parsed['currency'] ?? 'CZK'), $supplierId);
-        $vatRates = $this->repo->vatRateMap();
-        $defaultVatRateId = $this->guessVatRateIdByCode($vatRates, 0.0); // fallback 0% pokud nic
+        // Sazba se páruje SDÍLENÝM resolverem, ne prostým hledáním procenta v celé tabulce:
+        // ta obsahuje i sazby jiných členských států (OSS) a sazby s omezenou platností.
+        // Slepé porovnání procent u tenanta s OSS číselníkem navázalo české 21 % klidně na
+        // sazbu jiné země (rozhodlo pořadí řádků) a nenamapovanou cizí sazbu na nulu.
+        // Resolver filtruje zemi dodavatele, platnost k datu i reverse charge — stejně jako
+        // ostatní importní kanály (audit VAT klasifikací, M-6).
+        $rateDate = (string) ($parsed['tax_date'] ?? '') ?: (string) ($parsed['issue_date'] ?? date('Y-m-d'));
 
         $items = [];
         foreach ((array) ($parsed['items'] ?? []) as $i => $line) {
             $rate = (float) ($line['vat_rate'] ?? 0);
-            $vatRateId = $this->guessVatRateIdByCode($vatRates, $rate) ?? $defaultVatRateId;
+            $match = $this->planner->resolveDomesticRate($supplierId, $rate, $rateDate);
+            if (!$match->found()) {
+                throw new \InvalidArgumentException(sprintf('Položka č. %d: %s', $i + 1, $match->message));
+            }
+            $vatRateId = $match->id;
             $items[] = [
                 'description'            => (string) ($line['description'] ?? ''),
                 'quantity'               => (float) ($line['quantity'] ?? 1),
@@ -287,19 +298,6 @@ final class IsdocToPurchaseInvoiceMapper
         return (int) $pdo->lastInsertId();
     }
 
-    /**
-     * Najdi vat_rate_id podle rate_percent (např. 21.0 → CZ_DPH_21).
-     * Pokud žádný matching, vrátí null (caller použije fallback).
-     *
-     * @param array<int, float> $vatRates id → rate_percent
-     */
-    private function guessVatRateIdByCode(array $vatRates, float $rate): ?int
-    {
-        foreach ($vatRates as $id => $r) {
-            if (abs($r - $rate) < 0.01) return $id;
-        }
-        return null;
-    }
 
     /**
      * Sanitize vendor invoice number. ISDOC `ID` může být cokoliv — náš sloupec
