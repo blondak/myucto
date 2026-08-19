@@ -173,18 +173,14 @@ final class CashJournalRepository
             // Kurz na CZK pro nespárované / poplatkové pohyby: rate z exchange_rates ke dni
             // pohybu (nejbližší předchozí); CZK a neznámá měna → 1 (nominál, dokumentovaný fallback).
             $feeRate = "IF(COALESCE(NULLIF(bt.currency, ''), 'CZK') = 'CZK', 1,
-                               (SELECT er.rate FROM exchange_rates er
-                                  WHERE er.currency_code = bt.currency AND er.rate_date <= bt.posted_at
-                                 ORDER BY er.rate_date DESC LIMIT 1))";
+                               " . self::nearestRateSql('bt.currency', 'bt.posted_at') . ')';
             // 8a: pm.amount je uložen v měně BANKOVNÍHO POHYBU (StatementMatcher ukládá $absAmount
             // v měně bt), NE v měně PF. Převod na CZK proto musí jít přes kurz měny bankovního
             // pohybu (mirror $feeRate, jen nad bt2 uvnitř agregace), ne přes pi.exchange_rate —
             // jinak by se CZK banka platící EUR PF nadhodnotila ~24×. Daňový poměr (bez/s DPH) je
             // bezrozměrný a bere se dál z PF.
             $btRate = "IF(COALESCE(NULLIF(bt2.currency, ''), 'CZK') = 'CZK', 1,
-                              (SELECT er.rate FROM exchange_rates er
-                                 WHERE er.currency_code = bt2.currency AND er.rate_date <= bt2.posted_at
-                                ORDER BY er.rate_date DESC LIMIT 1))";
+                              " . self::nearestRateSql('bt2.currency', 'bt2.posted_at') . ')';
             // G4: kurz inkasa faktury k DATU ÚHRADY (ip.paid_on), ne k datu vystavení
             // faktury (i.exchange_rate je zafixovaný při vystavení — kasová báze vyžaduje
             // kurz ke dni skutečného peněžního toku). Fallback na kurz faktury, když pro
@@ -339,18 +335,119 @@ final class CashJournalRepository
     private function ipRateSql(string $invoiceAlias): string
     {
         return "IF(COALESCE(NULLIF(ip.currency, ''), 'CZK') = 'CZK', 1,
-                    COALESCE((SELECT er.rate FROM exchange_rates er
-                               WHERE er.currency_code = ip.currency
-                                 AND er.rate_date <= ip.paid_on
-                              ORDER BY er.rate_date DESC LIMIT 1), {$invoiceAlias}.exchange_rate))";
+                    COALESCE(" . self::backwardRateSql('ip.currency', 'ip.paid_on')
+                        . ", {$invoiceAlias}.exchange_rate, "
+                        . self::forwardRateSql('ip.currency', 'ip.paid_on') . '))';
     }
 
     private function piRateSql(): string
     {
         return "IF(COALESCE(pcur.code, 'CZK') = 'CZK', 1,
-                    COALESCE((SELECT er.rate FROM exchange_rates er
-                               WHERE er.currency_code = pcur.code AND er.rate_date <= pi.paid_at
-                              ORDER BY er.rate_date DESC LIMIT 1), pi.exchange_rate))";
+                    COALESCE(" . self::backwardRateSql('pcur.code', 'pi.paid_at')
+                        . ', pi.exchange_rate, '
+                        . self::forwardRateSql('pcur.code', 'pi.paid_at') . '))';
+    }
+
+    /**
+     * Kurz „nejbližší známý" pro výrazy, které nemají čím dalším padnout (bankovní
+     * poplatek / nespárovaný pohyb nevisí na dokladu, takže tu není žádný
+     * `exchange_rate` do zálohy).
+     */
+    private static function nearestRateSql(string $currencyExpr, string $dateExpr): string
+    {
+        return 'COALESCE(' . self::backwardRateSql($currencyExpr, $dateExpr)
+            . ', ' . self::forwardRateSql($currencyExpr, $dateExpr) . ')';
+    }
+
+    /**
+     * Poslední kurz vyhlášený K ROZHODNÉMU DNI (nejbližší předchozí) — jediná
+     * varianta, která odpovídá § 4 ZoÚ, a proto vždy první v pořadí.
+     */
+    private static function backwardRateSql(string $currencyExpr, string $dateExpr): string
+    {
+        return "(SELECT er.rate FROM exchange_rates er
+                   WHERE er.currency_code = {$currencyExpr} AND er.rate_date <= {$dateExpr}
+                  ORDER BY er.rate_date DESC LIMIT 1)";
+    }
+
+    /**
+     * Nouzový kurz z nejbližšího POZDĚJŠÍHO dne. Použije se, až když ke dni pohybu
+     * není žádný starší kurz ani kurz na dokladu — typicky u pohybu staršího, než
+     * kam sahá kurzová historie instalace (#28: čerstvý tenant má v `exchange_rates`
+     * jen dnešek, ale zaeviduje loňskou úhradu).
+     *
+     * Kurz sousedního dne je od vyhlášeného v řádu desetin procenta; vypustit pohyb
+     * z daňového základu úplně (dřívější chování: NULL → výjimka → 500 na celý deník)
+     * je proti tomu chyba o celou jeho hodnotu. Přiblížení není tiché —
+     * {@see \MyInvoice\Service\TaxEvidence\CashJournalService} ho hlásí ve `warnings[]`
+     * a zároveň se pokusí pravý kurz dotáhnout z ČNB, takže při dalším otevření
+     * deníku je řádek oceněný správně.
+     */
+    private static function forwardRateSql(string $currencyExpr, string $dateExpr): string
+    {
+        return "(SELECT er.rate FROM exchange_rates er
+                   WHERE er.currency_code = {$currencyExpr} AND er.rate_date > {$dateExpr}
+                  ORDER BY er.rate_date ASC LIMIT 1)";
+    }
+
+    /**
+     * Dvojice (měna, den), pro které deník do `$to` nemá čím ocenit cizoměnový pohyb:
+     * v `exchange_rates` k tomu dni není ani žádný STARŠÍ kurz dané měny. `forward_date`
+     * je nejbližší pozdější známý den téže měny (nouzové ocenění, viz forwardRateSql),
+     * nebo NULL, když o měně nevíme vůbec nic.
+     *
+     * Podklad pro dotažení kurzu za běhu ({@see \MyInvoice\Service\TaxEvidence\CashJournalService}):
+     * seznam je krátký (jen dny, které opravdu chybí) a po doplnění kurzů zůstane prázdný,
+     * takže na zaplněné historii je to jeden levný dotaz navíc.
+     *
+     * Rozsah je ZÁMĚRNĚ `<= $to`, ne jen zobrazené období — pohyby před `from` vstupují
+     * do počátečního zůstatku, a ten by jinak neoceněné pohyby tiše přeskočil.
+     *
+     * @return list<array{currency:string, date:string, forward_date:?string}>
+     */
+    public function unpricedCurrencyDays(int $supplierId, string $to, int $limit = 25): array
+    {
+        $sid = $supplierId;
+        $toDate = $this->assertDate($to);
+        $lim = max(1, min(self::MAX_LIMIT, $limit));
+
+        $sources = [
+            "SELECT COALESCE(NULLIF(ip.currency, ''), 'CZK') AS c, ip.paid_on AS d
+               FROM invoice_payments ip
+              WHERE ip.supplier_id = {$sid} AND ip.paid_on <= '{$toDate}'",
+            "SELECT COALESCE(pcur.code, 'CZK') AS c, pi.paid_at AS d
+               FROM purchase_invoices pi
+               LEFT JOIN currencies pcur ON pcur.id = pi.currency_id
+              WHERE pi.supplier_id = {$sid} AND pi.paid_at IS NOT NULL AND pi.paid_at <= '{$toDate}'
+                AND pi.status <> 'cancelled'",
+        ];
+        $stmtIds = $this->matchingStatementIds($supplierId);
+        if ($stmtIds !== []) {
+            $inList = implode(',', array_map('intval', $stmtIds));
+            $sources[] = "SELECT COALESCE(NULLIF(bt.currency, ''), 'CZK') AS c, bt.posted_at AS d
+                            FROM bank_transactions bt
+                           WHERE bt.statement_id IN ({$inList}) AND bt.posted_at <= '{$toDate}'";
+        }
+
+        $sql = 'SELECT k.c AS currency, k.d AS `date`,
+                       (SELECT MIN(er.rate_date) FROM exchange_rates er
+                         WHERE er.currency_code = k.c AND er.rate_date > k.d) AS forward_date
+                  FROM ( ' . implode("\nUNION\n", $sources) . " ) k
+                 WHERE k.c <> 'CZK' AND k.d IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM exchange_rates er
+                                    WHERE er.currency_code = k.c AND er.rate_date <= k.d)
+                 ORDER BY k.d
+                 LIMIT {$lim}";
+
+        $out = [];
+        foreach ($this->db->pdo()->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[] = [
+                'currency'     => (string) $row['currency'],
+                'date'         => (string) $row['date'],
+                'forward_date' => $row['forward_date'] === null ? null : (string) $row['forward_date'],
+            ];
+        }
+        return $out;
     }
 
     /**

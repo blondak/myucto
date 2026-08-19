@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\CashJournalRepository;
 use MyInvoice\Repository\TaxProfileRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Vat\VatStatusService;
 
 /**
@@ -31,6 +32,14 @@ use MyInvoice\Service\Vat\VatStatusService;
  */
 final class CashJournalService
 {
+    /**
+     * Kolik chybějících kurzových dnů se smí dotáhnout z ČNB v jednom sestavení deníku.
+     * Jeden den = jeden HTTP dotaz (~60 ms) a zaplní VŠECHNY měny toho dne, takže deset
+     * je pod tři sekundy i při studeném startu. Zbytek dotáhne další otevření deníku
+     * nebo jednorázově `api/bin/backfill-cnb-rates.php` — na to seznam varování odkazuje.
+     */
+    private const RATE_FETCH_LIMIT = 10;
+
     public function __construct(
         private readonly CashJournalRepository $repo,
         private readonly TaxProfileRepository $taxProfiles,
@@ -38,6 +47,7 @@ final class CashJournalService
         private readonly TaxConstantsRepository $constants,
         private readonly TaxExpenseAllocationCalculator $taxExpenses,
         private readonly VatStatusService $vatStatus,
+        private readonly CnbExchangeRateClient $cnb,
     ) {}
 
     /**
@@ -51,6 +61,10 @@ final class CashJournalService
         $isVatPayer = $this->isVatPayerAt($supplierId, $to);
         $year = isset($opts['year']) ? (int) $opts['year'] : (int) substr($from, 0, 4);
         $taxConstants = $this->constants->forYear($year);
+
+        // #28: chybějící kurz dotáhneme JEŠTĚ PŘED dotazem na pohyby, ať je řádek
+        // rovnou oceněný správně a ne jen nouzově sousedním dnem.
+        $rateWarnings = $this->ensureExchangeRates($supplierId, $to);
 
         $opening = $this->repo->openingBalance($supplierId, $from, $isVatPayer);
         $raw = $this->repo->movements($supplierId, $from, $to, $isVatPayer); // vše v rozsahu (totály se počítají nad celkem)
@@ -74,7 +88,7 @@ final class CashJournalService
         ];
 
         $rows = [];
-        $warnings = [];
+        $warnings = $rateWarnings;
         $bucketKeyMap = [
             'income_taxable'   => 'prijem_danovy',
             'income_exempt'    => 'prijem_osvobozeny',
@@ -109,11 +123,12 @@ final class CashJournalService
                 ];
             }
 
-            // #28: cizoměnový pohyb, který se neměl čím ocenit — ke dni úhrady (ani
-            // zpětně) není kurz v `exchange_rates` a doklad nemá ani vlastní kurz.
-            // Dřív kvůli jednomu takovému dokladu spadlo sestavení celého deníku na
-            // 500; teď projde s nulou a účetní dostane adresné blokující varování,
-            // ať ví, který doklad opravit. Trvalá prevence je cron `cron-cnb-rates`.
+            // #28: cizoměnový pohyb, který se neměl čím ocenit. Po dotažení kurzů z ČNB
+            // (ensureExchangeRates) i po nouzovém ocenění nejbližším pozdějším kurzem
+            // sem spadne jen pohyb v měně, o které v `exchange_rates` NENÍ ANI JEDEN
+            // řádek a doklad nemá vlastní kurz — typicky exotická měna mimo lístek ČNB.
+            // Dřív kvůli takovému dokladu spadlo sestavení celého deníku na 500; teď
+            // projde s nulou a účetní dostane adresné blokující varování.
             if (($r['fx_rate_missing'] ?? false) === true) {
                 $doc = trim((string) $r['doc_no']);
                 $partner = trim((string) $r['partner']);
@@ -126,9 +141,9 @@ final class CashJournalService
                     'amount'      => 0.0,
                     'blocking'    => true,
                     'message'     => sprintf(
-                        'Cizoměnový pohyb %s ze dne %s%s nemá kurz ke dni úhrady — není oceněn '
-                            . 'a nevstupuje do daňového základu. Doplňte kurzy ČNB (úloha cron-cnb-rates) '
-                            . 'nebo kurz přímo na dokladu.',
+                        'Cizoměnový pohyb %s ze dne %s%s se nepodařilo ocenit — pro jeho měnu '
+                            . 'není znám žádný kurz. Zadejte kurz přímo na dokladu, jinak pohyb '
+                            . 'nevstupuje do daňového základu.',
                         $doc !== '' ? '„' . $doc . '"' : '#' . (int) $r['source_id'],
                         (string) $r['movement_date'],
                         $partner !== '' ? ' (' . $partner . ')' : '',
@@ -206,6 +221,100 @@ final class CashJournalService
             'checks'          => $this->reconciliation($supplierId, $year, $isVatPayer, $totals, $variance),
             'warnings'        => $warnings,
         ];
+    }
+
+    /**
+     * #28: dotáhne z ČNB kurzy pro dny, ke kterým deník nemá čím ocenit cizoměnový
+     * pohyb, a vrátí varování o tom, co ani potom ocenit přesně nejde.
+     *
+     * Proč za běhu a ne jen cronem: `cron-cnb-rates` drží historii souvislou OD SVÉHO
+     * ZAVEDENÍ dál, ale nepokryje pohyb starší, než kam sahá kurzová historie instalace
+     * — a přesně ten shazoval deník u čerstvého tenanta, který zaeviduje loňské doklady.
+     * Doplnění je jednorázové: kurz se uloží do sdílené `exchange_rates`, takže druhé
+     * otevření deníku už síť nepotřebuje. V demu klient síť nepoužívá vůbec.
+     *
+     * Deník se kvůli téhle pomocné akci NIKDY nesmí zastavit — nedostupná ČNB znamená
+     * jen nouzové ocenění sousedním dnem a varování, ne chybu. Proto `catch (\Throwable)`.
+     *
+     * @return list<array<string,mixed>> varování do `warnings[]`
+     */
+    private function ensureExchangeRates(int $supplierId, string $to): array
+    {
+        $gaps = $this->repo->unpricedCurrencyDays($supplierId, $to, self::RATE_FETCH_LIMIT + 1);
+        if ($gaps === []) {
+            return [];
+        }
+
+        // Ptáme se JEN na měny, o kterých už nějaký kurz známe (`forward_date`) — tedy
+        // takové, které ČNB prokazatelně vyhlašuje. Bez téhle podmínky by exotická měna
+        // mimo kurzovní lístek (a takovou nedoplní ani ČNB) posílala osm marných HTTP
+        // dotazů při KAŽDÉM otevření deníku, navždy. Neznámou měnu tak neoceníme, ale to
+        // je stav, který se stejně řeší kurzem na dokladu.
+        // Datum mimo rozsah, za který ČNB kurzy vyhlašuje (od roku 1991 do dneška),
+        // se ptát nemá smysl — budoucí kurz ještě neexistuje a starší nikdy nebyl.
+        $today = date('Y-m-d');
+        $fetchable = array_values(array_filter(
+            $gaps,
+            static fn (array $g): bool => $g['forward_date'] !== null
+                && $g['date'] <= $today
+                && $g['date'] >= '1991-01-01',
+        ));
+        $backlog = count($gaps) > self::RATE_FETCH_LIMIT;
+        foreach (array_slice($fetchable, 0, self::RATE_FETCH_LIMIT) as $gap) {
+            try {
+                $this->cnb->getRate($gap['currency'], new \DateTimeImmutable($gap['date']));
+            } catch (\Throwable) {
+                // Síť ani ČNB nejsou spolehlivé; zbytek si poradí nouzovým oceněním.
+            }
+        }
+
+        // Bez pokusu o dotažení se nemohlo nic změnit — druhý dotaz by jen opsal ten první.
+        $remaining = $fetchable === []
+            ? array_slice($gaps, 0, self::RATE_FETCH_LIMIT)
+            : $this->repo->unpricedCurrencyDays($supplierId, $to, self::RATE_FETCH_LIMIT);
+
+        $warnings = [];
+        foreach ($remaining as $gap) {
+            // Bez jediného známého kurzu měny se pohyb ocenit nedá vůbec — to hlásí
+            // adresněji per-řádkové varování `fx_rate_missing` (zná i číslo dokladu).
+            if ($gap['forward_date'] === null) {
+                continue;
+            }
+            $warnings[] = [
+                'type'        => 'fx_rate_approximate',
+                'source_type' => 'exchange_rate',
+                'source_id'   => 0,
+                'date'        => $gap['date'],
+                'direction'   => 'in',
+                'amount'      => 0.0,
+                'blocking'    => false,
+                'message'     => sprintf(
+                    'Ke dni %s není znám kurz %s — pohyby toho dne jsou oceněny nejbližším '
+                        . 'pozdějším kurzem ze dne %s. Kurz se pokusíme dotáhnout z ČNB při '
+                        . 'dalším otevření deníku.',
+                    $gap['date'],
+                    $gap['currency'],
+                    $gap['forward_date'],
+                ),
+            ];
+        }
+
+        if ($backlog) {
+            $warnings[] = [
+                'type'        => 'fx_rate_backlog',
+                'source_type' => 'exchange_rate',
+                'source_id'   => 0,
+                'date'        => $to,
+                'direction'   => 'in',
+                'amount'      => 0.0,
+                'blocking'    => false,
+                'message'     => 'Kurzová historie má víc mezer, než se stihne doplnit najednou — '
+                    . 'doplňuje se po částech při každém otevření deníku. Rychlejší je '
+                    . 'jednorázové doplnění příkazem `php api/bin/backfill-cnb-rates.php --apply`.',
+            ];
+        }
+
+        return $warnings;
     }
 
     /** @return array<int,float> Měsíční kasové příjmy pro limity paušálního režimu (§ 7a ZDP). */

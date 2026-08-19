@@ -289,6 +289,61 @@ final class CashJournalDedupFxTest extends CashJournalTestCase
         self::assertCount(1, $fxWarnings, 'I bankovní noha hlásí chybějící kurz varováním.');
     }
 
+    /**
+     * #28: pohyb STARŠÍ, než kam sahá kurzová historie instalace (čerstvý tenant má
+     * v `exchange_rates` jen pár posledních dnů, ale zaeviduje loňskou úhradu).
+     * Zpětně není co najít → ocení se nejbližším POZDĚJŠÍM známým kurzem, ne nulou:
+     * kurz sousedního dne se od vyhlášeného liší v desetinách procenta, kdežto
+     * vypuštění pohybu je chyba o celou jeho hodnotu.
+     *
+     * Kurz na faktuře má přednost před cizím dnem — tady ho proto nemá, ať je vidět
+     * čistě větev „nejbližší pozdější".
+     */
+    public function testMovementOlderThanRateHistoryIsPricedByNearestKnownRate(): void
+    {
+        $xts = $this->noHistoryCurrency($this->supplierId);
+        $inv = $this->invoiceFx($this->supplierId, $xts, 24.50, 826.45, 1000.0);
+        $this->db->pdo()->prepare('UPDATE invoices SET exchange_rate = NULL WHERE id = ?')->execute([$inv]);
+        $this->paymentCcy($this->supplierId, $inv, 1000.0, 'XTS', 'mark_paid', null);
+        // Jediný známý kurz XTS je AŽ PO dni úhrady (2099-06-15).
+        $this->exchangeRate('XTS', self::YEAR . '-09-01', 25.00);
+
+        $res = $this->fullYear($this->supplierId);
+
+        self::assertEqualsWithDelta(20661.25, $res['totals']['prijem_danovy'], 0.05,
+            '#28: ocenit nejbližším pozdějším kurzem (25,00), ne nulou.');
+
+        $flagged = array_filter($res['rows'], static fn (array $r): bool => $r['fx_rate_missing'] === true);
+        self::assertSame([], $flagged, 'Oceněný řádek už není „bez kurzu".');
+
+        $approx = array_values(array_filter(
+            $res['warnings'],
+            static fn (array $w): bool => ($w['type'] ?? '') === 'fx_rate_approximate',
+        ));
+        self::assertCount(1, $approx, 'Nouzové ocenění nesmí být tiché — patří do warnings[].');
+        self::assertFalse($approx[0]['blocking'],
+            'Přiblížení kurzu není blokující: pohyb v základu daně JE, jen s kurzem sousedního dne.');
+        self::assertStringContainsString(self::YEAR . '-09-01', $approx[0]['message'],
+            'Zpráva musí říct, ze kterého dne je použitý kurz.');
+    }
+
+    /**
+     * Kurz na dokladu má přednost před kurzem cizího dne — je to reálný kurz TOHO
+     * dokladu, kdežto pozdější den je jen nejbližší dostupné přiblížení.
+     */
+    public function testDocumentRateWinsOverNearestLaterDay(): void
+    {
+        $xts = $this->noHistoryCurrency($this->supplierId);
+        $inv = $this->invoiceFx($this->supplierId, $xts, 24.50, 826.45, 1000.0);
+        $this->paymentCcy($this->supplierId, $inv, 1000.0, 'XTS', 'mark_paid', null);
+        $this->exchangeRate('XTS', self::YEAR . '-09-01', 25.00);
+
+        $res = $this->fullYear($this->supplierId);
+
+        self::assertEqualsWithDelta(20248.03, $res['totals']['prijem_danovy'], 0.05,
+            'Kurz faktury (24,50) má přednost před pozdějším dnem (25,00).');
+    }
+
     // ── H2: bank-paid income vanishes if statement stops matching → warning ──
 
     /** H2: source='bank' platba, jejíž výpis neodpovídá účtu supplieru → blokující varování. */
