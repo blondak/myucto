@@ -18,7 +18,7 @@ use MyInvoice\Service\Auth\WebAuthnOperationPolicy;
  */
 final class ClientRoutePolicy
 {
-    private const MANIFEST = __DIR__ . '/../../../../shared/client-route-policy.json';
+    private const MANIFEST = __DIR__ . '/../../../../web/shared/client-route-policy.json';
 
     /** @var array{routes:list<array<string,mixed>>,flow_paths:list<array<string,mixed>>,portal_api_paths:list<array<string,mixed>>}|null */
     private static ?array $manifest = null;

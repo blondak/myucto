@@ -25,12 +25,12 @@ Options -Indexes -MultiViews
     RewriteRule ^(.*)$ https://%{HTTP_HOST}/$1 [R=301,L]
 
     # 2) Bezpečnostní bariéra: blokovat citlivé a vývojové složky.
-    # `shared/` obsahuje zdrojové policy sdílené při buildu, nikoli veřejná data.
+    # `web/shared/` obsahuje zdrojové policy sdílené při buildu, nikoli veřejná data.
     # `(?:\.[^/]*)?` za jménem složky je ZÁMĚRNÉ: na disku reálně existuje
     # `api/vendor.prod/` (produkční autoloader) a holé `vendor(/|$)` ho nematchne
     # (dostane '.', ne '/'). Pokrývá i `private.bak/`, `db.old/` apod. Suffix se
     # kotví na tečku, takže legitimní `/dbxyz` zůstává dostupné.
-    RewriteRule ^(shared|private|db|log|source|storage|tools|cmd|docker|web/(src|node_modules)|node_modules|api/(src|vendor|templates|tests|bin))(?:\.[^/]*)?(/|$) - [F,L]
+    RewriteRule ^(private|db|log|source|storage|tools|cmd|docker|web/(src|shared|node_modules)|node_modules|api/(src|vendor|templates|tests|bin))(?:\.[^/]*)?(/|$) - [F,L]
 
     # 2b) Blokovat cfg.php, tooling manifesty a zdrojové dokumenty.
     # `(?:(?:api|web)/)?` — `api/composer.json` a `api/composer.lock` jsou reálné

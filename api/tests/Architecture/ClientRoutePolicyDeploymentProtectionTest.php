@@ -14,8 +14,8 @@ use ReflectionClass;
 
 final class ClientRoutePolicyDeploymentProtectionTest extends TestCase
 {
-    private const MANIFEST_PATH = 'shared/client-route-policy.json';
-    private const MANIFEST_URI = '/shared/client-route-policy.json';
+    private const MANIFEST_PATH = 'web/shared/client-route-policy.json';
+    private const MANIFEST_URI = '/web/shared/client-route-policy.json';
 
     public function testBackendAndFrontendResolveTheSameManifest(): void
     {
@@ -41,9 +41,18 @@ final class ClientRoutePolicyDeploymentProtectionTest extends TestCase
 
         $vite = self::read($root . '/web/vite.config.ts');
         self::assertMatchesRegularExpression(
-            '/[\'\"]@shared[\'\"]\s*:\s*fileURLToPath\(new URL\([\'\"]\.\.\/shared[\'\"]/',
+            '/[\'\"]@shared[\'\"]\s*:\s*fileURLToPath\(new URL\([\'\"]\.\/shared[\'\"]/',
             $vite,
-            'Vite alias @shared musí mířit na kořenovou složku shared.',
+            'Vite alias @shared musí mířit na složku web/shared.',
+        );
+
+        // Vitest má vlastní resolve.alias — bez něj projde produkční build,
+        // ale celá testovací sada spadne na nevyřešeném importu manifestu.
+        $vitest = self::read($root . '/web/vitest.config.ts');
+        self::assertMatchesRegularExpression(
+            '/[\'\"]@shared[\'\"]\s*:\s*fileURLToPath\(new URL\([\'\"]\.\/shared[\'\"]/',
+            $vitest,
+            'Vitest alias @shared musí mířit na stejnou složku jako Vite.',
         );
 
         $tsconfig = json_decode(
@@ -53,13 +62,13 @@ final class ClientRoutePolicyDeploymentProtectionTest extends TestCase
             JSON_THROW_ON_ERROR,
         );
         self::assertSame(
-            ['../shared/*'],
+            ['./shared/*'],
             $tsconfig['compilerOptions']['paths']['@shared/*'] ?? null,
             'TypeScript alias @shared musí odpovídat Vite aliasu.',
         );
 
         self::assertMatchesRegularExpression(
-            '/^\s*[\'\"]\/shared\/client-route-policy\.json[\'\"],$/m',
+            '/^\s*[\'\"]\/web\/shared\/client-route-policy\.json[\'\"],$/m',
             self::read($root . '/tools/securitySmokeTest.php'),
             'Živý security smoke test musí hlídat přímé načtení manifestu.',
         );
@@ -82,15 +91,22 @@ final class ClientRoutePolicyDeploymentProtectionTest extends TestCase
         self::assertNotFalse($webStageEnd, "{$filename} nemá očekávanou web build stage.");
         $webStage = substr($dockerfile, 0, $webStageEnd);
 
+        // Manifest leží ve `web/shared/`, takže ho do build stage přinese
+        // samotné `COPY web/ ./` — žádná zvláštní kopie mimo /app už netřeba.
         self::assertMatchesRegularExpression(
-            '/^COPY shared\/ \/shared\/$/m',
+            '/^COPY web\/ \.\/$/m',
             $webStage,
-            "{$filename} musí zpřístupnit manifest Vite buildu mimo jeho /app workdir.",
+            "{$filename} musí zkopírovat web/ (a s ním manifest) do build stage.",
         );
         self::assertLessThan(
             strpos($webStage, 'RUN pnpm build'),
-            strpos($webStage, 'COPY shared/ /shared/'),
+            strpos($webStage, 'COPY web/ ./'),
             "{$filename} musí manifest zkopírovat před frontend buildem.",
+        );
+        self::assertStringNotContainsString(
+            'COPY shared/',
+            $dockerfile,
+            "{$filename} nesmí manifest kopírovat z kořenové složky shared/ — ta už neexistuje.",
         );
 
         $runtimeStart = strpos($dockerfile, ' AS runtime');
@@ -108,6 +124,7 @@ final class ClientRoutePolicyDeploymentProtectionTest extends TestCase
         $root = self::repoRoot();
         foreach ([
             'client-route-policy.json',
+            'shared/client-route-policy.json',
             'api/public/client-route-policy.json',
             'web/public/client-route-policy.json',
             'web/dist/client-route-policy.json',
@@ -142,7 +159,7 @@ final class ClientRoutePolicyDeploymentProtectionTest extends TestCase
             }
         }
 
-        self::assertTrue($denied, 'Apache musí /shared/client-route-policy.json odmítnout před statickým servírováním.');
+        self::assertTrue($denied, 'Apache musí /web/shared/client-route-policy.json odmítnout před statickým servírováním.');
         self::assertMatchesRegularExpression(
             '/<Files\s+[\'\"]client-route-policy\.json[\'\"]>\s*Require all denied\s*<\/Files>/s',
             $configuration,
@@ -182,7 +199,7 @@ final class ClientRoutePolicyDeploymentProtectionTest extends TestCase
             }
         }
 
-        self::assertNotNull($denialIndex, 'IIS musí /shared/client-route-policy.json vrátit jako Forbidden.');
+        self::assertNotNull($denialIndex, 'IIS musí /web/shared/client-route-policy.json vrátit jako Forbidden.');
         self::assertNotNull($fallbackIndex, 'IIS konfigurace nemá očekávaný SPA fallback.');
         self::assertLessThan($fallbackIndex, $denialIndex, 'IIS blokace musí předcházet SPA fallbacku.');
     }
@@ -207,7 +224,7 @@ final class ClientRoutePolicyDeploymentProtectionTest extends TestCase
             }
         }
 
-        self::assertTrue($denied, 'nginx musí /shared/client-route-policy.json odmítnout před statickým servírováním.');
+        self::assertTrue($denied, 'nginx musí /web/shared/client-route-policy.json odmítnout před statickým servírováním.');
         self::assertStringContainsString(
             'COPY docker/nginx.conf /etc/nginx/nginx.conf',
             self::read(self::repoRoot() . '/Dockerfile.alpine'),
