@@ -6,8 +6,10 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
+use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Support\ExchangeRateSources;
 use MyInvoice\Support\PaymentMethods;
+use MyInvoice\Support\PublicAuthorityFeeText;
 use MyInvoice\Support\Sql\PayablePredicate;
 use PDO;
 
@@ -1751,6 +1753,17 @@ final class PurchaseInvoiceRepository
         $docYear = !empty($meta['doc_date']) ? (int) substr((string) $meta['doc_date'], 0, 4) : (int) date('Y');
         $standardRate = $this->taxConstants->vatRateStandard($docYear);
 
+        // Plátcovství TENANTA k datu dokladu. Tuzemský režim přenesené povinnosti (§ 92a)
+        // funguje jen MEZI PLÁTCI — identifikovaná osoba ani neplátce v něm být nemůže,
+        // takže by jí kód '5' vyrobil samovyměření na ř. 10 a větu KH B.1, které nedluží.
+        // Samovyměření u ZAHRANIČNÍHO plnění (23/24/24e/25) zůstává: to se identifikované
+        // osoby týká (§ 108) a je hlavním důvodem existence celého režimu.
+        $docDate = !empty($meta['doc_date']) ? (string) $meta['doc_date'] : date('Y-m-d');
+        $tenantIsVatPayer = true;
+        if ($supplierId > 0 && $this->db->hasTable('supplier_vat_status_history')) {
+            $tenantIsVatPayer = VatStatusService::flagsAt($pdo, $supplierId, $docDate)['is_vat_payer'];
+        }
+
         foreach (array_values($items) as $i => $item) {
             $vatRateId = (int) ($item['vat_rate_id'] ?? 0);
             $rate = $vatRates[$vatRateId] ?? 0.0;
@@ -1759,7 +1772,14 @@ final class PurchaseInvoiceRepository
             // faktura NEDORAZILA do výkazů (VatClassificationMapper SKIPNE code=NULL).
             $code = $item['vat_classification_code'] ?? null;
             if ($code === null) {
-                $code = self::defaultClassificationCode($rate, $reverseCharge, $countryIso, $standardRate);
+                $code = self::defaultClassificationCode(
+                    $rate,
+                    $reverseCharge,
+                    $countryIso,
+                    $standardRate,
+                    PublicAuthorityFeeText::indicatesPublicAuthorityFee((string) ($item['description'] ?? '')),
+                    $tenantIsVatPayer,
+                );
             }
             $sid = isset($item['stock_item_id']) && $item['stock_item_id'] !== null && $item['stock_item_id'] !== ''
                 ? (int) $item['stock_item_id'] : 0;
@@ -1851,6 +1871,12 @@ final class PurchaseInvoiceRepository
         // Základní sazba pro rok dokladu (číselník daňových konstant). Default 21
         // drží zpětnou kompatibilitu pro volání bez kontextu (CLI backfill).
         float $standardRate = 21.0,
+        // Poplatek orgánu veřejné moci ({@see PublicAuthorityFeeText}) — plnění
+        // MIMO předmět daně, nikdy se nesamovyměřuje ani u zahraničního „dodavatele".
+        bool $publicAuthorityFee = false,
+        // Je TENANT plátcem DPH k datu dokladu? Neplátce ani identifikovaná osoba nemůže
+        // být v tuzemském § 92a → kód '5' se jim nepřiřazuje (zahraniční samovyměření ano).
+        bool $tenantIsVatPayer = true,
     ): ?string {
         $r = (int) round($rate);
         $std = (int) round($standardRate);
@@ -1868,6 +1894,13 @@ final class PurchaseInvoiceRepository
         // nebo dovoz ZBOŽÍ (ř.3 / ř.7) se ze samotné sazby nepozná → tam kód vybírá
         // AI dle povahy plnění (supply_nature) nebo uživatel ručně. Dřív se mimo-EU
         // 0 % defaultovalo na 25 (ř.7 dovoz zboží), což u služeb bylo věcně špatně.
+        // Poplatek orgánu veřejné moci (soudní, správní, kolek) — orgán nejedná jako
+        // osoba povinná k dani (§ 5 odst. 4 ZDPH / čl. 13 směrnice), plnění tedy NENÍ
+        // předmětem daně a příjemci nevzniká povinnost přiznat daň ani u zahraničního
+        // soudu/úřadu. Žádný kód → doklad zůstane mimo přiznání i KH (issue #30).
+        if ($r === 0 && $publicAuthorityFee) {
+            return null;
+        }
         if ($isForeign && $r === 0) {
             return $isEu ? '24e' : '24';
         }
@@ -1875,8 +1908,12 @@ final class PurchaseInvoiceRepository
         // Vzácnější použití (vendor obvykle fakturuje bez DPH), ale když má 21 % sazbu
         // (typicky reverse-charge invoice s vyčíslenou daní pro info), tohle je správně.
         if ($isEu && $reverseCharge && $r >= $std) return '23';
-        // CZ tuzemsko (nebo zahraniční vendor s CZ DPH, vzácné)
-        if ($reverseCharge && $r >= $std) return '5';
+        // CZ tuzemsko (nebo zahraniční vendor s CZ DPH, vzácné). Tuzemský § 92a jen pro
+        // plátce — neplátci/identifikované osobě kód '5' nepřiřadíme (viz $tenantIsVatPayer).
+        if ($reverseCharge && $tenantIsVatPayer && $r >= $std) return '5';
+        // Tuzemský § 92a doklad se vystavuje BEZ vyčíslené daně (sazba 0 %) — dřív takový
+        // doklad propadl na null a do přiznání (ř.10 + KH B.1) se vůbec nedostal.
+        if ($reverseCharge && $tenantIsVatPayer && $r === 0)   return '5';
         if ($r >= $std)                   return '40';
         // Snížené sazby 5–15 % (12 aktuální, 10/15 historické). Pásmo 16 až <std
         // záměrně nemapujeme (např. německá 19 % není česká DPH → user vybere ručně).

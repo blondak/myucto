@@ -64,4 +64,47 @@ final class DefaultClassificationCodeTest extends TestCase
         $this->assertSame('5', PurchaseInvoiceRepository::defaultClassificationCode(22.0, true, 'CZ', 22.0));
         $this->assertSame('23', PurchaseInvoiceRepository::defaultClassificationCode(22.0, true, 'DE', 22.0));
     }
+
+    public function testPublicAuthorityFeeStaysOutOfScope(): void
+    {
+        // issue #30: soudní poplatek německému soudu. Orgán veřejné moci není osobou
+        // povinnou k dani (§ 5 odst. 4 ZDPH) → žádné samovyměření § 9/1, žádný kód.
+        $f = fn (string $iso, bool $fee) =>
+            PurchaseInvoiceRepository::defaultClassificationCode(0.0, false, $iso, 21.0, $fee);
+
+        $this->assertNull($f('DE', true), 'soudní poplatek zahraničnímu soudu → mimo předmět daně');
+        $this->assertNull($f('CZ', true), 'tuzemský soudní poplatek → mimo předmět daně');
+        $this->assertNull($f('US', true));
+        $this->assertSame('24e', $f('DE', false), 'běžná EU služba se samovyměřuje dál');
+    }
+
+    public function testDomesticReverseChargeZeroRate(): void
+    {
+        // Tuzemský § 92a doklad je bez vyčíslené daně (0 %) — plátci patří na ř.10 + KH B.1.
+        $this->assertSame(
+            '5',
+            PurchaseInvoiceRepository::defaultClassificationCode(0.0, true, 'CZ'),
+            'plátce v tuzemském režimu přenesené povinnosti'
+        );
+    }
+
+    public function testNonPayerNeverGetsDomesticReverseCharge(): void
+    {
+        // § 92a funguje jen mezi plátci. Identifikovaná osoba ani neplátce v něm být
+        // nemůže → kód '5' by jí vyrobil samovyměření na ř.10 a větu KH B.1, které nedluží.
+        $f = fn (float $rate) => PurchaseInvoiceRepository::defaultClassificationCode(
+            $rate, true, 'CZ', 21.0, false, tenantIsVatPayer: false
+        );
+
+        // 21 % propadne na tuzemské '40' — do přiznání neplátce stejně nevstoupí
+        // (VatLedgerService filtruje podle plátcovství k DUZP), jen se nevyrobí ř.10/KH B.1.
+        $this->assertSame('40', $f(21.0), 'neplátce → běžné tuzemské plnění, ne § 92a');
+        $this->assertNull($f(0.0), 'nulová sazba u neplátce → bez klasifikace');
+        // Zahraniční samovyměření (§ 108) se identifikované osoby naopak TÝKÁ.
+        $this->assertSame(
+            '24e',
+            PurchaseInvoiceRepository::defaultClassificationCode(0.0, true, 'DE', 21.0, false, tenantIsVatPayer: false),
+            'identifikovaná osoba přijímající službu z EU samovyměřuje dál'
+        );
+    }
 }

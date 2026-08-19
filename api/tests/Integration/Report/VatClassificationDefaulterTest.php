@@ -26,6 +26,21 @@ final class VatClassificationDefaulterTest extends TestCase
     {
         $this->assertNull($this->defaulter->defaultForSale(0.0));
     }
+
+    /**
+     * issue #30: nulová sazba na přijatém dokladu se tady NEROZHODUJE. Jediný purchase
+     * kód se sazbou 0,00 je '30' (třístranný obchod, § 17) — DB lookup ho dřív přiřadil
+     * každému nulovému dokladu a poslal ho na ř. 30 přiznání. Kód doplní až country-aware
+     * SSOT {@see PurchaseInvoiceRepository::defaultClassificationCode()}.
+     */
+    public function testZeroRatePurchaseNeverAutoAssignsTriangularCode(): void
+    {
+        $this->assertNull($this->defaulter->defaultForPurchase(0.0));
+        $this->assertNull($this->defaulter->defaultForPurchase(0.0, true));
+        // Kladné sazby se defaultují beze změny.
+        $this->assertSame('40', $this->defaulter->defaultForPurchase(21.0));
+        $this->assertSame('41', $this->defaulter->defaultForPurchase(12.0));
+    }
     private VatClassificationDefaulter $defaulter;
     private ?Connection $conn = null;
 

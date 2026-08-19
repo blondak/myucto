@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Validation;
 
 use MyInvoice\Support\PaymentMethods;
+use MyInvoice\Support\PublicAuthorityFeeText;
 
 /**
  * Validace přijaté faktury. Vrací mapu pole → list chyb (CZ texty z ErrorCatalog jsou pro
@@ -185,6 +186,25 @@ final class PurchaseInvoiceValidation
             $totalBase = (float) ($invoice['total_without_vat'] ?? 0);
             if ($totalBase > 0.005) {
                 $warn[] = 'credit_note_positive_total';
+            }
+        }
+
+        // Poplatek orgánu veřejné moci v nulové sazbě — plnění mimo předmět daně
+        // (§ 5 odst. 4 ZDPH). Doklad zůstane bez klasifikace a nevstoupí do přiznání
+        // ani KH; u zahraničního soudu/úřadu se ZÁMĚRNĚ nesamovyměřuje (§ 9 odst. 1
+        // se na orgán veřejné moci nevztahuje). Upozornění to říká nahlas, ať uživatel
+        // pozná, že prázdná klasifikace je záměr, a mohl ji přepsat, když jde přece
+        // o běžnou službu. Viz issue #30.
+        foreach ((array) ($invoice['items'] ?? []) as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            if ((float) ($item['vat_rate_snapshot'] ?? 0) > 0.0) {
+                continue;
+            }
+            if (PublicAuthorityFeeText::indicatesPublicAuthorityFee((string) ($item['description'] ?? ''))) {
+                $warn[] = 'public_authority_fee_out_of_scope';
+                break;
             }
         }
 

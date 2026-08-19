@@ -16,7 +16,7 @@ use MyInvoice\Infrastructure\Database\Connection;
  * Pravidla per MF ČR (DPHDP3, aktuální seed):
  *   - Vystavená (sale, tuzemsko):    21% → 1,  12% → 2,  0% → bez defaultu
  *   - Vystavená (sale, reverse):     22 (EU služba §9/1; dodání zboží '20' se volí ručně)
- *   - Přijatá (purchase, tuzemsko):  21% → 40, 12% → 41, 0% → 42
+ *   - Přijatá (purchase, tuzemsko):  21% → 40, 12% → 41, 0% → bez defaultu
  *   - Přijatá (purchase, reverse):   5  (tuzemský reverse charge)
  *
  * Algoritmus:
@@ -29,6 +29,8 @@ final class VatClassificationDefaulter
 {
     /** Hard-coded fallback (matchne seed v migrace 0037 pro CZ 2025-2026 sazby) */
     private const FALLBACK_SALE_TUZEMSKO    = ['21.0' => '1',  '12.0' => '2'];
+    // '0.0' => '42' je jen poslední záchrana byRateFallback() pro NEZNÁMOU kladnou sazbu
+    // (např. cizí 19 %) — nulová sazba se sem už nedostane, viz defaultForPurchase().
     private const FALLBACK_PURCHASE_TUZEMSKO = ['21.0' => '40', '12.0' => '41', '0.0' => '42'];
     // RC + EU odběratel: statistický default SLUŽBA '22' (§ 9 odst. 1, ř.21) — použije se
     // až když ani jednotky položek, ani CZ-NACE dodavatele nedají signál „zboží" (viz
@@ -121,9 +123,23 @@ final class VatClassificationDefaulter
 
     /**
      * Default pro přijatou fakturu (cost side).
+     *
+     * **Nulová sazba se tu NEROZHODUJE.** U 0 % závisí správný kód na zemi dodavatele
+     * (tuzemsko osvobozené / neplátce → žádný řádek přiznání; EU služba § 9/1 → '24e',
+     * ř.5; 3. země → '24', ř.12; tuzemský § 92a → '5') a tuhle znalost má jediný SSOT
+     * {@see PurchaseInvoiceRepository::defaultClassificationCode()}, který doplní kód
+     * při ukládání řádků. Vracíme `null`, ať ho nepřebijeme.
+     *
+     * Historicky se tady na 0 % sahalo do DB lookupu — jediný nereverse-charge purchase
+     * kód se sazbou 0 % je '30' (pořízení zboží prostřední osobou při třístranném
+     * obchodu, § 17), takže KAŽDÝ nulový doklad dostal '30' a mířil na ř. 30 přiznání
+     * (issue #30). Symetricky k {@see defaultForSale()}, který u 0 % vrací null taky.
      */
-    public function defaultForPurchase(float $vatRate, bool $reverseCharge = false, ?string $taxDate = null, int $supplierId = 0): string
+    public function defaultForPurchase(float $vatRate, bool $reverseCharge = false, ?string $taxDate = null, int $supplierId = 0): ?string
     {
+        if ($vatRate <= 0.0) {
+            return null;
+        }
         return $this->lookup('purchase', $vatRate, $reverseCharge, $taxDate, $supplierId)
             ?? ($reverseCharge ? self::FALLBACK_PURCHASE_REVERSE : $this->byRateFallback($vatRate, self::FALLBACK_PURCHASE_TUZEMSKO));
     }
