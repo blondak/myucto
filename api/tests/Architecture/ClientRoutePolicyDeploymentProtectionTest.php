@@ -224,6 +224,9 @@ final class ClientRoutePolicyDeploymentProtectionTest extends TestCase
     {
         $contents = file_get_contents($path);
         self::assertIsString($contents, "Nelze načíst {$path}.");
-        return $contents;
+        // Dockerfile, .htaccess i nginx.conf nemají v .gitattributes vynucené LF,
+        // takže Windows checkout (core.autocrlf) je dostane s CRLF. Řádkové
+        // regexy níže hlídají obsah konfigurace, ne konce řádků.
+        return str_replace("\r\n", "\n", $contents);
     }
 }

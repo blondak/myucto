@@ -7,8 +7,8 @@ vi.mock('@/i18n', () => ({
 }))
 
 import routePolicy from '@shared/client-route-policy.json'
-import appLayoutSource from '@/components/layout/AppLayout.vue?raw'
-import routerSource from '@/router/index.ts?raw'
+import appLayoutSourceRaw from '@/components/layout/AppLayout.vue?raw'
+import routerSourceRaw from '@/router/index.ts?raw'
 import { router } from '@/router'
 import {
   canonicalDomainLoginHandoffPath,
@@ -21,6 +21,12 @@ import {
   usesClientNavigation,
 } from '@/security/clientRoutePolicy'
 import { isClientPermission, type PermissionKey } from '@/security/permissions'
+
+// `?raw` vrací zdroják přesně tak, jak leží na disku — na Windows checkoutu
+// tedy s CRLF. Řádkové regexy níže porovnávají strukturu kódu, ne konce řádků,
+// takže se zdroj normalizuje na LF a test padá jen na obsahu.
+const appLayoutSource = appLayoutSourceRaw.replace(/\r\n/g, '\n')
+const routerSource = routerSourceRaw.replace(/\r\n/g, '\n')
 
 type ManifestRoute = (typeof routePolicy.routes)[number]
 
