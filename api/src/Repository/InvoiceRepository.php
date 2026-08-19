@@ -1766,7 +1766,8 @@ final class InvoiceRepository
      *   CZ klient:
      *     21% → '1' (tuzemsko základní)
      *     12% → '2' (tuzemsko snížená)
-     *     0%  → '3' (tuzemsko osvobozeno)
+     *     RC  → '25s' (§ 92a přenesená povinnost, ř. 25 + KH A.1)
+     *     0%  → bez kódu (viz níž)
      *   EU klient (DE, SK, AT, …):
      *     0%  → '22' (poskytnutí služby do EU, B2B reverse charge — nejčastější CZ IT use case)
      *     21%/12% → tuzemsko sazby (B2C nebo CZ klient s EU adresou)
@@ -1784,8 +1785,12 @@ final class InvoiceRepository
         bool $reverseCharge,
         ?string $clientCountryIso2 = null,
         ?string $unit = null,
+        // Základní sazba pro rok dokladu (číselník daňových konstant). Default 21 drží
+        // zpětnou kompatibilitu pro volání bez kontextu (CLI backfill, staré testy).
+        float $standardRate = 21.0,
     ): ?string {
         $r = (int) round($rate);
+        $std = (int) round($standardRate);
         $iso = strtoupper((string) ($clientCountryIso2 ?? 'CZ'));
         // EU member states (ISO-2 kódy, bez CZ které je tuzemsko)
         $euCountries = [
@@ -1803,10 +1808,27 @@ final class InvoiceRepository
                 $unit !== null && $unit !== '' ? [$unit] : []
             ) === 'goods' ? '20' : '22';
         }
+        // Tuzemský odběratel v režimu přenesené povinnosti (§ 92a — stavební práce, odpad,
+        // zlato) → ř. 25 (pln_rez_pren) + věta KH A.1. Doklad se vystavuje bez daně, takže
+        // dřív propadl na '3' (osvobozeno, ř. 50) a plnění z KH úplně zmizelo. Hlavička
+        // přitom dostávala od VatClassificationDefaulter správné '25s' — dva zdroje pravdy
+        // proti sobě a ve výkazech vyhrává řádek.
+        if (!$isForeign && $reverseCharge && $r === 0) return '25s';
         // Tuzemsko / B2C cizinec s českou DPH sazbou
-        if ($r >= 21)            return '1';
+        if ($r >= $std)          return '1';
         if ($r >= 5 && $r <= 15) return '2';
-        return '3';
+        // Nulová sazba u tuzemského odběratele NENÍ automaticky osvobozené plnění § 51.
+        // Stejně často je to přeúčtování nákladů, náhrada škody, smluvní pokuta nebo jiné
+        // plnění mimo předmět daně — a tvrdé '3' takové řádky posílalo na ř. 50, kde
+        // nafukují jmenovatel koeficientu § 76 a snižují krácený odpočet. Osvobozené
+        // plnění si uživatel označí sám; neklasifikovaný nulový řádek pojmenuje varování
+        // v přiznání („nebyl zahrnut na ř. 50"), které bylo do teď mrtvý kód, protože
+        // '3' se dosadilo vždy. Symetrické s přijatou stranou (issue #30).
+        //
+        // Pásmo 16 % až pod základní sazbu (historická CZ 20 %, cizí sazby mimo OSS) se
+        // taky nemapuje — česká klasifikace pro ně neexistuje, viz tatáž mezera
+        // v PurchaseInvoiceRepository::defaultClassificationCode().
+        return null;
     }
 
     private function loadVatRates(): array

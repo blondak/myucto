@@ -797,8 +797,11 @@ final class OssInvoiceImportTest extends TestCase
      *
      * Ty dva kódy plní SOUHRNNÉ HLÁŠENÍ, které se podává za plnění osobě registrované
      * k dani v jiném členském státě. U B2C spotřebitele bez DIČ by vznikl řádek výkazu
-     * bez protistrany — a to je horší než původní '3', protože souhrnné hlášení se podává
-     * a kontroluje samostatně.
+     * bez protistrany — a souhrnné hlášení se podává a kontroluje samostatně.
+     *
+     * Řádek zůstane BEZ klasifikace: nulová sazba se od auditu VAT klasifikací (H-1)
+     * nepřeklápí na '3' (osvobozeno § 51, ř. 50), protože tuzemské osvobození to prokazatelně
+     * není. Pojmenuje ho varování přiznání „neklasifikovaný řádek se sazbou 0 %".
      */
     public function testZeroRateForEuConsumerWithoutVatIdStaysOutOfTheEcSalesList(): void
     {
@@ -811,7 +814,7 @@ final class OssInvoiceImportTest extends TestCase
         self::assertSame(0, $result['oss_items'], 'Nulová sazba do OSS nepatří (§ 110a se týká zdaněných plnění).');
 
         $item = $this->itemRow((int) $result['invoice_id']);
-        self::assertSame('3', (string) $item['vat_classification_code'],
+        self::assertNull($item['vat_classification_code'],
             'Kódy 20/22 by doklad poslaly do souhrnného hlášení, ačkoli odběratel DIČ nemá.');
 
         $sh = (new \MyInvoice\Service\Report\SouhrnneHlaseniBuilder($this->db, $this->vatLedger))
