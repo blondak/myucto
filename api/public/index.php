@@ -2,6 +2,69 @@
 
 declare(strict_types=1);
 
+/**
+ * Brána údržby — MUSÍ zůstat nad `require autoload.php` a nesmí sáhnout na
+ * žádnou třídu aplikace. Přesně v okně, které hlídá (swap souborů + migrace),
+ * je autoloader nekonzistentní: mapa tříd ukazuje na soubory, které ještě
+ * nedorazily. Kdyby brána potřebovala autoload, spadla by dřív, než odpoví.
+ *
+ * Značku zakládá a maže {@see \MyInvoice\Service\Update\MaintenanceMode}.
+ * Formát sdílí s MyInvoice.cz: při přechodu na nástupce ji zakládá ještě starý
+ * kód, swap pak vymění tenhle soubor a okno musí držet dál — migrace běží
+ * dlouho po swapu.
+ */
+(static function (): void {
+    $base = getenv('MYINVOICE_DATA_DIR');
+    $base = is_string($base) && trim($base) !== ''
+        ? rtrim(trim($base), "/\\")
+        : dirname(__DIR__, 2);
+
+    $raw = @file_get_contents($base . '/storage/maintenance.json');
+    if (!is_string($raw) || $raw === '') {
+        return;
+    }
+    $flag = json_decode($raw, true);
+    if (!is_array($flag)) {
+        return;
+    }
+
+    // Mrtvá značka po spadlém workeru nesmí držet instalaci dole navěky.
+    $expires = strtotime((string) ($flag['expires_at'] ?? ''));
+    if ($expires === false || $expires < time()) {
+        return;
+    }
+
+    $product = (string) ($flag['product'] ?? 'aplikace');
+    $target  = (string) ($flag['target'] ?? '');
+    $message = 'Probíhá aktualizace na ' . $product . ($target !== '' ? ' ' . $target : '')
+        . '. Zkus to prosím za chvíli — nasazení souborů a migrace databáze trvají jednotky minut.';
+
+    http_response_code(503);
+    header('Retry-After: 20');
+    header('Cache-Control: no-store');
+
+    $path   = (string) ($_SERVER['REQUEST_URI'] ?? '');
+    $accept = (string) ($_SERVER['HTTP_ACCEPT'] ?? '');
+    if (str_starts_with($path, '/api/') || stripos($accept, 'application/json') !== false) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(
+            ['error' => ['code' => 'maintenance', 'message' => $message]],
+            JSON_UNESCAPED_UNICODE
+        );
+        exit;
+    }
+
+    header('Content-Type: text/html; charset=utf-8');
+    echo '<!doctype html><html lang="cs"><head><meta charset="utf-8">'
+        . '<meta http-equiv="refresh" content="20">'
+        . '<title>Probíhá aktualizace</title>'
+        . '<style>body{font:14px/1.6 system-ui,sans-serif;max-width:560px;margin:80px auto;padding:0 20px;color:#15131D}'
+        . 'h1{color:#3B2D83;font-size:22px}</style></head><body>'
+        . '<h1>Probíhá aktualizace</h1><p>' . htmlspecialchars($message, ENT_QUOTES) . '</p>'
+        . '<p>Stránka se sama obnoví.</p></body></html>';
+    exit;
+})();
+
 require __DIR__ . '/../vendor/autoload.php';
 
 use MyInvoice\Bootstrap;

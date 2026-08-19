@@ -211,11 +211,20 @@ final class NativeUpdateService
             $backup = $work . '/backup';
             $this->ensureDir($backup);
 
+            // Od téhle chvíle je instalace nekonzistentní (půl staré, půl nové
+            // verze; schéma ještě neposunuté) a musí requestům odpovídat 503,
+            // ne fatálem z půlky autoloadu. Značka padá až po migracích.
+            MaintenanceMode::begin($this->stateDir, 'MyÚčto.cz', $target);
+            $this->appendLog($log, 'Režim údržby zapnut — requesty dostanou 503 do konce migrací.');
+
             $this->progress($target, 'swap', 'Nasazuji nové soubory…');
             $swapped = $this->swap($stage, $backup, $target, $log);
 
             $this->progress($target, 'migrate', 'Spouštím databázové migrace…');
             $this->runMigrations($log);
+
+            MaintenanceMode::end($this->stateDir);
+            $this->appendLog($log, 'Režim údržby vypnut.');
 
             $this->progress($target, 'finish', 'Dokončuji…');
             $this->writeVersionFile($target, $stage, $log);
@@ -230,6 +239,11 @@ final class NativeUpdateService
             $this->appendLog($log, 'CHYBA: ' . $e->getMessage());
             $this->cleanupParked($log);
             return $this->finishFailed($target, $e->getMessage(), $log);
+        } finally {
+            // I aktualizace, která skončila chybou, musí instalaci vrátit do
+            // provozu. Bez tohohle by ji značka držela na 503 až do vlastní
+            // expirace, tedy i po rollbacku na funkční starou verzi.
+            MaintenanceMode::end($this->stateDir);
         }
     }
 
