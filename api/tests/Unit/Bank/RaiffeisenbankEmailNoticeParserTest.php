@@ -117,4 +117,63 @@ TEXT;
         self::assertSame('Faktura 2608001', $parsed->message);
         self::assertSame(98765.43, $parsed->balance);
     }
+
+    public function testParsesOutgoingCardTransactionWithoutVariableSymbolOrCounterpartyAccount(): void
+    {
+        $text = <<<TEXT
+Vážená klientko, vážený kliente,
+na účtě byla provedena následující odchozí karetní transakce:
+Datum a čas
+19. 08. 2026 04:41
+Účet
+1000000005/5500Firma Test s.r.o.
+Debetní karta
+123456XXXXXX7890
+Částka v měně účtu
+-1.234,56 CZK
+Původní částka a měna
+-49,99 EUR
+Kurz
+24,70
+Kategorie pohybu
+Platba kartou
+Typ pohybu
+Platba kartou
+Konstantní symbol
+1178
+Detaily
+DEMO SOFTWARE; PRAHA; CZE
+Disponibilní zůstatek po pohybu
++98.765,43 CZK
+TEXT;
+
+        $message = new BankEmailNoticeMessage(
+            uid: 3,
+            messageId: '<sanitized-card@rb.cz>',
+            date: new \DateTimeImmutable('2026-08-19 04:41:00'),
+            sender: 'Raiffeisenbank <info@rb.cz>',
+            subject: 'Pohyb na účtě',
+            text: $text,
+            raw: $text,
+        );
+
+        $parser = new RaiffeisenbankEmailNoticeParser();
+        $provider = $parser->defaultProvider();
+        self::assertInstanceOf(BankEmailNoticeProvider::class, $provider);
+        self::assertTrue($parser->supports($message, $provider));
+
+        $parsed = $parser->parse($message, $provider);
+
+        self::assertSame('', $parsed->variableSymbol);
+        self::assertSame(-1234.56, $parsed->amount);
+        self::assertSame('CZK', $parsed->currency);
+        self::assertSame('2026-08-19', $parsed->postedAt);
+        self::assertSame('1000000005/5500', $parsed->recipientAccount);
+        self::assertNull($parsed->counterpartyAccount);
+        self::assertNull($parsed->counterpartyBank);
+        self::assertSame('DEMO SOFTWARE; PRAHA; CZE', $parsed->counterpartyName);
+        self::assertSame('1178', $parsed->constantSymbol);
+        self::assertNull($parsed->message);
+        self::assertSame(98765.43, $parsed->balance);
+    }
 }
