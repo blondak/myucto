@@ -474,6 +474,16 @@ haléřových součtů proto nemusí být totožný.
 > plnění, na DPHDP3 se uvádí **jen základ** (žádná daň), ale ovlivňují vypořádací
 > koeficient (ř. 51-53).
 
+> [!NOTE]
+> **Identifikovaná osoba** vyplňuje z celé tabulky jen **ř. 3-6 a 12-13**.
+> Zrcadlový odpočet **ř. 43** a navázaný **ř. 47** se vyřadí potichu — to je
+> pointa režimu, IO nárok na odpočet nemá a samovyměřená daň jí zůstává jako
+> skutečný výdaj. Ř. 7/8 (dovoz — daň vybírá celní úřad) a ř. 10/11 (tuzemský
+> RC § 92a — jen mezi plátci) IO věcně nemá. Cokoli dalšího, co z klasifikací
+> vyjde (tuzemské ř. 1/2, oddíl C, odpočty ř. 40+), se vynechá **s upozorněním
+> v náhledu**, ať je vidět, co a proč vypadlo. Kvartální volba se ignoruje —
+> IO podává vždy měsíčně. Podrobnosti [§ 35.1.4](35_Fakturujeme.md#3514-identifikovana-osoba-6g-6l-zdph).
+
 #### Krácený odpočet § 76 (koeficient)
 
 Přijaté faktury s **Nárok na odpočet DPH = Krácený (§76)** (viz
