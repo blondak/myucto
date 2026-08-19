@@ -220,6 +220,75 @@ final class CashJournalDedupFxTest extends CashJournalTestCase
             'NESMÍ tiše spadnout na nominál 826 (1:1).');
     }
 
+    // ── #28: chybějící kurz nesmí shodit CELÝ deník ─────────────────────────
+
+    /**
+     * #28: cizoměnová úhrada ke dni, ke kterému není kurz ani zpětně, a doklad nemá
+     * ani vlastní `exchange_rate` → dřív z toho letěla RuntimeException a `GET
+     * /api/tax-evidence/cash-journal` vracel 500 pro CELÝ rok. Účetní neviděl ani
+     * zbytek deníku a z hlášky nepoznal, který doklad je vadný.
+     *
+     * Nově deník projde, vadný řádek je oceněn nulou (NE tichým 1:1, to by pohyb
+     * podhodnotilo ~25×), nese příznak `fx_rate_missing` a ve `warnings[]` je
+     * blokující položka s identifikací dokladu.
+     */
+    public function testMissingRateFlagsTheRowInsteadOfKillingTheWholeJournal(): void
+    {
+        $xts = $this->noHistoryCurrency($this->supplierId);
+        $broken = $this->invoiceFx($this->supplierId, $xts, 24.50, 826.45, 1000.0);
+        // Ani kurz na faktuře — jinak by G4 fallback pohyb ocenit uměl.
+        $this->db->pdo()->prepare('UPDATE invoices SET exchange_rate = NULL WHERE id = ?')->execute([$broken]);
+        $this->paymentCcy($this->supplierId, $broken, 1000.0, 'XTS', 'mark_paid', null);
+
+        // Zdravý korunový příjem ve stejném období — MUSÍ být vidět i s vadným sousedem.
+        $healthy = $this->cashDoc('in', 'sale', 5000.0);
+
+        $res = $this->fullYear($this->supplierId);
+
+        self::assertSame(1, $this->countRows($res, 'cash', $healthy),
+            '#28: jeden neoceněný doklad nesmí schovat zbytek deníku.');
+        self::assertEqualsWithDelta(5000.0, $res['totals']['prijem_danovy'], 0.01,
+            'Neoceněný pohyb do daňového základu nevstupuje (nula, ne tichý nominál 1 000).');
+
+        $flagged = array_values(array_filter(
+            $res['rows'],
+            static fn (array $r): bool => $r['source_type'] === 'invoice_payment' && $r['fx_rate_missing'] === true,
+        ));
+        self::assertCount(1, $flagged, 'Řádek bez kurzu musí být označený příznakem fx_rate_missing.');
+        self::assertSame(0.0, $flagged[0]['income'], 'Neoceněný řádek se vykazuje nulou.');
+
+        $fxWarnings = array_values(array_filter(
+            $res['warnings'],
+            static fn (array $w): bool => ($w['type'] ?? '') === 'fx_rate_missing',
+        ));
+        self::assertCount(1, $fxWarnings, 'Chybějící kurz musí být ve warnings[], ať účetní ví, co opravit.');
+        self::assertTrue($fxWarnings[0]['blocking'], 'Varování je blokující — daňový základ je podhodnocený.');
+        self::assertStringContainsString(self::YEAR . '-06-15', $fxWarnings[0]['message'],
+            'Zpráva musí identifikovat doklad datem pohybu.');
+    }
+
+    /**
+     * Tatáž pojistka pro nohu B: nespárovaný cizoměnový bankovní pohyb se ocení
+     * kurzem měny pohybu a ten ŽÁDNÝ fallback na doklad nemá. Bez kurzu k datu
+     * (ani staršího) tedy vzniká NULL — a i ten musí skončit varováním, ne 500.
+     */
+    public function testMissingRateOnUnmatchedBankMovementIsAlsoOnlyAWarning(): void
+    {
+        $st = $this->statement($this->supplierId, $this->accountA);
+        $tx = $this->bankTx($st, 1000.0);
+        // bankTx() měnu hardcoduje na CZK — pro FX scénář ji přepíšeme.
+        $this->db->pdo()->prepare('UPDATE bank_transactions SET currency = ? WHERE id = ?')->execute(['XTS', $tx]);
+
+        $res = $this->fullYear($this->supplierId);
+
+        self::assertSame(1, $this->countRows($res, 'bank', $tx), 'Pohyb musí v deníku zůstat vidět.');
+        $fxWarnings = array_values(array_filter(
+            $res['warnings'],
+            static fn (array $w): bool => ($w['type'] ?? '') === 'fx_rate_missing',
+        ));
+        self::assertCount(1, $fxWarnings, 'I bankovní noha hlásí chybějící kurz varováním.');
+    }
+
     // ── H2: bank-paid income vanishes if statement stops matching → warning ──
 
     /** H2: source='bank' platba, jejíž výpis neodpovídá účtu supplieru → blokující varování. */

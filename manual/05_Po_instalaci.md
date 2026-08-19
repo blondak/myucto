@@ -77,6 +77,7 @@ Oba režimy nekombinuj, jinak by se některé úlohy spouštěly dvakrát.
 | `cron-vat-clearing` | 1× měsíčně 1. dne 04:30; interní doklad zúčtování DPH za skončené období ([§ 62.3.3](62_Ucetni_osnova.md#6233-mesicni-zuctovani-dph)) |
 | `cron-vat-status-apply` | 1× denně 00:30; aplikuje plánované změny plátcovství DPH v den účinnosti |
 | `cron-journal-integrity-check` | 1× denně 02:30; čtecí kontrola integrity deníku |
+| `cron-cnb-rates` | 1× denně 15:00; stahuje kurzovní lístek ČNB do kurzové historie a dohání mezery za posledních 30 dnů. Bez ní se kurzy plní jen náhodně při prvním dotazu a cizoměnová úhrada ke dni bez kurzu se nemá čím ocenit |
 | `cron-license-renew` | 1× denně 05:00 |
 | `cron-version-check` | 1× denně 06:00; kontrola dostupné aktualizace |
 | `cron-dispatch` | každou minutu, pouze v režimu jednoho dispatcheru |

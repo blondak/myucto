@@ -32,6 +32,8 @@ export interface CashJournalRow {
   vat: number
   unclassified: boolean
   blocking: boolean
+  /** Cizoměnový pohyb bez kurzu ke dni úhrady — není oceněn (income/expense = 0). */
+  fx_rate_missing: boolean
 }
 
 export interface CashJournalTotals {

@@ -187,6 +187,33 @@ final class CnbExchangeRateClient
     }
 
     /**
+     * Stáhne kurzovní lístek daného dne a uloží VŠECHNY vyhlášené měny do cache.
+     * Vrací počet uložených kurzů; 0 znamená „ČNB pro ten den nic nevyhlásila"
+     * (víkend, svátek, den ještě nezveřejněný) nebo nedostupný feed.
+     *
+     * Určeno pro `api/bin/cron-cnb-rates.php` (#28): bez pravidelného plnění byla
+     * `exchange_rates` jen ad-hoc cache prvního dotazu, takže historie zůstávala
+     * děravá a cizoměnová úhrada ke dni bez kurzu neměla čím ocenit.
+     * Idempotentní — opakovaný běh jen přepíše tytéž hodnoty.
+     */
+    public function syncDay(DateTimeImmutable $date): int
+    {
+        // Demo nesmí generovat odchozí provoz (viz getRate) — mlčky nic neudělá.
+        if ($this->isDemo()) {
+            return 0;
+        }
+
+        $rates = $this->fetchAndParse($date);
+        if ($rates === null || $rates === []) {
+            return 0;
+        }
+
+        $this->saveBatch($date->format('Y-m-d'), $rates);
+
+        return count($rates);
+    }
+
+    /**
      * Fetch + parse jednoho dne. Vrací map [CODE => rate_per_unit] nebo null pokud
      * feed nedostupný / 404 / parse selhal.
      *

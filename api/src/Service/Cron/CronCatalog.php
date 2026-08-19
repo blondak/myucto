@@ -264,6 +264,20 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // #28: bez tohohle se `exchange_rates` plnila jen jako ad-hoc cache
+                // prvního dotazu, takže u čerstvé instalace v ní seděl jediný kurzový
+                // den — a cizoměnová úhrada ke dni bez kurzu shodila celý peněžní
+                // deník. 15:00, protože ČNB vyhlašuje kurz kolem 14:30; mezery si
+                // úloha dohání sama, takže pozdější běh o nic nepřijde.
+                'script' => 'cron-cnb-rates',
+                'recommended' => 'daily_1500',
+                'linux_cron' => '0 15 * * *',
+                'windows_schtasks' => '/sc daily /st 15:00',
+                'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 'script' => 'cron-version-check',
                 'recommended' => 'daily_0600',
                 'linux_cron' => '0 6 * * *',

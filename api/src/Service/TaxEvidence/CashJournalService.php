@@ -109,6 +109,33 @@ final class CashJournalService
                 ];
             }
 
+            // #28: cizoměnový pohyb, který se neměl čím ocenit — ke dni úhrady (ani
+            // zpětně) není kurz v `exchange_rates` a doklad nemá ani vlastní kurz.
+            // Dřív kvůli jednomu takovému dokladu spadlo sestavení celého deníku na
+            // 500; teď projde s nulou a účetní dostane adresné blokující varování,
+            // ať ví, který doklad opravit. Trvalá prevence je cron `cron-cnb-rates`.
+            if (($r['fx_rate_missing'] ?? false) === true) {
+                $doc = trim((string) $r['doc_no']);
+                $partner = trim((string) $r['partner']);
+                $warnings[] = [
+                    'type'        => 'fx_rate_missing',
+                    'source_type' => (string) $r['source_type'],
+                    'source_id'   => (int) $r['source_id'],
+                    'date'        => (string) $r['movement_date'],
+                    'direction'   => (string) $r['direction'],
+                    'amount'      => 0.0,
+                    'blocking'    => true,
+                    'message'     => sprintf(
+                        'Cizoměnový pohyb %s ze dne %s%s nemá kurz ke dni úhrady — není oceněn '
+                            . 'a nevstupuje do daňového základu. Doplňte kurzy ČNB (úloha cron-cnb-rates) '
+                            . 'nebo kurz přímo na dokladu.',
+                        $doc !== '' ? '„' . $doc . '"' : '#' . (int) $r['source_id'],
+                        (string) $r['movement_date'],
+                        $partner !== '' ? ' (' . $partner . ')' : '',
+                    ),
+                ];
+            }
+
             // R5: sub-agregace pro vysvětlení variance (jen daňový příjem)
             $taxableIncome = $c['alloc']['income_taxable'] ?? 0.0;
             if ($taxableIncome > 0) {
@@ -142,6 +169,7 @@ final class CashJournalService
                 'vat'                 => $c['vat'],
                 'unclassified'        => $c['unclassified'],
                 'blocking'            => $c['blocking'],
+                'fx_rate_missing'     => ($r['fx_rate_missing'] ?? false) === true,
             ];
         }
 

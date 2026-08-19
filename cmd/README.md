@@ -41,6 +41,7 @@ samotného skriptu, takže jsou přenositelné mezi `C:\inetpub\wwwroot\…`,
 | `license-activate.{cmd,sh}` | **Headless aktivace licenčního klíče** (E4) bez přihlášení do UI — `license-activate.cmd MYU-XXXX-XXXX-XXXX-XXXX [--takeover]`. Zavolá licenční server, uloží klíč+token, vypíše tarif / počty / platnost (u doživotní licence „Neomezeně"). Hodí se pro demo instance, servery a automatizaci. `--takeover` vynutí přenos vazby z jiné instalace (po chybě `already_bound`) |
 | `license-status.{cmd,sh}` | Výpis aktuálního stavu licence (E4) — stav, tarif, počty, platnost, maskovaný klíč |
 | `license-deactivate.{cmd,sh}` | Deaktivace licence (E4) — uvolní vazbu na serveru a smaže klíč/token lokálně |
+| `cron-cnb-rates.{cmd,sh}` | Denní stažení kurzovního lístku ČNB do `exchange_rates` (`--days=N`, `--dry-run`). Bez ní se tabulka plní jen jako ad-hoc cache prvního dotazu, historie zůstává děravá a cizoměnová úhrada ke dni bez kurzu nemá čím ocenit pohyb. Dohání i mezery za posledních 30 dnů; dny, které kurz už mají, přeskočí bez HTTP volání. Jednorázové doplnění celé historie: `api/bin/backfill-cnb-rates.php` |
 | `cron-version-check.{cmd,sh}` | Denní kontrola GitHub Releases API; cachuje poslední dostupnou verzi + release notes pro **Systém → Aktualizace** |
 | `cron-dispatch.{cmd,sh}` | **Plánovač** pro režim „jeden dispatcher" (Systém → Plánované úlohy). Jediná položka běžící každou minutu, která spustí právě ty úlohy, které jsou na řadě a mají co dělat. V default režimu „jednotlivé úlohy" se neplánuje (`--dry-run`, `--at="RRRR-MM-DD HH:MM"`) |
 
@@ -95,6 +96,7 @@ se záměrně nevytvoří a úloha skončí chybou (vidět v **Systém → Plán
 | `cron-payroll-post` | 1× měsíčně, 1. den | 04:00 (`0 4 1 * *`) |
 | `cron-vat-clearing` | 1× měsíčně, 1. den | 04:30 (`30 4 1 * *`) |
 | `cron-license-renew` | 1× denně | 05:00 |
+| `cron-cnb-rates` | 1× denně (po vyhlášení kurzu ČNB ~14:30) | 15:00 |
 | `cron-version-check` | 1× denně | 06:00 |
 | `cron-dispatch` | každou minutu — **jen v režimu dispatcher**, kde nahrazuje všechny položky výše | `* * * * *` |
 
@@ -126,6 +128,7 @@ schtasks /create /tn "MyUcto JournalIntegrity"  /tr "C:\inetpub\wwwroot\myucto.c
 schtasks /create /tn "MyUcto PayrollPost"       /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-post.cmd"             /sc monthly /d 1 /st 04:00 /ru SYSTEM
 schtasks /create /tn "MyUcto VatClearing"       /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-vat-clearing.cmd"            /sc monthly /d 1 /st 04:30 /ru SYSTEM
 schtasks /create /tn "MyUcto LicenseRenew"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-license-renew.cmd"          /sc daily /st 05:00 /ru SYSTEM
+schtasks /create /tn "MyUcto CnbRates"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-cnb-rates.cmd"             /sc daily /st 15:00 /ru SYSTEM
 schtasks /create /tn "MyUcto VersionCheck"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-version-check.cmd"           /sc daily /st 06:00 /ru SYSTEM
 
 REM Režim "jeden dispatcher" — MÍSTO všech úloh výše zaregistruj jen tuhle jednu.
@@ -182,6 +185,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
   0  4  1   *   *    /var/www/myucto.cz/cmd/cron-payroll-post.sh
  30  4  1   *   *    /var/www/myucto.cz/cmd/cron-vat-clearing.sh
   0  5  *   *   *    /var/www/myucto.cz/cmd/cron-license-renew.sh
+  0 15  *   *   *    /var/www/myucto.cz/cmd/cron-cnb-rates.sh
   0  6  *   *   *    /var/www/myucto.cz/cmd/cron-version-check.sh
 ```
 

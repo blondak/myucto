@@ -460,14 +460,25 @@ final class CashJournalRepository
         return $date;
     }
 
-    /** @param array<string,mixed> $r @return array<string,mixed> */
+    /**
+     * NULL v `amount` znamená, že se cizoměnový pohyb neměl čím ocenit: ke dni úhrady
+     * (ani zpětně) není v `exchange_rates` kurz a doklad nemá ani vlastní `exchange_rate`.
+     *
+     * Dřív tady letěla výjimka a shodila SESTAVENÍ CELÉHO DENÍKU na 500 (#28) — účetní
+     * neviděl ani zbytek roku a z hlášky nepoznal, který doklad je vadný. Řádek proto
+     * projde s nulou a příznakem `fx_rate_missing`; {@see \MyInvoice\Service\TaxEvidence\CashJournalService}
+     * z něj udělá blokující varování s identifikací dokladu. Nula, ne tichý přepočet
+     * kurzem 1:1 — ten by pohyb podhodnotil ~25× a v daňovém základu by to nikdo nenašel.
+     * Do agregací (running_delta, opening/closing balance) NULL stejně nevstupoval,
+     * SQL `SUM` ho ignoruje, takže se čísla proti dosavadnímu chování nemění.
+     *
+     * @param array<string,mixed> $r @return array<string,mixed>
+     */
     private function castRow(array $r): array
     {
-        if (!array_key_exists('amount', $r) || $r['amount'] === null) {
-            throw new \RuntimeException('Pro cizoměnový pohyb chybí kurz ke dni úhrady.');
-        }
+        $r['fx_rate_missing'] = !array_key_exists('amount', $r) || $r['amount'] === null;
         $r['source_id']    = (int) $r['source_id'];
-        $r['amount']       = round((float) $r['amount'], 2);
+        $r['amount']       = $r['fx_rate_missing'] ? 0.0 : round((float) $r['amount'], 2);
         $r['running_delta'] = isset($r['running_delta']) ? round((float) $r['running_delta'], 2) : 0.0;
         foreach (['invoice_id', 'purchase_invoice_id'] as $k) {
             $r[$k] = ($r[$k] === null) ? null : (int) $r[$k];

@@ -228,7 +228,9 @@ onMounted(load)
       <div class="flex items-start gap-2">
         <svg class="w-5 h-5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" /></svg>
         <div class="text-sm">
-          <p class="font-semibold">{{ t('tax_evidence.cash_journal.unclassified_warning', { n: unclassifiedCount || blockingWarnings.length }) }}</p>
+          <p class="font-semibold">{{ unclassifiedCount > 0
+            ? t('tax_evidence.cash_journal.unclassified_warning', { n: unclassifiedCount })
+            : t('tax_evidence.cash_journal.blocking_warning', { n: blockingWarnings.length }) }}</p>
           <ul class="mt-1.5 space-y-0.5 text-danger-500">
             <li v-for="(w, i) in blockingWarnings" :key="i">{{ w.message }}</li>
           </ul>
@@ -336,7 +338,7 @@ onMounted(load)
           </thead>
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="(row, i) in report.rows" :key="`${row.source_type}-${row.source_id}-${i}`"
-              class="hover:bg-neutral-50" :class="row.unclassified ? 'bg-danger-50/40' : ''">
+              class="hover:bg-neutral-50" :class="row.unclassified || row.fx_rate_missing ? 'bg-danger-50/40' : ''">
               <td v-if="tbl.isVisible('date')" class="px-3 py-2 whitespace-nowrap">{{ row.date }}</td>
               <td v-if="tbl.isVisible('doc')" class="px-3 py-2">
                 <RouterLink v-if="docLink(row)" :to="docLink(row)!"
