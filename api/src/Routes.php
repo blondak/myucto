@@ -353,6 +353,10 @@ final class Routes
             $g->post('/setup-crpdph-lookup', SetupCrpDphLookupAction::class);  // public proxy do registru plátců DPH (účty z DIČ)
             $g->post('/setup-sample',    SetupSampleAction::class);         // public sample data generator (jen pokud nejsou data)
             $g->post('/login',           LoginAction::class);
+            $g->get ('/domain-context',  \MyInvoice\Action\Auth\DomainContextAction::class);
+            $g->post('/domain-login/start',     [\MyInvoice\Action\Auth\DomainLoginAction::class, 'start']);
+            $g->post('/domain-login/authorize', [\MyInvoice\Action\Auth\DomainLoginAction::class, 'authorize']);
+            $g->post('/domain-login/exchange',  [\MyInvoice\Action\Auth\DomainLoginAction::class, 'exchange']);
             $g->post('/webauthn/login/options', [LoginAction::class, 'passkeyOptions']);
             $g->post('/logout',          LogoutAction::class);
             $g->get ('/me',              MeAction::class);
@@ -674,6 +678,7 @@ final class Routes
         $app->get    ('/api/public/work-report/{token:[a-f0-9]{32,128}}',              PublicWorkReportGetAction::class);
         $app->post   ('/api/public/work-report/{token:[a-f0-9]{32,128}}/request-code', PublicWorkReportRequestCodeAction::class);
         $app->post   ('/api/public/work-report/{token:[a-f0-9]{32,128}}/verify',       PublicWorkReportVerifyAction::class);
+        $app->get    ('/api/public/domain-verification/{token:[a-f0-9]{64}}', \MyInvoice\Action\Public\DomainVerificationAction::class);
 
         // Úplné mzdy — samostatný bounded context nezávislý na účetním režimu.
         $app->group('/api/payroll', function ($g) {
@@ -1867,6 +1872,14 @@ final class Routes
 
         // Settings (M6) — aktuální supplier (z X-Supplier-Id)
         $app->get ('/api/settings/supplier',                [SettingsAction::class, 'getSupplier']);
+        $app->get    ('/api/settings/domains',                         [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'list']);
+        $app->post   ('/api/settings/domains',                         [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'create']);
+        $app->put    ('/api/settings/domains/{id:[0-9]+}',              [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'update']);
+        $app->post   ('/api/settings/domains/{id:[0-9]+}/challenge',    [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'rotateChallenge']);
+        $app->post   ('/api/settings/domains/{id:[0-9]+}/verify',       [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'verify']);
+        $app->post   ('/api/settings/domains/{id:[0-9]+}/activate',     [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'activate']);
+        $app->post   ('/api/settings/domains/{id:[0-9]+}/disable',      [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'disable']);
+        $app->delete ('/api/settings/domains/{id:[0-9]+}',              [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'delete']);
         $app->put ('/api/settings/supplier',                [SettingsAction::class, 'updateSupplier']);
         // Historie plátcovství DPH (EPIC VH-01) — seznam vrací GET /api/settings/supplier.
         $app->post   ('/api/settings/vat-status-history',              [\MyInvoice\Action\Settings\VatStatusHistoryAction::class, 'save']);

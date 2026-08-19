@@ -141,12 +141,14 @@ jobs:
       #
       # Server MUSÍ jet nad toutéž `_test` databází jako PHPUnit — fixtury zakládá
       # test, ověřuje je HTTP volání. Nad cfg.php databází by viděl prázdno.
+      # Host v URL MUSÍ odpovídat kanonickému app.url z cfg.php. TenantDomainMiddleware
+      # jiný Host záměrně odmítne jako neznámou doménu (421), i když míří na stejnou IP.
       - name: Start test server
         run: |
           MYINVOICE_DB_NAME=myinvoice_ci_test \
             php -S 127.0.0.1:8080 api/bin/dev-server-router.php >/tmp/php-server.log 2>&1 &
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/api/health >/dev/null; then exit 0; fi
+            if curl -fsS http://localhost:8080/api/health >/dev/null; then exit 0; fi
             sleep 1
           done
           echo "Server se nerozeběhl:"; cat /tmp/php-server.log; exit 1
@@ -170,7 +172,7 @@ jobs:
       - name: Run PHPUnit
         working-directory: api
         env:
-          MYINVOICE_TEST_URL: http://127.0.0.1:8080
+          MYINVOICE_TEST_URL: http://localhost:8080
         run: vendor/bin/phpunit --no-coverage
 
   frontend:

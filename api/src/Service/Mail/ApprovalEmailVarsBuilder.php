@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Mail;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\WorkReportRepository;
+use MyInvoice\Service\Tenant\TenantUrlResolver;
 
 /**
  * Sestavuje template variables pro invoice_approval.{cs|en}.{html|txt}.twig.
@@ -17,6 +18,7 @@ final class ApprovalEmailVarsBuilder
         private readonly Connection $db,
         private readonly Config $config,
         private readonly WorkReportRepository $workReports,
+        private readonly ?TenantUrlResolver $tenantUrls = null,
     ) {}
 
     /**
@@ -31,8 +33,13 @@ final class ApprovalEmailVarsBuilder
         string $locale,
         bool $isReminder = false,
     ): array {
-        $appUrl = rtrim((string) $this->config->get('app.url', ''), '/');
-        $approvalUrl = $appUrl . '/approval/' . $approvalToken;
+        $approvalUrl = $this->tenantUrls !== null
+            ? $this->tenantUrls->forSupplier(
+                (int) ($invoice['supplier_id'] ?? 0),
+                'public_links',
+                '/approval/' . $approvalToken,
+            )
+            : rtrim((string) $this->config->get('app.url', ''), '/') . '/approval/' . $approvalToken;
 
         $varsymbolOrId = $invoice['varsymbol'] ?: ('DRAFT-' . $invoice['id']);
         // Doplň pole, které se používá ve šabloně (subject + filename)

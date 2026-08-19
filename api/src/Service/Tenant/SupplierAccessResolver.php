@@ -18,7 +18,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * PAT → X-Supplier-Id header → ?supplier_id query → fallback) a zároveň
  * vynucuje membership z user_suppliers:
  *
- *   - systémový superadmin: bez omezení, vidí všechny firmy a override se neaplikuje
+ *   - systémový superadmin: na canonical hostu vidí všechny firmy; vlastní host
+ *     zachová membership výjimku, ale zamkne ho na firmu ověřené domény
  *   - každý non-superadmin BEZ membership řádků = denied (fail-closed)
  *   - uživatel S membership: explicitní požadavek na cizí firmu → denied
  *     (middleware vrací 403); bez explicitního požadavku fallback na nejnižší
@@ -58,6 +59,23 @@ final class SupplierAccessResolver
             || (($user['role_summary']['type'] ?? null) === 'superadmin')
             || (($user['role_summary']['system_key'] ?? null) === 'superadmin');
 
+        // Vlastní aktivní hostname je nejsilnější tenantová autorita. Ani PAT,
+        // X-Supplier-Id ani query parametr nesmí request přesměrovat do jiné firmy.
+        $domain = $request->getAttribute(\MyInvoice\Middleware\TenantDomainMiddleware::ATTR_CONTEXT);
+        if ($domain instanceof TenantDomainContext && $domain->locksSupplier()) {
+            $sid = (int) $domain->supplierId;
+            $requested = $this->requestedId($request);
+            $apiToken = $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN);
+            $boundSid = is_array($apiToken) && ($apiToken['supplier_id'] ?? null) !== null
+                ? (int) $apiToken['supplier_id']
+                : 0;
+            if (($requested > 0 && $requested !== $sid) || ($boundSid > 0 && $boundSid !== $sid)) {
+                return new SupplierAccess($sid, true, null);
+            }
+            $key = 'domain:' . $userId . ':' . $roleId . ':' . (int) $isSuperadmin . ':' . $sid;
+            return $this->memo[$key] ??= $this->resolveBound($userId, $isSuperadmin, $sid);
+        }
+
         // 0. Bearer (API token) bound na konkrétní supplier — forcuj ho, ignoruj
         //    header/query (token nesmí "skočit" do jiné firmy).
         $apiToken = $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN);
@@ -73,15 +91,21 @@ final class SupplierAccessResolver
     }
 
     /**
-     * PAT bound na supplier_id. Globální admin i uživatel bez membershipu ho
-     * dostane bez omezení; uživatel s membershipem jen když je bound supplier
-     * v jeho přiřazených firmách (jinak denied — token nesmí obejít F0).
+     * Autoritativní supplier z PAT nebo ověřené domény. Globální admin ho
+     * dostane bez membership omezení; ostatní pouze ve své přiřazené firmě.
      */
     private function resolveBound(int $userId, bool $isSuperadmin, int $sid): SupplierAccess
     {
         if ($isSuperadmin) {
             return new SupplierAccess($sid, false, null);
         }
+
+        return $this->resolveMemberBound($userId, $sid);
+    }
+
+    /** Membership kontrola pro běžné role nad autoritativně určenou firmou. */
+    private function resolveMemberBound(int $userId, int $sid): SupplierAccess
+    {
         $assignments = $this->assignmentsFor($userId);
         if ($assignments === []) {
             return new SupplierAccess($sid, true, null);

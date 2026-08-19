@@ -23,7 +23,10 @@ test('logout clears private state even when the server request fails and isolate
   assert.match(auth, /if \(requestCsrfToken\) setCsrfToken\(requestCsrfToken\)/)
   assert.match(auth, /catch \(error\) \{\s*logoutRetryCsrfToken = requestCsrfToken[\s\S]*throw error/)
   assert.match(auth, /finally \{\s*clearPrivateState\(\)/)
-  assert.match(auth, /clearPrivateState[\s\S]*setCsrfToken\(null\)[\s\S]*setAvailable\(\[\], 0\)/)
+  assert.match(
+    auth,
+    /clearPrivateState[\s\S]*setCsrfToken\(null\)[\s\S]*setAvailable\(\[\], 0, domainContext\.value\?\.locked === true\)/,
+  )
 })
 
 test('logout failures are surfaced by both private layout and forced MFA setup', () => {
@@ -48,7 +51,7 @@ test('manual lock is available only for a session with passkey unlock', () => {
 // my zpátky na `/`, guard sem… Celé v JS, bez reloadu — poznat je to jen jako
 // opakující se `Promise.then` v call stacku.
 test('login and the router guard agree on what "authenticated" means', () => {
-  assert.match(router, /if \(requiresAuth && !auth\.isAuthenticated\) \{[\s\S]*?await auth\.refresh\(\)[\s\S]*?if \(!auth\.isAuthenticated\) \{[\s\S]*?return \{ name: 'login' \}/)
+  assert.match(router, /if \(requiresAuth && !auth\.isAuthenticated\) \{[\s\S]*?await auth\.refresh\(\)[\s\S]*?if \(!auth\.isAuthenticated\) \{[\s\S]*?name: 'login'/)
   assert.match(login, /await auth\.refresh\(\)\s*\n\s*if \(auth\.isAuthenticated\) \{/)
   assert.doesNotMatch(login, /const stillAuthed = await auth\.refresh\(\)/)
 })
@@ -72,7 +75,7 @@ test('failed sample data generation is reported as an error, not a passing note'
 // /api/auth/me) smyčku vyrobí i tak. Musí ji utnout pojistka — jinak nainstalovaná
 // PWA zamrzne v okně bez adresního řádku, ze kterého se nedá odejít.
 test('a redirect loop between / and /login is broken instead of spinning forever', () => {
-  assert.match(router, /if \(!auth\.isAuthenticated\) \{\s*\n\s*recordLoginBounce\(\)\s*\n\s*return \{ name: 'login' \}/)
+  assert.match(router, /if \(!auth\.isAuthenticated\) \{\s*\n\s*recordLoginBounce\(\)[\s\S]*?name: 'login'/)
   assert.match(router, /export function loginRedirectLoopDetected\(\)/)
   assert.match(router, /export function clearLoginBounces\(\)/)
   // Počítadlo musí přežít tvrdý window.location redirect z api/client.ts.
@@ -84,7 +87,10 @@ test('a redirect loop between / and /login is broken instead of spinning forever
     login.indexOf('loginRedirectLoopDetected()') < login.indexOf('if (auth.isAuthenticated) {'),
     'kontrola smyčky musí předcházet automatickému redirectu',
   )
-  assert.match(login, /clearLoginBounces\(\)\s*\n\s*router\.push/)
+  assert.match(
+    login,
+    /clearLoginBounces\(\)\s*\n\s*if \(await finishDomainLoginIfNeeded\(\)\) return\s*\n\s*router\.push/,
+  )
 })
 
 // Service worker je vázaný na origin, ne na aplikaci. `http://localhost:8080` běžně

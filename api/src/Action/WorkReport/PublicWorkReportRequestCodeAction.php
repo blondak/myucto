@@ -10,6 +10,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Captcha\TurnstileVerifier;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\WorkReport\WorkReportLinkService;
+use MyInvoice\Service\Tenant\PublicTenantGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -28,6 +29,7 @@ final class PublicWorkReportRequestCodeAction
         private readonly TurnstileVerifier $captcha,
         private readonly IpMatcher $ipMatcher,
         private readonly ActivityLogger $logger,
+        private readonly PublicTenantGuard $tenantGuard,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -40,6 +42,9 @@ final class PublicWorkReportRequestCodeAction
         if ($link === null) {
             return Json::error($response, 'token_invalid_or_expired',
                 'Tento odkaz není platný nebo byl zneplatněn.', 404);
+        }
+        if (!$this->tenantGuard->allows($request, (int) $link['supplier_id'])) {
+            return Json::error($response, 'not_found', 'Tento odkaz není platný.', 404);
         }
 
         $body = (array) ($request->getParsedBody() ?? []);

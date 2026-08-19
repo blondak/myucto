@@ -21,6 +21,12 @@ final class MfaStepUpService
     /** Vygenerování nové sady záložních kódů — stará se tím nevratně zahodí. */
     public const OPERATION_RECOVERY_CODES = 'mfa.recovery_codes';
 
+    public static function domainActivationOperation(int $domainId): string
+    {
+        if ($domainId < 1) throw new \InvalidArgumentException('Neplatné ID domény.');
+        return 'domain.activate:' . $domainId;
+    }
+
     private const METHODS = ['passkey', 'totp', 'recovery'];
 
     /**
@@ -47,11 +53,14 @@ final class MfaStepUpService
         if (!in_array($authMethod, self::METHODS, true)) {
             throw new StepUpOperationException('Nepodporovaná metoda step-up ověření.');
         }
+        $isPasskeyRevoke = preg_match('/^passkey\.revoke:([1-9][0-9]*)$/D', $operation, $passkeyMatches) === 1;
+        $isDomainActivation = preg_match('/^domain\.activate:([1-9][0-9]*)$/D', $operation) === 1;
         if ($operation !== self::OPERATION_API_TOKEN_CREATE
             && $operation !== self::OPERATION_PASSKEY_REGISTER
             && $operation !== self::OPERATION_EPO_CERTIFICATE
             && $operation !== self::OPERATION_RECOVERY_CODES
-            && preg_match('/^passkey\.revoke:([1-9][0-9]*)$/D', $operation, $matches) !== 1
+            && !$isPasskeyRevoke
+            && !$isDomainActivation
         ) {
             throw new StepUpOperationException('Nepovolený účel step-up ověření.');
         }
@@ -59,15 +68,14 @@ final class MfaStepUpService
         if ($authMethod === 'recovery') {
             // Odebrání klíče je hlavní důvod, proč kód existuje — bez něj by uživatel
             // sice byl přihlášený, ale ztracený passkey by ze seznamu neodstranil.
-            $isRevoke = isset($matches[1]);
-            if (!$isRevoke && !in_array($operation, self::RECOVERY_OPERATIONS, true)) {
+            if (!$isPasskeyRevoke && !in_array($operation, self::RECOVERY_OPERATIONS, true)) {
                 throw new StepUpOperationException('Záložní kód tuhle operaci potvrdit nemůže.');
             }
         }
 
-        if (isset($matches[1])) {
+        if ($isPasskeyRevoke) {
             $credentialId = filter_var(
-                $matches[1],
+                $passkeyMatches[1],
                 FILTER_VALIDATE_INT,
                 ['options' => ['min_range' => 1, 'max_range' => PHP_INT_MAX]],
             );

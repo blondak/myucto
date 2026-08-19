@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { isClientDomainAuthenticatedPath } from '@/security/clientRoutePolicy'
 
 export const api = axios.create({
   baseURL: '/api',
@@ -11,9 +12,14 @@ export const api = axios.create({
 
 // CSRF token interceptor — token žije v Pinia auth store
 let csrfToken: string | null = null
+let domainSupplierLock: number | null = null
 let forbiddenPermissionHandler: (() => void | Promise<void>) | null = null
 export function setCsrfToken(token: string | null) {
   csrfToken = token
+}
+export function setDomainSupplierLock(supplierId: number | null) {
+  domainSupplierLock = supplierId && supplierId > 0 ? supplierId : null
+  if (domainSupplierLock !== null) localStorage.removeItem('myinvoice.current_supplier_id')
 }
 export function setForbiddenPermissionHandler(handler: () => void | Promise<void>) {
   forbiddenPermissionHandler = handler
@@ -30,9 +36,13 @@ api.interceptors.request.use((config) => {
 
   // Multi-supplier — aktuální supplier z localStorage (Pinia persist).
   // Server fallbackuje na MIN(supplier.id) když chybí/neplatný.
-  const sid = localStorage.getItem('myinvoice.current_supplier_id')
-  if (sid && /^\d+$/.test(sid) && !config.headers.has('X-Supplier-Id')) {
-    config.headers.set('X-Supplier-Id', sid)
+  if (domainSupplierLock !== null) {
+    config.headers.delete('X-Supplier-Id')
+  } else {
+    const sid = localStorage.getItem('myinvoice.current_supplier_id')
+    if (sid && /^\d+$/.test(sid) && !config.headers.has('X-Supplier-Id')) {
+      config.headers.set('X-Supplier-Id', sid)
+    }
   }
   return config
 })
@@ -52,7 +62,10 @@ api.interceptors.response.use(
     ].includes(code)) {
       const path = window.location.pathname
       if (!path.startsWith('/login') && !path.startsWith('/setup')) {
-        window.location.href = '/login'
+        const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
+        window.location.href = domainSupplierLock !== null && isClientDomainAuthenticatedPath(returnPath)
+          ? `/login?return_to=${encodeURIComponent(returnPath)}`
+          : '/login'
       }
     }
     if (status === 423 && code === 'session_locked') {
@@ -136,12 +149,40 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 }
 
+export type AppUrlConfigurationState =
+  | 'missing'
+  | 'invalid'
+  | 'routing_only'
+  | 'hostname_conflict'
+  | 'webauthn_ready'
+
+export type AppUrlConfigurationReason =
+  | 'app_url_missing'
+  | 'app_url_invalid_origin'
+  | 'app_url_webauthn_incompatible'
+  | 'app_url_hostname_conflict'
+  | 'app_url_valid'
+
+export interface AppUrlConfigurationStatus {
+  state: AppUrlConfigurationState
+  reason_code: AppUrlConfigurationReason
+  routing_compatible: boolean
+  webauthn_compatible: boolean
+}
+
+export interface HealthWarning {
+  code: string
+  message: string
+  reason_code?: string
+}
+
 export interface HealthResponse {
   status: 'ok'
   version: string
   db: boolean
   redis: boolean
-  warnings?: Array<{ code: string; message: string }>
+  configuration: { app_url: AppUrlConfigurationStatus }
+  warnings?: HealthWarning[]
   time: string
 }
 

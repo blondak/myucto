@@ -17,7 +17,8 @@ final class RoutePermissionMap
         '/api/auth/setup-status', '/api/auth/setup-preflight', '/api/auth/setup', '/api/auth/setup-ares-lookup',
         '/api/auth/setup-crpdph-lookup', '/api/auth/login',
         '/api/auth/webauthn/login/options', '/api/auth/webauthn/login/verify',
-        '/api/auth/forgot', '/api/auth/reset', '/api/csrf-token',
+        '/api/auth/forgot', '/api/auth/reset', '/api/auth/domain-context',
+        '/api/auth/domain-login/start', '/api/auth/domain-login/exchange', '/api/csrf-token',
     ];
 
     /** @var list<string> */
@@ -33,6 +34,7 @@ final class RoutePermissionMap
         '/api/auth/mfa/recovery-codes',
         '/api/auth/session/status', '/api/auth/session/activity', '/api/auth/session/lock',
         '/api/auth/session/lock-preference',
+        '/api/auth/domain-login/authorize',
         '/api/auth/session/unlock/options', '/api/auth/session/unlock/verify',
     ];
 
@@ -41,6 +43,8 @@ final class RoutePermissionMap
      * @var list<array{0:string,1:string,2:string,3:AccessLevel}>
      */
     private const RULES = [
+        ['GET', '#^/api/settings/domains(/|$)#', 'settings.domains', AccessLevel::READ],
+        ['*', '#^/api/settings/domains(/|$)#', 'settings.domains', AccessLevel::WRITE],
         ['GET', '#^/api/auth/tokens(/|$)#', 'profile.tokens', AccessLevel::READ],
         ['*', '#^/api/auth/tokens(/|$)#', 'profile.tokens', AccessLevel::WRITE],
         // Log volání API vlastními tokeny — čtení sdílí oprávnění se správou tokenů.

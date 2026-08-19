@@ -11,6 +11,7 @@ use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Service\Approval\ApprovalTokenValidator;
 use MyInvoice\Service\Mail\SafeLogoPath;
+use MyInvoice\Service\Tenant\PublicTenantGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -35,6 +36,7 @@ final class PublicApprovalGetAction
         private readonly WorkReportRepository $workReports,
         private readonly Config $config,
         private readonly Connection $db,
+        private readonly PublicTenantGuard $tenantGuard,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -53,6 +55,9 @@ final class PublicApprovalGetAction
             $decided = $this->repo->findByApprovalReceipt($token);
             $status = (string) ($decided['approval_status'] ?? '');
             if ($decided !== null && ($status === 'approved' || $status === 'rejected')) {
+                if (!$this->tenantGuard->allows($request, (int) $decided['supplier_id'])) {
+                    return Json::error($response, 'not_found', 'Tento odkaz není platný.', 404);
+                }
                 return Json::ok($response, [
                     'state'            => $status,
                     'supplier_name'    => $this->resolveSupplierName($decided),
@@ -69,6 +74,10 @@ final class PublicApprovalGetAction
             }
             return Json::error($response, 'token_invalid_or_expired',
                 'Tento odkaz byl již použit nebo není platný.', 404);
+        }
+
+        if (!$this->tenantGuard->allows($request, (int) $invoice['supplier_id'])) {
+            return Json::error($response, 'not_found', 'Tento odkaz není platný.', 404);
         }
 
         if ((string) ($invoice['approval_status'] ?? '') !== 'requested') {

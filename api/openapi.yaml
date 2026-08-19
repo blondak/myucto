@@ -48,7 +48,7 @@ info:
     `403 token_endpoint_forbidden` bez ohledu na scope. Jsou v této dokumentaci
     proto, aby integrátor věděl, že existují a proč je nemá k dispozici:
 
-    - `/api/v1/admin/**` a `/api/v1/settings/{ai-assist,accounting-activation,mode-switch-preview}`
+    - `/api/v1/admin/**` a `/api/v1/settings/{ai-assist,accounting-activation,mode-switch-preview,domains}`
       — konfigurace systému, ne data firmy.
     - `/api/v1/portal/**` a `/api/v1/user/{filters,preferences}` — plocha webového
       rozhraní (klientský portál, uložené filtry a předvolby uživatele).
@@ -194,24 +194,51 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/health:
+    description: |
+      Veřejná provozní diagnostika, interně přepsaná na přesnou cestu
+      `/api/health`. Běžný monitoring instalace musí volat `GET` nebo `HEAD`
+      přes origin a hostname nakonfigurovaný v `app.url`; recovery volání přes
+      jiný request hostname je určeno jen pro stav, kdy canonical origin není
+      použitelný pro routování.
+
+      Pokud `app.url` obsahuje jen whitespace nebo jinou neprázdnou neplatnou
+      hodnotu, tenant host gate propustí přes cizí hostname výhradně přesné
+      `GET`/`HEAD /api/health`. Ostatní metody a cesty zůstávají odmítnuté.
+      Chybějící nebo přesně prázdná hodnota zachovává legacy fallback, ve kterém
+      se platný request hostname považuje za canonical; tento fallback se
+      nerozšiřuje na whitespace ani na jinou neprázdnou chybnou hodnotu.
+      Health je veřejný jen z hlediska autentizace: neobchází reverse proxy ani
+      zapnutý IP allowlist. Během nedokončeného first-run setupu používej `GET`;
+      setup allowlist metodu `HEAD` nepovoluje.
     get:
       tags: [System]
       summary: Health-check
       security: []
       responses:
         '200':
-          description: OK
+          description: |
+            Endpoint odpověděl. `status` neagreguje stav závislostí; monitor musí
+            samostatně vyhodnotit `db`, podle nasazení `redis` a
+            `configuration.app_url`. Diagnostika canonical URL obsahuje jen
+            stabilní stav, reason code a capability booleany, nikdy původní
+            hodnotu ani její části.
           content:
             application/json:
               schema:
                 type: object
-                required: [status, version, db, redis, time]
+                required: [status, version, db, redis, time, configuration]
                 properties:
                   status: { type: string, enum: [ok] }
                   version: { type: string, example: "4.3.1" }
                   db: { type: boolean }
                   redis: { type: boolean }
                   time: { type: string, format: date-time }
+                  configuration:
+                    type: object
+                    additionalProperties: false
+                    required: [app_url]
+                    properties:
+                      app_url: { $ref: '#/components/schemas/AppUrlConfigurationDiagnostic' }
                   warnings:
                     type: array
                     description: Diagnostika dostupná pouze přihlášenému uživateli.
@@ -228,6 +255,16 @@ paths:
                             - session_lock_configuration
                             - session_lock_without_unlock_method
                         message: { type: string }
+    head:
+      tags: [System]
+      summary: Health-check bez response body
+      description: |
+        Stejná dostupnost a tenant-host pravidla jako u `GET`; response body se
+        pro metodu `HEAD` nepřenáší.
+      security: []
+      responses:
+        '200':
+          description: Health endpoint je dosažitelný; bez response body.
 
   /api/v1/version:
     get:
@@ -279,6 +316,40 @@ paths:
               schema: { $ref: '#/components/schemas/ApiMe' }
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/domain-context:
+    get:
+      tags: [Auth]
+      summary: Kontext aktuálního hostname
+      description: |
+        Pre-auth endpoint pro webové rozhraní. Rozliší canonical `app.url`
+        a aktivní vlastní doménu firmy. Vlastní doména obsluhuje celý rozsah
+        autentizovaných rout povolených klientské roli, ne jen prefix `/portal`.
+        WebAuthn-dependent správa passkeys a vynucené nastavení MFA přecházejí
+        serverem svázaným tokem na canonical origin z `app.url`; WebAuthn API
+        vlastní doména neobsluhuje.
+        `supplier_id` je na ní autoritativní a nelze jej přepsat hlavičkou ani
+        query parametrem.
+        Neznámý nebo neaktivní hostname je odmítnut ještě před akcí.
+      security: []
+      responses:
+        '200':
+          description: Bezpečný kontext aktuálního originu
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DomainContext' }
+        '421':
+          description: Hostname není nakonfigurovaný nebo aktivní
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`); endpoint je určený
+            browserovému pre-auth toku bez bearer identity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/clients:
     get:
@@ -4022,6 +4093,29 @@ paths:
         '200': { description: Návrh odmítnut }
         '404': { description: Návrh neexistuje v aktuální firmě }
         '409': { description: Návrh už není pending }
+
+  /api/v1/settings/domains:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Settings]
+      summary: Vlastní domény aktuální firmy
+      description: |
+        Session-only přehled domén klientského portálu a veřejných odkazů,
+        včetně stavu DNS/HTTPS ověření. Bearer token vrátí
+        `403 forbidden_via_token`; změny se provádějí výhradně z webového UI.
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Seznam domén firmy
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SupplierDomain' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/settings/supplier:
     parameters:
@@ -16627,6 +16721,13 @@ components:
       scheme: bearer
       bearerFormat: mi_pat_
       description: Personal Access Token získaný v Nastavení → API tokeny.
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-myinvoice_session
+      description: |
+        Host-only browserová session webového rozhraní. Název lze v lokálním
+        HTTP vývoji změnit konfigurací; produkční výchozí používá prefix `__Host-`.
 
   parameters:
     SupplierIdHeader:
@@ -16676,6 +16777,61 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    AppUrlConfigurationDiagnostic:
+      type: object
+      additionalProperties: false
+      description: |
+        Veřejná bezpečná klasifikace canonical `app.url`. Neobsahuje původní
+        hodnotu, hostname, userinfo, heslo, cestu, query ani fragment.
+
+        Stav a reason code tvoří pevné páry:
+        * `missing` / `app_url_missing`: klíč chybí, je přesně prázdný nebo
+          obsahuje jen whitespace. Diagnostický stav tyto případy záměrně
+          slučuje, ale tenant routing ne: jen chybějící a přesně prázdná hodnota
+          zachovává legacy request-host fallback; whitespace má pouze úzkou
+          health výjimku.
+        * `invalid` / `app_url_invalid_origin`: neprázdná hodnota není samostatný
+          HTTP(S) origin. Pokud z ní legacy tenant resolver přesto získá platný
+          hostname, může jako canonical uznat pouze request s přesně tímto
+          hostname; nejde o důvěru k libovolnému hostu. Přes jiný hostname je
+          dostupný pouze přesný read-only health endpoint.
+        * `routing_only` / `app_url_webauthn_incompatible`: HTTP(S) origin je
+          použitelný pro běžné routování, včetně HTTP nebo LAN IP, ale ne pro
+          WebAuthn.
+        * `hostname_conflict` / `app_url_hostname_conflict`: hostname originu
+          je současně uložený jako vlastní doména firmy. Aplikace fail-closed
+          odmítne běžné cesty; přesný read-only health endpoint zůstane dostupný
+          pro bezpečnou diagnostiku bez zveřejnění hostname.
+        * `webauthn_ready` / `app_url_valid`: origin vyhovuje routování i
+          WebAuthn. WebAuthn vyžaduje HTTPS DNS origin; jediná HTTP výjimka je
+          `http://localhost`.
+
+        First-run setup může doplnit chybějící, prázdnou nebo whitespace-only
+        hodnotu a známý distribuční placeholder z detekovaného originu.
+        Explicitně neprázdnou neplatnou hodnotu zachová pro diagnostiku a
+        preflight ji označí jako chybu.
+      required: [state, reason_code, routing_compatible, webauthn_compatible]
+      properties:
+        state:
+          type: string
+          enum: [missing, invalid, routing_only, hostname_conflict, webauthn_ready]
+          description: Stabilní třída konfigurace; nikdy neobsahuje část URL.
+        reason_code:
+          type: string
+          description: Stabilní reason code odpovídající hodnotě `state`.
+          enum:
+            - app_url_missing
+            - app_url_invalid_origin
+            - app_url_webauthn_incompatible
+            - app_url_hostname_conflict
+            - app_url_valid
+        routing_compatible:
+          type: boolean
+          description: Zda lze `app.url` použít jako canonical HTTP(S) origin pro routování.
+        webauthn_compatible:
+          type: boolean
+          description: Zda `app.url` splňuje přísnější origin a RP ID podmínky WebAuthn.
+
     StockVendorOfferPatch:
       type: object
       description: >
@@ -18369,6 +18525,74 @@ components:
                 scope: { type: string, enum: [read, read_write] }
                 expires_at: { type: [string, "null"], format: date-time }
             - { type: "null" }
+
+    DomainContext:
+      type: object
+      required:
+        [mode, hostname, origin, locked, supplier_id, purpose,
+         canonical_base_url, canonical_login_url]
+      properties:
+        mode:
+          type: string
+          enum: [canonical, custom]
+        hostname:
+          type: string
+          format: hostname
+        origin:
+          type: string
+          format: uri
+        locked:
+          type: boolean
+          description: Aktivní vlastní doména autoritativně uzamyká tenant firmy.
+        supplier_id:
+          type: [integer, "null"]
+        purpose:
+          type: [string, "null"]
+          enum: [portal, public_links, all, null]
+          description: Hodnota `portal` označuje celé klientské rozhraní podle oprávnění role client.
+        canonical_base_url:
+          type: string
+          format: uri
+        canonical_login_url:
+          type: string
+          format: uri
+          description: Canonical origin pro přihlášení a RP-bound WebAuthn operace.
+
+    SupplierDomain:
+      type: object
+      required:
+        [id, supplier_id, hostname, purpose, status, is_primary,
+         is_primary_portal, is_primary_public, dns, verification_url,
+         portal_url, public_base_url]
+      properties:
+        id: { type: integer, format: int64 }
+        supplier_id: { type: integer }
+        hostname: { type: string, format: hostname }
+        purpose:
+          type: string
+          enum: [portal, public_links, all]
+          description: Hodnota `portal` označuje celé klientské rozhraní podle oprávnění role client.
+        status:
+          type: string
+          enum: [pending, verified, active, disabled, verification_failed]
+        is_primary: { type: boolean }
+        is_primary_portal: { type: boolean }
+        is_primary_public: { type: boolean }
+        verified_at: { type: [string, "null"], format: date-time }
+        last_checked_at: { type: [string, "null"], format: date-time }
+        verification_error: { type: [string, "null"] }
+        dns:
+          type: object
+          required: [type, name, value]
+          properties:
+            type: { type: string, const: TXT }
+            name: { type: string }
+            value: { type: string }
+        verification_url: { type: string, format: uri }
+        portal_url: { type: string, format: uri }
+        public_base_url: { type: string, format: uri }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
 
     SupplierBrief:
       type: object

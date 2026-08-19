@@ -14,6 +14,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import AutomationPolicyBox from '@/components/settings/AutomationPolicyBox.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import SupplierDomainsSettings from '@/components/settings/SupplierDomainsSettings.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -884,6 +885,8 @@ function vatCollisionLabel(c: VatStatusCollision): string {
         </div>
 
       </section>
+
+      <SupplierDomainsSettings v-if="tab === 'company' && auth.canRead('settings.domains')" />
 
       <!-- Číslování faktur — samostatný box -->
       <section v-if="tab === 'documents'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">

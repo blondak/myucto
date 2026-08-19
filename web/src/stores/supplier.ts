@@ -21,8 +21,9 @@ export const useSupplierStore = defineStore('supplier', () => {
 
   const currentSupplierId = ref<number>(initial)
   const availableSuppliers = ref<SupplierBrief[]>([])
+  const domainLocked = ref(false)
 
-  const hasMultiple = computed(() => availableSuppliers.value.length > 1)
+  const hasMultiple = computed(() => !domainLocked.value && availableSuppliers.value.length > 1)
   // False = onboarding přeskočil dodavatele (žádný supplier v DB). Bez dodavatele je
   // celá aplikace nepoužitelná (data jsou supplier-scoped, currencies se sázejí per-supplier),
   // proto router + dashboard navigují uživatele na vytvoření prvního dodavatele.
@@ -32,18 +33,29 @@ export const useSupplierStore = defineStore('supplier', () => {
   )
 
   watch(currentSupplierId, (v) => {
+    if (domainLocked.value) {
+      localStorage.removeItem(STORAGE_KEY)
+      return
+    }
     if (v > 0) localStorage.setItem(STORAGE_KEY, String(v))
     else localStorage.removeItem(STORAGE_KEY)
   })
 
   function setSupplier(id: number) {
+    if (domainLocked.value && id !== currentSupplierId.value) return
     currentSupplierId.value = id
     if (id > 0) localStorage.setItem(STORAGE_KEY, String(id))
     else localStorage.removeItem(STORAGE_KEY)
   }
 
-  function setAvailable(list: SupplierBrief[], serverCurrent: number) {
+  function setAvailable(list: SupplierBrief[], serverCurrent: number, locked = false) {
+    domainLocked.value = locked
     availableSuppliers.value = list
+    if (locked) {
+      localStorage.removeItem(STORAGE_KEY)
+      currentSupplierId.value = serverCurrent || (list[0]?.id ?? 0)
+      return
+    }
     // Pokud localStorage value není v dostupném listu, přejdi na server-side default
     if (!list.find(s => s.id === currentSupplierId.value)) {
       currentSupplierId.value = serverCurrent || (list[0]?.id ?? 0)
@@ -64,6 +76,7 @@ export const useSupplierStore = defineStore('supplier', () => {
   return {
     currentSupplierId,
     availableSuppliers,
+    domainLocked,
     hasMultiple,
     hasSupplier,
     currentSupplier,

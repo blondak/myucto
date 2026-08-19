@@ -24,6 +24,7 @@ use MyInvoice\Middleware\PermissionMiddleware;
 use MyInvoice\Middleware\RequireMfaMiddleware;
 use MyInvoice\Middleware\SessionLockMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Middleware\WebAuthnBodyLimitMiddleware;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Auth\PasskeyService;
@@ -540,6 +541,27 @@ final class Bootstrap
                 $c->get(\MyInvoice\Repository\UserSupplierRepository::class),
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
             ),
+            \MyInvoice\Service\Invoice\InvoicePublicLinkService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Invoice\InvoicePublicLinkService(
+                $c->get(Config::class),
+                $c->get(\MyInvoice\Repository\InvoiceRepository::class),
+                $c->get(\MyInvoice\Service\Tenant\TenantUrlResolver::class),
+            ),
+            \MyInvoice\Service\Mail\ApprovalEmailVarsBuilder::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Mail\ApprovalEmailVarsBuilder(
+                $c->get(Connection::class),
+                $c->get(Config::class),
+                $c->get(\MyInvoice\Repository\WorkReportRepository::class),
+                $c->get(\MyInvoice\Service\Tenant\TenantUrlResolver::class),
+            ),
+            \MyInvoice\Service\WorkReport\WorkReportLinkService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\WorkReport\WorkReportLinkService(
+                $c->get(Connection::class),
+                $c->get(Config::class),
+                $c->get(\MyInvoice\Service\Mail\Mailer::class),
+                $c->get(\MyInvoice\Repository\WorkReportRepository::class),
+                $c->get(\MyInvoice\Repository\WorkReportLinkRepository::class),
+                $c->get(LoggerInterface::class),
+                $c->get(\MyInvoice\Service\Vat\VatStatusService::class),
+                $c->get(\MyInvoice\Service\Tenant\TenantUrlResolver::class),
+            ),
             \MyInvoice\Security\UserRoleProfile::class => fn (ContainerInterface $c) => new \MyInvoice\Security\UserRoleProfile(
                 $c->get(Connection::class),
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
@@ -702,7 +724,7 @@ final class Bootstrap
 
         // Slim 4 LIFO: poslední `add()` = NEJVĚTŠÍ vrstva = běží JAKO PRVNÍ.
         // Cílový order běhu (outside → inside):
-        //   IpAllowlist → FirstRunLock → Auth → ApiRequestLog → SessionLock → RequireMfa → License → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
+        //   IpAllowlist → FirstRunLock → TenantDomain → Auth → ApiRequestLog → SessionLock → RequireMfa → License → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
         // → add() v opačném pořadí (innermost první):
         //
         // ⚠️ Middleware se předávají jako CLASS-STRING, ne jako instance. Slim je pak
@@ -725,6 +747,7 @@ final class Bootstrap
         $app->add(SessionLockMiddleware::class);                     // autoritativní idle/manual lock browser session
         $app->add(ApiRequestLogMiddleware::class);                   // bearer-only: per-request log do api_request_log (nad scope/právy, ať jsou vidět i zamítnutá volání)
         $app->add(AuthMiddleware::class);                            // načte session nebo bearer token
+        $app->add(TenantDomainMiddleware::class);                   // Host autoritativně určí tenant před autentizací
         $app->add(FirstRunLockMiddleware::class);                    // 423 pokud users prázdná
         $app->add(IpAllowlistMiddleware::class);                     // outermost user mw
         $app->add(new ApiVersionRewriteMiddleware());                // /api/v1/* → /api/* před vším ostatním

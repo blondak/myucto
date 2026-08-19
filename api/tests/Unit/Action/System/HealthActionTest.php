@@ -9,13 +9,18 @@ use MyInvoice\Infrastructure\Cache\RedisProbe;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\PasskeyService;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\SessionLockPolicy;
+use MyInvoice\Service\System\AppUrlConfiguration;
+use MyInvoice\Service\Tenant\HostnameNormalizer;
+use MyInvoice\Service\Tenant\TenantDomainContext;
 use MyInvoice\Service\Update\VersionService;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
 use Slim\Psr7\Factory\ResponseFactory;
 use Slim\Psr7\Factory\ServerRequestFactory;
 
@@ -47,6 +52,7 @@ final class HealthActionTest extends TestCase
             $passkeys,
             $policy,
             new SessionLockPolicy(new Config([])),
+            $this->appUrl('https://invoice.example.test'),
         );
 
         $response = $action(
@@ -78,6 +84,8 @@ final class HealthActionTest extends TestCase
         $passkeys->expects(self::never())->method('isAvailable');
         $policy = $this->createMock(MfaPolicyService::class);
         $policy->expects(self::never())->method('isMethodAllowed');
+        $sensitiveUrl = 'https://health-user:health-password@example.test/'
+            . '?token=health-secret';
         $action = new HealthAction(
             $db,
             $redis,
@@ -86,6 +94,7 @@ final class HealthActionTest extends TestCase
             $passkeys,
             $policy,
             new SessionLockPolicy(new Config([])),
+            $this->appUrl($sensitiveUrl),
         );
 
         $response = $action(
@@ -95,6 +104,15 @@ final class HealthActionTest extends TestCase
         $body = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
 
         self::assertArrayNotHasKey('warnings', $body);
+        self::assertSame([
+            'state' => AppUrlConfiguration::STATE_INVALID,
+            'reason_code' => AppUrlConfiguration::REASON_INVALID_ORIGIN,
+            'routing_compatible' => false,
+            'webauthn_compatible' => false,
+        ], $body['configuration']['app_url']);
+        foreach ([$sensitiveUrl, 'health-user', 'health-password', 'health-secret', 'example.test'] as $secret) {
+            self::assertStringNotContainsString($secret, (string) $response->getBody());
+        }
     }
 
     public function testAuthenticatedHealthReportsInvalidSessionLockConfiguration(): void
@@ -124,6 +142,7 @@ final class HealthActionTest extends TestCase
             new SessionLockPolicy(new Config([
                 'session' => ['lock_after_minutes' => 'invalid'],
             ])),
+            $this->appUrl('http://192.168.10.20:8080'),
         );
 
         $response = $action(
@@ -138,6 +157,56 @@ final class HealthActionTest extends TestCase
         self::assertStringContainsString(
             'výchozí automatický zámek byl vypnut',
             $body['warnings'][0]['message'],
+        );
+    }
+
+    public function testHealthReportsCanonicalHostnameConflictWithoutLeakingHostname(): void
+    {
+        $db = $this->createStub(Connection::class);
+        $db->method('ping')->willReturn(true);
+        $redis = $this->createStub(RedisProbe::class);
+        $redis->method('isAvailable')->willReturn(false);
+        $version = $this->createStub(VersionService::class);
+        $version->method('getCurrentVersion')->willReturn('test');
+        $action = new HealthAction(
+            $db,
+            $redis,
+            $this->createStub(SecretEncryption::class),
+            $version,
+            $this->createStub(PasskeyService::class),
+            $this->createStub(MfaPolicyService::class),
+            new SessionLockPolicy(new Config([])),
+            $this->appUrl('https://private-portal.example.test'),
+        );
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('GET', '/api/health')
+            ->withAttribute(
+                TenantDomainMiddleware::ATTR_CONTEXT,
+                new TenantDomainContext(
+                    TenantDomainContext::CONFIGURATION_ERROR,
+                    'private-portal.example.test',
+                    'https://private-portal.example.test',
+                ),
+            );
+
+        $response = $action($request, (new ResponseFactory())->createResponse());
+        $body = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+
+        self::assertSame([
+            'state' => AppUrlConfiguration::STATE_HOSTNAME_CONFLICT,
+            'reason_code' => AppUrlConfiguration::REASON_HOSTNAME_CONFLICT,
+            'routing_compatible' => false,
+            'webauthn_compatible' => false,
+        ], $body['configuration']['app_url']);
+        self::assertStringNotContainsString('private-portal.example.test', (string) $response->getBody());
+    }
+
+    private function appUrl(string $url): AppUrlConfiguration
+    {
+        return new AppUrlConfiguration(
+            new Config(['app' => ['url' => $url]]),
+            new HostnameNormalizer(),
+            new NullLogger(),
         );
     }
 }

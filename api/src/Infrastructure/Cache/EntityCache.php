@@ -76,6 +76,7 @@ final class EntityCache
         'role_permissions'       => self::GROUP_USER,
         'user_suppliers'         => self::GROUP_USER,
         'supplier'               => self::GROUP_SUPPLIER,
+        'supplier_domains'       => self::GROUP_SUPPLIER,
         'journal_entries'        => self::GROUP_ACCOUNTING,
         'journal_lines'          => self::GROUP_ACCOUNTING,
         'invoices'               => self::GROUP_ACCOUNTING,

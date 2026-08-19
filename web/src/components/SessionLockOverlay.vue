@@ -5,6 +5,8 @@ import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import { isWebAuthnAvailable } from '@/security/webauthn'
+import { beginDomainLogin } from '@/security/domainLogin'
+import { isClientDomainAuthenticatedPath } from '@/security/clientRoutePolicy'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -23,10 +25,10 @@ const privateRoute = computed(() => route.matched.some(record => record.meta.req
   && route.name !== 'setup-mfa')
 const visible = computed(() => security.privacyCurtain && privateRoute.value)
 const hasPasskey = computed(() => security.state?.unlock_methods.includes('passkey') === true)
+const centralDomainUnlock = computed(() => auth.domainContext?.locked === true)
 const automaticLockEnabled = computed(() => (security.state?.lock_after_minutes ?? 0) > 0)
-const canUnlock = computed(() => hasPasskey.value
-  && passkeySupported
-  && security.error !== 'session_status_failed')
+const canUnlock = computed(() => centralDomainUnlock.value
+  || (hasPasskey.value && passkeySupported && security.error !== 'session_status_failed'))
 // Bez timeoutu a bez odemykací metody se session nemá jak zamknout, takže
 // kontrola stavu při každém přepnutí okna nemá co zjistit. Zámek z jiného tabu
 // chodí přes BroadcastChannel, serverový 423 přes interceptor.
@@ -82,6 +84,18 @@ async function logout() {
     security.clear()
     security.markLocked()
     security.error = 'logout_failed'
+  }
+}
+async function unlock() {
+  if (!centralDomainUnlock.value) {
+    await security.unlock()
+    return
+  }
+  security.error = ''
+  try {
+    await beginDomainLogin(isClientDomainAuthenticatedPath(route.fullPath) ? route.fullPath : '/portal')
+  } catch {
+    security.error = 'unlock_failed'
   }
 }
 function trapFocus(event: KeyboardEvent) {
@@ -205,15 +219,15 @@ onUnmounted(() => {
             : t('session_lock.failed') }}
       </p>
       <button v-if="canUnlock" ref="unlockButton" type="button" :disabled="security.busy"
-              @click="security.unlock"
+              @click="unlock"
               class="mt-5 w-full h-11 rounded-md bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-400 text-white font-medium">
         {{ security.busy ? t('session_lock.unlocking') : t('session_lock.unlock') }}
       </button>
       <p v-if="!security.state && security.error !== 'logout_failed'"
          class="mt-3 text-xs text-neutral-500">{{ t('session_lock.status_failed') }}</p>
-      <p v-else-if="!hasPasskey"
+      <p v-else-if="!centralDomainUnlock && !hasPasskey"
          class="mt-3 text-xs text-neutral-500">{{ t('session_lock.no_passkey') }}</p>
-      <p v-else-if="!passkeySupported"
+      <p v-else-if="!centralDomainUnlock && !passkeySupported"
          class="mt-3 text-xs text-neutral-500">{{ t('session_lock.unsupported') }}</p>
       <button v-if="security.error === 'session_status_failed'" type="button"
               @click="security.refresh({ force: true })"

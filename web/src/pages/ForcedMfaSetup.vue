@@ -7,6 +7,7 @@ import { authApi, type TotpSetup } from '@/api/auth'
 import { createCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
+import { authorizePendingDomainLogin, hasPendingCanonicalDomainLogin } from '@/security/domainLogin'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -22,6 +23,14 @@ const currentPassword = ref('')
 const passkeyLabel = ref('')
 const totpSetup = ref<TotpSetup | null>(null)
 const totpCode = ref('')
+
+async function continueAfterSetup(): Promise<void> {
+  if (hasPendingCanonicalDomainLogin()) {
+    await authorizePendingDomainLogin()
+    return
+  }
+  await router.replace('/')
+}
 
 const allowed = computed<Array<'passkey' | 'totp'>>(() => auth.allowedMfaMethods.length > 0
   ? auth.allowedMfaMethods
@@ -73,7 +82,7 @@ async function completePasskey() {
     if (result.csrf_token) auth.setSessionCsrfToken(result.csrf_token)
     await auth.refresh()
     await sessionSecurity.refresh({ force: true })
-    await router.replace('/')
+    await continueAfterSetup()
   } catch (e: any) {
     const ceremonyError = webAuthnErrorKey(e)
     error.value = ceremonyError !== null
@@ -107,7 +116,7 @@ async function completeTotp() {
     const result = await authApi.totpEnable(totpCode.value)
     if (result.csrf_token) auth.setSessionCsrfToken(result.csrf_token)
     await auth.refresh()
-    await router.replace('/')
+    await continueAfterSetup()
   } catch (e: any) {
     error.value = e?.response?.data?.error?.message || t('auth.totp_invalid')
   } finally {

@@ -6,10 +6,17 @@ import {
   type RouteRecordRaw,
 } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import type { DomainContext } from '@/api/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import type { AccessLevel, PermissionKey } from '@/security/permissions'
 import { ensureNamespaces, namespacesForRoute } from '@/i18n'
+import {
+  clientDomainCanonicalHandoffPath,
+  clientDomainRedirect,
+  isClientDomainAuthenticatedPath,
+  isClientDomainRouteName,
+} from '@/security/clientRoutePolicy'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -404,6 +411,7 @@ const routes: RouteRecordRaw[] = [
     ],
   },
   { path: '/login',  name: 'login',  component: () => import('@/pages/Login.vue'),          meta: { public: true } },
+  { path: '/domain-login/callback', name: 'domain-login-callback', component: () => import('@/pages/DomainLoginCallback.vue'), meta: { public: true } },
   { path: '/setup',  name: 'setup',  component: () => import('@/pages/Setup.vue'),          meta: { public: true } },
   { path: '/setup-mfa', name: 'setup-mfa', component: () => import('@/pages/ForcedMfaSetup.vue'), meta: { requiresAuth: true, mfaSetupOnly: true } },
   { path: '/setup-totp', name: 'setup-totp', redirect: { path: '/setup-mfa', query: { method: 'totp' } } },
@@ -639,7 +647,10 @@ export function clearLoginBounces(): void {
   }
 }
 
-export async function authorizationGuard(to: RouteLocationNormalized): Promise<boolean | RouteLocationRaw> {
+export async function authorizationGuard(
+  to: RouteLocationNormalized,
+  from?: RouteLocationNormalized,
+): Promise<boolean | RouteLocationRaw> {
   const auth = useAuthStore()
 
   if (auth.setupStatus === null) {
@@ -658,14 +669,47 @@ export async function authorizationGuard(to: RouteLocationNormalized): Promise<b
   }
 
   const requiresAuth = to.matched.some((r) => r.meta.requiresAuth)
+  if (requiresAuth && auth.domainContext?.locked) {
+    const redirect = clientDomainRedirect(to.name)
+    if (redirect !== null) return { path: redirect }
+
+    if (clientDomainCanonicalHandoffPath(to.fullPath) !== null) {
+      const returnPath = from
+        && isClientDomainAuthenticatedPath(from.fullPath)
+        && clientDomainCanonicalHandoffPath(from.fullPath) === null
+        ? from.fullPath
+        : '/portal'
+      return {
+        name: 'login',
+        query: {
+          return_to: returnPath,
+          domain_handoff: to.fullPath,
+        },
+      }
+    }
+
+    const canonicalUrl = canonicalInternalUrl(to, auth.domainContext)
+    if (canonicalUrl !== null) {
+      window.location.replace(canonicalUrl)
+      return false
+    }
+  }
   if (requiresAuth && !auth.isAuthenticated) {
     // Rozhoduje stav storu, ne návratová hodnota: refresh() při síťovém výpadku
     // vrací false, ale známou identitu si záměrně drží.
     await auth.refresh()
     if (!auth.isAuthenticated) {
       recordLoginBounce()
-      return { name: 'login' }
+      return auth.domainContext?.locked && isClientDomainAuthenticatedPath(to.fullPath)
+        ? { name: 'login', query: { return_to: to.fullPath } }
+        : { name: 'login' }
     }
+  }
+
+  // Klientská role se z canonical kořene posílá na svůj přehled. Vlastní doména
+  // řeší stejný vstup výše přes sdílenou route policy i pro staff náhled klienta.
+  if (auth.isClientRole && to.name === 'home') {
+    return { name: 'portal' }
   }
   if (requiresAuth && auth.lockedSession) {
     useSessionSecurityStore().apply(auth.lockedSession)
@@ -689,10 +733,6 @@ export async function authorizationGuard(to: RouteLocationNormalized): Promise<b
   }
   if (auth.isAuthenticated && !mustSetupMfa && mfaSetupRoute) {
     return { name: 'home' }
-  }
-
-  if (auth.isClientRole && to.name === 'home') {
-    return { name: 'portal' }
   }
 
   const superadminOnly = to.matched.some((r) => r.meta.superadminOnly)
@@ -778,6 +818,21 @@ export async function authorizationGuard(to: RouteLocationNormalized): Promise<b
   }
 
   return true
+}
+
+/** Vrátí bezpečný canonical cíl jen pro routy mimo sdílenou klientskou plochu. */
+export function canonicalInternalUrl(
+  to: RouteLocationNormalized,
+  context: DomainContext | null,
+): string | null {
+  if (!context?.locked || isClientDomainRouteName(to.name)) return null
+  if (!context.canonical_base_url || !to.fullPath.startsWith('/') || to.fullPath.startsWith('//')) return null
+  try {
+    const origin = new URL(context.canonical_base_url).origin
+    return new URL(to.fullPath, `${origin}/`).toString()
+  } catch {
+    return null
+  }
 }
 
 router.beforeEach(authorizationGuard)

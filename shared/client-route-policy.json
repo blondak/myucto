@@ -1,0 +1,58 @@
+{
+  "routes": [
+    { "name": "home", "path_pattern": "^/$", "kind": "client_redirect", "redirect_to": "/portal" },
+
+    { "name": "portal", "path_pattern": "^/portal/?$", "kind": "permission", "permission": "profile", "access": "read" },
+    { "name": "portal-document-requests", "path_pattern": "^/portal/document-requests/?$", "kind": "permission", "permission": "documents.submit", "access": "read" },
+    { "name": "portal-purchase-invoice-submissions", "path_pattern": "^/portal/purchase-invoice-submissions/?$", "kind": "permission", "permission": "documents.submit", "access": "read" },
+
+    { "name": "clients", "path_pattern": "^/clients/?$", "kind": "permission", "permission": "clients", "access": "read" },
+    { "name": "client-new", "path_pattern": "^/clients/new/?$", "kind": "permission", "permission": "clients.create", "access": "write" },
+    { "name": "client-detail", "path_pattern": "^/clients/[0-9]+/?$", "kind": "permission", "permission": "clients", "access": "read" },
+    { "name": "client-edit", "path_pattern": "^/clients/[0-9]+/edit/?$", "kind": "permission", "permission": "clients", "access": "write" },
+
+    { "name": "invoices", "path_pattern": "^/invoices/?$", "kind": "permission", "permission": "invoices", "access": "read" },
+    { "name": "invoice-ai-import", "path_pattern": "^/invoices/ai-import/?$", "kind": "permission", "permission": "invoices.create", "access": "write" },
+    { "name": "invoice-new", "path_pattern": "^/invoices/new/?$", "kind": "permission", "permission": "invoices.create", "access": "write" },
+    { "name": "invoice-detail", "path_pattern": "^/invoices/[0-9]+/?$", "kind": "permission", "permission": "invoices", "access": "read" },
+    { "name": "invoice-edit", "path_pattern": "^/invoices/[0-9]+/edit/?$", "kind": "permission", "permission": "invoices", "access": "write" },
+    { "name": "invoices-export", "path_pattern": "^/invoices/export/?$", "kind": "permission", "permission": "invoices", "access": "read" },
+    { "name": "invoices-import", "path_pattern": "^/invoices/import/?$", "kind": "client_redirect", "permission": "invoices", "access": "read", "redirect_to": "/invoices/export" },
+
+    { "name": "purchase-invoices", "path_pattern": "^/purchase-invoices/?$", "kind": "permission", "permission": "purchase_invoices", "access": "read" },
+    { "name": "purchase-invoices-export", "path_pattern": "^/purchase-invoices/export/?$", "kind": "permission", "permission": "purchase_invoices", "access": "read" },
+    { "name": "purchase-invoices-import", "path_pattern": "^/purchase-invoices/import/?$", "kind": "client_redirect", "permission": "purchase_invoices", "access": "read", "redirect_to": "/purchase-invoices/export" },
+    { "name": "purchase-invoice-new", "path_pattern": "^/purchase-invoices/new/?$", "kind": "permission", "permission": "purchase_invoices.create", "access": "write" },
+    { "name": "purchase-invoice-detail", "path_pattern": "^/purchase-invoices/[0-9]+/?$", "kind": "permission", "permission": "purchase_invoices", "access": "read" },
+    { "name": "purchase-invoice-edit", "path_pattern": "^/purchase-invoices/[0-9]+/edit/?$", "kind": "permission", "permission": "purchase_invoices", "access": "write" },
+
+    { "name": "recurring", "path_pattern": "^/recurring/?$", "kind": "permission", "permission": "recurring", "access": "read" },
+    { "name": "recurring-new", "path_pattern": "^/recurring/new/?$", "kind": "permission", "permission": "recurring.create", "access": "write" },
+    { "name": "recurring-detail", "path_pattern": "^/recurring/[0-9]+/?$", "kind": "permission", "permission": "recurring", "access": "read" },
+    { "name": "recurring-edit", "path_pattern": "^/recurring/[0-9]+/edit/?$", "kind": "permission", "permission": "recurring", "access": "write" },
+
+    { "name": "profile-totp", "path_pattern": "^/profile/totp/?$", "kind": "router_redirect", "redirect_to": "/profile/password?tab=totp" },
+    { "name": "profile-password", "path_pattern": "^/profile/password/?$", "kind": "self_service", "canonical_handoff": { "match_query": { "tab": "passkeys" }, "to": "/profile/password?tab=passkeys" } },
+    { "name": "profile-shortcuts", "path_pattern": "^/profile/shortcuts/?$", "kind": "router_redirect", "permission": "profile", "access": "write", "redirect_to": "/profile/password?tab=shortcuts" },
+    { "name": "profile-passkeys", "path_pattern": "^/profile/passkeys/?$", "kind": "router_redirect", "redirect_to": "/profile/password?tab=passkeys", "canonical_handoff": { "to": "/profile/password?tab=passkeys" } },
+    { "name": "profile-session-lock", "path_pattern": "^/profile/session-lock/?$", "kind": "router_redirect", "redirect_to": "/profile/password?tab=session-lock" },
+
+    { "name": "setup-mfa", "path_pattern": "^/setup-mfa/?$", "kind": "self_service", "canonical_handoff": { "to": "/setup-mfa", "query_targets": { "method": { "totp": "/setup-mfa?method=totp" } } } },
+    { "name": "setup-totp", "path_pattern": "^/setup-totp/?$", "kind": "router_redirect", "redirect_to": "/setup-mfa?method=totp", "canonical_handoff": { "to": "/setup-mfa?method=totp" } },
+
+    { "name": "data-exchange", "path_pattern": "^/exchange/?$", "kind": "router_redirect", "redirect_destinations": ["invoices-export", "invoices-import", "purchase-invoices-export", "purchase-invoices-import"] },
+    { "name": "admin-export", "path_pattern": "^/admin/export/?$", "kind": "router_redirect", "redirect_to": "/invoices/export" },
+    { "name": "admin-import", "path_pattern": "^/admin/import/?$", "kind": "router_redirect", "redirect_destinations": ["invoices-import", "purchase-invoices-import"] }
+  ],
+  "flow_paths": [
+    { "name": "login", "path_pattern": "^/login/?$" },
+    { "name": "domain-login-callback", "path_pattern": "^/domain-login/callback/?$" }
+  ],
+  "portal_api_paths": [
+    { "method": "GET", "path": "/api/version" },
+    { "method": "GET", "path": "/api/auth/setup-status" },
+    { "method": "GET", "path": "/api/auth/domain-context" },
+    { "method": "POST", "path": "/api/auth/domain-login/start" },
+    { "method": "POST", "path": "/api/auth/domain-login/exchange" }
+  ]
+}

@@ -46,7 +46,7 @@ final class PublicLinkAction
         }
 
         return Json::ok($response, [
-            'url'              => $this->links->url($token),
+            'url'              => $this->links->url($token, (int) $invoice['supplier_id']),
             'token'            => $token,
             'public_viewed_at' => $invoice['public_viewed_at'] ?? null,
         ]);
@@ -63,7 +63,7 @@ final class PublicLinkAction
         $this->log($request, 'invoice.public_link_regenerated', (int) $invoice['id']);
 
         return Json::ok($response, [
-            'url'              => $this->links->url($token),
+            'url'              => $this->links->url($token, (int) $invoice['supplier_id']),
             'token'            => $token,
             'public_viewed_at' => null,
         ]);

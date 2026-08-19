@@ -10,7 +10,7 @@ vi.mock('@/i18n', () => ({
   namespacesForRoute: () => [],
 }))
 
-import { authorizationGuard, router } from '../index'
+import { authorizationGuard, canonicalInternalUrl, router } from '../index'
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 
@@ -116,5 +116,70 @@ describe('router guard vynuceného nastavení MFA', () => {
     const result = await authorizationGuard(resolveTarget({ name: 'admin-users' }))
 
     expect(result).toEqual({ name: 'home' })
+  })
+})
+
+describe('oddělení klientské a interní domény', () => {
+  const customContext = {
+    mode: 'custom',
+    hostname: 'portal.example.test',
+    origin: 'https://portal.example.test',
+    locked: true,
+    supplier_id: 7,
+    purpose: 'portal',
+    canonical_base_url: 'https://ucto.example.test/app-path',
+  } as const
+
+  it('nechá na vlastní doméně klientské obrazovky bez WebAuthn ceremony', () => {
+    for (const location of [
+      { name: 'portal-document-requests', query: { page: '2' } },
+      { name: 'client-edit', params: { id: '7' } },
+      { name: 'invoice-new' },
+      { name: 'purchase-invoice-detail', params: { id: '7' } },
+      { name: 'recurring-edit', params: { id: '7' } },
+      { name: 'profile-password', query: { tab: 'totp' } },
+    ]) {
+      const target = resolveTarget(location)
+      expect(canonicalInternalUrl(target, customContext), String(location.name)).toBeNull()
+    }
+  })
+
+  it('pošle WebAuthn obrazovku přes domain-login handoff a zachová bezpečný klientský návrat', async () => {
+    const auth = signIn()
+    auth.domainContext = customContext as never
+    const target = resolveTarget({ name: 'profile-password', query: { tab: 'passkeys' } })
+    const from = resolveTarget({ name: 'invoice-detail', params: { id: '7' } })
+
+    await expect(authorizationGuard(target, from)).resolves.toEqual({
+      name: 'login',
+      query: {
+        return_to: '/invoices/7',
+        domain_handoff: '/profile/password?tab=passkeys',
+      },
+    })
+  })
+
+  it('přímý vstup na vynucené MFA vrací po canonical nastavení na portál', async () => {
+    const auth = signIn({ must_setup_mfa: true })
+    auth.domainContext = customContext as never
+
+    await expect(authorizationGuard(resolveTarget({ name: 'setup-mfa' }))).resolves.toEqual({
+      name: 'login',
+      query: {
+        return_to: '/portal',
+        domain_handoff: '/setup-mfa',
+      },
+    })
+  })
+
+  it('přesměruje neklientské obrazovky na canonical origin a zachová cestu', () => {
+    for (const [location, expected] of [
+      [{ name: 'admin-settings', query: { tab: 'company' }, hash: '#domains' }, 'https://ucto.example.test/admin/settings?tab=company#domains'],
+      [{ name: 'projects' }, 'https://ucto.example.test/projects'],
+      [{ name: 'purchase-invoices-payment-orders' }, 'https://ucto.example.test/purchase-invoices/payment-orders'],
+      [{ name: 'profile-api-tokens' }, 'https://ucto.example.test/profile/api-tokens'],
+    ] as const) {
+      expect(canonicalInternalUrl(resolveTarget(location), customContext)).toBe(expected)
+    }
   })
 })
