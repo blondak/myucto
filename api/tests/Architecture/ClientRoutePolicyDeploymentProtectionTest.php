@@ -72,6 +72,15 @@ final class ClientRoutePolicyDeploymentProtectionTest extends TestCase
             self::read($root . '/tools/securitySmokeTest.php'),
             'Živý security smoke test musí hlídat přímé načtení manifestu.',
         );
+
+        // Node sada `pnpm test:pwa` čte manifest vlastní relativní cestou,
+        // mimo alias @shared. Bez téhle kontroly se přesun složky projeví až
+        // pádem CI, ne architekturního testu.
+        self::assertMatchesRegularExpression(
+            '/new URL\([\'\"]\.\.\/shared\/client-route-policy\.json[\'\"], import\.meta\.url\)/',
+            self::read($root . '/web/tests/custom-domain-client-surface.test.mjs'),
+            'Node test PWA sady musí číst stejný sdílený manifest.',
+        );
     }
 
     /** @return array<string,array{string}> */

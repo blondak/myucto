@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const src = new URL('../src/', import.meta.url)
-const manifest = JSON.parse(await readFile(new URL('../../shared/client-route-policy.json', import.meta.url), 'utf8'))
+const manifest = JSON.parse(await readFile(new URL('../shared/client-route-policy.json', import.meta.url), 'utf8'))
 const router = await readFile(new URL('router/index.ts', src), 'utf8')
 const layout = await readFile(new URL('components/layout/AppLayout.vue', src), 'utf8')
 const login = await readFile(new URL('pages/Login.vue', src), 'utf8')
