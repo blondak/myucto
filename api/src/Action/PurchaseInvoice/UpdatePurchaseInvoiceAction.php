@@ -74,6 +74,9 @@ final class UpdatePurchaseInvoiceAction
         'reverse_charge', 'prices_include_vat', 'advance_paid_amount',
         'vat_classification_code', 'vat_deduction', 'vat_deduction_percent',
         'tax_deductible', 'is_fixed_asset', 'expense_category_id', 'varsymbol',
+        // Zakázka (issue #29) je analytická dimenze zaúčtovaného nákladu — její změna
+        // přepisuje journal_entry_lines.project_id, takže do notes_only nepatří.
+        'project_id',
         // Volba hotovostního vyrovnání (migrace 1327) zakládá/ruší ZAÚČTOVANÝ pokladní
         // doklad, takže je to účetní pole jako každé jiné — notes_only ji nesmí pustit.
         'cash_register_id',
@@ -176,7 +179,7 @@ final class UpdatePurchaseInvoiceAction
         $badRefs = $this->tenantRefs->violations(
             $supplierId,
             $body,
-            ['expense_category_id', 'currency_id', 'payment_currency_id', 'cash_register_id'],
+            ['expense_category_id', 'currency_id', 'payment_currency_id', 'cash_register_id', 'project_id'],
         );
         if ($badRefs !== []) {
             return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);

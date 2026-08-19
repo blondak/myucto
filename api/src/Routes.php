@@ -147,6 +147,7 @@ use MyInvoice\Action\Invoice\IssueInvoiceAction;
 use MyInvoice\Action\Invoice\ListInvoicesAction;
 use MyInvoice\Action\Invoice\PreviewVarsymbolAction;
 use MyInvoice\Action\Invoice\MarkPaidAction;
+use MyInvoice\Action\Invoice\SetInvoiceProjectAction;
 use MyInvoice\Action\Invoice\UnmarkPaidAction;
 use MyInvoice\Action\Invoice\ListPaymentsAction;
 use MyInvoice\Action\Invoice\CreatePaymentAction;
@@ -175,6 +176,7 @@ use MyInvoice\Action\PurchaseInvoice\PaymentOrderAction;
 use MyInvoice\Action\PurchaseInvoice\ListPurchaseInvoicesAction;
 use MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceImportBatchesAction;
 use MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceDocumentKindAction;
+use MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceProjectAction;
 use MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceActivityAction;
 use MyInvoice\Action\PurchaseInvoice\ScanInboxAction;
 use MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceExchangeRateAction;
@@ -221,6 +223,7 @@ use MyInvoice\Action\Project\CreateProjectAction;
 use MyInvoice\Action\Project\DeleteProjectAction;
 use MyInvoice\Action\Project\GetProjectAction;
 use MyInvoice\Action\Project\ListProjectsAction;
+use MyInvoice\Action\Project\ProjectProfitAction;
 use MyInvoice\Action\Project\ProjectStatsAction;
 use MyInvoice\Action\Project\UpdateProjectAction;
 use MyInvoice\Action\Auth\ApiMeAction;
@@ -495,10 +498,13 @@ final class Routes
         // Projects
         $app->get   ('/api/clients/{client_id:[0-9]+}/projects', ListProjectsAction::class);
         $app->get   ('/api/projects/stats',          ProjectStatsAction::class);
+        // Výsledovka po zakázkách (issue #29). Statická cesta MUSÍ být před /{id}.
+        $app->get   ('/api/projects/profitability',  [ProjectProfitAction::class, 'overview']);
         $app->get   ('/api/projects',                ListProjectsAction::class);
         $app->post  ('/api/projects',                CreateProjectAction::class);
         $app->get   ('/api/projects/{id:[0-9]+}',    GetProjectAction::class);
         $app->put   ('/api/projects/{id:[0-9]+}',    UpdateProjectAction::class);
+        $app->get   ('/api/projects/{id:[0-9]+}/profit',   [ProjectProfitAction::class, 'detail']);
         $app->post  ('/api/projects/{id:[0-9]+}/archive', ArchiveProjectAction::class);
         $app->delete('/api/projects/{id:[0-9]+}',         DeleteProjectAction::class);
         // Sledovací odkaz na výkaz práce (zakázka — jen otevřené výkazy dané zakázky)
@@ -524,6 +530,8 @@ final class Routes
         $app->post   ('/api/invoices/{id:[0-9]+}/issue',     IssueInvoiceAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/mark-paid', MarkPaidAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/unmark-paid', UnmarkPaidAction::class);
+        // Zakázka (issue #29) — smí i u zaúčtovaného dokladu, je to analytická dimenze.
+        $app->post   ('/api/invoices/{id:[0-9]+}/project',   SetInvoiceProjectAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/rebuild-snapshots', \MyInvoice\Action\Invoice\RebuildInvoiceSnapshotsAction::class);
         // Evidence plateb / částečné úhrady (#89) + daňový doklad k přijaté platbě (zálohy)
         $app->get    ('/api/invoices/{id:[0-9]+}/payments', ListPaymentsAction::class);
@@ -595,6 +603,8 @@ final class Routes
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/exchange-rate', SetPurchaseInvoiceExchangeRateAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/transition',     TransitionPurchaseInvoiceStatusAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/document-kind',   SetPurchaseInvoiceDocumentKindAction::class);
+        // Zakázka (issue #29) — smí i u zaúčtovaného dokladu, je to analytická dimenze.
+        $app->post   ('/api/purchase-invoices/{id:[0-9]+}/project',         SetPurchaseInvoiceProjectAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/dismiss-extraction-warning', DismissExtractionWarningAction::class);
         // Propojení se zálohovou fakturou (advance) — proti dvojímu započtení nákladu
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}/advance-candidates', AdvanceCandidatesAction::class);

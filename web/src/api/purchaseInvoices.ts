@@ -362,6 +362,10 @@ export interface PurchaseInvoice {
   /** Název + kód kategorie nákladu (join z expense_categories, jen v detailu). */
   expense_category_label?: string | null
   expense_category_code?: string | null
+  /** Zakázka (issue #29) — analytická dimenze nákladu, nezávislá na dodavateli. */
+  project_id?: number | null
+  project_name?: string | null
+  project_number?: string | null
   ai_posting_suggestion?: AiPostingSuggestion | null
   /** Záloha (advance), kterou tato finální faktura vyúčtovává (vazba uložená na finální). */
   advance_purchase_invoice_id: number | null
@@ -548,6 +552,8 @@ export interface PurchaseInvoicePayload {
   exchange_diff_base?: number | null
   vat_classification_code?: string | null
   expense_category_id?: number | null
+  /** Zakázka (issue #29). */
+  project_id?: number | null
   /** Dobropis (credit_note): ID opravované přijaté faktury (migrace 1096). */
   parent_purchase_invoice_id?: number | null
   /** Ruční rekapitulace DPH dle dokladu (§ 73). null/[] = počítat standardně. */
@@ -592,6 +598,8 @@ export interface PurchaseListFilters {
   status?: PurchaseInvoiceStatus | PurchaseInvoiceStatus[]
   document_kind?: PurchaseDocumentKind | PurchaseDocumentKind[]
   vendor_id?: number
+  /** Zakázka (issue #29); 'none' = doklady bez zakázky. */
+  project_id?: number | 'none'
   year?: number
   month?: number
   date_from?: string
@@ -668,6 +676,7 @@ export const purchaseInvoicesApi = {
         : filters.document_kind
     }
     if (filters.vendor_id)   params['filter[vendor_id]']   = filters.vendor_id
+    if (filters.project_id)  params['filter[project_id]']  = filters.project_id
     if (filters.year)        params['filter[year]']        = filters.year
     if (filters.month)       params['filter[month]']       = filters.month
     if (filters.date_from)   params['filter[date_from]']   = filters.date_from
@@ -752,6 +761,15 @@ export const purchaseInvoicesApi = {
   setDocumentKind: (id: number, documentKind: PurchaseDocumentKind) =>
     api.post<PurchaseInvoice>(`/purchase-invoices/${id}/document-kind`, {
       document_kind: documentKind,
+    }).then(r => r.data),
+
+  /**
+   * Zařazení dokladu k zakázce (issue #29). Funguje i u ZAÚČTOVANÉ faktury — zakázka
+   * je analytická dimenze, takže se jen přerazítkují řádky deníku (§35 se neporušuje).
+   */
+  setProject: (id: number, projectId: number | null) =>
+    api.post<PurchaseInvoice>(`/purchase-invoices/${id}/project`, {
+      project_id: projectId,
     }).then(r => r.data),
 
   /** Posledních N dávek hromadného AI importu (#232) — pro „dohledat import". */

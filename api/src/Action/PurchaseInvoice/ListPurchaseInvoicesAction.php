@@ -16,7 +16,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * GET /api/purchase-invoices
  *
  * Vrací seznam přijatých faktur seskupený po měsících (per tenant).
- * Filtry: status, document_kind, vendor_id, year, month, date_from, date_to, currency, q, unpaid_only, overdue,
+ * Filtry: status, document_kind, vendor_id, project_id (id | 'none' = bez zakázky),
+ * year, month, date_from, date_to, currency, q, unpaid_only, overdue,
  * unpaid_as_of (YYYY-MM-DD — stav úhrady K DATU X, ne dnešní status; viz PurchaseInvoiceRepository::listGroupedByMonth)
  */
 final class ListPurchaseInvoicesAction
@@ -46,6 +47,7 @@ final class ListPurchaseInvoicesAction
             'status'        => $filter['status']        ?? null,
             'document_kind' => $filter['document_kind'] ?? null,
             'vendor_id'     => $filter['vendor_id']     ?? null,
+            'project_id'    => $filter['project_id']    ?? null,
             'year'          => $filter['year']          ?? null,
             'month'         => $filter['month']         ?? null,
             'date_from'     => $filter['date_from']     ?? null,

@@ -98,14 +98,41 @@ Detail ukazuje:
 - **Výkazy víceprací** — pokud používáš work_report v editoru, zde je seznam
   všech výkazů (PDF se sčítá per faktura)
 
-## 19.4 Editace zakázky
+## 19.4 Ekonomika zakázky — výnosy, náklady, marže
+
+V detailu zakázky je blok **Ekonomika zakázky**: výnosy, náklady a jejich rozdíl
+(marže) za celou akci — **bez ohledu na protistranu**. Jedna akce tak může mít
+několik odběratelů (víc vydaných faktur) i několik dodavatelů (hotel, doprava,
+vstupenky) a přesto uvidíš jedno číslo, jak je na tom.
+
+Doklad k zakázce zařadíš takto:
+
+- **Vydaná faktura** — pole „Zakázka" v editoru faktury.
+- **Přijatá faktura** — pole „Zakázka" v bloku *Klasifikace* v editoru přijaté
+  faktury. Hromadně je zařadíš v seznamu přijatých faktur: zaškrtni doklady a
+  v liště vyber **Zařadit k zakázce**. Funguje i u **zaúčtovaných** dokladů —
+  zakázka je jen analytické členění, účetní zápis se jí nemění.
+- **Pokladní doklad** — pole „Zakázka" na dokladu.
+
+V seznamu přijatých faktur můžeš filtrovat podle zakázky, včetně volby
+**Bez zakázky** — tak dohledáš doklady, které do ekonomiky akcí ještě nikdo
+nezařadil.
+
+> 💡 **Odkud se čísla berou.** Ve firmě vedené v **podvojném účetnictví** se
+> počítají z účetního deníku (nákladové účty 5xx proti výnosovým 6xx), takže
+> sedí na výsledovku a správně počítají dobropisy i storna. Doklad, který ještě
+> **není zaúčtovaný**, se do součtu nezapočítá — aplikace na to upozorní hláškou
+> „Zakázka má N nezaúčtovaných dokladů". V **daňové evidenci** deník neexistuje,
+> proto se sčítají přímo doklady podle data vystavení.
+
+## 19.5 Editace zakázky
 
 Tlačítko **Upravit** vpravo nahoře.
 
 Změna **hodinové sazby** se projeví jen na NOVÝCH položkách v editoru faktury.
 Stávající koncepty si zachovají původní sazbu, dokud je ručně neupravíš.
 
-## 19.5 Pozastavení / uzavření zakázky
+## 19.6 Pozastavení / uzavření zakázky
 
 - **Pozastavit** — zakázka zůstává v seznamu, ale v editoru faktury se objeví
   varování „Pozastaveno". Pro nové faktury použij jinou.
@@ -113,7 +140,7 @@ Stávající koncepty si zachovají původní sazbu, dokud je ručně neupraví�
   obrat se počítá. Lze obnovit zpět na `Aktivní`.
 - **Smazat** je možné jen pokud zakázka nemá žádné faktury.
 
-## 19.6 Schvalování výkazu zákazníkem
+## 19.7 Schvalování výkazu zákazníkem
 
 V editoru zakázky (sekce **Schvalování výkazu**) je checkbox
 **„Vyžaduje schválení výkazu práce zákazníkem"**.
@@ -140,7 +167,7 @@ schválení se faktura **automaticky vystaví a odešle**.
 Detailní popis workflow schvalování (tlačítka, stavy, public stránka) viz
 kapitola [15. Faktura — editor a výkaz víceprací § 15.7](15_Faktura_editor.md).
 
-## 19.7 Náhled na výkaz práce (sledovací odkaz)
+## 19.8 Náhled na výkaz práce (sledovací odkaz)
 
 V detailu **klienta** i **zakázky** je dole tlačítko **„Poslat odkaz na sledování
 výkazu práce"**. Vytvoří **trvalý veřejný odkaz**, na kterém klient vidí vždy
@@ -184,7 +211,7 @@ nový.
 Obě e-mailové šablony („odkaz na sledování" a „ověřovací kód") si můžeš upravit
 v **Nastavení → E-maily → E-mail šablony**.
 
-## 19.8 Schvalování — admin fronta
+## 19.9 Schvalování — admin fronta
 
 **Cesta: `Prodej → Schvalování`** (jen administrátor nebo role s oprávněním
 číst schvalování faktur).
@@ -205,7 +232,7 @@ nad stavem faktur aktuální firmy, stránkovaný po dávkách. Novou žádost, 
 nebo ruční změnu stavu provedeš v detailu konkrétní faktury; celý schvalovací
 cyklus je popsán v [§ 15.7](15_Faktura_editor.md#157-schvalovani-vykazu-zakaznikem).
 
-## 19.9 Tipy
+## 19.10 Tipy
 
 - **Bez zakázky lze fakturovat** — v editoru nech pole „Zakázka" prázdné.
   Užitečné pro jednorázové faktury (poradenství, licence).

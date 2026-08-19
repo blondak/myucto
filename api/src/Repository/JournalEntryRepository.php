@@ -31,7 +31,7 @@ final class JournalEntryRepository
      *     document_no?:?string, description?:?string, source_type?:string,
      *     source_id?:?int, posted_at?:?string, posted_by?:?int
      * } $header
-     * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, cost_center?:?string, line_no?:int}> $lines
+     * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, cost_center?:?string, project_id?:?int, line_no?:int}> $lines
      */
     public function insert(array $header, array $lines): int
     {
@@ -84,7 +84,7 @@ final class JournalEntryRepository
      *     document_no?:?string, description?:?string, source_type?:string,
      *     source_id?:?int, posted_at?:?string, posted_by?:?int
      * } $header
-     * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, cost_center?:?string, line_no?:int}> $lines
+     * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, cost_center?:?string, project_id?:?int, line_no?:int}> $lines
      */
     public function replace(int $id, array $header, array $lines): void
     {
@@ -318,15 +318,15 @@ final class JournalEntryRepository
     }
 
     /**
-     * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, cost_center?:?string, line_no?:int}> $lines
+     * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, cost_center?:?string, project_id?:?int, line_no?:int}> $lines
      */
     private function insertLines(\PDO $pdo, int $entryId, int $supplierId, array $lines): void
     {
         $lineStmt = $pdo->prepare(
             'INSERT INTO journal_entry_lines
                 (entry_id, supplier_id, account_id, side, amount, currency_code, fx_rate,
-                 amount_foreign, cost_center, line_no)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 amount_foreign, cost_center, project_id, line_no)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $n = 0;
         foreach ($lines as $line) {
@@ -340,6 +340,7 @@ final class JournalEntryRepository
                 $line['fx_rate'] ?? null,
                 $line['amount_foreign'] ?? null,
                 $line['cost_center'] ?? null,
+                isset($line['project_id']) && (int) $line['project_id'] > 0 ? (int) $line['project_id'] : null,
                 $line['line_no'] ?? $n,
             ]);
             $n++;
@@ -441,7 +442,7 @@ final class JournalEntryRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, entry_id, supplier_id, account_id, side, amount, currency_code, fx_rate,
-                    amount_foreign, cost_center, line_no
+                    amount_foreign, cost_center, project_id, line_no
                FROM journal_entry_lines
               WHERE entry_id = ? AND supplier_id = ?
               ORDER BY line_no ASC, id ASC'
@@ -455,6 +456,7 @@ final class JournalEntryRepository
             $r['amount'] = (float) $r['amount'];
             $r['fx_rate'] = $r['fx_rate'] === null ? null : (float) $r['fx_rate'];
             $r['amount_foreign'] = $r['amount_foreign'] === null ? null : (float) $r['amount_foreign'];
+            $r['project_id'] = $r['project_id'] === null ? null : (int) $r['project_id'];
             $r['line_no'] = (int) $r['line_no'];
             return $r;
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));

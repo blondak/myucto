@@ -376,7 +376,7 @@ detailní rozpis.
 ## 15.7 Schvalování výkazu zákazníkem
 
 Pokud má zakázka zapnuté **„Vyžaduje schválení výkazu práce zákazníkem"** (viz
-[§ 19.6](19_Zakazky.md)) a faktura obsahuje výkaz víceprací, faktura **nepůjde
+[§ 19.7](19_Zakazky.md)) a faktura obsahuje výkaz víceprací, faktura **nepůjde
 vystavit**, dokud zákazník výkaz neschválí přes e-mailový odkaz. Po schválení
 se faktura **automaticky vystaví a odešle**.
 

@@ -97,6 +97,71 @@ export const projectsApi = {
   delete:  (id: number) => api.delete(`/projects/${id}`).then((r) => r.data),
 
   stats: () => api.get<ProjectStats>('/projects/stats').then(r => r.data),
+
+  /** Výsledovka po zakázkách — výnos, náklad, marže napříč protistranami (issue #29). */
+  profitability: (params?: ProjectProfitFilters & { include_archived?: boolean }) =>
+    api.get<ProjectProfitOverview>('/projects/profitability', { params }).then(r => r.data),
+
+  /** Ekonomika jedné zakázky + doklady, ze kterých vznikla. */
+  profit: (id: number, params?: ProjectProfitFilters) =>
+    api.get<ProjectProfitDetail>(`/projects/${id}/profit`, { params }).then(r => r.data),
+}
+
+export interface ProjectProfitFilters {
+  date_from?: string
+  date_to?: string
+}
+
+export interface ProjectProfitItem {
+  id: number
+  name: string
+  project_number: string | null
+  contract_number: string | null
+  status: 'active' | 'paused' | 'closed'
+  client_company_name: string | null
+  revenue: number
+  cost: number
+  margin: number
+  /** null = zakázka zatím nemá výnos, procento by nedávalo smysl. */
+  margin_percent: number | null
+  budget_total: number | null
+  budget_used_percent: number | null
+  /** Doklady se zakázkou, které ještě nejsou zaúčtované (jen v režimu 'journal'). */
+  unposted_documents: number
+}
+
+/** 'journal' = podvojné účetnictví (čte se deník), 'documents' = daňová evidence. */
+export type ProjectProfitSource = 'journal' | 'documents'
+
+export interface ProjectProfitOverview {
+  source: ProjectProfitSource
+  currency: string
+  date_from: string | null
+  date_to: string | null
+  items: ProjectProfitItem[]
+  totals: { revenue: number; cost: number; margin: number }
+}
+
+export interface ProjectProfitDocument {
+  kind: 'invoice' | 'purchase_invoice' | 'cash_document'
+  direction: 'revenue' | 'cost'
+  id: number
+  number: string | null
+  doc_date: string
+  partner_name: string | null
+  currency: string
+  amount: number
+  amount_czk: number
+  status: string
+  booked: boolean
+}
+
+export type ProjectProfitDetail = ProjectProfitItem & {
+  source: ProjectProfitSource
+  currency: string
+  date_from: string | null
+  date_to: string | null
+  documents: ProjectProfitDocument[]
 }
 
 export interface ProjectStatsTopItem {

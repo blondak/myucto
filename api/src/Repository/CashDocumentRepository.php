@@ -17,7 +17,7 @@ final class CashDocumentRepository
     private const COLUMNS =
         'id, supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date,
          partner_name, partner_ic, partner_dic, description, vat_mode, total_amount, currency_code,
-         fx_rate, amount_foreign, rule_key, counter_account_code, invoice_id, purchase_invoice_id, invoice_payment_id,
+         fx_rate, amount_foreign, rule_key, counter_account_code, project_id, invoice_id, purchase_invoice_id, invoice_payment_id,
          journal_entry_id, reversal_entry_id, status, created_by, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
@@ -34,9 +34,9 @@ final class CashDocumentRepository
             'INSERT INTO cash_documents
                 (supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date,
                  partner_name, partner_ic, partner_dic, description, vat_mode, total_amount,
-                 currency_code, fx_rate, amount_foreign, rule_key, counter_account_code, invoice_id,
-                 purchase_invoice_id, status, created_by)
-             VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 currency_code, fx_rate, amount_foreign, rule_key, counter_account_code, project_id,
+                 invoice_id, purchase_invoice_id, status, created_by)
+             VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             (int) $data['register_id'],
@@ -55,6 +55,7 @@ final class CashDocumentRepository
             isset($data['amount_foreign']) && $data['amount_foreign'] !== null ? (float) $data['amount_foreign'] : null,
             $data['rule_key'] ?? null,
             $data['counter_account_code'] ?? null,
+            isset($data['project_id']) && (int) $data['project_id'] > 0 ? (int) $data['project_id'] : null,
             isset($data['invoice_id']) ? (int) $data['invoice_id'] : null,
             isset($data['purchase_invoice_id']) ? (int) $data['purchase_invoice_id'] : null,
             (string) ($data['status'] ?? 'draft'),
@@ -75,7 +76,7 @@ final class CashDocumentRepository
                 register_id = ?, doc_type = ?, purpose = ?, issue_date = ?, tax_date = ?,
                 partner_name = ?, partner_ic = ?, partner_dic = ?, description = ?, vat_mode = ?,
                 total_amount = ?, currency_code = ?, fx_rate = ?, amount_foreign = ?, rule_key = ?, counter_account_code = ?,
-                invoice_id = ?, purchase_invoice_id = ?
+                project_id = ?, invoice_id = ?, purchase_invoice_id = ?
               WHERE id = ? AND supplier_id = ?'
         )->execute([
             (int) $data['register_id'],
@@ -94,6 +95,7 @@ final class CashDocumentRepository
             isset($data['amount_foreign']) && $data['amount_foreign'] !== null ? (float) $data['amount_foreign'] : null,
             $data['rule_key'] ?? null,
             $data['counter_account_code'] ?? null,
+            isset($data['project_id']) && (int) $data['project_id'] > 0 ? (int) $data['project_id'] : null,
             isset($data['invoice_id']) ? (int) $data['invoice_id'] : null,
             isset($data['purchase_invoice_id']) ? (int) $data['purchase_invoice_id'] : null,
             $id,
@@ -395,6 +397,7 @@ final class CashDocumentRepository
         $r['total_amount'] = (float) $r['total_amount'];
         $r['fx_rate'] = (float) $r['fx_rate'];
         $r['amount_foreign'] = $r['amount_foreign'] !== null ? (float) $r['amount_foreign'] : null;
+        $r['project_id'] = ($r['project_id'] ?? null) !== null ? (int) $r['project_id'] : null;
         $r['invoice_id'] = $r['invoice_id'] !== null ? (int) $r['invoice_id'] : null;
         $r['purchase_invoice_id'] = $r['purchase_invoice_id'] !== null ? (int) $r['purchase_invoice_id'] : null;
         $r['invoice_payment_id'] = $r['invoice_payment_id'] !== null ? (int) $r['invoice_payment_id'] : null;

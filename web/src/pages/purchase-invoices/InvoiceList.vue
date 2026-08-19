@@ -26,6 +26,7 @@ import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
 import { useListKeyboard } from '@/composables/useListKeyboard'
 import { clientsApi, type Client } from '@/api/clients'
+import { projectsApi, type Project } from '@/api/projects'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import type { SavedFilter } from '@/api/preferences'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
@@ -84,6 +85,10 @@ const bookedFilter = ref<'' | '1' | '0'>('')
 const currencyFilter = ref('')
 const vendorFilter = ref<number | ''>('')
 const vendors = ref<Client[]>([])
+// Zakázka (issue #29). 'none' = doklady bez zakázky — bez toho by nešlo dohledat,
+// co do ekonomiky akcí ještě nikdo nezařadil.
+const projectFilter = ref<number | '' | 'none'>('')
+const projects = ref<Project[]>([])
 // Filtr na dávku hromadného AI importu (#232) — proklik z obrazovky importu.
 const importBatchFilter = ref('')
 const importBatches = ref<ImportBatch[]>([])
@@ -94,6 +99,7 @@ const activeFilterCount = computed(() => {
   if (statusFilter.value) n++
   if (kindFilter.value) n++
   if (vendorFilter.value !== '') n++
+  if (projectFilter.value !== '') n++
   if (monthFilter.value !== '') n++
   if (dateFrom.value || dateTo.value) n++
   if (overdueOnly.value) n++
@@ -120,6 +126,12 @@ const filterChips = computed<FilterChip[]>(() => {
   if (vendorFilter.value !== '') {
     const v = vendors.value.find(x => x.id === vendorFilter.value)
     if (v) chips.push({ key: 'vendor', value: v.company_name })
+  }
+  if (projectFilter.value !== '') {
+    const p = projectFilter.value === 'none'
+      ? t('purchase_invoice.filters.project_none')
+      : projects.value.find(x => x.id === projectFilter.value)?.name
+    if (p) chips.push({ key: 'project', value: p })
   }
   if (currencyFilter.value) chips.push({ key: 'currency', value: currencyFilter.value })
   if (monthFilter.value !== '') {
@@ -150,6 +162,7 @@ function clearFilter(key: string) {
     case 'status': statusFilter.value = ''; break
     case 'kind': kindFilter.value = ''; break
     case 'vendor': vendorFilter.value = ''; break
+    case 'project': projectFilter.value = ''; break
     case 'currency': currencyFilter.value = ''; break
     case 'month': monthFilter.value = ''; break
     case 'dates': dateFrom.value = ''; dateTo.value = ''; break
@@ -320,6 +333,11 @@ onMounted(async () => {
   // Dodavatelé pro filtr (jen dodavatelé — přijaté faktury chodí od nich).
   clientsApi.list({ archived: false, per_page: 200, role: 'vendors' })
     .then(r => { vendors.value = r.data }).catch(() => {})
+  // Zakázky pro filtr i hromadné zařazení (issue #29) — bez vazby na dodavatele.
+  if (!auth.isClientRole) {
+    projectsApi.list({ status: 'active', per_page: 200 })
+      .then(r => { projects.value = r.data }).catch(() => {})
+  }
   // Dávky hromadného AI importu pro „dohledat import" dropdown (#232).
   purchaseInvoicesApi.listImportBatches().then(b => { importBatches.value = b }).catch(() => {})
   if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
@@ -345,6 +363,9 @@ function loadFiltersFromQuery(q: typeof route.query) {
   dateTo.value       = typeof q.to === 'string' ? q.to : ''
   currencyFilter.value = typeof q.currency === 'string' ? q.currency : ''
   vendorFilter.value = typeof q.vendor === 'string' && q.vendor !== '' ? Number(q.vendor) : ''
+  projectFilter.value = typeof q.project === 'string' && q.project !== ''
+    ? (q.project === 'none' ? 'none' : Number(q.project))
+    : ''
   importBatchFilter.value = typeof q.import_batch === 'string' ? q.import_batch : ''
   // Proklik z importu obvykle přijde bez roku — přepnout na „všechny roky", ať se
   // dávka neschová kvůli defaultu na aktuální rok.
@@ -364,6 +385,7 @@ function buildQuery(): Record<string, string> {
   if (dateTo.value) q.to = dateTo.value
   if (currencyFilter.value) q.currency = currencyFilter.value
   if (vendorFilter.value !== '') q.vendor = String(vendorFilter.value)
+  if (projectFilter.value !== '') q.project = String(projectFilter.value)
   if (overdueOnly.value) q.overdue = '1'
   if (unpaidOnly.value) q.unpaid = '1'
   if (unpaidAsOf.value) q.unpaid_as_of = unpaidAsOf.value
@@ -392,7 +414,7 @@ function applyQueryToPage(q: Record<string, string>) {
 
 watch([statusFilter, kindFilter, yearFilter, monthFilter, dateFrom, dateTo,
        overdueOnly, unpaidOnly, unpaidAsOf, unmatchedOnly, needsReviewOnly, paymentOrderedFilter, bookedFilter,
-       currencyFilter, vendorFilter, importBatchFilter], () => {
+       currencyFilter, vendorFilter, projectFilter, importBatchFilter], () => {
   syncFiltersToUrl()
   load()
 })
@@ -422,6 +444,7 @@ watch(() => route.query, (newQ) => {
     bookedFilter.value = ''
     currencyFilter.value = ''
     vendorFilter.value = ''
+    projectFilter.value = ''
     importBatchFilter.value = ''
     search.value = ''
     // Uvolnit po flush (watch effects)
@@ -475,6 +498,7 @@ async function load(reset = true) {
       date_to:       dateTo.value       || undefined,
       currency:      currencyFilter.value || undefined,
       vendor_id:     vendorFilter.value   || undefined,
+      project_id:    projectFilter.value  || undefined,
       unpaid_only:   unpaidOnly.value   || undefined,
       overdue:       overdueOnly.value  || undefined,
       unpaid_as_of:  unpaidAsOf.value   || undefined,
@@ -701,6 +725,31 @@ async function bulkPost() {
   }
 }
 
+// Hromadné zařazení k zakázce (issue #29) — klient (cestovní kancelář) zakládá
+// doklady akce průběžně a zařazuje je k akci až dodatečně, často po desítkách.
+// Endpoint zvládne i zaúčtovaný doklad (zakázka je analytická dimenze).
+const projectAssignableSelected = computed(() =>
+  selectedIds.value.filter(id => invOf(id)?.status !== 'cancelled'))
+const bulkProjectTarget = ref<number | '' | 'none'>('')
+async function bulkSetProject() {
+  const target = bulkProjectTarget.value
+  const ids = projectAssignableSelected.value
+  if (target === '' || ids.length === 0 || bulkBusy.value) { bulkProjectTarget.value = ''; return }
+  const projectId = target === 'none' ? null : Number(target)
+  bulkBusy.value = true
+  const done: number[] = []
+  let fail = 0
+  for (const id of ids) {
+    try { await purchaseInvoicesApi.setProject(id, projectId); done.push(id) } catch { fail++ }
+  }
+  bulkBusy.value = false
+  bulkProjectTarget.value = ''
+  if (fail === 0) toast.success(t('purchase_invoice.bulk.project_success', { n: done.length }))
+  else            toast.error(t('purchase_invoice.bulk.partial', { ok: done.length, fail }))
+  markRowsTouched('purchase_invoice', done)
+  await load()
+}
+
 // Hromadná změna typu dokladu (#232) — po AI importu přehodit vybrané „Doklady
 // o úhradě" na „Faktura" apod. Vyloučené: stornované a zálohy (settlement vazby).
 function invOf(id: number): PurchaseInvoiceListItem | null {
@@ -792,6 +841,16 @@ async function bulkSetKind() {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.clipboardCheck" /></svg>
           {{ bulkBusy ? '…' : t('purchase_invoice.bulk.post', { n: postableSelected.length }) }}
         </button>
+        <!-- Hromadné zařazení k zakázce (issue #29) -->
+        <select v-if="(projectAssignableSelected.length > 0) && !auth.isClientRole && auth.canWrite('purchase_invoices')"
+          v-model="bulkProjectTarget"
+          @change="bulkSetProject"
+          :disabled="bulkBusy"
+          class="cursor-pointer h-9 max-w-56 px-2 border border-primary-500 text-primary-700 bg-surface hover:bg-primary-50 disabled:opacity-50 text-sm font-medium rounded-md">
+          <option value="">{{ t('purchase_invoice.bulk.set_project', { n: projectAssignableSelected.length }) }}</option>
+          <option value="none">{{ t('purchase_invoice.filters.project_none') }}</option>
+          <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
+        </select>
         <!-- Hromadná změna typu dokladu (#232) — oprava AI klasifikace po importu -->
         <select v-if="(kindEditableSelected.length > 0) && auth.canWrite('purchase_invoices.transition')"
           v-model="bulkKindTarget"
@@ -894,6 +953,12 @@ async function bulkSetKind() {
             :placeholder="t('purchase_invoice.filters.all_vendors')"
           />
         </div>
+        <select v-if="!auth.isClientRole" v-model="projectFilter"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+          <option value="">{{ t('purchase_invoice.filters.all_projects') }}</option>
+          <option value="none">{{ t('purchase_invoice.filters.project_none') }}</option>
+          <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
+        </select>
         <select v-model="yearFilter" :disabled="!!dateFrom || !!dateTo"
           class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm disabled:opacity-50">
           <option value="">{{ t('invoice.all_years') }}</option>

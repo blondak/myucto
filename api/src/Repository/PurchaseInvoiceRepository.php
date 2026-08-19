@@ -51,12 +51,14 @@ final class PurchaseInvoiceRepository
                     c.main_email AS vendor_main_email, c.language AS vendor_language,
                     cur.code AS currency, cur.symbol AS currency_symbol, cur.decimals AS currency_decimals,
                     pcur.code AS payment_currency, pcur.symbol AS payment_currency_symbol,
-                    ec.label AS expense_category_label, ec.code AS expense_category_code
+                    ec.label AS expense_category_label, ec.code AS expense_category_code,
+                    prj.name AS project_name, prj.project_number AS project_number
                FROM purchase_invoices pi
                JOIN clients c        ON c.id   = pi.vendor_id
                JOIN currencies cur   ON cur.id = pi.currency_id
           LEFT JOIN currencies pcur  ON pcur.id = pi.payment_currency_id
           LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id
+          LEFT JOIN projects prj     ON prj.id = pi.project_id
               WHERE pi.id = ? AND pi.supplier_id = ?'
         );
         $stmt->execute([$id, $supplierId]);
@@ -685,6 +687,16 @@ final class PurchaseInvoiceRepository
             $where[] = 'pi.vendor_id = ?';
             $params[] = (int) $filters['vendor_id'];
         }
+        // Zakázka (issue #29). `none` = doklady bez zakázky — jinak by nešlo dohledat,
+        // co do ekonomiky akcí ještě nikdo nezařadil.
+        if (!empty($filters['project_id'])) {
+            if ((string) $filters['project_id'] === 'none') {
+                $where[] = 'pi.project_id IS NULL';
+            } else {
+                $where[] = 'pi.project_id = ?';
+                $params[] = (int) $filters['project_id'];
+            }
+        }
         if (!empty($filters['year'])) {
             // Sargovatelný půlotevřený rozsah místo YEAR(...) — využije idx_pi_supplier_issue.
             $y = (int) $filters['year'];
@@ -840,6 +852,7 @@ final class PurchaseInvoiceRepository
                        pi.status, pi.booked_at, pi.paid_at, pi.cancelled_at,
                        pi.extraction_warning, pi.vat_deduction, pi.vat_deduction_percent, pi.tax_deductible,
                        ec.label AS expense_category_label, ec.code AS expense_category_code,
+                       pi.project_id, prj.name AS project_name,
                        c.company_name AS vendor_company_name, c.ic AS vendor_ic,
                        DATE_FORMAT(pi.issue_date, '%Y-%m') AS month_bucket,
                        EXISTS (SELECT 1 FROM purchase_invoices adv_f
@@ -855,6 +868,7 @@ final class PurchaseInvoiceRepository
                   JOIN clients c ON c.id = pi.vendor_id
                   JOIN currencies cur ON cur.id = pi.currency_id
              LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id
+             LEFT JOIN projects prj ON prj.id = pi.project_id
                  WHERE $whereSql
                  ORDER BY pi.issue_date DESC, pi.id DESC";
 
@@ -1112,6 +1126,18 @@ final class PurchaseInvoiceRepository
                                      WHERE id = ? AND supplier_id = ?');
                 $u->execute([$parentId, $newId, $supplierId]);
             }
+        }
+
+        // Zakázka (issue #29) — týmž aditivním způsobem jako vazba dobropisu výš, aby
+        // poziční INSERT zůstal beze změny. Tenant vazbu ověřuje Action
+        // (TenantReferenceGuard), tady jen persistujeme int|null.
+        $projectId = (isset($data['project_id']) && (int) $data['project_id'] > 0)
+            ? (int) $data['project_id']
+            : null;
+        if ($projectId !== null) {
+            $pdo->prepare('UPDATE purchase_invoices SET project_id = ?
+                            WHERE id = ? AND supplier_id = ?')
+                ->execute([$projectId, $newId, $supplierId]);
         }
 
         return $newId;
@@ -1504,6 +1530,19 @@ final class PurchaseInvoiceRepository
         // Vazba dobropisu na opravovanou fakturu (migrace 1096). Přepisujeme jen když ji
         // volající explicitně poslal (editor dokladu) — ostatní update cesty ji neposílají
         // → uložená vazba zůstává nedotčená. Tenant/self/kind validaci dělá Action.
+        // Zakázka (issue #29): píšeme JEN když ji volající skutečně poslal. Bezpodmínečný
+        // zápis by ji každému volajícímu, který pole vynechá (bankovní párování, AI import,
+        // status transition), tiše vynuloval — a s ní by z výsledovky zmizel náklad akce.
+        $hasProject = array_key_exists('project_id', $data);
+        $projectParam = null;
+        $projectSet = '';
+        if ($hasProject) {
+            $projectParam = ($data['project_id'] ?? null) && (int) $data['project_id'] > 0
+                ? (int) $data['project_id']
+                : null;
+            $projectSet = ', project_id = ?';
+        }
+
         $hasParent = array_key_exists('parent_purchase_invoice_id', $data);
         $parentParam = null;
         $parentSet = '';
@@ -1567,6 +1606,7 @@ final class PurchaseInvoiceRepository
                 paid_amount_payment_ccy = ?, paid_amount_invoice_ccy = ?, exchange_diff_base = ?,
                 vat_classification_code = ?, vat_deduction = ?, vat_deduction_percent = ?, tax_deductible = ?, is_fixed_asset = ?, expense_category_id = ?'
               . $receivedAtSourceSet
+              . $projectSet
               . $parentSet
               . ($hasVendorVatPayer ? ', vendor_is_vat_payer = ?' : '')
               . $paymentSet
@@ -1604,6 +1644,7 @@ final class PurchaseInvoiceRepository
             isset($data['expense_category_id']) && $data['expense_category_id'] ? (int) $data['expense_category_id'] : null,
         ];
         if ($hasReceivedAtSource) $params[] = $receivedAtSourceParam;
+        if ($hasProject) $params[] = $projectParam;
         if ($hasParent) $params[] = $parentParam;
         if ($hasVendorVatPayer) $params[] = $vendorIsVatPayer;
         if ($hasPayment) {
@@ -2756,6 +2797,19 @@ final class PurchaseInvoiceRepository
      *
      * @return string|null  chybová hláška (pro UI), nebo null při úspěchu
      */
+    /**
+     * Zařadí doklad k zakázce / vyřadí ho z ní (issue #29). Samostatně od update(),
+     * protože dimenzi lze měnit i u ZAÚČTOVANÉHO dokladu — viz
+     * {@see \MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceProjectAction}.
+     * Tenant scope zakázky ověřuje Action (TenantReferenceGuard).
+     */
+    public function updateProject(int $id, int $supplierId, ?int $projectId): void
+    {
+        $this->db->pdo()
+            ->prepare('UPDATE purchase_invoices SET project_id = ? WHERE id = ? AND supplier_id = ?')
+            ->execute([$projectId, $id, $supplierId]);
+    }
+
     public function updateDocumentKind(int $id, int $supplierId, string $kind): ?string
     {
         $allowed = ['invoice', 'receipt', 'credit_note', 'advance'];
@@ -3004,7 +3058,7 @@ final class PurchaseInvoiceRepository
         foreach (['id', 'supplier_id', 'vendor_id', 'currency_id', 'payment_currency_id',
                   'created_by', 'pdf_size_bytes', 'source_size_bytes', 'expense_category_id',
                   'advance_purchase_invoice_id', 'advance_link_suggested_id',
-                  'parent_purchase_invoice_id', 'cash_register_id'] as $f) {
+                  'parent_purchase_invoice_id', 'cash_register_id', 'project_id'] as $f) {
             if (isset($row[$f]) && $row[$f] !== null) $row[$f] = (int) $row[$f];
         }
         $row['reverse_charge'] = isset($row['reverse_charge']) ? (bool) $row['reverse_charge'] : false;

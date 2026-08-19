@@ -1164,6 +1164,19 @@ final class CashDocumentService
         if (!self::isDate((string) $doc['issue_date'])) {
             throw new CashException('validation', 'Datum vystavení je povinné.');
         }
+        // Zakázka (issue #29) — BOLA guard. Pokladna nemá Action-level TenantReferenceGuard
+        // (jediná zapisovací cesta je tahle služba), takže vazbu na tenanta ověřujeme tady.
+        // `projects` vlastní supplier_id nemá, scope jde přes clients.supplier_id.
+        if (($doc['project_id'] ?? null) !== null) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT 1 FROM projects p JOIN clients c ON c.id = p.client_id
+                  WHERE p.id = ? AND c.supplier_id = ?'
+            );
+            $stmt->execute([(int) $doc['project_id'], $supplierId]);
+            if ($stmt->fetchColumn() === false) {
+                throw new CashException('invalid_reference', 'Zakázka neexistuje nebo nepatří této firmě.');
+            }
+        }
         if (trim((string) $doc['description']) === '') {
             throw new CashException('validation', 'Popis (obsah účetního případu) je povinný.');
         }
@@ -1772,6 +1785,8 @@ final class CashDocumentService
                 ? round((float) $data['amount_foreign'], 2) : null,
             'rule_key'             => self::nullableString($data['rule_key'] ?? null),
             'counter_account_code' => self::nullableString($data['counter_account_code'] ?? null),
+            // Zakázka (issue #29) — hotovostní náklad akce (vstupenky, drobné nákupy).
+            'project_id'           => isset($data['project_id']) && (int) $data['project_id'] > 0 ? (int) $data['project_id'] : null,
             'invoice_id'           => isset($data['invoice_id']) && (int) $data['invoice_id'] > 0 ? (int) $data['invoice_id'] : null,
             'purchase_invoice_id'  => isset($data['purchase_invoice_id']) && (int) $data['purchase_invoice_id'] > 0 ? (int) $data['purchase_invoice_id'] : null,
             'status'               => 'draft',

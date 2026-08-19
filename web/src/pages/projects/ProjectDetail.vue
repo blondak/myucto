@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { projectsApi, type Project } from '@/api/projects'
+import { projectsApi, type Project, type ProjectProfitDetail } from '@/api/projects'
 import { invoicesApi, type InvoiceListItem } from '@/api/invoices'
 import { formatMoney, formatDate, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass } from '@/composables/useFormat'
 import MonthlyRevenueChart from '@/components/charts/MonthlyRevenueChart.vue'
@@ -32,6 +32,12 @@ const invoicesLoadingMore = ref(false)
 const invoicesTotal = ref(0)
 const invoicesPage = ref(1)
 const invoicesPages = ref(1)
+
+// Ekonomika zakázky (issue #29) — výnos/náklad/marže napříč VŠEMI protistranami.
+// Načítá se samostatně, ne v load(): sestava sahá do deníku a nemá blokovat detail,
+// když firma podvojné účetnictví teprve zapíná (endpoint pak vrátí nuly, ne chybu).
+const profit = ref<ProjectProfitDetail | null>(null)
+const profitLoading = ref(false)
 
 const canDelete = computed(() => (project.value?.invoices_count ?? 0) === 0)
 
@@ -103,7 +109,22 @@ async function loadMoreInvoices() {
   }
 }
 
-onMounted(load)
+async function loadProfit() {
+  const id = Number(route.params.id)
+  profitLoading.value = true
+  try {
+    profit.value = await projectsApi.profit(id)
+  } catch {
+    profit.value = null
+  } finally {
+    profitLoading.value = false
+  }
+}
+
+onMounted(() => {
+  void load()
+  void loadProfit()
+})
 
 async function archive() {
   if (!project.value) return
@@ -275,6 +296,78 @@ const projectActions = computed<ActionItem[]>(() => {
           </tbody>
         </table>
         </div>
+      </div>
+    </div>
+
+    <!-- Ekonomika zakázky (issue #29): výnos − náklad = marže, napříč všemi
+         protistranami. Na rozdíl od obratu výš zahrnuje i přijaté faktury a pokladnu. -->
+    <div v-if="profit" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+      <div class="px-5 py-3 border-b border-neutral-200 flex flex-wrap items-center justify-between gap-2">
+        <h3 class="font-semibold">{{ t('project.profit.title') }}</h3>
+        <span class="text-xs text-neutral-500">
+          {{ profit.source === 'journal' ? t('project.profit.source_journal') : t('project.profit.source_documents') }}
+        </span>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-neutral-100">
+        <div class="p-5">
+          <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">{{ t('project.profit.revenue') }}</div>
+          <div class="text-2xl font-semibold font-mono text-neutral-900">{{ formatMoney(profit.revenue, profit.currency) }}</div>
+        </div>
+        <div class="p-5">
+          <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">{{ t('project.profit.cost') }}</div>
+          <div class="text-2xl font-semibold font-mono text-neutral-900">{{ formatMoney(profit.cost, profit.currency) }}</div>
+          <div v-if="profit.budget_used_percent !== null" class="text-xs text-neutral-500 mt-1">
+            {{ t('project.profit.budget_used', { pct: profit.budget_used_percent }) }}
+          </div>
+        </div>
+        <div class="p-5">
+          <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">{{ t('project.profit.margin') }}</div>
+          <div class="text-2xl font-semibold font-mono" :class="profit.margin < 0 ? 'text-danger-500' : 'text-success-600'">
+            {{ formatMoney(profit.margin, profit.currency) }}
+          </div>
+          <div v-if="profit.margin_percent !== null" class="text-xs text-neutral-500 mt-1">
+            {{ profit.margin_percent }} %
+          </div>
+        </div>
+      </div>
+
+      <!-- Nezaúčtované doklady by v součtu z deníku chyběly bez varování → falešná marže. -->
+      <div v-if="profit.unposted_documents > 0" class="px-5 py-3 border-t border-warning-200 bg-warning-50 text-sm text-neutral-700">
+        {{ t('project.profit.unposted', { n: profit.unposted_documents }) }}
+      </div>
+
+      <div v-if="profit.documents.length > 0" class="border-t border-neutral-200 overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500">
+            <tr>
+              <th class="text-left font-medium px-5 py-2">{{ t('project.profit.doc_date') }}</th>
+              <th class="text-left font-medium px-3 py-2">{{ t('project.profit.doc_kind') }}</th>
+              <th class="text-left font-medium px-3 py-2">{{ t('project.profit.doc_number') }}</th>
+              <th class="text-left font-medium px-3 py-2">{{ t('project.profit.doc_partner') }}</th>
+              <th class="text-right font-medium px-5 py-2">{{ t('project.profit.doc_amount') }}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-neutral-100">
+            <tr v-for="d in profit.documents" :key="`${d.kind}-${d.id}`">
+              <td class="px-5 py-2 whitespace-nowrap text-neutral-700">{{ formatDate(d.doc_date) }}</td>
+              <td class="px-3 py-2 whitespace-nowrap text-neutral-500">{{ t(`project.profit.kind_${d.kind}`) }}</td>
+              <td class="px-3 py-2">
+                <RouterLink v-if="d.kind === 'invoice'" :to="`/invoices/${d.id}`" class="text-primary-600 hover:underline">{{ d.number }}</RouterLink>
+                <RouterLink v-else-if="d.kind === 'purchase_invoice'" :to="`/purchase-invoices/${d.id}`" class="text-primary-600 hover:underline">{{ d.number }}</RouterLink>
+                <span v-else class="text-neutral-700">{{ d.number }}</span>
+              </td>
+              <td class="px-3 py-2 text-neutral-700">{{ d.partner_name }}</td>
+              <td class="px-5 py-2 text-right font-mono whitespace-nowrap"
+                  :class="d.direction === 'cost' ? 'text-danger-500' : 'text-neutral-900'">
+                {{ d.direction === 'cost' ? '−' : '' }}{{ formatMoney(d.amount_czk, profit.currency) }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else-if="!profitLoading" class="px-5 py-4 text-sm text-neutral-500">
+        {{ t('project.profit.empty') }}
       </div>
     </div>
 

@@ -29,6 +29,7 @@ import type { CashSettlementResult } from '@/api/invoices'
 import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
 import { stockApi, type StockItemSearchResult } from '@/api/stock'
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
+import { projectsApi, type Project } from '@/api/projects'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { settingsApi } from '@/api/settings'
 import AutomationBadge from '@/components/automation/AutomationBadge.vue'
@@ -173,6 +174,9 @@ const vatRates = ref<VatRate[]>([])
 const currencies = ref<Currency[]>([])
 const units = ref<Unit[]>([])
 const expenseCategories = ref<ExpenseCategory[]>([])
+// Zakázky (issue #29). Na přijaté straně se NEfiltrují dle protistrany — akce má víc
+// dodavatelů i víc odběratelů, takže vazba na klienta zakázky by picker vyprázdnila.
+const projects = ref<Project[]>([])
 const aiPostingSuggestion = ref<AiPostingSuggestion | null>(null)
 const aiSuggestionSaving = ref(false)
 
@@ -231,6 +235,7 @@ const form = ref<{
   paid_amount_invoice_ccy: number | null
   exchange_diff_base: number | null
   expense_category_id: number | null
+  project_id: number | null
   vat_classification_code: string | null
   parent_purchase_invoice_id: number | null
   items: PurchaseInvoiceItem[]
@@ -272,6 +277,7 @@ const form = ref<{
   paid_amount_invoice_ccy: null,
   exchange_diff_base: null,
   expense_category_id: null,
+  project_id: null,
   vat_classification_code: null,
   parent_purchase_invoice_id: null,
   items: [],
@@ -592,6 +598,14 @@ async function loadCodebooks() {
     units.value = u
     expenseCategories.value = ec
     vatClassifications.value = vc
+    // Zakázky picker — klientská role je nevidí (stejně jako účtovou osnovu níž).
+    if (!auth.isClientRole) {
+      try {
+        projects.value = (await projectsApi.list({ status: 'active', per_page: 200 })).data
+      } catch {
+        projects.value = []
+      }
+    }
     if (!auth.isClientRole) {
       try {
         accountingAccounts.value = await accountingApi.listAccounts()
@@ -768,6 +782,7 @@ function populate(inv: PurchaseInvoice) {
   form.value.paid_amount_invoice_ccy = inv.paid_amount_invoice_ccy
   form.value.exchange_diff_base = inv.exchange_diff_base
   form.value.expense_category_id = inv.expense_category_id ?? null
+  form.value.project_id = inv.project_id ?? null
   form.value.vat_classification_code = inv.vat_classification_code ?? null
   form.value.parent_purchase_invoice_id = inv.parent_purchase_invoice_id ?? null
   form.value.items = inv.items.length > 0 ? inv.items : []
@@ -1280,6 +1295,7 @@ async function submit() {
       paid_amount_invoice_ccy: form.value.paid_amount_invoice_ccy,
       exchange_diff_base: form.value.exchange_diff_base,
       expense_category_id: form.value.expense_category_id,
+      project_id: form.value.project_id,
       vat_classification_code: form.value.vat_classification_code,
       // Vazba přes parent_purchase_invoice_id — dobropis → opravovaná faktura (migrace 1096),
       // DDKP (tax_document) → uhrazená záloha. BE ji stejně provaliduje (tenant/druh/self)
@@ -2241,6 +2257,16 @@ function fieldErr(key: string): string | null {
                 {{ t('purchase_invoice.classification.manage_categories') }}
               </RouterLink>
             </p>
+          </div>
+          <div v-if="!auth.isClientRole">
+            <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.classification.project') }}</label>
+            <select v-model="form.project_id" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+              <option :value="null">— {{ t('purchase_invoice.classification.no_project') }} —</option>
+              <option v-for="p in projects" :key="p.id" :value="p.id">
+                {{ p.name }}<span v-if="p.project_number" class="text-neutral-400"> ({{ p.project_number }})</span>
+              </option>
+            </select>
+            <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_invoice.classification.project_hint') }}</p>
           </div>
           <div>
             <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.classification.vat_classification') }}</label>

@@ -8417,6 +8417,8 @@
             "all_statuses": "All statuses",
             "all_kinds": "All types",
             "all_vendors": "All vendors",
+            "all_projects": "All projects",
+            "project_none": "No project",
             "unpaid_only": "Unpaid only",
             "overdue": "Overdue",
             "unmatched": "No payment matched",
@@ -8472,6 +8474,9 @@
             "expense_category": "Expense category",
             "no_category": "(no category)",
             "manage_categories": "Manage categories in Codebooks →",
+            "project": "Project",
+            "no_project": "no project",
+            "project_hint": "Assigns the cost to an event — revenue, costs and margin are shown on the project detail.",
             "vat_classification": "VAT classification (VAT return)",
             "no_vat_class": "(auto-default by rate)",
             "vat_classification_hint": "If unset, system auto-assigns code by VAT rate (21%→40, 12%→41, 0%→42, reverse→5).",
@@ -8520,7 +8525,9 @@
             "post_success": "Posted {n} purchase invoices.",
             "post_partial": "Posted {ok}, errors: {err}",
             "post_failed": "Bulk posting failed",
-            "kind_success": "Document type changed for {n} documents."
+            "kind_success": "Document type changed for {n} documents.",
+            "set_project": "Assign to project ({n})",
+            "project_success": "Project set for {n} documents."
         }
     },
     "payment_order": {
@@ -10698,6 +10705,25 @@
     "project": {
         "title": "Projects",
         "info_create_in_client": "New projects are created in the client's page — they are always tied to a specific client.",
+        "profit": {
+            "title": "Project economics",
+            "source_journal": "Calculated from the accounting journal",
+            "source_documents": "Calculated from documents (tax evidence)",
+            "revenue": "Revenue",
+            "cost": "Costs",
+            "margin": "Margin",
+            "budget_used": "{pct}% of budget",
+            "unposted": "This project has {n} unposted documents — they are not included yet.",
+            "doc_date": "Date",
+            "doc_kind": "Document",
+            "doc_number": "Number",
+            "doc_partner": "Counterparty",
+            "doc_amount": "Amount",
+            "kind_invoice": "Issued invoice",
+            "kind_purchase_invoice": "Purchase invoice",
+            "kind_cash_document": "Cash document",
+            "empty": "No documents linked to this project yet."
+        },
         "all_clients": "All clients",
         "clear_filter": "✕ Clear filter",
         "name": "Name",

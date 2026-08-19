@@ -100,7 +100,7 @@ final class CreatePurchaseInvoiceAction
         $badRefs = $this->tenantRefs->violations(
             $supplierId,
             $body,
-            ['expense_category_id', 'currency_id', 'payment_currency_id', 'cash_register_id'],
+            ['expense_category_id', 'currency_id', 'payment_currency_id', 'cash_register_id', 'project_id'],
         );
         if ($badRefs !== []) {
             return Json::error($response, 'invalid_reference', TenantReferenceGuard::message($badRefs), 400);

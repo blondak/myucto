@@ -1039,6 +1039,16 @@ const purchaseActions = computed<ActionItem[]>(() => {
               <span v-else class="text-neutral-400">—</span>
             </dd>
           </div>
+          <!-- Zakázka (issue #29) — proklik na ekonomiku akce (výnos/náklad/marže). -->
+          <div class="flex justify-between gap-3">
+            <dt class="text-neutral-500">{{ t('purchase_invoice.classification.project') }}</dt>
+            <dd class="font-medium text-right text-neutral-700">
+              <RouterLink v-if="invoice.project_id" :to="`/projects/${invoice.project_id}`" class="text-primary-600 hover:underline">
+                {{ invoice.project_name }}
+              </RouterLink>
+              <span v-else class="text-neutral-400">—</span>
+            </dd>
+          </div>
         </dl>
       </div>
 

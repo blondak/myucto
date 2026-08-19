@@ -8417,6 +8417,8 @@
             "all_statuses": "Všechny stavy",
             "all_kinds": "Všechny typy",
             "all_vendors": "Všichni dodavatelé",
+            "all_projects": "Všechny zakázky",
+            "project_none": "Bez zakázky",
             "unpaid_only": "Pouze neuhrazené",
             "overdue": "Po splatnosti",
             "unmatched": "Bez párování úhrady",
@@ -8472,6 +8474,9 @@
             "expense_category": "Kategorie nákladu",
             "no_category": "(bez kategorie)",
             "manage_categories": "Spravovat kategorie v Číselnících →",
+            "project": "Zakázka",
+            "no_project": "bez zakázky",
+            "project_hint": "Zařadí náklad k akci — přehled výnosů, nákladů a marže najdete v detailu zakázky.",
             "vat_classification": "VAT klasifikace (DPH přiznání)",
             "no_vat_class": "(auto-default podle sazby)",
             "vat_classification_hint": "Pokud nevyberete, systém auto-přiřadí kód podle sazby DPH (21%→40, 12%→41, 0%→42, reverse→5).",
@@ -8520,7 +8525,9 @@
             "post_success": "Zaúčtováno {n} přijatých faktur.",
             "post_partial": "Zaúčtováno {ok}, chyby: {err}",
             "post_failed": "Hromadné zaúčtování selhalo",
-            "kind_success": "Typ dokladu změněn u {n} dokladů."
+            "kind_success": "Typ dokladu změněn u {n} dokladů.",
+            "set_project": "Zařadit k zakázce ({n})",
+            "project_success": "Zakázka nastavena u {n} dokladů."
         }
     },
     "payment_order": {
@@ -10698,6 +10705,25 @@
     "project": {
         "title": "Zakázky",
         "info_create_in_client": "Novou zakázku přidáš v kartě klienta — je vždy navázaná na konkrétního zákazníka.",
+        "profit": {
+            "title": "Ekonomika zakázky",
+            "source_journal": "Počítáno z účetního deníku",
+            "source_documents": "Počítáno z dokladů (daňová evidence)",
+            "revenue": "Výnosy",
+            "cost": "Náklady",
+            "margin": "Marže",
+            "budget_used": "{pct} % rozpočtu",
+            "unposted": "Zakázka má {n} nezaúčtovaných dokladů — do součtu zatím nevstupují.",
+            "doc_date": "Datum",
+            "doc_kind": "Doklad",
+            "doc_number": "Číslo",
+            "doc_partner": "Protistrana",
+            "doc_amount": "Částka",
+            "kind_invoice": "Vydaná faktura",
+            "kind_purchase_invoice": "Přijatá faktura",
+            "kind_cash_document": "Pokladní doklad",
+            "empty": "K zakázce zatím nejsou žádné doklady."
+        },
         "all_clients": "Všichni klienti",
         "clear_filter": "✕ Zrušit filtr",
         "name": "Název",

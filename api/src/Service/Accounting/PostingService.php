@@ -152,6 +152,7 @@ final class PostingService
         //    tj. přesně na tom, co se uloží — ne na surovém vstupu.
         $codeMap = $this->accounts->codeToIdMap($supplierId);
         $resolved = $this->resolveLines($supplierId, $lines, $codeMap, $sourceType);
+        $resolved = $this->stampProjectDimension($supplierId, $sourceType, $sourceId, $resolved);
         self::assertBalanced($resolved); // v haléřích; UnbalancedEntryException při nerovnosti
 
         // R7 (Epic F4): flag allow_closing_period smí nastavit VÝHRADNĚ ClosingService —
@@ -412,6 +413,9 @@ final class PostingService
                 'fx_rate'        => $line['fx_rate'] ?? null,
                 'amount_foreign' => $line['amount_foreign'] ?? null,
                 'cost_center'    => $line['cost_center'] ?? null,
+                // Zakázka se do storna MUSÍ přenést, jinak by protizápis náklad akce
+                // odečetl z „bez zakázky" a v marži by původní řádek zůstal navždy.
+                'project_id'     => isset($line['project_id']) ? (int) $line['project_id'] : null,
             ];
         }
 
@@ -1874,7 +1878,97 @@ final class PostingService
         return (int) round(((float) $amount) * 100.0);
     }
 
+    /**
+     * Přepíše zakázku na řádcích JIŽ zaúčtovaného dokladu (issue #29).
+     *
+     * Proč to smí obejít §35: `project_id` je čistě analytická dimenze — nemění účet,
+     * stranu, částku ani období, takže deník zůstává co do účetního obsahu totožný a
+     * není co opravovat protizápisem. Zařazení dokladu k akci navíc typicky přijde AŽ
+     * po zaúčtování (účetní zaúčtuje došlou fakturu, projekťák ji pak přiřadí k akci);
+     * kdyby to šlo jen přeúčtováním, výsledovka po zakázkách by v praxi zůstala prázdná.
+     *
+     * Vědomé omezení: storna (`source_id` je u nich ZÁMĚRNĚ NULL, viz reverse()) se
+     * nepřerazítkují. Stornovaný doklad se k jiné zakázce nepřeřazuje — ruší se.
+     *
+     * @param 'invoice'|'purchase_invoice'|'cash' $sourceType
+     * @return int počet přerazítkovaných řádků deníku
+     */
+    public function restampProjectDimension(int $supplierId, string $sourceType, int $sourceId, ?int $projectId): int
+    {
+        if (!isset(self::PROJECT_DIMENSION_SOURCES[$sourceType])) {
+            return 0;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE journal_entry_lines jel
+               JOIN journal_entries je ON je.id = jel.entry_id
+                SET jel.project_id = ?
+              WHERE je.supplier_id = ? AND je.source_type = ? AND je.source_id = ?
+                AND jel.supplier_id = ?'
+        );
+        $stmt->execute([
+            $projectId !== null && $projectId > 0 ? $projectId : null,
+            $supplierId,
+            $sourceType,
+            $sourceId,
+            $supplierId,
+        ]);
+        return $stmt->rowCount();
+    }
+
     // ── interní ───────────────────────────────────────────────────────────────
+
+    /**
+     * Zdrojové doklady, které zakázku (`project_id`) na hlavičce nesou — sloupec je
+     * u všech tří stejný, liší se jen tabulka.
+     *
+     * Bankovní pohyb tu ZÁMĚRNĚ není: úhrada je rozvahový pohyb (321/311 × 221), do
+     * výsledovky nevstupuje, a dimenze na ní by jen zdvojila náklad už zaúčtovaný
+     * fakturou. Uzávěrkové a odpisové zápisy dimenzi nemají z podstaty (jsou souhrnné).
+     */
+    private const PROJECT_DIMENSION_SOURCES = [
+        'invoice'          => 'invoices',
+        'purchase_invoice' => 'purchase_invoices',
+        'cash'             => 'cash_documents',
+    ];
+
+    /**
+     * Dorazítkuje řádky zakázkou ze zdrojového dokladu (issue #29).
+     *
+     * Proč centrálně tady a ne v každém builderu: zápis vzniká šesti cestami
+     * (auto-post, ruční zaúčtování z JournalAction, aktivační backfill, pokladna,
+     * doúčtování historie…) a dimenze, kterou razítkuje jen část z nich, dělá
+     * výsledovku po zakázkách nepoužitelnou — chybějící náklad se v ní neprojeví
+     * jako nula, ale jako falešně vyšší marže.
+     *
+     * Řádky, které si zakázku přinesly z builderu, zůstávají beze změny.
+     *
+     * @param list<array<string,mixed>> $resolved
+     * @return list<array<string,mixed>>
+     */
+    private function stampProjectDimension(int $supplierId, string $sourceType, ?int $sourceId, array $resolved): array
+    {
+        $table = self::PROJECT_DIMENSION_SOURCES[$sourceType] ?? null;
+        if ($table === null || $sourceId === null) {
+            return $resolved;
+        }
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT project_id FROM {$table} WHERE id = ? AND supplier_id = ?"
+        );
+        $stmt->execute([$sourceId, $supplierId]);
+        $projectId = $stmt->fetchColumn();
+        if ($projectId === false || $projectId === null) {
+            return $resolved;
+        }
+        $projectId = (int) $projectId;
+
+        foreach ($resolved as $i => $line) {
+            if (($line['project_id'] ?? null) === null) {
+                $resolved[$i]['project_id'] = $projectId;
+            }
+        }
+        return $resolved;
+    }
 
     /**
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float|int|string, cost_center?:?string}> $lines
@@ -1932,6 +2026,12 @@ final class PostingService
                 'side'        => $side,
                 'amount'      => $amount,
                 'cost_center' => $line['cost_center'] ?? null,
+                // Zakázka (issue #29): builder ji smí určit per řádek (rozúčtování jednoho
+                // dokladu na víc akcí); co nechá NULL, dorazítkuje stampProjectDimension()
+                // ze zdrojového dokladu.
+                'project_id'  => isset($line['project_id']) && (int) $line['project_id'] > 0
+                    ? (int) $line['project_id']
+                    : null,
             ];
             // cizoměnová stopa (jen saldokontní řádky cizoměnových dokladů)
             if (isset($line['currency_code'])) {
