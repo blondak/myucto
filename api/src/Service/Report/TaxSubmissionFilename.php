@@ -37,9 +37,19 @@ final class TaxSubmissionFilename
 
         $timestamp ??= self::snapshotTimestamp($submission);
         $parts[] = $timestamp->format('Ymd-His-u');
-        $parts[] = self::safeSuffix($suffix);
 
-        return implode('-', $parts);
+        $safeSuffix = self::safeSuffix($suffix);
+        $base = implode('-', $parts);
+
+        // Holá přípona (např. 'xml') se připojuje tečkou, ne pomlčkou — jinak by
+        // se ".xml" změnilo na "-xml" a soubor by nešel podle přípony rozeznat.
+        // Sufix ve tvaru "název.přípona" (např. 'archive.xml', 'confirmation.p7s')
+        // se naopak od zbytku jména odděluje pomlčkou jako dosud.
+        if (!str_contains($safeSuffix, '.')) {
+            return $base . '.' . $safeSuffix;
+        }
+
+        return $base . '-' . $safeSuffix;
     }
 
     /** @param array<string,mixed> $submission */

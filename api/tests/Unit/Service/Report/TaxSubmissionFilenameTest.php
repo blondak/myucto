@@ -54,4 +54,33 @@ final class TaxSubmissionFilenameTest extends TestCase
         self::assertSame('DPHKH1-2026-06-s11-20260727-091500-000000-archive.xml', $second);
         self::assertNotSame($first, $second);
     }
+
+    /**
+     * Regrese pro GitHub issue #27: DPH přiznání, kontrolní i souhrnné hlášení
+     * volají forSnapshot() s holou příponou 'xml' (bez názvu artefaktu). Ta se
+     * nesmí připojit pomlčkou (…-xml), ale tečkou (….xml), jinak si soubor
+     * podle přípony nerozezná ani systém, ani uživatel.
+     */
+    public function testBareExtensionSuffixIsJoinedWithDotNotDash(): void
+    {
+        $filename = TaxSubmissionFilename::forSnapshot(
+            [
+                'id' => 3,
+                'form_code' => 'dphshv',
+                'period_year' => 2026,
+                'period_month' => 7,
+                'period_quarter' => null,
+            ],
+            'xml',
+            null,
+            new \DateTimeImmutable('2026-08-19 13:42:15.327900'),
+        );
+
+        self::assertSame(
+            'DPHSHV-2026-07-s3-20260819-134215-327900.xml',
+            $filename,
+        );
+        self::assertStringEndsWith('.xml', $filename);
+        self::assertStringNotContainsString('-xml', $filename);
+    }
 }
