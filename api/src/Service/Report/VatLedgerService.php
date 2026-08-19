@@ -951,6 +951,21 @@ final class VatLedgerService
      * → direction 'sale' (kódy 1/2), 'out' → 'purchase' (kódy 40/41). Zařazení do
      * období dle DUZP = den transakce (COALESCE(tax_date, issue_date)).
      *
+     * M-9 (audit pokladny 2026-08) — `'CZK'`/`1`/`'CZ'`/`0` jsou ZÁMĚR, ne opomenutí,
+     * a platí i pro VALUTOVOU pokladnu:
+     *  - `currency`/`exchange_rate`: `cash_documents.total_amount` i řádky
+     *    `cash_document_vat_lines` se ukládají už přepočtené na CZK (migrace 1114,
+     *    `CashDocumentService::convertVatLinesToCzk`) — druhý přepočet by částky
+     *    nafoukl (tatáž třída chyby jako C-1 v peněžním deníku).
+     *  - `country_iso2`/`country_is_eu`: doklad s `vat_mode='vat'` nese sazbu z ČESKÉHO
+     *    číselníku (`vat_rate_invalid` jinou nepustí), takže je to z konstrukce tuzemské
+     *    zdanitelné plnění — hotovostní prodej přes pult, místo plnění v tuzemsku.
+     *    Odvozovat zemi z partnera by takový doklad přeřadilo mezi dodání do JČS (§ 64)
+     *    nebo vývoz (§ 66), tedy do osvobození, které se u prodeje za hotové neuplatní.
+     *    Cizí měna sama o sobě daňový režim neurčuje. Hlídá se jen tvar DIČ protistrany
+     *    (varování `cash.warning.dic_not_czech` při zaúčtování), aby se do KH A.4
+     *    nedostalo cizí VAT ID vydávané za české.
+     *
      * @return list<array{0: array<string,mixed>, 1: 'sale'|'purchase'}>
      */
     private function fetchCash(int $supplierId, string $start, string $end, bool $includeDrafts): array

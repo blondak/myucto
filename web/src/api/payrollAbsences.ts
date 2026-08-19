@@ -3,7 +3,7 @@ import { api } from './client'
 export type AbsenceType =
   | 'vacation' | 'dpn' | 'quarantine' | 'ocr' | 'long_term_care' | 'ppm'
   | 'paternity' | 'parental' | 'unpaid_leave' | 'employee_obstacle'
-  | 'employer_obstacle' | 'other'
+  | 'employer_obstacle' | 'compensatory_time_off' | 'other'
 
 export interface PayrollAbsenceEmployment {
   id: number

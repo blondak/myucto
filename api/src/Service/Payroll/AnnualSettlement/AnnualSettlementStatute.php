@@ -25,15 +25,26 @@ use DateTimeImmutable;
  * a nezávisí na ničem dalším.
  *
  * Každá hodnota proto nese `source = 'statute'` do uloženého snapshotu — stejný
- * vzor jako `fiction_days_source` v migraci 1394. Kdyby se rozhodlo, že mají žít
- * v rulesetu, přibude tu druhá větev a snapshot řekne, odkud hodnota přišla.
+ * vzor jako `fiction_days_source` v migraci 1394.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Peněžní prahy jsou od 8/2026 i v rulesetu — a musí sedět
+ * ─────────────────────────────────────────────────────────────────────────────
+ * `settlement.payout_threshold` a `bonus.minimum_amount.yearly` v doméně daně
+ * z příjmů nesou tatáž dvě čísla jako {@see PAYOUT_THRESHOLD_MINOR_UNITS}
+ * a {@see ANNUAL_BONUS_MINIMUM_MINOR_UNITS}. Důvod je administrovatelnost: účetní
+ * má vidět všechny roční parametry na jednom místě a novela částky se nemá řešit
+ * nasazením. Dvě čísla pro jednu věc jsou ale riziko, takže se jejich shoda
+ * ověřuje při každém sestavení sazeb — {@see AnnualTaxRates::forRuleset()}
+ * zúčtování zastaví, jakmile se rozejdou. Lhůty (15. února, 31. března) v
+ * rulesetu NEJSOU: doména `Deadlines` je záměrně `ManualReview`.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * Co tu ZÁMĚRNĚ není
  * ─────────────────────────────────────────────────────────────────────────────
  * Roční částky slev a daňového zvýhodnění. Ty se NEODVOZUJÍ ze zákona v kódu,
  * ale z rulesetu — viz AnnualTaxRates a jeho vysvětlení, proč je roční částka
- * dvanáctinásobkem měsíční.
+ * slevy dvanáctinásobkem měsíční a proč u prahů výplaty totéž neplatí.
  */
 final class AnnualSettlementStatute
 {
@@ -61,8 +72,10 @@ final class AnnualSettlementStatute
      *
      * Není to totéž jako `bonus.minimum_amount.monthly` z rulesetu, i když je
      * tam dnes stejné číslo: tamto je práh MĚSÍČNÍHO daňového bonusu podle
-     * § 35d odst. 4, tohle je práh výplaty doplatku z ročního zúčtování.
-     * Sloučit je by znamenalo, že novela jednoho tiše změní druhé.
+     * § 35d odst. 4 a jeho nerovnost je NEOSTRÁ („alespoň 50 Kč"), kdežto tahle
+     * je ostrá. Sloučit je by znamenalo, že novela jednoho tiše změní druhé —
+     * a navíc obrátí operátor. Administrovatelný protějšek téhle hodnoty je
+     * `settlement.payout_threshold`, ne měsíční bonus.
      */
     public const PAYOUT_THRESHOLD_MINOR_UNITS = 5_000;
 

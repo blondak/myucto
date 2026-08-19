@@ -14,7 +14,22 @@ use Twig\Loader\FilesystemLoader;
 
 final class PayslipPdfRenderer
 {
-    public const VERSION = 'mz-16-payslip-v1';
+    /**
+     * Zvyšuje se spolu se šablonou, stejně jako u mzdového listu.
+     *
+     * Dřív se zvyšovat nesměla: běhový archiv uměl pro tutéž revizi vydat jen
+     * jeden doklad, takže jiná verze při opakovaném spuštění dávky narazila na
+     * `uq_payroll_document_revision`. Od té doby se {@see PayrollDocumentService
+     * ::archive()} chová jako roční archiv — táž revize s jinou verzí šablony
+     * nebo rendereru vydá DALŠÍ ČLÁNEK ŘETĚZU (`supersedes`,
+     * `document_revision_no + 1`), shodná verze vrátí hotový doklad a
+     * archivované PDF zůstává bajt na bajt stejné, protože se z uloženého
+     * souboru jen vydává.
+     *
+     * v2: páska tiskne podklad nezdanění (osvobozeno / není předmětem daně)
+     * a dva podsoučty.
+     */
+    public const VERSION = 'mz-16-payslip-v2';
 
     private ?Environment $twig = null;
 

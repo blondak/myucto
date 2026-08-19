@@ -800,7 +800,13 @@ final class KontrolniHlaseniBuilder
         }));
     }
 
-    private static function isValidCzechDic(?string $dic): bool
+    /**
+     * Tvar českého DIČ, jak ho KH přijme do vět s protistranou. Public záměrně:
+     * kdo plní `counterparty_dic`, musí umět zkontrolovat totéž ještě před podáním
+     * (M-9 — pokladní prodej s cizím VAT ID by se do A.4 dostal jako české DIČ
+     * osekané na číslice). Jediná definice, žádná kopie regexu.
+     */
+    public static function isValidCzechDic(?string $dic): bool
     {
         $value = strtoupper(trim((string) $dic));
         return preg_match('/^(?:CZ)?[0-9]{1,10}$/', $value) === 1;

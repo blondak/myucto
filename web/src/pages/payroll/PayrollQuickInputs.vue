@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
   type PayrollQuickInputRef,
@@ -14,6 +14,8 @@ import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
+import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -48,6 +50,8 @@ const MAX_OVERTIME_HOURS_MILLI = 1_000_000
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 const period = ref(localPayrollPeriod())
 const loading = ref(false)
 /*
@@ -76,6 +80,40 @@ const pageSize = 25
 const total = ref(0)
 const offset = ref(0)
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
+
+/**
+ * Zúžení na jeden vztah z odkazu na kartě zaměstnance (`?employment=12`).
+ *
+ * Zužuje SERVER (`quick-inputs?employment_id=`), a to do téhož dotazu jako
+ * stránkování — dokud filtroval prohlížeč nad načtenou stránkou, vztah z jiné
+ * strany se tiše neprojevil. Ukládání dostává zúžení taky: `payload()` posílá
+ * právě to, co je v `rows`, takže nezúžená odpověď by po uložení nasypala do
+ * formuláře lidi, které uživatel nevidí.
+ */
+const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
+/*
+ * Lišta se zúžením musí být vidět i tehdy, když zúžení nedalo nic. Bez ní zůstane
+ * prázdná tabulka a uživatel nemá jak poznat, že se dívá na zúžený seznam — ani
+ * jak se ze zúžení dostat.
+ */
+const focusName = computed(() => {
+  if (focusEmploymentId.value === null) return null
+  return rows.value.length > 0
+    ? rows.value[0].full_name
+    : t('payroll.agendas.focus.unknown_person')
+})
+/** Server zúžení uplatnil a nezbylo nic — prázdno se musí pojmenovat, ne mlčet. */
+const focusMissing = computed(() =>
+  focusEmploymentId.value !== null && !loading.value && !loadFailed.value
+  && loadedPeriod.value === period.value && rows.value.length === 0)
+
+function clearFocus(): void {
+  focusEmploymentId.value = null
+  const query = { ...route.query }
+  delete query.employment
+  void router.replace({ query })
+  reload()
+}
 
 function goToPage(nextPage: number): void {
   offset.value = Math.max(0, (nextPage - 1) * pageSize)
@@ -313,13 +351,15 @@ async function load(): Promise<void> {
   saveError.value = null
   saveConflict.value = false
   try {
-    const month = await payrollApi.quickInputs(requestedPeriod, {
-      limit: pageSize,
-      offset: offset.value,
-    })
+    const month = await payrollApi.quickInputs(
+      requestedPeriod,
+      { limit: pageSize, offset: offset.value },
+      focusEmploymentId.value ?? undefined,
+    )
     if (generation !== loadGeneration || period.value !== requestedPeriod
       || month.period !== requestedPeriod) return
     rows.value = month.items.map(toUi)
+    // `total` už je zúžené serverem, takže pager mluví o tom, co tabulka ukazuje.
     total.value = month.total
     loadedPeriod.value = requestedPeriod
   } catch (error) {
@@ -377,10 +417,11 @@ async function save(): Promise<void> {
   saveError.value = null
   saveConflict.value = false
   try {
-    const month = await payrollApi.saveQuickInputs(payload(), {
-      limit: pageSize,
-      offset: offset.value,
-    })
+    const month = await payrollApi.saveQuickInputs(
+      payload(),
+      { limit: pageSize, offset: offset.value },
+      focusEmploymentId.value ?? undefined,
+    )
     if (generation !== loadGeneration || period.value !== requestedPeriod
       || month.period !== requestedPeriod) return
     // Uložení dostalo v query tentýž limit/offset, takže vrací TU stránku,
@@ -486,7 +527,23 @@ onMounted(load)
       {{ t('payroll.quick_inputs.validation_summary', { count: invalidFieldCount }) }}
     </div>
 
-    <section class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
+    <PayrollFocusNotice
+      v-if="focusMissing"
+      :name="String(focusEmploymentId)"
+      missing
+      @clear="clearFocus"
+    />
+    <PayrollFocusNotice
+      v-else-if="focusName"
+      :name="focusName"
+      @clear="clearFocus"
+    />
+
+    <!--
+      Prázdno po zúžení pojmenovává už lišta nad seznamem. Generický prázdný
+      stav pod ní by totéž řekl podruhé, a ještě obecněji.
+    -->
+    <section v-if="!focusMissing" class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
       <div v-if="loading" class="p-8 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
       <EmptyState
         v-else-if="loadFailed"
@@ -833,6 +890,7 @@ onMounted(load)
           </article>
         </div>
 
+        <!-- Zúžení mění i `total`, takže pager mluví o zúženém seznamu. -->
         <PaginationBar
           embedded
           :page="currentPage"

@@ -483,6 +483,200 @@ final class AccountingActivationTest extends TestCase
     }
 
     /**
+     * Počáteční stav pokladen se rozpadá na analytiky jednotlivých pokladen, stejně jako
+     * banka. Zdroj dat to unese: doklad visí na registru a registr nese svůj account_code
+     * — týž účet, na který doklad zaúčtuje běžný provoz a nad kterým jede pokladní kniha.
+     * Bez opravy skončil celý zůstatek jedním řádkem na holé syntetice 211.
+     */
+    public function testOpeningCashBalanceSplitsPerRegisterAnalytic(): void
+    {
+        $asOf = '2098-12-31';
+        $before = $this->cashSplit($asOf);
+
+        $first = $this->cashRegister('TEST pokladna A', '211.941');
+        $this->cashDocument($first, 'in', 1000.00, $asOf);
+        $single = $this->cashSplit($asOf);
+        self::assertArrayHasKey('211.941', $single, 'Počáteční stav leží na analytice pokladny.');
+        self::assertEqualsWithDelta(1000.00, $single['211.941']['amount'] - ($before['211.941']['amount'] ?? 0.0), 0.001);
+        self::assertEqualsWithDelta(
+            $before['211']['amount'] ?? 0.0,
+            $single['211']['amount'] ?? 0.0,
+            0.001,
+            'Zůstatek přiřazené pokladny se na syntetice 211 neobjeví.',
+        );
+
+        $second = $this->cashRegister('TEST pokladna B', '211.942');
+        $this->cashDocument($second, 'in', 700.00, $asOf);
+        $this->cashDocument($second, 'out', 250.00, $asOf);
+        $both = $this->cashSplit($asOf);
+        self::assertEqualsWithDelta(1000.00, $both['211.941']['amount'] - ($before['211.941']['amount'] ?? 0.0), 0.001);
+        self::assertEqualsWithDelta(450.00, $both['211.942']['amount'] - ($before['211.942']['amount'] ?? 0.0), 0.001);
+        self::assertStringContainsString('TEST pokladna A', (string) $both['211.941']['note']);
+        self::assertStringContainsString('TEST pokladna B', (string) $both['211.942']['note']);
+    }
+
+    /**
+     * Analytika, kterou si uživatel v osnově VYPNUL, nesmí shodit prefill — replace() by
+     * nad neaktivním účtem hodil validation_failed. Zůstatek spadne na syntetiku 211
+     * s poznámkou volající po ručním rozúčtování.
+     */
+    public function testCashRegisterWithDisabledAnalyticFallsBackToSynthetic(): void
+    {
+        $asOf = '2098-12-31';
+        $before = $this->cashSplit($asOf);
+        $register = $this->cashRegister('TEST pokladna vypnutá', '211.943');
+        $this->db->pdo()->prepare(
+            'UPDATE chart_of_accounts SET is_active = 0 WHERE supplier_id = ? AND account_code = ?'
+        )->execute([$this->supplierId, '211.943']);
+        $this->cashDocument($register, 'in', 320.00, $asOf);
+
+        $after = $this->cashSplit($asOf);
+        self::assertArrayNotHasKey('211.943', $after, 'Vypnutá analytika se do rozvahy nedostane.');
+        self::assertEqualsWithDelta(320.00, $after['211']['amount'] - ($before['211']['amount'] ?? 0.0), 0.001);
+        self::assertStringContainsString('rozúčtujte ručně', (string) $after['211']['note']);
+    }
+
+    /**
+     * Dvě pokladny, které spadnou na TÝŽ účet, se musí sečíst do jednoho řádku — dva
+     * řádky se stejným account_code na téže straně by replace() odmítl jako duplicitu
+     * a prefill by spadl.
+     *
+     * UNIQUE (supplier_id, account_code) drží číselník, takže na jedné ANALYTICE dvě
+     * pokladny neskončí; sejít se ale můžou ve fallbacku na syntetice 211 — proto se
+     * kbelíkuje podle KÓDU, ne podle registru.
+     */
+    public function testRegistersFallingToSameAccountProduceSingleRow(): void
+    {
+        $asOf = '2098-12-31';
+        $before = $this->cashSplit($asOf);
+        foreach ([['TEST pokladna C1', '211.944', 100.00], ['TEST pokladna C2', '211.945', 60.00]] as [$name, $code, $amount]) {
+            $register = $this->cashRegister($name, $code);
+            $this->db->pdo()->prepare(
+                'UPDATE chart_of_accounts SET is_active = 0 WHERE supplier_id = ? AND account_code = ?'
+            )->execute([$this->supplierId, $code]);
+            $this->cashDocument($register, 'in', $amount, $asOf);
+        }
+
+        $after = $this->cashSplit($asOf);
+        $rows = (new \ReflectionMethod($this->opening, 'cashBalancesByRegister'))
+            ->invoke($this->opening, $this->supplierId, $asOf);
+        $onCode = array_filter($rows, static fn (array $r): bool => $r['account_code'] === '211');
+
+        self::assertCount(1, $onCode, 'Jeden účet = jeden řádek rozvahy.');
+        self::assertEqualsWithDelta(160.00, $after['211']['amount'] - ($before['211']['amount'] ?? 0.0), 0.001);
+        self::assertStringContainsString('TEST pokladna C1', (string) $after['211']['note']);
+        self::assertStringContainsString('TEST pokladna C2', (string) $after['211']['note']);
+    }
+
+    /** Pokladna bez dokladů nemá co do rozvahy přinést — žádný nulový řádek. */
+    public function testRegisterWithoutDocumentsHasNoOpeningRow(): void
+    {
+        $asOf = '2098-12-31';
+        $this->cashRegister('TEST pokladna prázdná', '211.946');
+        self::assertArrayNotHasKey('211.946', $this->cashSplit($asOf));
+    }
+
+    /** Rozpad nesmí žádný doklad ztratit ani přidat — součet sedí na plochý souhrn. */
+    public function testCashSplitSumsToFlatBalance(): void
+    {
+        $asOf = '2098-12-31';
+        $this->cashDocument($this->cashRegister('TEST pokladna D', '211.947'), 'in', 1234.50, $asOf);
+        $this->cashDocument($this->cashRegister('TEST pokladna E', '211.948'), 'out', 34.50, $asOf);
+
+        $flat = (float) (new \ReflectionMethod($this->opening, 'cashBalance'))
+            ->invoke($this->opening, $this->supplierId, $asOf);
+        $split = array_sum(array_column($this->cashSplit($asOf), 'amount'));
+
+        self::assertEqualsWithDelta($flat, $split, 0.011);
+    }
+
+    /**
+     * Valutová pokladna: `total_amount` je v DB už CZK ekvivalent (migrace 1114), kurzem
+     * se NEPŘEPOČÍTÁVÁ podruhé — jinak by se 100 EUR / 25 Kč zaúčtovalo jako 62 500 Kč.
+     */
+    public function testForeignCurrencyRegisterIsNotConvertedTwice(): void
+    {
+        $asOf = '2098-12-31';
+        $register = $this->cashRegister('TEST pokladna EUR', '211.949', 'EUR');
+        $this->db->pdo()->prepare(
+            "INSERT INTO cash_documents
+                (supplier_id, register_id, doc_type, purpose, issue_date, description,
+                 total_amount, currency_code, fx_rate, amount_foreign, status)
+             VALUES (?, ?, 'in', 'other', ?, 'TEST valuta', 2500.00, 'EUR', 25.000000, 100.00, 'posted')"
+        )->execute([$this->supplierId, $register, $asOf]);
+
+        $split = $this->cashSplit($asOf);
+        self::assertEqualsWithDelta(2500.00, $split['211.949']['amount'], 0.001);
+    }
+
+    /** Konec konců rozhoduje draft: prefill uloží pokladní stav na analytiku, ne na 211. */
+    public function testPrefillWritesCashOpeningToRegisterAnalytic(): void
+    {
+        $asOf = '2098-12-31';
+        // Test tvrdí „na 211 NIC nezůstalo" — cizí pokladní doklady v testovací DB by ho
+        // rozhodovaly za nás. Běží v transakci, která se v tearDown odrolluje.
+        $this->db->pdo()->prepare('DELETE FROM cash_documents WHERE supplier_id = ?')->execute([$this->supplierId]);
+        $this->cashDocument($this->cashRegister('TEST pokladna F', '211.950'), 'in', 500.00, $asOf);
+        $this->cashDocument($this->cashRegister('TEST pokladna G', '211.951'), 'in', 800.00, $asOf);
+
+        $draft = $this->opening->prefill($this->supplierId, $asOf);
+        $cashRows = array_values(array_filter(
+            $draft['rows'],
+            static fn (array $row): bool => str_starts_with((string) $row['account_code'], '211'),
+        ));
+        $byCode = array_column($cashRows, null, 'account_code');
+
+        self::assertArrayNotHasKey('211', $byCode, 'Počáteční stav pokladen nepatří na plochou syntetiku 211.');
+        self::assertArrayHasKey('211.950', $byCode);
+        self::assertArrayHasKey('211.951', $byCode);
+        self::assertEqualsWithDelta(500.00, (float) $byCode['211.950']['amount'], 0.001);
+        self::assertEqualsWithDelta(800.00, (float) $byCode['211.951']['amount'], 0.001);
+        self::assertSame('debit', $byCode['211.950']['side']);
+        self::assertSame('transition_report', $byCode['211.950']['source']);
+        self::assertStringContainsString('TEST pokladna F', (string) $byCode['211.950']['note'], 'Poznámka pojmenuje pokladnu.');
+    }
+
+    /**
+     * Rozpad počátečního stavu pokladen podle registrů.
+     *
+     * @return array<string, array{account_code:string, amount:float, note:string}>
+     */
+    private function cashSplit(string $asOf, ?int $supplierId = null): array
+    {
+        $rows = (new \ReflectionMethod($this->opening, 'cashBalancesByRegister'))
+            ->invoke($this->opening, $supplierId ?? $this->supplierId, $asOf);
+        return array_column($rows, null, 'account_code');
+    }
+
+    /** Pokladna s vlastní analytikou 211.xxx (účet se rovnou založí v osnově). */
+    private function cashRegister(string $name, string $accountCode, string $currency = 'CZK'): int
+    {
+        $pdo = $this->db->pdo();
+        $parentId = (int) $this->db->pdo()->query(
+            "SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '211'"
+        )->fetchColumn();
+        $pdo->prepare(
+            "INSERT INTO chart_of_accounts
+                (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active)
+             VALUES (?, ?, ?, 'asset', 'debit', 0, ?, 1)"
+        )->execute([$this->supplierId, $accountCode, $name, $parentId ?: null]);
+        $pdo->prepare(
+            'INSERT INTO cash_registers (supplier_id, name, currency_code, account_code, is_default, is_active)
+             VALUES (?, ?, ?, ?, 0, 1)'
+        )->execute([$this->supplierId, $name, $currency, $accountCode]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function cashDocument(int $registerId, string $type, float $amount, string $asOf): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO cash_documents
+                (supplier_id, register_id, doc_type, purpose, issue_date, description, total_amount, status)
+             VALUES (?, ?, ?, 'other', ?, 'TEST rozpad pokladen', ?, 'posted')"
+        )->execute([$this->supplierId, $registerId, $type, $asOf, $amount]);
+    }
+
+    /**
      * Rozpad počátečního stavu banky podle vlastních účtů.
      *
      * @return array<string, array{account_code:string, amount:float, note:string}>

@@ -52,6 +52,9 @@ final class AuthMiddleware implements MiddlewareInterface
         '/api/auth/login',
         '/api/auth/webauthn/login/options',
         '/api/auth/webauthn/login/verify',
+        '/api/auth/domain-context',
+        '/api/auth/domain-login/start',
+        '/api/auth/domain-login/exchange',
         '/api/auth/forgot',
         '/api/auth/reset',
     ];
@@ -71,6 +74,8 @@ final class AuthMiddleware implements MiddlewareInterface
             '/api/auth/login',
             '/api/auth/webauthn/login/options',
             '/api/auth/webauthn/login/verify',
+            '/api/auth/domain-login/start',
+            '/api/auth/domain-login/exchange',
         ],
     ];
 

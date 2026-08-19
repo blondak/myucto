@@ -44,6 +44,13 @@ function valueLabel(id: string, part: 'actual' | 'expected' | 'info'): string {
   return te(key) ? t(key) : t(`diagnostics.${part}`)
 }
 
+/** Strojové reason codes přeloží jen tehdy, když pro ně kontrola má slovník. */
+function checkValue(check: DiagnosticCheck, part: 'actual' | 'expected' | 'info'): string {
+  const value = check[part] ?? ''
+  const key = `diagnostics.checks.${check.id}.values.${value}`
+  return value && te(key) ? t(key) : value
+}
+
 function rowClass(status: string): string {
   switch (status) {
     case 'fail':
@@ -93,17 +100,17 @@ function statusPill(status: string): string {
           <dd
             class="font-mono break-all"
             :class="check.status === 'fail' || check.status === 'warn' ? 'text-danger-600 font-semibold' : ''"
-          >{{ check.actual }}</dd>
+          >{{ checkValue(check, 'actual') }}</dd>
         </div>
         <div v-if="check.expected" class="flex gap-1.5">
           <dt class="text-neutral-500 shrink-0">{{ valueLabel(check.id, 'expected') }}:</dt>
-          <dd class="font-mono break-all">{{ check.expected }}</dd>
+          <dd class="font-mono break-all">{{ checkValue(check, 'expected') }}</dd>
         </div>
         <!-- `info` je informace, ne nález — zůstává šedá i u kontroly ve stavu fail,
              ať se nepřičte k tomu, co má uživatel opravovat. -->
         <div v-if="check.info" class="flex gap-1.5 sm:col-span-2">
           <dt class="text-neutral-500 shrink-0">{{ valueLabel(check.id, 'info') }}:</dt>
-          <dd class="font-mono break-all">{{ check.info }}</dd>
+          <dd class="font-mono break-all">{{ checkValue(check, 'info') }}</dd>
         </div>
       </dl>
 

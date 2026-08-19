@@ -21,6 +21,7 @@ import type { PermissionKey } from '@/security/permissions'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import { useToast } from '@/composables/useToast'
 import { formatShortcut, useKeyboardShortcuts, type ShortcutAction } from '@/composables/useKeyboardShortcuts'
+import { usesClientNavigation } from '@/security/clientRoutePolicy'
 
 const { t, locale } = useI18n()
 
@@ -32,6 +33,7 @@ const automationStore = useAutomationStore()
 const sessionSecurity = useSessionSecurityStore()
 const toast = useToast()
 const keyboardShortcuts = useKeyboardShortcuts()
+const clientExperience = computed(() => usesClientNavigation(auth.isClientRole, auth.domainContext))
 const desktopSearchRef = ref<InstanceType<typeof GlobalSearch> | null>(null)
 const mobileSearchRef = ref<InstanceType<typeof GlobalSearch> | null>(null)
 
@@ -76,7 +78,7 @@ async function logout() {
 
 async function loadAccountantSigningMenu() {
   const requestId = ++signingSettingsRequest
-  if (!auth.canRead('settings.signing')) {
+  if (clientExperience.value || !auth.canRead('settings.signing')) {
     accountantSigningProfilesEnabled.value = false
     return
   }
@@ -94,7 +96,7 @@ async function loadAccountantSigningMenu() {
 }
 
 watch(
-  () => [auth.user?.role?.id, supplierStore.currentSupplierId] as const,
+  () => [auth.user?.role?.id, supplierStore.currentSupplierId, auth.domainContext?.locked] as const,
   () => { void loadAccountantSigningMenu() },
   { immediate: true },
 )
@@ -214,12 +216,15 @@ const ICONS = {
   coin:             'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
   folderOpen:       'M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z M3 9h18',
   requestDoc:       'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2M12 11v4m-2-2h4',
+  // Výmaz osobních údajů — koš. Odlišný od tax_archive (uschovávání), protože
+  // sousední položka menu dělá pravý opak.
+  erasure:          'M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16',
 }
 
 const navSections = computed<NavSection[]>(() => {
   // Role client (Epic F6): samostatný, minimální nav — Přehled (portál), Fakturace,
   // Nákupy, Kontakty, Nápověda. Vše ostatní skryto (BE stejně deny-by-default).
-  if (auth.isClientRole) {
+  if (clientExperience.value) {
     return filterNavigation([
       { key: 'dashboard', title: t('nav.dashboard'), accent: 'teal', items: [{ to: '/portal', label: t('nav.portal'), icon: ICONS.dashboard }] },
       {
@@ -253,7 +258,8 @@ const navSections = computed<NavSection[]>(() => {
         title: t('nav.section_documents'),
         accent: 'neutral',
         items: [
-          { to: '/portal/document-requests', label: t('nav.document_requests'), icon: ICONS.requestDoc },
+          { to: '/portal/purchase-invoice-submissions', label: t('nav.submit_documents'), icon: ICONS.documents, permission: 'documents.submit' as PermissionKey },
+          { to: '/portal/document-requests', label: t('nav.document_requests'), icon: ICONS.requestDoc, permission: 'documents.submit' as PermissionKey },
         ],
       },
     ])
@@ -326,6 +332,7 @@ const navSections = computed<NavSection[]>(() => {
       accent: 'warning',
       items: [
         { to: '/purchase-invoices',          label: t('nav.purchase_invoices'),  icon: ICONS.purchase, newTo: '/purchase-invoices/new' },
+        { to: '/purchase-invoices/incoming', label: t('nav.incoming_documents'), icon: ICONS.documents, permission: 'documents.inbox' as PermissionKey },
         // AI import přijaté faktury (§12b) — denní operativa účetní (nahrát PDF → draft PF);
         // nastavení AI brány (klíče, DPA) zůstává v adminu (Firma → AI nastavení).
         // Explicitní permission: scan zrcadlí BE check AiExtractPdfAction; readonly ji nevidí.
@@ -412,42 +419,6 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/reports/monthly-export', label: t('nav.reports_monthly_export'), icon: ICONS.exports, permission: 'reports.export' },
       ],
     },
-    ...(payrollEnabled ? [{
-      key: 'payroll',
-      title: t('nav.section_payroll'),
-      accent: 'payroll',
-      // Pořadí = pořadí měsíčního mzdového kroku, ne abeceda ani historie vzniku
-      // stránek. Sled drží `PayrollGuide.vue` („Jak to funguje" na přehledu):
-      // nepřítomnosti → docházka → rychlé vstupy → běh → platby → doklady →
-      // podání. Menu do teď začínalo Běhy a Platbami, tedy prostředkem měsíce, a
-      // vstupy, bez kterých běh nespočítá správně, měl uživatel až pod nimi.
-      items: [
-        // 1) Měsíční sled — přehled je rozcestník, zbytek jde v pořadí kroků.
-        { to: '/payroll', label: t('nav.payroll_overview'), icon: ICONS.users, permission: 'payroll' as PermissionKey },
-        { to: '/payroll/absences', label: t('nav.payroll_absences'), icon: ICONS.log, permission: 'payroll' as PermissionKey },
-        { to: '/payroll/time', label: t('nav.payroll_time'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
-        { to: '/payroll/travel', label: t('nav.payroll_travel'), icon: ICONS.logbook, permission: 'payroll' as PermissionKey },
-        { to: '/payroll/quick-inputs', label: t('nav.payroll_quick_inputs'), icon: ICONS.log, permission: 'payroll' as PermissionKey },
-        { to: '/payroll/runs', label: t('nav.payroll_runs'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
-        { to: '/payroll/posting-reconciliation', label: t('nav.payroll_posting_reconciliation'), icon: ICONS.accounting, permission: 'payroll.post' as PermissionKey },
-        { to: '/payroll/payments', label: t('nav.payroll_payments'), icon: ICONS.payment_orders, permission: 'payroll.payments' as PermissionKey },
-        { to: '/payroll/documents', label: t('nav.payroll_documents'), icon: ICONS.documents, permission: 'payroll.documents' as PermissionKey },
-        // Roční zúčtování stojí hned za dokumenty, protože je to jejich roční
-        // protějšek — nepatří do měsíčního sledu, běží jen v lednu až březnu.
-        { to: '/payroll/annual-settlement', label: t('nav.payroll_annual_settlement'), icon: ICONS.accounting, permission: 'payroll.documents' as PermissionKey },
-        { to: '/payroll/submissions', label: t('nav.payroll_submissions'), icon: ICONS.exports, permission: 'payroll.submissions' as PermissionKey },
-        // 2) Kmenová evidence zaměstnance — nemá měsíční takt, udržuje se průběžně.
-        { to: '/payroll/people', label: t('nav.payroll_people'), icon: ICONS.clients, permission: 'payroll' as PermissionKey, dividerBefore: true },
-        { to: '/payroll/deduction-agreements', label: t('nav.payroll_deduction_agreements'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },
-        { to: '/payroll/enforcement', label: t('nav.payroll_enforcement'), icon: ICONS.coin, permission: 'payroll.enforcement' as PermissionKey },
-        // 3) Jednorázové nastavení — sáhne se do něj při zavádění a pak výjimečně.
-        { to: '/payroll/settings', label: t('nav.payroll_settings'), icon: ICONS.settings, permission: 'payroll.settings' as PermissionKey, dividerBefore: true },
-        { to: '/payroll/components', label: t('nav.payroll_components'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },
-        // Legislativní pravidla: stránka existovala od commitu 88853785, ale
-        // nevedl na ni jediný odkaz — dalo se tam jen ručně napsanou URL.
-        { to: '/payroll/rulesets', label: t('nav.payroll_rulesets'), icon: ICONS.codebooks, permission: 'payroll.rulesets' as PermissionKey },
-      ],
-    } as NavSection] : []),
   ]
 
   if (auth.hasCommercialFeatures && isDoubleEntry) {
@@ -525,6 +496,12 @@ const navSections = computed<NavSection[]>(() => {
         // Přechodový můstek § 7b → § 24 — jen u firem na DE (chystaný/probíhající přechod);
         // firmě, co už podvojné vede, se v menu neukazuje (stránka zůstává na URL).
         { to: '/accounting/transition-report', label: t('nav.accounting_transition_report'), icon: ICONS.reports },
+        // Číselné řady: pokladní doklady se v daňové evidenci číslují z týchž řad jako
+        // v podvojném, takže prefix a tvar čísla musí jít nastavit i tady. Bez odkazu
+        // si firma vlastní řadu pokladny zapnula, ale opravit ji neměla kde — a hláška
+        // `series_prefix_unavailable` ji přitom posílá právě sem. Stránka Nástrojů
+        // v tomhle režimu nabízí jen tuhle jednu záložku, proto konkrétní popisek.
+        { to: '/utilities', label: t('accounting.closing.series.title'), icon: ICONS.codebooks },
         // Pokladna (PPD/VPD) je v sekci Peníze hned za Bankovní účty (jako u podvojného).
         // Export/Import vydaných/přijaté faktury jsou nezávisle na účetním režimu pod Prodej/Nákup.
         // Šablony (předkontace, pravidla nákladů a zaúčtování banky) tu ZÁMĚRNĚ nejsou:
@@ -532,6 +509,56 @@ const navSections = computed<NavSection[]>(() => {
         // co zobrazit a odkaz vedl na prázdno.
       ],
     })
+  }
+
+  // Mzdy stojí za Nástroji, tedy až za účetními sekcemi a těsně před Firmou.
+  if (payrollEnabled) {
+    sections.push({
+      key: 'payroll',
+      title: t('nav.section_payroll'),
+      accent: 'payroll',
+      // Pořadí = pořadí měsíčního mzdového kroku, ne abeceda ani historie vzniku
+      // stránek. Sled drží `PayrollGuide.vue` („Jak to funguje" na přehledu):
+      // nepřítomnosti → docházka → rychlé vstupy → běh → platby → doklady →
+      // podání. Menu do teď začínalo Běhy a Platbami, tedy prostředkem měsíce, a
+      // vstupy, bez kterých běh nespočítá správně, měl uživatel až pod nimi.
+      items: [
+        // 1) Měsíční sled — přehled je rozcestník, zbytek jde v pořadí kroků.
+        { to: '/payroll', label: t('nav.payroll_overview'), icon: ICONS.users, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/absences', label: t('nav.payroll_absences'), icon: ICONS.log, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/time', label: t('nav.payroll_time'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/travel', label: t('nav.payroll_travel'), icon: ICONS.logbook, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/quick-inputs', label: t('nav.payroll_quick_inputs'), icon: ICONS.log, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/runs', label: t('nav.payroll_runs'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/posting-reconciliation', label: t('nav.payroll_posting_reconciliation'), icon: ICONS.accounting, permission: 'payroll.post' as PermissionKey },
+        { to: '/payroll/payments', label: t('nav.payroll_payments'), icon: ICONS.payment_orders, permission: 'payroll.payments' as PermissionKey },
+        { to: '/payroll/documents', label: t('nav.payroll_documents'), icon: ICONS.documents, permission: 'payroll.documents' as PermissionKey },
+        // Roční zúčtování stojí hned za dokumenty, protože je to jejich roční
+        // protějšek — nepatří do měsíčního sledu, běží jen v lednu až březnu.
+        { to: '/payroll/annual-settlement', label: t('nav.payroll_annual_settlement'), icon: ICONS.accounting, permission: 'payroll.documents' as PermissionKey },
+        { to: '/payroll/submissions', label: t('nav.payroll_submissions'), icon: ICONS.exports, permission: 'payroll.submissions' as PermissionKey },
+        // 2) Kmenová evidence zaměstnance — nemá měsíční takt, udržuje se průběžně.
+        { to: '/payroll/people', label: t('nav.payroll_people'), icon: ICONS.clients, permission: 'payroll' as PermissionKey, dividerBefore: true },
+        { to: '/payroll/deduction-agreements', label: t('nav.payroll_deduction_agreements'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/enforcement', label: t('nav.payroll_enforcement'), icon: ICONS.coin, permission: 'payroll.enforcement' as PermissionKey },
+        // Roční koše osvobození benefitů se sledují průběžně, ne v měsíčním
+        // taktu: kdo se dozví o překročení až u prosincového vstupu, dozví se to
+        // pozdě.
+        { to: '/payroll/benefit-baskets', label: t('nav.payroll_benefit_baskets'), icon: ICONS.stats, permission: 'payroll' as PermissionKey },
+        // 3) Jednorázové nastavení — sáhne se do něj při zavádění a pak výjimečně.
+        { to: '/payroll/settings', label: t('nav.payroll_settings'), icon: ICONS.settings, permission: 'payroll.settings' as PermissionKey, dividerBefore: true },
+        { to: '/payroll/components', label: t('nav.payroll_components'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },
+        // Legislativní pravidla: stránka existovala od commitu 88853785, ale
+        // nevedl na ni jediný odkaz — dalo se tam jen ručně napsanou URL.
+        { to: '/payroll/rulesets', label: t('nav.payroll_rulesets'), icon: ICONS.codebooks, permission: 'payroll.rulesets' as PermissionKey },
+        // Retenční lhůty patří k nastavení: sáhne se do nich při zavádění
+        // (odchylka firmy) a pak už jen když se někdo ptá, jak dlouho co držíme.
+        { to: '/payroll/retention', label: t('nav.payroll_retention'), icon: ICONS.tax_archive, permission: 'payroll.retention' as PermissionKey },
+        // Výmaz stojí hned za lhůtami — bez nich nedává smysl —, ale má vlastní
+        // právo: číst lhůty smí i ten, kdo nesmí odklepnout nevratné smazání.
+        { to: '/payroll/erasure', label: t('nav.payroll_erasure'), icon: ICONS.erasure, permission: 'payroll.erasure' as PermissionKey },
+      ],
+    } as NavSection)
   }
 
   if (isAdmin || auth.isDemo) {
@@ -810,7 +837,7 @@ const activeSectionAccent = computed<string>(() => {
 
 /** Rychlé zkratky v topbaru (desktop) — ikony navazují na menu (ICONS). */
 const quickActions = computed(() => {
-  if (auth.isDemo) return [
+  if (auth.isDemo && !clientExperience.value) return [
     { to: '/invoices/new', label: t('nav.quick_invoice'), icon: ICONS.invoices },
     { to: '/purchase-invoices/new', label: t('nav.quick_purchase'), icon: ICONS.purchase },
     { to: '/clients/new', label: t('nav.quick_client'), icon: ICONS.clients },
@@ -825,14 +852,14 @@ const quickActions = computed(() => {
     { to: '/clients/new',           label: t('nav.quick_client'),    icon: ICONS.clients },
     { to: '/clients/new?role=vendor', label: t('nav.quick_vendor'), icon: ICONS.suppliers },
     { to: '/purchase-invoices/new', label: t('nav.quick_purchase'), icon: ICONS.purchase },
-    ...(auth.hasCommercialFeatures && auth.canWrite('accounting.journal.write') ? [
+    ...(!clientExperience.value && auth.hasCommercialFeatures && auth.canWrite('accounting.journal.write') ? [
       { to: '/accounting/journal/new', label: t('nav.quick_journal'), icon: ICONS.accounting },
     ] : []),
-    ...(auth.isClientRole ? [] : [
+    ...(clientExperience.value ? [] : [
       { to: '/logbook?tab=trips&new=trip', label: t('nav.quick_trip'),    icon: ICONS.logbook },
       { to: '/logbook?tab=fuel&new=fuel',  label: t('nav.quick_fueling'), icon: ICONS.fuel },
     ]),
-    ...(!auth.isClientRole && auth.hasCommercialFeatures && supplierStore.currentSupplier?.stock_enabled ? [
+    ...(!clientExperience.value && auth.hasCommercialFeatures && supplierStore.currentSupplier?.stock_enabled ? [
       { to: '/stock/documents/new?doc_type=receipt', label: t('nav.quick_stock_receipt'), icon: ICONS.stock_documents },
       { to: '/stock/documents/new?doc_type=issue',   label: t('nav.quick_stock_issue'),   icon: ICONS.stock_documents },
       { to: '/stock/items/new',                      label: t('nav.quick_stock_item'),    icon: ICONS.stock_items },
@@ -848,7 +875,7 @@ const quickActions = computed(() => {
   // AI z něj udělá draft). Nejde o zakládací route, takže `canCreate` by ji
   // vyhodila; gate je stejný jako u položky v menu — právo `purchase_invoices.scan`
   // (zrcadlí BE check v AiExtractPdfAction, readonly ji nevidí).
-  if (!auth.isDemo && auth.canWrite('purchase_invoices.scan')) {
+  if (!clientExperience.value && !auth.isDemo && auth.canWrite('purchase_invoices.scan')) {
     const purchaseIdx = actions.findIndex(a => a.to === '/purchase-invoices/new')
     const aiImport = { to: '/purchase-invoices/ai-import', label: t('nav.ai_import'), icon: ICONS.ai }
     if (purchaseIdx === -1) actions.push(aiImport)
@@ -1079,7 +1106,15 @@ const MANUAL_CHAPTERS: Array<[RegExp, string]> = [
 
 const manualHref = computed(() => {
   const match = MANUAL_CHAPTERS.find(([pattern]) => pattern.test(route.path))
-  return match ? `/manual?ch=${match[1]}` : '/manual'
+  const path = match ? `/manual?ch=${match[1]}` : '/manual'
+  const canonicalBaseUrl = auth.domainContext?.canonical_base_url
+  if (!auth.domainContext?.locked || !canonicalBaseUrl) return path
+
+  try {
+    return `${new URL(canonicalBaseUrl).origin}${path}`
+  } catch {
+    return path
+  }
 })
 
 /**
@@ -1193,7 +1228,8 @@ onMounted(async () => {
   void nextTick(evaluateDesktopNavFit)
   // Bez zapnutého účetnictví nemá smysl ani polling automatu — jeho badge visí
   // u položky, která v menu není.
-  if (supplierStore.currentSupplier?.accounting_mode === 'double_entry'
+  if (!clientExperience.value
+      && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
       && supplierStore.currentSupplier?.accounting_enabled !== false
       && auth.canRead('accounting')) {
     automationStore.startPolling()
@@ -1628,7 +1664,7 @@ onBeforeUnmount(() => {
             :class="BANNER_CLASS[licenseBanner.variant]"
           >
             <span>{{ licenseBanner.text }}</span>
-            <RouterLink v-if="auth.isSuperadmin" to="/activation/purchase" class="font-medium underline whitespace-nowrap">
+            <RouterLink v-if="auth.isSuperadmin && !clientExperience" to="/activation/purchase" class="font-medium underline whitespace-nowrap">
               {{ auth.license?.state === 'overage' ? t('license.banner_upgrade_cta') : t('license.banner_cta') }}
             </RouterLink>
           </div>
@@ -1700,7 +1736,7 @@ onBeforeUnmount(() => {
                  title="MyÚčto.cz">MyÚčto.cz</a>
               <template v-if="versionInfo">
                 <RouterLink
-                  v-if="auth.isSuperadmin"
+                  v-if="auth.isSuperadmin && !clientExperience"
                   to="/admin/update"
                   class="inline-flex items-center gap-1 text-neutral-400 hover:text-neutral-600 transition-colors"
                   :title="t('updates.title')"
@@ -1719,7 +1755,7 @@ onBeforeUnmount(() => {
               <span aria-hidden="true">·</span>
               <a href="https://mywebdesign.cz" target="_blank" rel="noopener" class="hidden xl:inline whitespace-nowrap hover:text-neutral-700">© MyWebdesign.cz</a>
               <span class="hidden xl:inline" aria-hidden="true">·</span>
-              <RouterLink to="/admin/support" :class="supportBtnClass" :title="t('support.help_title')">
+              <RouterLink v-if="!clientExperience" to="/admin/support" :class="supportBtnClass" :title="t('support.help_title')">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
                 </svg>
@@ -1736,7 +1772,7 @@ onBeforeUnmount(() => {
             <div class="flex flex-wrap items-center justify-end gap-1.5">
               <a href="https://myucto.cz/" target="_blank" rel="noopener" class="hover:text-primary-700">MyÚčto.cz</a>
               <span v-if="versionInfo" class="text-neutral-400">v{{ versionInfo.current }}</span>
-              <RouterLink to="/admin/support" :class="supportBtnClass" :title="t('support.help_title')">
+              <RouterLink v-if="!clientExperience" to="/admin/support" :class="supportBtnClass" :title="t('support.help_title')">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
                 </svg>

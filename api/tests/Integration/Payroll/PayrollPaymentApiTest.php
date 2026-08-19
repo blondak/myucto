@@ -124,9 +124,17 @@ final class PayrollPaymentApiTest extends TestCase
         self::assertSame([
             'period' => '2026-08',
             'allocations' => [],
+            'allocations_truncated' => false,
+            'offered_limit' => 50,
             'matches' => [],
+            'matches_total' => 0,
+            'matches_limit' => 25,
+            'matches_offset' => 0,
+            'reversible_matches' => [],
             'bank_evidence' => [],
+            'bank_evidence_truncated' => false,
             'cash_evidence' => [],
+            'cash_evidence_truncated' => false,
         ], $this->json($response));
     }
 

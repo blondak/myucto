@@ -48,10 +48,15 @@ final class PayrollRulesetProviderTest extends TestCase
     }
 
     /**
-     * Dodaná sada počítá hned po instalaci a NEnese schválení — za hodnoty ručí
-     * dodavatel, doložené jsou zdrojem a technickou kontrolou. Dřív tenhle test
-     * tvrdil opak (`is not active`) a byl to jediný důvod, proč si zákazník mzdy
-     * bez proklikání schvalování nespočítal.
+     * Dodaná sada počítá hned po instalaci a ZÁKAZNÍK ji neschvaluje — za hodnoty
+     * ručí provozovatel instalace, doložené jsou zdrojem a technickou kontrolou.
+     * Dřív tenhle test tvrdil opak (`is not active`) a byl to jediný důvod, proč si
+     * zákazník mzdy bez proklikání schvalování nespočítal.
+     *
+     * Podpis provozovatele ({@see VendorRulesetApprover}) na tom nic nemění: účinnost
+     * dodané sady stojí na otisku obsahu proti manifestu, ne na tom, že tam nějaké
+     * schválení je. Kdyby stála na podpisu, stačilo by ho přidat do uloženého
+     * overridu a zákazníkova změna sazby by se stala účinnou.
      */
     public function testDeliveredRulesetCalculatesWithoutCustomerApproval(): void
     {
@@ -60,7 +65,7 @@ final class PayrollRulesetProviderTest extends TestCase
 
         self::assertSame(PayrollRulesetLifecycle::Active, $inspection->lifecycle);
         self::assertSame(PayrollRulesetOrigin::Vendor, $inspection->origin);
-        self::assertNull($inspection->approval);
+        self::assertNotNull($inspection->approval);
         self::assertNotNull($inspection->technicalReview);
         self::assertNotSame([], $inspection->sources);
 
@@ -99,7 +104,7 @@ final class PayrollRulesetProviderTest extends TestCase
         );
         self::assertSame(
             CzechPayrollRulesets2026::ENFORCEMENT_DEDUCTIONS_HASH,
-            $ruleset->canonicalHash,
+            $ruleset->contentHash,
         );
     }
 
@@ -110,7 +115,7 @@ final class PayrollRulesetProviderTest extends TestCase
 
         $this->expectException(PayrollRulesetException::class);
         $this->expectExceptionMessage('requires manual review');
-        $ruleset->parameter('employer.rate.risk_employment');
+        $ruleset->parameter('employee.discount.agriculture_dpp');
     }
 
     public function testMissingRequiredParameterFailsClosed(): void

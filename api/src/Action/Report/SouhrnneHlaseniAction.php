@@ -96,6 +96,11 @@ final class SouhrnneHlaseniAction
             // readonly GET/download nesmí mutovat účetní stav — dorevize B8, HIGH#1.
             // (dphshv navíc zámek neposouvá vůbec — viz TaxSubmissionArchiver::VAT_LOCK_FORMS.)
             RequestAuthorization::allows($request, 'reports.export', AccessLevel::WRITE),
+            // Souhrnné hlášení má vlastní kódovou sadu — EPO u `shvies_forma`
+            // povoluje jen [RN]. Výchozí 'B' archivéru je kód z přiznání k DPH
+            // a u tohohle formuláře neexistuje; snapshot by tvrdil jiný druh
+            // podání, než jaký nese odeslané XML.
+            'R',
         );
         $periodLabel = $isQuarterly ? sprintf('%04d-Q%d', $year, $quarter) : sprintf('%04d-%02d', $year, $month);
         $this->logger->log('report.dphshv_downloaded', $userId, null, null, [

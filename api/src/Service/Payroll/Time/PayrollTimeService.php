@@ -7,10 +7,16 @@ namespace MyInvoice\Service\Payroll\Time;
 use MyInvoice\Repository\Payroll\PayrollOvertimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Service\Payroll\Time\Overtime\CompensatoryTimeOffReconciliation;
+use MyInvoice\Service\Payroll\Time\Overtime\OvertimeLimits;
+use MyInvoice\Service\Payroll\Time\Overtime\OvertimeProtectionWindow;
 use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
 
 final class PayrollTimeService
 {
+    public const LIST_DEFAULT_LIMIT = 25;
+    public const LIST_MAX_LIMIT = 200;
+
     private const CATEGORIES = [
         'regular',
         'overtime',
@@ -29,10 +35,38 @@ final class PayrollTimeService
     ) {}
 
     /** @return array<string,mixed> */
-    public function overview(int $supplierId, string $period, bool $incompleteOnly): array
-    {
+    public function overview(
+        int $supplierId,
+        string $period,
+        bool $incompleteOnly,
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+        ?int $employmentId = null,
+    ): array {
+        // Strop se klampuje i tady, ne jen na HTTP hranici: přehled staví na
+        // řádek několik dotazů a náhledů, takže „vypiš všechno" nesmí jít
+        // objednat ani jiným volajícím než akcí.
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+        if ($employmentId !== null && $employmentId <= 0) {
+            throw new \InvalidArgumentException('Vztah musí být kladné číslo.');
+        }
         [$periodStart, $periodEnd, $startsAtUtc, $endsAtUtc] = $this->periodBounds($period);
         $employments = $this->repository->employments($supplierId, $periodStart, $periodEnd);
+        // Zúžení na jeden vztah padá STEJNĚ brzy jako „jen nedokončené"
+        // a stránkování — před stavbou řádků. Dokud běželo v prohlížeči nad
+        // načtenou stránkou, vztah z jiné strany se tiše neprojevil: lišta
+        // zmizela a seznam zůstal celý, což vypadá jako prázdný výsledek,
+        // ne jako nefunkční filtr.
+        if ($employmentId !== null) {
+            $employments = array_values(array_filter(
+                $employments,
+                fn (array $employment): bool => PayrollTimeValue::int(
+                    $employment['id'] ?? null,
+                    'id',
+                ) === $employmentId,
+            ));
+        }
         $shifts = $this->groupByEmployment(
             $this->startingInPeriod(
                 $this->repository->shifts($supplierId, $startsAtUtc, $endsAtUtc),
@@ -50,9 +84,46 @@ final class PayrollTimeService
             $states[PayrollTimeValue::int($state['employment_id'] ?? null, 'employment_id')] = $state;
         }
 
-        // § 93 zákoníku práce — stav limitů přesčasu se počítá pro CELÝ přehled
-        // jedním dotazem, protože roční i vyrovnávací okno sahá mimo měsíc a
-        // dotaz na vztah by se jinak opakoval pro každý řádek.
+        // Zúžení „jen nedokončené" i stránkování musí padnout PŘED stavbou
+        // řádků: rozpracovanost se pozná z dat, která jsou v paměti stejně
+        // (směny, zápisy) plus jednoho hromadného dotazu na existenci
+        // kalendáře. Kdyby se filtrovalo až nad hotovými řádky, zaplatil by
+        // server fond, náhled JMHZ i limity přesčasu za každý vztah firmy.
+        $allIds = [];
+        foreach ($employments as $employment) {
+            $allIds[] = PayrollTimeValue::int($employment['id'] ?? null, 'id');
+        }
+        $withCalendar = array_fill_keys(
+            $this->repository->employmentIdsWithCalendar(
+                $supplierId,
+                $allIds,
+                $periodStart,
+                $periodEnd,
+            ),
+            true,
+        );
+        $incompleteFlags = [];
+        foreach ($allIds as $id) {
+            $incompleteFlags[$id] = $this->looksIncomplete(
+                isset($withCalendar[$id]),
+                $shifts[$id] ?? [],
+                $entries[$id] ?? [],
+            );
+        }
+        if ($incompleteOnly) {
+            $employments = array_values(array_filter(
+                $employments,
+                fn (array $employment): bool => $incompleteFlags[
+                    PayrollTimeValue::int($employment['id'] ?? null, 'id')
+                ],
+            ));
+        }
+        $total = count($employments);
+        $employments = array_slice($employments, $offset, $limit);
+
+        // § 93 zákoníku práce — stav limitů přesčasu se počítá pro CELOU
+        // stránku jedním dotazem, protože roční i vyrovnávací okno sahá mimo
+        // měsíc a dotaz na vztah by se jinak opakoval pro každý řádek.
         $employmentIds = [];
         $employmentStarts = [];
         foreach ($employments as $employment) {
@@ -72,6 +143,26 @@ final class PayrollTimeService
             $employmentStarts,
         );
         $overtimeConsents = $this->overtime->consentRowsForMany($supplierId, $employmentIds);
+        $overtimeProtections = $this->overtime->protectionRowsForMany($supplierId, $employmentIds);
+        // Náhradní volno se ukazuje za celé vyrovnávací okno, ne jen za měsíc —
+        // z okna se odečítá podle dne PŘESČASU (§ 93 odst. 5) a účetní musí
+        // vidět i zápis, který do zobrazeného měsíce nespadá.
+        $overtimeCompensations = $this->overtime->compensationRowsForMany(
+            $supplierId,
+            $employmentIds,
+            (new \DateTimeImmutable($periodStart))->modify('-52 weeks')->format('Y-m-d'),
+            $periodLastDay,
+        );
+        // Náhradní volno se eviduje na dvou místech (viz
+        // CompensatoryTimeOffReconciliation) a jednostranný zápis je tichá
+        // vada. Porovnání proto padne rovnou do přehledu měsíce.
+        $compensatoryReconciliation = $this->overtime
+            ->compensatoryTimeOffReconciliationForMany(
+                $supplierId,
+                $employmentIds,
+                $periodStart,
+                $periodLastDay,
+            );
 
         $items = [];
         foreach ($employments as $employment) {
@@ -143,19 +234,16 @@ final class PayrollTimeService
             $employmentShifts = $shifts[$employmentId] ?? [];
             $employmentEntries = $entries[$employmentId] ?? [];
             $plannedMinutes = 0;
-            $hasDraftShift = false;
             foreach ($employmentShifts as &$shift) {
                 $minutes = $this->netMinutes($shift);
                 $shift['net_minutes'] = $minutes;
                 $shift['starts_at'] = $this->displayInstant($shift, 'starts_at_utc');
                 $shift['ends_at'] = $this->displayInstant($shift, 'ends_at_utc');
                 $plannedMinutes += $minutes;
-                $hasDraftShift = $hasDraftShift || $shift['status'] === 'draft';
             }
             unset($shift);
 
             $categories = array_fill_keys(self::CATEGORIES, 0);
-            $hasDraftEntry = false;
             foreach ($employmentEntries as &$entry) {
                 $minutes = $this->netMinutes($entry);
                 $entry['net_minutes'] = $minutes;
@@ -165,14 +253,10 @@ final class PayrollTimeService
                 if (array_key_exists($category, $categories)) {
                     $categories[$category] += $minutes;
                 }
-                $hasDraftEntry = $hasDraftEntry || $entry['status'] === 'draft';
             }
             unset($entry);
             $actualMinutes = $categories['regular'] + $categories['overtime'];
-            $incomplete = $calendarVersions === []
-                || $hasDraftShift
-                || $hasDraftEntry
-                || ($plannedMinutes > 0 && $actualMinutes === 0);
+            $incomplete = $incompleteFlags[$employmentId];
 
             $state = $states[$employmentId] ?? [
                 'id' => null,
@@ -219,19 +303,70 @@ final class PayrollTimeService
                     ? $overtimeLimits[$employmentId]->toArray()
                     : null,
                 'overtime_consents' => $overtimeConsents[$employmentId] ?? [],
+                'overtime_protections' => $overtimeProtections[$employmentId] ?? [],
+                'overtime_compensations' => $overtimeCompensations[$employmentId] ?? [],
+                'compensatory_time_off_check' => isset(
+                    $compensatoryReconciliation[$employmentId],
+                )
+                    ? CompensatoryTimeOffReconciliation::fromRow(
+                        $employmentId,
+                        $period,
+                        $compensatoryReconciliation[$employmentId],
+                    )->toArray()
+                    : null,
                 'shifts' => $employmentShifts,
                 'entries' => $employmentEntries,
             ];
-            if (!$incompleteOnly || $incomplete) {
-                $items[] = $item;
-            }
+            $items[] = $item;
         }
 
         return [
             'period' => $period,
             'incomplete_only' => $incompleteOnly,
+            'employment_id' => $employmentId,
             'items' => $items,
+            'total' => $total,
+            'limit' => $limit,
+            'offset' => $offset,
         ];
+    }
+
+    /**
+     * Rozpracovanost řádku docházky bez stavby řádku.
+     *
+     * Musí odpovídat `summary.incomplete` v přehledu — proto se počítá jednou
+     * a stavěný řádek si výsledek jen převezme.
+     *
+     * @param list<array<string,mixed>> $employmentShifts
+     * @param list<array<string,mixed>> $employmentEntries
+     */
+    private function looksIncomplete(
+        bool $hasCalendar,
+        array $employmentShifts,
+        array $employmentEntries,
+    ): bool {
+        if (!$hasCalendar) {
+            return true;
+        }
+        $plannedMinutes = 0;
+        foreach ($employmentShifts as $shift) {
+            if (($shift['status'] ?? null) === 'draft') {
+                return true;
+            }
+            $plannedMinutes += $this->netMinutes($shift);
+        }
+        $actualMinutes = 0;
+        foreach ($employmentEntries as $entry) {
+            if (($entry['status'] ?? null) === 'draft') {
+                return true;
+            }
+            $category = PayrollTimeValue::string($entry['category'] ?? null, 'category');
+            if ($category === 'regular' || $category === 'overtime') {
+                $actualMinutes += $this->netMinutes($entry);
+            }
+        }
+
+        return $plannedMinutes > 0 && $actualMinutes === 0;
     }
 
     /**
@@ -453,6 +588,152 @@ final class PayrollTimeService
             $validFrom,
             $validTo,
             $this->nullableString($input['document_reference'] ?? null, 191),
+            $this->nullableString($input['note'] ?? null, 500),
+            $this->nonNegativeInt($input, 'row_version'),
+            $userId,
+        );
+    }
+
+    /**
+     * Zákaz práce přesčas u chráněné skupiny (§ 240 odst. 3 zákoníku práce).
+     *
+     * Mladistvost se sem nezapisuje — plyne z data narození zaměstnance
+     * (§ 350 odst. 2) a druhý zdroj pravdy by se s prvním jen rozešel.
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public function saveOvertimeProtection(
+        int $supplierId,
+        array $input,
+        ?int $userId,
+    ): array {
+        $validFrom = $this->date($input['valid_from'] ?? null, 'valid_from');
+        $validTo = $this->nullableDate($input['valid_to'] ?? null, 'valid_to');
+        if ($validTo !== null && $validTo < $validFrom) {
+            throw new \InvalidArgumentException(
+                'Konec ochrany nesmí předcházet jejímu začátku.',
+            );
+        }
+
+        return $this->overtime->saveProtection(
+            $supplierId,
+            $this->positiveInt($input, 'employment_id'),
+            $this->nullablePositiveInt($input, 'id'),
+            $this->enum($input, 'protection', OvertimeProtectionWindow::KINDS),
+            $validFrom,
+            $validTo,
+            $this->nullableString($input['document_reference'] ?? null, 191),
+            $this->nullableString($input['note'] ?? null, 500),
+            $this->nonNegativeInt($input, 'row_version'),
+            $userId,
+        );
+    }
+
+    /**
+     * Náhradní volno za práci přesčas (§ 93 odst. 5 zákoníku práce).
+     *
+     * Rozhodné je datum PŘESČASU, ne datum čerpání volna — vyjímá se „práce
+     * přesčas, za kterou bylo poskytnuto náhradní volno".
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public function saveOvertimeCompensation(
+        int $supplierId,
+        array $input,
+        ?int $userId,
+    ): array {
+        $overtimeDate = $this->date($input['overtime_date'] ?? null, 'overtime_date');
+        $grantedOn = $this->nullableDate($input['granted_on'] ?? null, 'granted_on');
+        if ($grantedOn !== null && $grantedOn < $overtimeDate) {
+            throw new \InvalidArgumentException(
+                'Náhradní volno nelze vybrat dřív, než byl přesčas odpracován.',
+            );
+        }
+        $minutes = $this->positiveInt($input, 'minutes');
+        if ($minutes > 1440) {
+            throw new \InvalidArgumentException(
+                'Náhradní volno za jeden den nesmí přesáhnout 24 hodin.',
+            );
+        }
+
+        return $this->overtime->saveCompensation(
+            $supplierId,
+            $this->positiveInt($input, 'employment_id'),
+            $this->nullablePositiveInt($input, 'id'),
+            $overtimeDate,
+            $minutes,
+            $grantedOn,
+            $this->nullableString($input['document_reference'] ?? null, 191),
+            $this->nullableString($input['note'] ?? null, 500),
+            $this->nonNegativeInt($input, 'row_version'),
+            $userId,
+        );
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function overtimeAveragingPeriods(int $supplierId): array
+    {
+        return $this->overtime->averagingPeriods($supplierId);
+    }
+
+    /**
+     * Vyrovnávací období podle § 93 odst. 4.
+     *
+     * Delší období než zákonných 26 týdnů smí vymezit „jen kolektivní
+     * smlouva", proto se bez odkazu na ni neuloží — a to už tady, aby uživatel
+     * dostal větu, ne hlášku o porušení databázového omezení.
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public function saveOvertimeAveragingPeriod(
+        int $supplierId,
+        array $input,
+        ?int $userId,
+    ): array {
+        $validFrom = $this->date($input['valid_from'] ?? null, 'valid_from');
+        $validTo = $this->nullableDate($input['valid_to'] ?? null, 'valid_to');
+        if ($validTo !== null && $validTo < $validFrom) {
+            throw new \InvalidArgumentException(
+                'Konec platnosti vyrovnávacího období nesmí předcházet jeho začátku.',
+            );
+        }
+        $basis = $this->enum($input, 'basis', OvertimeLimits::BASES);
+        $weeks = $this->positiveInt($input, 'weeks');
+        $reference = $this->nullableString($input['collective_agreement_reference'] ?? null, 255);
+        if ($basis === OvertimeLimits::BASIS_STATUTORY) {
+            if ($weeks > 26) {
+                throw new \InvalidArgumentException(
+                    'Bez kolektivní smlouvy smí vyrovnávací období činit nejvýše '
+                    . '26 týdnů po sobě jdoucích (§ 93 odst. 4 zákoníku práce).',
+                );
+            }
+            $reference = null;
+        } else {
+            if ($weeks > 52) {
+                throw new \InvalidArgumentException(
+                    'Ani kolektivní smlouva nesmí vymezit vyrovnávací období delší '
+                    . 'než 52 týdnů po sobě jdoucích (§ 93 odst. 4 zákoníku práce).',
+                );
+            }
+            if ($reference === null) {
+                throw new \InvalidArgumentException(
+                    'Vyrovnávací období delší než zákonné musí odkazovat na kolektivní '
+                    . 'smlouvu, která ho vymezuje (§ 93 odst. 4 zákoníku práce).',
+                );
+            }
+        }
+
+        return $this->overtime->saveAveragingPeriod(
+            $supplierId,
+            $this->nullablePositiveInt($input, 'id'),
+            $validFrom,
+            $validTo,
+            $weeks,
+            $basis,
+            $reference,
             $this->nullableString($input['note'] ?? null, 500),
             $this->nonNegativeInt($input, 'row_version'),
             $userId,

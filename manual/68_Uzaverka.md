@@ -427,10 +427,9 @@ a administrátor ho může vzít zpět.
 
 ## 68.5 Číselné řady dokladů uzávěrky
 
-Tlačítkem **„Číselné řady"** na stránce Účetní období (jen administrátor) otevřeš
-modální okno se dvěma částmi:
-
-**Číselné řady** — tabulka řad dokladů uzávěrky per účetní rok:
+Číselné řady se spravují v **Nástrojích** na záložce **„Číselné řady"**
+(`/utilities?section=document-series`, jen podvojné účetnictví). Tabulka drží řady
+dokladů per účetní rok:
 
 | Řada | Kód | Výchozí prefix |
 |---|---|---|
@@ -439,14 +438,35 @@ modální okno se dvěma částmi:
 | Kurzové rozdíly | `fx` | KR |
 | Převody mezi účty | `transfer` | PP |
 | Ruční zápisy | `manual` | ID |
+| Příjmové / výdajové pokladní doklady | `cash_in` / `cash_out` | PPD / VPD |
+| Skladové příjemky / výdejky / převodky | `stock_in` / `stock_out` / `stock_transfer` | PRI / VYD / PRE |
+| Zápočty | `offset` | ZAP |
+| Objednávky dodavatelům | `purchase_order` | OBJ |
 
 Řádek řady pro daný rok vzniká automaticky **při prvním vydání čísla** (dokud rok
-nemá žádný doklad dané řady, v tabulce se nezobrazuje). Editovat lze jen **prefix**
-(1–10 znaků A–Z/0–9, uloží se velkými písmeny) — číslo **Další číslo** je jen ke
-čtení a vydává se vzestupně; mezery po smazaných/stornovaných zápisech se **nikdy
+nemá žádný doklad dané řady, v tabulce se nezobrazuje). Editovat lze **prefix**
+(1–10 znaků A–Z/0–9, uloží se velkými písmeny), **tvar čísla** a **další číslo**;
+čísla se vydávají vzestupně a mezery po smazaných/stornovaných zápisech se **nikdy
 nedorovnávají** (§11 ZoÚ — jedinečné označení dokladu).
 
-**Nastavení uzávěrky a výkazů** — firemní výchozí hodnoty:
+**Tvar čísla** je nepovinná šablona — prázdné pole znamená vestavěné
+`PREFIX-YYYY-CCCC` (např. `UZ-2026-0001`). Placeholdery se píší do složených závorek:
+`PREFIX` prefix řady, `YYYY` rok čtyřmístně, `YY` rok dvoumístně a `C+` čítač, kde
+počet písmen C určuje odsazení nulami. Sloupec **Náhled** rovnou ukazuje, jak bude
+příští číslo vypadat.
+
+**Další číslo** je číslo, které dostane **příští** vydaný doklad té řady. Slouží
+hlavně při přechodu z jiného systému: firma, které v roce 2026 skončila vlastní
+pokladní řada na `26HP00010`, nastaví u řady `cash_in` prefix `26HP`, tvar čísla
+`PREFIX` a `CCCCC` ve složených závorkách a další číslo `11` — první doklad
+vystavený v MyÚčtu pak bude `26HP00011` a řada zůstane spojitá. Čítač lze i snížit;
+jedinečnost čísla ale hlídá databáze, takže kolize s už existujícím dokladem skončí
+chybou uložení, ne tichým duplikátem.
+
+### Nastavení uzávěrky a výkazů
+
+Tlačítkem **„Nastavení uzávěrky"** na stránce Účetní období otevřeš firemní výchozí
+hodnoty:
 
 - **Podléhá povinnému auditu (§20 ZoÚ)** — auditovaná jednotka pak sestavuje výkazy
   vždy v plném rozsahu (§3a vyhl. 500/2002 Sb.).

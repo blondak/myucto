@@ -6,6 +6,7 @@ namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\PayrollEmploymentAccountingClassifier;
 use MyInvoice\Service\Payroll\PayrollEmploymentLifecycle;
 use PDO;
@@ -62,7 +63,40 @@ final class PayrollEmploymentRepository
         private readonly PayrollEmploymentAccountingClassifier $accounting,
         private readonly ActivityLogger $activityLogger,
         private readonly PayrollEmploymentDeletionRepository $deletion,
+        private readonly PayrollEmployerSettingsRepository $employerSettings,
     ) {}
+
+    /**
+     * Účty firmy — v rámci jednoho požadavku se nemění, ale karta osoby se ptá
+     * za každý vztah zvlášť.
+     *
+     * @var array<int,array<string,string>>
+     */
+    private array $accountsCache = [];
+
+    /**
+     * Předkontace na kartě musí ukazovat účty, na které se mzda SKUTEČNĚ
+     * zaúčtuje, ne obecné defaulty.
+     *
+     * Klasifikátor umí konfigurované účty přijmout od začátku, jenže mu je nikdo
+     * nepředával — karta pak firmě s vlastním rozvrhem tvrdila „523/366", zatímco
+     * běh účtoval podle nastavení zaměstnavatele (u firem, které si účty
+     * přenastavily, klidně 521.100/331.100). Rozdíl si nikdo nemohl ověřit jinak
+     * než v deníku po zaúčtování.
+     *
+     * @return array<string,string>
+     */
+    private function configuredAccounts(int $supplierId): array
+    {
+        if (!array_key_exists($supplierId, $this->accountsCache)) {
+            $accounts = $this->employerSettings->get($supplierId)['accounts'] ?? null;
+            $this->accountsCache[$supplierId] = is_array($accounts)
+                ? array_map(strval(...), $accounts)
+                : PayrollAccountingDefaults::codes();
+        }
+
+        return $this->accountsCache[$supplierId];
+    }
 
     /** @return list<array<string,mixed>> */
     public function listForEmployee(int $supplierId, int $employeeId): array
@@ -129,7 +163,10 @@ final class PayrollEmploymentRepository
                 'can_delete' => $deletion !== null && $deletion->canDelete,
                 'delete_blocker' => $deletion?->blockerPayload(),
                 'delete_cascade' => $deletion === null ? [] : $deletion->cascade,
-                'accounting' => ($this->accounting)($relationType),
+                'accounting' => ($this->accounting)(
+                    $relationType,
+                    $this->configuredAccounts($supplierId),
+                ),
                 'terms' => $this->terms($supplierId, $employmentId),
                 'checklist' => $this->checklist($supplierId, $employmentId),
                 'timeline' => $this->events($supplierId, $employmentId),
@@ -158,7 +195,10 @@ final class PayrollEmploymentRepository
             $userAgent,
         ): array {
             $this->lockEmployee($supplierId, $employeeId);
-            $this->assertOffice($supplierId, $data['terms']['office_id']);
+            $data['terms']['office_id'] = $this->resolveOffice(
+                $supplierId,
+                $data['terms']['office_id'],
+            );
             $this->assertPrimaryAvailable($supplierId, $employeeId, $data['terms']['is_primary'], null);
             if ($data['code'] === '') {
                 $data['code'] = $this->nextEmploymentCode($supplierId, $employeeId);
@@ -243,6 +283,28 @@ final class PayrollEmploymentRepository
         return is_string($value) && $value !== '' ? $value : null;
     }
 
+    /**
+     * Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP, které u vztahu právě
+     * platí. Čte ho validátor smluvních podmínek, aby ho neshodila obrazovka,
+     * která o poli neví — viz PayrollEmploymentValidator::otherWithholdingEligibility().
+     */
+    public function currentOtherWithholdingEligibility(
+        int $supplierId,
+        int $employmentId,
+    ): ?string {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT other_withholding_eligibility
+               FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
     /** @param TermsInput $data
      *  @return array<string,mixed>
      */
@@ -290,7 +352,15 @@ final class PayrollEmploymentRepository
                 $data['actual_start_on'] = $actualStart;
             }
             $this->lockEmployee($supplierId, $employeeId);
-            $this->assertOffice($supplierId, $data['office_id']);
+            // Obrazovky, které účtárnu nenabízejí, posílají null — nesmí tím
+            // shodit tu, kterou vztah drží (viz {@see resolveOffice()}).
+            $data['office_id'] = $this->resolveOffice(
+                $supplierId,
+                $data['office_id'],
+                $employment['office_id'] === null
+                    ? null
+                    : (int) $employment['office_id'],
+            );
             $this->assertPrimaryAvailable($supplierId, $employeeId, $data['is_primary'], $employmentId);
 
             $previous = $this->latestTermsForUpdate($supplierId, $employmentId);
@@ -508,6 +578,7 @@ final class PayrollEmploymentRepository
                 ['status' => ['from' => $from, 'to' => $target]],
                 $userId,
             );
+            $this->alignCreatedEvent($supplierId, $employmentId, $effectiveOn);
             if ($target === 'ended') {
                 $this->ensureChecklist(
                     $supplierId,
@@ -670,8 +741,14 @@ final class PayrollEmploymentRepository
                     terms.jmhz_relationship_detail_code,
                     terms.social_insurance_participation,
                     terms.health_insurance_participation, terms.tax_regime,
+                    terms.other_withholding_eligibility,
                     terms.foreign_legislation_country_code,
                     terms.a1_certificate_until, terms.risky_work,
+                    terms.social_employer_rate_category,
+                    terms.social_employer_rate_category_evidence,
+                    terms.social_part_time_discount_reason,
+                    terms.social_part_time_discount_evidence,
+                    terms.social_part_time_discount_notified_on,
                     terms.tax_declaration_signed, terms.is_primary,
                     terms.change_reason, terms.row_version, terms.created_at
                FROM payroll_employment_terms terms
@@ -761,10 +838,15 @@ final class PayrollEmploymentRepository
                  jmhz_functional_benefits_status,
                  jmhz_temporary_assignment_status,
                  social_insurance_participation, health_insurance_participation,
-                 tax_regime, foreign_legislation_country_code,
-                 a1_certificate_until, risky_work, tax_declaration_signed,
+                 tax_regime, other_withholding_eligibility,
+                 foreign_legislation_country_code,
+                 a1_certificate_until, risky_work,
+                 social_employer_rate_category, social_employer_rate_category_evidence,
+                 social_part_time_discount_reason, social_part_time_discount_evidence,
+                 social_part_time_discount_notified_on,
+                 tax_declaration_signed,
                  is_primary, change_reason, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $employmentId,
@@ -792,9 +874,15 @@ final class PayrollEmploymentRepository
             $data['social_insurance_participation'],
             $data['health_insurance_participation'],
             $data['tax_regime'],
+            $data['other_withholding_eligibility'],
             $data['foreign_legislation_country_code'],
             $data['a1_certificate_until'],
             (int) $data['risky_work'],
+            $data['social_employer_rate_category'],
+            $data['social_employer_rate_category_evidence'],
+            $data['social_part_time_discount_reason'],
+            $data['social_part_time_discount_evidence'],
+            $data['social_part_time_discount_notified_on'],
             (int) $data['tax_declaration_signed'],
             (int) $data['is_primary'],
             $data['change_reason'],
@@ -866,6 +954,29 @@ final class PayrollEmploymentRepository
             json_encode($diff, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             $userId,
         ]);
+    }
+
+    /**
+     * Založení vztahu nesmí v časové ose ležet později než změna jeho stavu.
+     *
+     * Efektivní stav se čte jako poslední událost podle `effective_on`
+     * ({@see PayrollEmploymentLifecycleSql}). Vztah zapsaný dnes, ale s nástupem
+     * loni, měl událost `created → planned` s dnešním datem, takže zpětně
+     * potvrzený nástup (`status_changed → active` k loňskému datu) zůstal pod ní
+     * a vztah se dál tvářil jako plánovaný: v seznamu lidí svítil jako aktivní
+     * (ten čte sloupec `status`), ale z rychlých vstupů, docházky i z karet na
+     * přehledu mezd vypadl. Založení proto ustoupí zpět na datum té změny —
+     * plánovaným vztah byl od chvíle, kdy podle evidence začal, ne od chvíle,
+     * kdy ho někdo naťukal.
+     */
+    private function alignCreatedEvent(int $supplierId, int $employmentId, string $effectiveOn): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employment_events
+                SET effective_on = ?
+              WHERE supplier_id = ? AND employment_id = ?
+                AND event_type = 'created' AND effective_on > ?"
+        )->execute([$effectiveOn, $supplierId, $employmentId, $effectiveOn]);
     }
 
     /**
@@ -977,7 +1088,8 @@ final class PayrollEmploymentRepository
         ?int $expectedVersion,
     ): array {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, employee_id, code, relation_type, status, is_primary, start_date,
+            'SELECT id, employee_id, office_id, code, relation_type, status, is_primary,
+                    start_date,
                     actual_start_date, end_date, monthly_gross_minor, row_version
                FROM payroll_employments
               WHERE supplier_id = ? AND id = ?
@@ -995,10 +1107,29 @@ final class PayrollEmploymentRepository
         return $row;
     }
 
-    private function assertOffice(int $supplierId, ?int $officeId): void
-    {
+    /**
+     * Mzdová účtárna vztahu je POVINNÁ, ale uživatel ji nezadává.
+     *
+     * Variabilní symbol zaměstnavatele pro sociální pojistné vychází výhradně
+     * z `payroll_offices`, takže vztah bez účtárny nejde odvést; běh zúžený na
+     * účtárnu by ho navíc tiše vynechal. Formulář vztahu přitom účtárnu vůbec
+     * nenabízí a rychlá editace o poli neví — kdyby byla povinná na vstupu,
+     * nebylo by ji kde vyplnit. Doplňuje se proto tady: co drží vztah dnes,
+     * pak výchozí účtárna zaměstnavatele (`default_office_id` je NOT NULL).
+     * Když ani ta není, je to pojmenovaná překážka při zakládání vztahu, tedy
+     * v okamžiku, kdy se dá napravit.
+     */
+    private function resolveOffice(
+        int $supplierId,
+        ?int $officeId,
+        ?int $currentOfficeId = null,
+    ): int {
+        $officeId ??= $currentOfficeId ?? $this->defaultOffice($supplierId);
         if ($officeId === null) {
-            return;
+            throw new \InvalidArgumentException(
+                'Pracovní vztah nelze vést bez mzdové účtárny —'
+                . ' nejdřív ji nastavte u zaměstnavatele.',
+            );
         }
         $stmt = $this->db->pdo()->prepare(
             'SELECT id
@@ -1009,6 +1140,27 @@ final class PayrollEmploymentRepository
         if ($stmt->fetchColumn() === false) {
             throw new \InvalidArgumentException('Mzdová účtárna neexistuje nebo není aktivní.');
         }
+
+        return $officeId;
+    }
+
+    private function defaultOffice(int $supplierId): ?int
+    {
+        if (!$this->db->hasTable('payroll_employer_settings')) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT settings.default_office_id
+               FROM payroll_employer_settings settings
+               JOIN payroll_offices office
+                 ON office.supplier_id = settings.supplier_id
+                AND office.id = settings.default_office_id
+              WHERE settings.supplier_id = ? AND office.is_active = 1'
+        );
+        $stmt->execute([$supplierId]);
+        $value = $stmt->fetchColumn();
+
+        return $value === false || $value === null ? null : (int) $value;
     }
 
     private function assertPrimaryAvailable(

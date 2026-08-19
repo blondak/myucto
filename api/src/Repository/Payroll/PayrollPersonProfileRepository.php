@@ -328,8 +328,13 @@ final class PayrollPersonProfileRepository
                 $pdo->exec('RELEASE SAVEPOINT payroll_person_profile_save');
             }
             if ($e instanceof \PDOException && (string) $e->getCode() === '23000') {
+                // SQLSTATE 23000 nese víc různých chyb; jedna hláška pro všechny posílá
+                // uživatele hledat duplicitu i tam, kde jen chybí povinná hodnota.
+                $driverCode = (int) ($e->errorInfo[1] ?? 0);
                 throw new \InvalidArgumentException(
-                    'Osobní karta obsahuje duplicitní nebo neplatně provázaný záznam.',
+                    $driverCode === 1062
+                        ? 'Osobní karta obsahuje duplicitní záznam — stejná hodnota už je u zaměstnance vedená.'
+                        : 'Osobní kartu se nepodařilo uložit — chybí povinná hodnota nebo vazba na neexistující záznam.',
                     0,
                     $e,
                 );
@@ -496,6 +501,24 @@ final class PayrollPersonProfileRepository
         }
     }
 
+    /**
+     * Řádek kontaktu s TOUTÉŽ hodnotou (i deaktivovaný) — podklad pro recyklaci
+     * místo vložení druhého řádku, který by porazil `uq_payroll_contact_value`.
+     */
+    private function findContactByValue(int $supplierId, int $employeeId, string $contactType, string $lookupHash): ?int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id FROM payroll_person_contacts
+              WHERE supplier_id = ? AND employee_id = ? AND contact_type = ? AND contact_value_hash = ?
+              ORDER BY id LIMIT 1
+              FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $employeeId, $contactType, $lookupHash]);
+        $id = $stmt->fetchColumn();
+
+        return $id === false ? null : (int) $id;
+    }
+
     /** @param list<ContactInput> $rows */
     private function saveContacts(int $supplierId, int $employeeId, array $rows): void
     {
@@ -504,6 +527,24 @@ final class PayrollPersonProfileRepository
             $field = $row['contact_type'] === 'email'
                 ? PayrollSensitiveField::CONTACT_EMAIL
                 : PayrollSensitiveField::CONTACT_PHONE;
+            // Kontakt se stejnou hodnotou už u osoby JEDNOU existovat může — třeba
+            // deaktivovaný z dřívějška. `uq_payroll_contact_value` je nad
+            // (supplier, employee, contact_type, hash) a `is_active` v něm NENÍ, takže
+            // druhý řádek s touž hodnotou skončí na 23000. Formulář „Běžné údaje“
+            // přitom posílá e-mail i telefon jako náhradu vždy, když je pole vyplněné,
+            // takže uložení karty s NEZMĚNĚNÝM kontaktem padalo pokaždé. Existující
+            // řádek proto recyklujeme: hodnota se nemění, mění se jen příznaky.
+            if ($id === null && $row['value'] !== null) {
+                $existingId = $this->findContactByValue(
+                    $supplierId,
+                    $employeeId,
+                    $row['contact_type'],
+                    $this->sensitiveData->lookupHash($row['value'], $field, $supplierId),
+                );
+                if ($existingId !== null) {
+                    $id = $existingId;
+                }
+            }
             if ($id === null) {
                 $this->db->pdo()->prepare(
                     "INSERT INTO payroll_person_contacts

@@ -115,9 +115,130 @@ final class AccountingApiTest extends TestCase
             'parent_id' => $parentId, 'account_code' => '518001', 'name' => 'Software SaaS',
         ]);
         self::assertSame(201, $res['status'], 'Účetní smí založit analytiku.');
-        self::assertSame('518001', $res['body']['account_code']);
+        // Tečkovaný tvar je od migrace 1322 jediný správný zápis analytiky a kód účtu
+        // už později přejmenovat nejde — zadání bez tečky se proto normalizuje.
+        self::assertSame('518.001', $res['body']['account_code']);
         self::assertFalse((bool) $res['body']['is_synthetic']);
         self::assertSame($parentId, (int) $res['body']['parent_id']);
+    }
+
+    public function testAnalyticCodeKeepsOwnNotationWhenNotPlainDigits(): void
+    {
+        $parentId = (int) $this->db->pdo()->query(
+            "SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '518'"
+        )->fetchColumn();
+
+        // Vlastní systém značení (písmena, jiná syntetika, už tečkovaný tvar) se nepřepisuje.
+        foreach (['518.900', '518A01', '648001'] as $code) {
+            $res = $this->call($this->accountsAction, 'create', 'POST', 'accountant', [], [
+                'parent_id' => $parentId, 'account_code' => $code, 'name' => 'Vlastní ' . $code,
+            ]);
+            self::assertSame(201, $res['status'], $code);
+            self::assertSame($code, $res['body']['account_code'], 'Kód mimo tvar „syntetika + číslice" se nechává být.');
+        }
+    }
+
+    public function testAnalyticCodeTooLongAfterDotIsRejected(): void
+    {
+        $parentId = (int) $this->db->pdo()->query(
+            "SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '518'"
+        )->fetchColumn();
+
+        // 10 znaků projde délkovou validací, s tečkou by jich bylo 11 → sloupec varchar(10)
+        // by je tiše ořízl a vznikl by jiný účet, než uživatel zadal.
+        $res = $this->call($this->accountsAction, 'create', 'POST', 'accountant', [], [
+            'parent_id' => $parentId, 'account_code' => '5181234567', 'name' => 'Dlouhá',
+        ]);
+        self::assertSame(422, $res['status']);
+
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM chart_of_accounts WHERE supplier_id = ? AND account_code LIKE ?');
+        $stmt->execute([$this->supplierId, '518.123%']);
+        self::assertSame(0, (int) $stmt->fetchColumn(), 'Oříznutý kód nesmí v osnově vzniknout.');
+    }
+
+    public function testAnalyticWithoutMovementsCanBeDeleted(): void
+    {
+        $parentId = (int) $this->db->pdo()->query(
+            "SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '518'"
+        )->fetchColumn();
+        $created = $this->call($this->accountsAction, 'create', 'POST', 'accountant', [], [
+            'parent_id' => $parentId, 'account_code' => '518005', 'name' => 'Překlep',
+        ]);
+        $id = (int) $created['body']['id'];
+
+        $res = $this->call($this->accountsAction, 'delete', 'DELETE', 'accountant', ['id' => (string) $id]);
+        self::assertSame(200, $res['status'], 'Analytika bez pohybů jde smazat — jinak by překlep v kódu zůstal navždy.');
+
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM chart_of_accounts WHERE id = ?');
+        $stmt->execute([$id]);
+        self::assertSame(0, (int) $stmt->fetchColumn());
+    }
+
+    public function testAnalyticReferencedByPostingRuleCannotBeDeleted(): void
+    {
+        $parentId = (int) $this->db->pdo()->query(
+            "SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '518'"
+        )->fetchColumn();
+        $created = $this->call($this->accountsAction, 'create', 'POST', 'accountant', [], [
+            'parent_id' => $parentId, 'account_code' => '518006', 'name' => 'Používaná',
+        ]);
+        $id = (int) $created['body']['id'];
+
+        // Kontace drží kód jako TEXT, ne přes FK — právě proto se použití hlídá zvlášť.
+        $this->db->pdo()->prepare(
+            'INSERT INTO posting_rules (supplier_id, rule_key, description, debit_account_code, credit_account_code)
+             VALUES (?, ?, ?, ?, ?)'
+        )->execute([$this->supplierId, 'test.delete.guard', 'Test guardu mazání', '518.006', '321']);
+
+        $res = $this->call($this->accountsAction, 'delete', 'DELETE', 'accountant', ['id' => (string) $id]);
+        self::assertSame(409, $res['status']);
+        self::assertStringContainsString('kontace', (string) $res['body']['error']['message']);
+    }
+
+    /**
+     * Regrese: seznam míst, kde visí kód účtu, kopíroval migraci 1322 a chyběl v něm
+     * mj. protiúčet pokladního dokladu — analytiku použitou na dokladu tak šlo smazat
+     * a doklad se pak nedal vystavit.
+     */
+    public function testAnalyticUsedAsCashCounterAccountCannotBeDeleted(): void
+    {
+        $parentId = (int) $this->db->pdo()->query(
+            "SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '518'"
+        )->fetchColumn();
+        $created = $this->call($this->accountsAction, 'create', 'POST', 'accountant', [], [
+            'parent_id' => $parentId, 'account_code' => '518007', 'name' => 'Protiúčet dokladu',
+        ]);
+        $id = (int) $created['body']['id'];
+
+        $regId = (int) $this->db->pdo()->query(
+            "SELECT id FROM cash_registers WHERE supplier_id = {$this->supplierId} ORDER BY id LIMIT 1"
+        )->fetchColumn();
+        if ($regId === 0) {
+            $this->db->pdo()->prepare(
+                "INSERT INTO cash_registers (supplier_id, name, currency_code, account_code, is_default, is_active)
+                 VALUES (?, 'Test', 'CZK', '211', 1, 1)"
+            )->execute([$this->supplierId]);
+            $regId = (int) $this->db->pdo()->lastInsertId();
+        }
+        $this->db->pdo()->prepare(
+            "INSERT INTO cash_documents (supplier_id, register_id, doc_type, purpose, issue_date, tax_date,
+                                         description, total_amount, status, counter_account_code)
+             VALUES (?, ?, 'in', 'sale', '2099-06-15', '2099-06-15', 'Test', 100.00, 'draft', '518.007')"
+        )->execute([$this->supplierId, $regId]);
+
+        $res = $this->call($this->accountsAction, 'delete', 'DELETE', 'accountant', ['id' => (string) $id]);
+        self::assertSame(409, $res['status']);
+        self::assertStringContainsString('pokladní doklady', (string) $res['body']['error']['message']);
+    }
+
+    public function testSyntheticAccountCannotBeDeleted(): void
+    {
+        $id = (int) $this->db->pdo()->query(
+            "SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '518'"
+        )->fetchColumn();
+
+        $res = $this->call($this->accountsAction, 'delete', 'DELETE', 'accountant', ['id' => (string) $id]);
+        self::assertSame(422, $res['status'], 'Syntetika z šablony osnovy se nemaže.');
     }
 
     public function testReadonlyCannotCreateAccount(): void

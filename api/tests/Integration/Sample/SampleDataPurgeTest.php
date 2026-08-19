@@ -88,6 +88,26 @@ final class SampleDataPurgeTest extends TestCase
         $pdo = $this->db->pdo();
         try { $this->service->purge($this->supplierId); } catch (\Throwable) {}
 
+        // Když purge() selže (nebo ho test schválně nedoběhne), zůstanou doklady viset.
+        // Následující sweep je maže se ZAPNUTOU FK kontrolou, aby doběhly kaskády na
+        // položky, a hlavně DŘÍV než se níž s vypnutou kontrolou smažou `clients`
+        // a `currencies` — jinak tu po běhu zůstanou osiřelé přijaté faktury bez
+        // dodavatele i měny (naměřeno: 120 řádků, které pak shazovaly export testy).
+        foreach ([
+            'purchase_invoices',
+            'invoices',
+            'purchase_orders',
+            'recurring_invoice_templates',
+            'projects',
+            'offset_agreements',
+        ] as $table) {
+            try {
+                $pdo->prepare("DELETE FROM `$table` WHERE supplier_id=?")->execute([$this->supplierId]);
+            } catch (\Throwable) {
+                // Tabulka v tomhle schématu být nemusí — úklid pokračuje dál.
+            }
+        }
+
         // POZOR: `SET FOREIGN_KEY_CHECKS=0` nevypne jen KONTROLU, ale i ON DELETE CASCADE.
         // Dřívější verze mazala supplier s vypnutými kontrolami, takže kaskáda nikdy
         // neproběhla a po každém běhu tu zůstalo ~220 osiřelých řádků účtové osnovy,

@@ -7,11 +7,21 @@ import type {
 } from '@/api/payroll'
 
 const m = vi.hoisted(() => ({
+  routeQuery: {} as Record<string, string | string[]>,
+  routerReplace: vi.fn(),
   load: vi.fn(),
   save: vi.fn(),
   canWrite: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
+}))
+
+// Stránka čte předvýběr z adresy (odkaz z karty zaměstnance), takže potřebuje
+// router. Originál se rozprostře, ať zůstanou i ostatní exporty (RouterLink).
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRoute: () => ({ query: m.routeQuery }),
+  useRouter: () => ({ replace: m.routerReplace }),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -116,6 +126,7 @@ function mountPage() {
 describe('PayrollQuickInputs', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.routeQuery = {}
     m.canWrite.mockReturnValue(true)
     m.load.mockImplementation(async period => ({
       period,
@@ -403,7 +414,39 @@ describe('PayrollQuickInputs', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('Starý měsíc')
-    expect(m.load).toHaveBeenLastCalledWith('2026-07', { limit: 25, offset: 0 })
+    expect(m.load).toHaveBeenLastCalledWith('2026-07', { limit: 25, offset: 0 }, undefined)
+  })
+
+  /**
+   * Zúžení z karty zaměstnance zužuje SERVER, ne prohlížeč nad načtenou stránkou.
+   * Vztah z druhé strany by se jinak tiše neprojevil: seznam by zůstal celý,
+   * nebo by vyšel prázdný, a obojí vypadá jako legitimní výsledek.
+   */
+  it('sends the narrowing to the server instead of filtering the loaded page', async () => {
+    m.routeQuery = { employment: '9999' }
+    mountPage()
+    await flushPromises()
+
+    // Období závisí na dnešku, na kontraktu záleží zbytek: stránka zůstává
+    // normální a vztah jde na server jako parametr.
+    expect(m.load).toHaveBeenLastCalledWith(expect.any(String), { limit: 25, offset: 0 }, 9999)
+  })
+
+  /**
+   * Prázdné zúžení musí být pojmenované. Tichá prázdná tabulka vypadá stejně
+   * jako měsíc bez lidí a uživatel nemá jak poznat, že se dívá na zúžený
+   * seznam — ani jak se ze zúžení dostat ven.
+   */
+  it('names an empty narrowing instead of showing a silent empty table', async () => {
+    m.routeQuery = { employment: '9999' }
+    m.load.mockImplementation(async period => ({ period, items: [], total: 0 }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const notice = wrapper.find('[data-test="payroll-focus-notice"]')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('payroll.agendas.focus.missing')
+    expect(wrapper.find('[data-test="payroll-focus-clear"]').exists()).toBe(true)
   })
 
   it('invalidates old rows when loading a new payroll period fails', async () => {

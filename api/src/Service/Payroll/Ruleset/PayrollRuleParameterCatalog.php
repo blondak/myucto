@@ -48,14 +48,25 @@ final class PayrollRuleParameterCatalog
             'advance.rounding.base_above_100_czk' => 'Zaokrouhlení základu zálohy nad 100 Kč',
             'advance.rounding.base_up_to_100_czk' => 'Zaokrouhlení základu zálohy do 100 Kč',
             'advance.rounding.result' => 'Zaokrouhlení vypočtené zálohy na daň',
-            'benefit_exemption.meal.per_shift' => 'Osvobozený příspěvek na stravování za směnu',
+            'benefit_exemption.meal.minimum_work_minutes' =>
+                'Nejkratší odpracovaná doba ve směně pro osvobozený příspěvek na stravování',
+            'benefit_exemption.meal.per_shift' => 'Osvobozený příspěvek na stravování za jednu směnu',
+            'benefit_exemption.meal.second_contribution_day_minutes' =>
+                'Odpracovaná doba za den pro druhý osvobozený příspěvek na stravování',
+            'benefit_exemption.meal.second_contribution_shift_minutes' =>
+                'Délka směny včetně přestávky pro druhý osvobozený příspěvek na stravování',
+            'benefit_exemption.meal.shift_rate' =>
+                'Podíl horní hranice stravného za pracovní cestu 5 až 12 hodin',
             'benefit_exemption.non_cash_health.yearly' =>
                 'Roční limit osvobození nepeněžních zdravotnických plnění',
             'benefit_exemption.non_cash_leisure.yearly' =>
                 'Roční limit osvobození nepeněžních volnočasových plnění',
             'benefit_exemption.old_age_savings.yearly' =>
                 'Roční limit osvobození příspěvku na produkty spoření na stáří a pojištění dlouhodobé péče',
+            'benefit_exemption.temporary_accommodation.monthly' =>
+                'Měsíční limit osvobození hodnoty přechodného ubytování',
             'bonus.minimum_amount.monthly' => 'Nejnižší vyplatitelný měsíční daňový bonus',
+            'bonus.minimum_amount.yearly' => 'Nejnižší uplatnitelný roční daňový bonus',
             'bonus.minimum_income.monthly' => 'Minimální měsíční příjem pro nárok na daňový bonus',
             'bonus.minimum_income.yearly' => 'Minimální roční příjem pro nárok na daňový bonus',
             'credit.child.first.monthly' => 'Měsíční daňové zvýhodnění na první dítě',
@@ -63,17 +74,33 @@ final class PayrollRuleParameterCatalog
             'credit.child.third_and_next.monthly' => 'Měsíční daňové zvýhodnění na třetí a další dítě',
             'credit.disability.basic.monthly' => 'Měsíční základní sleva na invaliditu prvního a druhého stupně',
             'credit.disability.extended.monthly' => 'Měsíční rozšířená sleva na invaliditu třetího stupně',
+            'credit.spouse.eligibility' => 'Nárok na slevu na manžela',
+            'credit.spouse.yearly' => 'Roční sleva na manžela',
+            'credit.spouse.ztp_p_multiplier' => 'Násobek slevy na manžela s přiznaným nárokem na průkaz ZTP/P',
             'credit.taxpayer.monthly' => 'Měsíční základní sleva na poplatníka',
             'credit.ztp_p.monthly' => 'Měsíční sleva na držitele průkazu ZTP/P',
             'dpp.withholding.threshold' => 'Rozhodná částka pro srážkovou daň u dohody o provedení práce',
             'other.withholding.threshold' => 'Rozhodná částka pro srážkovou daň u ostatních příjmů ze závislé činnosti',
+            'settlement.payout_threshold' => 'Nejnižší vyplácený přeplatek z ročního zúčtování',
+            'spouse.income_limit' => 'Nejvyšší vlastní příjem manžela pro nárok na slevu',
             'withholding.rate' => 'Sazba srážkové daně',
         ],
         'social_insurance' => [
+            'average_wage.monthly' => 'Průměrná měsíční mzda pro limity slevy na kratší úvazky',
             'employee.discount.agriculture_dpp' => 'Sleva zaměstnance u zemědělské dohody o provedení práce',
             'employee.discount.working_pensioner' => 'Snížená sazba zaměstnance — pracující starobní důchodce',
             'employee.rate.ordinary' => 'Sazba pojistného zaměstnance',
             'employer.discount.part_time' => 'Sleva zaměstnavatele na kratší pracovní úvazek',
+            'employer.discount.part_time.assessment_base_limit_multiple' =>
+                'Násobek průměrné mzdy, nad který sleva na kratší úvazek nenáleží',
+            'employer.discount.part_time.hourly_assessment_base_limit' =>
+                'Podíl průměrné mzdy jako nejvyšší vyměřovací základ na hodinu',
+            'employer.discount.part_time.maximum_monthly_millihours' =>
+                'Nejvyšší odpracovaná doba za měsíc pro slevu na kratší úvazek (tisíciny hodiny)',
+            'employer.discount.part_time.maximum_weekly_millihours' =>
+                'Nejvyšší sjednaná týdenní doba pro slevu na kratší úvazek (tisíciny hodiny)',
+            'employer.discount.part_time.minimum_weekly_millihours' =>
+                'Nejnižší sjednaná týdenní doba pro slevu na kratší úvazek (tisíciny hodiny)',
             'employer.rate.ordinary' => 'Sazba pojistného zaměstnavatele',
             'employer.rate.rescue_and_company_fire_service' =>
                 'Sazba zaměstnavatele u hasičských záchranných sborů a podnikových hasičů',
@@ -221,13 +248,15 @@ final class PayrollRuleParameterCatalog
      */
     private const MANUAL_REVIEW = [
         'income_tax' => [
-            'benefit_exemption.meal.per_shift' => [
-                'why' => 'Osvobození příspěvku na stravování je 70 % horní hranice stravného za '
-                    . 'pracovní cestu 5 až 12 hodin, a platí ZA KAŽDOU SMĚNU zvlášť. Roční limit '
-                    . 'u mzdové složky proto na stravenkový paušál nesedí — aplikace nezná počet '
-                    . 'odpracovaných směn v okamžiku zadání složky a nebude si ho domýšlet.',
-                'action' => 'Nic tu nevyplňujte. Denní limit hlídejte při zadávání příspěvku na '
-                    . 'stravování; nadlimitní část zadejte jako běžný zdanitelný příjem.',
+            'credit.spouse.eligibility' => [
+                'why' => 'Roční sleva na manžela má od 1. 1. 2024 dvě podmínky NAJEDNOU: společně '
+                    . 'hospodařící domácnost s manželem A s vyživovaným dítětem poplatníka, které '
+                    . 'nedovršilo 3 let věku, k tomu vlastní příjem manžela do zákonného limitu '
+                    . 'a doložení podle § 38l. Domácnost, věk dítěte ani příjmy manžela mzdový '
+                    . 'modul v datech nemá — částky vedle jsou zákonná čísla, ne posouzení nároku.',
+                'action' => 'Nic tu nevyplňujte ani neschvalujte. Slevu na manžela uplatněte '
+                    . 'v ročním zúčtování ručně proti doloženým podkladům, nebo ji zaměstnanec '
+                    . 'uplatní v daňovém přiznání.',
             ],
         ],
         'social_insurance' => [
@@ -238,20 +267,6 @@ final class PayrollRuleParameterCatalog
                 'action' => 'Běžného zaměstnavatele se to netýká a nic nevyplňujte. Zaměstnáváte-li '
                     . 'sezónní pracovníky v zemědělství na dohodu o provedení práce, uplatněte '
                     . 'slevu ručně a splnění podmínek doložte.',
-            ],
-            'employer.rate.rescue_and_company_fire_service' => [
-                'why' => 'Sazba 29,8 % je oficiální, ale platí jen pro zaměstnance zařazené '
-                    . 'u hasičských záchranných sborů a podnikových hasičů. Zařazení je věcné '
-                    . 'rozhodnutí zaměstnavatele, ne údaj ze mzdového listu.',
-                'action' => 'Nemáte-li takové zaměstnance, nic nedělejte — počítá se běžnou sazbou '
-                    . 'zaměstnavatele. Máte-li je, zadejte jim vyšší sazbu ručně.',
-            ],
-            'employer.rate.risk_employment' => [
-                'why' => 'Sazba 27,8 % je oficiální, ale platí jen pro rizikové práce zařazené podle '
-                    . 'zákona o ochraně veřejného zdraví. Zařazení práce do kategorie aplikace '
-                    . 'nezná.',
-                'action' => 'Nemáte-li rizikové práce, nic nedělejte — počítá se běžnou sazbou '
-                    . 'zaměstnavatele. Máte-li je, zadejte jim vyšší sazbu ručně.',
             ],
         ],
         'compensation_averages' => [

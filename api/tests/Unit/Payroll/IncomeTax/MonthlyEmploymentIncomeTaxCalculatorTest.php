@@ -455,6 +455,199 @@ final class MonthlyEmploymentIncomeTaxCalculatorTest extends TestCase
         self::assertSame(64, strlen($result->rulesetHash));
     }
 
+    /**
+     * Odměna jednatele bez podepsaného prohlášení, o které plátce prohlásil, že
+     * účast na nemocenském pojištění nezakládá: § 6 odst. 4 písm. b) ZDP ji pod
+     * rozhodnou částkou (4 500 Kč pro rok 2026) daní srážkou 15 %.
+     *
+     * Bez prohlášení plátce tenhle výpočet neexistoval — každý jednatel skončil
+     * na `other-withholding-eligibility-unverified`, tedy v ručním posouzení.
+     */
+    public function testStatutoryBodyBelowDecisiveAmountIsTaxedByWithholding(): void
+    {
+        $result = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(
+            calculationDate: '2026-08-31',
+            employeeReference: 'synthetic-employee',
+            relationships: [$this->relationship(
+                'director',
+                EmploymentRelationshipKind::StatutoryBody,
+                440_000,
+                OtherWithholdingEligibility::EligibleVerified,
+            )],
+            declarations: [$this->unsignedDeclaration()],
+            residence: $this->czechResidence(),
+        ));
+
+        self::assertSame(TaxCalculationStatus::Calculated, $result->status);
+        self::assertSame([], $result->issues);
+        self::assertSame(TaxRegime::Withholding, $result->relationships[0]->regime);
+        self::assertSame(440_000, $result->withholdingBaseMinorUnits);
+        self::assertSame(66_000, $result->withholdingTaxMinorUnits);
+        self::assertSame(0, $result->advanceTax?->taxableIncomeMinorUnits);
+    }
+
+    /**
+     * Jednatel s odměnou PŘESNĚ na rozhodné částce. Test § 6 odst. 4 ZDP je
+     * ostrý („nedosáhne"), takže 4 500 Kč už zakládá účast na nemocenském
+     * pojištění a daní se zálohou — ne srážkou. Zároveň je to scénář, kvůli
+     * kterému celá tahle větev vznikla: srpnový běh na něm padal.
+     */
+    public function testStatutoryBodyExactlyAtDecisiveAmountFallsBackToAdvance(): void
+    {
+        $result = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(
+            calculationDate: '2026-08-31',
+            employeeReference: 'synthetic-employee',
+            relationships: [$this->relationship(
+                'director',
+                EmploymentRelationshipKind::StatutoryBody,
+                450_000,
+                OtherWithholdingEligibility::EligibleVerified,
+            )],
+            declarations: [$this->unsignedDeclaration()],
+            residence: $this->czechResidence(),
+        ));
+
+        self::assertSame(TaxCalculationStatus::Calculated, $result->status);
+        self::assertSame([], $result->issues);
+        self::assertSame(TaxRegime::Advance, $result->relationships[0]->regime);
+        self::assertSame(0, $result->withholdingBaseMinorUnits);
+        self::assertSame(450_000, $result->advanceTax?->taxableIncomeMinorUnits);
+    }
+
+    /**
+     * Druhá větev prohlášení: sjednaná odměna účast na nemocenském pojištění
+     * zakládá, takže se daní zálohou i v měsíci, kdy je skutečná odměna nízká.
+     * Kdyby se zařazení odvozovalo ze skutečné částky, spadl by tenhle případ
+     * pod srážku — a plátce by odvedl špatnou daň.
+     */
+    public function testStatutoryBodyParticipatingInSicknessInsuranceStaysOnAdvance(): void
+    {
+        $result = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(
+            calculationDate: '2026-08-31',
+            employeeReference: 'synthetic-employee',
+            relationships: [$this->relationship(
+                'director',
+                EmploymentRelationshipKind::StatutoryBody,
+                300_000,
+                OtherWithholdingEligibility::IneligibleVerified,
+            )],
+            declarations: [$this->unsignedDeclaration()],
+            residence: $this->czechResidence(),
+        ));
+
+        self::assertSame(TaxCalculationStatus::Calculated, $result->status);
+        self::assertSame([], $result->issues);
+        self::assertSame(TaxRegime::Advance, $result->relationships[0]->regime);
+        self::assertSame(0, $result->withholdingBaseMinorUnits);
+        self::assertSame(300_000, $result->advanceTax?->taxableIncomeMinorUnits);
+    }
+
+    /**
+     * Bez prohlášení plátce zůstává ruční posouzení. Je to jediná bezpečná
+     * odpověď: aplikace neví, jestli sjednaná odměna rozhodné částky dosahuje.
+     */
+    public function testStatutoryBodyWithoutPayerStatementStillRequiresManualReview(): void
+    {
+        $result = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(
+            calculationDate: '2026-08-31',
+            employeeReference: 'synthetic-employee',
+            relationships: [$this->relationship(
+                'director',
+                EmploymentRelationshipKind::StatutoryBody,
+                440_000,
+                OtherWithholdingEligibility::Unverified,
+            )],
+            declarations: [$this->unsignedDeclaration()],
+            residence: $this->czechResidence(),
+        ));
+
+        self::assertSame(TaxCalculationStatus::ManualReview, $result->status);
+        self::assertContains('other-withholding-eligibility-unverified', $result->issues);
+    }
+
+    /**
+     * Pojistka proti protimluvu druhu vztahu a zvoleného zařazení musí platit
+     * dál — jinak by nová volba dovolila srazit daň tam, kde ji srazit nelze.
+     *
+     * @param array<string,mixed> $case
+     */
+    #[DataProvider('classificationConflicts')]
+    public function testContradictoryClassificationStillBlocksTheCalculation(
+        EmploymentRelationshipKind $kind,
+        OtherWithholdingEligibility $eligibility,
+        TaxResidence $residence,
+    ): void {
+        $result = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(
+            calculationDate: '2026-08-31',
+            employeeReference: 'synthetic-employee',
+            relationships: [$this->relationship('vztah', $kind, 300_000, $eligibility)],
+            declarations: [$this->unsignedDeclaration()],
+            residence: new TaxResidenceEvidence(
+                $residence,
+                '2026-01-01',
+                null,
+                'synthetic-residence-evidence',
+            ),
+        ));
+
+        self::assertSame(TaxCalculationStatus::ManualReview, $result->status);
+        self::assertContains('relationship-tax-classification-conflict', $result->issues);
+    }
+
+    /**
+     * @return iterable<string,array{
+     *   EmploymentRelationshipKind,OtherWithholdingEligibility,TaxResidence
+     * }>
+     */
+    public static function classificationConflicts(): iterable
+    {
+        yield 'DPP má vlastní rozhodnou částku, cizí zařazení nesnese' => [
+            EmploymentRelationshipKind::Dpp,
+            OtherWithholdingEligibility::EligibleVerified,
+            TaxResidence::CzechResident,
+        ];
+        yield 'pracovní poměr účast zakládá od počátku' => [
+            EmploymentRelationshipKind::Employment,
+            OtherWithholdingEligibility::EligibleVerified,
+            TaxResidence::CzechResident,
+        ];
+        yield 'zaměstnání malého rozsahu účast nezakládá' => [
+            EmploymentRelationshipKind::SmallScaleEmployment,
+            OtherWithholdingEligibility::IneligibleVerified,
+            TaxResidence::CzechResident,
+        ];
+        yield 'nerezidentní člen orgánu jde § 22, ne § 6 odst. 4' => [
+            EmploymentRelationshipKind::StatutoryBody,
+            OtherWithholdingEligibility::EligibleVerified,
+            TaxResidence::NonResident,
+        ];
+    }
+
+    /**
+     * Jediné pravidlo o tom, které vztahy se bez prohlášení plátce zařadit
+     * nedají, drží enum vztahu. Kdyby si ho výpočet držel vlastní kopií,
+     * rozešel by se se sestavovačem vstupů — a ten by pak poslal `automatic`
+     * u vztahu, který prohlášení vyžaduje.
+     */
+    public function testAutomaticClassificationFollowsTheRelationshipKindRule(): void
+    {
+        foreach (EmploymentRelationshipKind::cases() as $kind) {
+            $result = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(
+                calculationDate: '2026-08-31',
+                employeeReference: 'synthetic-employee',
+                relationships: [$this->relationship('vztah', $kind, 300_000)],
+                declarations: [$this->unsignedDeclaration()],
+                residence: $this->czechResidence(),
+            ));
+
+            self::assertSame(
+                $kind->requiresOtherWithholdingStatement(),
+                in_array('other-withholding-eligibility-unverified', $result->issues, true),
+                "Zařazení druhu vztahu {$kind->value} se rozešlo s pravidlem enumu.",
+            );
+        }
+    }
+
     /** Dodaná sada je účinná rovnou — není co aktivovat ani co schvalovat. */
     private function calculator(): MonthlyEmploymentIncomeTaxCalculator
     {

@@ -104,7 +104,12 @@ final class CashDocumentRepository
     /**
      * Nahradí DPH rozpad dokladu (smaž + vlož). Prázdné pole = smazat vše (vat_mode=none).
      *
-     * @param list<array{vat_rate:float, base_amount:float, vat_amount:float, vat_classification_code?:?string}> $lines
+     * M-7: zapisuje i `vat_deduction` / `vat_deduction_percent` / `tax_treatment`
+     * (migrace 1120). Bez nich se rozpad při každé úpravě draftu přepsal na default
+     * (`full`/100/`deductible`), takže hotovostní nákup byl v daňové evidenci vždy
+     * plně daňový s plným nárokem na odpočet a poměrný odpočet nešlo zaznamenat.
+     *
+     * @param list<array{vat_rate:float, base_amount:float, vat_amount:float, vat_classification_code?:?string, vat_deduction?:string, vat_deduction_percent?:float, tax_treatment?:string}> $lines
      */
     public function replaceVatLines(int $cashDocumentId, array $lines): void
     {
@@ -116,8 +121,9 @@ final class CashDocumentRepository
         }
         $stmt = $pdo->prepare(
             'INSERT INTO cash_document_vat_lines
-                (cash_document_id, vat_rate, base_amount, vat_amount, vat_classification_code)
-             VALUES (?, ?, ?, ?, ?)'
+                (cash_document_id, vat_rate, base_amount, vat_amount, vat_classification_code,
+                 vat_deduction, vat_deduction_percent, tax_treatment)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($lines as $l) {
             $stmt->execute([
@@ -126,17 +132,21 @@ final class CashDocumentRepository
                 (float) $l['base_amount'],
                 (float) $l['vat_amount'],
                 $l['vat_classification_code'] ?? null,
+                (string) ($l['vat_deduction'] ?? 'full'),
+                (float) ($l['vat_deduction_percent'] ?? 100.0),
+                (string) ($l['tax_treatment'] ?? 'deductible'),
             ]);
         }
     }
 
     /**
-     * @return list<array{vat_rate:float, base_amount:float, vat_amount:float, vat_classification_code:?string}>
+     * @return list<array{vat_rate:float, base_amount:float, vat_amount:float, vat_classification_code:?string, vat_deduction:string, vat_deduction_percent:float, tax_treatment:string}>
      */
     public function vatLinesFor(int $cashDocumentId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT vat_rate, base_amount, vat_amount, vat_classification_code
+            'SELECT vat_rate, base_amount, vat_amount, vat_classification_code,
+                    vat_deduction, vat_deduction_percent, tax_treatment
                FROM cash_document_vat_lines WHERE cash_document_id = ? ORDER BY id'
         );
         $stmt->execute([$cashDocumentId]);
@@ -145,6 +155,9 @@ final class CashDocumentRepository
             'base_amount'             => (float) $r['base_amount'],
             'vat_amount'              => (float) $r['vat_amount'],
             'vat_classification_code' => $r['vat_classification_code'] !== null ? (string) $r['vat_classification_code'] : null,
+            'vat_deduction'           => (string) $r['vat_deduction'],
+            'vat_deduction_percent'   => (float) $r['vat_deduction_percent'],
+            'tax_treatment'           => (string) $r['tax_treatment'],
         ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
@@ -170,12 +183,18 @@ final class CashDocumentRepository
         return $row === false ? null : self::cast($row);
     }
 
-    public function markPosted(int $id, string $docNumber, int $journalEntryId): void
+    /**
+     * L-1: zapisovací metody scopují `supplier_id` stejně jako čtecí a mazací.
+     * Dnes sem `id` chodí ze scopovaného `lockForPost()`/`create()`, takže cross-tenant
+     * zápis nehrozí — jenže ta bezpečnost stojí na volajícím, ne na dotazu. První
+     * volání z jiného kontextu (import, CLI, budoucí batch) by z toho udělalo díru.
+     */
+    public function markPosted(int $supplierId, int $id, string $docNumber, int $journalEntryId): void
     {
         $this->db->pdo()->prepare(
             "UPDATE cash_documents SET status = 'posted', doc_number = ?, journal_entry_id = ?
-              WHERE id = ?"
-        )->execute([$docNumber, $journalEntryId, $id]);
+              WHERE id = ? AND supplier_id = ?"
+        )->execute([$docNumber, $journalEntryId, $id, $supplierId]);
     }
 
     /**
@@ -183,36 +202,39 @@ final class CashDocumentRepository
      * Používá se výhradně pro supplier.accounting_mode='tax_evidence' — kasová báze
      * neúčtuje do deníku, zámek řeší invoices.booked_at (R14).
      */
-    public function markPostedNoJournal(int $id, string $docNumber): void
+    public function markPostedNoJournal(int $supplierId, int $id, string $docNumber): void
     {
         $this->db->pdo()->prepare(
             "UPDATE cash_documents SET status = 'posted', doc_number = ?, journal_entry_id = NULL
-              WHERE id = ?"
-        )->execute([$docNumber, $id]);
+              WHERE id = ? AND supplier_id = ?"
+        )->execute([$docNumber, $id, $supplierId]);
     }
 
-    public function markReversed(int $id, int $reversalEntryId): void
+    public function markReversed(int $supplierId, int $id, int $reversalEntryId): void
     {
         $this->db->pdo()->prepare(
-            "UPDATE cash_documents SET status = 'reversed', reversal_entry_id = ? WHERE id = ?"
-        )->execute([$reversalEntryId, $id]);
+            "UPDATE cash_documents SET status = 'reversed', reversal_entry_id = ?
+              WHERE id = ? AND supplier_id = ?"
+        )->execute([$reversalEntryId, $id, $supplierId]);
     }
 
     /**
      * Daňová evidence (Epic DE §6): storno posted dokladu BEZ protizápisu
      * (reversal_entry_id NULL) — v tax_evidence neexistuje posting engine.
      */
-    public function markReversedNoJournal(int $id): void
+    public function markReversedNoJournal(int $supplierId, int $id): void
     {
         $this->db->pdo()->prepare(
-            "UPDATE cash_documents SET status = 'reversed', reversal_entry_id = NULL WHERE id = ?"
-        )->execute([$id]);
+            "UPDATE cash_documents SET status = 'reversed', reversal_entry_id = NULL
+              WHERE id = ? AND supplier_id = ?"
+        )->execute([$id, $supplierId]);
     }
 
-    public function setInvoicePaymentId(int $id, ?int $paymentId): void
+    public function setInvoicePaymentId(int $supplierId, int $id, ?int $paymentId): void
     {
-        $this->db->pdo()->prepare('UPDATE cash_documents SET invoice_payment_id = ? WHERE id = ?')
-            ->execute([$paymentId, $id]);
+        $this->db->pdo()->prepare(
+            'UPDATE cash_documents SET invoice_payment_id = ? WHERE id = ? AND supplier_id = ?'
+        )->execute([$paymentId, $id, $supplierId]);
     }
 
     public function deleteDraft(int $supplierId, int $id): void

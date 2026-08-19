@@ -278,6 +278,38 @@ final class PayrollPersonStatutoryEvidenceValidator
                 'Neověřená zdravotní pojišťovna nesmí nést ověřený důkaz.',
             );
         }
+        /*
+         * Jurisdikce váže stav pojišťovny — stejně jako u sociální jurisdikce
+         * a A1 ({@see self::socialJurisdiction()}). Vazba je ale OTOČENÁ, a to
+         * věcně: A1 je doklad, který existuje jen u přeshraničního případu,
+         * takže česká jurisdikce ho má mít `not_applicable`. Pojišťovna je
+         * naopak tuzemský protějšek — kdo podléhá českému veřejnému
+         * zdravotnímu pojištění (§ 2 zákona č. 48/1997 Sb.), je vždy u některé
+         * z nich. „Nepoužitelná" pojišťovna proto popírá právě to, co ověřená
+         * česká jurisdikce tvrdí.
+         *
+         * Zakazuje se JEN `not_applicable`, ne i `unverified`:
+         *  - `not_applicable` je TVRZENÍ o skutečnosti, a to protichůdné;
+         *  - `unverified` je přiznané „zatím nevíme", tedy legitimní mezistav,
+         *    ve kterém uživatel evidenci rozepisuje. Přitvrdit i na něj by
+         *    znemožnilo uložit rozdělanou kartu.
+         *
+         * PayrollRunStatutoryInputAssembler::healthPerson() je přísnější —
+         * u české jurisdikce hlásí `health_coverage_evidence_conflict` pro
+         * všechno kromě `verified`. Neodporuje si to: `unverified` tam
+         * neprojde jako platný podklad, ale ohlásí se jako blokátor běhu
+         * (vedle `health_insurer_evidence_unverified`), ne jako odmítnutý
+         * zápis. Rozhoduje se tak až tam, kde na tom skutečně záleží.
+         */
+        if ($jurisdiction === 'czech_regime_verified'
+            && $insurerStatus === 'not_applicable'
+        ) {
+            throw new InvalidArgumentException(
+                'Ověřená česká zdravotní jurisdikce nemůže mít pojišťovnu'
+                . ' označenou jako nepoužitelnou — vyberte pojišťovnu a doložte'
+                . ' ji, nebo ji do zjištění nechte jako neověřenou.',
+            );
+        }
 
         return $this->baseInterval($row) + [
             'jurisdiction' => $jurisdiction,

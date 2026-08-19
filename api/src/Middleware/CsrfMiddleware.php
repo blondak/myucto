@@ -7,6 +7,7 @@ namespace MyInvoice\Middleware;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\RequestPath;
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Service\Tenant\TenantDomainContext;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Server\MiddlewareInterface;
@@ -15,7 +16,7 @@ use Slim\Psr7\Factory\ResponseFactory;
 
 /**
  * Pro mutating requesty (POST/PUT/PATCH/DELETE) ověří:
- *   1) Origin header se shoduje s app.url
+ *   1) Origin header se shoduje s přesným originem bezpečně rozpoznané domény
  *   2) X-CSRF-Token sedí s session.csrf_token
  *
  * Whitelist endpointů bez CSRF (login, forgot, reset, setup) — ty mají
@@ -33,6 +34,8 @@ final class CsrfMiddleware implements MiddlewareInterface
         '/api/auth/login',
         '/api/auth/webauthn/login/options',
         '/api/auth/webauthn/login/verify',
+        '/api/auth/domain-login/start',
+        '/api/auth/domain-login/exchange',
         '/api/auth/forgot',
         '/api/auth/reset',
     ];
@@ -75,15 +78,19 @@ final class CsrfMiddleware implements MiddlewareInterface
         }
 
         // Origin / Referer check (i pro exempt routes)
-        $appUrl = rtrim((string) $this->config->get('app.url', ''), '/');
+        $domain = $request->getAttribute(TenantDomainMiddleware::ATTR_CONTEXT);
+        $appUrl = $domain instanceof TenantDomainContext
+            ? rtrim($domain->origin, '/')
+            : rtrim((string) $this->config->get('app.url', ''), '/');
+        $expectedOrigin = $this->originOf($appUrl);
         $origin = $request->getHeaderLine('Origin');
         $referer = $request->getHeaderLine('Referer');
 
-        if ($appUrl !== '') {
+        if ($expectedOrigin !== '') {
             $valid = false;
-            if ($origin !== '' && rtrim($origin, '/') === $appUrl) {
+            if ($origin !== '' && $this->originOf($origin) === $expectedOrigin) {
                 $valid = true;
-            } elseif ($referer !== '' && str_starts_with($referer, $appUrl . '/')) {
+            } elseif ($referer !== '' && $this->originOf($referer) === $expectedOrigin) {
                 $valid = true;
             }
             // V dev povolíme jen pokud Origin/Referer ukazuje na localhost (cross-port localhost:5173 → :8800).
@@ -118,5 +125,16 @@ final class CsrfMiddleware implements MiddlewareInterface
         }
 
         return $handler->handle($request);
+    }
+
+    private function originOf(string $url): string
+    {
+        $parts = parse_url($url);
+        if (!is_array($parts) || !isset($parts['scheme'], $parts['host'])) return '';
+        $scheme = strtolower((string) $parts['scheme']);
+        $host = strtolower((string) $parts['host']);
+        $port = isset($parts['port']) ? (int) $parts['port'] : null;
+        if (($scheme === 'https' && $port === 443) || ($scheme === 'http' && $port === 80)) $port = null;
+        return $scheme . '://' . $host . ($port !== null ? ':' . $port : '');
     }
 }

@@ -145,6 +145,7 @@ final class PayrollRunSnapshotBatchLoader
             'SELECT id, amount_minor, quantity_milliunits, source_kind,
                     source_period_start, component_snapshot_json,
                     HEX(component_snapshot_hash) AS component_snapshot_hash,
+                    benefit_basket, benefit_exempt_minor, benefit_taxable_minor,
                     employment_id AS ' . self::GROUP_KEY . '
                FROM payroll_inputs
               WHERE supplier_id = ?
@@ -316,6 +317,45 @@ final class PayrollRunSnapshotBatchLoader
             [$supplierId],
             $employmentIds,
             [$periodStart, $periodStart, $periodStart, $periodStart],
+        ));
+    }
+
+    /**
+     * Doložený záměr uplatňovat slevu na pojistném (OZUSPOJ) podle vztahu.
+     *
+     * Vrací JEN stavy, které záměr skutečně dokládají — `accepted` a `ended`.
+     * Rozpracovaný ani odmítnutý záměr se do zmrazeného vstupu nedostane, aby
+     * z něj nešlo omylem počítat slevu; § 7a odst. 5 váže nárok na okamžik
+     * DORUČENÍ oznámení ČSSZ, ne na to, že ho někdo v aplikaci vyplnil.
+     *
+     * `environment = "production"` je záměrné: záměr podaný do testovacího
+     * prostředí ČSSZ nezaložil nikomu žádný nárok a nesmí zlevnit skutečné
+     * pojistné.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,array<string,mixed>>
+     */
+    public function discountIntents(
+        int $supplierId,
+        array $employmentIds,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        return $this->single($this->fetch(
+            'SELECT status, intent_from, intent_to, accepted_on,
+                    discount_reason,
+                    employment_id AS ' . self::GROUP_KEY . '
+               FROM payroll_discount_intents
+              WHERE supplier_id = ?
+                AND environment = "production"
+                AND employment_id IN (%s)
+                AND status IN ("accepted", "ended")
+                AND intent_from <= ?
+                AND (intent_to IS NULL OR intent_to >= ?)
+              ORDER BY intent_from DESC, id DESC',
+            [$supplierId],
+            $employmentIds,
+            [$periodEnd, $periodStart],
         ));
     }
 

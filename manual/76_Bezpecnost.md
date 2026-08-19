@@ -60,6 +60,68 @@ přesný HTTPS origin, například `https://faktury.example.cz`. Klíč je sváz
 s hostname; po změně domény jej na nové doméně nelze použít. Pro lokální vývoj
 je podporované `http://localhost`, nikoli běžný HTTP přístup přes LAN IP.
 
+#### Provozní diagnostika canonical `app.url`
+
+`app.url` je současně canonical origin pro běžné routování, odkazy a WebAuthn.
+Pro pravidelný monitoring vždy volej health přes **přesný origin z `app.url`**,
+ne přes náhodnou IP nebo alternativní `Host` hlavičku. Například pro
+`app.url = https://faktury.example.cz`:
+
+```bash
+curl --fail --silent --show-error https://faktury.example.cz/api/v1/health
+```
+
+HTTP 200 pouze potvrzuje, že endpoint odpověděl. Monitoring má v JSON zvlášť
+kontrolovat `db`, podle nasazení `redis` a `configuration.app_url`. Poslední
+objekt je veřejný a neobsahuje nastavenou URL ani hostname, userinfo, heslo,
+cestu, query nebo fragment:
+
+| `state` / `reason_code` | Routování a náprava |
+|---|---|
+| `missing` / `app_url_missing` | Klíč chybí, je přesně prázdný nebo obsahuje jen whitespace. Chybějící a přesně prázdná hodnota zachovává legacy fallback na validní request hostname; whitespace tento fallback nemá. Po setupu nastav explicitní HTTP(S) origin. |
+| `invalid` / `app_url_invalid_origin` | Neprázdná hodnota není samostatný HTTP(S) origin. Pokud z ní legacy resolver ještě získá platný hostname, uzná nejvýše request s přesně stejným hostname, nikdy libovolný host; nejde však o podporovaný canonical origin a musí se opravit. Odstraň userinfo, cestu, query či fragment nebo oprav schéma, hostname a port. |
+| `routing_only` / `app_url_webauthn_incompatible` | Běžné rozhraní funguje, včetně záměrného HTTP nebo LAN-IP nasazení, ale passkeys nejsou dostupné. Pro WebAuthn použij HTTPS DNS hostname. |
+| `hostname_conflict` / `app_url_hostname_conflict` | Hostname z `app.url` je současně uložený jako vlastní doména firmy. Běžné cesty aplikace jsou fail-closed; přesný read-only health zůstane dostupný. Obnov původní canonical adresu, vlastní doménu deaktivuj a smaž, nebo nastav jiný canonical hostname. |
+| `webauthn_ready` / `app_url_valid` | Origin vyhovuje routování i WebAuthn. Vedle HTTPS DNS originu je povolená jediná HTTP výjimka: `http://localhost`. |
+
+Při whitespace-only nebo jiné neprázdné hodnotě nepoužitelné pro routování
+propustí tenant host gate přes jiný hostname jen přesné `GET` a `HEAD`
+`/api/v1/health` (interně `/api/health`). POST, jiný endpoint, přihlášení ani
+ostatní aplikační cesty výjimku nedostanou. Toto je pouze recovery cesta; po
+opravě se health znovu monitoruje přes nakonfigurovaný canonical hostname. Pokud
+cizí hostname odmítne už reverse proxy, spusť recovery dotaz ze serveru nebo
+kontejneru přes hostname, který proxy přijímá. Health neobchází zapnutý IP
+allowlist. Během nedokončeného first-run setupu používej `GET`; setup allowlist
+metodu `HEAD` nepovoluje.
+
+Stejná přesná health výjimka platí při kolizi canonical hostname s uloženou
+vlastní doménou. Na rozdíl od syntakticky neplatného `app.url` ji volej přes
+hostname z `app.url`; všechny ostatní cesty na něm zůstanou odmítnuté.
+
+First-run setup doplní z otevřeného originu chybějící, prázdnou či
+whitespace-only hodnotu a známé distribuční placeholdery. Jinou explicitně
+neprázdnou neplatnou hodnotu nepřepisuje: preflight ji označí jako chybu, aby ji
+správce opravil v `cfg.php`, `cfg.local.php` nebo přes
+`MYINVOICE_APP_URL` vědomě.
+
+Runtime zapíše pro stavy s `routing_compatible: false` serverový warning
+`configuration.app_url_unusable`. Kontext obsahuje jen stabilní `state` a
+`reason_code`; původní ani odvozená hodnota konfigurace se neloguje. Umístění
+logu určuje `logging.path`. Podrobný recovery postup je v
+[§ 99 Řešení problémů](99_Reseni_problemu.md#diagnostika-appurl).
+
+Vlastní domény klientských portálů se nestávají dalším WebAuthn RP ID. Browser
+se z nich přesměruje na přesný canonical origin z `app.url`, kde proběhne
+passwordless passkey, passkey jako druhý faktor nebo TOTP. Aplikace potom vydá
+jednorázový kód platný 60 sekund, svázaný s PKCE verifierem, uživatelem, firmou
+a přesným cílovým hostnamem. Kód lze spotřebovat jen jednou a skutečný session
+token se v URL nikdy neobjeví. Na cílové doméně vznikne samostatná host-only
+session; správa passkeys a ostatní interní obrazovky zůstávají na canonical
+originu. Přímé WebAuthn operace na vlastní doméně server odmítne, včetně správy
+klíčů a options/verify pro odemčení session. Zamykací obrazovka místo nich zahájí
+nové ověření na canonical originu a po jednorázovém PKCE návratu vytvoří pro
+vlastní doménu novou host-only session.
+
 Přidání a odvolání passkey vyžaduje nové ověření passkey nebo TOTP. U účtu bez
 dosavadního silného faktoru první registrace vyžádá aktuální heslo. Při povinném
 MFA nelze odvolat poslední povolený silný faktor.
@@ -549,8 +611,12 @@ nebo prázdný membership jsou vždy fail-closed.
 
 Každý mutating request (POST / PUT / PATCH / DELETE) musí mít:
 
-1. **Origin header** se shodující s `app.url` v `cfg.php`
+1. **Origin header** se shodující s přesným originem bezpečně rozpoznané domény
 2. **X-CSRF-Token** header se shodující s tokenem v session
+
+Na canonical hostu je očekávaný origin odvozený z `app.url`; na aktivní vlastní
+doméně je to výhradně `https://<její-hostname>`. Jiný port, koncová tečka,
+podvržený `Host`, neaktivní alias ani origin jiné firmy neprojde.
 
 Bez nich → 403 `csrf_failed` / `origin_mismatch`. UI to obsluhuje
 automaticky (token v Pinia store, header v axios interceptoru).

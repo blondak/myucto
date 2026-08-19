@@ -2,7 +2,7 @@
 #
 # /api/*        → api/public/index.php (Slim FrontController)
 # statika       → /styles/, /assets/ a PWA soubory napřímo
-# SPA fallback  → web/dist/index.html
+# SPA fallback  → api/public/index.php (host gate, potom web/dist/index.html)
 
 Options -Indexes -MultiViews
 
@@ -25,11 +25,12 @@ Options -Indexes -MultiViews
     RewriteRule ^(.*)$ https://%{HTTP_HOST}/$1 [R=301,L]
 
     # 2) Bezpečnostní bariéra: blokovat citlivé a vývojové složky.
+    # `web/shared/` obsahuje zdrojové policy sdílené při buildu, nikoli veřejná data.
     # `(?:\.[^/]*)?` za jménem složky je ZÁMĚRNÉ: na disku reálně existuje
     # `api/vendor.prod/` (produkční autoloader) a holé `vendor(/|$)` ho nematchne
     # (dostane '.', ne '/'). Pokrývá i `private.bak/`, `db.old/` apod. Suffix se
     # kotví na tečku, takže legitimní `/dbxyz` zůstává dostupné.
-    RewriteRule ^(private|db|log|source|storage|tools|cmd|docker|web/(src|node_modules)|node_modules|api/(src|vendor|templates|tests|bin))(?:\.[^/]*)?(/|$) - [F,L]
+    RewriteRule ^(private|db|log|source|storage|tools|cmd|docker|web/(src|shared|node_modules)|node_modules|api/(src|vendor|templates|tests|bin))(?:\.[^/]*)?(/|$) - [F,L]
 
     # 2b) Blokovat cfg.php, tooling manifesty a zdrojové dokumenty.
     # `(?:(?:api|web)/)?` — `api/composer.json` a `api/composer.lock` jsou reálné
@@ -41,6 +42,10 @@ Options -Indexes -MultiViews
     # Pravidlo 2b blokuje jen `.gitignore` v rootu, samotný adresář `.git/` ne.
     # IIS to řeší přes hiddenSegments (web.config), Docker přes .dockerignore.
     RewriteRule (^|/)\.(git|svn|hg|bzr)(/|$) - [F,L]
+
+    # Přímá cesta k SPA entry nesmí obejít hostname gate. Hashed assety pod
+    # web/dist zůstávají statické, ale index i adresářový default jdou přes PHP.
+    RewriteRule ^web/dist(?:/index\.html)?/?$ api/public/index.php [L,QSA]
 
     # 3a) /assets/* → web/dist/assets/* (Vite generuje absolutní URL `/assets/foo.css`,
     # ale skutečné soubory jsou v `web/dist/assets/`. V IIS to řeší alias z web.config,
@@ -65,7 +70,9 @@ Options -Indexes -MultiViews
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteRule ^api/(.*)$ api/public/index.php [L,QSA]
 
-    # 4) SPA fallback (vše co není reálný soubor a není /api/* → web/dist/index.html).
+    # 4) SPA fallback (vše co není reálný soubor a není /api/* → front controller).
+    # Front controller ověří hostname proti supplier_domains a teprve potom vydá
+    # web/dist/index.html; neznámý Host tak nedostane ani vstupní HTML aplikace.
     # `!-d` schválně NEPOUŽÍVÁME, jinak by `/` (= docroot dir) tímhle pravidlem neprošlo
     # a Apache by hodil 403 (Options -Indexes + chybějící DirectoryIndex). Statické
     # cesty mají `!-f`, takže je rewrite vynechá.
@@ -74,7 +81,7 @@ Options -Indexes -MultiViews
     RewriteCond %{REQUEST_URI} !^/styles/
     RewriteCond %{REQUEST_URI} !^/web/
     RewriteCond %{REQUEST_FILENAME} !-f
-    RewriteRule ^ web/dist/index.html [L]
+    RewriteRule ^ api/public/index.php [L,QSA]
 </IfModule>
 
 # Security headers
@@ -147,6 +154,12 @@ Options -Indexes -MultiViews
     Require all denied
 </Files>
 <Files "cfg.local.php">
+    Require all denied
+</Files>
+
+# Manifest je interní vstup PHP a Vite buildu, nikoli veřejný JSON endpoint.
+# Tohle pravidlo drží ochranu i v případě, že mod_rewrite není načtený.
+<Files "client-route-policy.json">
     Require all denied
 </Files>
 

@@ -12,6 +12,7 @@ use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Approval\ApprovalTokenValidator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Tenant\PublicTenantGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Psr7\Stream;
@@ -31,6 +32,7 @@ final class PublicInvoiceAttachmentAction
         private readonly InvoiceAttachmentRepository $attachments,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly PublicTenantGuard $tenantGuard,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -47,6 +49,9 @@ final class PublicInvoiceAttachmentAction
         if ($ref === null) {
             return Json::error($response, 'token_invalid_or_expired',
                 'Tento odkaz není platný nebo byl zneplatněn.', 404);
+        }
+        if (!$this->tenantGuard->allows($request, (int) $ref['supplier_id'])) {
+            return Json::error($response, 'not_found', 'Tento odkaz není platný.', 404);
         }
 
         $att = $this->attachments->find((int) ($args['attId'] ?? 0), $ref['id']);

@@ -54,9 +54,40 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
     <td style="width:33%">
       <div class="label">Dřívější jména v evidenci</div>
       <div class="value">{{ employee.previous_names is empty ? '—' : employee.previous_names|join(', ') }}</div>
-      <div class="meta">Roční zúčtování: {{ annual_settlement_status == 'approved' ? 'schváleno' : 'neprovedeno' }}</div>
+      <div class="meta">Roční zúčtování: {% if annual_settlement_status == 'approved' %}provedeno {{ annual_settlement.settled_on }}{% elseif annual_settlement_status == 'not_performed' %}neprovedeno{% else %}neevidováno{% endif %}</div>
     </td>
   </tr>
+</table>
+
+<div class="section">Pracovní vztahy a den nástupu</div>
+<table class="book">
+  <thead>
+    <tr>
+      <th class="first">Vztah</th>
+      <th class="first">Druh</th>
+      <th class="first">Den nástupu</th>
+      <th class="first">Skutečný nástup</th>
+      <th class="first">Den skončení</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% set relation_labels = {
+    'employment': 'Pracovní poměr',
+    'agreement_work': 'Dohoda o provedení práce',
+    'agreement_activity': 'Dohoda o pracovní činnosti'
+  } %}
+  {% for employment in employments %}
+    <tr>
+      <td class="first">{{ employment.code }}</td>
+      <td class="first">{{ relation_labels[employment.relation_type]|default(employment.relation_type) }}</td>
+      <td class="first">{{ employment.start_date }}</td>
+      <td class="first">{{ employment.actual_start_date is null ? '—' : employment.actual_start_date }}</td>
+      <td class="first">{{ employment.end_date is null ? '—' : employment.end_date }}</td>
+    </tr>
+  {% else %}
+    <tr><td class="first" colspan="5">Neevidováno v revizi, ze které doklad vznikl.</td></tr>
+  {% endfor %}
+  </tbody>
 </table>
 
 <div class="section">Příjmy, pojistné a čistá mzda</div>
@@ -67,6 +98,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <th>Hrubý<br>příjem</th>
       <th>Peněžní<br>příjem</th>
       <th>Nepeněžní<br>příjem</th>
+      <th>Osvobozeno<br>od daně</th>
       <th>Základ<br>SP</th>
       <th>SP<br>zaměstnanec</th>
       <th>SP<br>zaměstnavatel</th>
@@ -86,6 +118,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <td>{{ month.gross_minor_units|minor_money }}</td>
       <td>{{ month.cash_income_minor_units|minor_money }}</td>
       <td>{{ month.non_cash_income_minor_units|minor_money }}</td>
+      <td>{{ month.tax_detail_status == 'recorded' ? month.tax_exempt_income_minor_units|minor_money : 'neevidováno' }}</td>
       <td>{{ month.social_assessment_base_minor_units|minor_money }}</td>
       <td>{{ month.employee_social_minor_units|minor_money }}</td>
       <td>{{ month.employer_social_minor_units|minor_money }}</td>
@@ -104,6 +137,7 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <td>{{ totals.gross_minor_units|minor_money }}</td>
       <td>{{ totals.cash_income_minor_units|minor_money }}</td>
       <td>{{ totals.non_cash_income_minor_units|minor_money }}</td>
+      <td>{{ tax_detail_complete ? totals.tax_exempt_income_minor_units|minor_money : 'neúplné' }}</td>
       <td>{{ totals.social_assessment_base_minor_units|minor_money }}</td>
       <td>{{ totals.employee_social_minor_units|minor_money }}</td>
       <td>{{ totals.employer_social_minor_units|minor_money }}</td>
@@ -124,11 +158,14 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <th class="first">Měsíc</th>
       <th>Zálohový<br>základ</th>
       <th>Daň před<br>slevami</th>
-      <th>Nezdanitelné<br>slevy</th>
-      <th>Zvýhodnění<br>na děti</th>
+      <th>Uplatněná sleva<br>§ 35ba</th>
+      <th>Nárok na<br>zvýhodnění</th>
+      <th>Uplatněná sleva<br>§ 35c</th>
       <th>Sražená<br>záloha</th>
       <th>Daňový<br>bonus</th>
+      <th>Základ<br>srážkové daně</th>
       <th>Srážková<br>daň</th>
+      <th>Doplatek<br>ze zúčtování</th>
     </tr>
   </thead>
   <tbody>
@@ -137,11 +174,14 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <td class="first">{{ names[month.month - 1] }}</td>
       <td>{{ month.advance_tax_base_minor_units|minor_money }}</td>
       <td>{{ month.advance_tax_before_credits_minor_units|minor_money }}</td>
-      <td>{{ month.non_refundable_credits_minor_units|minor_money }}</td>
+      <td>{{ month.non_refundable_credits_minor_units|minor_money }}{{ month.credit_detail_status == 'applied' ? '' : '*' }}</td>
+      <td>{{ month.child_detail_status == 'recorded' ? month.child_entitlement_minor_units|minor_money : 'neevidováno' }}</td>
       <td>{{ month.child_credit_minor_units|minor_money }}</td>
       <td>{{ month.advance_tax_minor_units|minor_money }}</td>
       <td>{{ month.tax_bonus_minor_units|minor_money }}</td>
+      <td>{{ month.tax_detail_status == 'recorded' ? month.withholding_tax_base_minor_units|minor_money : 'neevidováno' }}</td>
       <td>{{ month.withholding_tax_minor_units|minor_money }}</td>
+      <td>{{ month.annual_settlement_minor_units|minor_money }}</td>
     </tr>
   {% endfor %}
   </tbody>
@@ -150,20 +190,97 @@ table.book tfoot td { background: #F8F5F7; border-top: 0.6pt solid #98466F; font
       <td class="first">Celkem</td>
       <td>{{ totals.advance_tax_base_minor_units|minor_money }}</td>
       <td>{{ totals.advance_tax_before_credits_minor_units|minor_money }}</td>
-      <td>{{ totals.non_refundable_credits_minor_units|minor_money }}</td>
+      <td>{{ totals.non_refundable_credits_minor_units|minor_money }}{{ credit_detail_complete ? '' : '*' }}</td>
+      <td>{{ child_detail_complete ? totals.child_entitlement_minor_units|minor_money : 'neúplné' }}</td>
       <td>{{ totals.child_credit_minor_units|minor_money }}</td>
       <td>{{ totals.advance_tax_minor_units|minor_money }}</td>
       <td>{{ totals.tax_bonus_minor_units|minor_money }}</td>
+      <td>{{ tax_detail_complete ? totals.withholding_tax_base_minor_units|minor_money : 'neúplné' }}</td>
       <td>{{ totals.withholding_tax_minor_units|minor_money }}</td>
+      <td>{{ totals.annual_settlement_minor_units|minor_money }}</td>
     </tr>
   </tfoot>
 </table>
 
+<div class="section">Roční zúčtování záloh a daňového zvýhodnění (§ 38j odst. 2 písm. h)</div>
+{% if annual_settlement_status == 'approved' %}
+<table class="book">
+  <tbody>
+    <tr><td class="first">Den provedení (§ 38ch odst. 4)</td><td>{{ annual_settlement.settled_on }}</td>
+        <td class="first">Uzavřených měsíců</td><td>{{ annual_settlement.completed_months }}</td></tr>
+    <tr><td class="first">Úhrn základu záloh</td><td>{{ annual_settlement.advance_base_minor_units|minor_money }}</td>
+        <td class="first">Základ daně (§ 16 odst. 2)</td><td>{{ annual_settlement.rounded_tax_base_minor_units|minor_money }}</td></tr>
+    <tr><td class="first">Daň před slevami (§ 16 odst. 1)</td><td>{{ annual_settlement.tax_before_credits_minor_units|minor_money }}</td>
+        <td class="first">Nárok na slevy § 35ba</td><td>{{ annual_settlement.annual_credits_minor_units|minor_money }}</td></tr>
+    <tr><td class="first">Uplatněné slevy § 35ba</td><td>{{ annual_settlement.applied_credits_minor_units|minor_money }}</td>
+        <td class="first">Nárok na zvýhodnění § 35c odst. 1</td><td>{{ annual_settlement.child_entitlement_minor_units|minor_money }}</td></tr>
+    <tr><td class="first">Sleva § 35c odst. 2</td><td>{{ annual_settlement.child_credit_minor_units|minor_money }}</td>
+        <td class="first">Roční bonus § 35c odst. 3</td><td>{{ annual_settlement.annual_tax_bonus_minor_units|minor_money }}</td></tr>
+    <tr><td class="first">Daň po všech slevách</td><td>{{ annual_settlement.tax_after_all_credits_minor_units|minor_money }}</td>
+        <td class="first">Úhrn sražených záloh</td><td>{{ annual_settlement.advance_tax_minor_units|minor_money }}</td></tr>
+    <tr><td class="first">Úhrn měsíčních bonusů</td><td>{{ annual_settlement.monthly_tax_bonus_minor_units|minor_money }}</td>
+        <td class="first">Potvrzení od jiných plátců</td><td>{{ annual_settlement.external_certificate_count }}</td></tr>
+    <tr><td class="first">Rozdíl na dani (§ 35d odst. 7)</td><td>{{ annual_settlement.tax_difference_minor_units|minor_money }}</td>
+        <td class="first">Rozdíl na bonusu (§ 35d odst. 7)</td><td>{{ annual_settlement.bonus_difference_minor_units|minor_money }}</td></tr>
+    <tr><td class="first">Doplatek ze zúčtování (§ 35d odst. 8)</td><td>{{ annual_settlement.settlement_difference_minor_units|minor_money }}</td>
+        <td class="first">Vyplácené (§ 38ch odst. 5)</td><td>{{ annual_settlement.payable_minor_units|minor_money }}</td></tr>
+    {% set outcome_labels = {
+      'overpayment': 'přeplatek k výplatě',
+      'overpayment_below_threshold': 'přeplatek do 50 Kč — nevrací se (§ 38ch odst. 5)',
+      'no_difference': 'bez rozdílu',
+      'underpayment_not_withheld': 'nedoplatek — nesráží se (§ 38ch odst. 5)'
+    } %}
+    <tr><td class="first">Výsledek</td><td colspan="3">{{ outcome_labels[annual_settlement.outcome]|default(annual_settlement.outcome) }} · zdroj: roční revize {{ annual_settlement.revision_id }}, otisk <span class="mono">{{ annual_settlement.snapshot_hash }}</span></td></tr>
+  </tbody>
+</table>
+{% else %}
+<div class="note">
+{% if annual_settlement_status == 'not_performed' %}
+Roční zúčtování se za tento rok neprovedlo — v evidenci není jeho zmrazený výsledek.
+{% if annual_settlement_evidence %}
+Doklad o posouzení podmínek § 38ch: žádost „{{ annual_settlement_evidence.request_status }}",
+předchozí plátci „{{ annual_settlement_evidence.prior_employers }}", povinnost podat přiznání
+„{{ annual_settlement_evidence.filing_obligation }}", ročně uplatňované nároky
+„{{ annual_settlement_evidence.annual_claims }}".
+{% else %}
+Za tento rok není založený ani záznam o žádosti podle § 38ch odst. 1, takže doklad nemůže
+uvést ani důvod. Chybějící záznam neznamená, že poplatník nepožádal.
+{% endif %}
+Odmítnuté zúčtování se do roční revize nezmrazuje, proto se tu jeho výpočet neuvádí.
+{% else %}
+Stav ročního zúčtování není evidován: doklad vznikl nad starším mapováním, které tento údaj
+nezjišťovalo. Není to „neprovedeno" — nově vydaná revize dokladu ho určí.
+{% endif %}
+</div>
+{% endif %}
+
+<div class="note">
+<strong>Údaje § 38j odst. 2 ZDP, které tento doklad nenese.</strong>
+Písm. d) — jméno a rodné číslo osoby, na kterou se uplatňuje sleva podle § 35ba a daňové
+zvýhodnění, a rozpis nezdanitelných částek podle § 15 a slev podle § 35 odst. 4 a § 35ba
+s důvodem uznání: doklad uvádí jen měsíční úhrny uplatněných slev, nikoli osoby a důvody.
+Písm. f) bod 8 — nabytí podílu v obchodní korporaci nebo opce podle § 6 odst. 3 věty třetí:
+modul takové plnění neeviduje. Věta za bodem 8 — oddělené uvedení odměny člena orgánu
+právnické osoby u daňového nerezidenta: doklad se pro nerezidenta nevydává vůbec, protože
+nemá rozšířenou identitu podle písm. b). Prázdné místo v těchto údajích proto neznamená nulu.
+</div>
 <div class="note">
 Částky jsou uvedeny v Kč a vznikly součtem schválených měsíčních výsledků. Více účtáren nebo
 doplatek po skončení se v jednom měsíci sčítají; počet zahrnutých revizí je uveden u názvu měsíce.
-Roční zúčtování se v tomto dokumentu nedopočítává. Zobrazí se pouze tehdy, pokud existuje jeho
-samostatně schválený roční výsledek.
+Roční zúčtování se v tomto dokumentu nedopočítává — hodnoty jsou převzaté ze samostatně
+schválené roční revize, na kterou doklad odkazuje otiskem. Sloupec „nárok na zvýhodnění" je
+měsíční daňové zvýhodnění podle § 35c odst. 1; sleva a bonus vedle něj jsou jeho části podle
+§ 35c odst. 2 a 3, ne další nárok. Sloupec „uplatněná sleva § 35ba" je sleva poskytnutá podle
+§ 35d odst. 3 věty první, tedy nejvýše do výše zálohy; nárok, který se do zálohy nevešel,
+zákon nikam nepřevádí a bod 5 ho nežádá. Sloupec „osvobozeno od daně" je podmnožina hrubého
+příjmu, ne samostatné plnění — do čisté mzdy se nepřičítá. Údaj „neevidováno" znamená, že revize
+vznikla před mapováním, které daný údaj zaznamenává; není to nula. Týká se osvobozených částek
+a základu srážkové daně, a u revizí vydaných před mapováním v3 také nároku na daňové zvýhodnění
+a stavu ročního zúčtování.
+{% if not credit_detail_complete %}
+Hvězdička u slevy podle § 35ba označuje měsíce z revizí vydaných před mapováním v4, které
+do téhle kolonky zapisovaly nárok, ne poskytnutou slevu; u nízké mzdy je nárok vyšší.
+{% endif %}
 </div>
 <div class="audit">
 Renderer: <span class="mono">{{ renderer_version }}</span> · Chráněný otisk zdroje HMAC-SHA-256:

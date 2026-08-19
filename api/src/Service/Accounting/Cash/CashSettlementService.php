@@ -25,7 +25,8 @@ use PDO;
  * ## Žádná paralelní účtovací cesta
  *
  * Tahle třída sama NIC neúčtuje: zakládá přes {@see CashDocumentService::create()}
- * (create + post v jedné transakci) a ruší přes {@see CashDocumentService::deleteDocument()}
+ * (create + post v jedné transakci) a ruší přes {@see CashDocumentService::reverse()}
+ * — u dokladu bez vydaného čísla (draft) přes {@see CashDocumentService::deleteDocument()}
  * (protizápis/úklid invoice_payments/návrat stavu PF). Tím dědí VŠECHNY pojistky
  * pokladny — kontrolu otevřenosti období, `locked_until` soft zámek, analytiku 211
  * z `cash_registers.account_code` (nikdy natvrdo 211), daňovou evidenci (journal-free
@@ -38,8 +39,9 @@ use PDO;
  * i kdyby byl na tutéž fakturu navázaný.
  *
  * Reconcile při každém uložení: shoda pokladny + částky + data → doklad se nechá být
- * (žádná duplicita při opakovaném uložení); rozdíl → starý se smaže a založí nový;
- * odebraná volba nebo přepnutí formy úhrady z „Hotově" → doklad se smaže.
+ * (žádná duplicita při opakovaném uložení); rozdíl → starý se STORNUJE a založí se nový;
+ * odebraná volba nebo přepnutí formy úhrady z „Hotově" → doklad se stornuje. Storno,
+ * ne smazání, protože vydané číslo řady se nevrací a řada musí zůstat souvislá (§ 11 ZoÚ).
  *
  * ## Nikdy neshodí uložení faktury
  *
@@ -60,6 +62,9 @@ final class CashSettlementService
 
     /** Klíč warningu, který si Action přidá do `_warnings` odpovědi. */
     public const WARNING = 'cash_settlement_failed';
+
+    /** Důvod storna pokladního dokladu, který vyrovnání ruší (reverse() vyžaduje ≥ 3 znaky). */
+    private const REVERSAL_REASON = 'Zrušeno hotovostní vyrovnání dokladu';
 
     /**
      * Typy vydaných dokladů, které se hotovostně vyrovnat NESMÍ.
@@ -180,7 +185,7 @@ final class CashSettlementService
         if ($registerId === null) {
             // Uživatel volbu odebral (nebo přepnul formu úhrady) → doklad zrušit.
             if ($existing !== null) {
-                $this->remove($supplierId, (int) $existing['id']);
+                $this->remove($supplierId, (int) $existing["id"], $existing);
                 return self::result(self::REMOVED, (int) $existing['id']);
             }
             return self::result(self::NOOP);
@@ -196,14 +201,30 @@ final class CashSettlementService
             );
         }
 
-        $total = round((float) $pf['total_with_vat'], 2);
+        // H-1: vyrovnává se ZBYTEK (brutto − uhrazená záloha − už zaúčtované úhrady),
+        // ne brutto. Vlastní doklad vyrovnání se z výpočtu vynechá, jinak by si po
+        // prvním zaúčtování odečetl sám sebe a chtěl se zrušit.
+        $total = $this->documents->purchaseRemaining(
+            $supplierId,
+            $purchaseInvoiceId,
+            $existing !== null ? (int) $existing['id'] : null,
+        );
         $issueDate = (string) $pf['issue_date'];
+
+        if (self::cents($total) <= 0) {
+            return self::result(
+                self::SKIPPED,
+                $existing !== null ? (int) $existing['id'] : null,
+                $existing['doc_number'] ?? null,
+                'nothing_to_settle',
+            );
+        }
 
         if ($existing !== null) {
             if (self::matches($existing, $registerId, $total, $issueDate)) {
                 return self::result(self::UNCHANGED, (int) $existing['id'], $existing['doc_number']);
             }
-            $this->remove($supplierId, (int) $existing['id']);
+            $this->remove($supplierId, (int) $existing["id"], $existing);
         }
 
         $created = $this->documents->create($supplierId, [
@@ -222,7 +243,7 @@ final class CashSettlementService
             'purchase_invoice_id' => $purchaseInvoiceId,
             'post'                => true,
         ], $userId);
-        $this->markAuto((int) $created['id']);
+        $this->markAuto($supplierId, (int) $created['id']);
 
         return self::result(self::CREATED, (int) $created['id'], $created['doc_number'] ?? null);
     }
@@ -247,7 +268,7 @@ final class CashSettlementService
 
         if ($registerId === null) {
             if ($existing !== null) {
-                $this->remove($supplierId, (int) $existing['id']);
+                $this->remove($supplierId, (int) $existing["id"], $existing);
                 return self::result(self::REMOVED, (int) $existing['id']);
             }
             return self::result(self::NOOP);
@@ -284,7 +305,7 @@ final class CashSettlementService
             if (self::matches($existing, $registerId, $remaining, $issueDate)) {
                 return self::result(self::UNCHANGED, (int) $existing['id'], $existing['doc_number']);
             }
-            $this->remove($supplierId, (int) $existing['id']);
+            $this->remove($supplierId, (int) $existing["id"], $existing);
         }
 
         $created = $this->documents->create($supplierId, [
@@ -300,7 +321,7 @@ final class CashSettlementService
             'invoice_id'   => $invoiceId,
             'post'         => true,
         ], $userId);
-        $this->markAuto((int) $created['id']);
+        $this->markAuto($supplierId, (int) $created['id']);
 
         return self::result(self::CREATED, (int) $created['id'], $created['doc_number'] ?? null);
     }
@@ -318,7 +339,7 @@ final class CashSettlementService
         if ($existing === null) {
             return false;
         }
-        $this->remove($supplierId, (int) $existing['id']);
+        $this->remove($supplierId, (int) $existing["id"], $existing);
 
         return true;
     }
@@ -443,17 +464,39 @@ final class CashSettlementService
         return null;
     }
 
-    /** Zruší pokladní doklad vyrovnání i s jeho zápisem a úklidem vazeb. */
-    private function remove(int $supplierId, int $cashDocumentId): void
+    /**
+     * Zruší pokladní doklad vyrovnání i s jeho zápisem a úklidem vazeb.
+     *
+     * H-6: doklad, kterému už bylo VYDÁNO číslo řady, se NESMÍ tvrdě smazat — číslo se
+     * nevrací (`DocumentSeriesService` dekrement nemá), takže by každá oprava částky na
+     * faktuře udělala v řadě PPD/VPD další díru a smazala deníkový zápis beze stopy
+     * (§ 11 ZoÚ). Místo toho se stornuje: protizápis i původní doklad zůstanou v evidenci
+     * a nový doklad dostane další číslo. Tvrdé smazání zůstává jen pro draft bez čísla.
+     */
+    private function remove(int $supplierId, int $cashDocumentId, ?array $existing = null): void
     {
+        $doc = $existing ?? $this->documents->get($supplierId, $cashDocumentId);
+        $numbered = trim((string) ($doc['doc_number'] ?? '')) !== '';
+        $posted = (string) ($doc['status'] ?? '') === 'posted';
+
+        if ($numbered && $posted) {
+            $this->documents->reverse(
+                $supplierId,
+                $cashDocumentId,
+                ['reason' => self::REVERSAL_REASON],
+                null,
+            );
+            return;
+        }
         $this->documents->deleteDocument($supplierId, $cashDocumentId);
     }
 
-    private function markAuto(int $cashDocumentId): void
+    /** L-1: scope na `supplier_id` stejně jako zbytek zápisů nad `cash_documents`. */
+    private function markAuto(int $supplierId, int $cashDocumentId): void
     {
         $this->db->pdo()
-            ->prepare('UPDATE cash_documents SET auto_settlement = 1 WHERE id = ?')
-            ->execute([$cashDocumentId]);
+            ->prepare('UPDATE cash_documents SET auto_settlement = 1 WHERE id = ? AND supplier_id = ?')
+            ->execute([$cashDocumentId, $supplierId]);
     }
 
     /** @param array<string,mixed> $existing */

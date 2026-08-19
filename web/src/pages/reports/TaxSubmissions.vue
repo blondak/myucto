@@ -264,6 +264,24 @@ function formCodeLabel(code: string): string {
   return key ? t(`reports.submissions.${key}`) : code
 }
 
+// Písmeno varianty je EPO kód a KAŽDÝ formulář má vlastní sadu — „N" je
+// u kontrolního hlášení následné, u souhrnného hlášení taky následné, ale
+// „B" souhrnné hlášení nezná vůbec (má R). Společná mapa by tiše lhala,
+// proto se páruje dvojice formulář + kód a neznámá kombinace zůstane holým
+// písmenem místo vymyšleného popisku.
+const VARIANT_LABELS: Record<string, Record<string, string>> = {
+  dphdp3: { B: 'variant_radne', O: 'variant_opravne', D: 'variant_dodatecne', E: 'variant_dodatecne_opravne' },
+  dphkh1: { B: 'variant_radne', O: 'variant_radne_opravne', N: 'variant_nasledne', E: 'variant_nasledne_opravne' },
+  dphshv: { R: 'variant_radne', N: 'variant_nasledne' },
+}
+
+function variantLabel(item: TaxSubmission): string {
+  const code = item.form_variant ?? ''
+  if (!code) return ''
+  const key = VARIANT_LABELS[item.form_code]?.[code]
+  return key ? t(`reports.submissions.${key}`) : code
+}
+
 function periodLabel(item: TaxSubmission): string {
   if (item.period_month !== null) return `${item.period_year}-${String(item.period_month).padStart(2, '0')}`
   if (item.period_quarter !== null) return `${item.period_year} Q${item.period_quarter}`
@@ -1171,7 +1189,10 @@ onMounted(async () => {
               @click="toggleDetail(item)">
               <td class="px-4 py-3">
                 <div class="font-medium">{{ formCodeLabel(item.form_code) }}</div>
-                <div class="text-xs text-neutral-400 font-mono mt-0.5">#{{ item.id }} · {{ item.form_variant || 'B' }}</div>
+                <div class="text-xs text-neutral-400 mt-0.5">
+                  <span class="font-mono">#{{ item.id }}</span>
+                  <template v-if="variantLabel(item)"> · {{ variantLabel(item) }}</template>
+                </div>
               </td>
               <td class="px-3 py-3 font-mono text-xs">{{ periodLabel(item) }}</td>
               <td class="px-3 py-3 text-xs text-neutral-500">{{ formatDate(item.generated_at) }}</td>

@@ -110,6 +110,11 @@ final class OssInvoiceImportTest extends TestCase
         $this->inTx = true;
         $this->supplierId = $this->createIsolatedSupplier($pdo, $source);
 
+        // Klon dědí VŠECHNY sloupce zdrojového dodavatele včetně `oss_enabled`. Zdroj
+        // v testovací databázi sdílí víc sad a jeho stav se mění, takže výchozí bod
+        // nastavuje test sám: OSS je vypnuté a kdo ho potřebuje, volá enableOss().
+        $this->disableOss();
+
         // Izolovaný dodavatel je klon jen řádku `supplier` — měny jsou per tenant,
         // takže si je test musí založit sám (import bez nich měnu dokladu neuloží).
         $this->czkId = $this->currency('CZK', 'Kč', 'Koruna česká', 'Czech koruna', isDefault: true);
@@ -1554,6 +1559,17 @@ final class OssInvoiceImportTest extends TestCase
         $stmt->execute([$invoiceId]);
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private function disableOss(): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE supplier
+                SET oss_enabled = 0,
+                    oss_valid_from = NULL,
+                    oss_valid_to = NULL
+              WHERE id = ?"
+        )->execute([$this->supplierId]);
     }
 
     private function enableOss(): void

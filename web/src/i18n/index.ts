@@ -22,11 +22,27 @@ const NAMESPACE_CHUNKS = import.meta.glob('./chunks/*/*.json')
 
 const initialLocale: Locale = (localStorage.getItem('locale') as Locale) || 'cs'
 
+/**
+ * Čeština má čtyři tvary: 0 / 1 / 2–4 / 5 a víc. Překlady je tak i píšou
+ * („žádný záznam | 1 záznam | {count} záznamy | {count} záznamů"), jenže
+ * vestavěné pravidlo vue-i18n vybírá `min(count, 2)` — čtvrtý tvar se tedy
+ * nikdy nedostal ke slovu a od pěti výš aplikace psala „5 záznamy" místo
+ * „5 záznamů". Ořez na počet dostupných tvarů drží i kratší zprávy: kde jsou
+ * jen tři, dostane pětka poslední z nich.
+ */
+function czechPluralIndex(choice: number, choicesLength: number): number {
+  const count = Math.abs(Math.trunc(choice))
+  const index = count === 0 ? 0 : count === 1 ? 1 : count < 5 ? 2 : 3
+
+  return Math.min(index, Math.max(choicesLength - 1, 0))
+}
+
 export const i18n = createI18n({
   legacy: false,
   locale: initialLocale,
   fallbackLocale: 'cs',
   messages: {},
+  pluralRules: { cs: czechPluralIndex },
   /**
    * Záchranná brzda. Mapa prostorů vzniká statickou analýzou, a ta se dá obejít
    * — klíč složený za běhu z dat serveru v ní není vidět. Než ukázat uživateli

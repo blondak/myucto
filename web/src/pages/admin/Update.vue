@@ -3,11 +3,11 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { updateApi, type UpdateStatus, type UpdatePreflight } from '@/api/update'
-import { systemApi, type HealthResponse } from '@/api/client'
+import { systemApi, type HealthResponse, type HealthWarning } from '@/api/client'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const auth = useAuthStore()
 
 const status = ref<UpdateStatus | null>(null)
@@ -273,17 +273,37 @@ const renderedNotes = computed(() => {
   return renderMarkdown(md)
 })
 
-const healthWarnings = computed(() => health.value?.warnings ?? [])
+const healthWarnings = computed<HealthWarning[]>(() => {
+  const warnings = health.value?.warnings ?? []
+  const appUrl = health.value?.configuration?.app_url
+  if (!appUrl || appUrl.state === 'webauthn_ready') return warnings
 
-function warningTitle(code: string): string {
-  if (code === 'secret_encryption_key') return t('updates.warning_secret_key_title')
-  if (code === 'webauthn_configuration') return t('updates.warning_webauthn_title')
+  return [
+    {
+      code: 'app_url_configuration',
+      message: '',
+      reason_code: appUrl.reason_code,
+    },
+    // Neplatné app.url je současně příčinou obecného WebAuthn warningu.
+    // Jeden konkrétní návod je pro správce srozumitelnější než dvě duplicity.
+    ...warnings.filter(warning => warning.code !== 'webauthn_configuration'),
+  ]
+})
+
+function warningTitle(warning: HealthWarning): string {
+  if (warning.code === 'secret_encryption_key') return t('updates.warning_secret_key_title')
+  if (warning.code === 'webauthn_configuration') return t('updates.warning_webauthn_title')
+  if (warning.code === 'app_url_configuration') return t('updates.warning_app_url_title')
   return t('updates.warning_generic_title')
 }
 
-function warningText(code: string): string {
-  if (code === 'secret_encryption_key') return t('updates.warning_secret_key_text')
-  if (code === 'webauthn_configuration') return t('updates.warning_webauthn_text')
+function warningText(warning: HealthWarning): string {
+  if (warning.code === 'secret_encryption_key') return t('updates.warning_secret_key_text')
+  if (warning.code === 'webauthn_configuration') return t('updates.warning_webauthn_text')
+  if (warning.code === 'app_url_configuration') {
+    const key = `updates.warning_${warning.reason_code}`
+    return te(key) ? t(key) : t('updates.warning_app_url_invalid_origin')
+  }
   return t('updates.warning_generic_text')
 }
 
@@ -318,8 +338,8 @@ function fmtDate(s?: string | null): string {
             :key="`${warning.code}:${warning.message}`"
             class="rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-900"
           >
-            <div class="font-medium">{{ warningTitle(warning.code) }}</div>
-            <div class="text-warning-800">{{ warningText(warning.code) }}</div>
+            <div class="font-medium">{{ warningTitle(warning) }}</div>
+            <div class="text-warning-800">{{ warningText(warning) }}</div>
           </li>
         </ul>
       </section>

@@ -72,7 +72,10 @@ describe('mzdové menu', () => {
 
   it('odděluje jednorázové nastavení od měsíční práce a řadí ho nakonec', () => {
     const items = payrollNavItems()
-    const setup = ['/payroll/settings', '/payroll/components', '/payroll/rulesets']
+    const setup = [
+      '/payroll/settings', '/payroll/components', '/payroll/rulesets',
+      '/payroll/retention', '/payroll/erasure',
+    ]
 
     expect(items.slice(-setup.length).map(item => item.to)).toEqual(setup)
     // Předěl patří na první položku nastavení, ne doprostřed skupiny.

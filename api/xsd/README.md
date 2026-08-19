@@ -7,6 +7,7 @@ Commitnutá veřejná schémata pro **automatickou XSD validaci** vygenerovanéh
    ji unit test `tests/Unit/Service/Export/IsdocExporterSchemaTest`.
 3. **JMHZ a navazující věty ČSSZ/MPSV** — verzované balíčky v `jmhz/`, včetně
    lokálních závislostí a kontrolních součtů oficiálních archivů.
+4. **Jednotná datová věta zdravotních pojišťoven** — `zp/2025-v8/`, viz níže.
 
 Aktuální verze jsou v repo — clone má funkční validaci bez setup kroku. Re-stáhnout
 přes `bash cmd/download-xsd.sh` nebo `cmd\download-xsd.cmd` (při novém ročníku MFČR,
@@ -36,6 +37,25 @@ ověřuje i každý redirect, SHA-256 celého ZIPu, bezpečnost cest, počet XSD
 očekávaná vstupní schémata a úplnost lokálních `include`/`import`. Až poté
 atomicky nahradí verzované adresáře; při jakékoli odchylce zůstane původní sada
 beze změny.
+
+## Zdroj zdravotních pojišťoven — jednotná datová věta (`zp/2025-v8/`)
+
+Od **1. 1. 2026** je hromadné oznámení zaměstnavatele (HOZ) i přehled o platbě
+zaměstnavatele (PPZ) společné pro všech **sedm** pojišťoven. Autorem obou schémat
+je VZP (namespace `xmlns.vzp.cz`), revize **08** z 8. 12. 2025.
+
+| Dokument | Soubor | SHA-256 |
+| --- | --- | --- |
+| HOZ | `hromadneOznameniZamestnavatele_2025_v8.xsd` | `67b19d3f70b27f30b7f26b46da79a75f53c89a7c6cf04adc81111558826959d9` |
+| PPZ | `prehledPlatbyZamestnavatele_2025_v8.xsd` | `fee3c66233bc3c2bd78e283b76918759be9b6a701003c8bffeb6db91e311cba1` |
+
+Otisky jsou zároveň připnuté v `HealthInsuranceSchemaCatalog`; soubor s jiným
+otiskem katalog neuzná a validace skončí `zp_schema_bundle_missing`. Instalace
+z lokálně staženého adresáře: `pwsh -File cmd\install-zp-xsd.ps1 <adresář>`.
+
+**Společné je schéma, ne kanál.** Transportní obálku žádná ze sedmi pojišťoven
+veřejně nedokládá, takže se nic neodesílá automaticky — viz
+`HealthInsurerChannelCatalog`.
 
 ## Zdroje EPO MFČR
 

@@ -72,7 +72,7 @@ const textareaClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surfa
 const absenceTypes: AbsenceType[] = [
   'vacation', 'dpn', 'quarantine', 'ocr', 'long_term_care', 'ppm',
   'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
-  'employer_obstacle', 'other',
+  'employer_obstacle', 'compensatory_time_off', 'other',
 ]
 const leaveEntryTypes = ['carryover', 'adjustment', 'shortening', 'overdrawn', 'payout']
 
@@ -254,8 +254,23 @@ function preselectedAbsenceType(): AbsenceType | null {
     : null
 }
 
+/**
+ * Průměrný výdělek nemá vlastní routu — je to záložka tady, protože se z něj
+ * počítá náhrada mzdy. Karta zaměstnance na něj proto odkazuje přes `?tab=`.
+ */
+const absenceTabs = ['absences', 'averages', 'leave'] as const
+
+function preselectedTab(): (typeof absenceTabs)[number] | null {
+  const raw = queryParam('tab')
+  return raw !== null && (absenceTabs as readonly string[]).includes(raw)
+    ? raw as (typeof absenceTabs)[number]
+    : null
+}
+
 async function loadContext() {
   employments.value = await payrollAbsenceApi.context()
+  const requestedTab = preselectedTab()
+  if (requestedTab !== null) tab.value = requestedTab
   if (employments.value.length === 0 || selectedEmploymentId.value !== null) return
   selectedEmploymentId.value = preselectedEmploymentId() ?? employments.value[0].id
   const type = preselectedAbsenceType()

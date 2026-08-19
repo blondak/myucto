@@ -30,6 +30,38 @@ V hlavním menu **Přijaté faktury**.
 
 Smazat jde **jen koncept**. Pro pozdější stavy použij Stornovat (zachová auditní stopu).
 
+### Příchozí doklady
+
+Originály čekají na zpracování v **Nákup → Příchozí doklady**. Nejsou to koncepty
+přijatých faktur: do okamžiku kontroly nevstupují do nákladů, závazků, cashflow ani
+evidence DPH. Účetní má u originálu náhled a může jej zpracovat přes ISDOC/AI,
+přepsat ručně, odmítnout nebo klienta požádat o náhradu.
+
+Do fronty vede několik cest:
+
+| Cesta | Kdo ji použije |
+| --- | --- |
+| **Portál → Doklady pro účetní** — dávka až 20 souborů | klient, spontánně |
+| Nahrání dokladu k **vyžádanému požadavku** | klient, jako odpověď účetní |
+| **Uložit a předat účetní** v editoru přijaté faktury | klient, když se doklad nevytěžil sám |
+| **Nahrát do fronty** přímo na stránce Příchozí doklady | účetní u dokladů, které přišly mimo portál (e-mailem, papírově) |
+
+Účetní tak nemusí čekat na klienta: co dostane e-mailem nebo naskenuje, vloží do
+fronty sama a zpracuje to stejným postupem. Podrobný průchod klientskou stranou je v
+[§ 9.8 Klientský portál](09_Klientsky_portal.md#98-vyzadane-doklady-od-klienta).
+
+> **Odmítnutí originál nemaže.** Přepne podání do stavu Odmítnuto a napíše klientovi
+> důvod; samotný soubor zůstává v Dokumentech i v auditní stopě. Uklidit frontu i
+> s originálem (omylem nahraná fotka, spam) jde tlačítkem **Smazat z fronty** — má
+> vlastní oprávnění *Trvale vyřadit z příchozí fronty* a originál posílá do koše
+> Dokumentů, odkud ho z disku odstraní až vysypání koše. U dokladu, který si účetní
+> nahrála sama, se zpráva klientovi nevyžaduje — není komu ji psát.
+
+Po zpracování se neměnný originál z Dokumentů připojí k výsledné faktuře. Faktura
+zůstává pro klienta needitovatelná i ve stavu Koncept; účetní ji může dál opravit
+a dokončit běžným stavovým postupem. Pokud účetní výsledný koncept smaže, původní
+podání se bezpečně vrátí do příchozí fronty k novému zpracování.
+
 > ⚠️ **Zaúčtování bez DUZP nejde.** Přechod Přijatá → Zaúčtovaná je zablokovaný, dokud
 > doklad nemá vyplněné DUZP (datum uskutečnění zdanitelného plnění) — bez něj by se
 > doklad dostal do podkladů DPH s nejistým obdobím. Blok platí jen pro NOVÝ přechod;
@@ -58,7 +90,9 @@ Nad formulářem je **drag & drop zóna** pro PDF, fotku, ISDOC nebo ISDOCX:
 - Běžné PDF bez vloženého ISDOC nebo fotka se pouze připraví jako příloha. Pole
   vyplníš ručně a originál se po prvním uložení automaticky **archivuje** mimo
   webroot. Pro nestrukturované PDF lze podle oprávnění použít také
-  [AI extrakci](25_AI_extrakce.md).
+  [AI extrakci](25_AI_extrakce.md). Klient s právem předávat doklady může místo
+  opisování kliknout **Uložit a předat účetní**: stejný originál se jedním krokem
+  uloží do podatelny mimo účetnictví a objeví se účetní v Příchozích dokladech.
 - **Strojově čitelný originál (ISDOC/ISDOCX) se uchová jako důkazní stopa.** U faktur importovaných ze strukturovaného zdroje (`.isdoc`, `.isdocx`, nebo ISDOC vložený v PDF/A-3) se vedle vizuálního PDF trvale archivuje i **původní strojový doklad**. Pro audit a kontrolu z finančního úřadu má při 10leté archivační lhůtě vyšší hodnotu než PDF render a umožňuje zpětnou rekonstrukci dat. V detailu faktury ho stáhneš přes badge **„ISDOC"** v hlavičce nebo akci **Zdrojový doklad** v menu. Bajty se ukládají tak, jak přišly — `.isdocx` se nerozbaluje (zachová podpis obálky), embedded ISDOC se uloží jako vytažené XML a originál se nikdy nepřepíše.
 
 > 💡 ISDOC/ISDOCX se importuje při **zakládání nové faktury**. Dropzone na detailu

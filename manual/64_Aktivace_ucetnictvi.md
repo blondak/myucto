@@ -70,13 +70,24 @@ Akce **Předvyplnit** sestaví návrh k dni předcházejícímu zahájení:
 | 314 MD | Poskytnuté zálohy |
 | 324 Dal | Přijaté zálohy |
 | 132 MD | Zásoby z přechodového můstku |
-| 211 MD/Dal | Stav zaúčtovaných pokladních dokladů |
+| `211.xxx` MD/Dal | Stav zaúčtovaných pokladních dokladů, samostatný řádek za každou pokladnu |
 | `221.xxx` MD/Dal | Stav bankovních transakcí, samostatný řádek za každý vlastní účet |
 
-Do návrhu se vloží jen účty existující v osnově. Bankovní zůstatek respektuje
-tenantové vlastnictví výpisu a počítá jen CZK pohyby do rozhodného dne. Návrh
-nenahrazuje inventuru. Administrátor musí doplnit ostatní aktiva, pasiva,
-oprávky, kapitál, daně a další zůstatky podle průkazných podkladů.
+Do návrhu se vloží jen účty, které v osnově existují a jsou aktivní. Bankovní
+zůstatek respektuje tenantové vlastnictví výpisu a počítá jen CZK pohyby do
+rozhodného dne. Návrh nenahrazuje inventuru. Administrátor musí doplnit ostatní
+aktiva, pasiva, oprávky, kapitál, daně a další zůstatky podle průkazných podkladů.
+
+Pokladna se stejně jako banka nepředvyplňuje jedním souhrnem: každý pokladní
+doklad patří konkrétní pokladně a ta nese svou analytiku (**211.001**,
+**211.002** …, viz kapitola *Pokladna*) — tutéž, na kterou pak padají její
+pohyby. Díky tomu sedí pokladní kniha každé pokladny s hlavní knihou od prvního
+dne účetnictví. Poznámka řádku pokladnu pojmenuje. U valutové pokladny jde do
+rozvahy CZK ekvivalent dokladů, kurzem se nepřepočítává podruhé.
+
+Doklad, u kterého pokladnu dohledat nejde, i pokladna, jejíž analytiku máte
+v osnově vypnutou, spadnou na syntetiku **211** s výzvou k ručnímu rozúčtování
+v poznámce — stejně jako u banky níže.
 
 Banka se nepředvyplňuje jedním souhrnem: každý výpis nese číslo vlastního účtu,
 takže počáteční stav jde rovnou na analytiku toho účtu (**221.100**, **221.200** …,

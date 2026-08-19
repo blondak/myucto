@@ -70,6 +70,32 @@ function fixture(overrides: Partial<PayrollInsuranceBreakdown> = {}): PayrollIns
       },
       employer: {
         scope: 'company_month',
+        allocation: {
+          method: 'capped_assessment_base_share',
+          not_allocatable_reason: null,
+          residual_rule: 'largest_remainder',
+          is_statutory_personal_amount: false,
+          people_count: 2,
+          company_assessment_base_minor: 6_000_000,
+          company_contribution_minor: 744_000,
+          person_assessment_base_minor: 3_000_000,
+          person_minor: 372_000,
+        },
+        categories: [{
+          category: 'ordinary',
+          paragraph5a_letter: 'a',
+          assessment_base_minor: 3_000_000,
+          contribution_minor: 744_000,
+          contribution_step: {
+            label: 'monthly-employer-social-insurance-ordinary',
+            input_minor_units: 3_000_000,
+            rate: { decimal: '0.248', numerator: 248, denominator: 1000, scale: 3 },
+            unrounded_numerator: 744_000_000,
+            unrounded_denominator: 1000,
+            rounding_mode: 'ceil',
+            output_minor_units: 744_000,
+          },
+        }],
         contribution_step: {
           label: 'monthly-employer-social-insurance',
           input_minor_units: 3_000_000,
@@ -132,6 +158,7 @@ function fixture(overrides: Partial<PayrollInsuranceBreakdown> = {}): PayrollIns
         top_up_applied: false,
         top_up_base_minor: null,
         top_up_responsibility: 'employee',
+        top_up_responsibility_source: 'statutory_default',
         top_up_employer_selection: 'unverified',
         top_up_responsibility_evidence_reference: null,
         selected_top_up_employer_evidence_reference: null,
@@ -140,6 +167,7 @@ function fixture(overrides: Partial<PayrollInsuranceBreakdown> = {}): PayrollIns
       },
       contribution: {
         rate_source: 'persisted',
+        rate_reconstruction: null,
         standard_step: {
           label: 'monthly-health-insurance-standard',
           input_minor_units: 3_000_000,
@@ -291,6 +319,29 @@ describe('PayrollInsuranceBreakdown', () => {
     const topUp = wrapper.get('[data-testid="health-minimum-top-up"]').text()
     expect(topUp).toContain('payroll.runs.insurance.health_top_up_detail')
     expect(topUp).toContain('payroll.runs.insurance.top_up_responsibility.employee')
+    // Kdo doplatek hradí, je jedna věc; čím je to podložené, druhá. Bez původu
+    // by po letech nešlo poznat, jestli to někdo prohlásil, nebo plyne ze zákona.
+    expect(topUp).toContain(
+      'payroll.runs.insurance.top_up_responsibility_source.statutory_default',
+    )
+  })
+
+  it('u starší revize bez zaznamenaného původu nedomýšlí, čím byl doplatek podložený', async () => {
+    const payload = fixture()
+    if (!payload.health.available) throw new Error('fixture')
+    // Tentýž stav jako v testu výš — jen bez zaznamenaného původu, jak ho mají
+    // revize spočítané dřív, než klíč vznikl.
+    payload.health.minimum = {
+      ...payload.health.minimum,
+      top_up_applied: true,
+      top_up_base_minor: 1_130_000,
+      top_up_responsibility_source: '',
+    }
+    const wrapper = await mountWith(payload)
+
+    const topUp = wrapper.get('[data-testid="health-minimum-top-up"]').text()
+    expect(topUp).toContain('payroll.runs.insurance.top_up_responsibility.employee')
+    expect(wrapper.find('[data-testid="health-top-up-source"]').exists()).toBe(false)
   })
 
   it('splits the health liability across insurers and marks the person’s own', async () => {
@@ -358,11 +409,77 @@ describe('PayrollInsuranceBreakdown', () => {
     expect(wrapper.text()).not.toContain('payroll.runs.insurance.health_top_up_detail')
   })
 
+  /**
+   * Rekonstruovaná sazba se NESMÍ tvářit jako uložená. Uživatel musí vidět, že
+   * je dopočtená, a čím je doložená — jinak se o ni opře jako o uložený doklad.
+   */
+  it('says out loud that the rate was reconstructed, and from what', async () => {
+    const payload = fixture()
+    if (!payload.health.available) throw new Error('fixture')
+    payload.health.contribution = {
+      ...payload.health.contribution,
+      rate_source: 'reconstructed',
+      rate_reconstruction: {
+        ruleset_id: 'cz-payroll-2026.health-insurance.v1',
+        ruleset_version: '1.0.0',
+        ruleset_hash: 'c'.repeat(64),
+        parameter_key: 'total.rate',
+        proof: 'ruleset_hash_and_amount_match',
+        standard_reconstructed: true,
+        top_up_reconstructed: false,
+      },
+    }
+    const wrapper = await mountWith(payload)
+
+    const note = wrapper.get('[data-testid="health-rate-reconstructed"]').text()
+    expect(note).toContain('payroll.runs.insurance.health_rate_reconstructed')
+    expect(note).toContain('cz-payroll-2026.health-insurance.v1')
+    // Rozklad se ukazuje dál — je dokázaný shodou s uloženou částkou.
+    expect(wrapper.get('[data-testid="health-standard-step"]').text()).toContain('13,5')
+    // A rozhodně to není hlášeno jako chybějící sazba.
+    expect(wrapper.find('[data-testid="health-rate-missing"]').exists()).toBe(false)
+  })
+
+  /**
+   * Podíl osoby na pojistném zaměstnavatele je alokace, ne zákonná částka —
+   * musí mít vlastní popisek i větu o metodě, ne splynout s ostatními částkami.
+   */
+  it('labels the employer share as an allocation, not a statutory amount', async () => {
+    const wrapper = await mountWith(fixture())
+
+    const allocation = wrapper.get('[data-testid="social-employer-allocation"]').text()
+    expect(allocation).toContain('payroll.runs.insurance.allocation_title')
+    expect(allocation).toContain('payroll.runs.insurance.allocation_note')
+    expect(allocation).toContain('capped_assessment_base_share')
+    expect(wrapper.find('[data-testid="allocation-blocked"]').exists()).toBe(false)
+  })
+
+  it('says why the employer contribution could not be allocated at all', async () => {
+    const payload = fixture()
+    if (!payload.social.available) throw new Error('fixture')
+    payload.social.employer.allocation = {
+      method: 'not_allocatable',
+      not_allocatable_reason: 'assessment_base_missing',
+      residual_rule: null,
+      is_statutory_personal_amount: false,
+      people_count: 2,
+      company_assessment_base_minor: 0,
+      company_contribution_minor: 744_000,
+      person_assessment_base_minor: 0,
+      person_minor: null,
+    }
+    const wrapper = await mountWith(payload)
+
+    expect(wrapper.get('[data-testid="allocation-blocked"]').text())
+      .toContain('payroll.runs.insurance.allocation_blocker.assessment_base_missing')
+  })
+
   it('does not cry wolf when no contribution arose at all', async () => {
     const payload = fixture()
     if (!payload.health.available) throw new Error('fixture')
     payload.health.contribution = {
       rate_source: 'not_applicable',
+      rate_reconstruction: null,
       standard_step: null,
       standard_minor: 0,
       employee_standard_minor: 0,

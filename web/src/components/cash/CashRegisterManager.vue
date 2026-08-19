@@ -3,15 +3,23 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { cashApi, type CashRegister } from '@/api/cash'
+import { cashErrorCode, cashErrorMessage } from '@/api/cashErrors'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatMoney } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { ICONS, btnFilled, btnOutline, btnIconSm, disabledTitle, BTN_DISABLED_NOTE } from '@/components/ui/buttonStyles'
 
 /**
- * Modal správy pokladen (§6.4). CRUD nad cash_registers; analytika 211 z osnovy,
- * měna skrytá (v1 CZK-only, O4). Smazání jen bez dokladů (409 → nabídka deaktivace).
+ * Modal správy pokladen (§6.4). CRUD nad cash_registers; analytika 211 z osnovy.
+ * Smazání jen bez dokladů (409 → nabídka deaktivace).
+ *
+ * Vícesekční editor = JEDNO společné Uložit (konvence UI): změny v seznamu
+ * (název, účet, výchozí, aktivní, smazání) i nová pokladna se sbírají do
+ * rozpracovaného stavu a odešlou se najednou lištou dole. Dřív tu bylo tlačítko
+ * u formuláře, okamžitý zápis na každý přepínač v řádku a nativní confirm()
+ * u mazání — tři různé způsoby potvrzení jedné obrazovky.
  */
 const emit = defineEmits<{ (e: 'close'): void; (e: 'changed'): void }>()
 
@@ -23,7 +31,17 @@ const supplierStore = useSupplierStore()
 // (COA se pro tax_evidence neseeduje). Účet je pak volitelný a select se skryje.
 const isTaxEvidence = computed(() => supplierStore.currentSupplier?.accounting_mode === 'tax_evidence')
 
-const registers = ref<CashRegister[]>([])
+interface RegisterRow {
+  source: CashRegister
+  name: string
+  account_code: string
+  is_default: boolean
+  own_series: boolean
+  is_active: boolean
+  remove: boolean
+}
+
+const rows = ref<RegisterRow[]>([])
 const accounts = ref<ChartAccount[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -36,9 +54,22 @@ const cashAccounts = computed(() =>
     .sort((a, b) => a.account_code.localeCompare(b.account_code)),
 )
 
-const form = ref({ name: '', account_code: '', currency_code: 'CZK', is_default: false })
+const form = ref({ name: '', account_code: '', currency_code: 'CZK', is_default: false, own_series: false })
 // Valutová pokladna (§11): u cizí měny je analytika volitelná (BE ji přidělí/dohraje automaticky).
 const isForeignForm = computed(() => form.value.currency_code !== 'CZK')
+const creating = computed(() => form.value.name.trim() !== '')
+
+function toRow(r: CashRegister): RegisterRow {
+  return {
+    source: r,
+    name: r.name,
+    account_code: r.account_code,
+    is_default: r.is_default,
+    own_series: r.own_series === true,
+    is_active: r.is_active,
+    remove: false,
+  }
+}
 
 async function load() {
   loading.value = true
@@ -50,86 +81,100 @@ async function load() {
       cashApi.listRegisters(true),
       isTaxEvidence.value ? Promise.resolve<ChartAccount[]>([]) : accountingApi.listAccounts(),
     ])
-    registers.value = regs
+    rows.value = regs.map(toRow)
     accounts.value = accs
     if (!form.value.account_code && cashAccounts.value.length > 0) {
       form.value.account_code = cashAccounts.value[0].account_code
     }
   } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('common.error'))
+    toast.error(cashErrorMessage(e, t))
   } finally {
     loading.value = false
   }
 }
 onMounted(load)
 
-function mapError(e: any): string {
-  const code = e?.response?.data?.error?.code
-  if (code) {
-    const key = code.startsWith('cash.error.') ? code : `cash.error.${code}`
-    const localized = t(key)
-    if (localized !== key) return localized
-  }
-  return e?.response?.data?.error?.message || t('common.error')
+/** Výchozí pokladna je právě jedna — volba v řádku odebere příznak ostatním i formuláři. */
+function pickDefault(row: RegisterRow) {
+  for (const r of rows.value) r.is_default = r === row
+  form.value.is_default = false
+}
+function pickNewDefault(value: boolean) {
+  form.value.is_default = value
+  if (value) for (const r of rows.value) r.is_default = false
 }
 
-async function create() {
+function rowChanged(r: RegisterRow): boolean {
+  return r.remove
+    || r.name.trim() !== r.source.name
+    || r.account_code !== r.source.account_code
+    || r.is_default !== r.source.is_default
+    || r.own_series !== (r.source.own_series === true)
+    || r.is_active !== r.source.is_active
+}
+const changedRows = computed(() => rows.value.filter(rowChanged))
+const removedRows = computed(() => rows.value.filter(r => r.remove))
+const dirty = computed(() => changedRows.value.length > 0 || creating.value)
+
+/** Věta, proč Uložit nejde (konvence BTN_DISABLED_NOTE). */
+const blockedReason = computed<string | null>(() => {
+  if (rows.value.some(r => !r.remove && r.name.trim() === '')) return t('cash.validation.name')
+  if (creating.value && !isTaxEvidence.value && !isForeignForm.value && !form.value.account_code) {
+    return t('cash.validation.account')
+  }
+  if (!dirty.value) return t('cash.register_nothing_to_save')
+  return null
+})
+const canSave = computed(() => !saving.value && dirty.value && blockedReason.value === null)
+
+async function saveAll() {
   error.value = ''
-  if (!form.value.name.trim()) { error.value = t('cash.register_name'); return }
-  if (!isTaxEvidence.value && !isForeignForm.value && !form.value.account_code) { error.value = t('cash.register_account'); return }
+  if (!canSave.value) { error.value = blockedReason.value ?? ''; return }
   saving.value = true
   try {
-    await cashApi.createRegister({
-      name: form.value.name.trim(),
-      account_code: form.value.account_code,
-      currency_code: form.value.currency_code,
-      is_default: form.value.is_default,
-    })
+    // Pořadí: nejdřív smazat, pak upravit, nakonec založit. Opačně by nová pokladna
+    // mohla narazit na analytiku, kterou právě uvolňuje mazaná/upravovaná pokladna.
+    for (const r of removedRows.value) {
+      try {
+        await cashApi.deleteRegister(r.source.id)
+      } catch (e: any) {
+        if (cashErrorCode(e) === 'register_has_documents') {
+          toast.warning(t('cash.register_deactivate_hint'))
+          throw e
+        }
+        throw e
+      }
+    }
+    for (const r of changedRows.value) {
+      if (r.remove) continue
+      await cashApi.updateRegister(r.source.id, {
+        name: r.name.trim(),
+        account_code: r.account_code,
+        is_default: r.is_default,
+        own_series: r.own_series,
+        is_active: r.is_active,
+      })
+    }
+    if (creating.value) {
+      await cashApi.createRegister({
+        name: form.value.name.trim(),
+        account_code: form.value.account_code,
+        currency_code: form.value.currency_code,
+        is_default: form.value.is_default,
+        own_series: form.value.own_series,
+      })
+      form.value = { name: '', account_code: cashAccounts.value[0]?.account_code ?? '', currency_code: 'CZK', is_default: false, own_series: false }
+    }
     toast.success(t('common.saved'))
-    form.value = { name: '', account_code: cashAccounts.value[0]?.account_code ?? '', currency_code: 'CZK', is_default: false }
     await load()
     emit('changed')
   } catch (e: any) {
-    error.value = mapError(e)
+    error.value = cashErrorMessage(e, t)
+    // Část operací mohla projít — přenačti, ať formulář neukazuje stav, který už neplatí.
+    await load()
+    emit('changed')
   } finally {
     saving.value = false
-  }
-}
-
-async function setDefault(r: CashRegister) {
-  try {
-    await cashApi.updateRegister(r.id, { is_default: true })
-    await load()
-    emit('changed')
-  } catch (e: any) {
-    toast.error(mapError(e))
-  }
-}
-
-async function toggleActive(r: CashRegister) {
-  try {
-    await cashApi.updateRegister(r.id, { is_active: !r.is_active })
-    await load()
-    emit('changed')
-  } catch (e: any) {
-    toast.error(mapError(e))
-  }
-}
-
-async function remove(r: CashRegister) {
-  if (!confirm(t('cash.register_delete_confirm', { name: r.name }))) return
-  try {
-    await cashApi.deleteRegister(r.id)
-    toast.success(t('common.saved'))
-    await load()
-    emit('changed')
-  } catch (e: any) {
-    const code = e?.response?.data?.error?.code
-    if (code === 'register_has_documents' || code === 'cash.error.register_has_documents') {
-      toast.warning(t('cash.register_deactivate_hint'))
-    } else {
-      toast.error(mapError(e))
-    }
   }
 }
 </script>
@@ -139,13 +184,16 @@ async function remove(r: CashRegister) {
     <div class="bg-surface rounded-xl shadow-lg max-w-2xl w-full my-8">
       <header class="px-5 py-4 border-b border-neutral-200 flex items-center justify-between gap-3">
         <h3 class="text-lg font-semibold">{{ t('cash.registers_manage') }}</h3>
-        <button @click="emit('close')" class="cursor-pointer text-neutral-400 hover:text-neutral-700 text-2xl leading-none">&times;</button>
+        <button type="button" @click="emit('close')" :title="t('common.close')" :aria-label="t('common.close')"
+          :class="btnIconSm('neutral')">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+        </button>
       </header>
 
       <div class="p-5 space-y-5">
         <!-- Seznam pokladen -->
         <div v-if="loading" class="text-center text-neutral-500 py-6 text-sm">{{ t('common.loading') }}</div>
-        <EmptyState v-else-if="registers.length === 0" dense accent="neutral" icon="coin" :title="t('cash.register_empty')" />
+        <EmptyState v-else-if="rows.length === 0" dense accent="neutral" icon="coin" :title="t('cash.register_empty')" />
         <div v-else class="overflow-x-auto border border-neutral-200 rounded-lg">
           <table class="w-full text-sm">
             <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
@@ -154,39 +202,53 @@ async function remove(r: CashRegister) {
                 <th class="px-3 py-2 text-left font-medium">{{ t('cash.register_account') }}</th>
                 <th class="px-3 py-2 text-right font-medium">{{ t('cash.balance') }}</th>
                 <th class="px-3 py-2 text-center font-medium">{{ t('cash.register_default') }}</th>
-                <th class="px-3 py-2 text-center font-medium">{{ t('cash.status.posted') }}</th>
+                <th class="px-3 py-2 text-center font-medium">{{ t('cash.register_own_series') }}</th>
+                <th class="px-3 py-2 text-center font-medium">{{ t('common.active') }}</th>
                 <th class="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="r in registers" :key="r.id" :class="{ 'opacity-50': !r.is_active }">
-                <td class="px-3 py-2">{{ r.name }}</td>
+              <tr v-for="r in rows" :key="r.source.id" :class="{ 'opacity-50': !r.is_active, 'bg-danger-50': r.remove }">
+                <td class="px-3 py-2">
+                  <input v-model="r.name" type="text" :disabled="r.remove"
+                    :aria-label="t('cash.register_name')"
+                    class="w-full h-8 px-2 border border-neutral-300 rounded-md text-sm disabled:bg-neutral-100" />
+                </td>
                 <td class="px-3 py-2">
                   <span class="font-mono">{{ r.account_code }}</span>
-                  <span class="text-neutral-500 ml-1">{{ r.account_name }}</span>
-                  <span v-if="r.currency_code && r.currency_code !== 'CZK'"
-                    class="ml-1 text-xs font-mono px-1 rounded bg-primary-50 text-primary-700">{{ r.currency_code }}</span>
+                  <span class="text-neutral-500 ml-1">{{ r.source.account_name }}</span>
+                  <span v-if="r.source.currency_code && r.source.currency_code !== 'CZK'"
+                    class="ml-1 text-xs font-mono px-1 rounded bg-primary-50 text-primary-700">{{ r.source.currency_code }}</span>
                 </td>
                 <td class="px-3 py-2 text-right font-mono">
-                  {{ formatMoney(r.balance) }}
-                  <span v-if="r.balance_foreign != null" class="block text-xs text-neutral-500">
-                    {{ formatMoney(r.balance_foreign) }} {{ r.currency_code }}
+                  {{ formatMoney(r.source.balance) }}
+                  <span v-if="r.source.balance_foreign != null" class="block text-xs text-neutral-500">
+                    {{ formatMoney(r.source.balance_foreign) }} {{ r.source.currency_code }}
                   </span>
                 </td>
                 <td class="px-3 py-2 text-center">
-                  <input type="radio" :checked="r.is_default" :disabled="r.is_default || !r.is_active"
-                    @change="setDefault(r)" class="cursor-pointer" />
+                  <input type="radio" :checked="r.is_default" :disabled="r.remove || !r.is_active"
+                    :aria-label="t('cash.register_default')"
+                    @change="pickDefault(r)" class="cursor-pointer" />
                 </td>
                 <td class="px-3 py-2 text-center">
-                  <button type="button" @click="toggleActive(r)"
-                    class="cursor-pointer text-xs px-2 py-0.5 rounded font-medium"
-                    :class="r.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-500'">
-                    {{ r.is_active ? t('common.yes') : t('common.no') }}
-                  </button>
+                  <input type="checkbox" v-model="r.own_series" :disabled="r.remove"
+                    :aria-label="t('cash.register_own_series')" :title="t('cash.register_own_series_hint')"
+                    class="cursor-pointer" />
+                </td>
+                <td class="px-3 py-2 text-center">
+                  <input type="checkbox" v-model="r.is_active" :disabled="r.remove"
+                    :aria-label="t('common.active')" class="cursor-pointer" />
                 </td>
                 <td class="px-3 py-2 text-right">
-                  <button type="button" @click="remove(r)" :title="t('common.delete')"
-                    class="cursor-pointer text-danger-500 hover:text-danger-600">✕</button>
+                  <button type="button" @click="r.remove = !r.remove"
+                    :title="r.remove ? t('common.restore') : t('common.delete')"
+                    :aria-label="r.remove ? t('common.restore') : t('common.delete')"
+                    :class="btnIconSm(r.remove ? 'neutral' : 'danger')">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" :d="r.remove ? ICONS.uturn : ICONS.trash" />
+                    </svg>
+                  </button>
                 </td>
               </tr>
             </tbody>
@@ -222,31 +284,42 @@ async function remove(r: CashRegister) {
                 <option value="" disabled>—</option>
                 <option v-for="a in cashAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
               </select>
-              <input v-else v-model="form.account_code" type="text" placeholder="211.500"
+              <input v-else v-model="form.account_code" type="text" :placeholder="t('cash.register_account_placeholder')"
                 class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
               <p v-if="isForeignForm" class="text-xs text-neutral-500 mt-1">{{ t('cash.register_foreign_hint') }}</p>
               <RouterLink v-else to="/accounting/accounts" class="text-xs text-primary-600 hover:text-primary-700 mt-1 inline-block">
-                {{ t('cash.register_account') }} +
+                {{ t('cash.register_account_manage') }}
               </RouterLink>
             </div>
           </div>
-          <div class="flex items-center justify-between mt-3">
-            <label class="inline-flex items-center gap-2 text-sm text-neutral-700 cursor-pointer">
-              <input v-model="form.is_default" type="checkbox" class="cursor-pointer" />
-              {{ t('cash.register_default') }}
-            </label>
-            <button type="button" @click="create" :disabled="saving"
-              class="cursor-pointer px-4 h-9 text-sm bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md disabled:opacity-40">
-              {{ saving ? t('common.saving') : t('cash.register_create') }}
-            </button>
-          </div>
-          <div v-if="error" class="text-sm text-danger-500 mt-2">{{ error }}</div>
+          <label class="inline-flex items-center gap-2 mt-3 text-sm text-neutral-700 cursor-pointer">
+            <input type="checkbox" :checked="form.is_default"
+              @change="pickNewDefault(($event.target as HTMLInputElement).checked)" class="cursor-pointer" />
+            {{ t('cash.register_default') }}
+          </label>
+          <label class="flex items-start gap-2 mt-2 text-sm text-neutral-700 cursor-pointer">
+            <input type="checkbox" v-model="form.own_series" class="mt-0.5 cursor-pointer" />
+            <span>{{ t('cash.register_own_series') }}
+              <span class="block text-xs text-neutral-500">{{ t('cash.register_own_series_hint') }}</span></span>
+          </label>
         </div>
       </div>
 
-      <footer class="px-5 py-4 border-t border-neutral-200 flex justify-end">
-        <button @click="emit('close')"
-          class="cursor-pointer px-4 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface">{{ t('common.close') }}</button>
+      <!-- Jedno společné Uložit pro obě sekce (seznam i nová pokladna). -->
+      <footer class="sticky bottom-0 px-5 py-4 border-t border-neutral-200 bg-surface rounded-b-xl space-y-2">
+        <p v-if="removedRows.length" class="text-xs text-danger-600">
+          {{ t('cash.register_delete_pending', { names: removedRows.map(r => r.source.name).join(', ') }) }}
+        </p>
+        <div v-if="error" class="text-sm text-danger-500">{{ error }}</div>
+        <div class="flex flex-wrap items-center justify-end gap-2">
+          <button type="button" @click="emit('close')" :class="btnOutline('neutral')">{{ t('common.close') }}</button>
+          <button type="button" @click="saveAll" :disabled="!canSave" :class="btnFilled('primary')"
+            :title="disabledTitle(!canSave, blockedReason)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ saving ? t('common.saving') : t('common.save') }}
+          </button>
+        </div>
+        <p v-if="blockedReason && dirty" :class="[BTN_DISABLED_NOTE, 'text-right']">{{ blockedReason }}</p>
       </footer>
     </div>
   </div>

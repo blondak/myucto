@@ -47,6 +47,7 @@ $mustDeny = [
     '/storage/',
     '/log/',
     '/db/',
+    '/web/shared/client-route-policy.json',
     '/web/src/',
     '/web/src/main.ts',
     '/web/node_modules/',

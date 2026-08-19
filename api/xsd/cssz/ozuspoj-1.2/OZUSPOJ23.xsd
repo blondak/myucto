@@ -1,0 +1,189 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="http://schemas.cssz.cz/POJ/OZUSPOJ23"
+  targetNamespace="http://schemas.cssz.cz/POJ/OZUSPOJ23" xmlns:bt="http://schemas.cssz.cz/baseTypes/v2"
+  elementFormDefault="qualified" attributeFormDefault="unqualified" version="1.2">
+
+  <xs:import namespace="http://schemas.cssz.cz/baseTypes/v2" schemaLocation="baseTypes2.xsd"/>
+
+  <xs:element name="podaniOzuspoj" type="podaniOzuspojType"/>
+  <xs:complexType name="podaniOzuspojType">
+    <xs:sequence>
+      <xs:element name="VENDOR" minOccurs="0">
+        <xs:complexType>
+          <xs:attribute name="productName" type="xs:string"/>
+          <xs:attribute name="productVersion" type="xs:string"/>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="SENDER" minOccurs="0">
+        <xs:complexType>
+          <xs:attribute name="EmailNotifikace" type="xs:string"/>
+          <xs:attribute name="ISDSreport" type="xs:string"/>
+          <xs:attribute name="VerzeProtokolu" type="xs:string"/>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="formularOzuspoj" type="formularOzuspojType"/>
+    </xs:sequence>
+    <xs:attribute name="partialAccept" type="xs:string"/>
+  </xs:complexType>
+
+  <xs:element name="formularOzuspoj" type="formularOzuspojType"/>
+  <xs:complexType name="formularOzuspojType">
+    <xs:sequence>
+      <xs:element name="zamer" type="zamerType"/>
+      <xs:element name="zamestnavatel" type="zamestnavatelType"/>
+      <xs:element name="zamestnanec" type="zamestnanecType"/>
+      <xs:element name="pracovnik" type="pracovnikType" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="zamerType">
+    <xs:sequence>
+      <xs:element name="typPodani">
+        <xs:annotation>
+          <xs:documentation>Typ podání. 1 - uplatneni zameru, 2 - skonceni zameru, 3 - storno</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="bt:simpleNType">
+            <xs:minInclusive value="1"/>
+            <xs:maxInclusive value="3"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="kodOSSZ">
+        <xs:annotation>
+          <xs:documentation>Kód OSSZ z číselníku CIS_PRACOVIST</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="bt:simpleNType">
+            <xs:minInclusive value="100"/>
+            <xs:maxInclusive value="999"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="datumOd" type="xs:date" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Datum uplatnění záměru</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="datumDo" type="xs:date" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Datum skončení záměru</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="zamestnavatelType">
+    <xs:sequence>
+      <xs:element name="vs" type="vs10Type">
+        <xs:annotation>
+          <xs:documentation>Variabilní symbol zaměstnavatele</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="IC" type="ICType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Identifikační číslo zaměstnavatele</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="nazev" type="nazevType">
+        <xs:annotation>
+          <xs:documentation>Název zaměstnavatele</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="zamestnanecType">
+    <xs:sequence>
+      <xs:element name="jmeno" type="jmenoType">
+        <xs:annotation>
+          <xs:documentation>Jméno</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="prijmeni" type="prijmeniType">
+        <xs:annotation>
+          <xs:documentation>Příjmení</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="datumNarozeni" type="xs:date">
+        <xs:annotation>
+          <xs:documentation>Datum narození</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="rodneCislo" type="rodneCisloType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Rodné číslo / Evidenční číslo pojištěnce</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="pracovnikType">
+    <xs:sequence>
+      <xs:element name="jmeno" type="jmenoType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Jméno kontaktního pracovníka</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="prijmeni" type="prijmeniType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Příjmení kontaktního pracovníka</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="telefon" type="telefonType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Telefon kontaktního pracovníka</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="email" type="emailType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>E-mail kontaktního pracovníka</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:simpleType name="vs10Type">
+    <xs:restriction base="bt:simpleNType">
+      <xs:pattern value="[0-9]{10}"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="jmenoType">
+    <xs:restriction base="bt:simpleA_ZX_SP_Type">
+      <xs:maxLength value="100"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="prijmeniType">
+    <xs:restriction base="bt:simpleA_ZX_SP_Type">
+      <xs:maxLength value="100"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="telefonType">
+    <xs:restriction base="bt:simpleA_NN_ZZ_SP_Type">
+      <xs:maxLength value="33"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="emailType">
+    <xs:restriction base="xs:string">
+      <xs:maxLength value="250"/>
+      <xs:pattern value="([^@]+@[^\.]+\..+)?"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="ICType">
+    <xs:restriction base="bt:simpleA_NN_ZZType">
+      <xs:maxLength value="35"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nazevType">
+    <xs:restriction base="bt:simpleL2Type">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="144"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="rodneCisloType">
+    <xs:restriction base="bt:simpleNNType">
+      <xs:minLength value="9"/>
+      <xs:maxLength value="10"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
   type PayrollDocument,
+  type PayrollDocumentBatchExit,
+  type PayrollDocumentBatchReport,
   type PayrollDocumentList,
   type PayrollPersonOption,
   type PayrollTaxCertificateKind,
@@ -17,6 +20,8 @@ import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
+import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -24,15 +29,29 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 const period = ref(localPayrollPeriod())
 const year = ref(Number(period.value.slice(0, 4)))
-const activeTab = ref<'monthly' | 'annual'>('monthly')
+/**
+ * Předvýběr z odkazu na kartě zaměstnance (`?person=7&tab=annual`).
+ *
+ * Roční tab je ten, na kterém se dokumenty za člověka VYSTAVUJÍ (mzdový list,
+ * potvrzení o zdanitelných příjmech), takže na něj odkaz míří rovnou. Zúžení má
+ * vlastní ref, ne `selectedEmployeeId`: ten říká „komu vystavit", ne „koho
+ * vypsat", a přebít jeho význam by změnilo chování i bez odkazu.
+ */
+const requestedTab = payrollQueryValue(route.query, 'tab')
+const activeTab = ref<'monthly' | 'annual'>(requestedTab === 'annual' ? 'annual' : 'monthly')
+const focusPersonId = ref<number | null>(payrollQueryId(route.query, 'person'))
 const data = ref<PayrollDocumentList | null>(null)
 const annualItems = ref<PayrollDocument[]>([])
 const people = ref<PayrollPersonOption[]>([])
-const selectedEmployeeId = ref<number | null>(null)
+const selectedEmployeeId = ref<number | null>(focusPersonId.value)
 const loading = ref(true)
 const generatingRevisionId = ref<number | null>(null)
+const generatingBatchId = ref<number | null>(null)
+const batchReport = ref<PayrollDocumentBatchReport | null>(null)
 type AnnualGenerationKind = 'payroll_sheet' | PayrollTaxCertificateKind
 const generatingAnnualKind = ref<AnnualGenerationKind | null>(null)
 const pendingCorrectionKind = ref<PayrollTaxCertificateKind | null>(null)
@@ -73,9 +92,31 @@ function reload(): void {
 const canGenerate = computed(() =>
   auth.canWrite('payroll.documents') && (data.value?.revisions.length ?? 0) > 0,
 )
+// Zúžení podle osoby zná SERVER (`employee_id` na obou výpisech) a padá do téhož
+// dotazu jako stránkování. Dokud filtroval prohlížeč nad načtenou stránkou,
+// dokument z druhé strany se tiše neprojevil a `total` v pageru mluvilo o celém
+// období, ne o tom, co tabulka ukazuje.
 const visibleItems = computed(() =>
-  activeTab.value === 'monthly' ? data.value?.items ?? [] : annualItems.value,
-)
+  activeTab.value === 'monthly' ? data.value?.items ?? [] : annualItems.value)
+const focusName = computed(() => {
+  const id = focusPersonId.value
+  if (id === null) return null
+  return people.value.find(person => person.id === id)?.full_name
+    ?? t('payroll.agendas.focus.unknown_person')
+})
+/**
+ * Server zúžení uplatnil a nezbylo nic. Tichá prázdná tabulka by tvrdila „ten
+ * člověk tu nic nemá", i když je zúžení jen slepé (cizí osoba, zestaralý odkaz).
+ */
+const focusMissing = computed(() =>
+  focusPersonId.value !== null && !loading.value && visibleItems.value.length === 0)
+function clearFocus(): void {
+  focusPersonId.value = null
+  const query = { ...route.query }
+  delete query.person
+  void router.replace({ query })
+  reload()
+}
 const employeeOptions = computed(() => people.value.map(person => ({
   value: person.id,
   label: person.full_name,
@@ -207,14 +248,25 @@ async function load(): Promise<void> {
   try {
     const page = { limit: pageSize, offset: offset.value }
     if (requestedTab === 'monthly') {
-      const loaded = await payrollApi.listDocuments(requestedPeriod, page)
+      const loaded = await payrollApi.listDocuments(
+        requestedPeriod,
+        page,
+        focusPersonId.value ?? undefined,
+      )
       if (sequence === loadSequence && requestedPeriod === period.value) {
         data.value = loaded
         total.value = loaded.total
       }
+      // Jmenný seznam se na měsíčním tabu jinak nenačítá, ale zúžení z odkazu
+      // musí umět říct KOHO se týká — bez jména by byl filtr neviditelný.
+      // Dotahuje se proto AŽ po výpisu a jen když zúžení opravdu je: jinak by
+      // se výpis zdržoval o požadavek, který k ničemu není.
+      if (focusPersonId.value !== null && people.value.length === 0) {
+        people.value = await payrollApi.peopleOptions().catch(() => people.value)
+      }
     } else {
       const [loaded, loadedPeople] = await Promise.all([
-        payrollApi.listAnnualDocuments(requestedYear, page),
+        payrollApi.listAnnualDocuments(requestedYear, page, focusPersonId.value ?? undefined),
         people.value.length ? Promise.resolve(people.value) : payrollApi.peopleOptions(),
       ])
       if (sequence === loadSequence && requestedYear === year.value) {
@@ -274,6 +326,27 @@ async function generateTaxCertificate(
   }
 }
 
+async function generateBatch(revision: PayrollDocumentList['revisions'][number]): Promise<void> {
+  if (generatingBatchId.value !== null) return
+  generatingBatchId.value = revision.revision_id
+  try {
+    batchReport.value = await payrollApi.generateDocumentBatch(
+      revision.run_id,
+      revision.revision_id,
+    )
+    toast.success(t(
+      batchReport.value.complete
+        ? 'payroll.documents.batch_complete'
+        : 'payroll.documents.batch_incomplete',
+    ))
+    await load()
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.documents.batch_failed')))
+  } finally {
+    generatingBatchId.value = null
+  }
+}
+
 async function generateBundle(revision: PayrollDocumentList['revisions'][number]): Promise<void> {
   if (generatingRevisionId.value !== null) return
   generatingRevisionId.value = revision.revision_id
@@ -290,6 +363,15 @@ async function generateBundle(revision: PayrollDocumentList['revisions'][number]
   } finally {
     generatingRevisionId.value = null
   }
+}
+
+function batchExitLabel(exit: PayrollDocumentBatchExit): string {
+  const certificate = exit.documents.employment_certificate
+  if (certificate?.archived) return t('payroll.documents.batch_exit_archived')
+  if (certificate?.available) return t('payroll.documents.batch_exit_pending')
+  return t('payroll.documents.batch_exit_blocked', {
+    code: certificate?.readiness_code ?? '',
+  })
 }
 
 async function download(item: PayrollDocument): Promise<void> {
@@ -369,9 +451,76 @@ onMounted(load)
               )
             }}
           </button>
+          <button
+            v-for="revision in canGenerate ? data?.revisions ?? [] : []"
+            :key="`batch-${revision.revision_id}`"
+            type="button"
+            data-test="generate-document-batch"
+            :class="btnOutline('primary')"
+            :disabled="generatingBatchId !== null"
+            @click="generateBatch(revision)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path :d="ICONS.doc" />
+            </svg>
+            {{
+              t(
+                generatingBatchId === revision.revision_id
+                  ? 'payroll.documents.batch_running'
+                  : 'payroll.documents.batch_run',
+                { office: revision.office_name || t('payroll.documents.company') },
+              )
+            }}
+          </button>
         </template>
       </div>
     </header>
+
+    <section
+      v-if="batchReport"
+      class="rounded-lg border p-4"
+      :class="batchReport.complete
+        ? 'border-success-500/30 bg-success-50'
+        : 'border-warning-500/30 bg-warning-50'"
+      data-test="document-batch-report"
+      role="status"
+    >
+      <h2 class="text-sm font-semibold text-neutral-900">
+        {{ t('payroll.documents.batch_title') }}
+      </h2>
+      <p class="mt-1 text-sm text-neutral-700">
+        {{ t('payroll.documents.batch_summary', {
+          payslips: batchReport.payslips.archived,
+          from: batchReport.period_start,
+          to: batchReport.period_end,
+        }) }}
+      </p>
+      <p class="mt-1 text-sm font-medium text-neutral-900">
+        {{ t(batchReport.complete
+          ? 'payroll.documents.batch_complete'
+          : 'payroll.documents.batch_incomplete') }}
+      </p>
+      <ul v-if="batchReport.employment_exits.length" class="mt-3 space-y-1 text-sm text-neutral-700">
+        <li v-for="exit in batchReport.employment_exits" :key="exit.employment_id">
+          {{ exit.employee_name || exit.employment_id }} · {{ exit.end_date }} · {{ batchExitLabel(exit) }}
+        </li>
+      </ul>
+      <p v-else class="mt-3 text-sm text-neutral-600">
+        {{ t('payroll.documents.batch_no_exits') }}
+      </p>
+    </section>
+
+    <PayrollFocusNotice
+      v-if="focusMissing"
+      :name="String(focusPersonId)"
+      missing
+      @clear="clearFocus"
+    />
+    <PayrollFocusNotice
+      v-else-if="focusName"
+      :name="focusName"
+      @clear="clearFocus"
+    />
 
     <nav class="flex gap-1 overflow-x-auto border-b border-neutral-200" :aria-label="t('payroll.documents.tabs_label')">
       <button

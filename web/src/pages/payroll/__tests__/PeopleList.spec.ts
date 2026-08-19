@@ -13,6 +13,7 @@ const m = vi.hoisted(() => ({
   routeQuery: {} as Record<string, string>,
   routerReplace: vi.fn(),
   deletePerson: vi.fn(),
+  capabilities: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -28,6 +29,9 @@ vi.mock('@/api/payroll', () => ({
     createPerson: m.createPerson,
     createEmployment: m.createEmployment,
     deletePerson: m.deletePerson,
+    // Bez toho neexistovala jako funkce a `onMounted` házel TypeError JEŠTĚ před
+    // `.catch()` — každý test skončil nezachycenou chybou v protokolu běhu.
+    capabilities: m.capabilities,
   },
 }))
 
@@ -54,6 +58,16 @@ vi.mock('vue-i18n', async (importOriginal) => ({
       params ? `${key}:${JSON.stringify(params)}` : key,
   }),
 }))
+
+// `useTablePrefs` jde přes Pinii a API; v testu stačí prázdné výchozí předvolby.
+vi.mock('@/composables/useUserPrefs', async () => {
+  const { computed } = await import('vue')
+  return {
+    ensurePrefsLoaded: () => Promise.resolve(),
+    getPagePrefs: () => computed(() => ({})),
+    patchPagePrefs: () => {},
+  }
+})
 
 import PeopleList from '@/pages/payroll/PeopleList.vue'
 
@@ -139,6 +153,7 @@ function mountPage() {
           template: '<div data-test="quick-edit-stub">{{ personId }}</div>',
         },
         PayrollPersonProfilePanel: true,
+        PayrollPersonStatutoryEvidencePanel: true,
       },
     },
   })
@@ -172,6 +187,7 @@ describe('PeopleList toolbar and shared employee creation', () => {
       employee_id: 4,
       relation_type: 'employment',
     })
+    m.capabilities.mockResolvedValue({ state: { start_period: '2026-01-01' } })
   })
 
   /*

@@ -5,10 +5,19 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Document;
 
 use MyInvoice\Service\Payroll\Calculation\Money;
+use MyInvoice\Service\Payroll\Component\PayrollExemptIncomeSplit;
+use MyInvoice\Service\Payroll\Insurance\EmployerSocialInsuranceAllocation;
 
 final class PayslipDocumentSnapshotMapper
 {
-    private const SCHEMA_VERSION = 'payroll-payslip-document.v1';
+    /**
+     * Mapování v2 doplňuje podklad nezdanění u jednotlivých složek mzdy.
+     *
+     * Verze je součástí zmrazeného výsledku osoby, takže nová páska vzniká jen
+     * novým během. Už archivovaná páska se tím nemění: její snapshot zůstává
+     * v1 a hydrátor ho vydá jako neevidovaný údaj, ne jako nulu.
+     */
+    private const SCHEMA_VERSION = 'payroll-payslip-document.v2';
 
     /**
      * @param array<string,mixed> $snapshot
@@ -79,6 +88,7 @@ final class PayslipDocumentSnapshotMapper
             $resultPeople,
             $employerSocialBeforeDiscount,
             $employerSocialDiscount,
+            $this->employerSocialCategoryAmounts($statutory, $employerSocialBeforeDiscount),
         );
         $attached = [];
         foreach ($people as $personResult) {
@@ -263,6 +273,10 @@ final class PayslipDocumentSnapshotMapper
             $nonCash,
         );
         $correction = $this->int($net, 'correction_minor_units');
+        $annualSettlement = $this->nonNegativeInt(
+            $net + ['annual_settlement_minor_units' => 0],
+            'annual_settlement_minor_units',
+        );
         $netBeforeEnforcement = $this->nonNegativeInt(
             $net,
             'net_payable_minor_units',
@@ -338,6 +352,8 @@ final class PayslipDocumentSnapshotMapper
             insuranceExpenseAccount:
                 $this->account($accounts, 'employer_insurance_debit'),
             insuranceLiabilityAccount: $insuranceLiability,
+            annualSettlementMinorUnits: $annualSettlement,
+            incomeDetailStatus: PayslipDocumentData::INCOME_DETAIL_RECORDED,
         );
 
         return $this->snapshot($document);
@@ -437,9 +453,19 @@ final class PayslipDocumentSnapshotMapper
                 );
                 $sourceAmount = $this->int($totals, 'source_amount_minor');
                 $cashAmount = $this->int($totals, 'cash_payable_minor');
+                // Tentýž rozpad, ze kterého mzdový list sestavuje § 38j odst. 2
+                // písm. f) bod 2. Sdílený, aby se oba doklady o téže mzdě
+                // nemohly rozejít.
+                $split = PayrollExemptIncomeSplit::fromFrozenInput(
+                    $input,
+                    $sourceAmount,
+                    $inputId,
+                );
                 $incomeLines[] = new PayslipLine(
                     $this->requiredText($component, 'name'),
                     $sourceAmount,
+                    $split->basis,
+                    $split->exemptMinorUnits,
                 );
                 $gross = $gross->add(new Money($sourceAmount));
                 $cash = $cash->add(new Money($cashAmount));
@@ -597,17 +623,53 @@ final class PayslipDocumentSnapshotMapper
     }
 
     /**
+     * Pojistné zaměstnavatele po kategoriích § 5a odst. 1 ZPSZ.
+     *
+     * Zákonný výsledek zmrazený dřív, než rozpad existoval, žádný nenese —
+     * tehdy uměl modul jen běžnou sazbu, takže prázdný seznam znamená „jedna
+     * kategorie" a páska se rozdělí po staru. Neúplný rozpad (součet nesedí na
+     * firemní částku) je naopak vada a nesmí se dopočítat zbytkem.
+     *
+     * @param array<string,mixed> $statutory
+     * @return array<string,int>
+     */
+    private function employerSocialCategoryAmounts(array $statutory, int $beforeDiscount): array
+    {
+        $amounts = [];
+        foreach ($this->rows(
+            $statutory['employer_social_categories'] ?? [],
+            'kategorie pojistného zaměstnavatele',
+        ) as $row) {
+            $category = $row['category'] ?? null;
+            if (!is_string($category) || $category === '') {
+                throw new \DomainException('Kategorie pojistného zaměstnavatele nemá název.');
+            }
+            $amounts[$category] = $this->nonNegativeInt($row, 'contribution_minor_units');
+        }
+        if ($amounts !== [] && array_sum($amounts) !== $beforeDiscount) {
+            throw new \DomainException(
+                'Rozpad pojistného zaměstnavatele nedává firemní částku před slevou.',
+            );
+        }
+
+        return $amounts;
+    }
+
+    /**
      * @param array<int,array<string,mixed>> $people
+     * @param array<string,int> $categoryAmounts
      * @return array<int,int>
      */
     private function allocateEmployerSocial(
         array $people,
         int $beforeDiscount,
         int $discount,
+        array $categoryAmounts,
     ): array
     {
         $baseWeights = [];
         $discountWeights = [];
+        $categoryWeights = array_fill_keys(array_keys($categoryAmounts), []);
         foreach ($people as $employeeId => $person) {
             $statutory = $this->object(
                 $person['statutory'] ?? null,
@@ -622,187 +684,58 @@ final class PayslipDocumentSnapshotMapper
                 'capped_assessment_base_minor_units',
             );
             $discountBase = new Money(0);
+            foreach ($categoryWeights as $category => $unused) {
+                $categoryWeights[$category][$employeeId] = 0;
+            }
             foreach ($this->rows(
                 $social['relationships'] ?? null,
                 "vztahy sociálního pojištění osoby {$employeeId}",
             ) as $relationship) {
-                if (($relationship['part_time_employer_discount'] ?? null)
-                    === 'verified'
+                $relationshipBase = $this->nonNegativeInt(
+                    $relationship,
+                    'capped_assessment_base_minor_units',
+                );
+                /*
+                 * Doložený nárok podle § 7a odst. 1 ještě není uplatněná sleva —
+                 * limity § 7a odst. 3 ji můžou vyloučit. Váhou rozdělení je jen
+                 * skutečně uplatněná sleva; jinak by osoba s nulovou slevou
+                 * ukrojila z rozdělení kus, který jí nepatří. Revize uložené
+                 * dřív, než výsledek `..._outcome` nesl, znaly jen „doložený =
+                 * uplatněný", a tak se z nich čtou dál.
+                 */
+                $discountOutcome = $relationship['part_time_employer_discount_outcome'] ?? null;
+                if (($relationship['part_time_employer_discount'] ?? null) === 'verified'
+                    && ($discountOutcome === null || $discountOutcome === 'applied')
                 ) {
-                    $discountBase = $discountBase->add(new Money(
-                        $this->nonNegativeInt(
-                            $relationship,
-                            'capped_assessment_base_minor_units',
-                        ),
-                    ));
+                    $discountBase = $discountBase->add(new Money($relationshipBase));
+                }
+                $category = $relationship['employer_rate_category'] ?? null;
+                if (is_string($category) && array_key_exists($category, $categoryWeights)) {
+                    $categoryWeights[$category][$employeeId] += $relationshipBase;
+                } elseif ($categoryAmounts !== []) {
+                    throw new \DomainException(
+                        "Vztah osoby {$employeeId} spadá do kategorie, kterou firemní výsledek nezná.",
+                    );
                 }
             }
             $discountWeights[$employeeId] = $discountBase->minorUnits;
         }
-        $beforeAllocations = $this->allocateByWeights(
-            $baseWeights,
-            $beforeDiscount,
-            'pojistné zaměstnavatele',
-        );
-        $discountAllocations = $this->allocateByWeights(
+
+        if ($categoryAmounts === []) {
+            return EmployerSocialInsuranceAllocation::allocate(
+                $baseWeights,
+                $discountWeights,
+                $beforeDiscount,
+                $discount,
+            );
+        }
+
+        return EmployerSocialInsuranceAllocation::allocateByCategory(
+            $categoryWeights,
+            $categoryAmounts,
             $discountWeights,
             $discount,
-            'slevu zaměstnavatele',
         );
-        $allocations = [];
-        foreach ($beforeAllocations as $employeeId => $amount) {
-            $allocated = $amount - $discountAllocations[$employeeId];
-            if ($allocated < 0) {
-                throw new \DomainException(
-                    'Sleva zaměstnavatele převyšuje pojistné konkrétní osoby.',
-                );
-            }
-            $allocations[$employeeId] = $allocated;
-        }
-
-        return $allocations;
-    }
-
-    /**
-     * @param array<int,int> $weights
-     * @return array<int,int>
-     */
-    private function allocateByWeights(
-        array $weights,
-        int $total,
-        string $context,
-    ): array {
-        $weightTotal = new Money(0);
-        foreach ($weights as $weight) {
-            $weightTotal = $weightTotal->add(new Money($weight));
-        }
-        if ($total > 0 && $weightTotal->minorUnits === 0) {
-            throw new \DomainException(
-                ucfirst($context)
-                    . ' nelze rozdělit bez příslušných vyměřovacích základů.',
-            );
-        }
-        if ($weightTotal->minorUnits === 0) {
-            return array_fill_keys(array_keys($weights), 0);
-        }
-
-        $allocations = [];
-        $minorRemainders = [];
-        $assigned = 0;
-        foreach ($weights as $employeeId => $weight) {
-            [$quotient, $remainder] = $this->multiplyDivide(
-                $total,
-                $weight,
-                $weightTotal->minorUnits,
-            );
-            $allocations[$employeeId] = $quotient;
-            $minorRemainders[$employeeId] = $remainder;
-            $assigned += $allocations[$employeeId];
-        }
-        $this->distributeRemainder(
-            $allocations,
-            $total - $assigned,
-            $minorRemainders,
-        );
-        ksort($allocations, SORT_NUMERIC);
-
-        return $allocations;
-    }
-
-    /** @return array{0:int,1:int} */
-    private function multiplyDivide(
-        int $amount,
-        int $weight,
-        int $totalWeight,
-    ): array {
-        if ($amount < 0 || $weight < 0 || $totalWeight <= 0 || $weight > $totalWeight) {
-            throw new \InvalidArgumentException(
-                'Poměrné rozdělení pojistného nemá platné hodnoty.',
-            );
-        }
-        $quotient = 0;
-        $remainder = 0;
-        $partQuotient = intdiv($amount, $totalWeight);
-        $partRemainder = $amount % $totalWeight;
-        $multiplier = $weight;
-        while ($multiplier > 0) {
-            if (($multiplier % 2) === 1) {
-                [$quotient, $remainder] = $this->addDivisionParts(
-                    $quotient,
-                    $remainder,
-                    $partQuotient,
-                    $partRemainder,
-                    $totalWeight,
-                );
-            }
-            $multiplier = intdiv($multiplier, 2);
-            if ($multiplier > 0) {
-                [$partQuotient, $partRemainder] = $this->addDivisionParts(
-                    $partQuotient,
-                    $partRemainder,
-                    $partQuotient,
-                    $partRemainder,
-                    $totalWeight,
-                );
-            }
-        }
-
-        return [$quotient, $remainder];
-    }
-
-    /** @return array{0:int,1:int} */
-    private function addDivisionParts(
-        int $leftQuotient,
-        int $leftRemainder,
-        int $rightQuotient,
-        int $rightRemainder,
-        int $denominator,
-    ): array {
-        $boundary = $denominator - $rightRemainder;
-        if ($leftRemainder >= $boundary) {
-            $remainder = $leftRemainder - $boundary;
-            $carry = 1;
-        } else {
-            $remainder = $leftRemainder + $rightRemainder;
-            $carry = 0;
-        }
-        $quotient = $this->addBounded(
-            $this->addBounded($leftQuotient, $rightQuotient),
-            $carry,
-        );
-
-        return [$quotient, $remainder];
-    }
-
-    private function addBounded(int $left, int $right): int
-    {
-        if ($left < 0 || $right < 0 || $right > PHP_INT_MAX - $left) {
-            throw new \OverflowException('Poměrné rozdělení pojistného přeteklo.');
-        }
-
-        return $left + $right;
-    }
-
-    /**
-     * @param array<int,int> $values
-     * @param array<int,int> $remainders
-     */
-    private function distributeRemainder(
-        array &$values,
-        int $remaining,
-        array $remainders,
-    ): void {
-        if ($remaining < 0 || $remaining > count($values)) {
-            throw new \LogicException('Poměrné rozdělení má neplatný zbytek.');
-        }
-        $ids = array_keys($values);
-        usort($ids, static fn (int $left, int $right): int =>
-            ($remainders[$right] <=> $remainders[$left])
-            ?: ($left <=> $right)
-        );
-        for ($index = 0; $index < $remaining; ++$index) {
-            $values[$ids[$index]]++;
-        }
     }
 
     /**
@@ -898,6 +831,8 @@ final class PayslipDocumentSnapshotMapper
             ),
             'rounding_adjustment_minor_units' =>
                 $document->roundingAdjustmentMinorUnits,
+            'annual_settlement_minor_units' =>
+                $document->annualSettlementMinorUnits,
             'net_minor_units' => $document->netMinorUnits,
             'employer_social_minor_units' => $document->employerSocialMinorUnits,
             'employer_health_minor_units' => $document->employerHealthMinorUnits,
@@ -906,6 +841,7 @@ final class PayslipDocumentSnapshotMapper
             'insurance_expense_account' => $document->insuranceExpenseAccount,
             'insurance_liability_account' => $document->insuranceLiabilityAccount,
             'currency' => $document->currency,
+            'income_detail_status' => $document->incomeDetailStatus,
         ];
     }
 

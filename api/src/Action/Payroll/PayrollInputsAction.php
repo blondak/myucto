@@ -38,18 +38,34 @@ final class PayrollInputsAction
         if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
             return $error;
         }
+        $query = $request->getQueryParams();
+        $limit = max(1, min(
+            PayrollInputRepository::LIST_MAX_LIMIT,
+            (int) ($query['limit'] ?? PayrollInputRepository::LIST_DEFAULT_LIMIT),
+        ));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
+        $employmentId = self::narrowingId($query, 'employment_id');
         try {
-            $period = $this->period(
-                $request->getQueryParams()['period'] ?? null,
+            $period = $this->period($query['period'] ?? null);
+            $page = $this->inputs->list(
+                $this->currentSupplierId($request),
+                $period,
+                $limit,
+                $offset,
+                $employmentId,
             );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
+
+        // `employment_id` se vrací zpátky, aby prohlížeč poznal zúžený prázdný
+        // seznam od nezúženého — bez toho vypadá obojí stejně.
         return Json::ok($response, [
-            'inputs' => $this->inputs->list(
-                $this->currentSupplierId($request),
-                $period,
-            ),
+            'inputs' => $page['items'],
+            'total' => $page['total'],
+            'limit' => $limit,
+            'offset' => $offset,
+            'employment_id' => $employmentId,
         ]);
     }
 
@@ -215,6 +231,67 @@ final class PayrollInputsAction
             return Json::error($response, 'not_found', 'Mzdový vstup nebyl nalezen.', 404);
         }
         $this->audit($request, 'payroll.input.approved', $input);
+        return Json::ok($response, ['input' => $input]);
+    }
+
+    /**
+     * Storno schváleného benefitního vstupu — uvolnění ročního koše § 6 odst. 9 ZDP.
+     *
+     * Vyžaduje totéž oprávnění jako schválení (`payroll.approve`): uvolnit koš je
+     * stejně silné rozhodnutí jako ho vyčerpat, jen opačným směrem.
+     *
+     * @param array<string,string> $args
+     */
+    public function reverseBenefit(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            AccessLevel::WRITE,
+            'payroll.approve',
+        )) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        $version = $this->rowVersion($body['row_version'] ?? null);
+        if ($version === null) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'row_version musí být kladné celé číslo.',
+                422,
+            );
+        }
+        $reason = $body['reason'] ?? null;
+        if (!is_string($reason) || trim($reason) === '') {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Důvod storna je povinný — bez něj nejde zpětně doložit, proč se koš uvolnil.',
+                422,
+            );
+        }
+        try {
+            $input = $this->inputs->reverseBenefit(
+                $this->currentSupplierId($request),
+                (int) ($args['id'] ?? 0),
+                $version,
+                $this->userId($request),
+                $reason,
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (PayrollInputCancellationException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), 409);
+        } catch (PayrollInputConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
+                'current_row_version' => $e->currentVersion,
+            ]);
+        }
+        if ($input === null) {
+            return Json::error($response, 'not_found', 'Mzdový vstup nebyl nalezen.', 404);
+        }
+        $this->audit($request, 'payroll.input.benefit_reversed', $input);
         return Json::ok($response, ['input' => $input]);
     }
 

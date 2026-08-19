@@ -77,12 +77,22 @@ async function load() {
 onMounted(load)
 
 const showForm = ref(false)
-useHotkey('escape', () => { if (showForm.value) showForm.value = false })
+useHotkey('escape', () => {
+  if (showForm.value) showForm.value = false
+  if (deleteTarget.value) deleteTarget.value = null
+})
 
 const form = reactive({
   parent_id: null as number | null,
   account_code: '',
   name: '',
+})
+
+// Tečkovaný tvar (211.100) je od migrace 1322 jediný správný zápis analytiky a
+// kód účtu už později změnit nejde — nabídneme ho tedy rovnou v placeholderu.
+const codePlaceholder = computed(() => {
+  const parent = syntheticAccounts.value.find(a => a.id === form.parent_id)
+  return parent ? `${parent.account_code}.100` : t('accounting.accounts.code_placeholder')
 })
 
 function openCreate() {
@@ -119,6 +129,28 @@ async function toggleActive(a: ChartAccount) {
     await load()
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+
+// Mazání analytiky: kód účtu nejde přejmenovat (visí na něm kontace, pravidla i karty
+// jako text), takže smazání je jediná oprava překlepu v kódu. Backend pustí jen účet
+// bez jediného pohybu a odkazu — tady se jen ptáme, protože je to nevratné.
+const deleteTarget = ref<ChartAccount | null>(null)
+const deleting = ref(false)
+
+async function confirmDelete() {
+  const account = deleteTarget.value
+  if (!account) return
+  deleting.value = true
+  try {
+    await accountingApi.deleteAccount(account.id)
+    deleteTarget.value = null
+    toast.success(t('accounting.accounts.deleted'))
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -217,11 +249,15 @@ function sideLabel(side: string | null): string {
                   <span v-if="a.is_active" class="text-success-600">✓</span>
                   <span v-else class="text-neutral-400">—</span>
                 </td>
-                <td class="px-3 py-2 text-right">
+                <td class="px-3 py-2 text-right whitespace-nowrap">
                   <button v-if="auth.canWrite('accounting') && !a.is_synthetic" @click.stop="toggleActive(a)"
                     class="cursor-pointer text-xs"
                     :class="a.is_active ? 'text-danger-500 hover:text-danger-600' : 'text-primary-600 hover:text-primary-700'">
                     {{ a.is_active ? t('accounting.accounts.deactivate') : t('accounting.accounts.reactivate') }}
+                  </button>
+                  <button v-if="auth.canWrite('accounting') && !a.is_synthetic" @click.stop="deleteTarget = a"
+                    class="cursor-pointer text-xs text-danger-500 hover:text-danger-600 ml-3">
+                    {{ t('common.delete') }}
                   </button>
                 </td>
               </tr>
@@ -264,7 +300,8 @@ function sideLabel(side: string | null): string {
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.accounts.code') }}</label>
             <input v-model="form.account_code" type="text" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono"
-              :placeholder="t('accounting.accounts.code_placeholder')" />
+              :placeholder="codePlaceholder" />
+            <p class="text-xs text-neutral-500 mt-1">{{ t('accounting.accounts.code_dot_hint') }}</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.accounts.name') }}</label>
@@ -278,6 +315,24 @@ function sideLabel(side: string | null): string {
               {{ t('common.create') }}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Potvrzení smazání analytiky -->
+    <div v-if="deleteTarget" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
+        <h3 class="text-lg font-semibold mb-1">{{ t('accounting.accounts.delete_title') }}</h3>
+        <p class="text-sm text-neutral-600 mb-1">
+          <span class="font-mono">{{ deleteTarget.account_code }}</span> — {{ deleteTarget.name }}
+        </p>
+        <p class="text-sm text-neutral-500 mb-4">{{ t('accounting.accounts.delete_hint') }}</p>
+        <div class="flex justify-end gap-2">
+          <button @click="deleteTarget = null" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
+          <button @click="confirmDelete" :disabled="deleting" :class="btnFilled('danger')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            {{ t('common.delete') }}
+          </button>
         </div>
       </div>
     </div>

@@ -17,6 +17,15 @@ const props = withDefaults(defineProps<{
   /** Indikátor načítání ve výsledcích (jen remote). */
   loading?: boolean
   loadingLabel?: string
+  /**
+   * Nabídka je oříznutá — shod je víc, než kolik jich server poslal.
+   *
+   * Why: mlčky oříznutý seznam tvrdí „nic dalšího neexistuje". U výběru
+   * bankovního důkazu k párování mzdy je to nejdražší možná lež: uživatel
+   * usoudí, že transakce chybí, a platbu založí znovu.
+   */
+  truncated?: boolean
+  truncatedLabel?: string
   /** Vybraná položka pro zobrazení labelu, i když není v options (edit / po hledání). */
   selectedOption?: Option | null
   invalid?: boolean
@@ -39,6 +48,8 @@ const props = withDefaults(defineProps<{
   remote: false,
   loading: false,
   loadingLabel: 'Hledám…',
+  truncated: false,
+  truncatedLabel: 'Zobrazena jen část shod — upřesněte hledání.',
   selectedOption: null,
   invalid: false,
   accent: 'primary',
@@ -309,6 +320,13 @@ onUnmounted(() => {
         <div class="truncate">{{ o.label }}</div>
         <div v-if="o.secondary" class="text-xs text-neutral-500 truncate">{{ o.secondary }}</div>
       </button>
+      <!-- Oříznutí se PŘIZNÁVÁ. Bez téhle věty by uživatel četl neúplnou
+           nabídku jako úplnou a hledanou položku považoval za neexistující. -->
+      <div
+        v-if="truncated && !loading && filtered.length > 0"
+        data-test="searchable-select-truncated"
+        class="border-t border-neutral-200 bg-warning-50 px-3 py-2 text-xs text-warning-800"
+      >{{ truncatedLabel }}</div>
     </div>
     </Teleport>
   </div>

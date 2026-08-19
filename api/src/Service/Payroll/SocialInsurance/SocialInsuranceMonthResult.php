@@ -10,6 +10,7 @@ use MyInvoice\Service\Payroll\Calculation\CalculationStep;
 final readonly class SocialInsuranceMonthResult implements JsonSerializable
 {
     /**
+     * @param list<SocialEmployerCategoryResult> $employerCategories
      * @param list<SocialPersonMonthResult> $people
      * @param list<string> $issues
      */
@@ -25,6 +26,7 @@ final readonly class SocialInsuranceMonthResult implements JsonSerializable
         public ?int $employerContributionMinorUnits,
         public ?CalculationStep $employerContributionStep,
         public ?CalculationStep $partTimeDiscountStep,
+        public array $employerCategories,
         public array $people,
         public array $issues,
         public string $rulesetId,
@@ -47,8 +49,21 @@ final readonly class SocialInsuranceMonthResult implements JsonSerializable
                 $this->partTimeDiscountAssessmentBaseMinorUnits,
             'part_time_discount_minor_units' => $this->partTimeDiscountMinorUnits,
             'employer_contribution_minor_units' => $this->employerContributionMinorUnits,
+            /*
+             * `employer_contribution_step` popisuje JEDNU sazbu z jednoho
+             * základu. Jakmile má firma v měsíci víc kategorií § 5a odst. 1,
+             * žádný takový jeden krok neexistuje a pole zůstává prázdné —
+             * dosadit do něj kteroukoli z kategorií by čtenáři podsunulo, že
+             * firemní částka vznikla tou sazbou. Úplný rozpad je vždy
+             * v `employer_categories`.
+             */
             'employer_contribution_step' => $this->employerContributionStep?->jsonSerialize(),
             'part_time_discount_step' => $this->partTimeDiscountStep?->jsonSerialize(),
+            'employer_categories' => array_map(
+                static fn (SocialEmployerCategoryResult $category): array =>
+                    $category->jsonSerialize(),
+                $this->employerCategories,
+            ),
             'people' => array_map(
                 static fn (SocialPersonMonthResult $person): array => $person->jsonSerialize(),
                 $this->people,

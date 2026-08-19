@@ -10,6 +10,7 @@ use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Document\AverageEarningsSnapshotBuilder;
 use MyInvoice\Service\Payroll\Document\EmploymentExitDocumentService;
 use MyInvoice\Service\Payroll\Document\EmploymentExitReadinessException;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -141,6 +142,7 @@ final class PayrollEmploymentExitDocumentAction
             || !in_array($kind, [
                 'employment-certificate',
                 'average-earnings-certificate',
+                'average-earnings-statement',
             ], true)
         ) {
             return $this->privateResponse(Json::error(
@@ -160,9 +162,13 @@ final class PayrollEmploymentExitDocumentAction
                     $idempotencyKey,
                     $userId,
                 )
-                : $this->documents->generateAverageEarningsCertificate(
+                : $this->documents->generateAverageEarningsDocument(
                     $supplierId,
                     $employmentId,
+                    $kind === 'average-earnings-certificate'
+                        ? AverageEarningsSnapshotBuilder::CERTIFICATE_PURPOSE
+                        : AverageEarningsSnapshotBuilder::STATEMENT_PURPOSE,
+                    $body,
                     $idempotencyKey,
                     $userId,
                 );

@@ -98,6 +98,18 @@ final class PayrollIncomeTaxLiabilityMaterializer
             }
 
             $totals = $this->validatedTotals($root, $statutory);
+            $offset = $this->add(
+                $totals['tax_bonus'],
+                $this->annualSettlementTotal($supplierId, $revisionId),
+            );
+            $unappliedOffset = max(
+                0,
+                $this->subtract($offset, $totals['advance_tax']),
+            );
+            $totals['advance_tax'] = max(
+                0,
+                $this->subtract($totals['advance_tax'], $offset),
+            );
             $periodStart = $this->date(
                 $revision['period_start'],
                 'období mzdového běhu',
@@ -205,6 +217,17 @@ final class PayrollIncomeTaxLiabilityMaterializer
                     'target_amount_minor' => $targetAmount,
                     'prior_signed_minor' => $priorSigned,
                     'delta_signed_minor' => $delta,
+                    // § 35d odst. 5 a 9, § 38ch odst. 5: o co se odvod záloh
+                    // snížil a co se z toho do nuly nevešlo. Nevešlý zbytek si
+                    // plátce podle týchž ustanovení buď odečte v dalších
+                    // měsících, nebo o něj požádá správce daně — obojí je jeho
+                    // úkon, takže se tady jen pojmenuje, nedomýšlí.
+                    ...($kind === PayrollLevyDeadlinePolicy::ADVANCE_TAX
+                        ? [
+                            'advance_tax_offset_minor' => $offset,
+                            'advance_tax_offset_unapplied_minor' => $unappliedOffset,
+                        ]
+                        : []),
                 ];
                 $sourceJson = CanonicalJson::encode($source);
                 $sourceHash = hash('sha256', $sourceJson);
@@ -264,6 +287,65 @@ final class PayrollIncomeTaxLiabilityMaterializer
                 'created_count' => $created,
             ];
         });
+    }
+
+    /**
+     * Doplatky ze zúčtování vyplacené v téhle revizi (§ 35d odst. 8).
+     *
+     * Berou se ze zmrazeného výsledku čisté mzdy, ne z evidence ročního
+     * zúčtování — odvod se musí opírat o totéž číslo, které skutečně odešlo
+     * zaměstnanci, jinak by se výplata a odvod mohly rozejít.
+     */
+    private function annualSettlementTotal(int $supplierId, int $revisionId): int
+    {
+        $statutory = $this->statutoryResults->find(
+            $supplierId,
+            $revisionId,
+            'net_pay',
+        );
+        if ($statutory === null) {
+            throw new \DomainException(
+                'Revize nemá neměnný výsledek čisté mzdy.',
+            );
+        }
+        if (($statutory['schema_version'] ?? null) !== 'payroll-net-result.v1'
+            || ($statutory['result_status'] ?? null) !== 'calculated'
+        ) {
+            throw new \DomainException(
+                'Daňové závazky vyžadují plně vypočtenou čistou mzdu.',
+            );
+        }
+        $people = $statutory['people'] ?? null;
+        if (!is_array($people) || !array_is_list($people) || $people === []) {
+            throw new \DomainException(
+                'Výsledek čisté mzdy neobsahuje neměnné výsledky osob.',
+            );
+        }
+        $total = 0;
+        foreach ($people as $index => $value) {
+            $person = $this->object($value, "čistá mzda {$index}");
+            $result = $this->object(
+                $person['result_snapshot'] ?? null,
+                "čistá mzda {$index}.result_snapshot",
+            );
+            if (!hash_equals(
+                $this->hash($person, 'result_snapshot_hash'),
+                hash('sha256', CanonicalJson::encode($result)),
+            )) {
+                throw new \DomainException(
+                    'Otisk výsledku čisté mzdy osoby nesouhlasí.',
+                );
+            }
+            $total = $this->add(
+                $total,
+                $this->nonNegativeInt(
+                    $result['annual_settlement_minor_units'] ?? 0,
+                    "doplatek ze zúčtování {$index}",
+                ),
+            );
+        }
+
+        return $total;
     }
 
     /** @param array<string,mixed> $revision */

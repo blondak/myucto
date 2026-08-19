@@ -25,9 +25,12 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
  *
  * ## Co se do listu vědomě nezapisuje
  *
- * - **Doba uchování stejnopisu.** § 38 zákona č. 582/1991 Sb. ukládá založit
- *   stejnopis do evidence zaměstnavatele; přesnou délku uchování se nepodařilo
- *   ověřit na úrovni odstavce, takže ji modul nikam netvrdí ani nevynucuje.
+ * - **Doba uchování stejnopisu.** § 38 odst. 5 věta první zákona č. 582/1991 Sb.
+ *   ve znění účinném do 31. 12. 2025 ukládá založit stejnopis do evidence
+ *   zaměstnavatele a odkazuje přitom na § 35a odst. 4 písm. a) — tam, a ne
+ *   v § 38, stojí lhůta **3 kalendářní roky**. Do listu se proto nezapisuje:
+ *   uchovávací lhůty modul drží na jednom místě, v retenčním katalogu
+ *   (kategorie `PENSION_EVIDENCE_SHEETS`), ne v jednotlivých sestavovačích.
  * - **Odečítané doby** (10375, 10462–10469) — týkají se dob po dosažení
  *   důchodového věku, který modul nezná. Nula je proto podmíněná výslovným
  *   potvrzením mzdové účetní, ne výpočtem.

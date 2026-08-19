@@ -33,6 +33,27 @@ final class PermissionCatalogParityTest extends TestCase
         self::assertSame([], $unknown, 'Router používá permission klíče mimo PERMISSION_KEYS.');
     }
 
+    public function testFrontendClientPermissionKeysFollowBackendRoleTypes(): void
+    {
+        $source = self::readRepoFile('web/src/security/permissions.ts');
+        self::assertMatchesRegularExpression(
+            '/CLIENT_PERMISSION_KEYS\s*=\s*\[(?<keys>.*?)]\s*as const/s',
+            $source,
+        );
+        preg_match('/CLIENT_PERMISSION_KEYS\s*=\s*\[(?<keys>.*?)]\s*as const/s', $source, $match);
+        preg_match_all('/[\'"](?<key>[a-z0-9_.]+)[\'"]/', $match['keys'], $keys);
+
+        $frontend = array_values(array_unique($keys['key']));
+        $backend = [];
+        foreach ((new PermissionCatalog())->all() as $key => $definition) {
+            if (in_array('client', $definition['role_types'], true)) $backend[] = $key;
+        }
+        sort($frontend);
+        sort($backend);
+
+        self::assertSame($backend, $frontend, 'CLIENT_PERMISSION_KEYS musí odpovídat role_types=client.');
+    }
+
     /** @return list<string> */
     private static function frontendPermissionKeys(): array
     {

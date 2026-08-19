@@ -39,6 +39,8 @@ final readonly class HealthPersonMonthInput
         public ?string $selectedTopUpEmployerEvidenceReference = null,
         public HealthMinimumTopUpEmployerSelection $topUpEmployerSelection =
             HealthMinimumTopUpEmployerSelection::Unverified,
+        public HealthMinimumTopUpResponsibilitySource $topUpResponsibilitySource =
+            HealthMinimumTopUpResponsibilitySource::Declared,
     ) {
         if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/D', $personId) !== 1) {
             throw new InvalidArgumentException('Health insurance person ID is not canonical.');
@@ -138,6 +140,20 @@ final readonly class HealthPersonMonthInput
         ) {
             throw new InvalidArgumentException(
                 'Another selected minimum top-up employer requires another employer.',
+            );
+        }
+        // Zákonný výchozí stav umí být JEN to, co zákon skutečně stanoví:
+        // § 3 odst. 10 z. č. 592/1992 Sb. dělá výchozím plátcem zaměstnance
+        // a výjimku (překážky na straně organizace) váže na doklad. Kdyby se
+        // sem dal odvodit i zaměstnavatel nebo `unverified`, vznikla by cesta,
+        // jak výjimku prohlásit bez dokladu „jménem zákona".
+        if (
+            $topUpResponsibilitySource === HealthMinimumTopUpResponsibilitySource::StatutoryDefault
+            && ($topUpResponsibility !== HealthMinimumTopUpResponsibility::Employee
+                || $topUpResponsibilityEvidenceReference !== null)
+        ) {
+            throw new InvalidArgumentException(
+                'The statutory default top-up responsibility is the employee without evidence.',
             );
         }
 

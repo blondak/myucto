@@ -13,10 +13,12 @@ use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionInterval;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionReason;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpEmployerSelection;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibility;
+use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibilitySource;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthOtherEmployerBase;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthPersonMonthInput;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthRelationshipKindMapper;
 use MyInvoice\Service\Payroll\IncomeTax\AnnualTaxAccumulatorInput;
+use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKind;
 use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKindMapper;
 use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipTaxInput;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxInput;
@@ -30,12 +32,18 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
 use MyInvoice\Service\Payroll\IncomeTax\TaxResidenceEvidence;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialDiscountEvidence;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerRateCategory;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialEmploymentKind;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialIncomeAttribution;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceRelationshipInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialJurisdictionEvidence;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPersonMonthInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialRelationshipKindMapper;
+use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojClaimDeadlinePolicy;
+use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojDiscountEligibility;
+use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojIntentEvidence;
 
 final class PayrollRunStatutoryInputAssembler
 {
@@ -46,17 +54,21 @@ final class PayrollRunStatutoryInputAssembler
     private readonly SocialRelationshipKindMapper $socialKinds;
     private readonly HealthRelationshipKindMapper $healthKinds;
     private readonly EmploymentRelationshipKindMapper $taxKinds;
+    private readonly OzuspojDiscountEligibility $discountEligibility;
 
     public function __construct(
         ?PayrollRunStatutoryComponentMapper $components = null,
         ?SocialRelationshipKindMapper $socialKinds = null,
         ?HealthRelationshipKindMapper $healthKinds = null,
         ?EmploymentRelationshipKindMapper $taxKinds = null,
+        ?OzuspojDiscountEligibility $discountEligibility = null,
     ) {
         $this->components = $components ?? new PayrollRunStatutoryComponentMapper();
         $this->socialKinds = $socialKinds ?? new SocialRelationshipKindMapper();
         $this->healthKinds = $healthKinds ?? new HealthRelationshipKindMapper();
         $this->taxKinds = $taxKinds ?? new EmploymentRelationshipKindMapper();
+        $this->discountEligibility = $discountEligibility
+            ?? new OzuspojDiscountEligibility(new OzuspojClaimDeadlinePolicy());
     }
 
     /** @param array<string,mixed> $snapshot */
@@ -491,6 +503,17 @@ final class PayrollRunStatutoryInputAssembler
             return null;
         }
 
+        [$rateCategory, $rateCategoryEvidence] = $this->socialEmployerRateCategory($term);
+        [$discountEvidence, $discountReason, $discountEvidenceReference] =
+            $this->socialPartTimeDiscount(
+                $term,
+                $mapping->kind,
+                $periodStart,
+                $periodEnd,
+                $employmentFrom,
+                $employmentTo,
+            );
+
         try {
             return new SocialInsuranceRelationshipInput(
                 $relationshipReference,
@@ -499,7 +522,22 @@ final class PayrollRunStatutoryInputAssembler
                 $active,
                 $attribution,
                 $components,
+                partTimeEmployerDiscount: $discountEvidence,
+                employerRateCategory: $rateCategory,
+                partTimeEmployerDiscountEvidenceReference: $discountEvidenceReference,
                 participationAggregationGroup: $mapping->aggregationGroup,
+                employerRateCategoryEvidenceReference: $rateCategoryEvidence,
+                partTimeEmployerDiscountReason: $discountReason,
+                partTimeDiscountAssessableMillihours:
+                    $this->socialPartTimeDiscountHours($snapshot['time_month'] ?? null),
+                partTimeDiscountEmploymentDays: $this->calendarDaysInPeriod(
+                    $employmentFrom,
+                    $employmentTo,
+                    $periodStart,
+                    $periodEnd,
+                ),
+                partTimeDiscountMonthDays: $this->calendarDaysInMonth($periodStart, $periodEnd),
+                agreedWeeklyWorkingMillihours: $this->weeklyWorkingMillihours($term),
             );
         } catch (\InvalidArgumentException) {
             $this->issue(
@@ -510,6 +548,241 @@ final class PayrollRunStatutoryInputAssembler
             );
             return null;
         }
+    }
+
+    /**
+     * Sazbová kategorie zaměstnavatele podle § 5a odst. 1 a odkaz na podklad.
+     *
+     * Zmrazená revize starší než sloupec kategorie klíč vůbec nemá. Takový
+     * snapshot se čte jako běžná sazba — přesně to, co se z něj počítalo
+     * v době, kdy vznikl; dosadit dnešní fail-closed by přepsalo historii.
+     * Hodnota, která JE, ale kategorii nepojmenovává, je naopak neznámé
+     * zařazení a končí ručním posouzením.
+     *
+     * @param array<string,mixed> $term
+     * @return array{0:SocialEmployerRateCategory,1:?string}
+     */
+    private function socialEmployerRateCategory(array $term): array
+    {
+        if (!array_key_exists('social_employer_rate_category', $term)) {
+            return [SocialEmployerRateCategory::Ordinary, null];
+        }
+        $category = SocialEmployerRateCategory::tryFrom(
+            is_string($term['social_employer_rate_category'] ?? null)
+                ? $term['social_employer_rate_category']
+                : '',
+        );
+        if ($category === null || $category === SocialEmployerRateCategory::Unverified) {
+            return [SocialEmployerRateCategory::Unverified, null];
+        }
+        if ($category === SocialEmployerRateCategory::Ordinary) {
+            return [$category, null];
+        }
+        $evidence = is_string($term['social_employer_rate_category_evidence'] ?? null)
+            ? trim($term['social_employer_rate_category_evidence'])
+            : '';
+        if ($evidence === '') {
+            return [SocialEmployerRateCategory::Unverified, null];
+        }
+
+        return [$category, $evidence];
+    }
+
+    /**
+     * Nárok na slevu zaměstnavatele podle § 7a a jeho doložení.
+     *
+     * Sleva je výhoda ZAMĚSTNAVATELE: § 7c odst. 3 dělá z přeplacené slevy dluh
+     * na pojistném, kdežto z neuplatněné žádný nedoplatek nevzniká. Fail-closed
+     * proto míří na NEUPLATNĚNÍ — chybějící podklad, chybějící nebo pozdní
+     * oznámení ČSSZ i nepodporovaný druh vztahu končí jako nedoložený nárok
+     * (ruční posouzení), nikdy jako tichá uplatněná sleva.
+     *
+     * § 7a odst. 5 podmiňuje nárok tím, že zaměstnavatel „nejpozději
+     * s uplatněním této slevy oznámil České správě sociálního zabezpečení záměr
+     * uplatňovat tuto slevu za tohoto zaměstnance; oznámením tohoto záměru se
+     * rozumí okamžik jeho DORUČENÍ České správě sociálního zabezpečení".
+     *
+     * Do 18. 8. 2026 se tahle podmínka posuzovala z jediného ručně opsaného
+     * data na kartě vztahu (`social_part_time_discount_notified_on`) a
+     * porovnávala se s koncem období. Bylo to špatně ve dvou směrech naráz:
+     *
+     *   * PŘÍSNĚ — oznámení doručené 5. dne následujícího měsíce je podle
+     *     § 7c odst. 2 pořád včas (sleva se uplatňuje až hlášením do splatnosti
+     *     pojistného), ale porovnání s koncem období ho zahodilo;
+     *   * BENEVOLENTNĚ — datum nikdo neověřoval a nešlo z něj poznat, NA JAKÉ
+     *     OBDOBÍ je záměr oznámen ani jestli mezitím neskončil. Kontrola 291
+     *     katalogu kontrol MH je přitom propustná, takže by se nesoulad projevil
+     *     až protokolem, kdy je pojistné odvedené ponížené a § 7c odst. 3 z toho
+     *     dělá dluh.
+     *
+     * Nárok se proto odvozuje z EVIDENCE ZÁMĚRŮ (podání OZUSPOJ, § 23e), která
+     * drží den doručení odděleně od období platnosti a od stavu přijetí. Ručně
+     * opsané datum už nárok nezakládá — zůstává jen ve zmrazených revizích,
+     * které vznikly dřív.
+     *
+     * Zmrazená revize starší než sloupec důvodu klíč `social_part_time_discount_reason`
+     * vůbec nemá — čte se jako neuplatněná sleva, přesně tak, jak se z ní tehdy
+     * počítalo. Revize, která důvod má, ale klíč `social_part_time_discount_intent`
+     * ne, pochází z doby před evidencí záměrů; přepočítat ji dnešním pravidlem
+     * by přepsalo historii, takže si podrží tehdejší posouzení podle ručně
+     * zadaného data.
+     *
+     * @param array<string,mixed> $term
+     * @return array{0:SocialDiscountEvidence,1:?SocialPartTimeDiscountReason,2:?string}
+     */
+    private function socialPartTimeDiscount(
+        array $term,
+        SocialEmploymentKind $kind,
+        string $periodStart,
+        string $periodEnd,
+        string $employmentFrom,
+        ?string $employmentTo,
+    ): array {
+        $raw = is_string($term['social_part_time_discount_reason'] ?? null)
+            ? $term['social_part_time_discount_reason']
+            : 'none';
+        if ($raw === 'none') {
+            return [SocialDiscountEvidence::NotClaimed, null, null];
+        }
+        $reason = SocialPartTimeDiscountReason::tryFrom($raw);
+        if ($reason === null || $kind !== SocialEmploymentKind::Employment) {
+            return [SocialDiscountEvidence::Unverified, null, null];
+        }
+        $evidence = is_string($term['social_part_time_discount_evidence'] ?? null)
+            ? trim($term['social_part_time_discount_evidence'])
+            : '';
+        if ($evidence === '') {
+            return [SocialDiscountEvidence::Unverified, null, null];
+        }
+        if (!array_key_exists('social_part_time_discount_intent', $term)) {
+            return $this->legacySocialPartTimeDiscount(
+                $term,
+                $reason,
+                $evidence,
+                $periodEnd,
+            );
+        }
+        $intent = OzuspojIntentEvidence::fromRow(
+            $this->object($term['social_part_time_discount_intent'] ?? null) ?? [],
+        );
+        $verdict = $this->discountEligibility->assess(
+            $intent,
+            $periodStart,
+            $periodEnd,
+            $employmentFrom,
+            $employmentTo,
+        );
+        if (!$verdict->allowsDiscount()) {
+            return [SocialDiscountEvidence::Unverified, null, null];
+        }
+
+        return [SocialDiscountEvidence::Verified, $reason, $evidence];
+    }
+
+    /**
+     * Posouzení revizí zmrazených před zavedením evidence záměrů. Beze změny
+     * proti stavu do 18. 8. 2026, aby přepočet staré revize dal totéž co tehdy.
+     *
+     * @param array<string,mixed> $term
+     * @return array{0:SocialDiscountEvidence,1:?SocialPartTimeDiscountReason,2:?string}
+     */
+    private function legacySocialPartTimeDiscount(
+        array $term,
+        SocialPartTimeDiscountReason $reason,
+        string $evidence,
+        string $periodEnd,
+    ): array {
+        $notifiedOn = is_string($term['social_part_time_discount_notified_on'] ?? null)
+            ? trim($term['social_part_time_discount_notified_on'])
+            : '';
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/D', $notifiedOn) !== 1
+            || $notifiedOn > $periodEnd
+        ) {
+            return [SocialDiscountEvidence::Unverified, null, null];
+        }
+
+        return [SocialDiscountEvidence::Verified, $reason, $evidence];
+    }
+
+    /**
+     * Hodiny pro § 7a odst. 3 písm. b) a c) — odpracované plus ty, za které
+     * náleží náhrada mzdy nebo platu („za odpracovanou hodinu se považuje též
+     * hodina, za kterou … náleží náhrada mzdy nebo platu").
+     *
+     * Rozpad placených neodpracovaných hodin nese teprve pracovní souhrn JMHZ
+     * verze `jmhz-work-month.v2`. Bez něj nelze úhrn sestavit a hodiny se
+     * nevracejí vůbec — kalkulátor pak nárok neuplatní a měsíc jde na ruční
+     * posouzení.
+     */
+    private function socialPartTimeDiscountHours(mixed $timeMonth): ?int
+    {
+        $month = $this->object($timeMonth);
+        $summary = $this->object($month['jmhz_work_summary'] ?? null);
+        if ($summary === null
+            || ($summary['derivation_version'] ?? null) !== 'jmhz-work-month.v2'
+        ) {
+            return null;
+        }
+        $values = $this->object($summary['values'] ?? null);
+        if ($values === null) {
+            return null;
+        }
+        $worked = $this->nonNegativeInt($values['worked_millihours'] ?? null);
+        $paidUnworked = $this->nonNegativeInt($values['unworked_paid_millihours'] ?? null);
+        if ($worked === null || $paidUnworked === null) {
+            return null;
+        }
+
+        return $worked + $paidUnworked;
+    }
+
+    /** Sjednaná týdenní pracovní doba v tisícinách hodiny (§ 7a odst. 2). */
+    /** @param array<string,mixed> $term */
+    private function weeklyWorkingMillihours(array $term): ?int
+    {
+        $raw = $term['weekly_hours'] ?? null;
+        if (!is_string($raw) && !is_int($raw) && !is_float($raw)) {
+            return null;
+        }
+        if (preg_match('/^\d+(\.\d{1,2})?$/D', (string) $raw) !== 1) {
+            return null;
+        }
+
+        return (int) round(((float) $raw) * 1_000);
+    }
+
+    private function calendarDaysInMonth(string $periodStart, string $periodEnd): ?int
+    {
+        $days = $this->dayDifference($periodStart, $periodEnd);
+
+        return $days === null ? null : $days + 1;
+    }
+
+    private function calendarDaysInPeriod(
+        string $from,
+        ?string $to,
+        string $periodStart,
+        string $periodEnd,
+    ): ?int {
+        $start = max($from, $periodStart);
+        $end = $to === null ? $periodEnd : min($to, $periodEnd);
+        if ($start > $end) {
+            return 0;
+        }
+        $days = $this->dayDifference($start, $end);
+
+        return $days === null ? null : $days + 1;
+    }
+
+    private function dayDifference(string $from, string $to): ?int
+    {
+        $start = \DateTimeImmutable::createFromFormat('!Y-m-d', $from, new \DateTimeZone('UTC'));
+        $end = \DateTimeImmutable::createFromFormat('!Y-m-d', $to, new \DateTimeZone('UTC'));
+        if ($start === false || $end === false) {
+            return null;
+        }
+
+        return (int) $start->diff($end)->days;
     }
 
     /**
@@ -579,35 +852,68 @@ final class PayrollRunStatutoryInputAssembler
             );
         }
 
+        /*
+         * Chybějící měsíční evidence zdravotního minima = zákonný výchozí stav,
+         * ne mezera v podkladech.
+         *
+         * § 3 odst. 10 zákona č. 592/1992 Sb.: „Pokud je vyměřovací základ
+         * zaměstnance nižší než minimální vyměřovací základ, je zaměstnanec
+         * povinen doplatit zdravotní pojišťovně prostřednictvím svého
+         * zaměstnavatele pojistné ve výši 13,5 % z rozdílu těchto základů. […]
+         * Pokud je vyměřovací základ nižší z důvodů překážek na straně
+         * organizace, je tento rozdíl povinen doplatit zaměstnavatel."
+         *
+         * Plátcem je tedy ze zákona ZAMĚSTNANEC a zaměstnavatel je výjimka
+         * vázaná na skutkovou okolnost (překážky na jeho straně), kterou musí
+         * někdo doložit. Vyžadovat řádek i pro pravidlo znamenalo u firmy
+         * s tisícem lidí 12 000 zápisů ročně, které jen opakují text zákona.
+         *
+         * Ptá se, až když to nastane: dopočet vůbec nevznikne, když vyměřovací
+         * základ dosahuje minima nebo se na osobu minimum nevztahuje, a
+         * HealthMinimumResolver hlásí `minimum_top_up_responsibility_unverified`
+         * i `selected_top_up_employer_*` jen při nenulové mezeře. V měsíci bez
+         * dopočtu proto nevznikne ani issue, ani požadavek na vstup.
+         *
+         * Doklad se drží tam, kde má co dokládat: u výjimky
+         * `employer_obstacle_verified` ho vynucuje HealthPersonMonthInput,
+         * u volby jiného zaměstnavatele při souběhu HealthMinimumResolver.
+         * U výchozího stavu žádný není a být nemá.
+         *
+         * Že hodnota vznikla odvozením ze zákona, nese snímek výpočtu vlastním
+         * klíčem — viz HealthMinimumTopUpResponsibilitySource.
+         */
         $monthEvidence = $this->object(
             $healthEvidence['month_evidence'] ?? null,
         );
-        if ($monthEvidence === null) {
-            $this->issue(
-                'health_insurance',
-                'health_minimum_month_evidence_missing',
-                $personReference,
+        $monthEvidenceRow = $monthEvidence ?? [];
+        $responsibility = HealthMinimumTopUpResponsibility::Employee;
+        $responsibilitySource =
+            HealthMinimumTopUpResponsibilitySource::StatutoryDefault;
+        if ($monthEvidence !== null) {
+            $responsibilitySource =
+                HealthMinimumTopUpResponsibilitySource::Declared;
+            $declared = $this->enum(
+                HealthMinimumTopUpResponsibility::class,
+                $monthEvidenceRow['top_up_responsibility'] ?? null,
             );
-            return null;
-        }
-        $responsibility = $this->enum(
-            HealthMinimumTopUpResponsibility::class,
-            $monthEvidence['top_up_responsibility'] ?? null,
-        );
-        if (!$responsibility instanceof HealthMinimumTopUpResponsibility) {
-            $this->issue(
-                'health_insurance',
-                'health_minimum_responsibility_invalid',
-                $personReference,
-            );
-            return null;
-        }
-        if ($responsibility === HealthMinimumTopUpResponsibility::Unverified) {
-            $this->issue(
-                'health_insurance',
-                'health_minimum_responsibility_unverified',
-                $personReference,
-            );
+            if (!$declared instanceof HealthMinimumTopUpResponsibility) {
+                $this->issue(
+                    'health_insurance',
+                    'health_minimum_responsibility_invalid',
+                    $personReference,
+                );
+                return null;
+            }
+            // Explicitní `unverified` je prohlášení „nevíme", ne absence
+            // prohlášení — a to zůstává důvodem k ručnímu posouzení.
+            if ($declared === HealthMinimumTopUpResponsibility::Unverified) {
+                $this->issue(
+                    'health_insurance',
+                    'health_minimum_responsibility_unverified',
+                    $personReference,
+                );
+            }
+            $responsibility = $declared;
         }
 
         $reductions = $this->healthReductions(
@@ -635,7 +941,7 @@ final class PayrollRunStatutoryInputAssembler
             return null;
         }
         $selectedEmployer = $this->nullableString(
-            $monthEvidence['selected_top_up_employer_reference'] ?? null,
+            $monthEvidenceRow['selected_top_up_employer_reference'] ?? null,
         );
         $selection = $selectedEmployer === null
             ? HealthMinimumTopUpEmployerSelection::ThisEmployer
@@ -662,17 +968,18 @@ final class PayrollRunStatutoryInputAssembler
                 $responsibility ===
                     HealthMinimumTopUpResponsibility::EmployerObstacleVerified
                     ? $this->nullableString(
-                        $monthEvidence[
+                        $monthEvidenceRow[
                             'top_up_responsibility_evidence_reference'
                         ] ?? null,
                     )
                     : null,
                 $this->nullableString(
-                    $monthEvidence[
+                    $monthEvidenceRow[
                         'selected_top_up_employer_evidence_reference'
                     ] ?? null,
                 ),
                 $selection,
+                $responsibilitySource,
             );
         } catch (\InvalidArgumentException) {
             $this->issue(
@@ -1032,6 +1339,12 @@ final class PayrollRunStatutoryInputAssembler
                 $relationshipReference,
             );
         }
+        // `tax_regime` je override VÝSLEDKU („zdaň to srážkou / v cizině / ručně")
+        // a podporovaná je z něj zatím jen `advance`. Zařazení podle § 6 odst. 4
+        // písm. b) ZDP se proto NEBERE odsud: to je vstupní skutečnost, na kterou
+        // výpočet teprve aplikuje rozhodnou částku, kdežto `tax_regime` by ji
+        // přeskočil a srazil daň i nad ní. Jede vlastním sloupcem — viz
+        // otherWithholdingEligibility().
         if (($term['tax_regime'] ?? null) !== 'advance') {
             $this->issue(
                 'income_tax',
@@ -1071,13 +1384,66 @@ final class PayrollRunStatutoryInputAssembler
             return null;
         }
 
+        [$eligibility, $classificationEvidence] = $this->otherWithholdingEligibility(
+            $kind,
+            $term,
+            $relationshipReference,
+        );
+
         return new EmploymentRelationshipTaxInput(
             $relationshipReference,
             "supplier:{$supplierId}",
             $kind,
             $components,
-            OtherWithholdingEligibility::Automatic,
+            $eligibility,
+            $classificationEvidence,
         );
+    }
+
+    /**
+     * Zařazení vztahu pro § 6 odst. 4 písm. b) ZDP.
+     *
+     * U pracovního poměru, zaměstnání malého rozsahu a DPP plyne odpověď ze
+     * samotného druhu vztahu, takže se posílá `Automatic` a zařadí si ho výpočet.
+     * U odměny jednatele nebo člena statutárního orgánu, u DPČ a u společníka
+     * konajícího práci pro s. r. o. to z druhu vztahu poznat nejde — rozhoduje,
+     * jestli sjednaná odměna dosahuje rozhodné částky pro účast na nemocenském
+     * pojištění — a odpověď proto nese prohlášení plátce ve smluvních podmínkách.
+     *
+     * Neznámá nebo nevyplněná hodnota končí na `Unverified`, tedy ručním
+     * posouzením. Je to fail-closed záměrně: běhy spočítané před migrací 1403
+     * mají snapshot bez tohohle klíče a nesmí se dopočítat jinak, než jak by je
+     * spočítal tehdejší kód.
+     *
+     * @param array<string,mixed> $term
+     * @return array{OtherWithholdingEligibility,?string}
+     */
+    private function otherWithholdingEligibility(
+        EmploymentRelationshipKind $kind,
+        array $term,
+        string $relationshipReference,
+    ): array {
+        if (!$kind->requiresOtherWithholdingStatement()) {
+            return [OtherWithholdingEligibility::Automatic, null];
+        }
+        $eligibility = match ($term['other_withholding_eligibility'] ?? null) {
+            'eligible' => OtherWithholdingEligibility::EligibleVerified,
+            'ineligible' => OtherWithholdingEligibility::IneligibleVerified,
+            default => OtherWithholdingEligibility::Unverified,
+        };
+        if ($eligibility === OtherWithholdingEligibility::Unverified) {
+            return [$eligibility, null];
+        }
+        // Doklad o zařazení je ta verze smluvních podmínek, ve které plátce
+        // prohlášení uložil — je effective-dated a nese autora i důvod změny.
+        $termId = $this->positiveInt($term['id'] ?? null);
+
+        return [
+            $eligibility,
+            $termId === null
+                ? $relationshipReference
+                : "employment-term:{$termId}",
+        ];
     }
 
     /** @param array<string,mixed> $person */
@@ -1299,7 +1665,7 @@ final class PayrollRunStatutoryInputAssembler
                 continue;
             }
             try {
-                $result[] = $this->components->social($input);
+                array_push($result, ...$this->components->social($input));
             } catch (\InvalidArgumentException|\ValueError|\UnexpectedValueException) {
                 $this->issue(
                     'social_insurance',
@@ -1356,7 +1722,7 @@ final class PayrollRunStatutoryInputAssembler
                 continue;
             }
             try {
-                $result[] = $this->components->health($input, $periodStart);
+                array_push($result, ...$this->components->health($input, $periodStart));
             } catch (\InvalidArgumentException|\ValueError|\UnexpectedValueException) {
                 $this->issue(
                     'health_insurance',
@@ -1389,7 +1755,13 @@ final class PayrollRunStatutoryInputAssembler
             $component = $this->object($input['component'] ?? null);
             $treatment = $component['tax_treatment'] ?? null;
             $usable = true;
-            if ($treatment === 'exempt') {
+            // Osvobození je jinak nedoložené tvrzení a výpočet se u něj zastaví.
+            // Na otázku, čím je podložené, odpovídá sdílený
+            // {@see PayrollExemptionEvidence} — týž doklad pak mapper vloží do
+            // složky, takže se tahle brána a brána výpočtu daně nemůžou rozejít.
+            if ($treatment === 'exempt'
+                && PayrollExemptionEvidence::resolve($input) === null
+            ) {
                 $this->issue(
                     'income_tax',
                     'tax_component_exemption_evidence_missing',
@@ -1420,7 +1792,7 @@ final class PayrollRunStatutoryInputAssembler
                 continue;
             }
             try {
-                $result[] = $this->components->incomeTax($input, $periodStart);
+                array_push($result, ...$this->components->incomeTax($input, $periodStart));
             } catch (\InvalidArgumentException|\ValueError|\UnexpectedValueException) {
                 $this->issue(
                     'income_tax',

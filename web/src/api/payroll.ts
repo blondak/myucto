@@ -54,6 +54,18 @@ export type PayrollRelationType = 'employment' | 'small_scale_employment' | 'dpp
 export type PayrollEmploymentStatus = 'planned' | 'preregistered' | 'active' | 'suspended' | 'ended' | 'archived' | 'no_show'
 export type PayrollInsuranceParticipation = 'automatic' | 'included' | 'excluded' | 'foreign'
 export type PayrollTaxRegime = 'advance' | 'withholding' | 'foreign' | 'manual_review'
+/** § 5a odst. 1 písm. a) až c) zák. č. 589/1992 Sb. — tři sazby zaměstnavatele. */
+export type PayrollSocialEmployerRateCategory =
+  | 'ordinary'
+  | 'rescue_and_company_fire_service'
+  | 'risk_employment'
+/**
+ * Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP: zakládá vztah účast na
+ * nemocenském pojištění (`ineligible` — vždy zálohová daň), nebo ne (`eligible` —
+ * do rozhodné částky srážková)? Ptáme se jen u vztahů, u kterých to z druhu
+ * poznat nejde: odměna jednatele/člena orgánu, DPČ, práce společníka pro s. r. o.
+ */
+export type PayrollOtherWithholdingEligibility = 'unverified' | 'eligible' | 'ineligible'
 export type PayrollChecklistStatus = 'pending' | 'completed' | 'not_applicable'
 
 /**
@@ -161,9 +173,20 @@ export interface PayrollEmploymentTerms {
   social_insurance_participation: PayrollInsuranceParticipation
   health_insurance_participation: PayrollInsuranceParticipation
   tax_regime: PayrollTaxRegime
+  // Nepovinné schválně: obrazovky, které pole nenabízejí, posílají podmínky bez
+  // něj a server v takovém případě ponechá uloženou hodnotu (jinak by uložení
+  // nesouvisející změny shodilo daňové zařazení jednatele na „neurčeno").
+  other_withholding_eligibility?: PayrollOtherWithholdingEligibility
   foreign_legislation_country_code: string | null
   a1_certificate_until: string | null
+  // Odvozený příznak, ne samostatné pole: server ho drží v souladu se sazbovou
+  // kategorií (§ 5a odst. 1 písm. c) je riziková práce). JMHZ ho čte dál.
   risky_work: boolean
+  social_employer_rate_category: PayrollSocialEmployerRateCategory
+  social_employer_rate_category_evidence: string | null
+  social_part_time_discount_reason: PayrollSocialPartTimeDiscountReason
+  social_part_time_discount_evidence: string | null
+  social_part_time_discount_notified_on: string | null
   tax_declaration_signed: boolean
   is_primary: boolean
   change_reason: string | null
@@ -193,11 +216,42 @@ export interface PayrollEmploymentEvent {
   created_at: string
 }
 
+/**
+ * `risky_work` a sazbová kategorie § 5a odst. 1 popisují TUTÉŽ věc, takže se
+ * posílá jedno z nich, ne obojí: obrazovka s výběrem kategorie pošle kategorii
+ * a server z ní boolean dopočítá, starší obrazovka pošle boolean a server ho
+ * na kategorii přeloží. Poslat obojí a nesouhlasně je chyba, ne tichá volba —
+ * proto jsou obě strany nepovinné, ne obě povinné.
+ */
+export type PayrollSocialPartTimeDiscountReason =
+  | 'none'
+  | 'age_55_plus'
+  | 'child_care_under_10'
+  | 'dependent_close_person_care'
+  | 'study_under_26'
+  | 'retraining_jobseeker'
+  | 'disabled_person'
+  | 'under_21'
+
 export type PayrollEmploymentTermsPayload = Omit<
   PayrollEmploymentTerms,
   'id' | 'office_code' | 'effective_to' | 'jmhz_external_codebook_overlay_key'
     | 'jmhz_external_codebook_manifest_sha256' | 'row_version' | 'created_at'
->
+    | 'risky_work' | 'social_employer_rate_category'
+    | 'social_employer_rate_category_evidence'
+    | 'social_part_time_discount_reason' | 'social_part_time_discount_evidence'
+    | 'social_part_time_discount_notified_on'
+> & {
+  risky_work?: boolean
+  social_employer_rate_category?: PayrollSocialEmployerRateCategory
+  social_employer_rate_category_evidence?: string | null
+  // Nárok podle § 7a nabízí jen karta vztahu; obrazovky, které o něm nevědí,
+  // ho neposílají a server je čte jako „sleva se neuplatňuje". Poslat prázdno
+  // je proto v pořádku, poslat nesmysl ne.
+  social_part_time_discount_reason?: PayrollSocialPartTimeDiscountReason
+  social_part_time_discount_evidence?: string | null
+  social_part_time_discount_notified_on?: string | null
+}
 
 export interface PayrollEmploymentCreatePayload {
   code: string
@@ -360,6 +414,53 @@ export interface PayrollOpeningBalances {
   openings: Record<string, number | null>
   /** Po schválené mzdě za daný rok už počáteční stavy měnit nelze. */
   locked: boolean
+}
+
+/**
+ * Zákonná evidence osoby — prohlášení k dani, daňová rezidence, sociální
+ * a zdravotní příslušnost, sleva pracujícího důchodce a měsíční evidence
+ * zdravotního minima.
+ *
+ * Řádky jsou časové řady, takže se posílají a vrací jako celé kolekce; server
+ * si z cílového stavu spočítá rozdíl. Hodnoty jsou úmyslně `string | null` —
+ * jde o výčty a reference, jejichž povolené hodnoty hlídá server (a validátor
+ * mzdového snímku), ne prohlížeč.
+ */
+export interface PayrollStatutoryEvidenceRow {
+  id?: number
+  row_version?: number
+  effective_from?: string
+  effective_to?: string | null
+  period_start?: string
+  evidence_note?: string | null
+  [field: string]: string | number | null | undefined
+}
+
+export type PayrollStatutoryEvidenceSection =
+  | 'tax_declarations'
+  | 'tax_residences'
+  | 'social_jurisdictions'
+  | 'social_discount_claims'
+  | 'health_coverages'
+  | 'health_month_evidence'
+
+export interface PayrollStatutoryEvidence {
+  employee_id: number
+  effective_on: string
+  /** Poslední den uzavřený schválenou mzdou; do něj se historie nepřepisuje. */
+  frozen_through: string | null
+  sections: Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
+  other_employer_bases: PayrollStatutoryEvidenceRow[]
+  /**
+   * Důvody, proč by mzdový běh k datu snímku skončil v ručním posouzení.
+   * Klíče jsou tytéž, jaké hlásí `PayrollRunStatutoryInputAssembler`.
+   */
+  blockers: string[]
+}
+
+export interface PayrollStatutoryEvidencePayload {
+  effective_on: string
+  sections: Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
 }
 
 export interface PayrollPersonProfile {
@@ -698,7 +799,13 @@ export interface PayrollOvertimeLimitFinding {
   scope_from: string
   scope_to: string
   consent_evidenced: boolean
+  /** Ustanovení, o které se nález opírá — zobrazuje se jako štítek u věty. */
+  provision: string
+  /** Porušený zákaz, ne překročený limit: bez ruční výjimky běh neschválíte. */
+  requires_override: boolean
 }
+
+export type PayrollOvertimeAveragingBasis = 'statutory' | 'collective_agreement'
 
 export interface PayrollOvertimeLimits {
   employment_id: number
@@ -712,6 +819,11 @@ export interface PayrollOvertimeLimits {
   averaging_weeks: number
   averaging_minutes: number
   averaging_limit_minutes: number
+  averaging_compensated_minutes: number
+  averaging_basis: PayrollOvertimeAveragingBasis
+  averaging_reference: string | null
+  prohibited_minutes: Partial<Record<'juvenile' | 'pregnancy' | 'child_under_one' | 'part_time', number>>
+  requires_override: boolean
   consent_evidenced: boolean
   limits_from_ruleset: boolean
 }
@@ -723,6 +835,47 @@ export interface PayrollOvertimeConsent {
   valid_from: string
   valid_to: string | null
   document_reference: string | null
+  note: string | null
+  row_version: number
+  created_at: string
+}
+
+export type PayrollOvertimeProtectionKind = 'pregnancy' | 'child_under_one'
+
+/** Zákaz práce přesčas u chráněné skupiny (§ 240 odst. 3). */
+export interface PayrollOvertimeProtection {
+  id: number
+  employment_id: number
+  protection: PayrollOvertimeProtectionKind
+  valid_from: string
+  valid_to: string | null
+  document_reference: string | null
+  note: string | null
+  row_version: number
+  created_at: string
+}
+
+/** Náhradní volno za práci přesčas (§ 93 odst. 5). */
+export interface PayrollOvertimeCompensation {
+  id: number
+  employment_id: number
+  overtime_date: string
+  minutes: number
+  granted_on: string | null
+  document_reference: string | null
+  note: string | null
+  row_version: number
+  created_at: string
+}
+
+/** Vyrovnávací období podle § 93 odst. 4 — firemní údaj, ne konstanta. */
+export interface PayrollOvertimeAveragingPeriod {
+  id: number
+  valid_from: string
+  valid_to: string | null
+  weeks: number
+  basis: PayrollOvertimeAveragingBasis
+  collective_agreement_reference: string | null
   note: string | null
   row_version: number
   created_at: string
@@ -755,14 +908,44 @@ export interface PayrollTimeOverviewItem {
   }
   overtime_limits: PayrollOvertimeLimits | null
   overtime_consents: PayrollOvertimeConsent[]
+  overtime_protections: PayrollOvertimeProtection[]
+  overtime_compensations: PayrollOvertimeCompensation[]
+  /**
+   * Porovnání dvou evidencí náhradního volna za měsíc: absence typu
+   * `compensatory_time_off` (den čerpání) proti `payroll_overtime_compensations`
+   * (den přesčasu). Sjednotit je nejde — mají jiný klíč — ale rozpor mezi nimi
+   * nesmí zůstat tichý.
+   */
+  compensatory_time_off_check: PayrollCompensatoryTimeOffCheck | null
   shifts: PayrollShift[]
   entries: PayrollTimeEntry[]
+}
+
+export type PayrollCompensatoryTimeOffFinding =
+  | 'absence_without_compensation'
+  | 'compensation_without_absence'
+  | 'grant_date_unknown'
+
+export interface PayrollCompensatoryTimeOffCheck {
+  employment_id: number
+  period: string
+  status: 'ok' | PayrollCompensatoryTimeOffFinding
+  findings: PayrollCompensatoryTimeOffFinding[]
+  absence_rows: number
+  granted_rows: number
+  granted_minutes: number
+  ungranted_rows: number
 }
 
 export interface PayrollTimeOverview {
   period: string
   incomplete_only: boolean
+  /** Zúžení na jeden vztah, které server SKUTEČNĚ uplatnil (§ zúžení z karty). */
+  employment_id: number | null
   items: PayrollTimeOverviewItem[]
+  total: number
+  limit: number
+  offset: number
 }
 
 export interface PayrollTimeImportError {
@@ -805,6 +988,7 @@ export type PayrollComponentKind =
   | 'benefit_education'
   | 'benefit_recreation'
   | 'benefit_health'
+  | 'benefit_accommodation'
   | 'risky_savings'
   | 'travel_reimbursement'
   | 'other'
@@ -813,6 +997,46 @@ export type PayrollComponentValueKind = 'monetary' | 'non_monetary'
 export type PayrollComponentFrequency = 'regular' | 'one_off'
 export type PayrollComponentTaxTreatment = 'included' | 'exempt' | 'withholding_candidate' | 'manual_review'
 export type PayrollComponentInclusion = 'included' | 'excluded' | 'manual_review'
+
+/**
+ * Koš osvobození plnění podle § 6 odst. 9 ZDP. Limit platí na ÚHRN plnění za dané
+ * ustanovení, ne na jednu mzdovou složku. Rozhodné období je roční u písm. d) a m),
+ * měsíční u písm. i) a za jednu směnu u písm. b).
+ */
+export type PayrollBenefitExemptionBasket =
+  | 'non_cash_health'
+  | 'non_cash_leisure'
+  | 'old_age_savings'
+  | 'meal_per_shift'
+  | 'temporary_accommodation'
+
+/**
+ * Čím je nezdanění složky podložené. `not_subject_to_tax` NENÍ osvobození —
+ * plnění podle § 6 odst. 7 ZDP předmětem daně vůbec není a na mzdovém listu
+ * se mezi osvobozené částky nevykazuje.
+ */
+export type PayrollExemptionBasis =
+  | 'not_subject_to_tax'
+  | 'statutory_exempt'
+  | 'benefit_basket'
+  | 'periodic_benefit_limit'
+
+export interface PayrollBenefitBasketUsage {
+  basket: PayrollBenefitExemptionBasket
+  statute: string
+  /**
+   * Počet směn s nárokem, ze kterých se strop poskládal. `null` u košů, jejichž
+   * limit na směnách nestojí — nula by tvrdila, že se nic neodpracovalo.
+   */
+  shift_entitlements: number | null
+  limit_minor: number
+  used_before_minor: number
+  used_after_minor: number
+  remaining_minor: number
+  exempt_minor: number
+  taxable_minor: number
+  limit_exceeded: boolean
+}
 
 export interface PayrollComponent {
   id: number
@@ -834,6 +1058,8 @@ export interface PayrollComponent {
   accounting_debit_code: string | null
   accounting_credit_code: string | null
   annual_limit_minor: number | null
+  exemption_basket: PayrollBenefitExemptionBasket | null
+  exemption_basis: PayrollExemptionBasis | null
   valid_from: string
   valid_to: string | null
   is_active: boolean
@@ -1024,6 +1250,10 @@ export interface PayrollInput {
   recurring_component_id?: number | null
   status: PayrollInputStatus
   component_snapshot_json: string | null
+  /** Zmrazený koš osvobození § 6 odst. 9 ZDP — vyplní se až schválením vstupu. */
+  benefit_basket?: string | null
+  benefit_exempt_minor?: number | null
+  benefit_taxable_minor?: number | null
   row_version: number
   created_by: number | null
   approved_by: number | null
@@ -1136,6 +1366,7 @@ export interface PayrollInputPreview {
   annual_used_minor: number
   annual_after_minor: number
   annual_limit_exceeded: boolean
+  exemption_basket: PayrollBenefitBasketUsage | null
 }
 
 export interface PayrollRecurringMaterialization {
@@ -1936,9 +2167,47 @@ export interface PayrollEmploymentDimensionPayload {
   row_version?: number
 }
 
+/**
+ * Navazující agendy karty zaměstnance. Pořadí drží server (repository), aby se
+ * rozcestník i souhrn řadily stejně a nedaly se rozejít.
+ */
+export type PayrollAgendaKey =
+  | 'time'
+  | 'absences'
+  | 'travel'
+  | 'quick_inputs'
+  | 'components'
+  | 'average_earnings'
+  | 'deduction_agreements'
+  | 'enforcement'
+  | 'documents'
+  | 'annual_settlement'
+
+export interface PayrollAgendaSummaryItem {
+  key: PayrollAgendaKey
+  /** Kolik záznamů agenda pro tenhle vztah (resp. osobu) vede. */
+  count: number
+  /** Datum posledního záznamu; `null` = agenda je prázdná. */
+  last_on: string | null
+  /** Souhrnná nebo poslední částka, kde má smysl; jinak `null`. */
+  amount_minor: number | null
+}
+
+export interface PayrollEmploymentAgendaSummary {
+  employment_id: number
+  employee_id: number
+  /** Chybí agendy, na které volající nemá oprávnění — ne nula, která by lhala. */
+  agendas: PayrollAgendaSummaryItem[]
+}
+
 export interface PayrollSetupCheckItem {
   code: string
-  status: 'ok' | 'blocked'
+  /**
+   * `pending` = kontrola nevyšla, ale nastavení neblokuje (nepovinná
+   * připravenost). Chyběl tu a stránka pak u takové kontroly vypsala syrový
+   * klíč překladu — viz `PayrollSetupCheckService::addCheck()`.
+   */
+  status: 'ok' | 'blocked' | 'pending'
   message: string
 }
 
@@ -2022,6 +2291,7 @@ export type PayrollDocumentKind =
   | 'taxable_income_withholding_certificate'
   | 'employment_certificate'
   | 'average_earnings_certificate'
+  | 'average_earnings_statement'
   | 'annual_settlement_result'
   | 'monthly_bundle'
 
@@ -2201,7 +2471,10 @@ export interface PayrollAnnualSettlementStoredOutcome {
   settlement_difference_minor: number
   payable_minor: number
   settled_on: string
-  payroll_input_id: number | null
+  /** Běh, revize a období, ve kterých se doplatek vyplatil (§ 38ch odst. 5). */
+  payout_run_id: number | null
+  payout_revision_id: number | null
+  payout_period_start: string | null
 }
 
 export interface PayrollAnnualSettlementListItem {
@@ -2220,7 +2493,9 @@ export interface PayrollAnnualSettlementListItem {
   settlement_difference_minor: number | null
   payable_minor: number | null
   settled_on: string | null
-  payroll_input_id: number | null
+  payout_run_id: number | null
+  payout_revision_id: number | null
+  payout_period_start: string | null
   annual_revision_id: number | null
 }
 
@@ -2234,7 +2509,20 @@ export interface PayrollAnnualSettlementList {
   payout_period: string
   payout_threshold_minor: number
   items: PayrollAnnualSettlementListItem[]
+  /** Počet lidí v CELÉM zúžení, ne na načtené stránce. */
+  total: number
+  limit: number
+  offset: number
+  search: string
+  state: PayrollAnnualSettlementListState
 }
+
+/** Pojmenované zúžení přehledu, ne dopočet ze stránky. */
+export type PayrollAnnualSettlementListState =
+  | 'all'
+  | 'requested'
+  | 'settled'
+  | 'unsettled'
 
 export interface PayrollAnnualSettlementCreditRow {
   label: string
@@ -2247,6 +2535,47 @@ export interface PayrollAnnualSettlementChildRow {
   amount_minor_units: number
 }
 
+/**
+ * Kód údaje, který § 38ch odst. 3 žádá a na potvrzení chybí. Klíč do slovníku
+ * `payroll.annual_settlement.certificate.field.*`.
+ */
+export type PayrollAnnualSettlementCertificateField =
+  | 'gross_income'
+  | 'advance_base'
+  | 'advance_tax'
+  | 'credit_35ba'
+  | 'credit_35c'
+  | 'tax_bonus'
+
+/**
+ * Potvrzení od předchozího plátce daně (§ 38ch odst. 3, tiskopis 25 5460).
+ *
+ * Částky jsou `null`, když je potvrzení nenese. `null` NENÍ nula — nula je
+ * doložený údaj, kdežto `null` znamená, že zúčtování provést nelze.
+ */
+export interface PayrollAnnualSettlementCertificate {
+  certificate_reference: string
+  payer_name: string | null
+  payer_tax_identification: string | null
+  /** § 38ch odst. 3 věta druhá — do 15. února po uplynutí období. */
+  received_on: string | null
+  /** ř. 1 tiskopisu — úhrn zúčtovaných příjmů. */
+  gross_income_minor_units: number | null
+  /** ř. 5 tiskopisu — základ daně. */
+  advance_base_minor_units: number | null
+  /** ř. 8 tiskopisu — záloha na daň celkem. */
+  advance_tax_minor_units: number | null
+  /** Úhrn poskytnutých měsíčních slev podle § 35ba. */
+  non_refundable_credit_minor_units: number | null
+  /** Úhrn poskytnutých měsíčních slev podle § 35c. */
+  child_credit_minor_units: number | null
+  /** ř. 9 tiskopisu — úhrn vyplacených měsíčních daňových bonusů. */
+  tax_bonus_minor_units: number | null
+  evidence_status: 'unverified' | 'verified'
+  evidence_reference: string | null
+  missing_statutory_fields: PayrollAnnualSettlementCertificateField[]
+}
+
 export interface PayrollAnnualSettlementPreview {
   tax_year: number
   employee_id: number
@@ -2254,6 +2583,7 @@ export interface PayrollAnnualSettlementPreview {
   result: PayrollAnnualSettlementResult
   credit_rows: PayrollAnnualSettlementCreditRow[]
   child_rows: PayrollAnnualSettlementChildRow[]
+  certificates: PayrollAnnualSettlementCertificate[]
   already_settled: PayrollAnnualSettlementStoredOutcome | null
 }
 
@@ -2282,6 +2612,25 @@ export interface PayrollAnnualSettlementRequestPayload {
   row_version?: number
 }
 
+/**
+ * Zápis potvrzení od jiného plátce. Prázdná částka se posílá jako `null`,
+ * ne jako nula — nula je doložený údaj a znamenala by, že se s ní počítá.
+ */
+export interface PayrollAnnualSettlementCertificatePayload {
+  certificate_reference: string
+  payer_name: string | null
+  payer_tax_identification: string | null
+  received_on: string | null
+  gross_income_minor_units: number | null
+  advance_base_minor_units: number | null
+  advance_tax_minor_units: number | null
+  non_refundable_credit_minor_units: number | null
+  child_credit_minor_units: number | null
+  tax_bonus_minor_units: number | null
+  evidence_status: 'unverified' | 'verified'
+  evidence_reference: string | null
+}
+
 export interface PayrollEmploymentExitReadinessItem {
   available: boolean
   readiness_code: string | null
@@ -2297,8 +2646,71 @@ export interface PayrollEmploymentExitDocumentList {
       decisive_year: number | null
       decisive_quarter: number | null
     }
+    average_earnings_statement: PayrollEmploymentExitReadinessItem & {
+      decisive_year: number | null
+      decisive_quarter: number | null
+    }
   }
   items: PayrollDocument[]
+}
+
+export type PayrollTerminationReasonKind =
+  | 'none'
+  | 'gross_breach'
+  | 'sickness_regime_breach'
+  | 'organizational'
+  | 'health'
+  | 'employer_breach'
+  | 'employee_unilateral'
+  | 'agreement'
+
+export interface PayrollPensionInsurancePeriod {
+  from: string
+  to: string
+}
+
+/** Oddelene potvrzeni podle § 313 odst. 2 zakoniku prace. */
+export interface PayrollAverageEarningsCertificateEvidence {
+  termination_assessment_complete: boolean
+  termination_reason_kind: PayrollTerminationReasonKind
+  employee_stated_reason: string | null
+  pension_insurance_periods: PayrollPensionInsurancePeriod[]
+  correction_reason: string | null
+}
+
+/** Samostatne potvrzeni o prumernem vydelku podle § 356 odst. 1 a 2. */
+export interface PayrollAverageEarningsStatementEvidence {
+  requested_purpose: string
+  correction_reason: string | null
+}
+
+export interface PayrollDocumentBatchExitDocument {
+  required: boolean
+  archived: boolean
+  document_id: number | null
+  available: boolean
+  readiness_code: string | null
+}
+
+export interface PayrollDocumentBatchExit {
+  employment_id: number
+  employee_id: number
+  employee_name: string | null
+  end_date: string
+  relation_type: string
+  documents: Record<string, PayrollDocumentBatchExitDocument>
+}
+
+export interface PayrollDocumentBatchReport {
+  run_id: number
+  revision_id: number
+  period_start: string
+  period_end: string
+  payslips: { archived: number, document_ids: number[] }
+  monthly_bundle: { document_id: number }
+  employment_exits: PayrollDocumentBatchExit[]
+  missing: string[]
+  complete: boolean
 }
 
 export interface PayrollEmploymentCertificateDeductionEvidence {
@@ -2958,6 +3370,20 @@ export const payrollApi = {
   personProfile: (id: number) =>
     api.get<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`)
       .then(response => response.data.profile),
+  /** Zákonná evidence osoby k danému dni včetně celé historie a blokátorů běhu. */
+  statutoryEvidence: (employeeId: number, effectiveOn: string) =>
+    api.get<{ evidence: PayrollStatutoryEvidence }>(
+      `/payroll/people/${employeeId}/statutory-evidence`,
+      { params: { effective_on: effectiveOn } },
+    ).then(response => response.data.evidence),
+  saveStatutoryEvidence: (
+    employeeId: number,
+    payload: PayrollStatutoryEvidencePayload,
+  ) =>
+    api.put<{ evidence: PayrollStatutoryEvidence }>(
+      `/payroll/people/${employeeId}/statutory-evidence`,
+      payload,
+    ).then(response => response.data.evidence),
     /** Počáteční stavy zákonných kumulací za rok — úhrny z předchozího zpracování. */
   statutoryOpenings: (employeeId: number, year: number) =>
     api.get<{ openings: PayrollOpeningBalances }>(
@@ -3394,10 +3820,16 @@ export const payrollApi = {
       URL.revokeObjectURL(objectUrl)
     }
   },
-  employerPolicies: (effectiveOn?: string) =>
-    api.get<{ policies: PayrollEmployerPolicy[] }>('/payroll/settings/policies', {
-      params: effectiveOn ? { effective_on: effectiveOn } : undefined,
-    }).then(response => response.data.policies),
+  employerPolicies: (effectiveOn?: string, page?: PayrollPageParams) =>
+    api.get<{ policies: PayrollEmployerPolicy[]; total: number }>('/payroll/settings/policies', {
+      params: {
+        ...(effectiveOn ? { effective_on: effectiveOn } : {}),
+        ...pageParams(page),
+      },
+    }).then(response => ({
+      items: response.data.policies,
+      total: response.data.total,
+    })),
   createEmployerPolicy: (payload: PayrollEmployerPolicyPayload) =>
     api.post<{ policy: PayrollEmployerPolicy }>('/payroll/settings/policies', payload)
       .then(response => response.data.policy),
@@ -3431,6 +3863,17 @@ export const payrollApi = {
   deletePayrollDimension: (id: number) =>
     api.delete<{ deleted: boolean }>(`/payroll/settings/dimensions/${id}`)
       .then(response => response.data.deleted),
+  /**
+   * Souhrn navazujících agend jednoho vztahu (rozcestník na kartě zaměstnance).
+   *
+   * Jeden dotaz místo deseti: bez něj by karta musela sáhnout do každé agendy
+   * zvlášť a tři z nich vracejí celý měsíc za celou firmu. Agendy, na které
+   * uživatel nemá právo, server do odpovědi vůbec nedá.
+   */
+  employmentAgendaSummary: (employmentId: number) =>
+    api.get<{ summary: PayrollEmploymentAgendaSummary }>(
+      `/payroll/employments/${employmentId}/agenda-summary`,
+    ).then(response => response.data.summary),
   employmentDimensions: (employmentId: number) =>
     api.get<{ dimensions: PayrollEmploymentDimension[] }>(`/payroll/employments/${employmentId}/dimensions`)
       .then(response => response.data.dimensions),
@@ -3448,17 +3891,38 @@ export const payrollApi = {
       `/payroll/employments/${employmentId}/dimensions/${assignmentId}`,
       payload,
     ).then(response => response.data.dimension),
-  listDocuments: (period: string, page?: PayrollPageParams) =>
+  /**
+   * `employeeId` zúží seznam na jednu osobu už na serveru. Zužovat načtenou
+   * stránku v prohlížeči nešlo: dokument z jiné strany se tiše neprojevil.
+   */
+  listDocuments: (period: string, page?: PayrollPageParams, employeeId?: number) =>
     api.get<PayrollDocumentList>('/payroll/documents', {
-      params: { period, ...pageParams(page) },
+      params: {
+        period,
+        ...pageParams(page),
+        ...(employeeId ? { employee_id: employeeId } : {}),
+      },
     }).then(response => response.data),
-  listAnnualDocuments: (year: number, page?: PayrollPageParams) =>
+  listAnnualDocuments: (year: number, page?: PayrollPageParams, employeeId?: number) =>
     api.get<PayrollAnnualDocumentList>('/payroll/documents/annual', {
-      params: { year, ...pageParams(page) },
+      params: {
+        year,
+        ...pageParams(page),
+        ...(employeeId ? { employee_id: employeeId } : {}),
+      },
     }).then(response => response.data),
-  listAnnualSettlements: (year: number) =>
-    api.get<PayrollAnnualSettlementList>(`/payroll/annual-settlements/${year}`)
-      .then(response => response.data),
+  listAnnualSettlements: (
+    year: number,
+    page?: PayrollPageParams,
+    filters?: { search?: string; state?: PayrollAnnualSettlementListState },
+  ) =>
+    api.get<PayrollAnnualSettlementList>(`/payroll/annual-settlements/${year}`, {
+      params: {
+        ...pageParams(page),
+        ...(filters?.search ? { search: filters.search } : {}),
+        ...(filters?.state && filters.state !== 'all' ? { state: filters.state } : {}),
+      },
+    }).then(response => response.data),
   previewAnnualSettlement: (year: number, employeeId: number) =>
     api.get<PayrollAnnualSettlementPreview>(
       `/payroll/annual-settlements/${year}/people/${employeeId}`,
@@ -3472,6 +3936,20 @@ export const payrollApi = {
       `/payroll/annual-settlements/${year}/people/${employeeId}/request`,
       payload,
     ).then(response => response.data.request),
+  /**
+   * Uloží CELÝ seznam potvrzení od předchozích plátců za rok (§ 38ch odst. 3).
+   * Doklady dávají smysl jen jako úplná sada od všech předchozích plátců,
+   * takže se posílají jedním požadavkem, ne po řádcích.
+   */
+  saveAnnualSettlementCertificates: (
+    year: number,
+    employeeId: number,
+    certificates: PayrollAnnualSettlementCertificatePayload[],
+  ) =>
+    api.put<{ certificates: PayrollAnnualSettlementCertificate[] }>(
+      `/payroll/annual-settlements/${year}/people/${employeeId}/certificates`,
+      { certificates },
+    ).then(response => response.data.certificates),
   /**
    * Provede roční zúčtování. Nesplněné podmínky NEJSOU chyba — vrátí se
    * `performed: false` a seznam překážek, které má obrazovka vypsat.
@@ -3519,6 +3997,31 @@ export const payrollApi = {
       `/payroll/employments/${employmentId}/documents/exit/employment-certificate`,
       payload,
       { headers: { 'Idempotency-Key': idempotencyKey } },
+    ).then(response => response.data),
+  generateAverageEarningsCertificate: (
+    employmentId: number,
+    payload: PayrollAverageEarningsCertificateEvidence,
+    idempotencyKey: string,
+  ) =>
+    api.post<PayrollDocument>(
+      `/payroll/employments/${employmentId}/documents/exit/average-earnings-certificate`,
+      payload,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    ).then(response => response.data),
+  generateAverageEarningsStatement: (
+    employmentId: number,
+    payload: PayrollAverageEarningsStatementEvidence,
+    idempotencyKey: string,
+  ) =>
+    api.post<PayrollDocument>(
+      `/payroll/employments/${employmentId}/documents/exit/average-earnings-statement`,
+      payload,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    ).then(response => response.data),
+  generateDocumentBatch: (runId: number, revisionId: number) =>
+    api.post<PayrollDocumentBatchReport>(
+      `/payroll/runs/${runId}/revisions/${revisionId}/documents/batch`,
+      {},
     ).then(response => response.data),
   /**
    * Stránka seznamu běhů. `result_snapshot` nese jen `totals` — osobní rozpad
@@ -3616,9 +4119,20 @@ export const payrollApi = {
       URL.revokeObjectURL(objectUrl)
     }
   },
-  timeMonth: (period: string, incomplete = false) =>
-    api.get<PayrollTimeOverview>('/payroll/time/month', { params: { period, incomplete: incomplete ? 1 : 0 } })
-      .then(response => response.data),
+  timeMonth: (
+    period: string,
+    incomplete = false,
+    page?: PayrollPageParams,
+    employmentId?: number | null,
+  ) =>
+    api.get<PayrollTimeOverview>('/payroll/time/month', {
+      params: {
+        period,
+        incomplete: incomplete ? 1 : 0,
+        ...pageParams(page),
+        ...(employmentId ? { employment_id: employmentId } : {}),
+      },
+    }).then(response => response.data),
   saveTimeCalendar: (employmentId: number, payload: Record<string, unknown>) =>
     api.put<{ calendar: PayrollWorkCalendar }>(`/payroll/time/calendars/${employmentId}`, payload)
       .then(response => response.data.calendar),
@@ -3639,6 +4153,45 @@ export const payrollApi = {
   }) =>
     api.post<{ consent: PayrollOvertimeConsent }>('/payroll/time/overtime-consents', payload)
       .then(response => response.data.consent),
+  saveOvertimeProtection: (payload: {
+    employment_id: number
+    id?: number | null
+    protection: PayrollOvertimeProtectionKind
+    valid_from: string
+    valid_to: string | null
+    document_reference: string | null
+    note: string | null
+    row_version: number
+  }) =>
+    api.post<{ protection: PayrollOvertimeProtection }>('/payroll/time/overtime-protections', payload)
+      .then(response => response.data.protection),
+  saveOvertimeCompensation: (payload: {
+    employment_id: number
+    id?: number | null
+    overtime_date: string
+    minutes: number
+    granted_on: string | null
+    document_reference: string | null
+    note: string | null
+    row_version: number
+  }) =>
+    api.post<{ compensation: PayrollOvertimeCompensation }>('/payroll/time/overtime-compensations', payload)
+      .then(response => response.data.compensation),
+  listOvertimeAveragingPeriods: () =>
+    api.get<{ periods: PayrollOvertimeAveragingPeriod[] }>('/payroll/time/overtime-averaging-periods')
+      .then(response => response.data.periods),
+  saveOvertimeAveragingPeriod: (payload: {
+    id?: number | null
+    valid_from: string
+    valid_to: string | null
+    weeks: number
+    basis: PayrollOvertimeAveragingBasis
+    collective_agreement_reference: string | null
+    note: string | null
+    row_version: number
+  }) =>
+    api.post<{ period: PayrollOvertimeAveragingPeriod }>('/payroll/time/overtime-averaging-periods', payload)
+      .then(response => response.data.period),
   previewTimeImport: (payload: { period: string; format: 'csv' | 'xlsx'; original_name: string; content: string }) =>
     api.post<{ preview: PayrollTimeImportPreview }>('/payroll/time/imports/preview', payload)
       .then(response => response.data.preview),
@@ -3718,16 +4271,37 @@ export const payrollApi = {
       '/payroll/recurring-components/materialize',
       { period },
     ).then(response => response.data.materialization),
-  inputs: (period: string) =>
-    api.get<{ inputs: PayrollInput[] }>('/payroll/inputs', { params: { period } })
-      .then(response => response.data.inputs),
-  quickInputs: (period: string, page?: PayrollPageParams) =>
+  /** `employmentId` zúží seznam na jeden vztah už na serveru, ne až za stránkováním. */
+  inputs: (period: string, page?: PayrollPageParams, employmentId?: number) =>
+    api.get<{ inputs: PayrollInput[]; total: number }>('/payroll/inputs', {
+      params: {
+        period,
+        ...pageParams(page),
+        ...(employmentId ? { employment_id: employmentId } : {}),
+      },
+    }).then(response => ({ items: response.data.inputs, total: response.data.total })),
+  quickInputs: (period: string, page?: PayrollPageParams, employmentId?: number) =>
     api.get<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', {
-      params: { period, ...pageParams(page) },
+      params: {
+        period,
+        ...pageParams(page),
+        ...(employmentId ? { employment_id: employmentId } : {}),
+      },
     }).then(response => response.data.month),
-  saveQuickInputs: (payload: PayrollQuickInputSavePayload, page?: PayrollPageParams) =>
+  /**
+   * Zúžení se posílá i při ukládání — odpověď je táž stránka, ze které se
+   * plní formulář, a ta musí zůstat zúžená.
+   */
+  saveQuickInputs: (
+    payload: PayrollQuickInputSavePayload,
+    page?: PayrollPageParams,
+    employmentId?: number,
+  ) =>
     api.put<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', payload, {
-      params: pageParams(page),
+      params: {
+        ...pageParams(page),
+        ...(employmentId ? { employment_id: employmentId } : {}),
+      },
     }).then(response => response.data.month),
   previewInput: (payload: PayrollInputPayload) =>
     api.post<{ preview: PayrollInputPreview }>('/payroll/inputs/preview', payload)
@@ -3747,6 +4321,11 @@ export const payrollApi = {
   cancelInput: (id: number, rowVersion: number) =>
     api.post<{ input: PayrollInput }>(`/payroll/inputs/${id}/cancel`, {
       row_version: rowVersion,
+    }).then(response => response.data.input),
+  reverseBenefitInput: (id: number, rowVersion: number, reason: string) =>
+    api.post<{ input: PayrollInput }>(`/payroll/inputs/${id}/reverse-benefit`, {
+      row_version: rowVersion,
+      reason,
     }).then(response => response.data.input),
   previewInputImport: (payload: PayrollInputImportPayload) =>
     api.post<{ preview: PayrollInputImportPreview }>('/payroll/input-imports/preview', payload)

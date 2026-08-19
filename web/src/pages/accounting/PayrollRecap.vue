@@ -7,9 +7,10 @@ import {
   type PayrollPreview, type PayrollTaxpayerType, type PayrollEmploymentType,
   type PayrollEmployee, type PayrollEmployeePayload, type ChartAccount,
 } from '@/api/accounting'
+import { payrollApi } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { formatMoney } from '@/composables/useFormat'
+import { formatMoney, formatPeriod } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 
@@ -57,7 +58,35 @@ const years = computed(() => {
 })
 const months = Array.from({ length: 12 }, (_, i) => i + 1)
 
-const canPost = computed(() => preview.value !== null && !saving.value && !loading.value)
+/**
+ * Od kterého období mzdy převzal modul Mzdy (`YYYY-MM`), nebo `null`.
+ *
+ * Rekapitulace i modul účtují na tytéž účty a jeden o druhém neví, takže měsíc
+ * spočítaný v modulu se tady zaúčtovat nesmí — seděl by v deníku dvakrát.
+ * Stránka ale nezmizí ani se nezamkne celá: starší období se dál opravují tam,
+ * kde vznikla. Výpadek dotazu (typicky chybějící právo na mzdy) jen skryje
+ * upozornění; skutečnou pojistkou je kontrola na serveru.
+ */
+const payrollModuleFrom = ref<string | null>(null)
+
+async function loadPayrollModuleState() {
+  try {
+    const state = await payrollApi.capabilities()
+    payrollModuleFrom.value = state.state.status === 'active' ? state.state.start_period : null
+  } catch {
+    payrollModuleFrom.value = null
+  }
+}
+
+const selectedPeriod = computed(
+  () => `${form.year}-${String(form.month).padStart(2, '0')}`
+)
+const moduleTookOver = computed(() =>
+  payrollModuleFrom.value !== null && selectedPeriod.value >= payrollModuleFrom.value
+)
+const canPost = computed(() =>
+  preview.value !== null && !saving.value && !loading.value && !moduleTookOver.value
+)
 
 function errorMessage(e: any): string {
   return e?.response?.data?.error?.message || t('common.error')
@@ -400,7 +429,7 @@ async function loadSettlementAccounts() {
   }
 }
 
-onMounted(() => { void loadEmployees(); void loadSettlementAccounts() })
+onMounted(() => { void loadEmployees(); void loadSettlementAccounts(); void loadPayrollModuleState() })
 
 /** Řádky rozpadu pro tabulku „co z hrubé mzdy odchází". */
 const breakdownRows = computed(() => {
@@ -533,6 +562,30 @@ const remittanceRows = computed(() => {
       <RouterLink to="/accounting/journal" class="text-sm text-neutral-500 hover:text-neutral-700 whitespace-nowrap">
         {{ t('common.back') }}
       </RouterLink>
+    </div>
+
+    <!--
+      Firma, která přešla do modulu Mzdy, tuhle stránku pořád potřebuje kvůli
+      obdobím před přechodem — ale nesmí v ní omylem zaúčtovat měsíc, který
+      počítá modul. Proto upozornění místo skryté položky v menu.
+    -->
+    <div
+      v-if="payrollModuleFrom"
+      class="mb-4 rounded-lg border border-warning-500/40 bg-warning-50 p-4"
+      data-test="payroll-module-notice"
+    >
+      <div class="flex items-start gap-3">
+        <svg class="mt-0.5 h-5 w-5 shrink-0 text-warning-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.bell" /></svg>
+        <div>
+          <h2 class="text-sm font-semibold text-neutral-900">{{ t('accounting.payroll.module_active_title') }}</h2>
+          <p class="mt-1 text-sm text-warning-800">
+            {{ t('accounting.payroll.module_active_hint', { period: formatPeriod(payrollModuleFrom) }) }}
+          </p>
+          <RouterLink to="/payroll" class="mt-2 inline-flex text-sm font-medium text-warning-800 underline">
+            {{ t('nav.section_payroll') }}
+          </RouterLink>
+        </div>
+      </div>
     </div>
 
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 space-y-4">
@@ -693,13 +746,16 @@ const remittanceRows = computed(() => {
           <p class="text-xs text-neutral-500 mt-2">{{ t('accounting.payroll.idempotent_note') }}</p>
         </div>
 
-        <div class="flex items-center gap-3 pt-1">
+        <div class="flex flex-wrap items-center gap-3 pt-1">
           <button type="button" :disabled="!canPost" @click="post" :class="btnFilled('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
             </svg>
             <span class="whitespace-nowrap">{{ saving ? t('common.saving') : t('accounting.payroll.post') }}</span>
           </button>
+          <p v-if="moduleTookOver" class="text-sm text-warning-800" data-test="payroll-module-blocked">
+            {{ t('accounting.payroll.module_blocked', { period: formatPeriod(selectedPeriod) }) }}
+          </p>
         </div>
       </template>
 

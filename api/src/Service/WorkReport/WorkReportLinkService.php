@@ -12,6 +12,7 @@ use MyInvoice\Service\Branding\AccentColor;
 use MyInvoice\Service\Mail\Mailer;
 use MyInvoice\Service\Mail\SafeLogoPath;
 use MyInvoice\Service\Vat\VatStatusService;
+use MyInvoice\Service\Tenant\TenantUrlResolver;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -44,6 +45,7 @@ final class WorkReportLinkService
         private readonly WorkReportLinkRepository $links,
         private readonly LoggerInterface $logger,
         private readonly VatStatusService $vatStatus,
+        private readonly ?TenantUrlResolver $tenantUrls = null,
     ) {}
 
     public function ttlMinutes(): int
@@ -109,8 +111,15 @@ final class WorkReportLinkService
     /** Plná veřejná URL odkazu (pro e-mail + UI „kopírovat"). */
     public function publicUrl(array $link): string
     {
-        $appUrl = rtrim((string) $this->config->get('app.url', ''), '/');
-        return $appUrl . '/work-report/' . (string) $link['token'];
+        if ($this->tenantUrls !== null) {
+            return $this->tenantUrls->forSupplier(
+                (int) ($link['supplier_id'] ?? 0),
+                'public_links',
+                '/work-report/' . (string) $link['token'],
+            );
+        }
+        return rtrim((string) $this->config->get('app.url', ''), '/')
+            . '/work-report/' . (string) $link['token'];
     }
 
     /**

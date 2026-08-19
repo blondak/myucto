@@ -258,6 +258,78 @@ final class PayrollEmploymentValidatorTest extends TestCase
         ];
     }
 
+    /**
+     * Sazbová kategorie § 5a odst. 1 je zdroj pravdy a `risky_work` se z ní
+     * odvozuje. Dva zapisovatelné údaje o téže věci by se rozešly — a rozešly
+     * by se tiše, protože jeden z nich čte mzdový výpočet a druhý JMHZ.
+     */
+    public function testRateCategoryDrivesTheLegacyRiskyWorkFlag(): void
+    {
+        $input = $this->terms();
+        $input['social_employer_rate_category'] = 'risk_employment';
+        $input['social_employer_rate_category_evidence'] = 'kategorizace-praci/2026/17';
+        unset($input['risky_work']);
+
+        $validated = $this->validator()->terms($input);
+
+        self::assertSame('risk_employment', $validated['social_employer_rate_category']);
+        self::assertTrue($validated['risky_work']);
+        self::assertSame(
+            'kategorizace-praci/2026/17',
+            $validated['social_employer_rate_category_evidence'],
+        );
+    }
+
+    /**
+     * Starší obrazovka kategorii neposílá, jen boolean. Ten se přeloží na
+     * písm. c) — jinak by uložení nesouvisející změny shodilo zařazení
+     * rizikové práce na běžnou sazbu.
+     */
+    public function testLegacyRiskyWorkFlagAloneStillMeansRiskEmployment(): void
+    {
+        $input = $this->terms();
+        $input['risky_work'] = true;
+
+        $validated = $this->validator()->terms($input);
+
+        self::assertSame('risk_employment', $validated['social_employer_rate_category']);
+        self::assertTrue($validated['risky_work']);
+    }
+
+    public function testContradictoryRiskyWorkFlagAndRateCategoryIsRejected(): void
+    {
+        $input = $this->terms();
+        $input['risky_work'] = true;
+        $input['social_employer_rate_category'] = 'ordinary';
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('si odporují');
+        $this->validator()->terms($input);
+    }
+
+    /** U běžné sazby žádný podklad neexistuje, takže se ani neukládá. */
+    public function testOrdinaryCategoryNeverKeepsAnEvidenceReference(): void
+    {
+        $input = $this->terms();
+        $input['social_employer_rate_category'] = 'ordinary';
+        $input['social_employer_rate_category_evidence'] = 'nesmysl';
+
+        $validated = $this->validator()->terms($input);
+
+        self::assertNull($validated['social_employer_rate_category_evidence']);
+    }
+
+    public function testUnknownRateCategoryIsRejected(): void
+    {
+        $input = $this->terms();
+        $input['social_employer_rate_category'] = 'unverified';
+        unset($input['risky_work']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Sazbová kategorie zaměstnavatele');
+        $this->validator()->terms($input);
+    }
+
     public function testRelationshipDetailRequiresPinnedCodeAndApplicableActivity(): void
     {
         $valid = $this->terms();
@@ -279,6 +351,45 @@ final class PayrollEmploymentValidatorTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('Bližší určení pracovněprávního vztahu');
         $this->validator()->terms($unknown);
+    }
+
+    /**
+     * Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP se ukládá jen tehdy,
+     * když ho klient poslal. Podmínky se zapisují celé, takže obrazovka, která
+     * o poli neví (rychlá editace, založení vztahu ze seznamu), by ho jinak
+     * shodila na „neurčeno" — a příští mzdový běh by kvůli uložení docela jiné
+     * změny skončil ručním posouzením.
+     */
+    public function testPayerStatementIsCarriedOverWhenTheClientDoesNotSendIt(): void
+    {
+        $terms = $this->terms();
+        self::assertArrayNotHasKey('other_withholding_eligibility', $terms);
+
+        self::assertSame(
+            'eligible',
+            $this->validator()->terms($terms, null, 'eligible')['other_withholding_eligibility'],
+        );
+        self::assertSame(
+            'unverified',
+            $this->validator()->terms($terms)['other_withholding_eligibility'],
+        );
+
+        $explicit = $terms;
+        $explicit['other_withholding_eligibility'] = 'ineligible';
+        self::assertSame(
+            'ineligible',
+            $this->validator()->terms($explicit, null, 'eligible')['other_withholding_eligibility'],
+        );
+    }
+
+    public function testUnsupportedPayerStatementIsRejected(): void
+    {
+        $terms = $this->terms();
+        $terms['other_withholding_eligibility'] = 'automatic';
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('srážkovou daň');
+        $this->validator()->terms($terms);
     }
 
     private function validator(): PayrollEmploymentValidator

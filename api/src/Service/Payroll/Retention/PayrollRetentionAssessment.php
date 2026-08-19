@@ -29,6 +29,20 @@ final readonly class PayrollRetentionAssessment
     public const BLOCK_NO_BASIS = 'no_retention_basis';
 
     /**
+     * Celá doména důvodů, proč se osoba nenavrhla. Obrazovka je vypisuje všechny
+     * i s nulou — důvod, který by se v seznamu neobjevil, protože ho zrovna nikdo
+     * nemá, vypadá jako by neexistoval, a přehled by pak zamlčel, že osoba může
+     * uváznout i takhle.
+     */
+    public const BLOCKS = [
+        self::BLOCK_WITHIN_RETENTION,
+        self::BLOCK_HOLD,
+        self::BLOCK_UNDETERMINED,
+        self::BLOCK_NO_BASIS,
+        self::BLOCK_ALREADY_DONE,
+    ];
+
+    /**
      * @param list<array<string,mixed>> $categories  rozpis lhůt, i těch neurčených
      * @param list<array<string,mixed>> $holds       aktivní zadržení, firemní i osobní
      * @param array<string,int>         $identity    co zmizí
@@ -36,6 +50,16 @@ final readonly class PayrollRetentionAssessment
      */
     public function __construct(
         public int $employeeId,
+        /**
+         * Účinné jméno osoby. Bez něj je panel k výmazu jen počet a schvalující
+         * nevidí, o KOHO jde — a nevratný úkon se nedá odklepnout podle čísla.
+         *
+         * Jméno není citlivý identifikátor ve smyslu `payroll.person.read_sensitive`
+         * (to hlídá rodná čísla, účty, adresy a rodné příjmení); seznam osob ho
+         * vydává už za samotné `payroll`. Do ULOŽENÉHO návrhu výmazu ale nepatří —
+         * tam se dopojuje až při čtení, aby doklad o výmazu osobní údaj nepřežil.
+         */
+        public string $fullName,
         public int $lastRecordYear,
         public array $categories,
         public ?string $governingCategory,
@@ -66,6 +90,7 @@ final readonly class PayrollRetentionAssessment
     {
         return [
             'employee_id' => $this->employeeId,
+            'full_name' => $this->fullName,
             'last_record_year' => $this->lastRecordYear,
             'categories' => $this->categories,
             'governing_category' => $this->governingCategory,

@@ -72,6 +72,26 @@ final class PayrollEnumContractTest extends TestCase
      */
     private const UNION_DOMAIN = [
         // Mzdový běh
+        'payroll.ts::PayrollBenefitExemptionBasket'
+            => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
+        // Čím je nezdanění složky podložené. Klient hodnotu vybírá ve formuláři
+        // složky a `not_subject_to_tax` musí umět odlišit od osvobození — na
+        // mzdovém listu totiž znamená pravý opak: plnění mimo předmět daně se
+        // mezi osvobozené částky nevykazuje.
+        'payroll.ts::PayrollExemptionBasis'
+            => 'enum:MyInvoice\Service\Payroll\Component\PayrollExemptionBasis',
+        // Stav řádku v přehledu čerpání košů. `incomplete` a `limit_unavailable`
+        // jsou přiznání chybějícího podkladu — klient, který je nezná, by je
+        // vykreslil jako prázdný stav, tedy jako „nic se neděje".
+        'payrollBenefitBaskets.ts::BenefitBasketStatus'
+            => 'const:MyInvoice\Service\Payroll\Component\PayrollBenefitBasketUsage::STATUSES',
+        // Nálezy porovnání dvou evidencí náhradního volna. Klient, který
+        // některý nezná, by rozpor vykreslil jako prázdno — tedy jako „sedí to".
+        'payroll.ts::PayrollCompensatoryTimeOffFinding'
+            => 'const:MyInvoice\Service\Payroll\Time\Overtime\CompensatoryTimeOffReconciliation::FINDINGS',
+        // Druh nabídky pro serverové hledání v pickeru párování plateb.
+        'payrollPayments.ts::PayrollPaymentOptionKind'
+            => 'const:MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationQueryService::PICKER_KINDS',
         'payroll.ts::PayrollRunStatus'      => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunStatus',
         'payroll.ts::PayrollRunCommand'     => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunCommand',
         'payroll.ts::PayrollRunOutcomeCode' => 'consts:MyInvoice\Service\Payroll\Run\PayrollRunCommandOutcome',
@@ -79,11 +99,35 @@ final class PayrollEnumContractTest extends TestCase
         // vlastní větu — nová hodnota bez věty by se projevila prázdnou kartou.
         'payrollInsurance.ts::PayrollInsuranceUnavailableReason' =>
             'const:MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService::UNAVAILABLE_REASONS',
+        // Odkud pochází sazba. `reconstructed` je DOLOŽENÝ dopočet, ne uložený
+        // záznam — klient, který tu hodnotu nezná, by ho vydal za uložený.
+        'payrollInsurance.ts::PayrollInsuranceRateSource' =>
+            'const:MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService::RATE_SOURCES',
+        // Rozdělení pojistného zaměstnavatele na osobu není zákonná částka.
+        // Metoda i důvod, proč rozdělit nejde, musí mít na obrazovce vlastní větu.
+        'payrollInsurance.ts::PayrollEmployerAllocationMethod' =>
+            'const:MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService::EMPLOYER_ALLOCATION_METHODS',
+        'payrollInsurance.ts::PayrollEmployerAllocationBlocker' =>
+            'const:MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService::EMPLOYER_ALLOCATION_BLOCKERS',
 
         // Pracovní vztah a jeho podmínky
         'payroll.ts::PayrollEmploymentStatus'        => 'db:payroll_employments.status',
         'payroll.ts::PayrollRelationType'            => 'db:payroll_employments.relation_type',
         'payroll.ts::PayrollTaxRegime'               => 'db:payroll_employment_terms.tax_regime',
+        // Doména sloupce je ÚZKO tři hodnoty; PHP enum OtherWithholdingEligibility
+        // má navíc `automatic`, protože to není volba uživatele, ale zařazení,
+        // které si výpočet odvodí z druhu vztahu. Klient tu čtvrtou hodnotu
+        // nesmí nabízet — proto se páruje sloupec, ne enum.
+        'payroll.ts::PayrollOtherWithholdingEligibility'
+            => 'db:payroll_employment_terms.other_withholding_eligibility',
+        // Stejný důvod jako výše: PHP enum SocialEmployerRateCategory má navíc
+        // `unverified`, což není čtvrtá zákonná kategorie § 5a odst. 1, ale stav
+        // evidence — vzniká až ve vstupu výpočtu, když k zařazení chybí podklad.
+        // Nabídnout ho v klientovi by znamenalo nabídnout „nevím" jako volbu.
+        'payroll.ts::PayrollSocialEmployerRateCategory'
+            => 'db:payroll_employment_terms.social_employer_rate_category',
+        'payroll.ts::PayrollSocialPartTimeDiscountReason'
+            => 'db:payroll_employment_terms.social_part_time_discount_reason',
         'payroll.ts::PayrollInsuranceParticipation'  => 'db:payroll_employment_terms.social_insurance_participation',
         'payroll.ts::PayrollChecklistStatus'         => 'db:payroll_employment_checklist_items.status',
         'payroll.ts::PayrollVerifiedTriState'        => 'db:payroll_employment_terms.jmhz_apz_contribution_status',
@@ -96,6 +140,8 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollPayoutMethod'         => 'db:payroll_employee_profiles.payout_method',
         'payroll.ts::PayrollSecureDeliveryChannel' => 'db:payroll_employee_profiles.secure_delivery_channel',
         'payroll.ts::PayrollDependantRelation'    => 'db:payroll_dependants.relation',
+        'payroll.ts::PayrollStatutoryEvidenceSection'
+            => 'const:MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository::EDITABLE_SECTIONS',
         'payroll.ts::PayrollPersonAccountVerificationSource'
             => 'enum:MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationSource',
 
@@ -110,6 +156,13 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollRecurringCalculationKind' => 'db:payroll_recurring_components.calculation_kind',
         'payroll.ts::PayrollRecurringAllocationRule'  => 'db:payroll_recurring_components.allocation_rule',
         'payroll.ts::PayrollTimeCategory'          => 'db:payroll_time_entries.category',
+        // Zákazy a vyrovnávací období u přesčasu (§ 93 odst. 4, § 240 odst. 3).
+        // Sloupce jsou VARCHAR s CHECK, ne ENUM, protože doména je právní výčet
+        // vázaný na ustanovení — páruje se proto konstanta domény, ne sloupec.
+        'payroll.ts::PayrollOvertimeProtectionKind'
+            => 'const:MyInvoice\Service\Payroll\Time\Overtime\OvertimeProtectionWindow::KINDS',
+        'payroll.ts::PayrollOvertimeAveragingBasis'
+            => 'const:MyInvoice\Service\Payroll\Time\Overtime\OvertimeLimits::BASES',
 
         // Výplata, instituce, dokumenty
         'payroll.ts::PayrollPayoutDestinationKind'    => 'db:payroll_payout_rules.destination_kind',
@@ -117,6 +170,10 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollInstitutionType'          => 'enum:MyInvoice\Service\Payroll\InstitutionAccountType',
         'payroll.ts::PayrollInstitutionAccountSource' => 'enum:MyInvoice\Service\Payroll\InstitutionAccountSourceKind',
         'payroll.ts::PayrollDocumentKind'             => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
+        // Způsob skončení vztahu na odděleném potvrzení podle § 313 odst. 2
+        // zákoníku práce. Doménu drží doklad, protože právě on ji tiskne.
+        'payroll.ts::PayrollTerminationReasonKind'
+            => 'const:MyInvoice\Service\Payroll\Document\AverageEarningsCertificateDocumentData::TERMINATION_REASONS',
 
         // Roční zúčtování (§ 38ch ZDP). Všech šest hodnot chodí po drátě —
         // stav evidence i důvod odmítnutí musí obrazovka umět vypsat větou.
@@ -134,6 +191,27 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementBlocker',
         'payroll.ts::PayrollDimensionType'            => 'db:payroll_dimensions.dimension_type',
         'payroll.ts::PayrollModuleStatus'             => 'db:payroll_module_state.status',
+
+        // Retence. Katalog lhůt žije v kódu, ne v tabulce (lhůta je tvrzení
+        // o právu a musí projít revizí v diffu), takže se páruje s jeho
+        // konstantami. Původ lhůty je z celé sady nejcitlivější: rozejít se
+        // o hodnotu `house_policy` by znamenalo, že se dodaná politika na
+        // obrazovce ukáže jako paragraf.
+        'payrollRetention.ts::RetentionOrigin'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::ORIGINS',
+        'payrollRetention.ts::RetentionSourceStatus'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::SOURCE_STATUSES',
+        'payrollRetention.ts::RetentionBasis'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::BASES',
+        'payrollRetention.ts::PayrollRetentionBlock'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionAssessment::BLOCKS',
+        // Zadržení a výmaz uložené JSOU, takže se párují se sloupcem. Důvod
+        // zadržení sdílí tabulku s účetní stranou (migrace 1396 ho rozšířila
+        // o exekuci a insolvenci) — kdyby se klient rozešel, mzdová obrazovka
+        // by nabídla důvod, který sloupec nepřijme.
+        'payrollRetention.ts::PayrollRetentionHoldReason' => 'db:retention_holds.reason',
+        'payrollRetention.ts::PayrollErasureStatus'       => 'db:payroll_erasure_proposals.status',
+        'payrollRetention.ts::PayrollErasureOutcome'      => 'db:payroll_erasure_proposal_items.outcome',
 
         // Podání
         'payroll.ts::PayrollSubmissionObligationStatus'     => 'db:payroll_obligations.status',
@@ -154,6 +232,30 @@ final class PayrollEnumContractTest extends TestCase
         // popisoval právě to, co stránka ukáže.
         'payroll.ts::PayrollSubmissionInboxStatusFilter'
             => 'const:MyInvoice\Repository\Payroll\PayrollSubmissionInboxRepository::STATUS_FILTERS',
+        // Zdravotní pojišťovny. Druh oznamovací povinnosti odchází v odpovědi
+        // od chvíle, kdy vznikl přehled za období — obrazovka podle něj filtruje
+        // i popisuje řádek, takže nová hodnota bez překladu by se projevila
+        // holým klíčem v tabulce.
+        'payrollHealthNotifications.ts::HealthDutyKind'
+            => 'enum:MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyKind',
+        // Důvod, proč aplikace nesmí odeslat sama. Každý má na obrazovce vlastní
+        // větu; nový kód bez věty by se vykreslil jako prázdné místo přesně tam,
+        // kde má stát přiznání, co modul neumí.
+        'payrollHealthNotifications.ts::HealthDispatchReasonCode'
+            => 'consts:MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsurerChannelCatalog',
+        // Jak je pravidlo doložené. Rozdíl mezi textem zákona a publikací
+        // pojišťovny se v tabulce ukazuje, takže se nesmí rozejít.
+        'payrollHealthNotifications.ts::HealthSourceStatus'
+            => 'consts:MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyRule',
+        // Záměr uplatňovat slevu na pojistném (OZUSPOJ). Stav rozhoduje o tom,
+        // jestli se sleva vůbec uplatní, a obrazovka podle něj nabízí akce —
+        // nová hodnota bez překladu by nechala řádek bez toho, co s ním dělat.
+        'payrollDiscountIntents.ts::PayrollDiscountIntentStatus'
+            => 'enum:MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojIntentStatus',
+        // Druh oznámení (`zamer/typPodani`). Hodnotou enumu je slovo, ne číslo
+        // z XSD — `2` v požadavku by nikdo nepřečetl jako „ukončit záměr".
+        'payrollDiscountIntents.ts::PayrollDiscountIntentSubmissionKind'
+            => 'enum:MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojSubmissionKind',
 
         // Politiky zaměstnavatele
         'payroll.ts::PayrollBusinessDayRule'     => 'policy:payday_business_day_rule',
@@ -189,6 +291,17 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Ruleset\PayrollRulesetOrigin',
         'payroll.ts::PayrollPeopleFilter'
             => 'const:MyInvoice\Repository\Payroll\PayrollPeopleRepository::LIST_FILTERS',
+        // Navazující agendy karty zaměstnance. Klíč navíc na klientovi = řádek
+        // souhrnu bez popisku, klíč navíc na serveru = agenda, na kterou karta
+        // neumí odkázat.
+        'payroll.ts::PayrollAgendaKey'
+            => 'const:MyInvoice\Repository\Payroll\PayrollEmploymentAgendaSummaryRepository::AGENDA_KEYS',
+        // Údaje, které § 38ch odst. 3 žádá po potvrzení od jiného plátce. Klíč
+        // navíc na klientovi = popisek pole, které se nikdy nevypíše; klíč navíc
+        // na serveru = chybějící údaj, ke kterému účetní neuvidí větu, PROČ se
+        // zúčtování neprovedlo.
+        'payroll.ts::PayrollAnnualSettlementCertificateField'
+            => 'const:MyInvoice\Service\Payroll\IncomeTax\ExternalEmployerTaxCertificate::REQUIRED_STATUTORY_FIELDS',
 
         'payrollTravel.ts::TravelTransportMode' => 'enum:MyInvoice\Service\Payroll\Travel\TravelTransportMode',
         'payrollTravel.ts::TravelVehicleKind'   => 'enum:MyInvoice\Service\Payroll\Travel\TravelVehicleKind',
@@ -245,6 +358,11 @@ final class PayrollEnumContractTest extends TestCase
             'Typ hodnoty parametru nese JSON obsahu rulesetu, ne sloupec ani enum.',
         'payrollRulesets.ts::PayrollRulesetDomainStatus' =>
             'Stav domény dopočítává PayrollRulesetAdminService z pokrytí a lifecyclu.',
+        'payroll.ts::PayrollAnnualSettlementListState' =>
+            'Pojmenované zúžení přehledu ročního zúčtování (vše / požádali a nemají '
+            . 'výsledek / bez zúčtování / se zúčtováním). Skládá ho '
+            . 'PayrollAnnualSettlementRepository::LIST_STATES z existence žádosti '
+            . 'a výsledku — uložená hodnota to není a sloupec pro ni neexistuje.',
     ];
 
     /**
@@ -268,6 +386,8 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.people.employment_status'    => 'db:payroll_employments.status',
         'payroll.people.relations'            => 'db:payroll_employments.relation_type',
         'payroll.people.tax_regime'           => 'db:payroll_employment_terms.tax_regime',
+        'payroll.people.other_withholding_eligibility'
+            => 'db:payroll_employment_terms.other_withholding_eligibility',
         'payroll.people.insurance_mode'       => 'db:payroll_employment_terms.social_insurance_participation',
         'payroll.people.checklist_status'     => 'db:payroll_employment_checklist_items.status',
         'payroll.people.event'                => 'db:payroll_employment_events.event_type',
@@ -275,12 +395,52 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.people.registration.agenda'  => 'db:payroll_registration_identity_snapshots.agenda_code',
 
         'payroll.components.kind'         => 'enum:MyInvoice\Service\Payroll\Component\PayrollComponentKind',
+        // Koš se v šabloně skládá dynamicky
+        // (`t(\`payroll.components.exemption_basket.${basket}\`)`), takže bez
+        // věty by účetní u benefitu viděla `non_cash_leisure` místo paragrafu.
+        'payroll.time.overtime.compensatory_check'
+            => 'const:MyInvoice\Service\Payroll\Time\Overtime\CompensatoryTimeOffReconciliation::FINDINGS',
+
+        'payroll.components.exemption_basket'
+            => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
         'payroll.components.frequency'    => 'enum:MyInvoice\Service\Payroll\Component\PayrollComponentFrequency',
         'payroll.components.source'       => 'db:payroll_inputs.source_kind',
         'payroll.components.input_status' => 'db:payroll_inputs.status',
         'payroll.components.calculation'  => 'db:payroll_recurring_components.calculation_kind',
 
+        // Přehled čerpání košů skládá oba klíče dynamicky. Bez věty by se místo
+        // stavu vypsalo `limit_unavailable` — právě tam, kde má být řečeno, že
+        // se limit netvrdí, ne že je nula.
+        'payroll.benefit_baskets.basket'
+            => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
+        'payroll.benefit_baskets.status'
+            => 'const:MyInvoice\Service\Payroll\Component\PayrollBenefitBasketUsage::STATUSES',
+
         'payroll.documents.kind' => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
+
+        // Rozklad pojistného skládá klíče dynamicky (`t(\`…allocation_blocker.${reason}\`)`).
+        // Chybějící věta by u rozdělení, které nevzniklo, vypsala syrový kód —
+        // právě tam, kde má být řečeno, PROČ osobní podíl nedostal.
+        'payroll.runs.insurance.allocation_method'
+            => 'const:MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService::EMPLOYER_ALLOCATION_METHODS',
+        'payroll.runs.insurance.allocation_blocker'
+            => 'const:MyInvoice\Service\Payroll\Insurance\PayrollInsuranceBreakdownQueryService::EMPLOYER_ALLOCATION_BLOCKERS',
+
+        // Retence skládá klíče dynamicky (`t(\`payroll.retention.origin.${origin}\`)`).
+        // Chybějící popisek by na obrazovce vypsal `house_policy` — přesně
+        // u sloupce, který má odlišit zákon od rozhodnutí aplikace.
+        'payroll.retention.origin'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::ORIGINS',
+        'payroll.retention.origin_hint'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::ORIGINS',
+        'payroll.retention.source_status'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::SOURCE_STATUSES',
+        'payroll.retention.basis'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionCatalog::BASES',
+        'payroll.retention.block'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionAssessment::BLOCKS',
+        'payroll.retention.block_hint'
+            => 'const:MyInvoice\Service\Payroll\Retention\PayrollRetentionAssessment::BLOCKS',
 
         // Roční zúčtování skládá klíče dynamicky z kódu překážky i stavu
         // evidence, takže statická i18n brána na ně nedosáhne. Chybějící věta
@@ -335,6 +495,7 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\Calculation\HealthMinimumTopUpPayer::class,
         \MyInvoice\Service\Payroll\Calculation\RoundingMode::class,
         \MyInvoice\Service\Payroll\Garnishment\DeductionLegalBasis::class,
+        \MyInvoice\Service\Payroll\Garnishment\EnforcementEvidenceSource::class,
         \MyInvoice\Service\Payroll\Garnishment\GarnishableIncomeKind::class,
         \MyInvoice\Service\Payroll\Garnishment\GarnishmentStatus::class,
         \MyInvoice\Service\Payroll\Garnishment\InsolvencyMode::class,
@@ -349,6 +510,7 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionReason::class,
         \MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpEmployerSelection::class,
         \MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibility::class,
+        \MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibilitySource::class,
         \MyInvoice\Service\Payroll\HealthInsurance\HealthParticipationStatus::class,
         \MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKind::class,
         \MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponentTreatment::class,
@@ -369,8 +531,21 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\SocialInsurance\SocialEmploymentKind::class,
         \MyInvoice\Service\Payroll\SocialInsurance\SocialIncomeAttribution::class,
         \MyInvoice\Service\Payroll\SocialInsurance\SocialJurisdictionEvidence::class,
+        // Důvod § 7a odst. 1 se s klientským unionem PÁRUJE přes sloupec, ne
+        // přes tenhle enum: sloupec má navíc `none` (sleva se neuplatňuje),
+        // což není zákonný důvod, ale výchozí stav evidence. Výsledek
+        // posouzení § 7a odst. 3 hranici HTTP nepřekračuje jako volba
+        // uživatele — je to zjištění výpočtu v uloženém výsledku.
+        \MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountOutcome::class,
+        \MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason::class,
         \MyInvoice\Service\Payroll\SocialInsurance\SocialParticipationAggregationGroup::class,
         \MyInvoice\Service\Payroll\SocialInsurance\SocialParticipationStatus::class,
+        \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsurerChannelKind::class,
+        \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationCodeGroup::class,
+        // Výsledek posouzení záměru (kontrola 291) je zjištění výpočtu, ne
+        // volba uživatele — do klienta odchází jen jako `evidences_discount`
+        // a věta, ne jako kód, který by šlo poslat zpátky.
+        \MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojEligibilityOutcome::class,
         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlPassability::class,
         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlScope::class,
         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSystem::class,

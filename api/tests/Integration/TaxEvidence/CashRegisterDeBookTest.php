@@ -13,6 +13,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\Cash\CashDocumentService;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -160,6 +161,91 @@ final class CashRegisterDeBookTest extends TestCase
         self::assertEqualsWithDelta(700.00, $detail['balance'], 0.001);
     }
 
+    /**
+     * L-9: filtry knihy (`q`/`doc_type`/`purpose`) musí platit v OBOU větvích stejně,
+     * jinak se čísla mezi účetními režimy rozejdou. Zůstatky a obraty se filtrem
+     * NESMÍ zkreslit — jsou za období, ne za výběr.
+     *
+     * @return array<string, array{0:'te'|'de'}>
+     */
+    public static function bookModes(): array
+    {
+        return [
+            'daňová evidence' => ['te'],
+            'podvojné účetnictví' => ['de'],
+        ];
+    }
+
+    #[DataProvider('bookModes')]
+    public function testBookFiltersNarrowRowsButNotBalances(string $which): void
+    {
+        $supplierId = $which === 'te' ? $this->teSupplierId : $this->deSupplierId;
+        $regId = $this->registers->create($supplierId, ['name' => 'Pokladna', 'account_code' => '211', 'is_default' => true]);
+
+        $this->postSale($supplierId, $regId, 1000.00, self::YEAR . '-06-10');       // popis „Pokladní tržba"
+        $this->postPurchase($supplierId, $regId, 400.00, self::YEAR . '-06-15');    // popis „Nákup materiálu"
+        $this->postSale($supplierId, $regId, 250.00, self::YEAR . '-06-20');
+
+        $from = self::YEAR . '-01-01';
+        $to = self::YEAR . '-12-31';
+
+        $all = $this->call($supplierId, $regId, $from, $to);
+        self::assertSame(200, $all['status']);
+        self::assertCount(3, $all['body']['items']);
+
+        // (a) typ dokladu
+        $income = $this->call($supplierId, $regId, $from, $to, ['doc_type' => 'in']);
+        self::assertCount(2, $income['body']['items']);
+        self::assertSame(2, (int) $income['body']['total']);
+        foreach ($income['body']['items'] as $it) {
+            self::assertSame('in', $it['doc_type']);
+        }
+
+        // (b) účel
+        $purchases = $this->call($supplierId, $regId, $from, $to, ['purpose' => 'purchase']);
+        self::assertCount(1, $purchases['body']['items']);
+        self::assertEqualsWithDelta(400.00, (float) $purchases['body']['items'][0]['expense'], 0.001);
+
+        // (c) fulltext přes popis, case-insensitive
+        $text = $this->call($supplierId, $regId, $from, $to, ['q' => 'nákup']);
+        self::assertCount(1, $text['body']['items']);
+
+        // (d) neshoda = prázdný výběr, ne prázdná kniha
+        $none = $this->call($supplierId, $regId, $from, $to, ['q' => 'tenhle popis nikde není']);
+        self::assertSame([], $none['body']['items']);
+        self::assertSame(0, (int) $none['body']['total']);
+
+        // (e) zůstatky a obraty se filtrem NESMÍ hnout — jsou za období.
+        foreach ([$income, $purchases, $text, $none] as $filtered) {
+            self::assertEqualsWithDelta(
+                (float) $all['body']['opening_balance'],
+                (float) $filtered['body']['opening_balance'],
+                0.001,
+                'Počáteční zůstatek je za období, ne za výběr.',
+            );
+            self::assertEqualsWithDelta((float) $all['body']['closing_balance'], (float) $filtered['body']['closing_balance'], 0.001);
+            self::assertEqualsWithDelta((float) $all['body']['income_total'], (float) $filtered['body']['income_total'], 0.001);
+            self::assertEqualsWithDelta((float) $all['body']['expense_total'], (float) $filtered['body']['expense_total'], 0.001);
+        }
+
+        // (f) běžící zůstatek řádku zůstává zůstatkem KNIHY, ne součtem výběru.
+        self::assertEqualsWithDelta(600.00, (float) $purchases['body']['items'][0]['balance'], 0.001, '1000 − 400 = 600.');
+    }
+
+    /** Neznámá hodnota filtru se ignoruje — nesmí vyprázdnit knihu ani spadnout. */
+    public function testUnknownFilterValueIsIgnored(): void
+    {
+        $regId = $this->registers->create($this->teSupplierId, ['name' => 'Pokladna', 'account_code' => '211', 'is_default' => true]);
+        $this->postSale($this->teSupplierId, $regId, 1000.00, self::YEAR . '-06-10');
+
+        $res = $this->call($this->teSupplierId, $regId, self::YEAR . '-01-01', self::YEAR . '-12-31', [
+            'doc_type' => 'nesmysl', 'purpose' => 'nesmysl', 'q' => '  ',
+        ]);
+
+        self::assertSame(200, $res['status']);
+        self::assertCount(1, $res['body']['items']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private function makeSupplier(string $mode): int
@@ -202,11 +288,96 @@ final class CashRegisterDeBookTest extends TestCase
     }
 
     /** @return array{status:int, body:array<string,mixed>} */
-    private function call(int $supplierId, int $registerId, string $from, string $to): array
+    /**
+     * L-6: kniha stránkuje v SQL, ne `array_slice()` nad celým oknem. Běžící zůstatek
+     * proto musí vzniknout nad CELÝM obdobím — druhá stránka nesmí začít počítat od nuly —
+     * a součty ani `total` se stránkou nesmí hnout.
+     */
+    public function testTaxEvidenceBookPagesInSqlWithoutRestartingRunningBalance(): void
+    {
+        $regId = $this->registers->create($this->teSupplierId, ['name' => 'Pokladna', 'account_code' => '211', 'is_default' => true]);
+
+        foreach ([100.00, 200.00, 300.00, 400.00] as $i => $amount) {
+            $this->postSale($this->teSupplierId, $regId, $amount, self::YEAR . '-06-' . str_pad((string) (10 + $i), 2, '0', STR_PAD_LEFT));
+        }
+
+        $first = $this->call($this->teSupplierId, $regId, self::YEAR . '-01-01', self::YEAR . '-12-31', ['page' => 1, 'per_page' => 2]);
+        self::assertSame(200, $first['status']);
+        self::assertCount(2, $first['body']['items']);
+        self::assertSame(4, (int) $first['body']['total'], 'total je počet řádků výběru, ne délka stránky.');
+        self::assertEqualsWithDelta(300.00, $first['body']['items'][1]['balance'], 0.001, '100 + 200 = 300.');
+
+        $second = $this->call($this->teSupplierId, $regId, self::YEAR . '-01-01', self::YEAR . '-12-31', ['page' => 2, 'per_page' => 2]);
+        self::assertCount(2, $second['body']['items']);
+        self::assertEqualsWithDelta(600.00, $second['body']['items'][0]['balance'], 0.001, 'Zůstatek běží dál přes stránky, nezačíná od 0.');
+        self::assertEqualsWithDelta(1000.00, $second['body']['items'][1]['balance'], 0.001);
+
+        // Obraty a zůstatky jsou za období — na stránce nezáleží.
+        foreach ([$first, $second] as $page) {
+            self::assertEqualsWithDelta(1000.00, $page['body']['income_total'], 0.001);
+            self::assertEqualsWithDelta(0.0, $page['body']['expense_total'], 0.001);
+            self::assertEqualsWithDelta(1000.00, $page['body']['closing_balance'], 0.001);
+        }
+    }
+
+    /**
+     * Zápor se hlídá nad průběhem, ne jen nad koncem období — kniha spadne pod nulu
+     * uprostřed a do konečného zůstatku se vrátí.
+     */
+    public function testTaxEvidenceBookFlagsNegativeDip(): void
+    {
+        $regId = $this->registers->create($this->teSupplierId, ['name' => 'Pokladna', 'account_code' => '211', 'is_default' => true]);
+
+        $this->postPurchase($this->teSupplierId, $regId, 500.00, self::YEAR . '-06-10');
+        $this->postSale($this->teSupplierId, $regId, 900.00, self::YEAR . '-06-20');
+
+        $body = $this->call($this->teSupplierId, $regId, self::YEAR . '-01-01', self::YEAR . '-12-31')['body'];
+        self::assertEqualsWithDelta(400.00, $body['closing_balance'], 0.001);
+        self::assertTrue($body['balance_negative'], 'Propad na -500 uprostřed období se nesmí ztratit.');
+    }
+
+    /**
+     * L-4: `total` se čte z `COUNT(*) OVER()`, tedy z vráceného řádku — na stránce
+     * mimo rozsah (po smazání dokladů) spadl na 0 a uživateli zmizela stránkovací
+     * tlačítka, kterými by se vrátil zpátky.
+     */
+    public function testTaxEvidenceBookKeepsTotalOnPageBeyondRange(): void
+    {
+        $regId = $this->registers->create($this->teSupplierId, ['name' => 'Pokladna', 'account_code' => '211', 'is_default' => true]);
+        $this->postSale($this->teSupplierId, $regId, 100.00, self::YEAR . '-06-10');
+
+        $res = $this->call($this->teSupplierId, $regId, self::YEAR . '-01-01', self::YEAR . '-12-31', ['page' => 5, 'per_page' => 50]);
+
+        self::assertSame(200, $res['status']);
+        self::assertSame([], $res['body']['items']);
+        self::assertSame(1, (int) $res['body']['total'], 'Prázdná stránka nesmí tvrdit, že kniha je prázdná.');
+    }
+
+    /**
+     * L-6: DE větev hledá SQL `LIKE` nad `utf8mb4_unicode_ci` (bez ohledu na diakritiku),
+     * podvojná filtrovala v PHP přes `str_contains` — stejný dotaz tedy dával v obou
+     * režimech jiné výsledky.
+     */
+    #[DataProvider('bookModes')]
+    public function testFulltextIgnoresDiacriticsInBothModes(string $which): void
+    {
+        $supplierId = $which === 'te' ? $this->teSupplierId : $this->deSupplierId;
+        $regId = $this->registers->create($supplierId, ['name' => 'Pokladna', 'account_code' => '211', 'is_default' => true]);
+        $this->postPurchase($supplierId, $regId, 400.00, self::YEAR . '-06-15');   // popis „Nákup materiálu"
+
+        $from = self::YEAR . '-01-01';
+        $to = self::YEAR . '-12-31';
+
+        self::assertCount(1, $this->call($supplierId, $regId, $from, $to, ['q' => 'nákup'])['body']['items']);
+        self::assertCount(1, $this->call($supplierId, $regId, $from, $to, ['q' => 'nakup'])['body']['items'],
+            'Dotaz bez diakritiky musí najít totéž v obou účetních režimech.');
+    }
+
+    private function call(int $supplierId, int $registerId, string $from, string $to, array $extraQuery = []): array
     {
         $req = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/accounting/cash-registers/' . $registerId . '/book')
-            ->withQueryParams(['from' => $from, 'to' => $to])
+            ->withQueryParams(array_merge(['from' => $from, 'to' => $to], $extraQuery))
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant']);
 

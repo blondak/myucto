@@ -18,6 +18,7 @@ use MyInvoice\Service\Ares\SupplierRegistryEnricher;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Config\CfgLocalWriter;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\System\AppUrlConfiguration;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -39,6 +40,7 @@ final class SetupAction
         private readonly IpMatcher $ipMatcher,
         private readonly SessionManager $sessions,
         private readonly Config $config,
+        private readonly AppUrlConfiguration $appUrl,
         private readonly SupplierRegistryEnricher $enricher,
         // SEC-01: brání „nárokování" cizího bankovního účtu už při initial setupu.
         private readonly \MyInvoice\Repository\BankStatementOwnershipResolver $bankOwnership,
@@ -110,7 +112,7 @@ final class SetupAction
         }
 
         $detectedUrl = $this->detectAppUrl($request);
-        $willWriteDetectedUrl = $detectedUrl !== null && $this->shouldOverwriteAppUrl();
+        $willWriteDetectedUrl = $detectedUrl !== null && $this->appUrl->shouldSetupUseDetectedOrigin();
         if ($requireMfa && $allowedMfaMethods === ['passkey']) {
             $canonicalUrl = $willWriteDetectedUrl
                 ? $detectedUrl
@@ -404,23 +406,6 @@ final class SetupAction
         $isStandard = ($scheme === 'http' && $port === 80) || ($scheme === 'https' && $port === 443);
 
         return $scheme . '://' . $host . ($port !== null && !$isStandard ? ':' . $port : '');
-    }
-
-    /**
-     * True pokud aktuální app.url je prázdná nebo známý placeholder z vzorových configů.
-     */
-    private function shouldOverwriteAppUrl(): bool
-    {
-        $current = rtrim((string) $this->config->get('app.url', ''), '/');
-        if ($current === '') {
-            return true;
-        }
-        $placeholders = [
-            'http://localhost:8080',  // cfg.docker.php default
-            'https://dev.example.com',// cfg.sample.php default
-            'https://example.com',    // generic sample
-        ];
-        return in_array($current, $placeholders, true);
     }
 
     /**

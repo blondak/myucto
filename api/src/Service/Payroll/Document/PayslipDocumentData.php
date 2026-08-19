@@ -9,6 +9,16 @@ final readonly class PayslipDocumentData
     private const MAX_MINOR_UNITS = 1_000_000_000_000;
     private const MAX_LINES = 100;
 
+    /** Páska nese u každé složky podklad jejího nezdanění. */
+    public const INCOME_DETAIL_RECORDED = 'recorded';
+
+    /**
+     * Páska vznikla nad snapshotem, který podklad nezdanění neevidoval.
+     * Není to „nic osvobozeného nebylo" — je to neevidovaný údaj a doklad ho
+     * tak musí i pojmenovat, stejně jako mzdový list.
+     */
+    public const INCOME_DETAIL_NOT_RECORDED = 'not_recorded';
+
     /**
      * @param list<PayslipLine> $incomeLines
      * @param list<PayslipLine> $otherDeductionLines
@@ -43,6 +53,12 @@ final readonly class PayslipDocumentData
         public string $insuranceExpenseAccount,
         public string $insuranceLiabilityAccount,
         public string $currency = 'CZK',
+        /**
+         * Doplatek ze zúčtování vyplacený s touto mzdou (§ 35d odst. 8).
+         * Není mzdou ani srážkou — připočítává se až k výplatě.
+         */
+        public int $annualSettlementMinorUnits = 0,
+        public string $incomeDetailStatus = self::INCOME_DETAIL_NOT_RECORDED,
     ) {
         $this->assertText($revisionId, 'Revision ID');
         $this->assertText($employerName, 'Employer name');
@@ -69,6 +85,31 @@ final readonly class PayslipDocumentData
         $this->assertLineList($incomeLines, 'Income lines', false);
         $this->assertLineList($otherDeductionLines, 'Other deduction lines', true);
 
+        if (!in_array($incomeDetailStatus, [
+            self::INCOME_DETAIL_RECORDED,
+            self::INCOME_DETAIL_NOT_RECORDED,
+        ], true)) {
+            throw new \InvalidArgumentException('Stav údajů o složkách mzdy není platný.');
+        }
+
+        if ($incomeDetailStatus === self::INCOME_DETAIL_NOT_RECORDED) {
+            foreach ($incomeLines as $line) {
+                if ($line->exemptionBasis !== null) {
+                    throw new \InvalidArgumentException(
+                        'Neevidované údaje o složkách mzdy nesmí nést podklad osvobození.',
+                    );
+                }
+            }
+        }
+
+        foreach ($otherDeductionLines as $line) {
+            if ($line->exemptionBasis !== null) {
+                throw new \InvalidArgumentException(
+                    'Srážka ze mzdy nemá podklad osvobození od daně.',
+                );
+            }
+        }
+
         foreach ([
             $grossMinorUnits,
             $employeeSocialMinorUnits,
@@ -83,6 +124,7 @@ final readonly class PayslipDocumentData
             $netMinorUnits,
             $employerSocialMinorUnits,
             $employerHealthMinorUnits,
+            $annualSettlementMinorUnits,
         ] as $amountMinorUnits) {
             if ($amountMinorUnits < 0 || $amountMinorUnits > self::MAX_MINOR_UNITS) {
                 throw new \InvalidArgumentException('Payslip amounts other than the rounding adjustment must not be negative.');
@@ -130,6 +172,7 @@ final readonly class PayslipDocumentData
             -$this->sumLines($otherDeductionLines),
             $taxBonusMinorUnits,
             $roundingAdjustmentMinorUnits,
+            $annualSettlementMinorUnits,
         ]);
 
         if ($netMinorUnits !== $expectedNet) {
@@ -151,6 +194,37 @@ final readonly class PayslipDocumentData
                 );
             }
         }
+    }
+
+    public function incomeDetailRecorded(): bool
+    {
+        return $this->incomeDetailStatus === self::INCOME_DETAIL_RECORDED;
+    }
+
+    /**
+     * Osvobozená část hrubé mzdy — táž podmnožina, kterou mzdový list vykazuje
+     * podle § 38j odst. 2 písm. f) bodu 2. Do hrubé mzdy je ZAHRNUTÁ, nepřičítá
+     * se: kdyby se sečetla zvlášť, páska by tvrdila vyšší příjem než mzdový list.
+     */
+    public function taxExemptIncomeMinorUnits(): int
+    {
+        return $this->sumExactly(array_map(
+            static fn (PayslipLine $line): int => $line->reportedExemptMinorUnits(),
+            $this->incomeLines,
+        ));
+    }
+
+    /**
+     * Plnění, které podle § 6 odst. 7 ZDP není předmětem daně. Na mzdovém listě
+     * mezi osvobozené částky NEPATŘÍ, na pásce být musí — je to složka, ze které
+     * se nic nesrazilo, a § 142 odst. 6 zákoníku práce žádá údaj o každé složce.
+     */
+    public function notSubjectToTaxIncomeMinorUnits(): int
+    {
+        return $this->sumExactly(array_map(
+            static fn (PayslipLine $line): int => $line->notSubjectToTaxMinorUnits(),
+            $this->incomeLines,
+        ));
     }
 
     public function totalOtherDeductionsMinorUnits(): int
@@ -193,8 +267,11 @@ final readonly class PayslipDocumentData
      *   employee:array{display_name:string},
      *   period:string,
      *   employment_label:string,
-     *   income_lines:list<array{label:string,amount_minor_units:int}>,
+     *   income_lines:list<array<string,mixed>>,
      *   gross_minor_units:int,
+     *   income_detail_status:string,
+     *   tax_exempt_income_minor_units:int,
+     *   not_subject_to_tax_income_minor_units:int,
      *   employee_social_minor_units:int,
      *   employee_health_minor_units:int,
      *   health_minimum_top_up_minor_units:int,
@@ -205,7 +282,7 @@ final readonly class PayslipDocumentData
      *   tax_bonus_eligible:bool,
      *   tax_after_credits_minor_units:int,
      *   tax_bonus_minor_units:int,
-     *   other_deduction_lines:list<array{label:string,amount_minor_units:int}>,
+     *   other_deduction_lines:list<array<string,mixed>>,
      *   total_other_deductions_minor_units:int,
      *   total_employee_deductions_minor_units:int,
      *   rounding_adjustment_minor_units:int,
@@ -237,6 +314,9 @@ final readonly class PayslipDocumentData
                 $this->incomeLines,
             ),
             'gross_minor_units' => $this->grossMinorUnits,
+            'income_detail_status' => $this->incomeDetailStatus,
+            'tax_exempt_income_minor_units' => $this->taxExemptIncomeMinorUnits(),
+            'not_subject_to_tax_income_minor_units' => $this->notSubjectToTaxIncomeMinorUnits(),
             'employee_social_minor_units' => $this->employeeSocialMinorUnits,
             'employee_health_minor_units' => $this->employeeHealthMinorUnits,
             'health_minimum_top_up_minor_units' => $this->healthMinimumTopUpMinorUnits,
@@ -254,6 +334,7 @@ final readonly class PayslipDocumentData
             'total_other_deductions_minor_units' => $this->totalOtherDeductionsMinorUnits(),
             'total_employee_deductions_minor_units' => $this->totalEmployeeDeductionsMinorUnits(),
             'rounding_adjustment_minor_units' => $this->roundingAdjustmentMinorUnits,
+            'annual_settlement_minor_units' => $this->annualSettlementMinorUnits,
             'net_minor_units' => $this->netMinorUnits,
             'employer_social_minor_units' => $this->employerSocialMinorUnits,
             'employer_health_minor_units' => $this->employerHealthMinorUnits,

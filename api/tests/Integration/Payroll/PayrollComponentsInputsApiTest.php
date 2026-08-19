@@ -268,6 +268,7 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'NEPENEZNI_PRIJEM',
             'ODMENA',
             'ODSTUPNE',
+            'PRECHODNE_UBYTOVANI',
             'PREMIE_PRIPLATKY',
             'PRISPEVEK_DLOUHODOBA_PECE',
             'PRISPEVEK_PENZE_ZIVOTNI',
@@ -381,6 +382,91 @@ final class PayrollComponentsInputsApiTest extends TestCase
                 'approved_input',
             )['status'],
         );
+    }
+
+    /**
+     * Zúžení mzdových vstupů na jeden vztah musí platit i za koncem stránky.
+     *
+     * Dokud zužoval prohlížeč nad načtenou stránkou, vypadalo zúžení na vztah
+     * z jiné strany jako „ten člověk v měsíci nic nemá". Druhý vztah patří
+     * osobě, která se v řazení podle jména propadne na konec, a ptáme se na
+     * první stránku o jednom řádku.
+     */
+    public function testInputNarrowingReachesAnEmploymentBeyondTheFirstPage(): void
+    {
+        $component = $this->createComponent($this->componentPayload(
+            code: 'SYN_FOCUS',
+            validFrom: '2026-01-01',
+            annualLimitMinor: null,
+            kind: 'bonus',
+            valueKind: 'monetary',
+        ));
+        $componentId = PayrollTimeValue::int($component['id'] ?? null, 'component_id');
+        $this->createInput($this->inputPayload($componentId, 11_000, 'focus-first'));
+
+        [$secondEmployeeId, $secondEmploymentId] = $this->employment(
+            $this->supplierId,
+            'Zúžený syntetik',
+            'SYN-COMP-FOCUS',
+        );
+        $offPage = $this->createInput([
+            ...$this->inputPayload($componentId, 22_000, 'focus-second'),
+            'employee_id' => $secondEmployeeId,
+            'employment_id' => $secondEmploymentId,
+        ]);
+        $offPageId = PayrollTimeValue::int($offPage['id'] ?? null, 'input_id');
+
+        $firstPage = $this->listInputs(['limit' => '1']);
+        self::assertNotContains(
+            $offPageId,
+            $this->inputIds($firstPage),
+            'Předpoklad testu: hledaný vstup na první stránce být nesmí.',
+        );
+
+        $narrowed = $this->listInputs([
+            'limit' => '1',
+            'employment_id' => (string) $secondEmploymentId,
+        ]);
+
+        self::assertSame([$offPageId], $this->inputIds($narrowed));
+        self::assertSame(1, $narrowed['total'], 'Total musí být zúžený stejně jako stránka.');
+        self::assertSame($secondEmploymentId, $narrowed['employment_id']);
+
+        $blind = $this->listInputs([
+            'employment_id' => (string) ($secondEmploymentId + 10_000),
+        ]);
+        self::assertSame([], $this->inputIds($blind), 'Slepé zúžení nesmí vrátit celý měsíc.');
+        self::assertSame(0, $blind['total']);
+    }
+
+    /**
+     * @param array<string,string> $query
+     * @return array<string,mixed>
+     */
+    private function listInputs(array $query): array
+    {
+        $response = $this->inputs->list(
+            $this->request('GET', '/api/payroll/inputs')
+                ->withQueryParams(['period' => '2026-06', ...$query]),
+            new Response(),
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+
+        return $this->json($response);
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<int>
+     */
+    private function inputIds(array $payload): array
+    {
+        $ids = [];
+        foreach (PayrollTimeValue::rows((array) $payload['inputs'], 'inputs') as $input) {
+            $ids[] = PayrollTimeValue::int($input['id'] ?? null, 'input.id');
+        }
+
+        return $ids;
     }
 
     /** @return array{0:int,1:int} */

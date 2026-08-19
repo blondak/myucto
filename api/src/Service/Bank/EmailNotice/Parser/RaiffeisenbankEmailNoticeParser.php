@@ -31,7 +31,7 @@ final class RaiffeisenbankEmailNoticeParser extends AbstractBankEmailNoticeParse
             enabled: true,
             senderWhitelist: 'info@rb.cz',
             subjectPattern: 'Pohyb\\s+na\\s+účtě|Pohyb\\s+na\\s+ucte',
-            bodyPattern: 'Variabilní\\s+symbol',
+            bodyPattern: 'Variabilní\\s+symbol|Debetní\\s+karta',
             fieldPatterns: [],
             normalizerConfig: [],
             system: true,
@@ -47,10 +47,16 @@ final class RaiffeisenbankEmailNoticeParser extends AbstractBankEmailNoticeParse
         if (!str_contains($subject, 'pohyb na účtě') && !str_contains($subject, 'pohyb na ucte')) {
             return false;
         }
-        $text = mb_strtolower($this->normalizeText($message->text));
-        return str_contains($text, 'variabilní symbol')
-            && str_contains($text, 'částka v měně účtu')
-            && str_contains($text, 'na účet');
+        $text = $this->normalizeText($message->text);
+        $folded = mb_strtolower($this->foldDiacritics($text));
+        if (!str_contains($folded, 'castka v mene uctu')) {
+            return false;
+        }
+
+        $isTransfer = str_contains($folded, 'variabilni symbol')
+            && str_contains($folded, 'na ucet');
+
+        return $isTransfer || $this->isCardTransaction($text);
     }
 
     public function parse(BankEmailNoticeMessage $message, BankEmailNoticeProvider $provider): ParsedBankEmailNotice
@@ -63,6 +69,32 @@ final class RaiffeisenbankEmailNoticeParser extends AbstractBankEmailNoticeParse
             throw new \RuntimeException('Raiffeisenbank parser nenašel částku a měnu.');
         }
         $amount = $this->parseAmount((string) $amountCurrency['amount']);
+        $constantSymbol = $this->optional($text, '/Konstantní\s+symbol\s*(?<value>[0-9]+)/iu');
+        $balance = $this->optional($text, '/Disponibilní\s+zůstatek(?:\s+po\s+pohybu)?\s*(?<value>[+\-]?[0-9][0-9 .]*,[0-9]{2})/iu');
+
+        if ($this->isCardTransaction($text)) {
+            $ownAccount = $this->required(
+                $text,
+                '/(?:^|\R)\s*Účet\s*(?<value>[0-9\-]+\/[0-9]{4})/iu',
+                'vlastní účet',
+            );
+            $details = $this->optional(
+                $text,
+                '/Detaily\s*(?<value>.*?)Disponibilní\s+zůstatek/isu',
+            );
+
+            return new ParsedBankEmailNotice(
+                variableSymbol: '',
+                amount: $amount,
+                currency: strtoupper((string) $amountCurrency['currency']),
+                postedAt: $this->parseDate($postedAt),
+                recipientAccount: $ownAccount,
+                counterpartyName: $details,
+                constantSymbol: $constantSymbol,
+                balance: $balance !== null ? $this->parseAmount($balance) : null,
+            );
+        }
+
         $to = $this->match(
             $text,
             '/Na\s+účet\s*(?<account>[0-9\-]+\/[0-9]{4})(?<name>.*?)(?=Částka\s+v\s+měně\s+účtu|Variabilní\s+symbol)/isu',
@@ -75,9 +107,7 @@ final class RaiffeisenbankEmailNoticeParser extends AbstractBankEmailNoticeParse
             '/Z\s+účtu\s*(?<account>[0-9\-]+\/[0-9]{4})(?<name>.*?)(?=Částka\s+v\s+měně\s+účtu|Variabilní\s+symbol)/isu',
         );
         $variableSymbol = $this->required($text, '/Variabilní\s+symbol\s*(?<value>[0-9]+)/iu', 'variabilní symbol');
-        $constantSymbol = $this->optional($text, '/Konstantní\s+symbol\s*(?<value>[0-9]+)/iu');
         $note = $this->optional($text, '/Zpráva\s+pro\s+příjemce\s*(?<value>.*?)Disponibilní\s+zůstatek/isu');
-        $balance = $this->optional($text, '/Disponibilní\s+zůstatek(?:\s+po\s+pohybu)?\s*(?<value>[+\-]?[0-9][0-9 .]*,[0-9]{2})/iu');
 
         $isOutgoing = $this->isOutgoingTransfer($text, $amount);
         if ($isOutgoing && $from === null) {
@@ -100,6 +130,14 @@ final class RaiffeisenbankEmailNoticeParser extends AbstractBankEmailNoticeParse
             message: $note,
             balance: $balance !== null ? $this->parseAmount($balance) : null,
         );
+    }
+
+    private function isCardTransaction(string $text): bool
+    {
+        $folded = mb_strtolower($this->foldDiacritics($text));
+        return str_contains($folded, 'odchozi karetni transakce')
+            && str_contains($folded, 'debetni karta')
+            && str_contains($folded, 'platba kartou');
     }
 
     private function isOutgoingTransfer(string $text, float $amount): bool

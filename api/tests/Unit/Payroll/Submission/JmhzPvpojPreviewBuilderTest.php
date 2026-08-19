@@ -226,6 +226,69 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Rozpad § 5a odst. 1 se vykazuje v samostatných blocích A, B a C — ČSSZ ho
+     * kontrolami 8, 10 a 167 počítá po blocích (10024 ze 10023, 10026 ze 10025,
+     * 10484 ze 10483) a teprve 10027 je jejich součet. Sečíst dvě kategorie do
+     * bloku A by podání neprošlo.
+     *
+     * Zaměstnanec 12 (7 000 Kč) je tu rizikový: 27,8 % = 1 946 Kč; zbylých
+     * 10 000 Kč zůstává v písm. a) s 24,8 % = 2 480 Kč.
+     */
+    public function testReportsSeparateBlocksForEachRateCategory(): void
+    {
+        $source = $this->source();
+        $relationship = &$source['statutory_result']['people'][0]['relationships'][0];
+        $relationship['result_snapshot']['employer_rate_category'] = 'risk_employment';
+        $relationship['result_snapshot_hash'] = $this->hash($relationship['result_snapshot']);
+        unset($relationship);
+
+        $root = &$source['statutory_result']['result_snapshot'];
+        $root['employer_categories'] = [
+            [
+                'category' => 'ordinary',
+                'paragraph5a_letter' => 'a',
+                'assessment_base_minor_units' => 1_000_000,
+                'contribution_minor_units' => 248_000,
+            ],
+            [
+                'category' => 'risk_employment',
+                'paragraph5a_letter' => 'c',
+                'assessment_base_minor_units' => 700_000,
+                'contribution_minor_units' => 194_600,
+            ],
+        ];
+        $root['employer_contribution_before_discount_minor_units'] = 442_600;
+        $root['employer_contribution_minor_units'] = 392_600;
+        $rootHash = $this->hash($root);
+        unset($root);
+        $source['statutory_result']['result_snapshot_hash'] = $rootHash;
+
+        $liability = $source['social_liabilities'][0]['source_snapshot'];
+        $liability['statutory_result_hash'] = $rootHash;
+        $liability['employer_contribution_minor'] = 392_600;
+        $liability['target_amount_minor'] = 506_800;
+        $liability['delta_signed_minor'] = 506_800;
+        $source['social_liabilities'][0]['source_snapshot'] = $liability;
+        $source['social_liabilities'][0]['source_snapshot_json'] =
+            CanonicalJson::encode($liability);
+        $source['social_liabilities'][0]['source_snapshot_hash'] = $this->hash($liability);
+        $source['social_liabilities'][0]['amount_minor'] = 506_800;
+
+        $preview = $this->builder->build(41, $source);
+
+        self::assertSame([
+            'zakladZamestnavateleA' => 10_000,
+            'pojistneZamestnavateleA' => 2_480,
+            'zakladZamestnavateleC' => 7_000,
+            'pojistneZamestnavateleC' => 1_946,
+            'pojistneZamestnavateleCelkem' => 4_426,
+            'pojistneZamestnance' => 1_207,
+            'pojistneCelkem' => 5_633,
+        ], $preview->pvpoj['pojistne']);
+        self::assertArrayNotHasKey('zakladZamestnavateleB', $preview->pvpoj['pojistne']);
+    }
+
     public function testRejectsUnsupportedEmployerRateCategory(): void
     {
         $source = $this->source();

@@ -237,6 +237,59 @@ final class PayrollPostingServiceImmutabilityTest extends TestCase
         }
     }
 
+    /**
+     * Nákladové středisko musí přežít cestu do databáze a zpět.
+     *
+     * Opravná dávka počítá rozdíl proti ULOŽENÝM alokacím předchozí dávky. Kdyby
+     * se středisko cestou ztratilo, zrušená alokace by se vrátila na řádku bez
+     * střediska a analytika 524 by se rozešla — v deníku by zůstal náklad na
+     * středisku a jeho storno mimo něj.
+     */
+    public function testPostingAllocationsKeepTheirCostCentreThroughTheDatabase(): void
+    {
+        $batchId = $this->preparePayrollContext();
+        $this->batches->insertAllocations($this->supplierId, $batchId, [
+            [
+                'allocation_key' => 'employer-insurance:social:employment:1:debit',
+                'account_code' => '524',
+                'signed_minor' => 33_800,
+                'description' => 'Sociální pojištění hrazené zaměstnavatelem',
+                'cost_center' => 'VYROBA',
+            ],
+            [
+                'allocation_key' => 'employer-insurance:social:credit',
+                'account_code' => '336',
+                'signed_minor' => -33_800,
+                'description' => 'Sociální pojištění hrazené zaměstnavatelem',
+            ],
+        ]);
+        $this->batches->markNoChange($this->supplierId, $batchId);
+
+        $statement = $this->db->pdo()->prepare(
+            'SELECT run_id FROM payroll_posting_batches WHERE supplier_id = ? AND id = ?',
+        );
+        $statement->execute([$this->supplierId, $batchId]);
+        $runId = (int) $statement->fetchColumn();
+
+        $previous = $this->batches->latestEffectiveBefore($this->supplierId, $runId, 2);
+        self::assertNotNull($previous);
+        self::assertSame([
+            [
+                'allocation_key' => 'employer-insurance:social:credit',
+                'account_code' => '336',
+                'signed_minor' => -33_800,
+                'description' => 'Sociální pojištění hrazené zaměstnavatelem',
+            ],
+            [
+                'allocation_key' => 'employer-insurance:social:employment:1:debit',
+                'account_code' => '524',
+                'signed_minor' => 33_800,
+                'description' => 'Sociální pojištění hrazené zaměstnavatelem',
+                'cost_center' => 'VYROBA',
+            ],
+        ], $previous['allocations']);
+    }
+
     public function testPayrollJournalCannotBeRepostedAndRemainsUnchanged(): void
     {
         $entryId = $this->postPayroll();

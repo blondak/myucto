@@ -20,6 +20,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookValueException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
+use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojClaimDeadlinePolicy;
 use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
 use PDO;
 
@@ -155,6 +156,12 @@ final class PayrollRunSnapshotBuilder
             $periodStart,
             $periodEnd,
         );
+        $discountIntentRows = $this->batch->discountIntents(
+            $supplierId,
+            $employmentIds,
+            $periodStart,
+            $periodEnd,
+        );
         $enforcementEvidence = $this->enforcement === null
             ? []
             : $this->enforcementEvidence(
@@ -198,6 +205,25 @@ final class PayrollRunSnapshotBuilder
                     'employment',
                     $employmentId,
                     'Pracovní vztah nemá pro mzdové období účinné smluvní podmínky.',
+                    "/payroll/employees/{$employeeId}",
+                );
+            }
+            // Mzdová účtárna je u vztahu POVINNÁ. Variabilní symbol
+            // zaměstnavatele pro sociální pojistné vychází výhradně
+            // z `payroll_offices`, takže odvod za vztah bez účtárny není čím
+            // vykázat, a běh zúžený na účtárnu by takový vztah navíc tiše
+            // vynechal. Zápisová cesta ji od migrace 1680 doplňuje z výchozí
+            // účtárny zaměstnavatele; tohle je pojistka pro data, která
+            // vznikla dřív nebo mimo ni — musí se ozvat tady, dokud se dá
+            // vztah opravit, ne až kontrolními součty při schvalování.
+            if ($row['office_id'] === null) {
+                $validations[] = new PayrollRunValidation(
+                    'blocker',
+                    'employment_without_office',
+                    'employment',
+                    $employmentId,
+                    'Pracovní vztah nemá mzdovou účtárnu. Bez ní nelze vykázat'
+                    . ' odvod sociálního pojistného.',
                     "/payroll/employees/{$employeeId}",
                 );
             }
@@ -245,6 +271,15 @@ final class PayrollRunSnapshotBuilder
                 );
             }
             $absences = $this->absences($absenceRows[$employmentId] ?? []);
+            foreach ($this->discountValidations(
+                $row,
+                $discountIntentRows[$employmentId] ?? null,
+                $employmentId,
+                $employeeId,
+                $periodStart,
+            ) as $validation) {
+                $validations[] = $validation;
+            }
 
             $people[$employeeId] ??= [
                 'employee' => [
@@ -308,9 +343,28 @@ final class PayrollRunSnapshotBuilder
                     'health_insurance_participation' =>
                         (string) $row['health_insurance_participation'],
                     'tax_regime' => (string) $row['tax_regime'],
+                    'other_withholding_eligibility' =>
+                        (string) $row['other_withholding_eligibility'],
                     'tax_declaration_signed' =>
                         (bool) $row['tax_declaration_signed'],
                     'risky_work' => (bool) $row['risky_work'],
+                    'social_employer_rate_category' =>
+                        (string) $row['social_employer_rate_category'],
+                    'social_employer_rate_category_evidence' =>
+                        $row['social_employer_rate_category_evidence'],
+                    'social_part_time_discount_reason' =>
+                        (string) $row['social_part_time_discount_reason'],
+                    'social_part_time_discount_evidence' =>
+                        $row['social_part_time_discount_evidence'],
+                    'social_part_time_discount_notified_on' =>
+                        $row['social_part_time_discount_notified_on'],
+                    // Doložený záměr OZUSPOJ. Ručně opsané datum výš zůstává
+                    // jen jako zmrazená historie starších revizí — nárok podle
+                    // § 7a odst. 5 se od téhle migrace posuzuje z evidence
+                    // záměrů, protože ta jediná ví, KDY bylo oznámení doručeno
+                    // a NA JAKÉ OBDOBÍ platí.
+                    'social_part_time_discount_intent' =>
+                        $discountIntentRows[$employmentId] ?? null,
                     'foreign_legislation_country_code' =>
                         $row['foreign_legislation_country_code'],
                     'a1_certificate_until' => $row['a1_certificate_until'],
@@ -536,9 +590,15 @@ final class PayrollRunSnapshotBuilder
                     term.social_insurance_participation,
                     term.health_insurance_participation,
                     term.tax_regime,
+                    term.other_withholding_eligibility,
                     term.tax_declaration_signed,
                     term.is_primary AS term_is_primary,
                     term.risky_work,
+                    term.social_employer_rate_category,
+                    term.social_employer_rate_category_evidence,
+                    term.social_part_time_discount_reason,
+                    term.social_part_time_discount_evidence,
+                    term.social_part_time_discount_notified_on,
                     term.foreign_legislation_country_code,
                     term.a1_certificate_until,
                     average.id AS average_earning_id,
@@ -656,6 +716,63 @@ final class PayrollRunSnapshotBuilder
             ...($officeId === null ? [] : [$officeId]),
         ]);
         return array_values($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Nálezy ke slevě zaměstnavatele podle § 7a. Jdou do VALIDACÍ, ne do
+     * `$data` — kanonický snapshot a tím i `input_hash` proto zůstávají beze
+     * změny a přepočet starší revize dá bit po bitu tentýž vstup jako předtím.
+     *
+     * Dvě věci, o kterých se uživatel jinak nedozví:
+     *
+     * 1. **Chybějící přijatý záměr.** Sleva se bez něj podle § 7a odst. 5
+     *    neuplatní. Ve výsledku běhu je to jen „nedoložený nárok"; odsud se
+     *    dozví, KTERÉ podání chybí.
+     * 2. **Přechodné pravidlo pro 01–03/2026.** Kontroly 164, 290 a 333 vážou
+     *    slevu za tahle období na 30. 6. 2026 a všechny tři jsou v evaluátoru
+     *    `NotEvaluable`, protože potřebují datum přijetí podání od ČSSZ.
+     *    Uživatel tedy z kontrol nedostane varování žádné.
+     *
+     * @param array<string,mixed> $row
+     * @param array<string,mixed>|null $intent
+     * @return list<PayrollRunValidation>
+     */
+    private function discountValidations(
+        array $row,
+        ?array $intent,
+        int $employmentId,
+        int $employeeId,
+        string $periodStart,
+    ): array {
+        $reason = $row['social_part_time_discount_reason'] ?? 'none';
+        if (!is_string($reason) || $reason === 'none') {
+            return [];
+        }
+        $validations = [];
+        if ($intent === null) {
+            $validations[] = new PayrollRunValidation(
+                'warning',
+                'part_time_discount_intent_missing',
+                'employment',
+                $employmentId,
+                'Sleva na pojistném za kratší úvazek je zadaná, ale za období není doložený přijatý záměr (OZUSPOJ). Podle § 7a odst. 5 se bez něj sleva neuplatní.',
+                '/payroll/submissions',
+                true,
+            );
+        }
+        if ((new OzuspojClaimDeadlinePolicy())->isTransitionalQ12026($periodStart)) {
+            $validations[] = new PayrollRunValidation(
+                'warning',
+                'part_time_discount_transitional_window',
+                'employment',
+                $employmentId,
+                'Slevu na pojistném za leden až březen 2026 bylo nutné vykázat v měsíčním hlášení do 30. 6. 2026. Po tomhle dni ji ČSSZ neuzná (kontrola 333) a odečtené pojistné se stane dluhem podle § 7c odst. 3.',
+                "/payroll/employees/{$employeeId}",
+                true,
+            );
+        }
+
+        return $validations;
     }
 
     /**
@@ -967,7 +1084,7 @@ final class PayrollRunSnapshotBuilder
             if (!is_array($component)) {
                 throw new \UnexpectedValueException('Snapshot mzdové složky není objekt.');
             }
-            $result[] = [
+            $entry = [
                 'id' => (int) $row['id'],
                 'amount_minor' => (int) $row['amount_minor'],
                 'quantity_milliunits' => $row['quantity_milliunits'] === null
@@ -979,6 +1096,16 @@ final class PayrollRunSnapshotBuilder
                     strtolower((string) $row['component_snapshot_hash']),
                 'component' => $component,
             ];
+            // Rozpad zákonného koše osvobození (§ 6 odst. 9 ZDP) zmrazený při
+            // schválení vstupu. Revize spočtené před migrací 1480 klíče nemají —
+            // čtou se proto jako „vstup do koše nepatří" a přepočítají se stejně
+            // jako dřív.
+            if (($row['benefit_basket'] ?? null) !== null) {
+                $entry['benefit_basket'] = (string) $row['benefit_basket'];
+                $entry['benefit_exempt_minor'] = (int) $row['benefit_exempt_minor'];
+                $entry['benefit_taxable_minor'] = (int) $row['benefit_taxable_minor'];
+            }
+            $result[] = $entry;
         }
         return $result;
     }

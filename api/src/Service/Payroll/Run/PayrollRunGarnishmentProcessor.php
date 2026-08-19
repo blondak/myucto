@@ -39,7 +39,7 @@ final class PayrollRunGarnishmentProcessor
         $payableTotal = 0;
         foreach ($people as &$person) {
             $employeeId = self::positiveInt($person, 'employee_id');
-            [$netCashPayable, $voluntaryDeducted] = $this->netPay(
+            [$netCashPayable, $voluntaryDeducted, $annualSettlement] = $this->netPay(
                 $person,
                 $context['requires_net_pay'],
             );
@@ -53,9 +53,14 @@ final class PayrollRunGarnishmentProcessor
                 'input' => $input->toCanonicalArray(),
                 'result' => $result->jsonSerialize(),
             ];
+            // Doplatek ze zúčtování se přičítá až za exekučními srážkami —
+            // není mzdou ani jiným postižitelným příjmem podle § 299 OSŘ.
             $payable = self::add(
-                $result->employeePaymentMinorUnits,
-                $income->excludedMinorUnits,
+                self::add(
+                    $result->employeePaymentMinorUnits,
+                    $income->excludedMinorUnits,
+                ),
+                $annualSettlement,
             ) - $voluntaryDeducted;
             if ($payable < 0) {
                 throw new \DomainException(
@@ -155,16 +160,21 @@ final class PayrollRunGarnishmentProcessor
     }
 
     /**
-     * Čistá mzda PŘED dobrovolnými srážkami a částka, kterou dohody nakonec
-     * dostaly. `null` znamená, že zákonný výsledek osoby není uzavřený.
+     * Čistá mzda PŘED dobrovolnými srážkami, částka, kterou dohody nakonec
+     * dostaly, a doplatek ze zúčtování. `null` znamená, že zákonný výsledek
+     * osoby není uzavřený.
+     *
+     * Doplatek ze zúčtování je třetí položkou schválně: do čisté mzdy, ze které
+     * se počítají srážky podle § 277 odst. 1 OSŘ, nepatří — vrácená záloha na
+     * daň mzdou není — ale k výplatě se připočítat musí.
      *
      * @param array<string,mixed> $person
-     * @return array{0:?int,1:int}
+     * @return array{0:?int,1:int,2:int}
      */
     private function netPay(array $person, bool $requiresNetPay): array
     {
         if (!$requiresNetPay) {
-            return [null, 0];
+            return [null, 0, 0];
         }
         $statutory = self::row(
             $person['statutory'] ?? null,
@@ -173,7 +183,7 @@ final class PayrollRunGarnishmentProcessor
         if (($statutory['status'] ?? null) !== 'calculated'
             || !is_int($statutory['net_payable_minor_units'] ?? null)
         ) {
-            return [null, 0];
+            return [null, 0, 0];
         }
         $netPay = self::row(
             $statutory['net_pay'] ?? null,
@@ -183,6 +193,10 @@ final class PayrollRunGarnishmentProcessor
         return [
             self::int($netPay, 'net_before_deductions_minor_units'),
             self::int($netPay, 'deducted_minor_units'),
+            self::int(
+                $netPay + ['annual_settlement_minor_units' => 0],
+                'annual_settlement_minor_units',
+            ),
         ];
     }
 

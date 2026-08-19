@@ -6,10 +6,17 @@ import {
   type RouteRecordRaw,
 } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import type { DomainContext } from '@/api/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import type { AccessLevel, PermissionKey } from '@/security/permissions'
 import { ensureNamespaces, namespacesForRoute } from '@/i18n'
+import {
+  clientDomainCanonicalHandoffPath,
+  clientDomainRedirect,
+  isClientDomainAuthenticatedPath,
+  isClientDomainRouteName,
+} from '@/security/clientRoutePolicy'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -43,6 +50,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'portal',                 name: 'portal',         component: () => import('@/pages/portal/PortalDashboard.vue'), meta: {  } },
       // Vyžádání chybějících dokladů (Fáze F, audit 2026-07) — klientský portál.
       { path: 'portal/document-requests', name: 'portal-document-requests', component: () => import('@/pages/portal/DocumentRequests.vue'), meta: {  } },
+      { path: 'portal/purchase-invoice-submissions', name: 'portal-purchase-invoice-submissions', component: () => import('@/pages/portal/PurchaseInvoiceSubmissions.vue'), meta: { requiresSupplier: true } },
       { path: 'clients',                name: 'clients',        component: () => import('@/pages/clients/ClientList.vue'), meta: {  } },
       { path: 'clients/new',            name: 'client-new',     component: () => import('@/pages/clients/ClientForm.vue'), meta: { requiresSupplier: true } },
       { path: 'clients/:id(\\d+)',      name: 'client-detail',  component: () => import('@/pages/clients/ClientDetail.vue'), meta: {  } },
@@ -72,6 +80,7 @@ const routes: RouteRecordRaw[] = [
       },
       // Přijaté faktury (fáze 1 integrace forku)
       { path: 'purchase-invoices',                 name: 'purchase-invoices',        component: () => import('@/pages/purchase-invoices/InvoiceList.vue'), meta: {  } },
+      { path: 'purchase-invoices/incoming',        name: 'purchase-invoice-submissions', component: () => import('@/pages/purchase-invoices/IncomingDocuments.vue'), meta: { requiresSupplier: true } },
       // Export/Import přijatých (reorg UX 2026-07) — nav pod Nákup; sdílená stránka
       // DataExchange.vue jen vybere ExportPurchase/ImportPurchase dle props.
       {
@@ -108,6 +117,10 @@ const routes: RouteRecordRaw[] = [
       { path: 'payroll/people', name: 'payroll-people', component: () => import('@/pages/payroll/PeopleList.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/quick-inputs', name: 'payroll-quick-inputs', component: () => import('@/pages/payroll/PayrollQuickInputs.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/components', name: 'payroll-components', component: () => import('@/pages/payroll/PayrollComponents.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      // Přehled čerpání ročních košů osvobození (§ 6 odst. 9 ZDP) za firmu. Jede
+      // na `payroll` READ stejně jako seznam mzdových vstupů — je to jejich
+      // součet za osobu a rok, ne nová třída údajů.
+      { path: 'payroll/benefit-baskets', name: 'payroll-benefit-baskets', component: () => import('@/pages/payroll/PayrollBenefitBaskets.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/time', name: 'payroll-time', component: () => import('@/pages/payroll/TimeAttendance.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/absences', name: 'payroll-absences', component: () => import('@/pages/payroll/AbsenceManagement.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/travel', name: 'payroll-travel', component: () => import('@/pages/payroll/PayrollTravel.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
@@ -120,6 +133,14 @@ const routes: RouteRecordRaw[] = [
       { path: 'payroll/annual-settlement', name: 'payroll-annual-settlement', component: () => import('@/pages/payroll/PayrollAnnualSettlement.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/submissions', name: 'payroll-submissions', component: () => import('@/pages/payroll/PayrollSubmissions.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/settings', name: 'payroll-settings', component: () => import('@/pages/payroll/EmployerSettings.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      // Retenční lhůty ukazují katalog z kódu a pouštějí dvojí zápis — odchylku
+      // firmy a zadržení výmazu. Jedou na `payroll.retention` — stejný klíč hlídá
+      // RoutePermissionMap u /api/payroll/retention, takže menu nesvítí tam,
+      // kde API vrátí 403.
+      { path: 'payroll/retention', name: 'payroll-retention', component: () => import('@/pages/payroll/PayrollRetention.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      // Výmaz je samostatné právo (`payroll.erasure`), ne součást retence:
+      // číst lhůty smí i ten, kdo nesmí odklepnout nevratné smazání osoby.
+      { path: 'payroll/erasure', name: 'payroll-erasure', component: () => import('@/pages/payroll/PayrollErasure.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Legislativní rulesety jsou GLOBÁLNÍ číselník (národní sazby a lhůty), ne
       // nastavení firmy — proto bez `requiresPayroll`, stejně jako daňové konstanty.
       { path: 'payroll/rulesets', name: 'payroll-rulesets', component: () => import('@/pages/payroll/PayrollRulesets.vue'), meta: { requiresSupplier: true } },
@@ -193,6 +214,8 @@ const routes: RouteRecordRaw[] = [
       // povolí double_entry i tax_evidence; ostatní /accounting/* zůstávají double_entry-only.
       { path: 'accounting/cash',      name: 'accounting-cash',      component: () => import('@/pages/accounting/CashRegister.vue'),       meta: { requiresCashMode: true } },
       { path: 'accounting/cash/new',  name: 'accounting-cash-new',  component: () => import('@/pages/accounting/CashDocumentEditor.vue'), meta: { requiresCashMode: true, requiresSupplier: true } },
+      // Úprava rozpracovaného (draft) dokladu — vystavený se opravuje stornem, PUT ho odmítne.
+      { path: 'accounting/cash/:id(\\d+)/edit', name: 'accounting-cash-edit', component: () => import('@/pages/accounting/CashDocumentEditor.vue'), meta: { requiresCashMode: true, requiresSupplier: true } },
       { path: 'accounting/cash/book', name: 'accounting-cash-book', component: () => import('@/pages/accounting/CashBook.vue'),           meta: { requiresCashMode: true } },
       // Daňová evidence (Epic DE) — jen supplier.accounting_mode === 'tax_evidence' (zrcadlo requiresDoubleEntry)
       { path: 'tax-evidence/cash-journal',         name: 'tax-evidence-cash-journal',         component: () => import('@/pages/tax-evidence/CashJournal.vue'),         meta: { requiresTaxEvidence: true } },
@@ -388,6 +411,7 @@ const routes: RouteRecordRaw[] = [
     ],
   },
   { path: '/login',  name: 'login',  component: () => import('@/pages/Login.vue'),          meta: { public: true } },
+  { path: '/domain-login/callback', name: 'domain-login-callback', component: () => import('@/pages/DomainLoginCallback.vue'), meta: { public: true } },
   { path: '/setup',  name: 'setup',  component: () => import('@/pages/Setup.vue'),          meta: { public: true } },
   { path: '/setup-mfa', name: 'setup-mfa', component: () => import('@/pages/ForcedMfaSetup.vue'), meta: { requiresAuth: true, mfaSetupOnly: true } },
   { path: '/setup-totp', name: 'setup-totp', redirect: { path: '/setup-mfa', query: { method: 'totp' } } },
@@ -408,7 +432,8 @@ const routes: RouteRecordRaw[] = [
 ]
 
 const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
-  home: ['dashboard'], portal: ['profile'], 'portal-document-requests': ['profile'],
+  home: ['dashboard'], portal: ['profile'], 'portal-document-requests': ['documents.submit'],
+  'portal-purchase-invoice-submissions': ['documents.submit'],
   clients: ['clients'], 'client-new': ['clients.create', 'write'], 'client-detail': ['clients'], 'client-edit': ['clients', 'write'],
   projects: ['projects'], 'project-new': ['projects.create', 'write'], 'project-detail': ['projects'], 'project-edit': ['projects', 'write'],
   invoices: ['invoices'], 'invoice-new': ['invoices.create', 'write'], 'invoice-detail': ['invoices'], 'invoice-edit': ['invoices', 'write'],
@@ -417,6 +442,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // Export/Import vydaných (reorg UX 2026-07) — nav pod Prodej, viz AppLayout.vue.
   'invoices-export': ['invoices'], 'invoices-import': ['invoices'],
   'purchase-invoices': ['purchase_invoices'], 'purchase-invoices-payment-orders': ['purchase_invoices.payment_orders'],
+  'purchase-invoice-submissions': ['documents.inbox'],
   'purchase-invoice-new': ['purchase_invoices.create', 'write'], 'purchase-invoice-detail': ['purchase_invoices'], 'purchase-invoice-edit': ['purchase_invoices', 'write'],
   // Export/Import přijatých (reorg UX 2026-07) — nav pod Nákup, viz AppLayout.vue.
   'purchase-invoices-export': ['purchase_invoices'], 'purchase-invoices-import': ['purchase_invoices'],
@@ -436,6 +462,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'payroll-people': ['payroll'],
   'payroll-quick-inputs': ['payroll'],
   'payroll-components': ['payroll'],
+  'payroll-benefit-baskets': ['payroll'],
   'payroll-time': ['payroll'],
   'payroll-absences': ['payroll'],
   'payroll-travel': ['payroll'],
@@ -446,6 +473,8 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'payroll-submissions': ['payroll.submissions'],
   'payroll-settings': ['payroll.settings'],
   'payroll-rulesets': ['payroll.rulesets'],
+  'payroll-retention': ['payroll.retention'],
+  'payroll-erasure': ['payroll.erasure'],
   'accounting-general-ledger': ['accounting'], 'accounting-trial-balance': ['accounting'], 'accounting-account-statement': ['accounting'],
   'accounting-balance-sheet': ['accounting'], 'accounting-income-statement': ['accounting'], 'accounting-income-statement-by-function': ['accounting'], 'accounting-saldo': ['accounting'],
   'accounting-document-completeness': ['accounting'],
@@ -461,7 +490,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // lookahead vylučuje jen `assets`, ne `small-assets`). Jiný klíč tady = menu svítí,
   // ale API vrátí 403.
   'accounting-small-assets': ['accounting'],
-  'accounting-period-closing': ['accounting.periods.close'], 'accounting-closing-package': ['reports.export'], 'accounting-statement-notes': ['accounting'], 'accounting-retention': ['accounting'], 'accounting-transition-report': ['tax_evidence'], 'accounting-cash': ['cash'], 'accounting-cash-new': ['cash.document.write', 'write'], 'accounting-cash-book': ['cash'],
+  'accounting-period-closing': ['accounting.periods.close'], 'accounting-closing-package': ['reports.export'], 'accounting-statement-notes': ['accounting'], 'accounting-retention': ['accounting'], 'accounting-transition-report': ['tax_evidence'], 'accounting-cash': ['cash'], 'accounting-cash-new': ['cash.document.write', 'write'], 'accounting-cash-edit': ['cash.document.write', 'write'], 'accounting-cash-book': ['cash'],
   'tax-evidence-cash-journal': ['tax_evidence'], 'tax-evidence-receivables-payables': ['tax_evidence'],
   'stock-items': ['stock'], 'stock-item-new': ['stock.items.write', 'write'], 'stock-item-detail': ['stock'], 'stock-item-edit': ['stock.items.write', 'write'],
   'stock-documents': ['stock'], 'stock-document-new': ['stock.documents.write', 'write'], 'stock-document-detail': ['stock'],
@@ -618,7 +647,10 @@ export function clearLoginBounces(): void {
   }
 }
 
-export async function authorizationGuard(to: RouteLocationNormalized): Promise<boolean | RouteLocationRaw> {
+export async function authorizationGuard(
+  to: RouteLocationNormalized,
+  from?: RouteLocationNormalized,
+): Promise<boolean | RouteLocationRaw> {
   const auth = useAuthStore()
 
   if (auth.setupStatus === null) {
@@ -637,14 +669,47 @@ export async function authorizationGuard(to: RouteLocationNormalized): Promise<b
   }
 
   const requiresAuth = to.matched.some((r) => r.meta.requiresAuth)
+  if (requiresAuth && auth.domainContext?.locked) {
+    const redirect = clientDomainRedirect(to.name)
+    if (redirect !== null) return { path: redirect }
+
+    if (clientDomainCanonicalHandoffPath(to.fullPath) !== null) {
+      const returnPath = from
+        && isClientDomainAuthenticatedPath(from.fullPath)
+        && clientDomainCanonicalHandoffPath(from.fullPath) === null
+        ? from.fullPath
+        : '/portal'
+      return {
+        name: 'login',
+        query: {
+          return_to: returnPath,
+          domain_handoff: to.fullPath,
+        },
+      }
+    }
+
+    const canonicalUrl = canonicalInternalUrl(to, auth.domainContext)
+    if (canonicalUrl !== null) {
+      window.location.replace(canonicalUrl)
+      return false
+    }
+  }
   if (requiresAuth && !auth.isAuthenticated) {
     // Rozhoduje stav storu, ne návratová hodnota: refresh() při síťovém výpadku
     // vrací false, ale známou identitu si záměrně drží.
     await auth.refresh()
     if (!auth.isAuthenticated) {
       recordLoginBounce()
-      return { name: 'login' }
+      return auth.domainContext?.locked && isClientDomainAuthenticatedPath(to.fullPath)
+        ? { name: 'login', query: { return_to: to.fullPath } }
+        : { name: 'login' }
     }
+  }
+
+  // Klientská role se z canonical kořene posílá na svůj přehled. Vlastní doména
+  // řeší stejný vstup výše přes sdílenou route policy i pro staff náhled klienta.
+  if (auth.isClientRole && to.name === 'home') {
+    return { name: 'portal' }
   }
   if (requiresAuth && auth.lockedSession) {
     useSessionSecurityStore().apply(auth.lockedSession)
@@ -668,10 +733,6 @@ export async function authorizationGuard(to: RouteLocationNormalized): Promise<b
   }
   if (auth.isAuthenticated && !mustSetupMfa && mfaSetupRoute) {
     return { name: 'home' }
-  }
-
-  if (auth.isClientRole && to.name === 'home') {
-    return { name: 'portal' }
   }
 
   const superadminOnly = to.matched.some((r) => r.meta.superadminOnly)
@@ -757,6 +818,21 @@ export async function authorizationGuard(to: RouteLocationNormalized): Promise<b
   }
 
   return true
+}
+
+/** Vrátí bezpečný canonical cíl jen pro routy mimo sdílenou klientskou plochu. */
+export function canonicalInternalUrl(
+  to: RouteLocationNormalized,
+  context: DomainContext | null,
+): string | null {
+  if (!context?.locked || isClientDomainRouteName(to.name)) return null
+  if (!context.canonical_base_url || !to.fullPath.startsWith('/') || to.fullPath.startsWith('//')) return null
+  try {
+    const origin = new URL(context.canonical_base_url).origin
+    return new URL(to.fullPath, `${origin}/`).toString()
+  } catch {
+    return null
+  }
 }
 
 router.beforeEach(authorizationGuard)

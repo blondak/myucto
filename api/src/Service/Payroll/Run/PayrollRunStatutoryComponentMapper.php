@@ -10,59 +10,144 @@ use MyInvoice\Service\Payroll\HealthInsurance\HealthCorrectionTreatment;
 use MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponent;
 use MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponentTreatment;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCorrectionTreatment;
+use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialAssessmentComponent;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialComponentTreatment;
 
 final class PayrollRunStatutoryComponentMapper
 {
-    /** @param array<string,mixed> $input */
-    public function social(array $input): SocialAssessmentComponent
+    /**
+     * Přípona reference nadlimitní části benefitu.
+     *
+     * Nadlimitní část vystupuje jako VLASTNÍ složka výpočtu, ne jako přepsaná
+     * částka té původní — jinak by z výsledku nešlo poznat, kolik plnění bylo
+     * osvobozené a kolik se zdanilo, a rozklad pojistného by o rozdílu mlčel.
+     * Vzorem je dvojice CESTOVNI_NAHRADA_LIMIT / CESTOVNI_NAHRADA_NADLIMIT.
+     */
+    private const OVER_LIMIT_SUFFIX = '.nadlimit';
+
+    /**
+     * Rozpad zákonného koše osvobození zmrazený při schválení vstupu.
+     *
+     * Vrací null, když vstup do koše nepatří NEBO se do něj celý vešel —
+     * v obou případech se nic nedělí a chování zůstává jako před migrací 1480.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function overLimitAmount(array $input): ?int
+    {
+        if (($input['benefit_basket'] ?? null) === null) {
+            return null;
+        }
+        $taxable = $this->integer(
+            $input['benefit_taxable_minor'] ?? null,
+            'input.benefit_taxable_minor',
+        );
+        $exempt = $this->integer(
+            $input['benefit_exempt_minor'] ?? null,
+            'input.benefit_exempt_minor',
+        );
+        if ($taxable < 0 || $exempt < 0) {
+            throw new \UnexpectedValueException(
+                'Rozpad koše osvobození nesmí být záporný.',
+            );
+        }
+        if ($exempt + $taxable !== $this->integer(
+            $input['amount_minor'] ?? null,
+            'input.amount_minor',
+        )) {
+            throw new \UnexpectedValueException(
+                'Rozpad koše osvobození nedává částku mzdového vstupu.',
+            );
+        }
+
+        return $taxable > 0 ? $taxable : null;
+    }
+    /**
+     * @param array<string,mixed> $input
+     * @return list<SocialAssessmentComponent>
+     */
+    public function social(array $input): array
     {
         $component = $this->component($input);
+        $overLimit = $this->overLimitAmount($input);
+        $amount = $this->integer($input['amount_minor'] ?? null, 'input.amount_minor');
+        $result = [
+            new SocialAssessmentComponent(
+                $this->reference($input, $component),
+                $overLimit === null ? $amount : $amount - $overLimit,
+                SocialComponentTreatment::from($this->string(
+                    $component['social_participation_treatment'] ?? null,
+                    'component.social_participation_treatment',
+                )),
+                SocialComponentTreatment::from($this->string(
+                    $component['social_treatment'] ?? null,
+                    'component.social_treatment',
+                )),
+            ),
+        ];
+        if ($overLimit !== null) {
+            $result[] = new SocialAssessmentComponent(
+                $this->reference($input, $component) . self::OVER_LIMIT_SUFFIX,
+                $overLimit,
+                SocialComponentTreatment::Included,
+                SocialComponentTreatment::Included,
+            );
+        }
 
-        return new SocialAssessmentComponent(
-            $this->reference($input, $component),
-            $this->integer($input['amount_minor'] ?? null, 'input.amount_minor'),
-            SocialComponentTreatment::from($this->string(
-                $component['social_participation_treatment'] ?? null,
-                'component.social_participation_treatment',
-            )),
-            SocialComponentTreatment::from($this->string(
-                $component['social_treatment'] ?? null,
-                'component.social_treatment',
-            )),
-        );
+        return $result;
     }
 
-    /** @param array<string,mixed> $input */
+    /**
+     * @param array<string,mixed> $input
+     * @return list<HealthAssessmentComponent>
+     */
     public function health(
         array $input,
         string $periodStart,
-    ): HealthAssessmentComponent {
+    ): array {
         $component = $this->component($input);
+        $overLimit = $this->overLimitAmount($input);
+        $amount = $this->integer($input['amount_minor'] ?? null, 'input.amount_minor');
+        $correction = $this->isCurrentPeriod($input, $periodStart)
+            ? HealthCorrectionTreatment::CurrentMonth
+            : HealthCorrectionTreatment::Unverified;
+        $result = [
+            new HealthAssessmentComponent(
+                $this->reference($input, $component),
+                $overLimit === null ? $amount : $amount - $overLimit,
+                HealthComponentTreatment::from($this->string(
+                    $component['health_participation_treatment'] ?? null,
+                    'component.health_participation_treatment',
+                )),
+                HealthComponentTreatment::from($this->string(
+                    $component['health_treatment'] ?? null,
+                    'component.health_treatment',
+                )),
+                $correction,
+            ),
+        ];
+        if ($overLimit !== null) {
+            $result[] = new HealthAssessmentComponent(
+                $this->reference($input, $component) . self::OVER_LIMIT_SUFFIX,
+                $overLimit,
+                HealthComponentTreatment::Included,
+                HealthComponentTreatment::Included,
+                $correction,
+            );
+        }
 
-        return new HealthAssessmentComponent(
-            $this->reference($input, $component),
-            $this->integer($input['amount_minor'] ?? null, 'input.amount_minor'),
-            HealthComponentTreatment::from($this->string(
-                $component['health_participation_treatment'] ?? null,
-                'component.health_participation_treatment',
-            )),
-            HealthComponentTreatment::from($this->string(
-                $component['health_treatment'] ?? null,
-                'component.health_treatment',
-            )),
-            $this->isCurrentPeriod($input, $periodStart)
-                ? HealthCorrectionTreatment::CurrentMonth
-                : HealthCorrectionTreatment::Unverified,
-        );
+        return $result;
     }
 
-    /** @param array<string,mixed> $input */
+    /**
+     * @param array<string,mixed> $input
+     * @return list<IncomeTaxComponent>
+     */
     public function incomeTax(
         array $input,
         string $periodStart,
-    ): IncomeTaxComponent {
+    ): array {
         $component = $this->component($input);
         $treatment = match ($this->string(
             $component['tax_treatment'] ?? null,
@@ -76,15 +161,41 @@ final class PayrollRunStatutoryComponentMapper
                 'Mzdová složka má nepodporované daňové zacházení.',
             ),
         };
+        $overLimit = $this->overLimitAmount($input);
+        $amount = $this->integer($input['amount_minor'] ?? null, 'input.amount_minor');
+        $correction = $this->isCurrentPeriod($input, $periodStart)
+            ? TaxCorrectionTreatment::CurrentMonth
+            : TaxCorrectionTreatment::Unverified;
+        // Doklad k osvobození nevzniká tady, ale ve sdíleném
+        // {@see PayrollExemptionEvidence}. Kdyby si ho mapper odvozoval sám,
+        // rozešel by se se sestavovačem zákonných vstupů — a přesně tím
+        // rozporem osvobozená složka nikdy neprošla: sestavovač ji pustil,
+        // výpočet daně ji shodil do ručního posouzení.
+        $evidence = $treatment === IncomeTaxComponentTreatment::Exempt
+            ? PayrollExemptionEvidence::resolve($input)
+            : null;
+        $result = [
+            new IncomeTaxComponent(
+                $this->reference($input, $component),
+                $overLimit === null ? $amount : $amount - $overLimit,
+                $treatment,
+                $correction,
+                $evidence?->status ?? TaxEvidenceStatus::Unverified,
+                $evidence?->effectiveFrom,
+                $evidence?->effectiveTo,
+                $evidence?->reference,
+            ),
+        ];
+        if ($overLimit !== null) {
+            $result[] = new IncomeTaxComponent(
+                $this->reference($input, $component) . self::OVER_LIMIT_SUFFIX,
+                $overLimit,
+                IncomeTaxComponentTreatment::Included,
+                $correction,
+            );
+        }
 
-        return new IncomeTaxComponent(
-            $this->reference($input, $component),
-            $this->integer($input['amount_minor'] ?? null, 'input.amount_minor'),
-            $treatment,
-            $this->isCurrentPeriod($input, $periodStart)
-                ? TaxCorrectionTreatment::CurrentMonth
-                : TaxCorrectionTreatment::Unverified,
-        );
+        return $result;
     }
 
     /** @param array<string,mixed> $input */

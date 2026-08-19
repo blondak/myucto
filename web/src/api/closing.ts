@@ -455,14 +455,59 @@ export interface ArchiveItem {
 }
 
 // ── Číselné řady (R13) ─────────────────────────────────────────────────────
-export type SeriesCode = 'closing' | 'opening' | 'fx' | 'transfer' | 'manual'
+export type SeriesCode =
+  | 'closing' | 'opening' | 'fx' | 'transfer' | 'manual'
+  | 'cash_in' | 'cash_out'
+  | 'stock_in' | 'stock_out' | 'stock_transfer'
+  | 'offset' | 'purchase_order'
+
+/**
+ * Výchozí prefixy řad = zrcadlo DocumentSeriesService::DEFAULT_PREFIXES. Řádek řady
+ * v DB vzniká lazy až prvním výdejem čísla, takže UI z nich skládá dosud neexistující
+ * řady, aby šly nastavit dopředu (převzetí řady z jiného systému).
+ */
+export const SERIES_DEFAULT_PREFIXES: Record<SeriesCode, string> = {
+  closing: 'UZ',
+  opening: 'OT',
+  fx: 'KR',
+  transfer: 'PP',
+  manual: 'ID',
+  cash_in: 'PPD',
+  cash_out: 'VPD',
+  stock_in: 'PRI',
+  stock_out: 'VYD',
+  stock_transfer: 'PRE',
+  offset: 'ZAP',
+  purchase_order: 'OBJ',
+}
+
+/**
+ * Řady vázané na účetní deník = zrcadlo `DocumentSeriesService::DOUBLE_ENTRY_ONLY_SERIES`.
+ * Daňová evidence je nevydává (a server je pro ni ani nevrací), pokladní / skladové /
+ * objednávkové řady naopak používá.
+ */
+export const SERIES_DOUBLE_ENTRY_ONLY: SeriesCode[] = ['closing', 'opening', 'fx', 'transfer', 'manual', 'offset']
 
 export interface DocumentSeries {
   id?: number
   series_code: SeriesCode
+  /** L-3: 0 = společná řada firmy, >0 = vlastní řada té pokladny. */
+  register_id?: number
+  /** Název pokladny u vlastní řady — jen pro zobrazení (BE dopočítává). */
+  register_name?: string | null
   fiscal_year: number
   prefix: string
+  /** Šablona čísla ({PREFIX}/{YYYY}/{YY}/{C+}); null = vestavěné {PREFIX}-{YYYY}-{CCCC}. */
+  number_format: string | null
   next_number: number
+}
+
+/** Aspoň jedna položka; number_format = '' vrátí řadu na vestavěnou šablonu. */
+export interface DocumentSeriesPatch {
+  register_id?: number
+  prefix?: string
+  number_format?: string | null
+  next_number?: number
 }
 
 // ── Převod přes 261 (R14) ──────────────────────────────────────────────────
@@ -662,8 +707,8 @@ export const archiveApi = {
 
 export const seriesApi = {
   list: () => api.get<DocumentSeries[]>('/accounting/document-series').then(r => r.data),
-  updatePrefix: (code: SeriesCode, year: number, prefix: string) =>
-    api.put<DocumentSeries>(`/accounting/document-series/${code}/${year}`, { prefix }).then(r => r.data),
+  update: (code: SeriesCode, year: number, patch: DocumentSeriesPatch) =>
+    api.put<DocumentSeries[]>(`/accounting/document-series/${code}/${year}`, patch).then(r => r.data),
 }
 
 export const transferApi = {

@@ -240,7 +240,7 @@ administrátor) otevřeš formulář **Ruční účetní zápis** (`/accounting/
 - **Číslo dokladu** — volitelné; necháš-li prázdné a firma má na stránce
   [Účetní období](68_Uzaverka.md) zapnutou volbu **„Automatická čísla dokladů ručních
   zápisů (řada ID)"**, systém číslo přidělí automaticky z číselné řady vedené pro ruční
-  zápisy (spravuje se v témže dialogu **Číselné řady**),
+  zápisy (spravuje se v Nástrojích na záložce **Číselné řady**),
 - **Popis** — volitelný text zápisu (max. 255 znaků).
 
 ### Řádky zápisu

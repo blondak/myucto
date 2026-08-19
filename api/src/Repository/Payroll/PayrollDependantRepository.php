@@ -7,6 +7,7 @@ namespace MyInvoice\Repository\Payroll;
 use DateTimeImmutable;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\PayrollApprovedPeriodFreeze;
 use MyInvoice\Service\Payroll\PayrollDependantCreditPreview;
 use MyInvoice\Service\Payroll\PayrollDependantValidator;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -41,6 +42,7 @@ final class PayrollDependantRepository
         private readonly PayrollDependantValidator $validator,
         private readonly PayrollDependantCreditPreview $preview,
         private readonly ActivityLogger $activityLogger,
+        private readonly PayrollApprovedPeriodFreeze $freeze,
     ) {}
 
     /** @return DependantsView|null */
@@ -1047,23 +1049,7 @@ final class PayrollDependantRepository
 
     private function frozenThrough(int $supplierId): ?string
     {
-        $statement = $this->db->pdo()->prepare(
-            "SELECT MAX(run.period_start)
-               FROM payroll_run_revisions revision
-               JOIN payroll_runs run
-                 ON run.supplier_id = revision.supplier_id
-                AND run.id = revision.run_id
-              WHERE revision.supplier_id = ? AND revision.status = 'approved'"
-        );
-        $statement->execute([$supplierId]);
-        $value = $statement->fetchColumn();
-        if (!is_string($value) || $value === '') {
-            return null;
-        }
-
-        return (new DateTimeImmutable($value))
-            ->modify('last day of this month')
-            ->format('Y-m-d');
+        return $this->freeze->frozenThrough($supplierId);
     }
 
     /**

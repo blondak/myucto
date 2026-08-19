@@ -17,15 +17,28 @@ final class PayslipDocumentSnapshotMapperTest extends TestCase
         );
 
         $document = $result['people'][0]['payslip_document'];
-        self::assertSame('payroll-payslip-document.v1', $document['schema_version']);
+        self::assertSame('payroll-payslip-document.v2', $document['schema_version']);
         self::assertSame('Syntetická společnost s.r.o.', $document['employer_name']);
         self::assertSame('00000000', $document['employer_identification_number']);
         self::assertSame('Syntetická Osoba', $document['employee_display_name']);
         self::assertSame('Pracovní poměr', $document['employment_label']);
         self::assertSame([
-            ['label' => 'Základní mzda', 'amount_minor_units' => 4_800_000],
-            ['label' => 'Korekce minulého období', 'amount_minor_units' => -10_000],
+            [
+                'label' => 'Základní mzda',
+                'amount_minor_units' => 4_800_000,
+                'exemption_basis' => null,
+                'exemption_statute' => null,
+                'exempt_part_minor_units' => 0,
+            ],
+            [
+                'label' => 'Korekce minulého období',
+                'amount_minor_units' => -10_000,
+                'exemption_basis' => null,
+                'exemption_statute' => null,
+                'exempt_part_minor_units' => 0,
+            ],
         ], $document['income_lines']);
+        self::assertSame('recorded', $document['income_detail_status']);
         self::assertSame(4_790_000, $document['gross_minor_units']);
         self::assertSame(340_100, $document['employee_social_minor_units']);
         self::assertSame(215_600, $document['employee_health_minor_units']);
@@ -34,7 +47,13 @@ final class PayslipDocumentSnapshotMapperTest extends TestCase
         self::assertSame(431_100, $document['employer_health_minor_units']);
         self::assertSame(4_790_100, $document['tax_base_minor_units']);
         self::assertSame([
-            ['label' => 'Syntetická srážka', 'amount_minor_units' => 8_000],
+            [
+                'label' => 'Syntetická srážka',
+                'amount_minor_units' => 8_000,
+                'exemption_basis' => null,
+                'exemption_statute' => null,
+                'exempt_part_minor_units' => 0,
+            ],
         ], $document['other_deduction_lines']);
         self::assertSame(4_276_300, $document['net_minor_units']);
         self::assertSame('521', $document['gross_expense_account']);
@@ -144,6 +163,69 @@ final class PayslipDocumentSnapshotMapperTest extends TestCase
         );
     }
 
+    /**
+     * Doložený nárok podle § 7a odst. 1 ještě není uplatněná sleva: limity
+     * odst. 3 ji můžou vyloučit. Rozdělení na osoby musí vážit jen skutečně
+     * uplatněnou slevu — jinak by osoba, které sleva nenáleží, ukrojila
+     * z rozdělení kus, který jí nepatří, a druhé osobě by chyběl.
+     */
+    public function testDiscountAllocationIgnoresClaimsThatSection7a3Excluded(): void
+    {
+        $snapshot = $this->inputSnapshot();
+        $second = $snapshot['people'][0];
+        $second['employee']['id'] = 12;
+        $second['employee']['full_name'] = 'Druhá Syntetická';
+        $second['employments'][0]['employment']['id'] = 102;
+        $second['employments'][0]['employment']['employee_id'] = 12;
+        $second['employments'][0]['inputs'][0]['id'] = 1003;
+        $second['employments'][0]['inputs'][1]['id'] = 1004;
+        $second['deduction_agreements'] = [];
+        $snapshot['people'][] = $second;
+
+        $result = $this->calculatedResult();
+        $secondResult = $result['people'][0];
+        $secondResult['employee_id'] = 12;
+        $secondResult['employments'][0]['employment_id'] = 102;
+        $secondResult['employments'][0]['inputs'][0]['input_id'] = 1003;
+        $secondResult['employments'][0]['inputs'][1]['input_id'] = 1004;
+        $secondResult['statutory']['person_reference'] = 'employee:12';
+        $secondResult['statutory']['social_insurance']['person_id'] = 'employee:12';
+        $secondResult['statutory']['social_insurance']['relationships'][0]
+            ['relationship_id'] = 'employment:102';
+        $secondResult['statutory']['social_insurance']['relationships'][0]
+            ['part_time_employer_discount'] = 'verified';
+        $secondResult['statutory']['social_insurance']['relationships'][0]
+            ['part_time_employer_discount_outcome'] = 'assessment_base_above_limit';
+        $secondResult['statutory']['health_insurance']['person_id'] = 'employee:12';
+        $secondResult['statutory']['income_tax']['employee_reference'] = 'employee:12';
+        $secondResult['statutory']['net_pay']['person_reference'] = 'employee:12';
+        $secondResult['statutory']['net_pay']['deductions'] = [];
+        $secondResult['statutory']['net_pay']['deducted_minor_units'] = 0;
+        $secondResult['statutory']['net_pay']['net_payable_minor_units'] = 4_284_300;
+        $secondResult['statutory']['net_payable_minor_units'] = 4_284_300;
+        $secondResult['payable_after_enforcement_minor'] = 4_284_300;
+        $result['people'][] = $secondResult;
+        $result['people'][0]['statutory']['social_insurance']['relationships'][0]
+            ['part_time_employer_discount'] = 'verified';
+        $result['people'][0]['statutory']['social_insurance']['relationships'][0]
+            ['part_time_employer_discount_outcome'] = 'applied';
+        $result['statutory']['employer_social_before_discount_minor_units'] = 2_376_000;
+        $result['statutory']['employer_social_part_time_discount_minor_units'] = 476_000;
+        $result['statutory']['employer_social_minor_units'] = 1_900_000;
+
+        $attached = (new PayslipDocumentSnapshotMapper())->attach($snapshot, $result);
+
+        // Celá sleva patří první osobě; rozdělit ji napůl by druhé osobě
+        // přiznalo slevu, kterou § 7a odst. 3 vyloučil.
+        self::assertSame(
+            [712_000, 1_188_000],
+            array_column(
+                array_column($attached['people'], 'payslip_document'),
+                'employer_social_minor_units',
+            ),
+        );
+    }
+
     public function testDisplaysMultipleGrossAndInsuranceAccountsWithoutBlocking(): void
     {
         $snapshot = $this->inputSnapshot();
@@ -204,10 +286,19 @@ final class PayslipDocumentSnapshotMapperTest extends TestCase
         $document = $attached['people'][0]['payslip_document'];
 
         self::assertSame([
-            ['label' => 'Syntetická srážka', 'amount_minor_units' => 8_000],
+            [
+                'label' => 'Syntetická srážka',
+                'amount_minor_units' => 8_000,
+                'exemption_basis' => null,
+                'exemption_statute' => null,
+                'exempt_part_minor_units' => 0,
+            ],
             [
                 'label' => 'Exekuční a insolvenční srážky',
                 'amount_minor_units' => 100_000,
+                'exemption_basis' => null,
+                'exemption_statute' => null,
+                'exempt_part_minor_units' => 0,
             ],
         ], $document['other_deduction_lines']);
         self::assertSame(4_176_300, $document['net_minor_units']);

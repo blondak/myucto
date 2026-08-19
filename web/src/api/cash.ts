@@ -5,7 +5,23 @@ export type CashPurpose = 'sale' | 'purchase' | 'invoice_payment'
                         | 'purchase_payment' | 'transfer' | 'other'      // šestihodnotový (O3/C3)
 export type CashDocumentStatus = 'draft' | 'posted' | 'reversed'         // BE kanon (O2/C2)
 
-export interface CashVatLine { vat_rate: number; base_amount: number; vat_amount: number }
+/** Rozsah nároku na odpočet DPH u řádku rozpadu (§ 75 poměrný / § 76 koeficient). */
+export type CashVatDeduction = 'full' | 'none' | 'proportional' | 'reduced'
+/** Uznatelnost pro daň z příjmů (§ 24/25) — na DPH nemá vliv. */
+export type CashTaxTreatment = 'deductible' | 'non_deductible' | 'not_expense'
+
+export interface CashVatLine {
+  vat_rate: number; base_amount: number; vat_amount: number
+  /**
+   * M-7: bez těchhle polí je editor při uložení neposílal a `normalize()` je na
+   * serveru resetoval na `full` / 100 / `deductible` — první uložení draftu z UI
+   * tak zahodilo poměrný odpočet i neuznatelnost, které do dokladu dostal import
+   * nebo API klient.
+   */
+  vat_deduction?: CashVatDeduction
+  vat_deduction_percent?: number
+  tax_treatment?: CashTaxTreatment
+}
 // vat_rate je number — sazby se čtou z API (taxConstants per rok), ŽÁDNÝ hardcode 21|12 (A4)
 
 export interface CashRegister {
@@ -14,6 +30,8 @@ export interface CashRegister {
   account_code: string                    // DB i API klíčem je KÓD (O4/C4)
   account_id: number; account_name: string    // obohacení pro FE select
   is_default: boolean; is_active: boolean
+  /** L-3: pokladna má vlastní číselnou řadu PPD/VPD; false = společná řada firmy. */
+  own_series?: boolean
   documents_count: number
   balance: number; balance_date: string   // v list i detail response (O12 — bez /balance endpointu)
   balance_foreign?: number | null          // duální zůstatek valutové pokladny (§11); null u CZK
@@ -21,7 +39,7 @@ export interface CashRegister {
 }
 
 export interface CashRegisterPayload {
-  name: string; account_code: string; currency_code?: string; is_default?: boolean
+  name: string; account_code: string; currency_code?: string; is_default?: boolean; own_series?: boolean
 }
 
 export interface CashDocument {
@@ -61,6 +79,20 @@ export interface CashDocumentCreateResult {
   status: CashDocumentStatus; warnings: string[]
 }
 
+export interface CashDocumentPostResult {
+  doc_number: string; journal_entry_id: number | null; warnings: string[]
+}
+
+/**
+ * Odpověď mazání. `doc_number` je vyplněné jen u dokladu, který už číslo dostal —
+ * a jen tehdy backend hlásí `cash.warning.series_gap` (u draftu díra nevzniká).
+ */
+export interface CashDocumentDeleteResult {
+  deleted: boolean; warnings: string[]
+  doc_number?: string | null
+  deleted_entry_ids?: number[]
+}
+
 export interface CashDocumentFilters {
   register_id?: number; doc_type?: CashDocType; purpose?: CashPurpose
   status?: CashDocumentStatus; from?: string; to?: string; q?: string
@@ -70,10 +102,18 @@ export interface CashDocumentListResponse {
   items: CashDocument[]; total: number; page: number; per_page: number
 }
 
+/** Kolik neuhrazených dokladů našeptávač zobrazí (server umí max. 50). */
+export const UNPAID_PAGE_SIZE = 20
+
 export interface UnpaidDocumentOption {
   id: number; kind: 'invoice' | 'purchase_invoice'; number: string
   partner_name: string; total: number; paid: number; remaining: number
   currency_code: string; issued_on: string
+  /** Zálohová faktura — úhrada se účtuje jako přijatá záloha (211/324), ne na saldokonto 311. */
+  is_proforma?: boolean
+  invoice_type?: string
+  /** Přijatá faktura: běžná / daňový doklad k záloze (DDKP). */
+  document_kind?: string | null
 }
 
 export interface CashBookItem {
@@ -83,10 +123,18 @@ export interface CashBookItem {
   income: number | null; expense: number | null; balance: number
   document_id: number | null; entry_id: number
 }
+/** Filtry pokladní knihy — `q`/`doc_type`/`purpose` zužují jen řádky, zůstatky a obraty zůstávají za období. */
+export interface CashBookFilters {
+  from: string; to: string
+  q?: string; doc_type?: CashDocType | ''; purpose?: CashPurpose | ''
+  page?: number; per_page?: number
+}
 export interface CashBookReport {
   register: CashRegister; opening_balance: number; items: CashBookItem[]
   income_total: number; expense_total: number; closing_balance: number
   balance_negative: boolean; total: number; page: number; per_page: number
+  /** Filtrované okno se v podvojné větvi načítá do PHP po dávkách — nad limit se usekne. */
+  truncated?: boolean
 }
 
 /** Předvolba „co to je" pro purpose=other — kontace s nohou na 211. */
@@ -114,22 +162,45 @@ export const cashApi = {
 
   listDocuments: (f: CashDocumentFilters) =>
     api.get<CashDocumentListResponse>('/accounting/cash-documents', { params: f }).then(r => r.data),
+  getDocument: (id: number) =>
+    api.get<CashDocument>(`/accounting/cash-documents/${id}`).then(r => r.data),
   createDocument: (p: CreateCashDocumentPayload) =>
     api.post<CashDocumentCreateResult>('/accounting/cash-documents', p).then(r => r.data),
+  // Úprava jen rozpracovaného (draft) dokladu — vystavený se opravuje stornem.
+  updateDocument: (id: number, p: CreateCashDocumentPayload) =>
+    api.put<CashDocument>(`/accounting/cash-documents/${id}`, p).then(r => r.data),
+  // Zaúčtování draftu (přidělí číslo řady a založí deníkový zápis).
+  postDocument: (id: number) =>
+    api.post<CashDocumentPostResult>(`/accounting/cash-documents/${id}/post`).then(r => r.data),
+  // Storno vrací varování stejně jako zaúčtování (posunutý protizápis, záporná pokladna).
   reverseDocument: (id: number, reason: string, entryDate?: string) =>
-    api.post<{ reversal_entry_id: number }>(
+    api.post<{ reversal_entry_id: number | null; warnings: string[] }>(
       `/accounting/cash-documents/${id}/reverse`, { reason, entry_date: entryDate }).then(r => r.data),
   // force=1 → smaže doklad i s účetními zápisy (bez force jen draft).
   deleteDocument: (id: number, force = false) =>
-    api.delete(`/accounting/cash-documents/${id}`, { params: force ? { force: 1 } : {} }).then(() => true),
+    api.delete<CashDocumentDeleteResult>(`/accounting/cash-documents/${id}`,
+      { params: force ? { force: 1 } : {} }).then(r => r.data),
   documentPdfUrl: (id: number) => `/api/accounting/cash-documents/${id}/pdf`,
 
-  searchUnpaid: (kind: 'invoice' | 'purchase_invoice', q: string, limit = 20) =>
+  /**
+   * L-8: vrací i příznak, že nabídka je oříznutá. Tiše oseknutý seznam tvrdí
+   * „další faktura neexistuje" — uživatel pak místo úhrady vystaví hotovostní
+   * prodej a DPH se vykáže dvakrát. Server se proto ptá o jeden řádek víc, než
+   * kolik se zobrazí; přebytek se zahodí a jen se z něj pozná `truncated`.
+   */
+  /** `refundable` = vratka úhrady: nabídnou se faktury, na kterých už úhrada visí. */
+  searchUnpaid: (kind: 'invoice' | 'purchase_invoice', q: string, limit = UNPAID_PAGE_SIZE, refundable = false) =>
     api.get<UnpaidDocumentOption[]>('/accounting/cash-documents/unpaid',
-      { params: { kind, q, limit } }).then(r => r.data),
+      { params: { kind, q, limit: limit + 1, refundable: refundable ? 1 : undefined } })
+      .then(r => ({ items: r.data.slice(0, limit), truncated: r.data.length > limit })),
 
-  getBook: (registerId: number, params: { from: string; to: string; page?: number; per_page?: number }) =>
+  getBook: (registerId: number, params: CashBookFilters) =>
     api.get<CashBookReport>(`/accounting/cash-registers/${registerId}/book`, { params }).then(r => r.data),
-  bookPdfUrl: (registerId: number, from: string, to: string) =>
-    `/api/accounting/cash-registers/${registerId}/book/pdf?from=${from}&to=${to}`,
+  bookPdfUrl: (registerId: number, f: CashBookFilters) => {
+    const qs = new URLSearchParams({ from: f.from, to: f.to })
+    if (f.q) qs.set('q', f.q)
+    if (f.doc_type) qs.set('doc_type', f.doc_type)
+    if (f.purpose) qs.set('purpose', f.purpose)
+    return `/api/accounting/cash-registers/${registerId}/book/pdf?${qs.toString()}`
+  },
 }

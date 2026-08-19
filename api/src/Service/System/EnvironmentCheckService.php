@@ -61,14 +61,15 @@ final class EnvironmentCheckService
     /**
      * Kontroly, které dávají smysl ještě PŘED prvním setupem — tedy takové, na
      * které má člověk vliv při instalaci prostředí. Cron sem nepatří (na čerstvé
-     * instalaci ještě nic neběželo), stejně jako stav vydání, velikost logů nebo
-     * provozní hygiena configu — ta se posuzuje až u běžící instalace.
+     * instalaci ještě nic neběželo), stejně jako stav vydání nebo velikost logů.
+     * Výjimkou z provozní konfigurace je app.url: chybějící doplní setup, ale
+     * explicitně chybnou hodnotu nepřepíše, a proto ji musí ukázat už preflight.
      *
      * @var list<string>
      */
     public const PREFLIGHT_CHECKS = [
         'php_version', 'php_extensions', 'php_extensions_optional',
-        'memory_limit', 'upload_limits', 'date_timezone', 'timezone_alignment', 'opcache',
+        'memory_limit', 'upload_limits', 'date_timezone', 'timezone_alignment', 'opcache', 'app_url',
         'db_version', 'db_charset', 'db_max_allowed_packet', 'db_sql_mode',
         'redis', 'disk_space', 'writable_paths', 'migrations_pending',
     ];
@@ -86,6 +87,7 @@ final class EnvironmentCheckService
         private readonly Config $config,
         private readonly RedisProbe $redis,
         private readonly VersionService $version,
+        private readonly AppUrlConfiguration $appUrl,
     ) {}
 
     /**
@@ -101,8 +103,22 @@ final class EnvironmentCheckService
      */
     public function report(?array $onlyIds = null): array
     {
+        return $this->buildReport($onlyIds, false);
+    }
+
+    /**
+     * @param list<string>|null $onlyIds
+     * @return array{
+     *     generated_at:string,
+     *     summary:array{status:string,ok:int,warn:int,fail:int,skip:int},
+     *     checks:list<array<string,mixed>>,
+     *     facts:array<string,mixed>
+     * }
+     */
+    private function buildReport(?array $onlyIds, bool $isSetupPreflight): array
+    {
         $facts  = $this->facts();
-        $checks = $this->evaluate($facts, $onlyIds);
+        $checks = $this->evaluate($facts, $onlyIds, $isSetupPreflight);
 
         $counts = [self::STATUS_OK => 0, self::STATUS_WARN => 0, self::STATUS_FAIL => 0, self::STATUS_SKIP => 0];
         foreach ($checks as $check) {
@@ -141,7 +157,7 @@ final class EnvironmentCheckService
      */
     public function preflight(): array
     {
-        $report = $this->report(self::PREFLIGHT_CHECKS);
+        $report = $this->buildReport(self::PREFLIGHT_CHECKS, true);
         unset($report['facts']);
 
         $environment = $this->guard(fn () => $this->version->detectEnvironment(), 'native');
@@ -548,7 +564,11 @@ final class EnvironmentCheckService
      * @param list<string>|null $onlyIds
      * @return list<array<string,mixed>>
      */
-    private function evaluate(array $facts, ?array $onlyIds = null): array
+    private function evaluate(
+        array $facts,
+        ?array $onlyIds = null,
+        bool $isSetupPreflight = false,
+    ): array
     {
         $php     = $facts['php'] ?? [];
         $ini     = $php['ini'] ?? [];
@@ -793,6 +813,28 @@ final class EnvironmentCheckService
         );
 
         // --- Provozní hygiena ---
+        $appUrl = $this->appUrl->status();
+        $appUrlCheckStatus = match ($appUrl['state']) {
+            AppUrlConfiguration::STATE_MISSING => $isSetupPreflight
+                ? self::STATUS_OK
+                : self::STATUS_FAIL,
+            AppUrlConfiguration::STATE_INVALID => self::STATUS_FAIL,
+            AppUrlConfiguration::STATE_HOSTNAME_CONFLICT => self::STATUS_FAIL,
+            AppUrlConfiguration::STATE_ROUTING_ONLY => self::STATUS_WARN,
+            default => self::STATUS_OK,
+        };
+        $checks[] = $this->check(
+            'app_url',
+            $appUrlCheckStatus,
+            $appUrl['reason_code'],
+            AppUrlConfiguration::REASON_VALID,
+            '99_Reseni_problemu',
+            $appUrl,
+            $isSetupPreflight && $appUrl['state'] === AppUrlConfiguration::STATE_MISSING
+                ? 'app_url_detected_during_setup'
+                : '',
+        );
+
         $isProd = ($runtime['app_env'] ?? '') === 'production';
         $checks[] = $this->check(
             'app_debug',

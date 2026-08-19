@@ -2,14 +2,25 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const m = vi.hoisted(() => ({
+  routeQuery: {} as Record<string, string | string[]>,
+  routerReplace: vi.fn(),
   listAnnualSettlements: vi.fn(),
   previewAnnualSettlement: vi.fn(),
   saveAnnualSettlementRequest: vi.fn(),
   settleAnnualSettlement: vi.fn(),
+  saveAnnualSettlementCertificates: vi.fn(),
   downloadDocument: vi.fn(),
   warning: vi.fn(),
   error: vi.fn(),
   success: vi.fn(),
+}))
+
+// Stránka čte předvýběr z adresy (odkaz z karty zaměstnance), takže potřebuje
+// router. Originál se rozprostře, ať zůstanou i ostatní exporty (RouterLink).
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRoute: () => ({ query: m.routeQuery }),
+  useRouter: () => ({ replace: m.routerReplace }),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -18,9 +29,35 @@ vi.mock('@/api/payroll', () => ({
     previewAnnualSettlement: m.previewAnnualSettlement,
     saveAnnualSettlementRequest: m.saveAnnualSettlementRequest,
     settleAnnualSettlement: m.settleAnnualSettlement,
+    saveAnnualSettlementCertificates: m.saveAnnualSettlementCertificates,
     downloadDocument: m.downloadDocument,
   },
 }))
+
+// Uložené pohledy jdou přes Pinii a API; v testu stačí prázdná sada bez
+// výchozího pohledu, ať se obrazovka nezastaví na načítání předvoleb.
+vi.mock('@/composables/useSavedFilters', async () => {
+  const { computed, ref } = await import('vue')
+  return {
+    useSavedFilters: (_key: string, opts: {
+      getQuery: () => Record<string, string>
+      applyQuery: (q: Record<string, string>) => void
+    }) => ({
+      filters: ref([]),
+      activeId: computed(() => null),
+      ready: ref(true),
+      getQuery: opts.getQuery,
+      saveCurrent: vi.fn(),
+      overwrite: vi.fn(),
+      apply: vi.fn(),
+      clearActive: () => opts.applyQuery({}),
+      rename: vi.fn(),
+      setDefault: vi.fn(),
+      remove: vi.fn(),
+      applyDefaultIfAny: () => Promise.resolve(false),
+    }),
+  }
+})
 
 vi.mock('@/api/errors', () => ({
   apiErrorMessage: (_error: unknown, fallback: string) => fallback,
@@ -62,7 +99,7 @@ const emptyStateStub = {
   template: '<div data-test="empty-state" :data-variant="variant">{{ title }}</div>',
 }
 
-function listResponse(items: unknown[]) {
+function listResponse(items: unknown[], overrides: Record<string, unknown> = {}) {
   return {
     tax_year: 2026,
     request_deadline: '2027-02-15',
@@ -70,6 +107,12 @@ function listResponse(items: unknown[]) {
     payout_period: '2027-03',
     payout_threshold_minor: 5000,
     items,
+    total: items.length,
+    limit: 25,
+    offset: 0,
+    search: '',
+    state: 'all',
+    ...overrides,
   }
 }
 
@@ -90,7 +133,9 @@ function person(overrides: Record<string, unknown> = {}) {
     settlement_difference_minor: null,
     payable_minor: null,
     settled_on: null,
-    payroll_input_id: null,
+    payout_run_id: null,
+    payout_revision_id: null,
+    payout_period_start: null,
     annual_revision_id: null,
     ...overrides,
   }
@@ -141,6 +186,7 @@ function previewResponse(overrides: Record<string, unknown> = {}) {
     result: result(),
     credit_rows: [{ label: 'Základní sleva na poplatníka', amount_minor_units: 3_084_000 }],
     child_rows: [],
+    certificates: [],
     already_settled: null,
     ...overrides,
   }
@@ -158,6 +204,7 @@ function mountPage() {
       stubs: {
         ActionBar: actionBarStub,
         EmptyState: emptyStateStub,
+        SavedFiltersMenu: true,
       },
     },
   })
@@ -300,7 +347,9 @@ describe('Roční zúčtování', () => {
         settlement_difference_minor: 120_000,
         payable_minor: 120_000,
         settled_on: '2027-03-10',
-        payroll_input_id: null,
+        payout_run_id: null,
+        payout_revision_id: null,
+        payout_period_start: null,
       },
     }))
     const wrapper = mountPage()
@@ -309,6 +358,58 @@ describe('Roční zúčtování', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="annual-settlement-already"]').exists()).toBe(true)
+  })
+
+  /**
+   * Nejnebezpečnější místo celé obrazovky: prázdné pole se NESMÍ odeslat jako
+   * nula. Nula je podle § 38ch odst. 3 doložený údaj a počítalo by se s ní —
+   * z toho by vyšel přeplatek, na který zaměstnanec nemá nárok.
+   */
+  it('prázdnou částku na potvrzení posílá jako null, ne jako nulu', async () => {
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      certificates: [{
+        certificate_reference: 'POT-1',
+        payer_name: 'Předchozí plátce',
+        payer_tax_identification: null,
+        received_on: '2027-02-10',
+        gross_income_minor_units: 3_000_000,
+        advance_base_minor_units: 3_000_000,
+        advance_tax_minor_units: 450_000,
+        non_refundable_credit_minor_units: 257_000,
+        child_credit_minor_units: 0,
+        tax_bonus_minor_units: null,
+        evidence_status: 'verified',
+        evidence_reference: 'doklad',
+        missing_statutory_fields: ['tax_bonus'],
+      }],
+    }))
+    m.saveAnnualSettlementCertificates.mockResolvedValue([])
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    // Chybějící údaj je vidět dřív, než se na něj někdo zeptá. (Mock `t`
+    // interpolaci nedělá, takže se ověřuje jen že varování je vypsané.)
+    expect(wrapper.find('[data-test="annual-settlement-certificate-missing"]').text())
+      .toContain('payroll.annual_settlement.certificate_missing')
+    // Nula se do formuláře načte jako „0.00", ne jako prázdno.
+    expect(
+      (wrapper.find('[data-test="annual-settlement-certificate-credit_35c"]')
+        .element as HTMLInputElement).value,
+    ).toBe('0.00')
+    expect(
+      (wrapper.find('[data-test="annual-settlement-certificate-tax_bonus"]')
+        .element as HTMLInputElement).value,
+    ).toBe('')
+
+    await wrapper.find('[data-test="annual-settlement-save-certificates"]').trigger('click')
+    await flushPromises()
+
+    const [, , payload] = m.saveAnnualSettlementCertificates.mock.calls[0]
+    expect(payload[0].tax_bonus_minor_units).toBeNull()
+    expect(payload[0].child_credit_minor_units).toBe(0)
+    expect(payload[0].advance_tax_minor_units).toBe(450_000)
   })
 
   it('uloží podklady s row_version, aby souběžná úprava nepřepsala odpovědi', async () => {
@@ -324,6 +425,78 @@ describe('Roční zúčtování', () => {
       defaultYear,
       7,
       expect.objectContaining({ row_version: 1, request_status: 'requested' }),
+    )
+  })
+  /**
+   * Seznam lidí nestránkoval vůbec — server posílal všechny zaměstnance firmy
+   * a obrazovka je všechny vykreslila. Test hlídá, že stránka dotazuje
+   * ohraničený výsek a že další stránku umí objednat.
+   */
+  it('žádá server o ohraničenou stránku a umí přejít na další', async () => {
+    m.listAnnualSettlements.mockResolvedValue(
+      listResponse([person()], { total: 60 }),
+    )
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.listAnnualSettlements).toHaveBeenCalledWith(
+      defaultYear,
+      { limit: 25, offset: 0 },
+      { search: '', state: 'all' },
+    )
+
+    m.listAnnualSettlements.mockResolvedValue(
+      listResponse([person({ employee_id: 9, employee_name: 'Syntetická osoba B' })], {
+        total: 60,
+        offset: 25,
+      }),
+    )
+    const next = wrapper.findAll('button')
+      .find(button => button.text().includes('common.next'))
+    expect(next).toBeDefined()
+    await next!.trigger('click')
+    await flushPromises()
+
+    expect(m.listAnnualSettlements).toHaveBeenLastCalledWith(
+      defaultYear,
+      { limit: 25, offset: 25 },
+      { search: '', state: 'all' },
+    )
+    expect(wrapper.text()).toContain('Syntetická osoba B')
+  })
+
+  /** Zúžení hledá na serveru a vrací stránku na začátek. */
+  it('posílá zúžení na server a vrací se na první stránku', async () => {
+    m.listAnnualSettlements.mockResolvedValue(
+      listResponse([person()], { total: 60 }),
+    )
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const next = wrapper.findAll('button')
+      .find(button => button.text().includes('common.next'))
+    await next!.trigger('click')
+    await flushPromises()
+
+    const search = wrapper.get('[data-test="annual-settlement-search"]')
+    await search.setValue('Novak')
+    await search.trigger('change')
+    await flushPromises()
+
+    expect(m.listAnnualSettlements).toHaveBeenLastCalledWith(
+      defaultYear,
+      { limit: 25, offset: 0 },
+      { search: 'Novak', state: 'all' },
+    )
+
+    const state = wrapper.get('[data-test="annual-settlement-state"]')
+    await state.setValue('requested')
+    await flushPromises()
+
+    expect(m.listAnnualSettlements).toHaveBeenLastCalledWith(
+      defaultYear,
+      { limit: 25, offset: 0 },
+      { search: 'Novak', state: 'requested' },
     )
   })
 })

@@ -122,6 +122,54 @@ final class PayrollTravelListPaginationTest extends TestCase
         );
     }
 
+    /**
+     * Zúžení na jeden vztah musí najít i cestu, která na první stránce není.
+     *
+     * Dokud zužoval prohlížeč nad načtenou dávkou, vypadalo zúžení na cestu
+     * z jiné strany jako „ten člověk žádnou cestu nemá". Test proto zadá cestu
+     * druhému vztahu jako POSLEDNÍ v pořadí (řadí se podle odjezdu sestupně)
+     * a ptá se na první stránku o dvou řádcích.
+     */
+    public function testNarrowingReachesATripBeyondTheFirstPage(): void
+    {
+        $this->seedTrips(4);
+        [$otherEmployeeId, $otherEmploymentId] = $this->employment('SYN-TRV-FOCUS', 'Syntetický zúžený');
+        $offPageTripId = $this->seedTrip($otherEmployeeId, $otherEmploymentId, '2026-06-01 05:00:00');
+
+        $firstPage = $this->listTrips(['limit' => '2', 'offset' => '0']);
+        self::assertNotContains(
+            $offPageTripId,
+            $this->ids($firstPage),
+            'Předpoklad testu: hledaná cesta na první stránce být nesmí.',
+        );
+
+        $narrowed = $this->listTrips([
+            'limit' => '2',
+            'offset' => '0',
+            'employment_id' => (string) $otherEmploymentId,
+        ]);
+
+        self::assertSame([$offPageTripId], $this->ids($narrowed), 'Zúžení musí vrátit hledanou cestu.');
+        self::assertSame(1, $narrowed['total'], 'Total musí být zúžený stejně jako stránka.');
+        self::assertSame($otherEmploymentId, $narrowed['employment_id']);
+    }
+
+    /**
+     * Cizí ani neexistující vztah nesmí vrátit všechny cesty firmy.
+     *
+     * Prázdný výsledek je poznatelný stav; tiché zobrazení všech je lež,
+     * ze které uživatel usoudí, že filtr nezabral.
+     */
+    public function testUnknownNarrowingReturnsNothingInsteadOfEverything(): void
+    {
+        $this->seedTrips(3);
+
+        $payload = $this->listTrips(['employment_id' => (string) ($this->employmentId + 10_000)]);
+
+        self::assertSame([], $this->ids($payload));
+        self::assertSame(0, $payload['total']);
+    }
+
     /** Klíč `trips` zůstává, aby stávající volající nespadli. */
     public function testCollectionKeyIsPreserved(): void
     {
@@ -167,7 +215,23 @@ final class PayrollTravelListPaginationTest extends TestCase
 
     private function seedTrips(int $count): void
     {
-        $stmt = $this->db->pdo()->prepare(
+        // Od druhého dne, aby si test zúžení mohl založit STARŠÍ cestu, která
+        // se v řazení podle odjezdu sestupně spolehlivě propadne za první stránku.
+        for ($i = 0; $i < $count; $i++) {
+            $day = 2 + intdiv($i, 24);
+            $hour = $i % 24;
+            $this->seedTrip(
+                $this->employeeId,
+                $this->employmentId,
+                sprintf('2026-06-%02d %02d:00:00', $day, $hour),
+            );
+        }
+    }
+
+    private function seedTrip(int $employeeId, int $employmentId, string $departureAt): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
             'INSERT INTO payroll_business_trips
                 (supplier_id, employee_id, employment_id, country_code,
                  departure_at, arrival_at, origin_place, destination_place,
@@ -175,37 +239,36 @@ final class PayrollTravelListPaginationTest extends TestCase
                  settlement_period_start, created_by)
              VALUES (?, ?, ?, "CZ", ?, ?, "Praha", "Brno", "Syntetická cesta",
                      "public_transport", 0, "2026-06-01", ?)'
-        );
-        for ($i = 0; $i < $count; $i++) {
-            $day = 1 + intdiv($i, 24);
-            $hour = $i % 24;
-            $stmt->execute([
-                $this->supplierId,
-                $this->employeeId,
-                $this->employmentId,
-                sprintf('2026-06-%02d %02d:00:00', $day, $hour),
-                sprintf('2026-06-%02d %02d:30:00', $day, $hour),
-                $this->userId,
-            ]);
-        }
+        )->execute([
+            $this->supplierId,
+            $employeeId,
+            $employmentId,
+            $departureAt,
+            substr($departureAt, 0, 14) . '30:00',
+            $this->userId,
+        ]);
+
+        return (int) $pdo->lastInsertId();
     }
 
     /** @return array{0:int,1:int} */
-    private function employment(): array
-    {
+    private function employment(
+        string $code = 'SYN-TRV-PAG',
+        string $name = 'Syntetický cestující',
+    ): array {
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO payroll_employees
                 (supplier_id, full_name, taxpayer_type, is_active)
-             VALUES (?, "Syntetický cestující", "employee", 1)'
-        )->execute([$this->supplierId]);
+             VALUES (?, ?, "employee", 1)'
+        )->execute([$this->supplierId, $name]);
         $employeeId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             'INSERT INTO payroll_employments
                 (supplier_id, employee_id, code, relation_type, status,
                  start_date, is_legacy_projection)
-             VALUES (?, ?, "SYN-TRV-PAG", "employment", "active", "2026-01-01", 0)'
-        )->execute([$this->supplierId, $employeeId]);
+             VALUES (?, ?, ?, "employment", "active", "2026-01-01", 0)'
+        )->execute([$this->supplierId, $employeeId, $code]);
 
         return [$employeeId, (int) $pdo->lastInsertId()];
     }

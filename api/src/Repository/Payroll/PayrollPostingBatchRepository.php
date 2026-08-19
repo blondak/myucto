@@ -309,7 +309,8 @@ final class PayrollPostingBatchRepository
      *   allocation_key:string,
      *   account_code:string,
      *   signed_minor:int,
-     *   description:string
+     *   description:string,
+     *   cost_center?:string
      * }> $allocations
      */
     public function insertAllocations(
@@ -323,8 +324,8 @@ final class PayrollPostingBatchRepository
         $statement = $this->db->pdo()->prepare(
             'INSERT INTO payroll_posting_allocations
                 (supplier_id, batch_id, allocation_key, account_code,
-                 signed_minor, description)
-             VALUES (?, ?, ?, ?, ?, ?)'
+                 signed_minor, description, cost_center)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($allocations as $allocation) {
             $statement->execute([
@@ -334,6 +335,7 @@ final class PayrollPostingBatchRepository
                 $allocation['account_code'],
                 $allocation['signed_minor'],
                 $allocation['description'],
+                $allocation['cost_center'] ?? null,
             ]);
         }
     }
@@ -372,13 +374,15 @@ final class PayrollPostingBatchRepository
      *   allocation_key:string,
      *   account_code:string,
      *   signed_minor:int,
-     *   description:string
+     *   description:string,
+     *   cost_center?:string
      * }>
      */
     private function allocations(int $supplierId, int $batchId): array
     {
         $statement = $this->db->pdo()->prepare(
-            'SELECT allocation_key, account_code, signed_minor, description
+            'SELECT allocation_key, account_code, signed_minor, description,
+                    cost_center
                FROM payroll_posting_allocations
               WHERE supplier_id = ? AND batch_id = ?
               ORDER BY allocation_key'
@@ -392,7 +396,7 @@ final class PayrollPostingBatchRepository
                     'Databáze vrátila neplatnou účetní alokaci.',
                 );
             }
-            $result[] = [
+            $allocation = [
                 'allocation_key' => self::databaseString(
                     $row['allocation_key'] ?? null,
                     'allocation_key',
@@ -410,6 +414,16 @@ final class PayrollPostingBatchRepository
                     'description',
                 ),
             ];
+            // Klíč se dosazuje jen když středisko opravdu je — alokace dávek
+            // bez střediska tak zůstávají tvarově shodné s tím, co postavil
+            // PayrollPostingLineBuilder, a `target_hash` se nerozejde.
+            if (($row['cost_center'] ?? null) !== null) {
+                $allocation['cost_center'] = self::databaseString(
+                    $row['cost_center'],
+                    'cost_center',
+                );
+            }
+            $result[] = $allocation;
         }
 
         return $result;

@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
+use MyInvoice\Service\Payroll\Document\ApprovedRevisionDocumentBatchService;
 use MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentKind;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentStorage;
@@ -24,6 +25,7 @@ final class ApprovedRevisionPayslipBatchServiceTest extends TestCase
 
     private Connection $db;
     private ApprovedRevisionPayslipBatchService $service;
+    private ApprovedRevisionDocumentBatchService $batch;
     private PayrollDocumentRepository $documents;
     private PayrollDocumentStorage $storage;
     private int $supplierId;
@@ -56,6 +58,9 @@ final class ApprovedRevisionPayslipBatchServiceTest extends TestCase
         $this->service = $service;
         $this->documents = $documents;
         $this->storage = $storage;
+        $batch = $container->get(ApprovedRevisionDocumentBatchService::class);
+        self::assertInstanceOf(ApprovedRevisionDocumentBatchService::class, $batch);
+        $this->batch = $batch;
         $pdo = $this->db->pdo();
         $sourceSupplierId = (int) $this->query(
             $pdo,
@@ -210,9 +215,11 @@ final class ApprovedRevisionPayslipBatchServiceTest extends TestCase
             );
             self::fail('Konfliktní druhá páska musí zrušit celou dávku.');
         } catch (\RuntimeException $exception) {
-            self::assertStringContainsString('conflict', strtolower(
+            // Pojmenované odmítnutí, ne syrová `PDOException` z unikátního klíče.
+            self::assertStringContainsString(
+                'jiným zdrojovým otiskem',
                 $exception->getMessage(),
-            ));
+            );
         }
 
         self::assertSame(1, $this->documentCount());
@@ -227,6 +234,112 @@ final class ApprovedRevisionPayslipBatchServiceTest extends TestCase
             $this->storedFileCount(),
             'Rollback dávky nesmí ponechat osiřelý PDF soubor první osoby.',
         );
+    }
+
+    /**
+     * Kolize na `uq_payroll_document_revision` musí skončit pojmenovaným
+     * odmítnutím, ne syrovou `PDOException` z databáze.
+     */
+    public function testDuplicateDocumentRevisionEndsAsNamedRefusal(): void
+    {
+        $revisionHash = (string) $this->query(
+            $this->db->pdo(),
+            'SELECT result_snapshot_hash
+               FROM payroll_run_revisions
+              WHERE id = ' . $this->revisionId
+        )->fetchColumn();
+        $record = function (string $idempotencyKey) use ($revisionHash): array {
+            $stored = $this->storage->store(
+                $this->supplierId,
+                '%PDF-1.4 ' . $idempotencyKey,
+            );
+
+            return [
+                'supplier_id' => $this->supplierId,
+                'run_id' => $this->runId,
+                'revision_id' => $this->revisionId,
+                'employee_id' => $this->employeeIds[0],
+                'document_kind' => PayrollDocumentKind::Payslip->value,
+                'document_revision_no' => 1,
+                'supersedes_document_id' => null,
+                'source_snapshot_hash' => str_repeat('e', 64),
+                'revision_snapshot_hash' => $revisionHash,
+                'template_version' => 'synthetic-v1',
+                'renderer_version' => 'synthetic-v1',
+                'file_sha256' => $stored['file_sha256'],
+                'size_bytes' => $stored['size_bytes'],
+                'mime_type' => 'application/pdf',
+                'storage_key' => $stored['storage_key'],
+                'suggested_filename' => 'synthetic.pdf',
+                'manifest_json' => null,
+                'idempotency_key_hash' => hash('sha256', $idempotencyKey),
+                'created_by' => null,
+            ];
+        };
+
+        $this->documents->insertOrGet($record('prvni'));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage(
+            'Generated payroll document conflicts with an existing artifact.',
+        );
+        $this->documents->insertOrGet($record('druha'));
+    }
+
+    public function testDocumentBatchReportsCompleteMonthWithoutEndedEmployments(): void
+    {
+        $report = $this->batch->generate(
+            $this->supplierId,
+            $this->runId,
+            $this->revisionId,
+            null,
+        );
+
+        self::assertSame(2, $report['payslips']['archived']);
+        self::assertGreaterThan(0, $report['monthly_bundle']['document_id']);
+        self::assertSame([], $report['employment_exits']);
+        self::assertSame([], $report['missing']);
+        self::assertTrue($report['complete']);
+    }
+
+    public function testDocumentBatchNeverCallsMonthWithMissingExitCertificateComplete(): void
+    {
+        $employmentId = $this->createEndedEmployment($this->employeeIds[0]);
+
+        $report = $this->batch->generate(
+            $this->supplierId,
+            $this->runId,
+            $this->revisionId,
+            null,
+        );
+
+        self::assertFalse($report['complete']);
+        self::assertSame(
+            ['employment_certificate_missing:' . $employmentId],
+            $report['missing'],
+        );
+        self::assertCount(1, $report['employment_exits']);
+        $exit = $report['employment_exits'][0];
+        self::assertSame($employmentId, $exit['employment_id']);
+        self::assertFalse($exit['documents']['employment_certificate']['archived']);
+        self::assertTrue($exit['documents']['employment_certificate']['required']);
+        self::assertFalse(
+            $exit['documents']['average_earnings_certificate']['required'],
+        );
+    }
+
+    private function createEndedEmployment(int $employeeId): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 start_date, actual_start_date, end_date, is_legacy_projection)
+             VALUES (?, ?, "SYNTH-BATCH", "employment", "ended",
+                     "2026-01-01", "2026-01-01", "2026-07-31", 0)'
+        )->execute([$this->supplierId, $employeeId]);
+
+        return (int) $pdo->lastInsertId();
     }
 
     private function createApprovedRevision(int $personCount): void

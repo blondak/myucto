@@ -14,13 +14,19 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import PayrollEldpPanel from './PayrollEldpPanel.vue'
+import PayrollDiscountIntentsPanel from './PayrollDiscountIntentsPanel.vue'
+import PayrollHealthNotificationPanel from './PayrollHealthNotificationPanel.vue'
 import PayrollSubmissionInboxPanel from './PayrollSubmissionInboxPanel.vue'
 import PayrollSubmissionOverviewPanel from './PayrollSubmissionOverviewPanel.vue'
 import PayrollSigningCertificatePanel from './PayrollSigningCertificatePanel.vue'
 import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 type SubmissionTab =
-  'transport' | 'regzel' | 'jmhz' | 'eldp' | 'health' | 'inbox' | 'certificate'
+  'transport' | 'regzel' | 'jmhz' | 'discount_intents' | 'eldp' | 'health'
+  | 'health_notifications' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -33,8 +39,15 @@ const activeTab = ref<SubmissionTab>('transport')
 // ELDP stojí hned za JMHZ: od roku 2026 ho ČSSZ sestavuje z měsíčního
 // hlášení sama, takže samostatný evidenční list je navazující a přechodná
 // agenda, ne konkurenční hlášení.
+// Zdravotní agenda má dvě záložky, protože jde o dvě různé povinnosti:
+// „health" je stav podaných přehledů o platbě, „health_notifications" je
+// oznamovací povinnost z § 10 — ta běží na osm dnů od skutečnosti, ne
+// měsíčně, a slít je do jedné záložky by tenhle rozdíl schovalo.
+// Záměr uplatňovat slevu stojí hned za JMHZ, protože je jeho podmínkou: sleva
+// se sice vykazuje v měsíčním hlášení, ale nárok na ni zakládá tohle podání.
 const tabs: SubmissionTab[] = [
-  'transport', 'regzel', 'jmhz', 'eldp', 'health', 'inbox', 'certificate',
+  'transport', 'regzel', 'jmhz', 'discount_intents', 'eldp', 'health',
+  'health_notifications', 'inbox', 'certificate',
 ]
 /*
  * `null` = počet neznáme (načtení odznaku selhalo), ne „nula nevyřízených".
@@ -58,6 +71,15 @@ const officeId = ref<number | null>(null)
 const evidenceConfirmed = ref(false)
 const error = ref('')
 const success = ref('')
+
+const SNAPSHOT_COLUMNS: ColumnDef[] = [
+  { key: 'created_at', labelKey: 'payroll.regzel.history.created_at', required: true },
+  { key: 'office', labelKey: 'payroll.regzel.history.office' },
+  { key: 'version', labelKey: 'payroll.regzel.history.version' },
+  { key: 'size', labelKey: 'payroll.regzel.history.size' },
+  { key: 'actions', labelKey: 'common.actions', required: true },
+]
+const snapshotsTbl = useTablePrefs('payroll-submissions', SNAPSHOT_COLUMNS)
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 const environmentOptions = computed(() => [
@@ -283,7 +305,19 @@ onMounted(loadInboxBadge)
       Evidenční list si data obstarává sám a nepotřebuje načtení REGZEL
       profilu, proto stojí mimo společný skeleton.
     -->
+    <!--
+      Záměr uplatňovat slevu si data obstarává sám a na REGZEL profilu
+      nezávisí, proto stojí mimo společný skeleton.
+    -->
+    <PayrollDiscountIntentsPanel v-else-if="activeTab === 'discount_intents'" />
+
     <PayrollEldpPanel v-else-if="activeTab === 'eldp'" />
+
+    <!--
+      Oznamovací povinnost si data obstarává sama a na REGZEL profilu
+      nezávisí, proto stojí mimo společný skeleton.
+    -->
+    <PayrollHealthNotificationPanel v-else-if="activeTab === 'health_notifications'" />
 
     <div v-else-if="loading" class="space-y-4">
       <div class="h-28 animate-pulse rounded-xl bg-neutral-100" />
@@ -456,40 +490,46 @@ onMounted(loadInboxBadge)
           {{ t('payroll.regzel.history.empty') }}
         </div>
 
-        <div v-else class="hidden overflow-x-auto md:block">
-          <table class="min-w-full divide-y divide-neutral-200 text-sm">
-            <thead>
-              <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th class="px-4 py-3">{{ t('payroll.regzel.history.created_at') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.regzel.history.office') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.regzel.history.version') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.regzel.history.size') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('common.actions') }}</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-neutral-100">
-              <tr v-for="snapshot in snapshots" :key="snapshot.id">
-                <td class="px-4 py-3 text-neutral-900">{{ snapshot.created_at }}</td>
-                <td class="px-4 py-3 text-neutral-700">{{ officeLabel(snapshot.office_id) }}</td>
-                <td class="px-4 py-3 text-neutral-700">XSD {{ snapshot.xsd_version }}</td>
-                <td class="px-4 py-3 text-neutral-700">{{ readableBytes(snapshot.xml_byte_size) }}</td>
-                <td class="px-4 py-3 text-right">
-                  <button
-                    type="button"
-                    :class="btnOutlineSm('neutral')"
-                    :disabled="downloadingId === snapshot.id"
-                    @click="download(snapshot)"
-                  >
-                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                      <path :d="ICONS.download" />
-                    </svg>
-                    {{ t('common.download') }}
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <template v-else>
+          <div class="hidden items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2 md:flex">
+            <ColumnPicker :ctrl="snapshotsTbl" />
+            <DensityToggle :ctrl="snapshotsTbl" />
+          </div>
+          <div class="hidden overflow-x-auto md:block">
+            <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="snapshotsTbl.densityClass.value">
+              <thead>
+                <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+                  <th v-if="snapshotsTbl.isVisible('created_at')" class="px-4 py-3">{{ t('payroll.regzel.history.created_at') }}</th>
+                  <th v-if="snapshotsTbl.isVisible('office')" class="px-4 py-3">{{ t('payroll.regzel.history.office') }}</th>
+                  <th v-if="snapshotsTbl.isVisible('version')" class="px-4 py-3">{{ t('payroll.regzel.history.version') }}</th>
+                  <th v-if="snapshotsTbl.isVisible('size')" class="px-4 py-3">{{ t('payroll.regzel.history.size') }}</th>
+                  <th v-if="snapshotsTbl.isVisible('actions')" class="px-4 py-3 text-right">{{ t('common.actions') }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-neutral-100">
+                <tr v-for="snapshot in snapshots" :key="snapshot.id">
+                  <td v-if="snapshotsTbl.isVisible('created_at')" class="px-4 py-3 text-neutral-900">{{ snapshot.created_at }}</td>
+                  <td v-if="snapshotsTbl.isVisible('office')" class="px-4 py-3 text-neutral-700">{{ officeLabel(snapshot.office_id) }}</td>
+                  <td v-if="snapshotsTbl.isVisible('version')" class="px-4 py-3 text-neutral-700">XSD {{ snapshot.xsd_version }}</td>
+                  <td v-if="snapshotsTbl.isVisible('size')" class="px-4 py-3 text-neutral-700">{{ readableBytes(snapshot.xml_byte_size) }}</td>
+                  <td v-if="snapshotsTbl.isVisible('actions')" class="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      :class="btnOutlineSm('neutral')"
+                      :disabled="downloadingId === snapshot.id"
+                      @click="download(snapshot)"
+                    >
+                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path :d="ICONS.download" />
+                      </svg>
+                      {{ t('common.download') }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
 
         <div v-if="snapshots.length" class="grid grid-cols-1 gap-3 p-4 md:hidden">
           <article

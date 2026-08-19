@@ -526,6 +526,163 @@ final class PayrollRetentionServiceTest extends TestCase
         self::assertTrue($this->assessmentFor($this->employeeId)->isProposable());
     }
 
+    // ── 8. Posudek jmenuje osobu, ne číslo ───────────────────────────────────
+
+    /**
+     * Bez jména je panel k výmazu jen počet a nevratný úkon se schvaluje naslepo.
+     *
+     * Jméno se bere TÝMŽ výrazem jako seznam osob, tedy z historie identit. Kdyby
+     * se četlo přímo z `payroll_employees.full_name`, po změně příjmení by seznam
+     * osob a návrh k výmazu ukazovaly dvě různá jména téhož člověka. Proto test
+     * zapisuje nové příjmení do historie a v `payroll_employees` nechává staré.
+     */
+    public function testAssessmentNamesThePersonByEffectiveIdentity(): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_person_identity_history
+                (supplier_id, employee_id, full_name, first_name, last_name, effective_from)
+             VALUES (?, ?, 'Jana Nováková', 'Jana', 'Nováková', '2000-01-01')"
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        self::assertSame(
+            'Jana Nováková',
+            $this->assessmentFor($this->employeeId)->fullName,
+        );
+        self::assertSame(
+            'Jana Nováková',
+            $this->assessmentFor($this->employeeId)->toArray()['full_name'],
+        );
+    }
+
+    /**
+     * Návrh výmazu jméno UKAZUJE, ale NEUKLÁDÁ.
+     *
+     * Doklad o výmazu, který si osobní údaj nechá, výmaz popírá — jméno se proto
+     * dopojuje až při čtení. Bez toho by buď v panelu chybělo, nebo by přežilo
+     * v tabulce, kterou výmaz záměrně nemaže.
+     */
+    public function testProposalShowsNameButDoesNotStoreIt(): void
+    {
+        $proposalId = $this->expiredProposal();
+
+        $items = $this->proposals->items($this->supplierId, $proposalId);
+        self::assertSame('Testovací Pracovník', (string) $items[0]['full_name']);
+
+        $stored = $this->fetchOne(
+            'SELECT * FROM payroll_erasure_proposal_items WHERE supplier_id = ? AND proposal_id = ?',
+            [$this->supplierId, $proposalId],
+        );
+        self::assertIsArray($stored);
+        self::assertArrayNotHasKey('full_name', $stored);
+        self::assertStringNotContainsString(
+            'Testovací',
+            json_encode($stored, JSON_THROW_ON_ERROR),
+        );
+    }
+
+    // ── 9. Uvolnění zadržení výmaz zase pustí ────────────────────────────────
+
+    /**
+     * Zadržení není konečné rozhodnutí. Když důvod pomine, uvolnění musí osobu
+     * do návrhu vrátit — jinak by hold fungoval jako trvalá blokace a lhůty
+     * by nikdy nedoběhly.
+     */
+    public function testReleasingHoldLetsErasureThroughAgain(): void
+    {
+        $this->ageEmployee($this->employeeId, 1975);
+        $this->insertMonthlyRecord($this->supplierId, $this->employeeId, 1975);
+
+        $holdId = $this->holds->place(
+            $this->supplierId,
+            null,
+            'litigation',
+            'Spor sp. zn. TEST-2',
+            '2026-01-01',
+            $this->userId,
+            RetentionHoldRepository::SUBJECT_PAYROLL_EMPLOYEE,
+            $this->employeeId,
+        );
+        self::assertSame(
+            PayrollRetentionAssessment::BLOCK_HOLD,
+            $this->assessmentFor($this->employeeId)->blockedBy,
+        );
+        self::assertNull(
+            $this->proposals->create($this->supplierId, $this->userId, self::AS_OF, null),
+            'Zadržená osoba se nesmí dostat do návrhu.',
+        );
+
+        self::assertTrue($this->holds->release(
+            $this->supplierId,
+            $holdId,
+            '2026-02-01',
+            $this->userId,
+            RetentionHoldRepository::SUBJECT_PAYROLL_EMPLOYEE,
+        ));
+
+        $assessment = $this->assessmentFor($this->employeeId);
+        self::assertNull($assessment->blockedBy);
+        self::assertTrue($assessment->isProposable());
+        self::assertSame([], $assessment->holds);
+        self::assertNotNull(
+            $this->proposals->create($this->supplierId, $this->userId, self::AS_OF, null),
+        );
+    }
+
+    /**
+     * Mzdová cesta uvolňuje jen mzdová zadržení. Kdyby `subject_kind` v podmínce
+     * chyběl, uvolnilo by se i firemní zadržení zadané na účetní straně.
+     */
+    public function testPayrollReleaseDoesNotTouchCompanyHold(): void
+    {
+        $companyHoldId = $this->holds->place(
+            $this->supplierId,
+            null,
+            'tax_audit',
+            'Kontrola sp. zn. TEST-3',
+            '2026-01-01',
+            $this->userId,
+        );
+
+        self::assertFalse($this->holds->release(
+            $this->supplierId,
+            $companyHoldId,
+            '2026-02-01',
+            $this->userId,
+            RetentionHoldRepository::SUBJECT_PAYROLL_EMPLOYEE,
+        ));
+        self::assertTrue($this->holds->hasActiveHold($this->supplierId));
+    }
+
+    /** Přehled mzdových zadržení musí říct, KOHO drží — ne jen `subject_id`. */
+    public function testPayrollHoldsListCarriesPersonName(): void
+    {
+        $this->holds->place(
+            $this->supplierId,
+            null,
+            'enforcement',
+            'Exekuce sp. zn. TEST-4',
+            '2026-01-01',
+            $this->userId,
+            RetentionHoldRepository::SUBJECT_PAYROLL_EMPLOYEE,
+            $this->employeeId,
+        );
+
+        $rows = $this->holds->payrollHolds($this->supplierId);
+        self::assertCount(1, $rows);
+        self::assertSame('Testovací Pracovník', (string) $rows[0]['employee_full_name']);
+
+        // Firemní zadržení do mzdového přehledu nepatří — má vlastní obrazovku.
+        $this->holds->place(
+            $this->supplierId,
+            null,
+            'tax_audit',
+            'Kontrola sp. zn. TEST-5',
+            '2026-01-01',
+            $this->userId,
+        );
+        self::assertCount(1, $this->holds->payrollHolds($this->supplierId));
+    }
+
     // ── Pomocné ──────────────────────────────────────────────────────────────
 
     private function assessmentFor(int $employeeId): PayrollRetentionAssessment

@@ -8,7 +8,8 @@ final readonly class AverageEarningsCertificateDocumentData
 {
     public const SCHEMA_VERSION = 'average-earnings-certificate-document.v1';
 
-    private const TERMINATION_REASONS = [
+    /** Doména způsobů skončení, kterou doklad tiskne. */
+    public const TERMINATION_REASONS = [
         'none',
         'gross_breach',
         'sickness_regime_breach',

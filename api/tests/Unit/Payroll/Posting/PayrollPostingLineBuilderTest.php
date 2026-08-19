@@ -516,6 +516,311 @@ final class PayrollPostingLineBuilderTest extends TestCase
         );
     }
 
+    /**
+     * `04-UCETNI-MUSTEK.md` slibuje analytiku 524 podle střediska; kód účtoval
+     * jednu firemní dvojici 524/336 a středisko neznal vůbec.
+     *
+     * Dělí se jen NÁKLAD. Závazek vůči ČSSZ/pojišťovně zůstává jednou částkou —
+     * pojistné zaměstnavatele je podle § 5a odst. 1 z. č. 589/1992 Sb. firemní
+     * veličina z úhrnu základů, takže podíl střediska je alokace, ne osobní
+     * zákonná částka. Součet alokací proto musí sednout na závazek na korunu.
+     */
+    public function testEmployerInsuranceCostSplitsByCostCentreAndMatchesTheLiability(): void
+    {
+        $snapshot = $this->snapshotWithCostCentres();
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        self::assertSame([
+            '' => 101_400,
+            'SPRAVA' => 67_600,
+            'VYROBA' => 33_800,
+        ], $this->costCentreMap($preview->lines, '524', 'debit'));
+        self::assertSame(
+            202_800,
+            array_sum($this->costCentreMap($preview->lines, '524', 'debit')),
+            'Součet nákladu po střediscích = závazek vůči ČSSZ a pojišťovně.',
+        );
+        self::assertSame(
+            ['' => 271_800],
+            $this->costCentreMap($preview->lines, '336', 'credit'),
+            'Závazek se na střediska nedělí — dluží se jako celek.',
+        );
+        self::assertSame($preview->debitTotalMinor, $preview->creditTotalMinor);
+    }
+
+    /**
+     * Zbytek po celočíselném dělení nesmí zmizet ani vzniknout: podíly by daly
+     * o korunu míň a účetní můstek by se rozešel s platbou.
+     */
+    public function testEmployerInsuranceSplitKeepsTheOddHallerOnTheLiability(): void
+    {
+        $snapshot = $this->snapshotWithCostCentres();
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+        $sets = $this->statutorySetsWithRelationships();
+        $sets['social_insurance']['result_snapshot'][
+            'employer_contribution_minor_units'
+        ] = 148_801;
+        $sets['social_insurance']['result_snapshot'][
+            'employer_contribution_before_discount_minor_units'
+        ] = 148_801;
+        $sets['social_insurance']['result_snapshot']['employer_categories'][0][
+            'contribution_minor_units'
+        ] = 148_801;
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $sets,
+            PayrollAccountingDefaults::codes(),
+        );
+
+        $split = $this->costCentreMap($preview->lines, '524', 'debit');
+        self::assertSame(202_801, array_sum($split));
+        self::assertSame([
+            // 148 801 × 3/6 = 74 400,5 — největší zbytek bere haléř navíc.
+            '' => 101_401,
+            'SPRAVA' => 67_600,
+            'VYROBA' => 33_800,
+        ], $split);
+    }
+
+    /**
+     * § 5a odst. 1 dělá ze zaměstnanců tři vyměřovací základy a § 7 odst. 1 na
+     * každý pouští jinou sazbu. Rozpustit firemní součet poměrem VŠECH základů
+     * by středisku se sazbou 24,8 % přisoudilo pojistné vzniklé sazbou 29,8 %.
+     */
+    public function testEmployerSocialSplitStaysInsideItsRateCategory(): void
+    {
+        $snapshot = $this->snapshotWithCostCentres();
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+        $sets = $this->statutorySetsWithRelationships();
+        // 101 (VYROBA) je záchranář se sazbou 29,8 %, zbytek běžná sazba.
+        $sets['social_insurance']['people'][0]['relationships'][0]['result_snapshot'][
+            'employer_rate_category'
+        ] = 'rescue_and_company_fire_service';
+        $sets['social_insurance']['result_snapshot']['employer_categories'] = [
+            ['category' => 'ordinary', 'contribution_minor_units' => 124_000],
+            [
+                'category' => 'rescue_and_company_fire_service',
+                'contribution_minor_units' => 29_800,
+            ],
+        ];
+        $sets['social_insurance']['result_snapshot'][
+            'employer_contribution_before_discount_minor_units'
+        ] = 153_800;
+        $sets['social_insurance']['result_snapshot'][
+            'employer_contribution_minor_units'
+        ] = 153_800;
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $sets,
+            PayrollAccountingDefaults::codes(),
+        );
+
+        self::assertSame([
+            // 124 000 × 300 000/500 000 + 27 000 zdravotního.
+            '' => 101_400,
+            // 124 000 × 200 000/500 000 + 18 000 zdravotního.
+            'SPRAVA' => 67_600,
+            // 29 800 celé z kategorie b) + 9 000 zdravotního.
+            'VYROBA' => 38_800,
+        ], $this->costCentreMap($preview->lines, '524', 'debit'));
+        self::assertSame(
+            207_800,
+            array_sum($this->costCentreMap($preview->lines, '524', 'debit')),
+        );
+    }
+
+    /** Středisko dimenze se musí projevit i na nákladu hrubé mzdy, ne jen na 524. */
+    public function testGrossCostLineCarriesTheCostCentreOfTheEmployment(): void
+    {
+        $snapshot = $this->snapshotWithCostCentres();
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        self::assertSame(
+            ['VYROBA' => 100_000],
+            $this->costCentreMap($preview->lines, '521', 'debit'),
+        );
+        self::assertSame(
+            ['' => 100_000],
+            $this->costCentreMap($preview->lines, '331', 'credit'),
+            'Středisko říká, kam patří NÁKLAD, ne komu se dluží.',
+        );
+    }
+
+    /**
+     * Revize bez dimenzí se nesmí zaúčtovat jinak než dosud — jinak by se
+     * zaúčtovaná revize při opakovaném zaúčtování ohlásila jiným cílovým otiskem.
+     */
+    public function testRevisionWithoutCostCentresKeepsTheSingleEmployerInsurancePair(): void
+    {
+        $withRelationships = $this->builder->build(
+            $this->snapshot(),
+            $this->calculatedResult(),
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+        $baseline = $this->builder->build(
+            $this->snapshot(),
+            $this->calculatedResult(),
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        self::assertSame($baseline->targetHash, $withRelationships->targetHash);
+        self::assertSame(
+            ['' => 202_800],
+            $this->costCentreMap($withRelationships->lines, '524', 'debit'),
+        );
+    }
+
+    /**
+     * Zákonný výsledek bez rozpadu na vztahy (revize zmrazené dřív) rozdělit
+     * nejde. Zastavit kvůli tomu schválení běhu by ale byla regrese — středisko
+     * je analytika navíc, ne podmínka zaúčtování.
+     */
+    public function testCostCentreWithoutRelationshipResultsPostsOneUnsplitLine(): void
+    {
+        $snapshot = $this->snapshotWithCostCentres();
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        self::assertSame(
+            ['' => 202_800],
+            $this->costCentreMap($preview->lines, '524', 'debit'),
+        );
+    }
+
+    /**
+     * @param list<array<string,mixed>> $lines
+     * @return array<string,int>
+     */
+    private function costCentreMap(
+        array $lines,
+        string $account,
+        string $side,
+        bool $sort = true,
+    ): array {
+        $result = [];
+        foreach ($lines as $line) {
+            if ($line['account_code'] !== $account || $line['side'] !== $side) {
+                continue;
+            }
+            $key = (string) ($line['cost_center'] ?? '');
+            $result[$key] = ($result[$key] ?? 0) + $line['amount_minor'];
+        }
+        if ($sort) {
+            ksort($result, SORT_STRING);
+        }
+
+        return $result;
+    }
+
+    /** @return array<string,mixed> */
+    private function snapshotWithCostCentres(): array
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['people'][0]['employments'][0]['dimensions'] = [
+            $this->dimension('cost_center', 'VYROBA', null),
+        ];
+        $snapshot['people'][0]['employments'][1]['dimensions'] = [
+            $this->dimension('cost_center', 'SPRAVA', null),
+        ];
+
+        return $snapshot;
+    }
+
+    /**
+     * Zákonné sady s rozpadem na pracovní vztahy — tak, jak je vrací
+     * `PayrollStatutoryResultRepository::find()`.
+     *
+     * @return array<string,array<string,mixed>>
+     */
+    private function statutorySetsWithRelationships(): array
+    {
+        $sets = $this->statutorySets();
+        $sets['social_insurance']['result_snapshot'] += [
+            'employer_contribution_before_discount_minor_units' => 148_800,
+            'part_time_discount_minor_units' => 0,
+            'employer_categories' => [
+                ['category' => 'ordinary', 'contribution_minor_units' => 148_800],
+            ],
+        ];
+        $sets['social_insurance']['people'][0]['relationships'] = [
+            $this->relationship(101, [
+                'capped_assessment_base_minor_units' => 100_000,
+                'employer_rate_category' => 'ordinary',
+                'part_time_employer_discount' => 'not_claimed',
+            ]),
+            $this->relationship(102, [
+                'capped_assessment_base_minor_units' => 200_000,
+                'employer_rate_category' => 'ordinary',
+                'part_time_employer_discount' => 'not_claimed',
+            ]),
+            $this->relationship(103, [
+                'capped_assessment_base_minor_units' => 300_000,
+                'employer_rate_category' => 'ordinary',
+                'part_time_employer_discount' => 'not_claimed',
+            ]),
+        ];
+        $sets['health_insurance']['people'][0]['result_snapshot'][
+            'employer_contribution_minor_units'
+        ] = 54_000;
+        $sets['health_insurance']['people'][0]['relationships'] = [
+            $this->relationship(101, [
+                'participating_assessment_base_minor_units' => 100_000,
+            ]),
+            $this->relationship(102, [
+                'participating_assessment_base_minor_units' => 200_000,
+            ]),
+            $this->relationship(103, [
+                'participating_assessment_base_minor_units' => 300_000,
+            ]),
+        ];
+
+        return $sets;
+    }
+
+    /**
+     * @param array<string,mixed> $snapshot
+     * @return array<string,mixed>
+     */
+    private function relationship(int $employmentId, array $snapshot): array
+    {
+        return [
+            'employment_id' => $employmentId,
+            'result_status' => 'calculated',
+            'result_snapshot' => $snapshot,
+        ];
+    }
+
     /** @return array<string,mixed> */
     private function dimension(string $type, string $code, ?string $account): array
     {

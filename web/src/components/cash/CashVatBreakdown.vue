@@ -2,7 +2,8 @@
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatMoney } from '@/composables/useFormat'
-import type { CashVatLine } from '@/api/cash'
+import { ICONS, btnIconSm, btnOutlineSm } from '@/components/ui/buttonStyles'
+import type { CashVatLine, CashVatDeduction, CashTaxTreatment } from '@/api/cash'
 
 /**
  * DPH rozpad pokladního dokladu (§6.5). Sazby z API (jen > 0, per rok — A4/O5c).
@@ -13,15 +14,31 @@ const props = defineProps<{
   modelValue: CashVatLine[]
   total: number
   rates: number[]
+  /**
+   * M-7: rozsah odpočtu (§ 75/76) a daňová uznatelnost (§ 24/25) dávají smysl jen
+   * na vstupu. Bez UI je editor neposílal a server je při každém uložení resetoval
+   * na `full` / 100 / `deductible`.
+   */
+  deduction?: boolean
 }>()
-const emit = defineEmits<{ (e: 'update:modelValue', v: CashVatLine[]): void }>()
+const emit = defineEmits<{
+  (e: 'update:modelValue', v: CashVatLine[]): void
+  /** Sedí SUROVÝ rozpad na celkovou částku? Rodič na tom drží blokaci uložení. */
+  (e: 'update:matches', v: boolean): void
+}>()
 
 const { t } = useI18n()
 
 type Mode = 'top' | 'bottom'
 const mode = ref<Mode>('top')
 
-interface Row { rate: number; gross: number | null; base: number | null; vat: number | null }
+interface Row {
+  rate: number; gross: number | null; base: number | null; vat: number | null
+  deduction: CashVatDeduction; deductionPercent: number; treatment: CashTaxTreatment
+}
+
+const VAT_DEDUCTIONS: CashVatDeduction[] = ['full', 'proportional', 'reduced', 'none']
+const TAX_TREATMENTS: CashTaxTreatment[] = ['deductible', 'non_deductible', 'not_expense']
 
 function round2(n: number): number { return Math.round(n * 100) / 100 }
 function cents(n: number): number { return Math.round((n || 0) * 100) }
@@ -30,7 +47,10 @@ function num(v: number | null): number { return Number(v) || 0 }
 const defaultRate = computed(() => props.rates[0] ?? 21)
 
 function newRow(): Row {
-  return { rate: defaultRate.value, gross: null, base: null, vat: null }
+  return {
+    rate: defaultRate.value, gross: null, base: null, vat: null,
+    deduction: 'full', deductionPercent: 100, treatment: 'deductible',
+  }
 }
 
 const rows = ref<Row[]>([])
@@ -43,6 +63,9 @@ function seedFromModel(): void {
       gross: round2(l.base_amount + l.vat_amount),
       base: l.base_amount,
       vat: l.vat_amount,
+      deduction: l.vat_deduction ?? 'full',
+      deductionPercent: l.vat_deduction_percent ?? 100,
+      treatment: l.tax_treatment ?? 'deductible',
     }))
   } else {
     rows.value = [newRow()]
@@ -94,6 +117,11 @@ const emitted = computed<CashVatLine[]>(() => {
     vat_rate: r.rate,
     base_amount: round2(num(r.base)),
     vat_amount: round2(num(r.vat)),
+    // Klasifikace jede s řádkem i tehdy, když se UI nezobrazuje — jinak by ji
+    // uložení draftu z pohledu bez `deduction` zahodilo na serverové defaulty.
+    vat_deduction: r.deduction,
+    vat_deduction_percent: r.deduction === 'proportional' ? round2(r.deductionPercent) : 100,
+    tax_treatment: r.treatment,
   }))
   const totalC = cents(props.total)
   const sumC = lines.reduce((s, l) => s + cents(l.base_amount) + cents(l.vat_amount), 0)
@@ -124,6 +152,11 @@ const rawSumC = computed(() =>
   rows.value.filter(r => r.rate > 0).reduce((s, r) => s + cents(num(r.base)) + cents(num(r.vat)), 0),
 )
 const matches = computed(() => Math.abs(rawSumC.value - cents(props.total)) <= 1)
+// Rozdíl, o který se poslední řádek dorovnává. Dokud byl jen barevný badge, uživatel
+// viděl číslo, které si komponenta domyslela (celý zbytek spadl do DPH posledního
+// řádku), a nedozvěděl se o tom — proto ho ukazujeme i slovy.
+const residual = computed(() => round2((cents(props.total) - rawSumC.value) / 100))
+watch(matches, v => emit('update:matches', v), { immediate: true })
 </script>
 
 <template>
@@ -145,7 +178,8 @@ const matches = computed(() => Math.abs(rawSumC.value - cents(props.total)) <= 1
     </div>
 
     <div class="space-y-2">
-      <div v-for="(row, i) in rows" :key="i" class="grid grid-cols-12 gap-2 items-end">
+      <div v-for="(row, i) in rows" :key="i" class="space-y-1.5">
+      <div class="grid grid-cols-12 gap-2 items-end">
         <div class="col-span-3">
           <label class="block text-[11px] text-neutral-500 mb-0.5">{{ t('cash.form.vat_rate') }}</label>
           <select v-model.number="row.rate" @change="onRateChange(row)"
@@ -176,14 +210,48 @@ const matches = computed(() => Math.abs(rawSumC.value - cents(props.total)) <= 1
         </div>
         <div class="col-span-1 flex items-center justify-center h-9">
           <button type="button" @click="removeRow(i)" :disabled="rows.length <= 1"
-            class="cursor-pointer text-danger-500 hover:text-danger-600 disabled:opacity-30 disabled:cursor-not-allowed">✕</button>
+            :title="t('cash.form.vat_rate_remove')" :aria-label="t('cash.form.vat_rate_remove')"
+            :class="btnIconSm('danger')">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+          </button>
         </div>
       </div>
-    </div>
 
-    <div class="flex items-center justify-between">
-      <button type="button" @click="addRow" class="cursor-pointer text-xs text-primary-600 hover:text-primary-700 font-medium">
-        + {{ t('cash.form.vat_rate') }}
+      <!-- Nárok na odpočet a daňová uznatelnost (jen na vstupu — u prodeje nedávají smysl). -->
+      <div v-if="deduction" class="grid grid-cols-12 gap-2 items-end">
+        <div class="col-span-5">
+          <label class="block text-[11px] text-neutral-500 mb-0.5">{{ t('cash.form.vat_deduction') }}</label>
+          <select v-model="row.deduction"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option v-for="d in VAT_DEDUCTIONS" :key="d" :value="d">{{ t(`purchase_invoice.vat_deduction.${d}`) }}</option>
+          </select>
+        </div>
+        <div class="col-span-3">
+          <label class="block text-[11px] text-neutral-500 mb-0.5">{{ t('purchase_invoice.vat_deduction_percent') }}</label>
+          <input v-model.number="row.deductionPercent" type="number" step="0.01" min="0" max="100"
+            :disabled="row.deduction !== 'proportional'"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm text-right disabled:bg-neutral-100 disabled:text-neutral-400" />
+        </div>
+        <div class="col-span-4">
+          <label class="block text-[11px] text-neutral-500 mb-0.5">{{ t('cash.form.tax_treatment') }}</label>
+          <select v-model="row.treatment"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option v-for="tr in TAX_TREATMENTS" :key="tr" :value="tr">{{ t(`cash.tax_treatment.${tr}`) }}</option>
+          </select>
+        </div>
+      </div>
+      </div>
+    </div>
+    <p v-if="deduction" class="text-[11px] text-neutral-500">{{ t('cash.form.vat_deduction_hint') }}</p>
+
+    <p v-if="!matches" class="text-xs px-3 py-2 rounded-md bg-warning-50 text-warning-700">
+      {{ t('cash.form.vat_mismatch_hint', { amount: formatMoney(residual) }) }}
+    </p>
+
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <button type="button" @click="addRow" :class="btnOutlineSm('primary')">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+        {{ t('cash.form.vat_rate_add') }}
       </button>
       <div class="text-xs flex items-center gap-3">
         <span class="text-neutral-500">{{ t('cash.form.vat_base') }}: <strong class="font-mono">{{ formatMoney(sumBase) }}</strong></span>

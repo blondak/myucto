@@ -17,7 +17,8 @@ final class RoutePermissionMap
         '/api/auth/setup-status', '/api/auth/setup-preflight', '/api/auth/setup', '/api/auth/setup-ares-lookup',
         '/api/auth/setup-crpdph-lookup', '/api/auth/login',
         '/api/auth/webauthn/login/options', '/api/auth/webauthn/login/verify',
-        '/api/auth/forgot', '/api/auth/reset', '/api/csrf-token',
+        '/api/auth/forgot', '/api/auth/reset', '/api/auth/domain-context',
+        '/api/auth/domain-login/start', '/api/auth/domain-login/exchange', '/api/csrf-token',
     ];
 
     /** @var list<string> */
@@ -33,6 +34,7 @@ final class RoutePermissionMap
         '/api/auth/mfa/recovery-codes',
         '/api/auth/session/status', '/api/auth/session/activity', '/api/auth/session/lock',
         '/api/auth/session/lock-preference',
+        '/api/auth/domain-login/authorize',
         '/api/auth/session/unlock/options', '/api/auth/session/unlock/verify',
     ];
 
@@ -41,6 +43,8 @@ final class RoutePermissionMap
      * @var list<array{0:string,1:string,2:string,3:AccessLevel}>
      */
     private const RULES = [
+        ['GET', '#^/api/settings/domains(/|$)#', 'settings.domains', AccessLevel::READ],
+        ['*', '#^/api/settings/domains(/|$)#', 'settings.domains', AccessLevel::WRITE],
         ['GET', '#^/api/auth/tokens(/|$)#', 'profile.tokens', AccessLevel::READ],
         ['*', '#^/api/auth/tokens(/|$)#', 'profile.tokens', AccessLevel::WRITE],
         // Log volání API vlastními tokeny — čtení sdílí oprávnění se správou tokenů.
@@ -86,6 +90,10 @@ final class RoutePermissionMap
         ['GET', '#^/api/purchase-invoices(/|$)#', 'purchase_invoices', AccessLevel::READ],
         ['*', '#^/api/purchase-invoices(/|$)#', 'purchase_invoices', AccessLevel::WRITE],
 
+        ['GET', '#^/api/purchase-invoice-submissions(/|$)#', 'documents.inbox', AccessLevel::READ],
+        ['DELETE', '#^/api/purchase-invoice-submissions/[0-9]+$#', 'documents.inbox.delete', AccessLevel::WRITE],
+        ['*', '#^/api/purchase-invoice-submissions(/|$)#', 'documents.inbox', AccessLevel::WRITE],
+
         ['POST', '#^/api/recurring$#', 'recurring.create', AccessLevel::WRITE],
         ['POST', '#^/api/recurring/[0-9]+/(run|run-now|generate)$#', 'recurring.run', AccessLevel::WRITE],
         ['POST', '#^/api/recurring/[0-9]+/(pause|resume)$#', 'recurring.pause', AccessLevel::WRITE],
@@ -120,8 +128,13 @@ final class RoutePermissionMap
         // smí i odesílat podání — a naopak nikdo jiný.
         // `defect-notices` = výzvy k odstranění vad podle § 74 daňového řádu.
         // Patří sem, protože se týkají osudu odeslaného podání, ne mzdové agendy.
-        ['GET', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices)(/|$)#', 'settings.signing', AccessLevel::READ],
-        ['*', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices)(/|$)#', 'settings.signing', AccessLevel::WRITE],
+        // `gateway` = návrat z odesílací brány ISDS. Je to sice „callback"
+        // adresa, kterou zná ISDS, ale VEŘEJNÁ NENÍ: `appToken` z přesměrování
+        // slouží jen k dohledání rozpracovaného podání a o oprávnění rozhoduje
+        // přihlášená relace. Proto stejné právo jako zbytek fronty — odeslání
+        // datové zprávy je právní úkon a nesmí ho vyvolat kdokoliv s odkazem.
+        ['GET', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices|gateway)(/|$)#', 'settings.signing', AccessLevel::READ],
+        ['*', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices|gateway)(/|$)#', 'settings.signing', AccessLevel::WRITE],
 
         // Retence a výmaz. Dvě různá práva ZÁMĚRNĚ: nastavit lhůtu nebo zadržet
         // výmaz je správa evidence, kdežto schválit a provést výmaz je nevratný
@@ -150,6 +163,13 @@ final class RoutePermissionMap
         ['*', '#^/api/payroll/people/[0-9]+/payout-rules(/(apply-defaults|[0-9]+))?$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+/dependants$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/people/[0-9]+/dependants(/[0-9]+(/claims(/[0-9]+)?)?)?$#', 'payroll.person.write', AccessLevel::WRITE],
+        // Zákonná evidence osoby (prohlášení k dani, daňová rezidence, sociální
+        // a zdravotní příslušnost, sleva pracujícího důchodce). Jsou to právní
+        // skutečnosti vedené na OSOBĚ, ne na pracovním vztahu — jedna osoba jich
+        // může mít víc a evidence platí napříč. Proto stejné právo jako profil
+        // a vyživované osoby, ne `payroll.employment.write`.
+        ['GET', '#^/api/payroll/people/[0-9]+/statutory-evidence$#', 'payroll', AccessLevel::READ],
+        ['PUT', '#^/api/payroll/people/[0-9]+/statutory-evidence$#', 'payroll.person.write', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/people/[0-9]+/quick-edit$#', 'payroll.person.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/people/[0-9]+/sensitive-reveal$#', 'payroll.person.read_sensitive', AccessLevel::READ],
         ['POST', '#^/api/payroll/people/[0-9]+/employments$#', 'payroll.employment.write', AccessLevel::WRITE],
@@ -158,6 +178,10 @@ final class RoutePermissionMap
         // Klasifikace zaměstnání ČSÚ je veřejná referenční data, ne data nájemce —
         // stejná úroveň jako sousední našeptávač obcí.
         ['GET', '#^/api/payroll/cz-isco$#', 'payroll', AccessLevel::READ],
+        // Rozcestník karty zaměstnance. Vstupní branou je obecné `payroll` (kdo smí
+        // na kartu, smí vidět, že agendy existují); citlivější agendy uvnitř si
+        // PayrollEmploymentAgendaSummaryAction filtruje po jedné vlastním právem.
+        ['GET', '#^/api/payroll/employments/[0-9]+/agenda-summary$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/employments/[0-9]+/(terms|transitions/[a-z_]+|checklist/[a-z0-9_]+)$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Totéž právo jako založení vztahu (POST /people/{id}/employments výše).
         ['DELETE', '#^/api/payroll/employments/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
@@ -186,6 +210,9 @@ final class RoutePermissionMap
         ['DELETE', '#^/api/payroll/runs/[0-9]+/validations/[0-9]+/override$#', 'payroll.approve', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/payments/liabilities$#', 'payroll.payments', AccessLevel::READ],
         ['GET', '#^/api/payroll/payments/(payer-options|batches|reconciliation)$#', 'payroll.payments', AccessLevel::READ],
+        // Nabídka pickeru je týž obsah jako `reconciliation`, jen zúžený —
+        // samostatné právo by zamklo hledání a nechalo otevřený celý seznam.
+        ['GET', '#^/api/payroll/payments/reconciliation/options$#', 'payroll.payments', AccessLevel::READ],
         ['POST', '#^/api/payroll/payments/batches$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/reconciliation/(matches|reversals)$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/batches/[0-9]+/exports$#', 'payroll.payments', AccessLevel::WRITE],
@@ -216,6 +243,13 @@ final class RoutePermissionMap
         // by se v praxi vždy přidělovaly společně.
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
+        // Záměr uplatňovat slevu na pojistném (OZUSPOJ). Zápis výsledku od ČSSZ
+        // je WRITE stejně jako příprava podání — mění doloženost nároku, tedy
+        // i výši odvedeného pojistného.
+        ['GET', '#^/api/payroll/submissions/discount-intents$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/discount-intents$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/discount-intents/[0-9]+/preview$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/discount-intents/[0-9]+/(?:prepare|end|receipt)$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::READ],
         ['*', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/jmhz-transport$#', 'payroll.submissions', AccessLevel::READ],
@@ -228,6 +262,11 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/submissions/[0-9]+/artifacts/[0-9]+/download-grant$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/[0-9]+/artifacts/[0-9]+/download$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/health-overviews/[0-9]+(?:/[0-9]{3}/download)?$#', 'payroll.submissions', AccessLevel::READ],
+        ['GET', '#^/api/payroll/submissions/health-notifications/capability$#', 'payroll.submissions', AccessLevel::READ],
+        ['GET', '#^/api/payroll/submissions/health-notifications/duties$#', 'payroll.submissions', AccessLevel::READ],
+        ['GET', '#^/api/payroll/submissions/health-notifications/duties/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/health-notifications/duties/[0-9]+/obligations$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/submissions/health-notifications/payment-overview/[0-9]+/[0-9]{3}/prepare$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/policies(?:/[0-9]+)?$#', 'payroll.settings', AccessLevel::READ],
         ['POST', '#^/api/payroll/settings/policies$#', 'payroll.settings', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/settings/policies/[0-9]+$#', 'payroll.settings', AccessLevel::WRITE],
@@ -247,9 +286,14 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/annual-settlements/[0-9]{4}$#', 'payroll.documents', AccessLevel::READ],
         ['GET', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+$#', 'payroll.documents', AccessLevel::READ],
         ['PUT', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+/request$#', 'payroll.documents', AccessLevel::WRITE],
+        // Zadání potvrzení od jiného plátce je taky `payroll.approve`: ta čísla
+        // jdou přímo do úhrnu, ze kterého vychází přeplatek, takže kdo je smí
+        // zadat, ten rozhoduje o penězích stejně jako ten, kdo zúčtování provede.
+        ['PUT', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+/certificates$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+/settle$#', 'payroll.approve', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/employments/[0-9]+/documents/exit$#', 'payroll.documents', AccessLevel::READ],
-        ['POST', '#^/api/payroll/employments/[0-9]+/documents/exit/(employment-certificate|average-earnings-certificate)$#', 'payroll.documents', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/employments/[0-9]+/documents/exit/(employment-certificate|average-earnings-certificate|average-earnings-statement)$#', 'payroll.documents', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/runs/[0-9]+/revisions/[0-9]+/documents/batch$#', 'payroll.documents', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/documents/[0-9]+/download-grant$#', 'payroll.documents', AccessLevel::READ],
         ['GET', '#^/api/payroll/documents/[0-9]+/download$#', 'payroll.documents', AccessLevel::READ],
         // Legislativní rulesety jsou GLOBÁLNÍ číselník: čtení pod payroll.rulesets,
@@ -379,6 +423,11 @@ final class RoutePermissionMap
 
         ['GET', '#^/api/accounting/cash-(documents|registers)(/|$)#', 'cash', AccessLevel::READ],
         ['*', '#^/api/accounting/cash-documents(/|$)#', 'cash.document.write', AccessLevel::WRITE],
+        // M-8: routa uzavření/uzamčení pokladny (inventarizace § 29–30 ZoÚ) zatím
+        // NEEXISTUJE — pravidlo je připravené pro ni. Právo `cash.close` samo mrtvé
+        // není: gatuje tvrdé smazání zaúčtovaného dokladu (`DELETE …?force=1`, H-4),
+        // které se kontroluje v CashDocumentAction — cesta je totiž shodná s běžným
+        // mazáním draftu, takže se od sebe podle URL odlišit nedají.
         ['*', '#^/api/accounting/cash-registers/[0-9]+/(close|lock)$#', 'cash.close', AccessLevel::WRITE],
         ['*', '#^/api/accounting/cash-(documents|registers)(/|$)#', 'cash', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/assets(/|$)#', 'assets', AccessLevel::READ],
@@ -439,8 +488,11 @@ final class RoutePermissionMap
         ['GET', '#^/api/(suppliers|search|slug)(/|$)#', 'profile', AccessLevel::READ],
         ['GET', '#^/api/branding-profiles$#', 'profile', AccessLevel::READ],
         ['*', '#^/api/user/(filters|preferences)(/|$)#', 'profile', AccessLevel::WRITE],
+        ['GET', '#^/api/portal/purchase-invoice-submissions(/|$)#', 'documents.submit', AccessLevel::READ],
+        ['POST', '#^/api/portal/purchase-invoice-submissions(/|$)#', 'documents.submit', AccessLevel::WRITE],
+        ['GET', '#^/api/portal/document-requests$#', 'documents.submit', AccessLevel::READ],
+        ['POST', '#^/api/portal/document-requests/[0-9]+/upload$#', 'documents.submit', AccessLevel::WRITE],
         ['GET', '#^/api/portal(/|$)#', 'profile', AccessLevel::READ],
-        ['POST', '#^/api/portal/document-requests/[0-9]+/upload$#', 'purchase_invoices.create', AccessLevel::WRITE],
         ['GET', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::READ],
         ['*', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::WRITE],
     ];

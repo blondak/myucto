@@ -26,6 +26,8 @@ final class PayrollComponentValidator
      *   accounting_debit_code:?string,
      *   accounting_credit_code:?string,
      *   annual_limit_minor:?int,
+     *   exemption_basket:?string,
+     *   exemption_basis:?string,
      *   valid_from:string,
      *   valid_to:?string,
      *   is_active:bool
@@ -106,7 +108,27 @@ final class PayrollComponentValidator
                 $input['annual_limit_minor'] ?? null,
                 'annual_limit_minor',
             ),
+            exemptionBasket: $this->optionalEnum(
+                PayrollBenefitExemptionBasket::class,
+                $input['exemption_basket'] ?? null,
+                'exemption_basket',
+            ),
+            exemptionBasis: $this->optionalEnum(
+                PayrollExemptionBasis::class,
+                $input['exemption_basis'] ?? null,
+                'exemption_basis',
+            ),
         );
+        // Osvobození bez uvedeného podkladu se sice uložit dá — legacy složky
+        // takové jsou — ale mzdový běh na něm skončí v ručním posouzení. Nová
+        // ani upravovaná složka se do toho stavu dostat nemá.
+        if ($definition->taxTreatment === PayrollComponentTaxTreatment::EXEMPT
+            && $definition->exemptionBasis === null
+        ) {
+            throw new \InvalidArgumentException(
+                'U složky osvobozené od daně je nutné uvést podklad osvobození.'
+            );
+        }
         $validFrom = $this->date($input['valid_from'] ?? null, 'valid_from');
         $validTo = $this->optionalDate($input['valid_to'] ?? null, 'valid_to');
         if ($validTo !== null && $validTo < $validFrom) {
@@ -133,6 +155,8 @@ final class PayrollComponentValidator
             'jmhz_treatment' => $definition->jmhzTreatment->value,
             'statistics_treatment' => $definition->statisticsTreatment->value,
             'annual_limit_minor' => $definition->annualLimitMinor,
+            'exemption_basket' => $definition->exemptionBasket?->value,
+            'exemption_basis' => $definition->exemptionBasis?->value,
             'accounting_debit_code' => $definition->accountingDebitCode,
             'accounting_credit_code' => $definition->accountingCreditCode,
             'valid_from' => $validFrom,
@@ -215,6 +239,20 @@ final class PayrollComponentValidator
             return null;
         }
         return $this->date($value, $field);
+    }
+
+    /**
+     * @template T of \BackedEnum
+     * @param class-string<T> $enum
+     * @return T|null
+     */
+    private function optionalEnum(string $enum, mixed $value, string $field): ?\BackedEnum
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return $this->enum($enum, $value, $field);
     }
 
     /**

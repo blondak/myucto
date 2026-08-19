@@ -66,7 +66,8 @@ final class PayrollEldpAction
                 'evidence_schema' => 'jmhz-1.4.3.4 eldpType',
                 'submission_schema_available' => false,
                 'stops_at_status' => 'prepared',
-                'legal_basis' => 'Zákon č. 582/1991 Sb., § 38 a § 39',
+                'legal_basis' => 'Zákon č. 582/1991 Sb., § 38 odst. 4 a § 39 odst. 2 '
+                    . 'až 4, ve znění účinném do 31. 12. 2025',
                 'deadline_rulesets' => [
                     EldpDeadlinePolicy::ANNUAL_RULESET,
                     EldpDeadlinePolicy::TERMINATION_RULESET,

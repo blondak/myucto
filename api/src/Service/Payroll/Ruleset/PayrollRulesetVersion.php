@@ -36,7 +36,14 @@ final readonly class PayrollRulesetVersion
         public array $parameters,
         public ?RulesetApproval $approval,
         public ?RulesetTechnicalReview $technicalReview = null,
-        ?string $expectedHash = null,
+        /**
+         * Integritní pin nad otiskem OBSAHU, ne nad plným snapshotem. Obsah je to
+         * jediné, co má u dodané sady zůstat bajtově beze změny; lifecycle
+         * a schvalovatel se legitimně liší podle stavu a podle instalace
+         * ({@see VendorRulesetApprover}) a pin nad nimi by u jiného provozovatele
+         * shodil sestavení registru výjimkou.
+         */
+        ?string $expectedContentHash = null,
     ) {
         if ($id === '' || $version === '') {
             throw new InvalidArgumentException('Ruleset ID and version are required.');
@@ -74,6 +81,9 @@ final readonly class PayrollRulesetVersion
         // je zkompilovaný ve {@see VendorRulesetManifest} — uložený override ani
         // požadavek z API takový otisk vyrobit nemůže, aniž by BYL dodanou sadou.
         $this->contentHash = PayrollRulesetContent::hash(PayrollRulesetContent::encode($this));
+        if ($expectedContentHash !== null && !hash_equals($expectedContentHash, $this->contentHash)) {
+            throw new PayrollRulesetException("Ruleset {$id} canonical checksum mismatch.");
+        }
         $this->origin = VendorRulesetManifest::contains($this->contentHash)
             ? PayrollRulesetOrigin::Vendor
             : PayrollRulesetOrigin::CustomerOverride;
@@ -93,9 +103,6 @@ final readonly class PayrollRulesetVersion
 
         $this->canonicalSnapshot = CanonicalJson::encode($this->snapshotArray());
         $this->canonicalHash = hash('sha256', $this->canonicalSnapshot);
-        if ($expectedHash !== null && !hash_equals($expectedHash, $this->canonicalHash)) {
-            throw new PayrollRulesetException("Ruleset {$id} canonical checksum mismatch.");
-        }
     }
 
     public function contains(string $date): bool

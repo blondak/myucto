@@ -248,15 +248,11 @@ final class JmhzPvpojPreviewBuilder
         );
 
         $pvpoj = [
-            'pojistne' => [
-                'zakladZamestnavateleA' => $this->toCzk(
-                    $reconciled['totals']['capped_base_minor'],
-                    'zakladZamestnavateleA',
-                ),
-                'pojistneZamestnavateleA' => $this->toCzk(
-                    $employerBeforeDiscount,
-                    'pojistneZamestnavateleA',
-                ),
+            'pojistne' => $this->employerCategoryBlocks(
+                $root,
+                $reconciled['totals'],
+                $employerBeforeDiscount,
+            ) + [
                 'pojistneZamestnavateleCelkem' => $this->toCzk(
                     $employerBeforeDiscount,
                     'pojistneZamestnavateleCelkem',
@@ -424,6 +420,13 @@ final class JmhzPvpojPreviewBuilder
             'employee_discount_base_minor' => 0,
             'part_time_discount_person_count' => 0,
             'part_time_discount_base_minor' => 0,
+            /*
+             * Dílčí vyměřovací základy podle § 5a odst. 1 — 10478 písm. a),
+             * 10479 písm. b), 10480 písm. c). Sčítají se po VZTAZÍCH, protože
+             * podle písmen se rozlišují vztahy, ne osoby: jeden člověk může mít
+             * rizikový i běžný vztah a jeho osobní úhrn by rozpad ztratil.
+             */
+            'category_base_minor' => [],
         ];
         $reconciliation = [];
         foreach ($people as $index => $person) {
@@ -574,7 +577,12 @@ final class JmhzPvpojPreviewBuilder
                         "Účast employment:{$employmentId} není uzavřená.",
                     );
                 }
-                if (($result['employer_rate_category'] ?? null) !== 'ordinary') {
+                $rateCategory = $result['employer_rate_category'] ?? null;
+                if (!in_array(
+                    $rateCategory,
+                    ['ordinary', 'rescue_and_company_fire_service', 'risk_employment'],
+                    true,
+                )) {
                     $this->invalid(
                         'jmhz_pvpoj_rate_category_unsupported',
                         'PVPOJ preview nepředstírá rozpad sazeb B/C bez vypočteného kategoriálního výsledku.',
@@ -583,6 +591,10 @@ final class JmhzPvpojPreviewBuilder
                 $base = $this->minor(
                     $result['capped_assessment_base_minor_units'] ?? null,
                     'relationship.capped_assessment_base_minor_units',
+                );
+                $totals['category_base_minor'][(string) $rateCategory] = $this->add(
+                    $totals['category_base_minor'][(string) $rateCategory] ?? 0,
+                    $base,
                 );
                 if ($participation['status'] === 'does_not_participate'
                     && $base !== 0
@@ -599,6 +611,10 @@ final class JmhzPvpojPreviewBuilder
                         'jmhz_relationship_not_calculated',
                         "Sleva employment:{$employmentId} není ověřená.",
                     );
+                }
+                $discountOutcome = $result['part_time_employer_discount_outcome'] ?? null;
+                if ($discountOutcome !== null && $discountOutcome !== 'applied') {
+                    $discount = 'not_claimed';
                 }
                 if ($discount === 'verified') {
                     if (!is_string(
@@ -737,8 +753,109 @@ final class JmhzPvpojPreviewBuilder
     }
 
     /**
+     * Bloky A, B a C pojistné části podle § 5a odst. 1 a § 7 odst. 1.
+     *
+     * ČSSZ počítá kontrolami 8, 10 a 167 každý blok samostatně: 10024 je sazba
+     * a) ze základu 10023, 10026 sazba b) ze základu 10025 a 10484 sazba c) ze
+     * základu 10483; teprve 10027 je jejich součet. Sečíst základy do jednoho
+     * bloku by proto podání neprošlo — a to je i důvod, proč se rozpad nesmí
+     * dopočítat odhadem.
+     *
+     * Revize zmrazená dřív, než výsledek kategorie nesl, žádný rozpad nemá.
+     * Tam se vykáže jediný blok A, protože jediné, co tehdy modul uměl
+     * spočítat, byla běžná sazba — a všechny vztahy takové revize to
+     * v `assertPeople` musí potvrdit.
+     *
      * @param array<string,mixed> $root
-     * @param array<string,int> $totals
+     * @param array<string,mixed> $totals
+     * @return array<string,int>
+     */
+    private function employerCategoryBlocks(
+        array $root,
+        array $totals,
+        int $employerBeforeDiscount,
+    ): array {
+        /** @var array<string,int> $relationshipBases */
+        $relationshipBases = $totals['category_base_minor'];
+        $letters = [
+            'ordinary' => 'A',
+            'rescue_and_company_fire_service' => 'B',
+            'risk_employment' => 'C',
+        ];
+        $categories = $this->rows($root['employer_categories'] ?? [], 'result.employer_categories');
+        if ($categories === []) {
+            if (array_keys($relationshipBases) !== ['ordinary']) {
+                $this->invalid(
+                    'jmhz_pvpoj_rate_category_unsupported',
+                    'Starší revize bez rozpadu § 5a nesmí obsahovat jinou než běžnou sazbu.',
+                );
+            }
+
+            return [
+                'zakladZamestnavateleA' => $this->toCzk(
+                    $totals['capped_base_minor'],
+                    'zakladZamestnavateleA',
+                ),
+                'pojistneZamestnavateleA' => $this->toCzk(
+                    $employerBeforeDiscount,
+                    'pojistneZamestnavateleA',
+                ),
+            ];
+        }
+
+        $blocks = [];
+        $seen = [];
+        $contributionTotal = 0;
+        foreach ($categories as $index => $category) {
+            $value = $category['category'] ?? null;
+            $letter = is_string($value) ? ($letters[$value] ?? null) : null;
+            if ($letter === null || isset($seen[$value])) {
+                $this->invalid(
+                    'jmhz_pvpoj_rate_category_unsupported',
+                    "Rozpad § 5a má neznámou nebo zdvojenou kategorii na pozici {$index}.",
+                );
+            }
+            $seen[$value] = true;
+            $base = $this->minor(
+                $category['assessment_base_minor_units'] ?? null,
+                "result.employer_categories.{$index}.assessment_base_minor_units",
+            );
+            $contribution = $this->minor(
+                $category['contribution_minor_units'] ?? null,
+                "result.employer_categories.{$index}.contribution_minor_units",
+            );
+            if ($base !== ($relationshipBases[(string) $value] ?? 0)) {
+                $this->invalid(
+                    'jmhz_social_totals_mismatch',
+                    "Dílčí základ § 5a písm. {$letter} neodpovídá součtu vztahů.",
+                );
+            }
+            $contributionTotal = $this->add($contributionTotal, $contribution);
+            $blocks["zakladZamestnavatele{$letter}"] = $this->toCzk(
+                $base,
+                "zakladZamestnavatele{$letter}",
+            );
+            $blocks["pojistneZamestnavatele{$letter}"] = $this->toCzk(
+                $contribution,
+                "pojistneZamestnavatele{$letter}",
+            );
+        }
+        if (array_diff(array_keys($relationshipBases), array_keys($seen)) !== []
+            || $contributionTotal !== $employerBeforeDiscount
+            || array_sum($relationshipBases) !== $totals['capped_base_minor']
+        ) {
+            $this->invalid(
+                'jmhz_social_totals_mismatch',
+                'Rozpad § 5a nedává firemní pojistné ani úhrn vyměřovacích základů.',
+            );
+        }
+
+        return $blocks;
+    }
+
+    /**
+     * @param array<string,mixed> $root
+     * @param array<string,mixed> $totals
      */
     private function assertRootTotals(array $root, array $totals): void
     {

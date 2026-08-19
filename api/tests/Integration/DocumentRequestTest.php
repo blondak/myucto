@@ -9,11 +9,20 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Action\Portal\PortalDocumentRequestAction;
+use MyInvoice\Action\Portal\PortalPurchaseInvoiceSubmissionAction;
+use MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionAction;
+use MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionFileAction;
 use MyInvoice\Repository\DocumentRequestRepository;
+use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Repository\PurchaseInvoiceSubmissionRepository;
 use MyInvoice\Service\ActivityLogger;
-use MyInvoice\Service\Import\AiPdfExtractor;
+use MyInvoice\Service\Document\DocumentStorage;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionCompletionService;
+use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionException;
+use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionProcessingService;
+use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionUploadService;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -27,8 +36,9 @@ use Slim\Psr7\UploadedFile;
  *
  * Ověřuje:
  *  - založení požadavku (ručně i s vazbou na bankovní transakci),
- *  - přechod requested → uploaded skrz PortalDocumentRequestAction::upload()
- *    (reuse AI extrakce mockem — status/vazba se nastaví, i když AI je mockovaná),
+ *  - přechod requested → uploaded skrz PortalDocumentRequestAction::upload(),
+ *    přičemž vznikne jen účetně neutrální staging podání a nikoli faktura,
+ *  - ruční dokončení staging podání, vazbu originálu a výsledné faktury,
  *  - resolve/reopen přechody,
  *  - KRITICKÉ: tenant izolace — listForSupplier i upload() nikdy nevidí/neovlivní
  *    požadavek jiné firmy (fail-closed 404, ne 403 — neprozrazuje existenci),
@@ -42,7 +52,13 @@ final class DocumentRequestTest extends TestCase
 {
     private Connection $db;
     private DocumentRequestRepository $repo;
+    private DocumentRepository $documents;
     private PurchaseInvoiceRepository $purchaseRepo;
+    private PurchaseInvoiceSubmissionRepository $submissions;
+    private PurchaseInvoiceSubmissionUploadService $upload;
+    private PurchaseInvoiceSubmissionCompletionService $completion;
+    private PurchaseInvoiceSubmissionProcessingService $processing;
+    private DocumentStorage $storage;
     private ActivityLogger $activity;
     private IpMatcher $ipMatcher;
 
@@ -52,6 +68,10 @@ final class DocumentRequestTest extends TestCase
     private int $currencyId = 0;
     private int $czId = 0;
     private bool $inTx = false;
+    /** @var list<string> */
+    private array $createdFiles = [];
+    /** @var list<string> */
+    private array $temporaryFiles = [];
 
     protected function setUp(): void
     {
@@ -63,7 +83,13 @@ final class DocumentRequestTest extends TestCase
             $container = Bootstrap::buildApp()->getContainer();
             $this->db           = $container->get(Connection::class);
             $this->repo          = $container->get(DocumentRequestRepository::class);
+            $this->documents     = $container->get(DocumentRepository::class);
             $this->purchaseRepo  = $container->get(PurchaseInvoiceRepository::class);
+            $this->submissions   = $container->get(PurchaseInvoiceSubmissionRepository::class);
+            $this->upload        = $container->get(PurchaseInvoiceSubmissionUploadService::class);
+            $this->completion    = $container->get(PurchaseInvoiceSubmissionCompletionService::class);
+            $this->processing    = $container->get(PurchaseInvoiceSubmissionProcessingService::class);
+            $this->storage       = $container->get(DocumentStorage::class);
             $this->activity      = $container->get(ActivityLogger::class);
             $this->ipMatcher     = $container->get(IpMatcher::class);
         } catch (\Throwable $e) {
@@ -77,6 +103,9 @@ final class DocumentRequestTest extends TestCase
         $this->czId       = (int) ($pdo->query("SELECT id FROM countries WHERE iso2='CZ' LIMIT 1")->fetchColumn() ?: 0);
         if ($baseSupplier === 0 || $this->userId === 0 || $this->currencyId === 0 || $this->czId === 0) {
             $this->markTestSkipped('Chybí základní data v DB.');
+        }
+        if ($pdo->query("SHOW TABLES LIKE 'purchase_invoice_submissions'")->fetchColumn() === false) {
+            $this->markTestSkipped('Chybí migrace purchase_invoice_submissions (1404).');
         }
 
         $pdo->beginTransaction();
@@ -104,6 +133,14 @@ final class DocumentRequestTest extends TestCase
             }
             $this->db->close();
         }
+        foreach (array_unique($this->createdFiles) as $path) {
+            if (is_file($path)) @unlink($path);
+            @rmdir(dirname($path));
+            @rmdir(dirname(dirname($path)));
+        }
+        foreach ($this->temporaryFiles as $path) {
+            if (is_file($path)) @unlink($path);
+        }
     }
 
     public function testCreateStoresFieldsAndIsFindable(): void
@@ -124,16 +161,17 @@ final class DocumentRequestTest extends TestCase
         self::assertNull($found['purchase_invoice_id']);
     }
 
-    public function testUploadTransitionsRequestedToUploadedAndLinksDocument(): void
+    public function testUploadCreatesNeutralSubmissionWithoutPurchaseInvoice(): void
     {
         $id = $this->repo->create($this->supplierA, [
             'description' => 'Chybí doklad k platbě', 'amount' => null,
             'context_date' => null, 'deadline' => null, 'bank_transaction_id' => null,
         ], $this->userId);
 
-        $piId = $this->createPurchaseInvoiceDraft($this->supplierA, 'DOCREQ-UP-1');
-
-        $action = $this->buildPortalAction($piId);
+        $before = (int) $this->db->pdo()->query(
+            'SELECT COUNT(*) FROM purchase_invoices WHERE supplier_id = ' . $this->supplierA
+        )->fetchColumn();
+        $action = $this->buildPortalAction();
         $request = $this->uploadRequest($this->supplierA, $id);
         $response = $action->upload($request, (new ResponseFactory())->createResponse(), ['id' => (string) $id]);
 
@@ -142,7 +180,482 @@ final class DocumentRequestTest extends TestCase
         $reloaded = $this->repo->find($id, $this->supplierA);
         self::assertNotNull($reloaded);
         self::assertSame('uploaded', $reloaded['status'], 'Upload musí přepnout stav requested → uploaded.');
-        self::assertSame($piId, (int) $reloaded['purchase_invoice_id'], 'Vazba na vzniklý doklad se musí uložit.');
+        self::assertNull($reloaded['purchase_invoice_id'], 'Před kontrolou účetní nesmí vzniknout účetní doklad.');
+        self::assertGreaterThan(0, (int) $reloaded['submission_id']);
+
+        $submission = $this->submissions->find((int) $reloaded['submission_id'], $this->supplierA);
+        self::assertNotNull($submission);
+        self::assertSame('submitted', $submission['status']);
+        self::assertSame('not_started', $submission['extraction_status']);
+        $documentStmt = $this->db->pdo()->prepare(
+            'SELECT text_status, thumb_status FROM documents WHERE id = ? AND supplier_id = ?'
+        );
+        $documentStmt->execute([(int) $submission['document_id'], $this->supplierA]);
+        $documentState = $documentStmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($documentState);
+        self::assertSame('none', $documentState['text_status'],
+            'Převzetí originálu nesmí synchronně spouštět paměťově náročný PDF parser.');
+        self::assertSame('none', $documentState['thumb_status'],
+            'Staging nepotřebuje při uploadu generovat odvozený náhled; servíruje originál.');
+        self::assertSame($before, (int) $this->db->pdo()->query(
+            'SELECT COUNT(*) FROM purchase_invoices WHERE supplier_id = ' . $this->supplierA
+        )->fetchColumn(), 'Nezpracované podání je mimo náklady, cashflow i DPH, protože nevytvoří purchase_invoice.');
+        $fileIdStmt = $this->db->pdo()->prepare(
+            "SELECT id FROM document_files WHERE document_id = ? AND supplier_id = ? AND role = 'primary' LIMIT 1"
+        );
+        $fileIdStmt->execute([(int) $submission['document_id'], $this->supplierA]);
+        $fileId = (int) ($fileIdStmt->fetchColumn() ?: 0);
+        self::assertGreaterThan(0, $fileId);
+        self::assertSame(1, $this->documents->countBySha(
+            $this->supplierA,
+            (string) $submission['document_sha256'],
+            [(int) $submission['document_id']],
+            [$fileId],
+        ), 'Staging reference musí chránit originální bajty i po odpojení DMS primary řádku.');
+        $this->trackSubmissionFile($submission);
+    }
+
+    public function testManualCompletionLinksOriginalAndRequestedDocument(): void
+    {
+        $requestId = $this->repo->create($this->supplierA, [
+            'description' => 'Doklad k ručnímu přepisu', 'amount' => null,
+            'context_date' => null, 'deadline' => null, 'bank_transaction_id' => null,
+        ], $this->userId);
+        $response = $this->buildPortalAction()->upload(
+            $this->uploadRequest(
+                $this->supplierA,
+                $requestId,
+                'uctenka.png',
+                "\x89PNG\r\n\x1A\nsynthetic-" . bin2hex(random_bytes(16)),
+            ),
+            (new ResponseFactory())->createResponse(),
+            ['id' => (string) $requestId],
+        );
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+
+        $requestRow = $this->repo->find($requestId, $this->supplierA);
+        $submissionId = (int) ($requestRow['submission_id'] ?? 0);
+        $submission = $this->submissions->find($submissionId, $this->supplierA);
+        self::assertNotNull($submission);
+        $this->trackSubmissionFile($submission);
+
+        $invoiceId = $this->createPurchaseInvoiceDraft($this->supplierA, 'DOCREQ-MANUAL-1');
+        self::assertTrue($this->submissions->claimForManual($submissionId, $this->supplierA));
+        $this->completion->complete(
+            $submissionId,
+            $this->supplierA,
+            $invoiceId,
+            $this->userId,
+            'manual',
+        );
+
+        $done = $this->submissions->find($submissionId, $this->supplierA);
+        self::assertSame('processed', $done['status']);
+        self::assertSame($invoiceId, (int) $done['purchase_invoice_id']);
+        $requestRow = $this->repo->find($requestId, $this->supplierA);
+        self::assertSame($invoiceId, (int) $requestRow['purchase_invoice_id']);
+
+        $link = $this->db->pdo()->prepare(
+            "SELECT 1 FROM document_links WHERE document_id = ? AND entity_type = 'purchase_invoice' AND entity_id = ?"
+        );
+        $link->execute([(int) $done['document_id'], $invoiceId]);
+        self::assertNotFalse($link->fetchColumn(), 'Neměnný DMS originál musí zůstat připojený k výsledné faktuře.');
+    }
+
+    public function testExactDedupIsPerTenantAndUnchangedReplacementIsRejected(): void
+    {
+        $bytes = "%PDF-1.4\n% deterministic synthetic duplicate";
+        $first = $this->upload->submit(
+            $this->uploadedFile('duplicate.pdf', $bytes),
+            $this->supplierA,
+            $this->userId,
+            'portal',
+        );
+        $duplicate = $this->upload->submit(
+            $this->uploadedFile('duplicate-renamed.pdf', $bytes),
+            $this->supplierA,
+            $this->userId,
+            'portal',
+        );
+        $otherTenant = $this->upload->submit(
+            $this->uploadedFile('duplicate.pdf', $bytes),
+            $this->supplierB,
+            $this->userId,
+            'portal',
+        );
+
+        self::assertFalse($first['duplicate']);
+        self::assertTrue($duplicate['duplicate']);
+        self::assertSame((int) $first['submission']['id'], (int) $duplicate['submission']['id']);
+        self::assertFalse($otherTenant['duplicate']);
+        self::assertNotSame((int) $first['submission']['id'], (int) $otherTenant['submission']['id']);
+        self::assertNull($this->submissions->find((int) $first['submission']['id'], $this->supplierB));
+        $this->trackSubmissionFile($first['submission']);
+        $this->trackSubmissionFile($otherTenant['submission']);
+
+        $firstId = (int) $first['submission']['id'];
+        self::assertTrue($this->submissions->needsInformation($firstId, $this->supplierA, 'Nahrajte čitelnější verzi.'));
+        try {
+            $this->upload->submit(
+                $this->uploadedFile('same-again.pdf', $bytes),
+                $this->supplierA,
+                $this->userId,
+                'portal',
+                supersedesSubmissionId: $firstId,
+            );
+            self::fail('Shodný soubor nesmí uzavřít požadavek na náhradu.');
+        } catch (PurchaseInvoiceSubmissionException $e) {
+            self::assertSame('replacement_unchanged', $e->errorCode);
+            self::assertSame(409, $e->httpStatus);
+        }
+    }
+
+    public function testSubmissionFileEndpointIsTenantAndRoleScoped(): void
+    {
+        $bytes = "%PDF-1.4\n% tenant scoped synthetic preview";
+        $created = $this->upload->submit(
+            $this->uploadedFile('tenant-preview.pdf', $bytes),
+            $this->supplierA,
+            $this->userId,
+            'portal',
+        );
+        $submission = $created['submission'];
+        $submissionId = (int) $submission['id'];
+        $this->trackSubmissionFile($submission);
+
+        $action = new PurchaseInvoiceSubmissionFileAction($this->submissions, $this->storage);
+        $responses = new ResponseFactory();
+        $requests = new ServerRequestFactory();
+        $portalRequest = $requests
+            ->createServerRequest('GET', "/api/portal/purchase-invoice-submissions/{$submissionId}/preview")
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierA)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'client']);
+
+        $preview = $action->portalPreview(
+            $portalRequest,
+            $responses->createResponse(),
+            ['id' => (string) $submissionId],
+        );
+        self::assertSame(200, $preview->getStatusCode());
+        self::assertSame('inline; filename="tenant-preview.pdf"', $preview->getHeaderLine('Content-Disposition'));
+        self::assertSame($bytes, (string) $preview->getBody());
+
+        $otherTenant = $action->portalPreview(
+            $portalRequest->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierB),
+            $responses->createResponse(),
+            ['id' => (string) $submissionId],
+        );
+        self::assertSame(404, $otherTenant->getStatusCode(), 'Cizí tenant nesmí zjistit existenci souboru.');
+
+        $staffAsClient = $action->staffPreview(
+            $portalRequest,
+            $responses->createResponse(),
+            ['id' => (string) $submissionId],
+        );
+        self::assertSame(403, $staffAsClient->getStatusCode());
+
+        $portalAsAccountant = $action->portalPreview(
+            $portalRequest->withAttribute(AuthMiddleware::ATTR_USER, [
+                'id' => $this->userId,
+                'role' => 'accountant',
+            ]),
+            $responses->createResponse(),
+            ['id' => (string) $submissionId],
+        );
+        self::assertSame(403, $portalAsAccountant->getStatusCode());
+    }
+
+    public function testReplacementRebindsOpenRequestAndCanOnlyBeSubmittedOnce(): void
+    {
+        $requestId = $this->repo->create($this->supplierA, [
+            'description' => 'Nahraďte nečitelný doklad', 'amount' => null,
+            'context_date' => null, 'deadline' => null, 'bank_transaction_id' => null,
+        ], $this->userId);
+        $first = $this->upload->submit(
+            $this->uploadedFile('necitelný.pdf', "%PDF-1.4\n% first synthetic original"),
+            $this->supplierA,
+            $this->userId,
+            'document_request',
+            'Kontext původního požadavku',
+            'invoice',
+        );
+        $firstId = (int) $first['submission']['id'];
+        self::assertTrue($this->repo->markSubmitted($requestId, $this->supplierA, $firstId));
+        self::assertTrue($this->submissions->needsInformation(
+            $firstId,
+            $this->supplierA,
+            'Soubor je nečitelný.',
+        ));
+        $this->trackSubmissionFile($first['submission']);
+
+        $replacement = $this->upload->submit(
+            $this->uploadedFile('čitelný.pdf', "%PDF-1.4\n% replacement synthetic original"),
+            $this->supplierA,
+            $this->userId,
+            'portal',
+            supersedesSubmissionId: $firstId,
+        );
+        $replacementId = (int) $replacement['submission']['id'];
+        $this->trackSubmissionFile($replacement['submission']);
+        self::assertSame('Kontext původního požadavku', $replacement['submission']['note']);
+        self::assertSame('invoice', $replacement['submission']['document_kind_hint']);
+
+        $old = $this->submissions->find($firstId, $this->supplierA);
+        self::assertSame($replacementId, (int) $old['replacement_submission_id']);
+        $request = $this->repo->find($requestId, $this->supplierA);
+        self::assertSame($replacementId, (int) $request['submission_id'],
+            'Pull požadavek musí po náhradě sledovat nový originál.');
+
+        try {
+            $this->upload->submit(
+                $this->uploadedFile('další.pdf', "%PDF-1.4\n% second replacement must fail"),
+                $this->supplierA,
+                $this->userId,
+                'portal',
+                supersedesSubmissionId: $firstId,
+            );
+            self::fail('Jedno podání nesmí dostat dvě souběžné náhrady.');
+        } catch (PurchaseInvoiceSubmissionException $e) {
+            self::assertSame('invalid_replacement', $e->errorCode);
+            self::assertSame(409, $e->httpStatus);
+        }
+
+        $invoiceId = $this->createPurchaseInvoiceDraft($this->supplierA, 'DOCREQ-REPLACEMENT-1');
+        self::assertTrue($this->submissions->claimForManual($replacementId, $this->supplierA));
+        $this->completion->complete(
+            $replacementId,
+            $this->supplierA,
+            $invoiceId,
+            $this->userId,
+            'manual',
+        );
+        self::assertSame(
+            $invoiceId,
+            (int) $this->repo->find($requestId, $this->supplierA)['purchase_invoice_id'],
+            'Výsledek náhradního souboru se musí propsat zpět do původního požadavku.',
+        );
+    }
+
+    public function testBatchUploadConfirmsAcceptedFilesEvenWhenAnotherFileIsRejected(): void
+    {
+        $action = new PortalPurchaseInvoiceSubmissionAction(
+            $this->submissions,
+            $this->upload,
+            $this->activity,
+            $this->ipMatcher,
+        );
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('POST', '/api/portal/purchase-invoice-submissions')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierA)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'client'])
+            ->withUploadedFiles(['file' => [
+                $this->uploadedFile('prijatý.pdf', "%PDF-1.4\n% accepted in partial batch"),
+                $this->uploadedFile('odmítnutý.exe', 'MZ synthetic rejected executable'),
+            ]]);
+
+        $response = $action->upload($request, (new ResponseFactory())->createResponse());
+        self::assertSame(207, $response->getStatusCode(), (string) $response->getBody());
+        $payload = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame(1, $payload['created']);
+        self::assertSame(0, $payload['duplicates']);
+        self::assertCount(1, $payload['items']);
+        self::assertCount(1, $payload['errors']);
+        self::assertSame('unsupported_format', $payload['errors'][0]['code']);
+
+        $submission = $this->submissions->find((int) $payload['items'][0]['id'], $this->supplierA);
+        self::assertNotNull($submission);
+        self::assertSame('submitted', $submission['status']);
+        $this->trackSubmissionFile($submission);
+    }
+
+    /** Doklad mimo portál (e-mail, papír) musí do fronty dostat i účetní sama za sebe. */
+    public function testStaffUploadsOriginalIntoQueueAndClientCannot(): void
+    {
+        $action = $this->buildInboxAction();
+        $responses = new ResponseFactory();
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('POST', '/api/purchase-invoice-submissions')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierA)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withParsedBody(['note' => 'Přišlo e-mailem', 'document_kind_hint' => 'receipt'])
+            ->withUploadedFiles(['file' => [
+                $this->uploadedFile('od-dodavatele.pdf', "%PDF-1.4\n% staff uploaded original"),
+            ]]);
+
+        $response = $action->upload($request, $responses->createResponse());
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $payload = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame(1, $payload['created']);
+
+        $submission = $this->submissions->find((int) $payload['items'][0]['id'], $this->supplierA);
+        self::assertNotNull($submission);
+        $this->trackSubmissionFile($submission);
+        self::assertSame('staff', $submission['submitted_via']);
+        self::assertSame('submitted', $submission['status'], 'Nahraný originál čeká ve frontě, ne v účetnictví.');
+        self::assertSame('receipt', $submission['document_kind_hint']);
+        self::assertSame('Přišlo e-mailem', $submission['note']);
+        self::assertNull($submission['purchase_invoice_id']);
+
+        $queue = $this->submissions->paginate($this->supplierA, 'submitted', 50, 0);
+        self::assertContains(
+            (int) $submission['id'],
+            array_map('intval', array_column($queue['items'], 'id')),
+            'Nahraný doklad se musí objevit ve frontě příchozích dokladů.',
+        );
+
+        $asClient = $action->upload(
+            $request->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'client']),
+            $responses->createResponse(),
+        );
+        self::assertSame(403, $asClient->getStatusCode(), 'Klient má vlastní portálovou cestu, do účetní fronty nesahá.');
+    }
+
+    /**
+     * Odmítnutí je jen stav — originál musí přežít. Trvale ho vyřadí až samostatné
+     * právo, a to jen dokud podání nedrží vazbu na existující fakturu.
+     */
+    public function testRejectKeepsOriginalWhileDeleteRemovesItFromQueue(): void
+    {
+        $action = $this->buildInboxAction();
+        $responses = new ResponseFactory();
+        $created = $this->upload->submit(
+            $this->uploadedFile('omylem.jpg', "\xFF\xD8\xFF synthetic photo " . bin2hex(random_bytes(8))),
+            $this->supplierA,
+            $this->userId,
+            'staff',
+        );
+        $submission = $created['submission'];
+        $submissionId = (int) $submission['id'];
+        $documentId = (int) $submission['document_id'];
+        $this->trackSubmissionFile($submission);
+
+        // Doklad nahrála účetní sama — není komu psát, odmítnutí projde bez zprávy.
+        $rejected = $action->reject(
+            $this->inboxRequest('POST', "/api/purchase-invoice-submissions/{$submissionId}/reject"),
+            $responses->createResponse(),
+            ['id' => (string) $submissionId],
+        );
+        self::assertSame(200, $rejected->getStatusCode(), (string) $rejected->getBody());
+        self::assertSame('rejected', $this->submissions->find($submissionId, $this->supplierA)['status']);
+        self::assertNull(
+            $this->documentDeletedAt($documentId),
+            'Odmítnutí nesmí originál smazat — je součástí auditní stopy.',
+        );
+
+        // Účetní bez práva na trvalé vyřazení narazí, i když frontu jinak obsluhuje.
+        $withoutRight = $action->delete(
+            $this->inboxRequest('DELETE', "/api/purchase-invoice-submissions/{$submissionId}", 'accountant'),
+            $responses->createResponse(),
+            ['id' => (string) $submissionId],
+        );
+        self::assertSame(403, $withoutRight->getStatusCode(), (string) $withoutRight->getBody());
+        self::assertNotNull($this->submissions->find($submissionId, $this->supplierA));
+
+        $deleted = $action->delete(
+            $this->inboxRequest('DELETE', "/api/purchase-invoice-submissions/{$submissionId}"),
+            $responses->createResponse(),
+            ['id' => (string) $submissionId],
+        );
+        self::assertSame(200, $deleted->getStatusCode(), (string) $deleted->getBody());
+        self::assertNull($this->submissions->find($submissionId, $this->supplierA));
+        self::assertNotNull(
+            $this->documentDeletedAt($documentId),
+            'Originál musí skončit v koši Dokumentů, odkud ho vysypání smaže i z disku.',
+        );
+    }
+
+    /** @return string|null `deleted_at` originálu, null když je aktivní */
+    private function documentDeletedAt(int $documentId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT deleted_at FROM documents WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$documentId, $this->supplierA]);
+        $value = $stmt->fetchColumn();
+        return is_string($value) ? $value : null;
+    }
+
+    /** Zpracované podání drží vazbu na fakturu, takže se z fronty vyřadit nedá. */
+    public function testProcessedSubmissionCannotBeDeleted(): void
+    {
+        $created = $this->upload->submit(
+            $this->uploadedFile('zpracovany.pdf', "%PDF-1.4\n% processed " . bin2hex(random_bytes(8))),
+            $this->supplierA,
+            $this->userId,
+            'staff',
+        );
+        $submissionId = (int) $created['submission']['id'];
+        $this->trackSubmissionFile($created['submission']);
+        $invoiceId = $this->createPurchaseInvoiceDraft($this->supplierA, 'DOCREQ-DELETE-GUARD-1');
+        self::assertTrue($this->submissions->claimForManual($submissionId, $this->supplierA));
+        $this->completion->complete($submissionId, $this->supplierA, $invoiceId, $this->userId, 'manual');
+
+        $response = $this->buildInboxAction()->delete(
+            $this->inboxRequest('DELETE', "/api/purchase-invoice-submissions/{$submissionId}"),
+            (new ResponseFactory())->createResponse(),
+            ['id' => (string) $submissionId],
+        );
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        $payload = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('invalid_status', $payload['error']['code'] ?? null);
+        self::assertNotNull($this->submissions->find($submissionId, $this->supplierA));
+    }
+
+    public function testPortalNeverServesInternalProcessingDiagnostics(): void
+    {
+        $created = $this->upload->submit(
+            $this->uploadedFile('diagnostika.pdf', "%PDF-1.4\n% synthetic portal projection"),
+            $this->supplierA,
+            $this->userId,
+            'portal',
+        );
+        $submission = $created['submission'];
+        $submissionId = (int) $submission['id'];
+        $this->trackSubmissionFile($submission);
+        self::assertTrue($this->submissions->claimForExtraction($submissionId, $this->supplierA));
+        $this->submissions->extractionFailed(
+            $submissionId,
+            $this->supplierA,
+            'ai',
+            'SQLSTATE[HY000]: interní hláška s cestou C:\\inetpub\\storage',
+        );
+        self::assertTrue($this->submissions->needsInformation(
+            $submissionId,
+            $this->supplierA,
+            'Doklad je nečitelný, pošlete ho prosím znovu.',
+        ));
+
+        $action = new PortalPurchaseInvoiceSubmissionAction(
+            $this->submissions,
+            $this->upload,
+            $this->activity,
+            $this->ipMatcher,
+        );
+        $response = $action->list(
+            (new ServerRequestFactory())
+                ->createServerRequest('GET', '/api/portal/purchase-invoice-submissions')
+                ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierA)
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'client']),
+            (new ResponseFactory())->createResponse(),
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $payload = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $row = null;
+        foreach ($payload['items'] as $item) {
+            if ((int) $item['id'] === $submissionId) $row = $item;
+        }
+        self::assertIsArray($row, 'Klient musí své podání ve frontě vidět.');
+        self::assertSame(
+            'Doklad je nečitelný, pošlete ho prosím znovu.',
+            $row['status_reason'],
+            'Důvod, proč po klientovi účetní něco chce, je naopak jediná užitečná zpráva.',
+        );
+        foreach (['extraction_error', 'extraction_source', 'extraction_status',
+            'document_sha256', 'document_filename', 'processed_by_name'] as $field) {
+            self::assertArrayNotHasKey(
+                $field,
+                $row,
+                "Portál nesmí klientovi servírovat interní diagnostiku ($field).",
+            );
+        }
     }
 
     public function testUploadOnRequestOfOtherSupplierIsNotFound(): void
@@ -153,8 +666,7 @@ final class DocumentRequestTest extends TestCase
             'context_date' => null, 'deadline' => null, 'bank_transaction_id' => null,
         ], $this->userId);
 
-        $piId = $this->createPurchaseInvoiceDraft($this->supplierA, 'DOCREQ-XT-1');
-        $action = $this->buildPortalAction($piId);
+        $action = $this->buildPortalAction();
         $request = $this->uploadRequest($this->supplierA, $idB);
         $response = $action->upload($request, (new ResponseFactory())->createResponse(), ['id' => (string) $idB]);
 
@@ -258,28 +770,64 @@ final class DocumentRequestTest extends TestCase
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    private function buildPortalAction(int $extractedPurchaseInvoiceId): PortalDocumentRequestAction
+    private function buildPortalAction(): PortalDocumentRequestAction
     {
-        $extractor = $this->createMock(AiPdfExtractor::class);
-        $extractor->method('extractAndCreate')->willReturn([
-            'ok' => true,
-            'purchase_invoice_id' => $extractedPurchaseInvoiceId,
-            'source' => 'ai',
-        ]);
-        return new PortalDocumentRequestAction($this->repo, $extractor, $this->activity, $this->ipMatcher);
+        return new PortalDocumentRequestAction($this->repo, $this->upload, $this->activity, $this->ipMatcher);
     }
 
-    private function uploadRequest(int $supplierId, int $requestId): \Psr\Http\Message\ServerRequestInterface
+    private function buildInboxAction(): PurchaseInvoiceSubmissionAction
     {
-        $tmpFile = tempnam(sys_get_temp_dir(), 'docreq');
-        file_put_contents($tmpFile, '%PDF-1.4 test');
-        $uploaded = new UploadedFile($tmpFile, 'doklad.pdf', 'application/pdf', (int) filesize($tmpFile), UPLOAD_ERR_OK);
+        return new PurchaseInvoiceSubmissionAction(
+            $this->submissions,
+            $this->processing,
+            $this->upload,
+            $this->documents,
+            $this->db,
+            $this->activity,
+            $this->ipMatcher,
+        );
+    }
+
+    /** @return \Psr\Http\Message\ServerRequestInterface */
+    private function inboxRequest(string $method, string $path, string $role = 'admin')
+    {
+        return (new ServerRequestFactory())
+            ->createServerRequest($method, $path)
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierA)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => $role]);
+    }
+
+    private function uploadRequest(
+        int $supplierId,
+        int $requestId,
+        string $name = 'doklad.pdf',
+        ?string $contents = null,
+    ): \Psr\Http\Message\ServerRequestInterface
+    {
+        $uploaded = $this->uploadedFile(
+            $name,
+            $contents ?? ("%PDF-1.4\n% synthetic " . bin2hex(random_bytes(16))),
+        );
 
         return (new ServerRequestFactory())
             ->createServerRequest('POST', "/api/portal/document-requests/{$requestId}/upload")
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'client'])
             ->withUploadedFiles(['file' => $uploaded]);
+    }
+
+    private function uploadedFile(string $name, string $contents): UploadedFile
+    {
+        $tmpFile = tempnam(sys_get_temp_dir(), 'docreq');
+        $this->temporaryFiles[] = $tmpFile;
+        file_put_contents($tmpFile, $contents);
+        return new UploadedFile(
+            $tmpFile,
+            $name,
+            'application/octet-stream',
+            (int) filesize($tmpFile),
+            UPLOAD_ERR_OK,
+        );
     }
 
     private function createPurchaseInvoiceDraft(int $supplierId, string $vendorInvoiceNumber): int
@@ -302,5 +850,15 @@ final class DocumentRequestTest extends TestCase
             'due_date'              => '2099-06-24',
             'currency_id'           => $this->currencyId,
         ], $this->userId, $supplierId);
+    }
+
+    /** @param array<string,mixed> $submission */
+    private function trackSubmissionFile(array $submission): void
+    {
+        $this->createdFiles[] = $this->storage->pathFor(
+            (int) $submission['supplier_id'],
+            (string) $submission['document_sha256'],
+            (string) $submission['document_filename'],
+        );
     }
 }

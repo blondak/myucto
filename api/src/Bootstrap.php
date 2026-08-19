@@ -24,6 +24,7 @@ use MyInvoice\Middleware\PermissionMiddleware;
 use MyInvoice\Middleware\RequireMfaMiddleware;
 use MyInvoice\Middleware\SessionLockMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Middleware\WebAuthnBodyLimitMiddleware;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Auth\PasskeyService;
@@ -44,6 +45,11 @@ final class Bootstrap
     public static function rootDir(): string
     {
         return dirname(__DIR__, 2);
+    }
+
+    private static function stringOrNull(mixed $value): ?string
+    {
+        return is_string($value) && trim($value) !== '' ? $value : null;
     }
 
     /**
@@ -72,6 +78,16 @@ final class Bootstrap
         }
 
         date_default_timezone_set((string) $config->get('app.timezone', 'Europe/Prague'));
+
+        // Schvalovatel dodaných mzdových legislativních sad = provozovatel TÉHLE
+        // instalace. Sada se sestavuje statickou tovární metodou volanou i mimo
+        // kontejner (CLI, fixtury), takže se hodnota předává jednou tady a dál se
+        // čte staticky; bez tohohle volání platí ENV a pak výchozí hodnota.
+        \MyInvoice\Service\Payroll\Ruleset\VendorRulesetApprover::configure(
+            self::stringOrNull($config->get(
+                \MyInvoice\Service\Payroll\Ruleset\VendorRulesetApprover::CONFIG_KEY,
+            )),
+        );
 
         // PHP error log → log/php-errors.log (jinak by warnings/notices padaly do
         // system php_errors.log, který je mimo repo). Display_errors v dev=on, prod=off.
@@ -219,6 +235,23 @@ final class Bootstrap
             \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator::class =>
                 static fn (): \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator
                     => \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator::create(),
+            // Volitelný class-parametr PHP-DI neautowiruje — bez tohohle bindu
+            // by se doplatek z ročního zúčtování do mzdového běhu nikdy
+            // nedostal a přeplatek by se zaměstnanci nevrátil.
+            \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryCalculationService::class =>
+                fn (ContainerInterface $c) =>
+                    new \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryCalculationService(
+                        $c->get(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class),
+                        $c->get(
+                            \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputAssembler::class,
+                        ),
+                        $c->get(
+                            \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryResultPersister::class,
+                        ),
+                        $c->get(
+                            \MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementPayoutService::class,
+                        ),
+                    ),
             \MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline::class =>
                 fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline(
                     $c->get(\MyInvoice\Service\Payroll\Run\PayrollRunCalculator::class),
@@ -334,6 +367,10 @@ final class Bootstrap
                     new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolParser(),
                     $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader::class),
                     $c->get(\MyInvoice\Service\Payroll\Submission\PayrollSubmissionService::class),
+                    // Ověření podpisu protokolu proti připnutému certifikátu ČSSZ.
+                    // Bez něj by dotažený protokol skončil jako nedůvěryhodná
+                    // příloha a podání by navždy zůstalo ve stavu `submitted`.
+                    new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifier(),
                 ),
             // § 33a — zřetězení auditní stopy hashem. Druhý argument loggeru je volitelný
             // kvůli testovacím dvojníkům; bez explicitního bindu by se v produkci nic
@@ -504,6 +541,27 @@ final class Bootstrap
                 $c->get(\MyInvoice\Repository\UserSupplierRepository::class),
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
             ),
+            \MyInvoice\Service\Invoice\InvoicePublicLinkService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Invoice\InvoicePublicLinkService(
+                $c->get(Config::class),
+                $c->get(\MyInvoice\Repository\InvoiceRepository::class),
+                $c->get(\MyInvoice\Service\Tenant\TenantUrlResolver::class),
+            ),
+            \MyInvoice\Service\Mail\ApprovalEmailVarsBuilder::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Mail\ApprovalEmailVarsBuilder(
+                $c->get(Connection::class),
+                $c->get(Config::class),
+                $c->get(\MyInvoice\Repository\WorkReportRepository::class),
+                $c->get(\MyInvoice\Service\Tenant\TenantUrlResolver::class),
+            ),
+            \MyInvoice\Service\WorkReport\WorkReportLinkService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\WorkReport\WorkReportLinkService(
+                $c->get(Connection::class),
+                $c->get(Config::class),
+                $c->get(\MyInvoice\Service\Mail\Mailer::class),
+                $c->get(\MyInvoice\Repository\WorkReportRepository::class),
+                $c->get(\MyInvoice\Repository\WorkReportLinkRepository::class),
+                $c->get(LoggerInterface::class),
+                $c->get(\MyInvoice\Service\Vat\VatStatusService::class),
+                $c->get(\MyInvoice\Service\Tenant\TenantUrlResolver::class),
+            ),
             \MyInvoice\Security\UserRoleProfile::class => fn (ContainerInterface $c) => new \MyInvoice\Security\UserRoleProfile(
                 $c->get(Connection::class),
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
@@ -568,6 +626,23 @@ final class Bootstrap
             // neví a vědět nesmí; proto je celý postavený nad `IsdsTransport`.
             \MyInvoice\Service\Submission\Channel\Isds\IsdsTransport::class => fn (ContainerInterface $c)
                 => $c->get(\MyInvoice\Service\Submission\Channel\Isds\UnavailableIsdsTransport::class),
+
+            // Odesílací brána ISDS (`SetConcept`). Vědomě NENÍ implementací
+            // `IsdsTransport` výš: brána umí JEN odesílat, a to s člověkem
+            // uprostřed (dvě přesměrování prohlížeče), kdežto `IsdsTransport`
+            // je synchronní port včetně čtení schránky a doručenek. Čtecí
+            // operace proto dál fail-closed odmítají — brána je neumí a
+            // předstírat to by byla lež. Viz `odesilaci_brana_ISDS.pdf` v. 1.11.
+            //
+            // Klient má poslední parametr jako testovací šev (`$httpDouble`).
+            // Produkce ho musí dostat jako `null`, aby si postavil vlastní cURL
+            // volání s timeouty, TLS 1.2 a klientským certifikátem.
+            \MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayClient::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Submission\Channel\Isds\Gateway\SoapIsdsGatewayClient(
+                    new \MyInvoice\Service\Submission\Channel\Isds\Gateway\SetConceptRequestWriter(),
+                    $c->get(LoggerInterface::class),
+                    null,
+                ),
             \MyInvoice\Service\Submission\Channel\Epo\EpoAttemptStatusReader::class => fn (ContainerInterface $c)
                 => $c->get(\MyInvoice\Service\Submission\Channel\Epo\EpoAttemptStatusRepository::class),
             \MyInvoice\Service\Submission\SubmissionArtifactResolver::class => fn (ContainerInterface $c)
@@ -649,7 +724,7 @@ final class Bootstrap
 
         // Slim 4 LIFO: poslední `add()` = NEJVĚTŠÍ vrstva = běží JAKO PRVNÍ.
         // Cílový order běhu (outside → inside):
-        //   IpAllowlist → FirstRunLock → Auth → ApiRequestLog → SessionLock → RequireMfa → License → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
+        //   IpAllowlist → FirstRunLock → TenantDomain → Auth → ApiRequestLog → SessionLock → RequireMfa → License → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
         // → add() v opačném pořadí (innermost první):
         //
         // ⚠️ Middleware se předávají jako CLASS-STRING, ne jako instance. Slim je pak
@@ -672,6 +747,7 @@ final class Bootstrap
         $app->add(SessionLockMiddleware::class);                     // autoritativní idle/manual lock browser session
         $app->add(ApiRequestLogMiddleware::class);                   // bearer-only: per-request log do api_request_log (nad scope/právy, ať jsou vidět i zamítnutá volání)
         $app->add(AuthMiddleware::class);                            // načte session nebo bearer token
+        $app->add(TenantDomainMiddleware::class);                   // Host autoritativně určí tenant před autentizací
         $app->add(FirstRunLockMiddleware::class);                    // 423 pokud users prázdná
         $app->add(IpAllowlistMiddleware::class);                     // outermost user mw
         $app->add(new ApiVersionRewriteMiddleware());                // /api/v1/* → /api/* před vším ostatním

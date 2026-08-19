@@ -120,6 +120,27 @@ const ENUM_FIELDS: Record<string, { prefix: string, values: string[] }> = {
     prefix: 'payroll.people.tax_regime',
     values: ['advance', 'withholding', 'foreign', 'manual_review'],
   },
+  other_withholding_eligibility: {
+    prefix: 'payroll.people.other_withholding_eligibility',
+    values: ['unverified', 'eligible', 'ineligible'],
+  },
+  social_employer_rate_category: {
+    prefix: 'payroll.people.social_employer_rate_category',
+    values: ['ordinary', 'rescue_and_company_fire_service', 'risk_employment'],
+  },
+  social_part_time_discount_reason: {
+    prefix: 'payroll.people.social_part_time_discount_reason',
+    values: [
+      'none',
+      'age_55_plus',
+      'child_care_under_10',
+      'dependent_close_person_care',
+      'study_under_26',
+      'retraining_jobseeker',
+      'disabled_person',
+      'under_21',
+    ],
+  },
   jmhz_apz_contribution_status: {
     prefix: 'payroll.people.jmhz_evidence.state',
     values: ['unverified', 'no', 'yes'],

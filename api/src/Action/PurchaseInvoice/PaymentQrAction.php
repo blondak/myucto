@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\PurchaseInvoice;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
@@ -16,6 +17,9 @@ use MyInvoice\Service\Import\PdfIsdocExtractor;
 use MyInvoice\Service\Payment\BankAccountParser;
 use MyInvoice\Service\Pdf\PdfImageExtractor;
 use MyInvoice\Service\Qr\QrPaymentGenerator;
+use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -34,6 +38,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class PaymentQrAction
 {
+    use GuardsDocumentLock;
+
     public function __construct(
         private readonly PurchaseInvoiceRepository $repo,
         private readonly QrPaymentGenerator $qr,
@@ -43,6 +49,9 @@ final class PaymentQrAction
         private readonly IsdocParser $isdoc,
         private readonly LlmGatewayInterface $anthropic,
         private readonly PdfImageExtractor $pdfImages,
+        private readonly DocumentLockService $locks,
+        private readonly ActivityLogger $logger,
+        private readonly IpMatcher $ipMatcher,
     ) {}
 
     /** GET — QR z uloženého účtu, jinak needs_account / fallback obrázek. */
@@ -83,6 +92,13 @@ final class PaymentQrAction
             return $err;
         }
         $id = (int) $invoice['id'];
+        if ($denied = $this->denyIfLocked(
+            $request,
+            $response,
+            $this->locks->forPurchaseInvoice($invoice),
+            'purchase_invoice',
+            $id,
+        )) return $denied;
 
         if ($this->hasStoredAccount($invoice)) {
             return Json::ok($response, $this->buildQrPayload($invoice));
@@ -146,6 +162,13 @@ final class PaymentQrAction
             return $err;
         }
         $id = (int) $invoice['id'];
+        if ($denied = $this->denyIfLocked(
+            $request,
+            $response,
+            $this->locks->forPurchaseInvoice($invoice),
+            'purchase_invoice',
+            $id,
+        )) return $denied;
 
         $body = (array) ($request->getParsedBody() ?? []);
         $payment = [

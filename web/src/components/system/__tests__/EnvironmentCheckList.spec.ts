@@ -8,6 +8,7 @@ import type { DiagnosticCheck } from '@/api/diagnostics'
 const TRANSLATED = new Set([
   'diagnostics.checks.php_extensions.actual_label',
   'diagnostics.checks.php_extensions.expected_label',
+  'diagnostics.checks.app_url.values.app_url_invalid_origin',
 ])
 
 vi.mock('vue-i18n', () => ({
@@ -81,5 +82,17 @@ describe('EnvironmentCheckList', () => {
 
     expect(labels).toContain('diagnostics.checks.php_extensions.actual_label:')
     expect(labels).not.toContain('diagnostics.actual:')
+  })
+
+  it('bezpečný reason code konfigurace přeloží přes slovník kontroly', () => {
+    const wrapper = mount(EnvironmentCheckList, {
+      props: {
+        checks: [check({ id: 'app_url', status: 'fail', actual: 'app_url_invalid_origin' })],
+      },
+    })
+
+    expect(wrapper.find('dd').text()).toBe(
+      'diagnostics.checks.app_url.values.app_url_invalid_origin',
+    )
   })
 })

@@ -5,7 +5,20 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Run;
 
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpEmployerSelection;
+use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibility;
+use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibilitySource;
+use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxCalculator;
+use MyInvoice\Service\Payroll\IncomeTax\OtherWithholdingEligibility;
+use MyInvoice\Service\Payroll\IncomeTax\TaxCalculationStatus;
+use MyInvoice\Service\Payroll\IncomeTax\TaxRegime;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputAssembler;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialDiscountEvidence;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerRateCategory;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class PayrollRunStatutoryInputAssemblerTest extends TestCase
@@ -46,6 +59,349 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         self::assertSame('supplier:7', $tax->payerReference);
         self::assertSame('employment:84', $tax->relationships[0]->relationshipReference);
         self::assertSame(5, $tax->annualAccumulator?->completedMonths);
+    }
+
+    /**
+     * Osvobozený benefit se zmrazeným rozpadem koše se do výpočtu DOSTANE
+     * a nadlimitní část v něm vystupuje jako vlastní zdanitelná složka, která
+     * vstupuje i do obou vyměřovacích základů.
+     *
+     * Bez rozpadu je osvobození nedoložené tvrzení a výpočet se u něj zastaví —
+     * to se nemění, ověřuje to
+     * {@see self::testExemptBenefitWithoutABasketStaysUnevidenced()}.
+     */
+    public function testOverLimitBenefitEntersTaxAndBothAssessmentBases(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $person = &$snapshot['people'][0];
+        $person['employments'][0]['inputs'][] = [
+            'id' => 421,
+            'amount_minor' => 3_000_000,
+            'source_period_start' => null,
+            'benefit_basket' => 'non_cash_leisure',
+            'benefit_exempt_minor' => 2_448_350,
+            'benefit_taxable_minor' => 551_650,
+            'component' => [
+                'code' => 'REKREACE_VOLNY_CAS',
+                'tax_treatment' => 'exempt',
+                'social_participation_treatment' => 'excluded',
+                'social_treatment' => 'excluded',
+                'health_participation_treatment' => 'excluded',
+                'health_treatment' => 'excluded',
+                'exemption_basket' => 'non_cash_leisure',
+                'exemption_basis' => 'benefit_basket',
+                'valid_from' => '2026-01-01',
+                'valid_to' => null,
+            ],
+        ];
+        unset($person);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame([], $bundle->issues);
+        self::assertNotNull($bundle->socialInsurance);
+        self::assertNotNull($bundle->healthInsurance);
+
+        $social = $bundle->socialInsurance->people[0]->relationships[0]->components;
+        self::assertSame([
+            'input.420.mzda_mesicni',
+            'input.421.rekreace_volny_cas',
+            'input.421.rekreace_volny_cas.nadlimit',
+        ], array_map(static fn ($item): string => $item->code, $social));
+        self::assertSame(551_650, $social[2]->amountMinorUnits);
+
+        $health = $bundle->healthInsurance->people[0]->relationships[0]->components;
+        self::assertSame(
+            'input.421.rekreace_volny_cas.nadlimit',
+            $health[2]->code,
+        );
+        self::assertSame(551_650, $health[2]->amountMinorUnits);
+
+        $tax = $bundle->incomeTax[0]->relationships[0]->components;
+        self::assertSame(
+            'input.421.rekreace_volny_cas.nadlimit',
+            $tax[2]->code,
+        );
+        self::assertSame(551_650, $tax[2]->amountMinorUnits);
+        // Osvobozená část zůstává osvobozená; do základu daně přispívá nulou.
+        self::assertSame(2_448_350, $tax[1]->amountMinorUnits);
+    }
+
+    /** Osvobození bez koše zůstává nedoložené — brána se neuvolnila plošně. */
+    public function testExemptBenefitWithoutABasketStaysUnevidenced(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $person = &$snapshot['people'][0];
+        $person['employments'][0]['inputs'][0]['component']['tax_treatment'] = 'exempt';
+        unset($person);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame([], $bundle->incomeTax);
+        self::assertContains(
+            'income_tax|tax_component_exemption_evidence_missing|employee:42|employment:84',
+            array_map(
+                static fn ($issue): string => implode('|', [
+                    $issue->toArray()['domain'],
+                    $issue->toArray()['code'],
+                    (string) $issue->toArray()['person_reference'],
+                    (string) $issue->toArray()['relationship_reference'],
+                ]),
+                $bundle->issues,
+            ),
+        );
+    }
+
+    /**
+     * Sazbová kategorie § 5a odst. 1 se musí dostat ze smluvních podmínek do
+     * vstupu výpočtu. Dokud se nedostávala, měl vztah označený jako rizikový
+     * ve vstupu běžnou sazbu a mzdový běh mu spočítal 24,8 % místo 27,8 % —
+     * o rozdílu se uživatel nedozvěděl, protože zaškrtnuté políčko na kartě
+     * vztahu vypadalo, že se uplatnilo.
+     */
+    public function testEmployerRateCategoryReachesTheSocialInputFromTheEmploymentTerms(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['employments'][0]['term']['social_employer_rate_category'] =
+            'risk_employment';
+        $snapshot['people'][0]['employments'][0]['term']['social_employer_rate_category_evidence'] =
+            'kategorizace-praci/2026/17';
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame([], $bundle->issues);
+        $relationship = $bundle->socialInsurance?->people[0]->relationships[0];
+        self::assertSame(
+            SocialEmployerRateCategory::RiskEmployment,
+            $relationship?->employerRateCategory,
+        );
+        self::assertSame(
+            'kategorizace-praci/2026/17',
+            $relationship?->employerRateCategoryEvidenceReference,
+        );
+    }
+
+    /**
+     * Sleva podle § 7a se musí dostat ze smluvních podmínek do vstupu výpočtu.
+     * Dokud se nedostávala, byl `partTimeEmployerDiscount` mrtvý vstup: nárok
+     * šlo doložit, ale sleva se neuplatnila nikdy a zaměstnavatel platil o 5 %
+     * vyměřovacího základu víc, než musel.
+     */
+    public function testPartTimeDiscountReachesTheSocialInputFromTheEmploymentTerms(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $term = &$snapshot['people'][0]['employments'][0]['term'];
+        $term['social_part_time_discount_reason'] = 'age_55_plus';
+        $term['social_part_time_discount_evidence'] = 'osobni-spis/2026/42';
+        $term['social_part_time_discount_notified_on'] = '2026-05-20';
+        $term['weekly_hours'] = '20.00';
+        unset($term);
+        $snapshot['people'][0]['employments'][0]['time_month'] = $this->workMonth(90_000, 8_000);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame([], $bundle->issues);
+        $relationship = $bundle->socialInsurance?->people[0]->relationships[0];
+        self::assertSame(SocialDiscountEvidence::Verified, $relationship?->partTimeEmployerDiscount);
+        self::assertSame(
+            SocialPartTimeDiscountReason::Age55Plus,
+            $relationship?->partTimeEmployerDiscountReason,
+        );
+        self::assertSame(
+            'osobni-spis/2026/42',
+            $relationship?->partTimeEmployerDiscountEvidenceReference,
+        );
+        self::assertSame(98_000, $relationship?->partTimeDiscountAssessableMillihours);
+        self::assertSame(20_000, $relationship?->agreedWeeklyWorkingMillihours);
+        self::assertSame(30, $relationship?->partTimeDiscountMonthDays);
+        self::assertSame(30, $relationship?->partTimeDiscountEmploymentDays);
+    }
+
+    /**
+     * § 7a odst. 5 — bez oznámení záměru ČSSZ sleva NENÁLEŽÍ. Chybějící nebo
+     * pozdní datum proto nesmí skončit tichou uplatněnou slevou: podle § 7c
+     * odst. 3 by z ní byl dluh na pojistném.
+     */
+    public function testPartTimeDiscountWithoutTimelyNotificationBecomesUnverified(): void
+    {
+        foreach ([null, '2026-07-01'] as $notifiedOn) {
+            $snapshot = $this->completeSnapshot();
+            $term = &$snapshot['people'][0]['employments'][0]['term'];
+            $term['social_part_time_discount_reason'] = 'age_55_plus';
+            $term['social_part_time_discount_evidence'] = 'osobni-spis/2026/42';
+            $term['social_part_time_discount_notified_on'] = $notifiedOn;
+            $term['weekly_hours'] = '20.00';
+            unset($term);
+
+            $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+            self::assertSame(
+                SocialDiscountEvidence::Unverified,
+                $bundle->socialInsurance?->people[0]->relationships[0]->partTimeEmployerDiscount,
+            );
+        }
+    }
+
+    /**
+     * Zmrazená revize starší než sloupec důvodu klíč vůbec nemá. Čte se jako
+     * neuplatněná sleva — přesně tak, jak se z ní tehdy počítalo.
+     */
+    public function testSnapshotWithoutTheDiscountKeyStaysNotClaimed(): void
+    {
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($this->completeSnapshot());
+
+        self::assertSame(
+            SocialDiscountEvidence::NotClaimed,
+            $bundle->socialInsurance?->people[0]->relationships[0]->partTimeEmployerDiscount,
+        );
+    }
+
+    /**
+     * Jakmile snapshot nese evidenci záměrů, rozhoduje ONA — ne ručně opsané
+     * datum. Chybějící přijatý záměr slevu zavře, i kdyby bylo
+     * `social_part_time_discount_notified_on` vyplněné a v termínu; § 7a odst. 5
+     * váže nárok na doručení oznámení ČSSZ, které z ručního políčka neplyne.
+     */
+    public function testDiscountNeedsAnAcceptedIntentOnceTheSnapshotCarriesEvidence(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $term = &$snapshot['people'][0]['employments'][0]['term'];
+        $term['social_part_time_discount_reason'] = 'age_55_plus';
+        $term['social_part_time_discount_evidence'] = 'osobni-spis/2026/42';
+        $term['social_part_time_discount_notified_on'] = '2026-05-20';
+        $term['social_part_time_discount_intent'] = null;
+        $term['weekly_hours'] = '20.00';
+        unset($term);
+        $snapshot['people'][0]['employments'][0]['time_month'] =
+            $this->workMonth(90_000, 8_000);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame(
+            SocialDiscountEvidence::Unverified,
+            $bundle->socialInsurance?->people[0]->relationships[0]->partTimeEmployerDiscount,
+        );
+    }
+
+    /**
+     * A naopak: přijatý záměr pokrývající období slevu uplatní i bez ručního
+     * data. Tohle je celý smysl přesunu — doložení je podání, ne políčko.
+     */
+    public function testAcceptedIntentAloneVerifiesTheDiscount(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $term = &$snapshot['people'][0]['employments'][0]['term'];
+        $term['social_part_time_discount_reason'] = 'age_55_plus';
+        $term['social_part_time_discount_evidence'] = 'osobni-spis/2026/42';
+        $term['social_part_time_discount_notified_on'] = null;
+        $term['social_part_time_discount_intent'] = [
+            'status' => 'accepted',
+            'intent_from' => '2026-01-01',
+            'intent_to' => null,
+            'accepted_on' => '2025-12-15',
+        ];
+        $term['weekly_hours'] = '20.00';
+        unset($term);
+        $snapshot['people'][0]['employments'][0]['time_month'] =
+            $this->workMonth(90_000, 8_000);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        $relationship = $bundle->socialInsurance?->people[0]->relationships[0];
+        self::assertSame(
+            SocialDiscountEvidence::Verified,
+            $relationship?->partTimeEmployerDiscount,
+        );
+        self::assertSame(
+            SocialPartTimeDiscountReason::Age55Plus,
+            $relationship?->partTimeEmployerDiscountReason,
+        );
+    }
+
+    /**
+     * Záměr ukončený uprostřed vykazovaného měsíce ho už nepokrývá
+     * (§ 7b odst. 4 a kontrola 291 bod 1).
+     */
+    public function testIntentEndedInsideThePeriodClosesTheDiscount(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $term = &$snapshot['people'][0]['employments'][0]['term'];
+        $term['social_part_time_discount_reason'] = 'age_55_plus';
+        $term['social_part_time_discount_evidence'] = 'osobni-spis/2026/42';
+        $term['social_part_time_discount_notified_on'] = '2026-05-20';
+        $term['social_part_time_discount_intent'] = [
+            'status' => 'ended',
+            'intent_from' => '2026-01-01',
+            'intent_to' => '2026-06-15',
+            'accepted_on' => '2025-12-15',
+        ];
+        $term['weekly_hours'] = '20.00';
+        unset($term);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame(
+            SocialDiscountEvidence::Unverified,
+            $bundle->socialInsurance?->people[0]->relationships[0]->partTimeEmployerDiscount,
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function workMonth(int $workedMillihours, int $paidUnworkedMillihours): array
+    {
+        return [
+            'id' => 7,
+            'status' => 'approved',
+            'jmhz_work_summary' => [
+                'derivation_version' => 'jmhz-work-month.v2',
+                'values' => [
+                    'worked_millihours' => $workedMillihours,
+                    'unworked_paid_millihours' => $paidUnworkedMillihours,
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Zařazení nad běžnou sazbu se dokládá. Bez podkladu vstup kategorii
+     * nedostane — a hlavně nespadne zpět na běžnou sazbu, protože nižší sazba
+     * je pro zaměstnavatele levnější a tichý default by mířil vždy tím směrem.
+     */
+    public function testRateCategoryWithoutEvidenceBecomesUnverifiedInsteadOfOrdinary(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['employments'][0]['term']['social_employer_rate_category'] =
+            'rescue_and_company_fire_service';
+        $snapshot['people'][0]['employments'][0]['term']['social_employer_rate_category_evidence'] =
+            '   ';
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame(
+            SocialEmployerRateCategory::Unverified,
+            $bundle->socialInsurance?->people[0]->relationships[0]->employerRateCategory,
+        );
+    }
+
+    /**
+     * Revize zmrazená dřív, než sloupec kategorie existoval, klíč vůbec nemá.
+     * Ta se čte jako běžná sazba — tak se z ní tehdy počítalo a dosadit do ní
+     * dnešní fail-closed by přepsalo hotovou historii.
+     */
+    public function testSnapshotFrozenBeforeTheCategoryColumnStaysOrdinary(): void
+    {
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble(
+            $this->completeSnapshot(),
+        );
+
+        self::assertSame(
+            SocialEmployerRateCategory::Ordinary,
+            $bundle->socialInsurance?->people[0]->relationships[0]->employerRateCategory,
+        );
+        self::assertNull(
+            $bundle->socialInsurance?->people[0]->relationships[0]
+                ->employerRateCategoryEvidenceReference,
+        );
     }
 
     public function testMissingAnnualAccumulatorsBlockInputsInsteadOfInventingZero(): void
@@ -167,6 +523,242 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
             static fn ($issue): string => "{$issue->domain}|{$issue->code}",
             $bundle->issues,
         ));
+    }
+
+    /**
+     * Chybějící měsíční evidence zdravotního minima není mezera v podkladech,
+     * ale zákonný výchozí stav podle § 3 odst. 10 zákona č. 592/1992 Sb.:
+     * doplatek hradí zaměstnanec. Ve vstupu je proto vidět, že hodnota je
+     * odvozená, ne prohlášená — a doklad k ní nepatří.
+     */
+    public function testMissingHealthMonthEvidenceMeansTheStatutoryDefault(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['statutory_evidence']['health']['month_evidence']
+            = null;
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame([], array_map(
+            static fn ($issue): string => "{$issue->domain}|{$issue->code}",
+            $bundle->issues,
+        ));
+        self::assertNotNull($bundle->healthInsurance);
+        $person = $bundle->healthInsurance->people[0];
+        self::assertSame(
+            HealthMinimumTopUpResponsibility::Employee,
+            $person->topUpResponsibility,
+        );
+        self::assertSame(
+            HealthMinimumTopUpResponsibilitySource::StatutoryDefault,
+            $person->topUpResponsibilitySource,
+        );
+        self::assertNull($person->topUpResponsibilityEvidenceReference);
+    }
+
+    /**
+     * Zapsaný řádek default přebíjí a zůstává prohlášením uživatele — proto
+     * `declared`. Bez tohohle rozlišení by schválená mzda po letech neuměla
+     * říct, jestli plátce doplatku někdo doložil, nebo se odvodil ze zákona.
+     */
+    public function testDeclaredHealthMonthEvidenceOverridesTheStatutoryDefault(): void
+    {
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble(
+            $this->completeSnapshot(),
+        );
+
+        self::assertNotNull($bundle->healthInsurance);
+        self::assertSame(
+            HealthMinimumTopUpResponsibilitySource::Declared,
+            $bundle->healthInsurance->people[0]->topUpResponsibilitySource,
+        );
+    }
+
+    /**
+     * Prohlásit „nevíme" je pořád možné a pořád to znamená ruční posouzení.
+     * Zjednodušení se týká CHYBĚJÍCÍHO záznamu, ne záznamu, který říká, že
+     * odpověď nikdo nezná.
+     */
+    public function testExplicitlyUnverifiedResponsibilityStillBlocksHealthInputs(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['statutory_evidence']['health']['month_evidence']
+            ['top_up_responsibility'] = 'unverified';
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNull($bundle->healthInsurance);
+        self::assertSame(
+            ['health_insurance|health_minimum_responsibility_unverified'],
+            array_map(
+                static fn ($issue): string => "{$issue->domain}|{$issue->code}",
+                $bundle->issues,
+            ),
+        );
+    }
+
+    /**
+     * Výjimka podle věty třetí § 3 odst. 10 (překážky na straně organizace)
+     * zůstává vázaná na doklad. Bez něj se NESMÍ sesypat na zákonný default —
+     * jinak by šlo přenést doplatek na zaměstnavatele smazáním reference.
+     */
+    public function testEmployerObstacleWithoutEvidenceStillBlocksHealthInputs(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $month = &$snapshot['people'][0]['statutory_evidence']['health']
+            ['month_evidence'];
+        $month['top_up_responsibility'] = 'employer_obstacle_verified';
+        $month['top_up_responsibility_evidence_reference'] = null;
+        unset($month);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNull($bundle->healthInsurance);
+        self::assertSame(
+            ['health_insurance|health_evidence_mapping_failed'],
+            array_map(
+                static fn ($issue): string => "{$issue->domain}|{$issue->code}",
+                $bundle->issues,
+            ),
+        );
+    }
+
+    /**
+     * Zařazení podle § 6 odst. 4 písm. b) ZDP se u pracovního poměru, zaměstnání
+     * malého rozsahu a DPP neptá — plyne ze zákona samo, takže výpočet dostane
+     * `automatic` a doklad o zařazení k němu nepatří.
+     */
+    public function testRelationshipsClassifiedByLawKeepAutomaticEligibility(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['employments'][0]['term']
+            ['other_withholding_eligibility'] = 'eligible';
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        $relationship = $bundle->incomeTax[0]->relationships[0];
+        self::assertSame(
+            OtherWithholdingEligibility::Automatic,
+            $relationship->otherWithholdingEligibility,
+        );
+        self::assertNull($relationship->classificationEvidenceReference);
+    }
+
+    /**
+     * Odměna jednatele naopak zařazení ze zákona nemá — nese ho prohlášení
+     * plátce ve smluvních podmínkách. Sestavovač ho posílal natvrdo jako
+     * `automatic`, takže výpočet každého jednatele bez podepsaného prohlášení
+     * odmítl s `other-withholding-eligibility-unverified`, ať uživatel nastavil
+     * cokoli. Doklad o zařazení míří na verzi podmínek, ve které prohlášení je.
+     *
+     * @param array{0:string,1:OtherWithholdingEligibility} $case
+     */
+    #[DataProvider('payerStatements')]
+    public function testStatutoryBodyTakesEligibilityFromEmploymentTerms(
+        string $stored,
+        OtherWithholdingEligibility $expected,
+    ): void {
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble(
+            $this->directorSnapshot($stored),
+        );
+
+        self::assertSame([], $bundle->issues);
+        $relationship = $bundle->incomeTax[0]->relationships[0];
+        self::assertSame($expected, $relationship->otherWithholdingEligibility);
+        self::assertSame(
+            'employment-term:99',
+            $relationship->classificationEvidenceReference,
+        );
+    }
+
+    /** @return iterable<string,array{string,OtherWithholdingEligibility}> */
+    public static function payerStatements(): iterable
+    {
+        yield 'nezakládá účast' => [
+            'eligible',
+            OtherWithholdingEligibility::EligibleVerified,
+        ];
+        yield 'zakládá účast' => [
+            'ineligible',
+            OtherWithholdingEligibility::IneligibleVerified,
+        ];
+    }
+
+    /**
+     * Fail-closed: snapshot bez prohlášení (typicky běh uzamčený před migrací
+     * 1403) se nesmí dopočítat jinak, než jak by ho spočítal tehdejší kód.
+     */
+    public function testMissingPayerStatementFallsBackToUnverified(): void
+    {
+        $snapshot = $this->directorSnapshot('eligible');
+        unset($snapshot['people'][0]['employments'][0]['term']
+            ['other_withholding_eligibility']);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        $relationship = $bundle->incomeTax[0]->relationships[0];
+        self::assertSame(
+            OtherWithholdingEligibility::Unverified,
+            $relationship->otherWithholdingEligibility,
+        );
+        self::assertNull($relationship->classificationEvidenceReference);
+    }
+
+    /**
+     * Celá cesta, kvůli které tahle větev vznikla: jednatel s odměnou 4 500 Kč
+     * bez podepsaného prohlášení. Sestavovač vezme prohlášení plátce ze
+     * smluvních podmínek a výpočet doběhne — dřív skončil ručním posouzením,
+     * které se nedalo přebít, protože to byl issue zákonného balíku, ne
+     * validace řádku.
+     */
+    public function testDirectorAtDecisiveAmountCompletesTheStatutoryCalculation(): void
+    {
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble(
+            $this->directorSnapshot('eligible'),
+        );
+
+        self::assertSame([], $bundle->issues);
+        $result = (new MonthlyEmploymentIncomeTaxCalculator(
+            new PayrollRulesetProvider([
+                CzechPayrollRulesets2026::provider()
+                    ->forDate(PayrollRulesetDomain::IncomeTax, '2026-06-30'),
+            ]),
+        ))->calculate($bundle->incomeTax[0]);
+
+        self::assertSame([], $result->issues);
+        self::assertSame(TaxCalculationStatus::Calculated, $result->status);
+        // 4 500 Kč je sama rozhodná částka, test § 6 odst. 4 ZDP je ostrý —
+        // účast na nemocenském pojištění vzniká a daní se zálohou.
+        self::assertSame(TaxRegime::Advance, $result->relationships[0]->regime);
+        self::assertSame(450_000, $result->advanceTax?->taxableIncomeMinorUnits);
+    }
+
+    /**
+     * Snapshot jednatele s odměnou 4 500 Kč, který u plátce nepodepsal
+     * prohlášení k dani.
+     *
+     * @return array<string,mixed>
+     */
+    private function directorSnapshot(string $eligibility): array
+    {
+        $snapshot = $this->completeSnapshot();
+        $person = &$snapshot['people'][0];
+        $person['statutory_evidence']['income_tax']['declaration']['status'] =
+            'not-signed';
+        $employment = &$person['employments'][0];
+        $employment['employment']['relation_type'] = 'statutory_body';
+        $employment['employment']['monthly_gross_minor'] = 450_000;
+        $employment['term']['tax_declaration_signed'] = false;
+        $employment['term']['other_withholding_eligibility'] = $eligibility;
+        $employment['inputs'][0]['amount_minor'] = 450_000;
+        unset($person, $employment);
+
+        // Sleva na poplatníka se bez podepsaného prohlášení uplatnit nedá;
+        // ponechaný nárok by shodil výpočet na `tax-credit-requires-signed-declaration`
+        // a test by měřil něco jiného, než měřit má.
+        $snapshot['people'][0]['statutory_evidence']['income_tax']['credit_claims'] = [];
+
+        return $snapshot;
     }
 
     /** @return array<string,mixed> */

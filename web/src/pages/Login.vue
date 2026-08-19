@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, markRaw, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { clearLoginBounces, loginRedirectLoopDetected } from '@/router'
 
@@ -15,8 +15,20 @@ import {
   isWebAuthnAvailable,
   webAuthnErrorKey,
 } from '@/security/webauthn'
+import {
+  authorizePendingDomainLogin,
+  beginDomainLogin,
+  captureCanonicalDomainLogin,
+  hasPendingCanonicalDomainLogin,
+  pendingCanonicalDomainLoginHandoff,
+} from '@/security/domainLogin'
+import {
+  clientDomainCanonicalHandoffPath,
+  isClientDomainAuthenticatedPath,
+} from '@/security/clientRoutePolicy'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 
 // Štítek pro „zapamatovat zařízení". Odpovídá cfg.auth.email_otp.trusted_device_days
@@ -113,12 +125,39 @@ onMounted(async () => {
     error.value = t('auth.redirect_loop_detected')
     return
   }
+  if (auth.domainContext?.mode === 'canonical') {
+    captureCanonicalDomainLogin(
+      route.query.domain_login_request,
+      route.query.state,
+      route.query.domain_login_handoff,
+    )
+  }
+  const domainHandoff = requestedDomainHandoffPath()
+  if (auth.domainContext?.locked && domainHandoff !== null) {
+    try {
+      await beginDomainLogin(requestedDomainReturnPath(), domainHandoff)
+    } catch (e: any) {
+      error.value = e?.response?.data?.error?.message || t('domain_login.start_failed')
+    }
+    return
+  }
   // Rozhoduje `isAuthenticated`, NE návratová hodnota refresh() — router guard
   // (router/index.ts) čte taky stav storu, a jakýkoli rozjezd těch dvou podmínek
   // je nekonečná smyčka `/` ↔ `/login`: guard by nás poslal sem, my zpátky na `/`.
   await auth.refresh()
   if (auth.isAuthenticated) {
-    router.replace((auth.mustSetupMfa || auth.mustSetupTotp) ? '/setup-mfa' : '/')
+    if (await finishDomainLoginIfNeeded()) return
+    router.replace((auth.mustSetupMfa || auth.mustSetupTotp)
+      ? '/setup-mfa'
+      : (auth.domainContext?.locked ? requestedDomainReturnPath() : '/'))
+    return
+  }
+  if (auth.domainContext?.locked) {
+    try {
+      await beginDomainLogin(requestedDomainReturnPath())
+    } catch (e: any) {
+      error.value = e?.response?.data?.error?.message || t('domain_login.start_failed')
+    }
     return
   }
   if (demo?.auto_login && demo.email && demo.password && demoLoginCanRun()) {
@@ -144,11 +183,43 @@ onMounted(async () => {
   }
 })
 
+function requestedDomainReturnPath(): string {
+  const candidate = route.query.return_to
+  return isClientDomainAuthenticatedPath(candidate) ? candidate : '/portal'
+}
+
+function requestedDomainHandoffPath(): string | null {
+  const candidate = route.query.domain_handoff
+  return typeof candidate === 'string' && clientDomainCanonicalHandoffPath(candidate) !== null
+    ? candidate
+    : null
+}
+
 function demoLoginCanRun(): boolean {
   const key = 'myinvoice.demo_auto_login_attempted'
   if (sessionStorage.getItem(key) === '1') return false
   sessionStorage.setItem(key, '1')
   return auth.setupStatus?.captcha.provider === 'none'
+}
+
+async function finishDomainLoginIfNeeded(): Promise<boolean> {
+  if (!hasPendingCanonicalDomainLogin()) return false
+  const handoffPath = pendingCanonicalDomainLoginHandoff()
+  if (auth.mustSetupMfa || auth.mustSetupTotp) {
+    await router.replace(handoffPath?.startsWith('/setup-mfa') ? handoffPath : '/setup-mfa')
+    return true
+  }
+  if (handoffPath !== null && !handoffPath.startsWith('/setup-mfa')) {
+    await router.replace(handoffPath)
+    return true
+  }
+  try {
+    await authorizePendingDomainLogin()
+    return true
+  } catch (e: any) {
+    error.value = e?.response?.data?.error?.message || t('domain_login.authorize_failed')
+    return true
+  }
 }
 
 async function submit() {
@@ -171,6 +242,7 @@ async function submit() {
     })
     // Ruční přihlášení uspělo — počítadlo odrazů už nemá co hlídat.
     clearLoginBounces()
+    if (await finishDomainLoginIfNeeded()) return
     router.push(auth.isClientRole ? '/portal' : '/')
   } catch (e: any) {
     const code = e?.response?.data?.error?.code
@@ -250,6 +322,7 @@ async function loginWithPasskey() {
     const credential = await getCredential(flow.public_key)
     await authApi.passkeyLoginVerify(flow.flow_token, credential)
     await auth.refresh()
+    if (await finishDomainLoginIfNeeded()) return
     router.push('/')
   } catch (e: any) {
     const code = e?.response?.data?.error?.code
@@ -276,6 +349,7 @@ async function verifyPasskey() {
     const credential = await getCredential(flow.publicKey)
     await authApi.passkeyLoginVerify(flow.flowToken, credential)
     await auth.refresh()
+    if (await finishDomainLoginIfNeeded()) return
     router.push('/')
   } catch (e: any) {
     // Verify endpoint spotřebuje flow už při prvním pokusu. Po browser cancelu

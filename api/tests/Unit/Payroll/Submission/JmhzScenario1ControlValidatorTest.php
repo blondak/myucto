@@ -918,6 +918,135 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         self::assertSame($czechToday, $context->evaluatedOn);
     }
 
+    /**
+     * Sleva podle § 7a se vykazuje třemi položkami u součásti (10372, 10373,
+     * 10374) a úhrnem v pojistné části. Když sedí, nesmí na ní uvíznout žádná
+     * kontrola — dokud rozpad neexistoval, blokovalo podání už jen to, že se
+     * sleva uplatnila.
+     */
+    public function testAppliedEmployerDiscountPassesEveryControl(): void
+    {
+        $report = $this->validate(JmhzXmlSample::withEmployerDiscount());
+
+        self::assertSame([], $this->failedIds($report));
+        self::assertSame([], $this->blockingIds($report));
+        foreach ([1, 45, 137, 138, 158, 188, 207] as $controlId) {
+            self::assertSame(
+                JmhzControlOutcome::Passed,
+                $this->finding($report, $controlId)->outcome,
+                "Kontrola {$controlId} neproběhla nad uplatněnou slevou.",
+            );
+        }
+    }
+
+    /**
+     * § 7a odst. 1 písm. g): zaměstnanci mladšímu 21 let sleva náleží i při
+     * plném úvazku, takže rozsah kratší doby se u něj uvést nesmí.
+     */
+    public function testUnder21DiscountWithoutShorterWorkingTimePasses(): void
+    {
+        $report = $this->validate(JmhzXmlSample::withEmployerDiscount('G', null));
+
+        self::assertSame([], $this->failedIds($report));
+        self::assertSame(
+            JmhzControlOutcome::Passed,
+            $this->finding($report, 138)->outcome,
+        );
+    }
+
+    public function testShorterWorkingTimeAboveThirtyHoursIsRefused(): void
+    {
+        $report = $this->validate(JmhzXmlSample::withEmployerDiscount('A', '30.01'));
+
+        self::assertContains(45, $this->failedIds($report));
+        self::assertFalse($report->submittable());
+    }
+
+    public function testShorterWorkingTimeIsRequiredForReasonsAtoF(): void
+    {
+        $report = $this->validate(JmhzXmlSample::withEmployerDiscount('A', null));
+
+        self::assertContains(138, $this->failedIds($report));
+        self::assertFalse($report->submittable());
+    }
+
+    public function testShorterWorkingTimeIsForbiddenForReasonG(): void
+    {
+        $report = $this->validate(JmhzXmlSample::withEmployerDiscount('G', '20.00'));
+
+        self::assertContains(138, $this->failedIds($report));
+    }
+
+    public function testDiscountReasonMustComeFromTheCodebook(): void
+    {
+        $report = $this->validate(JmhzXmlSample::withEmployerDiscount('H', '20.00'));
+
+        self::assertContains(158, $this->failedIds($report));
+        self::assertFalse($report->submittable());
+    }
+
+    /**
+     * Kontrola 207 — pojistná část vykazuje úhrn základů zaměstnanců se
+     * slevou. Když neodpovídá součtu za součásti, počítá se sleva z jiného
+     * čísla, než jaké podání dokládá.
+     */
+    public function testDiscountBaseMustMatchTheSumOfClaimingForms(): void
+    {
+        $report = $this->validate(JmhzXmlSample::document(
+            JmhzXmlSample::form(
+                '1000000001',
+                '2000000000000000000001',
+                discount: JmhzXmlSample::discountBlock(),
+            ),
+            pvpoj: JmhzXmlSample::discountPvpoj(base: 900, discount: 45),
+        ));
+
+        self::assertContains(207, $this->failedIds($report));
+    }
+
+    /**
+     * Kontrola 188 — vykonává-li zaměstnanec u téhož zaměstnavatele víc
+     * pracovních poměrů, sleva náleží jen z jednoho z nich.
+     */
+    public function testDiscountOnTwoEmploymentsOfOnePersonIsRefused(): void
+    {
+        $report = $this->validate(JmhzXmlSample::document(
+            JmhzXmlSample::form(
+                '1000000001',
+                '2000000000000000000001',
+                discount: JmhzXmlSample::discountBlock(),
+            )
+                . JmhzXmlSample::form(
+                    '1000000001',
+                    '2000000000000000000002',
+                    primary: false,
+                    discount: JmhzXmlSample::discountBlock(),
+                ),
+            formCount: 4,
+            pvpoj: JmhzXmlSample::discountPvpoj(headcount: 2, base: 2_000, discount: 100),
+        ));
+
+        self::assertContains(188, $this->failedIds($report));
+    }
+
+    /**
+     * Okruh podle § 7a odst. 1 (kontrola 42) i platnost oznámeného záměru
+     * podle § 7a odst. 5 (kontrola 291) se z hotového XML přečíst nedají —
+     * druh činnosti ani evidenci OZUSPOJ podání nenese. Nesmí se proto
+     * vydávat za splněné.
+     */
+    public function testDiscountScopeAndIntentControlsAreReportedAsNotEvaluable(): void
+    {
+        $report = $this->validate(JmhzXmlSample::withEmployerDiscount());
+
+        foreach ([42, 291] as $controlId) {
+            self::assertSame(
+                JmhzControlOutcome::NotEvaluable,
+                $this->finding($report, $controlId)->outcome,
+            );
+        }
+    }
+
     /** @return list<int> */
     private function failedIds(JmhzControlEvaluationReport $report): array
     {

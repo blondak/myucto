@@ -4,35 +4,53 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Component;
 
+use MyInvoice\Service\Payroll\Component\PayrollBenefitBasketService;
+use MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket;
 use MyInvoice\Service\Payroll\Component\PayrollComponentDefaults;
 use MyInvoice\Service\Payroll\Component\PayrollComponentKind;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use PHPUnit\Framework\TestCase;
 
 /**
- * MZ-08-W08 b — roční limit osvobození benefitů se u výchozích složek nikdy
- * nezaložil, takže `annual_limit_minor` zůstal NULL a
- * `PayrollInputRepository::approve()` (který strop hlídá jen u nenulového limitu)
- * neudělal nic. Tenhle test drží doložené částky u konkrétních složek a stejně
- * důrazně i to, u kterých složek limit VĚDOMĚ chybí.
+ * MZ-08 — zařazení výchozích složek do zákonných košů osvobození.
+ *
+ * Původně tu stály částky: `annual_limit_minor` se u výchozích složek dosazoval
+ * z rulesetu. Byl to ale strop JEDNÉ složky, kdežto § 6 odst. 9 ZDP limituje
+ * ÚHRN za ustanovení — dvě složky téhož bodu limit obešly a překročení navíc
+ * blokovalo schválení místo toho, aby se přebytek zdanil. Od migrace 1480 nese
+ * složka jen zařazení do koše a částku drží ruleset.
+ *
+ * Test proto drží dvojí: u kterých složek koš JE (a který), a u kterých
+ * VĚDOMĚ není.
  */
 final class PayrollComponentDefaultsTest extends TestCase
 {
-    /**
-     * Kód složky => očekávaný roční limit v haléřích.
-     *
-     * Zdroj hodnot: § 6 odst. 9 ZDP, průměrná mzda za zdaňovací období 2026
-     * 48 967 Kč (§ 21g ZDP, nařízení vlády o výši všeobecného vyměřovacího
-     * základu). Limity samotné bydlí v rulesetu; tady se jen kontroluje, že
-     * doputovaly ke správné mzdové složce.
-     */
-    private const EXPECTED_LIMITS = [
+    /** Kód složky => zákonný koš, do kterého její plnění spadá. */
+    private const EXPECTED_BASKETS = [
         // § 6 odst. 9 písm. d) bod 1 — nepeněžní zdravotnická plnění, průměrná mzda.
-        'ZDRAVOTNI_BENEFIT' => 4_896_700,
+        'ZDRAVOTNI_BENEFIT' => 'non_cash_health',
         // § 6 odst. 9 písm. d) bod 2 — volnočasová plnění, polovina průměrné mzdy.
-        'REKREACE_VOLNY_CAS' => 2_448_350,
-        // § 6 odst. 9 písm. p) — produkty spoření na stáří, 50 000 Kč ze zákona.
-        'PRISPEVEK_PENZE_ZIVOTNI' => 5_000_000,
+        'REKREACE_VOLNY_CAS' => 'non_cash_leisure',
+        // § 6 odst. 9 písm. m) — produkty spoření na stáří, 50 000 Kč ze zákona.
+        'PRISPEVEK_PENZE_ZIVOTNI' => 'old_age_savings',
+        // § 6 odst. 9 písm. b) — příspěvek na stravování, limit ZA JEDNU SMĚNU.
+        'PRISPEVEK_STRAVOVANI' => 'meal_per_shift',
+        // § 6 odst. 9 písm. i) — přechodné ubytování, 3 500 Kč MĚSÍČNĚ.
+        'PRECHODNE_UBYTOVANI' => 'temporary_accommodation',
+    ];
+
+    /**
+     * Částky košů, ověřené proti doslovnému znění ZDP účinnému pro rok 2026.
+     * Průměrná mzda za zdaňovací období 2026 je 48 967 Kč (§ 21g odst. 2 ZDP
+     * odkazuje na zákon o pojistném na sociální zabezpečení). U příspěvku na
+     * stravování je to částka NA JEDNU SMĚNU, tedy 70 % ze 185,00 Kč.
+     */
+    private const EXPECTED_BASKET_LIMITS = [
+        'non_cash_health' => 4_896_700,
+        'non_cash_leisure' => 2_448_350,
+        'old_age_savings' => 5_000_000,
+        'meal_per_shift' => 12_950,
+        'temporary_accommodation' => 350_000,
     ];
 
     /**
@@ -42,49 +60,105 @@ final class PayrollComponentDefaultsTest extends TestCase
      *
      * @var array<string,string>
      */
-    private const DELIBERATELY_WITHOUT_LIMIT = [
-        'PRISPEVEK_STRAVOVANI' => '§ 6 odst. 9 písm. b) — limit je za směnu, ne za rok.',
+    private const DELIBERATELY_WITHOUT_BASKET = [
         'SOUKROME_VOZIDLO' => '§ 6 odst. 6 — ocenění příjmu, žádné osvobození s ročním stropem.',
         'VZDELAVANI' => '§ 6 odst. 9 písm. a) — odborný rozvoj je osvobozený bez limitu.',
-        'PRISPEVEK_DLOUHODOBA_PECE' => 'Zařazení pod § 6 odst. 9 písm. p) určí až účetní.',
+        'PRISPEVEK_DLOUHODOBA_PECE' => 'Zařazení pod § 6 odst. 9 písm. m) určí až účetní.',
     ];
 
-    public function testBenefitLimitsComeFromTheRulesetAndLandOnTheRightComponents(): void
+    public function testBenefitComponentsLandInTheRightStatutoryBasket(): void
     {
         $rows = $this->rowsByCode('2026-01-01');
 
-        foreach (self::EXPECTED_LIMITS as $code => $expected) {
+        foreach (self::EXPECTED_BASKETS as $code => $expected) {
             self::assertArrayHasKey($code, $rows, "Výchozí číselník ztratil složku {$code}.");
             self::assertSame(
                 $expected,
-                $rows[$code]['annual_limit_minor'],
-                "Roční limit složky {$code} neodpovídá zákonné částce.",
+                $rows[$code]['exemption_basket'],
+                "Složka {$code} je zařazená do jiného zákonného koše.",
             );
         }
     }
 
-    public function testComponentsWithoutADocumentedLimitStayEmpty(): void
+    /**
+     * Zákonná částka NESMÍ skončit ve složkovém stropu: ten je tvrdá zábrana
+     * schválení, kdežto zákon plnění nad limit nezakazuje, jen ho zdaňuje.
+     */
+    public function testDefaultComponentsCarryNoHardAnnualCap(): void
     {
-        $rows = $this->rowsByCode('2026-01-01');
-
-        foreach (self::DELIBERATELY_WITHOUT_LIMIT as $code => $why) {
-            self::assertArrayHasKey($code, $rows, "Výchozí číselník ztratil složku {$code}.");
-            self::assertNull($rows[$code]['annual_limit_minor'], $why);
+        foreach ($this->rowsByCode('2026-01-01') as $code => $row) {
+            self::assertArrayNotHasKey(
+                'annual_limit_minor',
+                $row,
+                "Výchozí složka {$code} znovu dosazuje zákonnou částku do stropu složky.",
+            );
         }
     }
 
-    public function testOnlyBenefitComponentsCarryAnAnnualLimit(): void
+    public function testBasketLimitsMatchTheStatute(): void
+    {
+        $baskets = new PayrollBenefitBasketService(CzechPayrollRulesets2026::provider());
+
+        foreach (self::EXPECTED_BASKET_LIMITS as $basket => $expected) {
+            self::assertSame(
+                $expected,
+                $baskets->limitMinor(
+                    PayrollBenefitExemptionBasket::from($basket),
+                    '2026-01-01',
+                    1,
+                ),
+                "Limit koše {$basket} neodpovídá zákonné částce.",
+            );
+        }
+    }
+
+    public function testComponentsWithoutADocumentedBasketStayEmpty(): void
+    {
+        $rows = $this->rowsByCode('2026-01-01');
+
+        foreach (self::DELIBERATELY_WITHOUT_BASKET as $code => $why) {
+            self::assertArrayHasKey($code, $rows, "Výchozí číselník ztratil složku {$code}.");
+            self::assertNull($rows[$code]['exemption_basket'], $why);
+        }
+    }
+
+    public function testOnlyBenefitComponentsCarryAStatutoryBasket(): void
     {
         foreach ($this->rowsByCode('2026-01-01') as $code => $row) {
-            if ($row['annual_limit_minor'] === null) {
+            if ($row['exemption_basket'] === null) {
                 continue;
             }
             self::assertTrue(
                 PayrollComponentKind::from($row['component_kind'])->isBenefit(),
-                "Složka {$code} má roční limit, ale není benefitní — "
+                "Složka {$code} má zákonný koš, ale není benefitní — "
                 . 'PayrollComponentDefinition takovou kombinaci odmítne.',
             );
-            self::assertGreaterThan(0, $row['annual_limit_minor']);
+            self::assertArrayHasKey(
+                $row['exemption_basket'],
+                self::EXPECTED_BASKET_LIMITS,
+            );
+        }
+    }
+
+    /**
+     * Osvobozená složka bez uvedeného podkladu neprojde mzdovým během. Kdyby ji
+     * číselník takhle založil, byl by měsíc s ní neuzavíratelný — přesně stav,
+     * ve kterém CESTOVNI_NAHRADA_LIMIT byla.
+     */
+    public function testEveryExemptDefaultStatesItsExemptionBasis(): void
+    {
+        foreach ($this->rowsByCode('2026-01-01') as $code => $row) {
+            if ($row['tax_treatment'] !== 'exempt') {
+                self::assertNull(
+                    $row['exemption_basis'],
+                    "Složka {$code} tvrdí podklad osvobození, ale osvobozená není.",
+                );
+                continue;
+            }
+            self::assertNotNull(
+                $row['exemption_basis'],
+                "Osvobozená složka {$code} neuvádí, čím je osvobození podložené.",
+            );
         }
     }
 
@@ -114,8 +188,8 @@ final class PayrollComponentDefaultsTest extends TestCase
     }
 
     /**
-     * Verze, ke které není účinný ruleset daně z příjmů, se nezaloží vůbec.
-     * Založit ji s prázdným limitem by tiše vypnulo přesně to hlídání, kvůli
+     * Verze, ke které ruleset daně z příjmů nezná limit koše, se nezaloží vůbec.
+     * Založit složku s košem bez částky by tiše vypnulo přesně to hlídání, kvůli
      * kterému tahle třída vznikla.
      */
     public function testVersionWithoutAnEffectiveIncomeTaxRulesetIsSkipped(): void
@@ -147,7 +221,7 @@ final class PayrollComponentDefaultsTest extends TestCase
             'manual_review',
             'manual_review',
             'included',
-            'benefit_exemption.non_cash_leisure.yearly',
+            'non_cash_leisure',
         ];
     }
 

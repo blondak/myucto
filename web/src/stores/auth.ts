@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { authApi, type User, type SetupStatus, type SessionState } from '@/api/auth'
+import { authApi, type User, type SetupStatus, type SessionState, type DomainContext } from '@/api/auth'
 import type { LicenseSummary } from '@/api/license'
-import { setCsrfToken } from '@/api/client'
+import { setCsrfToken, setDomainSupplierLock } from '@/api/client'
 import { broadcastSessionEvent } from '@/security/sessionChannel'
 import { useSupplierStore } from './supplier'
 import { accessLevelValue, type AccessLevel, type PermissionKey, type PermissionValue } from '@/security/permissions'
@@ -20,6 +20,7 @@ export const useAuthStore = defineStore('auth', () => {
   const license = ref<LicenseSummary | null>(null)
   const lockedSession = ref<SessionState | null>(null)
   const profileHydrated = ref(false)
+  const domainContext = ref<DomainContext | null>(null)
   let logoutRetryCsrfToken = ''
   let logoutPromise: Promise<void> | null = null
 
@@ -49,7 +50,22 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function fetchSetupStatus() {
     setupStatus.value = await authApi.setupStatus()
+    // Na úplně čerstvé instalaci ještě nemusí existovat tabulka domén a setup
+    // záměr schválně povoluje přístup i z LAN hostname odlišného od app.url.
+    // Tenant kontext proto načítáme až po dokončení prvotního setupu.
+    if (!setupStatus.value.needs_setup) {
+      await fetchDomainContext()
+    } else {
+      domainContext.value = null
+      setDomainSupplierLock(null)
+    }
     return setupStatus.value
+  }
+
+  async function fetchDomainContext() {
+    domainContext.value = await authApi.domainContext()
+    setDomainSupplierLock(domainContext.value.locked ? domainContext.value.supplier_id : null)
+    return domainContext.value
   }
 
   function setSessionCsrfToken(token: string) {
@@ -67,6 +83,7 @@ export const useAuthStore = defineStore('auth', () => {
     permissionsLoading.value = true
     clearPermissions()
     try {
+      await fetchDomainContext()
       const data = await authApi.me()
       user.value = data.user
       setSessionCsrfToken(data.csrf_token)
@@ -76,7 +93,15 @@ export const useAuthStore = defineStore('auth', () => {
       license.value = data.license || null
       lockedSession.value = null
       profileHydrated.value = true
-      useSupplierStore().setAvailable(data.suppliers || [], data.current_supplier_id || 0)
+      domainContext.value = data.domain_context && domainContext.value
+        ? { ...domainContext.value, ...data.domain_context }
+        : data.domain_context || domainContext.value
+      setDomainSupplierLock(domainContext.value?.locked ? domainContext.value.supplier_id : null)
+      useSupplierStore().setAvailable(
+        data.suppliers || [],
+        data.current_supplier_id || 0,
+        domainContext.value?.locked === true,
+      )
       return true
     } catch (error: any) {
       if (error?.response?.status === 423
@@ -101,7 +126,7 @@ export const useAuthStore = defineStore('auth', () => {
       license.value = null
       lockedSession.value = null
       profileHydrated.value = false
-      useSupplierStore().setAvailable([], 0)
+      useSupplierStore().setAvailable([], 0, domainContext.value?.locked === true)
       return false
     } finally {
       permissionsLoading.value = false
@@ -150,7 +175,7 @@ export const useAuthStore = defineStore('auth', () => {
     profileHydrated.value = false
     license.value = null
     clearPermissions()
-    useSupplierStore().setAvailable([], 0)
+    useSupplierStore().setAvailable([], 0, domainContext.value?.locked === true)
   }
 
   async function performLogout() {
@@ -199,6 +224,7 @@ export const useAuthStore = defineStore('auth', () => {
     license,
     lockedSession,
     profileHydrated,
+    domainContext,
     isAuthenticated,
     needsSetup,
     isDemo,
@@ -216,6 +242,7 @@ export const useAuthStore = defineStore('auth', () => {
     canWrite,
     clearPermissions,
     fetchSetupStatus,
+    fetchDomainContext,
     setSessionCsrfToken,
     setMfaPolicy,
     setLockedSession,

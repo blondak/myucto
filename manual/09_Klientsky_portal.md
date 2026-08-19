@@ -42,7 +42,8 @@ Uživatelé** (stejný formulář jako u ostatních rolí, viz [§ 73.2 Uživate
 Po přihlášení nabídne menu klientovi jen pět sekcí: **Přehled**
 (portál, domovská stránka), **Prodej** (vydané faktury + pravidelná fakturace),
 **Nákup** (přijaté faktury), **Kontakty** (klienti/dodavatelé) a **Dokumenty**
-s položkou **Chybějící doklady** (viz [§ 9.8](#98-vyzadane-doklady-od-klienta)).
+s položkami **Předat doklady účetní** a **Chybějící doklady**
+(viz [§ 9.8](#98-vyzadane-doklady-od-klienta)).
 Na desktopu jsou sekce v horní liště s popup položkami, na mobilu v nabídce
 **☰**. Nápovědu otevírá kontextová ikona **?** v horní liště.
 Cokoliv jiného v aplikaci existuje — účetnictví, banka, sklad, e-shop, reporty,
@@ -125,13 +126,16 @@ zobrazí analogický „zatím tu nejsou žádná data" stav.
 
 ## 9.4 Rychlé akce
 
-Pod přehledem jsou (jen pokud má přihlášený uživatel právo zápisu) tři dlaždice
-pro rychlý skok mimo portál: **Vystavit fakturu**, **Nahrát přijatou fakturu** a
-**Přidat kontakt** — vedou přímo na formulář nové faktury / přijaté faktury /
-klienta. Samotná stránka portálu žádný formulář neobsahuje — je to čistě
-přehledová obrazovka, zakládání a editace dokladů se vždy odehrává na
-příslušných stránkách [Faktury](14_Faktury.md), [Přijaté faktury](23_Prijate_faktury.md)
-a [Klienti](18_Klienti.md).
+Pod záhlavím je výrazná akce **Předat doklad účetní**. Otevře bezpečnou podatelnu,
+kde stačí vybrat soubor; klient nemusí opisovat dodavatele, částky ani DPH. Běžné
+rychlé odkazy **Vystavit fakturu**, **Nahrát přijatou fakturu** a **Přidat kontakt**
+zůstávají k dispozici podle oprávnění a vedou na plné editory
+[Faktur](14_Faktury.md), [Přijatých faktur](23_Prijate_faktury.md) a
+[Klientů](18_Klienti.md). Když klient v editoru přijaté faktury nahraje běžné PDF
+nebo fotografii, ze kterých se údaje automaticky nenačtou, může je stále vyplnit
+ručně. Druhou možností je jediné tlačítko **Uložit a předat účetní**: formulář se
+nezaloží jako neúplná faktura a původní soubor se přesune do stejné bezpečné
+podatelny jako při rychlé akci.
 
 ## 9.5 Zámek zaúčtovaných dokladů
 
@@ -147,7 +151,9 @@ Doklad zamyká kterákoli z těchto podmínek:
 - firma vede podvojné účetnictví a datum dokladu spadá do **uzavřeného** nebo
   **schváleného** účetního období,
 - probíhá závěrka období (**closing**) — to zamyká **jen klienta**, účetní musí
-  v této fázi s doklady dál pracovat.
+  v této fázi s doklady dál pracovat,
+- přijatá faktura vznikla z originálu, který klient předal účetní přes podatelnu;
+  takový výsledek zůstává ve správě účetní i jako koncept.
 
 Zamčený doklad zobrazuje badge **„Zaúčtováno"** s vysvětlením „Doklad je
 zaúčtovaný — změny a storno vyřídí vaše účetní." (u uzavřeného období obdobný
@@ -205,7 +211,43 @@ Nejčastější zdržení měsíční uzávěrky je čekání na doklady od klie
 **Vyžádané doklady** drží požadavky i jejich stav přímo v aplikaci: účetní
 založí požadavek, klient ho vidí v portálu a doklad rovnou nahraje.
 
-### 9.8.1 Účetní strana — Dokumenty → Chybějící doklady
+Stejná podatelna podporuje oba směry práce: klient může doklad předat spontánně
+(**push**) nebo odpovědět na konkrétní požadavek účetní (**pull**). V obou
+případech se nejprve uloží neměnný originál do Dokumentů a vznikne samostatné
+podání mimo účetnictví. Dokud ho účetní nezpracuje, nejde o přijatou fakturu,
+nevstupuje do nákladů, cashflow, DPH ani kontrolního hlášení.
+
+### 9.8.1 Spontánní předání klientem
+
+Na stránce **Dokumenty → Předat doklady účetní**
+(`/portal/purchase-invoice-submissions`) lze najednou vybrat až 20 souborů ve
+formátu PDF, JPG, PNG, ISDOC, XML nebo ISDOCX. Ke skupině lze přidat poznámku pro
+účetní a nepovinný tip na typ dokladu. Každý soubor vytvoří samostatné podání.
+
+Přehled rozlišuje stavy **Předáno**, **Zpracovává se**, **Čeká na doplnění**,
+**Zpracováno** a **Odmítnuto**. Originál lze vždy zobrazit nebo stáhnout. Pokud
+účetní vyžádá čitelnější či správný soubor, klient u daného řádku použije
+**Nahrát náhradu**; původní podání zůstane v auditní stopě. Opakovaný upload
+bitově shodného souboru se podle SHA-256 nerozmnoží a shodný soubor nelze vydávat
+za opravenou náhradu.
+
+### 9.8.2 Účetní strana — Příchozí doklady
+
+Stránka **Nákup → Příchozí doklady** (`/purchase-invoices/incoming`) je pracovní
+fronta účetní. Nabízí filtr stavů, poznámku klienta, náhled PDF/obrázku a stažení
+každého originálu. Účetní může:
+
+- použít **Vytěžit a vytvořit** — ISDOC a ISDOCX se zpracují deterministicky;
+  běžné PDF nebo fotografie mohou při přiděleném oprávnění pokračovat přes AI;
+  po vytvoření se rovnou otevře editor výsledného konceptu ke kontrole,
+- zvolit **Přepsat ručně** a vyplnit přijatou fakturu s originálem vedle formuláře,
+- napsat klientovi důvod a vybrat **Vyžádat náhradu** nebo **Odmítnout**.
+
+Po úspěšném automatickém nebo ručním zpracování se originál připojí k výsledné
+přijaté faktuře a podání přejde na **Zpracováno**. Fakturu dál spravuje účetní;
+klient ji může zobrazit, ale nemůže měnit její hlavičku, položky, přílohy ani stav.
+
+### 9.8.3 Účetní strana — Dokumenty → Chybějící doklady
 
 Stránka **Dokumenty → Chybějící doklady** (`/document-requests`) nabízí:
 
@@ -217,30 +259,28 @@ Stránka **Dokumenty → Chybějící doklady** (`/document-requests`) nabízí:
   (např. „Chybí doklad k platbě 4 520 Kč z 12. 6.") a požadavek se rovnou naváže
   na danou transakci.
 - **Filtr stavu** — Vyžádáno / Nahráno — čeká na kontrolu / Vyřízeno.
-- **Proklik na doklad** — jakmile klient nahraje soubor, sloupec **Doklad** vede
-  přímo na vzniklou přijatou fakturu.
+- **Proklik na doklad** — po zpracování podání vede sloupec **Doklad** na vzniklou
+  přijatou fakturu; do té doby požadavek pouze ukazuje, že originál čeká na kontrolu.
 - **Uzavřít** — potvrdí, že je požadavek vyřízený (i bez uploadu, např. když
   doklad dorazil jinou cestou) — přechod na stav Vyřízeno. **Znovu otevřít**
   vrátí omylem uzavřený požadavek zpátky na Vyžádáno.
 
-### 9.8.2 Klientská strana — nahrání dokladu
+### 9.8.4 Klientská strana — odpověď na požadavek
 
 Klient vidí otevřené požadavky na stránce **Chybějící doklady** v portálu
 (`/portal/document-requests`) — u každého popis, kontextovou částku/datum a
-termín (po termínu červeně). Tlačítko **Nahrát doklad** otevře výběr souboru
-(PDF nebo foto/scan) — po nahrání systém doklad automaticky zpracuje stejnou AI
-extrakcí jako import přijatých faktur účetní (vytěží dodavatele, položky, DPH),
-založí koncept přijaté faktury a požadavek přepne na stav **Nahráno — čeká na
-kontrolu**. Vyřízené požadavky zůstávají na stránce v sekci **Vyřízené** jako
-historie.
+termín (po termínu červeně). Tlačítko **Nahrát doklad** přijímá stejné formáty
+jako spontánní podatelna. Soubor se bezpečně uloží do příchozí fronty a požadavek
+se přepne na **Nahráno — čeká na kontrolu**; faktura v této chvíli ještě nevzniká.
+Vyřízené požadavky zůstávají na stránce v sekci **Vyřízené** jako historie.
 
 > [!NOTE]
-> Nahrání dokladu jen **navrhne** — koncept přijaté faktury pak zkontroluje
-> a dokončí účetní stejně jako u ostatních AI importů (viz
-> [§ 25 AI extrakce přijatých faktur](25_AI_extrakce.md)). Požadavek se do stavu
-> **Vyřízeno** nepřepne automaticky — o tom rozhoduje účetní po kontrole.
+> Samotné předání nic nezaúčtuje. Účetní nejprve podání zpracuje v příchozí
+> frontě a požadavek potom podle skutečného vyřízení uzavře. Automatická extrakce
+> je jen jedna z možností kontroly (viz
+> [§ 25 AI extrakce přijatých faktur](25_AI_extrakce.md)).
 
-### 9.8.3 Notifikace na obou stranách
+### 9.8.5 Notifikace na obou stranách
 
 Dashboard účetní i domovská stránka portálu klienta zobrazí počet otevřených
 požadavků jako barevnou dlaždici/pruh (červeně, pokud je aspoň jeden po
@@ -251,9 +291,79 @@ upravitelná stejně jako ostatní šablony) a opakuje ji nejdřív po 7 dnech
 (cooldown) — obojí lze při spuštění úlohy přenastavit parametry `--days`
 a `--cooldown`.
 
-### 9.8.4 Tenant izolace
+### 9.8.6 Oprávnění a izolace firem
 
 Klient vidí vždy jen požadavky **vlastní aktuálně zvolené firmy** — stejný
 fail-closed princip jako zbytek portálu (viz [§ 9.1](#91-kdo-roli-client-dostane-a-jak)).
 Cizí požadavek (jiné firmy) vrátí 404, ne 403, aby se neprozrazovala ani jeho
 existence.
+
+Oprávnění **Předávat doklady účetní** patří jen klientským rolím. Oprávnění
+**Příchozí doklady** je naopak interní a odděluje pouhé čtení fronty od jejího
+zpracování. Přístup k příchozí frontě sám o sobě nenahrazuje oprávnění vytvořit
+přijatou fakturu ani použít AI extrakci.
+
+## 9.9 Vlastní doména portálu
+
+Každá firma může vedle výchozí adresy instalace (`app.url`) používat vlastní
+doménu, například `portal.klient.cz`. Nastavuje ji oprávněný správce na kartě
+**Nastavení → Firma → Vlastní domény**. Pokud firma žádnou aktivní doménu nemá,
+portál i veřejné odkazy dál fungují na výchozí adrese beze změny.
+
+Doméně se přiřazuje účel:
+
+- **Klientské rozhraní** — celý rozsah stránek, které dovoluje klientská role:
+  přehled, vydané a přijaté faktury, pravidelná fakturace, kontakty, předávání
+  dokladů a osobní profil;
+- **Veřejné odkazy** — webové faktury, schvalování a výkazy práce;
+- **Klientské rozhraní i veřejné odkazy** — oba předchozí účely.
+
+Firma může mít více aktivních aliasů, ale pro každý účel nejvýše jednu primární
+doménu. Nově odesílané odkazy používají primární doménu; starší canonical odkazy
+na `app.url` zůstávají platné. Deaktivace poslední použitelné domény vrátí nové
+odkazy automaticky na `app.url`.
+
+Aktivní vlastní doména zároveň jednoznačně určuje firmu. Přepínač firem se na ní
+nezobrazuje a firmu nelze podvrhnout hlavičkou, parametrem URL ani API tokenem.
+Uživatel musí mít k určené firmě stále platné přiřazení. Jedinou výjimkou je
+globální superadmin, který může firmu určenou aktivní vlastní doménou otevřít i bez
+tohoto přiřazení. Výjimka obchází pouze kontrolu přiřazení: stav a účel domény,
+vazba hostname na firmu, canonical přihlášení, PKCE a bezpečná návratová cesta se
+ověřují stejně jako u ostatních uživatelů. Veřejný token jiné firmy na této doméně
+vrátí pouze „nenalezeno"; stejný token na canonical adrese zůstává funkční.
+Vlastní doména zpřístupní jen klientské agendy podle skutečných oprávnění uživatele.
+Zakázky, platební příkazy, příchozí fronta účetní, API tokeny, systémová nastavení
+a ostatní interní agendy na ní dostupné nejsou; jejich přímý odkaz se otevře na
+canonical adrese `app.url`. Na canonical adrese se v novém panelu otevírá také
+uživatelský manuál, který není součástí autentizované klientské plochy.
+
+### 9.9.1 Přihlášení a passkeys
+
+Přihlášení se bezpečně dokončuje na canonical adrese z `app.url`, kde jsou
+zaregistrované passkeys a WebAuthn RP ID. Po heslu, TOTP nebo passkey se prohlížeč
+vrátí na přesnou původně otevřenou klientskou stránku vlastní domény jednorázovým
+krátkodobým kódem svázaným s PKCE.
+Session token se v URL nepřenáší; cílová doména dostane novou host-only cookie,
+kterou jiná doména nemůže číst.
+
+Na stejné canonical adrese probíhá také **správa přístupových klíčů** a vynucené
+první nastavení MFA. WebAuthn klíče jsou kryptograficky svázané s RP ID a originem
+z `app.url`, takže vlastní doména tyto obrazovky neotevře s nefunkčním bezpečnostním
+dialogem. Místo toho zahájí stejný jednorázový přechod, na canonical adrese nabídne
+správu klíčů nebo nastavení MFA a po dokončení se vrátí na předchozí bezpečnou
+klientskou stránku vlastní domény. Cílová firma i hostname jsou po celou dobu
+svázané se serverovým požadavkem; nelze je změnit parametrem návratové URL.
+
+Při zamčení session server na vlastní doméně odmítne přímé WebAuthn options i
+verify. Zamykací obrazovka proto zahájí nové ověření na canonical originu a po
+jednorázovém PKCE návratu vytvoří novou host-only session; návrat zachová aktuální
+klientskou stránku. Vlastní doména je originem celého klientského rozhraní, nikoli
+druhým originem interních agend účetní a správce. Povolení se neurčuje podle
+prefixu `/portal`, ale podle stejného katalogu klientských oprávnění, který řídí
+menu, router i API. Staré adresy `/exchange`, `/admin/export` a `/admin/import`
+se nejprve převedou na svůj skutečný klientský cíl; samotný prefix `/admin` jim
+tedy přístup ani nedává, ani nebere.
+
+Neznámý, neověřený, deaktivovaný nebo účelově nekompatibilní hostname nikdy
+nezobrazí data firmy. Postup ověření a aktivace popisuje
+[§ 73.16 Vlastní domény](73_Nastaveni.md#7316-vlastni-domeny-klientskeho-rozhrani).

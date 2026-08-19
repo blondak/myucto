@@ -11,6 +11,7 @@ use MyInvoice\Service\Approval\ApprovalTokenValidator;
 use MyInvoice\Service\Captcha\TurnstileVerifier;
 use MyInvoice\Service\Invoice\AutoIssueAndSendService;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Tenant\PublicTenantGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -39,6 +40,7 @@ final class PublicApprovalDecideAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly AutoIssueAndSendService $autoIssue,
+        private readonly PublicTenantGuard $tenantGuard,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -52,6 +54,9 @@ final class PublicApprovalDecideAction
         if ($invoice === null || $invoice['approval_status'] !== 'requested') {
             return Json::error($response, 'token_invalid_or_expired',
                 'Tento odkaz byl již použit nebo není platný.', 404);
+        }
+        if (!$this->tenantGuard->allows($request, (int) $invoice['supplier_id'])) {
+            return Json::error($response, 'not_found', 'Tento odkaz není platný.', 404);
         }
 
         $body = (array) ($request->getParsedBody() ?? []);

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { payrollApi, type PayrollPersonOption } from '@/api/payroll'
+import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 import {
   deductionAgreementKinds,
   deductionPriorityCeiling,
@@ -19,6 +21,9 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -32,7 +37,14 @@ const expandedId = ref<number | null>(null)
 const creating = ref(false)
 const formError = ref('')
 const listError = ref('')
-const employeeFilter = ref<number | null>(null)
+/**
+ * Předvýběr z odkazu na kartě zaměstnance (`/payroll/deduction-agreements?person=7`).
+ *
+ * Sedí do stávajícího filtru osob, takže se zúžení hned vidí a jde ho zrušit
+ * tam, kde ho uživatel čeká — v tom samém selectu. Zúžení zároveň předplní
+ * formulář nové dohody (`emptyForm()` čte tenhle ref).
+ */
+const employeeFilter = ref<number | null>(payrollQueryId(useRoute().query, 'person'))
 const statusFilter = ref<DeductionAgreementStatus | ''>('')
 const total = ref(0)
 const pageSize = 20
@@ -41,6 +53,18 @@ const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
 const statuses: DeductionAgreementStatus[] = ['draft', 'active', 'paused', 'ended', 'cancelled']
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'employee', labelKey: 'payroll.deductions.employee', required: true },
+  { key: 'title', labelKey: 'payroll.deductions.agreement_title' },
+  { key: 'status', labelKey: 'payroll.deductions.status_label' },
+  { key: 'priority', labelKey: 'payroll.deductions.priority', defaultHidden: true },
+  { key: 'requested', labelKey: 'payroll.deductions.requested' },
+  { key: 'withheld', labelKey: 'payroll.deductions.withheld' },
+  { key: 'validity', labelKey: 'payroll.deductions.validity' },
+  { key: 'actions', labelKey: 'common.detail', required: true },
+]
+const tbl = useTablePrefs('payroll-deduction-agreements', COLUMNS)
 
 function localIsoDate(date = new Date()): string {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
@@ -409,40 +433,45 @@ onMounted(load)
         <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.deductions.empty_description') }}</p>
       </div>
       <template v-else>
-        <div class="hidden overflow-x-auto md:block">
-          <table class="min-w-full divide-y divide-neutral-200 text-sm">
+        <div class="hidden md:block">
+          <div class="flex flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2">
+            <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+            <DensityToggle class="hidden md:block" :ctrl="tbl" />
+          </div>
+          <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th class="px-4 py-3">{{ t('payroll.deductions.employee') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.deductions.agreement_title') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.deductions.status_label') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('payroll.deductions.priority') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('payroll.deductions.requested') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('payroll.deductions.withheld') }}</th>
-                <th class="px-4 py-3">{{ t('payroll.deductions.validity') }}</th>
-                <th class="px-4 py-3"><span class="sr-only">{{ t('common.detail') }}</span></th>
+                <th v-if="tbl.isVisible('employee')" class="px-4 py-3">{{ t('payroll.deductions.employee') }}</th>
+                <th v-if="tbl.isVisible('title')" class="px-4 py-3">{{ t('payroll.deductions.agreement_title') }}</th>
+                <th v-if="tbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.deductions.status_label') }}</th>
+                <th v-if="tbl.isVisible('priority')" class="px-4 py-3 text-right">{{ t('payroll.deductions.priority') }}</th>
+                <th v-if="tbl.isVisible('requested')" class="px-4 py-3 text-right">{{ t('payroll.deductions.requested') }}</th>
+                <th v-if="tbl.isVisible('withheld')" class="px-4 py-3 text-right">{{ t('payroll.deductions.withheld') }}</th>
+                <th v-if="tbl.isVisible('validity')" class="px-4 py-3">{{ t('payroll.deductions.validity') }}</th>
+                <th v-if="tbl.isVisible('actions')" class="px-4 py-3"><span class="sr-only">{{ t('common.detail') }}</span></th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="item in agreements" :key="item.id" :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">
-                <td class="px-4 py-3 font-medium text-neutral-900">{{ item.full_name }}</td>
-                <td class="px-4 py-3">
+                <td v-if="tbl.isVisible('employee')" class="px-4 py-3 font-medium text-neutral-900">{{ item.full_name }}</td>
+                <td v-if="tbl.isVisible('title')" class="px-4 py-3">
                   {{ item.title }}
                   <span class="ml-1 text-xs text-neutral-500">{{ t(`payroll.deductions.kinds.${item.deduction_kind}`) }}</span>
                 </td>
-                <td class="px-4 py-3">
+                <td v-if="tbl.isVisible('status')" class="px-4 py-3">
                   <span class="rounded-full px-2 py-1 text-xs font-medium" :class="statusClass(item.status)">
                     {{ t(`payroll.deductions.status.${item.status}`) }}
                   </span>
                 </td>
-                <td class="px-4 py-3 text-right">{{ item.priority_no }}</td>
-                <td class="px-4 py-3 text-right font-medium">
+                <td v-if="tbl.isVisible('priority')" class="px-4 py-3 text-right">{{ item.priority_no }}</td>
+                <td v-if="tbl.isVisible('requested')" class="px-4 py-3 text-right font-medium">
                   {{ money(item.requested_minor) }}
                   <span v-if="item.basis_points !== null" class="block text-xs text-neutral-500">{{ percent(item.basis_points) }}</span>
                 </td>
-                <td class="px-4 py-3 text-right">{{ money(item.withheld_total_minor) }}</td>
-                <td class="px-4 py-3 text-neutral-600">{{ item.valid_from }} – {{ item.valid_to || '∞' }}</td>
-                <td class="px-4 py-3 text-right">
+                <td v-if="tbl.isVisible('withheld')" class="px-4 py-3 text-right">{{ money(item.withheld_total_minor) }}</td>
+                <td v-if="tbl.isVisible('validity')" class="px-4 py-3 text-neutral-600">{{ item.valid_from }} – {{ item.valid_to || '∞' }}</td>
+                <td v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right">
                   <button :class="btnOutlineSm('neutral')" :data-test="`deduction-detail-${item.id}`" @click="openDetail(item)">
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>
                     {{ t(expandedId === item.id ? 'common.close' : 'common.detail') }}
@@ -451,6 +480,7 @@ onMounted(load)
               </tr>
             </tbody>
           </table>
+          </div>
         </div>
         <div class="space-y-3 p-4 md:hidden">
           <article v-for="item in agreements" :key="item.id" class="rounded-lg border border-neutral-200 p-4" :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">

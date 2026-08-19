@@ -15,12 +15,15 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import {
   payrollApi,
   type PayrollAnnualSettlementAnnualClaims,
+  type PayrollAnnualSettlementCertificate,
   type PayrollAnnualSettlementFilingObligation,
   type PayrollAnnualSettlementList,
   type PayrollAnnualSettlementListItem,
+  type PayrollAnnualSettlementListState,
   type PayrollAnnualSettlementPreview,
   type PayrollAnnualSettlementPriorEmployers,
   type PayrollAnnualSettlementRequestStatus,
@@ -32,6 +35,10 @@ import { useToast } from '@/composables/useToast'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
+import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
+import { useSavedFilters } from '@/composables/useSavedFilters'
+import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -48,10 +55,34 @@ const preview = ref<PayrollAnnualSettlementPreview | null>(null)
 const document = ref<PayrollDocument | null>(null)
 const loading = ref(true)
 const loadFailed = ref(false)
+/**
+ * Seznam lidí stránkuje SERVER.
+ *
+ * Why: firma se stovkami zaměstnanců dostala v jedné odpovědi všechny a
+ * obrazovka je všechny vykreslila. Zúžení podle jména a stavu proto taky patří
+ * na server — kdyby filtroval prohlížeč, hledal by jen v načtené stránce
+ * a nenalezení by vypadalo jako „ten člověk tu není".
+ *
+ * Sloupcové vybavení tu záměrně NENÍ: levý seznam je výběr osoby (`<ul>`),
+ * ne datová tabulka, a jediná `<table>` na stránce je pevný dvousloupcový
+ * výpočet podle § 38ch — skrýt v něm sloupec znamená skrýt polovinu rovnice.
+ */
+const pageSize = 25
+const total = ref(0)
+const offset = ref(0)
+const search = ref('')
+const state = ref<PayrollAnnualSettlementListState>('all')
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const previewLoading = ref(false)
 const saving = ref(false)
 const settling = ref(false)
 let loadSequence = 0
+/**
+ * Osoba z odkazu na kartě zaměstnance. Uplatní se JEDNOU, po prvním načtení
+ * seznamu — kdyby se držela trvale, přepínání roku by pořád skákalo zpět na
+ * člověka, kterého uživatel dávno opustil.
+ */
+let pendingFocusPersonId: number | null = payrollQueryId(useRoute().query, 'person')
 
 const form = ref({
   request_status: 'unknown' as PayrollAnnualSettlementRequestStatus,
@@ -67,8 +98,47 @@ const form = ref({
   row_version: 0,
 })
 
+/**
+ * Formulářový řádek potvrzení. Částky jsou řetězce v korunách, protože prázdné
+ * pole musí zůstat prázdné — kdyby se držely jako čísla, prázdno by spadlo na
+ * nulu a nula je podle § 38ch odst. 3 doložený údaj, ne chybějící.
+ */
+interface CertificateForm {
+  certificate_reference: string
+  payer_name: string
+  payer_tax_identification: string
+  received_on: string
+  gross_income: string
+  advance_base: string
+  advance_tax: string
+  credit_35ba: string
+  credit_35c: string
+  tax_bonus: string
+  evidence_status: 'unverified' | 'verified'
+  evidence_reference: string
+  missing: string[]
+}
+
+const certificates = ref<CertificateForm[]>([])
+const savingCertificates = ref(false)
+
+/** Pořadí sloupců odpovídá § 38ch odst. 3 a řádkům tiskopisu 25 5460. */
+const CERTIFICATE_AMOUNTS = [
+  'gross_income',
+  'advance_base',
+  'advance_tax',
+  'credit_35ba',
+  'credit_35c',
+  'tax_bonus',
+] as const
+
 const canWrite = computed(() => auth.canWrite('payroll.documents'))
 const canSettle = computed(() => auth.canWrite('payroll.approve'))
+/**
+ * Zadání potvrzení je pod `payroll.approve`, ne pod `payroll.documents`: ta
+ * čísla jdou přímo do úhrnu, ze kterého vychází přeplatek.
+ */
+const canEditCertificates = canSettle
 const items = computed<PayrollAnnualSettlementListItem[]>(() => data.value?.items ?? [])
 const result = computed(() => preview.value?.result ?? null)
 const blockers = computed(() => result.value?.blockers ?? [])
@@ -146,15 +216,23 @@ async function load(): Promise<void> {
   const sequence = ++loadSequence
   loading.value = true
   try {
-    const response = await payrollApi.listAnnualSettlements(year.value)
+    const response = await payrollApi.listAnnualSettlements(
+      year.value,
+      { limit: pageSize, offset: offset.value },
+      { search: search.value.trim(), state: state.value },
+    )
     if (sequence !== loadSequence) return
     data.value = response
+    total.value = response.total
     loadFailed.value = false
-    if (selectedEmployeeId.value !== null
-      && !response.items.some(item => item.employee_id === selectedEmployeeId.value)
-    ) {
-      selectedEmployeeId.value = null
-      preview.value = null
+    // Odkaz z karty zaměstnance (`?person=7`) rozklikne rovnou jeho evidenci.
+    // Se stránkováním se členství v seznamu neověřuje — člověk může ležet na
+    // jiné straně a zamlčený odkaz by vypadal jako rozbité tlačítko. Neplatné
+    // id skončí na hlášce z náhledu, ne mlčením.
+    if (pendingFocusPersonId !== null) {
+      const focused = pendingFocusPersonId
+      pendingFocusPersonId = null
+      void select(focused)
     }
   } catch (error) {
     if (sequence !== loadSequence) return
@@ -187,11 +265,109 @@ async function select(employeeId: number): Promise<void> {
       note: response.request.note ?? '',
       row_version: response.request.row_version,
     }
+    // `?? []` schválně: chybějící seznam nesmí shodit celou obrazovku, protože
+    // pak by uživatel neviděl ani výpočet, ani překážky.
+    certificates.value = (response.certificates ?? []).map(certificateForm)
   } catch (error) {
     preview.value = null
+    certificates.value = []
     toast.error(apiErrorMessage(error, t('payroll.annual_settlement.preview_failed')))
   } finally {
     previewLoading.value = false
+  }
+}
+
+/** Minor units → koruny jako text. `null` zůstává prázdné pole. */
+function amountToInput(value: number | null): string {
+  return value === null ? '' : (value / 100).toFixed(2)
+}
+
+/**
+ * Koruny jako text → minor units. Prázdné pole je `null`, ne nula — a to je
+ * celý rozdíl mezi „na potvrzení to není" a „na potvrzení je nula".
+ */
+function inputToAmount(value: string): number | null {
+  const trimmed = value.trim().replace(',', '.')
+  if (trimmed === '') return null
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? Math.round(parsed * 100) : null
+}
+
+function certificateForm(certificate: PayrollAnnualSettlementCertificate): CertificateForm {
+  return {
+    certificate_reference: certificate.certificate_reference,
+    payer_name: certificate.payer_name ?? '',
+    payer_tax_identification: certificate.payer_tax_identification ?? '',
+    received_on: certificate.received_on ?? '',
+    gross_income: amountToInput(certificate.gross_income_minor_units),
+    advance_base: amountToInput(certificate.advance_base_minor_units),
+    advance_tax: amountToInput(certificate.advance_tax_minor_units),
+    credit_35ba: amountToInput(certificate.non_refundable_credit_minor_units),
+    credit_35c: amountToInput(certificate.child_credit_minor_units),
+    tax_bonus: amountToInput(certificate.tax_bonus_minor_units),
+    evidence_status: certificate.evidence_status,
+    evidence_reference: certificate.evidence_reference ?? '',
+    missing: certificate.missing_statutory_fields,
+  }
+}
+
+function addCertificate(): void {
+  certificates.value = [...certificates.value, {
+    certificate_reference: '',
+    payer_name: '',
+    payer_tax_identification: '',
+    received_on: '',
+    gross_income: '',
+    advance_base: '',
+    advance_tax: '',
+    credit_35ba: '',
+    credit_35c: '',
+    tax_bonus: '',
+    evidence_status: 'unverified',
+    evidence_reference: '',
+    missing: [...CERTIFICATE_AMOUNTS],
+  }]
+}
+
+function removeCertificate(index: number): void {
+  certificates.value = certificates.value.filter((_, position) => position !== index)
+}
+
+/**
+ * Ukládá se CELÝ seznam, ne jednotlivý řádek. Doklady dávají smysl jen jako
+ * úplná sada od všech předchozích plátců (§ 38ch odst. 3), takže i tlačítko je
+ * jedno pro celou sekci.
+ */
+async function saveCertificates(): Promise<void> {
+  if (selectedEmployeeId.value === null || savingCertificates.value) return
+  savingCertificates.value = true
+  try {
+    const saved = await payrollApi.saveAnnualSettlementCertificates(
+      year.value,
+      selectedEmployeeId.value,
+      certificates.value.map(row => ({
+        certificate_reference: row.certificate_reference.trim(),
+        payer_name: row.payer_name.trim() || null,
+        payer_tax_identification: row.payer_tax_identification.trim() || null,
+        received_on: row.received_on || null,
+        gross_income_minor_units: inputToAmount(row.gross_income),
+        advance_base_minor_units: inputToAmount(row.advance_base),
+        advance_tax_minor_units: inputToAmount(row.advance_tax),
+        non_refundable_credit_minor_units: inputToAmount(row.credit_35ba),
+        child_credit_minor_units: inputToAmount(row.credit_35c),
+        tax_bonus_minor_units: inputToAmount(row.tax_bonus),
+        evidence_status: row.evidence_status,
+        evidence_reference: row.evidence_reference.trim() || null,
+      })),
+    )
+    certificates.value = saved.map(certificateForm)
+    toast.success(t('payroll.annual_settlement.certificates_saved'))
+    // Přepočet — potvrzení mění úhrn, takže i výsledek na obrazovce.
+    await select(selectedEmployeeId.value)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.annual_settlement.certificates_save_failed')))
+  } finally {
+    savingCertificates.value = false
   }
 }
 
@@ -263,10 +439,51 @@ async function download(): Promise<void> {
 watch(year, () => {
   selectedEmployeeId.value = null
   preview.value = null
+  certificates.value = []
   document.value = null
+  offset.value = 0
   void load()
 })
-onMounted(load)
+
+// Změna zúžení mění obsah seznamu, takže stránka musí na začátek — jinak by
+// uživatel po zúžení skončil na prázdné páté straně.
+function applyFilters(): void {
+  offset.value = 0
+  void load()
+}
+
+function goToPage(nextPage: number): void {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  void load()
+}
+
+/**
+ * Uložené pohledy. Rok do payloadu NEPATŘÍ — pohled „požádali a nemají
+ * zúčtováno" má platit pro rok, který má uživatel otevřený, ne odskočit
+ * o rok zpět pokaždé, když ho použije v dalším období.
+ */
+function buildQuery(): Record<string, string> {
+  const query: Record<string, string> = {}
+  if (search.value.trim() !== '') query.search = search.value.trim()
+  if (state.value !== 'all') query.state = state.value
+  return query
+}
+
+function applyQueryToPage(query: Record<string, string>): void {
+  search.value = query.search ?? ''
+  state.value = (query.state as PayrollAnnualSettlementListState | undefined) ?? 'all'
+  applyFilters()
+}
+
+const saved = useSavedFilters('payroll-annual-settlement', {
+  getQuery: buildQuery,
+  applyQuery: applyQueryToPage,
+})
+
+onMounted(async () => {
+  if (await saved.applyDefaultIfAny()) return
+  await load()
+})
 </script>
 
 <template>
@@ -308,6 +525,44 @@ onMounted(load)
         })
       }}
     </p>
+
+    <div class="rounded-lg border border-neutral-200 bg-surface p-3">
+      <div class="flex flex-wrap items-end gap-3">
+        <label class="min-w-48 flex-1">
+          <span class="mb-1 block text-xs font-medium text-neutral-600">
+            {{ t('payroll.annual_settlement.filter_search') }}
+          </span>
+          <input
+            v-model="search"
+            type="search"
+            data-test="annual-settlement-search"
+            :placeholder="t('payroll.annual_settlement.filter_search_placeholder')"
+            class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"
+            @keyup.enter="applyFilters"
+            @change="applyFilters"
+          >
+        </label>
+        <label class="min-w-44">
+          <span class="mb-1 block text-xs font-medium text-neutral-600">
+            {{ t('payroll.annual_settlement.filter_state') }}
+          </span>
+          <select
+            v-model="state"
+            data-test="annual-settlement-state"
+            class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm"
+            @change="applyFilters"
+          >
+            <option value="all">{{ t('payroll.annual_settlement.states.all') }}</option>
+            <option value="requested">{{ t('payroll.annual_settlement.states.requested') }}</option>
+            <option value="unsettled">{{ t('payroll.annual_settlement.states.unsettled') }}</option>
+            <option value="settled">{{ t('payroll.annual_settlement.states.settled') }}</option>
+          </select>
+        </label>
+        <div class="flex flex-wrap items-center gap-2 pb-0.5">
+          <SavedFiltersMenu :ctrl="saved" />
+        </div>
+      </div>
+    </div>
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
       <section class="rounded-lg border border-neutral-200 bg-surface">
@@ -356,6 +611,14 @@ onMounted(load)
             </button>
           </li>
         </ul>
+        <PaginationBar
+          v-if="!loading"
+          embedded
+          :page="currentPage"
+          :per-page="pageSize"
+          :total="total"
+          @update:page="goToPage"
+        />
       </section>
 
       <section class="space-y-6">
@@ -538,6 +801,191 @@ onMounted(load)
             </div>
           </div>
 
+          <!--
+            Potvrzení od předchozích plátců (§ 38ch odst. 3).
+
+            Prázdná částka NENÍ nula. Prázdné pole znamená „na potvrzení to
+            není" a zúčtování se neprovede; nula znamená „na potvrzení je
+            nula" a počítá se s ní. Kdyby se prázdno četlo jako nula, vyšel by
+            z porovnání podle § 35d odst. 7 přeplatek, který poplatníkovi
+            nenáleží.
+          -->
+          <div
+            class="rounded-lg border border-neutral-200 bg-surface p-4"
+            data-test="annual-settlement-certificates"
+          >
+            <h2 class="text-base font-semibold text-neutral-900">
+              {{ t('payroll.annual_settlement.certificates_section') }}
+            </h2>
+            <p class="mt-1 text-sm text-neutral-500">
+              {{ t('payroll.annual_settlement.certificates_hint') }}
+            </p>
+
+            <p
+              v-if="certificates.length === 0"
+              class="mt-4 rounded-md bg-neutral-50 px-4 py-3 text-sm text-neutral-600"
+            >
+              {{ t('payroll.annual_settlement.certificates_empty') }}
+            </p>
+
+            <div
+              v-for="(certificate, index) in certificates"
+              :key="index"
+              class="mt-4 rounded-md border border-neutral-200 p-3"
+              data-test="annual-settlement-certificate"
+            >
+              <div class="grid gap-3 sm:grid-cols-2">
+                <label class="block">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.certificate_reference') }}
+                  </span>
+                  <input
+                    v-model="certificate.certificate_reference"
+                    type="text"
+                    maxlength="200"
+                    :disabled="!canEditCertificates"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  >
+                </label>
+                <label class="block">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.certificate_payer_name') }}
+                  </span>
+                  <input
+                    v-model="certificate.payer_name"
+                    type="text"
+                    maxlength="255"
+                    :disabled="!canEditCertificates"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  >
+                </label>
+                <label class="block">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.certificate_payer_tax_id') }}
+                  </span>
+                  <input
+                    v-model="certificate.payer_tax_identification"
+                    type="text"
+                    maxlength="30"
+                    :disabled="!canEditCertificates"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  >
+                </label>
+                <label class="block">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.certificate_received_on') }}
+                  </span>
+                  <input
+                    v-model="certificate.received_on"
+                    type="date"
+                    :disabled="!canEditCertificates"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  >
+                </label>
+
+                <label
+                  v-for="field in CERTIFICATE_AMOUNTS"
+                  :key="field"
+                  class="block"
+                >
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t(`payroll.annual_settlement.certificate.field.${field}`) }}
+                  </span>
+                  <input
+                    v-model="certificate[field]"
+                    type="text"
+                    inputmode="decimal"
+                    :disabled="!canEditCertificates"
+                    :placeholder="t('payroll.annual_settlement.certificate_amount_placeholder')"
+                    :data-test="`annual-settlement-certificate-${field}`"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-right text-sm tabular-nums text-neutral-900"
+                  >
+                </label>
+
+                <label class="block">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.certificate_evidence_status') }}
+                  </span>
+                  <select
+                    v-model="certificate.evidence_status"
+                    :disabled="!canEditCertificates"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  >
+                    <option
+                      v-for="option in ['unverified', 'verified']"
+                      :key="option"
+                      :value="option"
+                    >
+                      {{ t(`payroll.annual_settlement.certificate_evidence_options.${option}`) }}
+                    </option>
+                  </select>
+                </label>
+                <label class="block">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.certificate_evidence_reference') }}
+                  </span>
+                  <input
+                    v-model="certificate.evidence_reference"
+                    type="text"
+                    maxlength="500"
+                    :disabled="!canEditCertificates"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  >
+                </label>
+              </div>
+
+              <p
+                v-if="certificate.missing.length > 0"
+                class="mt-3 rounded-md border border-warning-500/40 bg-warning-50 px-3 py-2 text-sm text-neutral-700"
+                data-test="annual-settlement-certificate-missing"
+              >
+                {{
+                  t('payroll.annual_settlement.certificate_missing', {
+                    fields: certificate.missing
+                      .map(field => t(`payroll.annual_settlement.certificate.field.${field}`))
+                      .join(', '),
+                  })
+                }}
+              </p>
+
+              <div class="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  :class="btnOutline('danger')"
+                  :disabled="!canEditCertificates || savingCertificates"
+                  data-test="annual-settlement-certificate-remove"
+                  @click="removeCertificate(index)"
+                >
+                  {{ t('payroll.annual_settlement.certificate_remove') }}
+                </button>
+              </div>
+            </div>
+
+            <div class="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                :class="btnOutline('neutral')"
+                :disabled="!canEditCertificates || savingCertificates"
+                data-test="annual-settlement-certificate-add"
+                @click="addCertificate"
+              >
+                {{ t('payroll.annual_settlement.certificate_add') }}
+              </button>
+              <button
+                type="button"
+                data-test="annual-settlement-save-certificates"
+                :class="btnOutline('primary')"
+                :disabled="!canEditCertificates || savingCertificates"
+                @click="saveCertificates"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path :d="ICONS.check" />
+                </svg>
+                {{ t('payroll.annual_settlement.save_certificates') }}
+              </button>
+            </div>
+          </div>
+
           <div class="rounded-lg border border-neutral-200 bg-surface p-4">
             <h2 class="text-base font-semibold text-neutral-900">
               {{ t('payroll.annual_settlement.preview_section') }}
@@ -647,6 +1095,23 @@ onMounted(load)
                   year: preview.already_settled.tax_year,
                   date: formatDate(preview.already_settled.settled_on),
                 }) }}
+              </p>
+
+              <p
+                v-if="preview?.already_settled?.payout_period_start"
+                class="mt-1 text-sm text-neutral-600"
+                data-test="annual-settlement-paid-out"
+              >
+                {{ t('payroll.annual_settlement.paid_out_note', {
+                  period: formatMonth(String(preview.already_settled.payout_period_start).slice(0, 7)),
+                }) }}
+              </p>
+              <p
+                v-else-if="preview?.already_settled && preview.already_settled.payable_minor > 0"
+                class="mt-1 text-sm text-neutral-600"
+                data-test="annual-settlement-pending-payout"
+              >
+                {{ t('payroll.annual_settlement.pending_payout_note') }}
               </p>
 
               <button

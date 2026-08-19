@@ -44,11 +44,18 @@ final class PayrollTimeAction
             $query['incomplete'] ?? false,
             FILTER_VALIDATE_BOOL,
         );
+        $employmentId = self::narrowingId($query, 'employment_id');
         try {
             return Json::ok($response, $this->time->overview(
                 $this->currentSupplierId($request),
                 $period,
                 $incomplete,
+                max(1, min(
+                    PayrollTimeService::LIST_MAX_LIMIT,
+                    (int) ($query['limit'] ?? PayrollTimeService::LIST_DEFAULT_LIMIT),
+                )),
+                max(0, (int) ($query['offset'] ?? 0)),
+                $employmentId,
             ));
         } catch (\InvalidArgumentException $e) {
             return $this->validation($response, $e);
@@ -255,6 +262,159 @@ final class PayrollTimeAction
                 ],
             );
             return Json::ok($response, ['consent' => $consent], 201);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'payroll_time_conflict', $e->getMessage(), 409);
+        } catch (\InvalidArgumentException $e) {
+            return $this->validation($response, $e);
+        }
+    }
+
+    /**
+     * Zápis zákazu práce přesčas u chráněné skupiny (§ 240 odst. 3 zákoníku
+     * práce).
+     */
+    public function overtimeProtection(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.time.write',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $protection = $this->time->saveOvertimeProtection(
+                $this->currentSupplierId($request),
+                $this->input($request),
+                $this->userId($request),
+            );
+            $this->audit(
+                $request,
+                'payroll.time.overtime_protection_saved',
+                'payroll_overtime_protection',
+                PayrollTimeValue::int($protection['id'] ?? null, 'id'),
+                [
+                    'employment_id' => PayrollTimeValue::int(
+                        $protection['employment_id'] ?? null,
+                        'employment_id',
+                    ),
+                    'protection' => PayrollTimeValue::string(
+                        $protection['protection'] ?? null,
+                        'protection',
+                    ),
+                    'valid_from' => PayrollTimeValue::string(
+                        $protection['valid_from'] ?? null,
+                        'valid_from',
+                    ),
+                    'valid_to' => $protection['valid_to'],
+                ],
+            );
+            return Json::ok($response, ['protection' => $protection], 201);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'payroll_time_conflict', $e->getMessage(), 409);
+        } catch (\InvalidArgumentException $e) {
+            return $this->validation($response, $e);
+        }
+    }
+
+    /**
+     * Zápis náhradního volna za práci přesčas (§ 93 odst. 5 zákoníku práce).
+     */
+    public function overtimeCompensation(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.time.write',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $compensation = $this->time->saveOvertimeCompensation(
+                $this->currentSupplierId($request),
+                $this->input($request),
+                $this->userId($request),
+            );
+            $this->audit(
+                $request,
+                'payroll.time.overtime_compensation_saved',
+                'payroll_overtime_compensation',
+                PayrollTimeValue::int($compensation['id'] ?? null, 'id'),
+                [
+                    'employment_id' => PayrollTimeValue::int(
+                        $compensation['employment_id'] ?? null,
+                        'employment_id',
+                    ),
+                    'overtime_date' => PayrollTimeValue::string(
+                        $compensation['overtime_date'] ?? null,
+                        'overtime_date',
+                    ),
+                    'minutes' => PayrollTimeValue::int(
+                        $compensation['minutes'] ?? null,
+                        'minutes',
+                    ),
+                ],
+            );
+            return Json::ok($response, ['compensation' => $compensation], 201);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'payroll_time_conflict', $e->getMessage(), 409);
+        } catch (\InvalidArgumentException $e) {
+            return $this->validation($response, $e);
+        }
+    }
+
+    /** Vyrovnávací období podle § 93 odst. 4 zákoníku práce. */
+    public function overtimeAveragingPeriods(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.time.read',
+            AccessLevel::READ,
+        )) !== null) {
+            return $error;
+        }
+
+        return Json::ok($response, [
+            'periods' => $this->time->overtimeAveragingPeriods(
+                $this->currentSupplierId($request),
+            ),
+        ]);
+    }
+
+    public function overtimeAveragingPeriod(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.time.write',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $period = $this->time->saveOvertimeAveragingPeriod(
+                $this->currentSupplierId($request),
+                $this->input($request),
+                $this->userId($request),
+            );
+            $this->audit(
+                $request,
+                'payroll.time.overtime_averaging_period_saved',
+                'payroll_overtime_averaging_period',
+                PayrollTimeValue::int($period['id'] ?? null, 'id'),
+                [
+                    'valid_from' => PayrollTimeValue::string(
+                        $period['valid_from'] ?? null,
+                        'valid_from',
+                    ),
+                    'weeks' => PayrollTimeValue::int($period['weeks'] ?? null, 'weeks'),
+                    'basis' => PayrollTimeValue::string($period['basis'] ?? null, 'basis'),
+                ],
+            );
+            return Json::ok($response, ['period' => $period], 201);
         } catch (\DomainException $e) {
             return Json::error($response, 'payroll_time_conflict', $e->getMessage(), 409);
         } catch (\InvalidArgumentException $e) {

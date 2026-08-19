@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Calculation\Money;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
 
 final class PayrollInputPreviewService
 {
@@ -15,6 +16,8 @@ final class PayrollInputPreviewService
         private readonly PayrollComponentRepository $components,
         private readonly PayrollInputRepository $inputs,
         private readonly PayrollComponentDefinitionFactory $factory,
+        private readonly PayrollBenefitBasketService $baskets,
+        private readonly PayrollMealShiftEvidenceService $mealEvidence,
     ) {}
 
     /**
@@ -85,6 +88,60 @@ final class PayrollInputPreviewService
             'annual_used_minor' => $used,
             'annual_after_minor' => $after,
             'annual_limit_exceeded' => $limit !== null && $after > $limit,
+            'exemption_basket' => $this->basketSplit($supplierId, $definition, $input),
         ];
+    }
+
+    /**
+     * Čerpání zákonného koše osvobození, kdyby se vstup schválil teď.
+     *
+     * Bez tohohle náhledu je koš past: účetní zjistí překročení až tehdy, když
+     * z prosincového benefitu vyskočí daň a pojistné. Vrací se i pro plnění,
+     * které se do koše ještě vejde — smysl má vidět zbytek, ne jen překročení.
+     *
+     * U příspěvku na stravování náhled navíc ukáže, KOLIK směn s nárokem za měsíc
+     * eviduje (`shift_entitlements`) a jestli je podklad úplný
+     * (`entitlement`). Bez toho by účetní viděla jen nižší strop a nevěděla proč.
+     *
+     * @param array{employee_id:int, period_start:string, amount_minor:int, ...} $input
+     * @return array<string,mixed>|null
+     */
+    private function basketSplit(
+        int $supplierId,
+        PayrollComponentDefinition $definition,
+        array $input,
+    ): ?array {
+        if ($definition->exemptionBasket === null) {
+            return null;
+        }
+        $taxYear = (int) substr($input['period_start'], 0, 4);
+        try {
+            $entitlement = $definition->exemptionBasket->scalesWithShifts()
+                ? $this->mealEvidence->forPeriod(
+                    $supplierId,
+                    $input['employee_id'],
+                    $input['period_start'],
+                )
+                : null;
+
+            return [
+                ...$this->baskets->split(
+                    $definition->exemptionBasket,
+                    $input['period_start'],
+                    $this->inputs->basketTotal(
+                        $supplierId,
+                        $input['employee_id'],
+                        $definition->exemptionBasket,
+                        $taxYear,
+                        $input['period_start'],
+                    ),
+                    $input['amount_minor'],
+                    $entitlement?->count() ?? 0,
+                )->jsonSerialize(),
+                'entitlement' => $entitlement?->jsonSerialize(),
+            ];
+        } catch (PayrollRulesetException) {
+            return null;
+        }
     }
 }

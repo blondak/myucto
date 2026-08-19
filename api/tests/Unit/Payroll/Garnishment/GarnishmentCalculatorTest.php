@@ -495,6 +495,97 @@ final class GarnishmentCalculatorTest extends TestCase
         self::assertTrue($result->roundingTrace[0]['court_decision_override']);
     }
 
+    /**
+     * Osoba bez jediné aktivní pohledávky a bez jakéhokoli uplatněného nároku:
+     * dokládat není co, takže nesmí vzniknout issue. Tohle je ten scénář, kvůli
+     * kterému dřív celý mzdový běh skončil na nepřebitelném blokátoru
+     * `enforcement_manual_review` — a to u KAŽDÉ osoby a KAŽDÝ měsíc.
+     */
+    public function testPersonWithoutClaimsNeedsNoMonthlyEvidence(): void
+    {
+        $result = (new GarnishmentCalculator(CzechPayrollRulesets2026::provider()))->calculate(
+            $this->input(
+                4_000_000,
+                [],
+                claimRegisterEvidenceComplete: false,
+                dependantsEvidenceComplete: false,
+                spouseEvidenceComplete: false,
+            ),
+        );
+
+        self::assertSame(GarnishmentStatus::Supported, $result->status);
+        self::assertSame([], $result->issues);
+        self::assertSame(0, $result->totalWithheldMinorUnits);
+        self::assertSame(
+            [
+                'claim_register' => 'not_applicable',
+                'dependants' => 'not_applicable',
+                'spouse' => 'not_applicable',
+            ],
+            $result->evidenceSource?->toCanonicalArray(),
+        );
+    }
+
+    /**
+     * Uplatněný nárok na vyživovanou osobu ZVEDÁ nezabavitelnou částku, a ta se
+     * počítá i v měsíci bez exekuce — odvozuje se z ní strop dobrovolné dohody
+     * o srážkách (§ 148 odst. 2 zákoníku práce). Běh proto neblokuje, ale
+     * kapacita dohod je nula, dokud nárok nikdo nedoloží.
+     */
+    public function testUnattestedAllowanceWithoutClaimsClosesVoluntaryCapacity(): void
+    {
+        $calculator = new GarnishmentCalculator(CzechPayrollRulesets2026::provider());
+        $result = $calculator->calculate($this->input(
+            4_000_000,
+            [],
+            eligibleDependants: 2,
+            eligibleSpouse: true,
+            dependantsEvidenceComplete: false,
+            spouseEvidenceComplete: false,
+        ));
+
+        self::assertSame(GarnishmentStatus::Supported, $result->status);
+        self::assertSame([], $result->issues);
+        self::assertSame(
+            [
+                'claim_register' => 'declared',
+                'dependants' => 'nothing_withheld',
+                'spouse' => 'nothing_withheld',
+            ],
+            $result->evidenceSource?->toCanonicalArray(),
+        );
+        self::assertSame(0, $calculator->voluntaryDeductionCapacity($result));
+
+        $attested = $calculator->calculate($this->input(
+            4_000_000,
+            [],
+            eligibleDependants: 2,
+            eligibleSpouse: true,
+        ));
+        self::assertSame('declared', $attested->evidenceSource?->dependants->value);
+        self::assertGreaterThan(0, $calculator->voluntaryDeductionCapacity($attested));
+    }
+
+    /**
+     * Jakmile je co srážet, doklad se vyžaduje dál — nedoložený nárok
+     * na vyživovanou osobu u osoby s exekucí zůstává ručním posouzením.
+     */
+    public function testUnattestedAllowanceStillBlocksWhenAClaimIsActive(): void
+    {
+        $result = (new GarnishmentCalculator(CzechPayrollRulesets2026::provider()))->calculate(
+            $this->input(
+                4_000_000,
+                [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 1_000_000)],
+                eligibleDependants: 1,
+                dependantsEvidenceComplete: false,
+            ),
+        );
+
+        self::assertSame(GarnishmentStatus::ManualReview, $result->status);
+        self::assertContains('dependants_evidence_incomplete', $result->issues);
+        self::assertSame('missing', $result->evidenceSource?->dependants->value);
+    }
+
     public function testIncompleteClaimRegisterFailsClosedEvenWhenKnownClaimsAreValid(): void
     {
         $result = (new GarnishmentCalculator(CzechPayrollRulesets2026::provider()))->calculate($this->input(
@@ -564,7 +655,7 @@ final class GarnishmentCalculatorTest extends TestCase
 
         self::assertSame(
             CzechPayrollRulesets2026::ENFORCEMENT_DEDUCTIONS_HASH,
-            $policy->rulesetHash(),
+            $policy->ruleset->contentHash,
         );
         self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $policy->rulesetHash());
         self::assertSame(
@@ -751,6 +842,8 @@ final class GarnishmentCalculatorTest extends TestCase
         string $paymentDate = '2026-07-15',
         bool $claimRegisterEvidenceComplete = true,
         ?bool $protectedAmountOverrideVerified = null,
+        bool $dependantsEvidenceComplete = true,
+        bool $spouseEvidenceComplete = true,
     ): GarnishmentInput {
         $income = (new GarnishableIncomeResolver())->resolve([
             new GarnishableIncomeItem('net-wage', GarnishableIncomeKind::Wage, $netMinorUnits, 'payer-main'),
@@ -762,9 +855,9 @@ final class GarnishmentCalculatorTest extends TestCase
             $income,
             $claims,
             $eligibleDependants,
-            true,
+            $dependantsEvidenceComplete,
             $eligibleSpouse,
-            true,
+            $spouseEvidenceComplete,
             $pensionEvidence,
             $hasMultiplePayers,
             $protectedAmountOverrideMinorUnits,

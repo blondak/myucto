@@ -10,6 +10,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -471,6 +472,183 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
             'change_reason' => 'Kód z číselníku',
         ]);
         self::assertSame('24111', $accepted['terms'][0]['cz_isco_code']);
+    }
+
+    /**
+     * Zpětně potvrzený nástup nesmí zůstat schovaný pod událostí založení.
+     *
+     * Vztah převzatý z jiného zpracování se do systému zapisuje až po nástupu:
+     * založení nese dnešní datum, nástup se potvrzuje zpětně. Efektivní stav
+     * se přitom čte jako poslední událost podle `effective_on`, takže vztah
+     * dál vycházel jako `planned` — v seznamu lidí svítil aktivní (ten čte
+     * sloupec `status`), ale z rychlých vstupů, docházky i z karet zaměstnanců
+     * na přehledu mezd vypadl.
+     */
+    public function testBackdatedStartMovesCreatedEventSoEmploymentReadsActive(): void
+    {
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                "/api/payroll/people/{$this->employeeId}/employments",
+                [
+                    'code' => 'PREVZATY-1',
+                    'relation_type' => 'statutory_body',
+                    'monthly_gross_minor' => 4500000,
+                    'terms' => [
+                        ...$this->termsPayload(true, '2026-08-16'),
+                        'planned_start_on' => '2025-04-01',
+                        'fixed_term_end_on' => null,
+                    ],
+                ],
+            ),
+            new Response(),
+            ['id' => (string) $this->employeeId],
+        );
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $employment = $this->json($response)['employment'];
+        $employmentId = (int) $employment['id'];
+        self::assertSame('2026-08-16', $this->createdEventDate($employmentId));
+
+        $active = $this->transition($employment, 'active', '2025-04-01');
+        self::assertSame('active', $active['status']);
+        self::assertSame('2025-04-01', $active['actual_start_date']);
+        self::assertSame(
+            '2025-04-01',
+            $this->createdEventDate($employmentId),
+            'Založení musí ustoupit před zpětně datovaný nástup.',
+        );
+        self::assertSame('active', $this->effectiveStatusAt($employmentId, '2026-08-31'));
+        // Před nástupem vztah žádný stav nemá — oprava časové osy nesmí
+        // z minulosti udělat aktivní vztah dřív, než podle evidence začal.
+        self::assertNull($this->effectiveStatusAt($employmentId, '2025-03-31'));
+    }
+
+    /**
+     * Předkontace na kartě musí být ta, na kterou se mzda opravdu zaúčtuje.
+     *
+     * Firmy si účty přenastavují (typicky celou mzdu na jednu analytiku), jenže
+     * karta ukazovala obecné defaulty z číselníku — u statutárního orgánu tvrdila
+     * „523/366", zatímco běh účtoval podle nastavení zaměstnavatele. Rozdíl se
+     * dal zjistit až v deníku po zaúčtování.
+     */
+    public function testEmploymentCardShowsAccountsTheEmployerActuallyPostsTo(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employer_settings
+                (supplier_id, default_office_id, statutory_gross_debit_account,
+                 statutory_gross_credit_account, employer_insurance_debit_account)
+             VALUES (?, ?, "521.100", "331.100", "524.100")'
+        )->execute([$this->supplierId, $this->officeId]);
+
+        $employment = $this->create($this->employeeId, 'UCTY-1', 'statutory_body', true);
+
+        self::assertSame(
+            ['gross_debit' => '521.100', 'gross_credit' => '331.100'],
+            [
+                'gross_debit' => $employment['accounting']['gross_debit'],
+                'gross_credit' => $employment['accounting']['gross_credit'],
+            ],
+            'Karta nesmí ukazovat 523/366, když firma účtuje jinam.',
+        );
+        self::assertSame('524.100', $employment['accounting']['employer_insurance_debit']);
+    }
+
+    /**
+     * Mzdová účtárna je u vztahu povinná, ale formulář ji nenabízí. Zápisová
+     * cesta ji proto doplní z výchozí účtárny zaměstnavatele — jinak by vztah
+     * bez účtárny prošel až ke kontrolním součtům schválení.
+     */
+    public function testEmploymentWithoutOfficeTakesTheEmployerDefault(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employer_settings
+                (supplier_id, default_office_id, statutory_gross_debit_account,
+                 statutory_gross_credit_account, employer_insurance_debit_account)
+             VALUES (?, ?, "521.100", "331.100", "524.100")'
+        )->execute([$this->supplierId, $this->officeId]);
+
+        $employment = $this->createWithoutOffice('UCT-DEF');
+
+        self::assertSame($this->officeId, $employment['office_id']);
+        self::assertSame($this->officeId, $employment['terms'][0]['office_id']);
+    }
+
+    /**
+     * Když se účtárna nemá odkud vzít, musí to být pojmenovaná překážka při
+     * zakládání vztahu — ne mlčení, které se ozve až uzávěrkou.
+     */
+    public function testEmploymentWithoutAnyOfficeIsRefusedByName(): void
+    {
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                "/api/payroll/people/{$this->employeeId}/employments",
+                [
+                    'code' => 'UCT-NONE',
+                    'relation_type' => 'employment',
+                    'monthly_gross_minor' => 4000000,
+                    'terms' => ['office_id' => null]
+                        + $this->termsPayload(true, '2026-01-01'),
+                ],
+            ),
+            new Response(),
+            ['id' => (string) $this->employeeId],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertStringContainsString(
+            'mzdové účtárny',
+            (string) $response->getBody(),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function createWithoutOffice(string $code): array
+    {
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                "/api/payroll/people/{$this->employeeId}/employments",
+                [
+                    'code' => $code,
+                    'relation_type' => 'employment',
+                    'monthly_gross_minor' => 4000000,
+                    'terms' => ['office_id' => null]
+                        + $this->termsPayload(true, '2026-01-01'),
+                ],
+            ),
+            new Response(),
+            ['id' => (string) $this->employeeId],
+        );
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+
+        return $this->json($response)['employment'];
+    }
+
+    private function createdEventDate(int $employmentId): string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT effective_on
+               FROM payroll_employment_events
+              WHERE supplier_id = ? AND employment_id = ? AND event_type = 'created'"
+        );
+        $stmt->execute([$this->supplierId, $employmentId]);
+
+        return (string) $stmt->fetchColumn();
+    }
+
+    /** Stav se čte TOUTÉŽ cestou jako rychlé vstupy, docházka i karty na přehledu. */
+    private function effectiveStatusAt(int $employmentId, string $date): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . PayrollEmploymentLifecycleSql::effectiveStatusAtPlaceholder() . '
+               FROM payroll_employments employment
+              WHERE employment.supplier_id = ? AND employment.id = ?'
+        );
+        $stmt->execute([$date, $this->supplierId, $employmentId]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) ? $value : null;
     }
 
     /** @param array<string,mixed> $employment

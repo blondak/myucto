@@ -167,6 +167,18 @@ final class ChartOfAccountsRepository
     }
 
     /**
+     * Smaže účet. Volající MUSÍ nejdřív ověřit, že na něm nic nevisí
+     * ({@see \MyInvoice\Service\Accounting\ChartAccountUsage}) — repository
+     * jen provede výmaz.
+     */
+    public function delete(int $supplierId, int $id): bool
+    {
+        $stmt = $this->db->pdo()->prepare('DELETE FROM chart_of_accounts WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$id, $supplierId]);
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
      * Účtová osnova jako strom: kořeny (parent_id NULL) s vnořenými `children`.
      *
      * @return list<array<string,mixed>>

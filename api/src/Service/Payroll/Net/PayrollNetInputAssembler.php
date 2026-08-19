@@ -26,6 +26,7 @@ final class PayrollNetInputAssembler
         int $correctionMinorUnits,
         int $voluntaryDeductionCapacityMinorUnits,
         array $deductions,
+        int $annualSettlementMinorUnits = 0,
     ): PayrollNetInput {
         if ($social->personId !== $personReference
             || $health->personId !== $personReference
@@ -66,6 +67,7 @@ final class PayrollNetInputAssembler
             $correctionMinorUnits,
             $voluntaryDeductionCapacityMinorUnits,
             $deductions,
+            $annualSettlementMinorUnits,
         );
     }
 }

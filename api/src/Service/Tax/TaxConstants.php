@@ -171,6 +171,25 @@ final class TaxConstants
      *    (§38h odst. 2 ZDP). Vyšší sazbou se daní jen ČÁST základu nad měsíční hranicí
      *    `advance_tax_high_threshold`, ne celý základ. Hranice je měsíční (3× průměrná
      *    mzda), proto sedí v {@see self::TABLE} u konkrétního roku, ne tady.
+     *
+     * ── Proč tu `employer_social` zůstává, když je totéž v mzdovém rulesetu ─────
+     * Konzumentem téhle sady je JEDINĚ {@see \MyInvoice\Service\Accounting\Payroll\PayrollCalculator},
+     * tedy starší modul mzdové rekapitulace (§ 6 ZDP) mimo modul Mzdy. Ten počítá
+     * jednu mzdu jednou sazbou a víc kategorií zaměstnavatele podle § 5a odst. 1
+     * z. č. 589/1992 Sb. neumí ani zadat: nemá zaměstnance, nemá vztahy, nemá
+     * evidenci zařazení. `employer_social` je proto sazba PÍSMENE a) — ostatní
+     * zaměstnanci — a nic jiného.
+     *
+     * Přesměrovat ji na mzdový ruleset by nebyla konsolidace, ale změna výpočtu
+     * v modulu, který účtuje a jehož výsledky jsou uzavřené proti reálnému deníku
+     * účetní. Sazba 29,8 % (písm. b) ani 27,8 % (písm. c) se sem stejně dostat
+     * nemůže — modul nemá čím kategorii doložit a hádat ji je horší než ji neznat
+     * ({@see \MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerRateCategory::Unverified}).
+     * Kdo potřebuje kategorie, slevu § 7a nebo strop § 15a per zaměstnanec, musí
+     * použít modul Mzdy; tahle sazba na to není a nikdy nebyla.
+     *
+     * Co se hlídat MUSÍ, je rozejití obou zdrojů u té jedné společné sazby —
+     * to dělá `TaxConstantsPayrollRatesMatchRulesetTest`.
      */
     private const PAYROLL_2024_PLUS = [
         'employee_social' => 0.071,
@@ -252,6 +271,10 @@ final class TaxConstants
             'vat_quarterly_turnover_limit' => 15000000,
             'vat_rate_reduced'  => 12.0,
             'kh_item_threshold' => 10000,
+            // § 4 z. č. 254/2004 Sb., o omezení plateb v hotovosti — jedna platba téhož dne
+            // mezi týmiž osobami nad tento limit se MUSÍ provést bezhotovostně. Není to
+            // účetní chyba, ale povinnost plátce → v pokladně jen varování, ne blokace.
+            'cash_payment_limit' => 270000,
             'vat_coefficient_full_threshold_pct' => 95,
             // § 8 odst. 3 / § 10i ZDPH — celounijní práh pro zasílání zboží a digitální
             // služby B2C. Je v EUR (ne v Kč) a je společný pro všechny členské státy;
@@ -394,6 +417,10 @@ final class TaxConstants
             'vat_quarterly_turnover_limit' => 15000000,  // základní sazba § 47 ZDPH
             'vat_rate_reduced'  => 12.0,  // snížená sazba (od 2024 jednotná 12 %)
             'kh_item_threshold' => 10000, // limit KH: nad → A.4/B.2 jednotlivě, do → A.5/B.3 sumace
+            // § 4 z. č. 254/2004 Sb., o omezení plateb v hotovosti — jedna platba téhož dne
+            // mezi týmiž osobami nad tento limit se MUSÍ provést bezhotovostně. Není to
+            // účetní chyba, ale povinnost plátce → v pokladně jen varování, ne blokace.
+            'cash_payment_limit' => 270000,
             'vat_coefficient_full_threshold_pct' => 95,
             // § 8 odst. 3 / § 10i ZDPH — celounijní práh pro zasílání zboží a digitální
             // služby B2C. Je v EUR (ne v Kč) a je společný pro všechny členské státy;
@@ -539,6 +566,10 @@ final class TaxConstants
             'vat_quarterly_turnover_limit' => 15000000,
             'vat_rate_reduced'  => 12.0,
             'kh_item_threshold' => 10000,
+            // § 4 z. č. 254/2004 Sb., o omezení plateb v hotovosti — jedna platba téhož dne
+            // mezi týmiž osobami nad tento limit se MUSÍ provést bezhotovostně. Není to
+            // účetní chyba, ale povinnost plátce → v pokladně jen varování, ne blokace.
+            'cash_payment_limit' => 270000,
             'vat_coefficient_full_threshold_pct' => 95,
             // § 8 odst. 3 / § 10i ZDPH — celounijní práh pro zasílání zboží a digitální
             // služby B2C. Je v EUR (ne v Kč) a je společný pro všechny členské státy;

@@ -13,33 +13,41 @@ use MyInvoice\Service\Report\CzechWorkingDays;
  * ## Zákonný rámec
  *
  * Zákon č. 582/1991 Sb., o organizaci a provádění sociálního zabezpečení,
- * **§ 38** (vedení evidenčních listů) a **§ 39** (jejich předkládání):
+ * **§ 38** (vedení evidenčních listů) a **§ 39** (jejich předkládání),
+ * **ve znění účinném do 31. 12. 2025**. Modul staví evidenční list jen tam,
+ * kde přechodné ustanovení (čl. V bod 1 zák. č. 360/2025 Sb.) přikazuje
+ * postupovat podle znění účinného před 1. 1. 2026, proto se ustanovení citují
+ * v tehdejším číslování:
  *
  * - evidenční list vede zaměstnavatel pro každého občana účastného
- *   důchodového pojištění, a to **za kalendářní rok**;
- * - vyhotovuje se **po zúčtování mezd za prosinec, nejpozději do 30. dubna**
- *   následujícího kalendářního roku;
- * - skončí-li účast na důchodovém pojištění v průběhu roku, vyhotovuje se
- *   **do jednoho měsíce po konečném vyúčtování příjmů, nejpozději do
- *   31. ledna** následujícího kalendářního roku;
- * - **předkládá se ČSSZ do 30 dnů ode dne zápisu údajů** do evidenčního
- *   listu; na výzvu OSSZ do 8 dnů, při zániku zaměstnavatele do 30 dnů,
- *   při úmrtí pojištěnce do 3 měsíců;
+ *   důchodového pojištění, a to **za kalendářní rok** (§ 38 odst. 1 a 2);
+ * - údaje se do něj **zapisují** po účetní závěrce (závěrce mzdových listů),
+ *   **nejpozději do 30. dubna** následujícího kalendářního roku, a skončí-li
+ *   účast na důchodovém pojištění před 31. prosincem, **do 1 měsíce po
+ *   konečném vyúčtování příjmů, nejpozději do 31. ledna** následujícího roku
+ *   (§ 38 odst. 4, úvodní část ustanovení);
+ * - **předkládá se do 30 dnů ode dne zápisu údajů** (§ 39 odst. 2 písm. a));
+ *   do 30 dnů ode dne zániku zaměstnavatele (§ 39 odst. 2 písm. b)); na výzvu
+ *   orgánu sociálního zabezpečení do 8 dnů (§ 39 odst. 3); při úmrtí občana
+ *   do 3 měsíců (§ 39 odst. 4 písm. b));
  * - jeden stejnopis zaměstnavatel zakládá do své evidence, druhý vydává
- *   zaměstnanci.
+ *   občanovi (§ 38 odst. 5 věta první).
  *
- * Modul registruje jako termín povinnosti **vnější zákonnou mez pro
- * vyhotovení** (30. 4., resp. 31. 1. / vyúčtování + 1 měsíc), ne až mez pro
- * předložení (vyhotovení + 30 dnů). Je to vědomě přísnější: lhůta na
- * předložení běží od zápisu, který v aplikaci vzniká právě přípravou podání,
- * takže pozdější datum by povinnost jen falešně prodlužovalo.
+ * Lhůta je tedy mez pro **zápis údajů**, ne pro „vyhotovení po zúčtování mezd
+ * za prosinec" — takovou formulaci zákon neobsahuje. Modul registruje jako
+ * termín povinnosti tuhle vnější zákonnou mez pro zápis (30. 4., resp.
+ * vyúčtování + 1 měsíc se stropem 31. 1.), ne až mez pro předložení
+ * (zápis + 30 dnů). Je to vědomě přísnější: lhůta na předložení běží od
+ * zápisu, který v aplikaci vzniká právě přípravou podání, takže pozdější
+ * datum by povinnost jen falešně prodlužovalo.
  *
- * ⚠️ **Míra jistoty.** Věcný obsah lhůt je ověřený proti informační stránce
- * ČSSZ *Evidenční listy důchodového pojištění*. Členění na konkrétní
- * **odstavce** § 38 a § 39 se ověřit nepodařilo (plné znění zákona nebylo
- * z prostředí dostupné), proto se v katalogu zdrojů cituje jen úroveň
- * paragrafu. Doba uchování stejnopisu se z tohoto důvodu do rulesetu
- * nepromítá vůbec — viz `EldpAnnualStatementBuilder`.
+ * ⚠️ **Číslování ustanovení se k 1. 1. 2026 změnilo a nelze je zaměňovat.**
+ * V dnešním znění jsou lhůty pro předložení v § 39 odst. 3 písm. a) až d)
+ * a dva stejnopisy včetně tříleté úschovy v § 38 odst. 5 — ale dopadají už
+ * jen na zaměstnavatele **příslušníků ozbrojených sil** vůči ministerstvům
+ * obrany a vnitra, což je větev, kterou modul nepodporuje. Doslovné znění
+ * obou paragrafů před novelou i mapovací tabulka starých ustanovení na nová
+ * jsou v `private/Mzdy/24-ELDP-ZNENI-DO-2025.md`.
  *
  * ## Přechodná pravidla od JMHZ
  *
@@ -60,12 +68,15 @@ final class EldpDeadlinePolicy
     public const TERMINATION_RULESET = 'cz-eldp-deadlines.termination.v1';
 
     private const SOURCES = [
-        'law' => '582/1991 Sb., § 38 a § 39',
+        'law' => '582/1991 Sb., § 38 odst. 4 a § 39 odst. 2 až 4',
+        'law_wording' => 've znění účinném do 31. 12. 2025; použije se podle '
+            . 'čl. V bodu 1 zák. č. 360/2025 Sb.',
         'pension_law' => '155/1995 Sb., § 16 odst. 4 písm. a) a j)',
         'cssz_document' => 'ČSSZ — Evidenční listy důchodového pojištění',
         'jmhz_rules' =>
             'Pravidla podání JMHZ a související procesy, verze 1.4.4, kapitola 4',
-        'paragraph_detail_verified' => 'no',
+        'paragraph_detail_verified' => 'yes',
+        'paragraph_detail_verified_on' => '2026-08-17',
     ];
 
     /**
@@ -81,8 +92,9 @@ final class EldpDeadlinePolicy
             self::ANNUAL_RULESET,
             'annual_by_30_april_following_year',
             'annual',
-            'Zákon č. 582/1991 Sb., § 38 a § 39 — evidenční list za kalendářní rok '
-                . 'se vyhotovuje nejpozději do 30. dubna následujícího roku.',
+            'Zákon č. 582/1991 Sb., § 38 odst. 4 ve znění účinném do 31. 12. 2025 — '
+                . 'údaje se do evidenčního listu za kalendářní rok zapisují nejpozději '
+                . 'do 30. dubna následujícího roku.',
         );
     }
 
@@ -119,10 +131,10 @@ final class EldpDeadlinePolicy
             self::TERMINATION_RULESET,
             'termination_one_month_after_settlement_capped_31_january',
             'termination',
-            'Zákon č. 582/1991 Sb., § 38 a § 39 — skončí-li účast na důchodovém '
-                . 'pojištění v průběhu roku, vyhotovuje se evidenční list do jednoho '
-                . 'měsíce po konečném vyúčtování příjmů, nejpozději do 31. ledna '
-                . 'následujícího roku.',
+            'Zákon č. 582/1991 Sb., § 38 odst. 4 ve znění účinném do 31. 12. 2025 — '
+                . 'skončí-li účast na důchodovém pojištění před 31. prosincem, zapisují '
+                . 'se údaje do evidenčního listu do jednoho měsíce po konečném '
+                . 'vyúčtování příjmů, nejpozději do 31. ledna následujícího roku.',
         );
     }
 

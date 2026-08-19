@@ -53,8 +53,27 @@ use MyInvoice\Service\Accounting\RetentionPolicy;
  *     ne § 35a odst. 4 zák. č. 582/1991 Sb. — ten o pojistném vůbec nemluví.
  *   • zdravotní pojištění: v zák. č. 592/1992 Sb. žádná uschovávací lhůta není.
  *     Deset let zůstává, ale jako DODANÁ POLITIKA (`ORIGIN_HOUSE_POLICY`).
+ *     Zadavatel to v 8/2026 potvrdil — je to rozhodnutí, ne otevřená otázka.
  *   • evidence pracovní doby: lhůta EXISTUJE (§ 96 věta druhá zák. č. 187/2006
  *     Sb.), takže `UNDETERMINED` byl věcně nesprávný stav.
+ *
+ * ── Doplnění z 17. 8. 2026: katalog musí pokrýt VŠECHNO, co blokuje mazání ────
+ * Posudek retence se ptá jen na tabulky, které katalog jmenuje. Tabulka, která
+ * v katalogu není, ale blokuje smazání osoby (`BLOCKERS` / `GUARD_ONLY` v
+ * {@see \MyInvoice\Repository\Payroll\PayrollEmployeeDeletionRepository} a
+ * {@see \MyInvoice\Repository\Payroll\PayrollEmploymentDeletionRepository}),
+ * vyrobí dvě protichůdné a obě nepravdivé odpovědi: posudek řekne, že osobu nic
+ * nedrží, a samotné smazání pak selže na stráži. Osoba je držená napořád
+ * a žádná lhůta ji nikdy neuvolní. Šestnáct takových tabulek se doplnilo
+ * 17. 8. 2026; nově to hlídá
+ * {@see \MyInvoice\Tests\Architecture\PayrollRetentionBlockerCoverageTest}.
+ *
+ * Přibyly dvě kategorie s vlastním, doloženým pramenem:
+ *   • doklady o druhu, vzniku a skončení pracovního vztahu — § 96 věta druhá
+ *     zák. č. 187/2006 Sb. (10 let); jiný předmět než evidence docházky, i když
+ *     lhůtu mají společnou;
+ *   • povinný příspěvek na produkty spoření na stáří — § 7 odst. 2 věta první
+ *     zák. č. 324/2025 Sb. (10 let), účinný od 1. 1. 2026.
  *
  * ── Co katalog VĚDOMĚ nemodeluje ──────────────────────────────────────────────
  * 1. Zkrácenou lhůtu (10 let místo 45) pro poživatele důchodu — druhou část
@@ -74,6 +93,10 @@ use MyInvoice\Service\Accounting\RetentionPolicy;
  * 3. Druhou variantu lhůty u stejnopisů ELDP (běh od roku VYHOTOVENÍ). Katalog ji
  *    nese jako `alternative_basis`, ale posudek počítá nad ROKEM POSLEDNÍ STOPY
  *    osoby, ne nad rokem vyhotovení jednotlivého listu — viz poznámka u kategorie.
+ * 4. Delší, 45letou variantu u dokladů o vzniku a skončení pracovního vztahu,
+ *    kterou by dovolila fikce v § 35a odst. 4 zák. č. 582/1991 Sb. Zvážená
+ *    a zadavatelem v 8/2026 zamítnutá ve prospěch doloženého minima — podrobně
+ *    u kategorie `employment_relation_documents`.
  *
  * ── Účetní lhůtu si katalog NEDRŽÍ ────────────────────────────────────────────
  * Kategorie `accounting_records` nemá vlastní číslo. Lhůtu si bere z
@@ -94,7 +117,9 @@ final class PayrollRetentionCatalog
     public const SOCIAL_CONTRIBUTIONS = 'social_contributions';
     public const SOCIAL_DISCOUNT_DOCS = 'social_discount_documents';
     public const SICKNESS_INSURANCE = 'sickness_insurance';
+    public const EMPLOYMENT_RELATION_DOCS = 'employment_relation_documents';
     public const HEALTH_INSURANCE = 'health_insurance';
+    public const RISKY_SAVINGS = 'risky_savings';
     public const ACCOUNTING_RECORDS = 'accounting_records';
     public const WORKING_TIME = 'working_time';
     public const GARNISHMENT = 'garnishment';
@@ -122,8 +147,40 @@ final class PayrollRetentionCatalog
     /** Roky počínající koncem účetního období, kterého se záznam týká. */
     public const BASIS_ACCOUNTING_PERIOD = 'years_after_accounting_period_end';
 
+    /**
+     * Celé domény jako pole, ne jen jednotlivé konstanty.
+     *
+     * Katalog chodí po drátě do UI a každá hodnota tam musí mít větu — původ
+     * lhůty se na obrazovce nesmí ukázat jako `house_policy`. Bez pojmenované
+     * domény by se nová hodnota přidala do RULES a nikdo by nezjistil, že jí
+     * chybí překlad ani že se s ní klientský union rozešel. Kontrakt hlídá
+     * {@see \MyInvoice\Tests\Architecture\PayrollEnumContractTest}.
+     */
+    public const ORIGINS = [
+        self::ORIGIN_STATUTE,
+        self::ORIGIN_HOUSE_POLICY,
+        self::ORIGIN_NONE,
+    ];
+    public const SOURCE_STATUSES = [
+        self::STATUTE_VERIFIED,
+        self::STATUTE_SILENT,
+        self::EXTERNAL_UNVERIFIED,
+        self::UNDETERMINED,
+    ];
+    public const BASES = [
+        self::BASIS_CALENDAR_YEARS,
+        self::BASIS_CALENDAR_YEARS_AFTER_ISSUE,
+        self::BASIS_ACCOUNTING_PERIOD,
+    ];
+
     /** Den, ke kterému byla znění předpisů ověřena. */
     public const VERIFIED_ON = '2026-08-15';
+    /**
+     * Den, ke kterému byla ověřena znění pro kategorie doplněné při uzavírání
+     * mezery v pokrytí blokujících tabulek (§ 96 zák. č. 187/2006 Sb., § 7
+     * zák. č. 324/2025 Sb., § 38j zák. č. 586/1992 Sb.).
+     */
+    public const VERIFIED_ON_COVERAGE = '2026-08-17';
     /** Kde je doklad o ověření (mimo git — viz docblock třídy). */
     public const VERIFICATION_REFERENCE = 'private/RETENCNI-LHUTY-OVERENI.md';
 
@@ -135,6 +192,8 @@ final class PayrollRetentionCatalog
     private const ACT_HEALTH_PREMIUMS = 'zákon č. 592/1992 Sb., o pojistném na '
         . 'veřejné zdravotní pojištění';
     private const ACT_ACCOUNTING = 'zákon č. 563/1991 Sb., o účetnictví';
+    private const ACT_RISKY_SAVINGS = 'zákon č. 324/2025 Sb., o povinném příspěvku '
+        . 'na produkty spoření na stáří';
     private const ACT_ENFORCEMENT = 'zákon č. 99/1963 Sb., občanský soudní řád, '
         . 'a zákon č. 120/2001 Sb., exekuční řád';
 
@@ -171,13 +230,26 @@ final class PayrollRetentionCatalog
                 'payroll_monthly_records',
                 'payroll_generated_documents',
                 'payroll_annual_document_revisions',
+                'payroll_inputs',
+                'payroll_run_employments',
+                'payroll_run_persons',
+                'payroll_net_results',
+                'payroll_annual_settlement_outcomes',
             ],
             'employment_tables' => [],
             'note' => 'Povinnost VÉST mzdový list plyne z § 38j zákona č. 586/1992 Sb.; '
                 . 'lhůtu pro jeho uschování stanoví až předpis o sociálním zabezpečení, '
                 . 'a to pro účely důchodového pojištění. Je to nejdelší lhůta v celé '
                 . 'agendě a v praxi určuje, kdy vůbec smí osoba zmizet. Do 31. 12. 2022 '
-                . 'to bylo 30 let — kdo drží starší katalog, maže o patnáct let dřív.',
+                . 'to bylo 30 let — kdo drží starší katalog, maže o patnáct let dřív. '
+                . 'Kategorie nese i tabulky, ze kterých se mzdový list SKLÁDÁ, ne jen '
+                . 'vydaný doklad: § 38j odst. 2 písm. f) bod 1 až 7 žádá po mzdovém listu '
+                . 'právě úhrn zúčtovaných mezd, základ, zálohu, slevu a bonus za každý '
+                . 'kalendářní měsíc (mzdové vstupy, řádky běhu a výsledek čisté mzdy) '
+                . 'a písm. h) navíc údaje o provedeném ročním zúčtování záloh. Kdyby tyhle '
+                . 'tabulky zůstaly mimo katalog, osoba, po které zůstal jen spočítaný '
+                . 'měsíc bez vydaného dokladu, by vycházela jako nezadržovaná — a smazání '
+                . 'by přesto selhalo na stráži mazací rutiny.',
         ],
         self::PENSION_EVIDENCE_SHEETS => [
             'label' => 'Stejnopisy evidenčních listů důchodového pojištění',
@@ -195,9 +267,21 @@ final class PayrollRetentionCatalog
             'verified_on' => self::VERIFIED_ON,
             'accounting_relevant' => false,
             'closing_agenda' => true,
-            'employee_tables' => ['payroll_jmhz_eldp_evidence_snapshots'],
-            'employment_tables' => [],
-            'note' => 'DOBÍHAJÍCÍ AGENDA: od 1. 1. 2026 se evidenční listy nevedou, '
+            'employee_tables' => [
+                'payroll_jmhz_eldp_evidence_snapshots',
+                'payroll_eldp_statements',
+            ],
+            'employment_tables' => [
+                'payroll_eldp_statement_claims',
+                'payroll_jmhz_eldp_idempotency_claims',
+            ],
+            'note' => 'Idempotenční zámky nad evidenčním listem tu NEJSOU proto, že by měly '
+                . 'vlastní zákonnou lhůtu — nemají žádnou, je to technický klíč bez věcného '
+                . 'obsahu. Jsou tu proto, že vazba na vzniklý list je NULLOVATELNÁ: zámek, '
+                . 'jehož list nikdy nevznikl, blokuje smazání osoby a přitom by ji žádná '
+                . 'kategorie nedržela ani neuvolnila. Výjimkou „potomek rodičovské tabulky" '
+                . 'je proto pokrýt nelze; drží lhůtu rodiče, aby vůbec někdy skončila. '
+                . 'DOBÍHAJÍCÍ AGENDA: od 1. 1. 2026 se evidenční listy nevedou, '
                 . 'kategorie tedy nikdy nedostane nová data (poslední přibudou za vztahy '
                 . 'skončené před 1. 4. 2026). Zákon zná DVĚ báze: 3 roky po roce, kterého '
                 . 'se list týká, a u listů vyhotovených později 3 roky po roce VYHOTOVENÍ. '
@@ -221,13 +305,21 @@ final class PayrollRetentionCatalog
             'closing_agenda' => false,
             'employee_tables' => [
                 'payroll_jmhz_ordinary_evidence_snapshots',
+                'payroll_jmhz_ordinary_evidence_idempotency_claims',
                 'payroll_person_social_jurisdictions',
                 'payroll_person_external_ids',
+                'payroll_employment_external_ids',
             ],
             'employment_tables' => [],
             'note' => 'Jde o TUTÉŽ větu jako u mzdových listů („mzdové listy nebo účetní '
                 . 'záznamy o údajích potřebných pro účely důchodového pojištění"), takže '
-                . 'sdílejí i číslo: 45 kalendářních roků.',
+                . 'sdílejí i číslo: 45 kalendářních roků. Identifikátor pracovněprávního '
+                . 'vztahu přidělený ČSSZ (`payroll_employment_external_ids`) je tu ze '
+                . 'stejného důvodu jako jeho protějšek na osobě: bez něj se údaj v evidenci '
+                . 'podle § 37 odst. 1 zákona č. 582/1991 Sb. nedá k ničemu přiřadit. '
+                . 'Idempotenční zámek nad evidencí JMHZ vlastní lhůtu nemá, ale vazba na '
+                . 'vzniklý snapshot je nullovatelná — viz tatáž úvaha u stejnopisů '
+                . 'evidenčních listů.',
         ],
         self::SOCIAL_CONTRIBUTIONS => [
             'label' => 'Záznamy pro stanovení a odvod pojistného na sociální zabezpečení',
@@ -268,7 +360,10 @@ final class PayrollRetentionCatalog
             'accounting_relevant' => true,
             'closing_agenda' => false,
             'employee_tables' => ['payroll_person_social_discount_claims'],
-            'employment_tables' => [],
+            // Oznámený záměr uplatňovat slevu (OZUSPOJ, § 23e) je doklad ke
+            // stanovení slevy stejně jako podklady podle § 23d odst. 1 a váže
+            // se na pracovní vztah, ze kterého se sleva uplatňuje.
+            'employment_tables' => ['payroll_discount_intents'],
             'note' => 'Věta druhá § 22c má vlastní předmět — doklady potřebné ke stanovení '
                 . 'SLEVY na pojistném (u nás nárok pracujícího důchodce a další režimy '
                 . 'podle § 7a zákona č. 589/1992 Sb.). Doklad ke slevě není záznamem pro '
@@ -298,6 +393,47 @@ final class PayrollRetentionCatalog
                 . '`payroll_sickness_events` je jen dopočet nad ním a vlastní vazbu na '
                 . 'osobu nemá, takže by se v sondě choval jako tabulka bez vlastníka.',
         ],
+        self::EMPLOYMENT_RELATION_DOCS => [
+            'label' => 'Doklady o druhu, vzniku a skončení pracovního vztahu',
+            'retention_years' => 10,
+            'basis' => self::BASIS_CALENDAR_YEARS,
+            'alternative_basis' => null,
+            'origin' => self::ORIGIN_STATUTE,
+            'act' => self::ACT_SICKNESS,
+            'section' => '§ 96 věta druhá zákona č. 187/2006 Sb.',
+            'amendment' => null,
+            'source_status' => self::STATUTE_VERIFIED,
+            'verified_on' => self::VERIFIED_ON_COVERAGE,
+            'accounting_relevant' => false,
+            'closing_agenda' => false,
+            'employee_tables' => [
+                'payroll_registration_identity_snapshots',
+                'payroll_employment_exit_revisions',
+                'payroll_identity_resolution_tasks',
+            ],
+            'employment_tables' => [],
+            'note' => 'Vlastní kategorie, ne přílepek k evidenci pracovní doby: § 96 věta '
+                . 'druhá zákona č. 187/2006 Sb. prohlašuje za záznamy podle § 95 DVĚ různé '
+                . 'skupiny — „doklady o druhu, vzniku a skončení pracovního vztahu" '
+                . 'a „záznamy o evidenci docházky do práce". Lhůta je u obou stejná (10 '
+                . 'kalendářních roků podle věty první), ale předmět jiný, a citace se má '
+                . 'vázat na to, co skutečně pokrývá. Vznik vztahu drží zašifrovaný snapshot '
+                . 'identity odeslané do registračních agend ČSSZ, skončení výstupní doklad '
+                . '(zápočtový list, potvrzení o průměrném výdělku). Úkol na dořešení '
+                . 'identity sám dokladem není — je to auditní stopa k tomu, komu byl '
+                . 'registrační doklad přiřazen; zároveň mazání blokuje, takže mimo katalog '
+                . 'by osobu držel bez konce. Nesouvisí to s § 313 zákoníku práce, ten '
+                . 'ukládá potvrzení VYDAT, ne uschovat. '
+                . 'DELŠÍ VARIANTA BYLA ZVÁŽENÁ A ZAMÍTNUTÁ: fikce v § 35a odst. 4 zákona '
+                . 'č. 582/1991 Sb. jmenuje mezi záznamy pro důchodové pojištění tytéž '
+                . 'doklady o vzniku a skončení pracovního vztahu, což by lhůtu zvedlo '
+                . 'z 10 na 45 let. Doslovné znění ale neurčuje, ke kterému písmenu se ta '
+                . 'věta váže, takže delší lhůta by stála na výkladu, ne na textu. '
+                . 'Zadavatel v 8/2026 rozhodl pro DOLOŽENÉ MINIMUM: kategorie zůstává na '
+                . '10 letech podle § 96 věty druhé zákona č. 187/2006 Sb. Delší lhůtu si '
+                . 'zaměstnavatel může nastavit odchylkou v `payroll_retention_policies`, '
+                . 'protože ty přebíjejí katalog směrem NAHORU.',
+        ],
         self::HEALTH_INSURANCE => [
             'label' => 'Záznamy pro zdravotní pojištění',
             'retention_years' => 10,
@@ -318,7 +454,8 @@ final class PayrollRetentionCatalog
                 'payroll_person_health_other_employer_bases',
             ],
             'employment_tables' => [],
-            'note' => 'JEDINÁ DODANÁ LHŮTA V KATALOGU. Fulltext zákona č. 592/1992 Sb. '
+            'note' => 'JEDINÁ DODANÁ LHŮTA V KATALOGU, a zadavatel ji v 8/2026 potvrdil — '
+                . 'nečeká se na rozhodnutí, rozhodnutí padlo. Fulltext zákona č. 592/1992 Sb. '
                 . 'neobsahuje slovo „uschov" ani jednou; § 25 odst. 5 ukládá vést '
                 . 'průkaznou evidenci o platbách pojistného, ale ŽÁDNOU lhůtu nestanoví. '
                 . 'Deset let se v praxi opisuje z § 16 odst. 1 (předepsání dlužného '
@@ -328,6 +465,30 @@ final class PayrollRetentionCatalog
                 . 'č. 589/1992 Sb. pro údaje k odvodu pojistného, § 31 odst. 2 písm. b) '
                 . 'zákona č. 563/1991 Sb. pro účetní záznamy), ale jako ZÁKONNOU lhůtu '
                 . 'zdravotního pojištění ji katalog vydávat nesmí.',
+        ],
+        self::RISKY_SAVINGS => [
+            'label' => 'Záznamy o povinném příspěvku na produkty spoření na stáří',
+            'retention_years' => 10,
+            'basis' => self::BASIS_CALENDAR_YEARS,
+            'alternative_basis' => null,
+            'origin' => self::ORIGIN_STATUTE,
+            'act' => self::ACT_RISKY_SAVINGS,
+            'section' => '§ 7 odst. 2 věta první zákona č. 324/2025 Sb.',
+            'amendment' => null,
+            'source_status' => self::STATUTE_VERIFIED,
+            'verified_on' => self::VERIFIED_ON_COVERAGE,
+            'accounting_relevant' => true,
+            'closing_agenda' => false,
+            'employee_tables' => [],
+            'employment_tables' => ['payroll_risky_savings_contributions'],
+            'note' => 'Zákon má VLASTNÍ uschovávací lhůtu a vlastní evidenční povinnost, '
+                . 'takže se pod pojistné ani pod účetnictví schovat nedá: § 7 odst. 1 žádá '
+                . 'vést seznam zaměstnanců v rizikové práci, počet odpracovaných '
+                . 'kvalifikujících směn v rozhodném období a výši zaplacených příspěvků — '
+                . 'tedy přesně to, co tabulka drží — a § 7 odst. 2 věta první ukládá '
+                . 'uschovat je „po dobu 10 kalendářních roků následujících po roce, kterého '
+                . 'se týkají". Neuschování je podle § 8 odst. 1 písm. e) přestupek. '
+                . 'Povinnost platí od 1. 1. 2026, kdy zákon nabyl účinnosti.',
         ],
         self::ACCOUNTING_RECORDS => [
             // `null` tady NEZNAMENÁ neurčenou lhůtu — accounting_records si ji bere
@@ -349,9 +510,16 @@ final class PayrollRetentionCatalog
                 'payroll_payout_allocations',
                 'payroll_deduction_ledger',
                 'payroll_benefit_accumulators',
+                'payroll_business_trips',
             ],
             'employment_tables' => [],
-            'note' => 'Účetní doklady, knihy a přehledy 5 let počínajících koncem účetního '
+            'note' => 'Cestovní příkaz a jeho vyúčtování je účetní doklad, ne mzdový záznam: '
+                . 'náhrada do limitu není podle § 6 odst. 7 zákona č. 586/1992 Sb. předmětem '
+                . 'daně, takže se do úhrnu zúčtovaných mezd ve mzdovém listě nedostane. Část '
+                . 'nad limit ano — ta ale do mzdy vstupuje mzdovým vstupem, a ten už drží '
+                . 'kategorie mzdových listů na 45 let. Krátká účetní lhůta tedy nic '
+                . 'daňového neuvolní dřív. '
+                . 'Účetní doklady, knihy a přehledy 5 let počínajících koncem účetního '
                 . 'období (písm. b); účetní závěrka a výroční zpráva 10 let (písm. a) — '
                 . 'ty ale nejsou vázané na osobu, takže je tenhle katalog neřeší. Podle '
                 . '§ 32 odst. 2 téhož zákona může být účetním záznamem i mzdový list; '
@@ -379,8 +547,12 @@ final class PayrollRetentionCatalog
                 'payroll_absences',
                 'payroll_leave_ledger',
                 'payroll_overtime_consents',
+                'payroll_jmhz_work_month_revisions',
             ],
-            'note' => 'Lhůtu nestanoví zákoník práce — § 96 ZP evidenci jen PŘIKAZUJE '
+            'note' => 'Zmrazená revize pracovního měsíce pro JMHZ patří sem, a ne pod '
+                . 'evidenci pro důchodové pojištění: nese fond pracovní doby, evidenční dny '
+                . 'a odpracované hodiny, tedy docházku, ne vyměřovací základ. '
+                . 'Lhůtu nestanoví zákoník práce — § 96 ZP evidenci jen PŘIKAZUJE '
                 . 'VÉST — ale stanoví ji předpis o nemocenském pojištění: § 96 věta druhá '
                 . 'zákona č. 187/2006 Sb. prohlašuje záznamy o evidenci docházky do práce '
                 . 'včetně pracovního volna bez náhrady příjmu za záznamy podle § 95, '

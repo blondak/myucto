@@ -15,6 +15,7 @@ use MyInvoice\Service\Payroll\Document\PayrollDocumentService;
 use MyInvoice\Service\Payroll\IncomeTax\ExternalEmployerTaxCertificate;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationStatus;
+use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
@@ -63,6 +64,7 @@ final class AnnualTaxSettlementService
      *   request:array<string,mixed>,
      *   credit_rows:list<array{label:string,amount_minor_units:int}>,
      *   child_rows:list<array{label:string,months:int,amount_minor_units:int}>,
+     *   certificates:list<array<string,mixed>>,
      *   already_settled:?array<string,mixed>
      * }
      */
@@ -73,6 +75,127 @@ final class AnnualTaxSettlementService
         ?DateTimeImmutable $today = null,
     ): array {
         return $this->assess($supplierId, $employeeId, $taxYear, $today ?? new DateTimeImmutable());
+    }
+
+    /**
+     * Zapíše potvrzení od předchozích plátců daně (§ 38ch odst. 3).
+     *
+     * Celý seznam za rok najednou — potvrzení dávají smysl jen jako úplná sada
+     * („doklady … od VŠECH předchozích plátců daně"), a ukládat je po jednom by
+     * dovolilo stav, kdy je půlka roku doložená a druhá se ztratila.
+     *
+     * Neúplné potvrzení se uložit SMÍ. Rozpracovanou evidenci nemá smysl
+     * blokovat; úplnost je podmínka provedení zúčtování, ne podmínka existence
+     * záznamu, a posuzuje se až ve výpočtu.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    public function saveCertificates(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+        array $rows,
+        ?int $actorUserId,
+    ): array {
+        // Validace přes doménový typ, ne přes vlastní pravidla — jinak by šlo
+        // uložit něco, co pak výpočet odmítne přijmout.
+        $seen = [];
+        $prepared = [];
+        foreach ($rows as $row) {
+            $certificate = self::certificateFromInput($row);
+            $key = mb_strtolower($certificate->certificateReference);
+            if (isset($seen[$key])) {
+                throw new \InvalidArgumentException(
+                    'Potvrzení se stejným označením je v seznamu dvakrát.',
+                );
+            }
+            $seen[$key] = true;
+            $prepared[] = [
+                'certificate_reference' => $certificate->certificateReference,
+                'payer_name' => $certificate->payerName,
+                'payer_tax_identification' => $certificate->payerTaxIdentification,
+                'received_on' => $certificate->receivedOn,
+                'gross_income_minor' => $certificate->grossIncomeMinorUnits,
+                'advance_base_minor' => $certificate->advanceBaseMinorUnits,
+                'advance_tax_minor' => $certificate->advanceTaxMinorUnits,
+                'credit_35ba_minor' => $certificate->nonRefundableCreditMinorUnits,
+                'credit_35c_minor' => $certificate->childCreditMinorUnits,
+                'tax_bonus_minor' => $certificate->taxBonusMinorUnits,
+                'evidence_status' => $certificate->evidenceStatus->value,
+                'evidence_reference' => $certificate->evidenceReference,
+                'note' => self::text($row['note'] ?? null),
+            ];
+        }
+
+        $pdo = $this->db->pdo();
+        $owns = !$pdo->inTransaction();
+        if ($owns) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->settlements->replaceCertificates(
+                $supplierId,
+                $employeeId,
+                $taxYear,
+                $prepared,
+                $actorUserId,
+            );
+            if ($owns) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $exception) {
+            if ($owns) {
+                $this->rollbackIfOpen($pdo);
+            }
+            throw $exception;
+        }
+
+        return self::certificateRows(
+            $this->externalCertificates($supplierId, $employeeId, $taxYear),
+        );
+    }
+
+    /** @param array<string,mixed> $row */
+    private static function certificateFromInput(array $row): ExternalEmployerTaxCertificate
+    {
+        return new ExternalEmployerTaxCertificate(
+            trim((string) ($row['certificate_reference'] ?? '')),
+            self::inputAmount($row, 'advance_base_minor_units'),
+            self::inputAmount($row, 'advance_tax_minor_units'),
+            TaxEvidenceStatus::tryFrom((string) ($row['evidence_status'] ?? ''))
+                ?? TaxEvidenceStatus::Unverified,
+            self::text($row['evidence_reference'] ?? null),
+            self::inputAmount($row, 'gross_income_minor_units'),
+            self::inputAmount($row, 'non_refundable_credit_minor_units'),
+            self::inputAmount($row, 'child_credit_minor_units'),
+            self::inputAmount($row, 'tax_bonus_minor_units'),
+            self::text($row['payer_name'] ?? null),
+            self::text($row['payer_tax_identification'] ?? null),
+            self::isoDate($row['received_on'] ?? null),
+        );
+    }
+
+    /**
+     * Prázdný řetězec i chybějící klíč znamenají „nevyplněno", tedy `null`.
+     * Nula se pošle jako `0`, ne jako `""` — jinak by se nedalo odlišit
+     * „na potvrzení je nula" od „na potvrzení to není".
+     *
+     * @param array<string,mixed> $row
+     */
+    private static function inputAmount(array $row, string $key): ?int
+    {
+        $value = $row[$key] ?? null;
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!is_int($value) && !(is_string($value) && preg_match('~^-?\d+$~', $value) === 1)) {
+            throw new \InvalidArgumentException(
+                "Údaj {$key} na potvrzení není celé číslo.",
+            );
+        }
+
+        return (int) $value;
     }
 
     /**
@@ -210,6 +333,7 @@ final class AnnualTaxSettlementService
      *   request:array<string,mixed>,
      *   credit_rows:list<array{label:string,amount_minor_units:int}>,
      *   child_rows:list<array{label:string,months:int,amount_minor_units:int}>,
+     *   certificates:list<array<string,mixed>>,
      *   already_settled:?array<string,mixed>
      * }
      */
@@ -293,6 +417,8 @@ final class AnnualTaxSettlementService
             $totals = null;
         }
 
+        $certificates = $this->externalCertificates($supplierId, $employeeId, $taxYear);
+
         if ($rates === null || $totals === null) {
             return [
                 'result' => AnnualSettlementResult::refused(
@@ -303,6 +429,7 @@ final class AnnualTaxSettlementService
                 'request' => $request->toArray(),
                 'credit_rows' => [],
                 'child_rows' => [],
+                'certificates' => self::certificateRows($certificates),
                 'already_settled' => $settled,
             ];
         }
@@ -320,7 +447,7 @@ final class AnnualTaxSettlementService
             (int) ($totals['withholding_tax_minor_units'] ?? 0),
             $credits['credits'],
             $children['children'],
-            $this->externalCertificates(),
+            $certificates,
         );
 
         $result = $this->calculator->calculate($input, $rates, $this->unique($blockers));
@@ -330,6 +457,7 @@ final class AnnualTaxSettlementService
             'request' => $request->toArray(),
             'credit_rows' => $this->creditRows($result),
             'child_rows' => $this->childRows($result),
+            'certificates' => self::certificateRows($certificates),
             'already_settled' => $settled,
         ];
     }
@@ -352,18 +480,63 @@ final class AnnualTaxSettlementService
     /**
      * Potvrzení od předchozích plátců (§ 38ch odst. 3).
      *
-     * Vrací prázdný seznam, protože je modul dnes NEEVIDUJE — datový typ
-     * `ExternalEmployerTaxCertificate` existuje a měsíční výpočet ho protahuje
-     * dál, ale žádná tabulka ani formulář ho neplní. Metoda tu je proto, aby
-     * bylo na jednom místě vidět, kde se doplní, a aby se na ni dalo napojit,
-     * až potvrzení ponese i měsíční slevy a vyplacené bonusy. Do té doby by
-     * jakékoli potvrzení znamenalo `ExternalCertificateIncomplete`.
+     * Načítá se, co je v evidenci — VČETNĚ neúplných a nedoložených. Ty se do
+     * úhrnu nezapočítají, ale musí se dostat až do výpočtu, aby z nich vznikla
+     * překážka. Kdyby se odfiltrovaly tady, zúčtování by tiše proběhlo jen
+     * z vlastních kumulací a poplatníkovi by vyšel přeplatek z neúplného úhrnu.
      *
      * @return list<ExternalEmployerTaxCertificate>
      */
-    private function externalCertificates(): array
+    private function externalCertificates(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+    ): array {
+        $rows = $this->settlements->certificatesForYear($supplierId, $employeeId, $taxYear);
+
+        return array_map(
+            static fn (array $row): ExternalEmployerTaxCertificate
+                => new ExternalEmployerTaxCertificate(
+                    (string) $row['certificate_reference'],
+                    self::amount($row['advance_base_minor'] ?? null),
+                    self::amount($row['advance_tax_minor'] ?? null),
+                    TaxEvidenceStatus::tryFrom((string) ($row['evidence_status'] ?? ''))
+                        ?? TaxEvidenceStatus::Unverified,
+                    self::text($row['evidence_reference'] ?? null),
+                    self::amount($row['gross_income_minor'] ?? null),
+                    self::amount($row['credit_35ba_minor'] ?? null),
+                    self::amount($row['credit_35c_minor'] ?? null),
+                    self::amount($row['tax_bonus_minor'] ?? null),
+                    self::text($row['payer_name'] ?? null),
+                    self::text($row['payer_tax_identification'] ?? null),
+                    self::isoDate($row['received_on'] ?? null),
+                ),
+            $rows,
+        );
+    }
+
+    /**
+     * @param list<ExternalEmployerTaxCertificate> $certificates
+     * @return list<array<string,mixed>>
+     */
+    private static function certificateRows(array $certificates): array
     {
-        return [];
+        return array_map(
+            static fn (ExternalEmployerTaxCertificate $certificate): array
+                => $certificate->jsonSerialize(),
+            $certificates,
+        );
+    }
+
+    /** `null` zůstává `null` — chybějící údaj se nesmí stát nulou. */
+    private static function amount(mixed $value): ?int
+    {
+        return $value === null ? null : (int) $value;
+    }
+
+    private static function isoDate(mixed $value): ?string
+    {
+        return is_string($value) && $value !== '' ? substr($value, 0, 10) : null;
     }
 
     /** @return list<array{label:string,amount_minor_units:int}> */

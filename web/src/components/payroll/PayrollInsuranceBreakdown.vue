@@ -61,6 +61,21 @@ const healthNotApplicable = computed(() =>
   health.value?.contribution.rate_source === 'not_applicable',
 )
 
+/**
+ * Sazba se neuložila, ale je DOLOŽENÁ: vzala se ze sady pravidel zmrazené v té
+ * revizi (shoda otisku bajt na bajt) a po zaokrouhlení dá tutéž uloženou částku.
+ * Uživatel to musí vidět — jinak by rekonstrukci četl jako uložený mezikrok.
+ */
+const healthRateReconstructed = computed(() =>
+  health.value?.contribution.rate_source === 'reconstructed',
+)
+
+/** Rozdělení pojistného zaměstnavatele na osobu — alokace, ne zákonná částka. */
+const employerAllocation = computed(() => social.value?.employer.allocation ?? null)
+
+/** Rozpad firemního pojistného po písmenech § 5a odst. 1 — a), b), c). */
+const employerCategories = computed(() => social.value?.employer.categories ?? [])
+
 function personLabel(person: PayrollRunResultPerson): string {
   return props.personNames[person.employee_id]
     || t('payroll.runs.insurance.person_fallback', { id: person.employee_id })
@@ -300,7 +315,30 @@ watch(
             </p>
             <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.runs.insurance.employer_scope_note') }}</p>
             <dl class="mt-2 space-y-1 text-sm">
-              <div class="flex flex-wrap justify-between gap-2">
+              <!--
+                Sazby jsou podle § 7 odst. 1 tři, každá z vlastního vyměřovacího
+                základu podle § 5a odst. 1. Má-li firma v měsíci jedinou
+                kategorii, je to jedna věta jako dřív; jakmile jich má víc,
+                musí být vidět všechny — jinak by účetní hledala, proč částka
+                neodpovídá „té" sazbě. Prázdný rozpad má jen revize uložená
+                dřív, než rozpad existoval.
+              -->
+              <div
+                v-for="category in employerCategories"
+                :key="category.category"
+                class="flex flex-wrap justify-between gap-2"
+                data-testid="social-employer-category"
+              >
+                <dt class="text-neutral-600">
+                  {{ t(`payroll.runs.insurance.employer_rate_category.${category.category}`) }}
+                </dt>
+                <dd class="text-right font-medium tabular-nums">
+                  {{ category.contribution_step
+                    ? stepSentence(category.contribution_step, category.contribution_minor)
+                    : t('payroll.runs.insurance.step_not_recorded') }}
+                </dd>
+              </div>
+              <div v-if="employerCategories.length === 0" class="flex flex-wrap justify-between gap-2">
                 <dt class="text-neutral-600">{{ t('payroll.runs.insurance.employer_rate') }}</dt>
                 <dd class="text-right font-medium tabular-nums">
                   {{ social.employer.contribution_step
@@ -324,6 +362,39 @@ watch(
                 </dd>
               </div>
             </dl>
+
+            <!--
+              Podíl osoby je ALOKACE firemní částky, ne zákonná osobní částka.
+              Proto má vlastní rámeček, vlastní popisek a větu o metodě — vypsat
+              ho mezi ostatní částky by z něj udělal zákonný údaj.
+            -->
+            <div
+              v-if="employerAllocation"
+              class="mt-3 rounded-lg border border-dashed border-neutral-300 bg-surface p-3"
+              data-testid="social-employer-allocation"
+            >
+              <p class="text-sm font-medium text-neutral-800">
+                {{ t('payroll.runs.insurance.allocation_title') }}
+              </p>
+              <template v-if="employerAllocation.method === 'not_allocatable'">
+                <p class="mt-1 text-sm text-warning-900" data-testid="allocation-blocked">
+                  {{ t(`payroll.runs.insurance.allocation_blocker.${employerAllocation.not_allocatable_reason}`) }}
+                </p>
+              </template>
+              <template v-else>
+                <p class="mt-1 text-lg font-semibold tabular-nums text-neutral-900">
+                  {{ moneyOrUnknown(employerAllocation.person_minor) }}
+                </p>
+                <p class="mt-1 text-xs text-neutral-500">
+                  {{ t('payroll.runs.insurance.allocation_note', {
+                    method: t(`payroll.runs.insurance.allocation_method.${employerAllocation.method}`),
+                    personBase: money(employerAllocation.person_assessment_base_minor),
+                    companyBase: money(employerAllocation.company_assessment_base_minor),
+                    people: employerAllocation.people_count,
+                  }) }}
+                </p>
+              </template>
+            </div>
           </div>
 
           <div v-if="showRelationships && social.relationships.length" class="space-y-2">
@@ -436,6 +507,23 @@ watch(
             </div>
           </dl>
 
+          <!--
+            Rekonstruovaná sazba se NESMÍ tvářit jako uložená: věta stojí NAD
+            rozkladem, který z ní vychází, a jmenuje sadu pravidel, ze které je
+            doložená. Rozklad samotný se zobrazí normálně — je dokázaný shodou
+            s uloženou částkou.
+          -->
+          <p
+            v-if="healthRateReconstructed && health.contribution.rate_reconstruction"
+            class="rounded-lg border border-payroll-200 bg-surface p-3 text-sm text-neutral-700"
+            data-testid="health-rate-reconstructed"
+          >
+            {{ t('payroll.runs.insurance.health_rate_reconstructed', {
+              ruleset: health.contribution.rate_reconstruction.ruleset_id,
+              version: health.contribution.rate_reconstruction.ruleset_version,
+            }) }}
+          </p>
+
           <p
             v-if="healthRateMissing"
             class="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900"
@@ -498,8 +586,21 @@ watch(
                   + (health.contribution.employer_top_up_minor ?? 0)),
               }) }}
             </p>
+            <!--
+              Kdo doplatek hradí, a jestli to někdo prohlásil, nebo se to
+              odvodilo ze zákona. Bez toho rozlišení nejde po letech poznat,
+              čím byla schválená mzda podložená. Prázdný původ = revize
+              spočítaná dřív, než klíč vznikl; tam se nedomýšlí nic.
+            -->
             <p class="mt-1 text-xs">
               {{ t(`payroll.runs.insurance.top_up_responsibility.${health.minimum.top_up_responsibility}`) }}
+              <span
+                v-if="health.minimum.top_up_responsibility_source"
+                class="text-neutral-500"
+                data-testid="health-top-up-source"
+              >
+                · {{ t(`payroll.runs.insurance.top_up_responsibility_source.${health.minimum.top_up_responsibility_source}`) }}
+              </span>
             </p>
             <p v-if="health.minimum.applicable_calendar_days !== health.minimum.employment_calendar_days" class="mt-1 text-xs">
               {{ t('payroll.runs.insurance.health_minimum_days', {

@@ -28,6 +28,10 @@ final readonly class SocialRelationshipResult implements JsonSerializable
         public SocialEmployerRateCategory $employerRateCategory,
         public ?int $annualMaximumAllocationOrder,
         public ?string $partTimeEmployerDiscountEvidenceReference,
+        public ?string $employerRateCategoryEvidenceReference = null,
+        public ?SocialPartTimeDiscountReason $partTimeEmployerDiscountReason = null,
+        public ?SocialPartTimeDiscountOutcome $partTimeEmployerDiscountOutcome = null,
+        public ?int $agreedWeeklyWorkingMillihours = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -48,6 +52,26 @@ final readonly class SocialRelationshipResult implements JsonSerializable
             'annual_maximum_allocation_order' => $this->annualMaximumAllocationOrder,
             'part_time_employer_discount_evidence_reference' =>
                 $this->partTimeEmployerDiscountEvidenceReference,
+            'employer_rate_category_evidence_reference' =>
+                $this->employerRateCategoryEvidenceReference,
+            /*
+             * Důvod podle § 7a odst. 1 a výsledek posouzení § 7a odst. 3 jsou
+             * dvě různé věci: „nárok doložen" a „sleva náleží". Uplatní se jen
+             * `applied`; ostatní hodnoty popisují, KTERÁ mez slevu vyloučila,
+             * aby tichá nula nevypadala jako chyba výpočtu.
+             */
+            'part_time_employer_discount_reason' =>
+                $this->partTimeEmployerDiscountReason?->value,
+            'part_time_employer_discount_outcome' =>
+                $this->partTimeEmployerDiscountOutcome?->value,
+            /*
+             * Sjednaná týdenní pracovní doba je vstup posouzení § 7a odst. 2,
+             * ale zároveň JEDINÝ zdroj položky 10373 měsíčního hlášení. Bez ní
+             * ve výsledku by se rozsah kratší doby musel při podání dopočítat
+             * z jiného pramene, a to je přesně ten odhad, který kontrola 45
+             * ČSSZ odhalí až na protokolu.
+             */
+            'agreed_weekly_working_millihours' => $this->agreedWeeklyWorkingMillihours,
         ];
     }
 }

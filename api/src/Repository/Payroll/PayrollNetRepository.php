@@ -60,9 +60,10 @@ final class PayrollNetRepository
                          cash_income_minor, non_cash_income_minor,
                          employee_social_minor, employee_health_minor,
                          advance_tax_minor, withholding_tax_minor,
-                         tax_bonus_minor, correction_minor, deducted_minor,
+                         tax_bonus_minor, correction_minor,
+                         annual_settlement_minor, deducted_minor,
                          net_payable_minor, result_json, result_hash)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 );
                 $stmt->execute([
                     $supplierId,
@@ -76,6 +77,7 @@ final class PayrollNetRepository
                     $result->withholdingTaxMinorUnits,
                     $result->taxBonusMinorUnits,
                     $result->correctionMinorUnits,
+                    $result->annualSettlementMinorUnits,
                     $result->deductedMinorUnits,
                     $result->netPayableMinorUnits,
                     $json,
@@ -140,7 +142,8 @@ final class PayrollNetRepository
             'cash_income_minor', 'non_cash_income_minor',
             'employee_social_minor', 'employee_health_minor',
             'advance_tax_minor', 'withholding_tax_minor', 'tax_bonus_minor',
-            'correction_minor', 'deducted_minor', 'net_payable_minor',
+            'correction_minor', 'annual_settlement_minor',
+            'deducted_minor', 'net_payable_minor',
         ] as $field) {
             $row[$field] = PayrollTimeValue::int($row[$field] ?? null, $field);
         }

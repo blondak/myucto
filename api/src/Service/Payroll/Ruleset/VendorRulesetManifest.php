@@ -10,7 +10,9 @@ namespace MyInvoice\Service\Payroll\Ruleset;
  * Otisky jsou počítané z KANONICKÉHO OBSAHU verze ({@see PayrollRulesetContent}) —
  * tedy z identity, účinnosti, zdrojů a parametrů, BEZ lifecyclu a bez schvalovacích
  * podpisů. Přechod `draft → reviewed → approved → active → superseded` proto otisk
- * nemění a totéž číslo platí pro celý život verze.
+ * nemění a totéž číslo platí pro celý život verze. Nemění ho ani schvalovatel, který
+ * je podle {@see VendorRulesetApprover} vlastností instalace — jinak by u jiného
+ * provozovatele přestala být dodaná sada poznána jako dodaná.
  *
  * ## K čemu to je
  *
@@ -54,9 +56,9 @@ final class VendorRulesetManifest
         // cz-payroll-2026.health-insurance.v1
         'e5586a0e158b31570c6c10702d9ecaed9d4cbb636fd6cbe2e164a657e151f00b',
         // cz-payroll-2026.income-tax.v1
-        '05dc147477c3c34d546f4971c7f94c7a30d7984b93a617e726310180d60f0b25',
+        'dfb8c8fc8e52d37225eba195c53eda6f867be573029136c10b3301b148e7ea74',
         // cz-payroll-2026.social-insurance.v1
-        '8e1a513c37f25a26fef12d38d9328280d9214ad030dcb7a7acdb2c5812166422',
+        '23d0281cff6cae85f425b85e8ae9aa4e45401945ce5f92b1eca4d05b7e3fa9b0',
         // cz-payroll-2026.submissions.v1
         '5d4150f71b70da998f465b1ef5f5d396b3a457ff373cce434230a476854cf377',
         // cz-payroll-2026.travel-allowances.v1

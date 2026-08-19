@@ -30,9 +30,15 @@ namespace MyInvoice\Service\Payroll;
  *   social_insurance_participation:string,
  *   health_insurance_participation:string,
  *   tax_regime:string,
+ *   other_withholding_eligibility:string,
  *   foreign_legislation_country_code:?string,
  *   a1_certificate_until:?string,
  *   risky_work:bool,
+ *   social_employer_rate_category:string,
+ *   social_employer_rate_category_evidence:?string,
+ *   social_part_time_discount_reason:string,
+ *   social_part_time_discount_evidence:?string,
+ *   social_part_time_discount_notified_on:?string,
  *   tax_declaration_signed:bool,
  *   is_primary:bool,
  *   change_reason:?string
@@ -57,6 +63,25 @@ final class PayrollEmploymentValidator
 
     private const INSURANCE_MODES = ['automatic', 'included', 'excluded', 'foreign'];
     private const TAX_REGIMES = ['advance', 'withholding', 'foreign', 'manual_review'];
+    /** Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP — viz migrace 1403. */
+    private const OTHER_WITHHOLDING_ELIGIBILITIES = ['unverified', 'eligible', 'ineligible'];
+    /** § 5a odst. 1 písm. a) až c) ZPSZ — viz migrace 1510. */
+    private const SOCIAL_EMPLOYER_RATE_CATEGORIES = [
+        'ordinary',
+        'rescue_and_company_fire_service',
+        'risk_employment',
+    ];
+    /** § 7a odst. 1 písm. a) až g) ZPSZ — viz migrace 1550. */
+    private const SOCIAL_PART_TIME_DISCOUNT_REASONS = [
+        'none',
+        'age_55_plus',
+        'child_care_under_10',
+        'dependent_close_person_care',
+        'study_under_26',
+        'retraining_jobseeker',
+        'disabled_person',
+        'under_21',
+    ];
     private const CHECKLIST_STATUSES = ['pending', 'completed', 'not_applicable'];
     private const VERIFIED_STATES = ['unverified', 'no', 'yes'];
 
@@ -132,10 +157,18 @@ final class PayrollEmploymentValidator
      *        v databázi je. Předává ho zápisová cesta, nikdy klient — je to
      *        jediný důvod, proč smí projít kód mimo číselník (viz
      *        {@see optionalCzIscoCode()}).
+     * @param ?string $storedOtherWithholdingEligibility Prohlášení plátce podle
+     *        § 6 odst. 4 písm. b) ZDP, které u vztahu už platí. Taky ho předává
+     *        zápisová cesta: obrazovky, které o poli nevědí (rychlá editace,
+     *        založení vztahu ze seznamu), posílají podmínky bez něj a nesmí ho
+     *        tím zahodit — viz {@see otherWithholdingEligibility()}.
      * @return TermsInput
      */
-    public function terms(array $input, ?string $storedCzIscoCode = null): array
-    {
+    public function terms(
+        array $input,
+        ?string $storedCzIscoCode = null,
+        ?string $storedOtherWithholdingEligibility = null,
+    ): array {
         $effectiveFrom = $this->requiredDate($input, 'effective_from');
         $plannedStart = $this->requiredDate($input, 'planned_start_on');
         $fixedEnd = $this->optionalDate($input, 'fixed_term_end_on');
@@ -230,6 +263,9 @@ final class PayrollEmploymentValidator
         }
         $functionalBenefits = $this->verifiedState($input, 'jmhz_functional_benefits_status');
         $temporaryAssignment = $this->verifiedState($input, 'jmhz_temporary_assignment_status');
+        [$rateCategory, $rateCategoryEvidence] = $this->socialEmployerRateCategory($input);
+        [$discountReason, $discountEvidence, $discountNotifiedOn] =
+            $this->socialPartTimeDiscount($input);
         $activityCode = $this->optionalCode($input, 'activity_code', 32);
         $relationshipDetailCode = $this->optionalCode(
             $input,
@@ -273,9 +309,18 @@ final class PayrollEmploymentValidator
             'social_insurance_participation' => $social,
             'health_insurance_participation' => $health,
             'tax_regime' => $tax,
+            'other_withholding_eligibility' => $this->otherWithholdingEligibility(
+                $input,
+                $storedOtherWithholdingEligibility,
+            ),
             'foreign_legislation_country_code' => $country,
             'a1_certificate_until' => $this->optionalDate($input, 'a1_certificate_until'),
-            'risky_work' => $this->requiredBool($input, 'risky_work', false),
+            'risky_work' => $rateCategory === 'risk_employment',
+            'social_employer_rate_category' => $rateCategory,
+            'social_employer_rate_category_evidence' => $rateCategoryEvidence,
+            'social_part_time_discount_reason' => $discountReason,
+            'social_part_time_discount_evidence' => $discountEvidence,
+            'social_part_time_discount_notified_on' => $discountNotifiedOn,
             'tax_declaration_signed' => $this->requiredBool($input, 'tax_declaration_signed', false),
             'is_primary' => $this->requiredBool($input, 'is_primary', false),
             'change_reason' => $this->optionalText($input, 'change_reason', 500),
@@ -346,6 +391,84 @@ final class PayrollEmploymentValidator
             throw new \InvalidArgumentException("Pole {$key} musí být datum YYYY-MM-DD.");
         }
         return $value;
+    }
+
+    /**
+     * Sazbová kategorie zaměstnavatele podle § 5a odst. 1 ZPSZ a odkaz na podklad.
+     *
+     * Kategorie je zdroj pravdy a `risky_work` se z ní odvozuje, ne naopak —
+     * dva zapisovatelné údaje o téže věci by se rozešly. Starší klient, který
+     * kategorii ještě neposílá, se pozná podle prázdné hodnoty a jeho boolean
+     * se na kategorii přeloží; pošle-li obojí a odporují si, je to chyba, ne
+     * tichá volba jednoho z nich.
+     *
+     * Podklad je nepovinný ZÁMĚRNĚ: účetní smí zaměstnance zařadit dřív, než
+     * má doklad po ruce. Do výpočtu se ale takový vztah nedostane — bez
+     * podkladu z něj {@see \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputAssembler}
+     * udělá nedoložené zařazení a mzdový běh skončí na ručním posouzení.
+     *
+     * @param array<string,mixed> $input
+     * @return array{0:string,1:?string}
+     */
+    private function socialEmployerRateCategory(array $input): array
+    {
+        $category = trim($this->inputString($input['social_employer_rate_category'] ?? ''));
+        if ($category === '') {
+            $category = $this->requiredBool($input, 'risky_work', false)
+                ? 'risk_employment'
+                : 'ordinary';
+        } elseif (
+            array_key_exists('risky_work', $input)
+            && $this->requiredBool($input, 'risky_work', false)
+                !== ($category === 'risk_employment')
+        ) {
+            throw new \InvalidArgumentException(
+                'Riziková práce a sazbová kategorie zaměstnavatele si odporují.',
+            );
+        }
+        if (!in_array($category, self::SOCIAL_EMPLOYER_RATE_CATEGORIES, true)) {
+            throw new \InvalidArgumentException(
+                'Sazbová kategorie zaměstnavatele není podporována.',
+            );
+        }
+        $evidence = $this->optionalText($input, 'social_employer_rate_category_evidence', 190);
+
+        return [$category, $category === 'ordinary' ? null : $evidence];
+    }
+
+    /**
+     * Nárok na slevu zaměstnavatele podle § 7a odst. 1 ZPSZ.
+     *
+     * Podklad ani datum oznámení ČSSZ nejsou povinné vstupy: účetní smí důvod
+     * zapsat dřív, než oznámení odešle. Do výpočtu se ale takový vztah
+     * nedostane — bez obojího z něj
+     * {@see \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputAssembler}
+     * udělá nedoložený nárok a měsíc skončí na ručním posouzení. Tichý pád na
+     * uplatněnou slevu by z ní podle § 7c odst. 3 udělal dluh na pojistném.
+     *
+     * @param array<string,mixed> $input
+     * @return array{0:string,1:?string,2:?string}
+     */
+    private function socialPartTimeDiscount(array $input): array
+    {
+        $reason = trim($this->inputString($input['social_part_time_discount_reason'] ?? ''));
+        if ($reason === '') {
+            $reason = 'none';
+        }
+        if (!in_array($reason, self::SOCIAL_PART_TIME_DISCOUNT_REASONS, true)) {
+            throw new \InvalidArgumentException(
+                'Důvod slevy zaměstnavatele na kratší úvazek není podporován.',
+            );
+        }
+        if ($reason === 'none') {
+            return ['none', null, null];
+        }
+
+        return [
+            $reason,
+            $this->optionalText($input, 'social_part_time_discount_evidence', 190),
+            $this->optionalDate($input, 'social_part_time_discount_notified_on'),
+        ];
     }
 
     /** @param array<string,mixed> $input */
@@ -419,6 +542,35 @@ final class PayrollEmploymentValidator
             $value,
             CzIscoCodebook::CLASSIFICATION_VERSION,
         ));
+    }
+
+    /**
+     * Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP.
+     *
+     * Chybějící klíč znamená „na tohle pole nikdo nesahal", ne „vynuluj ho".
+     * Podmínky se ukládají celé, takže obrazovka, která pole nezná, by jinak
+     * daňové zařazení jednatele shodila zpátky na `unverified` — a příští běh
+     * by skončil ručním posouzením kvůli uložení nesouvisející změny. Stejná
+     * úvaha jako u uloženého kódu CZ-ISCO, jen opačným směrem: tam se přebírá,
+     * aby historická hodnota nezablokovala uložení, tady aby se neztratila.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function otherWithholdingEligibility(array $input, ?string $stored): string
+    {
+        if (($input['other_withholding_eligibility'] ?? null) === null) {
+            return in_array($stored, self::OTHER_WITHHOLDING_ELIGIBILITIES, true)
+                ? $stored
+                : 'unverified';
+        }
+        $value = $this->inputString($input['other_withholding_eligibility']);
+        if (!in_array($value, self::OTHER_WITHHOLDING_ELIGIBILITIES, true)) {
+            throw new \InvalidArgumentException(
+                'Zařazení pro srážkovou daň z ostatních příjmů není podporováno.',
+            );
+        }
+
+        return $value;
     }
 
     /** @param array<string,mixed> $input */

@@ -438,6 +438,7 @@ final class HealthInsuranceMonthCalculator
             $ppzCounted,
             $contribution?->standardContributionStep,
             $contribution?->minimumTopUpStep,
+            $input->topUpResponsibilitySource,
         );
     }
 

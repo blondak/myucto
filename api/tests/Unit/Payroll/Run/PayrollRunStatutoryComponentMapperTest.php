@@ -29,6 +29,12 @@ final class PayrollRunStatutoryComponentMapperTest extends TestCase
         $health = $mapper->health($input, '2026-08-01');
         $tax = $mapper->incomeTax($input, '2026-08-01');
 
+        self::assertCount(1, $social);
+        self::assertCount(1, $health);
+        self::assertCount(1, $tax);
+        $social = $social[0];
+        $health = $health[0];
+        $tax = $tax[0];
         self::assertSame('input.42.mzda_mesicni', $social->code);
         self::assertSame(SocialComponentTreatment::Included, $social->participationTreatment);
         self::assertSame(SocialComponentTreatment::Excluded, $social->assessmentBaseTreatment);
@@ -44,23 +50,171 @@ final class PayrollRunStatutoryComponentMapperTest extends TestCase
 
         self::assertSame(
             HealthCorrectionTreatment::Unverified,
-            $mapper->health($input, '2026-08-01')->correctionTreatment,
+            $mapper->health($input, '2026-08-01')[0]->correctionTreatment,
         );
         self::assertSame(
             TaxCorrectionTreatment::Unverified,
-            $mapper->incomeTax($input, '2026-08-01')->correctionTreatment,
+            $mapper->incomeTax($input, '2026-08-01')[0]->correctionTreatment,
         );
     }
 
     public function testTaxExemptionDoesNotInventVerifiedEvidence(): void
     {
-        $component = (new PayrollRunStatutoryComponentMapper())->incomeTax(
+        $components = (new PayrollRunStatutoryComponentMapper())->incomeTax(
             $this->input(['tax_treatment' => 'exempt']),
             '2026-08-01',
         );
 
-        self::assertSame(IncomeTaxComponentTreatment::Exempt, $component->treatment);
-        self::assertFalse($component->hasVerifiedTreatmentEvidence('2026-08-01'));
+        self::assertCount(1, $components);
+        self::assertSame(IncomeTaxComponentTreatment::Exempt, $components[0]->treatment);
+        self::assertFalse($components[0]->hasVerifiedTreatmentEvidence('2026-08-01'));
+    }
+
+    /**
+     * Uvedený podklad osvobození je doklad, který výpočet daně hledal.
+     *
+     * Bez něj byla brána `hasVerifiedTreatmentEvidence()` nesplnitelná — pole
+     * `treatment_evidence_*` nenastavoval nikdo — a osvobozený příjem tak
+     * neprošel mzdovým během NIKDY.
+     */
+    public function testStatedExemptionBasisBecomesVerifiedEvidence(): void
+    {
+        $components = (new PayrollRunStatutoryComponentMapper())->incomeTax(
+            $this->input([
+                'tax_treatment' => 'exempt',
+                'exemption_basis' => 'not_subject_to_tax',
+                'valid_from' => '2026-01-01',
+                'valid_to' => null,
+            ]),
+            '2026-08-01',
+        );
+
+        self::assertTrue($components[0]->hasVerifiedTreatmentEvidence('2026-08-01'));
+        self::assertSame(
+            'payroll-component:MZDA_MESICNI@2026-01-01/not_subject_to_tax',
+            $components[0]->treatmentEvidenceReference,
+        );
+    }
+
+    /**
+     * Doklad je sama verze klasifikace. Skončila-li její platnost před počítaným
+     * měsícem, není čím osvobození podložit.
+     */
+    public function testExpiredClassificationVersionStopsBeingEvidence(): void
+    {
+        $components = (new PayrollRunStatutoryComponentMapper())->incomeTax(
+            $this->input([
+                'tax_treatment' => 'exempt',
+                'exemption_basis' => 'statutory_exempt',
+                'valid_from' => '2026-01-01',
+                'valid_to' => '2026-06-30',
+            ]),
+            '2026-08-01',
+        );
+
+        self::assertFalse($components[0]->hasVerifiedTreatmentEvidence('2026-08-01'));
+    }
+
+    /**
+     * U ročního koše je doklad zmrazený rozpad. Bez něj není známé, kolik se do
+     * úhrnu ještě vešlo — samo zařazení do koše tedy nestačí.
+     */
+    public function testBasketBasisWithoutAFrozenSplitStaysUnevidenced(): void
+    {
+        $components = (new PayrollRunStatutoryComponentMapper())->incomeTax(
+            $this->input([
+                'tax_treatment' => 'exempt',
+                'exemption_basis' => 'benefit_basket',
+                'exemption_basket' => 'non_cash_leisure',
+                'valid_from' => '2026-01-01',
+                'valid_to' => null,
+            ]),
+            '2026-08-01',
+        );
+
+        self::assertFalse($components[0]->hasVerifiedTreatmentEvidence('2026-08-01'));
+    }
+
+    /**
+     * Nadlimitní část benefitu se rozpadne na vlastní složku výpočtu.
+     *
+     * Bez toho by zdanitelný přebytek zmizel: složka je klasifikovaná jako
+     * osvobozená a vyloučená z pojistného, takže by celé plnění prošlo bez daně
+     * i bez odvodů, ať je jakkoli vysoké.
+     */
+    public function testOverLimitBenefitBecomesItsOwnTaxableComponent(): void
+    {
+        $mapper = new PayrollRunStatutoryComponentMapper();
+        $input = $this->input([
+            'code' => 'REKREACE_VOLNY_CAS',
+            'tax_treatment' => 'exempt',
+            'social_participation_treatment' => 'excluded',
+            'social_treatment' => 'excluded',
+            'health_participation_treatment' => 'excluded',
+            'health_treatment' => 'excluded',
+            'exemption_basket' => 'non_cash_leisure',
+        ]);
+        $input['amount_minor'] = 3_000_000;
+        $input['benefit_basket'] = 'non_cash_leisure';
+        $input['benefit_exempt_minor'] = 2_448_350;
+        $input['benefit_taxable_minor'] = 551_650;
+
+        $tax = $mapper->incomeTax($input, '2026-08-01');
+        $social = $mapper->social($input);
+        $health = $mapper->health($input, '2026-08-01');
+
+        self::assertCount(2, $tax);
+        self::assertSame(IncomeTaxComponentTreatment::Exempt, $tax[0]->treatment);
+        self::assertSame(2_448_350, $tax[0]->amountMinorUnits);
+        self::assertSame('input.42.rekreace_volny_cas.nadlimit', $tax[1]->code);
+        self::assertSame(IncomeTaxComponentTreatment::Included, $tax[1]->treatment);
+        self::assertSame(551_650, $tax[1]->amountMinorUnits);
+
+        self::assertCount(2, $social);
+        self::assertSame(SocialComponentTreatment::Included, $social[1]->participationTreatment);
+        self::assertSame(SocialComponentTreatment::Included, $social[1]->assessmentBaseTreatment);
+        self::assertSame(551_650, $social[1]->amountMinorUnits);
+
+        self::assertCount(2, $health);
+        self::assertSame(HealthComponentTreatment::Included, $health[1]->assessmentBaseTreatment);
+        self::assertSame(551_650, $health[1]->amountMinorUnits);
+    }
+
+    /**
+     * Plnění přesně na limitu se NEROZDĚLUJE. Zákon říká „osvobozena v úhrnu
+     * do výše …", takže úhrn rovný limitu je ještě celý osvobozený.
+     */
+    public function testAmountExactlyOnTheLimitStaysOneExemptComponent(): void
+    {
+        $mapper = new PayrollRunStatutoryComponentMapper();
+        $input = $this->input([
+            'code' => 'REKREACE_VOLNY_CAS',
+            'tax_treatment' => 'exempt',
+            'exemption_basket' => 'non_cash_leisure',
+        ]);
+        $input['amount_minor'] = 2_448_350;
+        $input['benefit_basket'] = 'non_cash_leisure';
+        $input['benefit_exempt_minor'] = 2_448_350;
+        $input['benefit_taxable_minor'] = 0;
+
+        $tax = $mapper->incomeTax($input, '2026-08-01');
+
+        self::assertCount(1, $tax);
+        self::assertSame(IncomeTaxComponentTreatment::Exempt, $tax[0]->treatment);
+        self::assertSame(2_448_350, $tax[0]->amountMinorUnits);
+    }
+
+    /** Rozpad, který nedává částku vstupu, je vada dat — ne tichá oprava. */
+    public function testInconsistentSplitIsRejected(): void
+    {
+        $mapper = new PayrollRunStatutoryComponentMapper();
+        $input = $this->input(['exemption_basket' => 'non_cash_leisure']);
+        $input['benefit_basket'] = 'non_cash_leisure';
+        $input['benefit_exempt_minor'] = 1;
+        $input['benefit_taxable_minor'] = 1;
+
+        $this->expectException(\UnexpectedValueException::class);
+        $mapper->incomeTax($input, '2026-08-01');
     }
 
     /**

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
@@ -11,6 +12,8 @@ import { localPayrollPeriod } from './payrollComponentsUi'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
+import { payrollQueryId } from './payrollAgendaLinks'
 import { payrollAbsenceApi, type PayrollAbsenceEmployment } from '@/api/payrollAbsences'
 import {
   payrollTravelApi,
@@ -23,6 +26,9 @@ import {
   type TravelTripPayload,
   type TravelVehicleKind,
 } from '@/api/payrollTravel'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 interface ItemForm {
   item_kind: TravelItemKind
@@ -46,6 +52,8 @@ interface MealForm {
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 
 const transportModes: TravelTransportMode[] =
   ['public_transport', 'company_vehicle', 'private_vehicle', 'other']
@@ -80,6 +88,18 @@ const preview = ref<TravelCalculation | null>(null)
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
 const canApprove = computed(() => auth.canWrite('payroll.approve'))
 
+const COLUMNS: ColumnDef[] = [
+  { key: 'employee', labelKey: 'payroll_travel.table.employee', required: true },
+  { key: 'route', labelKey: 'payroll_travel.table.route' },
+  { key: 'interval', labelKey: 'payroll_travel.table.interval' },
+  { key: 'entitlement', labelKey: 'payroll_travel.table.entitlement' },
+  { key: 'exempt', labelKey: 'payroll_travel.table.exempt', defaultHidden: true },
+  { key: 'taxable', labelKey: 'payroll_travel.table.taxable' },
+  { key: 'status', labelKey: 'payroll_travel.table.status' },
+  { key: 'actions', labelKey: 'common.detail', required: true },
+]
+const tbl = useTablePrefs('payroll-travel', COLUMNS)
+
 const form = reactive({
   employee_id: null as number | null,
   employment_id: null as number | null,
@@ -103,6 +123,39 @@ const employmentOptions = computed(() => employments.value.map(item => ({
   value: item.id,
   label: `${item.full_name} · ${item.code}`,
 })))
+
+/**
+ * Zúžení na jeden vztah z odkazu na kartě zaměstnance (`?employment=12`).
+ *
+ * Zužuje SERVER (`travel/trips?employment_id=`) v témže dotazu jako stránkování.
+ * Dokud filtroval prohlížeč nad načtenou dávkou, cesta z jiné strany se tiše
+ * neprojevila a prázdný výpis tvrdil „žádné cesty".
+ */
+const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
+const focusName = computed(() => {
+  const id = focusEmploymentId.value
+  if (id === null) return null
+  const employment = employments.value.find(item => item.id === id)
+  return employment
+    ? `${employment.full_name} · ${employment.code}`
+    : t('payroll.agendas.focus.unknown_person')
+})
+/**
+ * Server zúžení uplatnil a nezbylo nic. Tichá prázdná tabulka by vypadala
+ * stejně jako období bez cest — prázdno se proto pojmenuje větou.
+ */
+const focusMissing = computed(() =>
+  focusEmploymentId.value !== null && !loading.value && !loadFailed.value
+  && trips.value.length === 0)
+function clearFocus() {
+  focusEmploymentId.value = null
+  const query = { ...route.query }
+  delete query.employment
+  void router.replace({ query })
+  // Zrušení zúžení mění obsah seznamu, takže stránka musí zpět na začátek.
+  offset.value = 0
+  void load()
+}
 const transportOptions = computed(() => transportModes.map(mode => ({
   value: mode,
   label: t(`payroll_travel.transport.${mode}`),
@@ -149,8 +202,11 @@ function resetForm(trip: TravelTrip | null) {
   formError.value = ''
   preview.value = null
   if (trip === null) {
+    // Prázdný formulář si drží zúžení z odkazu — kdo přišel „zadat cestu Novákovi",
+    // ho nechce vybírat po každém zavření editoru znovu.
     form.employee_id = null
     form.employment_id = null
+    if (focusEmploymentId.value !== null) selectEmployment(focusEmploymentId.value)
     form.country_code = 'CZ'
     form.departure_at = `${period.value}-01T08:00`
     form.arrival_at = `${period.value}-01T16:00`
@@ -257,8 +313,9 @@ async function load() {
   loading.value = true
   loadFailed.value = false
   try {
+    const page = { limit: pageSize, offset: offset.value }
     const [tripPage, context] = await Promise.all([
-      payrollTravelApi.listPage(period.value, { limit: pageSize, offset: offset.value }),
+      payrollTravelApi.listPage(period.value, page, focusEmploymentId.value ?? undefined),
       employments.value.length === 0
         ? payrollAbsenceApi.context()
         : Promise.resolve(employments.value),
@@ -266,6 +323,11 @@ async function load() {
     trips.value = tripPage.trips
     total.value = tripPage.total
     employments.value = context
+    // Předvybraný vztah se nabídne i v editoru nové cesty — jinak by uživatel
+    // po kliknutí na „Pracovní cesty" u konkrétního člověka vybíral znovu.
+    if (focusEmploymentId.value !== null && form.employment_id === null) {
+      selectEmployment(focusEmploymentId.value)
+    }
   } catch (error: unknown) {
     loadFailed.value = true
     toast.error(apiErrorMessage(error, t('payroll_travel.messages.load_failed')))
@@ -434,47 +496,72 @@ onMounted(load)
     />
 
     <template v-else>
-      <p
-        v-if="trips.length === 0"
-        class="rounded-xl border border-dashed border-neutral-300 p-8 text-center text-sm text-neutral-500"
-      >
-        {{ t('payroll_travel.empty') }}
-      </p>
+      <PayrollFocusNotice
+        v-if="focusMissing"
+        :name="String(focusEmploymentId)"
+        missing
+        class="mb-4"
+        @clear="clearFocus"
+      />
+      <PayrollFocusNotice
+        v-else-if="focusName"
+        :name="focusName"
+        class="mb-4"
+        @clear="clearFocus"
+      />
+
+      <!--
+        Prázdno po zúžení pojmenovává už lišta nad seznamem. Generická věta pod
+        ní by totéž řekla podruhé, a ještě obecněji.
+      -->
+      <template v-if="trips.length === 0">
+        <p
+          v-if="!focusMissing"
+          class="rounded-xl border border-dashed border-neutral-300 p-8 text-center text-sm text-neutral-500"
+        >
+          {{ t('payroll_travel.empty') }}
+        </p>
+      </template>
 
       <template v-else>
         <!-- Desktopová tabulka -->
-        <section class="hidden overflow-x-auto rounded-xl border border-neutral-200 bg-surface shadow-sm md:block">
-          <table class="w-full text-sm">
+        <section class="hidden rounded-xl border border-neutral-200 bg-surface shadow-sm md:block">
+          <div class="flex flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2">
+            <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+            <DensityToggle class="hidden md:block" :ctrl="tbl" />
+          </div>
+          <div class="overflow-x-auto">
+          <table class="w-full text-sm" :class="tbl.densityClass.value">
             <thead class="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
               <tr>
-                <th class="px-4 py-3">{{ t('payroll_travel.table.employee') }}</th>
-                <th class="px-4 py-3">{{ t('payroll_travel.table.route') }}</th>
-                <th class="px-4 py-3">{{ t('payroll_travel.table.interval') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('payroll_travel.table.entitlement') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('payroll_travel.table.exempt') }}</th>
-                <th class="px-4 py-3 text-right">{{ t('payroll_travel.table.taxable') }}</th>
-                <th class="px-4 py-3">{{ t('payroll_travel.table.status') }}</th>
-                <th class="px-4 py-3" />
+                <th v-if="tbl.isVisible('employee')" class="px-4 py-3">{{ t('payroll_travel.table.employee') }}</th>
+                <th v-if="tbl.isVisible('route')" class="px-4 py-3">{{ t('payroll_travel.table.route') }}</th>
+                <th v-if="tbl.isVisible('interval')" class="px-4 py-3">{{ t('payroll_travel.table.interval') }}</th>
+                <th v-if="tbl.isVisible('entitlement')" class="px-4 py-3 text-right">{{ t('payroll_travel.table.entitlement') }}</th>
+                <th v-if="tbl.isVisible('exempt')" class="px-4 py-3 text-right">{{ t('payroll_travel.table.exempt') }}</th>
+                <th v-if="tbl.isVisible('taxable')" class="px-4 py-3 text-right">{{ t('payroll_travel.table.taxable') }}</th>
+                <th v-if="tbl.isVisible('status')" class="px-4 py-3">{{ t('payroll_travel.table.status') }}</th>
+                <th v-if="tbl.isVisible('actions')" class="px-4 py-3" />
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="trip in trips" :key="trip.id" data-test="travel-row">
-                <td class="px-4 py-3">
+                <td v-if="tbl.isVisible('employee')" class="px-4 py-3">
                   <div class="font-medium text-neutral-900">{{ trip.employee_name }}</div>
                   <div class="text-xs text-neutral-500">{{ trip.employment_code }}</div>
                 </td>
-                <td class="px-4 py-3">
+                <td v-if="tbl.isVisible('route')" class="px-4 py-3">
                   <div class="text-neutral-900">{{ trip.origin_place }} → {{ trip.destination_place }}</div>
                   <div class="text-xs text-neutral-500">{{ trip.purpose }}</div>
                 </td>
-                <td class="px-4 py-3 text-neutral-700">
+                <td v-if="tbl.isVisible('interval')" class="px-4 py-3 text-neutral-700">
                   <div>{{ trip.departure_at.slice(0, 16) }}</div>
                   <div>{{ trip.arrival_at.slice(0, 16) }}</div>
                 </td>
-                <td class="px-4 py-3 text-right font-medium">{{ money(trip.entitlement_total_minor) }}</td>
-                <td class="px-4 py-3 text-right text-success-700">{{ money(trip.exempt_total_minor) }}</td>
-                <td class="px-4 py-3 text-right text-warning-700">{{ money(trip.taxable_total_minor) }}</td>
-                <td class="px-4 py-3">
+                <td v-if="tbl.isVisible('entitlement')" class="px-4 py-3 text-right font-medium">{{ money(trip.entitlement_total_minor) }}</td>
+                <td v-if="tbl.isVisible('exempt')" class="px-4 py-3 text-right text-success-700">{{ money(trip.exempt_total_minor) }}</td>
+                <td v-if="tbl.isVisible('taxable')" class="px-4 py-3 text-right text-warning-700">{{ money(trip.taxable_total_minor) }}</td>
+                <td v-if="tbl.isVisible('status')" class="px-4 py-3">
                   <span
                     class="rounded-full px-2 py-1 text-xs font-medium"
                     :class="{
@@ -487,7 +574,7 @@ onMounted(load)
                     {{ t(`payroll_travel.status.${trip.status}`) }}
                   </span>
                 </td>
-                <td class="px-4 py-3">
+                <td v-if="tbl.isVisible('actions')" class="px-4 py-3">
                   <div class="flex flex-wrap justify-end gap-2">
                     <button
                       v-if="canWrite && trip.status === 'draft'"
@@ -524,6 +611,7 @@ onMounted(load)
               </tr>
             </tbody>
           </table>
+          </div>
         </section>
 
         <!-- Mobilní karty -->
@@ -609,6 +697,7 @@ onMounted(load)
           </article>
         </section>
 
+        <!-- Zúžení mění i `total`, takže pager mluví o zúženém seznamu. -->
         <PaginationBar
           data-test="travel-pagination"
           :page="currentPage"

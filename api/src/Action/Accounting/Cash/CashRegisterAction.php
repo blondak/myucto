@@ -54,7 +54,7 @@ final class CashRegisterAction
 
     public function create(Request $request, Response $response): Response
     {
-        if (!$this->requireWrite($request, $response, $err)) {
+        if (!$this->requireCashWrite($request, $response, $err)) {
             return $err;
         }
         $supplierId = $this->currentSupplierId($request);
@@ -71,7 +71,7 @@ final class CashRegisterAction
 
     public function update(Request $request, Response $response, array $args): Response
     {
-        if (!$this->requireWrite($request, $response, $err)) {
+        if (!$this->requireCashWrite($request, $response, $err)) {
             return $err;
         }
         $supplierId = $this->currentSupplierId($request);
@@ -89,7 +89,7 @@ final class CashRegisterAction
 
     public function delete(Request $request, Response $response, array $args): Response
     {
-        if (!$this->requireWrite($request, $response, $err)) {
+        if (!$this->requireCashWrite($request, $response, $err)) {
             return $err;
         }
         $supplierId = $this->currentSupplierId($request);
@@ -117,11 +117,4 @@ final class CashRegisterAction
         );
     }
 
-    private function mapCashError(Response $response, \Throwable $e): Response
-    {
-        if ($e instanceof CashException) {
-            return Json::error($response, 'cash.error.' . $e->errorCode, $e->getMessage(), $e->httpStatus);
-        }
-        return $this->mapPostingError($response, $e);
-    }
 }

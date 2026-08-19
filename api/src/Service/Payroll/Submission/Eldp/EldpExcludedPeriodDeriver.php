@@ -79,6 +79,7 @@ final class EldpExcludedPeriodDeriver
         'unpaid_leave' => 'neplacené volno nelze bez dalšího údaje rozdělit mezi omluvenou nepřítomnost a odečítané dny',
         'parental' => 'rodičovská dovolená se řeší kódem ELDP a přerušením pojištění, ne vyloučenou dobou',
         'employee_obstacle' => 'u překážky na straně zaměstnance není doloženo, zda za ni náleží náhrada příjmu',
+        'compensatory_time_off' => 'náhradní volno za přesčas modul nezařazuje: § 16 odst. 4 zákona č. 187/2006 Sb. ho mezi vyloučené doby nejmenuje a atribut podle písm. j) modul neplní vůbec',
         'other' => 'nerozlišený druh absence',
     ];
 

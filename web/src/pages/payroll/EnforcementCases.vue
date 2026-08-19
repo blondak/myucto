@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { documentsApi, type DocItem } from '@/api/documents'
+import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 import {
   payrollApi,
   type PayrollInstitutionAccount,
@@ -19,7 +21,10 @@ import {
   type EnforcementClaimPayload,
   type EnforcementDependant,
   type EnforcementMonthEvidence,
+  type EnforcementEvidenceScope,
+  type EnforcementEvidenceSourceValue,
 } from '@/api/payrollEnforcement'
+import { eligibleAllowances, evidenceScope } from '@/pages/payroll/enforcementEvidenceScope'
 import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -27,6 +32,9 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -50,7 +58,13 @@ const total = ref(0)
 const pageSize = 20
 const offset = ref(0)
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
-const employeeFilter = ref<number | null>(null)
+/**
+ * Předvýběr z odkazu na kartě zaměstnance (`/payroll/enforcement?person=7`).
+ *
+ * Sedí do stávajícího filtru osob, takže je zúžení vidět a jde ho zrušit tam,
+ * kde ho uživatel čeká. Neplatné id nic nezúží.
+ */
+const employeeFilter = ref<number | null>(payrollQueryId(useRoute().query, 'person'))
 const statusFilter = ref<EnforcementCaseStatus | ''>('')
 const people = ref<PayrollPersonOption[]>([])
 const detail = ref<EnforcementCaseDetail | null>(null)
@@ -68,6 +82,16 @@ const canReadPeople = computed(() => auth.canRead('payroll'))
 const canManageInsolvency = computed(() => auth.canWrite('payroll.insolvency'))
 const canReadPayrollSettings = computed(() => auth.canRead('payroll.settings'))
 const recipientAccounts = ref<PayrollInstitutionAccount[]>([])
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'employee', labelKey: 'payroll.enforcement.employee', required: true },
+  { key: 'status', labelKey: 'payroll.enforcement.status_label' },
+  { key: 'case_kind', labelKey: 'payroll.enforcement.case_kind' },
+  { key: 'claims', labelKey: 'payroll.enforcement.claims', defaultHidden: true },
+  { key: 'balance', labelKey: 'payroll.enforcement.balance' },
+  { key: 'actions', labelKey: 'common.detail', required: true },
+]
+const tbl = useTablePrefs('payroll-enforcement', COLUMNS)
 const recipientOptions = computed(() => {
   const seen = new Map<number, PayrollInstitutionAccount>()
   for (const account of recipientAccounts.value) {
@@ -84,6 +108,16 @@ const today = localIsoDate()
 const evidencePeriod = ref(today.slice(0, 7))
 const monthEvidence = ref<EnforcementMonthEvidence | null>(null)
 const dependants = ref<EnforcementDependant[]>([])
+/*
+ * Měsíční evidence je vedená na OSOBU, ne na případ, a rozsah rejstříku
+ * pohledávek závisí na tom, jestli má osoba vůbec z čeho srážet. Filtrovaná
+ * stránka seznamu na to neodpoví — u člověka se dvěma exekucemi by při filtru
+ * na jeden stav ukázala jen jednu. Proto vlastní, nefiltrovaný dotaz na případy
+ * té osoby; `personCasesComplete = false` (výpadek nebo useknutý seznam) drží
+ * rozsah otevřený, ať se nezešedne něco, co dokládat je.
+ */
+const personCases = ref<EnforcementCaseSummary[]>([])
+const personCasesComplete = ref(false)
 const protectedOverrideCzk = ref('')
 const courtAmountCzk = ref('')
 const newDependant = ref<{
@@ -103,7 +137,9 @@ const newCase = ref<{
   employee_id: number | null
   case_kind: EnforcementCaseKind
   effective_from: string
-}>({ employee_id: null, case_kind: 'enforcement', effective_from: today })
+  // Zúžení z odkazu předplní i nový případ — kdo přišel „zavést exekuci
+  // Novákovi", ho nechce vybírat znovu.
+}>({ employee_id: employeeFilter.value, case_kind: 'enforcement', effective_from: today })
 function emptyClaim(): EnforcementClaimPayload {
   return {
     legal_basis: 'statutory',
@@ -272,6 +308,8 @@ function collapseDetail() {
   detail.value = null
   monthEvidence.value = null
   dependants.value = []
+  personCases.value = []
+  personCasesComplete.value = false
 }
 
 // Stránkuje sdílená `PaginationBar` (číslo stránky od jedné); server zná offset.
@@ -294,6 +332,8 @@ async function selectCase(item: EnforcementCaseSummary) {
   maintenanceWeightCzk.value = ''
   monthEvidence.value = null
   dependants.value = []
+  personCases.value = []
+  personCasesComplete.value = false
   expandedId.value = item.id
   detail.value = null
   try {
@@ -311,11 +351,17 @@ async function selectCase(item: EnforcementCaseSummary) {
 async function loadMonthlyEvidence(employeeId: number, sequence = detailRequestSequence) {
   if (!auth.canRead('payroll.insolvency')) return
   try {
-    const [evidence, loadedDependants] = await Promise.all([
+    const [evidence, loadedDependants, loadedCases] = await Promise.all([
       payrollEnforcementApi.monthEvidence(employeeId, evidencePeriod.value),
       payrollEnforcementApi.dependants(employeeId),
+      // Serverový strop je 100; při jeho dosažení se rozsah radši nezužuje.
+      payrollEnforcementApi.casesPage({ employee_id: employeeId, limit: 100, offset: 0 })
+        .catch(() => null),
     ])
     if (sequence !== detailRequestSequence || detail.value?.employee_id !== employeeId) return
+    personCases.value = loadedCases?.cases ?? []
+    personCasesComplete.value = loadedCases !== null
+      && loadedCases.cases.length >= loadedCases.total
     monthEvidence.value = evidence
     protectedOverrideCzk.value = evidence.protected_amount_override_minor_units === null
       ? ''
@@ -329,6 +375,63 @@ async function loadMonthlyEvidence(employeeId: number, sequence = detailRequestS
       toast.error(t('payroll.enforcement.month_evidence_load_failed'))
     }
   }
+}
+
+/*
+ * Tři měsíční potvrzení, tři různá pravidla rozsahu — proto se kreslí smyčkou
+ * nad rozsahem, ne třemi ručně opsanými checkboxy, které by se rozešly.
+ */
+const MONTH_EVIDENCE_ROWS = [
+  { key: 'claim_register', field: 'claim_register_evidence_complete' },
+  { key: 'dependants', field: 'dependants_evidence_complete' },
+  { key: 'spouse', field: 'spouse_evidence_complete' },
+] as const satisfies readonly {
+  key: keyof EnforcementEvidenceScope
+  field: 'claim_register_evidence_complete'
+    | 'dependants_evidence_complete'
+    | 'spouse_evidence_complete'
+}[]
+
+const monthEvidenceAllowances = computed(() =>
+  eligibleAllowances(dependants.value, evidencePeriod.value))
+
+const monthEvidenceScope = computed<EnforcementEvidenceScope | null>(() => {
+  const evidence = monthEvidence.value
+  if (!evidence) return null
+  return evidenceScope({
+    period: evidencePeriod.value,
+    cases: personCases.value,
+    casesComplete: personCasesComplete.value,
+    dependants: dependants.value,
+    evidence,
+  })
+})
+
+/**
+ * Má se checkbox nabízet k vyplnění? Jen `not_applicable` znamená „doklad by
+ * nedokládal nic". `nothing_withheld` zůstává aktivní schválně: doložením se
+ * otevře strop dobrovolné dohody o srážkách, takže tam je co dělat.
+ */
+function evidenceActionable(source: EnforcementEvidenceSourceValue | undefined): boolean {
+  return source !== 'not_applicable'
+}
+
+/**
+ * Věta pod checkboxem. U `declared` i `missing` mlčí — tam stav říká sám
+ * checkbox a další text by jen šuměl.
+ */
+function evidenceScopeNote(key: keyof EnforcementEvidenceScope): string | null {
+  const source = monthEvidenceScope.value?.[key]
+  const prefix = 'payroll.enforcement.month_evidence.scope.'
+  if (source === 'nothing_withheld') return t(`${prefix}nothing_withheld`)
+  if (source !== 'not_applicable') return null
+  if (key === 'claim_register') return t(`${prefix}claim_register_idle`)
+  // Uplatněný nárok, který přebilo rozhodnutí soudu, je jiný důvod než nárok,
+  // který nikdo neuplatnil — náprava se u nich liší.
+  const claimed = key === 'spouse'
+    ? monthEvidenceAllowances.value.spouse
+    : monthEvidenceAllowances.value.dependants > 0
+  return t(`${prefix}${claimed ? 'allowance_multiple_payers' : 'allowance_not_claimed'}`)
 }
 
 async function createCase() {
@@ -643,20 +746,26 @@ onMounted(load)
         <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.enforcement.empty_description') }}</p>
       </div>
       <template v-else>
-        <div class="hidden overflow-x-auto md:block">
-          <table class="min-w-full divide-y divide-neutral-200 text-sm">
-            <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="px-4 py-3">{{ t('payroll.enforcement.employee') }}</th><th class="px-4 py-3">{{ t('payroll.enforcement.status_label') }}</th><th class="px-4 py-3">{{ t('payroll.enforcement.case_kind') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.enforcement.claims') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.enforcement.balance') }}</th><th class="px-4 py-3"><span class="sr-only">{{ t('common.detail') }}</span></th></tr></thead>
+        <div class="hidden md:block">
+          <div class="flex flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2">
+            <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+            <DensityToggle class="hidden md:block" :ctrl="tbl" />
+          </div>
+          <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+            <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th v-if="tbl.isVisible('employee')" class="px-4 py-3">{{ t('payroll.enforcement.employee') }}</th><th v-if="tbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.enforcement.status_label') }}</th><th v-if="tbl.isVisible('case_kind')" class="px-4 py-3">{{ t('payroll.enforcement.case_kind') }}</th><th v-if="tbl.isVisible('claims')" class="px-4 py-3 text-right">{{ t('payroll.enforcement.claims') }}</th><th v-if="tbl.isVisible('balance')" class="px-4 py-3 text-right">{{ t('payroll.enforcement.balance') }}</th><th v-if="tbl.isVisible('actions')" class="px-4 py-3"><span class="sr-only">{{ t('common.detail') }}</span></th></tr></thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="item in cases" :key="item.id" :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">
-                <td class="px-4 py-3 font-medium text-neutral-900">{{ item.full_name }}</td>
-                <td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="statusClass(item.status)">{{ t(`payroll.enforcement.status.${item.status}`) }}</span></td>
-                <td class="px-4 py-3 text-neutral-600">{{ t(`payroll.enforcement.kinds.${item.case_kind}`) }}</td>
-                <td class="px-4 py-3 text-right">{{ item.claim_count }}</td>
-                <td class="px-4 py-3 text-right font-medium">{{ money(item.outstanding_minor_units) }}</td>
-                <td class="px-4 py-3 text-right"><button :class="btnOutlineSm('neutral')" :data-test="`enforcement-detail-${item.id}`" @click="selectCase(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t(expandedId === item.id ? 'common.close' : 'common.detail') }}</button></td>
+                <td v-if="tbl.isVisible('employee')" class="px-4 py-3 font-medium text-neutral-900">{{ item.full_name }}</td>
+                <td v-if="tbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="statusClass(item.status)">{{ t(`payroll.enforcement.status.${item.status}`) }}</span></td>
+                <td v-if="tbl.isVisible('case_kind')" class="px-4 py-3 text-neutral-600">{{ t(`payroll.enforcement.kinds.${item.case_kind}`) }}</td>
+                <td v-if="tbl.isVisible('claims')" class="px-4 py-3 text-right">{{ item.claim_count }}</td>
+                <td v-if="tbl.isVisible('balance')" class="px-4 py-3 text-right font-medium">{{ money(item.outstanding_minor_units) }}</td>
+                <td v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right"><button :class="btnOutlineSm('neutral')" :data-test="`enforcement-detail-${item.id}`" @click="selectCase(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t(expandedId === item.id ? 'common.close' : 'common.detail') }}</button></td>
               </tr>
             </tbody>
           </table>
+          </div>
         </div>
         <div class="space-y-3 p-4 md:hidden">
           <article v-for="item in cases" :key="item.id" class="rounded-lg border border-neutral-200 p-4" :class="expandedId === item.id ? 'bg-payroll-50/50' : ''">
@@ -784,11 +893,28 @@ onMounted(load)
             </div>
           </div>
           <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <!--
+              Rozsah zrcadlí GarnishmentCalculator::evidenceScope(). Potvrzení,
+              které v tomto měsíci nic nedokládá, se zešedne a vypne — pobízet
+              k němu znamenalo u firmy o tisíci lidech 12 000 zápisů ročně.
+            -->
             <div class="space-y-2 text-sm">
-              <label class="flex items-center gap-2"><input v-model="monthEvidence.claim_register_evidence_complete" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.claim_register') }}</label>
-              <label class="flex items-center gap-2"><input v-model="monthEvidence.dependants_evidence_complete" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.dependants') }}</label>
-              <label class="flex items-center gap-2"><input v-model="monthEvidence.spouse_evidence_complete" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.spouse') }}</label>
-              <label class="flex items-center gap-2"><input v-model="monthEvidence.has_multiple_payers" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.multiple_payers') }}</label>
+              <div v-for="row in MONTH_EVIDENCE_ROWS" :key="row.key">
+                <label class="flex items-center gap-2" :class="evidenceActionable(monthEvidenceScope?.[row.key]) ? '' : 'text-neutral-400'">
+                  <input
+                    v-model="monthEvidence[row.field]"
+                    :disabled="!evidenceActionable(monthEvidenceScope?.[row.key])"
+                    type="checkbox"
+                    class="rounded border-neutral-300 text-payroll-600 disabled:cursor-not-allowed disabled:opacity-50"
+                    :data-test="`month-evidence-${row.key}`"
+                  >
+                  {{ t(`payroll.enforcement.month_evidence.${row.key}`) }}
+                </label>
+                <p v-if="evidenceScopeNote(row.key)" class="mt-0.5 pl-6 text-xs text-neutral-500" :data-test="`month-evidence-${row.key}-note`">
+                  {{ evidenceScopeNote(row.key) }}
+                </p>
+              </div>
+              <label class="flex items-center gap-2"><input v-model="monthEvidence.has_multiple_payers" type="checkbox" class="rounded border-neutral-300 text-payroll-600" data-test="month-evidence-multiple-payers">{{ t('payroll.enforcement.month_evidence.multiple_payers') }}</label>
             </div>
             <div class="space-y-3">
               <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.pension') }}<select v-model="monthEvidence.pension_evidence" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="value in pensionEvidenceValues" :key="value" :value="value">{{ t(`payroll.enforcement.month_evidence.pension_${value === 'verified' ? 'receives' : value}`) }}</option></select></label>

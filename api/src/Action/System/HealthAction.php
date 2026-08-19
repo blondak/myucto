@@ -8,10 +8,13 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Cache\RedisProbe;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\PasskeyService;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\SessionLockPolicy;
+use MyInvoice\Service\System\AppUrlConfiguration;
+use MyInvoice\Service\Tenant\TenantDomainContext;
 use MyInvoice\Service\Update\VersionService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -26,16 +29,25 @@ final class HealthAction
         private readonly PasskeyService $passkeys,
         private readonly MfaPolicyService $mfaPolicy,
         private readonly SessionLockPolicy $sessionLockPolicy,
+        private readonly AppUrlConfiguration $appUrl,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
     {
+        $domainContext = $request->getAttribute(TenantDomainMiddleware::ATTR_CONTEXT);
+        $appUrlStatus = $domainContext instanceof TenantDomainContext
+            && $domainContext->mode === TenantDomainContext::CONFIGURATION_ERROR
+                ? $this->appUrl->hostnameConflictStatus()
+                : $this->appUrl->status();
         $payload = [
             'status'  => 'ok',
             'version' => $this->version->getCurrentVersion(),
             'db'      => $this->db->ping(),
             'redis'   => $this->redis->isAvailable(),
             'time'    => date(\DateTimeInterface::ATOM),
+            'configuration' => [
+                'app_url' => $appUrlStatus,
+            ],
         ];
 
         // Diagnostické warningy (např. slabý fallback secret_encryption_key) jen

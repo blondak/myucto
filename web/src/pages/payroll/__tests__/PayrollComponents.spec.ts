@@ -3,6 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 
 const m = vi.hoisted(() => ({
+  routeQuery: {} as Record<string, string | string[]>,
+  routerReplace: vi.fn(),
   components: vi.fn(),
   recurringComponents: vi.fn(),
   inputs: vi.fn(),
@@ -24,6 +26,14 @@ const m = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   slugify: vi.fn(),
+}))
+
+// Stránka čte předvýběr z adresy (odkaz z karty zaměstnance), takže potřebuje
+// router. Originál se rozprostře, ať zůstanou i ostatní exporty (RouterLink).
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRoute: () => ({ query: m.routeQuery }),
+  useRouter: () => ({ replace: m.routerReplace }),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -95,6 +105,9 @@ import PayrollComponents from '@/pages/payroll/PayrollComponents.vue'
 describe('PayrollComponents', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Zúžení z adresy si nese jen ten test, který ho zadá — jinak by přeteklo
+    // do dalších a ty by měřily něco jiného, než co mají v názvu.
+    m.routeQuery = {}
     m.canWrite.mockReturnValue(true)
     m.components.mockResolvedValue([{
       id: 5,
@@ -116,6 +129,7 @@ describe('PayrollComponents', () => {
       accounting_debit_code: null,
       accounting_credit_code: null,
       annual_limit_minor: null,
+      exemption_basket: null,
       valid_from: '2026-01-01',
       valid_to: null,
       is_active: true,
@@ -129,7 +143,9 @@ describe('PayrollComponents', () => {
       limit: 25,
       offset: 0,
     })
-    m.inputs.mockResolvedValue([{
+    // Seznam ručních vstupů se stránkuje na serveru — klient dostává stránku
+    // plus celkový počet.
+    m.inputs.mockResolvedValue({ total: 1, items: [{
       id: 9,
       supplier_id: 1,
       employee_id: 8,
@@ -157,7 +173,7 @@ describe('PayrollComponents', () => {
       approved_at: null,
       created_at: '2026-06-01 00:00:00',
       updated_at: '2026-06-01 00:00:00',
-    }])
+    }] })
     m.absenceContext.mockResolvedValue([{
       id: 12,
       employee_id: 8,
@@ -265,7 +281,66 @@ describe('PayrollComponents', () => {
       annual_limit_minor: null,
       annual_used_minor: null,
       annual_after_minor: null,
+      exemption_basket: null,
     })
+  })
+
+  /**
+   * Zúžení z karty zaměstnance musí jít na server u OBOU seznamů — opakovaných
+   * složek i mzdových vstupů. Vstupy dřív zužoval prohlížeč nad načtenou
+   * stránkou, takže vztah z jiné strany se tiše neprojevil.
+   */
+  it('sends the narrowing to the server for both recurring components and inputs', async () => {
+    m.routeQuery = { employment: '12' }
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    expect(m.recurringComponents).toHaveBeenLastCalledWith(12, { limit: 25, offset: 0 })
+    expect(m.inputs).toHaveBeenLastCalledWith(
+      expect.any(String),
+      { limit: 25, offset: 0 },
+      12,
+    )
+    wrapper.unmount()
+  })
+
+  /**
+   * Listování stránkami zúžení neztrácí — jinak se po prvním kliknutí na pager
+   * seznam tiše rozšířil zpátky na celou firmu.
+   */
+  it('keeps the narrowing while paging', async () => {
+    m.routeQuery = { employment: '12' }
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      goToRecurringPage: (page: number) => void
+      goToInputsPage: (page: number) => void
+    }
+
+    vm.goToRecurringPage(2)
+    vm.goToInputsPage(2)
+    await flushPromises()
+
+    expect(m.recurringComponents).toHaveBeenLastCalledWith(12, { limit: 25, offset: 25 })
+    expect(m.inputs).toHaveBeenLastCalledWith(
+      expect.any(String),
+      { limit: 25, offset: 25 },
+      12,
+    )
+    wrapper.unmount()
+  })
+
+  /** Prázdné zúžení se pojmenuje větou, ne tichou prázdnou tabulkou. */
+  it('names an empty narrowing', async () => {
+    m.routeQuery = { employment: '12' }
+    m.inputs.mockResolvedValue({ total: 0, items: [] })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    const notice = wrapper.find('[data-test="payroll-focus-notice"]')
+    expect(notice.exists()).toBe(true)
+    expect(notice.text()).toContain('payroll.agendas.focus.missing')
+    wrapper.unmount()
   })
 
   it('renders matching desktop tables and mobile cards from one API contract', async () => {
@@ -434,7 +509,7 @@ describe('PayrollComponents', () => {
 
     const editor = wrapper.get('[data-testid="payroll-component-editor"]')
     expect(editor.find('select').exists()).toBe(false)
-    expect(editor.findAll('[role="combobox"]').length).toBe(14)
+    expect(editor.findAll('[role="combobox"]').length).toBe(15)
 
     const debit = editor.get('[data-testid="payroll-component-debit"]')
     await debit.get('input').trigger('focus')
@@ -572,6 +647,51 @@ describe('PayrollComponents', () => {
     expect(m.previewInput).toHaveBeenCalledWith(expect.objectContaining({
       quantity_milliunits: 1750,
     }))
+    wrapper.unmount()
+  })
+
+  // Roční koš osvobození je bez náhledu past: účetní zjistí překročení až
+  // tehdy, když z prosincového benefitu vyskočí daň a pojistné. Náhled proto
+  // musí ukázat vyčerpání koše i rozpad na osvobozenou a zdanitelnou část.
+  it('shows how much of the statutory benefit basket is used and what is taxable', async () => {
+    m.previewInput.mockResolvedValue({
+      support_status: 'supported',
+      blocker: null,
+      annual_limit_exceeded: false,
+      annual_limit_minor: null,
+      annual_used_minor: null,
+      annual_after_minor: null,
+      exemption_basket: {
+        basket: 'non_cash_leisure',
+        statute: '§ 6 odst. 9 písm. d) bod 2 ZDP',
+        limit_minor: 2448350,
+        used_before_minor: 1900000,
+        used_after_minor: 2900000,
+        remaining_minor: 0,
+        exempt_minor: 548350,
+        taxable_minor: 451650,
+        limit_exceeded: true,
+      },
+    })
+
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.inputs')!
+      .trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.add')!
+      .trigger('click')
+    await wrapper.get('[data-testid="payroll-input-amount"]').setValue('10000')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.preview')!
+      .trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="payroll-input-basket"]').text())
+      .toContain('payroll.components.inputs.basket_usage')
+    expect(wrapper.get('[data-testid="payroll-input-basket-over"]').text())
+      .toContain('payroll.components.inputs.basket_over_limit')
     wrapper.unmount()
   })
 

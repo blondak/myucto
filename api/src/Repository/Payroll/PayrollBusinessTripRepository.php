@@ -33,6 +33,10 @@ final class PayrollBusinessTripRepository
      * stropu tenhle dotaz přečetl všechny cesty od vzniku firmy — a ke každé
      * ještě její položky a jídla. Stránkuje se s tvrdým stropem.
      *
+     * Zúžení na jeden pracovní vztah (`$employmentId`) padá do TÉHOŽ dotazu jako
+     * stránkování. Dokud filtroval prohlížeč nad načtenou stránkou, cesta z jiné
+     * strany se tiše neprojevila.
+     *
      * @return array{items: list<array<string,mixed>>, total: int}
      */
     public function list(
@@ -40,15 +44,23 @@ final class PayrollBusinessTripRepository
         ?string $periodStart = null,
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
+        ?int $employmentId = null,
     ): array {
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
+        if ($employmentId !== null && $employmentId <= 0) {
+            throw new \InvalidArgumentException('Vztah musí být kladné číslo.');
+        }
 
         $params = [$supplierId];
         $where = '';
         if ($periodStart !== null) {
             $where = ' AND trip.settlement_period_start = ?';
             $params[] = $periodStart;
+        }
+        if ($employmentId !== null) {
+            $where .= ' AND trip.employment_id = ?';
+            $params[] = $employmentId;
         }
         $from = 'FROM payroll_business_trips trip
                JOIN payroll_employees employee

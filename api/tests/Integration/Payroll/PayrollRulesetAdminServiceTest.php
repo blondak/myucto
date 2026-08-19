@@ -464,8 +464,8 @@ final class PayrollRulesetAdminServiceTest extends TestCase
         // doména jako celek zůstává použitelná.
         $social = $byDomain['social_insurance'];
         self::assertFalse($social['manual_review_by_design']);
-        self::assertSame(3, $social['manual_review_parameter_count']);
-        self::assertSame(10, $social['parameter_count']);
+        self::assertSame(1, $social['manual_review_parameter_count']);
+        self::assertSame(16, $social['parameter_count']);
         self::assertNotSame('manual_review', $social['status']);
     }
 

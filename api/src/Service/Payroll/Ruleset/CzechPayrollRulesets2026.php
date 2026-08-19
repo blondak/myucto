@@ -22,8 +22,19 @@ namespace MyInvoice\Service\Payroll\Ruleset;
  * {@see VendorRulesetManifest}. Za dodané hodnoty ručí dodavatel a doloženy jsou
  * {@see RulesetSource} (odkaz + datum stažení) a {@see RulesetTechnicalReview}.
  *
- * Co tím zatím NEVZNIKÁ: formální záznam o tom, KDO za hodnoty ručí. Technická
- * kontrola není odborné ani právní schválení a `approval` zůstává `null`.
+ * ## Kdo za hodnoty ručí
+ *
+ * Do 8/2026 tu stálo, že formální záznam o tom, KDO za hodnoty ručí, nevzniká,
+ * a `approval` bylo u všech jedenácti verzí `null`. Zadavatel rozhodl, že
+ * schvalovatelem je firma, která instalaci PROVOZUJE — proto sadu podepisuje
+ * {@see VendorRulesetApprover}, a to hodnotou z konfigurace instalace, ne
+ * literálem v kódu. Technická kontrola zůstává tím, čím byla (kontrola zdrojů
+ * a přesných hodnot), a je v podpisu vedená jako `reviewed_by`; odbornou
+ * odpovědnost nese `approved_by`.
+ *
+ * Zákazníka se to nedotkne: schválení není součástí otisku OBSAHU
+ * ({@see PayrollRulesetContent}), takže `content_hash` každé verze i uložené
+ * overridy zůstávají beze změny a sada je dál poznána jako dodaná.
  */
 final class CzechPayrollRulesets2026
 {
@@ -37,13 +48,21 @@ final class CzechPayrollRulesets2026
      * a pin hlídá už jen VÝCHOZÍ sadu z kódu — override z administrace má
      * vlastní `content_hash` a vlastní auditní stopu.
      *
-     * Pozor, tenhle pin je nad PLNÝM snapshotem, tedy VČETNĚ lifecyclu — proto se
-     * posunul při překlopení dodané sady na `active`. Otisk obsahu, podle kterého
-     * se pozná dodaná sada, je v {@see VendorRulesetManifest} a ten se překlopením
-     * nezměnil.
+     * Pin je od 8/2026 vedený nad otiskem OBSAHU ({@see PayrollRulesetContent}),
+     * ne nad plným snapshotem. Dřív byl nad plným snapshotem a hýbal se pokaždé,
+     * když se změnilo něco, co s nezabavitelnými částkami nemá nic společného —
+     * naposledy při překlopení dodané sady na `active`. Rozhodující ale bylo
+     * doplnění schvalovatele: ten je podle {@see VendorRulesetApprover} vlastností
+     * INSTALACE, takže pin nad plným snapshotem by u jiného provozovatele nesedl
+     * a shodil by celý mzdový modul výjimkou o nesouhlasném kontrolním součtu.
+     * Nad obsahem pin hlídá přesně to, co hlídat má: dodané částky a jejich zdroje.
+     *
+     * Je to tedy TÁŽ hodnota, jakou pro doménu exekučních srážek nese
+     * {@see VendorRulesetManifest::CONTENT_HASHES}. Dvě čísla pro jednu věc jsou
+     * riziko, proto jejich shodu hlídá `CzechPayrollRulesets2026Test`.
      */
     public const ENFORCEMENT_DEDUCTIONS_HASH =
-        '2eac7d62318c2d361ad6a00ce6d6d443fc68c78d9fff40f1bf900768302edfbd';
+        'ed148cfae04da4449f38425a3ff641f5c54865d741122735992eadb202d8bd1e';
 
     public static function provider(): PayrollRulesetProvider
     {
@@ -83,21 +102,39 @@ final class CzechPayrollRulesets2026
                 'advance.rounding.base_above_100_czk' => PayrollRuleValue::text('ceil-to-100-czk'),
                 'advance.rounding.base_up_to_100_czk' => PayrollRuleValue::text('ceil-to-1-czk'),
                 'advance.rounding.result' => PayrollRuleValue::text('ceil-to-1-czk'),
-                // § 6 odst. 9 písm. b) ZDP — příspěvek na stravování je osvobozený
-                // „v úhrnu do výše 70 % horní hranice stravného, které lze poskytnout
+                // § 6 odst. 9 písm. b) ZDP — příspěvek na stravování „poskytnutého
+                // zaměstnavatelem za jednu směnu …, pokud během této směny
+                // zaměstnanec vykonával práci alespoň 3 hodiny a nevznikl mu během
+                // této směny nárok na stravné v rámci cestovních náhrad …, a to
+                // v úhrnu do výše 70 % horní hranice stravného, které lze poskytnout
                 // zaměstnancům odměňovaným platem při pracovní cestě trvající 5 až
-                // 12 hodin". To je limit NA SMĚNU, ne na rok: 2026 vychází 70 % ze
-                // 185 Kč = 129,50 Kč (`meal_allowance.band_1.tax_exempt_maximum`
-                // v doméně cestovních náhrad). Roční limit mzdové složky
-                // (`payroll_component_definitions.annual_limit_minor`) ho vyjádřit
-                // neumí, protože nezná počet směn — proto tu není částka, ale
-                // vědomé ruční posouzení. Hodnota se tu ZÁMĚRNĚ nepočítá podruhé,
-                // aby nemohla utéct od sazby stravného, ze které plyne.
-                'benefit_exemption.meal.per_shift' => PayrollRuleValue::manualReview(
-                    'Příspěvek na stravování je osvobozený do 70 % horní hranice stravného za '
-                    . 'pracovní cestu 5 až 12 hodin, a to za každou směnu zvlášť. Roční limit '
-                    . 'mzdové složky takový strop nevyjádří a aplikace ho proto netvrdí.',
-                ),
+                // 12 hodin, a v úhrnu do výše 70 % této hranice, je-li příspěvek
+                // poskytnut jako další příspěvek v rámci stejné směny, pokud její
+                // délka v úhrnu s přestávkou v práci povinně poskytovanou
+                // zaměstnavatelem … je delší než 11 hodin".
+                //
+                // Čtyři parametry, protože zákon dává čtyři různá čísla:
+                //   per_shift ....... limit na jednu směnu, tj. 70 % ze 185,00 Kč
+                //                     (`meal_allowance.band_1.tax_exempt_maximum`
+                //                     v doméně cestovních náhrad) = 129,50 Kč.
+                //                     Odvození HLÍDÁ TEST, ať částka nemůže utéct
+                //                     od sazby stravného, ze které plyne.
+                //   shift_rate ...... těch 70 % jako data, ne jako věta v komentáři.
+                //   minimum_work_minutes ......... „alespoň 3 hodiny", NEOSTŘE.
+                //   second_contribution_shift_minutes ... „delší než 11 hodin",
+                //                     OSTŘE, a měří se délka směny V ÚHRNU
+                //                     S PŘESTÁVKOU, tedy hrubý interval směny.
+                //   second_contribution_day_minutes ..... větev pro výkon práce
+                //                     nerozvržený na směny: tam zákon říká
+                //                     „vykonával práci alespoň 11 hodin", tedy
+                //                     NEOSTŘE a o odpracované době, ne o intervalu.
+                'benefit_exemption.meal.minimum_work_minutes' => PayrollRuleValue::integer(180),
+                'benefit_exemption.meal.per_shift' => PayrollRuleValue::moneyMinor(12_950),
+                'benefit_exemption.meal.second_contribution_day_minutes' =>
+                    PayrollRuleValue::integer(660),
+                'benefit_exemption.meal.second_contribution_shift_minutes' =>
+                    PayrollRuleValue::integer(660),
+                'benefit_exemption.meal.shift_rate' => PayrollRuleValue::rate('0.70'),
                 // § 6 odst. 9 písm. d) ZDP — nepeněžní plnění zaměstnanci a jeho
                 // rodinnému příslušníkovi. Od 1. 1. 2025 má dva samostatné roční
                 // ÚHRNNÉ limity odvozené z průměrné mzdy za zdaňovací období
@@ -105,17 +142,40 @@ final class CzechPayrollRulesets2026
                 //   bod 1 — zdravotnické služby a zdravotnické prostředky … průměrná mzda
                 //   bod 2 — rekreace a zájezd, sport, kultura, tisk, použití
                 //           vzdělávacích a předškolních zařízení … polovina průměrné mzdy
-                // Limit je úhrn za celé písmeno (resp. bod), ne za jednu mzdovou
-                // složku. Složkový `annual_limit_minor` je proto jen strop JEDNÉ
-                // složky — nutná, ne postačující podmínka; viz PayrollComponentDefaults.
+                // Limit je úhrn za bod, ne za jednu mzdovou složku, a nerovnost je
+                // NEOSTRÁ („do výše"). Od migrace 1480 ho drží společný koš
+                // {@see \MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket};
+                // složkový `annual_limit_minor` je jen vlastní strop zaměstnavatele.
                 'benefit_exemption.non_cash_health.yearly' => PayrollRuleValue::moneyMinor(4_896_700),
                 'benefit_exemption.non_cash_leisure.yearly' => PayrollRuleValue::moneyMinor(2_448_350),
-                // § 6 odst. 9 písm. p) ZDP — příspěvek zaměstnavatele na daňově
+                // § 6 odst. 9 písm. m) ZDP — příspěvek zaměstnavatele na daňově
                 // podporované produkty spoření na stáří a na pojištění dlouhodobé
-                // péče, osvobozený v úhrnu nejvýše 50 000 Kč ročně. Částku píše
-                // zákon číslem, z průměrné mzdy se neodvozuje.
+                // péče, osvobozený „do úhrnné výše 50000 Kč ročně". Částku píše
+                // zákon číslem, z průměrné mzdy se neodvozuje. Písmeno se posunulo:
+                // do 2023 to bylo p), ve znění účinném pro 2026 je to m).
                 'benefit_exemption.old_age_savings.yearly' => PayrollRuleValue::moneyMinor(5_000_000),
+                // § 6 odst. 9 písm. i) ZDP — „hodnota přechodného ubytování, nejde-li
+                // o ubytování při pracovní cestě, poskytovaná jako nepeněžní plnění
+                // zaměstnavatelem zaměstnancům v souvislosti s výkonem práce, pokud
+                // obec přechodného ubytování není shodná s obcí, kde má zaměstnanec
+                // bydliště, a to maximálně do výše 3 500 Kč měsíčně". Částku píše
+                // zákon číslem a nerovnost je NEOSTRÁ („maximálně do výše"), takže
+                // přesně 3 500 Kč je ještě celé osvobozených. Období je KALENDÁŘNÍ
+                // MĚSÍC, nepřenáší se ani nesčítá do roku.
+                'benefit_exemption.temporary_accommodation.monthly' =>
+                    PayrollRuleValue::moneyMinor(350_000),
+                // § 35d odst. 4 ZDP: „Měsíční daňový bonus lze vyplatit, pokud jeho
+                // výše činí ALESPOŇ 50 Kč." Nerovnost je NEOSTRÁ — přesně 50 Kč se
+                // vyplácí. Sourozeneckým klíčem je `bonus.minimum_amount.yearly`
+                // (§ 35c odst. 3), ne dvanáctinásobek tohohle čísla.
                 'bonus.minimum_amount.monthly' => PayrollRuleValue::moneyMinor(5_000),
+                // § 35c odst. 3 ZDP: „Poplatník může daňový bonus uplatnit, pokud jeho
+                // výše činí ALESPOŇ 100 Kč." Roční hodnota tu stojí VÝSLOVNĚ, protože
+                // 12× měsíční práh by dal 600 Kč — vztah dvanáctiny, který § 35d odst. 2
+                // zakládá pro slevy a daňové zvýhodnění, na prahy výplaty NEDOPADÁ.
+                // Odvozovat ji by byla tichá chyba přesně té třídy, před kterou varuje
+                // {@see \MyInvoice\Service\Payroll\AnnualSettlement\AnnualTaxRates}.
+                'bonus.minimum_amount.yearly' => PayrollRuleValue::moneyMinor(10_000),
                 'bonus.minimum_income.monthly' => PayrollRuleValue::moneyMinor(1_120_000),
                 'bonus.minimum_income.yearly' => PayrollRuleValue::moneyMinor(13_440_000),
                 'credit.child.first.monthly' => PayrollRuleValue::moneyMinor(126_700),
@@ -123,6 +183,19 @@ final class CzechPayrollRulesets2026
                 'credit.child.third_and_next.monthly' => PayrollRuleValue::moneyMinor(232_000),
                 'credit.disability.basic.monthly' => PayrollRuleValue::moneyMinor(21_000),
                 'credit.disability.extended.monthly' => PayrollRuleValue::moneyMinor(42_000),
+                // § 35bb ZDP (od 1. 1. 2024 vyčleněno z § 35ba odst. 1 písm. b), kde
+                // zůstal jen odkaz). Sleva se uplatní AŽ v ročním zúčtování — § 38h
+                // odst. 6 ji vyjmenovává mezi tím, k čemu plátce při výpočtu záloh
+                // nepřihlíží — proto je klíč roční a měsíční protějšek nemá.
+                //
+                // § 35bb odst. 1 věta první: „Výše slevy na manžela činí 24 840 Kč."
+                'credit.spouse.yearly' => PayrollRuleValue::moneyMinor(2_484_000),
+                // § 35bb odst. 1 věta druhá: „Výše slevy se zvyšuje na DVOJNÁSOBEK,
+                // pokud je sleva uplatňována na manžela, kterému je přiznán nárok na
+                // průkaz ZTP/P." Rozhodný je PŘIZNANÝ NÁROK na průkaz, ne jeho držení.
+                // Násobek se veze jako vlastní parametr, ne jako druhá částka, aby
+                // novela základní částky nemohla nechat zdvojnásobenou verzi stát.
+                'credit.spouse.ztp_p_multiplier' => PayrollRuleValue::integer(2),
                 'credit.taxpayer.monthly' => PayrollRuleValue::moneyMinor(257_000),
                 'credit.ztp_p.monthly' => PayrollRuleValue::moneyMinor(134_500),
                 // ROZHODNÁ ČÁSTKA, ne „nejvyšší ještě sražená odměna“. § 6 odst. 4
@@ -149,6 +222,33 @@ final class CzechPayrollRulesets2026
                 // písm. a) z. č. 187/2006 Sb. je 1/10 průměrné mzdy zaokrouhlená dolů
                 // na celých 500 Kč: 48 967 / 10 = 4 896,7 → 4 500 Kč.
                 'other.withholding.threshold' => PayrollRuleValue::moneyMinor(450_000),
+                // § 38ch odst. 5 ZDP: přeplatek z ročního zúčtování plátce vrátí,
+                // „činí-li úhrnná výše tohoto přeplatku VÍCE NEŽ 50 Kč"; § 35d odst. 8
+                // říká totéž o doplatku ze zúčtování u poplatníka s daňovým zvýhodněním.
+                // Nerovnost je OSTRÁ — přesně 50 Kč se nevyplácí.
+                //
+                // Je to JINÉ PRAVIDLO než `bonus.minimum_amount.monthly`, i když je
+                // tam dnes stejné číslo: tamto je práh měsíčního daňového bonusu podle
+                // § 35d odst. 4 a je NEOSTRÝ. Sloučit je by znamenalo, že novela
+                // jednoho tiše změní druhé a navíc obrátí operátor.
+                'settlement.payout_threshold' => PayrollRuleValue::moneyMinor(5_000),
+                // § 35bb odst. 2 písm. b) ZDP: slevu lze uplatnit, jen pokud „manžel
+                // poplatníka nemá vlastní příjem PŘESAHUJÍCÍ za zdaňovací období
+                // 68 000 Kč". Příjem přesně 68 000 Kč nárok neruší.
+                'spouse.income_limit' => PayrollRuleValue::moneyMinor(6_800_000),
+                // Nárok na slevu na manžela aplikace NETVRDÍ. § 35bb odst. 2 písm. a)
+                // přidal od 1. 1. 2024 druhou, KUMULATIVNÍ podmínku: poplatník musí žít
+                // ve společně hospodařící domácnosti s manželem A s vyživovaným dítětem
+                // poplatníka, které nedovršilo věku 3 let (odst. 3 z toho vylučuje vnuka
+                // mimo náhradní péči). Do toho vlastní příjem manžela s taxativním
+                // výčtem sedmi vyňatých plnění (odst. 4) a doložení podle § 38l.
+                // Nic z toho nemá mzdový modul v datech a odhadovat to nebude —
+                // částky výše jsou zákonná čísla, ne příslib, že se sleva spočítá.
+                'credit.spouse.eligibility' => PayrollRuleValue::manualReview(
+                    'Nárok na slevu na manžela závisí na společně hospodařící domácnosti, '
+                    . 'na vyživovaném dítěti do 3 let věku, na vlastním příjmu manžela '
+                    . 'a na doložení podle § 38l — musí ho posoudit mzdová účetní.',
+                ),
                 'withholding.rate' => PayrollRuleValue::rate('0.15'),
             ],
             $technicalReview,
@@ -170,14 +270,38 @@ final class CzechPayrollRulesets2026
                 'employee.discount.working_pensioner' => PayrollRuleValue::rate('0.065'),
                 'employee.rate.ordinary' => PayrollRuleValue::rate('0.071'),
                 'employer.discount.part_time' => PayrollRuleValue::rate('0.05'),
+                // § 7a odst. 3 vyjmenovává meze, při jejichž překročení sleva
+                // NENÁLEŽÍ, ačkoli je zaměstnanec v okruhu podle odst. 1: úhrn
+                // vyměřovacích základů nad 1,5násobek průměrné mzdy, základ na
+                // hodinu nad 1,15 % průměrné mzdy a odpracovaná doba nad 138
+                // hodin. § 7a odst. 2 k tomu váže rozsah sjednané kratší doby
+                // 8 až 30 hodin týdně. Průměrná mzda se mění každý rok, a proto
+                // sem patří i ona — sazby ani limity nesmí být v kódu.
+                'employer.discount.part_time.assessment_base_limit_multiple' =>
+                    PayrollRuleValue::rate('1.5'),
+                'employer.discount.part_time.hourly_assessment_base_limit' =>
+                    PayrollRuleValue::rate('0.0115'),
+                'employer.discount.part_time.maximum_monthly_millihours' =>
+                    PayrollRuleValue::integer(138_000),
+                'employer.discount.part_time.maximum_weekly_millihours' =>
+                    PayrollRuleValue::integer(30_000),
+                'employer.discount.part_time.minimum_weekly_millihours' =>
+                    PayrollRuleValue::integer(8_000),
+                'average_wage.monthly' => PayrollRuleValue::moneyMinor(4_896_700),
+                // § 7 odst. 1 zák. č. 589/1992 Sb. dává zaměstnavateli TŘI sazby,
+                // každou z vlastního vyměřovacího základu podle § 5a odst. 1:
+                // písm. a) běžná 24,8 %, písm. b) zdravotničtí záchranáři a HZS
+                // podniku „počínaje rokem 2026" 29,8 %, písm. c) rizikové
+                // zaměstnání „v roce 2026" 27,8 %. Sazby b) a c) rostou po letech,
+                // takže patří do ročního rulesetu, ne do kódu.
+                //
+                // Zařazení zaměstnance ke kategorii ruleset NEROZHODUJE — to je
+                // údaj o konkrétním člověku a nese ho pracovní vztah spolu
+                // s odkazem na podklad. Bez doloženého zařazení skončí výpočet
+                // na `manual_review` ve vstupu, ne tady na chybějící sazbě.
                 'employer.rate.ordinary' => PayrollRuleValue::rate('0.248'),
-                'employer.rate.rescue_and_company_fire_service' => PayrollRuleValue::manualReview(
-                    'Sazba 29,8 % je oficiální, ale zařazení zaměstnance k hasičskému záchrannému '
-                    . 'sboru nebo mezi podnikové hasiče musí posoudit člověk.',
-                ),
-                'employer.rate.risk_employment' => PayrollRuleValue::manualReview(
-                    'Sazba 27,8 % je oficiální, ale zařazení práce mezi rizikové musí posoudit člověk.',
-                ),
+                'employer.rate.rescue_and_company_fire_service' => PayrollRuleValue::rate('0.298'),
+                'employer.rate.risk_employment' => PayrollRuleValue::rate('0.278'),
                 'maximum_assessment_base.yearly' => PayrollRuleValue::moneyMinor(235_041_600),
                 'participation.dpp.minimum' => PayrollRuleValue::moneyMinor(1_200_000),
                 'participation.small_scale.minimum' => PayrollRuleValue::moneyMinor(450_000),
@@ -359,7 +483,7 @@ final class CzechPayrollRulesets2026
             PayrollRulesetCapability::Supported,
             $sources,
             $parameters,
-            null,
+            VendorRulesetApprover::approval($technicalReview),
             $technicalReview,
         );
     }
@@ -483,7 +607,7 @@ final class CzechPayrollRulesets2026
         array $sources,
         array $parameters,
         RulesetTechnicalReview $technicalReview,
-        ?string $expectedHash = null,
+        ?string $expectedContentHash = null,
     ): PayrollRulesetVersion {
         ksort($parameters, SORT_STRING);
 
@@ -497,9 +621,9 @@ final class CzechPayrollRulesets2026
             $capability,
             $sources,
             $parameters,
-            null,
+            VendorRulesetApprover::approval($technicalReview),
             $technicalReview,
-            $expectedHash,
+            $expectedContentHash,
         );
     }
 

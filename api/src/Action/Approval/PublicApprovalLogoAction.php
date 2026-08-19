@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Approval\ApprovalTokenValidator;
 use MyInvoice\Service\Mail\SafeLogoPath;
+use MyInvoice\Service\Tenant\PublicTenantGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Psr7\Stream;
@@ -38,6 +39,7 @@ final class PublicApprovalLogoAction
     public function __construct(
         private readonly InvoiceRepository $repo,
         private readonly Connection $db,
+        private readonly PublicTenantGuard $tenantGuard,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -51,6 +53,9 @@ final class PublicApprovalLogoAction
         $invoice = $this->repo->findByApprovalToken($token) ?? $this->repo->findByApprovalReceipt($token);
         $supplierId = (int) ($invoice['supplier_id'] ?? 0);
         if ($invoice === null || $supplierId <= 0) {
+            return Json::error($response, 'not_found', 'Logo není k dispozici.', 404);
+        }
+        if (!$this->tenantGuard->allows($request, $supplierId)) {
             return Json::error($response, 'not_found', 'Logo není k dispozici.', 404);
         }
 

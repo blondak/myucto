@@ -17,6 +17,12 @@ use PDOException;
  */
 final class PayrollAnnualSettlementRepository
 {
+    public const LIST_DEFAULT_LIMIT = 25;
+    // Strop se klampuje i tady, ne jen na HTTP hranici: repozitář volá i jiný
+    // kód než akce a „vypiš všechny lidi firmy" nesmí jít objednat nikudy.
+    public const LIST_MAX_LIMIT = 200;
+    public const LIST_STATES = ['all', 'requested', 'settled', 'unsettled'];
+
     public function __construct(private readonly Connection $db) {}
 
     /** @return array<string,mixed>|null */
@@ -217,22 +223,91 @@ final class PayrollAnnualSettlementRepository
         return ['outcome' => $outcome, 'created' => true];
     }
 
-    /** Naváže mzdový vstup, kterým se přeplatek vrací (§ 38ch odst. 5). */
-    public function linkPayrollInput(
+    /**
+     * Co se v daném mzdovém období vyplácí (§ 38ch odst. 5, § 35d odst. 8).
+     *
+     * Okno je dané zákonem z obou stran: dřív než v měsíci provedení zúčtování
+     * vyplácet není co, a „nejpozději při zúčtování mzdy za březen po uplynutí
+     * zdaňovacího období" je poslední možnost. Výsledek navázaný na JINÝ běh se
+     * nevrací — jinak by se přeplatek vyplatil dvakrát. Vlastní běh se vrací
+     * dál, aby přepočet revize dal totéž číslo.
+     *
+     * @return array<int,int> employee_id => částka v haléřích
+     */
+    public function payableOutcomesForPeriod(
         int $supplierId,
-        int $outcomeId,
-        int $payrollInputId,
-    ): void {
+        int $runId,
+        string $periodStart,
+    ): array {
         $statement = $this->db->pdo()->prepare(
-            'UPDATE payroll_annual_settlement_outcomes
-                SET payroll_input_id = ?
-              WHERE supplier_id = ? AND id = ? AND payroll_input_id IS NULL'
+            'SELECT employee_id, SUM(payable_minor) AS payable_minor
+               FROM payroll_annual_settlement_outcomes
+              WHERE supplier_id = ?
+                AND payable_minor > 0
+                AND (payout_run_id IS NULL OR payout_run_id = ?)
+                AND ? >= DATE_FORMAT(settled_on, \'%Y-%m-01\')
+                AND ? <= CONCAT(tax_year + 1, \'-03-01\')
+              GROUP BY employee_id'
         );
-        $statement->execute([$payrollInputId, $supplierId, $outcomeId]);
-        if ($statement->rowCount() === 0) {
-            throw new PayrollAnnualSettlementConflictException(
-                'Výplata přeplatku už je navázaná na jiný mzdový vstup.',
-            );
+        $statement->execute([$supplierId, $runId, $periodStart, $periodStart]);
+        $payouts = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $payouts[(int) $row['employee_id']] = (int) $row['payable_minor'];
+        }
+        ksort($payouts, SORT_NUMERIC);
+
+        return $payouts;
+    }
+
+    /**
+     * Zapíše, kterou revizí se doplatek ze zúčtování vyplatil.
+     *
+     * Nejdřív se vazby toho běhu uvolní. Přepočet revize může seznam zúžit
+     * (zaměstnanec z běhu vypadl) a zůstalá vazba by tvrdila, že se vyplatilo
+     * něco, co ve výsledku není.
+     *
+     * @param array<int,int> $payouts employee_id => částka v haléřích
+     */
+    public function linkPayout(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+        string $periodStart,
+        array $payouts,
+    ): void {
+        $release = $this->db->pdo()->prepare(
+            'UPDATE payroll_annual_settlement_outcomes
+                SET payout_run_id = NULL,
+                    payout_revision_id = NULL,
+                    payout_period_start = NULL
+              WHERE supplier_id = ? AND payout_run_id = ?'
+        );
+        $release->execute([$supplierId, $runId]);
+        if ($payouts === []) {
+            return;
+        }
+        $link = $this->db->pdo()->prepare(
+            'UPDATE payroll_annual_settlement_outcomes
+                SET payout_run_id = ?,
+                    payout_revision_id = ?,
+                    payout_period_start = ?
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND payable_minor > 0
+                AND payout_run_id IS NULL
+                AND ? >= DATE_FORMAT(settled_on, \'%Y-%m-01\')
+                AND ? <= CONCAT(tax_year + 1, \'-03-01\')'
+        );
+        foreach (array_keys($payouts) as $employeeId) {
+            $link->execute([
+                $runId,
+                $revisionId,
+                $periodStart,
+                $supplierId,
+                $employeeId,
+                $periodStart,
+                $periodStart,
+            ]);
         }
     }
 
@@ -242,10 +317,61 @@ final class PayrollAnnualSettlementRepository
      * Zaměstnanec BEZ žádosti v seznamu zůstává — prázdný stav je informace
      * („nikdo nepožádal"), ne důvod ho schovat.
      *
-     * @return list<array<string,mixed>>
+     * Stránkuje SERVER. Firma se stovkou lidí posílala celý seznam najednou
+     * a obrazovka z něj zobrazila všechno — u ročního zúčtování je to navíc
+     * seznam, ve kterém se pracuje adresně (kdo požádal, komu co chybí),
+     * takže zúžení a stránka jsou tu užitečnější než úplný výpis.
+     *
+     * `state` je pojmenované zúžení, ne odvozený součet:
+     *  - `requested`   — požádal podle § 38ch odst. 1 a nemá výsledek
+     *  - `settled`     — zúčtování je provedené (existuje výsledek)
+     *  - `unsettled`   — výsledek neexistuje, ať už požádal, nebo ne
+     *
+     * @return array{items:list<array<string,mixed>>,total:int}
      */
-    public function listForYear(int $supplierId, int $taxYear): array
-    {
+    public function listForYear(
+        int $supplierId,
+        int $taxYear,
+        int $limit,
+        int $offset,
+        string $search = '',
+        string $state = 'all',
+    ): array {
+        $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
+        $offset = max(0, $offset);
+        $search = trim($search);
+        if (!in_array($state, self::LIST_STATES, true)) {
+            throw new \InvalidArgumentException('Zúžení přehledu ročního zúčtování není platné.');
+        }
+        $conditions = '';
+        $filterParams = [];
+        if ($search !== '') {
+            $conditions .= ' AND employee.full_name LIKE ?';
+            $filterParams[] = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $search) . '%';
+        }
+        $conditions .= match ($state) {
+            'requested' => ' AND request.request_status = "requested" AND outcome.id IS NULL',
+            'settled' => ' AND outcome.id IS NOT NULL',
+            'unsettled' => ' AND outcome.id IS NULL',
+            default => '',
+        };
+
+        $joins =
+            '  FROM payroll_employees employee
+               LEFT JOIN payroll_annual_settlement_requests request
+                 ON request.supplier_id = employee.supplier_id
+                AND request.employee_id = employee.id
+                AND request.tax_year = ?
+               LEFT JOIN payroll_annual_settlement_outcomes outcome
+                 ON outcome.supplier_id = employee.supplier_id
+                AND outcome.employee_id = employee.id
+                AND outcome.tax_year = ?
+              WHERE employee.supplier_id = ?' . $conditions;
+
+        $countStatement = $this->db->pdo()->prepare('SELECT COUNT(*) ' . $joins);
+        $countStatement->execute([$taxYear, $taxYear, $supplierId, ...$filterParams]);
+        $total = (int) $countStatement->fetchColumn();
+
         $statement = $this->db->pdo()->prepare(
             'SELECT employee.id AS employee_id,
                     employee.full_name AS employee_name,
@@ -262,26 +388,32 @@ final class PayrollAnnualSettlementRepository
                     outcome.settlement_difference_minor,
                     outcome.payable_minor,
                     outcome.settled_on,
-                    outcome.payroll_input_id,
+                    outcome.payout_run_id,
+                    outcome.payout_revision_id,
+                    outcome.payout_period_start,
                     outcome.annual_revision_id
-               FROM payroll_employees employee
-               LEFT JOIN payroll_annual_settlement_requests request
-                 ON request.supplier_id = employee.supplier_id
-                AND request.employee_id = employee.id
-                AND request.tax_year = ?
-               LEFT JOIN payroll_annual_settlement_outcomes outcome
-                 ON outcome.supplier_id = employee.supplier_id
-                AND outcome.employee_id = employee.id
-                AND outcome.tax_year = ?
-              WHERE employee.supplier_id = ?
-              ORDER BY employee.full_name, employee.id'
+             ' . $joins . '
+              ORDER BY employee.full_name, employee.id
+              LIMIT ? OFFSET ?'
         );
-        $statement->execute([$taxYear, $taxYear, $supplierId]);
+        $position = 0;
+        foreach ([$taxYear, $taxYear, $supplierId] as $value) {
+            $statement->bindValue(++$position, $value, PDO::PARAM_INT);
+        }
+        foreach ($filterParams as $value) {
+            $statement->bindValue(++$position, $value, PDO::PARAM_STR);
+        }
+        $statement->bindValue(++$position, $limit, PDO::PARAM_INT);
+        $statement->bindValue(++$position, $offset, PDO::PARAM_INT);
+        $statement->execute();
 
-        return array_values(array_map(
-            self::castListRow(...),
-            $statement->fetchAll(PDO::FETCH_ASSOC),
-        ));
+        return [
+            'items' => array_values(array_map(
+                self::castListRow(...),
+                $statement->fetchAll(PDO::FETCH_ASSOC),
+            )),
+            'total' => $total,
+        ];
     }
 
     /**
@@ -347,6 +479,111 @@ final class PayrollAnnualSettlementRepository
     }
 
     /**
+     * Potvrzení od předchozích plátců daně za daný rok (§ 38ch odst. 3).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function certificatesForYear(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_annual_settlement_certificates
+              WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?
+              ORDER BY certificate_reference, id'
+        );
+        $statement->execute([$supplierId, $employeeId, $taxYear]);
+
+        return array_map(
+            self::castCertificate(...),
+            array_values($statement->fetchAll(PDO::FETCH_ASSOC)),
+        );
+    }
+
+    /**
+     * Přepíše celý seznam potvrzení za rok.
+     *
+     * Celý seznam schválně, ne po řádcích: potvrzení dávají smysl jen jako
+     * úplná sada za rok (§ 38ch odst. 3 mluví o dokladech od VŠECH předchozích
+     * plátců), takže se ukládají jedním úkonem stejně, jako se jedním úkonem
+     * zadávají. Uložení po jednom by dovolilo stav, kdy je půlka roku doložená
+     * a druhá zmizela.
+     *
+     * Volá se uvnitř transakce volajícího — smazání a vložení nesmí být vidět
+     * odděleně.
+     *
+     * @param list<array<string,mixed>> $rows
+     */
+    public function replaceCertificates(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+        array $rows,
+        ?int $actorUserId,
+    ): void {
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) {
+            throw new \LogicException(
+                'Přepis potvrzení od jiných plátců musí běžet v transakci.',
+            );
+        }
+
+        $delete = $pdo->prepare(
+            'DELETE FROM payroll_annual_settlement_certificates
+              WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?'
+        );
+        $delete->execute([$supplierId, $employeeId, $taxYear]);
+
+        if ($rows === []) {
+            return;
+        }
+
+        $insert = $pdo->prepare(
+            'INSERT INTO payroll_annual_settlement_certificates
+                (supplier_id, employee_id, tax_year, certificate_reference,
+                 payer_name, payer_tax_identification, received_on,
+                 gross_income_minor, advance_base_minor, advance_tax_minor,
+                 credit_35ba_minor, credit_35c_minor, tax_bonus_minor,
+                 evidence_status, evidence_reference, note,
+                 created_by, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        foreach ($rows as $row) {
+            try {
+                $insert->execute([
+                    $supplierId,
+                    $employeeId,
+                    $taxYear,
+                    $row['certificate_reference'],
+                    $row['payer_name'] ?? null,
+                    $row['payer_tax_identification'] ?? null,
+                    $row['received_on'] ?? null,
+                    $row['gross_income_minor'] ?? null,
+                    $row['advance_base_minor'] ?? null,
+                    $row['advance_tax_minor'] ?? null,
+                    $row['credit_35ba_minor'] ?? null,
+                    $row['credit_35c_minor'] ?? null,
+                    $row['tax_bonus_minor'] ?? null,
+                    $row['evidence_status'] ?? 'unverified',
+                    $row['evidence_reference'] ?? null,
+                    $row['note'] ?? null,
+                    $actorUserId,
+                    $actorUserId,
+                ]);
+            } catch (PDOException $exception) {
+                if ((int) ($exception->errorInfo[1] ?? 0) === 1062) {
+                    throw new PayrollAnnualSettlementConflictException(
+                        'Potvrzení se stejným označením je v seznamu dvakrát.',
+                        previous: $exception,
+                    );
+                }
+                throw $exception;
+            }
+        }
+    }
+
+    /**
      * Prohlášení k dani a rezidentství účinné k danému dni.
      *
      * @return array{declaration:?string,residence:?string}
@@ -400,6 +637,31 @@ final class PayrollAnnualSettlementRepository
     }
 
     /**
+     * Částky zůstávají `null`, když je potvrzení nenese.
+     *
+     * Přetypovat je na nulu by znamenalo, že se chybějící údaj tváří jako
+     * doložená nula — a přesně z toho by vyšel přeplatek, který poplatníkovi
+     * nenáleží. Viz `ExternalEmployerTaxCertificate`.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private static function castCertificate(array $row): array
+    {
+        foreach ([
+            'id', 'supplier_id', 'employee_id', 'tax_year', 'row_version',
+            'gross_income_minor', 'advance_base_minor', 'advance_tax_minor',
+            'credit_35ba_minor', 'credit_35c_minor', 'tax_bonus_minor',
+        ] as $key) {
+            if (array_key_exists($key, $row) && $row[$key] !== null) {
+                $row[$key] = (int) $row[$key];
+            }
+        }
+
+        return $row;
+    }
+
+    /**
      * @param array<string,mixed> $row
      * @return array<string,mixed>
      */
@@ -409,7 +671,7 @@ final class PayrollAnnualSettlementRepository
             'id', 'supplier_id', 'employee_id', 'tax_year', 'annual_revision_id',
             'tax_difference_minor', 'bonus_difference_minor',
             'settlement_difference_minor', 'payable_minor',
-            'payout_threshold_minor', 'payroll_input_id',
+            'payout_threshold_minor', 'payout_run_id', 'payout_revision_id',
         ] as $key) {
             if (array_key_exists($key, $row) && $row[$key] !== null) {
                 $row[$key] = (int) $row[$key];
@@ -428,7 +690,8 @@ final class PayrollAnnualSettlementRepository
         foreach ([
             'employee_id', 'row_version', 'outcome_id', 'annual_revision_id',
             'tax_difference_minor', 'bonus_difference_minor',
-            'settlement_difference_minor', 'payable_minor', 'payroll_input_id',
+            'settlement_difference_minor', 'payable_minor',
+            'payout_run_id', 'payout_revision_id',
         ] as $key) {
             if (array_key_exists($key, $row) && $row[$key] !== null) {
                 $row[$key] = (int) $row[$key];

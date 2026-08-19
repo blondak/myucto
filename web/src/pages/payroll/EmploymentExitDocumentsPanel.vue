@@ -9,6 +9,8 @@ import {
   type PayrollEmploymentCertificateEvidence,
   type PayrollEmploymentCertificatePensionPeriod,
   type PayrollEmploymentExitDocumentList,
+  type PayrollPensionInsurancePeriod,
+  type PayrollTerminationReasonKind,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -33,7 +35,7 @@ const toast = useToast()
 const loading = ref(true)
 const generating = ref(false)
 const downloadingId = ref<number | null>(null)
-const activeTab = ref<'employment' | 'average'>('employment')
+const activeTab = ref<'employment' | 'average' | 'statement'>('employment')
 const showForm = ref(false)
 const loadError = ref('')
 const formError = ref('')
@@ -56,6 +58,31 @@ const pensionCategoryOptions: Array<{
   { value: 'II', label: 'II' },
 ]
 
+const showAverageForm = ref(false)
+const showStatementForm = ref(false)
+const terminationAssessmentComplete = ref(false)
+const terminationReasonKind = ref<PayrollTerminationReasonKind>('none')
+const employeeStatedReason = ref('')
+const pensionInsurancePeriods = ref<PayrollPensionInsurancePeriod[]>([])
+const averageCorrectionReason = ref('')
+const requestedPurpose = ref('')
+const statementCorrectionReason = ref('')
+const terminationReasonOptions = computed(() =>
+  ([
+    'none',
+    'gross_breach',
+    'sickness_regime_breach',
+    'organizational',
+    'health',
+    'employer_breach',
+    'employee_unilateral',
+    'agreement',
+  ] as const).map(value => ({
+    value,
+    label: t(`payroll.people.exit_documents.termination_reasons.${value}`),
+  })),
+)
+
 const employmentReadiness = computed(() => data.value?.readiness.employment_certificate ?? null)
 const averageReadiness = computed(() => data.value?.readiness.average_earnings_certificate ?? null)
 const employmentDocuments = computed(() =>
@@ -63,6 +90,32 @@ const employmentDocuments = computed(() =>
 )
 const averageDocuments = computed(() =>
   (data.value?.items ?? []).filter(item => item.document_kind === 'average_earnings_certificate'),
+)
+const statementReadiness = computed(() => data.value?.readiness.average_earnings_statement ?? null)
+const statementDocuments = computed(() =>
+  (data.value?.items ?? []).filter(item => item.document_kind === 'average_earnings_statement'),
+)
+const hasExistingAverage = computed(() => averageDocuments.value.length > 0)
+const hasExistingStatement = computed(() => statementDocuments.value.length > 0)
+const statedReasonRequired = computed(() =>
+  terminationReasonKind.value === 'employee_unilateral'
+  || terminationReasonKind.value === 'agreement',
+)
+const pensionInsurancePeriodsComplete = computed(() =>
+  pensionInsurancePeriods.value.every(row => row.from && row.to && row.from <= row.to),
+)
+const canGenerateAverage = computed(() =>
+  props.canWrite
+  && averageReadiness.value?.available === true
+  && terminationAssessmentComplete.value
+  && pensionInsurancePeriodsComplete.value
+  && (!hasExistingAverage.value || averageCorrectionReason.value.trim() !== ''),
+)
+const canGenerateStatement = computed(() =>
+  props.canWrite
+  && statementReadiness.value?.available === true
+  && requestedPurpose.value.trim() !== ''
+  && (!hasExistingStatement.value || statementCorrectionReason.value.trim() !== ''),
 )
 const hasExistingCertificate = computed(() => employmentDocuments.value.length > 0)
 const isDpp = computed(() => props.employment.relation_type === 'dpp')
@@ -116,6 +169,13 @@ function resetEvidence(): void {
   deductionAssessmentComplete.value = false
   pensionCategoryAssessmentComplete.value = false
   correctionReason.value = ''
+  terminationAssessmentComplete.value = false
+  terminationReasonKind.value = 'none'
+  employeeStatedReason.value = ''
+  pensionInsurancePeriods.value = []
+  averageCorrectionReason.value = ''
+  requestedPurpose.value = ''
+  statementCorrectionReason.value = ''
   pensionPeriods.value = []
   deductions.value = deductionClaimIds.value.map(sourceClaimId => ({
     source_claim_id: sourceClaimId,
@@ -201,6 +261,71 @@ async function generate(): Promise<void> {
   }
 }
 
+function addPensionInsurancePeriod(): void {
+  pensionInsurancePeriods.value.push({ from: '', to: '' })
+}
+
+function removePensionInsurancePeriod(index: number): void {
+  pensionInsurancePeriods.value.splice(index, 1)
+}
+
+async function generateAverage(): Promise<void> {
+  if (!canGenerateAverage.value || generating.value) return
+  generating.value = true
+  formError.value = ''
+  pendingIdempotencyKey.value ||= createIdempotencyKey()
+  try {
+    await payrollApi.generateAverageEarningsCertificate(
+      props.employment.id,
+      {
+        termination_assessment_complete: true,
+        termination_reason_kind: terminationReasonKind.value,
+        employee_stated_reason: statedReasonRequired.value
+          ? (employeeStatedReason.value.trim() || null)
+          : null,
+        pension_insurance_periods: pensionInsurancePeriods.value.map(row => ({ ...row })),
+        correction_reason: averageCorrectionReason.value.trim() || null,
+      },
+      pendingIdempotencyKey.value,
+    )
+    pendingIdempotencyKey.value = ''
+    showAverageForm.value = false
+    toast.success(t('payroll.people.exit_documents.created'))
+    await load()
+  } catch (error) {
+    formError.value = apiErrorMessage(error, t('payroll.people.exit_documents.create_failed'))
+    toast.error(formError.value)
+  } finally {
+    generating.value = false
+  }
+}
+
+async function generateStatement(): Promise<void> {
+  if (!canGenerateStatement.value || generating.value) return
+  generating.value = true
+  formError.value = ''
+  pendingIdempotencyKey.value ||= createIdempotencyKey()
+  try {
+    await payrollApi.generateAverageEarningsStatement(
+      props.employment.id,
+      {
+        requested_purpose: requestedPurpose.value.trim(),
+        correction_reason: statementCorrectionReason.value.trim() || null,
+      },
+      pendingIdempotencyKey.value,
+    )
+    pendingIdempotencyKey.value = ''
+    showStatementForm.value = false
+    toast.success(t('payroll.people.exit_documents.created'))
+    await load()
+  } catch (error) {
+    formError.value = apiErrorMessage(error, t('payroll.people.exit_documents.create_failed'))
+    toast.error(formError.value)
+  } finally {
+    generating.value = false
+  }
+}
+
 async function download(document: PayrollDocument): Promise<void> {
   if (downloadingId.value !== null) return
   downloadingId.value = document.id
@@ -244,7 +369,7 @@ onMounted(() => void load())
       :aria-label="t('payroll.people.exit_documents.tabs.label')"
     >
       <button
-        v-for="tab in (['employment', 'average'] as const)"
+        v-for="tab in (['employment', 'average', 'statement'] as const)"
         :key="tab"
         type="button"
         class="whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition"
@@ -456,29 +581,230 @@ onMounted(() => void load())
         </div>
       </template>
 
-      <template v-else>
-        <div class="rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-warning-800" role="status" data-test="average-certificate-unavailable">
+      <template v-else-if="activeTab === 'average'">
+        <div
+          v-if="averageReadiness?.available"
+          class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-success-500/30 bg-success-50 p-3"
+        >
+          <div>
+            <p class="text-sm font-medium text-success-800">
+              {{ t('payroll.people.exit_documents.average_ready') }}
+            </p>
+            <p class="mt-0.5 text-xs text-success-700">
+              {{ t('payroll.people.exit_documents.average_hint') }}
+            </p>
+          </div>
+          <button
+            v-if="canWrite"
+            type="button"
+            :class="btnFilled('primary')"
+            data-test="open-average-certificate-form"
+            @click="showAverageForm = !showAverageForm"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="showAverageForm ? ICONS.x : ICONS.doc" /></svg>
+            {{ t(showAverageForm ? 'common.cancel' : 'payroll.people.exit_documents.generate') }}
+          </button>
+        </div>
+        <div
+          v-else
+          class="rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-warning-800"
+          role="status"
+          data-test="average-certificate-unavailable"
+        >
           <p class="text-sm font-medium">{{ t('payroll.people.exit_documents.average_unavailable') }}</p>
           <p class="mt-1 text-xs">
             {{ blockerLabel(
-              averageReadiness?.readiness_code ?? 'average_earnings_ruleset_not_ready',
+              averageReadiness?.readiness_code,
               { year: averageReadiness?.decisive_year, quarter: averageReadiness?.decisive_quarter },
             ) }}
           </p>
         </div>
-        <div v-if="averageDocuments.length" class="mt-4 space-y-2">
+
+        <form
+          v-if="showAverageForm && averageReadiness?.available"
+          class="mt-4 space-y-4 rounded-lg border border-payroll-500/30 bg-surface p-3 sm:p-4"
+          data-test="average-certificate-form"
+          @submit.prevent="generateAverage"
+        >
+          <div class="text-xs text-neutral-600">
+            <span>{{ t('payroll.people.exit_documents.termination_reason') }}</span>
+            <SearchableSelect
+              v-model="terminationReasonKind"
+              class="mt-1"
+              :options="terminationReasonOptions"
+              :clearable="false"
+              accent="payroll"
+              :aria-label="t('payroll.people.exit_documents.termination_reason')"
+            />
+          </div>
+          <label v-if="statedReasonRequired" class="block text-xs text-neutral-600">
+            {{ t('payroll.people.exit_documents.employee_stated_reason') }}
+            <textarea v-model="employeeStatedReason" rows="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></textarea>
+          </label>
+
+          <div>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p class="text-sm font-semibold text-neutral-900">
+                  {{ t('payroll.people.exit_documents.pension_insurance_periods') }}
+                </p>
+                <p class="text-xs text-neutral-500">
+                  {{ t('payroll.people.exit_documents.pension_insurance_hint') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                :class="btnFilledSm('primary')"
+                data-test="add-pension-insurance-period"
+                @click="addPensionInsurancePeriod"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+                {{ t('payroll.people.exit_documents.add_period') }}
+              </button>
+            </div>
+            <div v-for="(row, index) in pensionInsurancePeriods" :key="index" class="mt-3 grid grid-cols-1 gap-3 rounded-lg border border-neutral-200 p-3 sm:grid-cols-[1fr_1fr_auto]">
+              <label class="text-xs text-neutral-600">{{ t('payroll.people.exit_documents.from') }}<input v-model="row.from" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+              <label class="text-xs text-neutral-600">{{ t('payroll.people.exit_documents.to') }}<input v-model="row.to" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+              <button type="button" :class="btnOutlineSm('danger')" class="self-end" @click="removePensionInsurancePeriod(index)">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+                {{ t('common.remove') }}
+              </button>
+            </div>
+          </div>
+
+          <label class="flex items-start gap-2 text-sm text-neutral-700">
+            <input v-model="terminationAssessmentComplete" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-payroll-600">
+            {{ t('payroll.people.exit_documents.termination_confirm') }}
+          </label>
+
+          <label v-if="hasExistingAverage" class="block text-xs text-neutral-600">
+            {{ t('payroll.people.exit_documents.correction_reason') }}
+            <textarea v-model="averageCorrectionReason" required rows="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></textarea>
+          </label>
+
+          <p v-if="formError" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert">
+            {{ formError }}
+          </p>
+          <div class="flex flex-wrap justify-end gap-2">
+            <button type="button" :class="btnOutline('neutral')" @click="showAverageForm = false">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+              {{ t('common.cancel') }}
+            </button>
+            <button type="submit" :class="btnFilled('primary')" :disabled="!canGenerateAverage || generating" data-test="generate-average-certificate">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.doc" /></svg>
+              {{ t('payroll.people.exit_documents.generate') }}
+            </button>
+          </div>
+        </form>
+
+        <div class="mt-4 space-y-2">
+          <p v-if="averageDocuments.length === 0" class="text-sm text-neutral-500">
+            {{ t('payroll.people.exit_documents.empty') }}
+          </p>
           <article v-for="document in averageDocuments" :key="document.id" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-surface p-3">
             <div class="min-w-0">
               <p class="truncate text-sm font-medium text-neutral-900">{{ document.suggested_filename }}</p>
-              <p class="mt-0.5 text-xs text-neutral-500">{{ formatDate(document.created_at) }} · {{ formatSize(document.size_bytes) }}</p>
+              <p class="mt-0.5 text-xs text-neutral-500">
+                {{ formatDate(document.created_at) }} · {{ formatSize(document.size_bytes) }} ·
+                {{ t('payroll.people.exit_documents.revision', { revision: document.document_revision_no ?? 1 }) }}
+              </p>
             </div>
-            <button type="button" :class="btnOutlineSm('neutral')" :disabled="downloadingId !== null" @click="download(document)">
+            <button type="button" :class="btnOutlineSm('neutral')" :disabled="downloadingId !== null" data-test="download-average-document" @click="download(document)">
               <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.download" /></svg>
               {{ t('common.download') }}
             </button>
           </article>
         </div>
       </template>
+
+      <template v-else>
+        <div
+          v-if="statementReadiness?.available"
+          class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-success-500/30 bg-success-50 p-3"
+        >
+          <div>
+            <p class="text-sm font-medium text-success-800">
+              {{ t('payroll.people.exit_documents.statement_ready') }}
+            </p>
+            <p class="mt-0.5 text-xs text-success-700">
+              {{ t('payroll.people.exit_documents.statement_hint') }}
+            </p>
+          </div>
+          <button
+            v-if="canWrite"
+            type="button"
+            :class="btnFilled('primary')"
+            data-test="open-average-statement-form"
+            @click="showStatementForm = !showStatementForm"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="showStatementForm ? ICONS.x : ICONS.doc" /></svg>
+            {{ t(showStatementForm ? 'common.cancel' : 'payroll.people.exit_documents.generate') }}
+          </button>
+        </div>
+        <div
+          v-else
+          class="rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-warning-800"
+          role="status"
+          data-test="average-statement-unavailable"
+        >
+          <p class="text-sm font-medium">{{ t('payroll.people.exit_documents.statement_unavailable') }}</p>
+          <p class="mt-1 text-xs">
+            {{ blockerLabel(
+              statementReadiness?.readiness_code,
+              { year: statementReadiness?.decisive_year, quarter: statementReadiness?.decisive_quarter },
+            ) }}
+          </p>
+        </div>
+
+        <form
+          v-if="showStatementForm && statementReadiness?.available"
+          class="mt-4 space-y-4 rounded-lg border border-payroll-500/30 bg-surface p-3 sm:p-4"
+          data-test="average-statement-form"
+          @submit.prevent="generateStatement"
+        >
+          <label class="block text-xs text-neutral-600">
+            {{ t('payroll.people.exit_documents.requested_purpose') }}
+            <input v-model="requestedPurpose" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+          </label>
+          <label v-if="hasExistingStatement" class="block text-xs text-neutral-600">
+            {{ t('payroll.people.exit_documents.correction_reason') }}
+            <textarea v-model="statementCorrectionReason" required rows="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></textarea>
+          </label>
+          <p v-if="formError" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert">
+            {{ formError }}
+          </p>
+          <div class="flex flex-wrap justify-end gap-2">
+            <button type="button" :class="btnOutline('neutral')" @click="showStatementForm = false">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+              {{ t('common.cancel') }}
+            </button>
+            <button type="submit" :class="btnFilled('primary')" :disabled="!canGenerateStatement || generating" data-test="generate-average-statement">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.doc" /></svg>
+              {{ t('payroll.people.exit_documents.generate') }}
+            </button>
+          </div>
+        </form>
+
+        <div class="mt-4 space-y-2">
+          <p v-if="statementDocuments.length === 0" class="text-sm text-neutral-500">
+            {{ t('payroll.people.exit_documents.empty') }}
+          </p>
+          <article v-for="document in statementDocuments" :key="document.id" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-surface p-3">
+            <div class="min-w-0">
+              <p class="truncate text-sm font-medium text-neutral-900">{{ document.suggested_filename }}</p>
+              <p class="mt-0.5 text-xs text-neutral-500">
+                {{ formatDate(document.created_at) }} · {{ formatSize(document.size_bytes) }} ·
+                {{ t('payroll.people.exit_documents.revision', { revision: document.document_revision_no ?? 1 }) }}
+              </p>
+            </div>
+            <button type="button" :class="btnOutlineSm('neutral')" :disabled="downloadingId !== null" data-test="download-statement-document" @click="download(document)">
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.download" /></svg>
+              {{ t('common.download') }}
+            </button>
+          </article>
+        </div>
+      </template>
+
     </div>
   </section>
 </template>

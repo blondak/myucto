@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Retention;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmployeeDeletionRepository;
+use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Repository\Payroll\PayrollPersonAnonymizationRepository;
 use MyInvoice\Repository\Payroll\PayrollRetentionPolicyRepository;
 use MyInvoice\Repository\RetentionHoldRepository;
@@ -73,11 +74,12 @@ final class PayrollRetentionService
         $heldIds = $this->holds->heldPayrollEmployeeIds($supplierId);
 
         $out = [];
-        foreach ($employees as $employeeId => $lastYear) {
+        foreach ($employees as $employeeId => $employee) {
             $out[] = $this->assessOne(
                 $supplierId,
                 $employeeId,
-                $lastYear,
+                $employee['full_name'],
+                $employee['last_year'],
                 $years,
                 $presence[$employeeId] ?? [],
                 $heldIds,
@@ -96,6 +98,7 @@ final class PayrollRetentionService
     private function assessOne(
         int $supplierId,
         int $employeeId,
+        string $fullName,
         int $lastRecordYear,
         array $years,
         array $presentCategories,
@@ -180,6 +183,7 @@ final class PayrollRetentionService
 
         return new PayrollRetentionAssessment(
             $employeeId,
+            $fullName,
             $lastRecordYear,
             $categories,
             $governing?->category,
@@ -202,32 +206,43 @@ final class PayrollRetentionService
      * AKTUÁLNÍ rok: dokud člověk u firmy je, lhůta se nemá od čeho odpíchnout.
      * Bez toho by zaměstnanec bez zaúčtované mzdy vypadal jako dávno odešlý.
      *
-     * @return array<int,int> employee_id => rok
+     * Jméno se bere TÝMŽ výrazem jako seznam osob
+     * ({@see PayrollPeopleRepository::fullNameExpression()}), ne přímo ze sloupce
+     * `payroll_employees.full_name`. Po změně příjmení by se jinak seznam osob
+     * a návrh k výmazu rozešly a mluvily o téže osobě dvěma jmény.
+     *
+     * @return array<int,array{full_name:string,last_year:int}>
      */
     private function employeeYears(int $supplierId): array
     {
         $currentYear = (int) date('Y');
         $stmt = $this->db->pdo()->prepare(
-            'SELECT e.id AS employee_id,
+            'SELECT employee.id AS employee_id,
+                    ' . PayrollPeopleRepository::fullNameExpression() . ' AS full_name,
                     GREATEST(
                         COALESCE((SELECT MAX(r.year) FROM payroll_monthly_records r
-                                   WHERE r.supplier_id = e.supplier_id AND r.employee_id = e.id), 0),
+                                   WHERE r.supplier_id = employee.supplier_id
+                                     AND r.employee_id = employee.id), 0),
                         COALESCE((SELECT MAX(CASE
                                      WHEN m.status IN (\'draft\', \'active\') OR m.end_date IS NULL
                                           THEN ?
                                      ELSE YEAR(m.end_date) END)
                                     FROM payroll_employments m
-                                   WHERE m.supplier_id = e.supplier_id AND m.employee_id = e.id), 0),
-                        YEAR(e.updated_at)
+                                   WHERE m.supplier_id = employee.supplier_id
+                                     AND m.employee_id = employee.id), 0),
+                        YEAR(employee.updated_at)
                     ) AS last_year
-               FROM payroll_employees e
-              WHERE e.supplier_id = ?'
+               FROM payroll_employees employee
+              WHERE employee.supplier_id = ?'
         );
         $stmt->execute([$currentYear, $supplierId]);
 
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $out[(int) $row['employee_id']] = (int) $row['last_year'];
+            $out[(int) $row['employee_id']] = [
+                'full_name' => (string) $row['full_name'],
+                'last_year' => (int) $row['last_year'],
+            ];
         }
 
         return $out;

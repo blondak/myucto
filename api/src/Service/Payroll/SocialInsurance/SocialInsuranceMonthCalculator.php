@@ -67,6 +67,7 @@ final class SocialInsuranceMonthCalculator
         foreach ($peopleInputs as $personInput) {
             $person = $this->calculatePerson(
                 $input->calculationDate,
+                $ruleset,
                 $personInput,
                 $smallScaleThreshold,
                 $dppThreshold,
@@ -91,6 +92,7 @@ final class SocialInsuranceMonthCalculator
                 null,
                 null,
                 null,
+                [],
                 $people,
                 $issues,
                 $ruleset->id,
@@ -103,6 +105,7 @@ final class SocialInsuranceMonthCalculator
         $employeeContribution = 0;
         $partTimeDiscountBase = 0;
         $employerInputs = [];
+        $categoryBases = [];
         foreach ($people as $person) {
             $participatingBase = $this->add(
                 $participatingBase,
@@ -121,13 +124,28 @@ final class SocialInsuranceMonthCalculator
                         SocialParticipationStatus::Participates;
                 if (
                     $relationship->partTimeEmployerDiscount ===
-                    SocialDiscountEvidence::Verified
+                        SocialDiscountEvidence::Verified
+                    && $relationship->partTimeEmployerDiscountOutcome ===
+                        SocialPartTimeDiscountOutcome::Applied
                 ) {
                     $partTimeDiscountBase = $this->add(
                         $partTimeDiscountBase,
                         $relationship->cappedAssessmentBaseMinorUnits,
                     );
                 }
+                /*
+                 * § 5a odst. 1 dělí vyměřovací základ zaměstnavatele podle
+                 * kategorie ZAMĚSTNANCE, ale rozhodující je vztah: jeden
+                 * člověk může mít u téhož zaměstnavatele rizikový i běžný
+                 * vztah a každý spadne pod jiné písmeno. Sčítá se proto
+                 * vztahový podíl základu po ročním maximu — přesně ta částka,
+                 * kterou podání vykazuje pod 10478/10479/10480.
+                 */
+                $categoryValue = $relationship->employerRateCategory->value;
+                $categoryBases[$categoryValue] = $this->add(
+                    $categoryBases[$categoryValue] ?? 0,
+                    $relationship->cappedAssessmentBaseMinorUnits,
+                );
             }
 
             $employerInputs[] = new MonthlyEmployerSocialInsuranceEmployeeInput(
@@ -147,6 +165,27 @@ final class SocialInsuranceMonthCalculator
                 'Employee and employer annual-maximum allocations must have the same total.',
             );
         }
+        [$employerCategories, $employerBeforeDiscount] = $this->employerCategoryResults(
+            $ruleset,
+            $categoryBases,
+            $cappedBase,
+        );
+        /*
+         * Souběh kategorií mění firemní částku, jedna kategorie ne. Když je
+         * v měsíci jen běžná sazba, MUSÍ kategoriální výpočet vyjít na haléř
+         * stejně jako souhrnný kalkulátor zaměstnavatele — jinak se dvě cesty
+         * k témuž číslu rozešly a nikdo by si toho nevšiml.
+         */
+        $onlyOrdinary = array_filter(
+            $employerCategories,
+            static fn (SocialEmployerCategoryResult $category): bool =>
+                $category->category !== SocialEmployerRateCategory::Ordinary,
+        ) === [];
+        if ($onlyOrdinary && $employerBeforeDiscount !== $employer->contributionBeforeDiscountMinorUnits) {
+            throw new LogicException(
+                'Ordinary-only employer contribution must match the aggregate calculator.',
+            );
+        }
 
         $discountStep = null;
         $discount = 0;
@@ -157,8 +196,13 @@ final class SocialInsuranceMonthCalculator
                 $this->rateParameter($ruleset, 'employer.discount.part_time'),
                 RoundingMode::Ceil,
             );
+            /*
+             * § 7c odst. 1: slevu zaměstnavatel odečte „z částky pojistného
+             * stanoveného podle § 5a a § 7 odst. 1 písm. a) až c)" — tedy
+             * z celkového pojistného za všechny kategorie, ne uvnitř jedné.
+             */
             $discount = min(
-                $employer->contributionBeforeDiscountMinorUnits,
+                $employerBeforeDiscount,
                 PayrollRounding::ceilToCzk($discountStep->outputMinorUnits),
             );
         }
@@ -169,12 +213,13 @@ final class SocialInsuranceMonthCalculator
             $participatingBase,
             $cappedBase,
             $employeeContribution,
-            $employer->contributionBeforeDiscountMinorUnits,
+            $employerBeforeDiscount,
             $partTimeDiscountBase,
             $discount,
-            $employer->contributionBeforeDiscountMinorUnits - $discount,
-            $employer->contributionStep,
+            $employerBeforeDiscount - $discount,
+            count($employerCategories) === 1 ? $employerCategories[0]->contributionStep : null,
             $discountStep,
+            $employerCategories,
             $people,
             [],
             $ruleset->id,
@@ -182,8 +227,74 @@ final class SocialInsuranceMonthCalculator
         );
     }
 
+    /**
+     * Vyměřovací základy a pojistné zaměstnavatele po kategoriích § 5a odst. 1.
+     *
+     * Zaokrouhluje se PO KATEGORII, ne až ze součtu: § 7 odst. 1 dává každému
+     * ze tří základů vlastní sazbu a § 7 odst. 3 pak zaokrouhluje pojistné
+     * nahoru na celé koruny. Sečíst pojistné a zaokrouhlit jednou by u firmy
+     * se dvěma kategoriemi dalo jinou částku, než jakou ČSSZ počítá
+     * v kontrolách 8, 10 a 167 nad JMHZ (10024 ze 10023, 10026 ze 10025,
+     * 10484 ze 10483, a teprve 10027 je jejich součet).
+     *
+     * Dílčí základ se tu už zaokrouhlovat nemusí: § 5d se uplatňuje o řád níž,
+     * na vyměřovacím základu vztahu podle § 5 ({@see SocialAssessmentBaseResolver}).
+     * Vyměřovací základ zaměstnavatele podle § 5a odst. 1 je jejich úhrn, takže
+     * je celými korunami sám od sebe a druhé zaokrouhlení by bylo bez účinku.
+     * Kdyby se zaokrouhlovalo teprve tady, rozešel by se rozpad kategorií
+     * se souhrnným kalkulátorem u firem s jedinou kategorií.
+     *
+     * @param array<string,int> $categoryBases
+     * @return array{0:list<SocialEmployerCategoryResult>,1:int}
+     */
+    private function employerCategoryResults(
+        PayrollRulesetVersion $ruleset,
+        array $categoryBases,
+        int $cappedBase,
+    ): array {
+        if (array_sum($categoryBases) !== $cappedBase) {
+            throw new LogicException(
+                'Employer rate categories must partition the capped assessment base.',
+            );
+        }
+        $statutory = array_map(
+            static fn (SocialEmployerRateCategory $category): string => $category->value,
+            SocialEmployerRateCategory::statutoryOrder(),
+        );
+        if (array_diff(array_keys($categoryBases), $statutory) !== []) {
+            throw new LogicException(
+                'A calculated month cannot carry an unverified employer rate category.',
+            );
+        }
+        $categories = [];
+        $total = 0;
+        foreach (SocialEmployerRateCategory::statutoryOrder() as $category) {
+            if (!array_key_exists($category->value, $categoryBases)) {
+                continue;
+            }
+            $base = $categoryBases[$category->value];
+            $step = CalculationStep::calculate(
+                "monthly-employer-social-insurance-{$category->value}",
+                $base,
+                $this->rateParameter($ruleset, $category->rateParameter()),
+                RoundingMode::Ceil,
+            );
+            $contribution = PayrollRounding::ceilToCzk($step->outputMinorUnits);
+            $total = $this->add($total, $contribution);
+            $categories[] = new SocialEmployerCategoryResult(
+                $category,
+                $base,
+                $contribution,
+                $step,
+            );
+        }
+
+        return [$categories, $total];
+    }
+
     private function calculatePerson(
         string $calculationDate,
+        PayrollRulesetVersion $ruleset,
         SocialPersonMonthInput $input,
         int $smallScaleThreshold,
         int $dppThreshold,
@@ -232,9 +343,16 @@ final class SocialInsuranceMonthCalculator
                         "relationship:{$relationship->relationshipId}:part_time_discount_relationship_kind_unsupported";
                 }
             }
-            if ($relationship->employerRateCategory !== SocialEmployerRateCategory::Ordinary) {
+            /*
+             * Doložená kategorie § 5a odst. 1 se počítá vlastní sazbou; ruční
+             * posouzení si vynutí jen NEDOLOŽENÉ zařazení. Dřív blokovalo běh
+             * každé písmeno mimo a) — jenže tím se nikdy neodvedlo správně,
+             * a hlavně: zařazení, které do vstupu nikdy nedoteklo, se tvářilo
+             * jako běžná sazba a odvedlo o 3 procentní body míň.
+             */
+            if ($relationship->employerRateCategory === SocialEmployerRateCategory::Unverified) {
                 $issues[] =
-                    "relationship:{$relationship->relationshipId}:employer_rate_category_requires_manual_review";
+                    "relationship:{$relationship->relationshipId}:employer_rate_category_unverified";
             }
             if ($relationship->agricultureDppEmployeeDiscountRequested) {
                 $issues[] =
@@ -243,6 +361,11 @@ final class SocialInsuranceMonthCalculator
         }
         if ($verifiedPartTimeClaims > 1) {
             $issues[] = 'part_time_discount_may_select_only_one_relationship_per_person';
+        }
+        if ($verifiedPartTimeClaims === 1) {
+            foreach ($this->partTimeDiscountDataGaps($facts) as $gap) {
+                $issues[] = $gap;
+            }
         }
         if ($input->workingPensionerDiscount === SocialDiscountEvidence::Unverified) {
             $issues[] = 'working_pensioner_discount_unverified';
@@ -339,8 +462,212 @@ final class SocialInsuranceMonthCalculator
             $employee->employeeContributionMinorUnits,
             $employee->contributionStep,
             $employee->discountStep,
-            $this->relationshipResults($facts, $decisions, $allocations),
+            $this->relationshipResults(
+                $facts,
+                $decisions,
+                $allocations,
+                $this->partTimeDiscountOutcomes($ruleset, $facts),
+            ),
             [],
+        );
+    }
+
+    /**
+     * Chybějící podklady pro posouzení § 7a odst. 2 a 3.
+     *
+     * Limity odstavce 3 se počítají z ÚHRNU za všechna zaměstnání v pracovním
+     * nebo služebním poměru u téhož zaměstnavatele, takže chybějící hodiny
+     * u kteréhokoli z nich znemožní posoudit nárok u toho, kde se sleva
+     * uplatňuje. Sleva je výhoda zaměstnavatele a § 7c odst. 3 z přeplacené
+     * slevy dělá dluh na pojistném — proto se při chybějícím údaji NEUPLATNÍ
+     * a měsíc jde na ruční posouzení, nikdy naopak.
+     *
+     * @param list<SocialRelationshipFacts> $facts
+     * @return list<string>
+     */
+    private function partTimeDiscountDataGaps(array $facts): array
+    {
+        $reason = null;
+        foreach ($facts as $fact) {
+            if (
+                $fact->relationship->partTimeEmployerDiscount === SocialDiscountEvidence::Verified
+            ) {
+                $reason = $fact->relationship->partTimeEmployerDiscountReason;
+            }
+        }
+        if ($reason === null) {
+            return [];
+        }
+        $gaps = [];
+        foreach ($facts as $fact) {
+            $relationship = $fact->relationship;
+            if ($relationship->kind !== SocialEmploymentKind::Employment) {
+                continue;
+            }
+            $id = $relationship->relationshipId;
+            if ($relationship->partTimeDiscountAssessableMillihours === null) {
+                $gaps[] = "relationship:{$id}:part_time_discount_worked_hours_missing";
+            }
+            if ($relationship->agreedWeeklyWorkingMillihours === null) {
+                $gaps[] = "relationship:{$id}:part_time_discount_weekly_working_time_missing";
+            }
+            if (
+                $reason->requiresShorterWorkingTime()
+                && ($relationship->partTimeDiscountEmploymentDays === null
+                    || $relationship->partTimeDiscountMonthDays === null)
+            ) {
+                $gaps[] = "relationship:{$id}:part_time_discount_employment_length_missing";
+            }
+        }
+
+        return $gaps;
+    }
+
+    /**
+     * Posouzení § 7a odst. 2 a odst. 3 nad ÚHRNEM zaměstnání téže osoby.
+     *
+     * Doložený nárok ještě není uplatněná sleva. Odstavec 3 vyjmenovává meze,
+     * při jejichž překročení sleva „nenáleží", a všechny se počítají z úhrnu za
+     * všechna zaměstnání v pracovním nebo služebním poměru u téhož
+     * zaměstnavatele — proto se sčítá přes vztahy, ne přes jediný vybraný.
+     * Sazba se pak podle § 7b odst. 2 počítá jen z vyměřovacího základu toho
+     * zaměstnání, ze kterého se sleva uplatňuje.
+     *
+     * @param list<SocialRelationshipFacts> $facts
+     * @return array<string,SocialPartTimeDiscountOutcome>
+     */
+    private function partTimeDiscountOutcomes(
+        PayrollRulesetVersion $ruleset,
+        array $facts,
+    ): array {
+        $claim = null;
+        foreach ($facts as $fact) {
+            if (
+                $fact->relationship->partTimeEmployerDiscount === SocialDiscountEvidence::Verified
+            ) {
+                $claim = $fact;
+            }
+        }
+        if ($claim === null || $claim->relationship->partTimeEmployerDiscountReason === null) {
+            return [];
+        }
+        $reason = $claim->relationship->partTimeEmployerDiscountReason;
+
+        $baseSum = 0;
+        $millihours = 0;
+        $weeklyMillihours = 0;
+        $employmentDays = 0;
+        $monthDays = 0;
+        foreach ($facts as $fact) {
+            $relationship = $fact->relationship;
+            if ($relationship->kind !== SocialEmploymentKind::Employment) {
+                continue;
+            }
+            $baseSum = $this->add($baseSum, $fact->assessmentBaseMinorUnits);
+            $millihours = $this->add(
+                $millihours,
+                $relationship->partTimeDiscountAssessableMillihours ?? 0,
+            );
+            $weeklyMillihours = $this->add(
+                $weeklyMillihours,
+                $relationship->agreedWeeklyWorkingMillihours ?? 0,
+            );
+            $employmentDays = max($employmentDays, $relationship->partTimeDiscountEmploymentDays ?? 0);
+            $monthDays = max($monthDays, $relationship->partTimeDiscountMonthDays ?? 0);
+        }
+
+        $averageWage = $this->moneyParameter($ruleset, 'average_wage.monthly');
+        $outcome = SocialPartTimeDiscountOutcome::Applied;
+        if (
+            $reason->requiresShorterWorkingTime()
+            && ($weeklyMillihours < $this->integerParameter(
+                $ruleset,
+                'employer.discount.part_time.minimum_weekly_millihours',
+            )
+                || $weeklyMillihours > $this->integerParameter(
+                    $ruleset,
+                    'employer.discount.part_time.maximum_weekly_millihours',
+                ))
+        ) {
+            $outcome = SocialPartTimeDiscountOutcome::ShorterWorkingTimeOutsideRange;
+        } elseif ($baseSum > PayrollRounding::ceilToCzk(CalculationStep::calculate(
+            'part-time-discount-assessment-base-limit',
+            $averageWage,
+            $this->rateParameter(
+                $ruleset,
+                'employer.discount.part_time.assessment_base_limit_multiple',
+            ),
+            RoundingMode::Ceil,
+        )->outputMinorUnits)) {
+            $outcome = SocialPartTimeDiscountOutcome::AssessmentBaseAboveLimit;
+        } elseif ($this->hourlyAssessmentBaseAboveLimit($ruleset, $averageWage, $baseSum, $millihours)) {
+            $outcome = SocialPartTimeDiscountOutcome::HourlyAssessmentBaseAboveLimit;
+        } elseif (
+            $reason->requiresShorterWorkingTime()
+            && $millihours > $this->monthlyHourLimit($ruleset, $employmentDays, $monthDays)
+        ) {
+            $outcome = SocialPartTimeDiscountOutcome::WorkedHoursAboveLimit;
+        }
+
+        return [$claim->relationship->relationshipId => $outcome];
+    }
+
+    /**
+     * § 7a odst. 3 písm. b) — úhrn vyměřovacích základů připadající na 1 hodinu
+     * z úhrnu odpracovaných hodin. Obě porovnávané částky se zaokrouhlují nahoru
+     * na celé koruny, teprve pak se srovnávají.
+     *
+     * Nula hodin s nenulovým základem nedává podíl, ze kterého by šlo nárok
+     * doložit — nedoložený nárok se neuplatňuje.
+     */
+    private function hourlyAssessmentBaseAboveLimit(
+        PayrollRulesetVersion $ruleset,
+        int $averageWage,
+        int $baseSum,
+        int $millihours,
+    ): bool {
+        if ($baseSum === 0) {
+            return false;
+        }
+        if ($millihours === 0) {
+            return true;
+        }
+        $perHour = PayrollRounding::ceilToCzk(
+            intdiv($baseSum * 1_000 + $millihours - 1, $millihours),
+        );
+        $limit = PayrollRounding::ceilToCzk(CalculationStep::calculate(
+            'part-time-discount-hourly-assessment-base-limit',
+            $averageWage,
+            $this->rateParameter(
+                $ruleset,
+                'employer.discount.part_time.hourly_assessment_base_limit',
+            ),
+            RoundingMode::Ceil,
+        )->outputMinorUnits);
+
+        return $perHour > $limit;
+    }
+
+    /**
+     * § 7a odst. 3 písm. c) — 138 hodin, a netrvalo-li zaměstnání celý kalendářní
+     * měsíc, v poměru kalendářních dnů se zaokrouhlením na celé hodiny nahoru.
+     */
+    private function monthlyHourLimit(
+        PayrollRulesetVersion $ruleset,
+        int $employmentDays,
+        int $monthDays,
+    ): int {
+        $limit = $this->integerParameter(
+            $ruleset,
+            'employer.discount.part_time.maximum_monthly_millihours',
+        );
+        if ($monthDays <= 0 || $employmentDays >= $monthDays) {
+            return $limit;
+        }
+
+        return PayrollRounding::ceilToMultiple(
+            intdiv($limit * $employmentDays + $monthDays - 1, $monthDays),
+            1_000,
         );
     }
 
@@ -444,17 +771,20 @@ final class SocialInsuranceMonthCalculator
      * @param list<SocialRelationshipFacts> $facts
      * @param array<string, SocialParticipationDecision> $decisions
      * @param array<string,int> $allocations
+     * @param array<string,SocialPartTimeDiscountOutcome> $discountOutcomes
      * @return list<SocialRelationshipResult>
      */
     private function relationshipResults(
         array $facts,
         array $decisions,
         array $allocations,
+        array $discountOutcomes = [],
     ): array {
         return array_map(
             static function (SocialRelationshipFacts $fact) use (
                 $decisions,
                 $allocations,
+                $discountOutcomes,
             ): SocialRelationshipResult {
                 $relationship = $fact->relationship;
 
@@ -472,6 +802,10 @@ final class SocialInsuranceMonthCalculator
                     $relationship->employerRateCategory,
                     $relationship->annualMaximumAllocationOrder,
                     $relationship->partTimeEmployerDiscountEvidenceReference,
+                    $relationship->employerRateCategoryEvidenceReference,
+                    $relationship->partTimeEmployerDiscountReason,
+                    $discountOutcomes[$relationship->relationshipId] ?? null,
+                    $relationship->agreedWeeklyWorkingMillihours,
                 );
             },
             $facts,
@@ -519,6 +853,16 @@ final class SocialInsuranceMonthCalculator
         $parameter = $ruleset->parameter($key);
         if ($parameter->type !== 'money_minor' || !is_int($parameter->value)) {
             throw new UnexpectedValueException("Payroll ruleset parameter {$key} is not money.");
+        }
+
+        return $parameter->value;
+    }
+
+    private function integerParameter(PayrollRulesetVersion $ruleset, string $key): int
+    {
+        $parameter = $ruleset->parameter($key);
+        if ($parameter->type !== 'integer' || !is_int($parameter->value)) {
+            throw new UnexpectedValueException("Payroll ruleset parameter {$key} is not an integer.");
         }
 
         return $parameter->value;

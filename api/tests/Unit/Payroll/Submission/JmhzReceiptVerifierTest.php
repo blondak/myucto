@@ -158,18 +158,70 @@ final class JmhzReceiptVerifierTest extends TestCase
         }
     }
 
-    public function testOtherChannelsAreNotHandledHere(): void
+    /**
+     * Podepsaný protokol je tentýž dokument bez ohledu na to, kterou cestou
+     * přišel — protokol ČSSZ v1.47, str. 47. ISDS je pro JMHZ rovnocenný kanál,
+     * takže jeho protokol se musí dát ověřit stejně jako ten z VREP.
+     */
+    public function testProtocolFromDataBoxIsVerifiedLikeTheOneFromVrep(): void
+    {
+        $receipt = (new JmhzReceiptVerifier($this->signatures()))->verify(
+            $this->protocol(),
+            'isds',
+            'test',
+            'CID0000000001',
+        );
+
+        self::assertSame('CID0000000001', $receipt->correlationReference);
+    }
+
+    /**
+     * Rozšíření o ISDS nesmí obejít ostatní brány: kanál nikdy nebyl to, co
+     * protokol dělá důvěryhodným, ale podpis a CorrelationID pořád platí.
+     */
+    public function testDataBoxProtocolStillNeedsSignatureVerification(): void
+    {
+        try {
+            (new JmhzReceiptVerifier())->verify($this->protocol(), 'isds', 'test', 'CID0000000001');
+            self::fail('Bez ověření podpisu nesmí projít ani protokol z datovky.');
+        } catch (JmhzTransportException $e) {
+            self::assertSame('jmhz_protocol_signature_verifier_missing', $e->errorCode);
+        }
+    }
+
+    public function testDataBoxProtocolOfAnotherSubmissionIsRefused(): void
     {
         try {
             (new JmhzReceiptVerifier($this->signatures()))->verify(
                 $this->protocol(),
                 'isds',
                 'test',
-                null,
+                'CID9999999999',
             );
-            self::fail('Jiný kanál musí padnout.');
+            self::fail('Protokol jiného podání musí padnout i u datovky.');
         } catch (JmhzTransportException $e) {
-            self::assertSame('jmhz_protocol_channel_unsupported', $e->errorCode);
+            self::assertSame('jmhz_protocol_correlation_mismatch', $e->errorCode);
+        }
+    }
+
+    /**
+     * Kanály bez doloženého tvaru protokolu zůstávají odmítnuté. Přijmout od
+     * nich stav by uzavřelo povinnost podle dokumentu neznámého původu.
+     */
+    public function testChannelsWithoutADocumentedProtocolAreStillRefused(): void
+    {
+        foreach (['manual_upload', 'pikr', 'health_portal', 'other'] as $channel) {
+            try {
+                (new JmhzReceiptVerifier($this->signatures()))->verify(
+                    $this->protocol(),
+                    $channel,
+                    'test',
+                    'CID0000000001',
+                );
+                self::fail("Kanál {$channel} musí padnout.");
+            } catch (JmhzTransportException $e) {
+                self::assertSame('jmhz_protocol_channel_unsupported', $e->errorCode);
+            }
         }
     }
 }

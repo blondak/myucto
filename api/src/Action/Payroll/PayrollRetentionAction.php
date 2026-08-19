@@ -80,7 +80,13 @@ final class PayrollRetentionAction
 
         $categories = [];
         foreach (PayrollRetentionCatalog::rules() as $rule) {
+            // Tabulky do payloadu patří, i když je `toArray()` nenese: bez nich se
+            // z obrazovky nedá poznat, ČEHO se lhůta drží, a katalog by tvrdil
+            // lhůtu nad neznámým rozsahem dat. Do auditní stopy naopak nepatří,
+            // proto zůstávají tady a ne v `toArray()`.
             $categories[] = $rule->toArray() + [
+                'employee_tables' => $rule->employeeTables,
+                'employment_tables' => $rule->employmentTables,
                 'effective_years' => $effective[$rule->category] ?? null,
                 'determined' => ($effective[$rule->category] ?? null) !== null,
             ];
@@ -323,8 +329,34 @@ final class PayrollRetentionAction
 
         return Json::ok($response, [
             'proposal' => $proposal,
-            'items' => $this->proposals->items($supplierId, $proposalId),
+            'items' => array_map(
+                $this->decodeCascade(...),
+                $this->proposals->items($supplierId, $proposalId),
+            ),
         ]);
+    }
+
+    /**
+     * `cascade_counts` je JSON sloupec, PDO ho vrací jako řetězec. Kdyby se
+     * posílal takhle, musel by ho rozebírat prohlížeč — a náhled dopadu výmazu
+     * by se rozpadl na tiše chybějící čísla, kdyby se tvar někdy změnil.
+     *
+     * @param  array<string,mixed> $item
+     * @return array<string,mixed>
+     */
+    private function decodeCascade(array $item): array
+    {
+        $raw = $item['cascade_counts'] ?? null;
+        if (!is_string($raw) || $raw === '') {
+            $item['cascade_counts'] = null;
+
+            return $item;
+        }
+
+        $decoded = json_decode($raw, true);
+        $item['cascade_counts'] = is_array($decoded) ? $decoded : null;
+
+        return $item;
     }
 
     /** @param array{id:string} $args */

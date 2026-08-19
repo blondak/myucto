@@ -254,6 +254,7 @@ class PayrollDocumentService
         if (!in_array($artifact->kind, [
             PayrollDocumentKind::EmploymentCertificate,
             PayrollDocumentKind::AverageEarningsCertificate,
+            PayrollDocumentKind::AverageEarningsStatement,
         ], true)) {
             throw new \InvalidArgumentException(
                 'Tento archiv ukončení vztahu nepodporuje zadaný druh dokumentu.',
@@ -478,6 +479,7 @@ class PayrollDocumentService
         string $period,
         int $limit = PayrollDocumentRepository::LIST_DEFAULT_LIMIT,
         int $offset = 0,
+        ?int $employeeId = null,
     ): array {
         if (preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $period) !== 1) {
             throw new \InvalidArgumentException('Payroll period must use YYYY-MM.');
@@ -488,6 +490,7 @@ class PayrollDocumentService
             $periodStart,
             $limit,
             $offset,
+            $employeeId,
         );
 
         return [
@@ -584,11 +587,7 @@ class PayrollDocumentService
             $employeeId,
             $artifact->kind->value,
         );
-        if (
-            $supersedesDocumentId === null
-            && $latest !== null
-            && (int) $latest['revision_id'] !== $revisionId
-        ) {
+        if ($supersedesDocumentId === null && $latest !== null) {
             $supersedesDocumentId = (int) $latest['id'];
         }
         $documentRevisionNo = 1;
@@ -605,8 +604,28 @@ class PayrollDocumentService
                 throw new \RuntimeException('Superseded payroll document is incompatible.');
             }
             $sameRevision = (int) $previous['revision_id'] === $revisionId;
+            // Táž revize se smí vydat znovu jen jako DALŠÍ ČLÁNEK ŘETĚZU, a jen
+            // z týchž podkladů — přesně jako u ročního archivu
+            // ({@see archiveAnnualPdf()}). Sada je jinak beze změny: shodná verze
+            // šablony i rendereru vrací hotový doklad, jiná zakládá další verzi
+            // a archivované PDF zůstává bajt na bajt stejné. Měsíční svazek se
+            // řídí vlastním otiskem obsahu, který se mění s každou přibylou
+            // páskou, takže se na shodu otisku neváže.
             if ($sameRevision && $artifact->kind !== PayrollDocumentKind::MonthlyBundle) {
-                throw new \RuntimeException('Superseded payroll document is incompatible.');
+                if (!hash_equals(
+                    (string) $previous['source_snapshot_hash'],
+                    $artifact->sourceSnapshotHash,
+                )) {
+                    throw new \RuntimeException(
+                        'Mzdová revize již má doklad s jiným zdrojovým otiskem.',
+                    );
+                }
+                if (
+                    $previous['template_version'] === $artifact->templateVersion
+                    && $previous['renderer_version'] === $artifact->rendererVersion
+                ) {
+                    return $previous;
+                }
             }
             if (!$sameRevision) {
                 $previousRevision = $this->requireApprovedRevision(

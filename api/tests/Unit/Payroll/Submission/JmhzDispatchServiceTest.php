@@ -15,10 +15,12 @@ use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzGovTalkEnvelope;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzReceiptVerifier;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSubmissionStatus;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzVrepClient;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Signing\PersonalCertificateVaultService;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -30,6 +32,7 @@ use PHPUnit\Framework\TestCase;
 \DG\BypassFinals::allowPaths([
     '*/api/src/Repository/Payroll/PayrollSubmissionTransportAttemptRepository.php',
     '*/api/src/Repository/Payroll/PayrollSigningProfileRepository.php',
+    '*/api/src/Service/Payroll/Submission/PayrollSubmissionService.php',
 ]);
 
 /**
@@ -345,6 +348,121 @@ final class JmhzDispatchServiceTest extends TestCase
     }
 
     /**
+     * Dotažený protokol musí podání posunout, jinak zůstane navždy „odesláno".
+     * Kontroluje se, že se import volá S ověřovatelem podpisu — bez něj by se
+     * `remote_status` do platformy nedostal a celý dotaz by byl zbytečný.
+     */
+    public function testSettledPollHandsTheProtocolToTheSubmissionPlatform(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('find')->willReturn(self::sentRow());
+        $attempts->expects(self::once())->method('markCompleted')->willReturn(
+            self::sentRow(['status' => 'completed', 'row_version' => 2]),
+        );
+
+        $submissions = $this->createMock(PayrollSubmissionService::class);
+        $submissions->method('get')->willReturn([
+            'id' => self::SUBMISSION,
+            'status' => 'submitted',
+            'row_version' => 7,
+        ]);
+        $submissions->expects(self::once())->method('importReceipt')->with(
+            self::SUPPLIER,
+            self::SUBMISSION,
+            7,
+            null,
+            self::anything(),
+            self::CORRELATION,
+            self::CORRELATION,
+            'CSSZ_JMHZ',
+            'accepted',
+            JmhzDispatchService::CHANNEL,
+            self::anything(),
+            null,
+            self::isInstanceOf(JmhzReceiptVerifier::class),
+        )->willReturn([
+            'submission_status' => 'accepted',
+            'submission_row_version' => 8,
+            'trusted' => true,
+        ]);
+
+        $this->service($attempts, [
+            new Response(200, ['Content-Type' => 'text/xml'], JmhzTransportSample::partialProtocol()),
+        ], null, $submissions)->poll(
+            self::SUPPLIER,
+            'test',
+            self::ATTEMPT,
+            JmhzTransportSample::VARIABLE_SYMBOL,
+        );
+    }
+
+    /**
+     * Když ověření podpisu neprojde, protokol se NESMÍ zahodit ani prohlásit
+     * za důvěryhodný — uloží se znovu bez verifieru, tedy jako příloha bez
+     * důkazní síly, a k obecnému `receipt_unverified` se přidá pojmenovaný
+     * důvod.
+     */
+    public function testUnverifiableProtocolIsStoredWithoutMovingTheSubmission(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('find')->willReturn(self::sentRow());
+        $attempts->expects(self::once())->method('markCompleted')->willReturn(
+            self::sentRow(['status' => 'completed', 'row_version' => 2]),
+        );
+
+        $verifiers = [];
+        $submissions = $this->createMock(PayrollSubmissionService::class);
+        $submissions->method('get')->willReturn([
+            'id' => self::SUBMISSION,
+            'status' => 'submitted',
+            'row_version' => 7,
+        ]);
+        $submissions->expects(self::exactly(2))->method('importReceipt')
+            ->willReturnCallback(
+                function (...$arguments) use (&$verifiers): array {
+                    $verifiers[] = $arguments[12] ?? null;
+                    if ($arguments[12] !== null) {
+                        // Vzorek protokolu žádný podpis nenese.
+                        throw new JmhzTransportException(
+                            'jmhz_protocol_signature_missing',
+                            'Protokol ČSSZ neobsahuje podepsanou časovou značku.',
+                        );
+                    }
+
+                    return [
+                        'submission_status' => 'submitted',
+                        'submission_row_version' => 8,
+                        'trusted' => false,
+                    ];
+                },
+            );
+        $submissions->expects(self::once())->method('recordIssue')->with(
+            self::SUPPLIER,
+            self::SUBMISSION,
+            7,
+            null,
+            'error',
+            'remote',
+            'jmhz_protocol_signature_missing',
+        )->willReturn(['id' => 1, 'submission_row_version' => 9]);
+
+        $outcome = $this->service($attempts, [
+            new Response(200, ['Content-Type' => 'text/xml'], JmhzTransportSample::partialProtocol()),
+        ], null, $submissions)->poll(
+            self::SUPPLIER,
+            'test',
+            self::ATTEMPT,
+            JmhzTransportSample::VARIABLE_SYMBOL,
+        );
+
+        // Výsledek dotazu se kvůli neověřenému podpisu neztrácí: ledger má
+        // pokus za vyřízený a report je pořád k dispozici.
+        self::assertTrue($outcome->isSettled());
+        self::assertInstanceOf(JmhzReceiptVerifier::class, $verifiers[0]);
+        self::assertNull($verifiers[1]);
+    }
+
+    /**
      * Transakce se uzavírá FUNKCÍ `delete`, kvalifikátor zůstává `poll`.
      * Zjištěno pokusem proti testovacímu VREP: `Qualifier=delete` vrátí
      * „Invalid qualifier" a transakce zůstane viset — což podací protokol
@@ -498,6 +616,7 @@ final class JmhzDispatchServiceTest extends TestCase
         PayrollSubmissionTransportAttemptRepository $attempts,
         array $queue,
         ?PayrollSigningProfileRepository $profiles = null,
+        ?PayrollSubmissionService $submissions = null,
     ): JmhzDispatchService {
         $material = self::certificate();
 
@@ -532,6 +651,7 @@ final class JmhzDispatchServiceTest extends TestCase
             $secrets,
             new JmhzSoftwareIdentification('MyUcto', '1.0'),
             $this->vrep($queue),
+            submissions: $submissions,
         );
     }
 

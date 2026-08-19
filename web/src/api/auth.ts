@@ -81,6 +81,17 @@ export interface SetupStatus {
   }
 }
 
+export interface DomainContext {
+  mode: 'canonical' | 'custom'
+  hostname: string
+  origin: string
+  locked: boolean
+  supplier_id: number | null
+  purpose: 'portal' | 'public_links' | 'all' | null
+  canonical_base_url?: string
+  canonical_login_url?: string
+}
+
 export interface LoginPayload {
   email: string
   password: string
@@ -146,6 +157,14 @@ export interface MeResponse extends AuthSessionContract {
   permissions: Record<string, 0 | 1 | 2>
   permission_catalog_version: string
   license?: LicenseSummary
+  domain_context?: DomainContext | null
+}
+
+export interface DomainLoginStart {
+  request_token: string
+  state: string
+  login_url: string
+  expires_in: number
 }
 
 export interface PasskeyCredential {
@@ -238,6 +257,29 @@ export interface SetupSampleResult {
 }
 
 export const authApi = {
+  domainContext: () => api.get<DomainContext>('/auth/domain-context').then((r) => r.data),
+
+  domainLoginStart: (codeChallenge: string, returnPath: string, handoffPath?: string) =>
+    api.post<DomainLoginStart>('/auth/domain-login/start', {
+      code_challenge: codeChallenge,
+      return_path: returnPath,
+      handoff_path: handoffPath || undefined,
+    }).then((r) => r.data),
+
+  domainLoginAuthorize: (requestToken: string, state: string) =>
+    api.post<{ redirect_url: string }>('/auth/domain-login/authorize', {
+      request_token: requestToken,
+      state,
+    }).then((r) => r.data),
+
+  domainLoginExchange: (requestToken: string, code: string, state: string, codeVerifier: string) =>
+    api.post<{ csrf_token: string; return_path: string; supplier_id: number }>('/auth/domain-login/exchange', {
+      request_token: requestToken,
+      code,
+      state,
+      code_verifier: codeVerifier,
+    }).then((r) => r.data),
+
   setupStatus: () => api.get<SetupStatus>('/auth/setup-status').then((r) => r.data),
 
   setup: (payload: SetupPayload) =>

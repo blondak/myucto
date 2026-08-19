@@ -16,18 +16,34 @@ import {
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const props = defineProps<{
   canWrite: boolean
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const toast = useToast()
 const loading = ref(true)
 const saving = ref(false)
 const editorOpen = ref(false)
 const editingId = ref<number | null>(null)
 const policies = ref<PayrollEmployerPolicy[]>([])
+const COLUMNS: ColumnDef[] = [
+  { key: 'validity', labelKey: 'payroll.employer.policies.validity', required: true },
+  { key: 'payday', labelKey: 'payroll.employer.policies.payday' },
+  { key: 'automation', labelKey: 'payroll.employer.policies.automation' },
+  { key: 'state', labelKey: 'payroll.employer.policies.state' },
+  { key: 'actions', labelKey: 'common.actions', required: true },
+]
+const tbl = useTablePrefs('payroll-employer-policies', COLUMNS)
+const pageSize = 25
+const total = ref(0)
+const offset = ref(0)
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const setup = ref<PayrollSetupCheck | null>(null)
 const loadError = ref('')
 const setupError = ref('')
@@ -122,9 +138,15 @@ function normalizeDelivery() {
   }
 }
 
-function statusClass(status: 'ok' | 'blocked'): string {
-  return status === 'ok'
-    ? 'bg-success-50 text-success-700'
+/**
+ * `pending` má vlastní, nenápadný tón: kontrola sice nevyšla, ale nastavení
+ * neblokuje. Varovná barva by z nepovinné připravenosti dělala překážku.
+ */
+function statusClass(status: PayrollSetupCheckItem['status']): string {
+  if (status === 'ok') return 'bg-success-50 text-success-700'
+
+  return status === 'pending'
+    ? 'bg-neutral-100 text-neutral-600'
     : 'bg-warning-50 text-warning-700'
 }
 
@@ -143,10 +165,17 @@ const knownCheckCodes = new Set([
   'jmhz_feature_source',
 ])
 
+/**
+ * Text kontroly skládáme z kódu a stavu, takže ho `check:i18n` staticky
+ * nevidí — chybějící kombinace se pozná až na stránce, kde vyskočí syrový klíč
+ * (přesně to potkalo `jmhz_certificate.pending`). Server přitom posílá vlastní
+ * českou hlášku, tak ji použijeme, kdykoliv překlad chybí: horší než přeložený
+ * text, pořád ale text, ne klíč.
+ */
 function checkMessage(check: PayrollSetupCheckItem): string {
-  return knownCheckCodes.has(check.code)
-    ? t(`payroll.employer.policies.checks.${check.code}.${check.status}`)
-    : check.message
+  const key = `payroll.employer.policies.checks.${check.code}.${check.status}`
+
+  return knownCheckCodes.has(check.code) && te(key) ? t(key) : check.message
 }
 
 function policyIsEffective(policy: PayrollEmployerPolicy): boolean {
@@ -199,13 +228,14 @@ async function load(): Promise<boolean> {
   setupError.value = ''
   let policiesLoaded = false
   const [policyResult, setupResult] = await Promise.allSettled([
-    payrollApi.employerPolicies(),
+    payrollApi.employerPolicies(undefined, { limit: pageSize, offset: offset.value }),
     payrollApi.payrollSetupCheck(effectiveOn.value),
   ])
   if (policyResult.status === 'fulfilled') {
-    policies.value = policyResult.value
+    policies.value = policyResult.value.items
+    total.value = policyResult.value.total
     policiesLoaded = true
-    if (policyResult.value.length === 0 && props.canWrite && !editorOpen.value) {
+    if (policyResult.value.total === 0 && props.canWrite && !editorOpen.value) {
       openNew()
     }
   } else {
@@ -220,6 +250,37 @@ async function load(): Promise<boolean> {
   }
   loading.value = false
   return policiesLoaded
+}
+
+/**
+ * Načtení JEN stránky historie, bez kontroly připravenosti.
+ *
+ * Po uložení a při listování se checklist netahá znovu — je to samostatný
+ * dotaz a jeho opakování by přebilo hlášku, kterou uložení právě vypsalo.
+ */
+async function loadPolicies(): Promise<boolean> {
+  loading.value = true
+  loadError.value = ''
+  try {
+    const page = await payrollApi.employerPolicies(undefined, {
+      limit: pageSize,
+      offset: offset.value,
+    })
+    policies.value = page.items
+    total.value = page.total
+    if (page.total === 0 && props.canWrite && !editorOpen.value) openNew()
+    return true
+  } catch (error: unknown) {
+    loadError.value = apiMessage(error) || t('payroll.employer.policies.load_failed')
+    return false
+  } finally {
+    loading.value = false
+  }
+}
+
+function goToPage(nextPage: number) {
+  offset.value = Math.max(0, (nextPage - 1) * pageSize)
+  void loadPolicies()
 }
 
 async function reloadCurrent() {
@@ -265,15 +326,16 @@ async function save() {
       delivery_verified_on: nullable(form.value.delivery_verified_on),
       source_reference: nullable(form.value.source_reference),
     }
-    const saved = editingId.value === null
-      ? await payrollApi.createEmployerPolicy(payload)
-      : await payrollApi.updateEmployerPolicy(editingId.value, payload)
-    const index = policies.value.findIndex(policy => policy.id === saved.id)
-    if (index === -1) policies.value.unshift(saved)
-    else policies.value.splice(index, 1, saved)
-    policies.value.sort((a, b) =>
-      b.valid_from.localeCompare(a.valid_from) || b.id - a.id,
-    )
+    if (editingId.value === null) {
+      await payrollApi.createEmployerPolicy(payload)
+      // Nová revize sedí podle `valid_from` kdekoli v historii, ne nutně na
+      // začátku načtené stránky — dopsat ji lokálně by rozešlo pořadí
+      // i celkový počet, takže se historie načte znovu od první stránky.
+      offset.value = 0
+    } else {
+      await payrollApi.updateEmployerPolicy(editingId.value, payload)
+    }
+    await loadPolicies()
     editorOpen.value = false
     editingId.value = null
     toast.success(t('payroll.employer.policies.saved'))
@@ -417,14 +479,19 @@ onMounted(load)
         {{ t('payroll.employer.policies.empty') }}
       </p>
 
-      <div v-else-if="policies.length" class="mt-5 hidden overflow-x-auto md:block">
-        <table class="min-w-full divide-y divide-neutral-200 text-sm">
+      <div v-else-if="policies.length" class="mt-5 hidden md:block">
+        <div class="flex flex-wrap items-center justify-end gap-2 pb-2">
+          <ColumnPicker :ctrl="tbl" />
+          <DensityToggle :ctrl="tbl" />
+        </div>
+        <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
             <tr>
               <th class="px-3 py-2">{{ t('payroll.employer.policies.validity') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.employer.policies.payday') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.employer.policies.automation') }}</th>
-              <th class="px-3 py-2">{{ t('payroll.employer.policies.state') }}</th>
+              <th v-if="tbl.isVisible('payday')" class="px-3 py-2">{{ t('payroll.employer.policies.payday') }}</th>
+              <th v-if="tbl.isVisible('automation')" class="px-3 py-2">{{ t('payroll.employer.policies.automation') }}</th>
+              <th v-if="tbl.isVisible('state')" class="px-3 py-2">{{ t('payroll.employer.policies.state') }}</th>
               <th class="px-3 py-2 text-right">{{ t('common.actions') }}</th>
             </tr>
           </thead>
@@ -433,20 +500,20 @@ onMounted(load)
               <td class="px-3 py-3">
                 {{ policy.valid_from }} – {{ policy.valid_to ?? '∞' }}
               </td>
-              <td class="px-3 py-3">
+              <td v-if="tbl.isVisible('payday')" class="px-3 py-3">
                 {{ t('payroll.employer.policies.payday_value', {
                   day: policy.payday_day,
                   offset: policy.payday_month_offset,
                 }) }}
               </td>
-              <td class="px-3 py-3 text-neutral-600">
+              <td v-if="tbl.isVisible('automation')" class="px-3 py-3 text-neutral-600">
                 {{ [
                   policy.automatic_calculation_enabled ? t('payroll.employer.policies.auto_calculation_short') : null,
                   policy.automatic_posting_enabled ? t('payroll.employer.policies.auto_posting_short') : null,
                   policy.automatic_payments_enabled ? t('payroll.employer.policies.auto_payments_short') : null,
                 ].filter(Boolean).join(', ') || '—' }}
               </td>
-              <td class="px-3 py-3">
+              <td v-if="tbl.isVisible('state')" class="px-3 py-3">
                 <span
                   :class="[
                     'inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
@@ -476,6 +543,7 @@ onMounted(load)
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
 
       <div v-if="policies.length" class="mt-5 space-y-3 md:hidden">
@@ -522,6 +590,15 @@ onMounted(load)
           </button>
         </article>
       </div>
+
+      <PaginationBar
+        v-if="policies.length"
+        class="mt-5"
+        :page="currentPage"
+        :per-page="pageSize"
+        :total="total"
+        @update:page="goToPage"
+      />
     </section>
 
     <section

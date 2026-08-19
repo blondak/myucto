@@ -193,7 +193,9 @@ Systémový provider Raiffeisenbank rozlišuje směr převodu podle úvodního t
 o příchozí nebo odchozí platbě; u starší či odlišné šablony použije jako záložní
 údaj znaménko částky. U odchozí úhrady je vlastním účtem pole **Z účtu** a
 protiúčtem pole **Na účet**; u příchozí úhrady je to opačně. Díky tomu se odchozí
-avízo mapuje na účet, ze kterého byla platba skutečně odepsána.
+avízo mapuje na účet, ze kterého byla platba skutečně odepsána. U karetní
+transakce se vlastní účet načte z pole **Účet** a obchodník z pole **Detaily**;
+chybějící variabilní symbol ani bankovní protiúčet importu nebrání.
 
 U Air Bank se avíza zapínají v internetovém bankovnictví pod **Účty a karty →
 Možnosti → Info o dění na účtu** (odesílatel `info@airbank.cz`, předměty

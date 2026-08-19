@@ -113,6 +113,13 @@ final class DocumentLockTest extends TestCase
             // FK fk_sup_currency: před smazáním test currencies vrať default na zdrojovou firmu
             $pdo->prepare('UPDATE supplier s JOIN supplier src ON src.id = ? SET s.default_currency_id = src.default_currency_id WHERE s.id = ?')
                 ->execute([$this->sourceSupplier, $sid]);
+            $pdo->prepare('DELETE dl FROM document_links dl JOIN documents d ON d.id = dl.document_id WHERE d.supplier_id = ?')
+                ->execute([$sid]);
+            $pdo->prepare('DELETE FROM document_requests WHERE supplier_id = ?')->execute([$sid]);
+            $pdo->prepare('DELETE FROM purchase_invoice_submissions WHERE supplier_id = ?')->execute([$sid]);
+            $pdo->prepare('DELETE df FROM document_files df JOIN documents d ON d.id = df.document_id WHERE d.supplier_id = ?')
+                ->execute([$sid]);
+            $pdo->prepare('DELETE FROM documents WHERE supplier_id = ?')->execute([$sid]);
             $pdo->prepare('DELETE FROM journal_entry_lines WHERE supplier_id = ?')->execute([$sid]);
             $pdo->prepare('DELETE FROM journal_entries WHERE supplier_id = ?')->execute([$sid]);
             $pdo->prepare('DELETE FROM accounting_periods WHERE supplier_id = ?')->execute([$sid]);
@@ -273,6 +280,81 @@ final class DocumentLockTest extends TestCase
         $res = $this->request('POST', "/api/purchase-invoices/$paid/transition", $client, $sid, ['target' => 'received']);
         self::assertSame(200, $res->getStatusCode(), 'paid bez booked není zamčené (M2): ' . (string) $res->getBody());
         self::assertSame('received', $this->json($res)['status'] ?? null);
+    }
+
+    /** Výsledek klientského podání smí měnit účetní, ale klient už ne. */
+    public function testAccountantManagedPurchaseInvoiceIsLockedOnlyForClient(): void
+    {
+        $sid = $this->mkSupplier('tax_evidence');
+        $invoiceId = $this->mkPurchaseInvoice($sid, 'draft');
+        $pdo = $this->db->pdo();
+        $sha = hash('sha256', 'synthetic-accountant-managed-' . $sid . '-' . $invoiceId);
+        $pdo->prepare(
+            "INSERT INTO documents
+                (supplier_id, title, original_name, filename, sha256, mime_type, size_bytes,
+                 doc_type, source, uploaded_by)
+             VALUES (?, 'syntetický doklad', 'synteticky-doklad.pdf', ?, ?,
+                     'application/pdf', 32, 'pdf', 'manual', ?)"
+        )->execute([$sid, $sha, $sha, $this->ownerIds[$sid]]);
+        $documentId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO purchase_invoice_submissions
+                (supplier_id, document_id, submitted_by, submitted_via, document_sha256,
+                 status, extraction_status, extraction_source, purchase_invoice_id,
+                 processed_at, processed_by)
+             VALUES (?, ?, ?, 'portal', ?, 'processed', 'succeeded', 'manual', ?, NOW(), ?)"
+        )->execute([
+            $sid,
+            $documentId,
+            $this->ownerIds[$sid],
+            $sha,
+            $invoiceId,
+            $this->ownerIds[$sid],
+        ]);
+        $submissionId = (int) $pdo->lastInsertId();
+
+        $client = $this->mkUserWithToken('client', $sid);
+        $accountant = $this->mkUserWithToken('accountant', $sid);
+
+        $detail = $this->request('GET', "/api/purchase-invoices/$invoiceId", $client, $sid);
+        self::assertSame(200, $detail->getStatusCode(), (string) $detail->getBody());
+        self::assertTrue($this->json($detail)['locked']['is_locked'] ?? false);
+        self::assertContains('accountant_managed', $this->json($detail)['locked']['reasons'] ?? []);
+
+        $clientEdit = $this->request(
+            'PUT',
+            "/api/purchase-invoices/$invoiceId/items",
+            $client,
+            $sid,
+            ['items' => []],
+        );
+        self::assertSame(403, $clientEdit->getStatusCode(), (string) $clientEdit->getBody());
+        self::assertSame('document_locked', $this->errorCode($clientEdit));
+
+        $staffEdit = $this->request(
+            'PUT',
+            "/api/purchase-invoices/$invoiceId/items",
+            $accountant,
+            $sid,
+            ['items' => []],
+        );
+        self::assertSame(200, $staffEdit->getStatusCode(), (string) $staffEdit->getBody());
+
+        $staffDelete = $this->request(
+            'DELETE',
+            "/api/purchase-invoices/$invoiceId",
+            $accountant,
+            $sid,
+        );
+        self::assertSame(200, $staffDelete->getStatusCode(), (string) $staffDelete->getBody());
+        $reopened = $pdo->prepare(
+            'SELECT status, purchase_invoice_id FROM purchase_invoice_submissions WHERE id = ? AND supplier_id = ?'
+        );
+        $reopened->execute([$submissionId, $sid]);
+        $reopenedRow = $reopened->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame('submitted', $reopenedRow['status'] ?? null);
+        self::assertNull($reopenedRow['purchase_invoice_id'] ?? null,
+            'Smazání výsledného konceptu musí podání vrátit do fronty, ne je osiřelit.');
     }
 
     /** Scénář 4: zavřené období — client 403 (force ignorován, M6), accountant 409, admin force 200 + audit. */

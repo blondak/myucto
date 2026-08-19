@@ -43,6 +43,14 @@ final class JmhzScenario1ControlEvaluator
     private const NOT_EVALUABLE = [
         7 => 'Úhrn se skládá z vyměřovacích základů zaměstnance (10477, 10478)'
             . ' rozlišených druhem činnosti (10239), které první profil nevykazuje.',
+        // Okruh, ve kterém sleva podle § 7a náleží, se v hotovém XML nedá
+        // přečíst: rozhoduje o něm druh činnosti (10239) a bližší určení
+        // pracovněprávního vztahu (10502), a první profil ani jeden z nich
+        // nevykazuje. Podmínku proto vynucuje resolver nad rozhodnutím
+        // selektoru scénáře — viz `jmhz_employer_part_time_discount_activity_unsupported`.
+        42 => 'Okruh slevy stojí na druhu činnosti (10239) a bližším určení'
+            . ' pracovněprávního vztahu (10502), které první profil nevykazuje;'
+            . ' podmínka se vynucuje před serializací, z podání ji ověřit nelze.',
         59 => 'Podmínky vyměřovacího základu se opírají o vyloučené a odečtené'
             . ' doby (10357, 10375), které první profil nevykazuje; předpoklad'
             . ' pravidla tedy nelze ani potvrdit, ani vyvrátit.',
@@ -190,10 +198,11 @@ final class JmhzScenario1ControlEvaluator
     public function implementedControlIds(): array
     {
         return [
-            1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 31, 37, 43, 44, 50, 56, 57, 58,
+            1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 31, 37, 43, 44, 45, 50, 56, 57, 58,
             60, 61, 62, 72, 74, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
-            103, 109, 118, 121, 129, 131, 132, 134, 135, 144, 145, 152, 153, 154,
-            157, 159, 162, 165, 167, 168, 170, 208, 211, 216, 227, 232, 235,
+            103, 109, 118, 121, 129, 131, 132, 134, 135, 137, 138, 144, 145, 152,
+            153, 154, 157, 158, 159, 162, 165, 167, 168, 170, 188, 207, 208, 211,
+            216, 227, 232, 235,
             236, 240, 244, 248, 251,
             253, 255, 260, 267, 270, 271, 272, 273, 275, 282, 283, 284, 286,
             296, 299, 300, 301, 303, 304, 306, 307, 309, 315, 328, 329, 330, 332,
@@ -260,6 +269,7 @@ final class JmhzScenario1ControlEvaluator
     {
         return [
             3 => ['source_row_6'],
+            45 => ['source_row_12'],
             8 => ['source_row_3'],
             10 => ['source_row_4'],
             118 => ['source_row_7'],
@@ -317,6 +327,12 @@ final class JmhzScenario1ControlEvaluator
             1 => $this->employerDiscountHeadcount($projection),
             3 => $this->employerDiscountAmount($projection),
             4 => $this->insurancePayable($projection),
+            45 => $this->shorterWorkingTimeWithinLimit($projection),
+            137 => $this->discountReasonRequired($projection),
+            138 => $this->shorterWorkingTimeRequiredForReason($projection),
+            158 => $this->discountReasonFromCodebook($projection),
+            188 => $this->employerDiscountOnlyOnOneEmployment($projection),
+            207 => $this->employerDiscountBaseMatchesForms($projection),
             8 => $this->employerInsuranceRate($projection, '10024', '10023', 'source_row_3'),
             10 => $this->employerInsuranceRate($projection, '10026', '10025', 'source_row_4'),
             11 => $this->employerInsuranceTotal($projection),
@@ -755,6 +771,225 @@ final class JmhzScenario1ControlEvaluator
                 null,
                 "Sleva na pojistném {$discount} Kč neodpovídá {$percent} % z úhrnu"
                     . " {$base} Kč; očekáváno {$expected} Kč.",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_PVPOJ)];
+    }
+
+    // --- sleva zaměstnavatele podle § 7a ----------------------------------
+
+    /**
+     * Kontrola 45 — rozsah kratší pracovní nebo služební doby (10373) nesmí
+     * překročit mez katalogu, tedy 30 hodin týdně podle § 7a odst. 2.
+     *
+     * Mez je parametrická konstanta, ne literál: ČSSZ ji vede jako hodnotu
+     * účinnou k datu a mění ji stejně jako sazby.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function shorterWorkingTimeWithinLimit(
+        JmhzAttributeProjection $projection,
+    ): array {
+        $limit = $this->parameters->integerValue(
+            'source_row_12',
+            $this->periodStart($projection),
+        );
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($limit): ?string {
+                $hours = $form->scaled('10373');
+                if ($hours === null) {
+                    return null;
+                }
+                if (self::compareScaled($hours, [$limit, 0]) > 0) {
+                    return "Rozsah kratší pracovní/služební doby překračuje mez"
+                        . " {$limit} hodin.";
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /**
+     * Kontrola 137 — uplatněná sleva (10372) musí nést důvod (10374).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function discountReasonRequired(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            if ($form->boolean('10372') !== true) {
+                return null;
+            }
+            if ($form->value('10374') === null) {
+                return 'Uplatněná sleva na pojistném zaměstnavatele nemá vyplněný'
+                    . ' důvod uplatnění.';
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Kontrola 138 — u důvodů „A" až „F" musí být vyplněn rozsah kratší
+     * pracovní nebo služební doby (10373), u ostatních vyplněn být nesmí.
+     *
+     * Rozdíl není kosmetický: podmínku kratší doby váže § 7a odst. 2 výslovně
+     * jen na okruh podle odst. 1 písm. a) až f). Zaměstnanci mladšímu 21 let
+     * podle písmene g) sleva náleží i při plném úvazku, a vykázaný rozsah by
+     * u něj tvrdil podmínku, kterou zákon nestanoví.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function shorterWorkingTimeRequiredForReason(
+        JmhzAttributeProjection $projection,
+    ): array {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $reason = $form->value('10374');
+            $hours = $form->value('10373');
+            if ($reason === null) {
+                // Vyplněný rozsah bez důvodu je vada, ale hlásí ji kontrola 137;
+                // tady by šlo o druhé hlášení téhož nálezu.
+                return null;
+            }
+            $requiresShorterTime = preg_match('/^[A-F]$/D', $reason) === 1;
+            if ($requiresShorterTime && $hours === null) {
+                return "Důvod uplatnění slevy {$reason} vyžaduje vyplněný rozsah"
+                    . ' kratší pracovní/služební doby.';
+            }
+            if (!$requiresShorterTime && $hours !== null) {
+                return "Důvod uplatnění slevy {$reason} nepřipouští rozsah kratší"
+                    . ' pracovní/služební doby.';
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Kontrola 158 — důvod uplatnění slevy (10374) musí být z číselníku
+     * `duvod_uplatneni_slevy` (písmena A až G podle § 7a odst. 1).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function discountReasonFromCodebook(JmhzAttributeProjection $projection): array
+    {
+        return $this->againstCodebook(
+            $projection,
+            fn (JmhzAttributeProjection $p): array => $this->checkDiscountReasonFromCodebook($p),
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function checkDiscountReasonFromCodebook(
+        JmhzAttributeProjection $projection,
+    ): array {
+        $catalog = $this->codebooks;
+        if ($catalog === null) {
+            return [JmhzControlVerdict::unverifiable(
+                JmhzAttributeProjection::PART_FORM,
+                'Číselník důvodů uplatnění slevy není k dispozici.',
+            )];
+        }
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($catalog): ?string {
+                $reason = $form->value('10374');
+                if ($reason === null) {
+                    return null;
+                }
+                try {
+                    $catalog->requireValue('duvod_uplatneni_slevy', $reason);
+                } catch (JmhzCodebookValueException | JmhzCodebookUnavailableException $exception) {
+                    return $exception->getMessage();
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /**
+     * Kontrola 188 — vykonává-li zaměstnanec u téhož zaměstnavatele více
+     * zaměstnání v pracovním poměru, sleva náleží jen z jednoho z nich.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function employerDiscountOnlyOnOneEmployment(
+        JmhzAttributeProjection $projection,
+    ): array {
+        $counts = [];
+        foreach ($projection->forms() as $form) {
+            $person = $form->value('10051');
+            if ($person === null || !$form->has('10372')) {
+                continue;
+            }
+            $counts[$person] ??= 0;
+            if ($form->boolean('10372') === true) {
+                ++$counts[$person];
+            }
+        }
+        if ($counts === []) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_FORM)];
+        }
+        $verdicts = [];
+        foreach ($counts as $person => $count) {
+            if ($count > 1) {
+                $verdicts[] = JmhzControlVerdict::failed(
+                    JmhzAttributeProjection::PART_FORM,
+                    null,
+                    "Za IK MPSV {$person} je sleva na pojistném zaměstnavatele"
+                        . " uplatněna u {$count} zaměstnání.",
+                );
+            }
+        }
+
+        return $verdicts === []
+            ? [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_FORM)]
+            : $verdicts;
+    }
+
+    /**
+     * Kontrola 207 — úhrn vyměřovacích základů zaměstnanců se slevou (10031)
+     * se musí rovnat součtu základů (10477) těch součástí, které slevu
+     * vykazují.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function employerDiscountBaseMatchesForms(
+        JmhzAttributeProjection $projection,
+    ): array {
+        $total = $projection->pvpoj()->integer('10031');
+        $sum = 0;
+        $claimed = 0;
+        foreach ($projection->forms() as $form) {
+            if ($form->boolean('10372') !== true) {
+                continue;
+            }
+            ++$claimed;
+            $sum += $form->integer('10477') ?? 0;
+        }
+        if ($total === null && $claimed === 0) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
+        }
+        if ($total === null) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_PVPOJ,
+                null,
+                "Slevu vykazuje {$claimed} součástí, ale pojistná část úhrn"
+                    . ' jejich vyměřovacích základů neuvádí.',
+            )];
+        }
+        if ($total !== $sum) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_PVPOJ,
+                null,
+                "Úhrn vyměřovacích základů se slevou {$total} Kč neodpovídá součtu"
+                    . " za jednotlivé součásti {$sum} Kč.",
             )];
         }
 

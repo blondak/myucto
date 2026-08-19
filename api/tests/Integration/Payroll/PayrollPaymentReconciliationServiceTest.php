@@ -30,6 +30,9 @@ final class PayrollPaymentReconciliationServiceTest extends TestCase
     private int $allocationId;
     private int $statementId;
 
+    /** Rozsah důkazů končí dneškem, takže testované období musí být v minulosti. */
+    private const PAST_PERIOD = '2026-01';
+
     protected function setUp(): void
     {
         $container = Bootstrap::buildContainer();
@@ -725,6 +728,181 @@ final class PayrollPaymentReconciliationServiceTest extends TestCase
             self::assertStringContainsString(
                 'Payroll cash evidence is already owned',
                 $exception->getMessage(),
+            );
+        }
+    }
+
+    /**
+     * Nabídka důkazů se posílá OŘEZANÁ a ořezání se přiznává.
+     *
+     * Bankovní důkazy sahají od nejstaršího data splatnosti do dneška, takže
+     * u dlouho běžící firmy je to neohraničená odpověď. Ořezat ji mlčky by
+     * ale bylo horší než ji neposlat vůbec: picker by tvrdil, že nic dalšího
+     * neexistuje, a hledaná transakce by zmizela bez jediné stopy.
+     */
+    public function testOfferedBankEvidenceIsCappedAndAdmitsIt(): void
+    {
+        $this->seedPastPeriodEvidence(
+            PayrollPaymentReconciliationQueryService::OFFERED_LIMIT + 1,
+        );
+
+        $page = $this->queries->forPeriod($this->supplierId, self::PAST_PERIOD);
+
+        self::assertCount(
+            PayrollPaymentReconciliationQueryService::OFFERED_LIMIT,
+            $page['bank_evidence'],
+            'Nabídka se musí zastavit na stropu.',
+        );
+        self::assertTrue(
+            $page['bank_evidence_truncated'],
+            'Oříznutá nabídka to musí přiznat — jinak vypadá jako úplná.',
+        );
+    }
+
+    /**
+     * Serverové hledání musí najít i důkaz, který se do poslané nabídky nevešel.
+     *
+     * Přesně tohle stránkování neumí: „vybrat jde jen to, co je na první
+     * straně" je u pickeru horší chování než dlouhá odpověď.
+     */
+    public function testOptionSearchReachesEvidenceOutsideTheOfferedList(): void
+    {
+        $this->seedPastPeriodEvidence(
+            PayrollPaymentReconciliationQueryService::OFFERED_LIMIT + 1,
+        );
+        // Nejstarší transakce leží v řazení (posted_at DESC) až za stropem.
+        $needleId = $this->insertBankTransaction(
+            self::PAST_PERIOD . '-02',
+            '-1234.00',
+            'jehla-v-kupce',
+        );
+
+        $page = $this->queries->forPeriod($this->supplierId, self::PAST_PERIOD);
+        $offeredIds = array_map(
+            static fn (array $row): int => (int) $row['bank_transaction_id'],
+            $page['bank_evidence'],
+        );
+        self::assertNotContains(
+            $needleId,
+            $offeredIds,
+            'Předpoklad testu: hledaný důkaz nesmí být v poslané nabídce.',
+        );
+
+        $found = $this->queries->searchOptions(
+            $this->supplierId,
+            self::PAST_PERIOD,
+            'bank_evidence',
+            ['search' => 'jehla-v-kupce', 'usage' => 'match'],
+        );
+
+        self::assertSame(
+            [$needleId],
+            array_map(
+                static fn (array $row): int => (int) $row['bank_transaction_id'],
+                $found['items'],
+            ),
+        );
+        self::assertFalse($found['truncated']);
+    }
+
+    /** Oříznutý VÝSLEDEK HLEDÁNÍ to musí přiznat úplně stejně jako nabídka. */
+    public function testOptionSearchAdmitsItsOwnTruncation(): void
+    {
+        $this->seedPastPeriodEvidence(8);
+
+        $found = $this->queries->searchOptions(
+            $this->supplierId,
+            self::PAST_PERIOD,
+            'bank_evidence',
+            ['usage' => 'match'],
+            3,
+        );
+
+        self::assertCount(3, $found['items']);
+        self::assertTrue($found['truncated']);
+        self::assertSame(3, $found['limit']);
+    }
+
+    /** Zúžení podle měny a směru patří na server, ne do prohlížeče. */
+    public function testOptionSearchNarrowsByCurrencyAndDirection(): void
+    {
+        $this->seedPastPeriodEvidence(3);
+
+        $incoming = $this->queries->searchOptions(
+            $this->supplierId,
+            self::PAST_PERIOD,
+            'bank_evidence',
+            ['usage' => 'match', 'direction' => 'incoming', 'currency' => 'CZK'],
+        );
+        self::assertSame([], $incoming['items'], 'Odchozí platba není příchozí důkaz.');
+
+        $outgoing = $this->queries->searchOptions(
+            $this->supplierId,
+            self::PAST_PERIOD,
+            'bank_evidence',
+            ['usage' => 'match', 'direction' => 'outgoing', 'currency' => 'CZK'],
+        );
+        self::assertCount(3, $outgoing['items']);
+
+        $foreign = $this->queries->searchOptions(
+            $this->supplierId,
+            self::PAST_PERIOD,
+            'bank_evidence',
+            ['usage' => 'match', 'direction' => 'outgoing', 'currency' => 'EUR'],
+        );
+        self::assertSame([], $foreign['items']);
+    }
+
+    public function testOptionSearchRejectsUnknownKindAndUsage(): void
+    {
+        try {
+            $this->queries->searchOptions(
+                $this->supplierId,
+                self::PAST_PERIOD,
+                'invoices',
+            );
+            self::fail('Neznámý druh nabídky musí skončit chybou.');
+        } catch (\InvalidArgumentException) {
+            self::assertTrue(true);
+        }
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->queries->searchOptions(
+            $this->supplierId,
+            self::PAST_PERIOD,
+            'bank_evidence',
+            ['usage' => 'anything'],
+        );
+    }
+
+    /**
+     * Období v minulosti se schváleným během, alokací a `$count` nespárovanými
+     * bankovními transakcemi. Rozsah důkazů sahá od nejstarší splatnosti do
+     * dneška, takže období MUSÍ ležet v minulosti — jinak je rozsah prázdný.
+     */
+    private function seedPastPeriodEvidence(int $count): void
+    {
+        [$revisionId, $employeeId] = $this->createApprovedRevision(
+            self::PAST_PERIOD . '-01',
+        );
+        $liabilityId = $this->insertLiability(
+            $revisionId,
+            $employeeId,
+            100_000,
+            'net-wage.past',
+            self::PAST_PERIOD . '-10',
+        );
+        $this->insertAllocation(
+            $liabilityId,
+            'bank',
+            100_000,
+            self::PAST_PERIOD . '-10',
+        );
+        for ($i = 0; $i < $count; ++$i) {
+            $this->insertBankTransaction(
+                sprintf('%s-%02d', self::PAST_PERIOD, ($i % 20) + 8),
+                '-1000.00',
+                sprintf('nabidka-%03d', $i),
             );
         }
     }

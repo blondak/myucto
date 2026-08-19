@@ -220,6 +220,74 @@ a vznikne nová účinná verze od měsíce následujícího, takže historický
 zůstane nedotčený. Ukončení nároku mimo zmrazené období se provede běžnou
 úpravou data „Nárok do".
 
+### 58.4.2 Zákonná evidence osoby
+
+Pod běžnými údaji zaměstnance je sekce **Zákonná evidence osoby**. Vede právní
+skutečnosti, ze kterých vychází zákonný výpočet:
+
+- **prohlášení poplatníka k dani** — rozhoduje, zda se uplatní měsíční slevy
+  a zvýhodnění, nebo se sráží daň bez nich;
+- **daňová rezidence** — rezident, nerezident (se zemí), nebo neověřeno;
+- **příslušnost k sociálnímu pojištění** včetně formuláře A1 u zahraničního
+  režimu;
+- **sleva pro pracujícího poplatníka v důchodu**;
+- **příslušnost ke zdravotnímu pojištění** a zdravotní pojišťovna;
+- **měsíční evidence zdravotního minima** — kdo za daný měsíc doplácí do
+  minimálního vyměřovacího základu.
+
+Chybí-li kterýkoli z prvních pěti údajů, mzdový běh zákonný výpočet této osoby
+nespočítá a skončí v ručním posouzení. Sekce proto v hlavičce ukazuje počet
+chybějících údajů a uvnitř je vyjmenuje pro konkrétní měsíc; datum **Ke kterému
+dni** určuje, který měsíc se kontroluje.
+
+Měsíční evidence zdravotního minima je **nepovinná**. Není-li za měsíc zadaná,
+platí zákonný výchozí stav podle § 3 odst. 10 zákona č. 592/1992 Sb.: doplatek
+do minimálního vyměřovacího základu hradí zaměstnanec. Zadává se tedy jen tehdy,
+když je skutečnost jiná — doplatek jde k tíži zaměstnavatele, protože nižší
+základ způsobily překážky na jeho straně (vyžaduje doklad), nebo si zaměstnanec
+při souběhu zvolil pro doplatek jiného zaměstnavatele. Rozklad pojistného u
+schválené mzdy pak ukazuje i to, jestli hodnota vznikla zápisem, nebo odvozením
+ze zákona. Volba **neověřeno** dál znamená ruční posouzení.
+
+Ověřené hodnoty (český nebo zahraniční režim, doložená pojišťovna, platný A1)
+jsou právní skutečnosti, takže vyžadují **doklad**. Ten se ale nepíše ručně —
+u každého dokladu se vybírá **typický důvod** (například „Podepsané prohlášení
+poplatníka (§ 38k)", „Rodné číslo a adresa bydliště v ČR", „Registrace
+u zdravotní pojišťovny") a evidence si z něj sama vytvoří odkaz do mzdové
+dokumentace. Volba **Jiné** odemkne volný text pro konkrétní číslo dokladu
+(písmena, číslice a znaky `.`, `:`, `/`, `_`, `-`). Lidské vysvětlení patří do
+pole **Poznámka k dokladu**. Kdo doklad nemá, zvolí variantu **neověřeno**; ta
+se uloží, ale zůstane vidět jako důvod ručního posouzení.
+
+Tlačítko **Přidat záznam** předvyplní běžný český případ: daňový rezident ČR,
+český sociální i zdravotní režim, formulář A1 se netýká, sleva pracujícího
+důchodce se neuplatňuje a zdravotní pojišťovna je ta, u které je osoba dosud
+vedená (jinak výchozí pojišťovna zaměstnavatele z nastavení mezd). U běžného
+zaměstnance tak není co vyplňovat — stačí zkontrolovat a uložit.
+
+Na co se evidence neptá, to si odvodí: u českého daňového rezidenta je stát vždy
+ČR, u českého sociálního režimu je A1 vždy „netýká se". Tato pole se proto
+nezobrazují a objeví se až po přepnutí na cizí režim — tehdy si evidence vyžádá
+stát (ze seznamu států) a doklad k režimu. Stát i zdravotní pojišťovna se vždy
+vybírají ze seznamu, nepíšou se. Chybí-li něco, co server nepřijme, napíše to
+evidence rovnou u záznamu i s tím, co s tím udělat.
+
+Evidence se zadává **po celých měsících** a záznamy jedné řady musí na sebe
+navazovat den po dni — čtecí cesta vyhodnocuje evidenci k prvnímu dni měsíce,
+takže změna uprostřed měsíce by se buď ztratila, nebo by pro daný měsíc vznikly
+dvě současně platné verze. Díra v řadě se odmítne už při uložení; jinak by se
+projevila až tím, že mzdový běh za chybějící měsíc spadne do ručního posouzení.
+
+Záznam, který začal před koncem posledního schváleného mzdového období, je
+uzavřený: jeho začátek nejde posunout ani ho smazat. Věcná změna se do něj
+nezapíše — původní záznam se ukončí posledním uzavřeným dnem a nová právní
+skutečnost vznikne jako nový záznam od dalšího měsíce. Doplnit dosud chybějící
+záznam do uzavřeného období naopak jde; nic tím nepřepisuje.
+
+Celá sekce se ukládá jedním tlačítkem **Uložit**. Čtení stačí obecné oprávnění
+pro mzdy, zápis vyžaduje **Spravovat zaměstnance** (`payroll.person.write`) —
+evidence je vedená na osobě, ne na jednotlivém pracovním vztahu.
+
 ## 58.5 Pracovní vztah a předkontace
 
 Jedna osoba může mít více samostatných právních vztahů. Rozlišení je důležité
@@ -269,6 +337,25 @@ nepřepíše. Historie drží zejména:
   daňový režim a prohlášení k dani;
 - příznak primárního pracovního vztahu a důvod změny.
 
+U odměny člena statutárního orgánu, u dohody o pracovní činnosti a u práce
+společníka pro vlastní společnost přibývá v podmínkách pole **Účast na
+nemocenském pojištění z odměny**. Rozhoduje o tom, jak se odměna zdaní, když
+zaměstnanec nepodepsal prohlášení k dani (§ 6 odst. 4 písm. b) zákona o daních
+z příjmů):
+
+- **Zakládá účast** — sjednaná odměna dosahuje rozhodné částky, takže se sráží
+  zálohová daň v každém měsíci.
+- **Nezakládá účast** — měsíce, ve kterých odměna rozhodné částky nedosáhne
+  (pro rok 2026 je to 4 500 Kč), se daní srážkovou daní 15 % ze samostatného
+  základu; ostatní měsíce zálohou.
+- **Neurčeno** — výchozí stav. Aplikace odpověď neodhaduje, protože za zařazení
+  ručí plátce daně, a zákonný výpočet skončí ručním posouzením, dokud ji někdo
+  nedoplní.
+
+U pracovního poměru, zaměstnání malého rozsahu a dohody o provedení práce se
+pole nenabízí — tam zařazení plyne přímo z druhu vztahu a aplikace si ho odvodí
+sama.
+
 Ve stejné verzi podmínek je skupina **JMHZ – vykonávaná pozice**. Eviduje
 strukturovanou obec pracoviště, kód obce a stát, druh činnosti, bližší určení
 pracovněprávního vztahu, příspěvek a nástroj APZ, funkční požitky a dočasné
@@ -305,6 +392,24 @@ pozdějšího doplatku. U každé položky je termín a stav **Nesplněno**,
 verze. Pokud jiný uživatel mezitím vztah změnil, starší formulář se neuloží a je
 nutné načíst aktuální verzi.
 
+### 58.8.1 Navazující agendy
+
+Karta vztahu má sekci **Navazující agendy**. Vede z ní jedno kliknutí do každé
+agendy, kde se k tomuto člověku dá něco pořídit — docházka a směny,
+nepřítomnosti, mzdové vstupy, pracovní cesty, opakované složky, průměrný
+výdělek, dohody o srážkách, exekuce, dokumenty a roční zúčtování. Cílová
+obrazovka se otevře už zúžená na daného zaměstnance; zúžení je vidět v horní
+liště a jedním tlačítkem se ruší. Zužuje server, ne jen zobrazená stránka —
+hledaný člověk se najde, i kdyby jeho záznamy ležely až na několikáté straně,
+a stránkování i počty mluví o zúženém seznamu. Když zúžení nedá žádný záznam
+(cizí nebo zaniklý vztah, zestaralý odkaz), řekne to lišta větou; prázdná
+tabulka bez vysvětlení se nezobrazí.
+
+Pod tlačítky je souhrn: u agend, ve kterých něco je, počet záznamů, datum
+posledního a případně částka. Agendy, ve kterých zatím nic není, se jmenují
+jednou nenápadnou větou pod souhrnem. Agenda, na kterou uživatel nemá
+oprávnění, se nenabízí ani nezapočítává.
+
 ## 58.9 Mzdové složky a vstupy
 
 V **Mzdy → Mzdové složky a vstupy** jsou běžnými záložkami oddělené:
@@ -327,6 +432,60 @@ Každá složka samostatně určuje dopad do daně, sociálního a zdravotního
 pojištění, průměrného výdělku, exekučního základu, JMHZ, statistiky a
 účetnictví. Schválený vstup si uloží neměnný snapshot této klasifikace; pozdější
 změna katalogu proto nepřepíše již zpracované období.
+
+### Roční koš osvobození benefitů
+
+U nepeněžních benefitů se limit osvobození podle zákona o daních z příjmů
+nevztahuje na jednu mzdovou složku, ale na **úhrn všech plnění daného
+ustanovení za kalendářní rok**. Aplikace to drží jako **zákonný koš**, který se
+u složky vybírá v katalogu:
+
+- **zdravotní plnění** (§ 6 odst. 9 písm. d) bod 1) — do výše průměrné mzdy;
+- **rekreace, sport a kultura** (§ 6 odst. 9 písm. d) bod 2) — do poloviny
+  průměrné mzdy;
+- **spoření na stáří a dlouhodobá péče** (§ 6 odst. 9 písm. m)) — 50 000 Kč.
+
+Koš se sčítá za osobu u zaměstnavatele, tedy i napříč souběžnými pracovními
+vztahy, a částku limitu bere z rulesetu daně z příjmů účinného pro daný rok.
+Náhled mzdového vstupu ukazuje, kolik z koše je po tomto plnění vyčerpáno a
+kolik zbývá — překročení se tedy nezjistí až v prosinci.
+
+Plnění nad limit se **neblokuje**: zákon ho nezakazuje, jen ho zdaňuje.
+Nadlimitní část se při schválení vstupu zmrazí zvlášť a do výpočtu vstupuje jako
+samostatná zdanitelná složka, která se započítá do daně i do vyměřovacích
+základů sociálního a zdravotního pojištění. Částka přesně na limitu je ještě
+celá osvobozená.
+
+Pole **Roční limit** u složky je něco jiného — je to **vlastní strop
+zaměstnavatele** a schválení vstupu nad něj neprojde.
+
+#### Přehled čerpání košů za firmu
+
+Náhled vstupu ukáže koš jen tomu, kdo ten vstup zrovna zadává. Souhrn za celou
+firmu je v **Mzdy → Roční koše benefitů**: jeden řádek na zaměstnance a koš,
+s vyčerpanou částkou, limitem, zbytkem a s tím, kolik se už zdanilo jako
+nadlimitní. Filtruje se podle zdaňovacího období, koše a jména; sloupce a hustotu
+tabulky si každý uživatel nastaví sám.
+
+Řádky se sčítají za osobu u zaměstnavatele, tedy i napříč souběžnými pracovními
+vztahy a napříč mzdovými složkami téhož koše — stejně, jako to počítá náhled
+vstupu. Stav řádku říká, jestli je osoba v limitu, blíží se mu (od 80 % koše),
+nebo je nad ním.
+
+Přehled **nic nepřepočítává**: osvobozenou i nadlimitní část čte zmrazenou
+z okamžiku schválení vstupu, takže sedí s výplatní páskou. Proto se u některých
+řádků objeví místo čísla přiznání, že podklad chybí:
+
+- **Neúplný podklad** — část vstupů je z doby, kdy se koše ještě nezmrazovaly.
+  Chybějící rozpad se nedopočítá, jen se přizná počet takových vstupů.
+- **Limit není k dispozici** — pro zvolený rok není schválená sada legislativních
+  pravidel, takže se netvrdí ani limit, ani zbývající částka.
+- Poznámka o **rozporu se zmrazeným rozpadem** znamená, že se limit v pravidlech
+  po schválení vstupů změnil. Zobrazená čísla zůstávají zmrazená; přepsat je
+  dnešním limitem by přehled rozešlo s už vyplacenými mzdami.
+
+Přehled je čtecí a jede na oprávnění `payroll`, tedy stejné, jaké má seznam
+mzdových vstupů — je to jejich součet za osobu a rok, ne nová třída údajů.
 
 U složky zahrnuté do JMHZ nastav také konkrétní cílový atribut měsíčního
 hlášení. Stav **Chybí mapování** nebrání výpočtu mzdy, ale znamená, že složku
@@ -503,9 +662,28 @@ evidované dohody se proti nim poměřuje všechen přesčas.
 > Překročení limitu je vada na straně zaměstnavatele, ne chyba výpočtu.
 > Odpracovaný přesčas se podle § 114 platí i tehdy, když byl nařízen nad
 > zákonný rozsah, proto se nález eviduje jako **upozornění** u revize mzdového
-> běhu a schválení ani výplatu nezastaví. Přesčas kompenzovaný náhradním volnem
-> se z vyrovnávacího období zatím neodečítá (§ 93 odst. 5) — kontrola je tedy na
-> bezpečné straně a může upozornit i tam, kde volno poskytnuto bylo.
+> běhu a schválení ani výplatu nezastaví.
+
+### Náhradní volno za přesčas
+
+Náhradní volno se eviduje na dvou místech, protože každý zápis odpovídá na
+jinou otázku a váže se k jinému dni:
+
+- **Absence druhu „Náhradní volno za přesčas"** v agendě Absence a dovolená je
+  záznam o **dni čerpání** — vstup do docházky a mzdy. Za dobu čerpání mzda
+  nepřísluší (§ 114 odst. 3), protože přesčas se už proplatil a volnem se
+  nahrazuje jen příplatek.
+- **Tlačítko Náhradní volno** v Docházce a směnách zapisuje, **ke kterému dni
+  přesčasu** se volno vztahuje. Podle toho se přesčas vyjímá z vyrovnávacího
+  období (§ 93 odst. 5); z limitů nařízeného přesčasu podle odst. 2 se
+  neodečítá, tam zákon výjimku nemá.
+
+Odvodit jedno z druhého nelze: absence den přesčasu nenese a jeden den čerpání
+může vyrovnávat přesčas z několika dnů. U vztahu proto přibude upozornění,
+když je za měsíc zapsaná jen jedna strana — jednostranný zápis by jinak zůstal
+tichý a projevil by se buď chybějícím vynětím z vyrovnávacího období, nebo
+neodpracovaným dnem bez důvodu. Zápis bez data poskytnutí volna se do měsíce
+nezařazuje a hlásí se zvlášť.
 
 ## 58.11 Mzdové běhy
 
@@ -674,6 +852,16 @@ výživné, více exekučních příkazů, více plátců, oddlužení a paušá
 nákladů zaměstnavatele. Chybějící měsíční podklady nezastoupí odhadem — výsledek
 označí pro ruční kontrolu.
 
+Měsíční podklady se ale vyžadují jen tam, kde mají co doložit. Zaměstnanec bez
+jediné aktivní pohledávky a bez oddlužení nic zadávat nemusí: rozdělovat není
+co, takže potvrzení rejstříku pohledávek za takový měsíc nechybí — jen se
+nevyžaduje. Potvrzení vyživovaných osob a slevy na manžela se ptá jen tehdy,
+když je nárok uplatněný, protože jen tehdy zvedá nezabavitelnou částku.
+U schválené mzdy je pak z výsledku vidět, jestli byl podklad doložený, nebo
+proč se v tom měsíci nevyžadoval. Uplatněný a nedoložený nárok mzdový běh
+neblokuje, ale do vyčerpání kapacity dobrovolných dohod o srážkách nepustí —
+nezabavitelná částka, ze které se strop dohody počítá, není doložená.
+
 Číslo řízení, bankovní účet příjemce ani právní dokument se do polí případu
 nepřepisují. Patří do zabezpečených dokumentů; agenda srážek pracuje pouze
 s interním identifikátorem a ověřenými skutečnostmi. Odklad a zastavení vyžadují
@@ -801,6 +989,12 @@ se stavem žádosti a výsledkem, vpravo evidence podkladů a výpočet vybrané
 Rok, který ještě neskončil, se nezúčtovává — stránka proto po otevření nabízí
 uplynulé období.
 
+Seznam se stránkuje na serveru a jde zúžit hledáním jména nebo stavem
+(**Požádali, nezúčtováno** / **Bez zúčtování** / **Zúčtováno**). Zúžení hledá
+v celém roce, ne jen na zobrazené straně, a dá se uložit jako pohled. Sloupce
+se tu nevybírají: vlevo je výběr osoby, ne datová tabulka, a jediná tabulka na
+stránce je pevný výpočet podle § 38ch.
+
 Zúčtování je právní úkon zaměstnavatele podle § 38ch zákona o daních z příjmů,
 ne dopočet. Aplikace ho proto provede jen tehdy, když je zodpovězené všechno
 následující. Nezodpovězená otázka má stejný účinek jako záporná odpověď: dokud
@@ -812,7 +1006,8 @@ platí „nevíme", zúčtování se neprovádí.
   z karty zaměstnance k 31. prosinci zúčtovávaného roku.
 - **Doklady od předchozích zaměstnavatelů** za tentýž rok jsou doložené,
   nebo zaměstnanec jiného zaměstnavatele neměl. Pozdější doručení než
-  15. února zúčtování zastaví.
+  15. února zúčtování zastaví. Samotné údaje z těch potvrzení se zadávají
+  v sekci níž a musí být úplné.
 - **Zaměstnanec nepodává daňové přiznání.** Kdo přiznání podá nebo je povinen
   ho podat, tomu zaměstnavatel roční zúčtování provést nesmí. Aplikace tuhle
   povinnost neodvozuje — o většině rozhodných skutečností nic neví, a odpověď
@@ -828,6 +1023,45 @@ platí „nevíme", zúčtování se neprovádí.
 
 Nesplněné podmínky se vypisují všechny najednou jako věty, ne jako kódy, a
 tlačítko **Provést roční zúčtování** zůstává vidět zašedlé i s vysvětlením.
+
+### Potvrzení od jiného plátce daně
+
+Měl-li zaměstnanec v roce ještě jiného zaměstnavatele, zapiš jeho potvrzení
+v sekci **Potvrzení od jiného plátce daně**. Údaje odpovídají tiskopisu
+*Potvrzení o zdanitelných příjmech ze závislé činnosti* (25 5460, vzor č. 33)
+a zúčtování je bez nich provést nelze — § 38ch odst. 3 říká, že plátce zúčtování
+provede „jen na základě dokladů … o zúčtované nebo vyplacené mzdě, sražených
+zálohách na daň z těchto příjmů, poskytnuté měsíční slevě na dani podle § 35ba
+a 35c a vyplacených měsíčních daňových bonusech".
+
+| Pole v aplikaci | Kde ho najdeš na potvrzení |
+|---|---|
+| Úhrn zúčtovaných příjmů | ř. 1 |
+| Základ daně | ř. 5 |
+| Záloha na daň celkem | ř. 8 |
+| Poskytnuté měsíční slevy podle § 35ba | dopočítá se z ř. 12 a z měsíců prohlášení v záhlaví |
+| Poskytnuté měsíční slevy podle § 35c | dopočítá se z ř. 11 |
+| Vyplacené měsíční daňové bonusy | ř. 9 |
+
+Slevy tiskopis jako částku neuvádí — nese je jako **měsíce nároku** (ř. 11 a 12
+a údaj o prohlášení v záhlaví), protože záloha na ř. 8 je už po nich. Aplikace
+si je proto nedomýšlí a žádá je zadat.
+
+> [!IMPORTANT]
+> **Prázdné pole není nula.** Prázdné pole znamená „na potvrzení ten údaj není"
+> a zúčtování zastaví; nula znamená „na potvrzení je nula" a počítá se s ní.
+> Kdyby se prázdné pole četlo jako nula, porovnal by se celoroční nárok na bonus
+> proti nižšímu úhrnu už vyplacených bonusů a zaměstnanci by vyšel přeplatek,
+> na který nemá nárok. U každého potvrzení je proto vidět, které údaje na něm
+> chybí.
+
+Potvrzení, které je vedené jako **nedoložené**, se do úhrnu nezapočítá — § 38ch
+odst. 4 mluví o úhrnu mezd od všech plátců a do toho úhrnu patří doklad, ne
+nepodložený údaj. Sekci smí zadávat jen ten, kdo smí zúčtování i provést: ta
+čísla jdou přímo do úhrnu, ze kterého vychází přeplatek.
+
+Na výsledném dokladu je úhrn rozepsaný — kolik základu a záloh je od tohoto
+zaměstnavatele a kolik podle potvrzení od předchozích.
 
 Výpočet nic nepřepočítává znovu. Roční úhrny daně a záloh vznikají průběžně při
 schválení každého mzdového běhu; roční zúčtování je jen sečte, porovná s roční
@@ -888,6 +1122,11 @@ Produkční a testovací prostředí zůstávají oddělená. Přehled je pouze
 kontrolní — bez implementovaného důvěryhodného transportu a parseru protokolu
 nenabízí falešné tlačítko odeslání ani nepovyšuje lokální stav na přijaté
 podání.
+
+Samostatná záložka **ZP — oznámení** řeší oznamovací povinnost vůči zdravotní
+pojišťovně, tedy hlášení nástupů, skončení a dalších skutečností v osmidenní
+lhůtě. Je to jiná povinnost než měsíční přehled o platbě pojistného, a proto
+má vlastní záložku; podrobně ji popisuje kapitola 58.22.
 
 U každého termínu se samostatně zobrazuje jeho aktuální fáze: okno ještě není
 otevřené, otevřeno, blíží se termín, termín je dnes, po termínu, čeká se na
@@ -973,6 +1212,9 @@ jen z přihlášené webové relace, ne přes běžný bearer token.
 Zakládání vztahů, nové verze podmínek, stavové přechody a checklist vyžadují
 `payroll.employment.write`; bez něj je detail pouze pro čtení.
 Změna osobní karty a ověření výplatního účtu vyžadují `payroll.person.write`.
+Přehled čerpání ročních košů benefitů jede na `payroll` jako čtení: je to součet
+týchž mzdových vstupů, které seznam vstupů ukazuje po jednom. Samostatné právo by
+nechalo otevřený seznam po řádcích a zamklo jen jeho součet.
 Archiv dokumentů vyžaduje `payroll.documents`; bez práva zápisu nelze vytvořit
 měsíční balíček.
 Platební závazky, dávky a párování vyžadují samostatné oprávnění
@@ -984,8 +1226,14 @@ Agenda srážek má samostatné oprávnění `payroll.enforcement`; právo pro b
 mzdy ani původní Mzdovou rekapitulaci samo o sobě přístup k těmto údajům
 nedává. Změna měsíčního insolvenčního režimu vyžaduje také
 `payroll.insolvency` a právní přechod s dokumentem oprávnění `documents`.
+Retenční lhůty, odchylka firmy a zadržení výmazu jedou na `payroll.retention`;
+schválení a provedení výmazu na samostatném `payroll.erasure`, které výchozí
+účetní role **nemá** — je nevratné, a proto ho přiděluje správce stejně jako
+schválení mzdového běhu.
 
 Běžný seznam ani detail neposílá rodné číslo, adresu nebo bankovní účet.
+Jméno osoby citlivý identifikátor v tomto smyslu není — ukazuje ho seznam osob
+i posudek retence, aby bylo poznat, o koho jde.
 Citlivé mzdové identifikátory se ukládají kontextově šifrované pro konkrétní
 firmu a osobu; vyhledávací otisk nelze použít ke spojování stejné hodnoty mezi
 firmami. Citlivé hodnoty a mzdové částky se redigují z provozních logů.
@@ -1029,3 +1277,210 @@ licencí úplných mezd.
 Nový modul nad společnou kartou pouze doplňuje další údaje. Ochrana období
 zabrání tomu, aby stejnou firmu a měsíc uzavřela legacy rekapitulace i nový
 mzdový běh.
+
+## 58.20 Retenční lhůty mzdové agendy
+
+Mzdový modul drží nejcitlivější osobní údaje v aplikaci a nesmí je držet
+navždy ani je zahodit dřív, než smí. Přehled **Mzdy → Retenční lhůty** ukazuje,
+jak dlouho se která skupina mzdových dat uchovává, od kdy lhůta běží a kde to
+stojí psané. Otevřít ho může role s oprávněním `payroll.retention`.
+
+Odsud se nic nemaže. Uplynulá lhůta je konec povinnosti uchovávat, ne příkaz
+ke skartaci. Nastavit jde dvojí: **odchylka firmy** od katalogové lhůty
+a **zadržení výmazu** konkrétní osoby. Samotný výmaz má vlastní obrazovku
+(viz 58.21).
+
+U každé kategorie je vidět:
+
+- **Lhůta** — počet let, podle kterého se opravdu počítá, tedy včetně
+  případného prodloužení, které si firma sama dohodla.
+- **Běží od** — kalendářní roky po roce, kterého se záznam týká, roky po roce
+  vyhotovení, nebo roky od konce účetního období.
+- **Právní pramen** — konkrétní ustanovení, ne jen číslo zákona, a u lhůt,
+  jejichž číslo se v posledních letech měnilo, i novela, která dnešní znění
+  zavedla.
+- **Ověřeno** — den, ke kterému se citace porovnala s účinným zněním předpisu.
+- **Dotčené tabulky** — čeho přesně se lhůta drží.
+
+### Původ lhůty
+
+Nejdůležitější sloupec není číslo, ale odkud se vzalo. Rozlišují se tři stavy
+a jejich počty stojí jako dlaždice nad tabulkou, takže rozdíl je vidět hned:
+
+- **Ze zákona** — číslo stojí v předpise a pramen říká kde.
+- **Dodaná politika** — číslo dodala aplikace, protože zákon pro tuhle skupinu
+  záznamů uschovávací lhůtu nemá. Týká se to zdravotního pojištění: v zákoně
+  č. 592/1992 Sb. žádná uschovávací lhůta není, deset let je bezpečné
+  rozhodnutí, ne právo, a přehled to říká nahlas.
+- **Bez lhůty** — doloženo, že předpis lhůtu nestanoví. Spis k exekučním
+  srážkám žádnou uschovávací lhůtu nemá: v občanském soudním řádu se
+  uschovávání týká jen prodeje nevyzvednutých movitých věcí a v exekučním řádu
+  je povinnost uložena exekutorovi, ne plátci mzdy.
+
+Kategorie bez lhůty se k výmazu **nikdy** nenavrhne, dokud lhůtu nedodá firma
+vlastní politikou. Sloupec **Výmaz** to u každé kategorie říká přímo.
+
+### Co z lhůt plyne pro výmaz
+
+Spodní panel přepočítá lhůty na konkrétní osoby k zadanému dni: kolik jich lze
+navrhnout k výmazu a — hlavně — proč se ostatní nenavrhly. Rozlišuje běžící
+retenční lhůtu, zadržení výmazu (kontrola, odvolání, spor, exekuce,
+insolvence), neurčenou lhůtu, chybějící základ výpočtu a osoby, které už
+anonymizované jsou. Návrh, který někoho mlčky vynechá, se nedá zkontrolovat.
+
+Panel osoby **jmenuje**, nejen počítá: kdo je na řadě k výmazu a koho drží
+zadržení. Nevratný úkon se podle samotného čísla odklepnout nedá.
+
+Lhůty účetních a daňových záznamů firmy jako celku (§ 31 a § 32 zákona
+o účetnictví) mají vlastní přehled na **Účetnictví → Retenční lhůty**.
+
+### Odchylka firmy od katalogové lhůty
+
+Tlačítko **Odchylka firmy** na řádku kategorie otevře jeden formulář s jedním
+tlačítkem Uložit. Zadává se v něm:
+
+- **Prodloužení o (roky)** — přičte se ke lhůtě z katalogu. Použije se, když
+  firmu váže smlouva nebo vnitřní předpis s delší lhůtou.
+- **Dodaná lhůta (roky)** — nabídne se **jen** u kategorií, které lhůtu
+  v katalogu nemají (dnes spis k exekučním srážkám). Dokud ji nikdo nedodá,
+  osoba se k výmazu nikdy nenavrhne.
+- **Zdůvodnění** — povinné. Odchylka od zákonné lhůty musí být doložitelná
+  a ukládá se s ní.
+
+**Lhůtu nelze zkrátit.** Není to omezení formuláře, ale pravidlo aplikace:
+zkrácení pod hodnotu z katalogu — ať už zákonnou, nebo dodanou politikou —
+se odmítne s vysvětlením, které řekne, odkud lhůta pochází. Odchylku jde
+kdykoli zrušit tlačítkem **Zrušit odchylku**; lhůta se tím vrátí na hodnotu
+z katalogu.
+
+### Zadržení výmazu (legal hold)
+
+Zadržení drží data osoby i po uplynutí lhůty — kvůli daňové kontrole,
+odvolání, soudnímu sporu, exekuci nebo insolvenci (§ 32 zákona o účetnictví
+a mzdové důvody). Zadává se tlačítkem **Zadržet výmaz** a vyžaduje osobu,
+důvod, č. j. nebo popis řízení a datum. Bez popisu se neuloží: jinak by
+nešlo doložit, proč se výmaz zadržel.
+
+Dokud zadržení trvá, osoba se k výmazu nenavrhne a už schválený návrh ji
+přeskočí. **Uvolnění** je vědomý úkon a potvrzuje se — výmaz osoby tím zase
+půjde navrhnout a provést. Uvolněný záznam nezmizí, jen dostane datum
+uvolnění; zaškrtnutím **Zobrazit i uvolněná** se zobrazí i historie.
+
+Zadržení zadané na účetní straně (**Účetnictví → Retenční lhůty**) platí na
+celou firmu, a tedy i na mzdy. Opačně to neplatí: zadržení jedné osoby
+nemá co blokovat mazání faktur.
+
+## 58.21 Výmaz osobních údajů
+
+Obrazovka **Mzdy → Výmaz osobních údajů** (oprávnění `payroll.erasure`) je
+jediné místo, odkud se mzdová osobní data mažou. Výmaz je **nevratný** —
+data zpátky nikdo nezadá —, proto je rozdělený do tří kroků, které se dají
+zkontrolovat každý zvlášť.
+
+### 1. Sestavit návrh
+
+Zadá se den, ke kterému se posuzuje, a aplikace sestaví návrh **jen** z osob,
+kterým lhůta uplynula a nic je nedrží. Když k tomu dni není koho navrhnout,
+řekne to a nevytvoří nic — prázdný návrh by se dal schválit a v přehledu by
+vypadal jako provedený výmaz.
+
+### 2. Schválit nebo zamítnout
+
+Detail návrhu jmenuje každou osobu a u ní uvádí:
+
+- **Rozsah** — *úplný výmaz* u osoby bez účetní stopy, jinak *anonymizace*:
+  účetní záznam zůstane, zmizí z něj jen osobní údaj.
+- **Podle ustanovení** — lhůta, o kterou se rozhodnutí opírá, i s tím, jak je
+  doložená.
+- **Dopad** — kolik řádků osobních dat zmizí, po skupinách.
+- **Zbytek** — osobní údaj, který zůstane ve zmrazeném obsahu (vystavená PDF,
+  odeslaná XML). Ten se nepřepisuje a návrh to říká předem, ne až potom.
+
+Zamítnutý návrh zůstává v přehledu jako doklad, ale provést už ho nelze.
+
+### 3. Provést
+
+Provedení je samostatný krok nad **schváleným** návrhem. Neschválený návrh
+aplikace odmítne. Potvrzovací dialog vypíše dotčené osoby a vyžaduje dvojí
+potvrzení — zaškrtnutí, že rozumíte nevratnosti, a opsání čísla návrhu.
+Jedním kliknutím se výmaz spustit nedá.
+
+Každá položka se **před provedením posuzuje znovu**. Co mezi schválením
+a provedením dostalo zadržení nebo se u toho změnil rozsah, se přeskočí
+s uvedeným důvodem místo aby se provedlo podle zastaralého rozhodnutí.
+Výsledek u každé osoby je vidět ve sloupci **Výsledek**.
+
+### Co po výmazu zůstane
+
+Návrh zůstává jako **doklad, že výmaz proběhl**: kdo ho schválil, kdy se
+provedl a podle které lhůty se rozhodovalo. V auditní stopě zůstává i jméno
+osoby — je to vědomé rozhodnutí, aby šlo doložit, o koho šlo. Samotná osobní
+data z evidence zmizí; u úplně vymazané osoby proto zůstane řádek návrhu bez
+jména a obrazovka to napíše.
+
+## 58.22 Podání zdravotním pojišťovnám
+
+Záložka **Mzdy → Podání a hlášení → ZP — oznámení** odpovídá na jedinou
+otázku: co se za zvolený měsíc hlásí zdravotní pojišťovně, komu a do kdy.
+Otevřít ji může role s oprávněním `payroll.submissions`.
+
+### Co modul neumí
+
+Přiznání stojí nahoře, nad seznamem, ne až v chybové hlášce:
+
+- **Aplikace podání neodesílá.** Ani jedna ze sedmi zdravotních pojišťoven
+  nemá veřejně popsanou transportní obálku — endpoint, typ obsahu, název
+  přílohy ani formát odpovědi. Odeslání na odhadnutý cíl by v nejhorším
+  případě znamenalo zmeškanou lhůtu bez povšimnutí.
+- **Doložená cesta je ruční.** Soubor se stáhne a podá se datovou schránkou
+  nebo nahráním do portálu pojišťovny. ID datových schránek a adresy portálů
+  jsou u jednotlivých pojišťoven přímo v panelu.
+- **U tří druhů povinnosti se nevydá kód změny.** U změny údajů, přestupu
+  mezi pojišťovnami a ostatních skutečností, kde je plátcem stát, neurčuje
+  připnuté schéma jediný kód. Řádek proto nese značku **Kód nedoložen** a po
+  najetí ukáže konkrétní důvod — jiný u každého z těch tří.
+
+### Přehled povinností
+
+Tabulka ukazuje za měsíc jednu řádku na každou oznamovanou skutečnost: koho
+se týká, jaký druh oznámení to je, které pojišťovně patří, kdy skutečnost
+nastala a do kdy se hlásí. Filtrovat lze podle pojišťovny, druhu oznámení,
+toho kdo hlásí, a podle chybějícího kódu změny; filtr i stránkování dělá
+server, takže počty nad tabulkou popisují právě ten seznam, který je vidět.
+
+Základní lhůta je osm **dnů** od vzniku skutečnosti podle § 10 zákona
+č. 48/1997 Sb. U dohod (DPP, DPČ) a u mateřské a rodičovské dovolené se místo
+toho uplatní 20. den následujícího měsíce; u těchto výjimek je pramenem
+metodika pojišťovny, ne text zákona, a sloupec **Pramen** to říká.
+
+Od 1. 1. 2026 se oznamovací povinnost zaměstnavatele u kategorií, kde je
+plátcem stát, zúžila na nástup na mateřskou a rodičovskou dovolenou. Ostatní
+skutečnosti hlásí sám pojištěnec. Takové povinnosti se ze seznamu
+**nevypouštějí** — zůstávají označené jako „Zaměstnavateli neběží", protože
+rozdíl mezi „nehlásí se" a „zapomnělo se" je přesně to, kvůli čemu se platí
+penále.
+
+Pracovní vztah, u kterého povinnost odvodit nelze (typicky chybí evidovaná
+zdravotní pojišťovna zaměstnance), se vypíše zvlášť nad tabulkou i s důvodem.
+Oznámení, které nemá komu odejít, je vada k opravě v kartě zaměstnance, ne
+prázdné místo v seznamu.
+
+### Sestavení přehledu o platbě
+
+Spodní panel zmrazí přehled o platbě pojistného za schválenou revizi do
+odesílatelné podoby a ověří ho proti připnutému XSD. Vyber revizi a
+pojišťovnu a stiskni **Sestavit větu**. Výsledek je jeden ze dvou:
+
+- **Věta je platná** — přehled prošel ověřením a podání je připravené
+  k odeslání. Připravené neznamená odeslané; odeslat ho musíš sama.
+- **Věta má blokující výhradu** — soubor vznikl, ale podání zůstalo
+  v konceptu s výhradou ve fázi ověření schématu. Konkrétní důvod je zapsaný
+  u podání v záložce **Zdravotní pojišťovny**.
+
+Tlačítko **Stáhnout XML** je k dispozici v obou případech. Soubor vzniká i
+u zablokovaného podání a právě tam je potřeba vidět, co se vyrobilo a proč to
+neprošlo. Stahuje se přesně ten archivovaný soubor, jehož otisk je u podání
+zapsaný, a každé stažení používá krátkodobé jednorázové oprávnění.
+
+Lhůta přehledu o platbě je 20. den následujícího kalendářního měsíce podle
+§ 25 odst. 3 zákona č. 592/1992 Sb.

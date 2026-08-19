@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { EnforcementEvidenceScope } from './payrollEnforcement'
 
 export type DeductionAgreementKind =
   | 'advance'
@@ -163,6 +164,12 @@ export interface NetResultBreakdown {
   deducted_minor: number
   net_payable_minor: number
   enforcement_withheld_minor: number
+  /**
+   * Rozsah exekuční evidence ze zmrazené revize. `null` = revize spočtená
+   * dřív, než se rozsah začal ukládat; nedopočítává se, takže obrazovka
+   * o důvodu mlčí, místo aby si nějaký domyslela.
+   */
+  enforcement_evidence_source: EnforcementEvidenceScope | null
   payable_after_enforcement_minor: number
   allocation_status: 'resolved' | 'no_rules'
   allocations: NetResultAllocation[]

@@ -237,6 +237,18 @@ pro klientský portál; interní účetnictví, banka a globální správa se ji
 nepovolí. Systémová role **Superadmin** je uzamčená, nelze ji deaktivovat,
 smazat ani upravit její matici a jako jediná smí spravovat uživatele a role.
 
+Předávání originálů používá záměrně oddělená práva. Klientské
+**Předávat doklady účetní** dovolí pouze vložit a sledovat vlastní podání aktuální
+firmy. Interní **Příchozí doklady** dovolí účetní frontu číst nebo zpracovávat —
+včetně nahrání dokladu, který přišel mimo portál; pro vznik faktury a případnou AI
+extrakci jsou navíc potřeba jejich vlastní oprávnění.
+
+**Trvale vyřadit z příchozí fronty** je samostatné právo a žádná systémová role
+kromě správce ho nemá. Odmítnutí dokladu totiž originál záměrně nemaže (zůstává
+v Dokumentech i v auditní stopě), takže úklid fronty i s originálem je vědomý zásah.
+Komu ho chcete dát, přidejte ho v editoru rolí — role se dají kopírovat, takže
+stačí jednou nastavit „správce podatelny" a dál z něj vycházet.
+
 Roli lze duplikovat jako základ nové role. Používanou roli nelze smazat;
 nejprve je nutné přeřadit uživatele a odstranit její přepisy u firem. Používanou
 roli lze deaktivovat, ale její uživatelé tím okamžitě ztratí firemní oprávnění.
@@ -820,3 +832,73 @@ Záložka je pouze pro čtení: zprávu z ní nelze znovu odeslat ani smazat. St
 **Odesláno** potvrzuje úspěch odesílacího kroku aplikace, nikoli přečtení nebo
 doručení do schránky příjemce. Pro technickou diagnostiku SMTP komunikace
 použij [SMTP log analýzu](#738-smtp-log-analyza).
+
+## 73.16 Vlastní domény klientského rozhraní
+
+**Cesta: `Nastavení → Firma → Vlastní domény`.** Sekce se zobrazí uživateli
+s oprávněním **Vlastní domény** alespoň pro čtení; založení, ověření, aktivace
+a deaktivace vyžadují zápis. Domény se vždy spravují pro právě vybranou firmu.
+V hostované instalaci musí vlastní hostname, směrování hlavičky `Host` a TLS
+výslovně podporovat provozovatel služby; samotné oprávnění v aplikaci tuto
+provozní podporu nezajistí.
+
+Při založení zadej jen hostname bez schématu, portu a cesty, například
+`portal.klient.cz`. Wildcard není podporovaný. Vyber účel **Klientské rozhraní**,
+**Veřejné odkazy** nebo **Klientské rozhraní i veřejné odkazy** a urči, zda má
+být doména po aktivaci primární. Klientské rozhraní zahrnuje přehled, doklady,
+kontakty, pravidelnou fakturaci i osobní profil podle oprávnění role client;
+nejde jen o adresy pod `/portal`. Více aliasů je povolených; pro každý účel může
+být primární nejvýše jeden aktivní hostname. Hostname, který používá výchozí
+`app.url`, nelze současně založit jako vlastní doménu firmy; zadej jiný hostname.
+Pokud správce změní `app.url` až později na už uloženou vlastní doménu, aplikace
+odmítne běžný provoz na tomto hostname a v health diagnostice ohlásí kolizi.
+Obnov původní canonical adresu, kolidující vlastní doménu deaktivuj a smaž,
+nebo nastav jiný canonical hostname.
+
+Přihlášení, správa passkeys a vynucené nastavení MFA používají canonical origin
+z `app.url`, protože WebAuthn RP ID je svázané právě s ním. Při otevření správy
+passkeys nebo nastavení MFA z vlastní domény aplikace provede krátkodobý PKCE
+přechod na canonical adresu a následně vytvoří novou host-only session pro původní
+doménu. Návrat vede jen na serverem ověřenou stránku klientského rozhraní a zachová
+firmu určenou aktivním hostname; vlastní doména sama WebAuthn options ani verify
+endpointy neobsluhuje. Stejná hranice platí pro výpis, přejmenování a odvolání
+passkeys i pro WebAuthn odemčení zamčené session; běžné TOTP operace zůstávají
+samostatné a na WebAuthn originu nezávisí.
+
+### Ověření a aktivace
+
+Nová doména zobrazí přesný DNS TXT záznam ve tvaru:
+
+```text
+_myucto-challenge.portal.klient.cz TXT myucto-verification=<token>
+```
+
+Současně nasměruj A/AAAA nebo CNAME domény na reverse proxy MyÚčta, zachovej
+původní hlavičku `Host` a připrav důvěryhodný TLS certifikát. Tlačítko
+**Ověřit DNS a HTTPS** kontroluje TXT challenge i HTTPS odpověď z přesné domény.
+Kontrola nepovoluje redirect, privátní cílovou IP ani nedůvěryhodný certifikát.
+Dokud neprojde, hostname obslouží pouze svůj jednorázový ověřovací endpoint,
+nikoli klientské rozhraní nebo firemní data.
+
+Po úspěšném ověření aktivaci potvrď passkey nebo TOTP. Aktivace bezprostředně
+zopakuje DNS i HTTPS kontrolu pro aktuální hostname a challenge; dříve uložený
+stav **Ověřeno** sám nestačí. Pokud se challenge mezitím změnila nebo některá
+kontrola už neprojde, doména zůstane neaktivní a aplikace zobrazí důvod. Po
+opravě proveď ověření a aktivaci znovu. Tím se zabrání tomu, aby ukradená běžná
+session nebo zastaralý výsledek kontroly přesměroval klienty na útočníkovu
+doménu. Aktivace, změny challenge, ověření i deaktivace se zapisují do activity
+logu.
+
+| Stav | Význam |
+|---|---|
+| **Čeká na ověření** | Je nutné publikovat DNS TXT, routing a TLS. |
+| **Ověřeno** | Poslední kontrola DNS a HTTPS prošla; lze aktivovat. |
+| **Aktivní** | Doména smí obsluhovat svůj účel a uzamyká firmu podle hostname. |
+| **Ověření selhalo** | Karta ukáže důvod; po opravě lze kontrolu zopakovat. |
+| **Deaktivováno** | Hostname nevydává firemní data; lze jej znovu ověřit nebo smazat. |
+
+Rotace challenge zneplatní předchozí TXT hodnotu a vrátí neaktivní doménu do
+stavu čekání. Aktivní doménu nejdřív deaktivuj. Deaktivace se projeví okamžitě;
+pokud nezůstane jiný aktivní alias daného účelu, nové odkazy použijí výchozí
+`app.url`. Provozní nastavení proxy, certifikátů a Turnstile popisuje
+[§ 3.8 HTTPS / TLS terminace](03_Instalace_Docker.md#38-https-tls-terminace).

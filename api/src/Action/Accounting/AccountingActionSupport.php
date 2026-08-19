@@ -9,6 +9,8 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Cash\CashException;
+use MyInvoice\Service\Accounting\Closing\ClosingException;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\UnbalancedEntryException;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -62,6 +64,34 @@ trait AccountingActionSupport
         return $this->requirePermission($request, $response, 'accounting.periods.close', AccessLevel::WRITE, $err);
     }
 
+    /**
+     * Pokladní doklady (PPD/VPD). Zrcadlí RoutePermissionMap, která celou rodinu
+     * /api/accounting/cash-documents gatuje na 'cash.document.write' — Action proto
+     * ověřuje TOTÉŽ právo. Na 'accounting' WRITE se ptát nesmí: `EffectiveRole::level()`
+     * je plochý katalog bez hierarchie, takže dedikovaná role „Pokladní" (cash +
+     * cash.document.write) prošla middlewarem a spadla na 403 až v Action.
+     */
+    protected function requireCashDocumentWrite(Request $request, Response $response, ?Response &$err): bool
+    {
+        return $this->requirePermission($request, $response, 'cash.document.write', AccessLevel::WRITE, $err);
+    }
+
+    /** Správa pokladen (číselník) — modul 'cash', shodně s RoutePermissionMap. */
+    protected function requireCashWrite(Request $request, Response $response, ?Response &$err): bool
+    {
+        return $this->requirePermission($request, $response, 'cash', AccessLevel::WRITE, $err);
+    }
+
+    /**
+     * Uzavření/uzamčení pokladny a TVRDÉ smazání zaúčtovaného dokladu (`?force=1`).
+     * Destrukce s účetními dopady (mizí deníkové zápisy, v číselné řadě zůstane díra)
+     * proto nestačí běžné zápisové právo — zrcadlo `accounting.journal.post`.
+     */
+    protected function requireCashClose(Request $request, Response $response, ?Response &$err): bool
+    {
+        return $this->requirePermission($request, $response, 'cash.close', AccessLevel::WRITE, $err);
+    }
+
     protected function requirePermission(Request $request, Response $response, string $permission, AccessLevel $minimum, ?Response &$err): bool
     {
         if (!RequestAuthorization::allows($request, $permission, $minimum)) {
@@ -104,5 +134,28 @@ trait AccountingActionSupport
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
         throw $e;
+    }
+
+    /**
+     * Chyby pokladny (Action pokladny i pokladních dokladů) — jedno mapování na obou
+     * místech, aby se větve nerozešly.
+     *
+     * `ClosingException` sem patří proto, že `CashRegisterService::ensureOwnSeries()`
+     * volá `DocumentSeriesService::updateSeries()`: `series_prefix_taken` /
+     * `invalid_prefix` je validační chyba pokladny, ale bez téhle větve propadla
+     * do `mapPostingError()` a uživatel dostal HTTP 500 místo 422.
+     */
+    protected function mapCashError(Response $response, \Throwable $e): Response
+    {
+        if ($e instanceof CashException) {
+            // `params` = strojová data hlášky pro i18n na FE (klient si je dosadí do
+            // vlastního překladu; česká `message` je jen fallback).
+            return Json::error($response, 'cash.error.' . $e->errorCode, $e->getMessage(), $e->httpStatus,
+                $e->extra === [] ? [] : ['params' => $e->extra]);
+        }
+        if ($e instanceof ClosingException) {
+            return Json::error($response, 'cash.error.' . $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        return $this->mapPostingError($response, $e);
     }
 }

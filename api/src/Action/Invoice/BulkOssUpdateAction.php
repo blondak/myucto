@@ -933,10 +933,19 @@ final class BulkOssUpdateAction
         $year = (int) substr($refDate, 0, 4);
         $month = (int) substr($refDate, 5, 2);
         $quarter = (int) ceil($month / 3);
-        $variants = ['B', 'O', 'D', 'E'];
+        // Každý formulář má vlastní sadu kódů varianty. Přiznání k DPH zná
+        // B/O/D/E, kontrolní hlášení ale N (následné) místo D — se sadou od
+        // přiznání by podané NÁSLEDNÉ kontrolní hlášení neplatilo za podání
+        // a hromadná změna by prošla nad už odevzdaným obdobím.
+        $variantsByForm = [
+            'dphdp3' => ['B', 'O', 'D', 'E'],
+            'dphkh1' => ['B', 'O', 'N', 'E'],
+            'ossei1' => ['B', 'O', 'D', 'E'],
+        ];
 
         $found = null;
         foreach ([['dphdp3', 'přiznání k DPH'], ['dphkh1', 'kontrolní hlášení']] as [$form, $label]) {
+            $variants = $variantsByForm[$form];
             if ($this->submissions->findLatestForPeriod($supplierId, $form, $year, $month, null, $variants) !== null) {
                 $found = sprintf('%s za %d/%d', $label, $month, $year);
                 break;
@@ -947,7 +956,14 @@ final class BulkOssUpdateAction
             }
         }
         if ($found === null
-            && $this->submissions->findLatestForPeriod($supplierId, 'ossei1', $year, null, $quarter, $variants) !== null) {
+            && $this->submissions->findLatestForPeriod(
+                $supplierId,
+                'ossei1',
+                $year,
+                null,
+                $quarter,
+                $variantsByForm['ossei1'],
+            ) !== null) {
             $found = sprintf('OSS přiznání za %s', OssPeriod::quarterCode($refDate) ?? ('Q' . $quarter . ' ' . $year));
         }
 

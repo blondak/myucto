@@ -13,11 +13,11 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
  * Roční částky slev, daňového zvýhodnění a hranice pásma — odvozené z rulesetu.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * Proč se roční částka smí odvodit z měsíční
+ * Proč se roční částka SLEV smí odvodit z měsíční
  * ─────────────────────────────────────────────────────────────────────────────
- * Ruleset daně z příjmů drží výhradně MĚSÍČNÍ částky (všechny klíče končí
- * `.monthly`). Roční zúčtování ale počítá s ročními částkami podle § 35ba,
- * § 35c a § 16. Vztah mezi nimi NEODHADUJEME — je v zákoně:
+ * Ruleset daně z příjmů drží slevy a daňové zvýhodnění jako MĚSÍČNÍ částky
+ * (klíče končí `.monthly`). Roční zúčtování ale počítá s ročními částkami podle
+ * § 35ba, § 35c a § 16. Vztah mezi nimi NEODHADUJEME — je v zákoně:
  *
  *   § 35d odst. 2: záloha se sníží „o částku ve výši odpovídající JEDNÉ
  *   DVANÁCTINĚ částky stanovené v § 35ba odst. 1 písm. a), c) až e)" a o daňové
@@ -41,6 +41,26 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
  * a zúčtování se neprovede. Je to levná brána proti celé třídě „admin přepsal
  * měsíční hodnotu a roční se rozešla".
  *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Kde se roční hodnota naopak odvodit NESMÍ
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Dvanáctina podle § 35d odst. 2 platí pro SLEVY a daňové zvýhodnění. Na prahy
+ * výplaty a na roční slevu na manžela nedopadá vůbec:
+ *
+ *   - § 35c odst. 3 dává roční bonus „alespoň 100 Kč", kdežto § 35d odst. 4 dává
+ *     měsíční „alespoň 50 Kč". Dvanáctinásobek by vyrobil 600 Kč a poplatník by
+ *     o bonus mezi 100 a 600 Kč tiše přišel.
+ *   - § 38ch odst. 5 (a § 35d odst. 8) mají práh výplaty „více než 50 Kč" —
+ *     stejné číslo jako měsíční bonus, ale OPAČNÝ operátor.
+ *   - § 35bb dává slevu na manžela rovnou ročně; měsíční protějšek nemá, protože
+ *     se k ní podle § 38h odst. 6 při zálohách nepřihlíží.
+ *
+ * Tyhle hodnoty proto ruleset od 8/2026 nese VÝSLOVNĚ jako roční klíče a čtou se
+ * přímo, bez násobení. Prahy zároveň existují jako zákonná čísla v
+ * {@see AnnualSettlementStatute}; jejich SHODU s rulesetem hlídá druhá brána
+ * v {@see forRuleset()} — dvě čísla pro jednu věc smí koexistovat jen potud,
+ * pokud se rozejít nemůžou.
+ *
  * @see AnnualSettlementStatute pro lhůty a prahy, které naopak stojí v zákoně
  */
 final readonly class AnnualTaxRates
@@ -57,6 +77,16 @@ final readonly class AnnualTaxRates
         public string $highRate,
         /** § 35c odst. 4: šestinásobek minimální mzdy za zdaňovací období. */
         public int $bonusMinimumIncomeMinorUnits,
+        /** § 35c odst. 3: nejnižší uplatnitelný roční bonus. Nerovnost je NEOSTRÁ. */
+        public int $bonusMinimumAmountMinorUnits,
+        /** § 38ch odst. 5 a § 35d odst. 8: práh výplaty. Nerovnost je OSTRÁ. */
+        public int $payoutThresholdMinorUnits,
+        /** § 35bb odst. 1 věta první: roční sleva na manžela. */
+        public int $spouseCreditMinorUnits,
+        /** § 35bb odst. 1 věta druhá: násobek u manžela s nárokem na průkaz ZTP/P. */
+        public int $spouseCreditZtpPMultiplier,
+        /** § 35bb odst. 2 písm. b): nejvyšší vlastní příjem manžela; nerovnost NEOSTRÁ. */
+        public int $spouseIncomeLimitMinorUnits,
         /** @var array<string,int> roční částka slevy podle TaxCreditKind->value */
         public array $annualCreditMinorUnits,
         /** @var array<int,int> roční daňové zvýhodnění podle pořadí dítěte (1, 2, 3+) */
@@ -75,6 +105,26 @@ final readonly class AnnualTaxRates
                 'Ruleset daně z příjmů nemá roční hodnoty jako dvanáctinásobek '
                 . 'měsíčních, takže roční částky slev z něj odvodit nelze.',
             );
+        }
+
+        // Druhá brána: hodnoty, které jsou zároveň v zákoně opsané v kódu
+        // (AnnualSettlementStatute) a zároveň administrovatelné v rulesetu, se
+        // NESMĚJÍ rozejít. Rozejdou-li se, zúčtování se zastaví — je to o řád
+        // lepší než tiše rozhodnout, které z těch dvou čísel platí.
+        $payoutThreshold = self::money($ruleset, 'settlement.payout_threshold');
+        $annualBonusMinimum = self::money($ruleset, 'bonus.minimum_amount.yearly');
+        foreach ([
+            'settlement.payout_threshold' =>
+                [$payoutThreshold, AnnualSettlementStatute::PAYOUT_THRESHOLD_MINOR_UNITS],
+            'bonus.minimum_amount.yearly' =>
+                [$annualBonusMinimum, AnnualSettlementStatute::ANNUAL_BONUS_MINIMUM_MINOR_UNITS],
+        ] as $key => [$fromRuleset, $fromStatute]) {
+            if ($fromRuleset !== $fromStatute) {
+                throw new AnnualSettlementUnavailableException(
+                    "Ruleset daně z příjmů má u {$key} jinou částku než zákonné číslo "
+                    . 'v modulu ročního zúčtování, takže není jasné, která platí.',
+                );
+            }
         }
 
         $credits = [];
@@ -104,9 +154,44 @@ final readonly class AnnualTaxRates
             $policy->rate('advance.low_rate'),
             $policy->rate('advance.high_rate'),
             $yearlyBonusIncome,
+            $annualBonusMinimum,
+            $payoutThreshold,
+            self::money($ruleset, 'credit.spouse.yearly'),
+            self::integer($ruleset, 'credit.spouse.ztp_p_multiplier'),
+            self::money($ruleset, 'spouse.income_limit'),
             $credits,
             $children,
         );
+    }
+
+    /**
+     * Roční klíče se čtou přímo z verze, ne přes {@see EmploymentIncomeTaxPolicy2026}.
+     * Ta hlídá úplnost parametrů potřebných pro MĚSÍČNÍ zálohu a její seznam je
+     * zároveň otiskem kontraktu — přidat do něj roční hodnoty by znamenalo, že
+     * ruleset bez nich neumí spočítat ani měsíční mzdu, což není pravda.
+     */
+    private static function money(PayrollRulesetVersion $ruleset, string $key): int
+    {
+        $value = $ruleset->parameter($key);
+        if ($value->type !== 'money_minor' || !is_int($value->value)) {
+            throw new AnnualSettlementUnavailableException(
+                "Roční parametr {$key} v rulesetu daně z příjmů není peněžní částka.",
+            );
+        }
+
+        return $value->value;
+    }
+
+    private static function integer(PayrollRulesetVersion $ruleset, string $key): int
+    {
+        $value = $ruleset->parameter($key);
+        if ($value->type !== 'integer' || !is_int($value->value)) {
+            throw new AnnualSettlementUnavailableException(
+                "Roční parametr {$key} v rulesetu daně z příjmů není celé číslo.",
+            );
+        }
+
+        return $value->value;
     }
 
     /**
@@ -170,10 +255,18 @@ final readonly class AnnualTaxRates
             'low_rate' => $this->lowRate,
             'high_rate' => $this->highRate,
             'bonus_minimum_income_minor_units' => $this->bonusMinimumIncomeMinorUnits,
+            'bonus_minimum_amount_minor_units' => $this->bonusMinimumAmountMinorUnits,
+            'payout_threshold_minor_units' => $this->payoutThresholdMinorUnits,
+            'spouse_credit_minor_units' => $this->spouseCreditMinorUnits,
+            'spouse_credit_ztp_p_multiplier' => $this->spouseCreditZtpPMultiplier,
+            'spouse_income_limit_minor_units' => $this->spouseIncomeLimitMinorUnits,
             'annual_credit_minor_units' => $this->annualCreditMinorUnits,
             'annual_child_credit_minor_units' => $this->annualChildCreditMinorUnits,
+            // Odvození 12× platí pro slevy a daňové zvýhodnění. Prahy výplaty
+            // a sleva na manžela se čtou z rulesetu jako roční hodnoty.
             'derivation' => 'monthly-times-twelve',
             'derivation_basis' => 'zdp-35d-2',
+            'annual_keys_source' => 'ruleset',
         ];
     }
 }

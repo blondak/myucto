@@ -119,8 +119,24 @@ const vatDeadlines = computed(() => data.value?.vat.deadlines ?? [])
         <p class="text-xs text-neutral-400 mt-1">{{ t('portal.disclaimer') }}</p>
       </div>
 
+      <RouterLink v-if="auth.canWrite('documents.submit')" to="/portal/purchase-invoice-submissions"
+        class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary-500/40 bg-primary-50 px-4 py-4 shadow-sm transition hover:border-primary-500 hover:shadow-md">
+        <span class="flex items-center gap-3">
+          <span class="w-10 h-10 rounded-lg bg-primary-600 text-white flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5a1 1 0 001 1h12a1 1 0 001-1v-5" />
+            </svg>
+          </span>
+          <span>
+            <span class="block font-semibold text-primary-800">{{ t('purchase_submissions.submit_title') }}</span>
+            <span class="block text-sm text-neutral-600">{{ t('purchase_submissions.submit_hint') }}</span>
+          </span>
+        </span>
+        <span class="text-sm font-medium text-primary-700">{{ t('purchase_submissions.submit_action') }} →</span>
+      </RouterLink>
+
       <!-- ═══ Vyžádání chybějících dokladů (Fáze F, audit 2026-07) ═══ -->
-      <RouterLink v-if="(data.document_requests_open?.open ?? 0) > 0" to="/portal/document-requests"
+      <RouterLink v-if="auth.canRead('documents.submit') && (data.document_requests_open?.open ?? 0) > 0" to="/portal/document-requests"
         class="flex items-center justify-between gap-3 rounded-lg border px-4 py-3 shadow-sm transition hover:bg-primary-50"
         :class="(data.document_requests_open?.overdue ?? 0) > 0 ? 'border-danger-500/50 bg-danger-50' : 'border-warning-500/40 bg-warning-50'">
         <span class="text-sm font-medium"

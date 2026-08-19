@@ -10,7 +10,7 @@ use MyInvoice\Service\Payroll\Run\PayrollRunValidation;
 /**
  * Spojka mezi evidencí přesčasu, rulesetem a čistou logikou § 93.
  *
- * ─── PROČ VARUJE A NEBLOKUJE ────────────────────────────────────────────────
+ * ─── PŘEKROČENÝ LIMIT VARUJE, PORUŠENÝ ZÁKAZ SI ŘEKNE O PODPIS ──────────────
  *
  * Překročení limitu podle § 93 je právní vada NA STRANĚ ZAMĚSTNAVATELE, ne vada
  * výpočtu. Přesčas, který zaměstnanec odpracoval, mu zaměstnavatel musí podle
@@ -19,26 +19,34 @@ use MyInvoice\Service\Payroll\Run\PayrollRunValidation;
  * tomu výplatu by tedy k první vadě přidalo druhou, těžší, a poškodilo by to
  * jedinou osobu, která na porušení nemá vinu.
  *
- * Proto všechny nálezy jdou do `payroll_run_validations` jako `warning`
- * s `requires_override = false` a jako `info` u včasného upozornění:
+ * Proto všechny nálezy o LIMITECH jdou do `payroll_run_validations` jako
+ * `warning` s `requires_override = false` a jako `info` u včasného upozornění:
  *
  *   • `blocker` je vyloučený — {@see \MyInvoice\Service\Payroll\Run\PayrollRunWorkflow}
  *     na něm zastaví příkaz `approve`, tedy přesně výplatu.
- *   • `requires_override = true` je vyloučené TAKÉ. Původně z ryze praktického
- *     důvodu (sloupce `override_reason` / `overridden_by` / `overridden_at`
- *     nikdo nenastavoval, protože k nim nevedla route ani obrazovka — varování
- *     vyžadující override bylo blokerem, který nešel odblokovat). Tahle past
- *     je od MZ-01-W07 pryč, cestu ven má
- *     {@see \MyInvoice\Service\Payroll\Run\PayrollRunValidationOverrideService}.
- *     Nastavení přesto zůstává na `false`, a to už z důvodu VĚCNÉHO: workflow
- *     na nevyřešeném overridu zastaví `approve`, tedy zase výplatu. Ta je podle
- *     § 114 splatná bez ohledu na to, jestli někdo výjimku stihl odklepnout —
- *     vázat proplacení odpracovaného přesčasu na podpis mzdové účetní by
- *     znamenalo, že administrativní zdržení zadrží mzdu. Varování bez override
- *     doloží nález stejně dobře a nedrží u toho peníze zaměstnance jako rukojmí.
+ *   • `requires_override = true` je u limitů vyloučené TAKÉ, protože workflow
+ *     na nevyřešeném overridu zastaví `approve` rovněž. Mzda je podle § 114
+ *     splatná bez ohledu na to, jestli někdo výjimku stihl odklepnout.
+ *
+ * ZÁKAZY práce přesčas se ale posuzují jinak. U mladistvého (§ 245 odst. 1),
+ * u těhotné zaměstnankyně (§ 240 odst. 3 věta první), u zaměstnance pečujícího
+ * o dítě mladší 1 roku a u zaměstnance s kratší pracovní dobou
+ * (§ 78 odst. 1 písm. i)) nejde o překročení stropu, ale o práci, která se
+ * konat vůbec neměla. Takový nález nesmí projít mlčky, proto jde do validací
+ * jako `warning` s `requires_override = true`:
+ *
+ *   • Workflow bez vyřízené výjimky `approve` zastaví — účetní se k nálezu
+ *     musí vyjádřit, nemůže ho přehlédnout v seznamu varování.
+ *   • Cesta ven existuje a je rychlá
+ *     ({@see \MyInvoice\Service\Payroll\Run\PayrollRunValidationOverrideService}),
+ *     takže se mzda nezadrží — jen se k ní připojí pojmenovaný důvod, kterým
+ *     zaměstnavatel porušení zákazu doloženě vzal na vědomí. To je přesně
+ *     rozdíl mezi „tichým povolením" a vědomým rozhodnutím.
+ *   • `blocker` se nepoužívá ani tady: z blokeru není cesta ven a mzda
+ *     zaměstnance, který porušení nezpůsobil, by uvázla natrvalo.
  *
  * Doloženost se tím neztrácí: validace se ukládá k REVIZI běhu, takže u každé
- * schválené revize navždy zůstane, že se na překročení v ten okamžik
+ * schválené revize navždy zůstane, že se na porušení v ten okamžik
  * upozorňovalo. Včasnost řeší docházka — assessment se počítá i pro otevřený
  * měsíc, takže mzdová účetní vidí stav dřív, než běh vůbec vznikne.
  */
@@ -70,7 +78,7 @@ final class PayrollOvertimeLimitService
         if ($employmentIds === []) {
             return [];
         }
-        $limits = $this->rules->forDate($periodStart);
+        $limits = $this->averagingLimits($supplierId, $this->rules->forDate($periodStart), $periodStart);
         $from = self::historyStart($periodStart, $periodEnd, $limits);
         $segments = $this->repository->segmentsForMany(
             $supplierId,
@@ -79,6 +87,14 @@ final class PayrollOvertimeLimitService
             $periodEnd,
         );
         $consents = $this->repository->consentsForMany($supplierId, $employmentIds);
+        $compensations = $this->repository->compensationsForMany(
+            $supplierId,
+            $employmentIds,
+            $from,
+            $periodEnd,
+        );
+        $protections = $this->repository->protectionsForMany($supplierId, $employmentIds);
+        $profiles = $this->repository->profilesForMany($supplierId, $employmentIds);
 
         $result = [];
         foreach ($employmentIds as $employmentId) {
@@ -90,6 +106,9 @@ final class PayrollOvertimeLimitService
                 $consents[$employmentId] ?? [],
                 $limits,
                 $employmentStarts[$employmentId] ?? null,
+                $compensations[$employmentId] ?? [],
+                $protections[$employmentId] ?? [],
+                $profiles[$employmentId] ?? null,
             );
         }
 
@@ -108,11 +127,38 @@ final class PayrollOvertimeLimitService
                 $assessment->employmentId,
                 $finding->message,
                 '/payroll/time',
-                false,
+                $finding->requiresOverride,
             );
         }
 
         return $validations;
+    }
+
+    /**
+     * Vyrovnávací období podle § 93 odst. 4 je firemní údaj, ne parametr
+     * rulesetu. Bez nastavení nebo s nastavením, které si neumí obhájit
+     * kolektivní smlouvu, se zůstává u zákonných 26 týdnů — kratší okno je
+     * konzervativní strana, protože se stejný objem přesčasu poměřuje s nižším
+     * stropem.
+     */
+    private function averagingLimits(
+        int $supplierId,
+        OvertimeLimits $limits,
+        string $periodStart,
+    ): OvertimeLimits {
+        $period = $this->repository->averagingPeriodFor($supplierId, $periodStart);
+        if ($period === null) {
+            return $limits;
+        }
+        try {
+            return $limits->withAveragingPeriod(
+                $period['weeks'],
+                $period['basis'],
+                $period['reference'],
+            );
+        } catch (\InvalidArgumentException) {
+            return $limits;
+        }
     }
 
     /**

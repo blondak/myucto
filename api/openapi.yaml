@@ -48,7 +48,7 @@ info:
     `403 token_endpoint_forbidden` bez ohledu na scope. Jsou v této dokumentaci
     proto, aby integrátor věděl, že existují a proč je nemá k dispozici:
 
-    - `/api/v1/admin/**` a `/api/v1/settings/{ai-assist,accounting-activation,mode-switch-preview}`
+    - `/api/v1/admin/**` a `/api/v1/settings/{ai-assist,accounting-activation,mode-switch-preview,domains}`
       — konfigurace systému, ne data firmy.
     - `/api/v1/portal/**` a `/api/v1/user/{filters,preferences}` — plocha webového
       rozhraní (klientský portál, uložené filtry a předvolby uživatele).
@@ -194,24 +194,51 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/health:
+    description: |
+      Veřejná provozní diagnostika, interně přepsaná na přesnou cestu
+      `/api/health`. Běžný monitoring instalace musí volat `GET` nebo `HEAD`
+      přes origin a hostname nakonfigurovaný v `app.url`; recovery volání přes
+      jiný request hostname je určeno jen pro stav, kdy canonical origin není
+      použitelný pro routování.
+
+      Pokud `app.url` obsahuje jen whitespace nebo jinou neprázdnou neplatnou
+      hodnotu, tenant host gate propustí přes cizí hostname výhradně přesné
+      `GET`/`HEAD /api/health`. Ostatní metody a cesty zůstávají odmítnuté.
+      Chybějící nebo přesně prázdná hodnota zachovává legacy fallback, ve kterém
+      se platný request hostname považuje za canonical; tento fallback se
+      nerozšiřuje na whitespace ani na jinou neprázdnou chybnou hodnotu.
+      Health je veřejný jen z hlediska autentizace: neobchází reverse proxy ani
+      zapnutý IP allowlist. Během nedokončeného first-run setupu používej `GET`;
+      setup allowlist metodu `HEAD` nepovoluje.
     get:
       tags: [System]
       summary: Health-check
       security: []
       responses:
         '200':
-          description: OK
+          description: |
+            Endpoint odpověděl. `status` neagreguje stav závislostí; monitor musí
+            samostatně vyhodnotit `db`, podle nasazení `redis` a
+            `configuration.app_url`. Diagnostika canonical URL obsahuje jen
+            stabilní stav, reason code a capability booleany, nikdy původní
+            hodnotu ani její části.
           content:
             application/json:
               schema:
                 type: object
-                required: [status, version, db, redis, time]
+                required: [status, version, db, redis, time, configuration]
                 properties:
                   status: { type: string, enum: [ok] }
                   version: { type: string, example: "4.3.1" }
                   db: { type: boolean }
                   redis: { type: boolean }
                   time: { type: string, format: date-time }
+                  configuration:
+                    type: object
+                    additionalProperties: false
+                    required: [app_url]
+                    properties:
+                      app_url: { $ref: '#/components/schemas/AppUrlConfigurationDiagnostic' }
                   warnings:
                     type: array
                     description: Diagnostika dostupná pouze přihlášenému uživateli.
@@ -228,6 +255,16 @@ paths:
                             - session_lock_configuration
                             - session_lock_without_unlock_method
                         message: { type: string }
+    head:
+      tags: [System]
+      summary: Health-check bez response body
+      description: |
+        Stejná dostupnost a tenant-host pravidla jako u `GET`; response body se
+        pro metodu `HEAD` nepřenáší.
+      security: []
+      responses:
+        '200':
+          description: Health endpoint je dosažitelný; bez response body.
 
   /api/v1/version:
     get:
@@ -279,6 +316,40 @@ paths:
               schema: { $ref: '#/components/schemas/ApiMe' }
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/domain-context:
+    get:
+      tags: [Auth]
+      summary: Kontext aktuálního hostname
+      description: |
+        Pre-auth endpoint pro webové rozhraní. Rozliší canonical `app.url`
+        a aktivní vlastní doménu firmy. Vlastní doména obsluhuje celý rozsah
+        autentizovaných rout povolených klientské roli, ne jen prefix `/portal`.
+        WebAuthn-dependent správa passkeys a vynucené nastavení MFA přecházejí
+        serverem svázaným tokem na canonical origin z `app.url`; WebAuthn API
+        vlastní doména neobsluhuje.
+        `supplier_id` je na ní autoritativní a nelze jej přepsat hlavičkou ani
+        query parametrem.
+        Neznámý nebo neaktivní hostname je odmítnut ještě před akcí.
+      security: []
+      responses:
+        '200':
+          description: Bezpečný kontext aktuálního originu
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DomainContext' }
+        '421':
+          description: Hostname není nakonfigurovaný nebo aktivní
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: |
+            Volání API tokenem (`token_endpoint_forbidden`); endpoint je určený
+            browserovému pre-auth toku bez bearer identity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/clients:
     get:
@@ -4025,6 +4096,29 @@ paths:
         '200': { description: Návrh odmítnut }
         '404': { description: Návrh neexistuje v aktuální firmě }
         '409': { description: Návrh už není pending }
+
+  /api/v1/settings/domains:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Settings]
+      summary: Vlastní domény aktuální firmy
+      description: |
+        Session-only přehled domén klientského portálu a veřejných odkazů,
+        včetně stavu DNS/HTTPS ověření. Bearer token vrátí
+        `403 forbidden_via_token`; změny se provádějí výhradně z webového UI.
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Seznam domén firmy
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SupplierDomain' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/settings/supplier:
     parameters:
@@ -8268,7 +8362,10 @@ paths:
     patch:
       tags: [Accounting]
       summary: Přejmenování / deaktivace účtu
-      description: Účetní/admin. Účty se nemažou, jen deaktivují (is_active=false).
+      description: |
+        Účetní/admin. Běžná cesta je deaktivace (`is_active=false`) — kód účtu visí
+        jako TEXT na kontacích, pravidlech i kartách, takže se nemění. Analytiku
+        BEZ jediného použití lze i smazat (viz DELETE níž).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -8289,6 +8386,23 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [Accounting]
+      summary: Smazání nepoužité analytiky — účetní|admin, jen podvojné účetnictví
+      description: |
+        Smazat jde POUZE analytika, kterou nic nepoužívá — ani deník, ani doklady,
+        kontace, karty majetku či mzdové nastavení. Syntetický účet z osnovy se
+        smazat nedá (`account_synthetic`), použitá analytika vrátí `account_in_use`
+        se seznamem míst; místo mazání ji deaktivujte přes PATCH.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: "OK — `{deleted: true}`", content: { application/json: { schema: { type: object } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: "Účet se používá (`account_in_use`) — hláška vyjmenuje agendy, které na něj odkazují." }
+        '422': { description: "Syntetický účet (`account_synthetic`) smazat nelze." }
 
   /api/v1/accounting/periods:
     get:
@@ -10806,8 +10920,11 @@ paths:
   /api/v1/accounting/document-series:
     get:
       tags: [Accounting]
-      summary: Číselné řady deníku (UZ/OT/KR/PP/ID per rok)
-      description: Řádek řady vzniká lazy při prvním výdeji čísla.
+      summary: Číselné řady deníku, pokladny a skladu (per rok)
+      description: |
+        Řádek řady vzniká lazy při prvním výdeji čísla. Firmě v daňové evidenci se
+        vracejí jen řady, které umí vydat (pokladní, skladové, objednávkové) —
+        deníkové (`closing`, `opening`, `fx`, `transfer`, `manual`, `offset`) ne.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       responses:
@@ -10817,15 +10934,35 @@ paths:
   /api/v1/accounting/document-series/{code}/{year}:
     put:
       tags: [Accounting]
-      summary: Změna prefixu číselné řady
-      description: Účetní/admin. Prefix 1–10 znaků A–Z/0–9; projeví se u dalšího vydaného čísla.
+      summary: Nastavení číselné řady (prefix, tvar čísla, čítač)
+      description: |
+        Účetní/admin. Aspoň jedna položka těla; projeví se u dalšího vydaného čísla.
+        `prefix` 1–10 znaků A–Z/0–9. `number_format` je šablona čísla s placeholdery
+        {PREFIX}, {YYYY}, {YY} a {C+} (počet C = odsazení nulami); prázdná / null vrací
+        řadu na vestavěné `{PREFIX}-{YYYY}-{CCCC}`. `next_number` je číslo PŘÍŠTÍHO
+        vydaného dokladu — umožňuje navázat na řadu převzatou z jiného systému.
+        `register_id` > 0 míří na vlastní řadu té pokladny (jen `cash_in` / `cash_out`),
+        0 nebo vynechané na společnou řadu firmy.
+
+        Deníkové řady (`closing`, `opening`, `fx`, `transfer`, `manual`, `offset`) jsou
+        dostupné jen v podvojném účetnictví; v daňové evidenci vrátí `wrong_accounting_mode`
+        (403). Pokladní, skladové a objednávkové řady editují oba režimy.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: path, name: code, required: true, schema: { type: string, enum: [closing, opening, fx, transfer, manual] } }
+        - { in: path, name: code, required: true, schema: { type: string, enum: [closing, opening, fx, transfer, manual, cash_in, cash_out, stock_in, stock_out, stock_transfer, offset, purchase_order] } }
         - { in: path, name: year, required: true, schema: { type: integer } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [prefix], properties: { prefix: { type: string, pattern: "^[A-Z0-9]{1,10}$" } } } } }
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                prefix: { type: string, pattern: "^[A-Z0-9]{1,10}$" }
+                number_format: { type: string, nullable: true, maxLength: 40, example: "{PREFIX}{CCCCC}" }
+                next_number: { type: integer, minimum: 1, maximum: 999999999 }
+                register_id: { type: integer, minimum: 0, default: 0, description: "Vlastní řada pokladny (jen cash_in/cash_out); 0 = společná řada firmy" }
       responses:
         '200': { description: OK (aktuální seznam řad), content: { application/json: { schema: { type: array, items: { type: object } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -11147,7 +11284,7 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [name, account_code], properties: { name: { type: string }, account_code: { type: string }, currency_code: { type: string, default: CZK }, is_default: { type: boolean } } } } }
+        content: { application/json: { schema: { type: object, required: [name, account_code], properties: { name: { type: string }, account_code: { type: string, description: "Analytika 211; tvar bez tečky (211200) se dohledá jako 211.200" }, currency_code: { type: string, default: CZK }, is_default: { type: boolean }, own_series: { type: boolean, default: false, description: "Vlastní číselná řada PPD/VPD pokladny místo společné řady firmy" } } } } }
       responses:
         '201': { description: Detail nové pokladny, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -11167,12 +11304,12 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     put:
       tags: [Accounting]
-      summary: Úprava pokladny (název/analytika/výchozí/aktivní) — účetní|admin
+      summary: Úprava pokladny (název/analytika/výchozí/aktivní/vlastní řada) — účetní|admin
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
       requestBody:
-        content: { application/json: { schema: { type: object, properties: { name: { type: string }, account_code: { type: string }, is_default: { type: boolean }, is_active: { type: boolean } } } } }
+        content: { application/json: { schema: { type: object, properties: { name: { type: string }, account_code: { type: string, description: "Analytika 211; tvar bez tečky (211200) se dohledá jako 211.200" }, is_default: { type: boolean }, is_active: { type: boolean }, own_series: { type: boolean, description: "Přepnutí vlastní řady; roky, ve kterých pokladna už vydala číslo, se odmítnou (`series_switch_locked`)" } } } } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -11193,11 +11330,21 @@ paths:
     get:
       tags: [Accounting]
       summary: Pokladní kniha (opening + running balance + join na cash_documents, O8)
+      description: |
+        Filtry `q`/`doc_type`/`purpose` zužují jen vypsané řádky (a `total`).
+        Počáteční a konečný zůstatek i obraty se počítají za CELÉ období, nikdy
+        za výběr — jinak by filtr vyrobil zůstatek, který v knize neplatí.
+
+        `truncated: true` znamená, že filtrované okno bylo delší, než kolik se dá
+        prohledat najednou, a výběr proto není úplný — je potřeba zúžit období.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
         - { in: query, name: from, schema: { type: string, format: date } }
         - { in: query, name: to, schema: { type: string, format: date } }
+        - { in: query, name: q, schema: { type: string }, description: "Fulltext přes popis, partnera a číslo dokladu; diakritiku ignoruje" }
+        - { in: query, name: doc_type, schema: { type: string, enum: [in, out] } }
+        - { in: query, name: purpose, schema: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] } }
         - { in: query, name: page, schema: { type: integer } }
         - { in: query, name: per_page, schema: { type: integer } }
       responses:
@@ -11207,10 +11354,18 @@ paths:
   /api/v1/accounting/cash-registers/{id}/book/pdf:
     get:
       tags: [Accounting]
-      summary: PDF pokladní knihy (doplní PDF stage)
+      summary: PDF pokladní knihy (podvojné účetnictví i daňová evidence)
+      description: |
+        Přijímá tytéž filtry jako `/book`, aby tisk odpovídal obrazovce. Obraty
+        a zůstatky zůstávají i v PDF za celé období.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: from, schema: { type: string, format: date } }
+        - { in: query, name: to, schema: { type: string, format: date } }
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: doc_type, schema: { type: string, enum: [in, out] } }
+        - { in: query, name: purpose, schema: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] } }
       responses:
         '200': { description: PDF, content: { application/pdf: { schema: { type: string, format: binary } } } }
 
@@ -11238,7 +11393,7 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [register_id, doc_type, purpose, issue_date, description, total_amount], properties: { register_id: { type: integer }, doc_type: { type: string, enum: [in, out] }, purpose: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] }, issue_date: { type: string, format: date }, tax_date: { type: string, format: date }, partner_name: { type: string }, partner_ic: { type: string }, partner_dic: { type: string }, description: { type: string }, vat_mode: { type: string, enum: [none, vat] }, total_amount: { type: number }, vat_lines: { type: array, items: { type: object, properties: { vat_rate: { type: number }, base_amount: { type: number }, vat_amount: { type: number } } } }, invoice_id: { type: integer }, purchase_invoice_id: { type: integer }, rule_key: { type: string }, counter_account_code: { type: string }, post: { type: boolean, default: true } } } } }
+        content: { application/json: { schema: { type: object, required: [register_id, doc_type, purpose, issue_date, description, total_amount], properties: { register_id: { type: integer }, doc_type: { type: string, enum: [in, out] }, purpose: { type: string, enum: [sale, purchase, invoice_payment, purchase_payment, transfer, other] }, issue_date: { type: string, format: date }, tax_date: { type: string, format: date }, partner_name: { type: string }, partner_ic: { type: string }, partner_dic: { type: string }, description: { type: string }, vat_mode: { type: string, enum: [none, vat] }, total_amount: { type: number }, amount_foreign: { type: number, nullable: true, description: "Částka v měně pokladny u valutové pokladny (§11); CZK ekvivalent do total_amount dopočítá server" }, fx_rate: { type: number, description: "Ruční kurz; vynechte, ať se použije kurz ČNB k datu vystavení" }, vat_lines: { type: array, items: { type: object, properties: { vat_rate: { type: number }, base_amount: { type: number }, vat_amount: { type: number }, vat_deduction: { type: string, enum: [full, none, proportional, reduced], default: full, description: "Rozsah nároku na odpočet DPH řádku (§ 75/76)" }, vat_deduction_percent: { type: number, default: 100, description: "Poměrný / skutečný roční koeficient odpočtu v procentech (0–100)" }, tax_treatment: { type: string, enum: [deductible, non_deductible, not_expense], default: deductible, description: "Uznatelnost řádku pro daň z příjmů (§ 24/25), nezávislá na DPH" } } } }, invoice_id: { type: integer }, purchase_invoice_id: { type: integer }, rule_key: { type: string }, counter_account_code: { type: string }, post: { type: boolean, default: true } } } } }
       responses:
         '201': { description: Vytvořeno, content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -11248,13 +11403,21 @@ paths:
     get:
       tags: [Accounting]
       summary: Našeptávač nezaplacených FV/PF (jen CZK) pro úhradu hotově
+      description: |
+        Vrací doklady, na kterých ještě něco zbývá k úhradě. `remaining` je zbytek,
+        ne brutto: u přijaté faktury se odečítá uhrazená záloha (`amount_to_pay`)
+        i už zaúčtované úhrady (bankovní i hotovostní), takže doklad krytý zálohou
+        se nenabízí vůbec. U vydaných faktur je v seznamu i zálohová faktura
+        (`invoice_type = proforma`, příznak `is_proforma`) — hotově se hradit smí,
+        ale úhrada spustí vystavení finálního dokladu nebo daňového dokladu
+        k přijaté platbě. Platební kalendář se nenabízí.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: kind, required: true, schema: { type: string, enum: [invoice, purchase_invoice] } }
         - { in: query, name: q, schema: { type: string } }
         - { in: query, name: limit, schema: { type: integer, default: 20 } }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: array, items: { type: object } } } } }
+        '200': { description: "OK — položky {id, kind, number, partner_name, total, paid, remaining, currency_code, issued_on} + `invoice_type`/`is_proforma` (FV) nebo `document_kind` (PF)", content: { application/json: { schema: { type: array, items: { type: object } } } } }
 
   /api/v1/accounting/cash-documents/rule-presets:
     get:
@@ -11291,15 +11454,23 @@ paths:
         '422': { $ref: '#/components/responses/ValidationFailed' }
     delete:
       tags: [Accounting]
-      summary: Smazání draftu (s `?force=1` i zaúčtovaného dokladu) — účetní|admin
+      summary: Smazání draftu (s `?force=1` i zaúčtovaného dokladu) — `cash.document.write`, force navíc `cash.close`
+      description: |
+        Bez `force` smaže jen rozpracovaný (draft) doklad. `?force=1` smaže i zaúčtovaný
+        doklad včetně deníkových zápisů — nevratně a bez protizápisu. Vydané číslo řady
+        se nevrací, takže v řadě PPD/VPD zůstane trvalá díra; odpověď proto vrací
+        `doc_number`, `deleted_entry_ids` a varování `cash.warning.series_gap`.
+        Varování chodí jen tehdy, když doklad číslo skutečně měl (`doc_number != null`) —
+        po draftu smazaném přes `?force=1` žádná díra nevzniká.
+        Preferovanou cestou je storno (`/reverse`), které auditní stopu zachová.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
-        - { in: query, name: force, required: false, schema: { type: string, enum: ['1'] }, description: "Tvrdé smazání dokladu i s účetními zápisy" }
+        - { in: query, name: force, required: false, schema: { type: string, enum: ['1'] }, description: "Tvrdé smazání dokladu i s účetními zápisy; vyžaduje právo `cash.close`" }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object } } } }
+        '200': { description: "OK — `{deleted, warnings}`; s `?force=1` navíc `doc_number` a `deleted_entry_ids`", content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: "Doklad má živou vazbu z jiné agendy (kód `cash.error.has_dependencies`, `error.blocked_by` uvádí počty po druzích) — typicky je použit jako doklad o vyplacení mezd." }
+        '409': { description: "Doklad má živou vazbu z jiné agendy (kód `cash.error.has_dependencies`, `error.blocked_by` uvádí počty po druzích) — typicky je použit jako doklad o vyplacení mezd. Nebo z úhrady zálohy už vznikl navazující doklad (`cash.error.followup_document_exists`) a je potřeba zrušit nejdřív ten." }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/cash-documents/{id}/post:
@@ -11317,16 +11488,27 @@ paths:
   /api/v1/accounting/cash-documents/{id}/reverse:
     post:
       tags: [Accounting]
-      summary: Storno pokladního dokladu (povinný reason) — účetní|admin
+      summary: Storno pokladního dokladu (povinný reason) — `cash.document.write`
+      description: |
+        Bez `entry_date` se protizápis datuje datem PŮVODNÍHO zápisu; na dnešek ho
+        posune až tehdy, když je původní datum uzamčené. Doklad v uzamčeném období
+        proto stornovat lze. Storno úhrady zálohové faktury, ze které už vznikla
+        finální faktura nebo daňový doklad k přijaté platbě, se odmítne s kódem
+        `cash.error.followup_document_exists` — navazující doklad je nutné zrušit dřív.
+
+        `warnings` nesou klíče `cash.warning.*`: `reversal_date_shifted` (protizápis
+        skončil u jiného data než původní zápis) a `negative_balance_after_reverse`
+        (pokladna je po stornu v mínusu). Nejsou to chyby — storno proběhlo.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3 }, entry_date: { type: string, format: date } } } } }
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3 }, entry_date: { type: string, format: date, description: "Datum protizápisu; vynechte, ať se použije datum původního zápisu" } } } } }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { reversal_entry_id: { type: integer } } } } } }
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { reversal_entry_id: { type: [integer, "null"] }, warnings: { type: array, items: { type: string } } } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: "Z úhrady zálohy už vznikl navazující doklad (`cash.error.followup_document_exists`), nebo je uzamčené i datum protizápisu (`cash.error.date_locked`)." }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/cash-documents/{id}/pdf:
@@ -16542,6 +16724,13 @@ components:
       scheme: bearer
       bearerFormat: mi_pat_
       description: Personal Access Token získaný v Nastavení → API tokeny.
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-myinvoice_session
+      description: |
+        Host-only browserová session webového rozhraní. Název lze v lokálním
+        HTTP vývoji změnit konfigurací; produkční výchozí používá prefix `__Host-`.
 
   parameters:
     SupplierIdHeader:
@@ -16591,6 +16780,61 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    AppUrlConfigurationDiagnostic:
+      type: object
+      additionalProperties: false
+      description: |
+        Veřejná bezpečná klasifikace canonical `app.url`. Neobsahuje původní
+        hodnotu, hostname, userinfo, heslo, cestu, query ani fragment.
+
+        Stav a reason code tvoří pevné páry:
+        * `missing` / `app_url_missing`: klíč chybí, je přesně prázdný nebo
+          obsahuje jen whitespace. Diagnostický stav tyto případy záměrně
+          slučuje, ale tenant routing ne: jen chybějící a přesně prázdná hodnota
+          zachovává legacy request-host fallback; whitespace má pouze úzkou
+          health výjimku.
+        * `invalid` / `app_url_invalid_origin`: neprázdná hodnota není samostatný
+          HTTP(S) origin. Pokud z ní legacy tenant resolver přesto získá platný
+          hostname, může jako canonical uznat pouze request s přesně tímto
+          hostname; nejde o důvěru k libovolnému hostu. Přes jiný hostname je
+          dostupný pouze přesný read-only health endpoint.
+        * `routing_only` / `app_url_webauthn_incompatible`: HTTP(S) origin je
+          použitelný pro běžné routování, včetně HTTP nebo LAN IP, ale ne pro
+          WebAuthn.
+        * `hostname_conflict` / `app_url_hostname_conflict`: hostname originu
+          je současně uložený jako vlastní doména firmy. Aplikace fail-closed
+          odmítne běžné cesty; přesný read-only health endpoint zůstane dostupný
+          pro bezpečnou diagnostiku bez zveřejnění hostname.
+        * `webauthn_ready` / `app_url_valid`: origin vyhovuje routování i
+          WebAuthn. WebAuthn vyžaduje HTTPS DNS origin; jediná HTTP výjimka je
+          `http://localhost`.
+
+        First-run setup může doplnit chybějící, prázdnou nebo whitespace-only
+        hodnotu a známý distribuční placeholder z detekovaného originu.
+        Explicitně neprázdnou neplatnou hodnotu zachová pro diagnostiku a
+        preflight ji označí jako chybu.
+      required: [state, reason_code, routing_compatible, webauthn_compatible]
+      properties:
+        state:
+          type: string
+          enum: [missing, invalid, routing_only, hostname_conflict, webauthn_ready]
+          description: Stabilní třída konfigurace; nikdy neobsahuje část URL.
+        reason_code:
+          type: string
+          description: Stabilní reason code odpovídající hodnotě `state`.
+          enum:
+            - app_url_missing
+            - app_url_invalid_origin
+            - app_url_webauthn_incompatible
+            - app_url_hostname_conflict
+            - app_url_valid
+        routing_compatible:
+          type: boolean
+          description: Zda lze `app.url` použít jako canonical HTTP(S) origin pro routování.
+        webauthn_compatible:
+          type: boolean
+          description: Zda `app.url` splňuje přísnější origin a RP ID podmínky WebAuthn.
+
     StockVendorOfferPatch:
       type: object
       description: >
@@ -18284,6 +18528,74 @@ components:
                 scope: { type: string, enum: [read, read_write] }
                 expires_at: { type: [string, "null"], format: date-time }
             - { type: "null" }
+
+    DomainContext:
+      type: object
+      required:
+        [mode, hostname, origin, locked, supplier_id, purpose,
+         canonical_base_url, canonical_login_url]
+      properties:
+        mode:
+          type: string
+          enum: [canonical, custom]
+        hostname:
+          type: string
+          format: hostname
+        origin:
+          type: string
+          format: uri
+        locked:
+          type: boolean
+          description: Aktivní vlastní doména autoritativně uzamyká tenant firmy.
+        supplier_id:
+          type: [integer, "null"]
+        purpose:
+          type: [string, "null"]
+          enum: [portal, public_links, all, null]
+          description: Hodnota `portal` označuje celé klientské rozhraní podle oprávnění role client.
+        canonical_base_url:
+          type: string
+          format: uri
+        canonical_login_url:
+          type: string
+          format: uri
+          description: Canonical origin pro přihlášení a RP-bound WebAuthn operace.
+
+    SupplierDomain:
+      type: object
+      required:
+        [id, supplier_id, hostname, purpose, status, is_primary,
+         is_primary_portal, is_primary_public, dns, verification_url,
+         portal_url, public_base_url]
+      properties:
+        id: { type: integer, format: int64 }
+        supplier_id: { type: integer }
+        hostname: { type: string, format: hostname }
+        purpose:
+          type: string
+          enum: [portal, public_links, all]
+          description: Hodnota `portal` označuje celé klientské rozhraní podle oprávnění role client.
+        status:
+          type: string
+          enum: [pending, verified, active, disabled, verification_failed]
+        is_primary: { type: boolean }
+        is_primary_portal: { type: boolean }
+        is_primary_public: { type: boolean }
+        verified_at: { type: [string, "null"], format: date-time }
+        last_checked_at: { type: [string, "null"], format: date-time }
+        verification_error: { type: [string, "null"] }
+        dns:
+          type: object
+          required: [type, name, value]
+          properties:
+            type: { type: string, const: TXT }
+            name: { type: string }
+            value: { type: string }
+        verification_url: { type: string, format: uri }
+        portal_url: { type: string, format: uri }
+        public_base_url: { type: string, format: uri }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
 
     SupplierBrief:
       type: object

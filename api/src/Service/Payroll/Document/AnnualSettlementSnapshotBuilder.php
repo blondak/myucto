@@ -40,6 +40,13 @@ final class AnnualSettlementSnapshotBuilder
     public const PURPOSE = 'annual_settlement_result';
     public const MAPPING_VERSION = 'annual-settlement-mapping.v1';
 
+    /**
+     * Doména klíčovaného otisku snapshotu. Je veřejná proto, že revizi čte
+     * i mzdový list (§ 38j odst. 2 písm. h) a otisk musí ověřovat POD TOUTÉŽ
+     * doménou, pod kterou vznikl — jinak mu žádná skutečná revize neprojde.
+     */
+    public const SNAPSHOT_FINGERPRINT_DOMAIN = 'annual-settlement-snapshot-v1';
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollAnnualDocumentRepository $annualRevisions,
@@ -190,6 +197,11 @@ final class AnnualSettlementSnapshotBuilder
         $employee = self::object($snapshot['employee'] ?? null, 'employee');
         $result = self::object($snapshot['result'] ?? null, 'result');
         $trace = self::object($result['trace'] ?? null, 'result.trace');
+        // Starší revize klíč nenesly — chybějící příspěvek je nula, protože se
+        // tehdy potvrzení od jiného plátce nepoužilo vůbec.
+        $external = is_array($trace['external_certificates'] ?? null)
+            ? $trace['external_certificates']
+            : [];
 
         return new AnnualSettlementDocumentData(
             $snapshotHash,
@@ -218,6 +230,10 @@ final class AnnualSettlementSnapshotBuilder
             (int) $result['settlement_difference_minor_units'],
             (int) $result['payable_minor_units'],
             (string) $result['outcome'],
+            (int) ($external['count'] ?? 0),
+            (int) ($external['advance_base_minor_units'] ?? 0),
+            (int) ($external['advance_tax_minor_units'] ?? 0),
+            (int) ($external['tax_bonus_minor_units'] ?? 0),
         );
     }
 
@@ -370,7 +386,7 @@ final class AnnualSettlementSnapshotBuilder
     {
         return $this->sensitiveData->keyedFingerprint(
             $snapshotJson,
-            'annual-settlement-snapshot-v1',
+            self::SNAPSHOT_FINGERPRINT_DOMAIN,
             $supplierId,
         );
     }
