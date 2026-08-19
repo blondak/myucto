@@ -868,6 +868,22 @@ final class VatLedgerService
             }
         }
 
+        // Totéž pro BĚŽNÁ tuzemská plnění: dvojice ř. 1↔2 (vystavené) a 40↔41 (přijaté).
+        // Ručně zvolený kód pro základní sazbu na 12% řádku (překlep v editoru, import
+        // s pevným kódem) jinak pošle základ na ř. 1/40, zatímco KH bucketuje podle
+        // SKUTEČNÉ sazby a týž základ dá do 12% sloupce → přiznání a KH se rozejdou.
+        // Cross-check to neodhalí, protože porovnává jen součet obou sazeb. Rozhoduje
+        // sazba na řádku, ne kód: sazba je snapshot z dokladu a tu daň dodavatel opravdu
+        // účtoval. Krácené klíče (přípona „k") tu být nemůžou — přiřazují se až níž.
+        if (!$isRc && $vatRate > 0) {
+            $domesticPairs = $vatRate < $bucket
+                ? ['1' => '2', '40' => '41']   // kód pro základní sazbu na sníženém řádku
+                : ['2' => '1', '41' => '40'];  // a obráceně
+            if ($primaryLine !== null && isset($domesticPairs[$primaryLine])) {
+                $primaryLine = $domesticPairs[$primaryLine];
+            }
+        }
+
         return [
             'source'                => $source,
             'invoice_id'            => (int) $r['invoice_id'],

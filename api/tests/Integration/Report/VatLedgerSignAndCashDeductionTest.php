@@ -23,6 +23,10 @@ use PHPUnit\Framework\TestCase;
  *       má. Opravný daňový doklad s kladnými částkami (import z cizího systému —
  *       InvoiceAmountPolicy ho nezakazuje) daň na výstupu místo snížení NAVÝŠIL.
  *
+ * Přibyly sem i nálezy C-3 (cizí sazba se nesmí přes fallback stát českým odpočtem)
+ * a M-1 (řádek přiznání se řídí skutečnou sazbou, ne ručně zvoleným kódem) — všechny
+ * čtou tentýž ledger, takže dávají smysl v jednom souboru.
+ *
  * Izolovaný rok 2093 pod existujícím supplierem (vynucen plátce), úklid v tearDown.
  */
 #[Group('integration')]
@@ -242,6 +246,24 @@ final class VatLedgerSignAndCashDeductionTest extends TestCase
         $result = $this->dph->build($this->supplierId, self::YEAR, 11, 'monthly');
 
         $this->assertSame(1200.0, (float) ($result['summary']['lines']['41']['vat'] ?? 0));
+    }
+
+    /**
+     * M-1: kód pro základní sazbu na 12% řádku (překlep v editoru, import s pevným kódem)
+     * nesmí poslat základ na ř. 1, zatímco KH ho podle skutečné sazby dá do 12% sloupce.
+     * Rozhoduje sazba na řádku — tu daň dodavatel skutečně účtoval.
+     */
+    public function testLineFollowsActualRateNotTheChosenCode(): void
+    {
+        $cust = $this->client('Odběratel překlep', 'CZ90000235');
+        // Kód '1' (základní sazba) na položce se sazbou 12 %.
+        $this->sale('S-RATE-MIX', $cust, 'invoice', $this->d(12, 3), [[10000, 1200, 12]]);
+
+        $result = $this->dph->build($this->supplierId, self::YEAR, 12, 'monthly');
+
+        $this->assertSame(10000.0, (float) ($result['summary']['lines']['2']['base'] ?? 0), 'základ patří na ř. 2');
+        $this->assertSame(1200.0, (float) ($result['summary']['lines']['2']['vat'] ?? 0));
+        $this->assertSame(0.0, (float) ($result['summary']['lines']['1']['base'] ?? 0), 'ř. 1 zůstane prázdný');
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
