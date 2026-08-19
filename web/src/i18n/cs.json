@@ -8458,7 +8458,8 @@
             "exchange_rate_not_reloaded": "Změnilo se rozhodné datum (DUZP) nebo měna, ale kurz zůstal původní ({rate} k {date}) — {reason} Zkontroluj prosím kurz na dokladu.",
             "exchange_rate_not_reloaded_source_locked": "kurz na dokladu nepochází z automatického přepočtu (zadal ho člověk, přišel z importu nebo je jeho původ neznámý), takže ho automatika nepřepisuje.",
             "exchange_rate_not_reloaded_cnb_unavailable": "kurz ČNB k novému datu se nepodařilo načíst.",
-            "public_authority_fee_out_of_scope": "Doklad vypadá jako poplatek orgánu veřejné moci (soudní, správní poplatek, kolek). Orgán veřejné moci při výkonu veřejné správy není osobou povinnou k dani (§ 5 odst. 4 ZDPH), takže plnění není předmětem daně — a to i u zahraničního soudu či úřadu: nesamovyměřuje se podle § 9 odst. 1 a doklad nevstupuje do přiznání ani do kontrolního hlášení. Proto zůstal bez klasifikace DPH. Jde-li přesto o běžnou přijatou službu, vyberte klasifikaci ručně."
+            "public_authority_fee_out_of_scope": "Doklad vypadá jako poplatek orgánu veřejné moci (soudní, správní poplatek, kolek). Orgán veřejné moci při výkonu veřejné správy není osobou povinnou k dani (§ 5 odst. 4 ZDPH), takže plnění není předmětem daně — a to i u zahraničního soudu či úřadu: nesamovyměřuje se podle § 9 odst. 1 a doklad nevstupuje do přiznání ani do kontrolního hlášení. Proto zůstal bez klasifikace DPH. Jde-li přesto o běžnou přijatou službu, vyberte klasifikaci ručně.",
+            "missing_vat_classification": "Doklad nese DPH (nebo je v režimu přenesené daňové povinnosti), ale nemá klasifikaci DPH — do přiznání ani do kontrolního hlášení se tak vůbec nedostane. Typicky jde o sazbu, kterou český číselník nezná (např. německých 19 %), nebo o dodavatele s neurčenou zemí. Zkontrolujte sazby na řádcích a vyberte klasifikaci ručně."
         },
         "exchange_rate_source": {
             "cnb": "denní kurz ČNB",

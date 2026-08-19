@@ -25,7 +25,6 @@ use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Currency\PurchaseInvoiceRateReloader;
 use MyInvoice\Service\Invoice\DocumentItemsPayload;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
-use MyInvoice\Service\Report\VatClassificationDefaulter;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
 use MyInvoice\Service\Ai\AiSuggestionService;
@@ -49,7 +48,6 @@ final class UpdatePurchaseInvoiceAction
         private readonly PurchaseInvoiceRepository $repo,
         private readonly ClientRepository $clients,
         private readonly PurchaseInvoiceCalculator $calc,
-        private readonly VatClassificationDefaulter $vatDefaulter,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly DocumentLockService $locks,
@@ -208,7 +206,8 @@ final class UpdatePurchaseInvoiceAction
         }
 
         // Auto-default VAT klasifikace pokud uživatel nezadal — na header i items (s multi-tenant scope).
-        $this->applyVatClassificationDefaults($body, $supplierId);
+        // Klasifikaci DPH doplní až SSOT při ukládání řádků + syncHeaderClassificationFromItems()
+        // po uložení — viz CreatePurchaseInvoiceAction.
 
         // C6 (§ 73/1/a) — issue #9: na 'manual' překlápíme jen SKUTEČNOU změnu data přijetí.
         //
@@ -300,6 +299,10 @@ final class UpdatePurchaseInvoiceAction
                 $this->repo->setVatOverrides($id, $supplierId, is_array($body['vat_overrides']) ? $body['vat_overrides'] : null);
             }
             $this->calc->recompute($id);
+            // Hlavičková klasifikace se přebírá z řádků (SSOT je defaultClassificationCode()).
+            // Až PO recompute — volba dominantního kódu váží podle total_with_vat, které
+            // kalkulátor dopočítává.
+            $this->repo->syncHeaderClassificationFromItems($id, $supplierId);
             if (array_key_exists('rounding', $body)) {
                 $this->repo->setRounding($id, $supplierId, (float) $body['rounding']);
             }
@@ -570,43 +573,4 @@ final class UpdatePurchaseInvoiceAction
         return $changed;
     }
 
-    /**
-     * Auto-default vat_classification_code podle vat_rate na řádcích a header.
-     * Aplikuje se jen pokud user nezadal (NULL nebo prázdný string).
-     */
-    private function applyVatClassificationDefaults(array &$body, int $supplierId): void
-    {
-        $vatRates = $this->repo->vatRateMap();  // id → rate_percent
-        $reverseCharge = !empty($body['reverse_charge']);
-
-        // Items first — needed pro header dominantní sazby
-        if (!empty($body['items']) && is_array($body['items'])) {
-            foreach ($body['items'] as &$item) {
-                if (!empty($item['vat_classification_code'])) continue;
-                $rateId = (int) ($item['vat_rate_id'] ?? 0);
-                $rate = (float) ($vatRates[$rateId] ?? 0);
-                $taxDate = $body['tax_date'] ?? $body['issue_date'] ?? null;
-                $item['vat_classification_code'] = $this->vatDefaulter->defaultForPurchase($rate, $reverseCharge, $taxDate, $supplierId);
-            }
-            unset($item);
-        }
-
-        // Header default
-        if (empty($body['vat_classification_code']) && !empty($body['items'])) {
-            $itemsWithTotals = array_map(function ($it) use ($vatRates) {
-                $rateId = (int) ($it['vat_rate_id'] ?? 0);
-                $rate = (float) ($vatRates[$rateId] ?? 0);
-                $qty = (float) ($it['quantity'] ?? 1);
-                $price = (float) ($it['unit_price_without_vat'] ?? 0);
-                return ['vat_rate' => $rate, 'total_with_vat' => $qty * $price * (1 + $rate / 100)];
-            }, (array) $body['items']);
-            $body['vat_classification_code'] = $this->vatDefaulter->suggestHeaderForInvoice(
-                $itemsWithTotals,
-                (bool) ($body['reverse_charge'] ?? false),
-                'purchase',
-                $body['tax_date'] ?? $body['issue_date'] ?? null,
-                $supplierId,
-            );
-        }
-    }
 }

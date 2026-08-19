@@ -845,6 +845,12 @@ const purchaseActions = computed<ActionItem[]>(() => {
       ⚠ {{ t('purchase_invoice.warning.public_authority_fee_out_of_scope') }}
     </div>
 
+    <!-- ═══ Varování: doklad s daní bez klasifikace → tiše mimo přiznání i KH ═══ -->
+    <div v-if="invoice._warnings?.includes('missing_vat_classification')"
+      class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+      ⚠ {{ t('purchase_invoice.warning.missing_vat_classification') }}
+    </div>
+
     <!-- ═══ Úhrady dokladu → provenience (banka + pokladna + zaúčtování úhrady) ═══ -->
     <div v-if="(invoice.bank_payments && invoice.bank_payments.length) || (invoice.cash_payments && invoice.cash_payments.length) || (invoice.settlement_payments && invoice.settlement_payments.length)"
       class="bg-success-50 dark:bg-success-500/[0.06] border border-success-200 dark:border-success-500/20 rounded-lg px-4 py-2.5 text-sm">

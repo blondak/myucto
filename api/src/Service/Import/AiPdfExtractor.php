@@ -14,6 +14,7 @@ use MyInvoice\Service\Accounting\Expense\ExpenseKindSuggestion;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Support\AdvanceTaxDocumentText;
 use MyInvoice\Support\PaymentMethods;
+use MyInvoice\Support\PublicAuthorityFeeText;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -1868,6 +1869,17 @@ final class AiPdfExtractor
     private function inferReverseCharge(int $vendorId, array $items): bool
     {
         if (empty($items)) return false;
+        // Poplatek orgánu veřejné moci (soudní, správní, kolek, evropský platební rozkaz)
+        // NENÍ zdanitelné plnění: orgán při výkonu veřejné správy není osobou povinnou
+        // k dani (§ 5 odst. 4 ZDPH), takže se § 9 odst. 1 neuplatní ani u zahraničního
+        // soudu či úřadu. Bez téhle brzdy heuristika sepne (cizí země + nulové sazby),
+        // blok volajícího přepíše sazby na 21 % a doklad se samovyměří na ř. 5/12 + KH A.2
+        // — daň z plnění, které vůbec není předmětem daně (audit VAT klasifikací, H-7).
+        if (PublicAuthorityFeeText::anyIndicatesPublicAuthorityFee(
+            array_map(static fn ($it) => (string) ($it['description'] ?? ''), $items)
+        )) {
+            return false;
+        }
         // Pokud kterýkoli item má vat_rate > 0 → není to RC.
         // loadVatRateMap vrací [id => rate_percent] (float).
         $vatRates = $this->loadVatRateMap();

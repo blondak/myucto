@@ -208,7 +208,44 @@ final class PurchaseInvoiceValidation
             }
         }
 
+        // Doklad, který nese daň (nebo je v režimu samovyměření), ale nemá klasifikaci,
+        // ve výkazech TIŠE ZMIZÍ — VatClassificationMapper řádek bez kódu přeskočí.
+        // Stává se to u sazby, kterou český číselník nezná (cizí 19 %), a u dokladu
+        // se zahraničním dodavatelem, jehož zemi se nepodařilo určit. Osvobozené
+        // tuzemské plnění a plnění mimo předmět daně sem nepatří — u nich je prázdná
+        // klasifikace správný výsledek, proto se ptáme jen na nenulovou sazbu nebo RC.
+        if (self::hasUnclassifiedTaxableLine($invoice)) {
+            $warn[] = 'missing_vat_classification';
+        }
+
         return $warn;
+    }
+
+    /**
+     * Nese doklad řádek s daní (nebo v režimu samovyměření) bez klasifikačního kódu?
+     * Kód se hledá na řádku i na hlavičce — výkazy čtou COALESCE(položka, hlavička).
+     *
+     * @param array<string,mixed> $invoice
+     */
+    private static function hasUnclassifiedTaxableLine(array $invoice): bool
+    {
+        $headerCode = trim((string) ($invoice['vat_classification_code'] ?? ''));
+        if ($headerCode !== '') {
+            return false;
+        }
+        $isRc = !empty($invoice['reverse_charge']);
+        foreach ((array) ($invoice['items'] ?? []) as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            if (trim((string) ($item['vat_classification_code'] ?? '')) !== '') {
+                continue;
+            }
+            if ($isRc || (float) ($item['vat_rate_snapshot'] ?? 0) > 0.0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static function isValidDate(string $date): bool
