@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Bank;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Bank\FxPaymentSettlement;
 use PDO;
 
 /**
@@ -256,7 +257,7 @@ final class BankPostingBackfill
                                           UPPER(pic.code) = UPPER(COALESCE(NULLIF(bt.currency, ''), NULLIF(bs.currency, '')))
                                           -- ruční párování nemá confidence (NULL) — důkazem je člověk, ne skóre
                                           AND (pm.match_type = 'manual' OR COALESCE(pm.match_confidence, 0) >= 70)
-                                          AND ABS(ABS(bt.amount) - pi.amount_to_pay) <= 1.00
+                                          AND ABS(ABS(bt.amount) - pi.amount_to_pay) <= ?
                                       )
                                       OR (
                                           UPPER(pic.code) <> UPPER(COALESCE(NULLIF(bt.currency, ''), NULLIF(bs.currency, '')))
@@ -264,7 +265,7 @@ final class BankPostingBackfill
                                           AND UPPER(COALESCE(NULLIF(bt.currency, ''), NULLIF(bs.currency, ''))) = 'CZK'
                                           AND UPPER(pic.code) <> 'CZK' AND pi.exchange_rate > 0
                                           AND ABS(ABS(bt.amount) - pi.amount_to_pay * pi.exchange_rate)
-                                              <= GREATEST(1.00, pi.amount_to_pay * pi.exchange_rate * 0.04)
+                                              <= GREATEST(?, pi.amount_to_pay * pi.exchange_rate * ?)
                                       )
                                   )
                                   AND ABS(pm.amount - ABS(bt.amount)) < 0.005
@@ -277,13 +278,19 @@ final class BankPostingBackfill
                  ORDER BY bt.posted_at ASC, bt.id ASC";
         // pořadí parametrů: příznak explicitní alokace 2×, live,
         // vlastnictví účtu přes resolver (2× — SEC-01) + explicitní vazby 3×, journal,
-        // normalizace partial 2×, [from]
+        // normalizace partial: supplier + sdílené tolerance + supplier, [from]
         $params = array_merge(
             [$supplierId, $supplierId, $supplierId],
             \MyInvoice\Repository\BankStatementOwnershipResolver::params($supplierId),
             [$supplierId, $supplierId, $supplierId],
             [$supplierId],
-            [$supplierId, $supplierId],
+            [
+                $supplierId,
+                FxPaymentSettlement::AMOUNT_TOLERANCE,
+                FxPaymentSettlement::AMOUNT_TOLERANCE,
+                FxPaymentSettlement::MATCH_TOLERANCE_PCT,
+                $supplierId,
+            ],
         );
         if ($hasFrom) {
             $params[] = $from;

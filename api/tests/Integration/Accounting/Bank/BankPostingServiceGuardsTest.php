@@ -25,7 +25,7 @@ final class BankPostingServiceGuardsTest extends BankPostingTestCase
         self::assertSame(0, $this->suggestionCountForTx($tx));
     }
 
-    public function testCzkTxOnForeignInvoiceSkipped(): void
+    public function testCzkTxOnForeignInvoiceWithoutRateIsSkipped(): void
     {
         $eur = $this->currencyRow($this->supplierId, 'EUR');
         $client = $this->client('Odběratel s.r.o.');
@@ -46,7 +46,7 @@ final class BankPostingServiceGuardsTest extends BankPostingTestCase
 
         $res = $this->service->handleTransaction($tx, $this->userId);
         self::assertSame('skipped', $res['action']);
-        self::assertSame('fx_not_supported', $res['reason']);
+        self::assertSame('missing_exchange_rate', $res['reason']);
         self::assertSame(0, $this->entryCountForTx($tx));
     }
 

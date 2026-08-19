@@ -42,7 +42,11 @@ final class PaymentMatchAuditChecker
     /** Tolerance zaokrouhlení pro CZK↔CZK spárování (Kč). */
     public const CZK_TOLERANCE = 1.0;
 
-    /** Relativní tolerance pro CZK transakci hradící cizoměnový doklad (kurzový drift). */
+    /**
+     * Relativní tolerance pro post-hoc audit CZK úhrady cizoměnového dokladu.
+     * Záměrně je přísnější než 4% přijímací tolerance matcheru: párování
+     * neblokuje, pouze upozorňuje na již uloženou odchylku ke kontrole.
+     */
     public const FX_TOLERANCE_PCT = 0.01;
 
     /** Práh podobnosti jmen (similar_text %) pod kterým se protistrana považuje za neshodnou. */

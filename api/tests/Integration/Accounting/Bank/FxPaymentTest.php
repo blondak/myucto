@@ -64,6 +64,38 @@ final class FxPaymentTest extends BankPostingTestCase
         $this->assertBalanced($this->entryIdForBankTx($tx));
     }
 
+    // CZK pohyb hradí cizoměnovou FV: banka zůstává ve skutečných CZK,
+    // saldokonto se odúčtuje kurzem předpisu a rozdíl je kurzová ztráta.
+    public function testIncomingCzkPaymentOfForeignInvoiceBooksExchangeLoss(): void
+    {
+        $client = $this->client('CZK úhrada EUR faktury');
+        $inv = $this->fxSaleInvoice('FV-EUR-CZK-LOSS', $client, 1000.00, 24.50);
+
+        $stmt = $this->statement();
+        $tx = $this->transaction($stmt, 24300.00, [
+            'match_status' => 'manual',
+            'currency' => 'CZK',
+            'matched_invoice_id' => $inv,
+        ]);
+        $this->fxInvoicePayment($inv, $tx, 1000.00);
+
+        $res = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('posted', $res['action'], 'CZK úhrada EUR faktury se má zaúčtovat: ' . ($res['reason'] ?? ''));
+
+        $entryId = $this->entryIdForBankTx($tx);
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(24300.00, $byAcc['221']['debit'], 0.001, '221 MD = skutečný CZK pohyb.');
+        self::assertEqualsWithDelta(24500.00, $byAcc['311']['credit'], 0.001, '311 D = 1 000 EUR × kurz předpisu 24,50.');
+        self::assertEqualsWithDelta(200.00, $byAcc['563']['debit'], 0.001, '563 MD = kurzová ztráta.');
+        self::assertArrayNotHasKey('663', $byAcc);
+        $this->assertBalanced($entryId);
+
+        $saldo = $this->lineForAccount($entryId, '311');
+        self::assertSame('EUR', $saldo['currency_code']);
+        self::assertEqualsWithDelta(24.50, (float) $saldo['fx_rate'], 0.0001);
+        self::assertEqualsWithDelta(1000.00, (float) $saldo['amount_foreign'], 0.001);
+    }
+
     // (c) — částečná úhrada FX faktury: poměrná část salda i kurzového rozdílu.
     public function testIncomingPartialPaymentBooksProportionalDifference(): void
     {

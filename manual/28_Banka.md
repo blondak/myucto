@@ -153,6 +153,15 @@ připraví koncept **daňového dokladu k přijaté platbě** (viz § 11.1.2);
 doplatek zálohy, ke které už existuje finální doklad, se eviduje na finál.
 Stejně fungují platby z **e-mailových avíz** ([29. Bankovní účty](29_Bankovni_ucty.md)).
 
+U cizoměnové faktury placené na **CZK účet** se přepočet kurzem dokladu
+použije jen k rozpoznání platby. Pokud se CZK pohyb vejde do devizové tolerance,
+zaeviduje se jako úhrada celého zbývajícího obnosu v měně faktury. Skutečná
+CZK částka zůstává beze změny na bankovní transakci; nemusí se rovnat
+částce faktury násobené kurzem dokladu. Výrazně nižší platba se nadále
+eviduje jako částečná úhrada přepočtená kurzem faktury. V podvojném
+účetnictví zůstává bankovní noha 221 ve skutečné CZK částce, pohledávka
+311 se odúčtuje kurzem předpisu a rozdíl se zachytí na 563/663.
+
 ### 28.4.2 Manuální párování
 
 Pro transakce, které se nespárovaly automaticky (typicky chybí VS, nebo
@@ -182,14 +191,17 @@ Když nabídka nesedí, pokračuj klasickým ručním výběrem:
 2. Najdeš fakturu (číslo / klient / částka).
 3. Vyber a potvrď.
 
-Zaeviduje se platba ve výši transakce — plné pokrytí označí fakturu `paid`
-(`paid_at` = datum transakce), nižší částka je částečná úhrada. Activity log:
+Ve stejné měně se zaeviduje platba ve výši transakce. U CZK platby
+cizoměnové faktury, která odpovídá celému zbytku v devizové toleranci, se
+faktura vyrovná celým zbytkem v její měně; přesný CZK pohyb zůstane na
+bankovní transakci. Výrazně nižší částka je částečná úhrada.
+Plné pokrytí označí fakturu `paid` (`paid_at` = datum transakce).
 
 Samotná shoda částky a data nebo jen přibližná shoda názvu dodavatele se
 automaticky nepotvrdí ani nezaúčtuje. Doklad zůstane nezměněný, dokud kandidáta
 neověříš ručním párováním. Stejně se postupuje, když platba míří na přijatou
 fakturu, která už je označená jako uhrazená.
-`bank.matched_manual`.
+Activity log: `bank.matched_manual`.
 
 #### Sloučená úhrada (jedna platba na více faktur)
 

@@ -17,6 +17,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\Bank\GpcParser;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\StatementImporter;
 use MyInvoice\Service\Bank\StatementMatcher;
 use MyInvoice\Service\Bank\Match\MatchSuggestionException;
@@ -44,11 +45,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class BankStatementAction
 {
     /** Absolutní tolerance shody částky ve stejné měně (měna faktury). */
-    private const CANDIDATE_AMOUNT_TOLERANCE = 1.0;
-    /** Relativní tolerance pro cross-currency shodu (CZK platba cizoměnové faktury) —
-     *  banka si bere spread klidně ~2 % a kurz se za pár dní pohne, takže 4 % dává
-     *  rezervu, aby se kandidáti reálně našli. */
-    private const CANDIDATE_FX_TOLERANCE_PCT = 0.04;
+    private const CANDIDATE_AMOUNT_TOLERANCE = FxPaymentSettlement::AMOUNT_TOLERANCE;
     /** Okno ±N dní kolem data transakce (issue_date nebo due_date faktury). */
     private const CANDIDATE_DAY_WINDOW = 14;
     /** Fallback okno, když v CANDIDATE_DAY_WINDOW nic nesedí — širší rozsah + povolí
@@ -2001,8 +1998,7 @@ final class BankStatementAction
         $q->execute(array_merge($branch, $branch));
 
         $absTol = self::CANDIDATE_AMOUNT_TOLERANCE;
-        $pct    = self::CANDIDATE_FX_TOLERANCE_PCT;
-        $local  = 'CZK';
+        $local  = FxPaymentSettlement::LOCAL_CURRENCY;
         $postedTs = strtotime($posted) ?: time();
 
         $candidates = [];
@@ -2026,8 +2022,8 @@ final class BankStatementAction
                 $tol = $absTol;
             } elseif ($txCcy === $local) {
                 // Cizoměnová faktura placená v CZK → přepočet kurzem faktury (CZK = částka × kurz).
-                $expected = $invMag * $rate;
-                $tol = max($absTol, $expected * $pct);
+                $expected = FxPaymentSettlement::expectedLocalAmount($invMag, $rate);
+                $tol = FxPaymentSettlement::matchTolerance($expected, $absTol);
                 $converted = $expected;
             } elseif ($allowRawAmountFallback) {
                 // Fallback (nic nesedí přesně): porovnej syrovou magnitudu BEZ FX převodu —
@@ -2236,7 +2232,9 @@ final class BankStatementAction
             foreach ($items as $it) {
                 if ($it['is_fx']) { $hasFx = true; break; }
             }
-            $tol = max(self::CANDIDATE_AMOUNT_TOLERANCE, $hasFx ? $txAmount * self::CANDIDATE_FX_TOLERANCE_PCT : 0.0);
+            $tol = $hasFx
+                ? FxPaymentSettlement::matchTolerance($txAmount, self::CANDIDATE_AMOUNT_TOLERANCE)
+                : self::CANDIDATE_AMOUNT_TOLERANCE;
 
             if ($anchorItem !== null) {
                 // Kotva fixní: dohledej kombinace ZBYTKU (1..max-1) na (cíl − kotva).
@@ -2330,7 +2328,7 @@ final class BankStatementAction
         // Cizoměnová faktura placená v CZK → přepočet kurzem faktury. Bez platného kurzu
         // NEpřevádíme (žádný tichý fallback 1:1 — to by vyrobilo nesmyslnou částku platby).
         if ($txCcy === 'CZK' && $rate > 0) {
-            return $remaining * $rate;
+            return FxPaymentSettlement::expectedLocalAmount($remaining, $rate);
         }
         return null;
     }
@@ -2551,12 +2549,23 @@ final class BankStatementAction
             $partialPayment = false;
             if (in_array($invoice['status'], ['issued', 'sent', 'reminded'], true)) {
                 $remaining = round((float) ($invoice['amount_to_pay'] ?? 0) - (float) ($invoice['paid_total'] ?? 0), 2);
+                $txAmount = (float) ($txRow['amount'] ?? 0);
+                $txCurrency = isset($txRow['tx_currency']) && $txRow['tx_currency'] !== null
+                    ? (string) $txRow['tx_currency']
+                    : null;
                 $invAmount = $this->txAmountInInvoiceCurrency(
-                    (float) ($txRow['amount'] ?? 0),
+                    $txAmount,
                     (string) ($invoice['currency'] ?? 'CZK'),
                     (float) ($invoice['exchange_rate'] ?? 0),
-                    isset($txRow['tx_currency']) && $txRow['tx_currency'] !== null ? (string) $txRow['tx_currency'] : null,
+                    $txCurrency,
                     $remaining,
+                    FxPaymentSettlement::isFullCzkSettlement(
+                        $txAmount,
+                        $remaining,
+                        (string) ($invoice['currency'] ?? 'CZK'),
+                        (float) ($invoice['exchange_rate'] ?? 0),
+                        $txCurrency,
+                    ),
                 );
 
                 // Idempotence: transakce už mohla platbu založit (legacy auto_partial flag
@@ -2693,20 +2702,27 @@ final class BankStatementAction
 
     /**
      * Částka transakce v měně faktury (mirror StatementMatcher::txAmountInInvoiceCurrency):
-     * stejná/neznámá měna → přímo; CZK platba cizoměnové faktury → děleno kurzem faktury;
-     * jinak $fallback (zbývající částka — manuální match = uživatel říká „tahle platba
-     * patří k téhle faktuře", bez převoditelné měny bereme doplacení zbytku).
+     * stejná/neznámá měna → přímo; úplná FX úhrada → celý zbytek faktury;
+     * částečná CZK platba cizoměnové faktury → děleno kurzem faktury. Jiná
+     * nepřevoditelná kombinace použije $fallback, protože manuální match potvrzuje vazbu.
      */
-    private function txAmountInInvoiceCurrency(float $txAmount, string $invCcy, float $rate, ?string $txCurrency, float $fallback): float
+    private function txAmountInInvoiceCurrency(
+        float $txAmount,
+        string $invCcy,
+        float $rate,
+        ?string $txCurrency,
+        float $fallback,
+        bool $settleRemaining = false,
+    ): float
     {
-        if ($txCurrency === null || strtoupper($txCurrency) === strtoupper($invCcy)) {
-            return round($txAmount, 2);
-        }
-        if (strtoupper($txCurrency) === 'CZK') {
-            $r = $rate > 0 ? $rate : 1.0;
-            return round($txAmount / $r, 2);
-        }
-        return round($fallback, 2);
+        return FxPaymentSettlement::amountInInvoiceCurrency(
+            $txAmount,
+            $invCcy,
+            $rate,
+            $txCurrency,
+            $fallback,
+            $settleRemaining,
+        );
     }
 
     /**
@@ -2837,7 +2853,9 @@ final class BankStatementAction
         }
 
         // Guard: součet zbytků (v měně platby) musí ≈ částka platby.
-        $tol = max(self::CANDIDATE_AMOUNT_TOLERANCE, $hasFx ? $txAmount * self::CANDIDATE_FX_TOLERANCE_PCT : 0.0);
+        $tol = $hasFx
+            ? FxPaymentSettlement::matchTolerance($txAmount, self::CANDIDATE_AMOUNT_TOLERANCE)
+            : self::CANDIDATE_AMOUNT_TOLERANCE;
         if (abs(round($sumConverted, 2) - $txAmount) > $tol) {
             return Json::error($response, 'sum_mismatch',
                 'Součet faktur (' . number_format(round($sumConverted, 2), 2, ',', ' ') . ' ' . $txCcy

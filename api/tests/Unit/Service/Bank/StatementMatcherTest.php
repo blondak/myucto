@@ -42,6 +42,26 @@ final class StatementMatcherTest extends TestCase
         return $r;
     }
 
+    private function paymentAmount(
+        float $txAmount,
+        string $invCcy,
+        float $rate,
+        ?string $txCcy,
+        float $remaining,
+        bool $settleRemaining = false,
+    ): float
+    {
+        $ref = new \ReflectionMethod($this->matcher, 'txAmountInInvoiceCurrency');
+        return (float) $ref->invoke(
+            $this->matcher,
+            $txAmount,
+            ['currency' => $invCcy, 'exchange_rate' => $rate],
+            $txCcy,
+            $remaining,
+            $settleRemaining,
+        );
+    }
+
     public function testSameCurrencyComparesDirectly(): void
     {
         $m = $this->expectedMatch(2520.0, 'EUR', 24.36, 'EUR');
@@ -68,6 +88,14 @@ final class StatementMatcherTest extends TestCase
         self::assertSame(63000.0, $m['expected']);
         self::assertEqualsWithDelta(2520.0, $m['exact'], 0.001);
         self::assertSame($m['exact'], $m['partial']);
+    }
+
+    public function testCzkExpectedAmountIsRoundedToCents(): void
+    {
+        // 123,45 × 24,50 = 3 024,525; bankovní pohyb lze porovnávat jen na haléře.
+        $m = $this->expectedMatch(123.45, 'EUR', 24.5, 'CZK');
+        self::assertNotNull($m);
+        self::assertSame(3024.53, $m['expected']);
     }
 
     public function testCzkPaymentOfCzkInvoiceIsDirect(): void
@@ -112,5 +140,27 @@ final class StatementMatcherTest extends TestCase
         self::assertNotNull($m);
         self::assertSame(0.5, $m['expected']);
         self::assertSame(0.05, $m['exact']);
+    }
+
+    public function testFullFxSettlementRecordsWholeInvoiceRemainder(): void
+    {
+        // Banka připsala 24 300 CZK za plnou fakturu 1 000 EUR @ 24,50.
+        // Rozdíl je kurz banky/spread; po přijetí jako exact musí být faktura vyrovnaná.
+        self::assertSame(1000.0, $this->paymentAmount(24300.0, 'EUR', 24.5, 'CZK', 1000.0, true));
+        // Efektivní bankovní kurz nemusí jít vyjádřit tak, aby násobení po
+        // zaokrouhlení vrátilo přesně CZK pohyb; ani tehdy se hodnoty neslévají.
+        self::assertSame(123.45, $this->paymentAmount(3018.41, 'EUR', 24.5, 'CZK', 123.45, true));
+    }
+
+    public function testPartialFxSettlementStillConvertsByInvoiceRate(): void
+    {
+        self::assertSame(408.16, $this->paymentAmount(10000.0, 'EUR', 24.5, 'CZK', 1000.0));
+    }
+
+    public function testSameCurrencyExactSettlementKeepsActualPaymentAmount(): void
+    {
+        // Nové pravidlo je pouze pro cross-currency; haléřová odchylka ve stejné
+        // měně zůstává skutečnou evidovanou částkou.
+        self::assertSame(999.98, $this->paymentAmount(999.98, 'EUR', 24.5, 'EUR', 1000.0, true));
     }
 }
