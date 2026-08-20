@@ -84,7 +84,7 @@ final class TaxSubmissionEpoRepositoryTest extends TestCase
             'downloaded',
         );
 
-        self::assertFalse($this->epo->hasEvidence($submissionId, $this->supplierId));
+        self::assertNull($this->epo->deletionBlocker($submissionId, $this->supplierId));
 
         $attemptId = $this->epo->insertAttempt(
             $this->supplierId,
@@ -95,7 +95,10 @@ final class TaxSubmissionEpoRepositoryTest extends TestCase
             'production',
         );
 
-        self::assertTrue($this->epo->hasEvidence($submissionId, $this->supplierId));
+        self::assertSame(
+            TaxSubmissionEpoRepository::BLOCK_UNRESOLVED,
+            $this->epo->deletionBlocker($submissionId, $this->supplierId),
+        );
         $rows = $this->epo->enrich(
             [$this->submissions->find($submissionId, $this->supplierId)],
             $this->supplierId,
@@ -223,11 +226,14 @@ final class TaxSubmissionEpoRepositoryTest extends TestCase
             'submitted',
         );
 
-        self::assertTrue($this->epo->hasEvidence($submissionId, $this->supplierId));
-        self::assertSame('has_evidence', $this->epo->deleteSubmissionIfNoEvidence(
+        self::assertSame(
+            TaxSubmissionEpoRepository::BLOCK_SUBMITTED,
+            $this->epo->deletionBlocker($submissionId, $this->supplierId),
+        );
+        self::assertSame('blocked', $this->epo->deleteSubmission(
             $submissionId,
             $this->supplierId,
-        ));
+        )['result']);
         self::assertNotNull($this->submissions->find($submissionId, $this->supplierId));
     }
 
@@ -306,15 +312,15 @@ final class TaxSubmissionEpoRepositoryTest extends TestCase
             'downloaded',
         );
 
-        self::assertSame('deleted', $this->epo->deleteSubmissionIfNoEvidence(
+        self::assertSame('deleted', $this->epo->deleteSubmission(
             $submissionId,
             $this->supplierId,
-        ));
+        )['result']);
         self::assertNull($this->submissions->find($submissionId, $this->supplierId));
-        self::assertSame('not_found', $this->epo->deleteSubmissionIfNoEvidence(
+        self::assertSame('not_found', $this->epo->deleteSubmission(
             $submissionId,
             $this->supplierId,
-        ));
+        )['result']);
     }
 
     public function testSoftDeletedArtifactCanBeReplacedByFreshDocument(): void

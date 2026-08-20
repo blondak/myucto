@@ -894,9 +894,22 @@ async function confirmRecovery() {
 }
 
 async function deleteItem(item: TaxSubmission) {
-  if (!confirm(t('reports.submissions.delete_confirm'))) return
+  let note: string | undefined
+  if (item.delete_needs_acknowledgement) {
+    // Nedořešené předání nemazat potichu: aplikace neví, jestli uživatel v portálu
+    // EPO nakonec podal, takže to musí vědomě uzavřít on — a napsat, jak to ověřil.
+    const answer = window.prompt(t('reports.submissions.delete_not_submitted_prompt'), '')
+    if (answer === null) return
+    if (answer.trim().length < 10) {
+      toast.error(t('reports.submissions.delete_not_submitted_note_required'))
+      return
+    }
+    note = answer.trim()
+  } else if (!confirm(t('reports.submissions.delete_confirm'))) {
+    return
+  }
   try {
-    await epoSubmissionsApi.remove(item.id)
+    await epoSubmissionsApi.remove(item.id, note)
     if (expandedId.value === item.id) expandedId.value = null
     await load(false)
     toast.success(t('common.deleted'))
@@ -905,11 +918,20 @@ async function deleteItem(item: TaxSubmission) {
   }
 }
 
-function mayDelete(item: TaxSubmission): boolean {
-  return canDelete.value
-    && !['submitted', 'accepted'].includes(item.status)
-    && item.attempts.length === 0
-    && item.artifacts.length === 0
+/**
+ * Akci ukazujeme vždy, když má uživatel právo mazat — i když je snapshot zamčený.
+ * Chybějící tlačítko nechávalo uživatele hádat, PROČ mazání nejde; zašedlé tlačítko
+ * s větou v `disabledReason` je tu tou lepší variantou.
+ */
+function deleteDisabledReason(item: TaxSubmission): string | undefined {
+  switch (item.delete_blocker) {
+    case 'submitted_snapshot':
+      return t('reports.submissions.delete_blocked_submitted')
+    case 'delivered_attempt':
+      return t('reports.submissions.delete_blocked_delivered')
+    default:
+      return undefined
+  }
 }
 
 async function openSettings() {
@@ -1051,11 +1073,15 @@ const submissionActions = computed<ActionItem[]>(() => {
     },
     {
       key: 'delete',
-      label: t('common.delete'),
+      label: s.delete_needs_acknowledgement
+        ? t('reports.submissions.delete_after_closing')
+        : t('common.delete'),
       icon: 'trash',
       tier: 'advanced',
       variant: 'danger',
-      show: mayDelete(s),
+      show: canDelete.value,
+      disabled: !s.deletable && !s.delete_needs_acknowledgement,
+      disabledReason: deleteDisabledReason(s),
       run: () => deleteItem(s),
     },
   ]

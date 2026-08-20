@@ -210,37 +210,302 @@ final class TaxSubmissionEpoRepository
     }
 
     /**
-     * @return 'deleted'|'has_evidence'|'not_found'
+     * Snapshot, který uživatel (nebo potvrzené předání) označil za podaný.
+     * Tvrdá zábrana — z tohohle stavu se ven nedostane nic než oprava dat.
      */
-    public function deleteSubmissionIfNoEvidence(int $submissionId, int $supplierId): string
+    private const SUBMITTED_SNAPSHOT_STATUSES = ['submitted', 'accepted'];
+
+    /**
+     * Stavy pokusu, ve kterých EPO podání PROKAZATELNĚ převzalo.
+     *
+     * `rejected` je tu záměrně: odmítnutí je odpověď OSTRÉHO podání (`test=0`), tedy
+     * doklad o tom, že se na EPO reálně komunikovalo, a patří k němu archivovaný chybový
+     * XML. Naproti tomu neúspěšný test končí jako `test_failed` a nedokazuje nic.
+     */
+    private const DELIVERED_ATTEMPT_STATUSES = [
+        'submitted',
+        'processing',
+        'confirmed',
+        'rejected',
+    ];
+
+    /**
+     * Stavy pokusu, u kterých aplikace NEVÍ, jestli podání odešlo.
+     *
+     * `prepared`/`handoff_created`/`awaiting_confirmation` = asistované předání; uživatel
+     * dostal odkaz do portálu EPO a mohl tam podat, aniž by se to sem vrátilo.
+     * `submitting` = request je na drátě, `uncertain` = odpověď nešla vyhodnotit.
+     * Blokují mazání, ale jde je vědomě uzavřít jako „nepodáno" ({@see releaseUnresolvedAttempts()}).
+     */
+    private const UNRESOLVED_ATTEMPT_STATUSES = [
+        'prepared',
+        'handoff_created',
+        'awaiting_confirmation',
+        'submitting',
+        'uncertain',
+    ];
+
+    /**
+     * Artefakty, které samy o sobě dokazují přijetí podání na straně EPO.
+     *
+     * `source_xml`, `epo_xml`, `signed_submission_p7s` ani `epo_error_xml` mezi ně NEPATŘÍ:
+     * vznikají i při testu (`test=1`), na který EPO odpovídá „Podání nebylo přijato, protože
+     * bylo odesláno v testovacím režimu." Právě tahle záměna zamykala testované snapshoty.
+     */
+    private const EVIDENCE_ARTIFACT_KINDS = ['confirmation_p7s', 'receipt_pdf', 'epo_status_xml'];
+
+    /** Snapshot je označený jako podaný. */
+    public const BLOCK_SUBMITTED = 'submitted_snapshot';
+
+    /** Existuje důkaz, že EPO podání převzalo (doručenka, podací číslo, potvrzený pokus). */
+    public const BLOCK_DELIVERED = 'delivered_attempt';
+
+    /** Existuje pokus, u kterého nevíme, jak dopadl. Uživatel ho může vědomě uzavřít. */
+    public const BLOCK_UNRESOLVED = 'unresolved_attempt';
+
+    /**
+     * Proč nejde snapshot smazat — `null` = nic nebrání.
+     *
+     * ── Proč to není „existuje řádek v tax_submission_attempts" ─────────────────────
+     * Původní `hasEvidence()` blokovalo mazání, jakmile u snapshotu existoval JAKÝKOLI
+     * pokus. Jenže pokus vzniká i pro test EPO (`test=1`), který se z principu nikdy
+     * nepodá — EPO na něj odpovídá `TEST_REZIM`. Otestovaný snapshot tak šlo zamknout
+     * navždy, aniž by kdy cokoli odešlo.
+     *
+     * Rozlišujeme proto tři situace a každou jinak:
+     *   1. prokazatelně odešlo  → {@see BLOCK_SUBMITTED} / {@see BLOCK_DELIVERED}, natvrdo;
+     *      je to zákonný důkaz podání a mazat se nesmí ani se souhlasem uživatele,
+     *   2. nevíme                → {@see BLOCK_UNRESOLVED}, blokuje, ale jde uzavřít jako
+     *      „nepodáno" (uživatel to vědomě potvrdí, uzavření se zapíše do auditu),
+     *   3. prokazatelně neodešlo → NEBLOKUJE. Sem patří `testing`/`test_passed`/`test_failed`
+     *      (test EPO), `failed` (pád před odesláním – po odeslání se stav vždy zapisuje jako
+     *      `uncertain`, ne `failed`), `expired` (propadlé předání) a `cancelled` (vědomě uzavřené).
+     *
+     * @return self::BLOCK_*|null
+     */
+    public function deletionBlocker(int $submissionId, int $supplierId): ?string
     {
+        return $this->deletionBlockers([$submissionId], $supplierId)[$submissionId] ?? null;
+    }
+
+    /**
+     * Batchovaná varianta {@see deletionBlocker()} — jediné místo, kde pravidlo žije.
+     * Používá ji i {@see enrich()}, aby UI hlásilo přesně to, co brána skutečně udělá.
+     *
+     * @param list<int> $submissionIds
+     * @return array<int,?string> id snapshotu → self::BLOCK_*|null
+     */
+    public function deletionBlockers(array $submissionIds, int $supplierId): array
+    {
+        $ids = array_values(array_unique(array_filter($submissionIds, static fn (int $id): bool => $id > 0)));
+        if ($ids === []) {
+            return [];
+        }
+
+        $idIn = implode(',', array_fill(0, count($ids), '?'));
+        $submittedIn = implode(',', array_fill(0, count(self::SUBMITTED_SNAPSHOT_STATUSES), '?'));
+        $deliveredIn = implode(',', array_fill(0, count(self::DELIVERED_ATTEMPT_STATUSES), '?'));
+        $kindIn = implode(',', array_fill(0, count(self::EVIDENCE_ARTIFACT_KINDS), '?'));
+        $unresolvedIn = implode(',', array_fill(0, count(self::UNRESOLVED_ATTEMPT_STATUSES), '?'));
+
+        // Tvrdý důkaz doručení nehlídáme jen podle stavu: `submitted_at`, `confirmed_at`,
+        // `remote_submission_ref` i `offline_transfer_id` se zapisují VÝHRADNĚ z odpovědi
+        // ostrého podání (stageConfirmation / recordConfirmed / recordOffline), takže
+        // pravidlo platí, i kdyby se enum stavů někdy rozšířil.
+        // Artefakty se schválně NEfiltrují přes `documents.deleted_at` — doručenka
+        // přesunutá do koše je pořád důkaz, že podání odešlo.
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT s.id,
+                    (s.status IN ($submittedIn)) AS submitted_snapshot,
+                    (EXISTS(
+                        SELECT 1 FROM tax_submission_attempts a
+                         WHERE a.tax_submission_id = s.id AND a.supplier_id = s.supplier_id
+                           AND (
+                                a.status IN ($deliveredIn)
+                             OR a.submitted_at IS NOT NULL
+                             OR a.confirmed_at IS NOT NULL
+                             OR a.remote_submission_ref IS NOT NULL
+                             OR a.offline_transfer_id IS NOT NULL
+                           )
+                    )
+                    OR EXISTS(
+                        SELECT 1 FROM tax_submission_artifacts f
+                         WHERE f.tax_submission_id = s.id AND f.supplier_id = s.supplier_id
+                           AND f.artifact_kind IN ($kindIn)
+                    )) AS delivered,
+                    EXISTS(
+                        SELECT 1 FROM tax_submission_attempts u
+                         WHERE u.tax_submission_id = s.id AND u.supplier_id = s.supplier_id
+                           AND u.status IN ($unresolvedIn)
+                    ) AS unresolved
+               FROM tax_submissions s
+              WHERE s.supplier_id = ? AND s.id IN ($idIn)"
+        );
+        $stmt->execute([
+            ...self::SUBMITTED_SNAPSHOT_STATUSES,
+            ...self::DELIVERED_ATTEMPT_STATUSES,
+            ...self::EVIDENCE_ARTIFACT_KINDS,
+            ...self::UNRESOLVED_ATTEMPT_STATUSES,
+            $supplierId,
+            ...$ids,
+        ]);
+
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $out[(int) $row['id']] = match (true) {
+                (bool) $row['submitted_snapshot'] => self::BLOCK_SUBMITTED,
+                (bool) $row['delivered'] => self::BLOCK_DELIVERED,
+                (bool) $row['unresolved'] => self::BLOCK_UNRESOLVED,
+                default => null,
+            };
+        }
+
+        return $out;
+    }
+
+    /**
+     * Pokusy, u kterých aplikace neví, jestli podání odešlo.
+     *
+     * @return list<array{id:int,channel:string,status:string,epo_environment:string,requested_at:string}>
+     */
+    public function unresolvedAttempts(int $submissionId, int $supplierId): array
+    {
+        $placeholders = implode(',', array_fill(0, count(self::UNRESOLVED_ATTEMPT_STATUSES), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, channel, status, epo_environment, requested_at
+               FROM tax_submission_attempts
+              WHERE tax_submission_id = ? AND supplier_id = ?
+                AND status IN ($placeholders)
+              ORDER BY id"
+        );
+        $stmt->execute([$submissionId, $supplierId, ...self::UNRESOLVED_ATTEMPT_STATUSES]);
+
+        return array_map(
+            static fn (array $row): array => [
+                'id' => (int) $row['id'],
+                'channel' => (string) $row['channel'],
+                'status' => (string) $row['status'],
+                'epo_environment' => (string) $row['epo_environment'],
+                'requested_at' => (string) $row['requested_at'],
+            ],
+            $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
+        );
+    }
+
+    /**
+     * Vědomé uzavření nedořešených pokusů jako „nepodáno / zrušeno".
+     *
+     * Nesahá na pokusy s tvrdým důkazem doručení — ty odfiltruje stejná podmínka jako
+     * {@see deletionBlocker()}, takže tudy nejde obejít blokaci skutečného podání.
+     */
+    public function releaseUnresolvedAttempts(
+        int $submissionId,
+        int $supplierId,
+        ?int $resolvedBy,
+        string $note,
+    ): int {
+        $placeholders = implode(',', array_fill(0, count(self::UNRESOLVED_ATTEMPT_STATUSES), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE tax_submission_attempts
+                SET status = 'cancelled',
+                    resolution_code = 'verified_not_submitted',
+                    resolution_note = ?,
+                    resolved_by = ?,
+                    resolved_at = CURRENT_TIMESTAMP,
+                    next_poll_at = NULL
+              WHERE tax_submission_id = ? AND supplier_id = ?
+                AND status IN ($placeholders)
+                AND submitted_at IS NULL
+                AND confirmed_at IS NULL
+                AND remote_submission_ref IS NULL
+                AND offline_transfer_id IS NULL"
+        );
+        $stmt->execute([
+            mb_substr(trim($note), 0, 500),
+            $resolvedBy,
+            $submissionId,
+            $supplierId,
+            ...self::UNRESOLVED_ATTEMPT_STATUSES,
+        ]);
+
+        return $stmt->rowCount();
+    }
+
+    /**
+     * Fyzické smazání snapshotu.
+     *
+     * `$acknowledgeNote` je vědomé potvrzení uživatele, že nedořešené pokusy nakonec
+     * podané nebyly. Bez něj {@see BLOCK_UNRESOLVED} blokuje dál; tvrdé blokace
+     * ({@see BLOCK_SUBMITTED}, {@see BLOCK_DELIVERED}) neuvolní ani s ním.
+     *
+     * Vrací i počty navázaných řádků, které smazání strhne s sebou (FK ON DELETE CASCADE),
+     * aby je volající mohl zapsat do auditní stopy — po commitu už je nikde nepřečte.
+     *
+     * @return array{result:'deleted'|'blocked'|'not_found', blocker:?string,
+     *               purged:array{attempts:int,artifacts:int,status_events:int},
+     *               released_attempts:int}
+     */
+    public function deleteSubmission(
+        int $submissionId,
+        int $supplierId,
+        ?int $resolvedBy = null,
+        ?string $acknowledgeNote = null,
+    ): array {
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
         if ($ownsTransaction) {
             $pdo->beginTransaction();
         }
         try {
+            $blocked = static fn (?string $code): array => [
+                'result' => $code === null ? 'not_found' : 'blocked',
+                'blocker' => $code,
+                'purged' => ['attempts' => 0, 'artifacts' => 0, 'status_events' => 0],
+                'released_attempts' => 0,
+            ];
+
             if ($this->lockSubmission($submissionId, $supplierId) === null) {
                 if ($ownsTransaction) {
                     $pdo->commit();
                 }
-                return 'not_found';
+                return $blocked(null);
             }
-            if ($this->hasEvidence($submissionId, $supplierId)) {
+
+            $released = 0;
+            $blocker = $this->deletionBlocker($submissionId, $supplierId);
+            if ($blocker === self::BLOCK_UNRESOLVED && $acknowledgeNote !== null) {
+                $released = $this->releaseUnresolvedAttempts(
+                    $submissionId,
+                    $supplierId,
+                    $resolvedBy,
+                    $acknowledgeNote,
+                );
+                $blocker = $this->deletionBlocker($submissionId, $supplierId);
+            }
+            if ($blocker !== null) {
                 if ($ownsTransaction) {
                     $pdo->commit();
                 }
-                return 'has_evidence';
+                return $blocked($blocker);
             }
+
+            $purged = $this->relatedRowCounts($submissionId, $supplierId);
 
             $stmt = $pdo->prepare(
                 'DELETE FROM tax_submissions WHERE id = ? AND supplier_id = ?'
             );
             $stmt->execute([$submissionId, $supplierId]);
+            $deleted = $stmt->rowCount() > 0;
             if ($ownsTransaction) {
                 $pdo->commit();
             }
-            return $stmt->rowCount() > 0 ? 'deleted' : 'not_found';
+
+            return [
+                'result' => $deleted ? 'deleted' : 'not_found',
+                'blocker' => null,
+                'purged' => $purged,
+                'released_attempts' => $released,
+            ];
         } catch (\Throwable $e) {
             if ($ownsTransaction && $pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -249,35 +514,30 @@ final class TaxSubmissionEpoRepository
         }
     }
 
-    public function hasEvidence(int $submissionId, int $supplierId): bool
+    /**
+     * Co smazání snapshotu strhne s sebou přes `ON DELETE CASCADE`.
+     *
+     * Dokumenty v DMS mezi tím NEJSOU: `fk_tart_document` míří opačným směrem
+     * (smazaný dokument ruší vazbu, ne naopak), takže soubory zůstávají v archivu.
+     *
+     * @return array{attempts:int,artifacts:int,status_events:int}
+     */
+    private function relatedRowCounts(int $submissionId, int $supplierId): array
     {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT EXISTS(
-                    SELECT 1
-                      FROM tax_submissions s
-                     WHERE s.id = ? AND s.supplier_id = ?
-                       AND s.status IN ('submitted','accepted')
-                )
-                OR EXISTS(
-                    SELECT 1
-                      FROM tax_submission_attempts a
-                     WHERE a.tax_submission_id = ? AND a.supplier_id = ?
-                )
-                OR EXISTS(
-                    SELECT 1
-                      FROM tax_submission_artifacts a
-                     WHERE a.tax_submission_id = ? AND a.supplier_id = ?
-                )"
-        );
-        $stmt->execute([
-            $submissionId,
-            $supplierId,
-            $submissionId,
-            $supplierId,
-            $submissionId,
-            $supplierId,
-        ]);
-        return (bool) $stmt->fetchColumn();
+        $counts = [];
+        foreach ([
+            'attempts' => 'tax_submission_attempts',
+            'artifacts' => 'tax_submission_artifacts',
+            'status_events' => 'tax_submission_status_events',
+        ] as $key => $table) {
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT COUNT(*) FROM $table WHERE tax_submission_id = ? AND supplier_id = ?"
+            );
+            $stmt->execute([$submissionId, $supplierId]);
+            $counts[$key] = (int) $stmt->fetchColumn();
+        }
+
+        return $counts;
     }
 
     /**
@@ -496,10 +756,20 @@ final class TaxSubmissionEpoRepository
             $artifacts[(int) $artifact['tax_submission_id']][] = $this->normalizeArtifact($artifact);
         }
 
+        // Důvod blokace počítá stejná brána, která mazání skutečně provádí — UI tak
+        // nemůže nabídnout tlačítko, které backend odmítne, ani skrýt to, co by prošlo.
+        $blockers = $this->deletionBlockers($ids, $supplierId);
+
         foreach ($rows as &$row) {
             $id = (int) $row['id'];
             $row['attempts'] = $attempts[$id] ?? [];
             $row['artifacts'] = $artifacts[$id] ?? [];
+            $blocker = $blockers[$id] ?? null;
+            $row['delete_blocker'] = $blocker;
+            $row['deletable'] = $blocker === null;
+            // Nedořešené předání smí uživatel vědomě uzavřít jako „nepodáno" a teprve
+            // pak mazat; u tvrdého důkazu podání žádná cesta ven neexistuje.
+            $row['delete_needs_acknowledgement'] = $blocker === self::BLOCK_UNRESOLVED;
         }
         unset($row);
 

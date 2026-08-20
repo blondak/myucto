@@ -19,8 +19,25 @@ Související výpočty jsou popsány v kapitolách [Výkazy DPH](36_Vykazy_DPH.
 
 Samostatnou obrazovku otevřeš v **Nástroje → EPO podání a archív**. Zobrazuje
 vygenerované snapshoty, výsledek lokální validace, historii předání do EPO,
-uložené důkazní dokumenty a stav podání. Záznam, ke kterému už existuje EPO
-pokus, dokument nebo potvrzený stav, nelze smazat.
+uložené důkazní dokumenty a stav podání.
+
+### Kdy jde snapshot smazat
+
+Mazání blokuje jen to, co prokazatelně odešlo:
+
+| Situace | Smazat lze? |
+|---|---|
+| Snapshot bez předání, případně jen s testem EPO (`test=1`) | Ano. Test se z principu nepodává — EPO na něj odpovídá, že podání nebylo přijato, protože šlo o testovací režim. |
+| Předání do EPO, jehož výsledek aplikace nezná (čeká na P7S, propadlý odkaz, nejednoznačná odpověď) | Až po vědomém uzavření. Ověř v portálu EPO, jestli podání prošlo; pokud ne, popiš, jak jsi to ověřil, a pokus se uzavře jako nepodaný. |
+| Snapshot označený jako podaný, potvrzené podání, podací číslo nebo doručenka | Ne. Je to doklad o podání pro správce daně. |
+
+Nad obdobím, na kterém běží zadržení podle § 32 ZoÚ (daňová kontrola, odvolání,
+soudní spor), se snapshoty nemažou vůbec — mazání není cesta, jak se zbavit
+podkladu, který správce daně prověřuje.
+
+Smazání zachytí auditní log včetně toho, co spolu se snapshotem zmizelo
+(pokusy, vazby na důkazní dokumenty). Samotné dokumenty v modulu **Dokumenty**
+zůstávají.
 
 ## 70.2 Co se v archivu ukládá
 
