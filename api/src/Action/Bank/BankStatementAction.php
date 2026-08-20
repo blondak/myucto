@@ -54,7 +54,8 @@ final class BankStatementAction
 
     /** Sloučená úhrada (split): výchozí okno ±N dní pro hledání kombinací (uživatel může rozšířit). */
     private const SPLIT_DAY_WINDOW = 7;
-    /** Sloučená úhrada: horní mez okna, kterou smí uživatel zvolit. */
+    /** Sloučená úhrada: horní mez KLADNÉHO okna, které smí uživatel zvolit. `window=0`
+     *  znamená BEZ datového omezení — viz splitSuggestions(). */
     private const SPLIT_DAY_WINDOW_MAX = 60;
     /** Sloučená úhrada: max počet faktur v jedné kombinaci (omezení subset-sum). */
     private const SPLIT_MAX_INVOICES = 6;
@@ -2086,6 +2087,14 @@ final class BankStatementAction
      * ±7 dní kolem data platby (rozšiřitelné). Klient s názvem podobným protistraně se
      * řadí první. Volitelná „kotva" invoice_id = uživatel už jednu fakturu vybral a
      * částka nesedí → dohledáme další faktury TÉHOŽ klienta, aby součet seděl.
+     *
+     * **Datové okno se u kotvy neuplatní vůbec** a bez kotvy ho lze vypnout `window=0`.
+     * Sloučená úhrada STARÝCH pohledávek je legitimní případ — vymožená platba (exekuce,
+     * evropský platební rozkaz) přijde klidně rok po splatnosti a pokrývá faktury
+     * rozeseté přes několik měsíců, takže žádné rozumné okno je nepokryje (issue #31).
+     * U kotvy je pool stejně zúžený na jednoho klienta, takže datum nic nechrání.
+     * Kombinatoriku drží SPLIT_POOL_PER_CLIENT (pool na klienta) a SPLIT_MAX_INVOICES
+     * (délka kombinace), objem dat `LIMIT 600` — ne datový filtr.
      */
     public function splitSuggestions(Request $request, Response $response, array $args): Response
     {
@@ -2098,8 +2107,9 @@ final class BankStatementAction
         $pdo = $this->db->pdo();
 
         $q = $request->getQueryParams();
+        // `window = 0` → bez datového omezení; kladná hodnota se ořízne na povolený rozsah.
         $window = (int) ($q['window'] ?? self::SPLIT_DAY_WINDOW);
-        $window = max(1, min(self::SPLIT_DAY_WINDOW_MAX, $window));
+        $window = $window <= 0 ? 0 : max(1, min(self::SPLIT_DAY_WINDOW_MAX, $window));
         $maxInv = (int) ($q['max'] ?? self::SPLIT_MAX_INVOICES);
         $maxInv = max(2, min(self::SPLIT_MAX_INVOICES, $maxInv));
         $anchorId = (int) ($q['invoice_id'] ?? 0);
@@ -2124,20 +2134,29 @@ final class BankStatementAction
         $cpName = (string) ($tx['counterparty_name'] ?? '');
 
         // Kotva: omez na klienta vybrané faktury (musí patřit tenantovi a být otevřená).
+        // Bereme i datum splatnosti — pool kotvícího klienta se řadí podle blízkosti K NÍ,
+        // ne k datu platby: u vymožené staré pohledávky jsou sourozenci kotvy roky od
+        // platby, ale týdny od sebe, a řazení podle platby by je vytlačilo za strop poolu.
         $anchorClientId = 0;
+        $anchorRefDate = null;
         if ($anchorId > 0) {
             $a = $pdo->prepare(
-                "SELECT client_id FROM invoices
+                "SELECT client_id, COALESCE(due_date, issue_date) AS ref_date FROM invoices
                   WHERE id = ? AND supplier_id = ?
                     AND status IN ('issued','sent','reminded','paid')
                     AND invoice_type IN ('invoice','proforma')"
             );
             $a->execute([$anchorId, $sid]);
-            $anchorClientId = (int) $a->fetchColumn();
+            $anchorRow = $a->fetch(\PDO::FETCH_ASSOC) ?: [];
+            $anchorClientId = (int) ($anchorRow['client_id'] ?? 0);
+            $anchorRefDate = ($anchorRow['ref_date'] ?? null) !== null ? (string) $anchorRow['ref_date'] : null;
             if ($anchorClientId <= 0) {
                 return Json::ok($response, ['suggestions' => [], 'window' => $window, 'max' => $maxInv]);
             }
         }
+        // Kotva zužuje pool na jednoho klienta → datové okno by už jen zahazovalo správné
+        // kombinace. Bez kotvy rozhoduje uživatel (window=0).
+        $useWindow = $window > 0 && $anchorClientId === 0;
 
         // Pool: vystavené faktury v okně ±window dní. Zahrnuje i ZAPLACENÉ — u nich jde
         // o rekonciliaci (navázat existující platbu na transakci), proto k nim tahám
@@ -2156,15 +2175,21 @@ final class BankStatementAction
                  WHERE i.supplier_id = ?
                    AND i.client_id IS NOT NULL
                    AND i.status IN ('issued','sent','reminded','paid')
-                   AND i.invoice_type IN ('invoice','proforma')
-                   AND (ABS(DATEDIFF(i.due_date, ?)) <= ? OR ABS(DATEDIFF(i.issue_date, ?)) <= ?)";
-        $params = [$sid, $posted, $window, $posted, $window];
+                   AND i.invoice_type IN ('invoice','proforma')";
+        $params = [$sid];
+        if ($useWindow) {
+            $sql .= " AND (ABS(DATEDIFF(i.due_date, ?)) <= ? OR ABS(DATEDIFF(i.issue_date, ?)) <= ?)";
+            array_push($params, $posted, $window, $posted, $window);
+        }
         if ($anchorClientId > 0) {
             $sql .= " AND i.client_id = ?";
             $params[] = $anchorClientId;
         }
+        // Bez kotvy řadíme podle blízkosti k platbě, s kotvou podle blízkosti k jejímu
+        // datu splatnosti (viz komentář u načtení kotvy výš).
+        $orderRef = $anchorRefDate ?? $posted;
         $sql .= " ORDER BY ABS(DATEDIFF(COALESCE(i.due_date, i.issue_date), ?)) ASC, i.id DESC LIMIT 600";
-        $params[] = $posted;
+        $params[] = $orderRef;
         $ps = $pdo->prepare($sql);
         $ps->execute($params);
 
