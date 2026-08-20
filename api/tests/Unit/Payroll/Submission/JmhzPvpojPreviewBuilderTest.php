@@ -261,6 +261,26 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Sloupec v `payroll_offices` připouští 1–10 číslic kvůli platebnímu
+     * použití, ale podání vyžaduje přesně deset (`jmhzPodani.xsd`,
+     * `variabilniSymbol`, `xs:length 10`). Kratší symbol musí zastavit
+     * přehled, ne až XSD, kde už není poznat, které účtárny se to týká.
+     */
+    public function testRejectsVariableSymbolShorterThanTheSubmittableLength(): void
+    {
+        $source = $this->twoOfficeSource();
+        $source['offices'] = [
+            $this->office(4, '1234567890'),
+            $this->office(7, '12345'),
+        ];
+
+        $this->expectCode(
+            'jmhz_office_variable_symbol_missing',
+            fn () => $this->builder->build(41, $source, 7),
+        );
+    }
+
     public function testListsOfficesOfTheRevisionWithSubmittability(): void
     {
         $source = $this->twoOfficeSource();

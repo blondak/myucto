@@ -435,8 +435,7 @@ final class JmhzPvpojPreviewBuilder
                 );
             }
             $variableSymbol = $office['social_security_variable_symbol'] ?? null;
-            $valid = is_string($variableSymbol)
-                && preg_match('/^[0-9]{1,10}$/D', $variableSymbol) === 1;
+            $valid = self::isSubmittableVariableSymbol($variableSymbol);
             $result[] = [
                 'office_id' => $officeId,
                 'code' => $this->nonEmptyString($office['code'] ?? null, 'offices.code'),
@@ -449,6 +448,19 @@ final class JmhzPvpojPreviewBuilder
         }
 
         return $result;
+    }
+
+    /**
+     * Variabilní symbol zaměstnavatele je v podání povinně DESETIMÍSTNÝ
+     * (`jmhzPodani.xsd`, prvek `variabilniSymbol`, `xs:length 10`); stejnou
+     * délku vyžaduje příprava i GovTalk obálka. Sloupec v `payroll_offices`
+     * připouští 1–10 číslic kvůli platebnímu použití, takže kratší symbol
+     * se do číselníku uložit dá — a bez téhle kontroly by prošel přehledem
+     * a spadl až na XSD, kde už uživatel netuší, které účtárny se to týká.
+     */
+    private static function isSubmittableVariableSymbol(mixed $symbol): bool
+    {
+        return is_string($symbol) && preg_match('/^[0-9]{10}$/D', $symbol) === 1;
     }
 
     /**
@@ -532,13 +544,12 @@ final class JmhzPvpojPreviewBuilder
                 continue;
             }
             $variableSymbol = $office['social_security_variable_symbol'] ?? null;
-            if (!is_string($variableSymbol)
-                || preg_match('/^[0-9]{1,10}$/D', $variableSymbol) !== 1
-            ) {
+            if (!self::isSubmittableVariableSymbol($variableSymbol)) {
                 $this->invalid(
                     'jmhz_office_variable_symbol_missing',
                     "Mzdová účtárna office:{$officeId} nemá variabilní symbol"
-                    . ' zaměstnavatele u ČSSZ — bez něj přehled podat nelze.',
+                    . ' zaměstnavatele u ČSSZ v podatelném tvaru (deset číslic)'
+                    . ' — bez něj přehled podat nelze.',
                 );
             }
 
