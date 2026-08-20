@@ -12,6 +12,7 @@ use MyInvoice\Repository\Payroll\PayrollComponentDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollRecurringComponentDeletionRepository;
+use MyInvoice\Tests\Support\JmhzSpecPackageFixtureTrait;
 use MyInvoice\Tests\Support\PayrollDeletionFixturesTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -28,6 +29,7 @@ use Slim\Psr7\Response;
 #[Group('integration')]
 final class PayrollSettingsDeletionApiTest extends TestCase
 {
+    use JmhzSpecPackageFixtureTrait;
     use PayrollDeletionFixturesTrait;
 
     private PayrollInstitutionAccountsAction $accountsAction;
@@ -626,6 +628,7 @@ final class PayrollSettingsDeletionApiTest extends TestCase
 
     private function insertJmhzMapping(int $componentId): void
     {
+        $this->installDefaultJmhzSpecPackage($this->db);
         $attribute = $this->fetchRow(
             "SELECT package_id, attribute_id
                FROM payroll_jmhz_dictionary_attributes

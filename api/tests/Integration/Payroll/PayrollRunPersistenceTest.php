@@ -31,6 +31,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioRequirementSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use MyInvoice\Tests\Support\JmhzSpecPackageFixtureTrait;
 use PDO;
 use PDOException;
 use PHPUnit\Framework\Attributes\Group;
@@ -43,6 +44,7 @@ use Slim\Psr7\Response;
 final class PayrollRunPersistenceTest extends TestCase
 {
     use IsolatedSupplierTrait;
+    use JmhzSpecPackageFixtureTrait;
 
     private Connection $db;
     private ContainerInterface $container;
@@ -762,6 +764,7 @@ final class PayrollRunPersistenceTest extends TestCase
             'scenario_catalog_key' => JmhzScenarioRequirementSourceCatalog::CATALOG_KEY,
             'scenario_manifest_sha256' => JmhzScenarioRequirementSourceCatalog::MANIFEST_SHA256,
         ];
+        $specPackageId = $this->installDefaultJmhzSpecPackage($this->db);
         $values = [
             'standard_fund_millihours' => 168000,
             'agreed_fund_millihours' => 168000,
@@ -797,12 +800,7 @@ final class PayrollRunPersistenceTest extends TestCase
             $this->supplierId,
             $this->employmentId,
             $timeMonthId,
-            (int) $this->db->pdo()->query(
-                'SELECT id FROM payroll_jmhz_spec_packages
-                  WHERE package_key = ' . $this->db->pdo()->quote(
-                    JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
-                )
-            )->fetchColumn(),
+            $specPackageId,
             $specification['spec_manifest_sha256'],
             $specification['scenario_catalog_key'],
             $specification['scenario_manifest_sha256'],
@@ -853,6 +851,7 @@ final class PayrollRunPersistenceTest extends TestCase
             'control_catalog_key' => JmhzControlSourceCatalog::CATALOG_KEY,
             'control_manifest_sha256' => JmhzControlSourceCatalog::MANIFEST_SHA256,
         ];
+        $specPackageId = $this->installDefaultJmhzSpecPackage($this->db);
         $values = [
             'standard_fund_millihours' => 168000,
             'agreed_fund_millihours' => 168000,
@@ -908,12 +907,7 @@ final class PayrollRunPersistenceTest extends TestCase
             $this->supplierId,
             $this->employmentId,
             $timeMonthId,
-            (int) $this->db->pdo()->query(
-                'SELECT id FROM payroll_jmhz_spec_packages
-                  WHERE package_key = ' . $this->db->pdo()->quote(
-                    JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
-                )
-            )->fetchColumn(),
+            $specPackageId,
             $specification['spec_manifest_sha256'],
             $specification['scenario_catalog_key'],
             $specification['scenario_manifest_sha256'],
