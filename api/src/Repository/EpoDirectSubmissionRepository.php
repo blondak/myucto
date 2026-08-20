@@ -193,6 +193,29 @@ final class EpoDirectSubmissionRepository
         return $stmt->fetchColumn() !== false;
     }
 
+    public function hasUnresolvedDirectAttempt(
+        int $submissionId,
+        int $supplierId,
+        string $environment,
+    ): bool
+    {
+        $environment = $this->normalizeEnvironment($environment);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1
+               FROM tax_submission_attempts
+              WHERE tax_submission_id = ? AND supplier_id = ?
+                AND channel = 'epo_direct'
+                AND (epo_environment = 'production' OR epo_environment = ?)
+                AND (
+                  status IN ('submitting','processing','uncertain')
+                  OR (status = 'confirmed' AND epo_environment = 'production')
+                )
+              LIMIT 1"
+        );
+        $stmt->execute([$submissionId, $supplierId, $environment]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     public function storeEncryptedTestPayload(int $attemptId, string $ciphertext): void
     {
         $this->db->pdo()->prepare(

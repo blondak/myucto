@@ -202,9 +202,12 @@ Postup:
    Zkontroluj vlastníka, vydavatele a platnost certifikátu.
 2. Pokud certifikát používáš pro další spravovanou firmu, přepni se na ni a
    certifikát pro ni výslovně povol.
-3. V detailu validního XML snapshotu vyber certifikát a klikni
+3. Pro vizuální kontrolu můžeš nejdřív otevřít předvyplněný formulář EPO a
+   zavřít jej bez odeslání. Otevřená asistovaná relace neblokuje neúčinný datový
+   test, ale do svého vypršení blokuje skutečné odeslání proti duplicitě.
+4. V detailu validního XML snapshotu vyber certifikát a klikni
    **Otestovat v EPO**.
-4. MyÚčto vytvoří připojený podpis PKCS#7 v DER, odešle jej s `test=1` a
+5. MyÚčto vytvoří připojený podpis PKCS#7 v DER, odešle jej s `test=1` a
    zobrazí všechny zprávy EPO. Test kontroluje podpis, strukturu i věcná
    pravidla, ale daňové podání nevytvoří. Úspěšný test lze pro ostré podání
    použít jednou a nejdéle 30 minut. Testovací podepsaný balíček je uložen jen
@@ -214,17 +217,18 @@ Postup:
    XML snapshot i jeho SHA-256 přitom zůstávají beze změny.
    Do tohoto okamžiku aplikace certifikát označuje jako **Dosud neověřen EPO**;
    samotné načtení PFX neprokazuje jeho kvalifikovanost ani přijatelnost pro EPO.
-5. Chyby typu struktura, kritická chyba nebo systémová výjimka musíš odstranit
+6. Chyby typu struktura, kritická chyba nebo systémová výjimka musíš odstranit
    v datech a vygenerovat nový snapshot. Propustná upozornění jsou zobrazena,
    ale úspěšný test neblokují.
-6. Až po úspěšném testu se zpřístupní **Podepsat a podat**. Znovu se ověř
+7. Akce **Podepsat a podat** je při dostupném certifikátu stále viditelná, ale
+   odemkne se až po úspěšném testu a po skončení případné asistované relace. Znovu se ověř
    (přístupový klíč, nebo heslo a případný TOTP) a potvrď právně účinné odeslání.
-7. MyÚčto automaticky uloží zdrojové XML, ostrý odchozí podepsaný balíček,
+8. MyÚčto automaticky uloží zdrojové XML, ostrý odchozí podepsaný balíček,
    testovací protokol a P7S potvrzení podatelny. Podací číslo a čas převezme z
    kryptograficky ověřeného potvrzení. Automatické potvrzení vyžaduje platný
    certifikační řetězec, identitu **Společného technického zařízení správců
    daně** v podpisovém certifikátu a přesnou vazbu na odeslaný CMS balíček.
-8. Tlačítkem **Obnovit stav EPO** lze stáhnout aktuální stav zpracování. U
+9. Tlačítkem **Obnovit stav EPO** lze stáhnout aktuální stav zpracování. U
    rozsáhlého podání nejprve EPO vrátí identifikátor předání; potvrzení se
    vyzvedne později stejným tlačítkem. Stejné dotazy bezpečně provádí
    `cron-epo-status` s exponenciálním odstupem nejvýše jedné hodiny. Worker zná

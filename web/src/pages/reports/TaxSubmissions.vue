@@ -380,7 +380,7 @@ function latestDirectAttempt(item: TaxSubmission): EpoAttempt | null {
   ) ?? null
 }
 
-function canDirectTest(item: TaxSubmission): boolean {
+function canOfferDirectActions(item: TaxSubmission): boolean {
   return canWrite.value
     && !isMossOssForm(item)
     && epoEnvironment.value !== null
@@ -388,7 +388,10 @@ function canDirectTest(item: TaxSubmission): boolean {
     && selectedCredentialId.value !== null
     && item.validation_status === 'passed'
     && !['submitted', 'accepted'].includes(item.status)
-    && !hasActiveAttempt(item)
+}
+
+function canDirectTest(item: TaxSubmission): boolean {
+  return canOfferDirectActions(item)
     && !hasUnresolvedDirectAttempt(item)
     && !directBusy.value
 }
@@ -401,12 +404,21 @@ function canResolveDirectAttempt(attempt: EpoAttempt | null): boolean {
 }
 
 function canDirectSubmit(item: TaxSubmission): boolean {
-  return canWrite.value
-    && !isMossOssForm(item)
-    && epoEnvironment.value !== null
+  return canOfferDirectActions(item)
     && latestDirectAttempt(item)?.status === 'test_passed'
-    && !['submitted', 'accepted'].includes(item.status)
+    && !hasActiveAttempt(item)
     && !directBusy.value
+}
+
+function directSubmitDisabledReason(item: TaxSubmission): string | undefined {
+  if (canDirectSubmit(item) || directBusy.value) return undefined
+  if (latestDirectAttempt(item)?.status !== 'test_passed') {
+    return t('reports.submissions.direct_hint')
+  }
+  if (hasActiveAttempt(item)) {
+    return t('reports.submissions.handoff_window')
+  }
+  return t('reports.submissions.direct_hint_unknown')
 }
 
 function handoffButtonLabel(item: TaxSubmission): string {
@@ -964,10 +976,11 @@ const submissionActions = computed<ActionItem[]>(() => {
       key: 'submit_direct',
       label: t(epoEnvironment.value === 'test' ? 'reports.submissions.submit_direct_sandbox' : 'reports.submissions.submit_direct'),
       icon: 'send',
-      tier: 'primary',
+      tier: canDirectSubmit(s) ? 'primary' : 'secondary',
       variant: 'success',
-      show: canDirectSubmit(s),
-      disabled: directBusy.value,
+      show: canOfferDirectActions(s),
+      disabled: !canDirectSubmit(s),
+      disabledReason: directSubmitDisabledReason(s),
       run: () => openSubmitModal(s),
     },
     {
@@ -995,8 +1008,8 @@ const submissionActions = computed<ActionItem[]>(() => {
       icon: 'badgeCheck',
       tier: 'secondary',
       variant: 'primary',
-      show: canDirectTest(s),
-      disabled: directBusy.value,
+      show: canOfferDirectActions(s),
+      disabled: !canDirectTest(s),
       run: () => openTestModal(s),
     },
     {

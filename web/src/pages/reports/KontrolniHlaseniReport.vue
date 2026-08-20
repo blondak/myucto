@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { reportsApi, type DphSettings, type KhVariant } from '@/api/reports'
 import { apiErrorMessage } from '@/api/errors'
 import { useYearOptions } from '@/composables/useYearOptions'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
+import { downloadApiFile } from '@/utils/downloadFile'
 
 const { t, locale } = useI18n()
+const router = useRouter()
 const auth = useAuthStore()
 
 const now = new Date()
@@ -77,13 +80,18 @@ async function loadPreview() {
   }
 }
 
-function downloadXml() {
-  window.open(reportsApi.khDownloadUrl(
-    year.value, month.value, effectivePeriod.value,
-    variant.value,
-    isFollowUp.value ? dZjist.value : undefined,
-    isFollowUp.value ? cJedVyzvy.value : undefined,
-  ), '_blank')
+async function downloadXml() {
+  try {
+    await downloadApiFile(reportsApi.khDownloadUrl(
+      year.value, month.value, effectivePeriod.value,
+      variant.value,
+      isFollowUp.value ? dZjist.value : undefined,
+      isFollowUp.value ? cJedVyzvy.value : undefined,
+    ))
+    await router.push('/reports/submissions')
+  } catch (e) {
+    error.value = apiErrorMessage(e)
+  }
 }
 
 const monthOptions = computed(() =>

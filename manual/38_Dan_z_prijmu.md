@@ -80,7 +80,8 @@ Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary,
   účetních dat i po finalizaci; po uzavření účetnictví proto data neměň a podávanou
   kopii vždy archivuj. Soubor nahraješ na
   [mojedane.gov.cz](https://mojedane.gov.cz) přes „Načtení souboru". Ostrý export se
-  **archivuje**. V **Nástroje → EPO podání a archív** lze snapshot předat do
+  **archivuje** a po dokončení stažení aplikace otevře **Nástroje → EPO podání
+  a archív**. Tam lze snapshot předat do
   předvyplněného formuláře EPO a po odeslání k němu přetáhnout XML a potvrzení.
   Dokumenty DPFO a DPPO se ukládají pod samostatně konfigurovatelný kořen
   **Daň z příjmů** a dále podle roku a typu formuláře.

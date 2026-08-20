@@ -74,6 +74,7 @@ final class EpoDirectSubmissionService
             $supplierId,
             false,
             $environment,
+            true,
         );
         $unlocked = $this->credentials->unlockForSigning(
             $credentialId,
@@ -1258,6 +1259,8 @@ final class EpoDirectSubmissionService
      * @param bool $allowSubmitted `false` = chystáme se něco odeslat ven (test, podání),
      *     `true` = jen dohledáváme nebo uzavíráme stav už existujícího pokusu. Rozlišení
      *     používá i brána na MOSS/OSS formuláře, viz {@see self::MOSS_OSS_FORMS}.
+     * @param bool $allowActiveAssisted neúčinný test `test=1` smí běžet souběžně
+     *     s otevřenou vizuální kontrolou v EPO; právně účinné podání ji dál blokuje.
      *
      * @return array<string,mixed>
      */
@@ -1266,6 +1269,7 @@ final class EpoDirectSubmissionService
         int $supplierId,
         bool $allowSubmitted = false,
         string $environment = 'production',
+        bool $allowActiveAssisted = false,
     ): array {
         $submission = $this->submissions->find($submissionId, $supplierId);
         if ($submission === null) {
@@ -1290,11 +1294,17 @@ final class EpoDirectSubmissionService
         }
         if (
             !$allowSubmitted
-            && $this->direct->hasUnresolvedLiveAttempt(
-                $submissionId,
-                $supplierId,
-                $environment,
-            )
+            && ($allowActiveAssisted
+                ? $this->direct->hasUnresolvedDirectAttempt(
+                    $submissionId,
+                    $supplierId,
+                    $environment,
+                )
+                : $this->direct->hasUnresolvedLiveAttempt(
+                    $submissionId,
+                    $supplierId,
+                    $environment,
+                ))
         ) {
             throw new EpoSubmissionException(
                 'submission_outcome_unresolved',

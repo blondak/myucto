@@ -484,6 +484,63 @@ final class EpoDirectSubmissionRepositoryTest extends TestCase
         ));
     }
 
+    public function testActiveAssistedHandoffBlocksSubmissionButNotDirectTest(): void
+    {
+        $xml = '<Pisemnost><DPHDP3/></Pisemnost>';
+        $submissionId = $this->submissions->archive(
+            $this->supplierId,
+            'dphdp3',
+            2026,
+            10,
+            null,
+            $xml,
+            [],
+            'passed',
+            [],
+            $this->userId,
+            'B',
+            'downloaded',
+        );
+        $this->db->pdo()->prepare(
+            "INSERT INTO tax_submission_attempts
+                (supplier_id, tax_submission_id, channel, status, idempotency_key,
+                 request_sha256, requested_by, handoff_expires_at)
+             VALUES (?, ?, 'epo_assisted', 'awaiting_confirmation', ?, ?, ?,
+                     CURRENT_TIMESTAMP + INTERVAL 20 MINUTE)"
+        )->execute([
+            $this->supplierId,
+            $submissionId,
+            bin2hex(random_bytes(16)),
+            hash('sha256', $xml),
+            $this->userId,
+        ]);
+
+        self::assertTrue($this->direct->hasUnresolvedLiveAttempt(
+            $submissionId,
+            $this->supplierId,
+            'production',
+        ));
+        self::assertFalse($this->direct->hasUnresolvedDirectAttempt(
+            $submissionId,
+            $this->supplierId,
+            'production',
+        ));
+
+        $validatedSubmission = new \ReflectionMethod(
+            EpoDirectSubmissionService::class,
+            'validatedSubmission',
+        );
+        $validated = $validatedSubmission->invoke(
+            $this->container->get(EpoDirectSubmissionService::class),
+            $submissionId,
+            $this->supplierId,
+            false,
+            'production',
+            true,
+        );
+        self::assertSame($submissionId, (int) $validated['id']);
+    }
+
     public function testPollQueueContainsOnlyDueAttemptsWithStatusCredentials(): void
     {
         $xml = '<Pisemnost><DPHDP3/></Pisemnost>';

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { reportsApi, type DphPriznaniPreview, type DphSettings, type DphTrendRow, type DphDraftsPrediction, type DphVariant, type DphCrossCheckDocument, type DphCrossCheckFinding, type DphCrossCheck343Reason } from '@/api/reports'
 import { vatClearingApi, type VatClearingStatus } from '@/api/vatClearing'
 import { apiErrorMessage } from '@/api/errors'
@@ -10,8 +11,10 @@ import { ICONS, btnOutline, btnFilled } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { downloadApiFile } from '@/utils/downloadFile'
 
 const { t, locale } = useI18n()
+const router = useRouter()
 const auth = useAuthStore()
 
 const now = new Date()
@@ -180,19 +183,21 @@ function formatCrossAmount(value: number | null): string {
   return value == null ? '—' : formatMoney(value, 'CZK')
 }
 
-function downloadXml() {
+async function downloadXml() {
   if (!preview.value) return
   const acknowledge = blockingCrossCheck.value.length > 0
     ? confirm(t('reports.dph.cross_check.confirm_download_anyway'))
     : false
   if (blockingCrossCheck.value.length > 0 && !acknowledge) return
-  window.open(
-    reportsApi.dphDownloadUrl(
+  try {
+    await downloadApiFile(reportsApi.dphDownloadUrl(
       year.value, month.value, periodOverride.value || undefined, acknowledge,
       variant.value, isAmendment.value ? dZjist.value : undefined,
-    ),
-    '_blank',
-  )
+    ))
+    await router.push('/reports/submissions')
+  } catch (e) {
+    error.value = apiErrorMessage(e)
+  }
 }
 
 const monthOptions = computed(() =>

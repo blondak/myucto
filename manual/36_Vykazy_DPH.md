@@ -251,7 +251,9 @@ s přiznáním k DPH srovnat** — podrobně
 - **Toggle Měsíčně / Kvartálně** — override podle `supplier.vat_period`
 - **Month / Year picker** — pro měsíční; **Q1/Q2/Q3/Q4 picker** pro kvartální
 - **Typ podání** — Řádné / Opravné / Dodatečné (viz [níže](#typ-podani-radne-opravne-dodatecne))
-- **Stáhnout XML** — vytvoří XML formuláře DPHDP3 pro EPO portál
+- **Stáhnout XML** — vytvoří XML formuláře DPHDP3 pro EPO portál a po dokončení
+  stažení otevře **Nástroje → EPO podání a archív**. Stejně se chová export
+  kontrolního a souhrnného hlášení.
 
 #### Typ podání — řádné, opravné, dodatečné
 

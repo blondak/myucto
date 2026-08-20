@@ -13,6 +13,7 @@ import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { taxApi, type TaxProfile, type TaxActivity, type TaxChild, type SpouseClaim, type OsvcMonth } from '@/api/tax'
 import { taxEvidenceApi, type TaxEvidenceClosing, type TaxEvidenceAdjustment } from '@/api/taxEvidence'
+import { downloadApiFile } from '@/utils/downloadFile'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -279,11 +280,18 @@ async function reopen() {
   }
 }
 
-function downloadXml() {
+async function downloadXml() {
   const url = !isFinal.value && type.value === 'fo'
     ? taxReturnApi.previewXmlUrl(year.value, variant.value, seqParam())
     : taxReturnApi.xmlUrl(type.value, year.value, variant.value, seqParam())
-  window.open(url, '_blank')
+  try {
+    await downloadApiFile(url)
+    if (type.value === 'po' || isFinal.value) {
+      await router.push('/reports/submissions')
+    }
+  } catch (e) {
+    error.value = apiErrorMessage(e)
+  }
 }
 
 function addActivity() {
