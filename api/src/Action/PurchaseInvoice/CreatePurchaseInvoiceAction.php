@@ -24,7 +24,6 @@ use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionCompletionService;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionException;
-use MyInvoice\Service\Report\VatClassificationDefaulter;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
 use MyInvoice\Service\Ai\AiSuggestionService;
 use MyInvoice\Support\AdvanceTaxDocumentText;
@@ -47,7 +46,6 @@ final class CreatePurchaseInvoiceAction
         private readonly PurchaseInvoiceRepository $repo,
         private readonly ClientRepository $clients,
         private readonly PurchaseInvoiceCalculator $calc,
-        private readonly VatClassificationDefaulter $vatDefaulter,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly DocumentLockService $locks,
@@ -156,8 +154,11 @@ final class CreatePurchaseInvoiceAction
             }
         }
 
-        // Auto-default VAT klasifikace pokud user nezadal (s multi-tenant scope)
-        $this->applyVatClassificationDefaults($body, $supplierId);
+        // Klasifikaci DPH tady ZÁMĚRNĚ nedoplňujeme. Rozhoduje jediný country-aware SSOT
+        // {@see PurchaseInvoiceRepository::defaultClassificationCode()} při ukládání řádků,
+        // který zná zemi dodavatele, plátcovství tenanta i povahu plnění; hlavičku z řádků
+        // převezme syncHeaderClassificationFromItems() po uložení. Dřív tu předsazený
+        // VatClassificationDefaulter kód dosadil dřív, než se SSOT vůbec dostal ke slovu.
 
         // C6 (§ 73/1/a): ruční zadání data přijetí ve formuláři je vědomý úkon účetní
         // (i default dnešek z UI), ne slepý otisk importu → 'manual'. VatLedgerService pak
@@ -215,6 +216,10 @@ final class CreatePurchaseInvoiceAction
                 $this->repo->setVatOverrides($id, $supplierId, is_array($body['vat_overrides']) ? $body['vat_overrides'] : null);
             }
             $this->calc->recompute($id);
+            // Hlavičková klasifikace se přebírá z řádků (SSOT je defaultClassificationCode()).
+            // Až PO recompute — volba dominantního kódu váží podle total_with_vat, které
+            // kalkulátor dopočítává.
+            $this->repo->syncHeaderClassificationFromItems($id, $supplierId);
             $this->repo->replaceVatAllocations(
                 $id,
                 $supplierId,
@@ -411,40 +416,4 @@ final class CreatePurchaseInvoiceAction
         );
     }
 
-    /**
-     * Auto-default vat_classification_code (purchase) podle vat_rate na řádcích a header.
-     */
-    private function applyVatClassificationDefaults(array &$body, int $supplierId): void
-    {
-        $vatRates = $this->repo->vatRateMap();
-        $reverseCharge = !empty($body['reverse_charge']);
-
-        if (!empty($body['items']) && is_array($body['items'])) {
-            foreach ($body['items'] as &$item) {
-                if (!empty($item['vat_classification_code'])) continue;
-                $rateId = (int) ($item['vat_rate_id'] ?? 0);
-                $rate = (float) ($vatRates[$rateId] ?? 0);
-                $taxDate = $body['tax_date'] ?? $body['issue_date'] ?? null;
-                $item['vat_classification_code'] = $this->vatDefaulter->defaultForPurchase($rate, $reverseCharge, $taxDate, $supplierId);
-            }
-            unset($item);
-        }
-
-        if (empty($body['vat_classification_code']) && !empty($body['items'])) {
-            $itemsWithTotals = array_map(function ($it) use ($vatRates) {
-                $rateId = (int) ($it['vat_rate_id'] ?? 0);
-                $rate = (float) ($vatRates[$rateId] ?? 0);
-                $qty = (float) ($it['quantity'] ?? 1);
-                $price = (float) ($it['unit_price_without_vat'] ?? 0);
-                return ['vat_rate' => $rate, 'total_with_vat' => $qty * $price * (1 + $rate / 100)];
-            }, (array) $body['items']);
-            $body['vat_classification_code'] = $this->vatDefaulter->suggestHeaderForInvoice(
-                $itemsWithTotals,
-                (bool) ($body['reverse_charge'] ?? false),
-                'purchase',
-                $body['tax_date'] ?? $body['issue_date'] ?? null,
-                $supplierId,
-            );
-        }
-    }
 }

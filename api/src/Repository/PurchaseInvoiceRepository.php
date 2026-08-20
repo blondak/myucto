@@ -1908,6 +1908,12 @@ final class PurchaseInvoiceRepository
         // Vzácnější použití (vendor obvykle fakturuje bez DPH), ale když má 21 % sazbu
         // (typicky reverse-charge invoice s vyčíslenou daní pro info), tohle je správně.
         if ($isEu && $reverseCharge && $r >= $std) return '23';
+        // Dodavatel ze 3. země / neusazená osoba + RC + základní sazba → přijetí služby
+        // (kód 24, ř. 12 + KH A.2). Dřív takový doklad propadl na tuzemský § 92a ('5',
+        // ř. 10 + KH B.1), přestože přenesenou povinnost mezi plátci v tuzemsku
+        // se zahraničním dodavatelem uplatnit nelze. Dovoz ZBOŽÍ (ř. 7, kód 25) se ze
+        // sazby nepozná — ten vybírá AI dle povahy plnění nebo uživatel ručně.
+        if ($isForeign && $reverseCharge && $r >= $std) return '24';
         // CZ tuzemsko (nebo zahraniční vendor s CZ DPH, vzácné). Tuzemský § 92a jen pro
         // plátce — neplátci/identifikované osobě kód '5' nepřiřadíme (viz $tenantIsVatPayer).
         if ($reverseCharge && $tenantIsVatPayer && $r >= $std) return '5';
@@ -1919,6 +1925,49 @@ final class PurchaseInvoiceRepository
         // záměrně nemapujeme (např. německá 19 % není česká DPH → user vybere ručně).
         if ($r >= 5 && $r <= 15)          return '41';
         return null;
+    }
+
+    /**
+     * Doplní hlavičkovou klasifikaci z řádků, pokud na hlavičce žádná není.
+     *
+     * Kód na řádcích derivuje {@see defaultClassificationCode()} (zná zemi dodavatele,
+     * plátcovství tenanta i povahu plnění), takže hlavička ho jen přebírá — nikdy
+     * nerozhoduje sama. Dřív ji dopočítával VatClassificationDefaulter, který zemi
+     * dodavatele nezná: doklad v tuzemském režimu přenesené povinnosti (§ 92e stavební
+     * práce, 21 %) tak dostal '24e' → ř. 5 + KH A.2 (služba z EU) místo ř. 10 + KH B.1.
+     *
+     * Bere kód s největším součtem |total_with_vat| — u dokladu s víc kódy je hlavička
+     * jen orientační, rozhoduje řádek (výkazy čtou COALESCE(položka, hlavička)).
+     * Řádky BEZ kódu se do volby nepočítají, ale prázdná hlavička je legitimní výsledek:
+     * u plnění mimo předmět daně (§ 5 odst. 4) i u osvobozeného tuzemského plnění
+     * se kód nepřiřazuje záměrně.
+     */
+    public function syncHeaderClassificationFromItems(int $purchaseInvoiceId, int $supplierId): void
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'SELECT pii.vat_classification_code AS code,
+                    SUM(ABS(COALESCE(pii.total_with_vat, 0))) AS weight
+               FROM purchase_invoice_items pii
+               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
+              WHERE pii.purchase_invoice_id = ?
+                AND pi.supplier_id = ?
+                AND pii.vat_classification_code IS NOT NULL
+           GROUP BY pii.vat_classification_code
+           ORDER BY weight DESC, code ASC
+              LIMIT 1'
+        );
+        $stmt->execute([$purchaseInvoiceId, $supplierId]);
+        $code = $stmt->fetchColumn();
+        if ($code === false) {
+            return;
+        }
+        $pdo->prepare(
+            'UPDATE purchase_invoices
+                SET vat_classification_code = ?
+              WHERE id = ? AND supplier_id = ?
+                AND (vat_classification_code IS NULL OR vat_classification_code = "")'
+        )->execute([(string) $code, $purchaseInvoiceId, $supplierId]);
     }
 
     /**

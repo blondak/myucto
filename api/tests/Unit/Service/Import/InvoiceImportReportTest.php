@@ -72,19 +72,18 @@ final class InvoiceImportReportTest extends TestCase
 
     /**
      * § D11, druhá půlka. U NULOVÉ sazby země rozhoduje o všem: zahraniční odběratel
-     * překlopí kód z '3' na '20'/'22', a ty dva kódy plní SOUHRNNÉ HLÁŠENÍ. To se podává
+     * překlopí kód z prázdna na '20'/'22', a ty dva kódy plní SOUHRNNÉ HLÁŠENÍ. To se podává
      * za plnění osobě REGISTROVANÉ k dani v jiném členském státě — u spotřebitele bez DIČ
      * by vznikl řádek výkazu bez protistrany.
      */
-    public function testZeroRateEuConsumerWithoutVatIdKeepsTheDomesticCode(): void
+    public function testZeroRateEuConsumerWithoutVatIdStaysOutOfTheEcSalesList(): void
     {
         $consumer = new OssClientContext('PL', true, null);
 
         $country = $this->call('classificationCountry', $consumer, 0.0);
 
         self::assertNull($country, 'B2C spotřebitel bez DIČ zemi do klasifikace nedostane');
-        self::assertSame(
-            '3',
+        self::assertNull(
             InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'kg'),
             'kód „20" by doklad poslal do souhrnného hlášení, ačkoli odběratel DIČ nemá',
         );
@@ -117,15 +116,18 @@ final class InvoiceImportReportTest extends TestCase
     }
 
     /**
-     * Vývoz do třetí země ('26') se souhrnného hlášení netýká, takže omezení na DIČ tam
-     * nemá co dělat — bez země by se z vývozu stalo tuzemské osvobozené plnění ('3').
+     * Plnění do třetí země se souhrnného hlášení netýká, takže omezení na DIČ tam nemá co
+     * dělat — bez země by zůstalo úplně bez klasifikace. Povahu plnění pod zemí rozliší
+     * měrná jednotka: vývoz zboží '26' (ř. 22), služba '26s' (ř. 26) — audit H-3.
      */
-    public function testZeroRateOutsideEuAlwaysGetsTheExportCode(): void
+    public function testZeroRateOutsideEuAlwaysGetsAThirdCountryCode(): void
     {
         $country = $this->call('classificationCountry', new OssClientContext('US', false, null), 0.0);
 
         self::assertSame('US', $country);
-        self::assertSame('26', InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'ks'));
+        self::assertSame('26', InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'kg'));
+        self::assertSame('26s', InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'h'));
+        self::assertSame('26s', InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'ks'));
     }
 
     /** Neznámá země se nedomýšlí ani tady — `defaultSaleClassificationCode` má vlastní default. */

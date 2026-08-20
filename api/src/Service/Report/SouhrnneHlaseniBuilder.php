@@ -163,6 +163,22 @@ final class SouhrnneHlaseniBuilder
             $shv->appendChild($v);
             $totalRows++;
             $totalAmount += $r['amount'];
+            // Záporná hodnota plnění: dobropis do JČS převyšuje v období dodávky téže
+            // protistraně. Do ŘÁDNÉHO hlášení taková věta nepatří — opravy se podávají
+            // NÁSLEDNÝM hlášením s kódem storna (to zatím negenerujeme), a EPO řádné
+            // hlášení se zápornou pln_hodnota odmítne. Musí to být vidět před odesláním,
+            // ne až z chybové hlášky portálu (audit VAT klasifikací, L-2).
+            if ($r['amount'] < 0) {
+                $warnings[] = sprintf(
+                    'Souhrnné hlášení má zápornou hodnotu plnění u protistrany %s %s (%s Kč) — '
+                    . 'dobropis v období převyšuje dodávky. Řádné hlášení zápornou hodnotu '
+                    . 'nepřipouští; opravu je nutné podat následným souhrnným hlášením s kódem '
+                    . 'storna, které aplikace zatím negeneruje.',
+                    KontrolniHlaseniBuilder::khCountryCode($r['country_iso2']),
+                    $r['vat_id'],
+                    $this->formatAmount($r['amount']),
+                );
+            }
         }
 
         // Termín podání: 25. dne měsíce následujícího po konci období
@@ -283,8 +299,18 @@ final class SouhrnneHlaseniBuilder
     }
 
 
+    /**
+     * Hodnota plnění v celých korunách — zaokrouhlení na plnou částku, tedy OD NULY.
+     *
+     * Kladná hodnota nahoru (dosavadní chování, drží ho i test). Záporná hodnota ale
+     * `ceil()` zaokrouhloval SMĚREM K NULE, takže dobropis do JČS podhodnotil — správně
+     * musí jít dolů, aby se opravovaná částka nezmenšila. Že se u kladných řádků
+     * zaokrouhluje nahoru a ne matematicky, je převzatý předpoklad: souhrnné hlášení se
+     * tím systematicky rozchází s ř. 20+21 přiznání (haléře, matematické zaokrouhlení)
+     * a čím víc protistran, tím větší rozdíl — stojí za ověření proti pokynům k SH.
+     */
     private function formatAmount(float $amount): string
     {
-        return (string) (int) ceil($amount);
+        return (string) (int) ($amount < 0 ? floor($amount) : ceil($amount));
     }
 }

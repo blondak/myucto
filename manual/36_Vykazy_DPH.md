@@ -573,33 +573,113 @@ povinnost) / `N` podle znaménka.
 
 Každá faktura (nebo její řádek) má `vat_classification_code` (např. "1", "40", "5", "20"). Tento kód určuje na který **řádek DPH přiznání** položka patří.
 
-**Standardní kódy (CZ, 2025-2026):**
+**Vystavené doklady (sale):**
 
-| Vystavené (sale) | Přijaté (purchase) |
-|---|---|
-| **1** — Tuzemsko 21% (řádek 1 DPHDP3) | **40** — Tuzemsko 21% s odpočtem |
-| **2** — Tuzemsko 12% (řádek 2) | **41** — Tuzemsko 12% s odpočtem |
-| **3** — Osvobozeno (řádek 3) | **42** — Bez nároku na odpočet |
-| **20** — EU dodání zboží (řádek 20) | **5** — Tuzemský reverse charge (řádek 10) |
-| **22** — EU služby | **23** — EU acquisition zboží (řádek 3) |
-| **26** — Export do 3. země | **24** — Přijatá služba z EU (řádek 5) |
+| Kód | Význam | Řádek DPHDP3 | KH / SH |
+|---|---|---|---|
+| **1** / **2** | Tuzemské plnění 21 % / 12 % | 1 / 2 | KH A.4 nebo A.5 |
+| **1m** / **2m** | Prodej dlouhodobého majetku 21 % / 12 % — vyloučeno z koeficientu § 76 | 1 / 2 | KH A.4 / A.5 |
+| **1c** / **2c** | Cestovní služba § 89 — **přirážka**, 21 % / 12 % | 1 / 2 | KH A.4 s `kod_rezim_pl=1` |
+| **1p** / **2p** | Použité zboží § 90 — **přirážka**, 21 % / 12 % | 1 / 2 | KH A.4 s `kod_rezim_pl=2` |
+| **3** | Osvobozené plnění bez nároku na odpočet (§ 51) | 50 | — |
+| **3m** | Příležitostné osvobozené plnění vyloučené z koeficientu § 76 odst. 4 | 50 | — |
+| **20** | Dodání zboží do jiného členského státu | 20 | SH kód plnění 0 |
+| **22** | Poskytnutí služby do JČS (§ 9 odst. 1) | 21 | SH kód plnění 3 |
+| **31** | Dodání zboží prostřední osobou při třístranném obchodu (§ 17) | 31 | SH kód plnění 2 |
+| **23n** | Dodání nového dopravního prostředku neregistrované osobě (§ 19) | 23 | — |
+| **24z** | Zasílání zboží do JČS (§ 8) — mimo režim OSS | 24 | — |
+| **25s** | Tuzemský přenos — **stavební a montážní práce § 92e** (dodavatel) | 25 | KH A.1, `kod_pred_pl=4` |
+| **25s5** | Tuzemský přenos — **odpad a šrot § 92c** (dodavatel) | 25 | KH A.1, `kod_pred_pl=5` |
+| **25s3** | Tuzemský přenos — **dodání nemovité věci § 92d** (dodavatel) | 25 | KH A.1, `kod_pred_pl=3` |
+| **26** | Vývoz **zboží** do 3. země (§ 66) | 22 | — |
+| **26s** | **Služba** s místem plnění mimo tuzemsko — 3. země (§ 9 odst. 1) | 26 | — |
+
+**Přijaté doklady (purchase):**
+
+| Kód | Význam | Řádek DPHDP3 | KH |
+|---|---|---|---|
+| **40** / **41** | Tuzemské plnění 21 % / 12 % s nárokem na odpočet | 40 / 41 | KH B.2 nebo B.3 |
+| **42** | Tuzemské plnění **bez nároku** na odpočet | — (mimo přiznání) | — |
+| **5** | Tuzemský přenos — **stavební a montážní práce § 92e** (příjemce) | 10 + odpočet 43 | KH B.1, `kod_pred_pl=4` |
+| **5c** | Tuzemský přenos — **odpad a šrot § 92c** (příjemce) | 10 + 43 | KH B.1, `kod_pred_pl=5` |
+| **5d** | Tuzemský přenos — **dodání nemovité věci § 92d** (příjemce) | 10 + 43 | KH B.1, `kod_pred_pl=3` |
+| **23** | Pořízení zboží z JČS (§ 25) | 3 + 43 | KH A.2 |
+| **24e** | Přijetí služby z JČS (§ 9 odst. 1) | 5 + 43 | KH A.2 |
+| **24** | Přijetí služby ze 3. země / od osoby neusazené v tuzemsku | 12 + 43 | KH A.2 |
+| **25** | Dovoz zboží ze 3. země | 7 | — |
+| **30** | Pořízení zboží prostřední osobou při třístranném obchodu (§ 17) | 30 | — |
+
+> Kódy s příponou (`1m`, `25s5`, `26s`, …) se od základní varianty liší **jediným atributem** —
+> vyloučením z koeficientu, kódem předmětu plnění, zvláštním režimem, nebo řádkem přiznání.
+> Číselník je editovatelný: v `Nastavení → Číselníky → Klasifikace DPH` si můžeš přidat vlastní
+> kód, včetně kódu předmětu plnění s písmenným sufixem (`1a`, `3a`) z číselníku MFČR.
 
 ### Auto-default klasifikace
 
-Pokud na fakturu/řádek manuálně nevybereš kód, systém **automaticky přiřadí** podle:
-- VAT sazby na řádku (`vat_rate_snapshot`)
-- Reverse charge flagu na faktuře
-- Direction (sale → vystavené kódy, purchase → přijaté kódy)
-- Tax date faktury (pro budoucí změny sazby)
+Pokud na fakturu ani řádek kód nevybereš, doplní ho systém sám. Rozhoduje:
 
-Mapování se čte z číselníku `vat_classifications`. Když administrátor v záložce
-**Klasifikace DPH** nastaví účinnost nové sazby, automatické přiřazení použije
-hodnotu platnou k DUZP dokladu.
+- **sazba** na řádku (`vat_rate_snapshot`),
+- **země protistrany** (tuzemsko / EU / 3. země),
+- **reverse charge** na dokladu,
+- u přijatých dokladů navíc **plátcovství tvé firmy** k datu dokladu a **povaha plnění**
+  (poplatek orgánu veřejné moci — viz níž),
+- u nulové sazby do zahraničí **měrná jednotka** položky: časová (h, den, měsíc) znamená službu,
+  fyzikální míra nebo balení (kg, l, m², paleta) zboží; `ks` je neutrální a rozhodne statistický
+  default (služba).
 
-U vystavených řádků se sazbou **0 %** se klasifikace záměrně nedoplňuje automaticky.
-Nulová sazba sama nerozlišuje osvobození bez nároku, vývoz, plnění mimo předmět
-daně ani přeúčtování. Přiznání zobrazí warning a řádek zahrne až po výslovném
-výběru správné klasifikace.
+U **přijatých** dokladů přiřazuje kód jediné místo — ukládání řádků. Hlavička dokladu ho jen
+**přebírá z dominantního řádku**, sama nikdy nerozhoduje; ručně zvolený kód na hlavičce zůstává.
+Výkazy čtou kód z řádku a teprve pak z hlavičky.
+
+Hodnoty se berou z číselníku `vat_classifications` k **DUZP dokladu**, takže po změně sazby
+dostanou starší doklady starou klasifikaci a nové novou.
+
+#### Kdy se kód ZÁMĚRNĚ nepřiřadí
+
+Prázdná klasifikace je někdy správný výsledek, ne opomenutí:
+
+- **Nulová sazba v tuzemsku.** Nula sama nerozlišuje osvobození bez nároku (§ 51), plnění mimo
+  předmět daně, přeúčtování nákladů, náhradu škody ani smluvní pokutu. Přiznání na neklasifikovaný
+  nulový řádek upozorní a zahrne ho, až mu vybereš kód. (Dřív se všechno tohle bralo jako
+  osvobození § 51, což nafukovalo ř. 50 a snižovalo krácený odpočet podle koeficientu § 76.)
+- **Poplatek orgánu veřejné moci** — soudní a správní poplatky, kolky, evropský platební rozkaz,
+  `Gerichtskosten`, `court fee`. Orgán při výkonu veřejné správy není osobou povinnou k dani
+  (§ 5 odst. 4 ZDPH), takže plnění není předmětem daně **ani u zahraničního soudu či úřadu**:
+  nesamovyměřuje se podle § 9 odst. 1 a doklad nepatří do přiznání ani do KH. Aplikace ho pozná
+  z popisu položky, nechá bez klasifikace a řekne to upozorněním v detailu dokladu. Účetně jde
+  o běžný náklad (typicky 538 – Ostatní daně a poplatky).
+- **Sazba, kterou český číselník nezná** (např. německých 19 %). Cizí daň nelze uplatnit jako
+  odpočet, takže se nepřiřadí ani `40`, ani `41`. Doklad dostane upozornění, že bez zásahu
+  nevstoupí do přiznání ani do KH — zkontroluj sazby a rozhodni, jestli jde o náklad včetně cizí
+  daně, nebo o špatně vytěžený doklad.
+
+> **Automatika je pomůcka, ne rozhodnutí.** Daňové zařazení dokladu je odpovědnost uživatele nebo
+> jeho účetní; návrh je vždy přepsatelný a u nejednoznačných případů raději nenavrhneme nic, než
+> abychom potichu vyrobili daňovou povinnost nebo odpočet.
+
+#### Co automatika u přijatých dokladů udělá
+
+| Dodavatel | Sazba | Reverse charge | Výsledek |
+|---|---|---|---|
+| tuzemský | 21 % / 12 % | ne | `40` / `41` |
+| tuzemský | 0 % | ne | bez kódu |
+| tuzemský, firma je **plátce** | libovolná | ano | `5` (§ 92a, ř. 10 + KH B.1) |
+| tuzemský, firma je **neplátce / identifikovaná osoba** | libovolná | ano | tuzemský přenos se **nepřiřadí** — § 92a funguje jen mezi plátci |
+| z EU | 0 % | jedno | `24e` (přijetí služby, ř. 5) |
+| z EU | 21 % | ano | `23` (pořízení zboží z JČS, ř. 3) |
+| ze 3. země | 0 %, nebo 21 % + RC | jedno | `24` (služba od neusazené osoby, ř. 12) |
+| jakýkoli | 0 % | poplatek úřadu | bez kódu (mimo předmět daně) |
+
+Zahraniční samovyměření podle § 108 se týká **i identifikované osoby** — kvůli němu ten režim
+existuje. Nárok na odpočet ale nemá, takže se jí zrcadlový odpočet na ř. 43 nepřizná.
+
+#### Řádek přiznání se řídí sazbou, ne jen kódem
+
+Když si vybereš kód pro základní sazbu, ale řádek nese sníženou (nebo obráceně), použije se
+**dvojče kódu odpovídající skutečné sazbě** (1↔2, 40↔41, u samovyměření 3↔4, 5↔6, 7↔8, 10↔11,
+12↔13). Bez toho by přiznání vykázalo základ v 21% sloupci, zatímco kontrolní hlášení bucketuje
+podle skutečné sazby do 12% sloupce, a oba výkazy by se rozešly. Vlastní přemapování kódu
+v číselníku (per firma) tím dotčené není — přepíná se jen při skutečném rozporu sazeb.
 
 ### Override per řádek nebo header
 
@@ -642,7 +722,10 @@ je samostatná sekce **47.047** se sumací.
 Právnická osoba podává KH měsíčně; fyzická osoba podle svého zdaňovacího období
 měsíčně nebo čtvrtletně. Identifikovaná osoba KH nepodává. KH obsahuje sekce:
 
-- **A.1** — Plnění v režimu přenesené daňové povinnosti (dodavatel)
+- **A.1** — Plnění v režimu přenesené daňové povinnosti (dodavatel). Doklad, který nese víc
+  režimů § 92 najednou (např. stavební práce a odpad na jedné faktuře), dá **větu za každý kód
+  předmětu plnění** — tak to vyžaduje XSD i párování s protistranou. Kód předmětu plnění nese
+  klasifikace řádku (`25s` = 4 stavební práce, `25s5` = 5 odpad a šrot, `25s3` = 3 nemovitá věc).
 - **A.2** — Pořízení zboží z jiného členského státu a přijaté služby od osoby
   neusazené v tuzemsku podle § 24, včetně třetích zemí. Typicky používá kód `23`,
   `24` nebo jeho zahraniční variantu. Atributy: `k_stat`, `vatid_dod`, `c_evid_dd`, `dppd`,
@@ -650,7 +733,8 @@ měsíčně nebo čtvrtletně. Identifikovaná osoba KH nepodává. KH obsahuje 
   i u řádků RC počítá z `základ × sazba/100`.
 - **A.4** — Tuzemská plnění s DPH **nad 10 000 Kč** (individuálně)
 - **A.5** — Tuzemská plnění s DPH **do 10 000 Kč** (sumace)
-- **B.1** — Přenesená daňová povinnost (odběratel)
+- **B.1** — Přenesená daňová povinnost (odběratel). Rozpad na věty per kód předmětu plnění
+  platí stejně jako u A.1; kódy nesou klasifikace `5`, `5c`, `5d`.
 - **B.2** — Přijatá tuzemská plnění nad 10 000 Kč
 - **B.3** — Přijatá tuzemská plnění do 10 000 Kč (sumace)
 

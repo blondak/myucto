@@ -253,6 +253,7 @@ function fmtAmount(a?: number | null): string {
  */
 const KNOWN_ISSUE_CODES = new Set([
   'amount_mismatch', 'counterparty_mismatch', 'currency_mismatch', 'fx_on_czk_czk',
+  'marked_paid_unposted',
 ])
 
 function legacyIssueCodes(note?: string | null): string[] {

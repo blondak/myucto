@@ -31,15 +31,26 @@ final class IsdocToPurchaseInvoiceMapperRoundingTest extends TestCase
 
     protected function setUp(): void
     {
-        // Z 5 závislostí používá applyRoundingFromPayable jen $repo (find + setRounding).
+        // Z 6 závislostí používá applyRoundingFromPayable jen $repo (find + setRounding).
         $this->repo = $this->createMock(PurchaseInvoiceRepository::class);
 
+        // Plánovač je `final` (nejde doubleovat) — reálná instance nad mockovaným spojením;
+        // testovaná metoda na něj nesahá, takže se nikdy nezeptá DB.
+        $conn = $this->createMock(Connection::class);
+        $planner = new \MyInvoice\Service\Oss\OssItemPlanner(
+            $conn,
+            new \MyInvoice\Service\Oss\OssItemDeriver($conn, new \MyInvoice\Service\Oss\OssRateCodebook($conn)),
+            new \MyInvoice\Service\Oss\OssRateCodebook($conn),
+            new \MyInvoice\Service\Vat\VatRateResolver($conn),
+        );
+
         $this->mapper = new IsdocToPurchaseInvoiceMapper(
-            $this->createMock(Connection::class),
+            $conn,
             $this->repo,
             $this->createMock(PurchaseInvoiceCalculator::class),
             $this->createMock(ClientResolver::class),
             $this->createMock(PurchaseInvoiceCnbApplier::class),
+            $planner,
         );
     }
 

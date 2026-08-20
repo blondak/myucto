@@ -89,12 +89,16 @@ const {
       <div v-if="matchCtx && matchCtx.amount > 0" class="mb-4">
         <div class="flex items-center justify-between gap-2 mb-1">
           <div class="text-sm font-medium text-neutral-700">{{ t('bank.split_title') }}</div>
-          <button v-if="splitWindow < 60" type="button" @click="widenSplitWindow"
+          <button v-if="splitWindow > 0" type="button" @click="widenSplitWindow"
             class="cursor-pointer text-xs text-primary-600 hover:underline whitespace-nowrap">
-            {{ t('bank.split_widen', { days: Math.min(60, splitWindow + 7) }) }}
+            {{ splitWindow >= 60
+              ? t('bank.split_widen_all')
+              : t('bank.split_widen', { days: Math.min(60, splitWindow + 7) }) }}
           </button>
         </div>
-        <p class="text-xs text-neutral-400 mb-1.5">{{ t('bank.split_hint', { days: splitWindow }) }}</p>
+        <p class="text-xs text-neutral-400 mb-1.5">
+          {{ splitWindow > 0 ? t('bank.split_hint', { days: splitWindow }) : t('bank.split_hint_all') }}
+        </p>
 
         <!-- Kotva: vyber jednu fakturu, dohledá se zbytek téhož klienta -->
         <div class="mb-2">

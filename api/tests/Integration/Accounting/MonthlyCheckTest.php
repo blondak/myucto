@@ -405,6 +405,100 @@ final class MonthlyCheckTest extends TestCase
     }
 
     /**
+     * Faktura vyrovnaná NAVÁZANÝM DOBROPISEM není otevřené saldo. Opravný doklad nese na
+     * 321 opačné znaménko, takže dvojice účet vynuluje i bez pohybu peněz (vrácené zboží
+     * prostě sníží závazek) — dřív kontrola hlásila obě strany dvojice, každou v plné výši.
+     */
+    public function testCreditNoteSettlesParentInvoiceWithoutMoney(): void
+    {
+        $vendorId = $this->createClient();
+        $entryDate = self::YEAR . '-06-14';
+
+        $pfId = $this->createPaidPurchase($vendorId, 'K3-PF-CN-PARENT', $entryDate);
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pfId, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 1000],
+            ['account_code' => '343', 'side' => 'debit', 'amount' => 210],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 1210],
+        ], ['entry_date' => $entryDate, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $cnId = $this->createPaidPurchase($vendorId, 'K3-PF-CN-CHILD', $entryDate);
+        $this->db->pdo()->prepare(
+            'UPDATE purchase_invoices
+                SET document_kind = "credit_note", parent_purchase_invoice_id = ?,
+                    total_without_vat = -1000, total_vat = -210, total_with_vat = -1210
+              WHERE id = ?'
+        )->execute([$pfId, $cnId]);
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $cnId, [
+            ['account_code' => '321', 'side' => 'debit', 'amount' => 1210],
+            ['account_code' => '518', 'side' => 'credit', 'amount' => 1000],
+            ['account_code' => '343', 'side' => 'credit', 'amount' => 210],
+        ], ['entry_date' => $entryDate, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $byId = $this->paidPurchaseFindingsById();
+
+        self::assertArrayNotHasKey($pfId, $byId, 'Faktura vyrovnaná dobropisem není otevřené saldo.');
+        self::assertArrayNotHasKey($cnId, $byId, 'Ani dobropis sám — jeho protistranou je právě ta faktura.');
+    }
+
+    /**
+     * Haléřový rozdíl z platby (banka pošle zaokrouhlenou částku) není chybějící úhrada.
+     * Tolerance je 1 Kč; rozdíl nad ni se hlásit musí dál.
+     */
+    public function testSubKorunaRoundingDifferenceIsTolerated(): void
+    {
+        $vendorId = $this->createClient();
+        $entryDate = self::YEAR . '-06-16';
+
+        $pfId = $this->createPaidPurchase($vendorId, 'K3-PF-ROUND', $entryDate);
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pfId, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 1000],
+            ['account_code' => '343', 'side' => 'debit', 'amount' => 210],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 1210],
+        ], ['entry_date' => $entryDate, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        // Banka poslala 1 209,20 — o 80 haléřů míň, než je předpis (stará tolerance
+        // 0,50 Kč takový rozdíl ještě hlásila).
+        $this->bookPurchaseBankSettlement($pfId, 1209.20, $entryDate);
+
+        self::assertArrayNotHasKey($pfId, $this->paidPurchaseFindingsById(),
+            'Rozdíl 0,80 Kč je zaokrouhlení úhrady, ne chybějící platba.');
+    }
+
+    /**
+     * Doklad označený jako uhrazený ručně (typicky po zápočtu) se pořád hlásí — deník
+     * o úhradě neví —, ale dostane vlastní kód nálezu, ať ho účetní odliší od dokladu,
+     * kde úhrada existuje a jen nesedí částka.
+     */
+    public function testManuallyPaidPurchaseCarriesItsOwnIssueCode(): void
+    {
+        $vendorId = $this->createClient();
+        $entryDate = self::YEAR . '-06-18';
+
+        $pfId = $this->createPaidPurchase($vendorId, 'K3-PF-MANUAL', $entryDate);
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pfId, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 1000],
+            ['account_code' => '343', 'side' => 'debit', 'amount' => 210],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 1210],
+        ], ['entry_date' => $entryDate, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $byId = $this->paidPurchaseFindingsById();
+
+        self::assertArrayHasKey($pfId, $byId);
+        self::assertSame(['marked_paid_unposted'], $byId[$pfId]['issues'] ?? null);
+    }
+
+    /** Nálezy kontroly `paid_purchases_open_saldo` naklíčované podle doc_id. */
+    private function paidPurchaseFindingsById(): array
+    {
+        $result = $this->closing->monthlyCheck($this->supplierId, $this->periodId, self::YEAR . '-06-01', self::YEAR . '-06-30');
+        foreach ($result['checks'] as $c) {
+            if ($c['key'] === 'paid_purchases_open_saldo') {
+                return array_column($c['value']['findings'], null, 'doc_id');
+            }
+        }
+        self::fail('Kontrola paid_purchases_open_saldo v sestavě chybí.');
+    }
+
+    /**
      * Regrese F1: monthlyCheck nezapisuje žádný krok do accounting_closing_steps
      * (na rozdíl od runPrecheck, který krok 'precheck' persistuje) — je to čistě
      * READ-ONLY sestava spustitelná kdykoli bez zahájení uzávěrky.
@@ -660,6 +754,43 @@ final class MonthlyCheckTest extends TestCase
         $this->posting->postDocument($this->supplierId, 'bank', $txId, $lines, [
             'entry_date' => $date, 'posted_by' => $this->userId, 'user_id' => $this->userId,
         ]);
+    }
+
+    /**
+     * Zaúčtuje bankovní úhradu PŘIJATÉ faktury. Vazbu na doklad nese `payment_matches`
+     * (invoice_payments míří na vydané faktury a FK by neprošel), zápis je 321 MD / 221 D.
+     */
+    private function bookPurchaseBankSettlement(int $purchaseInvoiceId, float $czk, string $date): void
+    {
+        $pdo = $this->db->pdo();
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, statement_date)
+             VALUES (?, "k3-purchase.gpc", ?, "123456789/0100", ?)'
+        );
+        $stmt->execute([
+            $this->supplierId,
+            hash('sha256', 'k3-pf-settle-' . $purchaseInvoiceId . '-' . microtime(true)),
+            $date,
+        ]);
+        $statementId = (int) $pdo->lastInsertId();
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, variable_symbol)
+             VALUES (?, ?, ?, "CZK", ?)'
+        );
+        $stmt->execute([$statementId, $date, -$czk, 'PF' . $purchaseInvoiceId]);
+        $txId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare(
+            'INSERT INTO payment_matches (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, matched_by_user_id)
+             VALUES (?, ?, ?, ?, "manual", ?)'
+        )->execute([$this->supplierId, $txId, $purchaseInvoiceId, $czk, $this->userId]);
+
+        $this->posting->postDocument($this->supplierId, 'bank', $txId, [
+            ['account_code' => '321', 'side' => 'debit', 'amount' => $czk],
+            ['account_code' => '221', 'side' => 'credit', 'amount' => $czk],
+        ], ['entry_date' => $date, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
     }
 
     /** Přidá řádek přijaté faktury s daným druhem výdaje (expense_kind) a netto částkou. */

@@ -363,6 +363,78 @@ final class SplitPaymentTest extends TestCase
         }
     }
 
+    /**
+     * issue #31: sloučená úhrada STARÝCH pohledávek. Vymožená platba (exekuce, evropský
+     * platební rozkaz) přijde klidně rok po splatnosti a pokrývá faktury rozeseté přes
+     * několik měsíců — do žádného rozumného okna se to nevejde. S kotvou se datové okno
+     * neuplatní vůbec, bez kotvy ho vypne `window=0`.
+     */
+    public function testSuggestionsIgnoreDateWindowForOldReceivables(): void
+    {
+        // Posuň obě faktury dva roky před platbu a rozházej je po měsících (jako v reportu).
+        $this->db->pdo()->prepare('UPDATE invoices SET issue_date = ?, tax_date = ?, due_date = ? WHERE id = ?')
+            ->execute(['2097-05-01', '2097-05-01', '2097-05-01', $this->invoiceA]);
+        $this->db->pdo()->prepare('UPDATE invoices SET issue_date = ?, tax_date = ?, due_date = ? WHERE id = ?')
+            ->execute(['2097-08-28', '2097-08-28', '2097-08-28', $this->invoiceB]);
+
+        $expected = [$this->invoiceA, $this->invoiceB];
+        sort($expected);
+
+        // Výchozí okno ±7 dní kombinaci nenajde — faktury jsou dva roky staré.
+        foreach ($this->callSuggestions([]) as $s) {
+            $ids = self::invoiceIdsOf($s);
+            sort($ids);
+            self::assertNotSame($expected, $ids, 'V úzkém okně se kombinace nabízet nemá.');
+        }
+
+        // Kotva = faktura A: okno se neuplatní, zbytek se dohledá bez ohledu na stáří.
+        $withAnchor = $this->callSuggestions(['invoice_id' => $this->invoiceA]);
+        self::assertTrue(
+            $this->containsCombination($withAnchor, $expected),
+            'S kotvou musí být kombinace A+B nalezena i mimo datové okno.',
+        );
+
+        // Bez kotvy totéž po vypnutí okna (window=0).
+        self::assertTrue(
+            $this->containsCombination($this->callSuggestions(['window' => 0]), $expected),
+            'window=0 hledá mezi všemi neuhrazenými fakturami.',
+        );
+
+        // Okno se ořezává jen shora — 999 dní se chová jako povolené maximum, ne jako 0.
+        foreach ($this->callSuggestions(['window' => 999]) as $s) {
+            $ids = self::invoiceIdsOf($s);
+            sort($ids);
+            self::assertNotSame($expected, $ids, 'Kladné okno zůstává ořezané na povolené maximum.');
+        }
+    }
+
+    /**
+     * Kombinace jen v rámci jednoho klienta platí i bez datového omezení — vypnuté okno
+     * nesmí začít míchat faktury cizích klientů (D patří druhému klientovi).
+     */
+    public function testUnlimitedWindowStillKeepsOneClientPerCombination(): void
+    {
+        foreach ($this->callSuggestions(['window' => 0]) as $s) {
+            self::assertNotContains($this->invoiceD, self::invoiceIdsOf($s));
+        }
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $suggestions
+     * @param list<int> $expected seřazená id faktur
+     */
+    private function containsCombination(array $suggestions, array $expected): bool
+    {
+        foreach ($suggestions as $s) {
+            $ids = self::invoiceIdsOf($s);
+            sort($ids);
+            if ($ids === $expected) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ── Rekonciliace ZAPLACENÝCH faktur (split nabízí i 'paid') ──────────────
 
     /** Dřívější (ne-bankovní) úhrada → faktura 'paid', platba bez bank_transaction_id. */

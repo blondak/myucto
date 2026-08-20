@@ -31,9 +31,14 @@ porovnej seznam faktur s náhledem; nejde o bezpečnou náhradu kontroly VIES.
 
 Řádky se seskupí podle státu, normalizovaného VAT ID a typu plnění. Hodnota je základ
 v Kč ze všech dokladů skupiny a počet je počet různých faktur. Atribut `pln_hodnota`
-se zapisuje na celé Kč funkcí zaokrouhlení nahoru; u opravných záporných hodnot jde
-matematicky o zaokrouhlení směrem k nule. Souhrnný náhled může proto zobrazovat haléře,
-zatímco jednotlivý řádek XML celé koruny.
+se zapisuje na celé Kč zaokrouhlením **od nuly** — kladná hodnota nahoru, záporná dolů.
+Souhrnný náhled může proto zobrazovat haléře, zatímco jednotlivý řádek XML celé koruny.
+
+**Záporná hodnota plnění** (dobropis do JČS převyšuje v období dodávky téže protistraně)
+do řádného hlášení nepatří: opravy se podávají **následným** souhrnným hlášením s kódem
+storna, které aplikace zatím negeneruje, a EPO řádné hlášení se zápornou `pln_hodnota`
+odmítne. Náhled na takový řádek upozorní se jménem protistrany a částkou, ať to zjistíš
+před odesláním, ne až z chybové hlášky portálu.
 
 ## Období a typ podání
 

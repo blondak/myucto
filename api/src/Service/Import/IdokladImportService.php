@@ -618,8 +618,6 @@ final class IdokladImportService
         $taxDate   = (string) ($i['DateOfTaxing'] ?? $issueDate);
         $dueDate   = (string) ($i['DateOfMaturity'] ?? $issueDate);
 
-        $defaultVatRateId = $this->fallbackVatRateId($supplierId, $taxDate);
-
         // Sleva (issue #48): přijaté faktury nemají header discount_percent — slevu
         // z iDokladu (DiscountType=OnDocument) materializujeme rovnou jako zápornou
         // položku „Sleva X %" na každou sazbu DPH (per-rate split = správné DPH).
@@ -631,7 +629,7 @@ final class IdokladImportService
         $discountBaseByRate = []; // vat_rate_id => ['rate_id' => int, 'base' => float]
         foreach (($i['Items'] ?? []) as $idx => $line) {
             $rate = (float) ($line['VatRate'] ?? 0);
-            $vatRateId = $this->planner->resolveDomesticRate($supplierId, $rate, $taxDate)->id ?? $defaultVatRateId;
+            $vatRateId = $this->requireVatRateId($supplierId, $rate, $taxDate, (int) $idx);
             $qty = (float) ($line['Amount'] ?? 1);
             $unitPrice = self::idokladNetUnitPrice($line, $rate);
             $items[] = [
@@ -855,14 +853,12 @@ final class IdokladImportService
         $taxDate   = $hdr['tax_date'];
         $dueDate   = $hdr['due_date'];
 
-        $defaultVatRateId = $this->fallbackVatRateId($supplierId, $taxDate);
-
         // Položky — stejný tvar jako ReceivedInvoices (Amount/Name/Unit/VatRate + per-řádek Prices).
         // idokladNetUnitPrice() řeší i PriceType=WithVat (účtenky bývají ceny s DPH).
         $items = [];
         foreach (($i['Items'] ?? []) as $idx => $line) {
             $rate = (float) ($line['VatRate'] ?? 0);
-            $vatRateId = $this->planner->resolveDomesticRate($supplierId, $rate, $taxDate)->id ?? $defaultVatRateId;
+            $vatRateId = $this->requireVatRateId($supplierId, $rate, $taxDate, (int) $idx);
             $items[] = [
                 'description'            => (string) ($line['Name'] ?? $line['Description'] ?? ''),
                 'quantity'               => (float) ($line['Amount'] ?? 1),
@@ -1195,23 +1191,22 @@ final class IdokladImportService
     }
 
     /**
-     * Náhradní sazba pro PŘIJATOU stranu, když se sazba z dokladu nenajde.
+     * Sazba řádku PŘIJATÉHO dokladu — nebo tvrdá chyba dokladu.
      *
-     * Fallback tu zůstává (bez `vat_rate_id` by řádek porušil FK a celý doklad by
-     * spadl), ale hledá se přes SDÍLENÝ {@see \MyInvoice\Service\Vat\VatRateResolver},
-     * takže i on respektuje zemi dodavatele, platnost k datu a `is_reverse_charge` —
-     * dřív mohla „nula" trefit reverse-charge sazbu, protože obě mají 0,00 a rozlišilo
-     * je jen pořadí řádků v tabulce.
-     *
-     * VYDANÁ strana fallback NEMÁ a mít nesmí: tam je nenalezená sazba tvrdá chyba
-     * dokladu ({@see OssItemPlanner::planIssuedItems()}), protože dosazená cizí sazba
-     * by změnila odvedenou daň.
+     * Fallback na tuzemských 21 % tu být NESMÍ, i když bez `vat_rate_id` řádek poruší FK:
+     * z německých 19 % udělal českou základní sazbu a cizí daň se dostala na ř. 41 + KH B.3
+     * jako nárok na odpočet. {@see \MyInvoice\Service\Vat\VatRateMatch} to zakazuje
+     * výslovně („tichý fallback na jinou sazbu je zakázaný") a VYDANÁ strana se tak chová
+     * odjakživa ({@see OssItemPlanner::planIssuedItems()}). Nenamapovaný doklad se v importu
+     * zaznamená jako chybný i s hláškou resolveru, ať uživatel ví, kterou sazbu doplnit.
      */
-    private function fallbackVatRateId(int $supplierId, string $onDate): int
+    private function requireVatRateId(int $supplierId, float $ratePercent, string $onDate, int $index): int
     {
-        return $this->planner->resolveDomesticRate($supplierId, 21.0, $onDate)->id
-            ?? $this->planner->resolveDomesticRate($supplierId, 0.0, $onDate)->id
-            ?? 0;
+        $match = $this->planner->resolveDomesticRate($supplierId, $ratePercent, $onDate);
+        if (!$match->found()) {
+            throw new \RuntimeException(sprintf('Položka č. %d: %s', $index + 1, $match->message));
+        }
+        return (int) $match->id;
     }
 
     /**

@@ -458,20 +458,25 @@ final class FakturoidImportService
         // páruje týmž resolverem — filtr na zemi, platnost k datu a `is_reverse_charge`
         // se jí týká stejně: nula mohla dřív trefit reverse-charge sazbu, protože obě
         // mají 0,00 a rozlišilo je jen pořadí řádků.
-        $defaultVatRateId = $this->planner->resolveDomesticRate($supplierId, 21.0, $taxDate)->id
-            ?? $this->planner->resolveDomesticRate($supplierId, 0.0, $taxDate)->id
-            ?? 0;
-
         $items = [];
         foreach (($e['lines'] ?? []) as $idx => $line) {
             $rate = (float) ($line['vat_rate'] ?? 0);
+            // Nenamapovanou sazbu doklad ODMÍTNE, nefallbackuje na tuzemských 21 %.
+            // Fallback tady dřív z německých 19 % udělal českou základní sazbu, takže se
+            // cizí daň dostala na ř. 41 + KH B.3 jako nárok na odpočet — {@see VatRateMatch}
+            // to zakazuje výslovně („tichý fallback na jinou sazbu je zakázaný") a vydaná
+            // větev téhož importu se tak chová odjakživa (planIssuedItems hodí výjimku).
+            // Import doklad zaznamená jako chybný s touhle hláškou v logu úlohy.
+            $match = $this->planner->resolveDomesticRate($supplierId, $rate, $taxDate);
+            if (!$match->found()) {
+                throw new \RuntimeException(sprintf('Položka č. %d: %s', $idx + 1, $match->message));
+            }
             $items[] = [
                 'description'            => (string) ($line['name'] ?? ''),
                 'quantity'               => (float) ($line['quantity'] ?? 1),
                 'unit'                   => (string) ($line['unit_name'] ?? 'ks'),
                 'unit_price_without_vat' => (float) ($line['unit_price'] ?? 0),
-                'vat_rate_id'            => $this->planner->resolveDomesticRate($supplierId, $rate, $taxDate)->id
-                    ?? $defaultVatRateId,
+                'vat_rate_id'            => $match->id,
                 'order_index'            => $idx,
             ];
         }

@@ -125,11 +125,16 @@ final class VatClassificationsAction
         // v EXTERNÍM číselníku MFČR, ne v XSD (to omezuje jen délku na 3 znaky), takže se
         // kontroluje TVAR, ne členství v seznamu. Vlastní seznam kódů by se s číselníkem
         // rozešel a odmítal by legitimní hodnoty — to je horší než žádná kontrola.
+        //
+        // Číselník ale NENÍ jen číselný: má i kódy s písmenným sufixem ('1a', '3a').
+        // Tvarová kontrola na samé číslice je proto odmítala, takže část režimů § 92
+        // nešla v číselníku vůbec zavést — kontrola tvaru se změnila ve skrytý výčet.
         if (array_key_exists('kod_pred_pl', $body)
             && $body['kod_pred_pl'] !== null
             && $body['kod_pred_pl'] !== ''
-            && !preg_match('/^\d{1,3}$/', (string) $body['kod_pred_pl'])) {
-            return 'kod_pred_pl musí být 1–3 číslice (kód z číselníku MFČR) nebo prázdné.';
+            && !preg_match('/^\d{1,2}[a-z]?$/', (string) $body['kod_pred_pl'])) {
+            return 'kod_pred_pl musí být 1–2 číslice s volitelným písmenem (např. 4, 5, 1a) '
+                . 'z číselníku MFČR, nebo prázdné.';
         }
         if (array_key_exists('kh_bad_debt', $body)
             && $body['kh_bad_debt'] !== null

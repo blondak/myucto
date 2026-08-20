@@ -185,9 +185,15 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       .finally(() => { loadingSplit.value = false })
   }
 
+  /**
+   * Rozšíří okno o týden; po vyčerpání horní meze (60 dní) přepne na hledání BEZ datového
+   * omezení (`window = 0`). Sloučená úhrada starých pohledávek — vymožená platba přijde
+   * klidně rok po splatnosti — se do žádného rozumného okna nevejde (issue #31).
+   */
   function widenSplitWindow() {
     if (!matchCtx.value) return
-    loadSplitSuggestions(matchCtx.value, Math.min(60, splitWindow.value + 7), anchorInvoiceId.value)
+    const next = splitWindow.value >= 60 ? 0 : Math.min(60, splitWindow.value + 7)
+    loadSplitSuggestions(matchCtx.value, next, anchorInvoiceId.value)
   }
 
   function onAnchorSearch(q: string) {

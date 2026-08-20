@@ -943,9 +943,15 @@ final class KhDphTaxScenariosTest extends TestCase
      * Country-aware RC klasifikace vystavených plnění (fix 2026-05-29): příznak reverse_charge
      * se klasifikuje podle ZEMĚ odběratele —
      *   • tuzemský odběratel (CZ) → tuzemský §92a dodavatel → kód '25s' → DPHDP3 ř.25 (pln_rez_pren)
-     *   • zahraniční EU odběratel  → dodání zboží do JČS    → kód '20'  → DPHDP3 ř.20 (dod_zb)
+     *   • zahraniční EU odběratel  → plnění do JČS          → kód '22'  → DPHDP3 ř.21 (pln_sluzby)
      * Dříve oba končily na '20'/ř.20 → tuzemský RC (stavební práce ap.) se chybně vykázal jako
      * dodání do EU. Ani jeden nepřidává výstupní daň (ř.1).
+     *
+     * Doklad tu vzniká přímým zápisem do DB (bez kódu), takže rozhoduje fallback ve
+     * VatLedgerService. Ten od auditu VAT klasifikací (L-5) drží TÝŽ statistický default
+     * jako SSOT — služba (ř.21), ne zboží (ř.20). Dřív se doklad bez kódu vykázal jinak
+     * podle toho, kudy do výkazu vstoupil; zboží od služby rozliší jednotka položky,
+     * kterou vidí jen SSOT.
      */
     public function testReverseChargeClassifiedByCustomerCountry(): void
     {
@@ -959,7 +965,8 @@ final class KhDphTaxScenariosTest extends TestCase
 
         $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
         $this->assertSame('12000', (string) $dp->Veta2['pln_rez_pren'], 'tuzemský RC → ř.25 (pln_rez_pren)');
-        $this->assertSame('34000', (string) $dp->Veta2['dod_zb'],       'EU RC → ř.20 (dod_zb)');
+        $this->assertSame('34000', (string) $dp->Veta2['pln_sluzby'],   'EU RC bez kódu → ř.21 (pln_sluzby)');
+        $this->assertSame('', (string) $dp->Veta2['dod_zb'],            'ř.20 zůstane prázdný — zboží se z dat nepozná');
         $this->assertSame('', (string) $dp->Veta1['obrat23'], 'RC plnění nepatří do ř.1 (výstupní daň)');
     }
 
@@ -1340,6 +1347,42 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->assertCount(1, $kh->DPHKH1->VetaB1, 'B.1: tuzemský RC příjemce');
         $this->assertSame('4', (string) $kh->DPHKH1->VetaB1[0]['kod_pred_pl'],
             'kod_pred_pl musí přijít z klasifikace (4 = stavební práce §92e), ne natvrdo 5');
+    }
+
+    /**
+     * Audit VAT klasifikací 2026-08 (H-5): doklad se dvěma režimy § 92 musí dát DVĚ věty
+     * B.1 — XSD chce větu per kód předmětu plnění. Dřív se agregovalo za celý doklad
+     * a `kod_pred_pl` přepsala POSLEDNÍ neprázdná hodnota, takže stavební práce i odpad
+     * odešly pod jedním kódem a protistrana hlásila něco jiného.
+     */
+    public function testTwoSection92RegimesOnOneDocumentSplitIntoTwoB1Rows(): void
+    {
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        $vend = $this->client('Dodavatel dvou režimů', $this->czId, 'CZ22222239', vendor: true);
+
+        // Jeden doklad, dva řádky: stavební práce (kód 5 → kod_pred_pl 4)
+        // a odpad/šrot (kód 5c → kod_pred_pl 5, migrace 1510).
+        $id = $this->purchase('P-2099-92MIX', $vend, null, false, 'invoice', $d(11), $d(11),
+            [[9000, 0, 21], [4000, 0, 21]]);
+        $items = $this->db->pdo()->prepare(
+            'SELECT id FROM purchase_invoice_items WHERE purchase_invoice_id = ? ORDER BY order_index'
+        );
+        $items->execute([$id]);
+        [$firstItem, $secondItem] = $items->fetchAll(\PDO::FETCH_COLUMN);
+        $upd = $this->db->pdo()->prepare('UPDATE purchase_invoice_items SET vat_classification_code = ? WHERE id = ?');
+        $upd->execute(['5', $firstItem]);
+        $upd->execute(['5c', $secondItem]);
+
+        $kh = new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']);
+        $rows = $kh->DPHKH1->VetaB1;
+
+        $this->assertCount(2, $rows, 'každý režim § 92 má vlastní větu B.1');
+        $byCode = [];
+        foreach ($rows as $row) {
+            $byCode[(string) $row['kod_pred_pl']] = (string) $row['zakl_dane1'];
+        }
+        $this->assertSame('9000.00', $byCode['4'] ?? null, 'stavební práce § 92e');
+        $this->assertSame('4000.00', $byCode['5'] ?? null, 'odpad a šrot § 92c');
     }
 
     /**

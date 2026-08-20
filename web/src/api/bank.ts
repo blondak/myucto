@@ -411,7 +411,8 @@ export const bankApi = {
       `/bank-transactions/${txId}/split-suggestions`,
       { params: {
         ...(opts.invoiceId ? { invoice_id: opts.invoiceId } : {}),
-        ...(opts.window ? { window: opts.window } : {}),
+        // `window: 0` = bez datového omezení, takže se testuje na undefined, ne na falsy.
+        ...(opts.window !== undefined ? { window: opts.window } : {}),
         ...(opts.max ? { max: opts.max } : {}),
       } },
     ).then(r => r.data),

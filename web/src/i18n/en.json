@@ -8458,7 +8458,8 @@
             "exchange_rate_not_reloaded": "The relevant date (tax point) or the currency changed, but the exchange rate stayed as it was ({rate} as of {date}) — {reason} Please check the rate on the document.",
             "exchange_rate_not_reloaded_source_locked": "the rate on the document does not come from an automatic conversion (a person entered it, it came from an import, or its origin is unknown), so automation does not overwrite it.",
             "exchange_rate_not_reloaded_cnb_unavailable": "the CNB rate for the new date could not be fetched.",
-            "public_authority_fee_out_of_scope": "This document looks like a public-authority fee (court fee, administrative fee, duty stamp). A public authority acting in that capacity is not a taxable person (Section 5(4) of the Czech VAT Act), so the supply is outside the scope of VAT — including fees charged by a foreign court or office: no self-assessment under Section 9(1), and the document enters neither the VAT return nor the control statement. That is why no VAT classification was assigned. If this really is an ordinary purchased service, pick the classification manually."
+            "public_authority_fee_out_of_scope": "This document looks like a public-authority fee (court fee, administrative fee, duty stamp). A public authority acting in that capacity is not a taxable person (Section 5(4) of the Czech VAT Act), so the supply is outside the scope of VAT — including fees charged by a foreign court or office: no self-assessment under Section 9(1), and the document enters neither the VAT return nor the control statement. That is why no VAT classification was assigned. If this really is an ordinary purchased service, pick the classification manually.",
+            "missing_vat_classification": "This document carries VAT (or is under reverse charge) but has no VAT classification, so it reaches neither the VAT return nor the control statement. Typically a rate the Czech codebook does not know (e.g. German 19%) or a vendor with an undetermined country. Check the line rates and pick a classification manually."
         },
         "exchange_rate_source": {
             "cnb": "daily CNB rate",
@@ -9367,7 +9368,8 @@
             "amount_mismatch": "amount does not match",
             "counterparty_mismatch": "counterparty does not match",
             "currency_mismatch": "currency does not match",
-            "fx_on_czk_czk": "FX difference on a CZK payment"
+            "fx_on_czk_czk": "FX difference on a CZK payment",
+            "marked_paid_unposted": "marked paid manually — no payment posted (e.g. set-off)"
         },
         "open_list": "Open in list",
         "field": {
@@ -10947,7 +10949,9 @@
         "candidate_currency_mismatch_hint": "The amount matches numerically, but the invoice currency doesn't match the payment currency — this isn't a real exchange-rate conversion. Verify before matching.",
         "split_title": "Combined payment (several invoices in one payment)",
         "split_hint": "Combinations of one client's invoices whose sum matches this payment (window ±{days} days).",
+        "split_hint_all": "Combinations of one client’s invoices adding up to this payment (no date limit — for enforced or otherwise late settlements).",
         "split_widen": "Search a wider window (±{days} days)",
+        "split_widen_all": "Search all unpaid invoices",
         "split_none": "No combination of a single client's invoices matches the payment amount.",
         "split_reconcile_hint": "Invoice is already paid — matching only links its existing payment to this transaction (no new payment is created).",
         "split_unknown_client": "Unknown client",

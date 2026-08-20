@@ -912,23 +912,40 @@ final class ClosingRepository
                    AND (e.reversed_by IS NULL OR rev.entry_date > ?)
                    AND (ca.account_code LIKE '311%' OR COALESCE(pa.account_code, '') LIKE '311%')
                  GROUP BY COALESCE(cd.invoice_id, ip.invoice_id)
+            ), doc AS (
+                -- Doklad + jeho peněžní vyrovnání; dobropis patří do skupiny svého RODIČE.
+                -- Zdůvodnění skupiny viz {@see paidPurchasesOpenSaldo} — na výnosové straně
+                -- platí zrcadlově (dobropis snižuje pohledávku na 311 i bez pohybu peněz).
+                SELECT i.id,
+                       CASE WHEN i.invoice_type = 'credit_note' AND i.parent_invoice_id IS NOT NULL
+                            THEN i.parent_invoice_id ELSE i.id END AS group_id,
+                       b.booked,
+                       COALESCE(sb.settled, 0) + COALESCE(sbm.settled, 0) + COALESCE(sc.settled, 0) AS settled
+                  FROM booked b
+                  JOIN invoices i ON i.id = b.invoice_id AND i.supplier_id = ?
+                  LEFT JOIN settled_bank sb ON sb.invoice_id = i.id
+                  LEFT JOIN settled_bank_matched sbm ON sbm.invoice_id = i.id
+                  LEFT JOIN settled_cash sc ON sc.invoice_id = i.id
+            ), grp AS (
+                SELECT group_id, SUM(booked) AS booked, SUM(settled) AS settled
+                  FROM doc
+                 GROUP BY group_id
             )
             SELECT i.id,
                    COALESCE(NULLIF(i.varsymbol, ''), CONCAT('#', i.id)) AS doc_no,
                    i.issue_date AS doc_date,
                    cl.company_name AS partner_name,
-                   b.booked,
-                   COALESCE(sb.settled, 0) + COALESCE(sbm.settled, 0) + COALESCE(sc.settled, 0) AS settled,
-                   b.booked - (COALESCE(sb.settled, 0) + COALESCE(sbm.settled, 0) + COALESCE(sc.settled, 0)) AS saldo
-              FROM booked b
-              JOIN invoices i ON i.id = b.invoice_id AND i.supplier_id = ?
+                   g.booked,
+                   g.settled,
+                   g.booked - g.settled AS saldo,
+                   CASE WHEN ABS(g.settled) < 0.005 THEN 'marked_paid_unposted' END AS note
+              FROM grp g
+              JOIN invoices i ON i.id = g.group_id AND i.supplier_id = ?
               JOIN clients cl ON cl.id = i.client_id
-              LEFT JOIN settled_bank sb ON sb.invoice_id = i.id
-              LEFT JOIN settled_bank_matched sbm ON sbm.invoice_id = i.id
-              LEFT JOIN settled_cash sc ON sc.invoice_id = i.id
              WHERE i.status = 'paid'
                AND (i.paid_at IS NULL OR i.paid_at <= ?)
-            HAVING ABS(saldo) > 0.5
+            -- Tolerance 1 Kč — zdůvodnění viz paidPurchasesOpenSaldo.
+            HAVING ABS(saldo) > 1.0
              ORDER BY ABS(saldo) DESC, i.id";
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([
@@ -937,6 +954,7 @@ final class ClosingRepository
             $supplierId,                        // alloc
             $supplierId,                        // settled_bank
             $supplierId, $asOf, $asOf,          // settled_cash
+            $supplierId,                        // doc
             $supplierId, $asOf,                 // final SELECT
         ]);
         return array_map(static fn (array $r): array => self::castPaidSaldoRow($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -947,9 +965,22 @@ final class ClosingRepository
      * (source_type 'purchase_invoice'), settled = Σ(MD − D) z úhrad — bankovní
      * přes payment_matches.purchase_invoice_id (poměr pm.amount při více
      * dokladech na jedné tx), pokladní přes cash_documents.purchase_invoice_id.
-     * Detaily sémantiky a tolerance viz {@see paidInvoicesOpenSaldo}.
+     * Detaily sémantiky viz {@see paidInvoicesOpenSaldo}.
      *
-     * @return list<array{id:int, doc_no:string, partner_name:string, booked:float, settled:float, saldo:float}>
+     * Saldo se počítá za **skupinu doklad + navázané dobropisy**, ne za jednotlivý doklad.
+     * Opravný doklad nese na 321 opačné znaménko, takže dvojice faktura + dobropis účet
+     * vynuluje, i když peníze nikdy netekly (vrácené zboží prostě sníží závazek) — a když
+     * dodavatel dobropis proplatí, sedí to taky, protože do skupiny vstupují i obě peněžní
+     * vyrovnání. Po dokladech to nešlo spočítat ani jedním směrem: bez dobropisů kontrola
+     * hlásila obě strany dvojice v plné výši, s naivním přičtením dobropisu k rodiči zase
+     * proplacený dobropis vyrobil záporné saldo. Vazbu nese `parent_purchase_invoice_id`
+     * (migrace 1096); skupina se hlásí pod rodičovským dokladem.
+     *
+     * `note` označí doklad, který je 'paid', ale nemá ŽÁDNOU zaznamenanou úhradu (banka
+     * ani pokladna) — typicky ruční „označit jako uhrazené" po zápočtu. To není totéž
+     * jako „úhrada nesedí" a účetní to potřebuje v seznamu rozlišit.
+     *
+     * @return list<array{id:int, doc_no:string, partner_name:string, booked:float, settled:float, saldo:float, note:?string}>
      */
     public function paidPurchasesOpenSaldo(int $supplierId, string $asOf): array
     {
@@ -1008,22 +1039,46 @@ final class ClosingRepository
                    AND (e.reversed_by IS NULL OR rev.entry_date > ?)
                    AND (ca.account_code LIKE '321%' OR COALESCE(pa.account_code, '') LIKE '321%')
                  GROUP BY cd.purchase_invoice_id
+            ), doc AS (
+                -- Doklad = předpis + jeho vlastní peněžní vyrovnání. Dobropis se přiřadí
+                -- ke skupině svého RODIČE: opravný doklad nese na 321 opačné znaménko,
+                -- takže dvojice účet vynuluje, i když peníze nikdy netekly (vrácené zboží
+                -- prostě sníží závazek). Hodnotit každou stranu zvlášť znamenalo hlásit
+                -- obě jako otevřené saldo v plné výši, přestože 321 je po nich nula.
+                SELECT pi.id,
+                       CASE WHEN pi.document_kind = 'credit_note' AND pi.parent_purchase_invoice_id IS NOT NULL
+                            THEN pi.parent_purchase_invoice_id ELSE pi.id END AS group_id,
+                       b.booked,
+                       COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0) AS settled
+                  FROM booked b
+                  JOIN purchase_invoices pi ON pi.id = b.purchase_invoice_id AND pi.supplier_id = ?
+                  LEFT JOIN settled_bank sb ON sb.purchase_invoice_id = pi.id
+                  LEFT JOIN settled_cash sc ON sc.purchase_invoice_id = pi.id
+            ), grp AS (
+                SELECT group_id, SUM(booked) AS booked, SUM(settled) AS settled
+                  FROM doc
+                 GROUP BY group_id
             )
             SELECT pi.id,
                    COALESCE(NULLIF(pi.vendor_invoice_number, ''), NULLIF(pi.varsymbol, ''), CONCAT('#', pi.id)) AS doc_no,
                    pi.issue_date AS doc_date,
                    cl.company_name AS partner_name,
-                   b.booked,
-                   COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0) AS settled,
-                   b.booked - (COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0)) AS saldo
-              FROM booked b
-              JOIN purchase_invoices pi ON pi.id = b.purchase_invoice_id AND pi.supplier_id = ?
+                   g.booked,
+                   g.settled,
+                   g.booked - g.settled AS saldo,
+                   -- Doklad tvrdí, že je zaplacený, ale žádná úhrada (banka ani pokladna) k němu
+                   -- zaznamenaná není — typicky ruční označení po zápočtu. Jiná diagnóza než
+                   -- rozdíl v částce, a účetní to v seznamu potřebuje rozlišit.
+                   CASE WHEN ABS(g.settled) < 0.005 THEN 'marked_paid_unposted' END AS note
+              FROM grp g
+              JOIN purchase_invoices pi ON pi.id = g.group_id AND pi.supplier_id = ?
               JOIN clients cl ON cl.id = pi.vendor_id
-              LEFT JOIN settled_bank sb ON sb.purchase_invoice_id = pi.id
-              LEFT JOIN settled_cash sc ON sc.purchase_invoice_id = pi.id
              WHERE pi.status = 'paid'
                AND (pi.paid_at IS NULL OR pi.paid_at <= ?)
-            HAVING ABS(saldo) > 0.5
+            -- Tolerance 1 Kč: haléřové rozdíly vznikají zaokrouhlením úhrady (banka pošle
+            -- 1 637 Kč proti faktuře 1 637,52) a chybějící úhrada to být nemůže. Dřív 0,50 Kč
+            -- propouštělo i takové řádky a účetní je musela odbavovat jednu po druhé.
+            HAVING ABS(saldo) > 1.0
              ORDER BY ABS(saldo) DESC, pi.id";
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([
@@ -1032,6 +1087,7 @@ final class ClosingRepository
             $supplierId,                        // alloc
             $supplierId,                        // settled_bank
             $supplierId, $asOf, $asOf,          // settled_cash
+            $supplierId,                        // doc
             $supplierId, $asOf,                 // final SELECT
         ]);
         return array_map(static fn (array $r): array => self::castPaidSaldoRow($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -1747,6 +1803,10 @@ final class ClosingRepository
             'booked'       => round((float) $r['booked'], 2),
             'settled'      => round((float) $r['settled'], 2),
             'saldo'        => round((float) $r['saldo'], 2),
+            // Kód nálezu, ne hotová věta: klient ho překládá (`checks.issue.*`), stejně
+            // jako u kontroly spárovaných plateb. Diagnóza „doklad označen jako uhrazený,
+            // ale žádná úhrada k němu není" se liší od „úhrada je, jen nesedí částka".
+            'issues'       => isset($r['note']) && $r['note'] !== null ? [(string) $r['note']] : null,
         ];
     }
 

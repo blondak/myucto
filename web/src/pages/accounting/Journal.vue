@@ -156,7 +156,7 @@ function resetFilters() {
 
 function goToPage(p: number) {
   const np = Math.min(Math.max(1, p), totalPages.value)
-  if (np !== page.value) { page.value = np; load(); expandedId.value = null }
+  if (np !== page.value) { page.value = np; load(); collapseAll() }
 }
 
 function buildQuery(): Record<string, string> {
@@ -403,22 +403,38 @@ onMounted(async () => {
 })
 
 // ── Expand / detail ────────────────────────────────────────────────────────
-const expandedId = ref<number | null>(null)
-const detail = ref<JournalEntryDetail | null>(null)
-const detailLoading = ref(false)
+// Rozbalených zápisů může být VÍC najednou: účetní typicky porovnává doklad s jeho
+// úhradou nebo se stornem, a akordeon, který při otevření druhého zavřel první,
+// znamenal skákání nahoru a dolů. Detaily se drží per ID a při přechodu na jinou
+// stránku (nebo po zásahu, který data mění) se zahodí.
+const expandedIds = ref<number[]>([])
+const details = ref<Record<number, JournalEntryDetail>>({})
+const detailLoadingIds = ref<number[]>([])
+
+function isExpanded(id: number): boolean { return expandedIds.value.includes(id) }
+function isDetailLoading(id: number): boolean { return detailLoadingIds.value.includes(id) }
+
+function collapseAll() {
+  expandedIds.value = []
+  details.value = {}
+  detailLoadingIds.value = []
+}
 
 async function toggleExpand(entry: JournalEntry) {
-  if (expandedId.value === entry.id) { expandedId.value = null; detail.value = null; return }
-  expandedId.value = entry.id
-  detail.value = null
-  detailLoading.value = true
+  if (isExpanded(entry.id)) {
+    expandedIds.value = expandedIds.value.filter(id => id !== entry.id)
+    delete details.value[entry.id]
+    return
+  }
+  expandedIds.value = [...expandedIds.value, entry.id]
+  detailLoadingIds.value = [...detailLoadingIds.value, entry.id]
   try {
-    detail.value = await accountingApi.getEntry(entry.id)
+    details.value = { ...details.value, [entry.id]: await accountingApi.getEntry(entry.id) }
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
-    expandedId.value = null
+    expandedIds.value = expandedIds.value.filter(id => id !== entry.id)
   } finally {
-    detailLoading.value = false
+    detailLoadingIds.value = detailLoadingIds.value.filter(id => id !== entry.id)
   }
 }
 
@@ -436,8 +452,7 @@ async function reverse(entry: JournalEntryDetail) {
   try {
     await accountingApi.reverseEntry(entry.id)
     toast.success(t('accounting.journal.reversed'))
-    expandedId.value = null
-    detail.value = null
+    collapseAll()
     await load()
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
@@ -470,8 +485,7 @@ async function deleteEntry(entry: JournalEntryDetail) {
           ? 'accounting.journal.manual_deleted'
           : 'accounting.journal.deleted'
     toast.success(t(successKey))
-    expandedId.value = null
-    detail.value = null
+    collapseAll()
     await load()
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
@@ -480,9 +494,10 @@ async function deleteEntry(entry: JournalEntryDetail) {
 
 /** Sync editovaného description zpět do řádku listu i do detailu (Epic F7). */
 function onDescriptionUpdated(entryId: number, description: string, rowVersion: number) {
-  if (detail.value && detail.value.id === entryId) {
-    detail.value.description = description
-    detail.value.row_version = rowVersion
+  const d = details.value[entryId]
+  if (d) {
+    d.description = description
+    d.row_version = rowVersion
   }
   const row = entries.value.find(e => e.id === entryId)
   if (row) { row.description = description; row.row_version = rowVersion }
@@ -523,8 +538,10 @@ async function focusEntry(entryId: number): Promise<boolean> {
   filters.date_to = d.entry_date
   page.value = 1
   await load()
-  expandedId.value = entryId
-  detail.value = d
+  // Proklik na konkrétní zápis ho ukáže rozbalený sám, ostatní k němu nepatří.
+  expandedIds.value = [entryId]
+  details.value = { [entryId]: d }
+  detailLoadingIds.value = []
   return true
 }
 
@@ -632,6 +649,21 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
       @clear="clearFilter"
       @clear-all="resetFilters"
     >
+      <!-- Hledání zůstává viditelné i se sbalenými filtry — je to nejpoužívanější
+           prvek lišty a schovat ho za „Filtry" znamená dvě kliknutí na každé hledání. -->
+      <template #primary>
+        <div class="relative flex-1 min-w-56">
+          <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400"
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
+          </svg>
+          <input v-model.trim="filters.q" type="search" @keyup.enter="applyFilters" @search="applyFilters"
+            :aria-label="t('accounting.journal.filter_q')"
+            :placeholder="t('accounting.journal.filter_q_placeholder')"
+            class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+        </div>
+      </template>
+
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_document_no') }}</label>
@@ -692,12 +724,6 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
             <option value="amount_mismatch">{{ t('accounting.journal.filter_integrity_amount_mismatch') }}</option>
           </select>
           <p class="text-[11px] text-neutral-500 mt-1">{{ t('accounting.journal.filter_integrity_hint') }}</p>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_q') }}</label>
-          <input v-model.trim="filters.q" type="search" @keyup.enter="applyFilters" @search="applyFilters"
-            :placeholder="t('accounting.journal.filter_q_placeholder')"
-            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_account_from') }}</label>
@@ -769,12 +795,12 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
                    při odrolování ztratí, na kterém řádku vlastně pracuju. -->
               <tr class="cursor-pointer" :class="[
                     e.reversed_by ? 'opacity-60' : '',
-                    expandedId === e.id
+                    isExpanded(e.id)
                       ? 'bg-primary-50/60 border-x-2 border-t-2 border-primary-500/60'
                       : 'hover:bg-neutral-50',
                   ]" @click="toggleExpand(e)">
                 <td class="px-3 py-2 text-neutral-400">
-                  <span class="inline-block transition-transform" :class="{ 'rotate-90': expandedId === e.id }">▸</span>
+                  <span class="inline-block transition-transform" :class="{ 'rotate-90': isExpanded(e.id) }">▸</span>
                 </td>
                 <td v-if="tbl.isVisible('date')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(e.entry_date) }}</td>
                 <td v-if="tbl.isVisible('document_no')" class="px-3 py-2 font-mono text-xs">{{ e.document_no || '—' }}</td>
@@ -838,44 +864,44 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
                 <td v-if="tbl.isVisible('posted_by')" class="px-3 py-2 truncate max-w-[10rem]">{{ e.posted_by_name || '—' }}</td>
               </tr>
               <!-- Detail (rozbalený) -->
-              <tr v-if="expandedId === e.id">
+              <tr v-if="isExpanded(e.id)">
                 <td :colspan="visibleColCount"
                   class="px-3 py-3 bg-primary-50/60 border-x-2 border-b-2 border-primary-500/60">
-                  <div v-if="detailLoading" class="text-center text-neutral-500 py-4 text-sm">{{ t('common.loading') }}</div>
-                  <div v-else-if="detail">
+                  <div v-if="isDetailLoading(e.id)" class="text-center text-neutral-500 py-4 text-sm">{{ t('common.loading') }}</div>
+                  <div v-else-if="details[e.id]">
                     <!-- Rozpad na účty — sdílená karta, tutéž ukazuje panel Souvisí
                          u protějšku, aby je účetní poznal jako stejnou věc. -->
-                    <JournalLinesTable class="mb-3" :lines="detail.lines" />
+                    <JournalLinesTable class="mb-3" :lines="details[e.id]!.lines" />
                     <!-- Souvisí hned za kontacemi: protějšek zápisu (doklad ↔ úhrada)
                          je to první, co účetní po rozpadu na účty hledá. Dřív byl až
                          pod přílohami, poznámkami a historií, tedy o obrazovku níž. -->
-                    <JournalRelatedPanel class="mt-3 block" :entry-id="detail.id" show-preview
+                    <JournalRelatedPanel class="mt-3 block" :entry-id="details[e.id]!.id" show-preview
                       @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry" />
-                    <WhyPanel v-if="detail.automation" class="mt-3" :provenance="detail.automation" />
+                    <WhyPanel v-if="details[e.id]!.automation" class="mt-3" :provenance="details[e.id]!.automation!" />
                     <!-- Epic F7: inline editace description (§35) + přílohy §33a -->
-                    <JournalEntryExtras :entry="detail"
-                      @description-updated="(desc, rv) => onDescriptionUpdated(detail!.id, desc, rv)" />
-                    <LinkedDocumentsPanel class="mt-4 block" entity-type="journal_entry" :entity-id="detail.id" />
+                    <JournalEntryExtras :entry="details[e.id]!"
+                      @description-updated="(desc, rv) => onDescriptionUpdated(details[e.id]!.id, desc, rv)" />
+                    <LinkedDocumentsPanel class="mt-4 block" entity-type="journal_entry" :entity-id="details[e.id]!.id" />
                     <div class="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-neutral-200">
                       <div class="text-xs text-neutral-500">
-                        <span v-if="detail.created_at">{{ t('accounting.journal.created_at') }}: {{ formatDate(detail.created_at) }}</span>
+                        <span v-if="details[e.id]!.created_at">{{ t('accounting.journal.created_at') }}: {{ formatDate(details[e.id]!.created_at) }}</span>
                       </div>
                       <div class="flex flex-wrap items-center gap-2">
-                        <RouterLink v-if="auth.canWrite('accounting')" :to="{ path: '/accounting/journal/new', query: { copy_from: String(detail.id) } }" :class="btnOutline('neutral')">
+                        <RouterLink v-if="auth.canWrite('accounting')" :to="{ path: '/accounting/journal/new', query: { copy_from: String(details[e.id]!.id) } }" :class="btnOutline('neutral')">
                           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
                           <span class="whitespace-nowrap">{{ t('accounting.journal.copy_as_new') }}</span>
                         </RouterLink>
-                        <button v-if="auth.canWrite('accounting') && !detail.reversed_by" @click="reverse(detail)" :class="btnOutline('danger')">
+                        <button v-if="auth.canWrite('accounting') && !details[e.id]!.reversed_by" @click="reverse(details[e.id]!)" :class="btnOutline('danger')">
                           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
                           {{ t('accounting.journal.reverse') }}
                         </button>
-                        <button v-if="auth.canWrite('accounting') && canDeleteEntry(detail)" @click="deleteEntry(detail)" :class="btnOutline('danger')">
+                        <button v-if="auth.canWrite('accounting') && canDeleteEntry(details[e.id]!)" @click="deleteEntry(details[e.id]!)" :class="btnOutline('danger')">
                           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
                           {{ t('accounting.journal.delete') }}
                         </button>
-                        <button v-else-if="detail.reversed_by" type="button" @click="openReversal(detail.reversed_by)"
+                        <button v-else-if="details[e.id]!.reversed_by" type="button" @click="openReversal(details[e.id]!.reversed_by!)"
                           class="cursor-pointer text-xs text-primary-600 hover:text-primary-700 hover:underline">
-                          {{ t('accounting.journal.reversal_entry') }} #{{ detail.reversed_by }}
+                          {{ t('accounting.journal.reversal_entry') }} #{{ details[e.id]!.reversed_by }}
                         </button>
                       </div>
                     </div>

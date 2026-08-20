@@ -14,6 +14,7 @@ use MyInvoice\Service\Accounting\Expense\ExpenseKindSuggestion;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Support\AdvanceTaxDocumentText;
 use MyInvoice\Support\PaymentMethods;
+use MyInvoice\Support\PublicAuthorityFeeText;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -451,6 +452,9 @@ final class AiPdfExtractor
         // stejná definice „rozhodného data", jakou používá zbytek importní vrstvy.
         $rateDate = (string) ($data['tax_date'] ?? '') ?: (string) ($data['issue_date'] ?? date('Y-m-d'));
         $defaultVatRateId = $this->matchVatRateId($supplierId, 0.0, $rateDate);
+        /** @var list<float> $unmappedRates sazby z dokladu, které český číselník nezná */
+        $unmappedRates = [];
+
 
         // Sanity guard na prohozené datumy z AI extrakce (issue ↔ due). AI občas
         // zamění „Datum vystavení" a „Datum splatnosti"; na běžné faktuře ale splatnost
@@ -579,12 +583,22 @@ final class AiPdfExtractor
                 $assetLimit,
             );
 
+            // Sazba, kterou český číselník nezná (typicky DE 19 %), propadá na nulovou —
+            // bez `vat_rate_id` by řádek porušil FK. Nula je ale ZÁSTUPNÁ hodnota, ne údaj
+            // z dokladu: nesmí spustit heuristiku reverse charge (jinak se z faktury s cizí
+            // daní stane samovyměření, audit VAT klasifikací C-4) a uživatel se o ní musí
+            // dozvědět. Původní vytěženou sazbu si proto pamatujeme zvlášť.
+            $matchedRateId = $this->matchVatRateId($supplierId, $rate, $rateDate);
+            if ($matchedRateId === null && $rate > 0.0) {
+                $unmappedRates[] = $rate;
+            }
+
             $items[] = [
                 'description'            => (string) $line['description'],
                 'quantity'               => $qty,
                 'unit'                   => (string) ($line['unit'] ?? 'ks'),
                 'unit_price_without_vat' => $price,
-                'vat_rate_id'            => $this->matchVatRateId($supplierId, $rate, $rateDate) ?? $defaultVatRateId,
+                'vat_rate_id'            => $matchedRateId ?? $defaultVatRateId,
                 'order_index'            => $idx,
                 // vat_classification_code tady nesetujeme — PurchaseInvoiceRepository::replaceItems()
                 // auto-derive based on rate + RC + vendor country (lookup z DB). Výjimka:
@@ -728,7 +742,7 @@ final class AiPdfExtractor
         // Reverse charge auto-detect: vendor je v EU/3.zemi A všechny řádky mají vat_rate=0
         // → typicky přenesená daňová povinnost (Čech přijímá službu/zboží ze zahraničí).
         // AI tuto info neextrahuje explicitně, takže detekujeme heuristikou.
-        $reverseCharge = $this->inferReverseCharge($vendorId, $items);
+        $reverseCharge = $this->inferReverseCharge($vendorId, $items, $unmappedRates);
         if ($reverseCharge) {
             $this->logger->info('AI extractor: detected reverse_charge (non-CZ vendor + all items vat_rate=0)', [
                 'vendor_id' => $vendorId,
@@ -957,6 +971,27 @@ final class AiPdfExtractor
         if ($vatRecapWarning !== null && $vatRecapWarning !== '') {
             try {
                 $this->repo->appendExtractionWarning($id, $supplierId, $vatRecapWarning);
+            } catch (\Throwable) {
+                // Varování je „nice to have" — faktura už je vytvořená správně.
+            }
+        }
+        // Sazba, kterou český číselník nezná — řádek dostal zástupnou nulu, takže doklad
+        // bez zásahu uživatele NEDORAZÍ do přiznání ani KH (mapper řádek bez kódu skipne).
+        // Musí to být vidět v editoru, ne jen v logu: cizí daň se odpočíst nedá a účetní
+        // rozhodne, jestli je to náklad včetně daně, nebo chybně vytěžená sazba.
+        if ($unmappedRates !== []) {
+            $rateList = implode(', ', array_map(
+                static fn (float $r): string => rtrim(rtrim(number_format($r, 2, ',', ' '), '0'), ',') . ' %',
+                array_values(array_unique($unmappedRates)),
+            ));
+            try {
+                $this->repo->appendExtractionWarning($id, $supplierId, sprintf(
+                    'Doklad obsahuje sazbu DPH, kterou český číselník nezná (%s). Řádky dostaly '
+                    . 'nulovou sazbu a doklad bez klasifikace nevstoupí do přiznání ani do '
+                    . 'kontrolního hlášení. Zkontrolujte sazby — cizí daň nelze uplatnit '
+                    . 'jako odpočet, náklad se účtuje včetně ní.',
+                    $rateList,
+                ));
             } catch (\Throwable) {
                 // Varování je „nice to have" — faktura už je vytvořená správně.
             }
@@ -1865,9 +1900,29 @@ final class AiPdfExtractor
      *   - jakýkoli item má vat_rate > 0 (tuzemská faktura s DPH)
      *   - country lookup selže (bezpečný default)
      */
-    private function inferReverseCharge(int $vendorId, array $items): bool
+    private function inferReverseCharge(int $vendorId, array $items, array $unmappedRates = []): bool
     {
         if (empty($items)) return false;
+        // Sazba, kterou se nepodařilo namapovat (DE 19 %), skončila na řádku jako zástupná
+        // NULA. Kdyby o reverse charge rozhodovala ta, vypadal by doklad s vyčíslenou
+        // německou daní jako plnění bez daně → samovyměření na ř. 5/12 + KH A.2 a odpočet
+        // ř. 43 z daně, kterou už zaplatil dodavatel (audit VAT klasifikací, C-4).
+        // Testuje se JEN nenamapovaná sazba: nulu dosazenou kvůli neplátci
+        // (isVendorNonPayer výš) heuristika brát smí — tam je bezdaňový doklad realita.
+        foreach ($unmappedRates as $rate) {
+            if ((float) $rate > 0.0) return false;
+        }
+        // Poplatek orgánu veřejné moci (soudní, správní, kolek, evropský platební rozkaz)
+        // NENÍ zdanitelné plnění: orgán při výkonu veřejné správy není osobou povinnou
+        // k dani (§ 5 odst. 4 ZDPH), takže se § 9 odst. 1 neuplatní ani u zahraničního
+        // soudu či úřadu. Bez téhle brzdy heuristika sepne (cizí země + nulové sazby),
+        // blok volajícího přepíše sazby na 21 % a doklad se samovyměří na ř. 5/12 + KH A.2
+        // — daň z plnění, které vůbec není předmětem daně (audit VAT klasifikací, H-7).
+        if (PublicAuthorityFeeText::anyIndicatesPublicAuthorityFee(
+            array_map(static fn ($it) => (string) ($it['description'] ?? ''), $items)
+        )) {
+            return false;
+        }
         // Pokud kterýkoli item má vat_rate > 0 → není to RC.
         // loadVatRateMap vrací [id => rate_percent] (float).
         $vatRates = $this->loadVatRateMap();

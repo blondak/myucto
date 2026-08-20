@@ -17,9 +17,12 @@ final class PurchaseInvoiceValidation
     public const ALLOWED_DOC_KINDS = ['invoice', 'receipt', 'credit_note', 'advance', 'tax_document'];
     public const ALLOWED_STATUSES  = ['draft', 'received', 'booked', 'paid', 'cancelled'];
 
-    /** Klasifikační kódy v režimu samovyměření příjemcem: tuzemský §92 (5), pořízení
-     *  zboží z JČS (23), služba z EU/3. země (24, 24e), dovoz zboží ze 3. země (25). */
-    public const REVERSE_CHARGE_CODES = ['5', '23', '24', '24e', '25'];
+    /** Klasifikační kódy v režimu samovyměření příjemcem: tuzemský § 92 (5 stavební
+     *  práce, 5c odpad a šrot § 92c, 5d nemovitá věc § 92d), pořízení zboží z JČS (23),
+     *  služba z EU/3. země (24, 24e), dovoz zboží ze 3. země (25). Autoritativní seznam
+     *  pro evidenci DPH staví VatLedgerService z číselníku (`is_reverse_charge = 1`);
+     *  tady jde jen o potlačení varování, takže stačí seed. */
+    public const REVERSE_CHARGE_CODES = ['5', '5c', '5d', '23', '24', '24e', '25'];
 
     /**
      * Je doklad v režimu přenesení daňové povinnosti / samovyměření? Rozpozná se
@@ -208,7 +211,44 @@ final class PurchaseInvoiceValidation
             }
         }
 
+        // Doklad, který nese daň (nebo je v režimu samovyměření), ale nemá klasifikaci,
+        // ve výkazech TIŠE ZMIZÍ — VatClassificationMapper řádek bez kódu přeskočí.
+        // Stává se to u sazby, kterou český číselník nezná (cizí 19 %), a u dokladu
+        // se zahraničním dodavatelem, jehož zemi se nepodařilo určit. Osvobozené
+        // tuzemské plnění a plnění mimo předmět daně sem nepatří — u nich je prázdná
+        // klasifikace správný výsledek, proto se ptáme jen na nenulovou sazbu nebo RC.
+        if (self::hasUnclassifiedTaxableLine($invoice)) {
+            $warn[] = 'missing_vat_classification';
+        }
+
         return $warn;
+    }
+
+    /**
+     * Nese doklad řádek s daní (nebo v režimu samovyměření) bez klasifikačního kódu?
+     * Kód se hledá na řádku i na hlavičce — výkazy čtou COALESCE(položka, hlavička).
+     *
+     * @param array<string,mixed> $invoice
+     */
+    private static function hasUnclassifiedTaxableLine(array $invoice): bool
+    {
+        $headerCode = trim((string) ($invoice['vat_classification_code'] ?? ''));
+        if ($headerCode !== '') {
+            return false;
+        }
+        $isRc = !empty($invoice['reverse_charge']);
+        foreach ((array) ($invoice['items'] ?? []) as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            if (trim((string) ($item['vat_classification_code'] ?? '')) !== '') {
+                continue;
+            }
+            if ($isRc || (float) ($item['vat_rate_snapshot'] ?? 0) > 0.0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static function isValidDate(string $date): bool

@@ -947,6 +947,36 @@ final class AiPdfExtractorUnitTest extends TestCase
         self::assertArrayNotHasKey('tax_date', $out);
     }
 
+    // ── inferReverseCharge — brzdy před heuristikou (audit VAT klasifikací) ──
+    // Obě větve rozhodnou DŘÍV, než se sáhne na zemi dodavatele, takže testy běží
+    // bez DB (Connection je mock). To je zároveň pointa: nesmí se ptát databáze,
+    // když už z dokladu samotného plyne, že o reverse charge nejde.
+
+    /**
+     * C-4: sazba, kterou český číselník nezná (DE 19 %), skončí na řádku jako zástupná
+     * NULA. Kdyby o RC rozhodovala ta, vypadala by faktura s vyčíslenou německou daní
+     * jako plnění bez daně → samovyměření ř. 5/12 + KH A.2 a odpočet ř. 43 z cizí daně.
+     */
+    public function testInferReverseCharge_unmappedForeignRateBlocksSelfAssessment(): void
+    {
+        $ref = new \ReflectionMethod($this->extractor, 'inferReverseCharge');
+        $items = [['description' => 'Beratung', 'vat_rate_id' => 1]];
+
+        self::assertFalse($ref->invoke($this->extractor, 42, $items, [19.0]));
+    }
+
+    /**
+     * H-7: poplatek orgánu veřejné moci není zdanitelné plnění (§ 5 odst. 4 ZDPH),
+     * takže se § 9 odst. 1 neuplatní ani u zahraničního soudu — heuristika musí mlčet.
+     */
+    public function testInferReverseCharge_publicAuthorityFeeBlocksSelfAssessment(): void
+    {
+        $ref = new \ReflectionMethod($this->extractor, 'inferReverseCharge');
+        $items = [['description' => 'Gerichtskosten Europäisches Mahnverfahren', 'vat_rate_id' => 1]];
+
+        self::assertFalse($ref->invoke($this->extractor, 42, $items, []));
+    }
+
     // ── normalizeIc (BUG 2, vendor bugreport 2026-08-06) ────────────────────
     // Guard „Faktura adresovaná jinému plátci" (extractAndCreate) porovnává
     // customer.ic vs tenant.ic jako řetězec po normalizaci. AI extrakce u IČO

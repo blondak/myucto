@@ -48,6 +48,9 @@ use MyInvoice\Service\Accounting\PostingException;
  */
 final class VatLedgerService
 {
+    /** @var array<int,string> Cache SQL seznamu RC kódů přijaté strany, per tenant. */
+    private array $rcPurchaseCodesSql = [];
+
     public function __construct(
         private readonly Connection $db,
         private readonly TaxConstantsRepository $taxConstants,
@@ -240,7 +243,9 @@ final class VatLedgerService
             : '';
         // Práh základní/snížená sazba pro fallback klasifikaci — per rok období
         // (číselník daňových konstant, ne natvrdo 20.5).
-        $bucket = $this->taxConstants->vatBucketThreshold((int) substr($start, 0, 4));
+        // ZÁKLADNÍ sazba, ne práh mezi buckety: fallback rozhoduje, jestli je sazba česká
+        // základní. Práh (21+12)/2 = 16,5 by za základní prohlásil i německých 19 %.
+        $standardRate = $this->taxConstants->vatRateStandard((int) substr($start, 0, 4));
         $stmt = $this->db->pdo()->prepare("
             SELECT i.id AS invoice_id, i.varsymbol AS doc_number, i.varsymbol AS vendor_invoice_number,
                    i.invoice_type AS document_kind, i.status,
@@ -248,33 +253,57 @@ final class VatLedgerService
                    -- RAW kurz (bez COALESCE ...,1) — normalize() rozliší chybějící kurz
                    -- od CZK a nastaví příznak exchange_rate_missing (issue #238).
                    i.exchange_rate AS exchange_rate, COALESCE(cur.code, 'CZK') AS currency,
-                   i.total_with_vat AS inv_total, i.reverse_charge AS rc_flag,
+                   -- Vydaný dobropis snižuje daň na výstupu → do DPH evidence musí vstoupit
+                   -- záporně. Naše vlastní vystavení i ruční pořízení ho ukládají záporně,
+                   -- ale import z cizího systému (Fakturoid/iDoklad/ISDOC) může přinést
+                   -- kladné částky a InvoiceAmountPolicy kladný dobropis nezakazuje —
+                   -- na konvenci se tedy spolehnout nedá a kladně vzatý opravný doklad by
+                   -- daň místo snížení NAVÝŠIL (ř. 1/2 + kladná věta KH A.4).
+                   --
+                   -- Normalizuje se CELÝ DOKLAD jedním znaménkem podle jeho součtu, ne každá
+                   -- položka zvlášť — zdůvodnění a precedent viz tentýž výraz ve fetchPurchases().
+                   (CASE WHEN i.invoice_type = 'credit_note' AND i.total_with_vat > 0
+                         THEN -1 ELSE 1 END) * i.total_with_vat AS inv_total,
+                   i.reverse_charge AS rc_flag,
                    c.company_name AS counterparty_name, {$dicExpr} AS counterparty_dic,
                    co.iso2 AS country_iso2, COALESCE(co.is_eu, 0) AS country_is_eu,
                    0 AS is_fixed_asset,
                    COALESCE(
                        ii.vat_classification_code, i.vat_classification_code,
                        CASE
-                           -- Zahraniční EU odběratel + RC = dodání do JČS → ř.20 (dod_zb).
-                           -- (Fallback nerozliší zboží vs službu; služba do JČS je kód 22/ř.21 —
-                           -- pokud jde o službu, uživatel má zvolit kód ručně.)
+                           -- Zahraniční EU odběratel + RC → poskytnutí služby do JČS
+                           -- (kód 22, ř.21 + SH kód plnění 3). Zboží od služby fallback
+                           -- nerozliší, takže drží TÝŽ statistický default jako SSOT
+                           -- (InvoiceRepository::defaultSaleClassificationCode) — u typického
+                           -- uživatele jsou přeshraniční služby častější než dodání zboží.
+                           -- Dřív tu bylo natvrdo '20' (zboží), takže se doklad bez kódu vykázal
+                           -- jinak podle toho, KUDY do výkazu vstoupil. Rozhoduje jednotka
+                           -- položky, kterou vidí jen SSOT; fallback řeší už jen legacy řádky
+                           -- úplně bez kódu a hlásí je příznakem code_estimated.
                            WHEN i.reverse_charge = 1
-                                AND COALESCE(co.is_eu, 0) = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ' THEN '20'
+                                AND COALESCE(co.is_eu, 0) = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ' THEN '22'
                            -- Odběratel ze 3. země + RC = plnění s místem plnění mimo EU (bez české
                            -- DPH) → kód '26' (ř.22, MIMO KH). NESMÍ spadnout na '25s' (to je tuzemský
                            -- §92 → KH A.1 + ř.25) — jinak zahraniční plnění chybně leakuje do KH.
                            WHEN i.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ' THEN '26'
                            -- Tuzemský odběratel + RC = přenesená daň. povinnost §92 → ř.25 (pln_rez_pren), KH A.1.
                            WHEN i.reverse_charge = 1 THEN '25s'
-                           WHEN ii.vat_rate_snapshot >= ?    THEN '1'
-                           WHEN ii.vat_rate_snapshot > 0     THEN '2'
+                           WHEN ii.vat_rate_snapshot >= ? - 0.5 THEN '1'
+                           -- Jen ČESKÁ snížená sazba (12 %, historicky 10/15). Pásmo 16 %
+                           -- až pod základní sazbu se NEMAPUJE: cizí sazba (DE 19 %) není
+                           -- česká DPH a kód '2' by ji poslal na ř. 2 jako tuzemské plnění.
+                           -- Shodně s InvoiceRepository::defaultSaleClassificationCode().
+                           WHEN ii.vat_rate_snapshot BETWEEN 5 AND 15 THEN '2'
                            ELSE NULL
                        END
                    ) AS code,
                    ii.vat_rate_snapshot AS vat_rate,
                    ii.description AS description,
-                   COALESCE(ii.total_without_vat, 0) AS base,
-                   COALESCE(ii.total_vat, 0) AS vat
+                   -- Totéž dokladové znaménko jako u inv_total výše (viz komentář tam).
+                   (CASE WHEN i.invoice_type = 'credit_note' AND i.total_with_vat > 0
+                         THEN -1 ELSE 1 END) * COALESCE(ii.total_without_vat, 0) AS base,
+                   (CASE WHEN i.invoice_type = 'credit_note' AND i.total_with_vat > 0
+                         THEN -1 ELSE 1 END) * COALESCE(ii.total_vat, 0) AS vat
               FROM invoices i
               JOIN clients c ON c.id = i.client_id
          LEFT JOIN countries co ON co.id = c.country_id
@@ -287,7 +316,7 @@ final class VatLedgerService
                AND i.effective_tax_date BETWEEN ? AND ?
           ORDER BY i.effective_tax_date, i.id, ii.id
         ");
-        $stmt->execute([$bucket, $supplierId, $start, $end]);
+        $stmt->execute([$standardRate, $supplierId, $start, $end]);
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
@@ -467,6 +496,51 @@ final class VatLedgerService
     }
 
     /**
+     * Klasifikační kódy PŘIJATÉ strany v režimu samovyměření, jako SQL seznam
+     * (`'5','23','24','24e','25'`). Čte se z číselníku (`is_reverse_charge = 1`), ne
+     * z natvrdo zapsaného výčtu: seed přibývá (§ 92c odpad, § 92d nemovitost — migrace
+     * 1510) a tenant si smí v Číselnících přidat vlastní. Zapomenutý kód by doklad
+     * vyhodil z evidence DPH úplně (filtr „bez nároku na odpočet" i § 72 plátcovství
+     * pouštějí samovyměření právě přes tenhle seznam).
+     *
+     * Kódy jdou do SQL literálem, ne přes bind (jsou uvnitř složeného výrazu sdíleného
+     * dvěma dotazy), takže se propouští jen bezpečný tvar — cokoli jiného se ignoruje.
+     * Prázdný výsledek by seznam degradoval na „nic", proto fallback na seed.
+     */
+    private function reverseChargePurchaseCodesSql(int $supplierId): string
+    {
+        if (isset($this->rcPurchaseCodesSql[$supplierId])) {
+            return $this->rcPurchaseCodesSql[$supplierId];
+        }
+        $codes = [];
+        try {
+            // Multi-tenant scope jako v classificationMap(): globální seed + vlastní kódy
+            // tenanta, NIKDY kódy cizí firmy — jinak by si tenant bez vlastního číselníku
+            // natáhl do evidence samovyměření podle kódu, který nikdy nezaložil.
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT DISTINCT code FROM vat_classifications
+                  WHERE is_reverse_charge = 1
+                    AND direction IN ('purchase', 'both')
+                    AND archived = 0
+                    AND (supplier_id IS NULL OR supplier_id = ?)"
+            );
+            $stmt->execute([$supplierId]);
+            $rows = $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: [];
+            foreach ($rows as $code) {
+                if (preg_match('/^[A-Za-z0-9_-]{1,8}$/', (string) $code) === 1) {
+                    $codes[] = (string) $code;
+                }
+            }
+        } catch (\Throwable) {
+            // Chybějící tabulka (unit schémata nad SQLite) — fallback níž.
+        }
+        if ($codes === []) {
+            $codes = ['5', '23', '24', '24e', '25'];
+        }
+        return $this->rcPurchaseCodesSql[$supplierId] = "'" . implode("','", $codes) . "'";
+    }
+
+    /**
      * Pozn. k odpočtu DPH na vstupu:
      *  - `vat_deduction = 'none'` (bez nároku — reprezentace, osobní spotřeba…) → do DPH
      *    evidence se VŮBEC nezahrnuje (ani Kniha DPH, ani DPHDP3, ani KH), jen účetní náklad.
@@ -486,10 +560,12 @@ final class VatLedgerService
     {
         $statusFilter = $includeDrafts ? "pi.status != 'cancelled'" : "pi.status NOT IN ('draft', 'cancelled')";
         // Práh základní/snížená sazba pro fallback klasifikaci — per rok období.
-        $bucket = $this->taxConstants->vatBucketThreshold((int) substr($start, 0, 4));
+        // Viz fetchSales — rozhoduje ZÁKLADNÍ sazba, ne práh mezi buckety.
+        $standardRate = $this->taxConstants->vatRateStandard((int) substr($start, 0, 4));
 
         // § 72 filtr plátcovství k DUZP dokladu (viz komentář ve WHERE). Fallback 1
         // (firmy bez historie) i chybějící tabulka (SQLite unit schémata) = beze změny.
+        $rcCodes = $this->reverseChargePurchaseCodesSql($supplierId);
         $payerFilter = '';
         if ($this->db->hasTable('supplier_vat_status_history')) {
             $payerAtDuzp = \MyInvoice\Service\Vat\VatStatusService::payerAtExpr(
@@ -498,7 +574,7 @@ final class VatLedgerService
             $payerFilter = "AND ({$payerAtDuzp} = 1
                     OR (COALESCE(pii.total_vat, 0) = 0
                         AND (pi.reverse_charge = 1
-                             OR COALESCE(pii.vat_classification_code, pi.vat_classification_code) IN ('5','23','24','24e','25'))))";
+                             OR COALESCE(pii.vat_classification_code, pi.vat_classification_code) IN ({$rcCodes}))))";
         }
 
         // Období odpočtu (tuzemská plnění). Zákonně rozhoduje datum, kdy plátce doklad
@@ -583,8 +659,14 @@ final class VatLedgerService
                                 AND COALESCE(co.is_eu, 0) = 1 THEN '24e'
                            WHEN pi.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ' THEN '24'
                            WHEN pi.reverse_charge = 1 THEN '5'
-                           WHEN pii.vat_rate_snapshot >= ?    THEN '40'
-                           WHEN pii.vat_rate_snapshot > 0     THEN '41'
+                           WHEN pii.vat_rate_snapshot >= ? - 0.5 THEN '40'
+                           -- Jen ČESKÁ snížená sazba (12 %, historicky 10/15). Nenamapovaná
+                           -- cizí sazba (DE 19 %) tudy dřív dostala '41' → ř. 41 + KH B.3,
+                           -- tedy ODPOČET NĚMECKÉ DANĚ. SSOT
+                           -- (PurchaseInvoiceRepository::defaultClassificationCode) tohle
+                           -- pásmo vědomě nemapuje a fallback ho nesmí přebít; doklad bez
+                           -- kódu pojmenuje varování missing_vat_classification.
+                           WHEN pii.vat_rate_snapshot BETWEEN 5 AND 15 THEN '41'
                            ELSE NULL
                        END
                    ) AS code,
@@ -645,7 +727,7 @@ final class VatLedgerService
                AND (COALESCE(pii.vat_deduction, pi.vat_deduction) <> 'none'
                     OR (COALESCE(pii.total_vat, 0) = 0
                         AND (pi.reverse_charge = 1
-                             OR COALESCE(pii.vat_classification_code, pi.vat_classification_code) IN ('5','23','24','24e','25'))))
+                             OR COALESCE(pii.vat_classification_code, pi.vat_classification_code) IN ({$rcCodes}))))
                -- § 72: nárok na odpočet jen z plnění přijatých v době plátcovství. Doklad
                -- s DUZP mimo plátcovství (před registrací / po zrušení) do odpočtu nepatří —
                -- majetek při registraci řeší § 79 vlastní agendou (ř. 45). Samovyměření
@@ -658,7 +740,7 @@ final class VatLedgerService
                AND {$periodExpr} BETWEEN ? AND ?
           ORDER BY {$periodExpr}, pi.id, pii.id
         ");
-        $stmt->execute([$bucket, $supplierId, $start, $end]);
+        $stmt->execute([$standardRate, $supplierId, $start, $end]);
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
@@ -795,6 +877,29 @@ final class VatLedgerService
             }
             if ($secondaryLine === '43') {
                 $secondaryLine = '44';
+            }
+        }
+
+        // Totéž pro BĚŽNÁ tuzemská plnění: dvojice ř. 1↔2 (vystavené) a 40↔41 (přijaté).
+        // Ručně zvolený kód pro základní sazbu na 12% řádku (překlep v editoru, import
+        // s pevným kódem) jinak pošle základ na ř. 1/40, zatímco KH bucketuje podle
+        // SKUTEČNÉ sazby a týž základ dá do 12% sloupce → přiznání a KH se rozejdou.
+        // Cross-check to neodhalí, protože porovnává jen součet obou sazeb. Rozhoduje
+        // sazba na řádku, ne kód: sazba je snapshot z dokladu a tu daň dodavatel opravdu
+        // účtoval. Krácené klíče (přípona „k") tu být nemůžou — přiřazují se až níž.
+        // Spouští se JEN při rozporu mezi sazbou klasifikace a sazbou řádku. Samotná
+        // dvojice řádek/sazba nestačí: per-tenant override smí kód '40' vědomě namapovat
+        // na ř. 41 (číselník to umožňuje) a takové mapování se přebít nesmí — tam sazba
+        // kódu se sazbou řádku SOUHLASÍ, rozchází se až s výchozím významem řádku.
+        $clsfRate = $clsf !== null && ($clsf['vat_rate'] ?? null) !== null ? (float) $clsf['vat_rate'] : null;
+        $rateContradictsCode = $clsfRate !== null && $clsfRate > 0
+            && (($clsfRate >= $bucket) !== ($vatRate >= $bucket));
+        if (!$isRc && $vatRate > 0 && $rateContradictsCode) {
+            $domesticPairs = $vatRate < $bucket
+                ? ['1' => '2', '40' => '41']   // kód pro základní sazbu na sníženém řádku
+                : ['2' => '1', '41' => '40'];  // a obráceně
+            if ($primaryLine !== null && isset($domesticPairs[$primaryLine])) {
+                $primaryLine = $domesticPairs[$primaryLine];
             }
         }
 
@@ -978,7 +1083,7 @@ final class VatLedgerService
                    COALESCE(cd.tax_date, cd.issue_date) AS tax_date, cd.issue_date,
                    1 AS exchange_rate, 'CZK' AS currency,
                    cd.total_amount AS inv_total, 0 AS rc_flag,
-                   'full' AS vat_deduction, 100 AS vat_deduction_percent,
+                   cl.vat_deduction, cl.vat_deduction_percent,
                    COALESCE(cd.partner_name, '') AS counterparty_name, cd.partner_dic AS counterparty_dic,
                    'CZ' AS country_iso2, 0 AS country_is_eu, 0 AS is_fixed_asset,
                    COALESCE(cl.vat_classification_code,
@@ -992,6 +1097,14 @@ final class VatLedgerService
              WHERE cd.supplier_id = ?
                AND cd.vat_mode = 'vat'
                AND cd.invoice_id IS NULL AND cd.purchase_invoice_id IS NULL
+               -- Rozsah nároku na odpočet (migrace 1120) platí i pro pokladnu: VPD za
+               -- reprezentaci označený jako bez nároku na odpočet nesmí do evidence, jinak by si uživatel
+               -- odečetl daň, kterou u téhož dokladu v podobě přijaté faktury nedostane
+               -- (tentýž filtr má fetchPurchases). Výdejka = přijaté plnění (doc_type='out');
+               -- u příjmového dokladu je to tržba a nárok na odpočet se na ni nevztahuje.
+               -- Výjimka pro reverse charge tu není potřeba: hotovostní doklad je
+               -- z konstrukce tuzemské zdanitelné plnění (rc_flag = 0, viz komentář výše).
+               AND (cd.doc_type = 'in' OR cl.vat_deduction <> 'none')
                AND {$statusFilter}
                AND COALESCE(cd.tax_date, cd.issue_date) BETWEEN ? AND ?
           ORDER BY COALESCE(cd.tax_date, cd.issue_date), cd.id, cl.id
