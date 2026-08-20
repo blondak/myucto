@@ -27,9 +27,18 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
  *
  * ## Co vyloučenou dobu netvoří a nechává řádek beze změny
  *
- * `vacation` (dovolená se proplácí a pojištění běží dál) a `employer_obstacle`
- * (překážka na straně zaměstnavatele s náhradou mzdy). Ani jedno nesnižuje
- * dobu pojištění ani netvoří vyloučenou dobu.
+ * `vacation` (dovolená se proplácí a pojištění běží dál), `employer_obstacle`
+ * (překážka na straně zaměstnavatele s náhradou mzdy) a `compensatory_time_off`
+ * (náhradní volno za přesčas podle § 114 odst. 3 zákoníku práce). Ani jedno
+ * nesnižuje dobu pojištění ani netvoří vyloučenou dobu.
+ *
+ * U náhradního volna je to úsudek z výčtu atributů, ne z primárního textu
+ * zákona: žádný z atributů vyloučených dob, které ELDP zná, na něj nesedí —
+ * 10358–10362 jsou dávky nemocenského pojištění a 10536 (§ 16 odst. 4 písm. j)
+ * zákona č. 155/1995 Sb.) je o době, po kterou podle rozhodnutí soudu nebo
+ * mimosoudní dohody nadále trval pracovní vztah po neplatném skončení. Úplný
+ * výčet § 16 odst. 4 zákona č. 155/1995 Sb. v repozitáři doložený není; opora
+ * je ve výčtu atributů ELDP a v doslovném znění písm. j) z podkladů ČSSZ.
  *
  * ## Co je fail-closed a proč
  *
@@ -71,15 +80,22 @@ final class EldpExcludedPeriodDeriver
         'paternity' => 'otcovska',
     ];
 
-    /** Druhy absence, které dobu pojištění ani vyloučenou dobu nemění. */
-    private const NEUTRAL_TYPES = ['vacation', 'employer_obstacle'];
+    /**
+     * Druhy absence, které dobu pojištění ani vyloučenou dobu nemění.
+     *
+     * `compensatory_time_off` je tu proto, že pojistný vztah po dobu čerpání
+     * náhradního volna trvá dál a žádný atribut vyloučené doby, který ELDP zná,
+     * na něj nesedí — 10536 je podle § 16 odst. 4 písm. j) zákona č. 155/1995 Sb.
+     * o době trvání pracovního vztahu po neplatném skončení, ne o volnu za
+     * přesčas. Mez důkazu: úplný výčet § 16 odst. 4 v repozitáři doložený není.
+     */
+    private const NEUTRAL_TYPES = ['vacation', 'employer_obstacle', 'compensatory_time_off'];
 
     /** Druhy absence, u kterých modul nemá doložený způsob výpočtu. */
     private const UNSUPPORTED_TYPES = [
         'unpaid_leave' => 'neplacené volno nelze bez dalšího údaje rozdělit mezi omluvenou nepřítomnost a odečítané dny',
         'parental' => 'rodičovská dovolená se řeší kódem ELDP a přerušením pojištění, ne vyloučenou dobou',
         'employee_obstacle' => 'u překážky na straně zaměstnance není doloženo, zda za ni náleží náhrada příjmu',
-        'compensatory_time_off' => 'náhradní volno za přesčas modul nezařazuje: § 16 odst. 4 zákona č. 187/2006 Sb. ho mezi vyloučené doby nejmenuje a atribut podle písm. j) modul neplní vůbec',
         'other' => 'nerozlišený druh absence',
     ];
 

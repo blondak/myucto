@@ -173,6 +173,32 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         }
     }
 
+    public function testCompensatoryTimeOffIsNeutralAndDoesNotBlockTheStatement(): void
+    {
+        $revisions = $this->wholeYear(2025);
+        $revisions[5] = $this->revision(
+            2025,
+            6,
+            absences: [[
+                'id' => 9200,
+                'absence_type' => 'compensatory_time_off',
+                'date_from' => '2025-06-02',
+                'date_to' => '2025-06-06',
+            ]],
+        );
+
+        $statement = $this->build($revisions);
+
+        $sections = $statement->sections();
+        self::assertCount(1, $sections);
+        self::assertSame(365, $sections[0]['insurance_days']);
+        self::assertSame(0, $sections[0]['excluded_days_total']);
+        foreach ($sections[0]['excluded_days'] as $component => $days) {
+            self::assertSame(0, $days, "Náhradní volno se promítlo do {$component}.");
+        }
+        self::assertSame([], $sections[0]['excluded_days_provenance']);
+    }
+
     public function testDeductedDaysMustBeConfirmedExplicitly(): void
     {
         $confirmation = $this->confirmation();
