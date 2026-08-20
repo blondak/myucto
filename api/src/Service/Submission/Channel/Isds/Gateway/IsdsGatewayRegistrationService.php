@@ -30,7 +30,7 @@ use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
  * končí pojmenovanou výjimkou. Nikdy se nepokračuje „naprázdno" — odeslání
  * podání není operace, u které by mělo smysl doufat.
  */
-final readonly class IsdsGatewayRegistrationService
+final readonly class IsdsGatewayRegistrationService implements IsdsGatewayRegistrationSource
 {
     private const CONTEXT_CERTIFICATE = 'isds:gateway-certificate';
     private const CONTEXT_PASSPHRASE = 'isds:gateway-passphrase';
@@ -288,6 +288,32 @@ final readonly class IsdsGatewayRegistrationService
         $row = $this->repository->findPublic($environment);
 
         return $row !== null && $row['is_active'] === true;
+    }
+
+    /**
+     * Je brána nastavená natolik, že má smysl na ni v kontejneru nabindovat
+     * {@see GatewayIsdsTransport} místo `UnavailableIsdsTransport`?
+     *
+     * Oproti {@see isUsable()} trvá navíc na certifikátu: bez něj se ke službám
+     * brány nedovoláme vůbec (kap. 3.1 bod 4), takže by adaptér uživateli
+     * sliboval cestu, která neexistuje. Otisk je v `PUBLIC_COLUMNS`, takže se
+     * kvůli téhle otázce nesahá na ciphertext.
+     *
+     * **Není to povolení k odeslání.** Tím zůstává {@see load()}, který se
+     * volá až v okamžiku odesílání a hází pojmenované chyby. Tohle rozhoduje
+     * jen o tom, kterou překážku uživatel uvidí.
+     */
+    public function isDispatchReady(string $environment): bool
+    {
+        if (!in_array($environment, self::ENVIRONMENTS, true)) {
+            return false;
+        }
+        $row = $this->repository->findPublic($environment);
+
+        return $row !== null
+            && $row['is_active'] === true
+            && is_string($row['certificate_fingerprint'] ?? null)
+            && $row['certificate_fingerprint'] !== '';
     }
 
     // ───────────────────────── interní ─────────────────────────
