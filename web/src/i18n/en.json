@@ -15315,7 +15315,9 @@
             "opening": "Opening balance",
             "documents": "Invoices",
             "cash": "Cash",
-            "bank": "Bank"
+            "bank": "Bank",
+            "account_settlements": "Set-offs against an account",
+            "advance_settlements": "Advance settlements"
         },
         "report_source": "Source",
         "report_ready": "Ready",

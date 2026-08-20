@@ -236,6 +236,53 @@ final class InvoiceSettlementServiceTest extends TestCase
         self::assertNotSame('paid', $this->purchaseStatus($pfId));
     }
 
+    /**
+     * Doúčtování zápočtu, kterému chybí účetní zápis.
+     *
+     * Reálný případ: `invoice_settlements.journal_entry_id` má `ON DELETE SET NULL`, takže
+     * hromadné přeúčtování deníku — které zápočty neumělo — vazbu tiše zruší. Zůstane
+     * evidovaná úhrada bez zápisu: doklad tvrdí „uhrazeno", 321 je otevřené, v detailu
+     * chybí proklik a uzávěrková kontrola hlásí díru, kterou uživatel nemá jak zavřít.
+     */
+    public function testPostMissingEntriesRepostsOrphanedSettlement(): void
+    {
+        $vendor = $this->client('Dodavatel osiřelý zápočet', false, true);
+        $pfId = $this->purchaseInvoice('PF-2099-600', $vendor, 1500.00);
+
+        $res = $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
+            'settled_on' => self::YEAR . '-06-30', 'amount' => 1500.00, 'account_id' => $this->accountId('365'),
+        ], $this->userId);
+        $settlementId = (int) $res['id'];
+        $originalEntry = (int) $res['journal_entry_id'];
+
+        // Simulace hromadného přeúčtování: zápis zmizí, FK vazbu vynuluje.
+        $pdo = $this->db->pdo();
+        $pdo->prepare('DELETE FROM journal_entry_lines WHERE entry_id = ?')->execute([$originalEntry]);
+        $pdo->prepare('DELETE FROM journal_entries WHERE id = ?')->execute([$originalEntry]);
+        $check = $pdo->prepare('SELECT journal_entry_id FROM invoice_settlements WHERE id = ?');
+        $check->execute([$settlementId]);
+        self::assertNull($check->fetchColumn(), 'FK ON DELETE SET NULL vazbu opravdu zruší.');
+
+        $report = $this->service->postMissingEntries($this->supplierId, $this->userId);
+
+        self::assertGreaterThanOrEqual(1, $report['candidates']);
+        self::assertGreaterThanOrEqual(1, $report['posted']);
+        self::assertSame(0, $report['failed'], implode(' | ', $report['errors']));
+
+        $check->execute([$settlementId]);
+        $newEntry = $check->fetchColumn();
+        self::assertNotFalse($newEntry);
+        self::assertNotNull($newEntry, 'Zápočet má zase účetní zápis.');
+
+        $byAcc = $this->linesByAccountCode((int) $newEntry);
+        self::assertEqualsWithDelta(1500.00, $byAcc['321']['debit'], 0.001, 'Doúčtuje se táž kontace jako původně.');
+        self::assertEqualsWithDelta(1500.00, $byAcc['365']['credit'], 0.001);
+
+        // Opakované spuštění už nemá co dělat — doúčtování je idempotentní.
+        $again = $this->service->postMissingEntries($this->supplierId, $this->userId);
+        self::assertSame(0, $again['posted']);
+    }
+
     public function testCancelReversesEntryAndUndoesPayment(): void
     {
         $client = $this->client('Odběratel', true, false);

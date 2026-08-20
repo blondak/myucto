@@ -77,12 +77,26 @@ final class PendingBackfillCounter
         $stmt->execute($params);
         $bankTransactions = (int) $stmt->fetchColumn();
 
+        // Zápočty proti účtu bez zápisu. Evidovaná úhrada, o které deník neví: doklad tvrdí
+        // „uhrazeno", saldokontní účet je ale otevřený a v detailu chybí proklik na zaúčtování.
+        // Vzniká v daňové evidenci (deník tam není) a při hromadném přeúčtování, které zápočty
+        // neumělo — `journal_entry_id` má ON DELETE SET NULL, takže vazba tiše zmizí.
+        $settlementDate = $from !== null ? ' AND settled_on >= ?' : '';
+        $stmt = $pdo->prepare(
+            "SELECT COUNT(*) FROM invoice_settlements
+              WHERE supplier_id = ? AND status = 'confirmed'
+                AND journal_entry_id IS NULL{$settlementDate}"
+        );
+        $stmt->execute($from !== null ? [$supplierId, $from] : [$supplierId]);
+        $settlements = (int) $stmt->fetchColumn();
+
         return [
             'cash_documents' => $cashDocuments,
             'invoices' => $invoices,
             'purchase_invoices' => $purchaseInvoices,
             'bank_transactions' => $bankTransactions,
-            'total' => $cashDocuments + $invoices + $purchaseInvoices + $bankTransactions,
+            'settlements' => $settlements,
+            'total' => $cashDocuments + $invoices + $purchaseInvoices + $bankTransactions + $settlements,
         ];
     }
 }

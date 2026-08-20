@@ -15315,7 +15315,9 @@
             "opening": "Otevírací rozvaha",
             "documents": "Faktury",
             "cash": "Pokladna",
-            "bank": "Banka"
+            "bank": "Banka",
+            "account_settlements": "Zápočty proti účtu",
+            "advance_settlements": "Zúčtování záloh"
         },
         "report_source": "Zdroj",
         "report_ready": "Připraveno",

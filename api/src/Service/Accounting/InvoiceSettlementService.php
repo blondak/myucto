@@ -244,6 +244,89 @@ final class InvoiceSettlementService
         }
     }
 
+    /**
+     * Doúčtuje POTVRZENÉ zápočty, které nemají účetní zápis.
+     *
+     * Vzniká to dvěma cestami. Zápočet pořízený v daňové evidenci zápis nikdy nedostal
+     * (deník tam není) a při přechodu na podvojné účetnictví ho nikdo nedoplnil. A hlavně:
+     * `invoice_settlements.journal_entry_id` má `ON DELETE SET NULL`, takže hromadné
+     * přeúčtování deníku — které zápočty neumělo — je odpojilo. Zůstala evidovaná úhrada
+     * bez zápisu: doklad tvrdí „uhrazeno", saldokontní účet je otevřený, proklik z detailu
+     * chybí a uzávěrková kontrola hlásí díru, kterou uživatel nemá jak zavřít.
+     *
+     * Zápis se skládá z ULOŽENÝCH údajů zápočtu (částka, protiúčet, datum), ne z aktuálního
+     * stavu dokladu — ten už je dávno `paid` a znovu validovat by ho nešlo. Doklad se tu
+     * proto ani nepřestavuje: mění se jen chybějící účetní stopa.
+     *
+     * @return array{candidates:int, posted:int, failed:int, errors:list<string>}
+     */
+    public function postMissingEntries(int $supplierId, ?int $userId = null): array
+    {
+        $report = ['candidates' => 0, 'posted' => 0, 'failed' => 0, 'errors' => []];
+        if ($this->supplierAccountingMode($supplierId) === 'tax_evidence') {
+            return $report;   // daňová evidence deník nemá — není kam doúčtovat
+        }
+
+        $rows = $this->repo->unpostedConfirmed($supplierId);
+        $report['candidates'] = count($rows);
+
+        foreach ($rows as $row) {
+            $pdo = $this->db->pdo();
+            $ownTx = !$pdo->inTransaction();
+            if ($ownTx) {
+                $pdo->beginTransaction();
+            }
+            try {
+                $docType = (string) $row['doc_type'];
+                $counter = $this->documentAccount($supplierId, $docType, (int) $row['doc_id']);
+                $lines = $this->buildLines($docType, (string) $row['account_code'], $counter, (float) $row['amount']);
+                $entryId = $this->posting->postDocument($supplierId, 'settlement', (int) $row['id'], $lines, [
+                    'entry_date'  => (string) $row['settled_on'],
+                    'document_no' => (string) ($row['doc_no'] ?? ''),
+                    'description' => 'Zápočet ' . (string) ($row['doc_no'] ?? '') . ' proti účtu '
+                        . (string) $row['account_code']
+                        . ($row['note'] !== null && $row['note'] !== '' ? ' — ' . (string) $row['note'] : ''),
+                    'posted_by'   => $userId,
+                    'user_id'     => $userId,
+                ]);
+                $this->repo->setPosted((int) $row['id'], $entryId, $row['invoice_payment_id'] !== null
+                    ? (int) $row['invoice_payment_id']
+                    : null);
+                if ($ownTx) {
+                    $pdo->commit();
+                }
+                $report['posted']++;
+            } catch (\Throwable $e) {
+                if ($ownTx && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                $report['failed']++;
+                $report['errors'][] = sprintf('Zápočet #%d: %s', (int) $row['id'], $e->getMessage());
+            }
+        }
+
+        return $report;
+    }
+
+    /**
+     * Saldokontní účet dokladu, na kterém zápočet visí — táž volba jako při vzniku zápočtu
+     * ({@see prepareInvoice()}, {@see preparePurchase()}), jen bez validace stavu dokladu:
+     * u doúčtování je doklad dávno vyrovnaný a znovu ho posuzovat nedává smysl.
+     */
+    private function documentAccount(int $supplierId, string $docType, int $docId): string
+    {
+        if ($docType === 'invoice') {
+            $isProforma = $this->repo->invoiceIsProforma($supplierId, $docId);
+            return $isProforma
+                ? $this->ruleAccount($supplierId, 'advance.received.collection', 'credit', '324')
+                : $this->ruleAccount($supplierId, 'payment.receivable.settlement', 'credit', '311');
+        }
+        $isAdvance = $this->repo->purchaseIsAdvance($supplierId, $docId);
+        return $isAdvance
+            ? $this->ruleAccount($supplierId, 'advance.paid.payment', 'debit', '314')
+            : $this->ruleAccount($supplierId, 'payment.payable.settlement', 'debit', '321');
+    }
+
     /** @return array<string,mixed> */
     public function get(int $supplierId, int $settlementId): array
     {

@@ -37,6 +37,55 @@ final class InvoiceSettlementRepository
         return (int) $pdo->lastInsertId();
     }
 
+    /**
+     * Potvrzené zápočty BEZ účetního zápisu — kandidáti na doúčtování.
+     *
+     * Vznikají dvěma cestami: zápočet pořízený v daňové evidenci (deník tam není) a zápočet,
+     * jehož zápis smazalo hromadné přeúčtování deníku — `journal_entry_id` má
+     * `ON DELETE SET NULL`, takže vazba tiše zmizí a zůstane evidovaná úhrada bez zápisu.
+     * Číslo dokladu se tahá rovnou, ať se pro popis zápisu nemusí chodit do dvou tabulek.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function unpostedConfirmed(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT s.*, a.account_code,
+                    CASE WHEN s.doc_type = 'invoice'
+                         THEN (SELECT COALESCE(NULLIF(i.varsymbol, ''), CONCAT('#', i.id))
+                                 FROM invoices i WHERE i.id = s.doc_id AND i.supplier_id = s.supplier_id)
+                         ELSE (SELECT COALESCE(NULLIF(p.vendor_invoice_number, ''), NULLIF(p.varsymbol, ''), CONCAT('#', p.id))
+                                 FROM purchase_invoices p WHERE p.id = s.doc_id AND p.supplier_id = s.supplier_id)
+                    END AS doc_no
+               FROM invoice_settlements s
+               JOIN chart_of_accounts a ON a.id = s.account_id
+              WHERE s.supplier_id = ? AND s.status = 'confirmed' AND s.journal_entry_id IS NULL
+              ORDER BY s.settled_on, s.id"
+        );
+        $stmt->execute([$supplierId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /** Je vydaný doklad zálohová proforma? (rozhoduje saldokontní účet 324 vs. 311) */
+    public function invoiceIsProforma(int $supplierId, int $docId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT invoice_type FROM invoices WHERE id = ? AND supplier_id = ?"
+        );
+        $stmt->execute([$docId, $supplierId]);
+        return (string) ($stmt->fetchColumn() ?: '') === 'proforma';
+    }
+
+    /** Je přijatý doklad zálohová faktura? (rozhoduje saldokontní účet 314 vs. 321) */
+    public function purchaseIsAdvance(int $supplierId, int $docId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT document_kind FROM purchase_invoices WHERE id = ? AND supplier_id = ?"
+        );
+        $stmt->execute([$docId, $supplierId]);
+        return (string) ($stmt->fetchColumn() ?: '') === 'advance';
+    }
+
     /** Řádkový zámek na dobu transakce — serializuje souběžné create()/cancel(). */
     public function lockSettlement(int $supplierId, int $id): ?array
     {

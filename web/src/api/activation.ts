@@ -2,13 +2,15 @@ import { api } from './client'
 
 export type ActivationState = 'none' | 'draft' | 'running' | 'completed' | 'failed'
 export type BackfillJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
-export type BackfillPhase = 'opening' | 'documents' | 'cash' | 'bank'
+export type BackfillPhase = 'opening' | 'documents' | 'cash' | 'bank' | 'advance_settlements' | 'account_settlements'
 
 export interface PendingBackfillCounts {
   cash_documents: number
   invoices: number
   purchase_invoices: number
   bank_transactions: number
+  /** Zápočty proti účtu bez účetního zápisu (daňová evidence, hromadné přeúčtování). */
+  settlements: number
   total: number
 }
 

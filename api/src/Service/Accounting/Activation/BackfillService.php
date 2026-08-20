@@ -21,6 +21,7 @@ final class BackfillService
         private readonly BankPostingBackfill $bank,
         private readonly PendingBackfillCounter $pending,
         private readonly AccountingModeRepository $accountingModes,
+        private readonly \MyInvoice\Service\Accounting\InvoiceSettlementService $settlements,
         private readonly ActivityLogger $logger,
     ) {}
 
@@ -165,6 +166,34 @@ final class BackfillService
                 $bankReport['suggested'] ?? 0,
                 $bankReport['skipped'] ?? 0,
             ));
+            if ($cancelled()) {
+                $this->cancel($jobId, $supplierId, $report);
+                return;
+            }
+
+            // Zápočty proti účtu (invoice_settlements) — evidovaná úhrada, která nemá zápis.
+            // Buď vznikla v daňové evidenci (deník tam není), nebo jí zápis smazalo hromadné
+            // přeúčtování: `journal_entry_id` má ON DELETE SET NULL, takže vazba tiše zmizí
+            // a zůstane doklad, který tvrdí „uhrazeno", zatímco saldokonto je otevřené.
+            if ($dryRun) {
+                $report['phases']['account_settlements'] = ['status' => 'skipped_dry_run'];
+            } else {
+                $this->jobs->updateProgress($jobId, 'account_settlements', $processed);
+                $offsetReport = $this->settlements->postMissingEntries($supplierId, $userId);
+                $report['phases']['account_settlements'] = $offsetReport;
+                $report['failed_total'] += $offsetReport['failed'];
+                if ($offsetReport['candidates'] > 0) {
+                    $this->jobs->appendLog($jobId, sprintf(
+                        'Zápočty proti účtu: kandidátů %d, doúčtováno %d, chyby %d.',
+                        $offsetReport['candidates'],
+                        $offsetReport['posted'],
+                        $offsetReport['failed'],
+                    ));
+                }
+                foreach ($offsetReport['errors'] as $err) {
+                    $this->jobs->appendLog($jobId, $err);
+                }
+            }
             if ($cancelled()) {
                 $this->cancel($jobId, $supplierId, $report);
                 return;
