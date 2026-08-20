@@ -26,7 +26,16 @@ const labelClass = 'block text-xs font-medium text-neutral-600'
     <legend class="text-sm font-semibold text-neutral-900">
       {{ t('payroll.people.quick_edit.contact_title') }}
     </legend>
-    <p v-if="currentAddressMasked" class="-mt-3 text-xs text-neutral-500">
+    <!--
+      Celá sekce je nepovinná: server bydliště ani kontakty na zápisu profilu
+      nevyžaduje (kolekce mají výchozí prázdný seznam). Proto tu není jediná
+      hvězdička a proto to věta říká nahlas — dřív to vypadalo jako povinný
+      blok, který drží uložení karty.
+    -->
+    <p class="-mt-3 text-xs text-neutral-500">
+      {{ t('payroll.people.quick_edit.contact_optional_hint') }}
+    </p>
+    <p v-if="currentAddressMasked" class="-mt-1 text-xs text-neutral-500">
       {{ t('payroll.people.quick_edit.current_address') }}:
       {{ currentAddressMasked }}
     </p>

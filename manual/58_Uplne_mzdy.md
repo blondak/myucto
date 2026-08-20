@@ -139,6 +139,12 @@ přímo v běžné editaci; úplná osobní evidence dál uchovává jejich 1:N 
 Rodné číslo se v seznamu nezobrazuje. Tlačítko zůstává viditelné
 i uživateli bez práva zápisu, ale je neaktivní a vysvětlí chybějící oprávnění.
 
+Hvězdička u popisku znamená, že bez toho pole uložení neprojde. Při zakládání
+jsou takové jen tři: jméno, druh vztahu a plánovaný nástup. Rodné číslo, datum
+narození ani mzda povinné nejsou a jdou doplnit kdykoli později — rodné číslo
+je potřeba až u přihlášky na ČSSZ (kde stačí i EČP) a u oznámení zdravotní
+pojišťovně.
+
 Toolbar nad seznamem umožňuje hledání podle jména, přepnutí mezi aktivními,
 všemi a kartami vyžadujícími doplnění a rychlý přechod na měsíční zadání mezd.
 
@@ -336,6 +342,27 @@ nepřepíše. Historie drží zejména:
 - mzdovou účtárnu, pojistnou účast, A1 a cizí předpisy, rizikovou práci,
   daňový režim a prohlášení k dani;
 - příznak primárního pracovního vztahu a důvod změny.
+
+Formulář nové verze podmínek je rozdělený na dvě části. Nahoře je jen to, co se
+běžně mění: účinnost, plánovaný nástup, **mzdová účtárna**, týdenní hodiny,
+úvazek, data smlouvy, příznak primárního vztahu, prohlášení k dani a nepovinný
+důvod změny. Zbytek — evidence pro JMHZ, režimy sociálního a zdravotního
+pojištění, daňový režim, cizí předpisy, sazbová kategorie § 5a a sleva § 7a —
+je ve sbalené části **Další údaje**; ta se sama otevře jen u vztahu, kde už je
+něco z ní vyplněné.
+
+Hvězdička u popisku označuje pole, bez kterého uložení neprojde. Důvod změny
+mezi ně nepatří — vyplň ho, jen když chceš, aby v časové ose bylo vidět proč.
+
+Mzdovou účtárnu vybíráš přímo na kartě vztahu. Je to jediné místo, kde jde
+změnit: z účtárny vychází variabilní symbol zaměstnavatele pro odvod sociálního
+pojistného a mzdový běh se dá na účtárnu zúžit, takže vztah bez ní nemá čím
+vykázat odvod. Novému vztahu ji aplikace dosadí z výchozí účtárny
+zaměstnavatele; firmě s víc účtárnami nabídne výběr už při zakládání vztahu.
+Vztah, který účtárnu nemá (typicky převzatá data), na to na kartě upozorní —
+uložení to ale nikde neblokuje, blokátorem se to stane až při uzamčení vstupů
+mzdového běhu. V nabídce se objeví jen aktivní účtárny; deaktivovaná účtárna,
+kterou vztah drží, v ní zůstává, aby ji úprava podmínek tiše nezměnila.
 
 U odměny člena statutárního orgánu, u dohody o pracovní činnosti a u práce
 společníka pro vlastní společnost přibývá v podmínkách pole **Účast na

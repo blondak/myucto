@@ -7,6 +7,7 @@ import {
   payrollApi,
   type PayrollEmployment,
   type PayrollEmploymentCreatePayload,
+  type PayrollOffice,
   type PayrollPeopleFilter,
   type PayrollPerson,
   type PayrollPersonCreatePayload,
@@ -18,7 +19,9 @@ import {
 } from '@/api/payroll'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import RequiredMark from '@/components/ui/RequiredMark.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import { loadPayrollOffices } from '@/composables/usePayrollOffices'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -101,6 +104,27 @@ const relationOptions = computed(() => relationTypes.map(type => ({
   value: type,
   label: relationLabel(type),
 })))
+/**
+ * Mzdové účtárny pro výběr u nového vztahu.
+ *
+ * Nabízejí se jen firmě, která má víc než jednu aktivní účtárnu — jinak by to
+ * bylo pole s jedinou možností, kterou stejně dosadí server (výchozí účtárna
+ * zaměstnavatele). Firmě s víc účtárnami je naopak bez výběru nutil první vztah
+ * na výchozí a opravit se to dalo až novou verzí podmínek.
+ */
+const offices = ref<PayrollOffice[]>([])
+const officeOptions = computed(() => (offices.value.length > 1
+  ? offices.value.map(office => ({
+    value: office.id,
+    label: office.name,
+    secondary: office.code,
+  }))
+  : []))
+const selectedOfficeOption = computed(
+  () => officeOptions.value.find(
+    option => option.value === newEmployment.value?.terms.office_id,
+  ) ?? null,
+)
 const employeeForm = reactive({
   full_name: '',
   birth_date: '',
@@ -397,6 +421,8 @@ async function toggleDetail(person: PayrollPersonListItem) {
 function startCreate(personId: number) {
   const start = todayIso()
   creatingForId.value = personId
+  // Nabídka se drží v paměti aplikace, takže tohle nestojí požadavek navíc.
+  void loadPayrollOffices().then((value) => { offices.value = value })
   newEmploymentMonthlyGross.value = null
   newEmploymentError.value = ''
   newEmployment.value = employmentDraft(
@@ -685,6 +711,13 @@ onMounted(async () => {
         <div>
           <h2 class="text-base font-semibold text-neutral-900">{{ t('payroll.people.create.title') }}</h2>
           <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.people.create.subtitle') }}</p>
+          <!--
+            Server při zakládání vyžaduje jen jméno, druh vztahu a datum
+            nástupu (`PayrollPersonCreateValidator`). Rodné číslo, datum
+            narození ani mzda povinné nejsou — a formulář to teď říká rovnou,
+            místo aby to uživatel zkoušel.
+          -->
+          <p class="mt-1 text-xs text-neutral-500" data-test="new-employee-required-hint">{{ t('payroll.people.create.required_hint') }}</p>
         </div>
         <button type="button" :class="btnOutline('neutral')" @click="closeEmployeeForm">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
@@ -693,7 +726,7 @@ onMounted(async () => {
       </div>
       <div class="mt-4 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <label class="min-w-0 text-xs text-neutral-600 sm:col-span-2">
-          {{ t('payroll.people.create.full_name') }} *
+          {{ t('payroll.people.create.full_name') }} <RequiredMark />
           <input v-model="employeeForm.full_name" required class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employee-name">
         </label>
         <label class="min-w-0 text-xs text-neutral-600">
@@ -708,7 +741,7 @@ onMounted(async () => {
           <input v-model="employeeForm.birth_date" type="date" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
         </label>
         <label class="min-w-0 text-xs text-neutral-600">
-          {{ t('payroll.people.create.relation_type') }} *
+          {{ t('payroll.people.create.relation_type') }} <RequiredMark />
           <SearchableSelect
             v-model="employeeForm.relation_type"
             class="mt-1"
@@ -719,7 +752,7 @@ onMounted(async () => {
           />
         </label>
         <label class="min-w-0 text-xs text-neutral-600">
-          {{ t('payroll.people.create.planned_start') }} *
+          {{ t('payroll.people.create.planned_start') }} <RequiredMark />
           <input v-model="employeeForm.planned_start_on" required type="date" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employee-planned-start">
         </label>
         <label class="min-w-0 text-xs text-neutral-600">
@@ -920,10 +953,25 @@ onMounted(async () => {
             si označení přes „…" na kartě vztahu.
           -->
           <label class="text-xs text-neutral-600">
-            {{ t('payroll.people.relation_type') }}
+            {{ t('payroll.people.relation_type') }} <RequiredMark />
             <SearchableSelect v-model="newEmployment.relation_type" class="mt-1" :options="relationOptions" :clearable="false" accent="payroll" />
           </label>
-          <label class="text-xs text-neutral-600">{{ t('payroll.people.planned_start') }}<input v-model="newEmployment.terms.planned_start_on" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.planned_start') }} <RequiredMark /><input v-model="newEmployment.terms.planned_start_on" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <label v-if="officeOptions.length > 0" class="text-xs text-neutral-600">
+            {{ t('payroll.people.office_label') }} <RequiredMark />
+            <SearchableSelect
+              :model-value="newEmployment.terms.office_id"
+              :options="officeOptions"
+              :selected-option="selectedOfficeOption"
+              :clearable="false"
+              required
+              :placeholder="t('payroll.people.office_select')"
+              accent="payroll"
+              class="mt-1"
+              data-test="new-employment-office"
+              @update:model-value="newEmployment.terms.office_id = $event === null ? null : Number($event)"
+            />
+          </label>
           <label class="text-xs text-neutral-600">{{ t('payroll.people.weekly_hours') }}<input v-model="newEmployment.terms.weekly_hours" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
           <label class="text-xs text-neutral-600">{{ t('payroll.people.create.monthly_gross') }}<input v-model.number="newEmploymentMonthlyGross" type="number" min="0" step="1" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
           <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="newEmployment.terms.is_primary" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.primary') }}</label>

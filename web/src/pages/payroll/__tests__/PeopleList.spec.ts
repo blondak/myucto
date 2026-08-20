@@ -14,6 +14,7 @@ const m = vi.hoisted(() => ({
   routerReplace: vi.fn(),
   deletePerson: vi.fn(),
   capabilities: vi.fn(),
+  employerSettings: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -32,6 +33,8 @@ vi.mock('@/api/payroll', () => ({
     // Bez toho neexistovala jako funkce a `onMounted` házel TypeError JEŠTĚ před
     // `.catch()` — každý test skončil nezachycenou chybou v protokolu běhu.
     capabilities: m.capabilities,
+    // Nabídka mzdových účtáren pro nový pracovní vztah.
+    employerSettings: m.employerSettings,
   },
 }))
 
@@ -70,6 +73,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 })
 
 import PeopleList from '@/pages/payroll/PeopleList.vue'
+import { resetPayrollOffices } from '@/composables/usePayrollOffices'
 
 /** Velikost stránky, se kterou obrazovka chodí na server. */
 const PAGE_SIZE = 25
@@ -162,6 +166,8 @@ function mountPage() {
 describe('PeopleList toolbar and shared employee creation', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    // Nabídka účtáren se drží v paměti modulu na celý běh aplikace.
+    resetPayrollOffices()
     for (const key of Object.keys(m.routeQuery)) delete m.routeQuery[key]
     roster = [
       person(1, 'Alfa Aktivní', true, false),
@@ -324,6 +330,58 @@ describe('PeopleList toolbar and shared employee creation', () => {
     expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="quick-edit-stub"]').text()).toBe('1')
     expect(wrapper.get('[data-test="advanced-person-profile"]').attributes('open')).toBeUndefined()
+  })
+
+  /**
+   * Účtárnu má smysl nabízet jen firmě, která jich má víc. S jedinou účtárnou by
+   * to bylo pole s jednou možností, kterou stejně dosadí server z výchozí
+   * účtárny zaměstnavatele.
+   */
+  it.each([
+    [1, false],
+    [2, true],
+  ])('nabídne u nového vztahu výběr účtárny až od druhé účtárny (%i)', async (count, visible) => {
+    m.person.mockResolvedValue({
+      ...person(1, 'Alfa Aktivní', true, false),
+      employments: [],
+    })
+    m.employerSettings.mockResolvedValue({
+      offices: Array.from({ length: count }, (_, index) => ({
+        id: index + 1,
+        code: `O${index + 1}`,
+        name: `Účtárna ${index + 1}`,
+        social_security_variable_symbol: null,
+        is_active: true,
+        row_version: 1,
+      })),
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="action-add-employment"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="new-employment-office"]').exists()).toBe(visible)
+  })
+
+  /**
+   * Zakládání osoby vyžaduje jen jméno, druh vztahu a datum nástupu — a formulář
+   * to teď říká rovnou, místo aby to uživatel zkoušel podle chybových hlášek.
+   */
+  it('u zakládání osoby značí hvězdičkou jen povinná pole', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="add-employee"]').trigger('click')
+    await nextTick()
+
+    const form = wrapper.get('[data-test="new-employee-form"]')
+    expect(form.findAll('[data-test="required-mark"]')).toHaveLength(3)
+    expect(wrapper.get('[data-test="new-employee-required-hint"]').text())
+      .toContain('payroll.people.create.required_hint')
+    expect(form.get('[data-test="new-employee-birth-number"]').attributes('required'))
+      .toBeUndefined()
   })
 
   it('names the edited person in the header even without a structured name', async () => {

@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { payrollApi, type PayrollEmployment } from '@/api/payroll'
 
 vi.mock('@/api/payroll', () => ({
@@ -31,6 +31,13 @@ vi.mock('@/api/payroll', () => ({
     searchJmhzMunicipalities: vi.fn().mockResolvedValue([
       { code: '554782', label: 'Hlavní město Praha' },
     ]),
+    // Nabídku mzdových účtáren bere karta z nastavení zaměstnavatele.
+    employerSettings: vi.fn().mockResolvedValue({
+      offices: [
+        { id: 7, code: 'PHA', name: 'Praha', social_security_variable_symbol: null, is_active: true, row_version: 1 },
+        { id: 8, code: 'OLD', name: 'Zrušená', social_security_variable_symbol: null, is_active: false, row_version: 1 },
+      ],
+    }),
   },
 }))
 
@@ -57,6 +64,18 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 }))
 
 import EmploymentCard from '@/pages/payroll/EmploymentCard.vue'
+import { resetPayrollOffices } from '@/composables/usePayrollOffices'
+
+/**
+ * Formulář podmínek má víc SearchableSelectů (účtárna, obec) — hledání podle
+ * jména komponenty trefí ten první, takže se rozlišují podle `data-test`.
+ */
+function selectByTest(wrapper: VueWrapper, test: string) {
+  const found = wrapper.findAllComponents({ name: 'SearchableSelect' })
+    .find(component => component.attributes('data-test') === test)
+  if (!found) throw new Error(`SearchableSelect [data-test="${test}"] nenalezen`)
+  return found
+}
 
 const actionBarStub = {
   ActionBar: {
@@ -159,6 +178,10 @@ function employment(): PayrollEmployment {
 }
 
 describe('EmploymentCard', () => {
+  // Nabídka účtáren se drží v paměti modulu na celý běh aplikace; mezi případy
+  // se musí vyprázdnit, jinak by druhý test dostal seznam z prvního.
+  beforeEach(resetPayrollOffices)
+
   /**
    * Zaměstnanec převzatý z jiného zpracování dostane výzvu k doplnění úhrnů.
    * Jakmile je někdo doplní, nesmí nad nimi ta výzva viset dál — karta by
@@ -346,7 +369,7 @@ describe('EmploymentCard', () => {
     await edit!.trigger('click')
     await flushPromises()
 
-    const municipality = wrapper.findComponent({ name: 'SearchableSelect' })
+    const municipality = selectByTest(wrapper, 'jmhz-municipality')
     municipality.vm.$emit('search', 'Praha')
     await flushPromises()
     municipality.vm.$emit('update:modelValue', '554782')
@@ -365,7 +388,7 @@ describe('EmploymentCard', () => {
     )
     await reopen!.trigger('click')
     await flushPromises()
-    const reopenedMunicipality = wrapper.findComponent({ name: 'SearchableSelect' })
+    const reopenedMunicipality = selectByTest(wrapper, 'jmhz-municipality')
     reopenedMunicipality.vm.$emit('search', 'Praha')
     await flushPromises()
     reopenedMunicipality.vm.$emit('update:modelValue', '554782')
@@ -695,5 +718,105 @@ describe('EmploymentCard', () => {
 
     expect(text).toContain('payroll.people.employment_status.ended')
     expect(text).not.toContain('payroll.people.term_field.status')
+  })
+
+  /**
+   * Účtárnu nešlo vybrat NIKDE ve frontendu — karta ji jen vypisovala, přestože
+   * na ni míří blokátor běhu `employment_without_office`. Tohle je ta chybějící
+   * cesta: vybraná účtárna musí dojít v podmínkách na server.
+   */
+  it('nabídne výběr mzdové účtárny a pošle ji v nové verzi podmínek', async () => {
+    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+    })
+    const edit = wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )
+    await edit!.trigger('click')
+    await flushPromises()
+
+    const office = selectByTest(wrapper, 'terms-office')
+    // Deaktivovaná účtárna se nenabízí — vybrat jde jen aktivní.
+    expect(office.props('options')).toEqual([
+      { value: 7, label: 'Praha', secondary: 'PHA' },
+    ])
+    office.vm.$emit('update:modelValue', 7)
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2].office_id).toBe(7)
+  })
+
+  /**
+   * Chybějící účtárna je UPOZORNĚNÍ, ne zákaz: karta řekne, co kvůli ní nepůjde,
+   * ale nic na ní nezablokuje. Blokátorem se to stane až při uzamčení vstupů běhu.
+   */
+  it('u vztahu bez účtárny varuje, u vztahu s účtárnou mlčí', () => {
+    const without = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+    })
+    expect(without.find('[data-test="employment-office-missing"]').exists()).toBe(true)
+
+    const withOffice = mount(EmploymentCard, {
+      props: {
+        employment: { ...employment(), office_id: 7, office_code: 'PHA', office_name: 'Praha' },
+        canWrite: true,
+      },
+    })
+    expect(withOffice.find('[data-test="employment-office-missing"]').exists()).toBe(false)
+    expect(withOffice.get('[data-test="employment-office"]').text()).toBe('Praha')
+  })
+
+  /**
+   * Důvod změny bere server jako volitelný text (`optionalText`, 500 znaků).
+   * Formulář ho měl `required`, takže kdo si přišel opravit úvazek, musel napřed
+   * vymyslet větu do časové osy.
+   */
+  it('uloží novou verzi podmínek i bez vyplněného důvodu změny', async () => {
+    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+    })
+    const edit = wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )
+    await edit!.trigger('click')
+    await flushPromises()
+
+    const reason = wrapper.get('[data-test="terms-change-reason"]')
+    expect(reason.attributes('required')).toBeUndefined()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2].change_reason).toBeNull()
+  })
+
+  /**
+   * Podrobnosti se u běžného pracovního poměru sbalí a otevřou se samy jen tam,
+   * kde je někdo vyplnil — jinak měl formulář přes dvacet polí, ze kterých pět
+   * lidí ze šesti nepotřebuje ani jedno.
+   */
+  it('sbalí podrobnosti podmínek, dokud v nich něco není', async () => {
+    const plain = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+    })
+    await plain.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )!.trigger('click')
+    await flushPromises()
+    expect(plain.get('[data-test="terms-advanced"]').attributes('open')).toBeUndefined()
+
+    const filled = employment()
+    filled.terms[0].activity_code = '1'
+    const withDetail = mount(EmploymentCard, {
+      props: { employment: filled, canWrite: true },
+    })
+    await withDetail.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )!.trigger('click')
+    await flushPromises()
+    expect(withDetail.get('[data-test="terms-advanced"]').attributes('open')).toBeDefined()
   })
 })

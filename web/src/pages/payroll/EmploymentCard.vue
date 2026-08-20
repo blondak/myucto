@@ -10,12 +10,16 @@ import {
   type PayrollJmhzMunicipalityOption,
   type PayrollEmploymentTermsPayload,
 } from '@/api/payroll'
+import type { PayrollOffice } from '@/api/payroll'
+import { apiErrorMessage } from '@/api/errors'
 import CzIscoPicker from '@/components/payroll/CzIscoPicker.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import RequiredMark from '@/components/ui/RequiredMark.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnOutlineSm } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate } from '@/composables/useFormat'
+import { loadPayrollOffices } from '@/composables/usePayrollOffices'
 import { useToast } from '@/composables/useToast'
 import EmploymentAgendaPanel from './EmploymentAgendaPanel.vue'
 import EmploymentDimensionsPanel from './EmploymentDimensionsPanel.vue'
@@ -54,8 +58,66 @@ const jmhzOptions = ref<PayrollEmploymentJmhzEvidenceOptions | null>(null)
 const jmhzOptionsFailed = ref(false)
 const municipalityOptions = ref<PayrollJmhzMunicipalityOption[]>([])
 const municipalitiesLoading = ref(false)
+const offices = ref<PayrollOffice[]>([])
 
 const currentTerms = computed(() => props.employment.terms[0] ?? null)
+
+/**
+ * Mzdová účtárna vztahu — jediné místo, kde se dá vybrat.
+ *
+ * Účtárna byla na kartě jen K PŘEČTENÍ (řádek s kódem vztahu), přestože z ní
+ * vychází variabilní symbol zaměstnavatele pro sociální pojistné a mzdový běh
+ * se dá na účtárnu zúžit. Vztah bez ní proto shodí uzamčení vstupů běhu
+ * blokátorem `employment_without_office` — a nebylo ho čím spravit.
+ *
+ * Deaktivovaná účtárna, kterou vztah drží, zůstává v nabídce: jinak by ji výběr
+ * tiše shodil na jinou při první úpravě podmínek.
+ */
+const officeOptions = computed(() => {
+  const active = offices.value.map(office => ({
+    value: office.id,
+    label: office.name,
+    secondary: office.code,
+  }))
+  const current = props.employment.office_id
+  if (current !== null && !active.some(option => option.value === current)) {
+    active.unshift({
+      value: current,
+      label: props.employment.office_name ?? String(current),
+      secondary: props.employment.office_code ?? '',
+    })
+  }
+  return active
+})
+const selectedOfficeOption = computed(
+  () => officeOptions.value.find(option => option.value === termsForm.value?.office_id) ?? null,
+)
+/** Vztah bez účtárny — upozornění, ne zákaz: opravit se dá novou verzí podmínek. */
+const officeMissing = computed(() => props.employment.office_id === null)
+
+/**
+ * Podrobnosti (JMHZ evidence, režimy pojištění a daně, sazbové kategorie § 5a
+ * a slevy § 7a) se otevřou samy jen tam, kde je někdo vyplnil. Běžný pracovní
+ * poměr je nechá sbalené — bez toho měl formulář nové verze podmínek přes
+ * dvacet polí, ze kterých pět lidí ze šesti nepotřebuje ani jedno.
+ */
+const advancedTermsPrefilled = computed(() => {
+  const terms = termsForm.value
+  if (terms === null) return false
+  return terms.jmhz_workplace_municipality_code !== null
+    || terms.jmhz_apz_contribution_status !== 'unverified'
+    || terms.jmhz_functional_benefits_status !== 'unverified'
+    || terms.jmhz_temporary_assignment_status !== 'unverified'
+    || terms.cz_isco_code !== null
+    || terms.activity_code !== null
+    || terms.social_insurance_participation !== 'automatic'
+    || terms.health_insurance_participation !== 'automatic'
+    || terms.tax_regime !== 'advance'
+    || terms.foreign_legislation_country_code !== null
+    || terms.a1_certificate_until !== null
+    || (terms.social_employer_rate_category ?? 'ordinary') !== 'ordinary'
+    || (terms.social_part_time_discount_reason ?? 'none') !== 'none'
+})
 
 /**
  * Zařazení pro srážkovou daň se ptáme jen tam, kde ho z druhu vztahu nejde
@@ -254,6 +316,9 @@ async function startTermsEdit() {
     change_reason: null,
   }
   editingTerms.value = true
+  // Nabídka účtáren se drží v paměti aplikace (jedno nastavení zaměstnavatele
+  // na celý běh), takže tohle nestojí požadavek na každé otevření formuláře.
+  offices.value = await loadPayrollOffices()
   if (jmhzOptions.value === null && !jmhzOptionsFailed.value) {
     try {
       jmhzOptions.value = await payrollApi.employmentJmhzEvidenceOptions()
@@ -346,8 +411,11 @@ async function saveTerms() {
     emit('updated', updated)
     editingTerms.value = false
     toast.success(t('payroll.people.terms_saved'))
-  } catch {
-    toast.error(t('payroll.people.mutation_failed'))
+  } catch (error) {
+    // Server jmenuje konkrétní pole („Nástroj APZ je povinný", „Nová smluvní
+    // verze musí začínat později…"); obecné „nepovedlo se" ho jen zakrylo
+    // a uživatel neměl podle čeho jednat.
+    toast.error(apiErrorMessage(error, t('payroll.people.mutation_failed')))
   } finally {
     busy.value = false
   }
@@ -574,8 +642,20 @@ const actions = computed<ActionItem[]>(() => [
       <div><dt class="text-neutral-500">{{ t('payroll.people.start_date') }}</dt><dd class="mt-0.5 text-neutral-800">{{ formatDate(employment.start_date) }}</dd></div>
       <div><dt class="text-neutral-500">{{ t('payroll.people.actual_start') }}</dt><dd class="mt-0.5 text-neutral-800">{{ formatDate(employment.actual_start_date) }}</dd></div>
       <div><dt class="text-neutral-500">{{ t('payroll.people.end_date') }}</dt><dd class="mt-0.5 text-neutral-800">{{ formatDate(employment.end_date) }}</dd></div>
+      <div><dt class="text-neutral-500">{{ t('payroll.people.office_label') }}</dt><dd class="mt-0.5 text-neutral-800" data-test="employment-office">{{ employment.office_name ?? '—' }}</dd></div>
       <div><dt class="text-neutral-500">{{ t('payroll.people.accounting') }}</dt><dd class="mt-0.5 text-neutral-800">{{ employment.accounting.gross_debit }}/{{ employment.accounting.gross_credit }} · {{ employment.accounting.employer_insurance_debit }}/{{ employment.accounting.employer_insurance_credit }}</dd></div>
     </dl>
+
+    <!--
+      Chybějící účtárna NEBLOKUJE uložení ani nic na kartě — jen říká, co kvůli
+      ní nepůjde. Blokátorem se to stane až při uzamčení vstupů mzdového běhu
+      (`employment_without_office`), a do té doby se dá v klidu doplnit.
+    -->
+    <p
+      v-if="officeMissing"
+      class="mt-3 rounded-md bg-warning-50 px-3 py-2 text-xs text-warning-800"
+      data-test="employment-office-missing"
+    >{{ t('payroll.people.office_missing_warning') }}</p>
 
     <ActionBar v-if="actions.some(action => action.show)" :actions="actions" class="mt-4" />
 
@@ -591,14 +671,61 @@ const actions = computed<ActionItem[]>(() => [
 
     <form v-if="editingTerms && termsForm" class="mt-4 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3 sm:p-4" @submit.prevent="saveTerms">
       <h4 class="text-sm font-semibold text-neutral-900">{{ t('payroll.people.new_terms') }}</h4>
+      <p class="mt-1 text-xs text-neutral-600">{{ t('payroll.people.terms_basics_hint') }}</p>
       <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <label class="text-xs text-neutral-600">{{ t('payroll.people.effective_from') }}<input v-model="termsForm.effective_from" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-        <label class="text-xs text-neutral-600">{{ t('payroll.people.contract_signed') }}<input v-model="termsForm.contract_signed_on" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-        <label class="text-xs text-neutral-600">{{ t('payroll.people.planned_start') }}<input v-model="termsForm.planned_start_on" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-        <label class="text-xs text-neutral-600">{{ t('payroll.people.actual_start') }}<input v-model="termsForm.actual_start_on" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-        <label class="text-xs text-neutral-600">{{ t('payroll.people.fixed_end') }}<input v-model="termsForm.fixed_term_end_on" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+        <label class="text-xs text-neutral-600">{{ t('payroll.people.effective_from') }} <RequiredMark /><input v-model="termsForm.effective_from" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+        <label class="text-xs text-neutral-600">{{ t('payroll.people.planned_start') }} <RequiredMark /><input v-model="termsForm.planned_start_on" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+        <!--
+          Účtárna se dosud NEDALA VYBRAT nikde ve frontendu — karta ji jen
+          vypisovala. Bez ní není čím vykázat odvod sociálního pojistného.
+          Povinná je jen tehdy, když je z čeho vybírat: firma bez nastavených
+          účtáren by jinak neuložila ani opravu překlepu v úvazku.
+        -->
+        <label class="text-xs text-neutral-600">
+          {{ t('payroll.people.office_label') }} <RequiredMark v-if="officeOptions.length > 0" />
+          <SearchableSelect
+            :model-value="termsForm.office_id"
+            :options="officeOptions"
+            :selected-option="selectedOfficeOption"
+            :clearable="false"
+            :required="officeOptions.length > 0"
+            :placeholder="t('payroll.people.office_select')"
+            :no-results-label="t('payroll.people.office_empty')"
+            accent="payroll"
+            class="mt-1"
+            data-test="terms-office"
+            @update:model-value="termsForm.office_id = $event === null ? null : Number($event)"
+          />
+          <span v-if="officeOptions.length === 0" class="mt-1 block text-neutral-500">{{ t('payroll.people.office_empty') }}</span>
+        </label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.weekly_hours') }}<input v-model="termsForm.weekly_hours" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.workload_bps') }}<input v-model.number="termsForm.workload_basis_points" type="number" min="1" max="10000" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+        <label class="text-xs text-neutral-600">{{ t('payroll.people.contract_signed') }}<input v-model="termsForm.contract_signed_on" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+        <label class="text-xs text-neutral-600">{{ t('payroll.people.actual_start') }}<input v-model="termsForm.actual_start_on" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+        <label class="text-xs text-neutral-600">{{ t('payroll.people.fixed_end') }}<input v-model="termsForm.fixed_term_end_on" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+        <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="termsForm.is_primary" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.primary') }}</label>
+        <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="termsForm.tax_declaration_signed" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.tax_declaration') }}</label>
+        <!--
+          Důvod změny server bere jako VOLITELNÝ text (`optionalText`, 500 znaků),
+          jenže formulář ho měl `required` — kdo si přišel opravit úvazek, musel
+          napřed vymyslet větu do časové osy. Zůstává tu jako doporučený údaj.
+        -->
+        <label class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.change_reason') }}<textarea v-model="termsForm.change_reason" rows="2" data-test="terms-change-reason" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></textarea><span class="mt-1 block text-neutral-500">{{ t('payroll.people.change_reason_hint') }}</span></label>
+      </div>
+
+      <!--
+        Zbytek podmínek je evidence pro podání a výjimečné režimy. Sbalí se;
+        otevře se sám jen u vztahu, kde je něco z toho vyplněné.
+      -->
+      <details class="group mt-3 rounded-md border border-payroll-200 bg-surface" :open="advancedTermsPrefilled" data-test="terms-advanced">
+        <summary class="flex cursor-pointer list-none items-center gap-2 px-3 py-2">
+          <svg class="h-4 w-4 shrink-0 text-neutral-500 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+          <span class="min-w-0">
+            <span class="block text-xs font-semibold text-neutral-900">{{ t('payroll.people.terms_advanced_title') }}</span>
+            <span class="mt-0.5 block text-xs text-neutral-500">{{ t('payroll.people.terms_advanced_hint') }}</span>
+          </span>
+        </summary>
+        <div class="grid grid-cols-1 gap-3 border-t border-neutral-200 p-3 sm:grid-cols-2 lg:grid-cols-4">
         <label class="text-xs text-neutral-600 sm:col-span-2">{{ t('payroll.people.regular_workplace') }}<input v-model="termsForm.regular_workplace" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <fieldset data-test="jmhz-evidence" class="grid grid-cols-1 gap-3 rounded-md border border-payroll-200 bg-surface p-3 sm:col-span-2 sm:grid-cols-2 lg:col-span-4 lg:grid-cols-4">
           <legend class="px-1 text-xs font-semibold text-payroll-800">{{ t('payroll.people.jmhz_evidence.title') }}</legend>
@@ -614,6 +741,7 @@ const actions = computed<ActionItem[]>(() => [
               :placeholder="t('payroll.people.jmhz_evidence.search_municipality')"
               accent="payroll"
               class="mt-1"
+              data-test="jmhz-municipality"
               @search="searchMunicipalities"
               @update:model-value="selectMunicipality"
             />
@@ -639,8 +767,6 @@ const actions = computed<ActionItem[]>(() => [
         <label v-if="needsOtherWithholdingStatement" class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.other_withholding_eligibility_label') }}<select v-model="termsForm.other_withholding_eligibility" data-test="other-withholding-eligibility" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="state in ['unverified','eligible','ineligible']" :key="state" :value="state">{{ t(`payroll.people.other_withholding_eligibility.${state}`) }}</option></select><span class="mt-1 block text-neutral-500">{{ t('payroll.people.other_withholding_eligibility_hint') }}</span></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.foreign_country') }}<input v-model="termsForm.foreign_legislation_country_code" maxlength="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm uppercase"></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.a1_certificate_until') }}<input v-model="termsForm.a1_certificate_until" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-        <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="termsForm.is_primary" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.primary') }}</label>
-        <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="termsForm.tax_declaration_signed" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.tax_declaration') }}</label>
         <!--
           Sazbová kategorie § 5a odst. 1 nahradila zaškrtávátko „Riziková práce":
           písmena jsou tři, ne dvě, a boolean neuměl říct, že jde o zdravotnického
@@ -652,8 +778,8 @@ const actions = computed<ActionItem[]>(() => [
         <label class="text-xs text-neutral-600">{{ t('payroll.people.social_part_time_discount_label') }}<select v-model="termsForm.social_part_time_discount_reason" data-test="social-part-time-discount-reason" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="reason in ['none','age_55_plus','child_care_under_10','dependent_close_person_care','study_under_26','retraining_jobseeker','disabled_person','under_21']" :key="reason" :value="reason">{{ t(`payroll.people.social_part_time_discount_reason.${reason}`) }}</option></select></label>
         <label v-if="termsForm.social_part_time_discount_reason !== 'none'" class="text-xs text-neutral-600">{{ t('payroll.people.social_part_time_discount_notified_on') }}<input v-model="termsForm.social_part_time_discount_notified_on" type="date" data-test="social-part-time-discount-notified-on" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><span class="mt-1 block text-neutral-500">{{ t('payroll.people.social_part_time_discount_notified_on_hint') }}</span></label>
         <label v-if="termsForm.social_part_time_discount_reason !== 'none'" class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-3">{{ t('payroll.people.social_part_time_discount_evidence') }}<input v-model="termsForm.social_part_time_discount_evidence" maxlength="190" data-test="social-part-time-discount-evidence" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><span class="mt-1 block text-neutral-500">{{ t('payroll.people.social_part_time_discount_evidence_hint') }}</span></label>
-        <label class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.change_reason') }}<textarea v-model="termsForm.change_reason" rows="2" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></textarea></label>
-      </div>
+        </div>
+      </details>
       <div class="mt-4 flex flex-wrap justify-end gap-2">
         <button type="button" :class="btnOutlineSm('neutral')" @click="editingTerms = false">{{ t('common.cancel') }}</button>
         <button type="submit" :class="btnOutlineSm('accent')" :disabled="busy">{{ t('common.save') }}</button>
