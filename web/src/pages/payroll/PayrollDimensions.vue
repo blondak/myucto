@@ -14,6 +14,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { useAutoSlug } from '@/composables/useAutoSlug'
 
 const props = defineProps<{
   canWrite: boolean
@@ -80,10 +81,34 @@ const filteredDimensions = computed(() => typeFilter.value === ''
   ? dimensions.value
   : dimensions.value.filter(dimension => dimension.dimension_type === typeFilter.value))
 
-const valid = computed(() => {
-  if (!/^[A-Z0-9][A-Z0-9._-]{0,49}$/.test(form.value.code.trim().toUpperCase())) return false
+/** Obsazené kódy — kolize řeší auto-generátor suffixem `_2`, `_3`. */
+const takenCodes = computed(() => dimensions.value
+  .filter(dimension => dimension.id !== editingId.value)
+  .map(dimension => dimension.code))
+
+const codeSlug = useAutoSlug(value => { form.value.code = value }, {
+  maxLen: 50,
+  mode: 'code',
+  taken: () => takenCodes.value,
+})
+
+function codeError(): string | null {
+  const code = form.value.code.trim().toUpperCase()
+  if (!/^[A-Z0-9][A-Z0-9._-]{0,49}$/.test(code)) return t('payroll.employer.dimensions.validation.code')
+  if (takenCodes.value.some(taken => taken.trim().toUpperCase() === code)) {
+    return t('payroll.employer.dimensions.validation.code_duplicate')
+  }
+  return null
+}
+
+function nameError(): string | null {
   const name = form.value.name.trim()
-  if (name === '' || name.length > 190) return false
+  return name === '' || name.length > 190 ? t('payroll.employer.dimensions.validation.name') : null
+}
+
+const valid = computed(() => {
+  if (codeError() !== null) return false
+  if (nameError() !== null) return false
   if (!/^\d{4}-\d{2}-\d{2}$/.test(form.value.valid_from)) return false
   const validTo = nullable(form.value.valid_to)
   if (validTo !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(validTo) || validTo < form.value.valid_from)) return false
@@ -111,6 +136,7 @@ function openNew() {
   conflict.value = false
   historyLocked.value = false
   showValidation.value = false
+  codeSlug.init('', false)
   editorOpen.value = true
 }
 
@@ -130,6 +156,7 @@ function edit(dimension: PayrollDimension) {
   conflict.value = false
   historyLocked.value = false
   showValidation.value = false
+  codeSlug.init(dimension.code, true)
   editorOpen.value = true
 }
 
@@ -447,15 +474,18 @@ onMounted(load)
         </div>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">
-            {{ t('payroll.employer.dimensions.code') }}
+            {{ t('payroll.employer.dimensions.name') }} <span class="text-danger-600">*</span>
           </span>
-          <input v-model="form.code" type="text" maxlength="50" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+          <input v-model="form.name" type="text" maxlength="190" :disabled="!canWrite" :aria-invalid="showValidation && nameError() !== null" data-test="dimension-name" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" @input="codeSlug.fromName(form.name)">
+          <span v-if="showValidation && nameError()" class="mt-1 block text-xs text-danger-600">{{ nameError() }}</span>
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">
-            {{ t('payroll.employer.dimensions.name') }}
+            {{ t('payroll.employer.dimensions.code') }} <span class="text-danger-600">*</span>
           </span>
-          <input v-model="form.name" type="text" maxlength="190" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+          <input v-model="form.code" type="text" maxlength="50" :disabled="!canWrite" :aria-invalid="showValidation && codeError() !== null" data-test="dimension-code" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" @input="codeSlug.markManual(form.code)">
+          <span v-if="showValidation && codeError()" class="mt-1 block text-xs text-danger-600">{{ codeError() }}</span>
+          <span v-else-if="editingId === null" class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.dimensions.code_hint') }}</span>
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">

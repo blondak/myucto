@@ -15,6 +15,7 @@ import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { healthInsurerName, healthInsurerOptions } from '@/utils/healthInsurers'
+import { codeFromName } from '@/utils/slugifyCode'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -361,6 +362,25 @@ function setCreateInsurer(value: string | null) {
 
 function enableManualInsurerCode() {
   manualInsurerCode.value = true
+  manualCodeTouched.value = createForm.institution_code.trim() !== ''
+}
+
+/** true = uživatel do kódu instituce sáhl ručně, přestaň ho odvozovat z názvu. */
+const manualCodeTouched = ref(false)
+
+/**
+ * Ruční větev (instituce mimo číselník): hlavní pole je NÁZEV, kód se z něj
+ * odvodí sám, dokud ho uživatel nepřepíše. Kolizi s už zadanými účty řeší
+ * suffix `_2`, ať to nespadne až na serverovou unikátní validaci.
+ */
+function onManualInstitutionName() {
+  if (manualCodeTouched.value) return
+  const taken = accounts.value.map(account => account.institution_code)
+  createForm.institution_code = codeFromName(createForm.institution_name, taken, 32)
+}
+
+function onManualInstitutionCode() {
+  manualCodeTouched.value = createForm.institution_code.trim() !== ''
 }
 
 function setCreateSource(value: PayrollInstitutionAccountSource | null) {
@@ -533,12 +553,13 @@ onMounted(async () => {
           </div>
           <template v-else>
             <label class="block">
-              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_code') }}</span>
-              <input v-model="createForm.institution_code" data-testid="health-create-code" type="text" maxlength="32" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_name') }} <span class="text-danger-600">*</span></span>
+              <input v-model="createForm.institution_name" data-testid="health-create-name" type="text" maxlength="190" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" @input="onManualInstitutionName">
             </label>
             <label class="block">
-              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_name') }}</span>
-              <input v-model="createForm.institution_name" data-testid="health-create-name" type="text" maxlength="190" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_code') }} <span class="text-danger-600">*</span></span>
+              <input v-model="createForm.institution_code" data-testid="health-create-code" type="text" maxlength="32" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" @input="onManualInstitutionCode">
+              <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.health_accounts.institution_code_hint') }}</span>
             </label>
           </template>
           <label class="block">

@@ -1,16 +1,36 @@
 import { ref } from 'vue'
 import { slugify } from '@/api/slug'
+import { codeFromName } from '@/utils/slugifyCode'
 
 /**
- * Auto-předvyplnění pole „Kód" slugem z „Název/Label" (serverový Slugifier).
+ * Auto-předvyplnění pole „Kód" slugem z „Název/Label".
  * Sdílená linkage logika pro CodeNameFields.vue i ručně stavěné číselníkové
- * formuláře (admin/codebooks). Jakmile uživatel do kódu sáhne, auto-generování
- * se vypne; když kód smaže, zase zapne.
+ * formuláře (admin/codebooks, mzdy). Jakmile uživatel do kódu sáhne,
+ * auto-generování se vypne; když kód smaže, zase zapne.
+ *
+ * Dva režimy podle toho, jaký tvar identifikátoru dané pole vyžaduje:
+ *  - `'slug'` (výchozí) — serverový Slugifier (`GET /api/slug`), lowercase
+ *    s pomlčkou; používají e-shopové číselníky, kde je kód zároveň URL slug.
+ *    Debounced, protože jde o síťový round-trip.
+ *  - `'code'` — klientský {@link codeFromName}, VERZÁLKY s podtržítkem;
+ *    číselníky mezd mají serverové validace typu `^[A-Z0-9][A-Z0-9_-]{0,31}$`,
+ *    kterými by lowercase slug neprošel. Synchronní, bez round-tripu.
  *
  * @param setCode  callback, který zapíše vygenerovaný kód do modelu
  * @param opts.maxLen  ořez slugu na délku pole (kód bývá kratší než 50)
+ * @param opts.mode    tvar generovaného identifikátoru (viz výše)
+ * @param opts.taken   getter obsazených kódů; při kolizi se přidá `_2`, `_3`
+ *                     (jen v režimu `'code'`), ať to nespadne až na serverové
+ *                     unikátní validaci
  */
-export function useAutoSlug(setCode: (value: string) => void, opts: { maxLen?: number } = {}) {
+export function useAutoSlug(
+  setCode: (value: string) => void,
+  opts: {
+    maxLen?: number
+    mode?: 'slug' | 'code'
+    taken?: () => Iterable<string>
+  } = {},
+) {
   const manual = ref(false)
   let timer: ReturnType<typeof setTimeout> | null = null
   let seq = 0
@@ -31,6 +51,10 @@ export function useAutoSlug(setCode: (value: string) => void, opts: { maxLen?: n
     if (timer) clearTimeout(timer)
     const s = ++seq
     if (nameValue.trim() === '') { setCode(''); return }
+    if (opts.mode === 'code') {
+      setCode(codeFromName(nameValue, opts.taken?.() ?? [], opts.maxLen ?? 0))
+      return
+    }
     timer = setTimeout(async () => {
       try {
         let slug = await slugify(nameValue)
