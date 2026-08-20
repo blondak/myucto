@@ -1047,6 +1047,10 @@ final class Routes
                 [PayrollSubmissionInboxAction::class, 'snooze'],
             );
             $g->get(
+                '/submissions/jmhz-pvpoj/{revisionId:[0-9]+}/offices',
+                [PayrollJmhzPvpojPreviewAction::class, 'offices'],
+            );
+            $g->get(
                 '/submissions/jmhz-pvpoj/{revisionId:[0-9]+}',
                 PayrollJmhzPvpojPreviewAction::class,
             );

@@ -18,7 +18,8 @@ final class JmhzPvpojPreviewRepository
      * @return array{
      *   revision:array<string,mixed>,
      *   statutory_result:array<string,mixed>,
-     *   social_liabilities:list<array<string,mixed>>
+     *   social_liabilities:list<array<string,mixed>>,
+     *   offices:list<array<string,mixed>>
      * }|null
      */
     public function findSource(int $supplierId, int $revisionId): ?array
@@ -113,6 +114,41 @@ final class JmhzPvpojPreviewRepository
             ];
         }
 
+        /*
+         * Registrace u OSSZ je na účtárně, takže přehled potřebuje kód, název
+         * a variabilní symbol každé účtárny běhu. Číselník je malý a vztah na
+         * účtárnu je až ve zmrazeném vstupu, proto se načte celý pro firmu
+         * a výběr účtárny si udělá builder.
+         */
+        $officeStatement = $this->db->pdo()->prepare(
+            'SELECT id, code, name, social_security_variable_symbol, is_active
+               FROM payroll_offices
+              WHERE supplier_id = ?
+              ORDER BY id',
+        );
+        $officeStatement->execute([$supplierId]);
+        $offices = [];
+        foreach ($officeStatement->fetchAll(PDO::FETCH_ASSOC) as $office) {
+            if (!is_array($office)) {
+                throw new \UnexpectedValueException(
+                    'Databáze vrátila neplatnou mzdovou účtárnu.',
+                );
+            }
+            $variableSymbol = $office['social_security_variable_symbol'] ?? null;
+            $offices[] = [
+                'id' => $this->dbPositiveInt($office['id'] ?? null, 'office.id'),
+                'code' => $this->dbString($office['code'] ?? null, 'office.code'),
+                'name' => $this->dbString($office['name'] ?? null, 'office.name'),
+                'social_security_variable_symbol' => $variableSymbol === null
+                    ? null
+                    : $this->dbString(
+                        $variableSymbol,
+                        'office.social_security_variable_symbol',
+                    ),
+                'is_active' => (int) ($office['is_active'] ?? 0) === 1,
+            ];
+        }
+
         return [
             'revision' => [
                 'id' => $this->dbPositiveInt($row['id'] ?? null, 'revision.id'),
@@ -147,6 +183,7 @@ final class JmhzPvpojPreviewRepository
             ],
             'statutory_result' => $statutory,
             'social_liabilities' => $liabilities,
+            'offices' => $offices,
         ];
     }
 

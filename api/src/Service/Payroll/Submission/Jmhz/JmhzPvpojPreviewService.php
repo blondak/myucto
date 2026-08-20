@@ -13,7 +13,32 @@ final class JmhzPvpojPreviewService
         private readonly JmhzPvpojPreviewBuilder $builder,
     ) {}
 
-    public function preview(int $supplierId, int $revisionId): JmhzPvpojPreview
+    public function preview(
+        int $supplierId,
+        int $revisionId,
+        ?int $officeId = null,
+    ): JmhzPvpojPreview {
+        return $this->builder->build(
+            $supplierId,
+            $this->source($supplierId, $revisionId),
+            $officeId,
+        );
+    }
+
+    /**
+     * Mzdové účtárny, za které se z revize podává.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function offices(int $supplierId, int $revisionId): array
+    {
+        return $this->builder->offices(
+            $this->source($supplierId, $revisionId),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function source(int $supplierId, int $revisionId): array
     {
         $source = $this->repository->findSource($supplierId, $revisionId);
         if ($source === null) {
@@ -23,7 +48,7 @@ final class JmhzPvpojPreviewService
             );
         }
 
-        return $this->builder->build($supplierId, $source);
+        return $source;
     }
 
     public function assertOfficialSubmissionSupported(): never

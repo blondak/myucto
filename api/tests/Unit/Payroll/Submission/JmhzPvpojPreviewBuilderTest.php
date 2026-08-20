@@ -163,23 +163,144 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
     }
 
     /**
-     * PVPOJ se podává za registraci u OSSZ, a ta je na mzdové účtárně. Běh přes
-     * víc účtáren má od rozpadu sociálního závazku víc než jeden závazek ČSSZ —
-     * bez pojmenované hlášky by to spadlo na „chybějící závazek", který nechybí.
+     * Běh přes víc účtáren UŽ NENÍ blocker: přehled se za každou registraci
+     * sestaví zvlášť rozdělením kořenové částky. Blocker zůstal jen na
+     * NEVYBRANOU účtárnu — jeden přehled pořád nemůže pokrýt dvě registrace,
+     * protože každá má vlastní variabilní symbol.
      */
-    public function testRejectsRunSpanningMultipleOffices(): void
+    public function testRequiresOfficeSelectionForRunSpanningMultipleOffices(): void
     {
-        $source = $this->source();
-        $input = $source['statutory_result']['input_snapshot'];
-        self::assertIsArray($input['people']);
-        $input['people'][1]['employments'][0]['employment']['office_id'] = 7;
-        $source['statutory_result']['input_snapshot'] = $input;
-        $source['statutory_result']['input_snapshot_hash'] = $this->hash($input);
-        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
-        $source['revision']['input_snapshot_hash'] = $this->hash($input);
-
         $this->expectCode(
             'jmhz_social_multiple_offices',
+            fn () => $this->builder->build(41, $this->twoOfficeSource()),
+        );
+    }
+
+    /**
+     * Součet přehledů přes účtárny se musí rovnat kořenovému výsledku BLOK PO
+     * BLOKU — jinak by podání, účetnictví a platby držely jiné číslo.
+     */
+    public function testSplitsRunAcrossOfficesAndSumsBackToTheRoot(): void
+    {
+        $source = $this->twoOfficeSource();
+        $first = $this->builder->build(41, $source, 4);
+        $second = $this->builder->build(41, $source, 7);
+
+        self::assertSame([
+            'zakladZamestnavateleA' => 10_000,
+            'pojistneZamestnavateleA' => 2_480,
+            'pojistneZamestnavateleCelkem' => 2_480,
+            'pojistneZamestnance' => 710,
+            'pojistneCelkem' => 3_190,
+        ], $first->pvpoj['pojistne']);
+        self::assertSame([
+            'zakladZamestnavateleA' => 7_000,
+            'pojistneZamestnavateleA' => 1_736,
+            'pojistneZamestnavateleCelkem' => 1_736,
+            'pojistneZamestnance' => 497,
+            'pojistneCelkem' => 2_233,
+        ], $second->pvpoj['pojistne']);
+
+        $whole = $this->builder->build(41, $this->source());
+        foreach ($whole->pvpoj['pojistne'] as $field => $rootValue) {
+            self::assertSame(
+                $rootValue,
+                $first->pvpoj['pojistne'][$field]
+                    + $second->pvpoj['pojistne'][$field],
+                "Blok {$field} se přes účtárny nesečetl na kořenový výsledek.",
+            );
+        }
+        self::assertSame(
+            $whole->pvpoj['pojistneUhrada'],
+            $first->pvpoj['pojistneUhrada'] + $second->pvpoj['pojistneUhrada'],
+        );
+
+        self::assertSame(4, $first->office['office_id']);
+        self::assertSame('1234567890', $first->office['variable_symbol']);
+        self::assertSame('9876543210', $second->office['variable_symbol']);
+        self::assertSame(81, $first->source['social_liability_id']);
+        self::assertSame(82, $second->source['social_liability_id']);
+        self::assertSame(2_625, $first->pvpoj['pojistneUhrada']);
+        self::assertSame(2_233, $second->pvpoj['pojistneUhrada']);
+        self::assertSame([
+            'pocetZamestnancu' => 1,
+            'uhrnVymerovacichZakladu' => 10_000,
+            'pojistneSleva' => 500,
+        ], $first->pvpoj['slevaZamestnavatele']);
+        self::assertArrayNotHasKey('slevaZamestnavatele', $second->pvpoj);
+        self::assertArrayNotHasKey('slevyZamestnancu', $second->pvpoj);
+        self::assertSame(
+            $first->downloadBytes(),
+            $this->builder->build(41, $source, 4)->downloadBytes(),
+        );
+    }
+
+    public function testRejectsOfficeWithoutAnyRelationshipInTheRevision(): void
+    {
+        $this->expectCode(
+            'jmhz_social_office_unknown',
+            fn () => $this->builder->build(41, $this->twoOfficeSource(), 9),
+        );
+    }
+
+    /**
+     * Variabilní symbol je jediné, čím se přehled přiřadí k registraci. Prázdná
+     * hodnota by v podání vypadala jako platná — proto fail-closed.
+     */
+    public function testRejectsOfficeWithoutVariableSymbol(): void
+    {
+        $source = $this->twoOfficeSource();
+        $source['offices'] = [
+            $this->office(4, '1234567890'),
+            $this->office(7, null),
+        ];
+
+        $this->expectCode(
+            'jmhz_office_variable_symbol_missing',
+            fn () => $this->builder->build(41, $source, 7),
+        );
+    }
+
+    public function testListsOfficesOfTheRevisionWithSubmittability(): void
+    {
+        $source = $this->twoOfficeSource();
+        $source['offices'] = [
+            $this->office(4, '1234567890'),
+            $this->office(7, null),
+        ];
+
+        self::assertSame(
+            [
+                [
+                    'office_id' => 4,
+                    'code' => 'UC4',
+                    'name' => 'Mzdová účtárna 4',
+                    'social_security_variable_symbol' => '1234567890',
+                    'submittable' => true,
+                ],
+                [
+                    'office_id' => 7,
+                    'code' => 'UC7',
+                    'name' => 'Mzdová účtárna 7',
+                    'social_security_variable_symbol' => null,
+                    'submittable' => false,
+                ],
+            ],
+            $this->builder->offices($source),
+        );
+    }
+
+    /**
+     * Variabilní symbol účtárny se od zmaterializování závazku změnit může —
+     * přehled a platba by pak šly pod jinou registraci.
+     */
+    public function testRejectsVariableSymbolThatDriftedFromTheLiability(): void
+    {
+        $source = $this->source();
+        $source['offices'] = [$this->office(4, '5555555555')];
+
+        $this->expectCode(
+            'jmhz_social_liability_mismatch',
             fn () => $this->builder->build(41, $source),
         );
     }
@@ -427,6 +548,7 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
             'logical_reference' => 'social-insurance:office:4',
             'recipient_reference' => 'institution:social_security:110:account:5',
             'payroll_office_id' => 4,
+            'variable_symbol' => '1234567890',
             'employee_contribution_minor' => 114_200,
             'employer_contribution_minor' => 371_600,
             'target_amount_minor' => 485_800,
@@ -472,6 +594,102 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
                 'source_snapshot_json' => CanonicalJson::encode($liability),
                 'source_snapshot_hash' => $this->hash($liability),
             ]],
+            'offices' => [
+                $this->office(4, '1234567890'),
+                $this->office(7, '9876543210'),
+            ],
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function office(int $officeId, ?string $variableSymbol): array
+    {
+        return [
+            'id' => $officeId,
+            'code' => "UC{$officeId}",
+            'name' => "Mzdová účtárna {$officeId}",
+            'social_security_variable_symbol' => $variableSymbol,
+            'is_active' => true,
+        ];
+    }
+
+    /**
+     * Běh přes dvě účtárny: employment:120 (základ 7 000 Kč) je v účtárně 7,
+     * vztahy zaměstnance 7 zůstávají v účtárně 4.
+     *
+     * @return SourceFixture
+     */
+    private function twoOfficeSource(): array
+    {
+        $source = $this->source();
+        $input = $source['statutory_result']['input_snapshot'];
+        self::assertIsArray($input['people']);
+        $input['people'][1]['employments'][0]['employment']['office_id'] = 7;
+        $input['office_id'] = null;
+        $source['statutory_result']['input_snapshot'] = $input;
+        $source['statutory_result']['input_snapshot_hash'] = $this->hash($input);
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = $this->hash($input);
+
+        $person = &$source['statutory_result']['people'][0];
+        self::assertSame(12, $person['employee_id']);
+        $person['input_snapshot'] = $input['people'][1];
+        $person['input_snapshot_hash'] = $this->hash($input['people'][1]);
+        $person['relationships'][0]['input_snapshot'] =
+            $input['people'][1]['employments'][0];
+        $person['relationships'][0]['input_snapshot_hash'] =
+            $this->hash($input['people'][1]['employments'][0]);
+        unset($person);
+
+        $rootHash = $source['statutory_result']['result_snapshot_hash'];
+        $source['social_liabilities'] = [
+            $this->liability(81, 4, '1234567890', $rootHash, 64_500, 198_000),
+            $this->liability(82, 7, '9876543210', $rootHash, 49_700, 173_600),
+        ];
+
+        return $source;
+    }
+
+    /** @return LiabilityFixture */
+    private function liability(
+        int $id,
+        int $officeId,
+        string $variableSymbol,
+        string $rootHash,
+        int $employee,
+        int $employer,
+    ): array {
+        $amount = $employee + $employer;
+        $snapshot = [
+            'schema_reference' => 'payroll-payment-social-insurance-source.v1',
+            'run_id' => 19,
+            'revision_id' => 53,
+            'revision_no' => 2,
+            'statutory_result_hash' => $rootHash,
+            'logical_reference' => "social-insurance:office:{$officeId}",
+            'recipient_reference' =>
+                'institution:social_security:110:account:5',
+            'payroll_office_id' => $officeId,
+            'variable_symbol' => $variableSymbol,
+            'employee_contribution_minor' => $employee,
+            'employer_contribution_minor' => $employer,
+            'target_amount_minor' => $amount,
+            'prior_signed_minor' => 0,
+            'delta_signed_minor' => $amount,
+        ];
+
+        return [
+            'id' => $id,
+            'liability_reference' => "social-insurance:office:{$officeId}",
+            'direction' => 'outgoing',
+            'recipient_reference' =>
+                'institution:social_security:110:account:5',
+            'currency_code' => 'CZK',
+            'amount_minor' => $amount,
+            'previous_liability_id' => null,
+            'source_snapshot' => $snapshot,
+            'source_snapshot_json' => CanonicalJson::encode($snapshot),
+            'source_snapshot_hash' => $this->hash($snapshot),
         ];
     }
 

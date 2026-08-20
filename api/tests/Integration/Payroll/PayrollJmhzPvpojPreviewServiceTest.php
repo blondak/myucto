@@ -76,6 +76,7 @@ final class PayrollJmhzPvpojPreviewServiceTest extends TestCase
             $pdo,
             $sourceSupplierId,
         );
+        $officeId = $this->office($pdo, $this->supplierId);
         $employeeId = $this->employee($pdo, $this->supplierId);
         $employmentId = $this->employment(
             $pdo,
@@ -85,6 +86,7 @@ final class PayrollJmhzPvpojPreviewServiceTest extends TestCase
         $this->revisionId = $this->revision(
             $pdo,
             $this->supplierId,
+            $officeId,
             $employeeId,
             $employmentId,
             $statutory,
@@ -138,6 +140,23 @@ final class PayrollJmhzPvpojPreviewServiceTest extends TestCase
         $this->service->assertOfficialSubmissionSupported();
     }
 
+    /**
+     * Registrace u OSSZ je na mzdové účtárně, takže PVPOJ bez ní a bez jejího
+     * variabilního symbolu podat nelze.
+     */
+    private function office(PDO $pdo, int $supplierId): int
+    {
+        $pdo->prepare(
+            'INSERT INTO payroll_offices
+                (supplier_id, code, name, social_security_variable_symbol,
+                 is_active)
+             VALUES (?, "PVPOJ-SYN", "Syntetická účtárna PVPOJ",
+                     "1234567890", 1)',
+        )->execute([$supplierId]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
     private function employee(PDO $pdo, int $supplierId): int
     {
         $pdo->prepare(
@@ -171,6 +190,7 @@ final class PayrollJmhzPvpojPreviewServiceTest extends TestCase
     private function revision(
         PDO $pdo,
         int $supplierId,
+        int $officeId,
         int $employeeId,
         int $employmentId,
         PayrollStatutoryResultRepository $statutory,
@@ -188,14 +208,14 @@ final class PayrollJmhzPvpojPreviewServiceTest extends TestCase
                 'employment' => [
                     'id' => $employmentId,
                     'employee_id' => $employeeId,
-                    'office_id' => 4,
+                    'office_id' => $officeId,
                 ],
             ]],
         ];
         $input = [
             'schema_version' => 'payroll-run-input.v2',
             'supplier_id' => $supplierId,
-            'office_id' => 4,
+            'office_id' => $officeId,
             'period_start' => '2026-06-01',
             'people' => [$personInput],
         ];
@@ -311,9 +331,11 @@ final class PayrollJmhzPvpojPreviewServiceTest extends TestCase
             'revision_id' => $revisionId,
             'revision_no' => 1,
             'statutory_result_hash' => $this->hash($root),
-            'logical_reference' => 'social-insurance:office:4',
+            'logical_reference' => "social-insurance:office:{$officeId}",
             'recipient_reference' =>
                 'institution:social_security:110:account:5',
+            'payroll_office_id' => $officeId,
+            'variable_symbol' => '1234567890',
             'employee_contribution_minor' => 64_500,
             'employer_contribution_minor' => 248_000,
             'target_amount_minor' => 312_500,
@@ -327,13 +349,14 @@ final class PayrollJmhzPvpojPreviewServiceTest extends TestCase
                  liability_kind, direction, recipient_reference, due_on,
                  currency_code, amount_minor, source_snapshot_json,
                  source_snapshot_hash, idempotency_key_hash)
-             VALUES (?, ?, "social-insurance:office:4",
+             VALUES (?, ?, ?,
                      "social_insurance", "outgoing",
                      "institution:social_security:110:account:5",
                      "2026-07-20", "CZK", 312500, ?, ?, ?)',
         )->execute([
             $supplierId,
             $revisionId,
+            "social-insurance:office:{$officeId}",
             $liabilityJson,
             hash('sha256', $liabilityJson),
             hash(

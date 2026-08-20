@@ -11,9 +11,19 @@ final readonly class JmhzPvpojPreview
     public const SCHEMA_REFERENCE = 'payroll-jmhz-pvpoj-preview.v1';
 
     /**
+     * @param array{
+     *   office_id:int,
+     *   code:string,
+     *   name:string,
+     *   variable_symbol:string
+     * } $office registrace u OSSZ, za kterou se přehled podává
+     * @param list<array<string,mixed>> $allocation rozpad kořenových částek na
+     *        všechny účtárny běhu — přehled je jeho podílem, takže součet přes
+     *        účtárny musí dát kořenový sociální výsledek
      * @param array<string,mixed> $source
      * @param array<string,mixed> $pvpoj
-     * @param list<array<string,mixed>> $reconciliation
+     * @param list<array<string,mixed>> $reconciliation osoby CELÉHO běhu; přehled
+     *        vzniká rozdělením jejich kořenového úhrnu, ne přepočtem za účtárnu
      */
     public function __construct(
         public int $supplierId,
@@ -21,6 +31,8 @@ final readonly class JmhzPvpojPreview
         public int $revisionId,
         public int $revisionNo,
         public string $period,
+        public array $office,
+        public array $allocation,
         public array $source,
         public array $pvpoj,
         public array $reconciliation,
@@ -49,6 +61,12 @@ final readonly class JmhzPvpojPreview
             'revision_no' => $this->revisionNo,
             'period' => $this->period,
             'currency_code' => 'CZK',
+            'office' => $this->office,
+            'office_allocation' => [
+                'method' => 'largest_remainder_by_capped_assessment_base',
+                'root_result_is_single_source_of_truth' => true,
+                'offices' => $this->allocation,
+            ],
             'source' => $this->source,
             'pvpoj' => $this->pvpoj,
             'reconciliation' => $this->reconciliation,
@@ -73,9 +91,10 @@ final readonly class JmhzPvpojPreview
     public function filename(): string
     {
         return sprintf(
-            'jmhz-pvpoj-preview-%s-revize-%d.json',
+            'jmhz-pvpoj-preview-%s-revize-%d-uctarna-%d.json',
             $this->period,
             $this->revisionId,
+            $this->office['office_id'],
         );
     }
 }

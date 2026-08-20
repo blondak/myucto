@@ -527,6 +527,18 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             301,
             1,
             '2026-07',
+            [
+                'office_id' => 4,
+                'code' => 'UC4',
+                'name' => 'Mzdová účtárna 4',
+                'variable_symbol' => '1234567890',
+            ],
+            [[
+                'office_id' => 4,
+                'employee_contribution_minor_units' => 7_100,
+                'employer_contribution_minor_units' => 24_800,
+                'amount_minor_units' => 31_900,
+            ]],
             ['revision_input_hash' => str_repeat('d', 64)],
             [
                 'pojistne' => [

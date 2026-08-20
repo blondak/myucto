@@ -238,12 +238,15 @@ final class PayrollSocialInsuranceLiabilityMaterializer
              * celá částka padne na ni a výsledek je shodný s dosavadním
              * chováním; celofiremní běh dá tolik závazků, kolik různých
              * účtáren mají vztahy v běhu.
+             *
+             * Rozdělení dělá VÝHRADNĚ allocator — přehled o výši pojistného
+             * (PVPOJ) čte tytéž buňky účtárna × sazbová kategorie, takže závazek
+             * a podání nemohou mít každý jiné zaokrouhlení.
              */
             $allocations = $this->officeAllocator->allocate(
                 $input,
                 $people,
-                $employee,
-                $employer,
+                $root,
             );
             if ($scopeOfficeId !== null
                 && array_column($allocations, 'office_id') !== [$scopeOfficeId]

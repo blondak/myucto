@@ -110,15 +110,62 @@ final class PayrollJmhzPvpojPreviewAction
     }
 
     /**
+     * Mzdové účtárny, za které se z revize podává.
+     *
+     * PVPOJ je podání ZA REGISTRACI U OSSZ, takže běh přes víc účtáren dá víc
+     * přehledů. Bez tohohle seznamu by uživatel neměl kde zjistit, které
+     * `office` má do náhledu poslat.
+     *
+     * @param array{revisionId:string} $args
+     */
+    public function offices(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->guard($request, $response, $error)) {
+            return $this->guardFailure($error);
+        }
+
+        try {
+            $offices = $this->service->offices(
+                $this->currentSupplierId($request),
+                $this->routePositiveInt($args, 'revisionId'),
+            );
+        } catch (JmhzPvpojPreviewException $exception) {
+            return Json::error(
+                $response,
+                $exception->validationCode,
+                $exception->getMessage(),
+                422,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $exception->getMessage(),
+                422,
+            );
+        }
+
+        return Json::ok($response, ['offices' => $offices])
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /**
      * @param array{revisionId:string} $args
      */
     private function preview(
         Request $request,
         array $args,
     ): JmhzPvpojPreview {
+        $query = $request->getQueryParams();
+
         return $this->service->preview(
             $this->currentSupplierId($request),
             $this->routePositiveInt($args, 'revisionId'),
+            self::narrowingId(is_array($query) ? $query : [], 'office'),
         );
     }
 
@@ -180,6 +227,7 @@ final class PayrollJmhzPvpojPreviewAction
             [
                 'sha256' => $preview->sha256(),
                 'period' => $preview->period,
+                'office_id' => $preview->office['office_id'],
             ],
             $this->ipMatcher->clientIpFromRequest($serverParams),
             $request->getHeaderLine('User-Agent'),

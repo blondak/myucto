@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\Payment\PayrollSocialOfficeAllocator;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class JmhzPvpojPreviewBuilder
@@ -11,15 +12,46 @@ final class JmhzPvpojPreviewBuilder
     private const MAX_XSD_AMOUNT_CZK = 999_999_999_999;
     private const MAX_XSD_PERSON_COUNT = 999_999;
 
+    public function __construct(
+        private readonly PayrollSocialOfficeAllocator $officeAllocator
+            = new PayrollSocialOfficeAllocator(),
+    ) {}
+
     /**
+     * Přehled o výši pojistného za JEDNU mzdovou účtárnu.
+     *
+     * ─────────────────────────────────────────────────────────────────────────
+     * ZÁVAZNÉ ROZHODNUTÍ: přehled účtárny vzniká ROZDĚLENÍM kořenové částky
+     * ─────────────────────────────────────────────────────────────────────────
+     * Přehled se NIKDY nepočítá znovu z vyměřovacích základů účtárny. Kořenový
+     * sociální výsledek (`payroll_statutory_results`) je jediný zdroj pravdy a
+     * součet přehledů přes účtárny se mu musí rovnat na korunu — proto se jen
+     * rozděluje, a to výhradně přes
+     * {@see \MyInvoice\Service\Payroll\Payment\PayrollSocialOfficeAllocator},
+     * tedy stejným rozpadem, ze kterého vznikají závazky ČSSZ.
+     *
+     * Vlastní přepočet po účtárnách (základ × sazba, zaokrouhlení nahoru podle
+     * § 7 odst. 3) by v každé účtárně přidal vlastní zaokrouhlení a založil
+     * trvalý rozdíl mezi podáním, účetnictvím a platbami.
+     *
+     * Formální nevýhoda je přijatá vědomě: částka registrace není odvozená
+     * z jejího vlastního úhrnu základů, ale je podílem firemního výsledku.
+     * NEOPRAVOVAT „zpátky" na přepočet — je to rozhodnutí zadavatele, ne opomenutí.
+     *
      * @param array{
      *   revision:array<string,mixed>,
      *   statutory_result:array<string,mixed>,
-     *   social_liabilities:list<array<string,mixed>>
+     *   social_liabilities:list<array<string,mixed>>,
+     *   offices:list<array<string,mixed>>
      * } $source
+     * @param int|null $officeId účtárna, za kterou se podává; `null` uspěje jen
+     *        u běhu s jedinou účtárnou
      */
-    public function build(int $supplierId, array $source): JmhzPvpojPreview
-    {
+    public function build(
+        int $supplierId,
+        array $source,
+        ?int $officeId = null,
+    ): JmhzPvpojPreview {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException('Firma musí být kladné číslo.');
         }
@@ -170,7 +202,11 @@ final class JmhzPvpojPreviewBuilder
         }
 
         $frozenPeople = $this->frozenPeople($revisionInput);
-        $this->assertSingleOffice($frozenPeople);
+        $office = $this->resolveOffice(
+            $this->officeIds($frozenPeople),
+            $this->rows($source['offices'] ?? null, 'offices'),
+            $officeId,
+        );
         $reconciled = $this->reconcilePeople(
             $this->rows(
                 $statutory['people'] ?? null,
@@ -237,15 +273,28 @@ final class JmhzPvpojPreviewBuilder
             );
         }
 
+        $allocations = $this->allocate(
+            $revisionInput,
+            $this->rows($statutory['people'] ?? null, 'statutory_result.people'),
+            $root,
+            $payable,
+        );
+        $share = $allocations[$office['office_id']] ?? null;
+        if ($share === null) {
+            $this->invalid(
+                'jmhz_social_office_unknown',
+                "Rozpad sociálního odvodu nezná mzdovou účtárnu office:{$office['office_id']}.",
+            );
+        }
+
         $liability = $this->assertLiability(
             $liabilities,
+            $office,
             $revisionId,
             $runId,
             $revisionNo,
             $rootHash,
-            $employeeAfterDiscount,
-            $employerAfterDiscount,
-            $payable,
+            $share,
         );
 
         $pvpoj = [
@@ -253,53 +302,57 @@ final class JmhzPvpojPreviewBuilder
                 $root,
                 $reconciled['totals'],
                 $employerBeforeDiscount,
+                $share,
             ) + [
                 'pojistneZamestnavateleCelkem' => $this->toCzk(
-                    $employerBeforeDiscount,
+                    $share['employer_before_discount_minor'],
                     'pojistneZamestnavateleCelkem',
                 ),
                 'pojistneZamestnance' => $this->toCzk(
-                    $employeeBeforeDiscount,
+                    $share['employee_before_discount_minor'],
                     'pojistneZamestnance',
                 ),
                 'pojistneCelkem' => $this->toCzk(
-                    $contributionBeforeDiscount,
+                    $this->add(
+                        $share['employer_before_discount_minor'],
+                        $share['employee_before_discount_minor'],
+                    ),
                     'pojistneCelkem',
                 ),
             ],
         ];
-        if ($employerDiscount > 0) {
+        if ($share['employer_discount_minor'] > 0) {
             $pvpoj['slevaZamestnavatele'] = [
                 'pocetZamestnancu' => $this->xsdPersonCount(
-                    $reconciled['totals']['part_time_discount_person_count'],
+                    $share['employer_discount_person_count'],
                 ),
                 'uhrnVymerovacichZakladu' => $this->toCzk(
-                    $reconciled['totals']['part_time_discount_base_minor'],
+                    $share['employer_discount_base_minor'],
                     'slevaZamestnavatele.uhrnVymerovacichZakladu',
                 ),
                 'pojistneSleva' => $this->toCzk(
-                    $employerDiscount,
+                    $share['employer_discount_minor'],
                     'slevaZamestnavatele.pojistneSleva',
                 ),
             ];
         }
-        if ($employeeDiscount > 0) {
+        if ($share['employee_discount_minor'] > 0) {
             $pvpoj['slevyZamestnancu'] = [
                 'pocetZamestnancu' => $this->xsdPersonCount(
-                    $reconciled['totals']['employee_discount_person_count'],
+                    $share['employee_discount_person_count'],
                 ),
                 'uhrnVymerovacichZakladu' => $this->toCzk(
-                    $reconciled['totals']['employee_discount_base_minor'],
+                    $share['employee_discount_base_minor'],
                     'slevyZamestnancu.uhrnVymerovacichZakladu',
                 ),
                 'pojistneSleva' => $this->toCzk(
-                    $employeeDiscount,
+                    $share['employee_discount_minor'],
                     'slevyZamestnancu.pojistneSleva',
                 ),
             ];
         }
         $pvpoj['pojistneUhrada'] = $this->toCzk(
-            $payable,
+            $share['amount_minor'],
             'pojistneUhrada',
         );
 
@@ -309,6 +362,8 @@ final class JmhzPvpojPreviewBuilder
             $revisionId,
             $revisionNo,
             $period,
+            $office,
+            $this->allocationSummary($allocations),
             [
                 'revision_input_hash' =>
                     $this->hash(
@@ -331,24 +386,90 @@ final class JmhzPvpojPreviewBuilder
     }
 
     /**
-     * PVPOJ se podává ZA REGISTRACI U OSSZ, a ta je na mzdové účtárně
-     * (`payroll_offices.social_security_variable_symbol`). Jeden přehled proto
-     * nemůže pokrýt běh, jehož vztahy patří do víc účtáren — sloučily by se
-     * v něm dvě registrace pod jeden variabilní symbol.
+     * Seznam mzdových účtáren, za které se z revize podává.
      *
-     * Od rozpadu sociálního závazku na účtárny
-     * ({@see \MyInvoice\Service\Payroll\Payment\PayrollSocialOfficeAllocator})
-     * takový běh závazky vytvoří, jenže PVPOJ jich pak najde víc než jeden.
-     * Bez tohohle guardu by to spadlo na neurčité `jmhz_social_liability_missing`
-     * a účetní by hledal chybějící závazek, který nechybí. Podání per účtárna
-     * je samostatné zadání; do té doby se běh musí na účtárnu zúžit.
+     * Chybějící variabilní symbol tu ještě není blocker — účetní ho musí
+     * v seznamu VIDĚT, aby ho měl kde doplnit. Podání za takovou účtárnu
+     * zastaví {@see self::build()}.
+     *
+     * @param array{
+     *   revision:array<string,mixed>,
+     *   offices:list<array<string,mixed>>
+     * } $source
+     * @return list<array{
+     *   office_id:int,
+     *   code:string,
+     *   name:string,
+     *   social_security_variable_symbol:?string,
+     *   submittable:bool
+     * }>
+     */
+    public function offices(array $source): array
+    {
+        $revision = $this->object($source['revision'], 'revision');
+        $input = $this->canonicalObject(
+            $this->nonEmptyString(
+                $revision['input_snapshot_json'] ?? null,
+                'revision.input_snapshot_json',
+            ),
+            $this->hash(
+                $revision['input_snapshot_hash'] ?? null,
+                'revision.input_snapshot_hash',
+            ),
+            'zmrazeného vstupu revize',
+        );
+        $known = [];
+        foreach ($this->rows($source['offices'] ?? null, 'offices') as $office) {
+            $id = $office['id'] ?? null;
+            if (is_int($id) && $id > 0) {
+                $known[$id] = $office;
+            }
+        }
+        $result = [];
+        foreach ($this->officeIds($this->frozenPeople($input)) as $officeId) {
+            $office = $known[$officeId] ?? null;
+            if ($office === null) {
+                $this->invalid(
+                    'jmhz_social_office_unknown',
+                    "Mzdová účtárna office:{$officeId} v číselníku firmy neexistuje.",
+                );
+            }
+            $variableSymbol = $office['social_security_variable_symbol'] ?? null;
+            $valid = is_string($variableSymbol)
+                && preg_match('/^[0-9]{1,10}$/D', $variableSymbol) === 1;
+            $result[] = [
+                'office_id' => $officeId,
+                'code' => $this->nonEmptyString($office['code'] ?? null, 'offices.code'),
+                'name' => $this->nonEmptyString($office['name'] ?? null, 'offices.name'),
+                'social_security_variable_symbol' => $valid
+                    ? (string) $variableSymbol
+                    : null,
+                'submittable' => $valid,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Mzdové účtárny, za které se z revize podává.
+     *
+     * Účtárna se bere ze ZMRAZENÉHO VSTUPU revize
+     * (`input.people[].employments[].employment.office_id`), ne z kořenového
+     * `input.office_id` — ten je jen filtr rozsahu běhu a u celofiremního běhu
+     * je legitimně `null`.
+     *
+     * Vztah BEZ účtárny zůstává blockerem: PVPOJ by ho neměl pod jakým
+     * variabilním symbolem vykázat a tiché přiřazení k cizí registraci je horší
+     * než hlasitá chyba.
      *
      * @param array<int,array{
      *   input:array<string,mixed>,
      *   relationships:array<int,array<string,mixed>>
      * }> $frozenPeople
+     * @return list<int>
      */
-    private function assertSingleOffice(array $frozenPeople): void
+    private function officeIds(array $frozenPeople): array
     {
         $offices = [];
         foreach ($frozenPeople as $person) {
@@ -368,13 +489,144 @@ final class JmhzPvpojPreviewBuilder
                 $offices[$officeId] = true;
             }
         }
-        if (count($offices) > 1) {
+        $ids = array_keys($offices);
+        sort($ids, SORT_NUMERIC);
+
+        return $ids;
+    }
+
+    /**
+     * Registrace u OSSZ, za kterou se přehled podává.
+     *
+     * Běh přes víc účtáren UŽ NENÍ chyba — jen se z něj musí vybrat účtárna,
+     * protože každá má vlastní registraci a vlastní variabilní symbol. Chybějící
+     * variabilní symbol je blocker: prázdná hodnota by odešla do podání jako
+     * platná a přehled by se přiřadil k cizí nebo k žádné registraci.
+     *
+     * @param list<int> $officeIds
+     * @param list<array<string,mixed>> $offices
+     * @return array{office_id:int,code:string,name:string,variable_symbol:string}
+     */
+    private function resolveOffice(
+        array $officeIds,
+        array $offices,
+        ?int $officeId,
+    ): array {
+        if ($officeId === null) {
+            if (count($officeIds) !== 1) {
+                $this->invalid(
+                    'jmhz_social_multiple_offices',
+                    'Mzdový běh obsahuje vztahy z více mzdových účtáren. PVPOJ se podává'
+                    . ' za každou účtárnu zvlášť — zvolte, za kterou se má sestavit.',
+                );
+            }
+            $officeId = $officeIds[0];
+        } elseif ($officeId <= 0 || !in_array($officeId, $officeIds, true)) {
             $this->invalid(
-                'jmhz_social_multiple_offices',
-                'Mzdový běh obsahuje vztahy z více mzdových účtáren. PVPOJ se podává'
-                . ' za každou účtárnu zvlášť — zužte běh na jednu účtárnu.',
+                'jmhz_social_office_unknown',
+                "Mzdová účtárna office:{$officeId} nemá v této revizi žádný pracovní vztah.",
             );
         }
+        foreach ($offices as $office) {
+            if (($office['id'] ?? null) !== $officeId) {
+                continue;
+            }
+            $variableSymbol = $office['social_security_variable_symbol'] ?? null;
+            if (!is_string($variableSymbol)
+                || preg_match('/^[0-9]{1,10}$/D', $variableSymbol) !== 1
+            ) {
+                $this->invalid(
+                    'jmhz_office_variable_symbol_missing',
+                    "Mzdová účtárna office:{$officeId} nemá variabilní symbol"
+                    . ' zaměstnavatele u ČSSZ — bez něj přehled podat nelze.',
+                );
+            }
+
+            return [
+                'office_id' => $officeId,
+                'code' => $this->nonEmptyString(
+                    $office['code'] ?? null,
+                    'offices.code',
+                ),
+                'name' => $this->nonEmptyString(
+                    $office['name'] ?? null,
+                    'offices.name',
+                ),
+                'variable_symbol' => $variableSymbol,
+            ];
+        }
+        $this->invalid(
+            'jmhz_social_office_unknown',
+            "Mzdová účtárna office:{$officeId} v číselníku firmy neexistuje.",
+        );
+    }
+
+    /**
+     * Rozpad kořenových částek na účtárny.
+     *
+     * SSOT rozdělení je {@see PayrollSocialOfficeAllocator} — tentýž rozpad,
+     * ze kterého vznikají závazky ČSSZ. Přehled tu žádné vlastní pravidlo
+     * nemá, jen si z rozpadu vybere svou účtárnu.
+     *
+     * @param array<string,mixed> $input
+     * @param list<array<string,mixed>> $people
+     * @param array<string,mixed> $root
+     * @return array<int,array<string,mixed>> office_id => podíl účtárny
+     */
+    private function allocate(
+        array $input,
+        array $people,
+        array $root,
+        int $payable,
+    ): array {
+        try {
+            $allocations = $this->officeAllocator->allocate(
+                $input,
+                $people,
+                $root,
+            );
+        } catch (\DomainException | \OverflowException $exception) {
+            throw new JmhzPvpojPreviewException(
+                'jmhz_social_office_allocation_failed',
+                'Rozpad sociálního odvodu na mzdové účtárny selhal: '
+                . $exception->getMessage(),
+                $exception,
+            );
+        }
+        $byOffice = [];
+        $total = 0;
+        foreach ($allocations as $allocation) {
+            $byOffice[$allocation['office_id']] = $allocation;
+            $total = $this->add($total, $allocation['amount_minor']);
+        }
+        if ($total !== $payable) {
+            $this->invalid(
+                'jmhz_social_totals_mismatch',
+                'Součet přehledů přes mzdové účtárny nedává kořenové pojistné k úhradě.',
+            );
+        }
+        ksort($byOffice, SORT_NUMERIC);
+
+        return $byOffice;
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $allocations
+     * @return list<array<string,mixed>>
+     */
+    private function allocationSummary(array $allocations): array
+    {
+        $summary = [];
+        foreach ($allocations as $allocation) {
+            $summary[] = [
+                'office_id' => $allocation['office_id'],
+                'employee_contribution_minor_units' => $allocation['employee_minor'],
+                'employer_contribution_minor_units' => $allocation['employer_minor'],
+                'amount_minor_units' => $allocation['amount_minor'],
+            ];
+        }
+
+        return $summary;
     }
 
     /**
@@ -814,14 +1066,20 @@ final class JmhzPvpojPreviewBuilder
      * spočítat, byla běžná sazba — a všechny vztahy takové revize to
      * v `assertPeople` musí potvrdit.
      *
+     * Vykazují se ČÁSTKY ÚČTÁRNY, tedy podíly z kořenových bloků. Kontrola
+     * dílčích základů a součtu bloků proti kořeni zůstává na úrovni celého
+     * běhu — rozdělovat se smí jen to, co v kořeni sedí.
+     *
      * @param array<string,mixed> $root
      * @param array<string,mixed> $totals
+     * @param array<string,mixed> $share podíl účtárny z rozpadu
      * @return array<string,int>
      */
     private function employerCategoryBlocks(
         array $root,
         array $totals,
         int $employerBeforeDiscount,
+        array $share,
     ): array {
         /** @var array<string,int> $relationshipBases */
         $relationshipBases = $totals['category_base_minor'];
@@ -841,11 +1099,11 @@ final class JmhzPvpojPreviewBuilder
 
             return [
                 'zakladZamestnavateleA' => $this->toCzk(
-                    $totals['capped_base_minor'],
+                    $share['capped_base_minor'],
                     'zakladZamestnavateleA',
                 ),
                 'pojistneZamestnavateleA' => $this->toCzk(
-                    $employerBeforeDiscount,
+                    $share['employer_before_discount_minor'],
                     'pojistneZamestnavateleA',
                 ),
             ];
@@ -854,6 +1112,7 @@ final class JmhzPvpojPreviewBuilder
         $blocks = [];
         $seen = [];
         $contributionTotal = 0;
+        $officeContributionTotal = 0;
         foreach ($categories as $index => $category) {
             $value = $category['category'] ?? null;
             $letter = is_string($value) ? ($letters[$value] ?? null) : null;
@@ -879,18 +1138,34 @@ final class JmhzPvpojPreviewBuilder
                 );
             }
             $contributionTotal = $this->add($contributionTotal, $contribution);
+            $officeBase = $share['category_base_minor'][(string) $value] ?? null;
+            $officeContribution =
+                $share['category_contribution_minor'][(string) $value] ?? null;
+            if (!is_int($officeBase) || !is_int($officeContribution)) {
+                $this->invalid(
+                    'jmhz_social_totals_mismatch',
+                    "Rozpad na účtárny nezná dílčí blok § 5a písm. {$letter}.",
+                );
+            }
+            $officeContributionTotal = $this->add(
+                $officeContributionTotal,
+                $officeContribution,
+            );
             $blocks["zakladZamestnavatele{$letter}"] = $this->toCzk(
-                $base,
+                $officeBase,
                 "zakladZamestnavatele{$letter}",
             );
             $blocks["pojistneZamestnavatele{$letter}"] = $this->toCzk(
-                $contribution,
+                $officeContribution,
                 "pojistneZamestnavatele{$letter}",
             );
         }
         if (array_diff(array_keys($relationshipBases), array_keys($seen)) !== []
             || $contributionTotal !== $employerBeforeDiscount
             || array_sum($relationshipBases) !== $totals['capped_base_minor']
+            || $officeContributionTotal !== $share['employer_before_discount_minor']
+            || array_sum($share['category_base_minor'])
+                !== $share['capped_base_minor']
         ) {
             $this->invalid(
                 'jmhz_social_totals_mismatch',
@@ -924,26 +1199,43 @@ final class JmhzPvpojPreviewBuilder
     }
 
     /**
+     * Závazek ČSSZ TÉTO účtárny.
+     *
+     * Závazky vznikají per registrace s referencí `social-insurance:office:{id}`,
+     * takže se přehled páruje na referenci — nikoli na „jediný závazek revize",
+     * což u běhu přes víc účtáren platit přestalo.
+     *
      * @param list<array<string,mixed>> $liabilities
+     * @param array{office_id:int,code:string,name:string,variable_symbol:string} $office
+     * @param array<string,mixed> $share
      * @return array{id:int,source_snapshot_hash:string}
      */
     private function assertLiability(
         array $liabilities,
+        array $office,
         int $revisionId,
         int $runId,
         int $revisionNo,
         string $rootHash,
-        int $employeeContribution,
-        int $employerContribution,
-        int $payable,
+        array $share,
     ): array {
-        if (count($liabilities) !== 1) {
+        $employeeContribution = $share['employee_minor'];
+        $employerContribution = $share['employer_minor'];
+        $payable = $share['amount_minor'];
+        $reference = "social-insurance:office:{$office['office_id']}";
+        $matching = array_values(array_filter(
+            $liabilities,
+            static fn (array $row): bool =>
+                ($row['liability_reference'] ?? null) === $reference,
+        ));
+        if (count($matching) !== 1) {
             $this->invalid(
                 'jmhz_social_liability_missing',
-                'PVPOJ preview vyžaduje právě jeden závazek ČSSZ aktuální revize.',
+                "PVPOJ preview vyžaduje právě jeden závazek ČSSZ účtárny"
+                . " office:{$office['office_id']} v aktuální revizi.",
             );
         }
-        $liability = $liabilities[0];
+        $liability = $matching[0];
         $sourceJson = $this->nonEmptyString(
             $liability['source_snapshot_json'] ?? null,
             'liability.source_snapshot_json',
@@ -973,10 +1265,25 @@ final class JmhzPvpojPreviewBuilder
             || ($snapshot['employer_contribution_minor'] ?? null)
                 !== $employerContribution
             || ($snapshot['target_amount_minor'] ?? null) !== $payable
+            || ($snapshot['payroll_office_id'] ?? null) !== $office['office_id']
         ) {
             $this->invalid(
                 'jmhz_social_liability_mismatch',
                 'Závazek ČSSZ neodpovídá sociálnímu výsledku a PVPOJ.',
+            );
+        }
+        /*
+         * Variabilní symbol účtárny se od zmaterializování závazku mohl změnit.
+         * Přehled a platba by pak šly pod jinou registraci — a to je přesně ten
+         * rozdíl, který se v podání zpětně nedohledá.
+         */
+        $snapshotSymbol = $snapshot['variable_symbol'] ?? null;
+        if ($snapshotSymbol !== null
+            && $snapshotSymbol !== $office['variable_symbol']
+        ) {
+            $this->invalid(
+                'jmhz_social_liability_mismatch',
+                'Variabilní symbol mzdové účtárny se liší od variabilního symbolu závazku ČSSZ.',
             );
         }
         $prior = $this->signedMinor(
