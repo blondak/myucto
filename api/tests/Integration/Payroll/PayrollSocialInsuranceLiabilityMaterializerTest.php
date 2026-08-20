@@ -16,6 +16,7 @@ use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentQueryService;
 use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollSocialOfficeAllocator;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -35,7 +36,13 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
     private int $supplierId;
     private int $actorId;
     private int $employeeId;
+    private int $secondEmployeeId;
     private int $officeId;
+    private int $secondOfficeId;
+    private int $employmentId;
+    private int $secondEmploymentId;
+    private int $crossOfficeEmploymentId;
+    private int $officelessEmploymentId;
     private int $runId;
     private int $payerCurrencyId;
 
@@ -87,6 +94,20 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
         )->execute([$this->supplierId]);
         $this->officeId = (int) $pdo->lastInsertId();
         $pdo->prepare(
+            'INSERT INTO payroll_offices
+                (supplier_id, code, name, social_security_variable_symbol,
+                 is_active, row_version)
+             VALUES (?, "VZOROV2", "Syntetická účtárna Vzorov II",
+                     "0087654321", 1, 1)',
+        )->execute([$this->supplierId]);
+        $this->secondOfficeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Syntetická sociální osoba II", "employee", 1)',
+        )->execute([$this->supplierId]);
+        $this->secondEmployeeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
             'INSERT INTO payroll_employer_settings
                 (supplier_id, default_office_id,
                  social_security_office_code)
@@ -122,6 +143,46 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
                      "approved", 1)',
         )->execute([$this->supplierId, $this->officeId]);
         $this->runId = (int) $pdo->lastInsertId();
+        $this->employmentId = $this->createEmployment(
+            $pdo,
+            $this->employeeId,
+            $this->officeId,
+            'PV-A',
+        );
+        $this->secondEmploymentId = $this->createEmployment(
+            $pdo,
+            $this->secondEmployeeId,
+            $this->secondOfficeId,
+            'PV-B',
+        );
+        $this->crossOfficeEmploymentId = $this->createEmployment(
+            $pdo,
+            $this->employeeId,
+            $this->secondOfficeId,
+            'PV-C',
+        );
+        $this->officelessEmploymentId = $this->createEmployment(
+            $pdo,
+            $this->employeeId,
+            null,
+            'PV-D',
+        );
+    }
+
+    private function createEmployment(
+        PDO $pdo,
+        int $employeeId,
+        ?int $officeId,
+        string $code,
+    ): int {
+        $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, office_id, code, relation_type,
+                 status, start_date)
+             VALUES (?, ?, ?, ?, "employment", "active", "2026-01-01")',
+        )->execute([$this->supplierId, $employeeId, $officeId, $code]);
+
+        return (int) $pdo->lastInsertId();
     }
 
     protected function tearDown(): void
@@ -347,6 +408,283 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
         );
     }
 
+    /**
+     * Celofiremní běh (`office_id` v kořeni je `null`) se rozpadne na tolik
+     * závazků, kolik různých účtáren mají vztahy — a jejich součet sedí na
+     * kořenový výsledek, na kterém stojí kontrolní součty i účetní rekonciliace.
+     */
+    public function testCompanyWideRunSplitsLiabilityPerOffice(): void
+    {
+        $revisionId = $this->createRevision(
+            1,
+            'regular',
+            null,
+            8_000,
+            24_000,
+            0,
+            null,
+            0,
+            [
+                [
+                    'employee_id' => $this->employeeId,
+                    'employee_contribution' => 5_000,
+                    'relationships' => [[
+                        'employment_id' => $this->employmentId,
+                        'office_id' => $this->officeId,
+                        'capped_base' => 75_000,
+                    ]],
+                ],
+                [
+                    'employee_id' => $this->secondEmployeeId,
+                    'employee_contribution' => 3_000,
+                    'relationships' => [[
+                        'employment_id' => $this->secondEmploymentId,
+                        'office_id' => $this->secondOfficeId,
+                        'capped_base' => 25_000,
+                    ]],
+                ],
+            ],
+            true,
+        );
+
+        $result = $this->service()->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+        self::assertSame(2, $result['created_count']);
+        self::assertCount(2, $result['liability_ids']);
+
+        $byOffice = [];
+        foreach ($result['liability_ids'] as $liabilityId) {
+            $row = $this->liability($liabilityId);
+            $source = $this->jsonObject(
+                $this->string($row, 'source_snapshot_json'),
+            );
+            $byOffice[$this->integer($source, 'payroll_office_id')] = [
+                'amount' => $this->integer($row, 'amount_minor'),
+                'reference' => $this->string($row, 'liability_reference'),
+                'variable_symbol' => $source['variable_symbol'],
+                'employee' => $source['employee_contribution_minor'],
+                'employer' => $source['employer_contribution_minor'],
+            ];
+        }
+        ksort($byOffice, SORT_NUMERIC);
+        self::assertSame(
+            [$this->officeId, $this->secondOfficeId],
+            array_keys($byOffice),
+        );
+        // 75 % / 25 % vyměřovacího základu → 18 000 / 6 000 odvodu zaměstnavatele.
+        self::assertSame(23_000, $byOffice[$this->officeId]['amount']);
+        self::assertSame(5_000, $byOffice[$this->officeId]['employee']);
+        self::assertSame(18_000, $byOffice[$this->officeId]['employer']);
+        self::assertSame(
+            "social-insurance:office:{$this->officeId}",
+            $byOffice[$this->officeId]['reference'],
+        );
+        self::assertSame('0012345678', $byOffice[$this->officeId]['variable_symbol']);
+        self::assertSame(9_000, $byOffice[$this->secondOfficeId]['amount']);
+        self::assertSame(3_000, $byOffice[$this->secondOfficeId]['employee']);
+        self::assertSame(6_000, $byOffice[$this->secondOfficeId]['employer']);
+        self::assertSame(
+            '0087654321',
+            $byOffice[$this->secondOfficeId]['variable_symbol'],
+        );
+        // Součet závazků = kořenový výsledek; na tom stojí
+        // PayrollPostingReconciliationService.
+        self::assertSame(
+            32_000,
+            $byOffice[$this->officeId]['amount']
+                + $byOffice[$this->secondOfficeId]['amount'],
+        );
+
+        $replay = $this->service()->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+        self::assertSame(0, $replay['created_count']);
+        self::assertSame($result['liability_ids'], $replay['liability_ids']);
+
+        /*
+         * Obě účtárny platí na týž účet OSSZ, ale pod vlastním variabilním
+         * symbolem — v dávce to musí být DVĚ platby. Dokud se seskupovalo jen
+         * podle reference příjemce, skončil tenhle výběr chybou.
+         */
+        $batch = $this->batches->build(
+            $this->supplierId,
+            'abo',
+            "currency:{$this->payerCurrencyId}",
+            [
+                [
+                    'liability_id' => $result['liability_ids'][0],
+                    'amount_minor' => $this->integer(
+                        $this->liability($result['liability_ids'][0]),
+                        'amount_minor',
+                    ),
+                ],
+                [
+                    'liability_id' => $result['liability_ids'][1],
+                    'amount_minor' => $this->integer(
+                        $this->liability($result['liability_ids'][1]),
+                        'amount_minor',
+                    ),
+                ],
+            ],
+            $this->actorId,
+        );
+        $symbols = [];
+        foreach ($this->batchInstructions($batch['batch_id']) as $instruction) {
+            $symbols[] = $instruction['variable_symbol'];
+        }
+        sort($symbols, SORT_STRING);
+        self::assertSame(['0012345678', '0087654321'], $symbols);
+    }
+
+    /**
+     * Zbytek po celočíselném dělení nesmí zmizet ani přebýt — largest remainder
+     * ho přiřadí deterministicky a součet zůstane na haléř roven kořeni.
+     */
+    public function testOfficeSplitKeepsRoundingRemainderWithinRootTotal(): void
+    {
+        $revisionId = $this->createRevision(
+            1,
+            'regular',
+            null,
+            0,
+            10_001,
+            0,
+            null,
+            0,
+            [
+                [
+                    'employee_id' => $this->employeeId,
+                    'employee_contribution' => 0,
+                    'relationships' => [[
+                        'employment_id' => $this->employmentId,
+                        'office_id' => $this->officeId,
+                        'capped_base' => 50_000,
+                    ]],
+                ],
+                [
+                    'employee_id' => $this->secondEmployeeId,
+                    'employee_contribution' => 0,
+                    'relationships' => [[
+                        'employment_id' => $this->secondEmploymentId,
+                        'office_id' => $this->secondOfficeId,
+                        'capped_base' => 50_000,
+                    ]],
+                ],
+            ],
+            true,
+        );
+
+        $result = $this->service()->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+        $total = 0;
+        foreach ($result['liability_ids'] as $liabilityId) {
+            $total += $this->integer(
+                $this->liability($liabilityId),
+                'amount_minor',
+            );
+        }
+        self::assertSame(10_001, $total);
+    }
+
+    /**
+     * Vztah bez účtárny se nesmí tiše přiřadit k cizímu variabilnímu symbolu
+     * ani z odvodu vypadnout. Do běhu ho pustí jen historická data — blocker
+     * `employment_without_office` ho jinak zastaví už při zamykání vstupů.
+     */
+    public function testRejectsEmploymentWithoutOffice(): void
+    {
+        $revisionId = $this->createRevision(
+            1,
+            'regular',
+            null,
+            7_100,
+            24_800,
+            7_100,
+            null,
+            0,
+            [[
+                'employee_id' => $this->employeeId,
+                'employee_contribution' => 7_100,
+                'relationships' => [[
+                    'employment_id' => $this->officelessEmploymentId,
+                    'office_id' => null,
+                    'capped_base' => 100_000,
+                ]],
+            ]],
+            true,
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('nemá mzdovou účtárnu');
+        $this->service()->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+    }
+
+    /**
+     * Osoba se dvěma vztahy ve dvou účtárnách: pojistné zaměstnance je
+     * spočítané na osobu, takže se musí rozdělit uvnitř ní, ne padnout celé
+     * pod jednu registraci.
+     */
+    public function testSplitsPersonContributionBetweenTwoOffices(): void
+    {
+        $revisionId = $this->createRevision(
+            1,
+            'regular',
+            null,
+            6_000,
+            12_000,
+            0,
+            null,
+            0,
+            [[
+                'employee_id' => $this->employeeId,
+                'employee_contribution' => 6_000,
+                'relationships' => [
+                    [
+                        'employment_id' => $this->employmentId,
+                        'office_id' => $this->officeId,
+                        'capped_base' => 60_000,
+                    ],
+                    [
+                        'employment_id' => $this->crossOfficeEmploymentId,
+                        'office_id' => $this->secondOfficeId,
+                        'capped_base' => 40_000,
+                    ],
+                ],
+            ]],
+            true,
+        );
+
+        $result = $this->service()->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+        self::assertSame(2, $result['created_count']);
+        $amounts = [];
+        foreach ($result['liability_ids'] as $liabilityId) {
+            $row = $this->liability($liabilityId);
+            $source = $this->jsonObject(
+                $this->string($row, 'source_snapshot_json'),
+            );
+            $amounts[$this->integer($source, 'payroll_office_id')] =
+                $source['employee_contribution_minor'];
+        }
+        self::assertSame(3_600, $amounts[$this->officeId]);
+        self::assertSame(2_400, $amounts[$this->secondOfficeId]);
+    }
+
     private function service(): PayrollSocialInsuranceLiabilityMaterializer
     {
         return new PayrollSocialInsuranceLiabilityMaterializer(
@@ -363,9 +701,17 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
             $this->sensitiveData,
             $this->db,
             new PayrollLevyDeadlinePolicy(),
+            new PayrollSocialOfficeAllocator(),
         );
     }
 
+    /**
+     * @param list<array{
+     *   employee_id:int,
+     *   employee_contribution:int,
+     *   relationships:list<array{employment_id:int,office_id:?int,capped_base:int}>
+     * }>|null $layout
+     */
     private function createRevision(
         int $revisionNo,
         string $revisionKind,
@@ -375,6 +721,8 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
         int $personEmployeeContribution,
         ?int $employerBeforeDiscount = null,
         int $partTimeDiscount = 0,
+        ?array $layout = null,
+        bool $companyWide = false,
     ): int {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -382,12 +730,39 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
                 SET current_revision_no = ?
               WHERE supplier_id = ? AND id = ?',
         )->execute([$revisionNo, $this->supplierId, $this->runId]);
+        $layout ??= [[
+            'employee_id' => $this->employeeId,
+            'employee_contribution' => $personEmployeeContribution,
+            'relationships' => [[
+                'employment_id' => $this->employmentId,
+                'office_id' => $this->officeId,
+                'capped_base' => 100_000,
+            ]],
+        ]];
+        $inputPeople = [];
+        foreach ($layout as $person) {
+            $employments = [];
+            foreach ($person['relationships'] as $relationship) {
+                $employments[] = [
+                    'employment' => [
+                        'id' => $relationship['employment_id'],
+                        'employee_id' => $person['employee_id'],
+                        'office_id' => $relationship['office_id'],
+                    ],
+                ];
+            }
+            $inputPeople[] = [
+                'employee' => ['id' => $person['employee_id']],
+                'employments' => $employments,
+            ];
+        }
         $input = CanonicalJson::encode([
             'schema_version' => 'payroll-run-input.v2',
             'supplier_id' => $this->supplierId,
             'period_start' => '2026-06-01',
             'payment_date' => '2026-07-10',
-            'office_id' => $this->officeId,
+            'office_id' => $companyWide ? null : $this->officeId,
+            'people' => $inputPeople,
         ]);
         $result = '{"schema_version":"payroll-run-result.v2"}';
         $pdo->prepare(
@@ -417,21 +792,43 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
             ),
         ]);
         $revisionId = (int) $pdo->lastInsertId();
-        $personResultJson = json_encode([
-            'employee_id' => $this->employeeId,
-        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-        $pdo->prepare(
+        $personStatement = $pdo->prepare(
             'INSERT INTO payroll_run_persons
                 (supplier_id, revision_id, employee_id, result_json,
                  result_hash, status)
              VALUES (?, ?, ?, ?, ?, "calculated")',
-        )->execute([
-            $this->supplierId,
-            $revisionId,
-            $this->employeeId,
-            $personResultJson,
-            hash('sha256', $personResultJson),
-        ]);
+        );
+        $employmentStatement = $pdo->prepare(
+            'INSERT INTO payroll_run_employments
+                (supplier_id, revision_id, employee_id, employment_id,
+                 input_json, input_hash, status)
+             VALUES (?, ?, ?, ?, ?, ?, "calculated")',
+        );
+        foreach ($layout as $person) {
+            $personResultJson = json_encode([
+                'employee_id' => $person['employee_id'],
+            ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            $personStatement->execute([
+                $this->supplierId,
+                $revisionId,
+                $person['employee_id'],
+                $personResultJson,
+                hash('sha256', $personResultJson),
+            ]);
+            foreach ($person['relationships'] as $relationship) {
+                $employmentJson = json_encode([
+                    'employment_id' => $relationship['employment_id'],
+                ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+                $employmentStatement->execute([
+                    $this->supplierId,
+                    $revisionId,
+                    $person['employee_id'],
+                    $relationship['employment_id'],
+                    $employmentJson,
+                    hash('sha256', $employmentJson),
+                ]);
+            }
+        }
         (new PayrollStatutoryResultRepository($this->db))->store(
             $this->supplierId,
             $revisionId,
@@ -458,22 +855,54 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
                 'ruleset_id' => 'cz-social-2026',
                 'ruleset_hash' => str_repeat('b', 64),
             ],
-            [[
-                'employee_id' => $this->employeeId,
-                'input_snapshot' => [],
-                'relationships' => [],
-                'result_snapshot' => [
-                    'person_id' => "employee:{$this->employeeId}",
-                    'status' => 'calculated',
-                    'employee_contribution_minor_units' =>
-                        $personEmployeeContribution,
-                ],
-                'result_status' => 'calculated',
-            ]],
+            $this->statutoryPeople($layout),
             $this->actorId,
         );
 
         return $revisionId;
+    }
+
+    /**
+     * @param list<array{
+     *   employee_id:int,
+     *   employee_contribution:int,
+     *   relationships:list<array{employment_id:int,office_id:?int,capped_base:int}>
+     * }> $layout
+     * @return list<array<string,mixed>>
+     */
+    private function statutoryPeople(array $layout): array
+    {
+        $people = [];
+        foreach ($layout as $person) {
+            $relationships = [];
+            foreach ($person['relationships'] as $relationship) {
+                $relationships[] = [
+                    'employment_id' => $relationship['employment_id'],
+                    'input_snapshot' => [],
+                    'result_snapshot' => [
+                        'relationship_id' =>
+                            "employment:{$relationship['employment_id']}",
+                        'capped_assessment_base_minor_units' =>
+                            $relationship['capped_base'],
+                    ],
+                    'result_status' => 'calculated',
+                ];
+            }
+            $people[] = [
+                'employee_id' => $person['employee_id'],
+                'input_snapshot' => [],
+                'relationships' => $relationships,
+                'result_snapshot' => [
+                    'person_id' => "employee:{$person['employee_id']}",
+                    'status' => 'calculated',
+                    'employee_contribution_minor_units' =>
+                        $person['employee_contribution'],
+                ],
+                'result_status' => 'calculated',
+            ];
+        }
+
+        return $people;
     }
 
     /** @return array<string,mixed> */
@@ -577,6 +1006,29 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
         )->execute([$this->supplierId]);
 
         return (int) $pdo->lastInsertId();
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function batchInstructions(int $batchId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT item_reference, instruction_ciphertext
+               FROM payroll_payment_items
+              WHERE supplier_id = ? AND batch_id = ?
+              ORDER BY id',
+        );
+        $statement->execute([$this->supplierId, $batchId]);
+        $instructions = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $normalized = $this->row($row);
+            $instructions[] = $this->jsonObject($this->encryption->decryptFor(
+                $this->string($normalized, 'instruction_ciphertext'),
+                "payroll-payment-item:{$this->supplierId}:"
+                    . $this->string($normalized, 'item_reference'),
+            ));
+        }
+
+        return $instructions;
     }
 
     /** @return array<string,mixed> */

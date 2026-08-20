@@ -185,8 +185,19 @@ final class PayrollPaymentBatchBuilder
                 );
                 $recipient = $liability['recipient_reference'];
                 $source = $this->sourceSnapshot($liability);
-                if (!isset($groups[$recipient])) {
-                    $groups[$recipient] = [
+                /*
+                 * Do jedné platby se slévají závazky se STEJNÝM zmrazeným
+                 * cílem, ne jen se stejnou referencí příjemce. Sociální odvod
+                 * dvou mzdových účtáren jde na týž účet OSSZ, ale pod různým
+                 * variabilním symbolem — jsou to dvě platby, ne jedna. Dokud
+                 * bylo klíčem jen `recipient_reference`, skončil takový výběr
+                 * na neurčitém „nejednoznačný zmrazený cíl" a zaplatit se
+                 * nedaly společně vůbec.
+                 */
+                $groupKey = $recipient . "\0"
+                    . $this->frozenTargetFingerprint($source);
+                if (!isset($groups[$groupKey])) {
+                    $groups[$groupKey] = [
                         'recipient_reference' => $recipient,
                         'employee_id' => $liability['employee_id'],
                         'liability_kind' => $liability['liability_kind'],
@@ -194,12 +205,12 @@ final class PayrollPaymentBatchBuilder
                         'liabilities' => [],
                         'source' => $source,
                     ];
-                } elseif ($groups[$recipient]['employee_id']
+                } elseif ($groups[$groupKey]['employee_id']
                     !== $liability['employee_id']
-                    || $groups[$recipient]['liability_kind']
+                    || $groups[$groupKey]['liability_kind']
                         !== $liability['liability_kind']
                     || !$this->sameFrozenTarget(
-                        $groups[$recipient]['source'],
+                        $groups[$groupKey]['source'],
                         $source,
                     )
                 ) {
@@ -207,11 +218,11 @@ final class PayrollPaymentBatchBuilder
                         'Reference příjemce nemá v dávce jednoznačný zmrazený cíl.',
                     );
                 }
-                $groups[$recipient]['amount_minor'] = $this->addAmounts(
-                    $groups[$recipient]['amount_minor'],
+                $groups[$groupKey]['amount_minor'] = $this->addAmounts(
+                    $groups[$groupKey]['amount_minor'],
                     $amount,
                 );
-                $groups[$recipient]['liabilities'][] = [
+                $groups[$groupKey]['liabilities'][] = [
                     'id' => $liability['id'],
                     'reference' => $liability['liability_reference'],
                     'amount_minor' => $amount,
@@ -220,6 +231,7 @@ final class PayrollPaymentBatchBuilder
                 ];
             }
             ksort($groups, SORT_STRING);
+            unset($recipient, $source, $groupKey);
 
             $payerInstruction = $this->payerInstruction(
                 $supplierId,
@@ -231,12 +243,13 @@ final class PayrollPaymentBatchBuilder
             $batchReference = 'payroll-batch:'
                 . substr($idempotencyHex, 0, 48);
             $preparedItems = [];
-            foreach ($groups as $recipient => $group) {
+            foreach ($groups as $groupKey => $group) {
+                $recipient = $group['recipient_reference'];
                 $itemReference = 'payroll-item:'
                     . substr(
                         hash(
                             'sha256',
-                            $idempotencyHex . "\0" . $recipient,
+                            $idempotencyHex . "\0" . $groupKey,
                         ),
                         0,
                         48,
@@ -592,26 +605,29 @@ final class PayrollPaymentBatchBuilder
     }
 
     /**
+     * Otisk zmrazeného cíle platby — sjednocuje závazky, které se dají poslat
+     * JEDNOU platbou. Sleduje tytéž položky jako {@see self::sameFrozenTarget()},
+     * aby se seskupení a jeho kontrola nikdy nerozešly.
+     *
+     * @param array<string,mixed> $source
+     */
+    private function frozenTargetFingerprint(array $source): string
+    {
+        $target = [];
+        foreach (self::FROZEN_TARGET_FIELDS as $field) {
+            $target[$field] = $source[$field] ?? null;
+        }
+
+        return hash('sha256', CanonicalJson::encode($target));
+    }
+
+    /**
      * @param array<string,mixed> $left
      * @param array<string,mixed> $right
      */
     private function sameFrozenTarget(array $left, array $right): bool
     {
-        foreach ([
-            'institution_type',
-            'institution_code',
-            'payment_target_id',
-            'payment_target_hash',
-            'payment_target_row_version',
-            'payment_target_verification_hash',
-            'payroll_office_id',
-            'payroll_office_code',
-            'payroll_office_row_version',
-            'employer_settings_row_version',
-            'variable_symbol',
-            'specific_symbol',
-            'constant_symbol',
-        ] as $field) {
+        foreach (self::FROZEN_TARGET_FIELDS as $field) {
             if (($left[$field] ?? null) !== ($right[$field] ?? null)) {
                 return false;
             }
@@ -619,6 +635,23 @@ final class PayrollPaymentBatchBuilder
 
         return true;
     }
+
+    /** @var list<string> */
+    private const FROZEN_TARGET_FIELDS = [
+        'institution_type',
+        'institution_code',
+        'payment_target_id',
+        'payment_target_hash',
+        'payment_target_row_version',
+        'payment_target_verification_hash',
+        'payroll_office_id',
+        'payroll_office_code',
+        'payroll_office_row_version',
+        'employer_settings_row_version',
+        'variable_symbol',
+        'specific_symbol',
+        'constant_symbol',
+    ];
 
     /**
      * @return array<string,mixed>|null

@@ -784,10 +784,19 @@ ověření; celé číslo účtu ani interní reference neposílá. Splatnost se
 odvodí z mzdového období, ne z dne, kdy byl historický běh vypočten nebo
 opraven.
 
-Ze stejných schválených podkladů se připraví jeden závazek sociálního
-pojištění za mzdovou účtárnu a oddělené závazky zálohové a srážkové daně.
-Sociální pojistné používá zaměstnavatelský VS z účtárny a účet ČSSZ účinný
-ke splatnosti. Zálohová a srážková daň se neslučují: každá má vlastní účet
+Ze stejných schválených podkladů se připraví závazky sociálního pojištění
+a oddělené závazky zálohové a srážkové daně. Sociální pojistné se dělí podle
+**mzdové účtárny pracovního vztahu**, protože zaměstnavatelský variabilní
+symbol je na účtárně: běh zúžený na jednu účtárnu dá jeden závazek, celofiremní
+běh tolik závazků, kolik různých účtáren mají vztahy v běhu. Součet těchto
+závazků vždy odpovídá kořenovému výsledku, takže sedí i kontrolní součty
+a rekonciliace účetnictví s platbami. Každý závazek používá zaměstnavatelský VS
+své účtárny a účet ČSSZ účinný ke splatnosti; v platební dávce jsou to
+samostatné platby, i když jdou na týž účet ČSSZ. Vztah bez mzdové účtárny
+přípravu zastaví — bez ní není odvod pod jakým symbolem vykázat.
+Přehled o výši pojistného (PVPOJ) se naopak podává za jednu registraci u OSSZ,
+takže vyžaduje běh zúžený na jednu účtárnu; u celofiremního běhu přes víc
+účtáren aplikace přípravu podání odmítne. Zálohová a srážková daň se neslučují: každá má vlastní účet
 finančního úřadu a platební symboly. Záloha je splatná 20. den následujícího
 měsíce, srážková daň jeho poslední den.
 

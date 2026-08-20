@@ -23,6 +23,7 @@ final class PayrollSocialInsuranceLiabilityMaterializer
         private readonly PayrollSensitiveData $sensitiveData,
         private readonly Connection $db,
         private readonly PayrollLevyDeadlinePolicy $deadlines,
+        private readonly PayrollSocialOfficeAllocator $officeAllocator,
     ) {}
 
     /** @return array{liability_ids:list<int>,created_count:int} */
@@ -69,10 +70,21 @@ final class PayrollSocialInsuranceLiabilityMaterializer
                     'Zmrazený vstup neodpovídá firmě a období revize.',
                 );
             }
-            $officeId = $this->positiveInt(
-                $input['office_id'] ?? null,
-                'zmrazenou mzdovou účtárnu',
-            );
+            /*
+             * `office_id` v KOŘENI zmrazeného vstupu je filtr rozsahu běhu, ne
+             * účtárna odvodu — u celofiremního běhu je legitimně `null`. Účtárna
+             * se bere z pracovního vztahu, viz {@see PayrollSocialOfficeAllocator}.
+             * Dokud se četla odsud, celofiremní běh sociální závazek vůbec
+             * nezmaterializoval.
+             */
+            $scopeOfficeId = $input['office_id'] ?? null;
+            if ($scopeOfficeId !== null
+                && (!is_int($scopeOfficeId) || $scopeOfficeId <= 0)
+            ) {
+                throw new \DomainException(
+                    'Zmrazený filtr mzdové účtárny není platný.',
+                );
+            }
             $statutory = $this->statutoryResults->find(
                 $supplierId,
                 $revisionId,
@@ -148,10 +160,11 @@ final class PayrollSocialInsuranceLiabilityMaterializer
                 );
             }
             $personSum = 0;
-            foreach ($this->rows(
+            $people = $this->rows(
                 $statutory['people'] ?? null,
                 'výsledky osob sociálního pojištění',
-            ) as $person) {
+            );
+            foreach ($people as $person) {
                 if (($person['result_status'] ?? null) !== 'calculated') {
                     throw new \DomainException(
                         'Sociální výsledek obsahuje osobu k ruční kontrole.',
@@ -185,6 +198,31 @@ final class PayrollSocialInsuranceLiabilityMaterializer
                         'odvod osoby',
                     ),
                 );
+                /*
+                 * Vyměřovací základ vztahu je VÁHOU rozpadu na účtárny, takže
+                 * musí projít stejným ověřením otisku jako částky nad ním —
+                 * jinak by se odvod dělil podle čísla, které nikdo nepodepsal.
+                 */
+                foreach ($this->rows(
+                    $person['relationships'] ?? null,
+                    'vztahy osoby sociálního pojištění',
+                ) as $relationship) {
+                    $relationshipResult = $this->object(
+                        $relationship['result_snapshot'] ?? null,
+                        'výsledek vztahu sociálního pojištění',
+                    );
+                    if (!hash_equals(
+                        $this->hash($relationship, 'result_snapshot_hash'),
+                        hash(
+                            'sha256',
+                            CanonicalJson::encode($relationshipResult),
+                        ),
+                    )) {
+                        throw new \DomainException(
+                            'Otisk výsledku vztahu sociálního pojištění nesouhlasí.',
+                        );
+                    }
+                }
             }
             if ($personSum !== $employee) {
                 throw new \DomainException(
@@ -195,12 +233,46 @@ final class PayrollSocialInsuranceLiabilityMaterializer
             $dueOn = $this->statutoryDueOn(
                 $revision['period_start'],
             );
-            $target = $this->target(
-                $supplierId,
-                $officeId,
-                $dueOn,
+            /*
+             * Rozpad na mzdové účtárny. Zúžený běh má jedinou účtárnu, takže
+             * celá částka padne na ni a výsledek je shodný s dosavadním
+             * chováním; celofiremní běh dá tolik závazků, kolik různých
+             * účtáren mají vztahy v běhu.
+             */
+            $allocations = $this->officeAllocator->allocate(
+                $input,
+                $people,
+                $employee,
+                $employer,
             );
-            $reference = "social-insurance:office:{$officeId}";
+            if ($scopeOfficeId !== null
+                && array_column($allocations, 'office_id') !== [$scopeOfficeId]
+            ) {
+                throw new \DomainException(
+                    'Zmrazený vstup zúžený na účtárnu obsahuje vztahy jiné účtárny.',
+                );
+            }
+            $allocated = 0;
+            $targets = [];
+            foreach ($allocations as $allocation) {
+                $allocated = $this->add($allocated, $allocation['amount_minor']);
+                if ($allocation['amount_minor'] === 0) {
+                    continue;
+                }
+                $officeId = $allocation['office_id'];
+                $reference = "social-insurance:office:{$officeId}";
+                $targets[$reference] = [
+                    ...$this->target($supplierId, $officeId, $dueOn),
+                    'employee_minor' => $allocation['employee_minor'],
+                    'employer_minor' => $allocation['employer_minor'],
+                    'amount_minor' => $allocation['amount_minor'],
+                ];
+            }
+            if ($allocated !== $targetAmount) {
+                throw new \DomainException(
+                    'Rozpad sociálního odvodu na účtárny nesouhlasí s kořenovým výsledkem.',
+                );
+            }
             $prior = $this->priorState(
                 $this->liabilities->lockEarlierInstitutionalLiabilities(
                     $supplierId,
@@ -208,9 +280,8 @@ final class PayrollSocialInsuranceLiabilityMaterializer
                     $revision['revision_no'],
                     'social_insurance',
                 ),
-                $reference,
             );
-            if ($revision['revision_kind'] === 'regular' && $prior !== null) {
+            if ($revision['revision_kind'] === 'regular' && $prior !== []) {
                 throw new \DomainException(
                     'Další revize sociálního závazku musí být opravná.',
                 );
@@ -222,96 +293,113 @@ final class PayrollSocialInsuranceLiabilityMaterializer
                     'Opravná revize nemá předchozí revizi.',
                 );
             }
-            if ($prior !== null
-                && (
-                    $prior['recipient_reference']
-                        !== $target['recipient_reference']
-                    || $prior['target_snapshot']
-                        !== $target['target_snapshot']
-                )
-            ) {
-                throw new \DomainException(
-                    'Ověřený cíl sociálního pojištění se proti předchozímu závazku změnil.',
-                );
-            }
-            $priorSigned = $prior['signed_minor'] ?? 0;
-            $delta = $this->subtract($targetAmount, $priorSigned);
-            if ($delta === 0) {
-                return ['liability_ids' => [], 'created_count' => 0];
-            }
-            $direction = $delta > 0 ? 'outgoing' : 'incoming';
-            $amount = $this->absolute($delta);
-            $source = [
-                'schema_reference' =>
-                    'payroll-payment-social-insurance-source.v1',
-                'run_id' => $revision['run_id'],
-                'revision_id' => $revisionId,
-                'revision_no' => $revision['revision_no'],
-                'statutory_result_hash' => $rootHash,
-                'logical_reference' => $reference,
-                'recipient_reference' =>
-                    $target['recipient_reference'],
-                ...$target['target_snapshot'],
-                'employee_contribution_minor' => $employee,
-                'employer_contribution_minor' => $employer,
-                'target_amount_minor' => $targetAmount,
-                'prior_signed_minor' => $priorSigned,
-                'delta_signed_minor' => $delta,
-            ];
-            $sourceJson = CanonicalJson::encode($source);
-            $sourceHash = hash('sha256', $sourceJson);
-            $idempotencyHash = hash(
-                'sha256',
-                CanonicalJson::encode([
+            $references = array_unique([
+                ...array_keys($targets),
+                ...array_keys($prior),
+            ]);
+            sort($references, SORT_STRING);
+            $ids = [];
+            $created = 0;
+            foreach ($references as $reference) {
+                $target = $targets[$reference] ?? null;
+                $previous = $prior[$reference] ?? null;
+                if ($target !== null && $previous !== null
+                    && (
+                        $previous['recipient_reference']
+                            !== $target['recipient_reference']
+                        || $previous['target_snapshot']
+                            !== $target['target_snapshot']
+                    )
+                ) {
+                    throw new \DomainException(
+                        'Ověřený cíl sociálního pojištění se proti předchozímu závazku změnil.',
+                    );
+                }
+                $officeAmount = $target['amount_minor'] ?? 0;
+                $priorSigned = $previous['signed_minor'] ?? 0;
+                $delta = $this->subtract($officeAmount, $priorSigned);
+                if ($delta === 0) {
+                    continue;
+                }
+                $direction = $delta > 0 ? 'outgoing' : 'incoming';
+                $amount = $this->absolute($delta);
+                $recipientReference = $target['recipient_reference']
+                    ?? $previous['recipient_reference']
+                    ?? throw new \LogicException('Chybí příjemce sociálního závazku.');
+                $targetSnapshot = $target['target_snapshot']
+                    ?? $previous['target_snapshot']
+                    ?? throw new \LogicException('Chybí snapshot příjemce.');
+                $source = [
                     'schema_reference' =>
-                        'payroll-payment-social-insurance-idempotency.v1',
-                    'supplier_id' => $supplierId,
+                        'payroll-payment-social-insurance-source.v1',
+                    'run_id' => $revision['run_id'],
                     'revision_id' => $revisionId,
+                    'revision_no' => $revision['revision_no'],
+                    'statutory_result_hash' => $rootHash,
                     'logical_reference' => $reference,
-                    'source_snapshot_hash' => $sourceHash,
-                ]),
-                true,
-            );
-            $previousId = $prior['latest_id'] ?? null;
-            $existing = $this->liabilities->findAnyForUpdate(
-                $supplierId,
-                $revisionId,
-                $reference,
-            );
-            if ($existing !== null) {
-                $this->assertReplay(
-                    $existing,
+                    'recipient_reference' => $recipientReference,
+                    ...$targetSnapshot,
+                    'employee_contribution_minor' =>
+                        $target['employee_minor'] ?? 0,
+                    'employer_contribution_minor' =>
+                        $target['employer_minor'] ?? 0,
+                    'target_amount_minor' => $officeAmount,
+                    'prior_signed_minor' => $priorSigned,
+                    'delta_signed_minor' => $delta,
+                ];
+                $sourceJson = CanonicalJson::encode($source);
+                $sourceHash = hash('sha256', $sourceJson);
+                $idempotencyHash = hash(
+                    'sha256',
+                    CanonicalJson::encode([
+                        'schema_reference' =>
+                            'payroll-payment-social-insurance-idempotency.v1',
+                        'supplier_id' => $supplierId,
+                        'revision_id' => $revisionId,
+                        'logical_reference' => $reference,
+                        'source_snapshot_hash' => $sourceHash,
+                    ]),
+                    true,
+                );
+                $previousId = $previous['latest_id'] ?? null;
+                $existing = $this->liabilities->findAnyForUpdate(
+                    $supplierId,
+                    $revisionId,
+                    $reference,
+                );
+                if ($existing !== null) {
+                    $this->assertReplay(
+                        $existing,
+                        $direction,
+                        $recipientReference,
+                        $dueOn,
+                        $amount,
+                        $previousId,
+                        $sourceHash,
+                        $idempotencyHash,
+                    );
+                    $ids[] = $existing['id'];
+                    continue;
+                }
+                $ids[] = $this->liabilities->insertInstitutional(
+                    $supplierId,
+                    $revisionId,
+                    $reference,
+                    'social_insurance',
                     $direction,
-                    $target['recipient_reference'],
+                    $recipientReference,
                     $dueOn,
                     $amount,
                     $previousId,
+                    $sourceJson,
                     $sourceHash,
                     $idempotencyHash,
+                    $actorUserId,
                 );
-
-                return [
-                    'liability_ids' => [$existing['id']],
-                    'created_count' => 0,
-                ];
+                ++$created;
             }
-            $id = $this->liabilities->insertInstitutional(
-                $supplierId,
-                $revisionId,
-                $reference,
-                'social_insurance',
-                $direction,
-                $target['recipient_reference'],
-                $dueOn,
-                $amount,
-                $previousId,
-                $sourceJson,
-                $sourceHash,
-                $idempotencyHash,
-                $actorUserId,
-            );
 
-            return ['liability_ids' => [$id], 'created_count' => 1];
+            return ['liability_ids' => $ids, 'created_count' => $created];
         });
     }
 
@@ -540,20 +628,24 @@ final class PayrollSocialInsuranceLiabilityMaterializer
      *   source_snapshot_json:string,
      *   source_snapshot_hash:string
      * }> $rows
-     * @return array{
+     * @return array<string,array{
      *   recipient_reference:string,
      *   signed_minor:int,
      *   latest_id:int,
      *   target_snapshot:array<string,mixed>
-     * }|null
+     * }>
      */
-    private function priorState(array $rows, string $reference): ?array
+    private function priorState(array $rows): array
     {
-        $state = null;
+        $state = [];
         foreach ($rows as $row) {
-            if ($row['liability_reference'] !== $reference) {
+            $reference = $row['liability_reference'];
+            if (preg_match(
+                '/^social-insurance:office:[1-9][0-9]*$/D',
+                $reference,
+            ) !== 1) {
                 throw new \DomainException(
-                    'Dřívější sociální závazek má jinou účtárnu.',
+                    'Dřívější sociální závazek nemá referenci mzdové účtárny.',
                 );
             }
             $source = $this->canonicalObject(
@@ -588,16 +680,16 @@ final class PayrollSocialInsuranceLiabilityMaterializer
             ] as $field) {
                 $target[$field] = $source[$field] ?? null;
             }
-            if ($state === null) {
-                $state = [
+            if (!isset($state[$reference])) {
+                $state[$reference] = [
                     'recipient_reference' => $row['recipient_reference'],
                     'signed_minor' => 0,
                     'latest_id' => $row['id'],
                     'target_snapshot' => $target,
                 ];
-            } elseif ($state['recipient_reference']
+            } elseif ($state[$reference]['recipient_reference']
                     !== $row['recipient_reference']
-                || $state['target_snapshot'] !== $target
+                || $state[$reference]['target_snapshot'] !== $target
             ) {
                 throw new \DomainException(
                     'Řetězec sociálního závazku změnil zmrazený cíl.',
@@ -606,11 +698,18 @@ final class PayrollSocialInsuranceLiabilityMaterializer
             $signed = $row['direction'] === 'outgoing'
                 ? $row['amount_minor']
                 : -$row['amount_minor'];
-            $state['signed_minor'] = $this->add(
-                $state['signed_minor'],
+            $state[$reference]['signed_minor'] = $this->add(
+                $state[$reference]['signed_minor'],
                 $signed,
             );
-            $state['latest_id'] = $row['id'];
+            $state[$reference]['latest_id'] = $row['id'];
+        }
+        foreach ($state as $item) {
+            if ($item['signed_minor'] < 0) {
+                throw new \DomainException(
+                    'Dřívější sociální závazky mají záporný zůstatek.',
+                );
+            }
         }
 
         return $state;

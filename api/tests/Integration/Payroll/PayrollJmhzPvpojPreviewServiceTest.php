@@ -188,6 +188,7 @@ final class PayrollJmhzPvpojPreviewServiceTest extends TestCase
                 'employment' => [
                     'id' => $employmentId,
                     'employee_id' => $employeeId,
+                    'office_id' => 4,
                 ],
             ]],
         ];

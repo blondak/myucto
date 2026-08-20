@@ -170,6 +170,7 @@ final class JmhzPvpojPreviewBuilder
         }
 
         $frozenPeople = $this->frozenPeople($revisionInput);
+        $this->assertSingleOffice($frozenPeople);
         $reconciled = $this->reconcilePeople(
             $this->rows(
                 $statutory['people'] ?? null,
@@ -327,6 +328,53 @@ final class JmhzPvpojPreviewBuilder
             $pvpoj,
             $reconciled['people'],
         );
+    }
+
+    /**
+     * PVPOJ se podává ZA REGISTRACI U OSSZ, a ta je na mzdové účtárně
+     * (`payroll_offices.social_security_variable_symbol`). Jeden přehled proto
+     * nemůže pokrýt běh, jehož vztahy patří do víc účtáren — sloučily by se
+     * v něm dvě registrace pod jeden variabilní symbol.
+     *
+     * Od rozpadu sociálního závazku na účtárny
+     * ({@see \MyInvoice\Service\Payroll\Payment\PayrollSocialOfficeAllocator})
+     * takový běh závazky vytvoří, jenže PVPOJ jich pak najde víc než jeden.
+     * Bez tohohle guardu by to spadlo na neurčité `jmhz_social_liability_missing`
+     * a účetní by hledal chybějící závazek, který nechybí. Podání per účtárna
+     * je samostatné zadání; do té doby se běh musí na účtárnu zúžit.
+     *
+     * @param array<int,array{
+     *   input:array<string,mixed>,
+     *   relationships:array<int,array<string,mixed>>
+     * }> $frozenPeople
+     */
+    private function assertSingleOffice(array $frozenPeople): void
+    {
+        $offices = [];
+        foreach ($frozenPeople as $person) {
+            foreach ($person['relationships'] as $employmentId => $entry) {
+                $employment = $this->object(
+                    $entry['employment'] ?? null,
+                    'input.employment',
+                );
+                $officeId = $employment['office_id'] ?? null;
+                if (!is_int($officeId) || $officeId <= 0) {
+                    $this->invalid(
+                        'jmhz_employment_without_office',
+                        "Pracovní vztah employment:{$employmentId} nemá mzdovou účtárnu,"
+                        . ' takže ho PVPOJ nemá pod jakým variabilním symbolem vykázat.',
+                    );
+                }
+                $offices[$officeId] = true;
+            }
+        }
+        if (count($offices) > 1) {
+            $this->invalid(
+                'jmhz_social_multiple_offices',
+                'Mzdový běh obsahuje vztahy z více mzdových účtáren. PVPOJ se podává'
+                . ' za každou účtárnu zvlášť — zužte běh na jednu účtárnu.',
+            );
+        }
     }
 
     /**
