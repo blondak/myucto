@@ -15985,6 +15985,19 @@
             "production": "Production",
             "test": "Test environment"
         },
+        "gateway": {
+            "prepare": "Prepare in the data box",
+            "receiptManual": "Upload the delivery receipt for this message manually — the sending gateway cannot download it.",
+            "state": {
+                "awaiting_login": "Signing in to the data box",
+                "awaiting_approval": "The message is waiting for your approval",
+                "approved": "The message was sent from your data box",
+                "rejected": "You rejected the dispatch",
+                "failed": "The data box did not send the message",
+                "uncertain": "We do not know whether the message was sent",
+                "expired": "The dispatch expired"
+            }
+        },
         "tabs": {
             "access": "Access",
             "outbox": "Outgoing filings",

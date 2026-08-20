@@ -23,6 +23,8 @@ import {
   type DefectNotice,
   type DeliveryBasis,
   type DispatchState,
+  type GatewaySessionState,
+  type IsdsGatewayRegistration,
   type InboxMessage,
   type InboxPollState,
   type OutboxAttempt,
@@ -172,13 +174,15 @@ function acceptanceTone(state: AcceptanceState): string {
 /**
  * Právě jedna plná primární akce podle stavu — zbytek outline.
  *
- * U datovky je pro připravené podání primární akcí „označit jako odesláno",
- * ne „odeslat datovkou": strojový transport nasazený není, takže zprávu
- * doopravdy odesílá člověk ve své schránce. Nabízet jako hlavní krok tlačítko,
- * které dnes vždycky skončí překážkou, by uživatele posílalo do zdi.
+ * U datovky závisí na tom, jestli je zapnutá odesílací brána. Je-li, primární
+ * akcí je „připravit v datové schránce" — zprávu pořád odesílá člověk, ale
+ * aplikace mu ji připraví jako koncept a stačí ji schválit. Není-li (nebo
+ * o tom nevíme), zůstává primární „označit jako odesláno": nabízet jako hlavní
+ * krok tlačítko, které skončí překážkou, by uživatele posílalo do zdi.
  */
-function primaryAction(row: OutboxSubmission): 'confirm' | 'resolve' | 'markSent' | 'uploadReceipt' | null {
+function primaryAction(row: OutboxSubmission): 'gateway' | 'confirm' | 'resolve' | 'markSent' | 'uploadReceipt' | null {
   if (row.dispatch_state === 'send_uncertain' || row.dispatch_state === 'sending') return 'resolve'
+  if (canUseGateway(row)) return 'gateway'
   if (row.dispatch_state === 'ready') return row.channel === 'isds' ? 'markSent' : 'confirm'
   if (row.dispatch_state === 'sent' && row.channel === 'isds' && !row.receipt_document_id) return 'uploadReceipt'
   return null
@@ -567,7 +571,110 @@ async function deleteRecipient(row: SubmissionRecipient) {
   }
 }
 
-onMounted(loadAll)
+// ── Odesílací brána ISDS ─────────────────────────────────────────────────────
+// Zpráva neodchází ze serveru: připravíme koncept, uživatel ho schválí přímo
+// v datové schránce. Mezi tím jsou dvě přesměrování prohlížeče, takže tahle
+// obrazovka je zároveň návratovou adresou registrace brány.
+
+/**
+ * Je brána pro tohle prostředí zaregistrovaná a zapnutá?
+ *
+ * `null` znamená „nevíme" — typicky proto, že uživatel nemá právo
+ * `settings.signing` a výpis registrací mu vrátí 403. Nevědomost se nesmí
+ * vydávat za „brána není", takže tlačítko se v takovém případě nenabízí
+ * a ruční cesta zůstává beze změny.
+ */
+const gatewayRegistrations = ref<IsdsGatewayRegistration[] | null>(null)
+const gatewayBusyId = ref<number | null>(null)
+const gatewayNotice = ref<{ state: GatewaySessionState; message: string; messageId: string | null } | null>(null)
+
+const gatewayAvailable = computed(() =>
+  (gatewayRegistrations.value ?? []).some(r => r.environment === environment.value && r.is_active),
+)
+
+async function loadGatewayRegistrations() {
+  try {
+    gatewayRegistrations.value = await dataBoxApi.gatewayRegistrations()
+  } catch {
+    // 403 (bez práva) i výpadek: obojí je „nevíme". Mlčky — není to chyba
+    // uživatele a ruční cesta funguje dál.
+    gatewayRegistrations.value = null
+  }
+}
+
+/** Nabízí se jen tam, kde má smysl: připravené podání datovkou a zapnutá brána. */
+function canUseGateway(row: OutboxSubmission): boolean {
+  return gatewayAvailable.value && row.channel === 'isds' && row.dispatch_state === 'ready'
+}
+
+async function startGateway(row: OutboxSubmission) {
+  gatewayBusyId.value = row.id
+  try {
+    const start = await dataBoxApi.gatewayStart(row.id)
+    // Plná navigace, ne router: cíl je v perimetru ISDS a musí se z něj dát
+    // vrátit zpátky na naši návratovou adresu.
+    window.location.assign(start.redirect_url)
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    gatewayBusyId.value = null
+  }
+}
+
+/**
+ * Návrat z ISDS. Volá se pro obě fáze; která to je, ví server ze stavu relace.
+ *
+ * Parametry se z adresy odstraní hned po přečtení — `sessionId` je jednorázové
+ * a obnovení stránky s ním v adrese by skončilo `SESSION_NOT_FOUND`.
+ */
+async function handleGatewayReturn(): Promise<boolean> {
+  const params = new URLSearchParams(window.location.search)
+  const appToken = params.get('appToken') ?? ''
+  const sessionId = params.get('sessionId') ?? ''
+  if (appToken === '' || sessionId === '') return false
+
+  params.delete('appToken')
+  params.delete('sessionId')
+  const query = params.toString()
+  window.history.replaceState({}, '', window.location.pathname + (query === '' ? '' : '?' + query))
+
+  tab.value = 'outbox'
+  try {
+    const result = await dataBoxApi.gatewayComplete(appToken, sessionId)
+    if (result.redirect_url) {
+      // Koncept leží v datové schránce. Uživatel ho jde zkontrolovat
+      // a schválit — teprve tím zpráva odejde.
+      gatewayNotice.value = { state: result.state, message: result.message, messageId: null }
+      window.location.assign(result.redirect_url)
+
+      return true
+    }
+    gatewayNotice.value = {
+      state: result.state,
+      message: result.message,
+      messageId: result.external_message_id,
+    }
+    if (result.state === 'approved') toast.success(result.message)
+    else if (result.state === 'rejected') toast.info(result.message)
+    else toast.error(result.message)
+  } catch (e) {
+    const message = apiErrorMessage(e)
+    // ⚠️ Nevědomost se nesmí ztratit v toastu. Zůstává na obrazovce, protože
+    // z ní plyne pokyn „neodesílejte znovu, dokud si to neověříte".
+    gatewayNotice.value = { state: 'uncertain', message, messageId: null }
+    toast.error(message)
+  }
+
+  return true
+}
+
+onMounted(async () => {
+  await loadGatewayRegistrations()
+  const returning = await handleGatewayReturn()
+  // Při odchodu na schvalovací obrazovku se stránka stejně opouští — načítat
+  // zbytek by bylo zbytečné volání navíc.
+  if (!returning || gatewayNotice.value?.state !== 'awaiting_approval') await loadAll()
+})
 </script>
 
 <template>
@@ -795,6 +902,31 @@ onMounted(loadAll)
         </button>
       </div>
 
+      <!-- ── Výsledek návratu z datové schránky ──
+           Nezmizí jako toast: u nejistého konce z něj plyne pokyn
+           „neodesílejte znovu, dokud si to neověříte v odeslaných zprávách". -->
+      <div
+        v-if="gatewayNotice"
+        class="rounded-lg border p-3 text-sm"
+        :class="gatewayNotice.state === 'approved'
+          ? 'border-success-200 bg-success-50 text-success-800 dark:border-success-800 dark:bg-success-900/20 dark:text-success-200'
+          : gatewayNotice.state === 'uncertain'
+            ? 'border-warning-300 bg-warning-50 text-warning-800 dark:border-warning-800 dark:bg-warning-900/20 dark:text-warning-200'
+            : 'border-neutral-200 bg-neutral-50 text-neutral-700 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200'"
+      >
+        <div class="font-medium">{{ t(`databox.gateway.state.${gatewayNotice.state}`) }}</div>
+        <p class="mt-1">{{ gatewayNotice.message }}</p>
+        <p v-if="gatewayNotice.messageId" class="mt-1">
+          {{ t('databox.receipts.messageId') }}: <code>{{ gatewayNotice.messageId }}</code>
+        </p>
+        <p v-if="gatewayNotice.state === 'approved'" class="mt-1 text-xs">
+          {{ t('databox.gateway.receiptManual') }}
+        </p>
+        <button type="button" :class="[btnOutlineSm('neutral'), 'mt-2']" @click="gatewayNotice = null">
+          {{ t('common.close') }}
+        </button>
+      </div>
+
       <EmptyState v-if="!loading && outbox.length === 0" icon="send" :title="t('databox.outbox.empty')" />
 
       <div
@@ -918,6 +1050,32 @@ onMounted(loadAll)
         </div>
 
         <div class="mt-3 flex flex-wrap gap-2">
+          <!-- Připraví koncept v datové schránce. NEODESÍLÁ — odeslání je
+               právní úkon a potvrzuje ho uživatel přímo v ISDS. -->
+          <button
+            v-if="primaryAction(row) === 'gateway'"
+            type="button"
+            :class="btnFilled('primary')"
+            :disabled="gatewayBusyId === row.id || busyId === row.id"
+            @click="startGateway(row)"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send" />
+            </svg>
+            {{ t('databox.gateway.prepare') }}
+          </button>
+          <button
+            v-if="canUseGateway(row) && markSentFor !== row.id"
+            type="button"
+            :class="btnOutline('neutral')"
+            :disabled="busyId === row.id"
+            @click="startMarkSent(row)"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
+            </svg>
+            {{ t('databox.outbox.markSent') }}
+          </button>
           <button
             v-if="primaryAction(row) === 'markSent' && markSentFor !== row.id"
             type="button"
