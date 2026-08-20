@@ -318,7 +318,31 @@ Systém automaticky vypočte:
 - **Ekvivalent v měně faktury** — pro spárování proti `amount_to_pay`
 - **Kurzový rozdíl** — v základní měně (CZK). Záporný = kurzová ztráta, kladný = zisk. Zaznamenává se pro reporting a účetně se automaticky promítne do správných řádků DPH výkazů.
 
-### 23.2.6 Reverse charge z EU — pořízení zboží vs. služba
+### 23.2.6 Klasifikace DPH — co doplní aplikace a kdy ji nechá prázdnou
+
+Pole **Klasifikace DPH** v sekci *Klasifikace* můžeš nechat prázdné — kód doplní aplikace
+při uložení podle sazby, **země dodavatele**, reverse charge a plátcovství tvé firmy k datu
+dokladu. Hlavička dokladu kód jen přebírá z řádků; ručně vybraný kód nikdy nepřepíše.
+Kompletní tabulka kódů i pravidel je ve [Výkazech DPH](36_Vykazy_DPH.md#auto-default-klasifikace).
+
+Tři situace, kdy zůstane **prázdná záměrně** — a aplikace ti to řekne upozorněním nad dokladem:
+
+- **Poplatek orgánu veřejné moci** (soudní, správní, kolek, evropský platební rozkaz,
+  `Gerichtskosten`, `court fee`). Orgán při výkonu veřejné správy není osobou povinnou k dani
+  (§ 5 odst. 4 ZDPH), takže plnění není předmětem daně **ani u zahraničního soudu či úřadu**:
+  nesamovyměřuje se podle § 9 odst. 1 a doklad nepatří do přiznání ani do kontrolního hlášení.
+  Účetně je to běžný náklad, typicky 538 – Ostatní daně a poplatky. Jde-li přesto o běžnou
+  přijatou službu, vyber klasifikaci ručně.
+- **Nulová sazba od tuzemského dodavatele** (osvobozené plnění, nákup od neplátce). Nula sama
+  nerozliší osvobození bez nároku od plnění mimo předmět daně, takže kód vybírá účetní.
+- **Sazba, kterou český číselník nezná** (např. německých 19 %). Cizí daň nelze uplatnit jako
+  odpočet, takže se nepřiřadí ani `40`, ani `41`. Upozornění `Doklad nese DPH, ale nemá
+  klasifikaci` říká, že bez zásahu doklad do přiznání ani do KH nevstoupí — zkontroluj sazby.
+
+> **Automatika je pomůcka, ne rozhodnutí.** Daňové zařazení dokladu zůstává na uživateli
+> a jeho účetní; návrh je vždy přepsatelný.
+
+### 23.2.7 Reverse charge z EU — pořízení zboží vs. služba
 
 Typický případ: nákup **zboží od EU dodavatele** (např. auto z Německa) — doklad
 je vystaven **bez DPH** (osvobozené intrakomunitární dodání) a daň si samovyměříš
@@ -351,7 +375,7 @@ Klíčové principy:
 > ⚠️ U **vybraných osobních automobilů** pohlídej limit odpočtu dle § 72
 > (strop základu 2 000 000 Kč / DPH 420 000 Kč) — aplikace ho nehlídá.
 
-### 23.2.7 Zaúčtování dobropisu
+### 23.2.8 Zaúčtování dobropisu
 
 Přijatý dobropis (typ dokladu **Dobropis**, viz [§ 23.2.2](#2322-povinna-pole)) se
 umí zaúčtovat do [Účetního deníku](45_Ucetni_denik.md) automaticky stejně jako běžná
@@ -366,7 +390,7 @@ detailech a správné promítnutí vráceného drobného majetku a kontrolního 
 Jednu původní fakturu může opravovat více částečných dobropisů. Pokud vazbu
 nevyplníš, automatika ji nesmí odhadnout podle samotné podobné částky.
 
-### 23.2.8 Kurz cizí měny a jeho přenačítání
+### 23.2.9 Kurz cizí měny a jeho přenačítání
 
 Kurz na dokladu se váže k **rozhodnému dni** — tím je DUZP, a když na dokladu není,
 datum vystavení. Tentýž den používá i evidence DPH a přepočet do účetního deníku.
@@ -396,7 +420,7 @@ kurzový rozdíl, ne chyba.
 U zaúčtovaného dokladu, který admin opravuje vynuceně (`?force=1`), se s novým kurzem
 **přepočte i zápis v účetním deníku**, aby korunové částky odpovídaly dokladu.
 
-### 23.2.9 Způsob úhrady a platba hotově z pokladny
+### 23.2.10 Způsob úhrady a platba hotově z pokladny
 
 Pole **Způsob úhrady** s volbou **Hotově** otevře výběr **Pokladna** — přijatou
 fakturu tak zaplatíš z pokladny přímo z editoru, aniž bys přecházel/a do modulu

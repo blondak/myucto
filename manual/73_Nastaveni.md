@@ -810,7 +810,20 @@ Vestavěné systémové kódy jsou společné a nelze je upravit ani smazat. Pro
 aktuální firmu lze vytvořit vlastní kód, upravit ho a později archivovat.
 Změnu prováděj jen tehdy, když znáš její dopad na DPHDP3, kontrolní hlášení a
 Knihu DPH. Význam jednotlivých polí je podrobně popsán v
-[36. Výkazech DPH](36_Vykazy_DPH.md#jak-funguji-vat-klasifikacni-kody).
+[36. Výkazech DPH](36_Vykazy_DPH.md#jak-funguji-vat-klasifikacni-kody), kde je
+i kompletní tabulka vestavěných kódů.
+
+**Kód předmětu plnění** (`kod_pred_pl`, jde do vět KH A.1 a B.1) přijímá jednu až dvě
+číslice s volitelným písmenem — číselník MFČR obsahuje i hodnoty jako `1a` nebo `3a`.
+Hodnotový výčet se záměrně nevaliduje: vlastní seznam by se s číselníkem rozešel
+a odmítal by legitimní kódy.
+
+**Vlastní kód přidávej pro režim, který vestavěné nepokrývají**, ne pro překlopení
+existujícího na jiný řádek. Vestavěné varianty už pokrývají tuzemský přenos podle
+režimu (§ 92c odpad, § 92d nemovitost, § 92e stavební práce), zvláštní režimy § 89
+a § 90 i rozlišení vývozu zboží od služby do 3. země. Pokud přesto namapuješ kód na
+jiný řádek přiznání, respektuje se to — přemapování podle skutečné sazby se spouští
+jen při rozporu sazby kódu se sazbou řádku, ne proti tvému mapování.
 
 **Daňové konstanty** už nejsou záložkou této stránky. Jsou samostatný bod
 menu hned pod Sazbami a číselníky; podrobnosti popisuje kapitola

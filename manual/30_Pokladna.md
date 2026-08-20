@@ -170,6 +170,12 @@ DPH vynuceně vypnuté — u úhrady faktury DPH nese už samotná faktura). Po 
   z příjmů (uznatelný / neuznatelný náklad / není náklad) ovlivňuje jen DPFO/DPPO, na DPH nemá
   vliv. Výchozí stav je plný nárok a daňově uznatelný náklad.
 
+  Volba se promítá do **výkazů DPH** stejně jako u přijaté faktury: výdajový doklad označený
+  „bez nároku na odpočet" (reprezentace, osobní spotřeba) do Knihy DPH, přiznání ani kontrolního
+  hlášení nevstoupí, krácený nárok § 75 se uplatní zadaným procentem a § 76 se vykáže ve sloupci
+  „Krácený odpočet". U **příjmového** dokladu je to tržba, na kterou se nárok na odpočet
+  nevztahuje — tam se nastavení neuplatní.
+
 > [!NOTE]
 > **Rozpad DPH ve valutové pokladně se zadává v měně pokladny.** V databázi se ukládá
 > v korunách přepočtený kurzem dokladu, ale formulář ho při otevření rozpracovaného dokladu
