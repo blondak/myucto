@@ -10,6 +10,7 @@ use MyInvoice\Repository\InvoiceSettlementRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Support\Sql\PurchaseSettledExpr;
 
 /**
  * Úhrada faktury ZÁPOČTEM proti zvolenému rozvahovému účtu (migrace 1126).
@@ -25,9 +26,15 @@ use MyInvoice\Service\Invoice\InvoicePaymentService;
  *   přijatá faktura → 321 MD / <zvolený účet> D   (zálohová PF → 314)
  *
  * Vydaná faktura dostane řádek v `invoice_payments` (source='settlement'), takže
- * částečné úhrady i `paid_total` fungují stejně jako u banky a pokladny. Přijatá
- * faktura `paid_total` nemá → zápočet jen v PLNÉ výši a status přejde na 'paid'
- * (stejné omezení jako úhrada PF pokladnou).
+ * částečné úhrady i `paid_total` fungují stejně jako u banky a pokladny.
+ *
+ * Přijatá faktura `paid_total` nemá — úhrada k ní visí podle kanálu ve třech tabulkách
+ * ({@see PurchaseSettledExpr}). ČÁSTEČNÝ zápočet přesto umí: zbytek se dopočítá z těch
+ * tabulek a `invoice_settlements` je jednou z nich, takže se druhý zápočet už odečítá
+ * od zbytku po prvním. Na 'paid' doklad překlopí teprve zápočet, který zbytek vynuluje;
+ * storno ho vrátí zpět, pokud po odečtení zrušené částky zbytek zase vznikne.
+ * Dřív směl být zápočet jen v plné výši — účetní, která započítávala část, musela
+ * doklad označit jako uhrazený ručně, a tím ho vyřadila z evidence úplně.
  *
  * V daňové evidenci (§6) se nic neúčtuje — `journal_entry_id` zůstane NULL, ale
  * vyrovnání dokladu proběhne stejně (vzor {@see Cash\CashDocumentService}).
@@ -151,7 +158,9 @@ final class InvoiceSettlementService
                     'created_by' => $userId,
                 ]);
                 $paymentId = (int) $res['payment_id'];
-            } else {
+            } elseif ($doc['settles_fully'] ?? true) {
+                // Částečný zápočet doklad NEUZAVÍRÁ — zůstává 'received'/'booked' a dál
+                // se nabízí k úhradě (příkaz, další zápočet) už jen svým zbytkem.
                 $this->purchaseInvoices->setStatus($docId, 'paid', $supplierId, $settledOn);
             }
 
@@ -196,14 +205,22 @@ final class InvoiceSettlementService
                 $this->invoicePayments->deletePayment((int) $row['invoice_payment_id'], skipBankGuard: true);
             }
             if ((string) $row['doc_type'] === 'purchase_invoice') {
-                // Vrátit do stavu před úhradou dle tvaru zápočtu (zaúčtovaný → 'booked',
-                // journal-free v daňové evidenci → 'received') — vzor storna pokladny.
-                $this->purchaseInvoices->setStatus(
-                    (int) $row['doc_id'],
-                    $row['journal_entry_id'] !== null ? 'booked' : 'received',
-                    $supplierId,
-                    null,
-                );
+                // Status vracíme jen tehdy, když po odečtení rušené částky zase vznikne
+                // zbytek. U částečných zápočtů doklad na 'paid' nikdy nepřešel (pak není
+                // co vracet) a u dokladu doplaceného jiným kanálem by ho storno jednoho
+                // zápočtu chybně otevřelo. Tvar návratu dle zápočtu: zaúčtovaný → 'booked',
+                // journal-free v daňové evidenci → 'received' (vzor storna pokladny).
+                $pf = $this->repo->lockPurchase($supplierId, (int) $row['doc_id']);
+                $stillSettled = $pf !== null
+                    && self::cents((float) $pf['remaining'] + (float) $row['amount']) <= self::TOLERANCE_CENTS;
+                if ($pf !== null && (string) $pf['status'] === 'paid' && !$stillSettled) {
+                    $this->purchaseInvoices->setStatus(
+                        (int) $row['doc_id'],
+                        $row['journal_entry_id'] !== null ? 'booked' : 'received',
+                        $supplierId,
+                        null,
+                    );
+                }
             }
 
             $reversalId = null;
@@ -294,22 +311,32 @@ final class InvoiceSettlementService
         if ($pf['currency'] !== 'CZK') {
             throw new SettlementException('foreign_currency', 'Zápočet je zatím podporovaný jen u dokladů v CZK.');
         }
-        // PF nemá paid_total → částečný zápočet by zůstal neevidovaný (stejné omezení
-        // jako úhrada PF pokladnou). Proto vynucujeme plnou výši.
-        if (self::cents($amount) !== self::cents($pf['total'])) {
+        // Zbytek k úhradě zamčený `FOR UPDATE` (viz lockPurchase) — dvě souběžné žádosti
+        // o zápočet téhož dokladu se serializují a druhá vidí zbytek už snížený první.
+        $remaining = round((float) $pf['remaining'], 2);
+        if (self::cents($remaining) <= 0) {
             throw new SettlementException(
-                'partial_not_supported',
-                sprintf(
-                    'Přijatou fakturu lze započíst jen v plné výši (%.2f Kč) — částečné úhrady u PF systém neeviduje.',
-                    $pf['total'],
-                ),
+                'already_settled',
+                'Přijatá faktura už je celá uhrazená — není co započíst.',
+            );
+        }
+        if (self::cents($amount) > self::cents($remaining) + self::TOLERANCE_CENTS) {
+            throw new SettlementException(
+                'amount_over_remaining',
+                sprintf('Částka zápočtu (%.2f Kč) převyšuje zbytek k úhradě (%.2f Kč).', $amount, $remaining),
             );
         }
         // Zálohová PF visí na poskytnutých zálohách (314), běžná na 321.
         $counter = $pf['kind'] === 'advance'
             ? $this->ruleAccount($supplierId, 'advance.paid.payment', 'debit', '314')
             : $this->ruleAccount($supplierId, 'payment.payable.settlement', 'debit', '321');
-        return ['number' => $pf['number'], 'doc_account' => $counter, 'counter_account' => $counter];
+        return [
+            'number'          => $pf['number'],
+            'doc_account'     => $counter,
+            'counter_account' => $counter,
+            // Vyrovnává zápočet doklad celý? Rozhoduje o překlopení na 'paid'.
+            'settles_fully'   => self::cents($amount) >= self::cents($remaining) - self::TOLERANCE_CENTS,
+        ];
     }
 
     /**

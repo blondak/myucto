@@ -43,6 +43,7 @@ final class MonthlyCheckTest extends TestCase
     private int $userId = 0;
     private int $periodId = 0;
     private bool $inTx = false;
+    private \MyInvoice\Service\Accounting\InvoiceSettlementService $settlements;
 
     protected function setUp(): void
     {
@@ -58,6 +59,7 @@ final class MonthlyCheckTest extends TestCase
             $this->periods = $container->get(AccountingPeriodRepository::class);
             $this->assets  = $container->get(AssetRepository::class);
             $this->smallAssets = $container->get(SmallAssetRepository::class);
+            $this->settlements = $container->get(\MyInvoice\Service\Accounting\InvoiceSettlementService::class);
             $seeder        = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -484,6 +486,50 @@ final class MonthlyCheckTest extends TestCase
 
         self::assertArrayHasKey($pfId, $byId);
         self::assertSame(['marked_paid_unposted'], $byId[$pfId]['issues'] ?? null);
+    }
+
+    /**
+     * Faktura uhrazená ZÁPOČTEM proti účtu (321 MD / zvolený účet D) není otevřené saldo.
+     * Kontrola dosud znala jen banku a pokladnu, takže třetí zaúčtovaný kanál úhrady
+     * hlásila jako díru v deníku — a to v plné výši dokladu.
+     */
+    public function testAccountSettlementCountsAsPaidOnSaldoCheck(): void
+    {
+        $vendorId = $this->createClient();
+        $entryDate = self::YEAR . '-06-20';
+
+        $pfId = $this->createPaidPurchase($vendorId, 'K3-PF-SETTLE', $entryDate);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET status = "received", paid_at = NULL WHERE id = ?')
+            ->execute([$pfId]);
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pfId, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 1000],
+            ['account_code' => '343', 'side' => 'debit', 'amount' => 210],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 1210],
+        ], ['entry_date' => $entryDate, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $account = $this->db->pdo()->prepare(
+            'SELECT id FROM chart_of_accounts WHERE supplier_id = ? AND account_code LIKE "365%" ORDER BY id LIMIT 1'
+        );
+        $account->execute([$this->supplierId]);
+        $accountId = (int) ($account->fetchColumn() ?: 0);
+        if ($accountId === 0) {
+            self::markTestSkipped('Účet 365 není v osnově tenanta.');
+        }
+
+        $this->settlements->create($this->supplierId, 'purchase_invoice', $pfId, [
+            'settled_on' => $entryDate, 'amount' => 1210.00, 'account_id' => $accountId,
+        ], $this->userId);
+
+        self::assertSame('paid', (string) $this->purchaseStatusOf($pfId), 'Plný zápočet doklad uzavře.');
+        self::assertArrayNotHasKey($pfId, $this->paidPurchaseFindingsById(),
+            'Doklad uhrazený zápočtem nesmí kontrola hlásit jako otevřené saldo.');
+    }
+
+    private function purchaseStatusOf(int $purchaseInvoiceId): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT status FROM purchase_invoices WHERE id = ?');
+        $stmt->execute([$purchaseInvoiceId]);
+        return (string) ($stmt->fetchColumn() ?: '');
     }
 
     /** Nálezy kontroly `paid_purchases_open_saldo` naklíčované podle doc_id. */

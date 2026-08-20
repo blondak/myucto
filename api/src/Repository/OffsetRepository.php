@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
 /**
@@ -16,7 +17,7 @@ use PDO;
  * kurzového přepočtu). Zbývající hodnota:
  *   - vydaná faktura: amount_to_pay − paid_total (invoice_payments, vč. dřívějších
  *     zápočtů, které se evidují jako platba),
- *   - přijatá faktura: amount_to_pay − Σ payment_matches − Σ potvrzené zápočty
+ *   - přijatá faktura: amount_to_pay − Σ úhrad všemi kanály ({@see PurchaseSettledExpr})
  *     (u PF není paid_total; potvrzené zápočty se odečtou explicitně, ať se doklad
  *     nezapočte dvakrát).
  */
@@ -68,27 +69,17 @@ final class OffsetRepository
      */
     public function openPayables(int $supplierId, int $partnerId): array
     {
+        // Kolik je na PF uhrazeno — sdílený SSOT přes všechny kanály úhrady
+        // (banka, vzájemný zápočet, zápočet proti účtu). Viz PurchaseSettledExpr.
+        $settled = PurchaseSettledExpr::settled('d');
         $sql =
             "SELECT t.* FROM (
                 SELECT d.id AS doc_id,
                        COALESCE(NULLIF(d.varsymbol, ''), CONCAT('#', d.id)) AS doc_no,
                        d.issue_date, d.due_date,
                        d.amount_to_pay AS total,
-                       (COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
-                                   WHERE pm.supplier_id = d.supplier_id AND pm.purchase_invoice_id = d.id), 0)
-                        + COALESCE((SELECT SUM(oi.amount) FROM offset_agreement_items oi
-                                     JOIN offset_agreements oa ON oa.id = oi.agreement_id AND oa.status = 'confirmed'
-                                    WHERE oi.supplier_id = d.supplier_id
-                                      AND oi.doc_type = 'purchase_invoice' AND oi.doc_id = d.id), 0)
-                       ) AS paid,
-                       (d.amount_to_pay
-                        - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
-                                     WHERE pm.supplier_id = d.supplier_id AND pm.purchase_invoice_id = d.id), 0)
-                        - COALESCE((SELECT SUM(oi.amount) FROM offset_agreement_items oi
-                                     JOIN offset_agreements oa ON oa.id = oi.agreement_id AND oa.status = 'confirmed'
-                                    WHERE oi.supplier_id = d.supplier_id
-                                      AND oi.doc_type = 'purchase_invoice' AND oi.doc_id = d.id), 0)
-                       ) AS remaining
+                       ({$settled}) AS paid,
+                       (d.amount_to_pay - ({$settled})) AS remaining
                   FROM purchase_invoices d
                   JOIN currencies cur ON cur.id = d.currency_id
                  WHERE d.supplier_id = ? AND d.vendor_id = ?
@@ -120,6 +111,8 @@ final class OffsetRepository
      */
     public function partnersWithOpenBoth(int $supplierId): array
     {
+        // Viz PurchaseSettledExpr — tentýž SSOT jako u seznamu kandidátů.
+        $settled = PurchaseSettledExpr::settled('d');
         $sql =
             "SELECT cl.id AS partner_id, cl.company_name AS partner_name
                FROM clients cl
@@ -132,14 +125,7 @@ final class OffsetRepository
                         SELECT 1 FROM purchase_invoices d JOIN currencies c ON c.id = d.currency_id
                          WHERE d.supplier_id = ? AND d.vendor_id = cl.id AND d.document_kind = 'invoice'
                            AND d.status IN ('received','booked') AND c.code = 'CZK'
-                           AND (d.amount_to_pay
-                                - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
-                                             WHERE pm.supplier_id = d.supplier_id AND pm.purchase_invoice_id = d.id), 0)
-                                - COALESCE((SELECT SUM(oi.amount) FROM offset_agreement_items oi
-                                             JOIN offset_agreements oa ON oa.id = oi.agreement_id AND oa.status = 'confirmed'
-                                            WHERE oi.supplier_id = d.supplier_id
-                                              AND oi.doc_type = 'purchase_invoice' AND oi.doc_id = d.id), 0)
-                               ) > 0.005)
+                           AND (d.amount_to_pay - ({$settled})) > 0.005)
               ORDER BY cl.company_name";
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$supplierId, $supplierId]);
@@ -296,18 +282,13 @@ final class OffsetRepository
      */
     public function purchaseRemaining(int $supplierId, int $docId, int $excludeAgreementId): float
     {
+        $remaining = PurchaseSettledExpr::remaining('d', $excludeAgreementId);
         $stmt = $this->db->pdo()->prepare(
-            "SELECT d.amount_to_pay
-                    - COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
-                                 WHERE pm.supplier_id = d.supplier_id AND pm.purchase_invoice_id = d.id), 0)
-                    - COALESCE((SELECT SUM(oi.amount) FROM offset_agreement_items oi
-                                 JOIN offset_agreements oa ON oa.id = oi.agreement_id AND oa.status = 'confirmed'
-                                WHERE oi.supplier_id = d.supplier_id AND oi.doc_type = 'purchase_invoice'
-                                  AND oi.doc_id = d.id AND oa.id <> ?), 0) AS remaining
+            "SELECT ({$remaining}) AS remaining
                FROM purchase_invoices d
               WHERE d.id = ? AND d.supplier_id = ?"
         );
-        $stmt->execute([$excludeAgreementId, $docId, $supplierId]);
+        $stmt->execute([$docId, $supplierId]);
         $v = $stmt->fetchColumn();
         return $v === false ? 0.0 : round((float) $v, 2);
     }

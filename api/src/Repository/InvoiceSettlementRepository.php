@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
 /**
@@ -121,19 +122,26 @@ final class InvoiceSettlementRepository
     }
 
     /**
-     * Přijatá faktura pro zápočet (plná výše — PF nemá paid_total).
+     * Přijatá faktura pro zápočet, se ZBYTKEM k úhradě.
      *
-     * @return array{total:float, status:string, currency:string, number:string, kind:string}|null
+     * Řádek se zamyká `FOR UPDATE`, takže dvě souběžné žádosti o zápočet téhož dokladu
+     * se serializují a druhá uvidí zbytek už snížený tou první — bez toho by šlo započíst
+     * dvakrát celou fakturu. Zbytek počítá sdílený {@see PurchaseSettledExpr}: přijatá
+     * faktura nemá `paid_total`, úhrada k ní visí ve třech tabulkách podle kanálu.
+     *
+     * @return array{total:float, remaining:float, status:string, currency:string, number:string, kind:string}|null
      */
     public function lockPurchase(int $supplierId, int $docId): ?array
     {
+        $remaining = PurchaseSettledExpr::remaining('p');
         $stmt = $this->db->pdo()->prepare(
-            'SELECT p.total_with_vat, p.status, p.document_kind, p.vendor_invoice_number, p.varsymbol,
-                    c.code AS currency
+            "SELECT p.total_with_vat, p.status, p.document_kind, p.vendor_invoice_number, p.varsymbol,
+                    c.code AS currency,
+                    ({$remaining}) AS remaining
                FROM purchase_invoices p
                LEFT JOIN currencies c ON c.id = p.currency_id
               WHERE p.id = ? AND p.supplier_id = ?
-              FOR UPDATE'
+              FOR UPDATE"
         );
         $stmt->execute([$docId, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -142,11 +150,12 @@ final class InvoiceSettlementRepository
         }
         $number = (string) ($row['vendor_invoice_number'] ?? '');
         return [
-            'total'    => round((float) $row['total_with_vat'], 2),
-            'status'   => (string) $row['status'],
-            'currency' => (string) ($row['currency'] ?? 'CZK'),
-            'number'   => $number !== '' ? $number : (string) ($row['varsymbol'] ?? ''),
-            'kind'     => (string) ($row['document_kind'] ?? 'invoice'),
+            'total'     => round((float) $row['total_with_vat'], 2),
+            'remaining' => round((float) $row['remaining'], 2),
+            'status'    => (string) $row['status'],
+            'currency'  => (string) ($row['currency'] ?? 'CZK'),
+            'number'    => $number !== '' ? $number : (string) ($row['varsymbol'] ?? ''),
+            'kind'      => (string) ($row['document_kind'] ?? 'invoice'),
         ];
     }
 }

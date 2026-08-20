@@ -9933,7 +9933,8 @@
             "title": "Payment by set-off",
             "account": "Set-off counter account",
             "account_required": "Select the counter account.",
-            "note": "Note"
+            "note": "Note",
+            "partial_hint": "A set-off may cover part of the document; the remainder stays open."
         },
         "pay_common": {
             "date": "Payment date",

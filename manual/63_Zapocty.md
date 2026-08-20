@@ -9,6 +9,12 @@ bankovní platby. Modul sestaví dohodu, po potvrzení vytvoří účetní zápi
 Aktuální implementace pracuje jen s doklady v **CZK** a jen v podvojném
 účetnictví.
 
+> Tenhle modul páruje **dva doklady** téhož partnera. Když chceš závazek nebo pohledávku
+> vyrovnat proti ÚČTU (pohledávka za společníkem, mzdový závazek, poskytnutá záloha), použij
+> *Označit jako uhrazené → Zápočtem proti účtu* přímo na dokladu —
+> viz [§ 23.3.4](23_Prijate_faktury.md#2334-zpusoby-uhrady-prijate-faktury). Oba kanály se
+> navzájem započítávají do zbytku dokladu, takže se nemůžou překrýt.
+
 ## 63.1 Přehled dohod a jejich stavy
 
 Tabulka zobrazuje číslo dohody, datum, partnera, částku a stav:

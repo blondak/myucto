@@ -9933,7 +9933,8 @@
             "title": "Úhrada zápočtem",
             "account": "Protiúčet zápočtu",
             "account_required": "Vyberte protiúčet zápočtu.",
-            "note": "Poznámka"
+            "note": "Poznámka",
+            "partial_hint": "Zápočtem lze uhradit i část — zbytek zůstane na dokladu otevřený."
         },
         "pay_common": {
             "date": "Datum úhrady",

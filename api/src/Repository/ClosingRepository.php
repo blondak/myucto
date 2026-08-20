@@ -912,6 +912,26 @@ final class ClosingRepository
                    AND (e.reversed_by IS NULL OR rev.entry_date > ?)
                    AND (ca.account_code LIKE '311%' OR COALESCE(pa.account_code, '') LIKE '311%')
                  GROUP BY COALESCE(cd.invoice_id, ip.invoice_id)
+            ), settled_offset AS (
+                -- Zápočet proti účtu (invoice_settlements, migrace 1126) — úhrada bez peněz,
+                -- na výnosové straně zvolený účet MD / 311 D pod source_type 'settlement'.
+                -- Bez něj by kontrola započtenou fakturu hlásila jako otevřené saldo v plné
+                -- výši, přestože 311 je vyrovnané.
+                SELECT stl.doc_id AS invoice_id,
+                       SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END) AS settled
+                  FROM invoice_settlements stl
+                  JOIN journal_entries e ON e.supplier_id = stl.supplier_id
+                   AND e.source_type = 'settlement' AND e.source_id = stl.id
+                  JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+                  JOIN chart_of_accounts ca ON ca.id = l.account_id
+                  LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
+                  LEFT JOIN journal_entries rev ON rev.id = e.reversed_by
+                 WHERE stl.supplier_id = ? AND stl.doc_type = 'invoice'
+                   AND stl.status = 'confirmed'
+                   AND e.posted_at IS NOT NULL AND e.entry_date <= ?
+                   AND (e.reversed_by IS NULL OR rev.entry_date > ?)
+                   AND (ca.account_code LIKE '311%' OR COALESCE(pa.account_code, '') LIKE '311%')
+                 GROUP BY stl.doc_id
             ), doc AS (
                 -- Doklad + jeho peněžní vyrovnání; dobropis patří do skupiny svého RODIČE.
                 -- Zdůvodnění skupiny viz {@see paidPurchasesOpenSaldo} — na výnosové straně
@@ -920,12 +940,14 @@ final class ClosingRepository
                        CASE WHEN i.invoice_type = 'credit_note' AND i.parent_invoice_id IS NOT NULL
                             THEN i.parent_invoice_id ELSE i.id END AS group_id,
                        b.booked,
-                       COALESCE(sb.settled, 0) + COALESCE(sbm.settled, 0) + COALESCE(sc.settled, 0) AS settled
+                       COALESCE(sb.settled, 0) + COALESCE(sbm.settled, 0) + COALESCE(sc.settled, 0)
+                         + COALESCE(so.settled, 0) AS settled
                   FROM booked b
                   JOIN invoices i ON i.id = b.invoice_id AND i.supplier_id = ?
                   LEFT JOIN settled_bank sb ON sb.invoice_id = i.id
                   LEFT JOIN settled_bank_matched sbm ON sbm.invoice_id = i.id
                   LEFT JOIN settled_cash sc ON sc.invoice_id = i.id
+                  LEFT JOIN settled_offset so ON so.invoice_id = i.id
             ), grp AS (
                 SELECT group_id, SUM(booked) AS booked, SUM(settled) AS settled
                   FROM doc
@@ -954,6 +976,7 @@ final class ClosingRepository
             $supplierId,                        // alloc
             $supplierId,                        // settled_bank
             $supplierId, $asOf, $asOf,          // settled_cash
+            $supplierId, $asOf, $asOf,          // settled_offset
             $supplierId,                        // doc
             $supplierId, $asOf,                 // final SELECT
         ]);
@@ -1039,6 +1062,26 @@ final class ClosingRepository
                    AND (e.reversed_by IS NULL OR rev.entry_date > ?)
                    AND (ca.account_code LIKE '321%' OR COALESCE(pa.account_code, '') LIKE '321%')
                  GROUP BY cd.purchase_invoice_id
+            ), settled_offset AS (
+                -- Zápočet proti účtu (invoice_settlements, migrace 1126): úhrada bez peněz,
+                -- zápis 321 MD / zvolený účet D pod source_type 'settlement'. Třetí kanál
+                -- vedle banky a pokladny — bez něj by kontrola započtenou fakturu hlásila
+                -- jako otevřené saldo v plné výši, přestože 321 je vyrovnané.
+                SELECT stl.doc_id AS purchase_invoice_id,
+                       SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS settled
+                  FROM invoice_settlements stl
+                  JOIN journal_entries e ON e.supplier_id = stl.supplier_id
+                   AND e.source_type = 'settlement' AND e.source_id = stl.id
+                  JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+                  JOIN chart_of_accounts ca ON ca.id = l.account_id
+                  LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
+                  LEFT JOIN journal_entries rev ON rev.id = e.reversed_by
+                 WHERE stl.supplier_id = ? AND stl.doc_type = 'purchase_invoice'
+                   AND stl.status = 'confirmed'
+                   AND e.posted_at IS NOT NULL AND e.entry_date <= ?
+                   AND (e.reversed_by IS NULL OR rev.entry_date > ?)
+                   AND (ca.account_code LIKE '321%' OR COALESCE(pa.account_code, '') LIKE '321%')
+                 GROUP BY stl.doc_id
             ), doc AS (
                 -- Doklad = předpis + jeho vlastní peněžní vyrovnání. Dobropis se přiřadí
                 -- ke skupině svého RODIČE: opravný doklad nese na 321 opačné znaménko,
@@ -1049,11 +1092,12 @@ final class ClosingRepository
                        CASE WHEN pi.document_kind = 'credit_note' AND pi.parent_purchase_invoice_id IS NOT NULL
                             THEN pi.parent_purchase_invoice_id ELSE pi.id END AS group_id,
                        b.booked,
-                       COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0) AS settled
+                       COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0) + COALESCE(so.settled, 0) AS settled
                   FROM booked b
                   JOIN purchase_invoices pi ON pi.id = b.purchase_invoice_id AND pi.supplier_id = ?
                   LEFT JOIN settled_bank sb ON sb.purchase_invoice_id = pi.id
                   LEFT JOIN settled_cash sc ON sc.purchase_invoice_id = pi.id
+                  LEFT JOIN settled_offset so ON so.purchase_invoice_id = pi.id
             ), grp AS (
                 SELECT group_id, SUM(booked) AS booked, SUM(settled) AS settled
                   FROM doc
@@ -1087,6 +1131,7 @@ final class ClosingRepository
             $supplierId,                        // alloc
             $supplierId,                        // settled_bank
             $supplierId, $asOf, $asOf,          // settled_cash
+            $supplierId, $asOf, $asOf,          // settled_offset
             $supplierId,                        // doc
             $supplierId, $asOf,                 // final SELECT
         ]);

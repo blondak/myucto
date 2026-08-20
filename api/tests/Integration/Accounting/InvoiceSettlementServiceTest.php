@@ -148,19 +148,10 @@ final class InvoiceSettlementServiceTest extends TestCase
         self::assertSame('paid', $this->invoiceRow($invoiceId)['status']);
     }
 
-    public function testPurchaseInvoiceSettlementRequiresFullAmount(): void
+    public function testPurchaseInvoiceSettlementInFullAmount(): void
     {
         $vendor = $this->client('Dodavatel', false, true);
         $pfId = $this->purchaseInvoice('PF-2099-500', $vendor, 5000.00);
-
-        try {
-            $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
-                'settled_on' => self::YEAR . '-06-30', 'amount' => 2000.00, 'account_id' => $this->accountId('365'),
-            ], $this->userId);
-            self::fail('Částečný zápočet PF musí selhat.');
-        } catch (SettlementException $e) {
-            self::assertSame('partial_not_supported', $e->errorCode);
-        }
 
         $res = $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
             'settled_on' => self::YEAR . '-06-30', 'amount' => 5000.00, 'account_id' => $this->accountId('365'),
@@ -170,6 +161,79 @@ final class InvoiceSettlementServiceTest extends TestCase
         self::assertEqualsWithDelta(5000.00, $byAcc['321']['debit'], 0.001);
         self::assertEqualsWithDelta(5000.00, $byAcc['365']['credit'], 0.001);
         self::assertSame('paid', $this->purchaseStatus($pfId));
+    }
+
+    /**
+     * ČÁSTEČNÝ zápočet přijaté faktury. Doklad nemá `paid_total`, zbytek se dopočítává
+     * ze všech kanálů úhrady ({@see PurchaseSettledExpr}) a `invoice_settlements` je
+     * jedním z nich — druhý zápočet se tedy odečítá už od zbytku po prvním. Dřív směl
+     * být zápočet jen v plné výši a účetní, která započítávala část, musela doklad
+     * označit jako uhrazený ručně (a tím ho vyřadit z evidence úplně).
+     */
+    public function testPurchaseInvoicePartialSettlementKeepsDocumentOpen(): void
+    {
+        $vendor = $this->client('Dodavatel částečně', false, true);
+        $pfId = $this->purchaseInvoice('PF-2099-501', $vendor, 5000.00);
+
+        $first = $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
+            'settled_on' => self::YEAR . '-06-30', 'amount' => 2000.00, 'account_id' => $this->accountId('365'),
+        ], $this->userId);
+
+        $byAcc = $this->linesByAccountCode((int) $first['journal_entry_id']);
+        self::assertEqualsWithDelta(2000.00, $byAcc['321']['debit'], 0.001, 'Zaúčtuje se jen započtená část.');
+        self::assertNotSame('paid', $this->purchaseStatus($pfId), 'Částečný zápočet doklad neuzavře.');
+
+        // Víc, než je zbytek (3 000), projít nesmí.
+        try {
+            $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
+                'settled_on' => self::YEAR . '-06-30', 'amount' => 3500.00, 'account_id' => $this->accountId('365'),
+            ], $this->userId);
+            self::fail('Zápočet nad zbytek k úhradě musí selhat.');
+        } catch (SettlementException $e) {
+            self::assertSame('amount_over_remaining', $e->errorCode);
+        }
+
+        // Doplacení přesně na zbytek doklad uzavře.
+        $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
+            'settled_on' => self::YEAR . '-06-30', 'amount' => 3000.00, 'account_id' => $this->accountId('365'),
+        ], $this->userId);
+        self::assertSame('paid', $this->purchaseStatus($pfId));
+
+        // Na plně uhrazeném dokladu už není co započíst.
+        try {
+            $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
+                'settled_on' => self::YEAR . '-06-30', 'amount' => 100.00, 'account_id' => $this->accountId('365'),
+            ], $this->userId);
+            self::fail('Zápočet na uhrazeném dokladu musí selhat.');
+        } catch (SettlementException $e) {
+            self::assertSame('doc_not_payable', $e->errorCode);
+        }
+    }
+
+    /**
+     * Storno JEDNOHO z několika zápočtů doklad zase otevře — a jen tehdy, když po vrácení
+     * jeho částky opravdu zbytek vznikne. U dokladu, který zůstává uhrazený jiným kanálem,
+     * by ho storno chybně otevřelo.
+     */
+    public function testCancelOfPartialSettlementReopensPurchaseInvoice(): void
+    {
+        $vendor = $this->client('Dodavatel storno', false, true);
+        $pfId = $this->purchaseInvoice('PF-2099-502', $vendor, 5000.00);
+
+        $first = $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
+            'settled_on' => self::YEAR . '-06-30', 'amount' => 2000.00, 'account_id' => $this->accountId('365'),
+        ], $this->userId);
+        $second = $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
+            'settled_on' => self::YEAR . '-06-30', 'amount' => 3000.00, 'account_id' => $this->accountId('365'),
+        ], $this->userId);
+        self::assertSame('paid', $this->purchaseStatus($pfId));
+
+        $this->service->cancel($this->supplierId, (int) $second['id'], ['entry_date' => self::YEAR . '-06-30']);
+        self::assertNotSame('paid', $this->purchaseStatus($pfId), 'Po stornu doplatku je doklad zase otevřený.');
+
+        // Storno prvního (na už otevřeném dokladu) status nemění a nespadne.
+        $this->service->cancel($this->supplierId, (int) $first['id'], ['entry_date' => self::YEAR . '-06-30']);
+        self::assertNotSame('paid', $this->purchaseStatus($pfId));
     }
 
     public function testCancelReversesEntryAndUndoesPayment(): void

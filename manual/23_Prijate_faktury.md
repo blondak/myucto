@@ -472,10 +472,45 @@ Po uložení / přechodu na detail:
   - Z draft: Označit jako přijaté / Stornovat
   - Z received: Označit jako zaúčtované / uhrazené / Stornovat
   - Z booked: Označit jako uhrazené / Stornovat
-- „**Označit jako uhrazené**" otevře modální okno s výběrem **data úhrady** (předvyplněno dneškem) — datum se zapíše do záznamu faktury.
+- „**Označit jako uhrazené**" otevře modální okno s výběrem **data úhrady** (předvyplněno
+  dneškem) a **způsobu úhrady** — viz [§ 23.3.4](#2334-zpusoby-uhrady-prijate-faktury).
 - Tlačítko **Upravit** je dostupné jen u draft. Po označení jako přijatá je doklad immutable (kromě admin override `?force=1` u received).
 - Tlačítko **Smazat** je dostupné jen u draft. Pro pozdější stavy použij Stornovat.
 - Tlačítko **Zaplatit pomocí QR** (u nezaplacených faktur s kladnou částkou k úhradě) — zobrazí QR platbu dodavateli, viz [§ 23.3.2](#2332-zaplatit-pomoci-qr).
+
+### 23.3.4 Způsoby úhrady přijaté faktury
+
+Okno „Označit jako uhrazené" nabízí tři způsoby a liší se tím, co po nich zůstane v deníku:
+
+| Způsob | Co vznikne | Částka |
+|---|---|---|
+| **Jen označit** | nic — doklad je uhrazený jen v evidenci, závazek na 321 zůstává otevřený | plná výše |
+| **Hotově z pokladny** | výdajový pokladní doklad + zápis 321 MD / 211 D | plná výše |
+| **Zápočtem proti účtu** | zápis **321 MD / zvolený účet D** | i **částečná** |
+
+**Jen označit** je nouzová volba pro doklad, jehož úhradu do MyÚčta nedostaneš. Uzávěrková
+kontrola takový doklad hlásí jako *zaplacená faktura s otevřeným saldem na 321* — a hlásí ho
+právem, protože deník o úhradě neví a závazek by se do závěrky přenesl jako neuhrazený.
+
+**Zápočtem proti účtu** je způsob, jak vyrovnat závazek bez peněz: proti pohledávce za
+společníkem (355 / 365), proti mzdovému závazku (331), proti přijaté záloze u téhož
+dodavatele (314) nebo proti čemukoli jinému, co v osnově dává smysl. Protiúčet se
+předvyplní z kontačního pravidla `payment.payable.settlement`, ale rozhoduje ten, který
+vybereš. Protiúčtem nesmí být týž účet, na kterém doklad visí — vznikl by zápis
+„321 MD / 321 D", který nic nevyrovná.
+
+Zápočet **může být částečný**: zbytek zůstane na dokladu otevřený, doklad zůstává ve stavu
+Přijatá/Zaúčtovaná a do příkazu k úhradě i k dalšímu zápočtu vstupuje už jen svým zbytkem.
+Na *Uhrazená* se překlopí teprve zápočet, který zbytek vynuluje. Zbytek se počítá ze všech
+kanálů úhrady dohromady — banka, vzájemný zápočet ([§ 63](63_Zapocty.md)) i zápočty proti
+účtu —, takže tutéž korunu nejde započíst dvakrát.
+
+Zápočet jde **stornovat** (v přehledu úhrad v detailu dokladu). Storno vytvoří protizápis
+a když po vrácení jeho částky zbytek zase vznikne, vrátí doklad ze stavu *Uhrazená* zpět.
+Doklad doplacený jiným kanálem zůstane uhrazený.
+
+Zatím jen doklady v **CZK**; v daňové evidenci se zápočet neúčtuje (deník tam není), ale
+doklad vyrovná stejně.
 
 ### 23.3.1 Propojení zálohy s vyúčtovací fakturou (proti dvojímu započtení)
 

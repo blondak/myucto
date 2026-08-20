@@ -57,8 +57,10 @@ const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
 
-// Přijatá faktura nemá evidenci částečných úhrad → jen plná výše.
-const fixedAmount = computed(() => props.docType === 'purchase_invoice')
+// Částečnou výši umí jen ZÁPOČET: eviduje se v invoice_settlements a zbytek přijaté
+// faktury se z nich dopočítává. Hotovostní úhrada přijaté faktury a prosté označení
+// „zaplaceno" částečnou částku neevidují, takže tam zůstává plná výše.
+const fixedAmount = computed(() => props.docType === 'purchase_invoice' && method.value !== 'settlement')
 const activeRegisters = computed(() => registers.value.filter(r => r.is_active))
 
 const methods = computed<{ key: Method; label: string; hint: string }[]>(() => [
@@ -120,6 +122,9 @@ async function ensureLoaded(m: Method) {
 
 watch(method, m => { ensureLoaded(m) })
 watch(() => props.amount, v => { amount.value = v })
+// Přepnutí metody vrátí částku na plnou výši: ručně zkrácená částka dává smysl jen
+// u zápočtu a u ostatních metod by se tiše propsala do úhrady, která částečná být nemůže.
+watch(method, () => { amount.value = props.amount })
 
 async function submit() {
   error.value = ''
@@ -226,6 +231,9 @@ async function submit() {
             <input v-model.number="amount" type="number" step="0.01" min="0" :disabled="fixedAmount"
               class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm disabled:bg-neutral-50 disabled:text-neutral-500" />
             <p v-if="fixedAmount" class="text-xs text-neutral-500 mt-1">{{ t('invoice.pay_common.full_amount_only') }}</p>
+            <p v-else-if="docType === 'purchase_invoice'" class="text-xs text-neutral-500 mt-1">
+              {{ t('invoice.pay_settlement.partial_hint') }}
+            </p>
           </div>
 
           <div v-if="method === 'settlement'">
