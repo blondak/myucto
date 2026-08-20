@@ -31,7 +31,8 @@ final class MariaDbTenantSchemaMetadataSource implements TenantSchemaMetadataSou
             $pdo = $this->mariaDb();
             $rows = $this->rows(
                 $pdo,
-                'SELECT t.TABLE_NAME, t.TABLE_TYPE, c.COLUMN_NAME, c.ORDINAL_POSITION
+                'SELECT t.TABLE_NAME, t.TABLE_TYPE, c.COLUMN_NAME,
+                        c.ORDINAL_POSITION, c.IS_NULLABLE
                    FROM information_schema.TABLES t
                    JOIN information_schema.COLUMNS c
                      ON c.TABLE_SCHEMA = t.TABLE_SCHEMA
@@ -50,6 +51,8 @@ final class MariaDbTenantSchemaMetadataSource implements TenantSchemaMetadataSou
                         'columns' => [],
                         'primary_key' => [],
                         'foreign_keys' => [],
+                        'unique_keys' => [],
+                        'nullable_columns' => [],
                     ];
                 } elseif ($tables[$name]['type'] !== $type) {
                     throw new TenantSchemaUnavailable(
@@ -57,7 +60,11 @@ final class MariaDbTenantSchemaMetadataSource implements TenantSchemaMetadataSou
                         'Databázové schéma vrátilo nejednotný typ tabulky.',
                     );
                 }
-                $tables[$name]['columns'][] = self::text($row, 'COLUMN_NAME');
+                $column = self::text($row, 'COLUMN_NAME');
+                $tables[$name]['columns'][] = $column;
+                if (self::yesNo($row, 'IS_NULLABLE')) {
+                    $tables[$name]['nullable_columns'][] = $column;
+                }
             }
             if ($tables === []) {
                 throw new TenantSchemaUnavailable(
@@ -89,6 +96,42 @@ final class MariaDbTenantSchemaMetadataSource implements TenantSchemaMetadataSou
                 $tables[$name]['primary_key'][] = $column;
             }
 
+            $uniqueRows = $this->rows(
+                $pdo,
+                "SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME, SEQ_IN_INDEX
+                   FROM information_schema.STATISTICS
+                  WHERE TABLE_SCHEMA = DATABASE()
+                    AND NON_UNIQUE = 0
+                  ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX",
+                [],
+            );
+            $uniqueIndexes = [];
+            foreach ($uniqueRows as $row) {
+                $name = self::text($row, 'TABLE_NAME');
+                $index = self::text($row, 'INDEX_NAME');
+                $column = self::text($row, 'COLUMN_NAME');
+                if (!isset($tables[$name])
+                    || !in_array($column, $tables[$name]['columns'], true)
+                ) {
+                    throw new TenantSchemaUnavailable(
+                        'invalid_schema_inventory',
+                        'Unikátní klíč databázové inventury odkazuje na neznámý sloupec.',
+                    );
+                }
+                $uniqueIndexes[$name][$index][] = $column;
+            }
+            foreach ($uniqueIndexes as $name => $indexes) {
+                $seenKeys = [];
+                foreach ($indexes as $columns) {
+                    $signature = implode("\0", $columns);
+                    if (isset($seenKeys[$signature])) {
+                        continue;
+                    }
+                    $seenKeys[$signature] = true;
+                    $tables[$name]['unique_keys'][] = $columns;
+                }
+            }
+
             $foreignRows = $this->rows(
                 $pdo,
                 'SELECT DISTINCT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME,
@@ -117,12 +160,26 @@ final class MariaDbTenantSchemaMetadataSource implements TenantSchemaMetadataSou
 
             $inventory = [];
             foreach ($tables as $name => $table) {
+                if (!isset(
+                    $table['type'],
+                    $table['columns'],
+                    $table['primary_key'],
+                    $table['foreign_keys'],
+                    $table['nullable_columns'],
+                )) {
+                    throw new TenantSchemaUnavailable(
+                        'invalid_schema_inventory',
+                        'Databázová inventura tabulky není úplná.',
+                    );
+                }
                 $inventory[] = new TenantSchemaTableInventory(
                     $name,
                     $table['type'],
                     $table['columns'],
                     $table['primary_key'],
                     $table['foreign_keys'],
+                    $table['unique_keys'],
+                    $table['nullable_columns'],
                 );
             }
             return $inventory;

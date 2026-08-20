@@ -169,6 +169,84 @@ final class TenantDataRegistryTest extends TestCase
         );
     }
 
+    public function testDraftClassifiesRemainingRegisteredReferenceTargets(): void
+    {
+        $definitions = [];
+        foreach (TenantDataRegistryFactory::draftV1()->definitionsFor(
+            TenantDataRegistry::TRANSFER_PROFILE,
+        ) as $definition) {
+            $definitions[$definition->key] = $definition;
+        }
+
+        self::assertSame(
+            TenantDataPolicy::TenantOwnedIndirect,
+            $definitions['table:bank_transactions']->policy ?? null,
+        );
+        self::assertSame(
+            [
+                'strategy' => 'foreign_key_path',
+                'path' => [
+                    [
+                        'from_column' => 'statement_id',
+                        'to_table' => 'bank_statements',
+                        'to_column' => 'id',
+                    ],
+                    [
+                        'from_column' => 'supplier_id',
+                        'to_table' => 'supplier',
+                        'to_column' => 'id',
+                        'reference' => 'soft',
+                    ],
+                ],
+            ],
+            $definitions['table:bank_transactions']->details['ownership']
+                ?? null,
+        );
+        self::assertSame(
+            ['matched_by' => ['strategy' => 'map_existing_user_or_null']],
+            $definitions['table:bank_transactions']
+                ->details['actor_references'] ?? null,
+        );
+        self::assertSame(
+            TenantDataPolicy::TenantOwned,
+            $definitions['table:small_assets']->policy ?? null,
+        );
+        self::assertSame(
+            TenantDataPolicy::TenantOwned,
+            $definitions['table:purchase_orders']->policy ?? null,
+        );
+        self::assertSame(
+            [
+                'confirmed_by' => [
+                    'strategy' => 'map_existing_user_or_null',
+                ],
+                'closed_by' => [
+                    'strategy' => 'map_existing_user_or_null',
+                ],
+                'cancelled_by' => [
+                    'strategy' => 'map_existing_user_or_null',
+                ],
+                'created_by' => [
+                    'strategy' => 'map_existing_user_or_null',
+                ],
+            ],
+            $definitions['table:purchase_orders']
+                ->details['soft_actor_references'] ?? null,
+        );
+        self::assertSame(
+            [
+                'submitted_by' => [
+                    'strategy' => 'map_existing_user_or_null',
+                ],
+                'generated_by' => [
+                    'strategy' => 'map_existing_user_or_null',
+                ],
+            ],
+            $definitions['table:tax_submissions']
+                ->details['soft_actor_references'] ?? null,
+        );
+    }
+
     public function testDraftKeepsTransferIncompleteButArchiveProfileComplete(): void
     {
         $registry = TenantDataRegistryFactory::draftV1();

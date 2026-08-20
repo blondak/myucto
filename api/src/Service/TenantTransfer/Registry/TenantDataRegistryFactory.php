@@ -167,6 +167,7 @@ final class TenantDataRegistryFactory
             'journal_entries' => ['id'],
             'journal_entry_lines' => ['id'],
             'assets' => ['id'],
+            'small_assets' => ['id'],
             'asset_improvements' => ['id'],
             'depreciation_entries' => ['id'],
             'cash_registers' => ['id'],
@@ -180,12 +181,15 @@ final class TenantDataRegistryFactory
             'tax_losses' => ['id'],
             'tax_loss_applications' => ['id'],
             'tax_advance_schedules' => ['id'],
+            'tax_submissions' => ['id'],
         ],
         'documents' => [
             'journal_entry_attachments' => ['id'],
         ],
         'stock' => [
             'warehouses' => ['id'],
+            'purchase_orders' => ['id'],
+            'purchase_order_lines' => ['id'],
             'stock_items' => ['id'],
             'manufacturers' => ['id'],
             'stock_media' => ['id'],
@@ -216,7 +220,12 @@ final class TenantDataRegistryFactory
      * @var array<string,array{
      *   primary_key:list<string>,
      *   feature_group:string,
-     *   path:list<array{from_column:string,to_table:string,to_column:string}>
+     *   path:list<array{
+     *     from_column:string,
+     *     to_table:string,
+     *     to_column:string,
+     *     reference?:string
+     *   }>
      * }>
      */
     private const INDIRECT_TABLES = [
@@ -226,6 +235,19 @@ final class TenantDataRegistryFactory
             'path' => [
                 ['from_column' => 'cash_document_id', 'to_table' => 'cash_documents', 'to_column' => 'id'],
                 ['from_column' => 'supplier_id', 'to_table' => 'supplier', 'to_column' => 'id'],
+            ],
+        ],
+        'bank_transactions' => [
+            'primary_key' => ['id'],
+            'feature_group' => 'bank',
+            'path' => [
+                ['from_column' => 'statement_id', 'to_table' => 'bank_statements', 'to_column' => 'id'],
+                [
+                    'from_column' => 'supplier_id',
+                    'to_table' => 'supplier',
+                    'to_column' => 'id',
+                    'reference' => 'soft',
+                ],
             ],
         ],
         'invoice_items' => [
@@ -262,9 +284,62 @@ final class TenantDataRegistryFactory
         ],
     ];
 
+    /** @var array<string,array<string,string>> */
+    private const ACTOR_REFERENCES = [
+        'bank_transactions' => [
+            'matched_by' => 'map_existing_user_or_null',
+        ],
+        'bank_statements' => [
+            'imported_by' => 'map_existing_user_or_null',
+        ],
+        'invoice_attachments' => [
+            'uploaded_by' => 'map_existing_user_or_null',
+        ],
+        'invoice_payments' => [
+            'created_by' => 'map_existing_user_or_null',
+        ],
+        'invoices' => [
+            'created_by' => 'map_existing_user_or_null',
+        ],
+        'journal_entries' => [
+            'posted_by' => 'map_existing_user_or_null',
+        ],
+        'journal_entry_attachments' => [
+            'uploaded_by' => 'map_existing_user_or_null',
+        ],
+        'payment_matches' => [
+            'matched_by_user_id' => 'map_existing_user_or_null',
+        ],
+        'purchase_invoices' => [
+            'created_by' => 'map_existing_user_required',
+        ],
+        'small_assets' => [
+            'created_by' => 'map_existing_user_or_null',
+        ],
+    ];
+
+    /** @var array<string,array<string,string>> */
+    private const SOFT_ACTOR_REFERENCES = [
+        'purchase_orders' => [
+            'confirmed_by' => 'map_existing_user_or_null',
+            'closed_by' => 'map_existing_user_or_null',
+            'cancelled_by' => 'map_existing_user_or_null',
+            'created_by' => 'map_existing_user_or_null',
+        ],
+        'tax_submissions' => [
+            'submitted_by' => 'map_existing_user_or_null',
+            'generated_by' => 'map_existing_user_or_null',
+        ],
+    ];
+
     public static function draftV1(): TenantDataRegistry
     {
-        $definitions = [self::supplier()];
+        $definitions = [
+            self::supplier(),
+            ...TenantDataSystemCatalog::definitions(),
+            ...TenantDataGlobalCatalog::definitions(),
+            ...TenantDataBusinessCatalog::definitions(),
+        ];
         foreach (self::DIRECT_TABLE_GROUPS as $featureGroup => $tables) {
             foreach ($tables as $table => $primaryKey) {
                 $definitions[] = self::tenantOwned(
@@ -296,53 +371,12 @@ final class TenantDataRegistryFactory
             ],
         );
 
-        // Dvě tabulky patří do staršího účetního archivu, ale v úplném
-        // cross-instance profilu ještě nemají dokončenou cílovou politiku.
-        // Archive-only klasifikace je drží ve společném SSOT bez předstírání,
-        // že už jsou bezpečně přenositelné mezi instancemi.
-        $definitions[] = self::archiveBankTransactions();
-        $definitions[] = self::archiveExchangeRates();
         $definitions = self::withAccountingArchiveProfile($definitions);
 
         return new TenantDataRegistry(
             1,
             $definitions,
             [TenantDataRegistry::ACCOUNTING_ARCHIVE_PROFILE],
-        );
-    }
-
-    private static function archiveBankTransactions(): TenantDataDefinition
-    {
-        return new TenantDataDefinition(
-            'table:bank_transactions',
-            TenantDataObjectKind::Table,
-            TenantDataPolicy::TenantOwnedIndirect,
-            [TenantDataRegistry::ACCOUNTING_ARCHIVE_PROFILE],
-            [
-                'primary_key' => ['id'],
-                'feature_group' => 'bank',
-                'ownership' => [
-                    'strategy' => 'relationship_union',
-                    'reason' => 'statement_invoice_or_client_account_relation',
-                ],
-                'secrets' => [],
-            ],
-        );
-    }
-
-    private static function archiveExchangeRates(): TenantDataDefinition
-    {
-        return new TenantDataDefinition(
-            'table:exchange_rates',
-            TenantDataObjectKind::Table,
-            TenantDataPolicy::GlobalReference,
-            [TenantDataRegistry::ACCOUNTING_ARCHIVE_PROFILE],
-            [
-                'primary_key' => ['rate_date', 'currency_code'],
-                'feature_group' => 'accounting',
-                'natural_key' => ['rate_date', 'currency_code'],
-                'secrets' => [],
-            ],
         );
     }
 
@@ -518,26 +552,40 @@ final class TenantDataRegistryFactory
         string $featureGroup,
         array $secrets,
     ): TenantDataDefinition {
+        $details = [
+            'primary_key' => $primaryKey,
+            'feature_group' => $featureGroup,
+            'ownership' => [
+                'strategy' => 'supplier_id',
+                'column' => 'supplier_id',
+            ],
+            'secrets' => $secrets,
+        ];
+        $actorReferences = self::actorReferences($table);
+        if ($actorReferences !== []) {
+            $details['actor_references'] = $actorReferences;
+        }
+        $softActorReferences = self::softActorReferences($table);
+        if ($softActorReferences !== []) {
+            $details['soft_actor_references'] = $softActorReferences;
+        }
         return new TenantDataDefinition(
             'table:' . $table,
             TenantDataObjectKind::Table,
             TenantDataPolicy::TenantOwned,
             [TenantDataRegistry::TRANSFER_PROFILE],
-            [
-                'primary_key' => $primaryKey,
-                'feature_group' => $featureGroup,
-                'ownership' => [
-                    'strategy' => 'supplier_id',
-                    'column' => 'supplier_id',
-                ],
-                'secrets' => $secrets,
-            ],
+            $details,
         );
     }
 
     /**
      * @param list<string> $primaryKey
-     * @param list<array{from_column:string,to_table:string,to_column:string}> $path
+     * @param list<array{
+     *   from_column:string,
+     *   to_table:string,
+     *   to_column:string,
+     *   reference?:string
+     * }> $path
      * @param array<string,array<string,string>> $secrets
      */
     private static function tenantOwnedIndirect(
@@ -547,21 +595,50 @@ final class TenantDataRegistryFactory
         array $path,
         array $secrets,
     ): TenantDataDefinition {
+        $details = [
+            'primary_key' => $primaryKey,
+            'feature_group' => $featureGroup,
+            'ownership' => [
+                'strategy' => 'foreign_key_path',
+                'path' => $path,
+            ],
+            'secrets' => $secrets,
+        ];
+        $actorReferences = self::actorReferences($table);
+        if ($actorReferences !== []) {
+            $details['actor_references'] = $actorReferences;
+        }
+        $softActorReferences = self::softActorReferences($table);
+        if ($softActorReferences !== []) {
+            $details['soft_actor_references'] = $softActorReferences;
+        }
         return new TenantDataDefinition(
             'table:' . $table,
             TenantDataObjectKind::Table,
             TenantDataPolicy::TenantOwnedIndirect,
             [TenantDataRegistry::TRANSFER_PROFILE],
-            [
-                'primary_key' => $primaryKey,
-                'feature_group' => $featureGroup,
-                'ownership' => [
-                    'strategy' => 'foreign_key_path',
-                    'path' => $path,
-                ],
-                'secrets' => $secrets,
-            ],
+            $details,
         );
+    }
+
+    /** @return array<string,array{strategy:string}> */
+    private static function actorReferences(string $table): array
+    {
+        $references = [];
+        foreach (self::ACTOR_REFERENCES[$table] ?? [] as $column => $strategy) {
+            $references[$column] = ['strategy' => $strategy];
+        }
+        return $references;
+    }
+
+    /** @return array<string,array{strategy:string}> */
+    private static function softActorReferences(string $table): array
+    {
+        $references = [];
+        foreach (self::SOFT_ACTOR_REFERENCES[$table] ?? [] as $column => $strategy) {
+            $references[$column] = ['strategy' => $strategy];
+        }
+        return $references;
     }
 
     /** @return array<string,array<string,string>> */

@@ -71,6 +71,11 @@ final class TenantDataRegistryCoverageValidator
                 ...$this->primaryKeyIssues($definition, $table),
                 ...$this->policyCoverageIssues($definition, $table, $tables),
                 ...$this->secretCoverageIssues($definition, $table),
+                ...$this->referenceCoverageIssues(
+                    $definition,
+                    $table,
+                    $definitions,
+                ),
             );
         }
         foreach (array_diff(array_keys($definitions), array_keys($tables)) as $tableName) {
@@ -221,9 +226,16 @@ final class TenantDataRegistryCoverageValidator
             $fromColumn = $step['from_column'] ?? null;
             $toTable = $step['to_table'] ?? null;
             $toColumn = $step['to_column'] ?? null;
+            $reference = $step['reference'] ?? (
+                $strategy === 'soft_reference_path'
+                    ? 'soft'
+                    : 'foreign_key'
+            );
             if (!is_string($fromColumn)
                 || !is_string($toTable)
                 || !is_string($toColumn)
+                || !is_string($reference)
+                || !in_array($reference, ['foreign_key', 'soft'], true)
                 || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $fromColumn) !== 1
                 || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $toTable) !== 1
                 || preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $toColumn) !== 1
@@ -236,7 +248,7 @@ final class TenantDataRegistryCoverageValidator
                     . $current->name . '.' . $fromColumn;
                 break;
             }
-            if ($strategy === 'foreign_key_path'
+            if ($reference === 'foreign_key'
                 && !$this->hasForeignKey(
                     $current,
                     $fromColumn,
@@ -304,6 +316,39 @@ final class TenantDataRegistryCoverageValidator
             }
             if (!in_array($key, $table->columns, true)) {
                 return ['global_mapping_column_missing:' . $table->name . '.' . $key];
+            }
+            if (in_array($key, $table->nullableColumns, true)) {
+                return ['global_mapping_nullable_key:' . $table->name . '.' . $key];
+            }
+        }
+        if (!in_array($keys, $table->uniqueKeys, true)) {
+            return ['global_mapping_not_unique:' . $table->name];
+        }
+
+        $values = $mapping['values'] ?? null;
+        $valueColumns = is_array($values) ? ($values['columns'] ?? null) : null;
+        if (!is_array($values)
+            || ($values['strategy'] ?? null) !== 'require_equal'
+            || !is_array($valueColumns)
+            || !array_is_list($valueColumns)
+            || $valueColumns === []
+        ) {
+            return ['invalid_global_value_policy:' . $table->name];
+        }
+        $seenValueColumns = [];
+        foreach ($valueColumns as $column) {
+            if (!is_string($column)) {
+                return ['invalid_global_value_column:' . $table->name];
+            }
+            if (isset($seenValueColumns[$column])) {
+                return ['invalid_global_value_policy:' . $table->name];
+            }
+            $seenValueColumns[$column] = true;
+            if (!in_array($column, $table->columns, true)) {
+                return [
+                    'global_value_column_missing:'
+                        . $table->name . '.' . $column,
+                ];
             }
         }
         return [];
@@ -384,5 +429,147 @@ final class TenantDataRegistryCoverageValidator
             }
         }
         return $issues;
+    }
+
+    /**
+     * Fyzické FK do jiného tenantového objektu se remapují podle politiky cíle.
+     * Odkazy do instanční identity jsou výjimka a musí mít explicitní actor mapu.
+     *
+     * @param array<string,TenantDataDefinition> $definitions
+     * @return list<string>
+     */
+    private function referenceCoverageIssues(
+        TenantDataDefinition $definition,
+        TenantSchemaTableInventory $table,
+        array $definitions,
+    ): array {
+        if (!in_array($definition->policy, [
+            TenantDataPolicy::TenantRoot,
+            TenantDataPolicy::TenantOwned,
+            TenantDataPolicy::TenantOwnedIndirect,
+            TenantDataPolicy::TenantRelation,
+            TenantDataPolicy::PersonalSecretAttachment,
+        ], true)) {
+            return [];
+        }
+
+        $actorReferences = $this->actorReferences(
+            $definition,
+            'actor_references',
+        );
+        if ($actorReferences === null) {
+            return ['invalid_actor_reference_registry:' . $table->name];
+        }
+        $softActorReferences = $this->actorReferences(
+            $definition,
+            'soft_actor_references',
+        );
+        if ($softActorReferences === null) {
+            return ['invalid_soft_actor_reference_registry:' . $table->name];
+        }
+        $issues = [];
+        $actualActorColumns = [];
+        foreach ($table->foreignKeys as $foreignKey) {
+            $target = $definitions[$foreignKey->referencedTable] ?? null;
+            if ($target === null) {
+                $issues[] = 'reference_target_unregistered:'
+                    . $table->name . '.' . $foreignKey->column
+                    . '->' . $foreignKey->referencedTable
+                    . '.' . $foreignKey->referencedColumn;
+                continue;
+            }
+            if ($target->policy === TenantDataPolicy::InstanceOwned) {
+                if ($foreignKey->referencedTable !== 'users') {
+                    $issues[] = 'instance_reference_policy_missing:'
+                        . $table->name . '.' . $foreignKey->column;
+                    continue;
+                }
+                $actualActorColumns[$foreignKey->column] = true;
+                $strategy = $actorReferences[$foreignKey->column] ?? null;
+                $expected = in_array(
+                    $foreignKey->column,
+                    $table->nullableColumns,
+                    true,
+                )
+                    ? 'map_existing_user_or_null'
+                    : 'map_existing_user_required';
+                if ($strategy !== $expected) {
+                    $issues[] = 'actor_reference_policy_mismatch:'
+                        . $table->name . '.' . $foreignKey->column;
+                }
+                continue;
+            }
+            if (in_array($target->policy, [
+                TenantDataPolicy::RuntimeDerived,
+                TenantDataPolicy::Unsupported,
+            ], true)) {
+                $issues[] = 'non_transferable_reference_target:'
+                    . $table->name . '.' . $foreignKey->column
+                    . '->' . $foreignKey->referencedTable;
+            }
+        }
+
+        foreach (array_keys($actorReferences) as $column) {
+            if (!isset($actualActorColumns[$column])) {
+                $issues[] = 'actor_reference_fk_missing:'
+                    . $table->name . '.' . $column;
+            }
+        }
+        foreach ($softActorReferences as $column => $strategy) {
+            if (!in_array($column, $table->columns, true)) {
+                $issues[] = 'soft_actor_reference_column_missing:'
+                    . $table->name . '.' . $column;
+                continue;
+            }
+            if (isset($actorReferences[$column])
+                || isset($actualActorColumns[$column])
+            ) {
+                $issues[] = 'soft_actor_reference_has_fk:'
+                    . $table->name . '.' . $column;
+                continue;
+            }
+            $expected = in_array($column, $table->nullableColumns, true)
+                ? 'map_existing_user_or_null'
+                : 'map_existing_user_required';
+            if ($strategy !== $expected) {
+                $issues[] = 'soft_actor_reference_policy_mismatch:'
+                    . $table->name . '.' . $column;
+            }
+        }
+        return $issues;
+    }
+
+    /**
+     * @return array<string,string>|null
+     */
+    private function actorReferences(
+        TenantDataDefinition $definition,
+        string $detail,
+    ): ?array {
+        $raw = $definition->details[$detail] ?? [];
+        if (!is_array($raw) || (array_is_list($raw) && $raw !== [])) {
+            return null;
+        }
+        $references = [];
+        foreach ($raw as $column => $declaration) {
+            if (!is_string($column)
+                || !is_array($declaration)
+                || array_is_list($declaration)
+            ) {
+                return null;
+            }
+            $strategy = $declaration['strategy'] ?? null;
+            if (!is_string($strategy)
+                || !in_array($strategy, [
+                    'map_existing_user_required',
+                    'map_existing_user_or_null',
+                ], true)
+            ) {
+                $references[$column] = 'invalid';
+                continue;
+            }
+            $references[$column] = $strategy;
+        }
+        return $references;
     }
 }

@@ -16,10 +16,18 @@ final readonly class TenantSchemaTableInventory
     /** @var list<TenantSchemaForeignKeyInventory> */
     public array $foreignKeys;
 
+    /** @var list<list<string>> */
+    public array $uniqueKeys;
+
+    /** @var list<string> */
+    public array $nullableColumns;
+
     /**
      * @param array<mixed> $columns
      * @param array<mixed> $primaryKey
      * @param array<mixed> $foreignKeys
+     * @param array<mixed> $uniqueKeys
+     * @param array<mixed> $nullableColumns
      */
     public function __construct(
         public string $name,
@@ -27,6 +35,8 @@ final readonly class TenantSchemaTableInventory
         array $columns,
         array $primaryKey,
         array $foreignKeys,
+        array $uniqueKeys = [],
+        array $nullableColumns = [],
     ) {
         if (preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $name) !== 1) {
             throw new \InvalidArgumentException('Inventura obsahuje neplatný název tabulky.');
@@ -93,5 +103,67 @@ final readonly class TenantSchemaTableInventory
             $validatedForeign[] = $foreignKey;
         }
         $this->foreignKeys = $validatedForeign;
+
+        if (!array_is_list($uniqueKeys)) {
+            throw new \InvalidArgumentException(
+                'Unikátní klíče inventury musí být seznam.',
+            );
+        }
+        $seenUnique = [];
+        $validatedUnique = [];
+        foreach ($uniqueKeys as $uniqueKey) {
+            if (!is_array($uniqueKey)
+                || !array_is_list($uniqueKey)
+                || $uniqueKey === []
+            ) {
+                throw new \InvalidArgumentException(
+                    'Inventura obsahuje neplatný unikátní klíč.',
+                );
+            }
+            $seenColumns = [];
+            $validatedKey = [];
+            foreach ($uniqueKey as $column) {
+                if (!is_string($column)
+                    || !in_array($column, $validated, true)
+                    || isset($seenColumns[$column])
+                ) {
+                    throw new \InvalidArgumentException(
+                        'Unikátní klíč inventury odkazuje na neplatný sloupec.',
+                    );
+                }
+                $seenColumns[$column] = true;
+                $validatedKey[] = $column;
+            }
+            $signature = implode("\0", $validatedKey);
+            if (isset($seenUnique[$signature])) {
+                throw new \InvalidArgumentException(
+                    'Inventura obsahuje duplicitní unikátní klíč.',
+                );
+            }
+            $seenUnique[$signature] = true;
+            $validatedUnique[] = $validatedKey;
+        }
+        $this->uniqueKeys = $validatedUnique;
+
+        if (!array_is_list($nullableColumns)) {
+            throw new \InvalidArgumentException(
+                'Nullable sloupce inventury musí být seznam.',
+            );
+        }
+        $seenNullable = [];
+        $validatedNullable = [];
+        foreach ($nullableColumns as $column) {
+            if (!is_string($column)
+                || !in_array($column, $validated, true)
+                || isset($seenNullable[$column])
+            ) {
+                throw new \InvalidArgumentException(
+                    'Inventura obsahuje neplatný nullable sloupec.',
+                );
+            }
+            $seenNullable[$column] = true;
+            $validatedNullable[] = $column;
+        }
+        $this->nullableColumns = $validatedNullable;
     }
 }
