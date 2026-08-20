@@ -38,11 +38,12 @@ import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import IsdsGatewayRegistrations from '@/components/settings/IsdsGatewayRegistrations.vue'
 
 const { t } = useI18n()
 const toast = useToast()
 
-type Tab = 'access' | 'outbox' | 'inbox' | 'notices' | 'recipients'
+type Tab = 'access' | 'outbox' | 'inbox' | 'notices' | 'recipients' | 'gateway'
 const tab = ref<Tab>('access')
 const environment = ref<'production' | 'test'>('production')
 const loading = ref(true)
@@ -592,6 +593,20 @@ const gatewayAvailable = computed(() =>
   (gatewayRegistrations.value ?? []).some(r => r.environment === environment.value && r.is_active),
 )
 
+/**
+ * Záložka se správou registrací se nabízí jen tomu, komu výpis prošel — tedy
+ * účtu s právem `settings.signing`. Nabízet ji ostatním by slibovalo obrazovku,
+ * na které by dostali jen 403.
+ */
+const canManageGateway = computed(() => gatewayRegistrations.value !== null)
+
+const tabs = computed<Tab[]>(() => {
+  const list: Tab[] = ['access', 'outbox', 'inbox', 'notices', 'recipients']
+  if (canManageGateway.value) list.push('gateway')
+
+  return list
+})
+
 async function loadGatewayRegistrations() {
   try {
     gatewayRegistrations.value = await dataBoxApi.gatewayRegistrations()
@@ -692,7 +707,7 @@ onMounted(async () => {
 
     <nav class="flex flex-wrap gap-2 border-b border-neutral-200 dark:border-neutral-700">
       <button
-        v-for="key in (['access', 'outbox', 'inbox', 'notices', 'recipients'] as Tab[])"
+        v-for="key in tabs"
         :key="key"
         type="button"
         class="cursor-pointer whitespace-nowrap px-3 py-2 text-sm font-medium border-b-2 -mb-px"
@@ -1401,6 +1416,11 @@ onMounted(async () => {
           </button>
         </div>
       </div>
+    </section>
+
+    <!-- ─────────────── Odesílací brána (registrace provozovatele) ─────────────── -->
+    <section v-else-if="tab === 'gateway'" class="space-y-4">
+      <IsdsGatewayRegistrations @changed="loadGatewayRegistrations" />
     </section>
 
     <!-- ─────────────── Příjemci ─────────────── -->

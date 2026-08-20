@@ -340,6 +340,43 @@ export interface IsdsGatewayRegistration {
   is_active: boolean
 }
 
+/**
+ * Výchozí hostitelé prostředí ISDS — jen předvolby formuláře.
+ *
+ * Závazná je hodnota uložená v registraci: staré domény `mojedatovaschranka.cz`
+ * poběží podle Provozního řádu souběžně minimálně do 31. 12. 2027.
+ */
+export interface IsdsGatewayHosts {
+  portal: string
+  service: string
+}
+
+export interface IsdsGatewaySettings {
+  items: IsdsGatewayRegistration[]
+  default_hosts: Record<'production' | 'test', IsdsGatewayHosts>
+}
+
+/**
+ * Vstup pro uložení registrace.
+ *
+ * Certifikát je PKCS#12 **včetně soukromého klíče** — používá se jako klientský
+ * certifikát TLS. Heslo k němu se posílá jen sem a zpátky se nikdy nevrací;
+ * proto je to `File` + `string`, ne pole, které by šlo předvyplnit.
+ */
+export interface IsdsGatewayRegistrationInput {
+  environment: 'production' | 'test'
+  ats_id: string
+  label: string
+  return_url: string
+  error_url: string | null
+  concept_ttl_seconds: number
+  portal_host: string
+  service_host: string
+  user_login_policy: IsdsGatewayRegistration['user_login_policy']
+  certificate: File
+  certificate_password: string
+}
+
 /** Odpověď na zahájení odeslání — kam poslat prohlížeč a co uživateli říct. */
 export interface GatewayStart {
   session_id: number
@@ -442,6 +479,31 @@ export const dataBoxApi = {
   gatewayRegistrations: () =>
     api.get<{ items: IsdsGatewayRegistration[] }>('/settings/isds-gateway').then(r => r.data.items),
 
+  /** Totéž co {@link gatewayRegistrations}, ale i s předvolbami hostitelů pro formulář. */
+  gatewaySettings: () =>
+    api.get<IsdsGatewaySettings>('/settings/isds-gateway').then(r => r.data),
+
+  /**
+   * Uloží registraci brány. Multipart, protože jde o soubor PKCS#12.
+   *
+   * ⚠️ Po uložení je registrace VŽDY vypnutá — zapíná se zvlášť přes
+   * {@link setGatewayActive}, až když ji provozovatel ověří pokusem.
+   */
+  saveGatewayRegistration: (input: IsdsGatewayRegistrationInput) =>
+    api.post<IsdsGatewayRegistration>('/settings/isds-gateway', gatewayForm(input), {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data),
+
+  /** Zapnutí/vypnutí registrace. Zapnout nejde neexistující ani prošlou. */
+  setGatewayActive: (environment: string, active: boolean) =>
+    api.post<{ environment: string; active: boolean }>('/settings/isds-gateway/active', {
+      environment,
+      active,
+    }).then(r => r.data),
+
+  deleteGatewayRegistration: (environment: string) =>
+    api.delete<{ deleted: boolean }>(`/settings/isds-gateway/${environment}`).then(r => r.data),
+
   /**
    * Zahájí odeslání přes bránu. Server sám nepřesměrovává — vrátí adresu,
    * aby šlo uživateli nejdřív ukázat, co ho v datové schránce čeká.
@@ -543,6 +605,22 @@ export const dataBoxApi = {
       responded_on: respondedOn,
       response_outbox_id: responseOutboxId ?? null,
     }).then(r => r.data),
+}
+
+function gatewayForm(input: IsdsGatewayRegistrationInput): FormData {
+  const form = new FormData()
+  form.append('environment', input.environment)
+  form.append('ats_id', input.ats_id)
+  form.append('label', input.label)
+  form.append('return_url', input.return_url)
+  form.append('error_url', input.error_url ?? '')
+  form.append('concept_ttl_seconds', String(input.concept_ttl_seconds))
+  form.append('portal_host', input.portal_host)
+  form.append('service_host', input.service_host)
+  form.append('user_login_policy', input.user_login_policy)
+  form.append('certificate', input.certificate)
+  form.append('certificate_password', input.certificate_password)
+  return form
 }
 
 function receiptForm(environment: string, file: File): FormData {
