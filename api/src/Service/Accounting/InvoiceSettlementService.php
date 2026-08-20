@@ -270,42 +270,84 @@ final class InvoiceSettlementService
         $rows = $this->repo->unpostedConfirmed($supplierId);
         $report['candidates'] = count($rows);
 
-        foreach ($rows as $row) {
-            $pdo = $this->db->pdo();
-            $ownTx = !$pdo->inTransaction();
-            if ($ownTx) {
-                $pdo->beginTransaction();
-            }
+        foreach ($rows as $row) {   // @phpstan-ignore-line — tělo sdílí postRow()
             try {
-                $docType = (string) $row['doc_type'];
-                $counter = $this->documentAccount($supplierId, $docType, (int) $row['doc_id']);
-                $lines = $this->buildLines($docType, (string) $row['account_code'], $counter, (float) $row['amount']);
-                $entryId = $this->posting->postDocument($supplierId, 'settlement', (int) $row['id'], $lines, [
-                    'entry_date'  => (string) $row['settled_on'],
-                    'document_no' => (string) ($row['doc_no'] ?? ''),
-                    'description' => 'Zápočet ' . (string) ($row['doc_no'] ?? '') . ' proti účtu '
-                        . (string) $row['account_code']
-                        . ($row['note'] !== null && $row['note'] !== '' ? ' — ' . (string) $row['note'] : ''),
-                    'posted_by'   => $userId,
-                    'user_id'     => $userId,
-                ]);
-                $this->repo->setPosted((int) $row['id'], $entryId, $row['invoice_payment_id'] !== null
-                    ? (int) $row['invoice_payment_id']
-                    : null);
-                if ($ownTx) {
-                    $pdo->commit();
-                }
+                $this->postRow($supplierId, $row, $userId);
                 $report['posted']++;
             } catch (\Throwable $e) {
-                if ($ownTx && $pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
                 $report['failed']++;
                 $report['errors'][] = sprintf('Zápočet #%d: %s', (int) $row['id'], $e->getMessage());
             }
         }
 
         return $report;
+    }
+
+    /**
+     * Doúčtuje JEDEN zápočet — akce z detailu dokladu vedle štítku „Nezaúčtováno".
+     *
+     * Hromadná varianta {@see postMissingEntries()} je schovaná v backfillu a je pro
+     * administrátora; tohle je cesta pro účetní, která má před sebou konkrétní doklad
+     * s chybějícím zápisem a potřebuje ho zavřít, ne spouštět opravu celé firmy.
+     *
+     * @return array<string,mixed> hlavička zápočtu po doúčtování
+     */
+    public function postMissingEntry(int $supplierId, int $settlementId, ?int $userId = null): array
+    {
+        if ($this->supplierAccountingMode($supplierId) === 'tax_evidence') {
+            throw new SettlementException('tax_evidence', 'V daňové evidenci se zápočet neúčtuje — deník tam není.');
+        }
+        $row = $this->repo->findUnpostedConfirmed($supplierId, $settlementId);
+        if ($row === null) {
+            throw new SettlementException(
+                'not_unposted',
+                'Zápočet nenalezen, je zrušený, nebo už účetní zápis má.',
+                404,
+            );
+        }
+        $this->postRow($supplierId, $row, $userId);
+        return $this->get($supplierId, $settlementId);
+    }
+
+    /**
+     * Zápis podle ULOŽENÝCH údajů zápočtu (částka, protiúčet, datum), ne podle aktuálního
+     * stavu dokladu — ten je po zápočtu vyrovnaný a znovu ho validovat by nešlo. Doklad se
+     * tu proto ani nepřestavuje: doplňuje se jen chybějící účetní stopa.
+     *
+     * @param array<string,mixed> $row řádek z {@see InvoiceSettlementRepository::unpostedConfirmed()}
+     */
+    private function postRow(int $supplierId, array $row, ?int $userId): void
+    {
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $docType = (string) $row['doc_type'];
+            $counter = $this->documentAccount($supplierId, $docType, (int) $row['doc_id']);
+            $lines = $this->buildLines($docType, (string) $row['account_code'], $counter, (float) $row['amount']);
+            $entryId = $this->posting->postDocument($supplierId, 'settlement', (int) $row['id'], $lines, [
+                'entry_date'  => (string) $row['settled_on'],
+                'document_no' => (string) ($row['doc_no'] ?? ''),
+                'description' => 'Zápočet ' . (string) ($row['doc_no'] ?? '') . ' proti účtu '
+                    . (string) $row['account_code']
+                    . ($row['note'] !== null && $row['note'] !== '' ? ' — ' . (string) $row['note'] : ''),
+                'posted_by'   => $userId,
+                'user_id'     => $userId,
+            ]);
+            $this->repo->setPosted((int) $row['id'], $entryId, $row['invoice_payment_id'] !== null
+                ? (int) $row['invoice_payment_id']
+                : null);
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -398,9 +440,15 @@ final class InvoiceSettlementService
         // o zápočet téhož dokladu se serializují a druhá vidí zbytek už snížený první.
         $remaining = round((float) $pf['remaining'], 2);
         if (self::cents($remaining) <= 0) {
+            // Doklad může být ve stavu Přijatá/Zaúčtovaná (třeba po odznačení úhrady)
+            // a přesto celý pokrytý — typicky zápočtem, kterému chybí účetní zápis.
+            // Bez téhle věty uživatel vidí „už je uhrazená" u dokladu, který se tváří
+            // jako neuhrazený, a nemá jak zjistit, co ho vlastně pokrývá.
             throw new SettlementException(
                 'already_settled',
-                'Přijatá faktura už je celá uhrazená — není co započíst.',
+                'Doklad je už celý pokrytý úhradami (banka, zápočet). Zbývá 0 Kč k započtení — '
+                . 'zkontroluj přehled úhrad v detailu dokladu; zápočet bez účetního zápisu tam '
+                . 'jde doúčtovat.',
             );
         }
         if (self::cents($amount) > self::cents($remaining) + self::TOLERANCE_CENTS) {

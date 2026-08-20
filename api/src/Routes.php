@@ -1509,6 +1509,8 @@ final class Routes
             $g->get   ('/settlements',                            [\MyInvoice\Action\Accounting\InvoiceSettlementAction::class, 'list']);
             $g->post  ('/settlements',                            [\MyInvoice\Action\Accounting\InvoiceSettlementAction::class, 'create']);
             $g->post  ('/settlements/{id:[0-9]+}/cancel',         [\MyInvoice\Action\Accounting\InvoiceSettlementAction::class, 'cancel']);
+            // Doúčtování zápočtu bez zápisu (daňová evidence, hromadné přeúčtování deníku).
+            $g->post  ('/settlements/{id:[0-9]+}/post',           [\MyInvoice\Action\Accounting\InvoiceSettlementAction::class, 'post']);
             // Majetek a odpisy (Epic F3). Specifické cesty PŘED generickým /assets/{id}.
             $g->get   ('/assets',                                   [AssetAction::class, 'list']);
             $g->post  ('/assets',                                   [AssetAction::class, 'create']);

@@ -8314,7 +8314,10 @@
             "source_settlement": "Zápočet",
             "open_journal": "Zaúčtování",
             "open_cash": "Pokladna",
-            "mark_paid_unposted": "Označeno jako uhrazeno ručně dne {date} — úhrada NENÍ zaúčtovaná (závazek 321 zůstává v deníku otevřený)."
+            "mark_paid_unposted": "Označeno jako uhrazeno ručně dne {date} — úhrada NENÍ zaúčtovaná (závazek 321 zůstává v deníku otevřený).",
+            "settlement_unposted": "nezaúčtováno",
+            "post_settlement": "Doúčtovat",
+            "settlement_posted": "Zápočet doúčtován do deníku."
         },
         "credit_note_link": {
             "label": "Opravovaná faktura",

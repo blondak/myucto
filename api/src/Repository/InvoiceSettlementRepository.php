@@ -66,6 +66,22 @@ final class InvoiceSettlementRepository
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
+    /**
+     * Jeden potvrzený zápočet bez zápisu — pro doúčtování z detailu dokladu.
+     * Vrací týž tvar jako {@see unpostedConfirmed()}, ať se zápis skládá jednou cestou.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function findUnpostedConfirmed(int $supplierId, int $settlementId): ?array
+    {
+        foreach ($this->unpostedConfirmed($supplierId) as $row) {
+            if ((int) $row['id'] === $settlementId) {
+                return $row;
+            }
+        }
+        return null;
+    }
+
     /** Je vydaný doklad zálohová proforma? (rozhoduje saldokontní účet 324 vs. 311) */
     public function invoiceIsProforma(int $supplierId, int $docId): bool
     {

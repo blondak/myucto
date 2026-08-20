@@ -8314,7 +8314,10 @@
             "source_settlement": "Set-off",
             "open_journal": "Posting",
             "open_cash": "Cash register",
-            "mark_paid_unposted": "Marked as paid manually on {date} — the payment is NOT posted (the 321 payable stays open in the journal)."
+            "mark_paid_unposted": "Marked as paid manually on {date} — the payment is NOT posted (the 321 payable stays open in the journal).",
+            "settlement_unposted": "not posted",
+            "post_settlement": "Post to journal",
+            "settlement_posted": "Set-off posted to the journal."
         },
         "credit_note_link": {
             "label": "Corrected invoice",

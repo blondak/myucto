@@ -1625,4 +1625,7 @@ export const accountingApi = {
     api.post<InvoiceSettlement>('/accounting/settlements', payload).then(r => r.data),
   cancelSettlement: (id: number) =>
     api.post<InvoiceSettlement>(`/accounting/settlements/${id}/cancel`, {}).then(r => r.data),
+  /** Doúčtuje zápočet, kterému chybí účetní zápis (daňová evidence, přeúčtování deníku). */
+  postSettlement: (id: number) =>
+    api.post<InvoiceSettlement>(`/accounting/settlements/${id}/post`, {}).then(r => r.data),
 }

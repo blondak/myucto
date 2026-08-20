@@ -87,6 +87,33 @@ final class InvoiceSettlementAction
         return Json::ok($response, $result);
     }
 
+    /**
+     * Doúčtuje zápočet, kterému chybí účetní zápis (viz
+     * {@see \MyInvoice\Service\Accounting\InvoiceSettlementService::postMissingEntry()}).
+     * Akce z detailu dokladu — účetní má před sebou konkrétní doklad se štítkem
+     * „Nezaúčtováno" a potřebuje ho zavřít, ne spouštět opravu celé firmy z aktivace.
+     */
+    public function post(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireWrite($request, $response, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        $id = (int) ($args['id'] ?? 0);
+        $user = $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER);
+        $userId = is_array($user) && isset($user['id']) ? (int) $user['id'] : null;
+
+        try {
+            $result = $this->settlements->postMissingEntry($supplierId, $id, $userId);
+        } catch (\Throwable $e) {
+            return $this->mapSettlementError($response, $e);
+        }
+
+        $this->log($request, 'accounting.settlement_posted', $id, [
+            'journal_entry_id' => $result['journal_entry_id'],
+        ], $supplierId);
+        return Json::ok($response, $result);
+    }
+
     public function cancel(Request $request, Response $response, array $args): Response
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;

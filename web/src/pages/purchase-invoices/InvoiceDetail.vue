@@ -9,6 +9,7 @@ import { useI18n } from 'vue-i18n'
 import { purchaseInvoicesApi, type PurchaseInvoice, type PurchaseInvoiceStatus, type PurchaseInvoiceBrief, type PaymentQrResponse } from '@/api/purchaseInvoices'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
+import { accountingApi } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { apiErrorMessage } from '@/api/errors'
@@ -556,6 +557,22 @@ async function onPosted() {
 // ─── Lišta akcí (sdílená ActionBar) ───
 // Primární = hlavní dopředný stavový přechod (typicky „Uhrazeno"); zaúčtování je sekundární,
 // reverzní přechody sekundární/neutrální, storno + exporty + smazání v „…" overflow.
+const postingSettlementId = ref<number | null>(null)
+
+/** Doúčtuje zápočet, kterému chybí účetní zápis, a načte doklad znovu. */
+async function postSettlement(settlementId: number) {
+  postingSettlementId.value = settlementId
+  try {
+    await accountingApi.postSettlement(settlementId)
+    toast.success(t('purchase_invoice.payment_provenance.settlement_posted'))
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    postingSettlementId.value = null
+  }
+}
+
 const purchaseActions = computed<ActionItem[]>(() => {
   const inv = invoice.value
   if (!inv) return []
@@ -913,6 +930,24 @@ const purchaseActions = computed<ActionItem[]>(() => {
               class="text-primary-600 hover:underline">
               {{ t('purchase_invoice.payment_provenance.open_journal') }} →
             </RouterLink>
+            <!--
+              Zápočet bez zápisu: úhrada je evidovaná, ale deník o ní neví — 321 zůstává
+              otevřený a uzávěrková kontrola to hlásí. Vzniká přeúčtováním deníku
+              (FK ON DELETE SET NULL) nebo zápočtem pořízeným v daňové evidenci. Doúčtovat
+              to musí jít odsud: účetní má doklad před sebou a nemá důvod hledat opravu
+              v aktivaci účetnictví.
+            -->
+            <template v-else>
+              <span class="text-warning-700 bg-warning-50 rounded px-1.5 py-0.5 text-xs font-medium">
+                {{ t('purchase_invoice.payment_provenance.settlement_unposted') }}
+              </span>
+              <button v-if="auth.canWrite('accounting')" type="button"
+                :disabled="postingSettlementId === pay.settlement_id"
+                @click="postSettlement(pay.settlement_id)"
+                class="cursor-pointer text-primary-600 hover:underline disabled:opacity-50">
+                {{ t('purchase_invoice.payment_provenance.post_settlement') }} →
+              </button>
+            </template>
           </span>
         </li>
       </ul>
