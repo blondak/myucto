@@ -8,7 +8,8 @@ use MyInvoice\Repository\Payroll\PayrollBenefitBasketOverviewRepository;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
 
 /**
- * Přehled čerpání ročních košů osvobození za firmu.
+ * Přehled čerpání košů osvobození za firmu — ročních {@see overview()} i měsíčních
+ * {@see monthlyOverview()}.
  *
  * Náhled jednoho vstupu zavírá past jen tomu, kdo zrovna ten vstup zadává.
  * Účetní se tak o blížícím se limitu dozví typicky v prosinci, kdy už se s tím
@@ -86,6 +87,73 @@ final class PayrollBenefitBasketOverviewService
     }
 
     /**
+     * Táž otázka za JEDEN KALENDÁŘNÍ MĚSÍC — pro koše podle § 6 odst. 9 písm. b)
+     * a i) ZDP, které se do ročního přehledu dostat nemohou.
+     *
+     * Platí tu totéž pravidlo o nepřepočítávání. Navíc jedna past: u příspěvku na
+     * stravování je limit ZA SMĚNU, ale sčítaný mzdový vstup je měsíční. Měsíční
+     * součet se proti limitu za směnu poměřit nedá, takže se u něj limit netvrdí
+     * vůbec ({@see monthlyLimitOrNull()}) a řádek jde ven jako `limit_unavailable`
+     * s `limit_basis = "per_shift"`. Zmrazená nadlimitní část se ukáže dál — ta
+     * vznikla proti doloženému počtu směn v okamžiku schválení a je fakt.
+     *
+     * @param string $period Měsíc ve tvaru `YYYY-MM`.
+     * @return array{
+     *     items: list<PayrollBenefitBasketUsage>,
+     *     total: int,
+     *     periods: list<string>
+     * }
+     */
+    public function monthlyOverview(
+        int $supplierId,
+        string $period,
+        ?PayrollBenefitExemptionBasket $basket = null,
+        string $search = '',
+        int $limit = PayrollBenefitBasketOverviewRepository::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        $periodStart = $period . '-01';
+        $page = $this->repository->monthlyPage(
+            $supplierId,
+            $periodStart,
+            $basket,
+            $search,
+            $limit,
+            $offset,
+        );
+
+        /** @var array<string,int|null> $limits */
+        $limits = [];
+        $items = [];
+        foreach ($page['items'] as $row) {
+            $rowBasket = PayrollBenefitExemptionBasket::from((string) $row['basket']);
+            if (!array_key_exists($rowBasket->value, $limits)) {
+                $limits[$rowBasket->value] = $this->monthlyLimitOrNull($rowBasket, $periodStart);
+            }
+            $items[] = new PayrollBenefitBasketUsage(
+                employeeId: (int) $row['employee_id'],
+                employeeName: (string) $row['employee_name'],
+                basket: $rowBasket,
+                limitMinor: $limits[$rowBasket->value],
+                usedMinor: (int) $row['used_minor'],
+                exemptMinor: (int) $row['exempt_minor'],
+                taxableMinor: (int) $row['taxable_minor'],
+                inputCount: (int) $row['input_count'],
+                unfrozenCount: (int) $row['unfrozen_count'],
+                negativeCount: (int) $row['negative_count'],
+                reversedCount: (int) $row['reversed_count'],
+                reversedMinor: (int) $row['reversed_minor'],
+            );
+        }
+
+        return [
+            'items' => $items,
+            'total' => $page['total'],
+            'periods' => $this->repository->periods($supplierId),
+        ];
+    }
+
+    /**
      * Limit koše, nebo `null`, když ho ruleset pro dané zdaňovací období netvrdí.
      *
      * Neschválená ani chybějící sada pravidel se nenahrazuje odhadem: bez limitu
@@ -103,6 +171,37 @@ final class PayrollBenefitBasketOverviewService
         }
         try {
             return $this->baskets->limitMinor($basket, sprintf('%04d-01-01', $taxYear));
+        } catch (PayrollRulesetException) {
+            return null;
+        }
+    }
+
+    /**
+     * Měsíční limit koše, nebo `null`.
+     *
+     * `null` tu má DVA různé důvody a oba jsou poctivé:
+     *
+     *  1. **Limit je za směnu, ne za měsíc** ({@see PayrollBenefitExemptionBasket::scalesWithShifts()}).
+     *     Měsíční strop by byl `limit na směnu × počet nároků`, a ten počet musí
+     *     být DOLOŽENÝ z docházky ({@see PayrollMealShiftEntitlement}), ne
+     *     odhadnutý z počtu pracovních dnů. Doložený je vždy jen za osobu
+     *     a měsíc v okamžiku schválení; přehled za celou firmu ho zpětně
+     *     rekonstruovat nesmí, protože docházka se od schválení mohla změnit
+     *     a řádek by pak tvrdil jiný limit, než proti kterému se opravdu
+     *     osvobozovalo. Prázdné místo je poctivější než smyšlené číslo.
+     *  2. Ruleset pro ten měsíc limit netvrdí (fail-closed, jako u ročního koše).
+     *
+     * Čím je `null` způsobené, řekne odpovědi `limit_basis`.
+     */
+    private function monthlyLimitOrNull(
+        PayrollBenefitExemptionBasket $basket,
+        string $periodStart,
+    ): ?int {
+        if ($basket->scalesWithShifts()) {
+            return null;
+        }
+        try {
+            return $this->baskets->limitMinor($basket, $periodStart);
         } catch (PayrollRulesetException) {
             return null;
         }

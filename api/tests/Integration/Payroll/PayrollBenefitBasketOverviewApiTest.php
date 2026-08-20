@@ -39,6 +39,9 @@ final class PayrollBenefitBasketOverviewApiTest extends TestCase
     /** § 6 odst. 9 písm. d) bod 1 ZDP pro rok 2026 — celá průměrná mzda. */
     private const HEALTH_LIMIT_MINOR = 4_896_700;
 
+    /** § 6 odst. 9 písm. i) ZDP — 3 500 Kč MĚSÍČNĚ. */
+    private const ACCOMMODATION_LIMIT_MINOR = 350_000;
+
     use IsolatedSupplierTrait;
 
     private Connection $db;
@@ -282,6 +285,177 @@ final class PayrollBenefitBasketOverviewApiTest extends TestCase
         self::assertSame(500_000, $row['used_minor']);
         self::assertSame(0, $row['exempt_minor']);
         self::assertFalse($row['split_drift']);
+    }
+
+    // ── Měsíční přehled (§ 6 odst. 9 písm. b) a i) ZDP) ─────────────────────
+
+    /**
+     * Měsíční přehled sčítá za MĚSÍC MZDOVÉHO VSTUPU, ne za rok akumulátoru.
+     *
+     * Akumulátor nese jen `tax_year`, takže dotaz vedený jím by slil celý rok do
+     * jednoho čísla a měsíční limit by proti němu neznamenal nic. Zároveň se do
+     * měsíčního přehledu nesmí připlést roční koš — dvanáctina ročního čerpání
+     * proti ročnímu limitu je číslo bez významu.
+     */
+    public function testMonthlyOverviewSumsTheInputMonthAndKeepsAnnualBasketsOut(): void
+    {
+        $meal = $this->createBasketComponent('PREH_STRAVA_A', 'meal_per_shift');
+        $leisure = $this->createBasketComponent('PREH_REKREACE_M', 'non_cash_leisure');
+        $this->insertApprovedBenefit($meal, 'meal_per_shift', '2026-07-01', 180_000, 'm-a1');
+        $this->insertApprovedBenefit($meal, 'meal_per_shift', '2026-07-01', 60_000, 'm-a2');
+        $this->insertApprovedBenefit($meal, 'meal_per_shift', '2026-08-01', 999_000, 'm-a3');
+        $this->approve($leisure, 500_000, $this->employmentId, 'm-a4');
+
+        $body = $this->fetch(['period' => '2026-07']);
+        $rows = $this->rows($body);
+
+        self::assertSame('2026-07', $body['period']);
+        self::assertCount(1, $rows, 'Roční koš do měsíčního přehledu nepatří.');
+        self::assertSame('meal_per_shift', $rows[0]['basket']);
+        self::assertSame(240_000, $rows[0]['used_minor'], 'Sčítá se jen červenec.');
+        self::assertSame(2, $rows[0]['input_count']);
+        self::assertSame(['2026-08', '2026-07'], $body['periods']);
+
+        // A obráceně: roční přehled se měsíčními koši ředit nesmí.
+        self::assertSame(1, $this->fetch(['year' => '2026'])['total']);
+    }
+
+    /**
+     * PAST PÍSM. B): měsíční součet se proti limitu ZA SMĚNU poměřit nedá.
+     *
+     * Limit je „za jednu směnu", ale mzdový vstup je měsíční. Kdyby přehled
+     * dosadil jakýkoli měsíční strop, tvrdil by o dodržení limitu něco, co
+     * z dat neplyne. Řádek proto limit netvrdí vůbec a řekne to základem
+     * `per_shift` — mlčky zelený stav „v limitu" by byl přesně ta lež, kvůli
+     * které se tenhle údaj do odpovědi přidával.
+     */
+    public function testMealRowNeverAssertsALimitFromAMonthlyTotal(): void
+    {
+        $meal = $this->createBasketComponent('PREH_STRAVA_B', 'meal_per_shift');
+        $this->insertApprovedBenefit($meal, 'meal_per_shift', '2026-07-01', 240_000, 'm-b1');
+
+        $row = $this->rows($this->fetch(['period' => '2026-07']))[0];
+
+        self::assertSame('per_shift', $row['limit_basis']);
+        self::assertNull($row['limit_minor']);
+        self::assertNull($row['remaining_minor']);
+        self::assertSame('limit_unavailable', $row['status']);
+        self::assertNotSame('ok', $row['status']);
+        self::assertSame(240_000, $row['used_minor']);
+        self::assertSame('§ 6 odst. 9 písm. b) ZDP', $row['statute']);
+    }
+
+    /**
+     * Přechodné ubytování měsíční limit MÁ („maximálně do výše 3 500 Kč
+     * měsíčně"), takže se u něj „zbývá" tvrdit smí — a musí, jinak by přehled
+     * zamlčel jediný koš, u kterého měsíční srovnání dává smysl.
+     */
+    public function testTemporaryAccommodationIsMeasuredAgainstItsRealMonthlyLimit(): void
+    {
+        $stay = $this->createBasketComponent('PREH_UBYT_A', 'temporary_accommodation');
+        $this->insertApprovedBenefit($stay, 'temporary_accommodation', '2026-07-01', 200_000, 'm-c1');
+
+        $row = $this->rows($this->fetch(['period' => '2026-07', 'basket' => 'temporary_accommodation']))[0];
+
+        self::assertSame('calendar_month', $row['limit_basis']);
+        self::assertSame(self::ACCOMMODATION_LIMIT_MINOR, $row['limit_minor']);
+        self::assertSame(self::ACCOMMODATION_LIMIT_MINOR - 200_000, $row['remaining_minor']);
+        self::assertSame('ok', $row['status']);
+    }
+
+    /**
+     * Koš z druhého režimu se odmítne, ne vrátí prázdno.
+     *
+     * Prázdná stránka by tvrdila „nikdo nečerpal" — přesně ta věta, kvůli které
+     * obrazovka vznikla a která nesmí zaznít omylem.
+     */
+    public function testBasketFromTheOtherModeIsRejectedInsteadOfReturningNothing(): void
+    {
+        self::assertSame(
+            422,
+            $this->response(['period' => '2026-07', 'basket' => 'non_cash_leisure'])->getStatusCode(),
+        );
+        self::assertSame(
+            422,
+            $this->response(['year' => '2026', 'basket' => 'meal_per_shift'])->getStatusCode(),
+        );
+    }
+
+    /** Nesmyslné období se netiší na aktuální měsíc — filtr, který ukáže jiný měsíc, je horší než chyba. */
+    public function testInvalidPeriodIsRejected(): void
+    {
+        self::assertSame(422, $this->response(['period' => '2026-13'])->getStatusCode());
+        self::assertSame(422, $this->response(['period' => '2026-7'])->getStatusCode());
+        self::assertSame(422, $this->response(['period' => 'letos'])->getStatusCode());
+    }
+
+    /** Bez `period` se nic nemění: roční přehled odpovídá přesně jako dřív. */
+    public function testAnnualModeIsUnchangedWhenPeriodIsAbsent(): void
+    {
+        $component = $this->createBasketComponent('PREH_REKREACE_BC', 'non_cash_leisure');
+        $this->approve($component, 500_000, $this->employmentId, 'm-d1');
+
+        $body = $this->fetch(['year' => '2026']);
+
+        self::assertSame(2026, $body['year']);
+        self::assertSame([2026], $body['years']);
+        self::assertArrayNotHasKey('period', $body);
+        self::assertSame('tax_year', $this->rows($body)[0]['limit_basis']);
+    }
+
+    /**
+     * Schválený benefit se pro MĚSÍČNÍ koše zapisuje přímo.
+     *
+     * Přes akci to nejde: schválení stravného skládá strop z DOLOŽENÉHO počtu
+     * směn ({@see \MyInvoice\Service\Payroll\Component\PayrollMealShiftEntitlement}),
+     * takže by bez publikované docházky spadlo dřív, než by koš vůbec vznikl.
+     * Testovaný endpoint je čtecí a zajímá ho jen zmrazený výsledek.
+     */
+    private function insertApprovedBenefit(
+        int $componentId,
+        string $basket,
+        string $periodStart,
+        int $amountMinor,
+        string $externalId,
+    ): void {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_inputs
+                (supplier_id, employee_id, employment_id, component_id, period_start,
+                 amount_minor, source_kind, external_id, status,
+                 component_snapshot_json, component_snapshot_hash,
+                 benefit_basket, benefit_exempt_minor, benefit_taxable_minor,
+                 created_by, approved_by, approved_at)
+             VALUES (?, ?, ?, ?, ?, ?, "manual", ?, "approved",
+                     "{}", ?, ?, ?, 0, ?, ?, NOW())'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentId,
+            $componentId,
+            $periodStart,
+            $amountMinor,
+            $externalId,
+            hash('sha256', $externalId, true),
+            $basket,
+            $amountMinor,
+            $this->userId,
+            $this->userId,
+        ]);
+        $inputId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare(
+            'INSERT INTO payroll_benefit_accumulators
+                (supplier_id, employee_id, component_id, input_id, tax_year, amount_minor)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $componentId,
+            $inputId,
+            (int) substr($periodStart, 0, 4),
+            $amountMinor,
+        ]);
     }
 
     /** @param array<string,string> $query */

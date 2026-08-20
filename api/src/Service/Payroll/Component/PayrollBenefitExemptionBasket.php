@@ -126,6 +126,25 @@ enum PayrollBenefitExemptionBasket: string
         return $this === self::MealPerShift;
     }
 
+    /**
+     * ČEHO SE LIMIT TÝKÁ — jedna z {@see PayrollBenefitBasketUsage::LIMIT_BASES}.
+     *
+     * Není to totéž co {@see accumulatesPerMonth()}. Ten říká, za jaké období se
+     * sčítá ÚHRN; tohle říká, za jaké období platí LIMIT. U písm. b) se ty dvě
+     * věci rozcházejí: úhrn se kvůli měsíčnímu mzdovému vstupu kumuluje za měsíc,
+     * ale limit je za JEDNU SMĚNU. Měsíční součet proto proti němu nelze poměřit
+     * a přehled, který by z něj usoudil „v limitu", by lhal — tenhle údaj jde do
+     * odpovědi právě proto, aby to obrazovka mohla říct nahlas.
+     */
+    public function limitBasis(): string
+    {
+        return match ($this) {
+            self::NonCashHealth, self::NonCashLeisure, self::OldAgeSavings => 'tax_year',
+            self::TemporaryAccommodation => 'calendar_month',
+            self::MealPerShift => 'per_shift',
+        };
+    }
+
     public function statute(): string
     {
         return match ($this) {

@@ -509,10 +509,26 @@ zaměstnavatele** a schválení vstupu nad něj neprojde.
 #### Přehled čerpání košů za firmu
 
 Náhled vstupu ukáže koš jen tomu, kdo ten vstup zrovna zadává. Souhrn za celou
-firmu je v **Mzdy → Roční koše benefitů**: jeden řádek na zaměstnance a koš,
+firmu je v **Mzdy → Koše benefitů**: jeden řádek na zaměstnance a koš,
 s vyčerpanou částkou, limitem, zbytkem a s tím, kolik se už zdanilo jako
-nadlimitní. Filtruje se podle zdaňovacího období, koše a jména; sloupce a hustotu
+nadlimitní. Filtruje se podle období, koše a jména; sloupce a hustotu
 tabulky si každý uživatel nastaví sám.
+
+Obrazovka má dvě záložky podle toho, za jaké období zákon limit dává:
+
+- **Roční koše** — zdravotní plnění, rekreace a spoření na stáří (§ 6 odst. 9
+  písm. d) a m) ZDP). Filtruje se zdaňovacím obdobím.
+- **Měsíční koše** — příspěvek na stravování a přechodné ubytování (písm. b)
+  a i)). Filtruje se konkrétním měsícem a sčítá se podle období mzdového vstupu,
+  takže zpětný vstup se započítá tomu měsíci, kterého se týká.
+
+U **přechodného ubytování** je limit měsíční (3 500 Kč), takže se proti
+měsíčnímu součtu poměřit dá a přehled u něj ukáže i zbytek. U **příspěvku na
+stravování** je ale limit podle zákona za **jednu směnu**, kdežto mzdový vstup je
+měsíční. Měsíční součet se proti limitu za směnu porovnat nedá, takže u takového
+řádku přehled **žádný limit ani zbytek netvrdí** a řekne to poznámkou: údaj
+znamená „tolik se za měsíc poskytlo", ne „limit je dodržený". Dodržení limitu za
+směnu se hlídá při schválení vstupu proti doloženému počtu směn z docházky.
 
 Řádky se sčítají za osobu u zaměstnavatele, tedy i napříč souběžnými pracovními
 vztahy a napříč mzdovými složkami téhož koše — stejně, jako to počítá náhled
@@ -525,14 +541,16 @@ z okamžiku schválení vstupu, takže sedí s výplatní páskou. Proto se u n�
 
 - **Neúplný podklad** — část vstupů je z doby, kdy se koše ještě nezmrazovaly.
   Chybějící rozpad se nedopočítá, jen se přizná počet takových vstupů.
-- **Limit není k dispozici** — pro zvolený rok není schválená sada legislativních
-  pravidel, takže se netvrdí ani limit, ani zbývající částka.
+- **Limit není k dispozici** — pro zvolené období není schválená sada
+  legislativních pravidel, takže se netvrdí ani limit, ani zbývající částka.
+  Týž stav mají v měsíční záložce řádky příspěvku na stravování, u nichž je limit
+  za směnu, a měsíční součet se proti němu poměřit nedá.
 - Poznámka o **rozporu se zmrazeným rozpadem** znamená, že se limit v pravidlech
   po schválení vstupů změnil. Zobrazená čísla zůstávají zmrazená; přepsat je
   dnešním limitem by přehled rozešlo s už vyplacenými mzdami.
 
 Přehled je čtecí a jede na oprávnění `payroll`, tedy stejné, jaké má seznam
-mzdových vstupů — je to jejich součet za osobu a rok, ne nová třída údajů.
+mzdových vstupů — je to jejich součet za osobu a období, ne nová třída údajů.
 
 U složky zahrnuté do JMHZ nastav také konkrétní cílový atribut měsíčního
 hlášení. Stav **Chybí mapování** nebrání výpočtu mzdy, ale znamená, že složku

@@ -85,6 +85,11 @@ final class PayrollEnumContractTest extends TestCase
         // vykreslil jako prázdný stav, tedy jako „nic se neděje".
         'payrollBenefitBaskets.ts::BenefitBasketStatus'
             => 'const:MyInvoice\Service\Payroll\Component\PayrollBenefitBasketUsage::STATUSES',
+        // Čeho se limit řádku týká. `per_shift` je jediný důvod, proč měsíční
+        // součet NELZE poměřit proti limitu — klient, který tu hodnotu nezná,
+        // by prázdný limit vykreslil jako „v pořádku".
+        'payrollBenefitBaskets.ts::BenefitBasketLimitBasis'
+            => 'const:MyInvoice\Service\Payroll\Component\PayrollBenefitBasketUsage::LIMIT_BASES',
         // Nálezy porovnání dvou evidencí náhradního volna. Klient, který
         // některý nezná, by rozpor vykreslil jako prázdno — tedy jako „sedí to".
         'payroll.ts::PayrollCompensatoryTimeOffFinding'
@@ -415,6 +420,11 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
         'payroll.benefit_baskets.status'
             => 'const:MyInvoice\Service\Payroll\Component\PayrollBenefitBasketUsage::STATUSES',
+        // Věta o tom, za jaké období limit platí. Bez ní by u příspěvku na
+        // stravování zůstal prázdný sloupec limitu bez vysvětlení — a měsíční
+        // součet by se četl jako součet proti měsíčnímu limitu, který neexistuje.
+        'payroll.benefit_baskets.limit_basis'
+            => 'const:MyInvoice\Service\Payroll\Component\PayrollBenefitBasketUsage::LIMIT_BASES',
 
         'payroll.documents.kind' => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
 

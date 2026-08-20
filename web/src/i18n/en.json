@@ -453,7 +453,7 @@
         "payroll_rulesets": "Payroll legislative rules",
         "payroll_retention": "Retention periods",
         "payroll_erasure": "Erasure of personal data",
-        "payroll_benefit_baskets": "Annual benefit baskets",
+        "payroll_benefit_baskets": "Benefit baskets",
         "settings": "Settings",
         "branding": "Branding",
         "supplier_current": "Supplier",
@@ -2075,8 +2075,7 @@
                 "advanced_title": "More details",
                 "advanced_hint": "Optional — you can add all of it later on the employee card.",
                 "health_insurer": "Health insurer",
-                "health_insurer_hint": "Recorded in the person’s statutory evidence as of the start date. Without it the bulk notification to the insurer cannot be filed.",
-                "insurer_failed": "The employee was created, but the health insurer could not be recorded. Add it on the card under Statutory evidence."
+                "health_insurer_hint": "Recorded in the person’s statutory evidence as of the start date. Without it the bulk notification to the insurer cannot be filed."
             },
             "empty_title": "There are no employees yet",
             "empty_description": "People will appear here with their employment relationships as soon as they are available in payroll.",
@@ -4598,19 +4597,25 @@
             }
         },
         "benefit_baskets": {
-            "title": "Annual benefit exemption baskets",
-            "subtitle": "How much of the annual limit under Section 6(9) of the Income Tax Act each employee has used up this year, and how much of it has already been taxed.",
+            "title": "Benefit exemption baskets",
+            "subtitle_annual": "How much of the annual limit under Section 6(9) of the Income Tax Act each employee has used up this year, and how much of it has already been taxed.",
+            "subtitle_monthly": "How much each employee received in the month into baskets whose decisive period is the calendar month, and how much of it has already been taxed.",
+            "tabs_label": "Decisive period of the basket",
+            "tab_annual": "Annual baskets",
+            "tab_monthly": "Monthly baskets",
             "explainer_title": "The limit is a shared basket, not a cap on one component",
             "explainer_body": "The act exempts benefits up to the limit in aggregate for the whole provision. The basket therefore adds up per person and employer — across concurrent employment relationships and across payroll components of the same basket. Benefits above the limit are not forbidden; only the excess is taxed and subject to contributions.",
             "explainer_frozen": "The exempt and above-limit parts are read frozen from the moment the input was approved, so they match the payslip. This overview does not recalculate them against today's rules.",
+            "explainer_monthly": "The monthly tab shows baskets under Section 6(9)(b) and (i) of the Income Tax Act. For temporary accommodation the limit is monthly, so the monthly total can be measured against it. For the meal contribution, however, the act ties the limit to a SINGLE SHIFT — a monthly total cannot be compared with it, so this overview asserts no limit and no remainder for it.",
             "filter_year": "Tax period",
+            "filter_period": "Month",
             "filter_q": "Employee",
             "filter_q_placeholder": "Search by name",
             "reset_filters": "Reset filters",
             "load_failed": "The basket usage overview could not be loaded.",
             "stale_warning": "The data shown comes from the last successful load. {error}",
             "no_match": "Nobody used a basket in the selected period",
-            "no_match_hint": "Try another year, or clear the basket and name filters.",
+            "no_match_hint": "Try another period, or clear the basket and name filters.",
             "action_components": "Payroll components",
             "action_components_hint": "A component is assigned to a basket in the payroll component catalogue.",
             "unfrozen_note": "Without a frozen split: {count} — the figure is incomplete and is not recalculated.",
@@ -4640,6 +4645,11 @@
                 "exceeded": "Above limit",
                 "incomplete": "Incomplete data",
                 "limit_unavailable": "Limit unavailable"
+            },
+            "limit_basis": {
+                "tax_year": "The limit applies per tax period.",
+                "calendar_month": "The limit applies per calendar month.",
+                "per_shift": "The limit is per single shift, not per month — a monthly total cannot be measured against it. The figure says how much was provided during the month, not that the limit was met."
             }
         },
         "discountIntents": {
@@ -13214,6 +13224,15 @@
             "direct_hint": "MyÚčto signs the immutable XML snapshot with your qualified certificate, sends it with test=1 and displays every EPO validation message. Live submission is enabled only after a successful test.",
             "direct_hint_sandbox": "MyÚčto exclusively uses the MOJE daně sandbox. It first validates with test=1 and then enables a complete sandbox filing with no effect on production.",
             "direct_hint_unknown": "The EPO environment could not be determined safely. Submission actions are disabled until the configuration can be loaded.",
+            "direct_reason_readonly": "You are not allowed to file for this company. Ask for a role with write permission.",
+            "direct_reason_moss_oss": "An OSS return cannot be filed through the direct EPO API. Download the XML and upload it in the MOSS/OSS application on the tax portal.",
+            "direct_reason_no_credential": "No signing certificate is selected. Upload and enable a ZAREP certificate for this company first.",
+            "direct_reason_validation": "The XML failed local XSD validation. Fix the data and regenerate the snapshot first.",
+            "direct_reason_already_submitted": "This XML snapshot has already been filed. Submitting again would create a duplicate.",
+            "direct_reason_unresolved": "A previous direct attempt has an unresolved outcome. Refresh or resolve its status in the “…” menu first.",
+            "direct_reason_test_missing": "Run “Test in EPO” first — live submission unlocks only after a successful test.",
+            "direct_reason_test_required": "The latest direct attempt is in state “{status}”. Live submission unlocks only after a successful EPO test.",
+            "direct_reason_handoff_active": "After the successful test you started an assisted EPO handoff (state “{status}”, link valid until {until}). Finish it or wait for the link to expire — otherwise you risk filing twice.",
             "assisted_alternative": "Assisted opening always uses the live interactive MOJE daně form and does not submit anything by itself. Manual receipt upload remains a separate alternative.",
             "run_direct_test": "Test in EPO",
             "submit_direct": "Sign and submit",
@@ -13311,16 +13330,7 @@
             "submit_direct_sandbox_hint": "The same validated XML snapshot will be sent to zkus.mojedane.gov.cz and the result fully archived.",
             "submit_direct_sandbox_warning": "This is only the Financial Administration sandbox. The result is not a legally effective tax filing and the local snapshot remains unfiled.",
             "submit_now": "Submit for real",
-            "submit_now_sandbox": "Submit to sandbox",
-            "direct_reason_readonly": "You are not allowed to file for this company. Ask for a role with write permission.",
-            "direct_reason_moss_oss": "An OSS return cannot be filed through the direct EPO API. Download the XML and upload it in the MOSS/OSS application on the tax portal.",
-            "direct_reason_no_credential": "No signing certificate is selected. Upload and enable a ZAREP certificate for this company first.",
-            "direct_reason_validation": "The XML failed local XSD validation. Fix the data and regenerate the snapshot first.",
-            "direct_reason_already_submitted": "This XML snapshot has already been filed. Submitting again would create a duplicate.",
-            "direct_reason_unresolved": "A previous direct attempt has an unresolved outcome. Refresh or resolve its status in the “…” menu first.",
-            "direct_reason_test_missing": "Run “Test in EPO” first — live submission unlocks only after a successful test.",
-            "direct_reason_test_required": "The latest direct attempt is in state “{status}”. Live submission unlocks only after a successful EPO test.",
-            "direct_reason_handoff_active": "After the successful test you started an assisted EPO handoff (state “{status}”, link valid until {until}). Finish it or wait for the link to expire — otherwise you risk filing twice."
+            "submit_now_sandbox": "Submit to sandbox"
         },
         "income_tax": {
             "title": "Income tax",

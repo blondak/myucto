@@ -9,7 +9,12 @@ use MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket;
 use PDO;
 
 /**
- * Čerpání ročních košů osvobození za celou firmu.
+ * Čerpání košů osvobození za celou firmu — ročních i měsíčních.
+ *
+ * Rozhodné období si koš nevybírá přehled, ale samo ustanovení
+ * ({@see PayrollBenefitExemptionBasket::accumulatesPerMonth()}), takže se obě
+ * množiny košů nepřekrývají: {@see page()} sčítá zdaňovací období,
+ * {@see monthlyPage()} kalendářní měsíc a každý koš patří právě do jedné z nich.
  *
  * Repozitář výhradně ČTE, a to ze dvou zdrojů, které se nesmí zaměnit:
  *
@@ -48,11 +53,21 @@ final class PayrollBenefitBasketOverviewRepository
     private const LIKE_ESCAPE = '!';
 
     /**
-     * Přehled je ROČNÍ, takže do něj patří jen koše, jejichž rozhodným obdobím je
-     * zdaňovací období. Měsíční koše (§ 6 odst. 9 písm. b) a i)) by tu ukázaly
-     * roční součet proti limitu, který za rok neexistuje — a „zbývá" by lhalo.
+     * Do ROČNÍHO přehledu patří jen koše, jejichž rozhodným obdobím je zdaňovací
+     * období. Měsíční koše (§ 6 odst. 9 písm. b) a i)) by tu ukázaly roční součet
+     * proti limitu, který za rok neexistuje — a „zbývá" by lhalo.
      */
     private const ANNUAL_BASKETS = '"non_cash_health", "non_cash_leisure", "old_age_savings"';
+
+    /**
+     * Do MĚSÍČNÍHO přehledu patří naopak jen koše, jejichž rozhodným obdobím je
+     * kalendářní měsíc. Roční koš by v něm ukázal jednu dvanáctinu čerpání proti
+     * ročnímu limitu, tedy číslo, které nic neznamená.
+     */
+    private const MONTHLY_BASKETS = '"meal_per_shift", "temporary_accommodation"';
+
+    /** Kolik nejvýš měsíců nabídne rozbalovátko období. */
+    private const PERIOD_OPTIONS_LIMIT = 120;
 
     private const SEARCH_MAX_LENGTH = 100;
 
@@ -74,6 +89,71 @@ final class PayrollBenefitBasketOverviewRepository
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
     ): array {
+        return $this->scan(
+            $supplierId,
+            self::ANNUAL_BASKETS,
+            'accumulator.tax_year = ?',
+            $taxYear,
+            $basket,
+            $search,
+            $limit,
+            $offset,
+        );
+    }
+
+    /**
+     * Táž stránka za JEDEN KALENDÁŘNÍ MĚSÍC, pro koše podle § 6 odst. 9 písm. b)
+     * a i) ZDP.
+     *
+     * Období se bere z mzdového VSTUPU (`payroll_inputs.period_start`), ne
+     * z akumulátoru — ten nese jen zdaňovací rok. Zpětný vstup do minulého měsíce
+     * se tak započte tomu měsíci, kterého se týká, ne tomu, ve kterém se zadával.
+     * Je to přesně týž klíč, jaký používá
+     * {@see PayrollInputRepository::monthlyBasketTotal()}, takže „vyčerpáno" tady
+     * znamená totéž, proti čemu se poměřuje další vstup.
+     *
+     * Nový index není potřeba: dotaz se dá vést existujícím
+     * `idx_payroll_input_period_status (supplier_id, period_start, status)` a na
+     * akumulátor se z něj sahá přes `uq_payroll_benefit_input (supplier_id, input_id)`.
+     *
+     * @param string $periodStart První den měsíce ve tvaru `YYYY-MM-01`.
+     * @return array{items: list<array<string,int|string>>, total: int}
+     */
+    public function monthlyPage(
+        int $supplierId,
+        string $periodStart,
+        ?PayrollBenefitExemptionBasket $basket = null,
+        string $search = '',
+        int $limit = self::LIST_DEFAULT_LIMIT,
+        int $offset = 0,
+    ): array {
+        return $this->scan(
+            $supplierId,
+            self::MONTHLY_BASKETS,
+            'input.period_start = ?',
+            $periodStart,
+            $basket,
+            $search,
+            $limit,
+            $offset,
+        );
+    }
+
+    /**
+     * @param string $basketList Seznam košů pro `IN (…)`, viz konstanty výše.
+     * @param string $windowClause Podmínka rozhodného období s jedním `?`.
+     * @return array{items: list<array<string,int|string>>, total: int}
+     */
+    private function scan(
+        int $supplierId,
+        string $basketList,
+        string $windowClause,
+        int|string $windowValue,
+        ?PayrollBenefitExemptionBasket $basket,
+        string $search,
+        int $limit,
+        int $offset,
+    ): array {
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
         $search = mb_substr(trim($search), 0, self::SEARCH_MAX_LENGTH);
@@ -85,7 +165,7 @@ final class PayrollBenefitBasketOverviewRepository
                 . " LIKE ? ESCAPE '" . self::LIKE_ESCAPE . "'";
 
         $countStmt = $this->db->pdo()->prepare(
-            $this->totalsCte($basketClause)
+            $this->totalsCte($basketList, $windowClause, $basketClause)
             . 'SELECT COUNT(*)
                  FROM basket_totals totals
                  JOIN payroll_employees employee
@@ -95,7 +175,11 @@ final class PayrollBenefitBasketOverviewRepository
         );
         $position = 1;
         $countStmt->bindValue($position++, $supplierId, PDO::PARAM_INT);
-        $countStmt->bindValue($position++, $taxYear, PDO::PARAM_INT);
+        $countStmt->bindValue(
+            $position++,
+            $windowValue,
+            is_int($windowValue) ? PDO::PARAM_INT : PDO::PARAM_STR,
+        );
         if ($basket !== null) {
             $countStmt->bindValue($position++, $basket->value);
         }
@@ -107,7 +191,7 @@ final class PayrollBenefitBasketOverviewRepository
         $total = (int) $countStmt->fetchColumn();
 
         $stmt = $this->db->pdo()->prepare(
-            $this->totalsCte($basketClause)
+            $this->totalsCte($basketList, $windowClause, $basketClause)
             . 'SELECT totals.employee_id,
                       totals.basket,
                       totals.used_minor,
@@ -129,7 +213,11 @@ final class PayrollBenefitBasketOverviewRepository
         );
         $position = 1;
         $stmt->bindValue($position++, $supplierId, PDO::PARAM_INT);
-        $stmt->bindValue($position++, $taxYear, PDO::PARAM_INT);
+        $stmt->bindValue(
+            $position++,
+            $windowValue,
+            is_int($windowValue) ? PDO::PARAM_INT : PDO::PARAM_STR,
+        );
         if ($basket !== null) {
             $stmt->bindValue($position++, $basket->value);
         }
@@ -212,12 +300,49 @@ final class PayrollBenefitBasketOverviewRepository
     }
 
     /**
+     * Měsíce, ve kterých firma vůbec něco do měsíčního koše načerpala.
+     *
+     * Protějšek {@see years()}. Období se čte ze mzdového VSTUPU, ne z roku
+     * akumulátoru — jinak by rozbalovátko nabízelo dvanáct měsíců každého roku,
+     * ve kterém padl jediný vstup.
+     *
+     * @return list<string> Měsíce ve tvaru `YYYY-MM`, od nejnovějšího.
+     */
+    public function periods(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT DISTINCT DATE_FORMAT(input.period_start, "%Y-%m") AS period
+               FROM payroll_benefit_accumulators accumulator
+               JOIN payroll_inputs input
+                 ON input.supplier_id = accumulator.supplier_id
+                AND input.id = accumulator.input_id
+               JOIN payroll_component_definitions component
+                 ON component.supplier_id = accumulator.supplier_id
+                AND component.id = accumulator.component_id
+              WHERE accumulator.supplier_id = ?
+                AND accumulator.status IN ("active", "reversed")
+                AND component.exemption_basket IN (' . self::MONTHLY_BASKETS . ')
+              ORDER BY period DESC
+              LIMIT ' . self::PERIOD_OPTIONS_LIMIT
+        );
+        $stmt->execute([$supplierId]);
+
+        return array_map(
+            static fn (mixed $period): string => (string) $period,
+            $stmt->fetchAll(PDO::FETCH_COLUMN),
+        );
+    }
+
+    /**
      * Agregace osoba × koš. Jméno se dojoinuje až v nadřazeném dotazu — jinak by
      * se korelovaný poddotaz účinného jména vyhodnocoval nad každým akumulátorem,
      * ne nad výslednou stránkou.
      */
-    private function totalsCte(string $basketClause): string
-    {
+    private function totalsCte(
+        string $basketList,
+        string $windowClause,
+        string $basketClause,
+    ): string {
         return 'WITH basket_totals AS (
                     SELECT accumulator.employee_id AS employee_id,
                            component.exemption_basket AS basket,
@@ -249,9 +374,9 @@ final class PayrollBenefitBasketOverviewRepository
                         ON input.supplier_id = accumulator.supplier_id
                        AND input.id = accumulator.input_id
                      WHERE accumulator.supplier_id = ?
-                       AND accumulator.tax_year = ?
+                       AND ' . $windowClause . '
                        AND accumulator.status IN ("active", "reversed")
-                       AND component.exemption_basket IN (' . self::ANNUAL_BASKETS . ')'
+                       AND component.exemption_basket IN (' . $basketList . ')'
                        . $basketClause . '
                      GROUP BY accumulator.employee_id, component.exemption_basket
                 ) ';

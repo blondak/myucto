@@ -140,6 +140,91 @@ final class PayrollBenefitBasketUsageTest extends TestCase
         );
     }
 
+    /**
+     * Řádek musí ŘÍCT, za jaké období limit platí — jinak se prázdný sloupec
+     * limitu čte jako „v pořádku".
+     *
+     * Rozhodné období součtu a období limitu nejsou totéž. U příspěvku na
+     * stravování se sčítá měsíc (mzdový vstup je měsíční), ale limit je podle
+     * § 6 odst. 9 písm. b) ZDP za JEDNU SMĚNU. Bez tohohle údaje by měsíční
+     * přehled ukázal součet vedle prázdného limitu a nic by nevysvětlil.
+     */
+    public function testRowNamesThePeriodItsLimitAppliesTo(): void
+    {
+        $bases = [];
+        foreach (PayrollBenefitExemptionBasket::cases() as $basket) {
+            $bases[$basket->value] = $basket->limitBasis();
+            self::assertContains(
+                $basket->limitBasis(),
+                PayrollBenefitBasketUsage::LIMIT_BASES,
+                'Základ limitu musí být z domény, kterou zná klient i slovník.',
+            );
+        }
+
+        self::assertSame([
+            'non_cash_health' => 'tax_year',
+            'non_cash_leisure' => 'tax_year',
+            'old_age_savings' => 'tax_year',
+            'meal_per_shift' => 'per_shift',
+            'temporary_accommodation' => 'calendar_month',
+        ], $bases);
+    }
+
+    /**
+     * MĚSÍČNÍ ŘÁDEK STRAVNÉHO NESMÍ TVRDIT „v limitu".
+     *
+     * Součet za měsíc se proti limitu za směnu poměřit nedá, takže se limit
+     * netvrdí a řádek jde ven jako `limit_unavailable` se základem `per_shift`.
+     * Kdyby se stav spočítal z měsíčního součtu, přehled by u překročeného
+     * stravného svítil zeleně.
+     */
+    public function testMonthlyMealRowNeverClaimsItIsWithinTheLimit(): void
+    {
+        $usage = new PayrollBenefitBasketUsage(
+            employeeId: 1,
+            employeeName: 'Syntetická osoba',
+            basket: PayrollBenefitExemptionBasket::MealPerShift,
+            limitMinor: null,
+            usedMinor: 250_000,
+            exemptMinor: 250_000,
+            taxableMinor: 0,
+            inputCount: 1,
+            unfrozenCount: 0,
+            negativeCount: 0,
+        );
+
+        self::assertSame('limit_unavailable', $usage->status());
+        self::assertNull($usage->remainingMinor());
+        self::assertFalse($usage->splitDrift());
+
+        $json = $usage->jsonSerialize();
+        self::assertSame('per_shift', $json['limit_basis']);
+        self::assertNull($json['limit_minor']);
+        self::assertNull($json['remaining_minor']);
+        self::assertSame(250_000, $json['used_minor']);
+    }
+
+    /** Přechodné ubytování měsíční limit MÁ, takže se u něj „zbývá" tvrdit smí. */
+    public function testMonthlyAccommodationRowStillReportsARealLimit(): void
+    {
+        $usage = new PayrollBenefitBasketUsage(
+            employeeId: 1,
+            employeeName: 'Syntetická osoba',
+            basket: PayrollBenefitExemptionBasket::TemporaryAccommodation,
+            limitMinor: 350_000,
+            usedMinor: 200_000,
+            exemptMinor: 200_000,
+            taxableMinor: 0,
+            inputCount: 1,
+            unfrozenCount: 0,
+            negativeCount: 0,
+        );
+
+        self::assertSame('ok', $usage->status());
+        self::assertSame(150_000, $usage->remainingMinor());
+        self::assertSame('calendar_month', $usage->jsonSerialize()['limit_basis']);
+    }
+
     /** Záporná oprava v koši rovnost rozbije očekávaně — drift by byl planý poplach. */
     public function testNegativeCorrectionSuppressesDrift(): void
     {

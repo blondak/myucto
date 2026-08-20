@@ -453,7 +453,7 @@
         "payroll_rulesets": "Legislativní pravidla mezd",
         "payroll_retention": "Retenční lhůty",
         "payroll_erasure": "Výmaz osobních údajů",
-        "payroll_benefit_baskets": "Roční koše benefitů",
+        "payroll_benefit_baskets": "Koše benefitů",
         "settings": "Nastavení",
         "branding": "Branding",
         "supplier_current": "Dodavatel",
@@ -2075,8 +2075,7 @@
                 "advanced_title": "Další údaje",
                 "advanced_hint": "Nepovinné — jde doplnit i později na kartě zaměstnance.",
                 "health_insurer": "Zdravotní pojišťovna",
-                "health_insurer_hint": "Zapíše se do zákonné evidence osoby k datu nástupu. Bez ní se nedá podat hromadné oznámení pojišťovně.",
-                "insurer_failed": "Zaměstnanec je založený, ale zdravotní pojišťovnu se nepodařilo zapsat. Doplňte ji na kartě v části Zákonná evidence."
+                "health_insurer_hint": "Zapíše se do zákonné evidence osoby k datu nástupu. Bez ní se nedá podat hromadné oznámení pojišťovně."
             },
             "empty_title": "Zatím tu nejsou žádní zaměstnanci",
             "empty_description": "Jakmile budou ve mzdové agendě dostupné osoby, zobrazí se zde jejich pracovní vztahy.",
@@ -4598,19 +4597,25 @@
             }
         },
         "benefit_baskets": {
-            "title": "Roční koše osvobození benefitů",
-            "subtitle": "Kolik má který zaměstnanec za rok vyčerpáno z ročního limitu podle § 6 odst. 9 ZDP a kolik z toho se už zdanilo.",
+            "title": "Koše osvobození benefitů",
+            "subtitle_annual": "Kolik má který zaměstnanec za rok vyčerpáno z ročního limitu podle § 6 odst. 9 ZDP a kolik z toho se už zdanilo.",
+            "subtitle_monthly": "Kolik který zaměstnanec za měsíc dostal do košů, jejichž rozhodným obdobím je kalendářní měsíc, a kolik z toho se už zdanilo.",
+            "tabs_label": "Rozhodné období koše",
+            "tab_annual": "Roční koše",
+            "tab_monthly": "Měsíční koše",
             "explainer_title": "Limit je společný koš, ne strop jedné složky",
             "explainer_body": "Zákon osvobozuje plnění „v úhrnu do výše\" limitu za celé ustanovení. Koš se proto sčítá za osobu u zaměstnavatele — napříč souběžnými pracovními vztahy i napříč mzdovými složkami téhož koše. Plnění nad limit se nezakazuje, jen se z přebytku odvádí daň a pojistné.",
             "explainer_frozen": "Osvobozená i nadlimitní část se čtou zmrazené z okamžiku schválení vstupu, takže sedí s výplatní páskou. Přehled je podle dnešních pravidel nepřepočítává.",
+            "explainer_monthly": "Měsíční záložka ukazuje koše podle § 6 odst. 9 písm. b) a i) ZDP. U přechodného ubytování je limit měsíční, takže se proti měsíčnímu součtu poměřit dá. U příspěvku na stravování ale zákon váže limit na JEDNU SMĚNU — měsíční součet se proti němu porovnat nedá a přehled u něj proto žádný limit ani zbytek netvrdí.",
             "filter_year": "Zdaňovací období",
+            "filter_period": "Měsíc",
             "filter_q": "Zaměstnanec",
             "filter_q_placeholder": "Hledat podle jména",
             "reset_filters": "Zrušit filtry",
             "load_failed": "Přehled čerpání košů se nepodařilo načíst.",
             "stale_warning": "Zobrazená data jsou z posledního úspěšného načtení. {error}",
             "no_match": "Za zvolené období nikdo koš nečerpal",
-            "no_match_hint": "Zkus jiný rok nebo zruš zúžení na koš a jméno.",
+            "no_match_hint": "Zkus jiné období nebo zruš zúžení na koš a jméno.",
             "action_components": "Mzdové složky",
             "action_components_hint": "Zařazení složky do koše se nastavuje v katalogu mzdových složek.",
             "unfrozen_note": "Bez zmrazeného rozpadu: {count} — údaj je neúplný a nedopočítává se.",
@@ -4640,6 +4645,11 @@
                 "exceeded": "Nad limitem",
                 "incomplete": "Neúplný podklad",
                 "limit_unavailable": "Limit není k dispozici"
+            },
+            "limit_basis": {
+                "tax_year": "Limit platí za zdaňovací období.",
+                "calendar_month": "Limit platí za kalendářní měsíc.",
+                "per_shift": "Limit je za jednu směnu, ne za měsíc — měsíční součet se proti němu poměřit nedá. Údaj říká, kolik se za měsíc poskytlo, ne že se limit dodržel."
             }
         },
         "discountIntents": {
@@ -13214,6 +13224,15 @@
             "direct_hint": "MyÚčto podepíše neměnný XML snapshot vaším kvalifikovaným certifikátem, odešle jej s test=1 a zobrazí všechny kontroly EPO. Ostré podání se odemkne pouze po úspěšném testu.",
             "direct_hint_sandbox": "MyÚčto používá výhradně zkušební portál MOJE daně. Nejprve provede kontrolu test=1 a potom umožní úplné zkušební podání bez dopadu do ostrého prostředí.",
             "direct_hint_unknown": "Prostředí EPO se nepodařilo bezpečně určit. Odesílací akce jsou do obnovení konfigurace zablokované.",
+            "direct_reason_readonly": "Nemáte oprávnění podávat za tuto firmu. Požádejte o roli s právem zápisu.",
+            "direct_reason_moss_oss": "OSS přiznání se přímým EPO API podat nedá. Stáhněte XML a nahrajte ho v aplikaci MOSS/OSS na Daňovém portálu.",
+            "direct_reason_no_credential": "Není vybraný podpisový certifikát. Nejdřív nahrajte a povolte certifikát ZAREP pro tuto firmu.",
+            "direct_reason_validation": "XML neprošlo lokální XSD validací. Nejdřív opravte data a vygenerujte snapshot znovu.",
+            "direct_reason_already_submitted": "Tento XML snapshot už je podaný. Další odeslání by vytvořilo duplicitu.",
+            "direct_reason_unresolved": "Předchozí přímý pokus má nedořešený výsledek. Nejdřív obnovte jeho stav nebo ho vyřešte v nabídce „…“.",
+            "direct_reason_test_missing": "Nejdřív spusťte „Otestovat v EPO“ — ostré odeslání se odemkne až po úspěšném testu.",
+            "direct_reason_test_required": "Poslední přímý pokus je ve stavu „{status}“. Ostré odeslání se odemkne až po úspěšném testu v EPO.",
+            "direct_reason_handoff_active": "Po úspěšném testu jste založili asistované předání do EPO (stav „{status}“, odkaz platí do {until}). Dokončete ho, nebo počkejte na vypršení odkazu — jinak hrozí dvojí podání.",
             "assisted_alternative": "Asistované otevření vždy používá ostrý interaktivní formulář MOJE daně; samo nic neodesílá. Ruční nahrání doručenky zůstává samostatnou alternativou.",
             "run_direct_test": "Otestovat v EPO",
             "submit_direct": "Podepsat a podat",
@@ -13311,16 +13330,7 @@
             "submit_direct_sandbox_hint": "Stejný otestovaný XML snapshot se odešle na zkus.mojedane.gov.cz a výsledek se kompletně archivuje.",
             "submit_direct_sandbox_warning": "Jde pouze o zkušební prostředí Finanční správy. Výsledek nebude právně účinným daňovým podáním a lokální snapshot zůstane nepodaný.",
             "submit_now": "Skutečně podat",
-            "submit_now_sandbox": "Podat do testu",
-            "direct_reason_readonly": "Nemáte oprávnění podávat za tuto firmu. Požádejte o roli s právem zápisu.",
-            "direct_reason_moss_oss": "OSS přiznání se přímým EPO API podat nedá. Stáhněte XML a nahrajte ho v aplikaci MOSS/OSS na Daňovém portálu.",
-            "direct_reason_no_credential": "Není vybraný podpisový certifikát. Nejdřív nahrajte a povolte certifikát ZAREP pro tuto firmu.",
-            "direct_reason_validation": "XML neprošlo lokální XSD validací. Nejdřív opravte data a vygenerujte snapshot znovu.",
-            "direct_reason_already_submitted": "Tento XML snapshot už je podaný. Další odeslání by vytvořilo duplicitu.",
-            "direct_reason_unresolved": "Předchozí přímý pokus má nedořešený výsledek. Nejdřív obnovte jeho stav nebo ho vyřešte v nabídce „…“.",
-            "direct_reason_test_missing": "Nejdřív spusťte „Otestovat v EPO“ — ostré odeslání se odemkne až po úspěšném testu.",
-            "direct_reason_test_required": "Poslední přímý pokus je ve stavu „{status}“. Ostré odeslání se odemkne až po úspěšném testu v EPO.",
-            "direct_reason_handoff_active": "Po úspěšném testu jste založili asistované předání do EPO (stav „{status}“, odkaz platí do {until}). Dokončete ho, nebo počkejte na vypršení odkazu — jinak hrozí dvojí podání."
+            "submit_now_sandbox": "Podat do testu"
         },
         "income_tax": {
             "title": "Daň z příjmů",

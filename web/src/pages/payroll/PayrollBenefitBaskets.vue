@@ -1,6 +1,16 @@
 <script setup lang="ts">
 /**
- * Přehled čerpání ročních košů osvobození za firmu (§ 6 odst. 9 ZDP).
+ * Přehled čerpání košů osvobození za firmu (§ 6 odst. 9 ZDP).
+ *
+ * Dvě záložky, protože rozhodné období si koš nevybírá — plyne z ustanovení.
+ * Roční záložka ukazuje koše písm. d) a m), měsíční koše písm. b) a i). Množiny
+ * se nepřekrývají, takže přepnutí záložky zahodí i filtr na koš: server by ho
+ * ve druhém režimu odmítl.
+ *
+ * PAST U STRAVNÉHO: limit podle písm. b) je za JEDNU SMĚNU, ale mzdový vstup je
+ * měsíční. Měsíční součet se proti limitu za směnu poměřit nedá, takže server
+ * u takového řádku limit netvrdí (`limit_basis = "per_shift"`) a obrazovka to
+ * musí říct větou. Prázdný sloupec limitu bez věty by se četl jako „v pořádku".
  *
  * Náhled mzdového vstupu ukáže koš jen tomu, kdo ten vstup zrovna zadává —
  * účetní se tedy o blížícím se limitu dozví typicky v prosinci, kdy už se s tím
@@ -15,6 +25,7 @@ import { computed, onMounted, ref, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   BENEFIT_EXEMPTION_BASKETS,
+  MONTHLY_BENEFIT_EXEMPTION_BASKETS,
   payrollBenefitBasketsApi,
   type BenefitBasketStatus,
   type BenefitBasketUsage,
@@ -34,17 +45,40 @@ const pageId = useId()
 
 const PAGE_SIZE = 50
 
+type BasketTab = 'annual' | 'monthly'
+
+/** Aktuální měsíc jako `YYYY-MM`; `toISOString` by posunul lednový začátek o TZ. */
+function thisMonth(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
 const items = ref<BenefitBasketUsage[]>([])
 const years = ref<number[]>([])
+const periods = ref<string[]>([])
 const total = ref(0)
 const offset = ref(0)
 const loading = ref(true)
 const failed = ref(false)
 const error = ref('')
 
+const tab = ref<BasketTab>('annual')
 const year = ref(new Date().getFullYear())
+const period = ref(thisMonth())
 const basket = ref<PayrollBenefitExemptionBasket | ''>('')
 const search = ref('')
+
+const monthly = computed(() => tab.value === 'monthly')
+// Popisky se skládají z LITERÁLNÍCH klíčů, ne z `${tab}` — statická i18n brána
+// (`web/scripts/check-i18n.mjs`) na složený klíč nedosáhne a chybějící překlad
+// by se projevil až syrovým kódem na obrazovce.
+const tabs = computed<{ key: BasketTab; label: string }[]>(() => [
+  { key: 'annual', label: t('payroll.benefit_baskets.tab_annual') },
+  { key: 'monthly', label: t('payroll.benefit_baskets.tab_monthly') },
+])
+const basketOptions = computed(() =>
+  monthly.value ? MONTHLY_BENEFIT_EXEMPTION_BASKETS : BENEFIT_EXEMPTION_BASKETS,
+)
 
 const currentPage = computed(() => Math.floor(offset.value / PAGE_SIZE) + 1)
 
@@ -85,16 +119,29 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const data = await payrollBenefitBasketsApi.overview({
-      year: year.value,
-      basket: basket.value,
-      q: search.value.trim(),
-      limit: PAGE_SIZE,
-      offset: offset.value,
-    })
-    items.value = data.items
-    years.value = data.years
-    total.value = data.total
+    if (monthly.value) {
+      const data = await payrollBenefitBasketsApi.monthlyOverview({
+        period: period.value,
+        basket: basket.value,
+        q: search.value.trim(),
+        limit: PAGE_SIZE,
+        offset: offset.value,
+      })
+      items.value = data.items
+      periods.value = data.periods
+      total.value = data.total
+    } else {
+      const data = await payrollBenefitBasketsApi.overview({
+        year: year.value,
+        basket: basket.value,
+        q: search.value.trim(),
+        limit: PAGE_SIZE,
+        offset: offset.value,
+      })
+      items.value = data.items
+      years.value = data.years
+      total.value = data.total
+    }
     failed.value = false
   } catch (e) {
     // Načtená data se při selhání NEMAŽOU: prázdná tabulka by tvrdila, že
@@ -115,10 +162,23 @@ function resetFilters() {
   basket.value = ''
   search.value = ''
   year.value = new Date().getFullYear()
+  period.value = thisMonth()
+}
+
+/**
+ * Přepnutí záložky zahodí filtr na koš. Koše obou režimů se nepřekrývají, takže
+ * ponechaný filtr by druhý režim odmítl (422) — a stránka by místo přehledu
+ * ukázala chybu, kterou uživatel nezpůsobil. Obě změny padnou do jednoho tiku,
+ * takže se načítá jednou.
+ */
+function selectTab(next: BasketTab) {
+  if (tab.value === next) return
+  basket.value = ''
+  tab.value = next
 }
 
 /** Zúžený výběr má míň stránek; třetí stránka by po přefiltrování ukázala prázdno. */
-watch([year, basket, search], () => {
+watch([tab, year, period, basket, search], () => {
   offset.value = 0
   void load()
 })
@@ -161,20 +221,63 @@ onMounted(load)
   <div class="max-w-6xl">
     <div class="mb-4">
       <h1 class="text-2xl font-semibold">{{ t('payroll.benefit_baskets.title') }}</h1>
-      <p class="text-sm text-neutral-500 mt-0.5">{{ t('payroll.benefit_baskets.subtitle') }}</p>
+      <p class="text-sm text-neutral-500 mt-0.5">
+        {{ monthly
+          ? t('payroll.benefit_baskets.subtitle_monthly')
+          : t('payroll.benefit_baskets.subtitle_annual') }}
+      </p>
     </div>
 
     <ActionBar :actions="actions" class="mb-4" />
 
+    <div
+      class="flex flex-wrap gap-1 border-b border-neutral-200 mb-4"
+      role="tablist"
+      :aria-label="t('payroll.benefit_baskets.tabs_label')"
+    >
+      <button
+        v-for="item in tabs"
+        :key="item.key"
+        type="button"
+        role="tab"
+        :aria-selected="tab === item.key"
+        :data-test="`basket-tab-${item.key}`"
+        class="-mb-px cursor-pointer whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
+        :class="tab === item.key
+          ? 'border-payroll-600 text-payroll-600'
+          : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900'"
+        @click="selectTab(item.key)"
+      >{{ item.label }}</button>
+    </div>
+
     <div class="bg-primary-50 border border-primary-200 rounded-lg p-4 mb-4 text-sm text-neutral-700">
       <p class="font-medium text-primary-800 mb-1">{{ t('payroll.benefit_baskets.explainer_title') }}</p>
       <p>{{ t('payroll.benefit_baskets.explainer_body') }}</p>
+      <!-- Past písm. b) se říká nahlas, ne až v prázdném sloupci limitu. -->
+      <p v-if="monthly" class="mt-1.5" data-test="basket-monthly-explainer">
+        {{ t('payroll.benefit_baskets.explainer_monthly') }}
+      </p>
       <p class="mt-1.5 text-xs text-neutral-600">{{ t('payroll.benefit_baskets.explainer_frozen') }}</p>
     </div>
 
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
       <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
-        <div>
+        <div v-if="monthly">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-basket-period`">
+            {{ t('payroll.benefit_baskets.filter_period') }}
+          </label>
+          <input
+            :id="`${pageId}-basket-period`"
+            v-model="period"
+            type="month"
+            :list="`${pageId}-basket-period-options`"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
+          />
+          <datalist :id="`${pageId}-basket-period-options`">
+            <option v-for="p in periods" :key="p" :value="p" />
+          </datalist>
+        </div>
+        <div v-else>
           <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-basket-year`">
             {{ t('payroll.benefit_baskets.filter_year') }}
           </label>
@@ -202,7 +305,7 @@ onMounted(load)
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
           >
             <option value="">{{ t('common.all') }}</option>
-            <option v-for="b in BENEFIT_EXEMPTION_BASKETS" :key="b" :value="b">
+            <option v-for="b in basketOptions" :key="b" :value="b">
               {{ t(`payroll.benefit_baskets.basket.${b}`) }}
             </option>
           </select>
@@ -302,6 +405,18 @@ onMounted(load)
                   :class="STATUS_BADGE[row.status]"
                   :data-test="`basket-status-${row.employee_id}-${row.basket}`"
                 >{{ t(`payroll.benefit_baskets.status.${row.status}`) }}</span>
+                <!--
+                  Čeho se limit týká. U `per_shift` je prázdný sloupec limitu
+                  JEDINÝ poctivý výsledek a bez téhle věty by se četl jako
+                  „měsíční součet je v pořádku" — právě to tvrdit nesmíme.
+                -->
+                <div
+                  v-if="row.limit_basis === 'per_shift'"
+                  class="text-[11px] text-neutral-600 mt-0.5"
+                  :data-test="`basket-limit-basis-${row.employee_id}-${row.basket}`"
+                >
+                  {{ t('payroll.benefit_baskets.limit_basis.per_shift') }}
+                </div>
                 <!-- Chybějící podklad se říká větou, nedopočítává se. -->
                 <div v-if="row.unfrozen_count > 0" class="text-[11px] text-warning-700 mt-0.5">
                   {{ t('payroll.benefit_baskets.unfrozen_note', { count: row.unfrozen_count }) }}
@@ -344,6 +459,9 @@ onMounted(load)
             <dt class="text-neutral-500">{{ t('payroll.benefit_baskets.col.taxable') }}</dt>
             <dd class="text-right font-mono tabular-nums">{{ money(row.taxable_minor) }}</dd>
           </dl>
+          <p v-if="row.limit_basis === 'per_shift'" class="text-[11px] text-neutral-600 mt-1">
+            {{ t('payroll.benefit_baskets.limit_basis.per_shift') }}
+          </p>
           <p v-if="row.unfrozen_count > 0" class="text-[11px] text-warning-700 mt-1">
             {{ t('payroll.benefit_baskets.unfrozen_note', { count: row.unfrozen_count }) }}
           </p>

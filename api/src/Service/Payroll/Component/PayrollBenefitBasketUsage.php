@@ -30,6 +30,16 @@ final readonly class PayrollBenefitBasketUsage implements \JsonSerializable
     public const STATUSES = ['ok', 'approaching', 'exceeded', 'incomplete', 'limit_unavailable'];
 
     /**
+     * Čeho se `limitMinor` týká. Je to ODPOVĚĎ NA JINOU OTÁZKU než období součtu:
+     * měsíční přehled u příspěvku na stravování sčítá měsíc, ale limit je podle
+     * § 6 odst. 9 písm. b) ZDP za JEDNU SMĚNU (`per_shift`). Takový řádek proto
+     * limit netvrdí vůbec a obrazovka musí říct, že měsíční součet se proti
+     * limitu za směnu poměřit nedá — jinak by z prázdného sloupce udělala
+     * „v pořádku".
+     */
+    public const LIMIT_BASES = ['tax_year', 'calendar_month', 'per_shift'];
+
+    /**
      * Práh „blíží se limitu" — 80 % koše, počítáno celočíselně
      * (`used * 5 >= limit * 4`), aby hranicí nehýbalo zaokrouhlení.
      */
@@ -127,6 +137,7 @@ final readonly class PayrollBenefitBasketUsage implements \JsonSerializable
             'employee_name' => $this->employeeName,
             'basket' => $this->basket->value,
             'statute' => $this->basket->statute(),
+            'limit_basis' => $this->basket->limitBasis(),
             'limit_minor' => $this->limitMinor,
             'used_minor' => $this->usedMinor,
             'exempt_minor' => $this->exemptMinor,
