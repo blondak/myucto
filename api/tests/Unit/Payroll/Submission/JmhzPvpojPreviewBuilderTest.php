@@ -162,6 +162,45 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
         );
     }
 
+    /**
+     * PVPOJ se podává za registraci u OSSZ, a ta je na mzdové účtárně. Běh přes
+     * víc účtáren má od rozpadu sociálního závazku víc než jeden závazek ČSSZ —
+     * bez pojmenované hlášky by to spadlo na „chybějící závazek", který nechybí.
+     */
+    public function testRejectsRunSpanningMultipleOffices(): void
+    {
+        $source = $this->source();
+        $input = $source['statutory_result']['input_snapshot'];
+        self::assertIsArray($input['people']);
+        $input['people'][1]['employments'][0]['employment']['office_id'] = 7;
+        $source['statutory_result']['input_snapshot'] = $input;
+        $source['statutory_result']['input_snapshot_hash'] = $this->hash($input);
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = $this->hash($input);
+
+        $this->expectCode(
+            'jmhz_social_multiple_offices',
+            fn () => $this->builder->build(41, $source),
+        );
+    }
+
+    public function testRejectsFrozenEmploymentWithoutOffice(): void
+    {
+        $source = $this->source();
+        $input = $source['statutory_result']['input_snapshot'];
+        self::assertIsArray($input['people']);
+        unset($input['people'][0]['employments'][0]['employment']['office_id']);
+        $source['statutory_result']['input_snapshot'] = $input;
+        $source['statutory_result']['input_snapshot_hash'] = $this->hash($input);
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = $this->hash($input);
+
+        $this->expectCode(
+            'jmhz_employment_without_office',
+            fn () => $this->builder->build(41, $source),
+        );
+    }
+
     public function testRejectsMissingCsszLiability(): void
     {
         $source = $this->source();
@@ -449,6 +488,7 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
                     'employment' => [
                         'id' => $employmentId,
                         'employee_id' => $employeeId,
+                        'office_id' => 4,
                     ],
                 ],
                 $employmentIds,
