@@ -8,15 +8,33 @@ use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 
 final class JmhzScenario1DocumentResolver
 {
+    /**
+     * Verze přípravy, ze kterých se scénář 1 normalizuje.
+     *
+     * @var list<string>
+     */
+    public const SUPPORTED_BUILDER_VERSIONS = [
+        JmhzPreparationSnapshotBuilder::PREVIOUS_V4_BUILDER_VERSION,
+        JmhzPreparationSnapshotBuilder::PREVIOUS_V5_BUILDER_VERSION,
+        JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+    ];
+
+    /**
+     * @param int|null $officeId mzdová účtárna, za jejíž REGISTRACI u OSSZ se
+     *        hlášení sestavuje; `null` uspěje jen u přípravy s jedinou
+     *        registrací (zpětně kompatibilní jednoúčtárenský běh)
+     */
     public function resolve(
         JmhzVerifiedPreparationSnapshot $preparation,
         ?JmhzPvpojPreview $pvpoj,
         ?string $pvpojFailureCode = null,
+        ?int $officeId = null,
     ): JmhzScenario1Resolution {
-        if (!in_array($preparation->builderVersion, [
-            JmhzPreparationSnapshotBuilder::PREVIOUS_V4_BUILDER_VERSION,
-            JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
-        ], true)) {
+        if (!in_array(
+            $preparation->builderVersion,
+            self::SUPPORTED_BUILDER_VERSIONS,
+            true,
+        )) {
             return new JmhzScenario1Resolution(null, [
                 $this->blocker(
                     'jmhz_scenario1_source_version_unsupported',
@@ -58,11 +76,21 @@ final class JmhzScenario1DocumentResolver
         $sourceRevision = $this->object(
             $preparation->payload['source_revision'] ?? null,
         );
-        $ordinaryEvidence = $preparation->builderVersion
-            === JmhzPreparationSnapshotBuilder::BUILDER_VERSION
+        $ordinaryEvidence = in_array($preparation->builderVersion, [
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V5_BUILDER_VERSION,
+            JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+        ], true)
             ? $this->object($preparation->payload['ordinary_evidence'] ?? null)
             : [];
-        $people = $this->rows($preparation->payload['people'] ?? null);
+        $registration = $this->registration(
+            $preparation,
+            $officeId,
+            $blockers,
+        );
+        $people = $this->officePeople(
+            $this->rows($preparation->payload['people'] ?? null),
+            $officeId,
+        );
         if (count($people) > 1500) {
             $blockers[] = $this->blocker(
                 'jmhz_scenario1_form_limit_exceeded',
@@ -316,6 +344,14 @@ final class JmhzScenario1DocumentResolver
             || $pvpoj->period !== substr($preparation->periodStart, 0, 7)
             || ($pvpoj->source['revision_input_hash'] ?? null)
                 !== ($sourceRevision['input_snapshot_hash'] ?? null)
+            // Přehled je podíl JEDNÉ registrace. Kdyby se do hlášení dostal
+            // přehled cizí účtárny, kontrola 12 ČSSZ (pojistné zaměstnanců
+            // proti součtu součástí) by srovnávala dvě různé populace —
+            // a to je přesně ten rozdíl, který se ve zmrazeném XML nedohledá.
+            || ($officeId !== null
+                && ($pvpoj->office['office_id'] ?? null) !== $officeId)
+            || ($registration['id'] !== null
+                && ($pvpoj->office['office_id'] ?? null) !== $registration['id'])
         ) {
             $blockers[] = $this->blocker(
                 'jmhz_scenario1_pvpoj_source_mismatch',
@@ -329,6 +365,31 @@ final class JmhzScenario1DocumentResolver
                 'values' => $pvpoj->pvpoj,
                 'reconciliation' => $pvpoj->reconciliation,
             ];
+        }
+
+        /*
+         * Variabilní symbol REGISTRACE, za kterou se podává.
+         *
+         * Přednost má přehled o výši pojistného: jeho variabilní symbol je
+         * jediný, který se ověřuje proti závazku ČSSZ (viz
+         * `JmhzPvpojPreviewBuilder::assertLiability()`), takže hlášení a platba
+         * jdou prokazatelně pod tutéž registraci. Neresolvovaná registrace
+         * variabilní symbol NEDOSTANE — bez ní není za co podat a doplnit ho
+         * z libovolného přehledu by znamenalo vykázat lidi pod cizím číslem.
+         */
+        $variableSymbol = $registration['variable_symbol'];
+        if ($pvpojPayload !== null && $registration['id'] !== null) {
+            $previewSymbol = $pvpoj?->office['variable_symbol'] ?? null;
+            if ($variableSymbol !== null && $previewSymbol !== $variableSymbol) {
+                $blockers[] = $this->blocker(
+                    'jmhz_office_variable_symbol_mismatch',
+                    'office',
+                    $registration['id'],
+                    ['10221'],
+                );
+                $previewSymbol = null;
+            }
+            $variableSymbol = $previewSymbol;
         }
 
         if ($ordinaryEvidence === []) {
@@ -369,6 +430,7 @@ final class JmhzScenario1DocumentResolver
             'schema_reference' => JmhzScenario1NormalizedDocument::SCHEMA_REFERENCE,
             'scope' => $scope + [
                 'submission_kind' => 'regular',
+                'office_id' => $registration['id'],
             ],
             'specification' => $preparation->payload['specification'] ?? null,
             'provenance' => [
@@ -383,7 +445,7 @@ final class JmhzScenario1DocumentResolver
             ],
             'header' => [
                 'type' => 'R',
-                'variable_symbol' => $preparation->payload['employer_summary']['office']['social_security_variable_symbol'] ?? null,
+                'variable_symbol' => $variableSymbol,
                 'year' => (int) substr($preparation->periodStart, 0, 4),
                 'month' => $month,
                 'individual_form_count' => count($normalizedPeople),
@@ -404,6 +466,131 @@ final class JmhzScenario1DocumentResolver
         ]);
 
         return new JmhzScenario1Resolution($candidate, $blockers);
+    }
+
+    /**
+     * Registrace u OSSZ, za kterou se hlášení sestavuje.
+     *
+     * Měsíční hlášení se podává za registraci, tedy za variabilní symbol
+     * účtárny — ne za mzdový běh. Běh přes víc účtáren proto musí účtárnu
+     * ZVOLIT; vykázat všechny osoby běhu pod jedním variabilním symbolem by
+     * znamenalo přiřadit lidi k cizí registraci.
+     *
+     * Příprava starší než v6 registrace nenese. Tam se vrací její jediný
+     * historický variabilní symbol, aby se jednoúčtárenský běh choval přesně
+     * jako dřív.
+     *
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @param-out list<JmhzScenario1Blocker> $blockers
+     * @return array{id:?int,variable_symbol:?string}
+     */
+    private function registration(
+        JmhzVerifiedPreparationSnapshot $preparation,
+        ?int $officeId,
+        array &$blockers,
+    ): array {
+        $summary = $this->object(
+            $preparation->payload['employer_summary'] ?? null,
+        );
+        $legacy = $this->object($summary['office'] ?? null);
+        $fallback = [
+            'id' => is_int($legacy['id'] ?? null) ? $legacy['id'] : null,
+            'variable_symbol' =>
+                is_string($legacy['social_security_variable_symbol'] ?? null)
+                    ? $legacy['social_security_variable_symbol']
+                    : null,
+        ];
+        $registrations = $this->rows($summary['offices'] ?? null);
+        if ($registrations === []) {
+            if ($officeId !== null && $fallback['id'] !== $officeId) {
+                $blockers[] = $this->blocker(
+                    'jmhz_social_office_unknown',
+                    'office',
+                    $officeId,
+                    ['10221'],
+                );
+            }
+
+            return $fallback;
+        }
+        if ($officeId === null) {
+            if (count($registrations) !== 1) {
+                $blockers[] = $this->blocker(
+                    'jmhz_social_multiple_offices',
+                    'revision',
+                    $preparation->sourceRevisionId,
+                    ['10221'],
+                );
+
+                return ['id' => null, 'variable_symbol' => null];
+            }
+            $officeId = is_int($registrations[0]['id'] ?? null)
+                ? $registrations[0]['id']
+                : null;
+        }
+        foreach ($registrations as $registration) {
+            if (($registration['id'] ?? null) !== $officeId) {
+                continue;
+            }
+            $symbol = $registration['social_security_variable_symbol'] ?? null;
+            if (!is_string($symbol)) {
+                $blockers[] = $this->blocker(
+                    'jmhz_office_variable_symbol_missing',
+                    'office',
+                    $officeId,
+                    ['10221'],
+                );
+            }
+
+            return [
+                'id' => $officeId,
+                'variable_symbol' => is_string($symbol) ? $symbol : null,
+            ];
+        }
+        $blockers[] = $this->blocker(
+            'jmhz_social_office_unknown',
+            'office',
+            $officeId,
+            ['10221'],
+        );
+
+        return ['id' => null, 'variable_symbol' => null];
+    }
+
+    /**
+     * Osoby TÉTO registrace.
+     *
+     * Individualizované součásti a pojistná část jedné datové věty musí popsat
+     * TUTÉŽ populaci: kontrola 12 ČSSZ sčítá pojistné zaměstnanců (10370) přes
+     * součásti a porovnává je s úhrnem 10028 pojistné části. Kdyby hlášení za
+     * jednu registraci neslo součásti všech účtáren běhu, součet by nikdy
+     * neseděl — a lidé by navíc byli vykázaní pod cizím variabilním symbolem.
+     *
+     * @param list<array<string,mixed>> $people
+     * @return list<array<string,mixed>>
+     */
+    private function officePeople(array $people, ?int $officeId): array
+    {
+        if ($officeId === null) {
+            return $people;
+        }
+        $filtered = [];
+        foreach ($people as $person) {
+            $employments = [];
+            foreach ($this->rows($person['employments'] ?? null) as $employment) {
+                $source = $this->object($employment['employment'] ?? null);
+                if (($source['office_id'] ?? null) === $officeId) {
+                    $employments[] = $employment;
+                }
+            }
+            if ($employments === []) {
+                continue;
+            }
+            $person['employments'] = $employments;
+            $filtered[] = $person;
+        }
+
+        return $filtered;
     }
 
     /**

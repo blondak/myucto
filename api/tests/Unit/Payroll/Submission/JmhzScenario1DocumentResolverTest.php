@@ -425,6 +425,169 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         }
     }
 
+    /**
+     * Hlášení se podává za REGISTRACI u OSSZ, takže z revize přes dvě mzdové
+     * účtárny musí vzniknout dvě datové věty: každá pod svým variabilním
+     * symbolem a jen se svými součástmi. Kdyby jedna věta nesla obě populace,
+     * kontrola 12 ČSSZ (pojistné zaměstnanců proti součtu součástí) by nikdy
+     * neseděla a lidé by šli pod cizí registraci.
+     */
+    public function testEachRegistrationGetsItsOwnVariableSymbolAndPeople(): void
+    {
+        $preparation = $this->multiOfficePreparation();
+
+        $first = (new JmhzScenario1DocumentResolver())->resolve(
+            $preparation,
+            $this->pvpoj(),
+            null,
+            4,
+        );
+        $second = (new JmhzScenario1DocumentResolver())->resolve(
+            $preparation,
+            $this->pvpoj(officeId: 5, variableSymbol: '9990001234'),
+            null,
+            5,
+        );
+
+        self::assertSame([], $first->blockers);
+        self::assertSame([], $second->blockers);
+        self::assertSame(
+            '1234567890',
+            $first->candidate?->payload['header']['variable_symbol'],
+        );
+        self::assertSame(
+            '9990001234',
+            $second->candidate?->payload['header']['variable_symbol'],
+        );
+        self::assertSame(
+            [11],
+            array_column($first->candidate?->payload['people'] ?? [], 'employee_id'),
+        );
+        self::assertSame(
+            [12],
+            array_column($second->candidate?->payload['people'] ?? [], 'employee_id'),
+        );
+        self::assertSame(4, $first->candidate?->payload['scope']['office_id']);
+        self::assertSame(5, $second->candidate?->payload['scope']['office_id']);
+        self::assertNotSame(
+            $first->candidate?->sha256(),
+            $second->candidate?->sha256(),
+        );
+    }
+
+    public function testRunWithTwoRegistrationsNeverPicksOneSilently(): void
+    {
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->multiOfficePreparation(),
+            $this->pvpoj(),
+        );
+
+        self::assertContains(
+            'jmhz_social_multiple_offices',
+            array_map(
+                static fn ($blocker): string => $blocker->code,
+                $resolution->blockers,
+            ),
+        );
+        self::assertNull(
+            $resolution->candidate?->payload['header']['variable_symbol'],
+        );
+    }
+
+    public function testPvpojOfAnotherRegistrationIsRefused(): void
+    {
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->multiOfficePreparation(),
+            $this->pvpoj(officeId: 5, variableSymbol: '9990001234'),
+            null,
+            4,
+        );
+
+        self::assertContains(
+            'jmhz_scenario1_pvpoj_source_mismatch',
+            array_map(
+                static fn ($blocker): string => $blocker->code,
+                $resolution->blockers,
+            ),
+        );
+    }
+
+    /**
+     * Příprava v6 se dvěma registracemi: employee 11 v účtárně 4,
+     * employee 12 v účtárně 5.
+     */
+    private function multiOfficePreparation(): JmhzVerifiedPreparationSnapshot
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        $payload['schema_reference'] = 'payroll-jmhz-preparation-source.v6';
+        $payload['builder_version'] = JmhzPreparationSnapshotBuilder::BUILDER_VERSION;
+        $payload['ordinary_evidence'] = [
+            'attribute_values' => ['10116' => false, '10546' => false],
+        ];
+        $payload['source_versions']['ordinary_evidence'] = [
+            'id' => 601,
+            'source_manifest_sha256' => str_repeat('4', 64),
+            'snapshot_fingerprint' => str_repeat('5', 64),
+        ];
+        $payload['employer_summary']['office'] = null;
+        $payload['employer_summary']['offices'] = [
+            [
+                'id' => 4,
+                'code' => 'UC4',
+                'name' => 'Mzdová účtárna 4',
+                'social_security_variable_symbol' => '1234567890',
+            ],
+            [
+                'id' => 5,
+                'code' => 'UC5',
+                'name' => 'Mzdová účtárna 5',
+                'social_security_variable_symbol' => '9990001234',
+            ],
+        ];
+        $payload['people'][0]['employments'][0]['employment']['office_id'] = 4;
+        $second = $payload['people'][0];
+        $second['employee_id'] = 12;
+        $second['employments'][0]['employment_id'] = 102;
+        $second['employments'][0]['employment']['office_id'] = 5;
+        $second['employments'][0]['insurance']['relationship_id'] = 'employment:102';
+        $second['person_summary']['statutory']['net_pay']['relationships']
+            = [['relationship_id' => 'employment:102']];
+        $payload['people'][] = $second;
+
+        return $this->withVersionedPayload(
+            $preparation,
+            JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+            $payload,
+        );
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function withVersionedPayload(
+        JmhzVerifiedPreparationSnapshot $preparation,
+        string $builderVersion,
+        array $payload,
+    ): JmhzVerifiedPreparationSnapshot {
+        return new JmhzVerifiedPreparationSnapshot(
+            $preparation->id,
+            $preparation->supplierId,
+            $preparation->environment,
+            $preparation->runId,
+            $preparation->sourceRevisionId,
+            $preparation->revisionNo,
+            $preparation->periodStart,
+            $preparation->periodEnd,
+            $preparation->scenarioKey,
+            $builderVersion,
+            $preparation->sourceManifestSha256,
+            $preparation->readinessSha256,
+            $preparation->snapshotFingerprint,
+            $preparation->manifest,
+            $preparation->readiness,
+            $payload,
+        );
+    }
+
     private function preparation(): JmhzVerifiedPreparationSnapshot
     {
         $payload = [
@@ -567,8 +730,10 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
-    private function pvpoj(): JmhzPvpojPreview
-    {
+    private function pvpoj(
+        int $officeId = 4,
+        string $variableSymbol = '1234567890',
+    ): JmhzPvpojPreview {
         return new JmhzPvpojPreview(
             7,
             401,
@@ -576,13 +741,13 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
             1,
             '2026-07',
             [
-                'office_id' => 4,
-                'code' => 'UC4',
-                'name' => 'Mzdová účtárna 4',
-                'variable_symbol' => '1234567890',
+                'office_id' => $officeId,
+                'code' => 'UC' . $officeId,
+                'name' => 'Mzdová účtárna ' . $officeId,
+                'variable_symbol' => $variableSymbol,
             ],
             [[
-                'office_id' => 4,
+                'office_id' => $officeId,
                 'employee_contribution_minor_units' => 7_100,
                 'employer_contribution_minor_units' => 24_800,
                 'amount_minor_units' => 31_900,

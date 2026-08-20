@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   downloadSubmissionArtifact: vi.fn(),
   runs: vi.fn(),
   jmhzPreview: vi.fn(),
+  jmhzOffices: vi.fn(),
   jmhzOrdinaryEvidence: vi.fn(),
   confirmJmhzOrdinaryEvidence: vi.fn(),
   downloadJmhzPreview: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('@/api/payroll', () => ({
     downloadSubmissionArtifact: m.downloadSubmissionArtifact,
     runs: m.runs,
     jmhzPvpojPreview: m.jmhzPreview,
+    jmhzPvpojOffices: m.jmhzOffices,
     jmhzOrdinaryEvidence: m.jmhzOrdinaryEvidence,
     confirmJmhzOrdinaryEvidence: m.confirmJmhzOrdinaryEvidence,
     downloadJmhzPvpojPreview: m.downloadJmhzPreview,
@@ -263,7 +265,19 @@ function setup() {
       reason_code: 'health_insurance_transport_unavailable',
     },
   }))
-  m.jmhzPreview.mockImplementation(async (revisionId: number) => ({
+  // Přehled se podává za REGISTRACI u OSSZ, takže panel se nejdřív ptá,
+  // za které účtárny se z revize podává.
+  m.jmhzOffices.mockImplementation(async () => [{
+    office_id: 4,
+    code: 'UC4',
+    name: 'Mzdová účtárna 4',
+    social_security_variable_symbol: '1234567890',
+    submittable: true,
+  }])
+  m.jmhzPreview.mockImplementation(async (
+    revisionId: number,
+    officeId?: number | null,
+  ) => ({
     schema_reference: 'payroll-jmhz-pvpoj-preview.v1',
     document_kind: 'internal_jmhz_pvpoj_preview',
     workflow_status: 'preview_only',
@@ -283,6 +297,17 @@ function setup() {
     revision_no: 1,
     period: '2026-08',
     currency_code: 'CZK',
+    office: {
+      office_id: officeId ?? 4,
+      code: `UC${officeId ?? 4}`,
+      name: `Mzdová účtárna ${officeId ?? 4}`,
+      variable_symbol: officeId === 5 ? '9990001234' : '1234567890',
+    },
+    office_allocation: {
+      method: 'largest_remainder_by_capped_assessment_base',
+      root_result_is_single_source_of_truth: true,
+      offices: [],
+    },
     source: {
       revision_input_hash: 'a'.repeat(64),
       statutory_result_id: 90,
@@ -576,8 +601,10 @@ describe('PayrollSubmissions', () => {
     await clickTab(wrapper, 'jmhz')
     await flushPromises()
 
-    expect(m.jmhzPreview).toHaveBeenCalledWith(18)
-    expect(m.jmhzPreview).toHaveBeenCalledWith(19)
+    expect(m.jmhzOffices).toHaveBeenCalledWith(18)
+    expect(m.jmhzOffices).toHaveBeenCalledWith(19)
+    expect(m.jmhzPreview).toHaveBeenCalledWith(18, 4)
+    expect(m.jmhzPreview).toHaveBeenCalledWith(19, 4)
     expect(m.jmhzOrdinaryEvidence).toHaveBeenCalledWith(18)
     expect(m.jmhzOrdinaryEvidence).toHaveBeenCalledWith(19)
     expect(wrapper.findAll('[data-test="jmhz-pvpoj-previews"] article')).toHaveLength(2)
@@ -590,6 +617,63 @@ describe('PayrollSubmissions', () => {
     expect(m.downloadJmhzPreview).toHaveBeenCalledWith(
       expect.objectContaining({ revision_id: 18, workflow_status: 'preview_only' }),
     )
+  })
+
+  /**
+   * Přehled se podává za registraci u OSSZ, takže revize přes dvě mzdové
+   * účtárny dá dva náhledy — každý pod svým variabilním symbolem. Účtárna bez
+   * variabilního symbolu se přitom musí ukázat ADRESNĚ, ne jako jeden slitý
+   * banner, jinak uživatel netuší, kterou registraci má doplnit.
+   */
+  it('rozpadne PVPOJ náhled na registrace a chybějící VS pojmenuje', async () => {
+    m.runs.mockImplementation(async () => [{
+      id: 8,
+      period_start: '2026-08-01',
+      revision_id: 18,
+      revision_status: 'approved',
+    }])
+    m.jmhzOffices.mockImplementation(async () => [
+      {
+        office_id: 4,
+        code: 'UC4',
+        name: 'Mzdová účtárna 4',
+        social_security_variable_symbol: '1234567890',
+        submittable: true,
+      },
+      {
+        office_id: 5,
+        code: 'UC5',
+        name: 'Mzdová účtárna 5',
+        social_security_variable_symbol: '9990001234',
+        submittable: true,
+      },
+      {
+        office_id: 6,
+        code: 'UC6',
+        name: 'Mzdová účtárna 6',
+        social_security_variable_symbol: null,
+        submittable: false,
+      },
+    ])
+
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+    await clickTab(wrapper, 'jmhz')
+    await flushPromises()
+
+    expect(m.jmhzPreview).toHaveBeenCalledWith(18, 4)
+    expect(m.jmhzPreview).toHaveBeenCalledWith(18, 5)
+    expect(m.jmhzPreview).not.toHaveBeenCalledWith(18, 6)
+    expect(wrapper.findAll('[data-test="jmhz-pvpoj-previews"] article'))
+      .toHaveLength(2)
+    const offices = wrapper.findAll('[data-test="jmhz-preview-office"]')
+    expect(offices).toHaveLength(2)
+
+    const blocked = wrapper.get('[data-test="jmhz-blocked-offices"]')
+    expect(blocked.text()).toContain('UC6')
+    expect(blocked.text())
+      .toContain('payroll.submissions.overview.jmhz_office_variable_symbol_missing')
+    expect(blocked.text()).not.toContain('UC4')
   })
 
   it('zpřístupní bezpečný detail částí, artefaktů a problémů posledního podání', async () => {

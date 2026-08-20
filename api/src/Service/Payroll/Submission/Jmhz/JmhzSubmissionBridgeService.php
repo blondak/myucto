@@ -62,11 +62,13 @@ final readonly class JmhzSubmissionBridgeService
         int $obligationId,
         string $environment,
         ?int $createdBy = null,
+        ?int $officeId = null,
     ): array {
         if ($supplierId <= 0
             || $preparationId <= 0
             || $obligationId <= 0
             || ($createdBy !== null && $createdBy <= 0)
+            || ($officeId !== null && $officeId <= 0)
         ) {
             throw new \InvalidArgumentException(
                 'Rozsah JMHZ bridge není platný.',
@@ -80,6 +82,7 @@ final readonly class JmhzSubmissionBridgeService
             $supplierId,
             $environment,
             $preparationId,
+            $officeId,
         );
         if ($resolution->status() !== 'resolved') {
             throw new JmhzXmlException(
@@ -97,6 +100,7 @@ final readonly class JmhzSubmissionBridgeService
             $environment,
             $obligationId,
             $snapshotHash,
+            $officeId,
         );
 
         return $this->submissionRepository->transaction(function () use (
@@ -105,6 +109,7 @@ final readonly class JmhzSubmissionBridgeService
             $obligationId,
             $environment,
             $createdBy,
+            $officeId,
             $resolution,
             $document,
             $snapshotHash,
@@ -125,6 +130,7 @@ final readonly class JmhzSubmissionBridgeService
                 ),
                 $runId,
                 $periodStart,
+                $officeId,
             );
 
             $submission = $this->submissions->prepare(
@@ -180,9 +186,9 @@ final readonly class JmhzSubmissionBridgeService
                 $supplierId,
                 $submission['id'],
                 $submission['row_version'],
-                "jmhz25:{$preparationId}",
+                self::partReference($preparationId, $officeId),
                 self::AGENDA_CODE,
-                self::runReference($runId),
+                self::runReference($runId, $officeId),
                 'jmhz_preparation',
                 self::sourceEventReference($preparationId),
                 $snapshotHash,
@@ -251,15 +257,42 @@ final readonly class JmhzSubmissionBridgeService
         return "jmhz_preparation:{$preparationId}";
     }
 
-    public static function runReference(int $runId): string
+    /**
+     * Předmět povinnosti.
+     *
+     * Hlášení se podává za REGISTRACI u OSSZ, takže běh přes víc účtáren má víc
+     * povinností a víc podání. Oddělit je musí právě tahle reference: klíč
+     * `uq_payroll_submissions_regular` pouští na jednu povinnost právě jedno
+     * řádné podání, takže dvě registrace pod jednou povinností by se tiše
+     * srazily na jedno. Jednoúčtárenský běh (`null`) drží původní tvar, aby
+     * povinnosti evidované dřív zůstaly platné.
+     */
+    public static function runReference(int $runId, ?int $officeId = null): string
     {
-        if ($runId <= 0) {
+        if ($runId <= 0 || ($officeId !== null && $officeId <= 0)) {
             throw new \InvalidArgumentException(
-                'Mzdový běh musí být kladné číslo.',
+                'Mzdový běh a mzdová účtárna musí být kladná čísla.',
             );
         }
 
-        return "payroll_run:{$runId}";
+        return $officeId === null
+            ? "payroll_run:{$runId}"
+            : "payroll_run:{$runId}:office:{$officeId}";
+    }
+
+    public static function partReference(
+        int $preparationId,
+        ?int $officeId = null,
+    ): string {
+        if ($preparationId <= 0 || ($officeId !== null && $officeId <= 0)) {
+            throw new \InvalidArgumentException(
+                'Příprava JMHZ a mzdová účtárna musí být kladná čísla.',
+            );
+        }
+
+        return $officeId === null
+            ? "jmhz25:{$preparationId}"
+            : "jmhz25:{$preparationId}:office:{$officeId}";
     }
 
     /**
@@ -351,6 +384,7 @@ final readonly class JmhzSubmissionBridgeService
         ?array $obligation,
         int $runId,
         string $periodStart,
+        ?int $officeId = null,
     ): void {
         if ($obligation === null) {
             throw new JmhzXmlException(
@@ -360,7 +394,7 @@ final readonly class JmhzSubmissionBridgeService
         }
         if ($obligation['agenda_code'] !== self::AGENDA_CODE
             || $obligation['subject_type'] !== self::SUBJECT_TYPE
-            || $obligation['subject_reference'] !== self::runReference($runId)
+            || $obligation['subject_reference'] !== self::runReference($runId, $officeId)
             || $obligation['obligation_kind'] !== 'regular'
             || $obligation['period_start'] !== $periodStart
             || !in_array($obligation['status'], ['open', 'prepared'], true)
@@ -483,6 +517,26 @@ final readonly class JmhzSubmissionBridgeService
      * přípravy je v klíči proto, že právě on odlišuje dvě podání za totéž
      * období postavená nad jinými daty.
      *
+     * ─────────────────────────────────────────────────────────────────────────
+     * IDEMPOTENCE — A TÍM I GUID — JE PER REGISTRACI, NE PER REVIZI
+     * ─────────────────────────────────────────────────────────────────────────
+     * Klíč nese mzdovou účtárnu, protože jedna příprava dá tolik podání, kolik
+     * má revize registrací u OSSZ, a otisk přípravy je pro všechny stejný. Bez
+     * účtárny v klíči by druhá registrace narazila na idempotentní opakování
+     * první: dostala by zpět CIZÍ zmrazený artefakt — tedy cizí GUID i cizí
+     * variabilní symbol — místo vlastního podání.
+     *
+     * Že se tím GUIDy oddělí, plyne z toho, KDE vznikají: `bridge()` je
+     * generuje jen na větvi `created === true`. Dva různé klíče proto vedou na
+     * dvě zakládající větve a dva různé GUIDy; tentýž klíč vede na
+     * `replayedResult()`, který XML nestaví znovu a vrátí původní GUID. Přesně
+     * to obojí zadání žádá: dvě registrace ≠ tentýž GUID, opakování téže
+     * registrace = tentýž GUID.
+     *
+     * `null` (jednoúčtárenský běh) záměrně DRŽÍ PŮVODNÍ KLÍČ — bajtově se do
+     * kanonického JSONu nepromítne jinak než jako chybějící dimenze, takže se
+     * dřív zmrazená podání idempotentně dohledají dál.
+     *
      * @return array{submission:string,artifact:string}
      */
     private static function idempotencyKeys(
@@ -490,17 +544,19 @@ final readonly class JmhzSubmissionBridgeService
         string $environment,
         int $obligationId,
         string $snapshotHash,
+        ?int $officeId = null,
     ): array {
-        $fingerprint = hash(
-            'sha256',
-            CanonicalJson::encode([
-                'schema_reference' => 'payroll-jmhz-submission-bridge.v1',
-                'supplier_id' => $supplierId,
-                'environment' => $environment,
-                'obligation_id' => $obligationId,
-                'source_snapshot_hash' => $snapshotHash,
-            ]),
-        );
+        $scope = [
+            'schema_reference' => 'payroll-jmhz-submission-bridge.v1',
+            'supplier_id' => $supplierId,
+            'environment' => $environment,
+            'obligation_id' => $obligationId,
+            'source_snapshot_hash' => $snapshotHash,
+        ];
+        if ($officeId !== null) {
+            $scope['payroll_office_id'] = $officeId;
+        }
+        $fingerprint = hash('sha256', CanonicalJson::encode($scope));
 
         return [
             'submission' => "jmhz25-submission:{$fingerprint}",

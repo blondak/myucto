@@ -46,11 +46,22 @@ final class PayrollJmhzXmlDryRunAction
                 422,
             );
         }
+        $query = $request->getQueryParams();
+        $officeId = self::narrowingId(is_array($query) ? $query : [], 'office');
+        if ($officeId !== null && $officeId <= 0) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'office musí být kladné celé číslo.',
+                422,
+            );
+        }
         try {
             $result = $this->service->dryRun(
                 $this->currentSupplierId($request),
                 $environment,
                 $this->preparationId($args),
+                $officeId,
             );
         } catch (JmhzXmlException $exception) {
             return Json::error(

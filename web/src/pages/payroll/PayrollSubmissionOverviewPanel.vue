@@ -5,6 +5,7 @@ import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
   type PayrollHealthPaymentOverview,
+  type PayrollJmhzPvpojOffice,
   type PayrollJmhzPvpojPreview,
   type PayrollRegzelEnvironment,
   type PayrollRun,
@@ -66,8 +67,21 @@ const healthOverviews = ref<PayrollHealthPaymentOverview[]>([])
 const jmhzPreviews = ref<PayrollJmhzPvpojPreview[]>([])
 const jmhzApprovedRuns = ref<PayrollRun[]>([])
 const downloadingHealthKey = ref<string | null>(null)
-const downloadingJmhzRevision = ref<number | null>(null)
+const downloadingJmhzKey = ref<string | null>(null)
 const jmhzError = ref('')
+/**
+ * Registrace u OSSZ, za které přehled sestavit NELZE. Držíme je zvlášť
+ * a adresně: dokud se všechny chyby slévaly do jednoho banneru, uživatel se
+ * nedozvěděl, KTERÉ účtárně chybí variabilní symbol — a ani to, že ostatní
+ * přehledy jsou v pořádku.
+ */
+const jmhzBlockedOffices = ref<Array<{
+  key: string
+  runId: number
+  revisionId: number
+  office: PayrollJmhzPvpojOffice
+  message: string
+}>>([])
 const detail = ref<PayrollSubmissionDetail | null>(null)
 const detailLoadingId = ref<number | null>(null)
 const detailError = ref('')
@@ -236,8 +250,14 @@ async function loadHealthOverviews() {
   }
 }
 
+/**
+ * Přehled o výši pojistného se podává ZA REGISTRACI u OSSZ, ne za mzdový běh.
+ * Revize přes víc mzdových účtáren proto dá víc přehledů a každý se musí
+ * vyžádat se svou účtárnou.
+ */
 async function loadJmhzPreviews() {
   jmhzPreviews.value = []
+  jmhzBlockedOffices.value = []
   jmhzApprovedRuns.value = []
   jmhzError.value = ''
   if (props.mode !== 'jmhz') return
@@ -247,19 +267,55 @@ async function loadJmhzPreviews() {
       run.revision_status === 'approved' && run.revision_id !== null,
     )
     jmhzApprovedRuns.value = approved
-    const responses = await Promise.allSettled(approved.map(run =>
-      payrollApi.jmhzPvpojPreview(run.revision_id!),
+    const officeLists = await Promise.allSettled(approved.map(run =>
+      payrollApi.jmhzPvpojOffices(run.revision_id!),
     ))
-    jmhzPreviews.value = responses.flatMap(response =>
-      response.status === 'fulfilled' ? [response.value] : [],
-    )
-    const failed = responses.find(response => response.status === 'rejected')
-    if (failed?.status === 'rejected') {
-      jmhzError.value = apiErrorMessage(
-        failed.reason,
-        t('payroll.submissions.overview.jmhz_load_failed'),
-      )
-    }
+    const wanted: Array<{ run: PayrollRun; office: PayrollJmhzPvpojOffice }> = []
+    officeLists.forEach((response, index) => {
+      const run = approved[index]!
+      if (response.status === 'rejected') {
+        jmhzError.value = apiErrorMessage(
+          response.reason,
+          t('payroll.submissions.overview.jmhz_load_failed'),
+        )
+        return
+      }
+      response.value.forEach(office => {
+        if (office.submittable) {
+          wanted.push({ run, office })
+          return
+        }
+        jmhzBlockedOffices.value.push({
+          key: `${run.revision_id}-${office.office_id}`,
+          runId: run.id,
+          revisionId: run.revision_id!,
+          office,
+          message: t(
+            'payroll.submissions.overview.jmhz_office_variable_symbol_missing',
+          ),
+        })
+      })
+    })
+    const responses = await Promise.allSettled(wanted.map(entry =>
+      payrollApi.jmhzPvpojPreview(entry.run.revision_id!, entry.office.office_id),
+    ))
+    responses.forEach((response, index) => {
+      const entry = wanted[index]!
+      if (response.status === 'fulfilled') {
+        jmhzPreviews.value.push(response.value)
+        return
+      }
+      jmhzBlockedOffices.value.push({
+        key: `${entry.run.revision_id}-${entry.office.office_id}`,
+        runId: entry.run.id,
+        revisionId: entry.run.revision_id!,
+        office: entry.office,
+        message: apiErrorMessage(
+          response.reason,
+          t('payroll.submissions.overview.jmhz_load_failed'),
+        ),
+      })
+    })
   } catch (exception) {
     jmhzError.value = apiErrorMessage(
       exception,
@@ -268,9 +324,13 @@ async function loadJmhzPreviews() {
   }
 }
 
+function jmhzPreviewKey(preview: PayrollJmhzPvpojPreview): string {
+  return `${preview.revision_id}-${preview.office.office_id}`
+}
+
 async function downloadJmhz(preview: PayrollJmhzPvpojPreview) {
   jmhzError.value = ''
-  downloadingJmhzRevision.value = preview.revision_id
+  downloadingJmhzKey.value = jmhzPreviewKey(preview)
   try {
     await payrollApi.downloadJmhzPvpojPreview(preview)
   } catch (exception) {
@@ -279,7 +339,7 @@ async function downloadJmhz(preview: PayrollJmhzPvpojPreview) {
       t('payroll.submissions.overview.jmhz_download_failed'),
     )
   } finally {
-    downloadingJmhzRevision.value = null
+    downloadingJmhzKey.value = null
   }
 }
 
@@ -746,14 +806,34 @@ onMounted(load)
           {{ jmhzError }}
         </p>
 
-        <div v-if="jmhzPreviews.length === 0 && !jmhzError" class="p-6 text-sm text-neutral-500">
+        <ul
+          v-if="jmhzBlockedOffices.length"
+          class="m-4 space-y-2"
+          data-test="jmhz-blocked-offices"
+        >
+          <li
+            v-for="blocked in jmhzBlockedOffices"
+            :key="blocked.key"
+            class="rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-700"
+          >
+            <span class="font-medium">
+              {{ blocked.office.code }} · {{ blocked.office.name }}
+            </span>
+            <span class="ml-1">{{ blocked.message }}</span>
+          </li>
+        </ul>
+
+        <div
+          v-if="jmhzPreviews.length === 0 && !jmhzError && !jmhzBlockedOffices.length"
+          class="p-6 text-sm text-neutral-500"
+        >
           {{ t('payroll.submissions.overview.jmhz_preview_empty') }}
         </div>
 
-        <div v-else-if="jmhzPreviews.length" class="grid grid-cols-1 gap-3 p-4 lg:grid-cols-2">
+        <div v-if="jmhzPreviews.length" class="grid grid-cols-1 gap-3 p-4 lg:grid-cols-2">
           <article
             v-for="preview in jmhzPreviews"
-            :key="preview.revision_id"
+            :key="jmhzPreviewKey(preview)"
             class="rounded-lg border border-neutral-200 p-4"
           >
             <div class="flex flex-wrap items-start justify-between gap-3">
@@ -769,11 +849,18 @@ onMounted(load)
                     revision: preview.revision_no,
                   }) }} · XSD {{ preview.xsd.bundle_version }}
                 </p>
+                <p class="mt-1 text-xs text-neutral-500" data-test="jmhz-preview-office">
+                  {{ t('payroll.submissions.overview.jmhz_preview_office', {
+                    code: preview.office.code,
+                    name: preview.office.name,
+                    symbol: preview.office.variable_symbol,
+                  }) }}
+                </p>
               </div>
               <button
                 type="button"
                 :class="btnOutlineSm('neutral')"
-                :disabled="downloadingJmhzRevision === preview.revision_id"
+                :disabled="downloadingJmhzKey === jmhzPreviewKey(preview)"
                 @click="downloadJmhz(preview)"
               >
                 <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">

@@ -13,7 +13,8 @@ final class JmhzPreparationSnapshotBuilder
     public const PREVIOUS_V2_BUILDER_VERSION = 'jmhz-preparation-source.v2';
     public const PREVIOUS_BUILDER_VERSION = 'jmhz-preparation-source.v3';
     public const PREVIOUS_V4_BUILDER_VERSION = 'jmhz-preparation-source.v4';
-    public const BUILDER_VERSION = 'jmhz-preparation-source.v5';
+    public const PREVIOUS_V5_BUILDER_VERSION = 'jmhz-preparation-source.v5';
+    public const BUILDER_VERSION = 'jmhz-preparation-source.v6';
 
     private ?JmhzScenario1SelectorResolver $scenarioSelector = null;
 
@@ -421,14 +422,16 @@ final class JmhzPreparationSnapshotBuilder
                 $normalizedPeople,
             );
         }
-        $office = $source['office'] ?? null;
-        if (!is_array($office)
-            || !is_string($office['social_security_variable_symbol'] ?? null)
-            || preg_match('/^[0-9]{10}$/D', $office['social_security_variable_symbol']) !== 1
-        ) {
-            $issues[] = $this->issue('social_security_variable_symbol_missing', 'run', $runId, ['10221']);
-            $office = null;
-        }
+        $registrations = $this->officeRegistrations(
+            $source['offices'] ?? null,
+            $normalizedPeople,
+            $runId,
+            $issues,
+        );
+        $office = count($registrations) === 1
+            && $registrations[0]['social_security_variable_symbol'] !== null
+                ? $registrations[0]
+                : null;
 
         $issues = $this->normalizeIssues($issues);
         $payload = [
@@ -465,6 +468,7 @@ final class JmhzPreparationSnapshotBuilder
             'employer_summary' => [
                 'employer' => $input['employer'] ?? null,
                 'office' => $office,
+                'offices' => $registrations,
             ],
             'people' => $normalizedPeople,
             'ordinary_evidence' => is_array($ordinaryEvidence)
@@ -472,6 +476,7 @@ final class JmhzPreparationSnapshotBuilder
                 : null,
             'source_versions' => [
                 'office_id' => is_array($office) ? ($office['id'] ?? null) : null,
+                'office_ids' => array_column($registrations, 'id'),
                 'employments' => $sourceVersions,
                 'ordinary_evidence' => is_array($ordinaryEvidence)
                     ? [
@@ -488,6 +493,116 @@ final class JmhzPreparationSnapshotBuilder
         ];
 
         return new JmhzPreparationSnapshot($payload, $issues);
+    }
+
+    /**
+     * Registrace u OSSZ, za které se z revize podává.
+     *
+     * ─────────────────────────────────────────────────────────────────────────
+     * Účtárna se bere z PRACOVNÍHO VZTAHU, ne z běhu
+     * ─────────────────────────────────────────────────────────────────────────
+     * Dřív se variabilní symbol četl z účtárny běhu (`payroll_runs.office_id`).
+     * To je ale jen filtr rozsahu běhu: u celofiremního běhu je `NULL` (a taková
+     * příprava tedy nikdy nebyla připravená) a u běhu přes víc účtáren by
+     * ukazoval na jedinou z nich, takže by se hlášení odeslalo pod cizím
+     * variabilním symbolem. Registrace je vlastností účtárny vztahu, proto se
+     * účtárny odvozují ze zmrazeného vstupu — stejně jako v
+     * {@see JmhzPvpojPreviewBuilder::offices()}, ze kterého vzniká přehled
+     * o výši pojistného.
+     *
+     * Chybějící variabilní symbol zůstává blokujícím nálezem, ale nově je
+     * ADRESNÝ: nese `office` a jeho id, takže účetní ví, KTEROU registraci má
+     * doplnit. U jednoúčtárenského běhu je to fakticky totéž hlášení jako dřív.
+     *
+     * @param list<array<string,mixed>> $people normalizované osoby
+     * @param list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $issues
+     * @param-out list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $issues
+     * @return list<array{
+     *   id:int,code:string,name:string,social_security_variable_symbol:?string
+     * }>
+     */
+    private function officeRegistrations(
+        mixed $catalog,
+        array $people,
+        int $runId,
+        array &$issues,
+    ): array {
+        $known = [];
+        foreach ($this->rows($catalog ?? [], 'offices') as $office) {
+            $id = $office['id'] ?? null;
+            if (is_int($id) && $id > 0) {
+                $known[$id] = $office;
+            }
+        }
+        $officeIds = [];
+        foreach ($people as $person) {
+            foreach ($this->rows(
+                $person['employments'] ?? null,
+                'people.employments',
+            ) as $employment) {
+                $employmentId = is_int($employment['employment_id'] ?? null)
+                    ? $employment['employment_id']
+                    : null;
+                $source = $employment['employment'] ?? null;
+                $officeId = is_array($source) ? ($source['office_id'] ?? null) : null;
+                if (!is_int($officeId) || $officeId <= 0) {
+                    $issues[] = $this->issue(
+                        'jmhz_employment_without_office',
+                        'employment',
+                        $employmentId,
+                        ['10221'],
+                    );
+                    continue;
+                }
+                $officeIds[$officeId] = true;
+            }
+        }
+        $ids = array_keys($officeIds);
+        sort($ids, SORT_NUMERIC);
+        if ($ids === []) {
+            $issues[] = $this->issue(
+                'social_security_variable_symbol_missing',
+                'run',
+                $runId,
+                ['10221'],
+            );
+
+            return [];
+        }
+        $registrations = [];
+        foreach ($ids as $officeId) {
+            $office = $known[$officeId] ?? null;
+            if ($office === null) {
+                $issues[] = $this->issue(
+                    'jmhz_social_office_unknown',
+                    'office',
+                    $officeId,
+                    ['10221'],
+                );
+                continue;
+            }
+            $symbol = $office['social_security_variable_symbol'] ?? null;
+            // Deset číslic je totéž, co vynucuje serializér u atributu 10221;
+            // kratší hodnota by prošla přípravou a spadla až na XSD.
+            $valid = is_string($symbol)
+                && preg_match('/^[0-9]{10}$/D', $symbol) === 1;
+            if (!$valid) {
+                $issues[] = $this->issue(
+                    'social_security_variable_symbol_missing',
+                    'office',
+                    $officeId,
+                    ['10221'],
+                );
+            }
+            $registrations[] = [
+                'id' => $officeId,
+                'code' => is_string($office['code'] ?? null) ? $office['code'] : '',
+                'name' => is_string($office['name'] ?? null) ? $office['name'] : '',
+                'social_security_variable_symbol' => $valid ? (string) $symbol : null,
+            ];
+        }
+
+        return $registrations;
     }
 
     /**

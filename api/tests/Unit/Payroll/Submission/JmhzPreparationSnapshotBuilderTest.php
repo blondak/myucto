@@ -22,7 +22,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
 
         self::assertSame(
-            'payroll-jmhz-preparation-source.v5',
+            'payroll-jmhz-preparation-source.v6',
             $snapshot->payload['schema_reference'],
         );
         self::assertSame('blocked', $snapshot->readiness()['status']);
@@ -466,6 +466,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
             'employment' => [
                 'id' => 101,
                 'employee_id' => 11,
+                'office_id' => 9,
                 'relation_type' => 'employment',
                 'is_primary' => true,
             ],
@@ -556,10 +557,158 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
                 'result_snapshot_json' => $resultJson,
                 'result_snapshot_hash' => hash('sha256', $resultJson),
             ],
-            'office' => [
-                'id' => 9,
-                'social_security_variable_symbol' => '1234567890',
+            'offices' => [
+                [
+                    'id' => 9,
+                    'code' => 'UC9',
+                    'name' => 'Mzdová účtárna 9',
+                    'social_security_variable_symbol' => '1234567890',
+                    'is_active' => true,
+                ],
             ],
         ];
+    }
+
+    /**
+     * Přehled i hlášení se podávají za REGISTRACI u OSSZ, ne za mzdový běh.
+     * Příprava proto musí nést variabilní symbol každé účtárny, ze které se
+     * z revize podává — dokud si ho brala z účtárny běhu, byl u celofiremního
+     * běhu `NULL` a příprava se nikdy nedostala do stavu `source_ready`.
+     */
+    public function testRegistrationsComeFromEmploymentsNotFromTheRun(): void
+    {
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $this->sourceWithTwoOffices(),
+            [],
+            [],
+        );
+
+        self::assertSame(
+            [
+                [
+                    'id' => 9,
+                    'code' => 'UC9',
+                    'name' => 'Mzdová účtárna 9',
+                    'social_security_variable_symbol' => '1234567890',
+                ],
+                [
+                    'id' => 12,
+                    'code' => 'UC12',
+                    'name' => 'Mzdová účtárna 12',
+                    'social_security_variable_symbol' => '9990001234',
+                ],
+            ],
+            $snapshot->payload['employer_summary']['offices'],
+        );
+        self::assertSame([9, 12], $snapshot->payload['source_versions']['office_ids']);
+        // Jediná registrace se do `office` promítne, dvě už ne — hlášení si
+        // účtárnu musí zvolit.
+        self::assertNull($snapshot->payload['employer_summary']['office']);
+        self::assertNotContains(
+            'social_security_variable_symbol_missing',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+    }
+
+    /**
+     * Chybějící variabilní symbol je adresný nález: účetní se z něj musí
+     * dozvědět, KTEROU registraci má doplnit.
+     */
+    public function testRegistrationWithoutVariableSymbolNamesItsOffice(): void
+    {
+        $source = $this->sourceWithTwoOffices();
+        $source['offices'][1]['social_security_variable_symbol'] = null;
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $source,
+            [],
+            [],
+        );
+
+        $missing = array_values(array_filter(
+            $snapshot->payload['readiness_issues'],
+            static fn (array $issue): bool =>
+                $issue['code'] === 'social_security_variable_symbol_missing',
+        ));
+        self::assertCount(1, $missing);
+        self::assertSame('office', $missing[0]['entity_type']);
+        self::assertSame(12, $missing[0]['entity_id']);
+        self::assertNull(
+            $snapshot->payload['employer_summary']['offices'][1]
+                ['social_security_variable_symbol'],
+        );
+    }
+
+    /**
+     * Zdroj se dvěma pracovními vztahy ve dvou mzdových účtárnách.
+     *
+     * @return array<string,mixed>
+     */
+    private function sourceWithTwoOffices(): array
+    {
+        $source = $this->source();
+        $input = json_decode(
+            $source['revision']['input_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        $result = json_decode(
+            $source['revision']['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($input);
+        self::assertIsArray($result);
+
+        $person = $input['people'][0];
+        $person['employee']['id'] = 12;
+        $person['employments'][0]['employment']['id'] = 102;
+        $person['employments'][0]['employment']['employee_id'] = 12;
+        $person['employments'][0]['employment']['office_id'] = 12;
+        $person['employments'][0]['term']['id'] = 202;
+        $input['people'][] = $person;
+
+        $resultPerson = $result['people'][0];
+        $resultPerson['employee_id'] = 12;
+        $resultPerson['employments'][0]['employment_id'] = 102;
+        $resultPerson['statutory']['social_insurance']['relationships'][0]
+            ['relationship_id'] = 'employment:102';
+        $result['people'][] = $resultPerson;
+
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['input_snapshot_json'],
+        );
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['result_snapshot_json'],
+        );
+        $result = json_decode(
+            $source['revision']['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($result);
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['result_snapshot_json'],
+        );
+        $source['offices'][] = [
+            'id' => 12,
+            'code' => 'UC12',
+            'name' => 'Mzdová účtárna 12',
+            'social_security_variable_symbol' => '9990001234',
+            'is_active' => true,
+        ];
+
+        return $source;
     }
 }

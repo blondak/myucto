@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 const m = vi.hoisted(() => ({
   freeze: vi.fn(),
   dryRun: vi.fn(),
+  offices: vi.fn(),
   canWrite: vi.fn(() => true),
 }))
 
@@ -11,6 +12,7 @@ vi.mock('@/api/payroll', () => ({
   payrollApi: {
     freezeJmhzPreparation: m.freeze,
     jmhzXmlDryRun: m.dryRun,
+    jmhzPvpojOffices: m.offices,
   },
 }))
 
@@ -42,6 +44,72 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)
     m.freeze.mockResolvedValue({ id: 77, readiness_status: 'source_ready' })
+    m.offices.mockResolvedValue([{
+      office_id: 4,
+      code: 'UC4',
+      name: 'Mzdová účtárna 4',
+      social_security_variable_symbol: '1234567890',
+      submittable: true,
+    }])
+  })
+
+  /**
+   * Měsíční hlášení se podává ZA REGISTRACI u OSSZ. Revize přes víc mzdových
+   * účtáren proto nesmí nacvičovat naslepo: dokud si uživatel účtárnu nezvolí,
+   * nácvik se nespustí — vykázat lidi jedné účtárny pod variabilním symbolem
+   * druhé je horší než nic nespustit.
+   */
+  it('u dvou registrací žádá volbu účtárny a předá ji do nácviku', async () => {
+    m.offices.mockResolvedValue([
+      {
+        office_id: 4,
+        code: 'UC4',
+        name: 'Mzdová účtárna 4',
+        social_security_variable_symbol: '1234567890',
+        submittable: true,
+      },
+      {
+        office_id: 5,
+        code: 'UC5',
+        name: 'Mzdová účtárna 5',
+        social_security_variable_symbol: '9990001234',
+        submittable: true,
+      },
+    ])
+    m.dryRun.mockResolvedValue({
+      status: 'dry_run_valid',
+      preparation_id: 77,
+      office_id: 5,
+      blockers: [],
+      xml,
+      xml_sha256: 'b'.repeat(64),
+      schema: {
+        package_key: 'jmhz-1.4.3.4',
+        data_version: '1.4.3',
+        bundle_sha256: 'c'.repeat(64),
+        document_sha256: 'd'.repeat(64),
+      },
+      official_submission: {
+        supported: false,
+        reason_code: 'jmhz_dry_run_is_not_a_submission',
+        reason: 'x',
+      },
+    })
+
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
+      props: { runs: [run] as never[] },
+    })
+    await flushPromises()
+
+    const start = wrapper.get('[data-test="jmhz-dry-run-start-18"]')
+    expect(start.attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-test="jmhz-dry-run-office-18"] select')
+      .setValue('5')
+    await start.trigger('click')
+    await flushPromises()
+
+    expect(m.dryRun).toHaveBeenCalledWith(77, 'test', 5)
   })
 
   it('zmrazí přípravu a ukáže XML ověřené proti připnutému schématu', async () => {
@@ -71,7 +139,7 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     await flushPromises()
 
     expect(m.freeze).toHaveBeenCalledWith(18, expect.any(String))
-    expect(m.dryRun).toHaveBeenCalledWith(77)
+    expect(m.dryRun).toHaveBeenCalledWith(77, 'test', 4)
     expect(wrapper.text()).toContain('jmhz_dry_run_valid')
     expect(wrapper.find('pre').exists()).toBe(false)
 

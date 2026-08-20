@@ -12,28 +12,38 @@ final readonly class JmhzScenario1DocumentService
         private JmhzScenario1DocumentResolver $resolver,
     ) {}
 
+    /**
+     * @param int|null $officeId registrace u OSSZ, za kterou se hlášení
+     *        sestavuje. Přehled o výši pojistného se podává za účtárnu, takže
+     *        se jí musí ptát i tahle vrstva — bez toho spadne běh přes víc
+     *        účtáren na `jmhz_scenario1_pvpoj_source_mismatch`. `null` zůstává
+     *        jednoúčtárenským během.
+     */
     public function resolve(
         int $supplierId,
         string $environment,
         int $preparationId,
+        ?int $officeId = null,
     ): JmhzScenario1Resolution {
         $preparation = $this->preparations->loadVerified(
             $supplierId,
             $environment,
             $preparationId,
         );
-        if (!in_array($preparation->builderVersion, [
-            JmhzPreparationSnapshotBuilder::PREVIOUS_V4_BUILDER_VERSION,
-            JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
-        ], true)) {
-            return $this->resolver->resolve($preparation, null);
+        if (!in_array(
+            $preparation->builderVersion,
+            JmhzScenario1DocumentResolver::SUPPORTED_BUILDER_VERSIONS,
+            true,
+        )) {
+            return $this->resolver->resolve($preparation, null, null, $officeId);
         }
         try {
             $pvpoj = $this->pvpoj->preview(
                 $supplierId,
                 $preparation->sourceRevisionId,
+                $officeId,
             );
-            return $this->resolver->resolve($preparation, $pvpoj);
+            return $this->resolver->resolve($preparation, $pvpoj, null, $officeId);
         } catch (JmhzPvpojPreviewException $exception) {
             return $this->resolver->resolve(
                 $preparation,
@@ -41,6 +51,7 @@ final readonly class JmhzScenario1DocumentService
                 $exception->validationCode === 'jmhz_pvpoj_source_not_found'
                     ? 'jmhz_scenario1_pvpoj_unavailable'
                     : 'jmhz_scenario1_pvpoj_source_mismatch',
+                $officeId,
             );
         }
     }

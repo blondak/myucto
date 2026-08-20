@@ -52,6 +52,13 @@ final class PayrollJmhzSubmissionFreezeAction
             return $this->invalid($response, 'obligation_id musí být kladné celé číslo.');
         }
 
+        // Hlášení se podává za REGISTRACI u OSSZ. Běh přes víc mzdových účtáren
+        // proto zmrazí tolik podání, kolik má registrací, a každé si volí svou.
+        $officeId = self::narrowingId($body, 'office');
+        if ($officeId !== null && $officeId <= 0) {
+            return $this->invalid($response, 'office musí být kladné celé číslo.');
+        }
+
         try {
             $result = $this->bridge->bridge(
                 $this->currentSupplierId($request),
@@ -59,6 +66,7 @@ final class PayrollJmhzSubmissionFreezeAction
                 (int) $obligationId,
                 $environment,
                 $this->userId($request),
+                $officeId,
             );
         } catch (\DomainException $exception) {
             return Json::error($response, 'conflict', $exception->getMessage(), 409);

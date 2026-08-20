@@ -421,6 +421,84 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         self::assertSame(0, $this->countRows('payroll_submissions'));
     }
 
+    /**
+     * Dvě registrace u OSSZ = dvě podání.
+     *
+     * Zmrazený GUID je jednorázový: duplicitu přijatého podání nelze u ČSSZ
+     * vzít zpět. Idempotence proto musí být PER REGISTRACI — dokud byla per
+     * revizi, druhá účtárna dostala idempotentní odpověď první, tedy cizí GUID
+     * i cizí variabilní symbol, místo vlastního podání.
+     */
+    public function testEachRegistrationFreezesItsOwnSubmissionAndGuid(): void
+    {
+        $first = $this->officeBridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(4),
+            self::ENVIRONMENT,
+            $this->userId,
+            4,
+        );
+        $second = $this->officeBridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(5),
+            self::ENVIRONMENT,
+            $this->userId,
+            5,
+        );
+
+        self::assertTrue($first['created']);
+        self::assertTrue($second['created']);
+        self::assertNotSame($first['submission_id'], $second['submission_id']);
+        self::assertNotSame($first['submission_guid'], $second['submission_guid']);
+        self::assertSame('1234567890', $first['variable_symbol']);
+        self::assertSame('9990001234', $second['variable_symbol']);
+
+        // Opakování TÉŽE registrace naopak musí vrátit původní podání i GUID.
+        $replay = $this->officeBridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(4),
+            self::ENVIRONMENT,
+            $this->userId,
+            4,
+        );
+        self::assertFalse($replay['created']);
+        self::assertSame($first['submission_id'], $replay['submission_id']);
+        self::assertSame($first['submission_guid'], $replay['submission_guid']);
+        self::assertSame($first['artifact_sha256'], $replay['artifact_sha256']);
+    }
+
+    /**
+     * Most, který dokument řeší podle zvolené mzdové účtárny — stejně jako
+     * skutečný `JmhzScenario1DocumentService`.
+     */
+    private function officeBridge(): JmhzSubmissionBridgeService
+    {
+        $documents = $this->createStub(JmhzScenario1DocumentService::class);
+        $documents->method('resolve')->willReturnCallback(
+            fn (
+                int $supplierId,
+                string $environment,
+                int $preparationId,
+                ?int $officeId = null,
+            ): JmhzScenario1Resolution => $officeId === 5
+                ? $this->resolutionForOffice(5, '9990001234')
+                : $this->resolutionForOffice(4, '1234567890'),
+        );
+
+        return new JmhzSubmissionBridgeService(
+            $documents,
+            new JmhzScenario1XmlValidator(),
+            JmhzScenario1ControlValidator::create(),
+            new JmhzSubmissionGuidFactory(),
+            $this->submissionRepository,
+            $this->submissions,
+            new MockClock('2026-08-05 11:30:00 Europe/Prague'),
+        );
+    }
+
     private function bridge(
         ?JmhzScenario1Resolution $resolution = null,
     ): JmhzSubmissionBridgeService {
@@ -440,13 +518,13 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         );
     }
 
-    private function registerObligation(): int
+    private function registerObligation(?int $officeId = null): int
     {
         $obligation = $this->obligations->register(
             $this->supplierId,
             JmhzSubmissionBridgeService::AGENDA_CODE,
             'payroll_run',
-            JmhzSubmissionBridgeService::runReference(self::RUN_ID),
+            JmhzSubmissionBridgeService::runReference(self::RUN_ID, $officeId),
             self::PERIOD_START,
             self::PERIOD_END,
             'regular',
@@ -461,7 +539,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             'calendar_days',
             'jmhz25-deadline-test',
             str_repeat('d', 64),
-            'jmhz-bridge-obligation:' . self::PREPARATION_ID,
+            'jmhz-bridge-obligation:' . self::PREPARATION_ID
+                . ($officeId === null ? '' : ":office:{$officeId}"),
             null,
             $this->userId,
             null,
@@ -485,8 +564,47 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         return $this->resolutionFor($this->pvpoj(employerTotal: 247));
     }
 
+    /**
+     * Řádné podání za JEDNU registraci u OSSZ.
+     *
+     * @param array<string,mixed>|null $payload
+     */
+    private function resolutionForOffice(
+        int $officeId,
+        string $variableSymbol,
+    ): JmhzScenario1Resolution {
+        $payload = $this->payload();
+        $payload['schema_reference'] = 'payroll-jmhz-preparation-source.v6';
+        $payload['employer_summary']['office'] = null;
+        $payload['employer_summary']['offices'] = [
+            [
+                'id' => 4,
+                'code' => 'UC4',
+                'name' => 'Mzdová účtárna 4',
+                'social_security_variable_symbol' => '1234567890',
+            ],
+            [
+                'id' => 5,
+                'code' => 'UC5',
+                'name' => 'Mzdová účtárna 5',
+                'social_security_variable_symbol' => '9990001234',
+            ],
+        ];
+        $payload['people'][0]['employments'][0]['employment']['office_id']
+            = $officeId;
+
+        return $this->resolutionFor(
+            $this->pvpoj(officeId: $officeId, variableSymbol: $variableSymbol),
+            $payload,
+            $officeId,
+        );
+    }
+
+    /** @param array<string,mixed>|null $payload */
     private function resolutionFor(
         JmhzPvpojPreview $pvpoj,
+        ?array $payload = null,
+        ?int $officeId = null,
     ): JmhzScenario1Resolution {
         $preparation = new JmhzVerifiedPreparationSnapshot(
             self::PREPARATION_ID,
@@ -510,17 +628,22 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
                 'issues' => [],
                 'official_submission_supported' => false,
             ],
-            $this->payload(),
+            $payload ?? $this->payload(),
         );
 
         return (new JmhzScenario1DocumentResolver())->resolve(
             $preparation,
             $pvpoj,
+            null,
+            $officeId,
         );
     }
 
-    private function pvpoj(int $employerTotal = 248): JmhzPvpojPreview
-    {
+    private function pvpoj(
+        int $employerTotal = 248,
+        int $officeId = 4,
+        string $variableSymbol = '1234567890',
+    ): JmhzPvpojPreview {
         return new JmhzPvpojPreview(
             7,
             self::RUN_ID,
@@ -528,13 +651,13 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             1,
             '2026-07',
             [
-                'office_id' => 4,
-                'code' => 'UC4',
-                'name' => 'Mzdová účtárna 4',
-                'variable_symbol' => '1234567890',
+                'office_id' => $officeId,
+                'code' => 'UC' . $officeId,
+                'name' => 'Mzdová účtárna ' . $officeId,
+                'variable_symbol' => $variableSymbol,
             ],
             [[
-                'office_id' => 4,
+                'office_id' => $officeId,
                 'employee_contribution_minor_units' => 7_100,
                 'employer_contribution_minor_units' => 24_800,
                 'amount_minor_units' => 31_900,

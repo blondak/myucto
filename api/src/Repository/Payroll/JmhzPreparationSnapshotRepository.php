@@ -38,7 +38,18 @@ final class JmhzPreparationSnapshotRepository
         }
     }
 
-    /** @return array<string,mixed>|null */
+    /**
+     * Zdroj přípravy JMHZ.
+     *
+     * Variabilní symbol se ZÁMĚRNĚ nebere z `run.office_id`. To je jen filtr
+     * rozsahu běhu — u celofiremního běhu je legitimně `NULL` a u běhu přes
+     * víc účtáren by ukázal na jedinou z nich. Registrace u OSSZ je přitom na
+     * účtárně PRACOVNÍHO VZTAHU, takže se načte celý (malý) číselník firmy
+     * a účtárny podání si z něj vybere builder podle zmrazeného vstupu —
+     * stejně jako {@see JmhzPvpojPreviewRepository::findSource()}.
+     *
+     * @return array<string,mixed>|null
+     */
     public function lockSource(int $supplierId, int $revisionId): ?array
     {
         $statement = $this->db->pdo()->prepare(
@@ -47,15 +58,11 @@ final class JmhzPreparationSnapshotRepository
                     revision.schema_version, revision.ruleset_manifest_hash,
                     revision.input_snapshot_json, revision.input_snapshot_hash,
                     revision.result_snapshot_json, revision.result_snapshot_hash,
-                    run.period_start, run.current_revision_no, run.office_id,
-                    office.social_security_variable_symbol
+                    run.period_start, run.current_revision_no, run.office_id
                FROM payroll_run_revisions revision
                JOIN payroll_runs run
                  ON run.supplier_id = revision.supplier_id
                 AND run.id = revision.run_id
-          LEFT JOIN payroll_offices office
-                 ON office.supplier_id = run.supplier_id
-                AND office.id = run.office_id
               WHERE revision.supplier_id = ? AND revision.id = ?
               FOR UPDATE'
         );
@@ -70,11 +77,44 @@ final class JmhzPreparationSnapshotRepository
         $row['office_id'] = $row['office_id'] === null ? null : (int) $row['office_id'];
         return [
             'revision' => $row,
-            'office' => [
-                'id' => $row['office_id'],
-                'social_security_variable_symbol' => $row['social_security_variable_symbol'],
-            ],
+            'offices' => $this->offices($supplierId),
         ];
+    }
+
+    /**
+     * Číselník mzdových účtáren firmy — registrace u OSSZ.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function offices(int $supplierId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, code, name, social_security_variable_symbol, is_active
+               FROM payroll_offices
+              WHERE supplier_id = ?
+              ORDER BY id'
+        );
+        $statement->execute([$supplierId]);
+        $offices = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $office) {
+            if (!is_array($office)) {
+                throw new \UnexpectedValueException(
+                    'Databáze vrátila neplatnou mzdovou účtárnu.',
+                );
+            }
+            $symbol = $office['social_security_variable_symbol'] ?? null;
+            $offices[] = [
+                'id' => (int) $office['id'],
+                'code' => (string) $office['code'],
+                'name' => (string) $office['name'],
+                'social_security_variable_symbol' => $symbol === null
+                    ? null
+                    : (string) $symbol,
+                'is_active' => (int) ($office['is_active'] ?? 0) === 1,
+            ];
+        }
+
+        return $offices;
     }
 
     /** @return array<string,mixed>|null */

@@ -27,16 +27,22 @@ final readonly class JmhzScenario1XmlDryRunService
         private JmhzDeadlinePolicy $deadlines = new JmhzDeadlinePolicy(),
     ) {}
 
-    /** @return array<string,mixed> */
+    /**
+     * @param int|null $officeId registrace u OSSZ, za kterou se nacvičuje;
+     *        `null` je jednoúčtárenský běh
+     * @return array<string,mixed>
+     */
     public function dryRun(
         int $supplierId,
         string $environment,
         int $preparationId,
+        ?int $officeId = null,
     ): array {
         $resolution = $this->documents->resolve(
             $supplierId,
             $environment,
             $preparationId,
+            $officeId,
         );
         $blockers = array_map(
             static fn (JmhzScenario1Blocker $blocker): array => $blocker->toArray(),
@@ -46,6 +52,7 @@ final readonly class JmhzScenario1XmlDryRunService
             return [
                 'status' => 'blocked',
                 'preparation_id' => $preparationId,
+                'office_id' => $officeId,
                 'blockers' => $blockers,
                 'official_submission' => $this->officialSubmission(),
             ];
@@ -74,6 +81,7 @@ final readonly class JmhzScenario1XmlDryRunService
         return [
             'status' => $controls->submittable() ? 'dry_run_valid' : 'dry_run_incomplete',
             'preparation_id' => $preparationId,
+            'office_id' => $officeId,
             'blockers' => [],
             'controls' => $controls->toArray(),
             'deadline' => $this->deadline($document),

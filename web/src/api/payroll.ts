@@ -1782,6 +1782,19 @@ export interface PayrollHealthPaymentOverview {
   filename: string
 }
 
+/**
+ * Mzdová účtárna = registrace u OSSZ. Přehled o výši pojistného se podává za
+ * registraci, takže běh přes víc účtáren dá víc přehledů. `submittable` je
+ * false, dokud účtárna nemá variabilní symbol zaměstnavatele.
+ */
+export interface PayrollJmhzPvpojOffice {
+  office_id: number
+  code: string
+  name: string
+  social_security_variable_symbol: string | null
+  submittable: boolean
+}
+
 export interface PayrollJmhzPvpojPreview {
   schema_reference: 'payroll-jmhz-pvpoj-preview.v1'
   document_kind: 'internal_jmhz_pvpoj_preview'
@@ -1802,6 +1815,22 @@ export interface PayrollJmhzPvpojPreview {
   revision_no: number
   period: string
   currency_code: 'CZK'
+  office: {
+    office_id: number
+    code: string
+    name: string
+    variable_symbol: string
+  }
+  office_allocation: {
+    method: string
+    root_result_is_single_source_of_truth: boolean
+    offices: Array<{
+      office_id: number
+      employee_contribution_minor_units: number
+      employer_contribution_minor_units: number
+      amount_minor_units: number
+    }>
+  }
   source: {
     revision_input_hash: string
     statutory_result_id: number
@@ -3668,9 +3697,18 @@ export const payrollApi = {
       URL.revokeObjectURL(objectUrl)
     }
   },
-  jmhzPvpojPreview: (revisionId: number) =>
+  /**
+   * Mzdové účtárny, za které se z revize podává. Bez nich nemá uživatel kde
+   * zjistit, kterou registraci má do náhledu poslat.
+   */
+  jmhzPvpojOffices: (revisionId: number) =>
+    api.get<{ offices: PayrollJmhzPvpojOffice[] }>(
+      `/payroll/submissions/jmhz-pvpoj/${revisionId}/offices`,
+    ).then(response => response.data.offices),
+  jmhzPvpojPreview: (revisionId: number, officeId?: number | null) =>
     api.get<PayrollJmhzPvpojPreview>(
       `/payroll/submissions/jmhz-pvpoj/${revisionId}`,
+      officeId == null ? undefined : { params: { office: officeId } },
     ).then(response => response.data),
   jmhzOrdinaryEvidence: (revisionId: number) =>
     api.get<{ evidence: PayrollJmhzOrdinaryEvidence | null }>(
@@ -3705,9 +3743,14 @@ export const payrollApi = {
   jmhzXmlDryRun: (
     preparationId: number,
     environment: 'test' | 'production' = 'test',
+    officeId?: number | null,
   ) => api.get<PayrollJmhzXmlDryRun>(
     `/payroll/submissions/jmhz-xml-dry-run/${preparationId}`,
-    { params: { environment } },
+    {
+      params: officeId == null
+        ? { environment }
+        : { environment, office: officeId },
+    },
   ).then(response => response.data),
   previewEmploymentRegistration: (
     employmentId: number,
@@ -3728,7 +3771,12 @@ export const payrollApi = {
   ): Promise<void> => {
     const response = await api.get<Blob>(
       `/payroll/submissions/jmhz-pvpoj/${preview.revision_id}/download`,
-      { responseType: 'blob' },
+      {
+        responseType: 'blob',
+        // Stažení musí trefit TUTÉŽ registraci jako náhled — jinak by soubor
+        // pojmenovaný podle jedné účtárny nesl čísla jiné.
+        params: { office: preview.office.office_id },
+      },
     )
     const objectUrl = URL.createObjectURL(response.data)
     try {

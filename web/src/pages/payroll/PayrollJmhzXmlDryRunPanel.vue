@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
   type PayrollJmhzControlFinding,
   type PayrollJmhzControlReport,
+  type PayrollJmhzPvpojOffice,
   type PayrollJmhzXmlDryRun,
   type PayrollRun,
 } from '@/api/payroll'
@@ -25,9 +26,61 @@ const { t } = useI18n()
 const auth = useAuthStore()
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 const states = ref<Record<number, DryRunState>>({})
+/**
+ * Registrace u OSSZ, za které se z revize podává. Měsíční hlášení je podání
+ * ZA REGISTRACI, takže nácvik nad během přes víc mzdových účtáren musí vědět,
+ * kterou z nich zkouší — jinak by se lidé jedné účtárny vykázali pod cizím
+ * variabilním symbolem.
+ */
+const offices = ref<Record<number, PayrollJmhzPvpojOffice[]>>({})
+const selectedOffice = ref<Record<number, number | null>>({})
+
+watch(() => props.runs, async runs => {
+  const loaded: Record<number, PayrollJmhzPvpojOffice[]> = {}
+  const selected: Record<number, number | null> = {}
+  const ids = runs
+    .map(revisionId)
+    .filter((id): id is number => id !== null)
+  const responses = await Promise.allSettled(
+    ids.map(id => payrollApi.jmhzPvpojOffices(id)),
+  )
+  responses.forEach((response, index) => {
+    const id = ids[index]!
+    const rows = response.status === 'fulfilled' ? response.value : []
+    loaded[id] = rows
+    const submittable = rows.filter(office => office.submittable)
+    selected[id] = submittable.length === 1
+      ? submittable[0]!.office_id
+      : selectedOffice.value[id] ?? null
+  })
+  offices.value = loaded
+  selectedOffice.value = selected
+}, { immediate: true, deep: true })
 
 function revisionId(run: PayrollRun): number | null {
   return run.revision_id && run.revision_id > 0 ? run.revision_id : null
+}
+
+function officeOptions(run: PayrollRun): PayrollJmhzPvpojOffice[] {
+  const id = revisionId(run)
+  return id === null ? [] : offices.value[id] ?? []
+}
+
+function submittableOffices(revision: number): PayrollJmhzPvpojOffice[] {
+  return (offices.value[revision] ?? []).filter(office => office.submittable)
+}
+
+async function ensureOffices(revision: number): Promise<void> {
+  if (offices.value[revision] !== undefined) return
+  const rows = await payrollApi.jmhzPvpojOffices(revision).catch(() => [])
+  offices.value = { ...offices.value, [revision]: rows }
+  const submittable = rows.filter(office => office.submittable)
+  if (selectedOffice.value[revision] == null && submittable.length === 1) {
+    selectedOffice.value = {
+      ...selectedOffice.value,
+      [revision]: submittable[0]!.office_id,
+    }
+  }
 }
 
 function state(run: PayrollRun): DryRunState | null {
@@ -46,11 +99,24 @@ async function run(payrollRun: PayrollRun) {
   }
   states.value = { ...states.value, [id]: current }
   try {
+    // Registrace se mohou ještě načítat — spustit nácvik dřív, než je známý
+    // seznam účtáren, by u víceúčtárenské revize znamenalo nacvičit naslepo.
+    await ensureOffices(id)
+    if (submittableOffices(id).length > 1 && selectedOffice.value[id] == null) {
+      states.value[id].error = t(
+        'payroll.submissions.overview.jmhz_social_multiple_offices',
+      )
+      return
+    }
     const preparation = await payrollApi.freezeJmhzPreparation(
       id,
       crypto.randomUUID(),
     )
-    states.value[id].result = await payrollApi.jmhzXmlDryRun(preparation.id)
+    states.value[id].result = await payrollApi.jmhzXmlDryRun(
+      preparation.id,
+      'test',
+      selectedOffice.value[id] ?? null,
+    )
   } catch (exception) {
     states.value[id].error = apiErrorMessage(
       exception,
@@ -137,10 +203,40 @@ async function copyXml(payrollRun: PayrollRun) {
               revision: payrollRun.revision_no,
             }) }}
           </h3>
+          <label
+            v-if="officeOptions(payrollRun).length > 1"
+            class="flex flex-wrap items-center gap-2 text-sm text-neutral-600"
+            :data-test="`jmhz-dry-run-office-${payrollRun.revision_id}`"
+          >
+            <span class="whitespace-nowrap">
+              {{ t('payroll.submissions.overview.jmhz_dry_run_office') }}
+            </span>
+            <select
+              v-model="selectedOffice[payrollRun.revision_id!]"
+              class="rounded-lg border border-neutral-300 bg-surface px-2 py-1 text-sm"
+            >
+              <option :value="null">
+                {{ t('payroll.submissions.overview.jmhz_dry_run_office_choose') }}
+              </option>
+              <option
+                v-for="office in officeOptions(payrollRun)"
+                :key="office.office_id"
+                :value="office.office_id"
+                :disabled="!office.submittable"
+              >
+                {{ office.code }} · {{ office.name }}
+                {{ office.submittable
+                  ? ''
+                  : t('payroll.submissions.overview.jmhz_office_variable_symbol_missing') }}
+              </option>
+            </select>
+          </label>
           <button
             type="button"
             :class="btnFilled('primary')"
-            :disabled="!canWrite || state(payrollRun)?.running"
+            :disabled="!canWrite || state(payrollRun)?.running
+              || (officeOptions(payrollRun).length > 1
+                && selectedOffice[payrollRun.revision_id!] == null)"
             :data-test="`jmhz-dry-run-start-${payrollRun.revision_id}`"
             @click="run(payrollRun)"
           >
