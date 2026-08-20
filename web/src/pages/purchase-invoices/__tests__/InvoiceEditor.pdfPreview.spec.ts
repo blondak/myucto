@@ -62,6 +62,17 @@ vi.mock('@/api/expenseCategories', () => ({
   expenseCategoriesApi: { list: vi.fn().mockResolvedValue([]) },
 }))
 
+// Zakázky a pokladny přibyly do loadCodebooks() až po vzniku tohohle testu. Bez mocku
+// jde v jsdom skutečný HTTP požadavek, který se nikdy nevrátí — onMounted() se proto
+// zasekne PŘED načtením faktury a komponenta zůstane trvale ve stavu „načítám".
+vi.mock('@/api/projects', () => ({
+  projectsApi: { list: vi.fn().mockResolvedValue({ data: [] }) },
+}))
+
+vi.mock('@/api/cash', () => ({
+  cashApi: { listRegisters: vi.fn().mockResolvedValue([]) },
+}))
+
 vi.mock('@/api/vatClassifications', () => ({
   vatClassificationsApi: { list: vi.fn().mockResolvedValue([]) },
 }))
