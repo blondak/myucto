@@ -117,11 +117,20 @@ describe('payroll REGZEL API', () => {
       data: {
         revision_id: 18,
         workflow_status: 'preview_only',
-        filename: 'jmhz-pvpoj-preview-2026-08-revize-18.json',
+        filename: 'jmhz-pvpoj-preview-2026-08-revize-18-uctarna-4.json',
+        office: {
+          office_id: 4,
+          code: 'HLAVNI',
+          name: 'Hlavni uctarna',
+          social_security_variable_symbol: '1234567890',
+          submittable: true,
+        },
       },
     })
     const preview = await payrollApi.jmhzPvpojPreview(18)
-    expect(m.get).toHaveBeenCalledWith('/payroll/submissions/jmhz-pvpoj/18')
+    // Bez zvolené účtárny se nesmí poslat žádný parametr — jinak by
+    // jednoúčtárenský běh mířil na jinou registraci, než ze které vznikl.
+    expect(m.get).toHaveBeenCalledWith('/payroll/submissions/jmhz-pvpoj/18', undefined)
 
     m.get.mockResolvedValueOnce({ data: new Blob(['synthetic-pvpoj']) })
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:synthetic-pvpoj')
@@ -131,7 +140,7 @@ describe('payroll REGZEL API', () => {
     await payrollApi.downloadJmhzPvpojPreview(preview)
     expect(m.get).toHaveBeenLastCalledWith(
       '/payroll/submissions/jmhz-pvpoj/18/download',
-      { responseType: 'blob' },
+      { responseType: 'blob', params: { office: 4 } },
     )
   })
 
