@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\RetentionHoldRepository;
 use MyInvoice\Repository\TaxSubmissionEpoRepository;
 use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Security\AccessLevel;
@@ -26,6 +27,10 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET    /api/reports/submissions/{id}/xml    → XML download
  *   POST   /api/reports/submissions/{id}/submit → označit jako prokazatelně PODANÉ (§2.4)
  *   DELETE /api/reports/submissions/{id}        → smazat archiv (admin)
+ *
+ * Mazání: blokuje jen to, co PROKAZATELNĚ odešlo, plus nedořešená předání — ta jde
+ * uvolnit vědomým potvrzením `not_submitted_note`. Pravidlo drží
+ * {@see TaxSubmissionEpoRepository::deletionBlocker()}.
  */
 final class TaxSubmissionAction
 {
@@ -35,6 +40,7 @@ final class TaxSubmissionAction
         private readonly TaxSubmissionArchiver $archiver,
         private readonly ActivityLogger $logger,
         private readonly Connection $db,
+        private readonly RetentionHoldRepository $holds,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -55,8 +61,7 @@ final class TaxSubmissionAction
         $supplierId = SupplierGuard::currentId($request);
         $row = $this->repo->find((int) ($args['id'] ?? 0), $supplierId);
         if ($row === null) return Json::error($response, 'not_found', 'Záznam nenalezen.', 404);
-        $row['attempts'] = $this->epo->attempts((int) $row['id'], $supplierId);
-        $row['artifacts'] = $this->epo->artifacts((int) $row['id'], $supplierId);
+        $row = $this->epo->enrich([$row], $supplierId)[0];
         return Json::ok($response, $row);
     }
 
@@ -191,19 +196,87 @@ final class TaxSubmissionAction
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $userId = (int) ($user['id'] ?? 0);
         $id = (int) ($args['id'] ?? 0);
-        $result = $this->epo->deleteSubmissionIfNoEvidence($id, $supplierId);
-        if ($result === 'has_evidence') {
+
+        $snapshot = $this->repo->find($id, $supplierId);
+        if ($snapshot === null) {
+            return Json::error($response, 'not_found', 'Záznam nenalezen.', 404);
+        }
+
+        // § 32 ZoÚ: běží-li nad obdobím daňové řízení, nesmí být mazání snapshotu cestou,
+        // jak se zbavit podkladu, který správce daně prověřuje. Lhůty § 31 / § 35a se
+        // naopak neuplatní — nepodaný XML snapshot není účetní ani daňový doklad, a ten
+        // podaný blokuje `delivered_attempt`, což je přísnější než jakákoli lhůta.
+        $periodYear = (int) ($snapshot['period_year'] ?? 0);
+        if ($periodYear > 0 && $this->holds->hasActiveHold($supplierId, $periodYear)) {
             return Json::error(
                 $response,
-                'submission_has_evidence',
-                'Podání s EPO pokusem, dokumentem nebo potvrzeným stavem nelze smazat.',
+                'submission_on_retention_hold',
+                sprintf(
+                    'Snapshot nelze smazat: záznamy období %d jsou zadržené podle § 32 ZoÚ.',
+                    $periodYear,
+                ),
                 409,
             );
         }
-        if ($result === 'not_found') {
+
+        $body = (array) ($request->getParsedBody() ?? []);
+        $note = trim((string) ($body['not_submitted_note'] ?? ''));
+        $unresolved = $this->epo->unresolvedAttempts($id, $supplierId);
+
+        $outcome = $this->epo->deleteSubmission(
+            $id,
+            $supplierId,
+            $userId > 0 ? $userId : null,
+            $note !== '' ? $note : null,
+        );
+
+        if ($outcome['result'] === 'not_found') {
             return Json::error($response, 'not_found', 'Záznam nenalezen.', 404);
         }
-        return Json::ok($response, ['deleted' => true]);
+        if ($outcome['result'] === 'blocked') {
+            return match ($outcome['blocker']) {
+                TaxSubmissionEpoRepository::BLOCK_UNRESOLVED => Json::error(
+                    $response,
+                    'submission_outcome_unresolved',
+                    'Snapshot má předání do EPO, u kterého nevíme, jak dopadlo. Ověřte v portálu '
+                        . 'EPO, jestli podání prošlo. Pokud ne, uzavřete ho jako nepodané '
+                        . '(uveďte, jak jste to ověřili) a teprve pak snapshot smažte.',
+                    409,
+                    ['attempts' => $unresolved],
+                ),
+                default => Json::error(
+                    $response,
+                    'submission_has_evidence',
+                    'Snapshot má důkaz o podání (potvrzený pokus, podací číslo nebo doručenku) '
+                        . 'a nelze ho smazat — je to zákonný doklad o podání.',
+                    409,
+                ),
+            };
+        }
+
+        // Auditní stopa musí přežít smazaný snapshot: navázané řádky odejdou s ním
+        // (FK ON DELETE CASCADE), takže co se smazalo, se pak z DB nedozvíme.
+        $this->logger->log('report.submission_deleted', $userId ?: null, 'tax_submission', $id, [
+            'submission_id'   => $id,
+            'form_code'       => $snapshot['form_code'] ?? null,
+            'period_year'     => $snapshot['period_year'] ?? null,
+            'period_month'    => $snapshot['period_month'] ?? null,
+            'period_quarter'  => $snapshot['period_quarter'] ?? null,
+            'status'          => $snapshot['status'] ?? null,
+            'xml_sha256'      => $snapshot['xml_sha256'] ?? null,
+            'purged'          => $outcome['purged'],
+            'released_attempts' => $outcome['released_attempts'],
+            'not_submitted_note' => $outcome['released_attempts'] > 0 ? $note : null,
+            'unresolved_attempts' => $outcome['released_attempts'] > 0 ? $unresolved : [],
+        ], null, null, $supplierId);
+
+        return Json::ok($response, [
+            'deleted' => true,
+            'purged' => $outcome['purged'],
+            'released_attempts' => $outcome['released_attempts'],
+        ]);
     }
 }

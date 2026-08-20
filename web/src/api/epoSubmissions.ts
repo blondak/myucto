@@ -100,7 +100,21 @@ export interface TaxSubmission {
   notes: string | null
   attempts: EpoAttempt[]
   artifacts: EpoArtifact[]
+  /** Smazatelnost počítá backend — UI jen zrcadlí to, co brána skutečně udělá. */
+  deletable: boolean
+  delete_blocker: SubmissionDeleteBlocker | null
+  /** Nedořešené předání jde odemknout vědomým potvrzením „nepodáno". */
+  delete_needs_acknowledgement: boolean
 }
+
+/**
+ * `submitted_snapshot` / `delivered_attempt` = prokazatelně podáno, mazat nelze.
+ * `unresolved_attempt` = nevíme, jak předání dopadlo — uživatel to může uzavřít.
+ */
+export type SubmissionDeleteBlocker =
+  | 'submitted_snapshot'
+  | 'delivered_attempt'
+  | 'unresolved_attempt'
 
 export interface EpoFolder {
   id: number
@@ -332,8 +346,15 @@ export const epoSubmissionsApi = {
       submission_ref: submissionRef,
     }).then(r => r.data),
 
-  remove: (id: number) =>
-    api.delete<{ deleted: boolean }>(`/reports/submissions/${id}`).then(r => r.data),
+  /**
+   * `notSubmittedNote` = vědomé potvrzení, že nedořešené předání nakonec podané nebylo.
+   * Tvrdé blokace (prokazatelně podáno) neuvolní — ty backend odmítne i s poznámkou.
+   */
+  remove: (id: number, notSubmittedNote?: string) =>
+    api.delete<{ deleted: boolean; released_attempts: number }>(
+      `/reports/submissions/${id}`,
+      notSubmittedNote ? { data: { not_submitted_note: notSubmittedNote } } : undefined,
+    ).then(r => r.data),
 
   xmlUrl: (id: number) => {
     const params = new URLSearchParams()

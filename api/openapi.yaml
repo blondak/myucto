@@ -6136,13 +6136,28 @@ paths:
     delete:
       tags: [Reports]
       summary: Smaže archivovaný záznam (jen admin)
+      description: >-
+        Blokuje jen to, co prokazatelně odešlo. Testovací pokus EPO (`test=1`) mazání
+        nebrání. U předání, jehož výsledek aplikace nezná, je potřeba vědomé potvrzení
+        `not_submitted_note` — pokus se tím uzavře jako nepodaný.
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
         - $ref: '#/components/parameters/SupplierIdHeader'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                not_submitted_note:
+                  type: string
+                  maxLength: 500
+                  description: Jak bylo ověřeno, že podání nevzniklo.
       responses:
         '200': { description: Deleted }
         '403': { description: Pouze admin }
-        '409': { description: Podání už obsahuje EPO pokus, dokument nebo potvrzený stav }
+        '409': { description: Prokazatelné podání, nedořešené předání nebo retenční hold podle § 32 ZoÚ }
 
   /api/v1/reports/submissions/{id}/xml:
     get:
@@ -21411,6 +21426,17 @@ components:
         artifacts:
           type: array
           items: { $ref: '#/components/schemas/EpoSubmissionArtifact' }
+        deletable: { type: boolean, description: Snapshot lze smazat bez dalšího potvrzení. }
+        delete_blocker:
+          type: [string, "null"]
+          enum: [submitted_snapshot, delivered_attempt, unresolved_attempt, null]
+          description: >-
+            Proč mazání nejde. `submitted_snapshot`/`delivered_attempt` = prokazatelně podáno,
+            neuvolní to ani potvrzení uživatele. `unresolved_attempt` = aplikace neví, jak
+            předání do EPO dopadlo.
+        delete_needs_acknowledgement:
+          type: boolean
+          description: Mazání projde až s vědomým potvrzením `not_submitted_note`.
     EpoHandoffResult:
       type: object
       required: [attempt_id, url, expires_at, archive_folder_id, source_document_id, environment]
