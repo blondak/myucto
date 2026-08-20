@@ -130,6 +130,22 @@ function showCreate(PDO $pdo, string $kind, string $schema, string $name): strin
     throw new RuntimeException("SHOW CREATE {$kind} {$name} nevrátilo DDL.");
 }
 
+/** @return list<string> */
+function columnsToCopy(PDO $pdo, string $schema, string $table): array
+{
+    $statement = $pdo->prepare(
+        'SELECT COLUMN_NAME
+           FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = ?
+            AND TABLE_NAME = ?
+            AND UPPER(EXTRA) NOT LIKE \'%GENERATED%\'
+          ORDER BY ORDINAL_POSITION',
+    );
+    $statement->execute([$schema, $table]);
+
+    return array_map('strval', $statement->fetchAll(PDO::FETCH_COLUMN));
+}
+
 function cloneDatabase(PDO $pdo, string $source, string $target): void
 {
     assertTestDatabaseName($source, 'Zdroj');
@@ -162,9 +178,14 @@ function cloneDatabase(PDO $pdo, string $source, string $target): void
         }
         foreach ($tables as $table) {
             try {
+                $columns = columnsToCopy($pdo, $source, $table);
+                if ($columns === []) {
+                    throw new RuntimeException('Tabulka neobsahuje žádný kopírovatelný sloupec.');
+                }
+                $columnList = implode(', ', array_map(quoteIdentifier(...), $columns));
                 $pdo->exec(
-                    'INSERT INTO ' . quoteIdentifier($target) . '.' . quoteIdentifier($table)
-                    . ' SELECT * FROM ' . quoteIdentifier($source) . '.' . quoteIdentifier($table),
+                    'INSERT INTO ' . quoteIdentifier($target) . '.' . quoteIdentifier($table) . ' (' . $columnList . ')'
+                    . ' SELECT ' . $columnList . ' FROM ' . quoteIdentifier($source) . '.' . quoteIdentifier($table),
                 );
             } catch (Throwable $e) {
                 throw new RuntimeException("Data tabulky {$table} nelze zkopírovat.", previous: $e);
