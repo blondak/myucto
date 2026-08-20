@@ -29,6 +29,7 @@ import { useToast } from '@/composables/useToast'
 import { focusLastRow } from '@/composables/useRowFocus'
 import { apiErrorMessage } from '@/api/errors'
 import { useSupplierStore } from '@/stores/supplier'
+import Modal from '@/components/ui/Modal.vue'
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -361,16 +362,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <div v-if="modelValue" class="fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto">
-    <div class="bg-surface rounded-xl shadow-lg max-w-4xl w-full my-4">
-      <header class="px-5 py-4 border-b border-neutral-200 flex items-baseline justify-between gap-3">
-        <h3 class="text-lg font-semibold">{{ t('invoice.wr_btn') }}</h3>
-        <button @click="close" class="cursor-pointer text-neutral-400 hover:text-neutral-700 text-2xl leading-none">&times;</button>
-      </header>
-
+  <Modal v-if="modelValue" :title="t('invoice.wr_btn')" width-class="max-w-4xl" @close="close">
       <div v-if="loading" class="p-8 text-center text-neutral-500">{{ t('common.loading') }}</div>
 
-      <div v-else class="p-5 space-y-6">
+      <div v-else class="space-y-6">
         <!-- ════════ Sekce: Výkaz práce ════════ -->
         <section class="space-y-4">
           <div class="flex items-center justify-between gap-3 border-b border-neutral-200 pb-1">
@@ -700,7 +695,8 @@ onMounted(() => {
         </p>
       </div>
 
-      <footer class="px-5 py-4 border-t border-neutral-200 flex items-center justify-between">
+      <template #footer>
+      <div class="flex items-center justify-between">
         <button @click="close"
                 class="cursor-pointer h-10 px-4 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">
           {{ t('common.cancel') }}
@@ -709,7 +705,7 @@ onMounted(() => {
                 class="cursor-pointer h-10 px-5 text-sm bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
           {{ saving ? t('common.saving') : t('invoice.wr_save_and_sync') }}
         </button>
-      </footer>
-    </div>
-  </div>
+      </div>
+      </template>
+  </Modal>
 </template>

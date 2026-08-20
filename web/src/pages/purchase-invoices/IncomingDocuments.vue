@@ -33,6 +33,7 @@ const files = ref<File[]>([])
 const note = ref('')
 const kindHint = ref<PurchaseInvoiceSubmissionKindHint | null>(null)
 const uploading = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
 
 const ALLOWED_FILES = '.pdf,.jpg,.jpeg,.png,.isdoc,.xml,.isdocx,application/pdf,image/jpeg,image/png'
 /** Server bere podle `documents.max_file_bytes`, výchozí 50 MiB; tady jen UX pojistka. */
@@ -83,8 +84,7 @@ function addDroppedFiles(dropped: File[]) {
 
 function clearFiles() {
   files.value = []
-  const input = document.getElementById('inbox-files') as HTMLInputElement | null
-  if (input) input.value = ''
+  if (fileInput.value) fileInput.value.value = ''
 }
 
 async function upload() {
@@ -297,7 +297,7 @@ watch(() => supplierStore.currentSupplierId, () => { selected.value = null; void
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5a1 1 0 001 1h12a1 1 0 001-1v-5" />
           </svg>
           {{ t('purchase_submissions.choose_files') }}
-          <input id="inbox-files" type="file" multiple :accept="ALLOWED_FILES" class="hidden" @change="selectFiles" />
+          <input ref="fileInput" type="file" multiple :accept="ALLOWED_FILES" class="hidden" @change="selectFiles" />
         </label>
         <span v-if="files.length" class="text-sm text-neutral-600">
           {{ t('purchase_submissions.files_selected', { n: files.length }) }}

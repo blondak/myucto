@@ -10,9 +10,9 @@ import { nextTick } from 'vue'
  * Selektor cílí na `[data-row-input="<marker>"]`; každý kontext má vlastní marker,
  * aby se např. modal výkazu práce netrefil do inputů editoru pod ním.
  */
-export function focusLastRow(selector: string): void {
+export function focusLastRow(selector: string, root: ParentNode = document): void {
   void nextTick(() => {
-    const els = Array.from(document.querySelectorAll<HTMLElement>(selector))
+    const els = Array.from(root.querySelectorAll<HTMLElement>(selector))
       .filter(el => el.offsetParent !== null)
     els[els.length - 1]?.focus()
   })

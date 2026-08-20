@@ -5,6 +5,16 @@
 /* Dark mode řízený třídou .dark na <html> (nastavuje composable useTheme přes VueUse).
    :where() drží specificitu na 0, aby utility nebyly přebity. */
 @custom-variant dark (&:where(.dark, .dark *));
+@custom-variant sm (@container workspace (width >= 40rem));
+@custom-variant md (@container workspace (width >= 48rem));
+@custom-variant lg (@container workspace (width >= 64rem));
+@custom-variant xl (@container workspace (width >= 80rem));
+@custom-variant 2xl (@container workspace (width >= 96rem));
+
+body {
+  container-name: workspace;
+  container-type: inline-size;
+}
 
 @theme {
   /* ─── Primary — indigo (sladěno s MyWebdesign.cz brand #3B2D83) ─── */
@@ -513,6 +523,10 @@ main[data-accent]::before {
   pointer-events: none;
 }
 
+main[data-accent].workspace-main-multi::before {
+  display: none;
+}
+
 /* Aktivní záložka podtržená barvou modulu místo univerzálního indiga.
    Barvu textu necháváme být — u jantarového nebo červeného accentu by na
    světlém podkladu spadl kontrast pod čitelnou mez. */
@@ -924,6 +938,36 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   }
   .row-link:hover {
     text-decoration: underline;
+  }
+
+  .workspace-row-drag-handle {
+    display: inline-flex;
+    width: 1.25rem;
+    height: 1.5rem;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-neutral-200);
+    border-radius: 0.375rem;
+    background: color-mix(in oklab, var(--color-neutral-100) 82%, var(--color-surface));
+    color: var(--color-neutral-500);
+    cursor: grab;
+    box-shadow: 0 1px 2px color-mix(in oklab, var(--color-neutral-900) 8%, transparent);
+    transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease, transform 140ms ease;
+  }
+  .workspace-row-drag-handle > svg {
+    width: 0.75rem;
+    height: 1.125rem;
+  }
+  [data-workspace-route]:hover .workspace-row-drag-handle {
+    border-color: var(--color-primary-300);
+    background: var(--color-primary-50);
+    color: var(--color-primary-600);
+    transform: translateY(-1px);
+  }
+  [data-workspace-route]:active .workspace-row-drag-handle {
+    cursor: grabbing;
+    transform: none;
   }
 
   /*

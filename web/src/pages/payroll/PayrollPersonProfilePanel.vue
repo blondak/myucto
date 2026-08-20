@@ -26,6 +26,7 @@ import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/butt
 import CountrySelect from '@/components/ui/CountrySelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { useToast } from '@/composables/useToast'
+import { usePaneDom } from '@/composables/usePaneDom'
 import { todayIso } from './employmentLifecycleUi'
 
 const props = defineProps<{
@@ -139,6 +140,7 @@ interface PayoutRuleFormRow {
 
 const { t, locale } = useI18n()
 const toast = useToast()
+const paneDom = usePaneDom()
 const loading = ref(true)
 const saving = ref(false)
 const profile = ref<PayrollPersonProfile | null>(null)
@@ -307,7 +309,7 @@ function payoutRuleNeedsVerification(row: PayoutRuleFormRow): boolean {
  */
 function focusAccountVerification(accountId: number | null) {
   if (accountId === null) return
-  const card = document.getElementById(`payout-account-${accountId}`)
+  const card = paneDom.querySelector(`#payout-account-${accountId}`)
   if (card === null) return
   card.scrollIntoView({ behavior: 'smooth', block: 'center' })
   const verify = card.querySelector<HTMLButtonElement>('[data-test="verify-account"]')

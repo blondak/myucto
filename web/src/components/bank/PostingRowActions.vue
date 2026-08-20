@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -39,6 +39,7 @@ const activeAccounts = computed(() =>
 )
 const overrideDebit = ref('')
 const overrideCredit = ref('')
+const accountListId = `posting-row-actions-coa-${useId()}`
 
 async function toggleOverride() {
   overrideOpen.value = !overrideOpen.value
@@ -131,12 +132,12 @@ function onPosted(payload: { result: PostResult; debit: string; credit: string }
           class="cursor-pointer text-neutral-400 hover:text-neutral-600 px-1" :title="t('bank.posting.override_accounts')">⚙</button>
       </div>
       <div v-if="overrideOpen" class="inline-flex items-center gap-1 mt-1">
-        <input v-model="overrideDebit" list="pra-coa" type="text" :placeholder="t('bank.posting.debit')"
+        <input v-model="overrideDebit" :list="accountListId" type="text" :placeholder="t('bank.posting.debit')"
           class="w-20 h-7 px-1.5 border border-neutral-300 rounded text-xs font-mono" />
         <span class="text-neutral-400">/</span>
-        <input v-model="overrideCredit" list="pra-coa" type="text" :placeholder="t('bank.posting.credit')"
+        <input v-model="overrideCredit" :list="accountListId" type="text" :placeholder="t('bank.posting.credit')"
           class="w-20 h-7 px-1.5 border border-neutral-300 rounded text-xs font-mono" />
-        <datalist id="pra-coa">
+      <datalist :id="accountListId">
           <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
         </datalist>
       </div>

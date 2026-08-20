@@ -6,7 +6,7 @@
  * Komponenta z toho dělá viditelné pravidlo, ne drobné písmo: dokud si uživatel
  * neodklikne, že kódy má uložené, panel nezmizí.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authApi, type RecoveryCodeStatus } from '@/api/auth'
 import { getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
@@ -22,6 +22,7 @@ const codes = ref<string[] | null>(null)
 const busy = ref(false)
 const error = ref('')
 const totpCode = ref('')
+const totpInputId = `recovery-totp-${useId()}`
 const passkeySupported = isWebAuthnAvailable()
 
 const OPERATION = 'mfa.recovery_codes'
@@ -160,10 +161,10 @@ onMounted(() => void loadStatus())
       <p v-else class="text-sm text-warning-700">{{ t('recovery_codes.none_yet') }}</p>
 
       <div v-if="totpUsable && !passkeyUsable">
-        <label for="recovery-totp" class="block text-sm font-medium text-neutral-700 mb-1">
+        <label :for="totpInputId" class="block text-sm font-medium text-neutral-700 mb-1">
           {{ t('recovery_codes.totp_label') }}
         </label>
-        <input id="recovery-totp" v-model="totpCode" type="text" inputmode="numeric"
+        <input :id="totpInputId" v-model="totpCode" type="text" inputmode="numeric"
                autocomplete="one-time-code" maxlength="6" pattern="\d{6}"
                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono" />
       </div>

@@ -480,7 +480,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
       ])
 
     const profileMenuPaths = [...appLayoutSource.matchAll(
-      /<RouterLink[^>]*\bto="(?<path>\/profile\/password[^"]*)"/g,
+      /<(?:RouterLink|WorkspaceNavLink)[^>]*\bto="(?<path>\/profile\/password[^"]*)"/g,
     )].map(item => item.groups!.path)
     expect([...new Set(profileMenuPaths)].sort()).toEqual([
       '/profile/password',

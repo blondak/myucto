@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import {
@@ -29,6 +29,7 @@ const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const editingId = ref<number | null>(null)
+const pageId = useId()
 
 interface EditableLine {
   account_code: string
@@ -180,10 +181,10 @@ async function deleteTemplate(tpl: JournalTemplateSummary) {
       </button>
     </div>
 
-    <datalist id="journal-template-accounts">
+    <datalist :id="`${pageId}-journal-template-accounts`">
       <option v-for="account in pickable" :key="account.id" :value="account.account_code">{{ account.account_code }} — {{ account.name }}</option>
     </datalist>
-    <datalist id="journal-template-cost-centers">
+    <datalist :id="`${pageId}-journal-template-cost-centers`">
       <option v-for="center in costCenters" :key="center.id" :value="center.code">{{ center.code }} — {{ center.name }}</option>
     </datalist>
 
@@ -259,14 +260,14 @@ async function deleteTemplate(tpl: JournalTemplateSummary) {
         </div>
         <div class="space-y-2">
           <div v-for="(line, index) in form.lines" :key="index" class="grid grid-cols-12 gap-2 items-start">
-            <input v-model="line.account_code" list="journal-template-accounts" type="text" :placeholder="t('accounting.manual.account_placeholder')" class="col-span-12 sm:col-span-2 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
+            <input v-model="line.account_code" :list="`${pageId}-journal-template-accounts`" type="text" :placeholder="t('accounting.manual.account_placeholder')" class="col-span-12 sm:col-span-2 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
             <select v-model="line.side" class="col-span-4 sm:col-span-2 h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
               <option value="debit">{{ t('accounting.journal.side.debit') }}</option>
               <option value="credit">{{ t('accounting.journal.side.credit') }}</option>
             </select>
             <input v-model.number="line.default_amount" type="number" min="0" step="0.01" :placeholder="t('accounting.templates.default_amount')" class="col-span-7 sm:col-span-2 h-9 px-2 border border-neutral-300 rounded-md text-sm text-right" />
             <input v-model="line.label" type="text" maxlength="255" :placeholder="t('accounting.templates.line_label')" class="col-span-12 sm:col-span-3 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-            <input v-model="line.cost_center" list="journal-template-cost-centers" type="text" maxlength="50" :placeholder="t('accounting.manual.cost_center')" class="col-span-10 sm:col-span-2 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+            <input v-model="line.cost_center" :list="`${pageId}-journal-template-cost-centers`" type="text" maxlength="50" :placeholder="t('accounting.manual.cost_center')" class="col-span-10 sm:col-span-2 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
             <button type="button" @click="removeLine(index)" :disabled="form.lines.length <= 1" class="col-span-2 sm:col-span-1 h-9 inline-flex items-center justify-center text-danger-500 hover:text-danger-600 disabled:opacity-30" :title="t('accounting.manual.remove_line')">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             </button>

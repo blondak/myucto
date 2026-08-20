@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch, nextTick, useId } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { recurringApi, type RecurringTemplate, type RecurringTemplatePayload, type Frequency, type OssRateType, type OssSupplyType } from '@/api/recurring'
@@ -15,6 +15,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import { formatMoney } from '@/composables/useFormat'
 import { focusLastRow } from '@/composables/useRowFocus'
+import { usePaneDom } from '@/composables/usePaneDom'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
@@ -25,6 +26,8 @@ const route = useRoute()
 const router = useRouter()
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
+const paneDom = usePaneDom()
+const pageId = useId()
 
 // Aktivní dodavatel — neplátce DPH fakturuje bez DPH (žádné DPH UI ani sazba), stejně
 // jako u ruční faktury (InvoiceEditor). Backend (RecurringInvoiceGenerator) to navíc
@@ -368,7 +371,7 @@ function catalogCurrentLabel(item: FormItem): string {
 
 function addItem() {
   form.value.items.push(blankItem())
-  focusLastRow('[data-row-input="rec-item"]')
+  focusLastRow('[data-row-input="rec-item"]', paneDom.root())
 }
 function removeItem(idx: number) {
   form.value.items.splice(idx, 1)
@@ -877,7 +880,7 @@ async function submit() {
     // Toast + scroll k bannéru — uživatel může být odscrollovaný dole u tlačítka Uložit.
     toast.error(error.value)
     await nextTick()
-    document.querySelector('[data-error-banner]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    paneDom.querySelector('[data-error-banner]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   } finally {
     submitting.value = false
   }
@@ -1061,9 +1064,9 @@ async function submit() {
             <p class="mt-1 text-xs text-neutral-500">{{ t('recurring.payment_due_unit_hint') }}</p>
           </div>
           <div>
-            <label for="rec_discount_percent" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.discount.label') }}</label>
+            <label :for="`${pageId}-rec-discount-percent`" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.discount.label') }}</label>
             <div class="relative">
-              <input id="rec_discount_percent" v-model.number="form.discount_percent" type="number" min="0" max="100" step="0.01"
+              <input :id="`${pageId}-rec-discount-percent`" v-model.number="form.discount_percent" type="number" min="0" max="100" step="0.01"
                 class="w-full h-10 pl-3 pr-8 border border-neutral-300 rounded-md text-right font-mono" />
               <span class="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none">%</span>
             </div>

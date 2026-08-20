@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { searchApi, type SearchResults } from '@/api/search'
+import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 
 interface MenuItem { to: string; label: string; icon: string; external?: boolean }
 const props = withDefaults(defineProps<{
@@ -17,7 +17,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ navigated: [] }>()
 
 const { t } = useI18n()
-const router = useRouter()
+const workspaceNavigation = useWorkspaceNavigation()
 
 const q = ref('')
 const open = ref(false)
@@ -48,19 +48,19 @@ const options = computed<Option[]>(() => {
   const out: Option[] = []
   for (const m of menuMatches.value) {
     out.push({ kind: 'menu', label: m.label, sub: '',
-      run: () => { m.external ? window.open(m.to, '_blank', 'noopener') : router.push(m.to) } })
+      run: () => { m.external ? workspaceNavigation.openExternal(m.to) : void workspaceNavigation.navigate(m.to) } })
   }
   for (const c of results.value.clients) {
     out.push({ kind: 'client', label: c.company_name, sub: c.main_email || '',
-      run: () => router.push(`/clients/${c.id}`) })
+      run: () => void workspaceNavigation.navigate(`/clients/${c.id}`) })
   }
   for (const i of results.value.invoices) {
     out.push({ kind: 'invoice', label: i.varsymbol || `#${i.id}`, sub: i.company_name,
-      run: () => router.push(`/invoices/${i.id}`) })
+      run: () => void workspaceNavigation.navigate(`/invoices/${i.id}`) })
   }
   for (const p of results.value.purchase_invoices) {
     out.push({ kind: 'purchase', label: p.varsymbol || p.vendor_invoice_number || `#${p.id}`, sub: p.company_name,
-      run: () => router.push(`/purchase-invoices/${p.id}`) })
+      run: () => void workspaceNavigation.navigate(`/purchase-invoices/${p.id}`) })
   }
   return out
 })

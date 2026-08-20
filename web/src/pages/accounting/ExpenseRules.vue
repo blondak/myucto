@@ -6,7 +6,7 @@
  * dodavatele / fragmentu názvu / fragmentu popisu. Shoda = VŠECHNA vyplněná kritéria (AND),
  * první podle priority vyhrává. Účtování samo neřeší — jen navrhuje druh a případně účet.
  */
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   expenseRulesApi,
@@ -30,6 +30,7 @@ defineProps<{ embedded?: boolean }>()
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const pageId = useId()
 
 const canWrite = computed(() => auth.canWrite('accounting'))
 
@@ -422,10 +423,10 @@ onMounted(load)
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.expense_rules.form_target_account') }}</label>
-          <input v-model="form.target_account_code" list="er-expense-accounts"
+          <input v-model="form.target_account_code" :list="`${pageId}-er-expense-accounts`"
                  :placeholder="KIND_DEFAULT_ACCOUNT[form.expense_kind]"
                  class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono bg-surface" />
-          <datalist id="er-expense-accounts">
+          <datalist :id="`${pageId}-er-expense-accounts`">
             <option v-for="a in expenseAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
           </datalist>
           <p class="text-xs text-neutral-400 mt-1">{{ t('accounting.expense_rules.target_account_hint') }}</p>

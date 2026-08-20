@@ -95,8 +95,15 @@ async function open(amount: number) {
   return wrapper
 }
 
-const optionValues = (wrapper: ReturnType<typeof mount>, id: string): string[] =>
-  wrapper.findAll(`#${id} option`).map(o => o.attributes('value') ?? '')
+const datalist = (wrapper: ReturnType<typeof mount>, side: string) => {
+  const input = side.includes('split') ? 'split' : side.includes('debit') ? 'debit' : 'credit'
+  if (input === 'split') return wrapper.find('datalist[id$="-split"]')
+  const listId = wrapper.find(`input[data-test="posting-${input}"]`).attributes('list')
+  return wrapper.findAll('datalist').find(el => el.attributes('id') === listId)!
+}
+
+const optionValues = (wrapper: ReturnType<typeof mount>, side: string): string[] =>
+  datalist(wrapper, side).findAll('option').map(o => o.attributes('value') ?? '')
 
 describe('PostTransactionModal — našeptávač účtů', () => {
   beforeEach(() => {
@@ -123,7 +130,7 @@ describe('PostTransactionModal — našeptávač účtů', () => {
 
   it('analytiku popisuje jejím názvem', async () => {
     const wrapper = await open(10)
-    const label = wrapper.findAll('#ptm-coa-credit option')
+    const label = datalist(wrapper, 'credit').findAll('option')
       .find(o => o.attributes('value') === '311.100')?.text()
     expect(label).toContain('311.100')
     expect(label).toContain('Pohledávky z obchodních vztahů')
@@ -149,7 +156,7 @@ describe('PostTransactionModal — našeptávač účtů', () => {
 
   it('saldokontní protiúčet lze odeslat, ale pravidlo z něj založit nejde', async () => {
     const wrapper = await open(10)
-    await wrapper.find('#ptm-coa-credit')
+    await datalist(wrapper, 'credit')
     const inputs = wrapper.findAll('input[type="text"]')
     await inputs[1].setValue('311.100')
     await flushPromises()

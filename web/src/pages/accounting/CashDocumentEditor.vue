@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, watch, nextTick, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import {
@@ -22,6 +22,7 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const pageId = useId()
 const supplierStore = useSupplierStore()
 
 // Daňová evidence (Epic DE §6): pokladna běží no-journal path — MD/D náhled zaúčtování
@@ -578,7 +579,7 @@ async function save(post = true) {
       <RouterLink to="/accounting/cash" class="text-sm text-neutral-500 hover:text-neutral-700">{{ t('common.back') }}</RouterLink>
     </div>
 
-    <datalist id="cash-partners">
+    <datalist :id="`${pageId}-cash-partners`">
       <option v-for="c in clients" :key="c.id" :value="c.company_name">{{ c.ic || '' }}</option>
     </datalist>
 
@@ -637,7 +638,7 @@ async function save(post = true) {
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div class="sm:col-span-1">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.form.partner') }}</label>
-              <input v-model="form.partner_name" @input="onPartnerSearch" list="cash-partners" type="text"
+              <input v-model="form.partner_name" @input="onPartnerSearch" :list="`${pageId}-cash-partners`" type="text"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
             <div>
@@ -753,11 +754,11 @@ async function save(post = true) {
              kurz", ale zadat ho nešlo, takže se doklad nedal dokončit vůbec. -->
         <div v-if="isForeign" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label for="cash-fx-rate" class="block text-sm font-medium text-neutral-700 mb-1">
+            <label :for="`${pageId}-cash-fx-rate`" class="block text-sm font-medium text-neutral-700 mb-1">
               {{ t('cash.form.fx_rate') }}
               <span class="font-mono text-primary-600">({{ registerCurrency }}/CZK)</span>
             </label>
-            <input id="cash-fx-rate" v-model.number="form.fx_rate" type="number" step="0.0001" min="0"
+            <input :id="`${pageId}-cash-fx-rate`" v-model.number="form.fx_rate" type="number" step="0.0001" min="0"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm text-right" />
             <p v-if="czkEquivalent !== null" class="mt-1 text-xs text-neutral-600 font-mono">
               {{ t('cash.form.fx_amount_czk') }}: {{ formatMoney(czkEquivalent) }}

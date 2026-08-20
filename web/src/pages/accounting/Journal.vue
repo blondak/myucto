@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed, watch } from 'vue'
+import { ref, onMounted, reactive, computed, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import {
@@ -36,6 +36,7 @@ const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
+const pageId = useId()
 
 const entries = ref<JournalEntry[]>([])
 const periods = ref<AccountingPeriod[]>([])
@@ -743,7 +744,7 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_account_from') }}</label>
-          <input v-model.trim="filters.account_from" type="text" list="journal-coa" @change="applyFilters"
+          <input v-model.trim="filters.account_from" type="text" :list="`${pageId}-journal-coa`" @change="applyFilters"
             :title="accountName(filters.account_from) || undefined"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
           <div v-if="accountName(filters.account_from)" class="mt-1 text-xs text-neutral-500 truncate">
@@ -752,7 +753,7 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_account_to') }}</label>
-          <input v-model.trim="filters.account_to" type="text" list="journal-coa" @change="applyFilters"
+          <input v-model.trim="filters.account_to" type="text" :list="`${pageId}-journal-coa`" @change="applyFilters"
             :title="accountName(filters.account_to) || undefined"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
           <div v-if="accountName(filters.account_to)" class="mt-1 text-xs text-neutral-500 truncate">
@@ -950,7 +951,7 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
     <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
       @close="sourceDrawerEntryId = null" @focus-entry="onFocusEntry" />
 
-    <datalist id="journal-coa">
+    <datalist :id="`${pageId}-journal-coa`">
       <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">
         {{ a.account_code }} — {{ a.name }}
       </option>

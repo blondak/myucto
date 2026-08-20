@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { RouterLink, RouterView, useRouter, useRoute } from 'vue-router'
+import { RouterView, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -17,22 +17,30 @@ import FooterTip from './FooterTip.vue'
 import ThemeToggle from './ThemeToggle.vue'
 import LanguageToggle from './LanguageToggle.vue'
 import DesktopMenuBar from './DesktopMenuBar.vue'
+import WorkspaceHost from '@/components/workspace/WorkspaceHost.vue'
+import WorkspaceLayoutToggle from '@/components/workspace/WorkspaceLayoutToggle.vue'
+import WorkspaceNavLink from '@/components/workspace/WorkspaceNavLink.vue'
+import PaneActivityScope from '@/components/workspace/PaneActivityScope.vue'
 import type { PermissionKey } from '@/security/permissions'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import { useToast } from '@/composables/useToast'
 import { formatShortcut, useKeyboardShortcuts, type ShortcutAction } from '@/composables/useKeyboardShortcuts'
 import { usesClientNavigation } from '@/security/clientRoutePolicy'
+import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 const { t, locale } = useI18n()
 
 const router = useRouter()
-const route = useRoute()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
 const automationStore = useAutomationStore()
 const sessionSecurity = useSessionSecurityStore()
 const toast = useToast()
 const keyboardShortcuts = useKeyboardShortcuts()
+const workspace = useWorkspaceStore()
+const workspaceNavigation = useWorkspaceNavigation()
+const activeRoute = computed(() => router.resolve(workspace.activeFullPath))
 const clientExperience = computed(() => usesClientNavigation(auth.isClientRole, auth.domainContext))
 const desktopSearchRef = ref<InstanceType<typeof GlobalSearch> | null>(null)
 const mobileSearchRef = ref<InstanceType<typeof GlobalSearch> | null>(null)
@@ -891,7 +899,7 @@ const quickActions = computed(() => {
  * respektuje canCreate, takže bez práva nebo mimo agendu vrátí prázdno.
  */
 const contextualCreateTarget = computed<string>(() => {
-  const here = route.path
+  const here = activeRoute.value.path
   let best: NavItem | null = null
   let bestScore = -1
   for (const section of orderedNav.value) {
@@ -902,7 +910,7 @@ const contextualCreateTarget = computed<string>(() => {
       // Přesná shoda i s query (/clients?role=vendors) bije shodu jen na cestě.
       // Bez toho by na /clients mohla vyhrát položka Dodavatelé podle pořadí sekcí
       // a Alt+N by zakládal dodavatele místo klienta.
-      const exact = route.fullPath === item.to
+      const exact = activeRoute.value.fullPath === item.to
       const score = base.length * 2 + (exact ? 1 : 0) - (item.to.includes('?') && !exact ? 1 : 0)
       if (score > bestScore) {
         bestScore = score
@@ -1000,7 +1008,7 @@ function onGlobalShortcut(event: KeyboardEvent): void {
   if (action.external) {
     window.open(action.to, '_blank', 'noopener')
   } else {
-    void router.push(action.to)
+    void workspaceNavigation.navigate(action.to)
   }
 }
 
@@ -1105,7 +1113,7 @@ const MANUAL_CHAPTERS: Array<[RegExp, string]> = [
 ]
 
 const manualHref = computed(() => {
-  const match = MANUAL_CHAPTERS.find(([pattern]) => pattern.test(route.path))
+  const match = MANUAL_CHAPTERS.find(([pattern]) => pattern.test(activeRoute.value.path))
   const path = match ? `/manual?ch=${match[1]}` : '/manual'
   const canonicalBaseUrl = auth.domainContext?.canonical_base_url
   if (!auth.domainContext?.locked || !canonicalBaseUrl) return path
@@ -1126,10 +1134,10 @@ const manualHref = computed(() => {
  */
 function urlCoversRoute(url: string): { covers: boolean; queried: boolean } {
   const [path, qs] = url.split('?', 2)
-  if (route.path !== path && !route.path.startsWith(path + '/')) return { covers: false, queried: false }
+  if (activeRoute.value.path !== path && !activeRoute.value.path.startsWith(path + '/')) return { covers: false, queried: false }
   if (!qs) return { covers: true, queried: false }
   for (const [k, v] of new URLSearchParams(qs)) {
-    if (String(route.query[k] ?? '') !== v) return { covers: false, queried: false }
+    if (String(activeRoute.value.query[k] ?? '') !== v) return { covers: false, queried: false }
   }
   return { covers: true, queried: true }
 }
@@ -1146,8 +1154,9 @@ function itemUrls(item: { to: string; newTo?: string }): string[] {
 }
 
 function isActive(item: NavItem): boolean {
+  if (!workspace.activePane?.fullPath) return false
   const to = item.to
-  if (to === '/') return route.path === '/'
+  if (to === '/') return activeRoute.value.path === '/'
 
   const [toPath] = to.split('?', 2)
 
@@ -1169,7 +1178,7 @@ function isActive(item: NavItem): boolean {
   // Delší `to` v menu má prednost (např. /purchase-invoices vs /purchase-invoices/export).
   for (const section of navSections.value) {
     for (const it of section.items) {
-      if (it.to !== to && it.to.startsWith(toPath + '/') && route.path.startsWith(it.to.split('?')[0])) {
+      if (it.to !== to && it.to.startsWith(toPath + '/') && activeRoute.value.path.startsWith(it.to.split('?')[0])) {
         return false
       }
     }
@@ -1177,12 +1186,26 @@ function isActive(item: NavItem): boolean {
   return true
 }
 
+function syncActivePaneTitle(): void {
+  if (!workspace.activePane?.fullPath) {
+    workspace.updatePane(workspace.activePaneId, { title: null })
+    return
+  }
+  const item = orderedNav.value
+    .flatMap(section => section.items)
+    .find(candidate => !candidate.external && isActive(candidate))
+  workspace.updatePane(workspace.activePaneId, {
+    title: item?.label ?? (typeof activeRoute.value.name === 'string' ? activeRoute.value.name : activeRoute.value.path),
+  })
+}
+
 // Zavři mobile drawer + popupy po navigaci
-watch(() => route.fullPath, () => {
+watch([() => workspace.activeFullPath, () => workspace.layoutRevision], () => {
   mobileOpen.value = false
   quickOpen.value = false
   userMenuOpen.value = false
-})
+  syncActivePaneTitle()
+}, { immediate: true })
 
 // Licenční banner (E4) — trial odpočet (od 3. dne), overage výzva s deadline,
 // degradovaný / prošlý-trial stav. Řídí se stavem z auth store (/auth/me).
@@ -1249,12 +1272,12 @@ onBeforeUnmount(() => {
     <!-- ═════════════════════ TOPBAR ═════════════════════ -->
     <header class="nav-inverted sticky top-0 z-30 bg-surface border-b border-neutral-200 shadow-md">
       <div class="h-12 px-3 flex items-center gap-1">
-        <RouterLink to="/" class="flex h-10 items-center gap-2 shrink-0 px-1.5 rounded-md hover:bg-neutral-100" @click="mobileOpen = false">
+        <WorkspaceNavLink to="/" class="flex h-10 items-center gap-2 shrink-0 px-1.5 rounded-md hover:bg-neutral-100" @click="mobileOpen = false">
           <img src="/styles/logo.svg" alt="MyÚčto" class="w-7 h-7" />
           <span class="text-sm font-semibold leading-tight select-none" :class="sideNavigation ? 'inline' : 'inline lg:hidden 2xl:inline'">
             My<span class="text-primary-600">Účto</span><span class="text-neutral-400 font-normal">.cz</span>
           </span>
-        </RouterLink>
+        </WorkspaceNavLink>
 
         <div
           ref="desktopNavHost"
@@ -1274,6 +1297,8 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="ml-auto flex h-full shrink-0 items-center gap-1 text-sm">
+          <WorkspaceLayoutToggle />
+
           <div v-if="quickActions.length > 0" class="relative hidden lg:block">
             <button
               type="button"
@@ -1297,7 +1322,7 @@ onBeforeUnmount(() => {
               leave-to-class="opacity-0 -translate-y-1"
             >
               <div v-if="quickOpen" class="absolute right-0 top-full mt-1 w-56 bg-surface border border-neutral-200 rounded-lg shadow-xl py-1 z-40">
-                <RouterLink
+                <WorkspaceNavLink
                   v-for="s in quickActions"
                   :key="s.to"
                   :to="s.to"
@@ -1308,7 +1333,7 @@ onBeforeUnmount(() => {
                     <path stroke-linecap="round" stroke-linejoin="round" :d="s.icon" />
                   </svg>
                   <span>{{ s.label }}</span>
-                </RouterLink>
+                </WorkspaceNavLink>
               </div>
             </transition>
             <div v-if="quickOpen" class="fixed inset-0 z-10" aria-hidden="true" @click="quickOpen = false"></div>
@@ -1376,26 +1401,26 @@ onBeforeUnmount(() => {
                   <div class="text-xs text-neutral-500 truncate">{{ auth.user?.email }}</div>
                 </div>
                 <template v-if="!auth.isDemo">
-                  <RouterLink to="/profile/password" class="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-primary-700" role="menuitem">
+                  <WorkspaceNavLink to="/profile/password" class="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-primary-700" role="menuitem">
                     <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 7a2 2 0 1 1 2 2m4 0a6 6 0 1 1-7.7 5.75L11 17H9v2H7v2H4a1 1 0 0 1-1-1v-2.6a1 1 0 0 1 .3-.7l6-6A6 6 0 0 1 21 9z"/></svg>
                     {{ t('auth.change_password_title') }}
-                  </RouterLink>
-                  <RouterLink to="/profile/password?tab=totp" class="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-primary-700" role="menuitem">
+                  </WorkspaceNavLink>
+                  <WorkspaceNavLink to="/profile/password?tab=totp" class="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-primary-700" role="menuitem">
                     <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2zm10-10V7a4 4 0 0 0-8 0v4h8z"/></svg>
                     {{ t('auth.totp_tab') }}
-                  </RouterLink>
-                  <RouterLink to="/profile/password?tab=passkeys" class="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-primary-700" role="menuitem">
+                  </WorkspaceNavLink>
+                  <WorkspaceNavLink to="/profile/password?tab=passkeys" class="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-primary-700" role="menuitem">
                     <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 7a2 2 0 1 1 2 2m4 0a6 6 0 1 1-7.7 5.75L11 17H9v2H7v2H4a1 1 0 0 1-1-1v-2.6a1 1 0 0 1 .3-.7l6-6A6 6 0 0 1 21 9z"/></svg>
                     {{ t('passkeys.title') }}
-                  </RouterLink>
-                  <RouterLink to="/profile/password?tab=session-lock" class="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-primary-700" role="menuitem">
+                  </WorkspaceNavLink>
+                  <WorkspaceNavLink to="/profile/password?tab=session-lock" class="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-primary-700" role="menuitem">
                     <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2m5-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
                     {{ t('session_lock.preference_tab') }}
-                  </RouterLink>
-                  <RouterLink to="/profile/password?tab=shortcuts" class="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-primary-700" role="menuitem">
+                  </WorkspaceNavLink>
+                  <WorkspaceNavLink to="/profile/password?tab=shortcuts" class="flex items-center gap-2.5 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-primary-700" role="menuitem">
                     <svg class="w-4 h-4 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 6.75A1.75 1.75 0 0 1 4.75 5h14.5A1.75 1.75 0 0 1 21 6.75v10.5A1.75 1.75 0 0 1 19.25 19H4.75A1.75 1.75 0 0 1 3 17.25V6.75zM6 9h.01M9 9h.01M12 9h.01M15 9h.01M18 9h.01M7 13h.01M10 13h.01M13 13h.01M16 13h.01M8 16h8"/></svg>
                     {{ t('keyboard_shortcuts.title') }}
-                  </RouterLink>
+                  </WorkspaceNavLink>
                 </template>
                 <button
                   v-if="canLockSession"
@@ -1553,7 +1578,7 @@ onBeforeUnmount(() => {
                 @dragend="nav.onDragEnd()"
                 :aria-label="isDesktop ? t('common.nav_drag_item', { name: item.label }) : undefined"
               >
-                <RouterLink
+                <WorkspaceNavLink
                   :to="item.to"
                   :draggable="false"
                   active-class=""
@@ -1571,9 +1596,9 @@ onBeforeUnmount(() => {
                   </svg>
                   {{ item.label }}
                   <span v-if="item.badge" class="ml-auto min-w-5 rounded-full bg-warning-100 px-1.5 py-0.5 text-center text-[10px] font-semibold text-warning-700">{{ item.badge }}</span>
-                </RouterLink>
+                </WorkspaceNavLink>
                 <!-- Rychlé „+" (vytvořit nový) — skryté, odhalí se až při hoveru nad položkou -->
-                <RouterLink
+                <WorkspaceNavLink
                   v-if="canCreate(item)"
                   :to="createTarget(item)"
                   :draggable="false"
@@ -1584,7 +1609,7 @@ onBeforeUnmount(() => {
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v8m4-4H8M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
                   </svg>
-                </RouterLink>
+                </WorkspaceNavLink>
               </div>
             </template>
             </div>
@@ -1609,7 +1634,7 @@ onBeforeUnmount(() => {
         <!-- Mobile only: profil + ovládání relace (na dně sidebaru) -->
         <div class="lg:hidden border-t border-neutral-200 px-4 py-3 bg-neutral-50 space-y-3">
           <div class="flex items-center justify-between">
-            <RouterLink
+            <WorkspaceNavLink
               to="/profile/password"
               @click="mobileOpen = false"
               class="group min-w-0 flex-1 rounded-md -ml-2 px-2 py-1.5 text-sm hover:bg-surface"
@@ -1619,7 +1644,7 @@ onBeforeUnmount(() => {
                 {{ auth.user?.name }}
               </div>
               <div class="truncate text-xs text-neutral-500">{{ auth.user?.email }} · {{ auth.user?.role?.name }}</div>
-            </RouterLink>
+            </WorkspaceNavLink>
             <a
               :href="manualHref" target="_blank" rel="noopener"
               class="inline-flex w-9 h-9 items-center justify-center rounded-md text-neutral-600 hover:bg-surface"
@@ -1654,7 +1679,11 @@ onBeforeUnmount(() => {
              stačí ji mít v layoutu jednou. -->
         <CommandPalette ref="paletteRef" :nav-items="paletteNavItems" :quick-actions="quickActions" />
 
-        <main class="flex-1 px-5 sm:px-8 py-6 w-full" :data-accent="activeSectionAccent">
+        <main
+          class="flex-1 px-5 sm:px-8 py-6 w-full"
+          :class="workspace.paneCount > 1 ? 'workspace-main-multi' : ''"
+          :data-accent="activeSectionAccent"
+        >
           <div v-if="auth.isDemo" class="mb-5 rounded-lg border border-primary-200 bg-primary-50 px-4 py-3 text-sm text-primary-800">
             {{ t('demo.banner') }}
           </div>
@@ -1664,11 +1693,19 @@ onBeforeUnmount(() => {
             :class="BANNER_CLASS[licenseBanner.variant]"
           >
             <span>{{ licenseBanner.text }}</span>
-            <RouterLink v-if="auth.isSuperadmin && !clientExperience" to="/activation/purchase" class="font-medium underline whitespace-nowrap">
+            <WorkspaceNavLink v-if="auth.isSuperadmin && !clientExperience" to="/activation/purchase" class="font-medium underline whitespace-nowrap">
               {{ auth.license?.state === 'overage' ? t('license.banner_upgrade_cta') : t('license.banner_cta') }}
-            </RouterLink>
+            </WorkspaceNavLink>
           </div>
-          <RouterView />
+          <WorkspaceHost>
+            <template #primary="{ revision }">
+              <PaneActivityScope pane-id="primary">
+                <RouterView v-slot="{ Component }">
+                  <component :is="Component" :key="revision" />
+                </RouterView>
+              </PaneActivityScope>
+            </template>
+          </WorkspaceHost>
         </main>
 
         <!-- Patička je stejné „chrome" jako topbar (globální hledání, jazyk, motiv),
@@ -1735,7 +1772,7 @@ onBeforeUnmount(() => {
                  class="whitespace-nowrap hover:text-primary-700 hover:underline transition-colors"
                  title="MyÚčto.cz">MyÚčto.cz</a>
               <template v-if="versionInfo">
-                <RouterLink
+                <WorkspaceNavLink
                   v-if="auth.isSuperadmin && !clientExperience"
                   to="/admin/update"
                   class="inline-flex items-center gap-1 text-neutral-400 hover:text-neutral-600 transition-colors"
@@ -1749,18 +1786,18 @@ onBeforeUnmount(() => {
                     <svg class="w-2 h-2" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/></svg>
                     v{{ versionInfo.latest }}
                   </span>
-                </RouterLink>
+                </WorkspaceNavLink>
                 <span v-else class="text-neutral-400">v{{ versionInfo.current }}</span>
               </template>
               <span aria-hidden="true">·</span>
               <a href="https://mywebdesign.cz" target="_blank" rel="noopener" class="hidden xl:inline whitespace-nowrap hover:text-neutral-700">© MyWebdesign.cz</a>
               <span class="hidden xl:inline" aria-hidden="true">·</span>
-              <RouterLink v-if="!clientExperience" to="/admin/support" :class="supportBtnClass" :title="t('support.help_title')">
+              <WorkspaceNavLink v-if="!clientExperience" to="/admin/support" :class="supportBtnClass" :title="t('support.help_title')">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
                 </svg>
                 {{ t('support.help_link') }}
-              </RouterLink>
+              </WorkspaceNavLink>
             </div>
           </div>
 
@@ -1772,12 +1809,12 @@ onBeforeUnmount(() => {
             <div class="flex flex-wrap items-center justify-end gap-1.5">
               <a href="https://myucto.cz/" target="_blank" rel="noopener" class="hover:text-primary-700">MyÚčto.cz</a>
               <span v-if="versionInfo" class="text-neutral-400">v{{ versionInfo.current }}</span>
-              <RouterLink v-if="!clientExperience" to="/admin/support" :class="supportBtnClass" :title="t('support.help_title')">
+              <WorkspaceNavLink v-if="!clientExperience" to="/admin/support" :class="supportBtnClass" :title="t('support.help_title')">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" />
                 </svg>
                 {{ t('support.help_link') }}
-              </RouterLink>
+              </WorkspaceNavLink>
             </div>
           </div>
         </footer>

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createRouter, createMemoryHistory, RouterLink } from 'vue-router'
+import { createPinia } from 'pinia'
 import DesktopMenuBar from '../DesktopMenuBar.vue'
 
 // Klik na název sekce v horním menu: na myši je submenu otevřené už od hoveru,
@@ -52,7 +53,7 @@ function mountBar(hoverCapable: boolean) {
       quickNewLabel: 'Nový',
       menuLabel: 'Hlavní menu',
     },
-    global: { plugins: [router], stubs: { RouterLink: RouterLink as never } },
+    global: { plugins: [createPinia(), router], stubs: { RouterLink: RouterLink as never } },
   })
 
   return { wrapper, push, sales: wrapper.findAll('button')[0]! }

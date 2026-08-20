@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import {
   payrollApi,
   type PayrollAccountOption,
@@ -30,6 +31,7 @@ import {
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const route = useRoute()
 const loading = ref(true)
 const saving = ref(false)
 const loadFailed = ref(false)
@@ -37,7 +39,7 @@ const conflict = ref(false)
 const settings = ref<PayrollEmployerSettings | null>(null)
 const chartAccounts = ref<PayrollAccountOption[]>([])
 type SettingsTab = 'employer' | 'institutions' | 'accounting' | 'policies' | 'dimensions' | 'submissions'
-const initialTab = new URLSearchParams(window.location.search).get('tab')
+const initialTab = String(route.query.tab ?? '')
 const activeTab = ref<SettingsTab>(initialTab === 'submissions' ? 'submissions' : 'employer')
 const tabs: SettingsTab[] = ['employer', 'institutions', 'accounting', 'policies', 'dimensions', 'submissions']
 

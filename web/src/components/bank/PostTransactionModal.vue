@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { accountPickerOptions } from '@/utils/chartAccountOptions'
@@ -26,6 +26,10 @@ const emit = defineEmits<{ posted: [{ result: PostResult; debit: string; credit:
 
 const { t } = useI18n()
 const toast = useToast()
+const idPrefix = `post-transaction-${useId()}`
+const debitListId = `${idPrefix}-debit`
+const creditListId = `${idPrefix}-credit`
+const splitListId = `${idPrefix}-split`
 
 const isIncoming = computed(() => props.tx.amount > 0)
 const absAmount = computed(() => Math.abs(props.tx.amount))
@@ -299,14 +303,14 @@ onMounted(async () => {
         <div class="grid grid-cols-2 gap-2">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.debit') }}</label>
-            <input v-model="debit" list="ptm-coa-debit" type="text"
+            <input v-model="debit" :list="debitListId" type="text" data-test="posting-debit"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             <div v-if="debit && accountByCode[debit]" class="text-xs text-neutral-500 mt-0.5 truncate">{{ accountName(debit) }}</div>
             <div v-else-if="debit" class="text-xs text-danger-500 mt-0.5">{{ t('bank.posting.err_account_not_found') }}</div>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.credit') }}</label>
-            <input v-model="credit" list="ptm-coa-credit" type="text"
+            <input v-model="credit" :list="creditListId" type="text" data-test="posting-credit"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             <div v-if="credit && accountByCode[credit]" class="text-xs text-neutral-500 mt-0.5 truncate">{{ accountName(credit) }}</div>
             <div v-else-if="credit" class="text-xs text-danger-500 mt-0.5">{{ t('bank.posting.err_account_not_found') }}</div>
@@ -337,7 +341,7 @@ onMounted(async () => {
             <option value="credit">{{ t('bank.posting.credit') }}</option>
           </select>
           <div class="flex-1 min-w-0">
-            <input v-model="l.account_code" list="ptm-coa-split" type="text" :placeholder="t('bank.posting.split_account')"
+            <input v-model="l.account_code" :list="splitListId" type="text" data-test="posting-split" :placeholder="t('bank.posting.split_account')"
               class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
             <div v-if="l.account_code && accountByCode[l.account_code]" class="text-xs text-neutral-500 mt-0.5 truncate">
               {{ accountName(l.account_code) }}
@@ -374,17 +378,17 @@ onMounted(async () => {
         {{ splitMode ? t('bank.posting.split_off') : t('bank.posting.split_on') }}
       </button>
       <!-- Plná osnova (rozúčtování i protiúčet dvojice) — analytiky před svou syntetikou. -->
-      <datalist id="ptm-coa-split">
+      <datalist :id="splitListId">
         <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">
           {{ a.account_code }} — {{ a.name }}
         </option>
       </datalist>
-      <datalist id="ptm-coa-debit">
+      <datalist :id="debitListId">
         <option v-for="a in (isIncoming ? bankOptions : counterOptions)" :key="a.id" :value="a.account_code">
           {{ a.account_code }} — {{ a.name }}
         </option>
       </datalist>
-      <datalist id="ptm-coa-credit">
+      <datalist :id="creditListId">
         <option v-for="a in (isIncoming ? counterOptions : bankOptions)" :key="a.id" :value="a.account_code">
           {{ a.account_code }} — {{ a.name }}
         </option>

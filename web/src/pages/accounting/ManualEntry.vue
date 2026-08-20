@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed } from 'vue'
+import { ref, onMounted, reactive, computed, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
 import {
@@ -21,6 +21,7 @@ const router = useRouter()
 const route = useRoute()
 const toast = useToast()
 const { blockDemoMutation } = useDemoMode()
+const pageId = useId()
 
 const accounts = ref<ChartAccount[]>([])
 const costCenters = ref<CostCenter[]>([])
@@ -436,10 +437,10 @@ async function submitTransfer(force = false) {
       </div>
     </div>
 
-    <datalist id="coa-options">
+    <datalist :id="`${pageId}-coa-options`">
       <option v-for="a in pickable" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
     </datalist>
-    <datalist id="cost-center-options">
+    <datalist :id="`${pageId}-cost-center-options`">
       <option v-for="center in costCenters" :key="center.id" :value="center.code">{{ center.code }} — {{ center.name }}</option>
     </datalist>
 
@@ -502,7 +503,7 @@ async function submitTransfer(force = false) {
         <div class="space-y-2">
           <div v-for="(l, i) in lines" :key="i" class="grid grid-cols-12 gap-2 items-start">
             <div class="col-span-12 sm:col-span-5">
-              <input v-model="l.account_code" list="coa-options" type="text"
+              <input v-model="l.account_code" :list="`${pageId}-coa-options`" type="text"
                 :placeholder="t('accounting.manual.account_placeholder')"
                 class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
               <div v-if="l.account_code && accountByCode[l.account_code]" class="text-xs text-neutral-500 mt-0.5 pl-1 truncate">
@@ -521,7 +522,7 @@ async function submitTransfer(force = false) {
                 class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm text-right" />
             </div>
             <div class="col-span-2 sm:col-span-2">
-              <input v-model="l.cost_center" list="cost-center-options" type="text" maxlength="50" :placeholder="t('accounting.manual.cost_center')"
+              <input v-model="l.cost_center" :list="`${pageId}-cost-center-options`" type="text" maxlength="50" :placeholder="t('accounting.manual.cost_center')"
                 class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
             </div>
             <div class="col-span-1 flex items-center justify-center h-9">
@@ -573,7 +574,7 @@ async function submitTransfer(force = false) {
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.closing.transfer.from') }}</label>
-              <input v-model="transfer.account_from" list="coa-options" type="text"
+              <input v-model="transfer.account_from" :list="`${pageId}-coa-options`" type="text"
                 :placeholder="t('accounting.manual.account_placeholder')"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
               <div v-if="transfer.account_from && accountByCode[transfer.account_from.trim()]"
@@ -581,7 +582,7 @@ async function submitTransfer(force = false) {
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.closing.transfer.to') }}</label>
-              <input v-model="transfer.account_to" list="coa-options" type="text"
+              <input v-model="transfer.account_to" :list="`${pageId}-coa-options`" type="text"
                 :placeholder="t('accounting.manual.account_placeholder')"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
               <div v-if="transfer.account_to && accountByCode[transfer.account_to.trim()]"

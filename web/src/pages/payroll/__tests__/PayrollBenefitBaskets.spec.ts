@@ -152,7 +152,7 @@ describe('PayrollBenefitBaskets', () => {
       expect.objectContaining({ year: new Date().getFullYear(), basket: '', offset: 0 }),
     )
 
-    await wrapper.find('#basket-kind').setValue('non_cash_health')
+    await wrapper.find('[id$="-basket-kind"]').setValue('non_cash_health')
     await flushPromises()
 
     expect(m.overview).toHaveBeenLastCalledWith(

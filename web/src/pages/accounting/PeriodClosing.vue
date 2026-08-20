@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive, watch } from 'vue'
+import { ref, computed, onMounted, reactive, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, RouterLink, type RouteLocationRaw } from 'vue-router'
 import { accountingApi, postingErrorI18nKey, type ChartAccount } from '@/api/accounting'
@@ -36,6 +36,7 @@ const { t } = useI18n()
 const route = useRoute()
 const auth = useAuthStore()
 const toast = useToast()
+const pageId = useId()
 
 const periodId = Number(route.params.id)
 
@@ -949,12 +950,12 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
                     + {{ t('accounting.closing.fx.add_cash_row') }}
                   </button>
                 </div>
-                <datalist id="closing-coa-options">
+                <datalist :id="`${pageId}-closing-fx-coa-options`">
                   <option v-for="a in pickableAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
                 </datalist>
                 <div class="space-y-2">
                   <div v-for="(r, i) in bankRows" :key="i" class="grid grid-cols-12 gap-2 items-center">
-                    <input v-model="r.account_code" list="closing-coa-options" type="text"
+                    <input v-model="r.account_code" :list="`${pageId}-closing-fx-coa-options`" type="text"
                       :placeholder="t('accounting.closing.fx.account')"
                       class="col-span-4 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
                     <input v-model="r.currency_code" type="text" maxlength="3"
@@ -1063,9 +1064,9 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
               </div>
               <div>
                 <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.closing.assist.counter_account') }}</label>
-                <input v-model="assistForm.counter_account" list="closing-coa-options" type="text"
+                <input v-model="assistForm.counter_account" :list="`${pageId}-closing-assist-coa-options`" type="text"
                   class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-                <datalist id="closing-coa-options">
+                <datalist :id="`${pageId}-closing-assist-coa-options`">
                   <option v-for="a in pickableAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
                 </datalist>
               </div>
@@ -1619,7 +1620,7 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
             <div v-for="(a, i) in pdAllocations" :key="i" class="flex flex-wrap items-end gap-2">
               <div>
                 <label class="block text-xs text-neutral-500 mb-0.5">{{ t('accounting.closing.profit_distribution.col_account') }}</label>
-                <input v-model="a.account_code" list="pd-coa-options" type="text"
+                <input v-model="a.account_code" :list="`${pageId}-pd-coa-options`" type="text"
                   class="w-24 h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
               </div>
               <div>
@@ -1639,7 +1640,7 @@ const canOpenNextStage = computed(() => ['closed', 'approved'].includes(state.va
               <button @click="removeAllocation(i)" :disabled="pdAllocations.length <= 1"
                 class="cursor-pointer h-9 px-2 text-danger-500 hover:text-danger-600 disabled:opacity-30">✕</button>
             </div>
-            <datalist id="pd-coa-options">
+            <datalist :id="`${pageId}-pd-coa-options`">
               <option v-for="a in pickableAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
             </datalist>
             <button @click="addAllocation" :class="btnOutline('neutral')">

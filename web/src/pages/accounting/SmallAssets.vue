@@ -6,7 +6,7 @@
  * Tahle stránka je evidence věcí — soupis k datu je podklad, který účetní podepisuje
  * k inventarizaci.
  */
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
@@ -28,6 +28,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const toast = useToast()
+const pageId = useId()
 
 const canWrite = computed(() => auth.canWrite('accounting'))
 
@@ -670,8 +671,8 @@ onMounted(async () => {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.col_location') }}</label>
-          <input v-model="form.location" list="sa-locations" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
-          <datalist id="sa-locations">
+          <input v-model="form.location" :list="`${pageId}-sa-locations`" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+          <datalist :id="`${pageId}-sa-locations`">
             <option v-for="loc in locations" :key="loc" :value="loc" />
           </datalist>
         </div>

@@ -11,6 +11,24 @@
         "title": "MyÚčto.cz",
         "subtitle": "Fakturační systém"
     },
+    "workspace": {
+        "layout_label": "Rozložení pracovního prostoru",
+        "layout_1": "Jeden panel",
+        "layout_2": "Dva panely",
+        "layout_3": "Tři panely",
+        "change_closes_panels": "Změna rozložení zavře otevřené panely",
+        "empty_panel": "Prázdný panel",
+        "choose_menu_item": "Vyberte položku menu, kterou chcete otevřít v tomto panelu.",
+        "back": "Zpět",
+        "forward": "Vpřed",
+        "load_error": "Obsah panelu se nepodařilo načíst.",
+        "retry": "Zkusit znovu",
+          "panel_number": "Panel {number}",
+            "resize_panels": "Změnit šířku panelů",
+            "close_content": "Zavřít obsah panelu",
+            "drop_link_here": "Otevřít odkaz v tomto panelu",
+            "drag_row": "Přetáhnout do jiného panelu"
+    },
     "documents": {
         "title": "Dokumenty",
         "subtitle": "Úložiště souborů, smluv a datových zpráv",
@@ -11829,7 +11847,7 @@
         "auto_generate_recurring_hint": "Když je vypnuto, cron pro tohoto dodavatele přeskočí všechny šablony pravidelné fakturace. Manuální spuštění (tlačítko \"Vygenerovat teď\") funguje vždy.",
         "embed_isdoc": "Přiložit ISDOC XML do PDF faktur",
         "embed_isdoc_hint": "Strojově čitelná data faktury (ISDOC 6.0.2) se vloží jako příloha do PDF. České účetní programy (Pohoda, Money S3, …) si je z PDF samy extrahují; v Adobe Reader / Foxit je vidět paperclip ikona pod variabilním symbolem. Funguje jen pro CZK faktury s přiděleným VS.",
-        "save_supplier": "Uložit dodavatele",
+        "save_supplier": "Uložit nastavení firmy",
         "signing_title": "Podpis PDF certifikátem",
         "signing_subtitle": "Elektronicky podepisovat PDF vydaných faktur a výkazů víceprací certifikátem (PAdES). Příjemce ověří, že doklad nebyl po vystavení změněn.",
         "signing_enabled": "Podepisovat PDF",

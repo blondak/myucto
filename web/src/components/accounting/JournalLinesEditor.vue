@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatMoney } from '@/composables/useFormat'
 import type { ChartAccount } from '@/api/accounting'
@@ -42,6 +42,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [EditorLine[]] }>()
 
 const { t } = useI18n()
+const accountListId = `journal-lines-${useId()}-${props.listId}`
 
 const activeAccounts = computed(() =>
   props.accounts.filter(a => a.is_active).sort((a, b) => a.account_code.localeCompare(b.account_code)))
@@ -96,7 +97,7 @@ defineExpose({ balanced, complete, valid: computed(() => balanced.value && compl
       </select>
 
       <div class="flex-1 min-w-0">
-        <input v-model="l.account_code" :list="listId" :disabled="disabled" type="text"
+        <input v-model="l.account_code" :list="accountListId" :disabled="disabled" type="text"
           :placeholder="t('accounting.lines_editor.account')"
           class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
         <div v-if="l.account_code && accountByCode[l.account_code]" class="text-xs text-neutral-500 mt-0.5 truncate">
@@ -136,7 +137,7 @@ defineExpose({ balanced, complete, valid: computed(() => balanced.value && compl
       <div v-else class="text-success-600">{{ t('accounting.lines_editor.ok') }}</div>
     </div>
 
-    <datalist :id="listId">
+    <datalist :id="accountListId">
       <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">
         {{ a.account_code }} — {{ a.name }}
       </option>

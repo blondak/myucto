@@ -25,7 +25,7 @@
  * takže se nestránkuje vůbec — půlka na klientovi a půlka na serveru by
  * schovala řádky, které filtr našel.
  */
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   payrollRetentionApi,
@@ -51,6 +51,7 @@ import SortableTh from '@/components/ui/SortableTh.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const { t, locale } = useI18n()
+const pageId = useId()
 const auth = useAuthStore()
 const toast = useToast()
 
@@ -524,11 +525,11 @@ onMounted(reloadAll)
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div class="sm:col-span-2">
-          <label class="block text-xs font-medium text-neutral-500 mb-1" for="retention-q">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-retention-q`">
             {{ t('payroll.retention.filter_q') }}
           </label>
           <input
-            id="retention-q"
+            :id="`${pageId}-retention-q`"
             v-model="filters.q"
             type="text"
             :placeholder="t('payroll.retention.filter_q_placeholder')"
@@ -536,11 +537,11 @@ onMounted(reloadAll)
           />
         </div>
         <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1" for="retention-origin">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-retention-origin`">
             {{ t('payroll.retention.col.origin') }}
           </label>
           <select
-            id="retention-origin"
+            :id="`${pageId}-retention-origin`"
             v-model="filters.origin"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
           >
@@ -928,11 +929,11 @@ onMounted(reloadAll)
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1" for="policy-extra">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-policy-extra`">
             {{ t('payroll.retention.policy_extra_years') }}
           </label>
           <input
-            id="policy-extra"
+            :id="`${pageId}-policy-extra`"
             v-model.number="policyForm.extraYears"
             type="number"
             min="0"
@@ -941,11 +942,11 @@ onMounted(reloadAll)
         </div>
 
         <div v-if="!policyForm.determined">
-          <label class="block text-xs font-medium text-neutral-500 mb-1" for="policy-override">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-policy-override`">
             {{ t('payroll.retention.policy_override_years') }}
           </label>
           <input
-            id="policy-override"
+            :id="`${pageId}-policy-override`"
             v-model.number="policyForm.overrideYears"
             type="number"
             min="1"
@@ -955,11 +956,11 @@ onMounted(reloadAll)
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1" for="policy-reason">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-policy-reason`">
             {{ t('payroll.retention.policy_reason') }}
           </label>
           <textarea
-            id="policy-reason"
+            :id="`${pageId}-policy-reason`"
             v-model="policyForm.reason"
             rows="3"
             maxlength="500"
@@ -1007,11 +1008,11 @@ onMounted(reloadAll)
         <p class="text-xs text-neutral-500">{{ t('payroll.retention.hold_hint') }}</p>
 
         <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1" for="hold-person">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-hold-person`">
             {{ t('payroll.retention.col.person') }}
           </label>
           <select
-            id="hold-person"
+            :id="`${pageId}-hold-person`"
             v-model.number="holdForm.employeeId"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
           >
@@ -1023,11 +1024,11 @@ onMounted(reloadAll)
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1" for="hold-reason">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-hold-reason`">
             {{ t('payroll.retention.col.reason') }}
           </label>
           <select
-            id="hold-reason"
+            :id="`${pageId}-hold-reason`"
             v-model="holdForm.reason"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
           >
@@ -1038,11 +1039,11 @@ onMounted(reloadAll)
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1" for="hold-description">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-hold-description`">
             {{ t('payroll.retention.col.description') }}
           </label>
           <textarea
-            id="hold-description"
+            :id="`${pageId}-hold-description`"
             v-model="holdForm.description"
             rows="2"
             maxlength="255"
@@ -1052,11 +1053,11 @@ onMounted(reloadAll)
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1" for="hold-placed">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-hold-placed`">
             {{ t('payroll.retention.col.placed_on') }}
           </label>
           <input
-            id="hold-placed"
+            :id="`${pageId}-hold-placed`"
             v-model="holdForm.placedOn"
             type="date"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"

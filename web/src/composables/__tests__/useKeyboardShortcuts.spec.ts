@@ -20,6 +20,8 @@ describe('keyboard shortcut helpers', () => {
     expect(shortcutProblem('a')).toBe('modifier_required')
     expect(shortcutProblem('shift+a')).toBe('modifier_required')
     expect(shortcutProblem('ctrl+n')).toBe('reserved')
+    expect(shortcutProblem('ctrl+alt+2')).toBe('reserved')
+    expect(shortcutProblem('shift+alt+3')).toBe('reserved')
     expect(shortcutProblem('alt+1')).toBeNull()
   })
 

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useHotkey } from '@/composables/useHotkey'
 import { markTipUsed } from '@/composables/useTips'
 import { searchApi, type SearchResults } from '@/api/search'
+import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 
 /**
  * Paleta příkazů (Ctrl/⌘ + K).
@@ -40,7 +40,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
-const router = useRouter()
+const workspaceNavigation = useWorkspaceNavigation()
 
 const open = ref(false)
 const q = ref('')
@@ -131,7 +131,7 @@ const options = computed<Option[]>(() => {
   // Bez dotazu: rychlé akce jako rozcestník, ať paleta není prázdná.
   if (!n) {
     for (const a of props.quickActions) {
-      out.push({ group: 'action', label: a.label, sub: t('command.action_hint'), icon: a.icon || ICON_PLUS, accent: 'primary', run: () => router.push(a.to) })
+      out.push({ group: 'action', label: a.label, sub: t('command.action_hint'), icon: a.icon || ICON_PLUS, accent: 'primary', run: () => void workspaceNavigation.navigate(a.to) })
     }
     return out
   }
@@ -145,7 +145,7 @@ const options = computed<Option[]>(() => {
   for (const a of props.quickActions) {
     const score = matchScore(`${createKeywords} ${a.label}`, n)
     if (score >= 0) {
-      scored.push({ score: score + 50, opt: { group: 'action', label: a.label, sub: t('command.action_hint'), icon: a.icon || ICON_PLUS, accent: 'primary', run: () => router.push(a.to) } })
+      scored.push({ score: score + 50, opt: { group: 'action', label: a.label, sub: t('command.action_hint'), icon: a.icon || ICON_PLUS, accent: 'primary', run: () => void workspaceNavigation.navigate(a.to) } })
     }
   }
 
@@ -160,7 +160,7 @@ const options = computed<Option[]>(() => {
           sub: item.section,
           icon: item.icon,
           accent: item.accent,
-          run: () => { item.external ? window.open(item.to, '_blank', 'noopener') : router.push(item.to) },
+          run: () => { item.external ? workspaceNavigation.openExternal(item.to) : void workspaceNavigation.navigate(item.to) },
         },
       })
     }
@@ -170,13 +170,13 @@ const options = computed<Option[]>(() => {
   out.push(...scored.slice(0, 12).map(s => s.opt))
 
   for (const c of results.value.clients) {
-    out.push({ group: 'client', label: c.company_name, sub: c.main_email || '', icon: ICON_USER, accent: 'success', run: () => router.push(`/clients/${c.id}`) })
+    out.push({ group: 'client', label: c.company_name, sub: c.main_email || '', icon: ICON_USER, accent: 'success', run: () => void workspaceNavigation.navigate(`/clients/${c.id}`) })
   }
   for (const i of results.value.invoices) {
-    out.push({ group: 'invoice', label: i.varsymbol || `#${i.id}`, sub: i.company_name, icon: ICON_DOC, accent: 'primary', run: () => router.push(`/invoices/${i.id}`) })
+    out.push({ group: 'invoice', label: i.varsymbol || `#${i.id}`, sub: i.company_name, icon: ICON_DOC, accent: 'primary', run: () => void workspaceNavigation.navigate(`/invoices/${i.id}`) })
   }
   for (const p of results.value.purchase_invoices) {
-    out.push({ group: 'purchase', label: p.varsymbol || p.vendor_invoice_number || `#${p.id}`, sub: p.company_name, icon: ICON_CART, accent: 'warning', run: () => router.push(`/purchase-invoices/${p.id}`) })
+    out.push({ group: 'purchase', label: p.varsymbol || p.vendor_invoice_number || `#${p.id}`, sub: p.company_name, icon: ICON_CART, accent: 'warning', run: () => void workspaceNavigation.navigate(`/purchase-invoices/${p.id}`) })
   }
 
   return out

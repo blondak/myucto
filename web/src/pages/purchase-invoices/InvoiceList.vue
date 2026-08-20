@@ -37,6 +37,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import { useSupplierStore } from '@/stores/supplier'
 import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
+import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -1119,6 +1120,8 @@ async function bulkSetKind() {
                      samotný doklad a jeho rozbalený náhled položek. -->
                 <template v-for="inv in g.invoices" :key="inv.id">
                 <tr
+                  draggable="true"
+                  :data-workspace-route="`/purchase-invoices/${inv.id}`"
                   @click="openInvoice(inv, $event)"
                   @auxclick.prevent="openInvoice(inv, $event)"
                   class="cursor-pointer hover:bg-neutral-50 transition"
@@ -1126,12 +1129,15 @@ async function bulkSetKind() {
                   :data-row-active="rowIndexById.get(inv.id) === activeIndex"
                 >
                   <td class="px-2 py-2.5 text-center" @click.stop>
-                    <input
-                      type="checkbox"
-                      :checked="selectedIds.includes(inv.id)"
-                      @change="toggleSelected(inv.id)"
-                      class="w-5 h-5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
-                    />
+                    <div class="flex items-center justify-center gap-1.5">
+                      <WorkspaceDragHandle />
+                      <input
+                        type="checkbox"
+                        :checked="selectedIds.includes(inv.id)"
+                        @change="toggleSelected(inv.id)"
+                        class="w-5 h-5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
+                      />
+                    </div>
                   </td>
                   <td v-if="tbl.isVisible('number')" class="px-4 py-2.5 font-mono text-xs">
                     <RouterLink class="row-link" :to="`/purchase-invoices/${inv.id}`" @click.stop @auxclick.stop>
@@ -1276,12 +1282,15 @@ async function bulkSetKind() {
           <div
             v-for="inv in g.invoices"
             :key="`m-${inv.id}`"
+            draggable="true"
+            :data-workspace-route="`/purchase-invoices/${inv.id}`"
             @click="openInvoice(inv, $event)"
             @auxclick.prevent="openInvoice(inv, $event)"
             class="cursor-pointer hover:bg-neutral-50 transition px-3 py-3"
             :class="[rowClass(inv), flashedIds.has(inv.id) ? 'row-flash' : '']"
           >
             <div class="flex items-start gap-3">
+              <WorkspaceDragHandle />
               <input
                 type="checkbox"
                 :checked="selectedIds.includes(inv.id)"

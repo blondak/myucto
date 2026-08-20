@@ -21,7 +21,8 @@
     "theme",
     "type",
     "updates",
-    "webauthn"
+    "webauthn",
+    "workspace"
   ],
   "lazy": [
     "activation",
@@ -97,6 +98,106 @@
     "workReportTracking"
   ],
   "routes": {
+    "login": [
+      "activation",
+      "activity_log",
+      "aiGateway",
+      "api_tokens",
+      "app",
+      "approval_inbox",
+      "automation",
+      "bank",
+      "bank_accounts",
+      "bank_template_admin",
+      "cash",
+      "cash_settlement",
+      "checks",
+      "codebookTransfer",
+      "costs",
+      "cron_jobs",
+      "dashboard",
+      "databox",
+      "diagnostics",
+      "documentCompleteness",
+      "document_requests",
+      "documents",
+      "domain_login",
+      "domains",
+      "electronic_signatures",
+      "errors",
+      "eshop",
+      "expense_categories",
+      "export",
+      "imports",
+      "integrations",
+      "lock",
+      "logbook",
+      "manualQueue",
+      "mfa_setup",
+      "monthly_report",
+      "oss_rates",
+      "payment_method",
+      "payment_order",
+      "payroll",
+      "payroll_absence",
+      "payroll_travel",
+      "permissions",
+      "portal",
+      "portfolio",
+      "price_list",
+      "profile_signing",
+      "project",
+      "purchase_invoice",
+      "purchase_submissions",
+      "recovery_codes",
+      "recurring",
+      "reports",
+      "revenue_categories",
+      "roles",
+      "sent_emails",
+      "settings",
+      "setup",
+      "smtp_logs",
+      "stats",
+      "stock",
+      "support_page",
+      "tax",
+      "taxReturn",
+      "tax_evidence",
+      "template_tools",
+      "users",
+      "vat_classifications",
+      "vendor",
+      "workReportTracking"
+    ],
+    "domain-login-callback": [
+      "app",
+      "domain_login"
+    ],
+    "setup": [
+      "app",
+      "diagnostics",
+      "settings",
+      "setup",
+      "users"
+    ],
+    "setup-mfa": [
+      "app",
+      "mfa_setup"
+    ],
+    "forgot": [
+      "app"
+    ],
+    "reset": [
+      "app",
+      "errors"
+    ],
+    "work-report-tracking": [
+      "workReportTracking"
+    ],
+    "not-found": [
+      "errors"
+    ],
     "home": [
       "activation",
       "automation",
@@ -695,106 +796,6 @@
     ],
     "profile-api-tokens": [
       "api_tokens"
-    ],
-    "login": [
-      "activation",
-      "activity_log",
-      "aiGateway",
-      "api_tokens",
-      "app",
-      "approval_inbox",
-      "automation",
-      "bank",
-      "bank_accounts",
-      "bank_template_admin",
-      "cash",
-      "cash_settlement",
-      "checks",
-      "codebookTransfer",
-      "costs",
-      "cron_jobs",
-      "dashboard",
-      "databox",
-      "diagnostics",
-      "documentCompleteness",
-      "document_requests",
-      "documents",
-      "domain_login",
-      "domains",
-      "electronic_signatures",
-      "errors",
-      "eshop",
-      "expense_categories",
-      "export",
-      "imports",
-      "integrations",
-      "lock",
-      "logbook",
-      "manualQueue",
-      "mfa_setup",
-      "monthly_report",
-      "oss_rates",
-      "payment_method",
-      "payment_order",
-      "payroll",
-      "payroll_absence",
-      "payroll_travel",
-      "permissions",
-      "portal",
-      "portfolio",
-      "price_list",
-      "profile_signing",
-      "project",
-      "purchase_invoice",
-      "purchase_submissions",
-      "recovery_codes",
-      "recurring",
-      "reports",
-      "revenue_categories",
-      "roles",
-      "sent_emails",
-      "settings",
-      "setup",
-      "smtp_logs",
-      "stats",
-      "stock",
-      "support_page",
-      "tax",
-      "taxReturn",
-      "tax_evidence",
-      "template_tools",
-      "users",
-      "vat_classifications",
-      "vendor",
-      "workReportTracking"
-    ],
-    "domain-login-callback": [
-      "app",
-      "domain_login"
-    ],
-    "setup": [
-      "app",
-      "diagnostics",
-      "settings",
-      "setup",
-      "users"
-    ],
-    "setup-mfa": [
-      "app",
-      "mfa_setup"
-    ],
-    "forgot": [
-      "app"
-    ],
-    "reset": [
-      "app",
-      "errors"
-    ],
-    "work-report-tracking": [
-      "workReportTracking"
-    ],
-    "not-found": [
-      "errors"
     ]
   }
 }

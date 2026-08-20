@@ -11,6 +11,24 @@
         "title": "MyÚčto.cz",
         "subtitle": "Invoicing system"
     },
+    "workspace": {
+        "layout_label": "Workspace layout",
+        "layout_1": "One panel",
+        "layout_2": "Two panels",
+        "layout_3": "Three panels",
+        "change_closes_panels": "Changing the layout closes open panels",
+        "empty_panel": "Empty panel",
+        "choose_menu_item": "Choose a menu item to open in this panel.",
+        "back": "Back",
+        "forward": "Forward",
+        "load_error": "The panel content could not be loaded.",
+        "retry": "Try again",
+          "panel_number": "Panel {number}",
+            "resize_panels": "Resize panels",
+            "close_content": "Close panel content",
+            "drop_link_here": "Open link in this panel",
+            "drag_row": "Drag to another panel"
+    },
     "documents": {
         "title": "Documents",
         "subtitle": "Storage for files, contracts and data-box messages",
@@ -11829,7 +11847,7 @@
         "auto_generate_recurring_hint": "When off, the cron skips all recurring invoice templates for this supplier. Manual \"Generate now\" still works.",
         "embed_isdoc": "Embed ISDOC XML in invoice PDFs",
         "embed_isdoc_hint": "Machine-readable invoice data (ISDOC 6.0.2) is attached to the PDF. Czech accounting software (Pohoda, Money S3, …) extracts it automatically; Adobe Reader / Foxit show a paperclip icon below the variable symbol. Only applies to CZK invoices with an assigned variable symbol.",
-        "save_supplier": "Save supplier",
+        "save_supplier": "Save company settings",
         "signing_title": "PDF signing with certificate",
         "signing_subtitle": "Electronically sign PDF of issued invoices and work reports with a certificate (PAdES). Recipients can verify the document was not altered after issuance.",
         "signing_enabled": "Sign PDFs",

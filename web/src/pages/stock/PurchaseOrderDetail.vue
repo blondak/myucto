@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, useId } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -24,6 +24,7 @@ const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
+const pageId = useId()
 
 const isNew = computed(() => route.name === 'stock-purchase-order-new')
 const orderId = computed<number | null>(() => (isNew.value ? null : Number(route.params.id)))
@@ -526,7 +527,7 @@ onMounted(async () => {
               <label class="block text-xs font-medium text-neutral-500 mb-1 sm:hidden">{{ t('stock.orders.col_qty') }}</label>
               <input v-model="row.qty_ordered" type="number" step="0.001" min="0"
                 class="w-full h-10 px-2 border border-neutral-300 rounded-md text-right font-mono text-sm" />
-              <input v-model="row.unit" type="text" :placeholder="t('stock.orders.col_unit')" list="po-line-units"
+              <input v-model="row.unit" type="text" :placeholder="t('stock.orders.col_unit')" :list="`${pageId}-po-line-units`"
                 class="mt-1 w-full h-8 px-2 border border-neutral-300 rounded-md text-xs text-right" />
             </div>
             <div class="sm:col-span-2">
@@ -552,7 +553,7 @@ onMounted(async () => {
               </button>
             </div>
           </div>
-          <datalist id="po-line-units">
+          <datalist :id="`${pageId}-po-line-units`">
             <option v-for="u in units" :key="u.id" :value="u.code" />
           </datalist>
         </div>

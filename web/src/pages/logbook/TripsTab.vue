@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed, watch } from 'vue'
+import { ref, reactive, onMounted, computed, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMonth } from '@/composables/useFormat'
@@ -15,6 +15,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 const { t, locale } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
+const pageId = useId()
 const props = defineProps<{ resetToken?: number; openNewToken?: number }>()
 
 // Počet aktivních filtrů pro odznáček na mobilním tlačítku „Filtry"
@@ -481,21 +482,21 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
             </div>
             <div class="col-span-2">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.purpose') }}</label>
-              <input v-model="draft.purpose" type="text" maxlength="255" list="trip-purposes" autocomplete="off"
+              <input v-model="draft.purpose" type="text" maxlength="255" :list="`${pageId}-trip-purposes`" autocomplete="off"
                 :placeholder="t('logbook.purpose_placeholder')" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
-              <datalist id="trip-purposes">
+              <datalist :id="`${pageId}-trip-purposes`">
                 <option v-for="p in purposes" :key="p" :value="p" />
               </datalist>
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.origin') }}</label>
-              <input v-model="draft.origin" type="text" maxlength="255" list="trip-places" autocomplete="off" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+              <input v-model="draft.origin" type="text" maxlength="255" :list="`${pageId}-trip-places`" autocomplete="off" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.destination') }}</label>
-              <input v-model="draft.destination" type="text" maxlength="255" list="trip-places" autocomplete="off" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+              <input v-model="draft.destination" type="text" maxlength="255" :list="`${pageId}-trip-places`" autocomplete="off" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
-            <datalist id="trip-places">
+            <datalist :id="`${pageId}-trip-places`">
               <option v-for="p in places" :key="p" :value="p" />
             </datalist>
           </div>

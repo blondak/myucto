@@ -21,6 +21,11 @@ const m = vi.hoisted(() => ({
   saveRegzelProfile: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  routeQuery: {} as Record<string, string>,
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: m.routeQuery, hash: '' }),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -162,7 +167,18 @@ async function openAccounting(wrapper: Awaited<ReturnType<typeof mountPage>>) {
 describe('EmployerSettings — účtová osnova', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.routeQuery = {}
     document.body.innerHTML = ''
+  })
+
+  it('otevře záložku podání podle query vedlejšího routeru', async () => {
+    m.routeQuery = { tab: 'submissions' }
+
+    const wrapper = await mountPage()
+
+    expect(wrapper.findAll('[role="tab"]')[5]!.attributes('aria-selected')).toBe('true')
+    expect(wrapper.text()).toContain('payroll.regzel.profile.title')
+    wrapper.unmount()
   })
 
   it('načte i neaktivní účty pro validaci a nabízí jen aktivní účet správného typu', async () => {

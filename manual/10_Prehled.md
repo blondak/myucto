@@ -129,6 +129,48 @@ Výchozí kombinace jsou **Alt+Q** pro hledání, **Alt+1** vydaná faktura,
 firem. Poslední zkratka se nabízí jen uživatelům s přístupem k více firmám.
 Kolizní nebo prohlížečem vyhrazenou kombinaci nelze uložit.
 
+### Více panelů pracovního prostoru
+
+Na široké desktopové obrazovce můžeš v horní liště zvolit rozložení s jedním,
+dvěma nebo třemi stejně širokými panely. Dva panely jsou dostupné od šířky
+pracovního prostoru 1 100 px, tři od 1 600 px. Na užším okně se aplikace
+automaticky vrátí k jednomu panelu. Přepínač rozložení je v horní liště.
+V režimu dvou nebo tří panelů můžeš jejich šířku změnit tažením svislého
+předělu myší nebo klávesami šipka vlevo a vpravo po zaměření předělu. Obsah
+stránky se přitom responzivně přeskupuje podle skutečné šířky svého panelu,
+nikoli podle šířky celého okna prohlížeče.
+
+Kliknutím do panelu jej aktivuješ. Barevná horní hrana ukazuje, do kterého
+panelu se otevře další položka hlavního menu, výsledek globálního hledání,
+příkaz z palety nebo rychlá akce **+**. Aktivní panel lze rychle přepnout také
+klávesami **Ctrl+Alt+1**, **Ctrl+Alt+2** a **Ctrl+Alt+3**. Kombinace
+**Shift+Alt+1**, **Shift+Alt+2** a **Shift+Alt+3** nastaví přímo počet panelů.
+Odkazy a tlačítka uvnitř otevřené stránky zůstávají v témže panelu. Každý panel má vlastní tlačítka **Zpět** a
+**Vpřed**; tlačítka prohlížeče ovládají první panel, jehož adresa je vidět
+v adresním řádku. Tlačítko **×** zavře nejprve pouze obsah daného panelu;
+samotný panel zůstane prázdný a připravený pro další stránku. Další kliknutí na
+**×** v prázdném vedlejším panelu zmenší počet panelů. Neuložené změny v
+zavřeném obsahu se nezachovají. První panel se místo prázdné stránky vrátí na
+Přehled, aby jeho obsah zůstal shodný s adresou prohlížeče. Interní odkaz nebo
+navigovatelný řádek označený
+šestibodovým úchytem lze také přetáhnout myší a pustit do panelu, ve kterém jej
+chceš otevřít.
+
+Zvýšení počtu panelů zachová jejich otevřený obsah, přidá nový prázdný panel
+napravo a aktivuje první prázdný vedlejší panel pro následující volbu z menu.
+Snížení počtu odstraní panely zprava; obsah ponechaných panelů se
+nemění. Neuložené změny v odstraněném panelu se nezachovají. Po obnovení celé
+záložky se vždy otevře bezpečný jednopanelový režim na adrese prvního panelu.
+
+Všechny panely používají stejnou přihlášenou relaci a jednu aktivní firmu.
+Přepnutí firmy proto změní kontext celého pracovního prostoru. Prakticky lze
+například ponechat seznam přijatých faktur v prvním panelu, otevřít detail
+dokladu ve druhém a účetní deník ve třetím. **Ctrl+klik** na interní odkaz
+uvnitř panelu jej otevře v prvním prázdném panelu napravo a tento panel
+aktivuje. Po zaplnění všech panelů napravo se další odkaz otevře v
+bezprostředním panelu **+1**. Ctrl+klik v posledním panelu, Cmd+klik a
+prostřední tlačítko myši zachovávají běžné otevření nové záložky prohlížeče.
+
 ## 10.7 Aktualizace dat
 
 Statistiky se nepočítají v reálném čase — používají agregační cache

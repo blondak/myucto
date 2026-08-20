@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import {
   payrollApi,
   type PayrollInstitutionAccount,
@@ -17,11 +18,14 @@ import { healthInsurerName, healthInsurerOptions } from '@/utils/healthInsurers'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { usePaneDom } from '@/composables/usePaneDom'
 
 defineProps<{ canWrite: boolean }>()
 
 const { t } = useI18n()
 const toast = useToast()
+const route = useRoute()
+const paneDom = usePaneDom()
 const loading = ref(true)
 const loadFailed = ref(false)
 const saving = ref(false)
@@ -370,8 +374,8 @@ function setEditSource(value: PayrollInstitutionAccountSource | null) {
 onMounted(async () => {
   await loadAccounts()
   await nextTick()
-  if (window.location.hash === '#health-insurer-accounts') {
-    document.getElementById('health-insurer-accounts')
+  if (route.hash === '#health-insurer-accounts') {
+    paneDom.querySelector('#health-insurer-accounts')
       ?.scrollIntoView({ block: 'start' })
   }
 })

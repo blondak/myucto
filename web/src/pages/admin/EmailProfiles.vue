@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   settingsApi,
@@ -14,6 +14,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
+const pageId = useId()
 
 const loading = ref(true)
 const saving = ref(false)
@@ -895,13 +896,13 @@ function certificateCommonName(subject: string | null | undefined): string | nul
               </select>
             </label>
             <div class="block text-xs font-medium text-neutral-600">
-              <label for="email-profile-imap-folder">
+              <label :for="`${pageId}-email-profile-imap-folder`">
                 {{ t('settings.email_profile_imap_folder') }}
                 <span class="ml-0.5 text-danger-600" :title="t('common.required')" aria-hidden="true">*</span>
                 <span class="sr-only">{{ t('common.required') }}</span>
               </label>
               <div class="mt-1 flex flex-col gap-2 sm:flex-row">
-                <input id="email-profile-imap-folder" v-model="draft.imap_folder" required class="min-w-0 flex-1 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
+                <input :id="`${pageId}-email-profile-imap-folder`" v-model="draft.imap_folder" required class="min-w-0 flex-1 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
                 <button type="button" @click="browseImapFolders" :disabled="browsingImapFolders || testingImapSettings"
                   :class="[btnOutline('neutral'), 'shrink-0']">
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.inbox" /></svg>

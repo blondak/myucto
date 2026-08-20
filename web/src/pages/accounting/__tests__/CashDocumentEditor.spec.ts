@@ -104,7 +104,7 @@ describe('CashDocumentEditor.vue', () => {
     m.listRegisters.mockResolvedValue([register({ currency_code: 'EUR', account_code: '211.500' })])
     const wrapper = await mountEditor()
 
-    const rate = wrapper.find('#cash-fx-rate')
+    const rate = wrapper.find('[id$="-cash-fx-rate"]')
     expect(rate.exists()).toBe(true)
 
     const vm = wrapper.vm as any
@@ -135,7 +135,7 @@ describe('CashDocumentEditor.vue', () => {
 
   it('korunová pokladna pole pro kurz nemá', async () => {
     const wrapper = await mountEditor()
-    expect(wrapper.find('#cash-fx-rate').exists()).toBe(false)
+    expect(wrapper.find('[id$="-cash-fx-rate"]').exists()).toBe(false)
   })
 
   // ── M-13: práh KH z číselníku, ne natvrdo 10 000 ──────────────────────────
@@ -409,7 +409,7 @@ describe('CashDocumentEditor — našeptávač partnera', () => {
     const wrapper = await mountEditor()
     m.clientsList.mockClear()
 
-    const input = wrapper.find('input[list="cash-partners"]')
+    const input = wrapper.find('input[list$="-cash-partners"]')
     await input.setValue('Zeta')
 
     expect(m.clientsList).not.toHaveBeenCalled()
@@ -424,7 +424,7 @@ describe('CashDocumentEditor — našeptávač partnera', () => {
     m.clientsList.mockResolvedValue(clientPage([client(7, 'Zeta s.r.o.', '12345678', 'CZ12345678')]))
     const wrapper = await mountEditor()
 
-    const input = wrapper.find('input[list="cash-partners"]')
+    const input = wrapper.find('input[list$="-cash-partners"]')
     await input.setValue('Zeta s.r.o.')
     vi.advanceTimersByTime(300)
     await flushPromises()
@@ -439,7 +439,7 @@ describe('CashDocumentEditor — našeptávač partnera', () => {
     const wrapper = await mountEditor()
     const vm = wrapper.vm as any
 
-    const input = wrapper.find('input[list="cash-partners"]')
+    const input = wrapper.find('input[list$="-cash-partners"]')
     await input.setValue('Zeta s.r.o.')
     vi.advanceTimersByTime(300)
     await flushPromises()

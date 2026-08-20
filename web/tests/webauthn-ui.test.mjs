@@ -113,7 +113,10 @@ test('passwordless login asks for discoverable passkey options before verificati
 
 test('security management renders inside the shared profile tabs', async () => {
   const profile = await readFile(new URL('pages/PasswordChange.vue', root), 'utf8')
-  const router = await readFile(new URL('router/index.ts', root), 'utf8')
+  const router = [
+    await readFile(new URL('router/index.ts', root), 'utf8'),
+    await readFile(new URL('router/workspaceRoutes.ts', root), 'utf8'),
+  ].join('\n')
   const authApi = await readFile(new URL('api/auth.ts', root), 'utf8')
 
   assert.match(profile, /type Tab = 'password' \| 'totp' \| 'passkeys' \| 'session-lock' \| 'shortcuts'/)

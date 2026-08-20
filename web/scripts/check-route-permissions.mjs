@@ -16,7 +16,9 @@ import { fileURLToPath } from 'node:url'
 
 const webRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const routerFile = join(webRoot, 'src', 'router', 'index.ts')
+const workspaceRoutesFile = join(webRoot, 'src', 'router', 'workspaceRoutes.ts')
 const src = readFileSync(routerFile, 'utf8')
+const workspaceSrc = readFileSync(workspaceRoutesFile, 'utf8')
 
 // Najde index znaku odpovídajícího otevírací závorce na `open`, přeskakuje řetězce
 // (', ", `) a komentáře (// i /* */). Podporuje páry {} [] ().
@@ -70,14 +72,14 @@ function topLevelObjects(text) {
   return objs
 }
 
-function blockAfter(marker) {
-  const at = src.indexOf(marker)
+function blockAfter(marker, text = src) {
+  const at = text.indexOf(marker)
   if (at < 0) { console.error(`route-check: nenašel jsem "${marker}"`); process.exit(2) }
   // Od KONCE markeru — `const routes: RouteRecordRaw[] =` má vlastní `[]` v typu
   // a hledání od začátku by otevřelo prázdný blok.
-  const open = src.indexOf('[', at + marker.length)
-  const close = matchBracket(src, open)
-  return src.slice(open + 1, close)
+  const open = text.indexOf('[', at + marker.length)
+  const close = matchBracket(text, open)
+  return text.slice(open + 1, close)
 }
 
 // routePermissions — klíče (hodnota je vždy pole [perm, access?]).
@@ -93,7 +95,7 @@ const superadminRouteNames = quoted(blockAfter('const superadminRouteNames = new
 const selfServiceRouteNames = quoted(blockAfter('const selfServiceRouteNames = new Set('))
 
 // Children routy `/` — hlavní větev s requiresAuth: true.
-const childrenBlock = blockAfter('children:')
+const childrenBlock = blockAfter('return', workspaceSrc)
 // Top-level routy: většina je `public: true`, ale `/setup-mfa` má vlastní
 // requiresAuth — a přesně tu brána dřív neviděla, takže smyčka
 // home → setup-mfa → home (#5) prošla až do vydání.

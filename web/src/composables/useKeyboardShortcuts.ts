@@ -23,10 +23,8 @@ const PREFERENCE_KEY = 'keyboard.shortcuts'
  * Výchozí zkratky. Zakládání dokladů drží číselnou řadu (alt+1…), skoky do agend
  * mají písmenné mnemotechnické zkratky podle popisku v menu.
  *
- * Proč ne alt+shift+číslo pro navigaci: Alt+Shift je ve Windows přepínač rozložení
- * klávesnice a čeští uživatelé mají typicky CS i EN — zkratka by uživateli měnila
- * klávesnici pod rukama. Proč ne alt+f / alt+e: to si v Chrome a Edge bere menu
- * prohlížeče. Proč ne alt+d pro Dokumenty: adresní řádek, viz RESERVED_SHORTCUTS —
+ * Proč ne alt+f / alt+e: to si v Chrome a Edge bere menu prohlížeče. Proč ne alt+d
+ * pro Dokumenty: adresní řádek, viz RESERVED_SHORTCUTS —
  * proto druhé písmeno, alt+o.
  */
 const DEFAULT_SHORTCUTS: Record<string, string> = {
@@ -63,6 +61,8 @@ const loadedUserId = ref<number | null>(null)
 
 const RESERVED_SHORTCUTS = new Set([
   'ctrl+n', 'ctrl+s', 'ctrl+l', 'ctrl+t', 'ctrl+w', 'ctrl+r', 'ctrl+f', 'ctrl+p',
+  'ctrl+alt+1', 'ctrl+alt+2', 'ctrl+alt+3',
+  'alt+shift+1', 'alt+shift+2', 'alt+shift+3',
   // alt+f a alt+e otevírají hlavní menu Chrome a Edge, alt+d skáče do adresního
   // řádku — aplikace se ke stisku vůbec nedostane. Kontroluje se jen při zadávání
   // nové zkratky, takže komu se jedna z nich podařila uložit dřív, o ni nepřijde.

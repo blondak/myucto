@@ -9,6 +9,11 @@ const m = vi.hoisted(() => ({
   updateInstitutionAccount: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  routeHash: '',
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ get hash() { return m.routeHash }, query: {} }),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -93,8 +98,8 @@ async function mountReadOnly(items: PayrollInstitutionAccount[] = [account()]) {
 describe('HealthInsurerAccounts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.routeHash = ''
     document.body.innerHTML = ''
-    window.history.replaceState(null, '', window.location.pathname)
   })
 
   it('zobrazuje pouze maskovaný účet a údaje o účinnosti a ověření', async () => {
@@ -318,11 +323,7 @@ describe('HealthInsurerAccounts', () => {
       configurable: true,
       value: scrollIntoView,
     })
-    window.history.replaceState(
-      null,
-      '',
-      `${window.location.pathname}#health-insurer-accounts`,
-    )
+    m.routeHash = '#health-insurer-accounts'
 
     const wrapper = await mountComponent()
 

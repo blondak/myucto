@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed } from 'vue'
+import { ref, onMounted, reactive, computed, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { accountingApi, type PostingRule, type ChartAccount } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
@@ -16,6 +16,7 @@ defineProps<{ embedded?: boolean }>()
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const pageId = useId()
 
 const rules = ref<PostingRule[]>([])
 const accounts = ref<ChartAccount[]>([])
@@ -113,7 +114,7 @@ function accountName(code: string | null): string {
       </div>
     </div>
 
-    <datalist id="pr-coa-options">
+    <datalist :id="`${pageId}-pr-coa-options`">
       <option v-for="a in pickable" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
     </datalist>
 
@@ -181,13 +182,13 @@ function accountName(code: string | null): string {
         <div class="space-y-3">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.posting_rules.debit') }}</label>
-            <input v-model="form.debit_account_code" list="pr-coa-options" type="text"
+            <input v-model="form.debit_account_code" :list="`${pageId}-pr-coa-options`" type="text"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             <div class="text-xs text-neutral-500 mt-0.5">{{ accountName(form.debit_account_code || null) }}</div>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.posting_rules.credit') }}</label>
-            <input v-model="form.credit_account_code" list="pr-coa-options" type="text"
+            <input v-model="form.credit_account_code" :list="`${pageId}-pr-coa-options`" type="text"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             <div class="text-xs text-neutral-500 mt-0.5">{{ accountName(form.credit_account_code || null) }}</div>
           </div>

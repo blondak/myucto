@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authApi, type PasskeyCredential } from '@/api/auth'
 import { createCredential, getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
@@ -11,6 +11,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 const { t } = useI18n()
 const auth = useAuthStore()
 const sessionSecurity = useSessionSecurityStore()
+const pageId = useId()
 const list = ref<PasskeyCredential[]>([])
 const label = ref('')
 const currentPassword = ref('')
@@ -177,26 +178,26 @@ onMounted(() => {
 
     <div v-if="passkeyAllowed" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm space-y-3 mb-5">
       <div>
-        <label for="passkey-label" class="block text-sm font-medium text-neutral-700 mb-1">
+        <label :for="`${pageId}-passkey-label`" class="block text-sm font-medium text-neutral-700 mb-1">
           {{ t('passkeys.credential_label') }} *
         </label>
-        <input id="passkey-label" v-model="label" type="text" maxlength="100"
+        <input :id="`${pageId}-passkey-label`" v-model="label" type="text" maxlength="100"
                autocomplete="off" required :placeholder="t('passkeys.label_placeholder')"
                class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
       </div>
       <div v-if="list.length === 0 && !auth.user?.totp_enabled">
-        <label for="passkey-current-password" class="block text-sm font-medium text-neutral-700 mb-1">
+        <label :for="`${pageId}-passkey-current-password`" class="block text-sm font-medium text-neutral-700 mb-1">
           {{ t('auth.current_password') }} *
         </label>
-        <input id="passkey-current-password" v-model="currentPassword"
+        <input :id="`${pageId}-passkey-current-password`" v-model="currentPassword"
                type="password" autocomplete="current-password" required
                class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
       </div>
       <div v-if="totpUsable">
-        <label for="passkey-totp" class="block text-sm font-medium text-neutral-700 mb-1">
+        <label :for="`${pageId}-passkey-totp`" class="block text-sm font-medium text-neutral-700 mb-1">
           {{ totpRequired ? t('passkeys.totp_label_required') : t('passkeys.totp_label') }}
         </label>
-        <input id="passkey-totp" v-model="totpCode" type="text" inputmode="numeric"
+        <input :id="`${pageId}-passkey-totp`" v-model="totpCode" type="text" inputmode="numeric"
                autocomplete="one-time-code" maxlength="6" pattern="\d{6}"
                :required="totpRequired"
                :placeholder="totpRequired ? t('passkeys.totp_required_placeholder') : t('passkeys.totp_optional')"

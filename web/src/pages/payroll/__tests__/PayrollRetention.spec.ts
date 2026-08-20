@@ -230,7 +230,7 @@ describe('PayrollRetention', () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    await wrapper.get('#retention-q').setValue('naprosto neexistující kategorie')
+    await wrapper.get('[id$="-retention-q"]').setValue('naprosto neexistující kategorie')
     expect(wrapper.text()).toContain('payroll.retention.no_match')
     expect(wrapper.text()).not.toContain('payroll.retention.load_failed')
   })
@@ -321,10 +321,10 @@ describe('PayrollRetention', () => {
 
     await wrapper.get('[data-test="retention-policy-edit-payroll_sheet"]').trigger('click')
     // Kategorie s katalogovou lhůtou vlastní lhůtu nenabízí — server by ji odmítl.
-    expect(wrapper.find('#policy-override').exists()).toBe(false)
+    expect(wrapper.find('[id$="-policy-override"]').exists()).toBe(false)
 
-    await wrapper.get('#policy-extra').setValue('5')
-    await wrapper.get('#policy-reason').setValue('Vnitřní předpis')
+    await wrapper.get('[id$="-policy-extra"]').setValue('5')
+    await wrapper.get('[id$="-policy-reason"]').setValue('Vnitřní předpis')
     await wrapper.get('[data-test="retention-policy-save"]').trigger('click')
     await flushPromises()
 
@@ -341,8 +341,8 @@ describe('PayrollRetention', () => {
     await flushPromises()
 
     await wrapper.get('[data-test="retention-policy-edit-garnishment"]').trigger('click')
-    await wrapper.get('#policy-override').setValue('10')
-    await wrapper.get('#policy-reason').setValue('Rozhodnutí firmy')
+    await wrapper.get('[id$="-policy-override"]').setValue('10')
+    await wrapper.get('[id$="-policy-reason"]').setValue('Rozhodnutí firmy')
     await wrapper.get('[data-test="retention-policy-save"]').trigger('click')
     await flushPromises()
 
@@ -364,14 +364,14 @@ describe('PayrollRetention', () => {
     await flushPromises()
 
     await wrapper.get('[data-test="retention-hold-new"]').trigger('click')
-    await wrapper.get('#hold-person').setValue('9')
+    await wrapper.get('[id$="-hold-person"]').setValue('9')
     await wrapper.get('[data-test="retention-hold-save"]').trigger('click')
     await flushPromises()
 
     expect(m.placeHold).not.toHaveBeenCalled()
     expect(m.toastError).toHaveBeenCalledWith('payroll.retention.hold_description_required')
 
-    await wrapper.get('#hold-description').setValue('Exekuce sp. zn. TEST-1')
+    await wrapper.get('[id$="-hold-description"]').setValue('Exekuce sp. zn. TEST-1')
     await wrapper.get('[data-test="retention-hold-save"]').trigger('click')
     await flushPromises()
 

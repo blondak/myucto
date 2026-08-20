@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, watch, computed, ref, onMounted } from 'vue'
+import { reactive, watch, computed, ref, onMounted, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ChartAccount } from '@/api/accounting'
 import { bankPostingApi, type BankPostingRulePayload, type RuleDryRunResult } from '@/api/bankPosting'
@@ -20,6 +20,9 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [BankPostingRulePayload] }>()
 
 const { t } = useI18n()
+const idPrefix = `bank-rule-form-${useId()}`
+const debitListId = `${idPrefix}-debit`
+const creditListId = `${idPrefix}-credit`
 
 const form = reactive<BankPostingRulePayload>({ ...props.modelValue })
 let syncing = false
@@ -179,23 +182,23 @@ defineExpose({ runDryRun, dryRun })
     <div class="grid grid-cols-2 gap-2">
       <div>
         <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.debit') }}</label>
-        <input v-model="form.debit_account_code" list="bpr-coa-debit" type="text"
+        <input v-model="form.debit_account_code" :list="debitListId" type="text"
           class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
         <div class="text-xs text-neutral-500 mt-0.5 truncate">{{ accountName(form.debit_account_code) }}</div>
       </div>
       <div>
         <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.credit') }}</label>
-        <input v-model="form.credit_account_code" list="bpr-coa-credit" type="text"
+        <input v-model="form.credit_account_code" :list="creditListId" type="text"
           class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
         <div class="text-xs text-neutral-500 mt-0.5 truncate">{{ accountName(form.credit_account_code) }}</div>
       </div>
     </div>
-    <datalist id="bpr-coa-debit">
+    <datalist :id="debitListId">
       <option v-for="a in (nonBankSide === 'debit' ? nonBankOptions : bankSideOptions)" :key="a.id" :value="a.account_code">
         {{ a.account_code }} — {{ a.name }}
       </option>
     </datalist>
-    <datalist id="bpr-coa-credit">
+    <datalist :id="creditListId">
       <option v-for="a in (nonBankSide === 'credit' ? nonBankOptions : bankSideOptions)" :key="a.id" :value="a.account_code">
         {{ a.account_code }} — {{ a.name }}
       </option>

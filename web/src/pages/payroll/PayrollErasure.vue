@@ -20,7 +20,7 @@
  * ve zmrazeném obsahu (vystavená PDF, odeslaná XML) se nepřepisují — obrazovka
  * je vypisuje jako „zbytek", ne aby se na ně přišlo až potom.
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   payrollRetentionApi,
@@ -41,6 +41,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 const { t, locale } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const pageId = useId()
 
 const canWrite = computed(() => auth.canWrite('payroll.erasure'))
 
@@ -543,11 +544,11 @@ onMounted(load)
         </label>
 
         <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1" for="erasure-confirm-id">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-erasure-confirm-id`">
             {{ t('payroll.erasure.confirm_type_id', { id: selectedId }) }}
           </label>
           <input
-            id="erasure-confirm-id"
+            :id="`${pageId}-erasure-confirm-id`"
             v-model="confirmExecute.typedId"
             type="text"
             inputmode="numeric"

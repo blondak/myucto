@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch, useId } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -32,6 +32,7 @@ const emit = defineEmits<{ 'counts-changed': [] }>()
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const pageId = useId()
 
 const TABS: SuggestionStatus[] = ['pending', 'needs_input', 'auto_posted', 'approved', 'rejected']
 const tab = ref<SuggestionStatus>('pending')
@@ -388,10 +389,10 @@ function resolveLink(it: PostingSuggestion) {
                         class="cursor-pointer text-neutral-400 hover:text-neutral-600 px-1" :title="t('bank.posting.override_accounts')">⚙</button>
                     </div>
                     <div v-if="overrideId === it.id" class="inline-flex items-center gap-1 mt-1">
-                      <input v-model="overrideDebit" list="bps-coa" type="text"
+                      <input v-model="overrideDebit" :list="`${pageId}-bps-coa`" type="text"
                         class="w-20 h-7 px-1.5 border border-neutral-300 rounded text-xs font-mono" />
                       <span class="text-neutral-400">/</span>
-                      <input v-model="overrideCredit" list="bps-coa" type="text"
+                      <input v-model="overrideCredit" :list="`${pageId}-bps-coa`" type="text"
                         class="w-20 h-7 px-1.5 border border-neutral-300 rounded text-xs font-mono" />
                     </div>
                   </template>
@@ -414,7 +415,7 @@ function resolveLink(it: PostingSuggestion) {
             </tr>
           </tbody>
         </table>
-        <datalist id="bps-coa">
+        <datalist :id="`${pageId}-bps-coa`">
           <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">{{ a.account_code }} — {{ a.name }}</option>
         </datalist>
       </div>

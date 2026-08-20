@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, useId } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { stockApi, type StockItemPayload } from '@/api/stock'
@@ -38,6 +38,7 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const pageId = useId()
 
 const isEdit = computed(() => route.params.id !== undefined && route.params.id !== 'new')
 const itemId = computed(() => (isEdit.value ? Number(route.params.id) : null))
@@ -752,9 +753,9 @@ function onImgError(e: Event) {
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.items.field_unit') }}</label>
-              <input v-model="form.unit" maxlength="20" list="stock-item-units"
+              <input v-model="form.unit" maxlength="20" :list="`${pageId}-stock-item-units`"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
-              <datalist id="stock-item-units">
+              <datalist :id="`${pageId}-stock-item-units`">
                 <option v-for="u in units" :key="u.id" :value="u.code" />
               </datalist>
             </div>
@@ -951,7 +952,7 @@ function onImgError(e: Event) {
             <div class="sm:col-span-2">
               <!-- text (s volbami → našeptávač přes datalist, ale volný text povolen) -->
               <input v-if="a.data_type === 'text'" v-model="ensureAttrState(a.id).value_text" type="text"
-                :list="(attrOptions[a.id] || []).length ? `attr-dl-${a.id}` : undefined"
+                :list="(attrOptions[a.id] || []).length ? `${pageId}-attr-dl-${a.id}` : undefined"
                 class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
               <!-- number -->
               <input v-else-if="a.data_type === 'number'" v-model="ensureAttrState(a.id).value_num" type="number" step="any"
@@ -976,7 +977,7 @@ function onImgError(e: Event) {
                 </button>
               </div>
               <!-- Našeptávač hodnot pro textový atribut s definovanými volbami -->
-              <datalist v-if="a.data_type === 'text' && (attrOptions[a.id] || []).length" :id="`attr-dl-${a.id}`">
+              <datalist v-if="a.data_type === 'text' && (attrOptions[a.id] || []).length" :id="`${pageId}-attr-dl-${a.id}`">
                 <option v-for="o in attrOptions[a.id]" :key="o.id" :value="o.label" />
               </datalist>
             </div>

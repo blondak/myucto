@@ -23,12 +23,14 @@ import BankRequestDocModal from '@/components/bank/BankRequestDocModal.vue'
 import type { PostResult } from '@/api/bankPosting'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { useBankTransactionActions } from '@/composables/useBankTransactionActions'
+import { usePaneDom } from '@/composables/usePaneDom'
 
 const { t, locale } = useI18n()
 const toast = useToast()
 const router = useRouter()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
+const paneDom = usePaneDom()
 const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
 
 // Počet transakcí s návrhem zaúčtování (pro chip v headeru) — počítá backend přes
@@ -157,7 +159,7 @@ async function highlightLinkedTx(): Promise<void> {
   const id = Number(route.query.tx)
   if (!Number.isInteger(id) || id <= 0) return
   await nextTick()
-  const row = document.querySelector<HTMLElement>(`[data-tx-id="${id}"]`)
+  const row = paneDom.querySelector<HTMLElement>(`[data-tx-id="${id}"]`)
   if (!row) return
   row.scrollIntoView({ block: 'center', behavior: 'smooth' })
   row.classList.add('row-flash')

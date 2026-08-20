@@ -163,6 +163,10 @@ const ROUTE_RE = /name:\s*'([^']+)',\s*(?:\r?\n\s*)?component:\s*\(\)\s*=>\s*imp
 
 /** [{ name, file }] pro každou routu, která má vlastní komponentu. */
 export function routeEntries() {
-  const router = readFileSync(join(SRC, 'router/index.ts'), 'utf8')
-  return [...router.matchAll(ROUTE_RE)].map(m => ({ name: m[1], file: join(SRC, m[2]) }))
+  const sources = [
+    readFileSync(join(SRC, 'router/index.ts'), 'utf8'),
+    readFileSync(join(SRC, 'router/workspaceRoutes.ts'), 'utf8'),
+  ]
+  return sources.flatMap(source => [...source.matchAll(ROUTE_RE)]
+    .map(m => ({ name: m[1], file: join(SRC, m[2]) })))
 }

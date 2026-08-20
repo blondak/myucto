@@ -121,7 +121,7 @@ function isLgBreakpoint(header) {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .toLowerCase()
     .replace(/\s+/g, '')
-  return compact.startsWith('@media')
+  return (compact.startsWith('@media') || compact.startsWith('@containerworkspace'))
     && (
       compact.includes('(width>=64rem)')
       || compact.includes('(min-width:64rem)')
@@ -144,7 +144,7 @@ function containsExpandedLgHidden(css, blocks, insideLgBreakpoint = false) {
   return false
 }
 
-test('development CSS flattens Tailwind responsive nesting', { timeout: 30_000 }, () => {
+test('development CSS flattens Tailwind workspace-container nesting', { timeout: 30_000 }, () => {
   const transformed = transformDevelopmentCss()
   const encodedCss = transformed.match(
     /const __vite__css = (".*")\r?\n__vite__updateStyle/,
@@ -154,5 +154,5 @@ test('development CSS flattens Tailwind responsive nesting', { timeout: 30_000 }
   const css = JSON.parse(encodedCss)
   const blocks = parseCssBlocks(css)
   assert.equal(containsExpandedLgHidden(css, blocks), true)
-  assert.doesNotMatch(css, /\.lg\\:hidden\s*\{\s*@media/)
+  assert.doesNotMatch(css, /\.lg\\:hidden\s*\{\s*@(media|container)/)
 })

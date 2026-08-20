@@ -11,7 +11,7 @@
  * schválení vstupu, takže sedí s výplatní páskou; server je jen sečte za osobu
  * a koš. Klient z nich odvozuje jedinou věc, a to šířku ukazatele.
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   BENEFIT_EXEMPTION_BASKETS,
@@ -30,6 +30,7 @@ import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const { t } = useI18n()
+const pageId = useId()
 
 const PAGE_SIZE = 50
 
@@ -174,29 +175,29 @@ onMounted(load)
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
       <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
         <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1" for="basket-year">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-basket-year`">
             {{ t('payroll.benefit_baskets.filter_year') }}
           </label>
           <input
-            id="basket-year"
+            :id="`${pageId}-basket-year`"
             v-model.number="year"
             type="number"
             min="2000"
             max="2200"
             step="1"
-            list="basket-year-options"
+            :list="`${pageId}-basket-year-options`"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
           />
-          <datalist id="basket-year-options">
+          <datalist :id="`${pageId}-basket-year-options`">
             <option v-for="y in years" :key="y" :value="y" />
           </datalist>
         </div>
         <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1" for="basket-kind">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-basket-kind`">
             {{ t('payroll.benefit_baskets.col.basket') }}
           </label>
           <select
-            id="basket-kind"
+            :id="`${pageId}-basket-kind`"
             v-model="basket"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
           >
@@ -207,11 +208,11 @@ onMounted(load)
           </select>
         </div>
         <div class="sm:col-span-2">
-          <label class="block text-xs font-medium text-neutral-500 mb-1" for="basket-q">
+          <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-basket-q`">
             {{ t('payroll.benefit_baskets.filter_q') }}
           </label>
           <input
-            id="basket-q"
+            :id="`${pageId}-basket-q`"
             v-model="search"
             type="text"
             :placeholder="t('payroll.benefit_baskets.filter_q_placeholder')"

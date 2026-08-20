@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, watch, nextTick, useId } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { invoicesApi, type Invoice, type InvoicePayload, type InvoiceItem, type WorkReportItem, type WorkReportMaterial, type InvoiceAttachment, type PaymentMethod, type PaymentScheduleRow, type CashSettlementResult } from '@/api/invoices'
 import { useHotkey } from '@/composables/useHotkey'
+import { usePaneDom } from '@/composables/usePaneDom'
 import { focusLastRow } from '@/composables/useRowFocus'
 import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
@@ -10,6 +11,8 @@ import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
 const toast = useToast()
+const pageId = useId()
+const paneDom = usePaneDom()
 const { blockDemoMutation } = useDemoMode()
 
 useHotkey('ctrl+s', (e) => { e.preventDefault(); submit() })
@@ -989,7 +992,7 @@ async function applyProjectDefaults(projectId: number) {
 
 function addItem() {
   form.value.items.push(blankItem())
-  focusLastRow('[data-row-input="inv-item"]')
+  focusLastRow('[data-row-input="inv-item"]', paneDom.root())
 }
 
 async function addPriceListItem() {
@@ -1349,7 +1352,7 @@ function addWrItem() {
     : (previousRate && previousRate > 0) ? previousRate
     : 1500
   wrItems.value.push({ description: '', hours: 1, rate: defaultRate, order_index: wrItems.value.length })
-  focusLastRow('[data-row-input="inv-wr"]')
+  focusLastRow('[data-row-input="inv-wr"]', paneDom.root())
 }
 function removeWrItem(idx: number) {
   wrItems.value.splice(idx, 1)
@@ -1518,7 +1521,7 @@ function addMatItem() {
     unit_price: 0,
     order_index: matItems.value.length,
   })
-  focusLastRow('[data-row-input="inv-mat"]')
+  focusLastRow('[data-row-input="inv-mat"]', paneDom.root())
 }
 function removeMatItem(idx: number) { matItems.value.splice(idx, 1) }
 function moveMatItem(idx: number, dir: -1 | 1) {
@@ -1874,7 +1877,7 @@ async function submit() {
     // Toast + scroll k bannéru — uživatel může být odscrollovaný dole u tlačítka Uložit.
     toast.error(error.value)
     await nextTick()
-    document.querySelector('[data-error-banner]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    paneDom.querySelector('[data-error-banner]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   } finally {
     submitting.value = false
   }
@@ -2563,9 +2566,9 @@ async function deleteDraft() {
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('invoice.summary') }}</h3>
           <div class="flex items-center justify-between gap-3 mb-3 pb-3 border-b border-neutral-100">
-            <label for="discount_percent" class="text-sm text-neutral-700">{{ t('invoice.discount.label') }}</label>
+            <label :for="`${pageId}-discount-percent`" class="text-sm text-neutral-700">{{ t('invoice.discount.label') }}</label>
             <div class="relative w-28">
-              <input id="discount_percent" v-model.number="form.discount_percent" type="number" min="0" max="100" step="0.01"
+              <input :id="`${pageId}-discount-percent`" v-model.number="form.discount_percent" type="number" min="0" max="100" step="0.01"
                 class="w-full h-9 pl-2 pr-7 border border-neutral-300 rounded text-right font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
               <span class="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 text-sm pointer-events-none">%</span>
             </div>

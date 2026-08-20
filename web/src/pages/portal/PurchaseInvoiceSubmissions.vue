@@ -26,6 +26,7 @@ const loading = ref(true)
 const uploading = ref(false)
 const error = ref('')
 const replacingId = ref<number | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
 
 const allowed = '.pdf,.jpg,.jpeg,.png,.isdoc,.xml,.isdocx,application/pdf,image/jpeg,image/png'
 const openItems = computed(() => items.value.filter(i =>
@@ -69,8 +70,7 @@ async function submit() {
     files.value = []
     note.value = ''
     kindHint.value = null
-    const input = document.getElementById('submission-files') as HTMLInputElement | null
-    if (input) input.value = ''
+    if (fileInput.value) fileInput.value.value = ''
     await load()
   } catch (e) {
     toast.error(apiErrorMessage(e))
@@ -172,7 +172,7 @@ watch(() => supplierStore.currentSupplierId, () => { void load() })
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5a1 1 0 001 1h12a1 1 0 001-1v-5" />
           </svg>
           {{ t('purchase_submissions.choose_files') }}
-          <input id="submission-files" type="file" multiple :accept="allowed" class="hidden" @change="selectFiles" />
+          <input ref="fileInput" type="file" multiple :accept="allowed" class="hidden" @change="selectFiles" />
         </label>
         <span v-if="files.length" class="text-sm text-neutral-600">
           {{ t('purchase_submissions.files_selected', { n: files.length }) }}

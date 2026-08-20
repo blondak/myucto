@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount } from 'vue'
+import { onMounted, onBeforeUnmount, watch } from 'vue'
+import { usePaneActivity, usePaneId } from '@/workspace/paneActivity'
+import { lockBodyScroll, unlockBodyScroll } from '@/utils/bodyScrollLock'
 
 /**
  * Generic right-anchored drawer — sourozenec Modal.vue se stejným kontraktem
@@ -21,27 +23,41 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
 }>()
+const paneActive = usePaneActivity()
+const paneId = usePaneId()
+let scrollLocked = false
+
+function syncBodyScrollLock(active: boolean): void {
+  if (active && !scrollLocked) {
+    lockBodyScroll()
+    scrollLocked = true
+  } else if (!active && scrollLocked) {
+    unlockBodyScroll()
+    scrollLocked = false
+  }
+}
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') emit('close')
+  if (paneActive.value && e.key === 'Escape') emit('close')
 }
 
 onMounted(() => {
   document.addEventListener('keydown', onKey)
-  // Zamkni body scroll dokud je drawer otevřený (shodně s Modal.vue).
-  document.body.style.overflow = 'hidden'
+  syncBodyScrollLock(paneActive.value)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKey)
-  document.body.style.overflow = ''
+  syncBodyScrollLock(false)
 })
+watch(paneActive, syncBodyScrollLock)
 
 void props
 </script>
 
 <template>
   <Teleport to="body">
-    <div class="fixed inset-0 z-50 bg-neutral-900/45 backdrop-blur-[3px]" @click.self="emit('close')">
+    <div v-show="paneActive" class="fixed inset-0 z-50 bg-neutral-900/45 backdrop-blur-[3px]"
+      :aria-hidden="paneActive ? undefined : true" :data-workspace-pane="paneId ?? undefined" @click.self="emit('close')">
       <!-- Vjezd spring křivkou (--ease-spring): panel dojede a nepatrně dosedne,
            místo aby lineárně dokloužl. Odjezd je kratší a lineární — zavírání
            nemá na co čekat. -->

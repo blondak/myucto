@@ -669,9 +669,15 @@ function vatCollisionLabel(c: VatStatusCollision): string {
 
 <template>
   <div class="max-w-5xl">
-    <div class="mb-4">
-      <h1 class="text-2xl font-semibold">{{ t('settings.title') }}</h1>
-      <p class="text-sm text-neutral-500 mt-0.5">{{ t('settings.subtitle') }}</p>
+    <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h1 class="text-2xl font-semibold">{{ t('settings.title') }}</h1>
+        <p class="text-sm text-neutral-500 mt-0.5">{{ t('settings.subtitle') }}</p>
+      </div>
+      <button v-if="!loading && supplier" type="button" @click="saveSupplier" :class="btnFilled('primary')">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+        {{ t('settings.save_supplier') }}
+      </button>
     </div>
 
     <nav class="flex flex-wrap gap-1 border-b border-neutral-200 mb-5" :aria-label="t('settings.tabs_label')">

@@ -22,10 +22,12 @@ import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { usePaneDom } from '@/composables/usePaneDom'
 
 const { t } = useI18n()
 const toast = useToast()
 const route = useRoute()
+const paneDom = usePaneDom()
 
 const periods = ref<AccountingPeriod[]>([])
 const report = ref<GeneralLedgerReport | null>(null)
@@ -168,7 +170,7 @@ async function focusAccountFromQuery() {
   if (!report.value.accounts.some(a => a.account_id === id)) return
   expandedId.value = id
   await nextTick()
-  document.getElementById(`gl-account-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  paneDom.querySelector(`#gl-account-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
 }
 
 const exporting = ref(false)

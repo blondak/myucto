@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch, useId } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 // RouterLink se používá i v Add Currency modalu — import už pokrývá
 import { useI18n } from 'vue-i18n'
@@ -32,6 +32,7 @@ import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategor
 import { projectsApi, type Project } from '@/api/projects'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { settingsApi } from '@/api/settings'
+import { usePaneDom } from '@/composables/usePaneDom'
 import AutomationBadge from '@/components/automation/AutomationBadge.vue'
 import ConfidenceLabel from '@/components/automation/ConfidenceLabel.vue'
 import { formatMoney } from '@/composables/useFormat'
@@ -57,6 +58,8 @@ const route = useRoute()
 const router = useRouter()
 const { t, locale } = useI18n()
 const toast = useToast()
+const pageId = useId()
+const paneDom = usePaneDom()
 const { blockDemoMutation } = useDemoMode()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
@@ -877,7 +880,7 @@ function addItem(hideDropzone = true) {
   // Automatický seed první položky při mountu posílá hideDropzone=false (viz onMounted).
   if (hideDropzone) {
     dropzoneVisible.value = false
-    focusLastRow('[data-row-input="pur-item"]') // jen u user kliku, ne u seedu při mountu
+    focusLastRow('[data-row-input="pur-item"]', paneDom.root()) // jen u user kliku, ne u seedu při mountu
   }
 }
 
@@ -1375,7 +1378,7 @@ async function submit() {
     // a jinak by validační chybu vůbec neviděl (jen tichý 422).
     toast.error(error.value)
     await nextTick()
-    document.querySelector('[data-error-banner]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    paneDom.querySelector('[data-error-banner]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   } finally {
     submitting.value = false
   }
@@ -2179,7 +2182,7 @@ function fieldErr(key: string): string | null {
                   </div>
                   <div class="sm:col-span-2">
                     <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.vat_allocation.account') }}</label>
-                    <input v-model="a.account_code" list="purchase-allocation-accounts" type="text"
+                    <input v-model="a.account_code" :list="`${pageId}-purchase-allocation-accounts`" type="text"
                       class="w-full h-9 px-2 border border-neutral-300 rounded text-sm font-mono" />
                   </div>
                   <div class="sm:col-span-1 text-right">
@@ -2193,7 +2196,7 @@ function fieldErr(key: string): string | null {
                 </div>
               </div>
             </section>
-            <datalist id="purchase-allocation-accounts">
+            <datalist :id="`${pageId}-purchase-allocation-accounts`">
               <option v-for="a in accountingAccounts.filter(a => a.is_active)" :key="a.id" :value="a.account_code">{{ a.name }}</option>
             </datalist>
             <p v-if="allocationInvalid" class="text-xs text-danger-600">{{ t('purchase_invoice.vat_allocation.invalid') }}</p>

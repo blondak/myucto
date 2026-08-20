@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import WorkspaceNavLink from '@/components/workspace/WorkspaceNavLink.vue'
+import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 interface NavItem {
   to: string
@@ -51,8 +53,8 @@ const props = defineProps<{
   menuLabel: string
 }>()
 
-const route = useRoute()
-const router = useRouter()
+const workspace = useWorkspaceStore()
+const workspaceNavigation = useWorkspaceNavigation()
 const root = ref<HTMLElement | null>(null)
 const openSection = ref<string | null>(null)
 const hoverCapable = ref(false)
@@ -90,7 +92,7 @@ function activateSection(section: NavSection) {
   const target = firstInternalTarget(section)
   if (target === null) return
   close()
-  router.push(target)
+  void workspaceNavigation.navigate(target)
 }
 
 function openFromPointer(key: string) {
@@ -117,7 +119,7 @@ function onHoverChange(event: MediaQueryListEvent) {
   hoverCapable.value = event.matches
 }
 
-watch(() => route.fullPath, close)
+watch(() => workspace.activeFullPath, close)
 
 onMounted(() => {
   hoverMql = window.matchMedia('(hover: hover) and (pointer: fine)')
@@ -206,7 +208,7 @@ onBeforeUnmount(() => {
               <span v-if="props.shortcutFor(item.to)" class="shrink-0 text-[11px] leading-none tracking-wide text-neutral-400">{{ props.shortcutFor(item.to) }}</span>
             </a>
             <div v-else class="relative group/item" role="none">
-              <RouterLink
+              <WorkspaceNavLink
                 :to="item.to"
                 class="flex items-center gap-2.5 px-3 py-2 text-sm transition-colors"
                 :class="props.isActive(item) ? 'bg-primary-50 text-primary-700 font-medium' : 'text-neutral-700 hover:bg-neutral-50 hover:text-primary-700'"
@@ -229,8 +231,8 @@ onBeforeUnmount(() => {
                   class="shrink-0 text-[11px] leading-none tracking-wide text-neutral-400 transition-opacity"
                   :class="props.canCreate(item) ? 'group-hover/item:opacity-0' : ''"
                 >{{ props.shortcutFor(item.to) }}</span>
-              </RouterLink>
-              <RouterLink
+              </WorkspaceNavLink>
+              <WorkspaceNavLink
                 v-if="props.canCreate(item)"
                 :to="props.createTarget(item)"
                 :title="quickNewLabel"
@@ -241,7 +243,7 @@ onBeforeUnmount(() => {
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 7v10m5-5H7" />
                 </svg>
-              </RouterLink>
+              </WorkspaceNavLink>
             </div>
           </template>
         </div>

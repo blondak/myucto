@@ -1,4 +1,6 @@
 import { ref, onMounted, onBeforeUnmount, type Ref } from 'vue'
+import { usePaneActivity, usePaneId } from '@/workspace/paneActivity'
+import { usePaneDom } from '@/composables/usePaneDom'
 
 /**
  * Klávesové ovládání seznamů: j/k pohyb, Enter otevřít, x označit, Esc zrušit výběr.
@@ -25,6 +27,9 @@ interface Options {
 
 export function useListKeyboard(opts: Options): { activeIndex: Ref<number> } {
   const activeIndex = ref(-1)
+  const paneActive = usePaneActivity()
+  const paneId = usePaneId()
+  const paneDom = usePaneDom()
 
   function isTyping(): boolean {
     const el = document.activeElement as HTMLElement | null
@@ -36,11 +41,14 @@ export function useListKeyboard(opts: Options): { activeIndex: Ref<number> } {
 
   /** Dialogy si klávesnici řídí samy (Esc zavírá, šipky vybírají v seznamu). */
   function inDialog(): boolean {
-    return document.querySelector('[role="dialog"], [aria-modal="true"]') !== null
+    if (paneDom.querySelector('[role="dialog"], [aria-modal="true"]')) return true
+    return paneId !== null && document.querySelector(
+      `[data-workspace-pane="${paneId}"][role="dialog"], [data-workspace-pane="${paneId}"] [role="dialog"], [data-workspace-pane="${paneId}"] [aria-modal="true"]`,
+    ) !== null
   }
 
   function scrollActiveIntoView(): void {
-    document.querySelector('[data-row-active="true"]')?.scrollIntoView({ block: 'nearest' })
+    paneDom.querySelector('[data-row-active="true"]')?.scrollIntoView({ block: 'nearest' })
   }
 
   function move(delta: number): void {
@@ -54,6 +62,7 @@ export function useListKeyboard(opts: Options): { activeIndex: Ref<number> } {
   }
 
   function onKey(e: KeyboardEvent): void {
+    if (!paneActive.value) return
     if (e.ctrlKey || e.metaKey || e.altKey) return
     if (isTyping() || inDialog()) return
 
