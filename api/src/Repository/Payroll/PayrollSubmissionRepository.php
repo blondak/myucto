@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Submission\PayrollAgendaGroupCatalog;
 use PDO;
 
 final class PayrollSubmissionRepository
@@ -20,24 +21,25 @@ final class PayrollSubmissionRepository
     /**
      * Zařazení agendy do skupiny, kterou ukazuje jeden panel.
      *
-     * Klasifikace patří SEM, ne na frontend: přehled se stránkuje na serveru,
-     * takže kdyby si panel skupinu filtroval až z přijaté stránky, pager by
-     * počítal řádky obou agend a tabulka ukazovala jen některé — čísla pod
-     * sebou by si odporovala. Jeden zdroj pravdy taky znamená, že se výčet
-     * kódů nemůže rozejít mezi backendem a frontendem.
+     * Klasifikace patří na SERVER, ne na frontend: přehled se stránkuje na
+     * serveru, takže kdyby si panel skupinu filtroval až z přijaté stránky,
+     * pager by počítal řádky obou agend a tabulka ukazovala jen některé —
+     * čísla pod sebou by si odporovala.
+     *
+     * Samotný předpis ale nepatří ani sem: dřív to byl ručně psaný REGEXP,
+     * který se rozešel s konstantami `AGENDA_CODE` (neuměl ročník v kódu).
+     * Výraz proto staví {@see PayrollAgendaGroupCatalog} z týchž konstant,
+     * které kódy zapisují.
      */
-    private const AGENDA_GROUP_SQL =
-        'CASE
-             WHEN UPPER(TRIM(obligation.agenda_code))
-                  REGEXP "^(HEALTH[_-])?(HOZ|PPZ)([_-]|$)" THEN "health"
-             WHEN UPPER(TRIM(obligation.agenda_code))
-                  REGEXP "^(JMHZ?|REGZEL(DOPL)?|PREZAM|PREZEC|REGZEC|DZMH|OREZAM|ZREZAM|OZUSPOJ)([_-]|$)"
-                  THEN "jmhz"
-             ELSE "other"
-         END';
+    private static function agendaGroupSql(): string
+    {
+        return PayrollAgendaGroupCatalog::sqlExpression(
+            'obligation.agenda_code',
+        );
+    }
 
     /** @var list<string> */
-    public const AGENDA_GROUPS = ['jmhz', 'health', 'other'];
+    public const AGENDA_GROUPS = PayrollAgendaGroupCatalog::GROUPS;
 
     private const OVERVIEW_FROM =
         ' FROM payroll_obligations obligation
@@ -188,7 +190,7 @@ final class PayrollSubmissionRepository
                     obligation.period_end, obligation.obligation_kind,
                     obligation.preferred_channel, obligation.status,
                     obligation.row_version,
-                    ' . self::AGENDA_GROUP_SQL . ' AS agenda_group,
+                    ' . self::agendaGroupSql() . ' AS agenda_group,
                     deadline.earliest_submission_on, deadline.due_on,
                     deadline.calendar_basis,
                     latest_submission.id AS submission_id,
@@ -320,7 +322,7 @@ final class PayrollSubmissionRepository
     {
         return $agendaGroup === null
             ? ''
-            : ' AND ' . self::AGENDA_GROUP_SQL . ' = ?';
+            : ' AND ' . self::agendaGroupSql() . ' = ?';
     }
 
     /** @return list<string> */

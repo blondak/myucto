@@ -8,6 +8,7 @@ import {
   type PayrollJmhzPvpojPreview,
   type PayrollRegzelEnvironment,
   type PayrollRun,
+  type PayrollSubmissionAgendaGroup,
   type PayrollSubmissionDeadlinePhase,
   type PayrollSubmissionDetail,
   type PayrollSubmissionOverviewItem,
@@ -24,8 +25,14 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
+/*
+ * `mode` je zároveň `agenda_group` pro server. Skupina `other` je záchytná:
+ * `agenda_code` povinnosti je volný text, takže se do přehledu může dostat
+ * kód, který katalog agend nezná. Panel pro ni ukáže jen holou tabulku —
+ * nástavby (náhledy JMHZ, přehledy plateb ZP) patří konkrétní agendě.
+ */
 const props = defineProps<{
-  mode: 'jmhz' | 'health'
+  mode: PayrollSubmissionAgendaGroup
 }>()
 
 const { locale, t } = useI18n()

@@ -1131,10 +1131,18 @@ kontrolní — bez implementovaného důvěryhodného transportu a parseru proto
 nenabízí falešné tlačítko odeslání ani nepovyšuje lokální stav na přijaté
 podání.
 
+Záložka **JMHZ** ukazuje všechny povinnosti vůči ČSSZ, tedy vedle měsíčního
+hlášení i registrace zaměstnance a zaměstnavatele, evidenční list důchodového
+pojištění a oznámení o zaměstnání osoby pobírající starobní důchod.
+
 Samostatná záložka **ZP — oznámení** řeší oznamovací povinnost vůči zdravotní
 pojišťovně, tedy hlášení nástupů, skončení a dalších skutečností v osmidenní
 lhůtě. Je to jiná povinnost než měsíční přehled o platbě pojistného, a proto
 má vlastní záložku; podrobně ji popisuje kapitola 58.22.
+
+Záložka **Ostatní** je záchytná. Zobrazí evidované povinnosti, jejichž agendu
+aplikace nezná — typicky zadané ručně nebo pocházející ze starší verze. Nic se
+tak neztratí z dohledu; přípravu ani odeslání pro ně aplikace nenabízí.
 
 U každého termínu se samostatně zobrazuje jeho aktuální fáze: okno ještě není
 otevřené, otevřeno, blíží se termín, termín je dnes, po termínu, čeká se na

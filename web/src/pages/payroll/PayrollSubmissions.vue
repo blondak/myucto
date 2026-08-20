@@ -26,7 +26,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 type SubmissionTab =
   'transport' | 'regzel' | 'jmhz' | 'discount_intents' | 'eldp' | 'health'
-  | 'health_notifications' | 'inbox' | 'certificate'
+  | 'health_notifications' | 'other' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -45,9 +45,13 @@ const activeTab = ref<SubmissionTab>('transport')
 // měsíčně, a slít je do jedné záložky by tenhle rozdíl schovalo.
 // Záměr uplatňovat slevu stojí hned za JMHZ, protože je jeho podmínkou: sleva
 // se sice vykazuje v měsíčním hlášení, ale nárok na ni zakládá tohle podání.
+// „Ostatní" je záchytná záložka pro skupinu `other`: `agenda_code` povinnosti
+// je volný text, takže se do přehledu může dostat kód, který server neumí
+// zařadit. Bez téhle záložky by taková povinnost nebyla vidět NIKDE — panely
+// filtrují skupinu na serveru, takže by ji ani jeden z nich nenačetl.
 const tabs: SubmissionTab[] = [
   'transport', 'regzel', 'jmhz', 'discount_intents', 'eldp', 'health',
-  'health_notifications', 'inbox', 'certificate',
+  'health_notifications', 'other', 'inbox', 'certificate',
 ]
 /*
  * `null` = počet neznáme (načtení odznaku selhalo), ne „nula nevyřízených".
@@ -590,7 +594,7 @@ onMounted(loadInboxBadge)
 
     <PayrollSubmissionOverviewPanel
       v-else
-      :mode="activeTab === 'health' ? 'health' : 'jmhz'"
+      :mode="activeTab === 'health' || activeTab === 'other' ? activeTab : 'jmhz'"
     />
   </div>
 </template>

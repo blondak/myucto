@@ -2997,10 +2997,13 @@
                 "eldp": "Evidenční list DP",
                 "health": "Zdravotní pojišťovny",
                 "health_notifications": "ZP — oznámení",
+                "other": "Ostatní",
                 "inbox": "Inbox",
                 "certificate": "Certifikát"
             },
             "unsupported": "Zatím nepodporováno",
+            "other_title": "Ostatní evidované povinnosti",
+            "other_fail_closed": "Povinnosti, jejichž agendu systém nezná — typicky ručně evidované nebo pocházející ze starší verze aplikace. Zůstávají vidět tady, aby se neztratily; přípravu ani odeslání pro ně systém nenabízí.",
             "jmhz_title": "Jednotné měsíční hlášení zaměstnavatele",
             "jmhz_fail_closed": "Přímá příprava a odeslání JMHZ zatím nejsou zpřístupněné. Dokud nebude dokončené mapování, ověření dodejek a korekcí, systém žádné podání nepředstírá.",
             "health_title": "Hlášení zdravotním pojišťovnám",
