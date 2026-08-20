@@ -13,6 +13,7 @@ import {
   type PayrollDependantsResponse,
 } from '@/api/payroll'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import RequiredMark from '@/components/ui/RequiredMark.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
@@ -502,11 +503,11 @@ function creditLabel(claim: PayrollDependantClaim): string {
           <SearchableSelect v-model="dependantForm.relation" class="mt-1" :options="relationOptions" :clearable="false" accent="payroll" />
         </label>
         <label :class="labelClass">
-          {{ t('payroll.people.dependants.form.full_name') }}
+          {{ t('payroll.people.dependants.form.full_name') }} <RequiredMark />
           <input v-model="dependantForm.full_name" required :class="inputClass" data-test="dependant-full-name">
         </label>
         <label :class="labelClass">
-          {{ t('payroll.people.dependants.form.birth_date') }}
+          {{ t('payroll.people.dependants.form.birth_date') }} <RequiredMark />
           <input v-model="dependantForm.birth_date" required type="date" :class="inputClass">
         </label>
         <label :class="labelClass">
@@ -515,7 +516,7 @@ function creditLabel(claim: PayrollDependantClaim): string {
           <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.form.birth_number_hint') }}</span>
         </label>
         <label :class="labelClass">
-          {{ t('payroll.people.dependants.form.existence_from') }}
+          {{ t('payroll.people.dependants.form.existence_from') }} <RequiredMark />
           <input v-model="dependantForm.existence_from" required type="date" :class="inputClass">
         </label>
         <label :class="labelClass">
@@ -538,7 +539,7 @@ function creditLabel(claim: PayrollDependantClaim): string {
 
       <div v-else class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <label :class="labelClass">
-          {{ t('payroll.people.dependants.form.child_order') }}
+          {{ t('payroll.people.dependants.form.child_order') }} <RequiredMark />
           <input v-model.number="claimForm.child_order" required type="number" min="1" max="20" step="1" :class="inputClass" data-test="claim-order">
           <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.form.child_order_hint') }}</span>
         </label>
@@ -562,7 +563,7 @@ function creditLabel(claim: PayrollDependantClaim): string {
           <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.form.evidence_reference_hint') }}</span>
         </label>
         <label :class="labelClass">
-          {{ t('payroll.people.dependants.form.effective_from') }}
+          {{ t('payroll.people.dependants.form.effective_from') }} <RequiredMark />
           <input v-model="claimForm.effective_from" required type="date" :class="inputClass" data-test="claim-effective-from">
         </label>
         <label :class="labelClass">

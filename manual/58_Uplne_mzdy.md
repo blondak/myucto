@@ -137,15 +137,32 @@ rekapitulace. Změna jména nebo aktivního stavu v původní agendě se proto t
 téže osoby; žádné slučování duplicitních karet není potřeba.
 
 Primárním tlačítkem **Přidat zaměstnance** založíš právě tuto společnou kartu,
-nikoli druhou osobu jen pro úplné mzdy. Krátký formulář obsahuje nejčastější
-vstupní údaje: jméno, volitelné rodné číslo, datum narození, druh vztahu,
-plánovaný nástup a základní mzdu. Jedno uložení založí kartu i první pracovní
-vztah; nový zaměstnanec se pak otevře k doplnění osobního profilu a podrobností
-vztahu. Zaměstnance bez českého rodného čísla lze založit bez náhradní hodnoty.
+nikoli druhou osobu jen pro úplné mzdy. Formulář se otevře místo seznamu, takže
+nemusíš nikam scrollovat ani hledat založenou osobu. Nahoře je jen to, bez čeho
+uložení neprojde — jméno, druh vztahu a plánovaný nástup. Zbytek je hned pod
+tím ve sbalitelné části **Další údaje**: rodné číslo, datum narození, základní
+mzda, týdenní pracovní doba, mzdová účtárna a zdravotní pojišťovna. Jedno
+uložení tak založí kartu, první pracovní vztah i jeho podmínky; nový zaměstnanec
+se pak otevře k doplnění zbytku osobního profilu.
+
+Týdenní pracovní doba je součástí formuláře schválně: dřív se dosazoval plný
+úvazek a poloviční se musel hned po založení přepsat novou verzí podmínek, čímž
+do historie vztahu spadl interval, který nikdy neplatil. Mzdová účtárna se
+nabízí firmě s víc než jednou aktivní účtárnou; ostatním ji aplikace dosadí
+z výchozí účtárny zaměstnavatele. Zdravotní pojišťovna se předvyplní tou, kterou
+má firma v nastavení jako výchozí, a zapíše se do **zákonné evidence osoby**
+k datu nástupu. Když se ten zápis nepovede, zaměstnanec zůstane založený
+a aplikace řekne, že pojišťovnu je potřeba doplnit v Zákonné evidenci na kartě. Zaměstnance bez českého rodného čísla lze založit bez náhradní hodnoty.
 EČP, VČP a zahraniční identifikátor se vedou samostatně a lze je doplnit
 přímo v běžné editaci; úplná osobní evidence dál uchovává jejich 1:N historii.
 Rodné číslo se v seznamu nezobrazuje. Tlačítko zůstává viditelné
 i uživateli bez práva zápisu, ale je neaktivní a vysvětlí chybějící oprávnění.
+
+Hvězdička u popisku znamená, že bez toho pole uložení neprojde. Při zakládání
+jsou takové jen tři: jméno, druh vztahu a plánovaný nástup. Rodné číslo, datum
+narození ani mzda povinné nejsou a jdou doplnit kdykoli později — rodné číslo
+je potřeba až u přihlášky na ČSSZ (kde stačí i EČP) a u oznámení zdravotní
+pojišťovně.
 
 Toolbar nad seznamem umožňuje hledání podle jména, přepnutí mezi aktivními,
 všemi a kartami vyžadujícími doplnění a rychlý přechod na měsíční zadání mezd.
@@ -344,6 +361,27 @@ nepřepíše. Historie drží zejména:
 - mzdovou účtárnu, pojistnou účast, A1 a cizí předpisy, rizikovou práci,
   daňový režim a prohlášení k dani;
 - příznak primárního pracovního vztahu a důvod změny.
+
+Formulář nové verze podmínek je rozdělený na dvě části. Nahoře je jen to, co se
+běžně mění: účinnost, plánovaný nástup, **mzdová účtárna**, týdenní hodiny,
+úvazek, data smlouvy, příznak primárního vztahu, prohlášení k dani a nepovinný
+důvod změny. Zbytek — evidence pro JMHZ, režimy sociálního a zdravotního
+pojištění, daňový režim, cizí předpisy, sazbová kategorie § 5a a sleva § 7a —
+je ve sbalené části **Další údaje**; ta se sama otevře jen u vztahu, kde už je
+něco z ní vyplněné.
+
+Hvězdička u popisku označuje pole, bez kterého uložení neprojde. Důvod změny
+mezi ně nepatří — vyplň ho, jen když chceš, aby v časové ose bylo vidět proč.
+
+Mzdovou účtárnu vybíráš přímo na kartě vztahu. Je to jediné místo, kde jde
+změnit: z účtárny vychází variabilní symbol zaměstnavatele pro odvod sociálního
+pojistného a mzdový běh se dá na účtárnu zúžit, takže vztah bez ní nemá čím
+vykázat odvod. Novému vztahu ji aplikace dosadí z výchozí účtárny
+zaměstnavatele; firmě s víc účtárnami nabídne výběr už při zakládání vztahu.
+Vztah, který účtárnu nemá (typicky převzatá data), na to na kartě upozorní —
+uložení to ale nikde neblokuje, blokátorem se to stane až při uzamčení vstupů
+mzdového běhu. V nabídce se objeví jen aktivní účtárny; deaktivovaná účtárna,
+kterou vztah drží, v ní zůstává, aby ji úprava podmínek tiše nezměnila.
 
 U odměny člena statutárního orgánu, u dohody o pracovní činnosti a u práce
 společníka pro vlastní společnost přibývá v podmínkách pole **Účast na

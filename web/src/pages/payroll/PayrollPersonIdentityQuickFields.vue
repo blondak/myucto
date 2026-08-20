@@ -5,6 +5,7 @@ import type {
   PayrollPersonIdentifier,
   PayrollPersonIdentifierType,
 } from '@/api/payroll'
+import RequiredMark from '@/components/ui/RequiredMark.vue'
 
 const props = defineProps<{
   identifiers: PayrollPersonIdentifier[]
@@ -65,7 +66,7 @@ const hasAlternativeIdentifier = computed(
 
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <label :class="labelClass">
-        {{ t('payroll.people.quick_edit.first_name') }}
+        {{ t('payroll.people.quick_edit.first_name') }} <RequiredMark />
         <input
           v-model="firstName"
           required
@@ -75,7 +76,7 @@ const hasAlternativeIdentifier = computed(
         >
       </label>
       <label :class="labelClass">
-        {{ t('payroll.people.quick_edit.last_name') }}
+        {{ t('payroll.people.quick_edit.last_name') }} <RequiredMark />
         <input
           v-model="lastName"
           required
@@ -94,8 +95,15 @@ const hasAlternativeIdentifier = computed(
           :class="inputClass"
           data-test="birth-number"
         >
+        <!--
+          Rodné číslo NENÍ povinné pro uložení karty — server ho na zápisu
+          nevyžaduje. Povinné je až u přihlášky PREZEC (tam stačí i EČP)
+          a u hromadného oznámení zdravotní pojišťovně. Věta to říká rovnou,
+          ať uživatel nehádá, jestli mu bez něj karta projde.
+        -->
         <span class="mt-1 block text-xs font-normal text-neutral-500">
           {{ t('payroll.people.quick_edit.sensitive_replace_hint') }}
+          {{ t('payroll.people.quick_edit.birth_number_optional_hint') }}
         </span>
       </label>
     </div>

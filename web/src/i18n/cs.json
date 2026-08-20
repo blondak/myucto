@@ -23,11 +23,11 @@
         "forward": "Vpřed",
         "load_error": "Obsah panelu se nepodařilo načíst.",
         "retry": "Zkusit znovu",
-          "panel_number": "Panel {number}",
-            "resize_panels": "Změnit šířku panelů",
-            "close_content": "Zavřít obsah panelu",
-            "drop_link_here": "Otevřít odkaz v tomto panelu",
-            "drag_row": "Přetáhnout do jiného panelu"
+        "panel_number": "Panel {number}",
+        "resize_panels": "Změnit šířku panelů",
+        "close_content": "Zavřít obsah panelu",
+        "drop_link_here": "Otevřít odkaz v tomto panelu",
+        "drag_row": "Přetáhnout do jiného panelu"
     },
     "documents": {
         "title": "Dokumenty",
@@ -2070,7 +2070,13 @@
                 "failed": "Zaměstnance se nepodařilo přidat.",
                 "permission_required": "Pro založení zaměstnance nemáte oprávnění.",
                 "next_steps": "Zaměstnanec i pracovní vztah jsou založeni. Nyní můžete doplnit osobní profil.",
-                "next_steps_hint": "Detail nového zaměstnance je otevřený níže; nevznikla žádná duplicitní payroll osoba."
+                "next_steps_hint": "Detail nového zaměstnance je otevřený níže; nevznikla žádná duplicitní payroll osoba.",
+                "required_hint": "Hvězdičkou je označené jen to, co musíte vyplnit teď. Rodné číslo, datum narození i mzdu jde doplnit kdykoli později.",
+                "advanced_title": "Další údaje",
+                "advanced_hint": "Nepovinné — jde doplnit i později na kartě zaměstnance.",
+                "health_insurer": "Zdravotní pojišťovna",
+                "health_insurer_hint": "Zapíše se do zákonné evidence osoby k datu nástupu. Bez ní se nedá podat hromadné oznámení pojišťovně.",
+                "insurer_failed": "Zaměstnanec je založený, ale zdravotní pojišťovnu se nepodařilo zapsat. Doplňte ji na kartě v části Zákonná evidence."
             },
             "empty_title": "Zatím tu nejsou žádní zaměstnanci",
             "empty_description": "Jakmile budou ve mzdové agendě dostupné osoby, zobrazí se zde jejich pracovní vztahy.",
@@ -2265,7 +2271,10 @@
                 "employment_unavailable": "Zaměstnanec nemá aktivní primární pracovní vztah, jehož pracovní údaje lze upravit.",
                 "load_failed": "Běžné údaje zaměstnance se nepodařilo načíst.",
                 "save_failed": "Běžné údaje zaměstnance se nepodařilo uložit.",
-                "saved": "Údaje zaměstnance jsou uložené."
+                "saved": "Údaje zaměstnance jsou uložené.",
+                "required_hint": "Hvězdičkou je označené jen to, bez čeho zápis neprojde. Rodné číslo, bydliště, kontakty, úvazek ani mzdu uložení nedrží — doplňte je, až je budete mít.",
+                "birth_number_optional_hint": "Nepovinné pro uložení karty; potřeba je až u přihlášky na ČSSZ (stačí i EČP) a u oznámení zdravotní pojišťovně.",
+                "contact_optional_hint": "Celá sekce je nepovinná — kartu uložíte i bez bydliště a kontaktů. Bydliště vyplňte celé, nebo vůbec."
             },
             "profile": {
                 "title": "Osobní a platební údaje",
@@ -2983,7 +2992,15 @@
                 "new_title": "Nové přiřazení dimenze",
                 "edit_title": "Upravit přiřazení dimenze"
             },
-            "load_failed_hint": "Seznam zaměstnanců se nenačetl, takže nevíme, koho firma má. Zkuste to prosím znovu."
+            "load_failed_hint": "Seznam zaměstnanců se nenačetl, takže nevíme, koho firma má. Zkuste to prosím znovu.",
+            "office_label": "Mzdová účtárna",
+            "office_select": "Vyberte účtárnu",
+            "office_empty": "Zaměstnavatel zatím nemá žádnou aktivní účtárnu — založte ji v Nastavení mezd.",
+            "office_missing_warning": "Vztah nemá mzdovou účtárnu. Odvod sociálního pojistného nepůjde vykázat a mzdový běh se u tohoto vztahu zastaví. Doplňte ji přes „Nová verze podmínek“.",
+            "terms_basics_hint": "Vyplňte, co se opravdu mění. Hvězdičkou je označené jen to, bez čeho zápis neprojde — zbytek je nepovinný.",
+            "terms_advanced_title": "Další údaje",
+            "terms_advanced_hint": "Evidence pro JMHZ, režimy pojištění a daně, sazbové kategorie a slevy. Běžný pracovní poměr tu nemá co vyplňovat.",
+            "change_reason_hint": "Nepovinné. Objeví se v časové ose vztahu."
         },
         "submissions": {
             "title": "Mzdová podání",

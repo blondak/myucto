@@ -298,6 +298,8 @@ export interface PayrollPersonCreatePayload {
   planned_start_on: string
   monthly_gross: number | null
   office_id?: number | null
+  /** Týdenní pracovní doba; bez ní dosadí server plný úvazek 40.00. */
+  weekly_hours?: string | null
 }
 
 export type PayrollPersonProfileStatus = 'missing' | 'legacy' | 'setup' | 'ready'

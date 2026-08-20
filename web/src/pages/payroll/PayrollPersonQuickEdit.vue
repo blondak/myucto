@@ -14,6 +14,7 @@ import {
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import type { PayrollPersonSensitiveReveal } from '@/api/payroll'
+import RequiredMark from '@/components/ui/RequiredMark.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useToast } from '@/composables/useToast'
 import { todayIso } from './employmentLifecycleUi'
@@ -485,12 +486,19 @@ function validate(): boolean {
     saveError.value = t('payroll.people.quick_edit.structured_history_required')
     return false
   }
-  const addressParts = [
+  // Stát u české adresy nikdo needituje a prázdné pole vracelo „Vyplňte ulici,
+  // obec, PSČ i stát." — čtvrtou povinnou položkou kvůli hodnotě, která je
+  // ve výchozím nastavení vždy stejná. Dosadí se, místo aby blokovala uložení.
+  const addressWithoutCountry = [
     form.street_line,
     form.city,
     form.postal_code,
-    form.country_code,
   ].filter(item => item.trim() !== '').length
+  if (addressWithoutCountry === 3 && form.country_code.trim() === '') {
+    form.country_code = 'CZ'
+  }
+  const addressParts = addressWithoutCountry
+    + (form.country_code.trim() === '' ? 0 : 1)
   if (addressParts !== 0 && addressParts !== 4) {
     saveError.value = t('payroll.people.quick_edit.address_complete_required')
     return false
@@ -637,6 +645,15 @@ onMounted(load)
         {{ saveError }}
       </div>
 
+      <!--
+        Jedna věta místo hádání: hvězdička je jen u toho, bez čeho zápis
+        neprojde. Zbytek karty (rodné číslo, bydliště, kontakty, úvazek, mzda)
+        jde doplnit později a uložení to nedrží.
+      -->
+      <p class="text-xs text-neutral-500" data-test="quick-edit-required-hint">
+        {{ t('payroll.people.quick_edit.required_hint') }}
+      </p>
+
       <PayrollPersonIdentityQuickFields
         v-model:first-name="form.first_name"
         v-model:last-name="form.last_name"
@@ -708,7 +725,7 @@ onMounted(load)
             kdo si přišel opravit překlep v telefonu.
           -->
           <label v-if="employmentChanged" :class="labelClass" data-test="employment-effective-from-field">
-            {{ t('payroll.people.quick_edit.effective_from') }}
+            {{ t('payroll.people.quick_edit.effective_from') }} <RequiredMark />
             <input
               v-model="form.employment_effective_from"
               required

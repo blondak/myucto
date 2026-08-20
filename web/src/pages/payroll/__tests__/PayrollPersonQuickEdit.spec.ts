@@ -485,6 +485,43 @@ describe('PayrollPersonQuickEdit', () => {
     ])
   })
 
+  /**
+   * Stát u české adresy nikdo needituje, a přesto vracel formulář „Vyplňte
+   * ulici, obec, PSČ i stát." — čtvrtou povinnou položkou kvůli hodnotě, která
+   * je vždycky stejná. Dosadí se, místo aby blokovala uložení.
+   */
+  it('adresu bez vyplněného státu doplní na CZ, místo aby zablokovala uložení', async () => {
+    const wrapper = await mountedEditor()
+    await wrapper.get('[data-test="street-line"]').setValue('Nová 12')
+    await wrapper.get('[data-test="city"]').setValue('Praha')
+    await wrapper.get('[data-test="postal-code"]').setValue('110 00')
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="quick-edit-error"]').exists()).toBe(false)
+    const addresses = mocks.savePersonQuickEdit.mock.calls[0][1].profile.addresses
+    expect(addresses.at(-1)).toEqual(expect.objectContaining({
+      street_line: 'Nová 12',
+      city: 'Praha',
+      postal_code: '110 00',
+      country_code: 'CZ',
+    }))
+  })
+
+  /** Nepovinná pole nesmí nést hvězdičku — jinak nese značka stejně málo informace jako žádná. */
+  it('hvězdičkou označí jen jméno a příjmení, ne rodné číslo ani kontakty', async () => {
+    const wrapper = await mountedEditor()
+
+    expect(wrapper.findAll('[data-test="required-mark"]')).toHaveLength(2)
+    expect(wrapper.get('[data-test="birth-number"]').attributes('required')).toBeUndefined()
+    expect(wrapper.get('[data-test="street-line"]').attributes('required')).toBeUndefined()
+    expect(wrapper.get('[data-test="email"]').attributes('required')).toBeUndefined()
+    expect(wrapper.get('[data-test="weekly-hours"]').attributes('required')).toBeUndefined()
+    expect(wrapper.get('[data-test="quick-edit-required-hint"]').text())
+      .toContain('payroll.people.quick_edit.required_hint')
+  })
+
   it('jméno založené dnes opraví na místě bez další historické verze', async () => {
     mocks.personProfile.mockResolvedValueOnce({
       ...profile(),

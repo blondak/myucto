@@ -72,6 +72,17 @@ final class PayrollPersonCreateValidator
         $relationType = $this->string($input['relation_type'] ?? null);
         $plannedStart = $this->string($input['planned_start_on'] ?? null);
         $officeId = $input['office_id'] ?? null;
+        /*
+         * Týdenní doba se dosazovala natvrdo na 40 hodin, takže poloviční úvazek
+         * se musel po založení hned přepsat novou verzí podmínek — a do historie
+         * vztahu tím spadl jednodenní interval s úvazkem, který nikdy neplatil.
+         * Tvar i meze hlídá `PayrollEmploymentValidator::terms()`; tady se jen
+         * předává dál, aby zůstal JEDEN validátor týdenní doby.
+         */
+        $weeklyHours = $input['weekly_hours'] ?? null;
+        if ($weeklyHours === '') {
+            $weeklyHours = null;
+        }
         $employment = $this->employmentValidator->create([
             'code' => 'ZAM-PENDING',
             'relation_type' => $relationType,
@@ -83,7 +94,7 @@ final class PayrollPersonCreateValidator
                 'planned_start_on' => $plannedStart,
                 'actual_start_on' => null,
                 'fixed_term_end_on' => null,
-                'weekly_hours' => '40.00',
+                'weekly_hours' => $weeklyHours ?? '40.00',
                 'workload_basis_points' => 10_000,
                 'work_place' => null,
                 'regular_workplace' => null,

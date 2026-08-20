@@ -23,11 +23,11 @@
         "forward": "Forward",
         "load_error": "The panel content could not be loaded.",
         "retry": "Try again",
-          "panel_number": "Panel {number}",
-            "resize_panels": "Resize panels",
-            "close_content": "Close panel content",
-            "drop_link_here": "Open link in this panel",
-            "drag_row": "Drag to another panel"
+        "panel_number": "Panel {number}",
+        "resize_panels": "Resize panels",
+        "close_content": "Close panel content",
+        "drop_link_here": "Open link in this panel",
+        "drag_row": "Drag to another panel"
     },
     "documents": {
         "title": "Documents",
@@ -2070,7 +2070,13 @@
                 "failed": "The employee could not be added.",
                 "permission_required": "You do not have permission to add an employee.",
                 "next_steps": "The employee and employment relationship were created. You can now complete the personal profile.",
-                "next_steps_hint": "The new employee detail is open below; no duplicate payroll person was created."
+                "next_steps_hint": "The new employee detail is open below; no duplicate payroll person was created.",
+                "required_hint": "Only fields you must fill in now are marked with an asterisk. Birth number, date of birth and pay can be added later.",
+                "advanced_title": "More details",
+                "advanced_hint": "Optional — you can add all of it later on the employee card.",
+                "health_insurer": "Health insurer",
+                "health_insurer_hint": "Recorded in the person’s statutory evidence as of the start date. Without it the bulk notification to the insurer cannot be filed.",
+                "insurer_failed": "The employee was created, but the health insurer could not be recorded. Add it on the card under Statutory evidence."
             },
             "empty_title": "There are no employees yet",
             "empty_description": "People will appear here with their employment relationships as soon as they are available in payroll.",
@@ -2265,7 +2271,10 @@
                 "employment_unavailable": "The employee has no active primary employment relationship whose employment details can be changed.",
                 "load_failed": "The common employee details could not be loaded.",
                 "save_failed": "The common employee details could not be saved.",
-                "saved": "The employee details are saved."
+                "saved": "The employee details are saved.",
+                "required_hint": "Only fields the save cannot go through without are marked with an asterisk. Birth number, address, contacts, working hours and pay never block saving — add them when you have them.",
+                "birth_number_optional_hint": "Not required to save the card; needed only for the social security registration (a foreign personal number works too) and for health insurer notifications.",
+                "contact_optional_hint": "The whole section is optional — the card saves without an address or contacts. Fill in the address completely, or not at all."
             },
             "profile": {
                 "title": "Personal and payment details",
@@ -2983,7 +2992,15 @@
                 "new_title": "New dimension assignment",
                 "edit_title": "Edit dimension assignment"
             },
-            "load_failed_hint": "The employee list did not load, so we do not know who the company has. Please try again."
+            "load_failed_hint": "The employee list did not load, so we do not know who the company has. Please try again.",
+            "office_label": "Payroll office",
+            "office_select": "Select an office",
+            "office_empty": "The employer has no active payroll office yet — create one in payroll settings.",
+            "office_missing_warning": "This employment has no payroll office. Social insurance cannot be reported and the payroll run will stop on it. Add it through “New terms version”.",
+            "terms_basics_hint": "Fill in what actually changes. Only fields the save cannot go through without are marked with an asterisk; everything else is optional.",
+            "terms_advanced_title": "More details",
+            "terms_advanced_hint": "JMHZ evidence, insurance and tax regimes, rate categories and discounts. An ordinary employment needs none of it.",
+            "change_reason_hint": "Optional. Shows up in the employment timeline."
         },
         "submissions": {
             "title": "Payroll submissions",

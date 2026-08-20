@@ -58,5 +58,60 @@ final class PayrollPersonCreateValidatorTest extends TestCase
         self::assertSame(1_250_000, $result['employment']['monthly_gross_minor']);
         self::assertSame($relationType, $result['employment']['relation_type']);
         self::assertTrue($result['employment']['terms']['is_primary']);
+        // Bez vlastní hodnoty zůstává plný úvazek.
+        self::assertSame('40.00', $result['employment']['terms']['weekly_hours']);
+    }
+
+    private static function validator(): PayrollPersonCreateValidator
+    {
+        return new PayrollPersonCreateValidator(new PayrollEmploymentValidator(
+            new PayrollEmploymentJmhzEvidenceCatalog(
+                new JmhzSpecPackageCatalog(),
+                new JmhzExternalCodebookCatalog(new JmhzSpecPackageCatalog()),
+            ),
+            new CzIscoCodebook(),
+        ));
+    }
+
+    /** @return array<string,mixed> */
+    private static function baseInput(): array
+    {
+        return [
+            'full_name' => 'Syntetická Osoba',
+            'birth_date' => null,
+            'birth_number' => null,
+            'relation_type' => 'employment',
+            'planned_start_on' => '2026-08-10',
+            'monthly_gross' => null,
+        ];
+    }
+
+    /**
+     * Týdenní doba se dosazovala natvrdo na 40 hodin, takže poloviční úvazek se
+     * musel po založení hned přepsat novou verzí podmínek — a do historie vztahu
+     * spadl jednodenní interval s úvazkem, který nikdy neplatil.
+     */
+    public function testKeepsWeeklyHoursFromInput(): void
+    {
+        $result = self::validator()->validate(
+            ['weekly_hours' => '20.00'] + self::baseInput(),
+        );
+
+        self::assertSame('20.00', $result['employment']['terms']['weekly_hours']);
+    }
+
+    public function testFallsBackToFullTimeWhenWeeklyHoursIsBlank(): void
+    {
+        $result = self::validator()->validate(['weekly_hours' => ''] + self::baseInput());
+
+        self::assertSame('40.00', $result['employment']['terms']['weekly_hours']);
+    }
+
+    /** Meze i tvar hlídá jediný validátor podmínek — tady se jen předává dál. */
+    public function testRejectsWeeklyHoursOverTheLegalCeiling(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        self::validator()->validate(['weekly_hours' => '200.00'] + self::baseInput());
     }
 }
