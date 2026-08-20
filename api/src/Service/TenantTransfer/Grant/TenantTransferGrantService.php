@@ -406,6 +406,53 @@ final class TenantTransferGrantService
         );
     }
 
+    public function rejectAuthenticationAttempt(
+        string $reason,
+        string $httpMethod,
+        string $endpoint,
+        string $requestIp,
+    ): TenantTransferGrantValidation {
+        $pdo = $this->db->pdo();
+        $now = $this->clock->capture($pdo);
+        if ($this->tooManyRejectedIpAttempts($pdo, $now, $requestIp)) {
+            $this->auditInTransaction(
+                $pdo,
+                $now,
+                null,
+                null,
+                null,
+                'authentication',
+                'rejected',
+                'rate_limited',
+                $httpMethod,
+                $endpoint,
+                $requestIp,
+            );
+            return TenantTransferGrantValidation::rejected(
+                'transfer_rate_limited',
+                429,
+                60,
+            );
+        }
+        $this->auditInTransaction(
+            $pdo,
+            $now,
+            null,
+            null,
+            null,
+            'authentication',
+            'rejected',
+            $reason,
+            $httpMethod,
+            $endpoint,
+            $requestIp,
+        );
+        return TenantTransferGrantValidation::rejected(
+            'transfer_authorization_required',
+            403,
+        );
+    }
+
     private function tooManyRejectedIpAttempts(
         PDO $pdo,
         SecurityTime $now,

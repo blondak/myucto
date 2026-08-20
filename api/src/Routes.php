@@ -65,6 +65,7 @@ use MyInvoice\Action\Settings\EmailProfilesAction;
 use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\AccountingActivationAction;
+use MyInvoice\Action\TenantTransfer\TenantTransferCapabilitiesAction;
 use MyInvoice\Action\TenantTransfer\TenantTransferGrantAction;
 use MyInvoice\Action\Payroll\AnnualTaxCertificateAction;
 use MyInvoice\Action\Payroll\PayrollAnnualSettlementAction;
@@ -303,6 +304,7 @@ use MyInvoice\Action\System\HealthAction;
 use MyInvoice\Action\System\OpenApiAction;
 use MyInvoice\Action\System\VersionAction;
 use MyInvoice\Action\Admin\UpdateAction;
+use MyInvoice\Middleware\TenantTransferGrantMiddleware;
 use Slim\App;
 
 final class Routes
@@ -311,6 +313,9 @@ final class Routes
     {
         $app->get('/api/health',  HealthAction::class);
         $app->get('/api/version', VersionAction::class);
+        $app->group('/api/tenant-transfer/v1', function ($group): void {
+            $group->get('/capabilities', TenantTransferCapabilitiesAction::class);
+        })->add(TenantTransferGrantMiddleware::class);
 
         // Public REST API v1 — dokumentace
         $app->get('/api/openapi.yaml', [OpenApiAction::class, 'spec']);

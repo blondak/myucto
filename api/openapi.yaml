@@ -4421,6 +4421,49 @@ paths:
         '403': { description: "Forbidden — role není admin (nebo bearer token)" }
         '404': { description: Uživatel nenalezen }
 
+  /api/tenant-transfer/v1/capabilities:
+    get:
+      tags: [TenantTransfer]
+      summary: Technické schopnosti zdrojového tenant transfer API
+      description: |
+        Inter-instance handshake zdrojového MyÚčta. Přijímá výhradně krátkodobý
+        grant v hlavičce `X-MyUcto-Transfer-Grant`; browser session, běžný PAT,
+        grant v URL ani `X-Supplier-Id` nejsou zdrojem oprávnění. Firma je vždy
+        určena serverovou vazbou grantu.
+
+        Odpověď neobsahuje hostname, název databáze, tenantová data ani secrets.
+        Dokud není úplný tenantový registr nebo některý bezpečný fingerprint,
+        endpoint selže uzavřeně stavem 503 a stabilním `reason` kódem.
+      security:
+        - TenantTransferGrantAuth: []
+      responses:
+        '200':
+          description: Bezpečná capability a kompatibilitní metadata zdroje
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantTransferCapabilities' }
+        '401':
+          description: Grant chybí, je neplatný, expirovaný nebo odvolaný
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Požadavek použil browser session nebo běžnou Authorization hlavičku
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Tenant transfer je na instanci vypnutý
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503':
+          description: Zdroj nemá bezpečně sestavitelná úplná capability metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/admin/tenant-transfer-grants:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -16859,6 +16902,13 @@ components:
       scheme: bearer
       bearerFormat: mi_pat_
       description: Personal Access Token získaný v Nastavení → API tokeny.
+    TenantTransferGrantAuth:
+      type: apiKey
+      in: header
+      name: X-MyUcto-Transfer-Grant
+      description: |
+        Krátkodobý jednorázový grant zdrojové firmy s prefixem `ttg_v1_`.
+        Není to PAT ani browser session a nesmí se posílat v URL.
     SessionCookie:
       type: apiKey
       in: cookie
@@ -16915,6 +16965,97 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    TenantTransferCapabilities:
+      type: object
+      additionalProperties: false
+      required:
+        [schema, schema_version, product, app_version, build_revision, format,
+         format_version, compatibility_profile, pending_migrations,
+         migration_set_hash, tenant_registry_version, tenant_registry_hash,
+         tenant_schema_hash, instance_fingerprint, compatibility_registry,
+         feature_registry, secret_registry, crypto_suites, limits, operations,
+         resumable_download, cutover_lock]
+      properties:
+        schema:
+          type: string
+          const: myucto-tenant-transfer-capabilities
+        schema_version: { type: integer, const: 1 }
+        product: { type: string, const: myucto }
+        app_version: { type: string, minLength: 1, maxLength: 128 }
+        build_revision: { type: string, minLength: 7, maxLength: 128 }
+        format: { type: string, const: myucto-tenant-transfer }
+        format_version: { type: integer, const: 1 }
+        compatibility_profile: { type: string, const: identity }
+        pending_migrations: { type: boolean }
+        migration_set_hash: { $ref: '#/components/schemas/TenantTransferSha256' }
+        tenant_registry_version: { type: integer, minimum: 1 }
+        tenant_registry_hash: { $ref: '#/components/schemas/TenantTransferSha256' }
+        tenant_schema_hash: { $ref: '#/components/schemas/TenantTransferSha256' }
+        instance_fingerprint: { $ref: '#/components/schemas/TenantTransferSha256' }
+        compatibility_registry:
+          $ref: '#/components/schemas/TenantTransferCompatibilityRegistry'
+        feature_registry:
+          $ref: '#/components/schemas/TenantTransferFeatureRegistry'
+        secret_registry:
+          $ref: '#/components/schemas/TenantTransferSecretRegistry'
+        crypto_suites:
+          type: array
+          uniqueItems: true
+          items: { type: string, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$' }
+        limits: { $ref: '#/components/schemas/TenantTransferLimits' }
+        operations:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [capabilities] }
+        resumable_download: { type: boolean, const: false }
+        cutover_lock: { type: boolean, const: false }
+
+    TenantTransferSha256:
+      type: string
+      pattern: '^sha256:[a-f0-9]{64}$'
+
+    TenantTransferCompatibilityRegistry:
+      type: object
+      additionalProperties: false
+      required: [version, profiles]
+      properties:
+        version: { type: integer, const: 1 }
+        profiles:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: { type: string, enum: [identity] }
+
+    TenantTransferFeatureRegistry:
+      type: object
+      additionalProperties: false
+      required: [version, complete, groups]
+      properties:
+        version: { type: integer, const: 1 }
+        complete: { type: boolean, const: false }
+        groups:
+          type: array
+          maxItems: 0
+          items: { type: string }
+
+    TenantTransferSecretRegistry:
+      type: object
+      additionalProperties: false
+      required: [version, complete, personal_certificate_attachments]
+      properties:
+        version: { type: integer, const: 1 }
+        complete: { type: boolean, const: false }
+        personal_certificate_attachments: { type: boolean, const: false }
+
+    TenantTransferLimits:
+      type: object
+      additionalProperties: false
+      required: [max_chunk_bytes, max_file_bytes, max_transfer_bytes]
+      properties:
+        max_chunk_bytes: { type: integer, format: int64, const: 16777216 }
+        max_file_bytes: { type: integer, format: int64, const: 536870912 }
+        max_transfer_bytes: { type: integer, format: int64, const: 21474836480 }
+
     TenantTransferGrant:
       type: object
       additionalProperties: false

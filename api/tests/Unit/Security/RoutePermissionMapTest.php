@@ -234,6 +234,17 @@ final class RoutePermissionMapTest extends TestCase
         self::assertTrue((new PermissionCatalog())->has('tenant.transfer.export'));
     }
 
+    public function testInterInstanceCapabilitiesDefersAuthorizationToTransferGrantMiddleware(): void
+    {
+        $match = (new RoutePermissionMap())->match(
+            'GET',
+            '/api/tenant-transfer/v1/capabilities',
+        );
+
+        self::assertSame(RoutePermissionMap::PUBLIC, $match?->kind);
+        self::assertNull($match?->key);
+    }
+
     /**
      * Výjimka je úzká a fail-closed: cokoli mimo vyjmenované importní routy zůstává
      * superadmin-only. Hlídá hlavně to, aby regex na `/imports/…` neuklouzl na
