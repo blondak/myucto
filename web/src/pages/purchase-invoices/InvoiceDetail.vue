@@ -823,8 +823,8 @@ const purchaseActions = computed<ActionItem[]>(() => {
         {{ t('common.edit') }}
       </RouterLink>
     </div>
-    <!-- DDKP zvolený druh, ale bez navázané zálohy → upozorni, že vazba chybí -->
-    <div v-else-if="invoice.document_kind === 'tax_document'"
+    <!-- DDKP bez navázané zálohy i finální faktury → upozorni, že vazba chybí -->
+    <div v-else-if="invoice.document_kind === 'tax_document' && !invoice.settled_by"
       class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
       {{ t('purchase_invoice.tax_document_link.missing') }}
     </div>

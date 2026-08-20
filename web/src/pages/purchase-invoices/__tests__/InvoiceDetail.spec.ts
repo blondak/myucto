@@ -268,3 +268,40 @@ describe('InvoiceDetail.vue — bankovní úhrady', () => {
     expect(bankLinks(wrapper)).toHaveLength(0)
   })
 })
+
+describe('InvoiceDetail.vue — vazba daňového dokladu k platbě', () => {
+  beforeEach(() => {
+    m.get.mockReset()
+    m.activity.mockReset()
+    m.activity.mockResolvedValue([])
+  })
+
+  it('upozorní na DDKP bez zálohy i bez finální faktury', async () => {
+    m.get.mockResolvedValue(makeInvoice({ document_kind: 'tax_document' }))
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('purchase_invoice.tax_document_link.missing')
+  })
+
+  it('neupozorní na samostatný DDKP vyúčtovaný finální fakturou', async () => {
+    m.get.mockResolvedValue(makeInvoice({
+      document_kind: 'tax_document',
+      settled_by: {
+        id: 21314,
+        varsymbol: '202621314',
+        vendor_invoice_number: 'FV-21314',
+        document_kind: 'invoice',
+        issue_date: '2026-06-30',
+        total_with_vat: 1210,
+        currency: 'CZK',
+        status: 'paid',
+      },
+    }))
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('purchase_invoice.advance_link.settled_by')
+    expect(wrapper.text()).not.toContain('purchase_invoice.tax_document_link.missing')
+  })
+})
