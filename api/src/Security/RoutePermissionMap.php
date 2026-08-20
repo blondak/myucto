@@ -528,6 +528,11 @@ final class RoutePermissionMap
         // (AiExtractPdfAction = přijaté, AiExtractPdfIssuedAction = vystavené).
         ['POST', '#^/api/admin/imports/ai-extract-pdf$#', 'purchase_invoices.scan', AccessLevel::WRITE],
         ['POST', '#^/api/admin/imports/ai-extract-pdf-issued$#', 'invoices.create', AccessLevel::WRITE],
+        // Zdrojový grant je vždy svázaný s aktuální firmou. Zápis navíc vyžaduje
+        // browser session, heslový re-auth a podle politiky instance MFA proof.
+        ['GET', '#^/api/admin/tenant-transfer-grants$#', 'tenant.transfer.export', AccessLevel::READ],
+        ['POST', '#^/api/admin/tenant-transfer-grants$#', 'tenant.transfer.export', AccessLevel::WRITE],
+        ['DELETE', '#^/api/admin/tenant-transfer-grants/[0-9]+$#', 'tenant.transfer.export', AccessLevel::WRITE],
         // Klíče k AI poskytovatelům sem vědomě NEPATŘÍ — zůstávají superadmin-only
         // (F7, viz F7NestedRbacTest). Guard `settings.ai_provider` v akcích je druhá
         // vrstva pro volání mimo middleware, ne pozvánka pustit sem účetní.

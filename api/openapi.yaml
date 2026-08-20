@@ -127,6 +127,8 @@ tags:
     description: Bankovní výpisy a párování plateb
   - name: Settings
     description: Konfigurace dodavatele a per-supplier overrides codebooku (read-only přes API)
+  - name: TenantTransfer
+    description: Session-only správa krátkodobého zdrojového oprávnění pro přenos firmy
   - name: Codebooks
     description: Číselníky (země, měny, DPH sazby, jednotky)
   - name: Documents
@@ -4418,6 +4420,139 @@ paths:
         '400': { description: "Validace — neexistující supplier_id, duplicitní položka, neplatná role" }
         '403': { description: "Forbidden — role není admin (nebo bearer token)" }
         '404': { description: Uživatel nenalezen }
+
+  /api/v1/admin/tenant-transfer-grants:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [TenantTransfer]
+      summary: Seznam zdrojových transfer grantů aktuální firmy
+      description: |
+        Session-only endpoint pro webové UI. Bearer token je vždy odmítnut.
+        Vrací pouze bezpečný prefix a stav; hash ani jednorázový kód se nevrací.
+        Funkce je dostupná jen při zapnutém feature flagu a vyžaduje oprávnění
+        `tenant.transfer.export` alespoň pro čtení.
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Granty aktuální firmy od nejnovějšího
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [grants]
+                additionalProperties: false
+                properties:
+                  grants:
+                    type: array
+                    items: { $ref: '#/components/schemas/TenantTransferGrant' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: Transfer API je na instanci vypnuté
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Není vybraná aktuální firma
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      tags: [TenantTransfer]
+      summary: Vydá krátkodobý zdrojový transfer grant aktuální firmy
+      description: |
+        Session-only operace s oprávněním `tenant.transfer.export` pro zápis.
+        Vyžaduje opětovné ověření aktuálním heslem. Pokud politika instance
+        vyžaduje MFA, klient nejprve získá účelový step-up proof pro operaci
+        `tenant_transfer.grant.create` a pošle jej jako `step_up_token`.
+        Náhodný kód se vrátí jen v této odpovědi; databáze ukládá pouze SHA-256.
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              additionalProperties: false
+              properties:
+                password:
+                  type: string
+                  format: password
+                  writeOnly: true
+                step_up_token:
+                  type: string
+                  writeOnly: true
+                  description: Jednorázový účelový proof; povinný podle MFA politiky instance.
+      responses:
+        '201':
+          description: Grant vytvořen; kód se už podruhé nezobrazí
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantTransferGrantCreated' }
+        '401':
+          description: Nepřihlášený uživatel nebo je vyžadovaný nový MFA step-up
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Bearer token, nedostatečné oprávnění nebo neplatný re-auth/step-up
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Transfer API je na instanci vypnuté
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Není vybraná aktuální firma
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/v1/admin/tenant-transfer-grants/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64, minimum: 1 }
+    delete:
+      tags: [TenantTransfer]
+      summary: Odvolá zdrojový transfer grant aktuální firmy
+      description: |
+        Session-only a tenant-scoped. Cizí nebo neexistující ID se navenek
+        nerozlišuje, takže endpoint nelze použít k enumeraci grantů jiné firmy.
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Požadavek byl bezpečně zpracován
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                additionalProperties: false
+                properties:
+                  ok: { type: boolean, const: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: Transfer API je na instanci vypnuté
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Není vybraná aktuální firma
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/admin/bank-rule-templates:
     get:
@@ -16780,6 +16915,57 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
+    TenantTransferGrant:
+      type: object
+      additionalProperties: false
+      required:
+        [id, public_id, grant_prefix, supplier_id, created_by_user_id, expires_at,
+         paired_at, target_instance_fingerprint, target_payload_key_fingerprint,
+         consumed_at, revoked_at, revoked_reason, last_used_at, created_at, state]
+      properties:
+        id: { type: integer, format: int64, minimum: 1 }
+        public_id: { type: string, format: uuid }
+        grant_prefix:
+          type: string
+          maxLength: 16
+          description: Bezpečný rozpoznávací prefix; nejde z něj obnovit kód.
+        supplier_id: { type: integer, minimum: 1 }
+        created_by_user_id: { type: integer, format: int64, minimum: 1 }
+        expires_at: { type: string, format: date-time }
+        paired_at: { type: [string, "null"], format: date-time }
+        target_instance_fingerprint:
+          type: [string, "null"]
+          pattern: '^[a-f0-9]{64}$'
+        target_payload_key_fingerprint:
+          type: [string, "null"]
+          pattern: '^[a-f0-9]{64}$'
+        consumed_at: { type: [string, "null"], format: date-time }
+        revoked_at: { type: [string, "null"], format: date-time }
+        revoked_reason: { type: [string, "null"], maxLength: 32 }
+        last_used_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        state:
+          type: string
+          enum: [active, paired, consumed, revoked, expired]
+    TenantTransferGrantCreated:
+      type: object
+      additionalProperties: false
+      required: [id, public_id, code, code_prefix, supplier_id, expires_at, warning]
+      properties:
+        id: { type: integer, format: int64, minimum: 1 }
+        public_id: { type: string, format: uuid }
+        code:
+          type: string
+          pattern: '^ttg_v1_[A-Za-z0-9_-]{43}$'
+          writeOnly: true
+          description: Jednorázově zobrazený grant kód; server uchovává jen jeho hash.
+        code_prefix: { type: string, maxLength: 16 }
+        supplier_id: { type: integer, minimum: 1 }
+        expires_at: { type: string, format: date-time }
+        source_url:
+          type: string
+          description: Canonical URL zdrojové instance z konfigurace, pokud je nastavená.
+        warning: { type: string }
     AppUrlConfigurationDiagnostic:
       type: object
       additionalProperties: false

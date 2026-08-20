@@ -92,6 +92,15 @@ PHP);
         self::assertSame('git:0123456789abcdef', $cfg->get('app.build_revision'));
     }
 
+    public function testTenantTransferDefaultsOffAndCanBeEnabledByEnvironment(): void
+    {
+        $this->unsetEnv('MYINVOICE_TENANT_TRANSFER_ENABLED');
+        self::assertFalse(Config::load($this->tmpDir)->get('tenant_transfer.enabled'));
+
+        $this->setEnv('MYINVOICE_TENANT_TRANSFER_ENABLED', 'true');
+        self::assertTrue(Config::load($this->tmpDir)->get('tenant_transfer.enabled'));
+    }
+
     public function testSessionLockDefaultsToDisabledWithoutExplicitConfiguration(): void
     {
         $this->unsetEnv('MYINVOICE_SESSION_LOCK_AFTER_MINUTES');
