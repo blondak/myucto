@@ -2996,10 +2996,13 @@
                 "eldp": "Pension record sheet",
                 "health": "Health insurers",
                 "health_notifications": "HI — notifications",
+                "other": "Other",
                 "inbox": "Inbox",
                 "certificate": "Certificate"
             },
             "unsupported": "Not supported yet",
+            "other_title": "Other recorded obligations",
+            "other_fail_closed": "Obligations whose agenda the system does not recognise — typically recorded manually or coming from an older version. They stay visible here so they cannot get lost; the system offers neither preparation nor submission for them.",
             "jmhz_title": "Unified monthly employer report",
             "jmhz_fail_closed": "Direct JMHZ preparation and submission are not available yet. Until mapping, receipt verification and corrections are complete, the system will not pretend that a submission occurred.",
             "health_title": "Health-insurer reports",

@@ -422,7 +422,8 @@ describe('PayrollSubmissions', () => {
 
     // Devět od chvíle, kdy má vlastní záložku i záměr uplatňovat slevu
     // (OZUSPOJ) — je to podmínka nároku, ne součást měsíčního hlášení.
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(9)
+    // Desátá je „Ostatní": skupina `other` jinak nemá kam se zobrazit.
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(10)
     await clickTab(wrapper, 'regzel')
     await flushPromises()
     expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(2)
@@ -447,6 +448,26 @@ describe('PayrollSubmissions', () => {
     )
     expect(wrapper.text()).toContain('JMHZ')
     expect(wrapper.text()).toContain('payroll.submissions.jmhz_fail_closed')
+  })
+
+  /*
+   * Povinnost s neznámou agendou spadne na serveru do skupiny `other`.
+   * Dokud pro ni nebyla záložka, nezobrazil ji ŽÁDNÝ panel — oba filtrovaly
+   * skupinu na serveru, takže se taková povinnost tiše ztratila.
+   */
+  it('má záložku pro skupinu other, aby nezařazená povinnost nezmizela', async () => {
+    const wrapper = mount(PayrollSubmissions)
+    await flushPromises()
+
+    await clickTab(wrapper, 'other')
+    await flushPromises()
+
+    expect(m.overview).toHaveBeenCalledWith(
+      'production',
+      expect.stringMatching(/^[0-9]{4}-[0-9]{2}$/),
+      { agenda_group: 'other', limit: 50, offset: 0 },
+    )
+    expect(wrapper.text()).toContain('payroll.submissions.other_title')
   })
 
   it('nabídne volbu podpisového certifikátu jako vlastní záložku', async () => {

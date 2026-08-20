@@ -16,6 +16,9 @@ use MyInvoice\Repository\Payroll\PayrollRegzelRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionInboxRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementService;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -351,14 +354,24 @@ final class PayrollSubmissionListPaginationTest extends TestCase
      * stránky, pager by počítal řádky obou a tabulka ukazovala jen některé —
      * čísla pod sebou by si odporovala. Filtr proto musí ubrat ze stránky,
      * z `total` i ze souhrnů zároveň.
+     *
+     * Kódy jsou ZÁMĚRNĚ ty skutečné, i s ročníkem. Test dřív seedoval `jmhz`
+     * a `HOZ`, tedy tvary, které v provozu nevznikají — a proto přehlédl, že
+     * klasifikace neuměla `JMHZ25` ani `HOZ_2026` a posílala je do `other`,
+     * kam se žádný panel nedívá.
      */
     public function testSubmissionOverviewFiltersAgendaGroupOnTheServer(): void
     {
-        $this->seedInboxItems(4, 'jmhz');
-        $this->seedInboxItems(3, 'HOZ');
+        $this->seedInboxItems(2, JmhzSubmissionBridgeService::AGENDA_CODE);
+        $this->seedInboxItems(2, EldpStatementService::AGENDA_CODE);
+        $this->seedInboxItems(
+            3,
+            HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
+        );
+        $this->seedInboxItems(1, 'VLASTNI_AGENDA');
 
         $all = $this->overview([]);
-        self::assertSame(7, $all['total']);
+        self::assertSame(8, $all['total']);
 
         $jmhz = $this->overview(['agenda_group' => 'jmhz']);
         self::assertSame(4, $jmhz['total'], 'Filtr musí ubrat i z celkového počtu.');
@@ -372,6 +385,15 @@ final class PayrollSubmissionListPaginationTest extends TestCase
         $health = $this->overview(['agenda_group' => 'health']);
         self::assertSame(3, $health['total']);
         self::assertSame(3, ((array) $health['summary'])['total']);
+
+        // Neznámý kód zůstává v `other` — a `other` má vlastní panel, takže
+        // se povinnost nikam neztratí.
+        $other = $this->overview(['agenda_group' => 'other']);
+        self::assertSame(1, $other['total']);
+        self::assertSame(
+            ['VLASTNI_AGENDA'],
+            array_column((array) $other['items'], 'agenda_code'),
+        );
 
         $response = $this->overviewAction()(
             $this->request('/api/payroll/submissions/overview')->withQueryParams([
