@@ -39,7 +39,7 @@ final class PayrollInstitutionAccountRepository
 
         $result = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $result[] = self::cast(self::databaseRow($row));
+            $result[] = $this->withBankAccount($supplierId, self::cast(self::databaseRow($row)));
         }
         return $this->deletion->decorate($supplierId, $result);
     }
@@ -54,7 +54,10 @@ final class PayrollInstitutionAccountRepository
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false
             ? null
-            : $this->deletion->decorateOne($supplierId, self::cast(self::databaseRow($row)));
+            : $this->deletion->decorateOne(
+                $supplierId,
+                $this->withBankAccount($supplierId, self::cast(self::databaseRow($row))),
+            );
     }
 
     /**
@@ -466,11 +469,53 @@ final class PayrollInstitutionAccountRepository
         }
     }
 
+    /**
+     * Doplní do DTO čitelné číslo účtu a zahodí ciphertext.
+     *
+     * Účet instituce NENÍ osobní údaj — je to veřejně publikovaný účet ČSSZ,
+     * finančního úřadu nebo zdravotní pojišťovny, který do aplikace zadal sám
+     * uživatel. Maskovaná podoba (`••••` + 6 znaků) mu znemožňovala zkontrolovat,
+     * kam se posílají odvody, což je horší riziko než zobrazení veřejného čísla.
+     * Šifrování v úložišti zůstává beze změny; čte se jen v této jediné cestě,
+     * která je za relací a právem `payroll.settings`.
+     *
+     * Účty zaměstnanců (`payroll_person_accounts`) tímhle NEJSOU dotčené a dál
+     * chodí ven pouze maskované.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function withBankAccount(int $supplierId, array $row): array
+    {
+        $ciphertext = self::requiredString($row, 'bank_account_ciphertext');
+        unset($row['bank_account_ciphertext']);
+
+        $bankAccount = null;
+        if (str_starts_with($ciphertext, 'enc:v2:')) {
+            try {
+                $bankAccount = $this->sensitiveData->reveal(
+                    $ciphertext,
+                    PayrollSensitiveField::BANK_ACCOUNT,
+                    $supplierId,
+                    self::requiredInt($row, 'id'),
+                );
+            } catch (\Throwable) {
+                // Cizí klíč, poškozený záznam nebo nedokončený zápis — přehled
+                // musí zůstat čitelný, uživateli zbude maskovaná podoba.
+                $bankAccount = null;
+            }
+        }
+        $row['bank_account'] = $bankAccount;
+
+        return $row;
+    }
+
     private function selectSql(): string
     {
         return 'SELECT account.id, account.supplier_id, account.institution_id,
                        institution.institution_type, institution.institution_code,
                        account.institution_name, account.bank_account_masked,
+                       account.bank_account_ciphertext,
                        account.currency_code, account.variable_symbol,
                        account.specific_symbol, account.constant_symbol,
                        account.valid_from, account.valid_to, account.source_kind,
@@ -497,6 +542,7 @@ final class PayrollInstitutionAccountRepository
             'institution_code' => self::requiredString($row, 'institution_code'),
             'institution_name' => self::requiredString($row, 'institution_name'),
             'bank_account_masked' => self::requiredString($row, 'bank_account_masked'),
+            'bank_account_ciphertext' => self::requiredString($row, 'bank_account_ciphertext'),
             'currency_code' => self::requiredString($row, 'currency_code'),
             'variable_symbol' => self::nullableString($row, 'variable_symbol'),
             'specific_symbol' => self::nullableString($row, 'specific_symbol'),

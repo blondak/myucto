@@ -11,6 +11,7 @@ import {
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import RequiredMark from '@/components/ui/RequiredMark.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -474,14 +475,14 @@ onMounted(load)
         </div>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">
-            {{ t('payroll.employer.dimensions.name') }} <span class="text-danger-600">*</span>
+            {{ t('payroll.employer.dimensions.name') }}<RequiredMark />
           </span>
           <input v-model="form.name" type="text" maxlength="190" :disabled="!canWrite" :aria-invalid="showValidation && nameError() !== null" data-test="dimension-name" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" @input="codeSlug.fromName(form.name)">
           <span v-if="showValidation && nameError()" class="mt-1 block text-xs text-danger-600">{{ nameError() }}</span>
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">
-            {{ t('payroll.employer.dimensions.code') }} <span class="text-danger-600">*</span>
+            {{ t('payroll.employer.dimensions.code') }}<RequiredMark />
           </span>
           <input v-model="form.code" type="text" maxlength="50" :disabled="!canWrite" :aria-invalid="showValidation && codeError() !== null" data-test="dimension-code" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20" @input="codeSlug.markManual(form.code)">
           <span v-if="showValidation && codeError()" class="mt-1 block text-xs text-danger-600">{{ codeError() }}</span>
