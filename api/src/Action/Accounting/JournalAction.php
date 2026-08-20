@@ -12,6 +12,7 @@ use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\JournalEntryAttachmentRepository;
+use MyInvoice\Repository\JournalEntryDocumentLinkRepository;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\AutomationProvenanceService;
@@ -86,6 +87,7 @@ final class JournalAction
         private readonly ReportXlsxExporter $xlsx,
         private readonly JournalHistoryService $history,
         private readonly JournalLinkService $links,
+        private readonly JournalEntryDocumentLinkRepository $documentLinks,
         private readonly JournalEntryAttachmentRepository $attachments,
         private readonly JournalAttachmentStorage $attachmentStorage,
         private readonly JournalIntegrityService $integrity,
@@ -250,6 +252,11 @@ final class JournalAction
             return $line;
         }, $entry['lines']);
         $entry['automation'] = $this->automationProvenance->forJournalEntries($supplierId, [$id])[$id] ?? null;
+        // Měkké vazby na doklady (migrace 1514) — detail zápisu je jediné místo, kde
+        // je uživatel spravuje, takže chodí rovnou s ním, ne dalším requestem.
+        // VČETNĚ popisu dokladu: bez něj by se navázaná faktura v UI tvářila jako
+        // smazaná, protože stejný seznam z /links popis nese.
+        $entry['links'] = $this->links->documentLinks($supplierId, $id);
 
         // ETag = row_version (silný validátor) — klient ho pošle zpět v If-Match (§ CAS).
         return Json::ok($response, $entry)->withHeader('ETag', '"' . $entry['row_version'] . '"');
@@ -297,6 +304,29 @@ final class JournalAction
             'document_no' => $this->nullableString($body['document_no'] ?? null),
         ]);
 
+        // Volitelné měkké vazby na existující doklady (migrace 1514). Validují se
+        // PŘED zaúčtováním: neplatná vazba nesmí nechat v deníku zápis, o kterém si
+        // uživatel myslí, že doklad nese. Zápis vazeb pak běží ve stejné transakci.
+        $links = [];
+        foreach ((array) ($body['links'] ?? []) as $i => $raw) {
+            if (!is_array($raw)) {
+                return Json::error($response, 'validation_failed', "Vazba #{$i} má neplatný formát.", 422);
+            }
+            $link = JournalDocumentLinkAction::validateLink($raw, $supplierId, $this->documentLinks, $code, $message);
+            if ($link === null) {
+                return Json::error($response, $code, $message, $code === 'not_found' ? 404 : 422);
+            }
+            $links[] = $link;
+        }
+        if (count($links) > JournalEntryDocumentLinkRepository::MAX_LINKS_PER_ENTRY) {
+            return Json::error(
+                $response,
+                'too_many_links',
+                'Zápis může mít nejvýš ' . JournalEntryDocumentLinkRepository::MAX_LINKS_PER_ENTRY . ' vazeb.',
+                422
+            );
+        }
+
         // Opt-in číselná řada ID pro ruční zápisy (Epic F4, R13) — výdej čísla drží
         // FOR UPDATE zámek, proto transakce obepíná i postDocument (mezera po rollbacku
         // nevzniká). Vnější transakci (testy) respektuje stejně jako PostingService.
@@ -312,6 +342,16 @@ final class JournalAction
                 $meta['document_no'] = $this->series->next($supplierId, 'manual', $fiscalYear);
             }
             $entryId = $this->posting->postDocument($supplierId, 'manual', null, $lines, $meta);
+            foreach ($links as $link) {
+                $this->documentLinks->add(
+                    $entryId,
+                    $supplierId,
+                    $link['doc_type'],
+                    $link['doc_id'],
+                    $link['note'],
+                    $meta['user_id'] ?? null
+                );
+            }
             if ($ownTx) {
                 $pdo->commit();
             }
@@ -322,7 +362,10 @@ final class JournalAction
             return $this->mapPostingError($response, $e);
         }
 
-        return Json::ok($response, $this->journal->find($entryId, $supplierId), 201);
+        $created = $this->journal->find($entryId, $supplierId);
+        $created['links'] = $this->links->documentLinks($supplierId, $entryId);
+
+        return Json::ok($response, $created, 201);
     }
 
     public function postInvoice(Request $request, Response $response, array $args): Response

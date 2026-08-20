@@ -504,6 +504,22 @@ function onDescriptionUpdated(entryId: number, description: string, rowVersion: 
 }
 
 /**
+ * Vazby na doklady se změnily. Panel „Souvisí" i odznak ve sloupci Zdroj z nich
+ * čtou, takže se překreslí panel (bump verze v `:key`) a rovnou se rozsvítí
+ * odznak — jinak by seznam tvrdil „bez vazby" u zápisu, který ji právě dostal.
+ */
+const relatedVersion = ref<Record<number, number>>({})
+function onLinksChanged(entryId: number) {
+  relatedVersion.value = { ...relatedVersion.value, [entryId]: (relatedVersion.value[entryId] ?? 0) + 1 }
+  void accountingApi.getJournalRelated(entryId)
+    .then(r => {
+      const row = entries.value.find(e => e.id === entryId)
+      if (row) row.has_related = r.items.length > 0
+    })
+    .catch(() => { /* odznak zůstane, jak byl — doplňková informace */ })
+}
+
+/**
  * Odskok na JEDEN konkrétní zápis v rámci téže stránky — společná cesta pro
  * deep-link `?entry_id=`, proklik na stornující zápis i proklik z panelu „Souvisí".
  *
@@ -875,12 +891,18 @@ function sourceLink(entry: JournalEntry): RouteLocationRaw | null {
                     <!-- Souvisí hned za kontacemi: protějšek zápisu (doklad ↔ úhrada)
                          je to první, co účetní po rozpadu na účty hledá. Dřív byl až
                          pod přílohami, poznámkami a historií, tedy o obrazovku níž. -->
-                    <JournalRelatedPanel class="mt-3 block" :entry-id="details[e.id]!.id" show-preview
+                    <!-- `key` s verzí vazeb: panel si data tahá sám podle entry-id,
+                         takže po přidání/zrušení vazby na doklad se jinak nepřekreslí
+                         a tvrdil by starý obsah. -->
+                    <JournalRelatedPanel class="mt-3 block"
+                      :key="`related-${e.id}-${relatedVersion[e.id] ?? 0}`"
+                      :entry-id="details[e.id]!.id" show-preview
                       @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry" />
                     <WhyPanel v-if="details[e.id]!.automation" class="mt-3" :provenance="details[e.id]!.automation!" />
                     <!-- Epic F7: inline editace description (§35) + přílohy §33a -->
                     <JournalEntryExtras :entry="details[e.id]!"
-                      @description-updated="(desc, rv) => onDescriptionUpdated(details[e.id]!.id, desc, rv)" />
+                      @description-updated="(desc, rv) => onDescriptionUpdated(details[e.id]!.id, desc, rv)"
+                      @links-changed="onLinksChanged(details[e.id]!.id)" />
                     <LinkedDocumentsPanel class="mt-4 block" entity-type="journal_entry" :entity-id="details[e.id]!.id" />
                     <div class="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-neutral-200">
                       <div class="text-xs text-neutral-500">

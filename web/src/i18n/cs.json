@@ -6060,7 +6060,9 @@
                 "title": "Souvisí",
                 "relation": {
                     "payment": "Úhrada",
-                    "document": "Doklad"
+                    "document": "Doklad",
+                    "linked_document": "Navázaný doklad",
+                    "linked_entry": "Navázaný zápis"
                 },
                 "allocated": "na doklad",
                 "not_posted": "Nezaúčtováno",
@@ -6300,7 +6302,8 @@
                 "stock": "Sklad",
                 "offset": "Vzájemný zápočet",
                 "settlement": "Zápočet proti účtu",
-                "vat_clearing": "Zúčtování DPH"
+                "vat_clearing": "Zúčtování DPH",
+                "journal_entry": "Účetní zápis"
             },
             "history": {
                 "title": "Historie",
@@ -6311,7 +6314,20 @@
                 "no_changes": "Zápis nebyl od vzniku upraven."
             },
             "att_preview": "Otevřít náhled",
-            "net_on_account": "Čistý dopad na {account}"
+            "net_on_account": "Čistý dopad na {account}",
+            "links": {
+                "title": "Vazba na doklad",
+                "hint": "Informativní vazba: zápis zůstává ručním zápisem, doklad se jí nezaúčtuje. Slouží k dohledání souvislosti (dohad, kurzový rozdíl, přeúčtování, oprava).",
+                "add": "Navázat doklad",
+                "remove": "Zrušit vazbu",
+                "empty": "Zápis zatím není navázaný na žádný doklad.",
+                "added": "Doklad navázán.",
+                "search_placeholder": "Hledat doklad (číslo, VS, partner)…",
+                "no_candidates": "Žádný doklad neodpovídá.",
+                "already_linked": "Už navázáno",
+                "note_placeholder": "Poznámka k vazbě (nepovinné)",
+                "missing_document": "Doklad neexistuje"
+            }
         },
         "manual": {
             "title": "Ruční účetní zápis",

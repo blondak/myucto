@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\JournalEntryDocumentLinkRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use PDO;
 
@@ -23,6 +24,12 @@ use PDO;
  *   purchase_invoice ↔ bank   přes payment_matches (N:N, migrace 0034)
  *   invoice / purchase_invoice ↔ cash       přes cash_documents.invoice_id / .purchase_invoice_id
  *   invoice / purchase_invoice ↔ settlement přes invoice_settlements.doc_type + .doc_id
+ *   JAKÝKOLI zápis          ↔ doklad přes journal_entry_document_links (RUČNÍ měkká
+ *                             vazba, migrace 1514) — jediná hrana, kterou zakládá
+ *                             uživatel, a jediná, kterou má i ruční zápis se
+ *                             source_id NULL. Nese ji obousměrně: ze zápisu na
+ *                             doklad ('linked_document') a z dokladu na zápis
+ *                             ('linked_entry', kind 'journal_entry').
  *
  * ── Bezpečnost ────────────────────────────────────────────────────────────────
  * Klíčem je VŽDY ověřený řádek journal_entries daného tenanta (stejně jako
@@ -53,9 +60,13 @@ final class JournalLinkService
         'bank'             => 'bank',
         'cash'             => 'cash',
         'settlement'       => 'accounting',
+        'journal_entry'    => 'accounting',
     ];
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly JournalEntryDocumentLinkRepository $documentLinks,
+    ) {}
 
     /**
      * Protějšky jednoho zápisu i s jejich zaúčtováním.
@@ -95,7 +106,30 @@ final class JournalLinkService
             if ($sid === null || !in_array($type, self::LINKABLE, true)) continue;
             $byRef[$type . ':' . $sid][] = (int) $e['id'];
         }
-        if ($byRef === []) return [];
+
+        // Měkké vazby stránku neomezují na LINKABLE zdroje: ruční zápis (source_id
+        // NULL) v $byRef vůbec není, a přesto odznak mít má. Proto se sbírají zvlášť
+        // z id zápisů a výsledek se s odvozenými hranami až na konci sloučí.
+        $pageIds = [];
+        foreach ($entries as $e) {
+            $id = (int) ($e['id'] ?? 0);
+            if ($id > 0) $pageIds[] = $id;
+        }
+        $pageIds = array_values(array_unique($pageIds));
+
+        /** @var array<int,true> $linked zápisy, které si samy navázaly doklad */
+        $linked = [];
+        if ($pageIds !== []) {
+            foreach ($this->rows(
+                'SELECT DISTINCT entry_id FROM journal_entry_document_links
+                  WHERE supplier_id = ? AND entry_id IN (' . $this->placeholders($pageIds) . ')',
+                array_merge([$supplierId], $pageIds)
+            ) as $r) {
+                $linked[(int) $r['entry_id']] = true;
+            }
+        }
+
+        if ($byRef === []) return $linked;
 
         $ids = static function (array $byRef, string $type): array {
             $out = [];
@@ -179,7 +213,23 @@ final class JournalLinkService
             $mark((int) $r['doc_id'], (string) $r['doc_type']);
         }
 
-        $out = [];
+        // 6) Měkká vazba z druhé strany: doklad na stránce, na který ukazuje ruční
+        //    zápis. Bez tohohle by odznak u faktury chyběl, ačkoli panel doúčtování
+        //    ukáže — a seznam by lhal (odznak a panel musí říkat totéž).
+        foreach ($this->pairsQuery(
+            'SELECT doc_type, doc_id FROM journal_entry_document_links WHERE supplier_id = ?',
+            [$supplierId],
+            [
+                ["CASE WHEN doc_type = 'invoice' THEN doc_id END", $invoices],
+                ["CASE WHEN doc_type = 'purchase_invoice' THEN doc_id END", $purchases],
+                ["CASE WHEN doc_type = 'bank' THEN doc_id END", $banks],
+                ["CASE WHEN doc_type = 'cash' THEN doc_id END", $cash],
+            ]
+        ) as $r) {
+            $mark((int) $r['doc_id'], (string) $r['doc_type']);
+        }
+
+        $out = $linked;
         foreach ($byRef as $key => $entryIds) {
             if (!isset($hits[$key])) continue;
             foreach ($entryIds as $entryId) $out[$entryId] = true;
@@ -192,24 +242,128 @@ final class JournalLinkService
     /**
      * Sousedé zápisu v grafu vazeb — jen reference (typ + id), bez popisných dat.
      *
+     * Dvě nezávislé skupiny hran:
+     *  a) ODVOZENÉ z evidence úhrad (doklad ↔ platba) — jen pro LINKABLE zdroje,
+     *  b) RUČNÍ měkké vazby z `journal_entry_document_links` — obousměrně a bez
+     *     ohledu na typ zápisu, protože právě ruční zápis (source_id NULL) je ten,
+     *     který si vazbu na doklad jinak nemá kde nést (viz migrace 1514).
+     *
      * @param  array<string,mixed> $entry
      * @return list<array{kind:string, id:int, relation:string, allocated:?float}>
      */
     private function neighbourRefs(int $supplierId, array $entry): array
     {
+        $refs    = [];
+        $entryId = (int) ($entry['id'] ?? 0);
+
+        if ($entryId > 0) {
+            foreach ($this->linkedDocumentRefs($supplierId, $entryId) as $r) {
+                $this->addRef($refs, $r['kind'], $r['id'], $r['relation'], $r['allocated']);
+            }
+        }
+
         $type     = (string) ($entry['source_type'] ?? '');
         $sourceId = $this->sourceId($entry);
         if ($sourceId === null || !in_array($type, self::LINKABLE, true)) {
-            return [];
+            return array_values($refs);
         }
 
-        return match ($type) {
+        $derived = match ($type) {
             'invoice', 'purchase_invoice' => $this->paymentsOfDocument($supplierId, $type, $sourceId),
             'bank'                        => $this->documentsOfBankTransaction($supplierId, $sourceId),
             'cash'                        => $this->documentsOfCashDocument($supplierId, $sourceId),
             'settlement'                  => $this->documentsOfSettlement($supplierId, $sourceId),
             default                       => [],
         };
+        foreach ($derived as $r) {
+            $this->addRef($refs, $r['kind'], $r['id'], $r['relation'], $r['allocated']);
+        }
+
+        // Zpětná hrana měkké vazby: zápisy, které si TENHLE doklad navázaly.
+        // Bez ní by vazba fungovala jen jedním směrem — z faktury by se účetní
+        // k ručnímu doúčtování nedostal a musel by ho hledat ve filtrech.
+        foreach ($this->linkingEntryRefs($supplierId, $type, $sourceId) as $r) {
+            $this->addRef($refs, $r['kind'], $r['id'], $r['relation'], $r['allocated']);
+        }
+
+        return array_values($refs);
+    }
+
+    /**
+     * Doklady ručně navázané na zápis (měkká vazba, migrace 1514).
+     *
+     * @return list<array{kind:string, id:int, relation:string, allocated:?float}>
+     */
+    private function linkedDocumentRefs(int $supplierId, int $entryId): array
+    {
+        $refs = [];
+        foreach ($this->rows(
+            'SELECT doc_type, doc_id FROM journal_entry_document_links
+              WHERE supplier_id = ? AND entry_id = ? ORDER BY id',
+            [$supplierId, $entryId]
+        ) as $r) {
+            $this->addRef($refs, (string) $r['doc_type'], (int) $r['doc_id'], 'linked_document', null);
+        }
+        return array_values($refs);
+    }
+
+    /**
+     * Zápisy, které si daný doklad ručně navázaly (opačný směr měkké vazby).
+     * Reference míří na SAMOTNÝ ZÁPIS (kind 'journal_entry'), ne na doklad —
+     * protějškem tu totiž není doklad, ale interní zápis bez vlastního dokladu.
+     *
+     * @return list<array{kind:string, id:int, relation:string, allocated:?float}>
+     */
+    private function linkingEntryRefs(int $supplierId, string $docType, int $docId): array
+    {
+        $refs = [];
+        foreach ($this->rows(
+            'SELECT entry_id FROM journal_entry_document_links
+              WHERE supplier_id = ? AND doc_type = ? AND doc_id = ? ORDER BY entry_id',
+            [$supplierId, $docType, $docId]
+        ) as $r) {
+            $this->addRef($refs, 'journal_entry', (int) $r['entry_id'], 'linked_entry', null);
+        }
+        return array_values($refs);
+    }
+
+    /**
+     * Ručně navázané doklady jednoho zápisu i s popisnými daty — podklad pro správu
+     * vazeb v UI. Tatáž struktura položky jako {@see related()}, aby seznam vazeb
+     * a panel „Souvisí" nemohly tentýž doklad popsat každý jinak.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function linkedDocuments(int $supplierId, int $entryId): array
+    {
+        $refs = $this->linkedDocumentRefs($supplierId, $entryId);
+        return $refs === [] ? [] : $this->hydrate($supplierId, array_slice($refs, 0, self::MAX_ITEMS));
+    }
+
+    /**
+     * Evidenční řádky vazeb (id, poznámka, kdo a kdy) slepené s popisem dokladu.
+     *
+     * JEDINÝ tvar, ve kterém vazby opouštějí backend — vrací ho detail zápisu
+     * i endpointy /links. Dva tvary by znamenaly, že tatáž vazba vypadá po
+     * načtení stránky jinak než po uložení: bez popisu se doklad tváří jako
+     * smazaný („#193 · doklad neexistuje"), ačkoli existuje.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function documentLinks(int $supplierId, int $entryId): array
+    {
+        $described = [];
+        foreach ($this->linkedDocuments($supplierId, $entryId) as $item) {
+            $described[$item['source_type'] . ':' . $item['source_id']] = $item;
+        }
+
+        $out = [];
+        foreach ($this->documentLinks->listForEntry($entryId, $supplierId) as $row) {
+            // Doklad mezitím smazaný (doc_id nemá FK) zůstane bez popisu — vazbu
+            // ukážeme dál, ať ji uživatel vidí a může ji zrušit.
+            $out[] = $row + ['document' => $described[$row['doc_type'] . ':' . $row['doc_id']] ?? null];
+        }
+        return $out;
     }
 
     /**
@@ -566,6 +720,32 @@ final class JournalLinkService
             return $out;
         }
 
+        if ($kind === 'journal_entry') {
+            // Protějškem měkké vazby je sám ÚČETNÍ ZÁPIS (typicky ruční doúčtování),
+            // ne doklad — popisná data proto jdou z deníku a částka je Σ MD.
+            foreach ($this->rows(
+                "SELECT e.id, e.document_no, e.description, e.entry_date,
+                        COALESCE((SELECT SUM(l.amount) FROM journal_entry_lines l
+                                   WHERE l.entry_id = e.id AND l.supplier_id = e.supplier_id
+                                     AND l.side = 'debit'), 0) AS amount
+                   FROM journal_entries e
+                  WHERE e.supplier_id = ? AND e.id IN ({$in})",
+                array_merge([$supplierId], $ids)
+            ) as $r) {
+                $id = (int) $r['id'];
+                $out[$id] = [
+                    'title'    => (string) ($r['document_no'] ?: ('#' . $id)),
+                    'subtitle' => $r['description'] !== null ? (string) $r['description'] : null,
+                    'date'     => (string) $r['entry_date'],
+                    'amount'   => (float) $r['amount'],
+                    'currency' => 'CZK',
+                    // Vlastní doklad nemá — proklik obstarají tlačítka na zápis.
+                    'route'    => null,
+                ];
+            }
+            return $out;
+        }
+
         return $out;
     }
 
@@ -579,6 +759,26 @@ final class JournalLinkService
     {
         if ($ids === []) return [];
         $in = $this->placeholders($ids);
+
+        // U reference 'journal_entry' JE protějšek sám zápisem — nehledá se přes
+        // (source_type, source_id), klíčem je rovnou jeho id.
+        if ($sourceType === 'journal_entry') {
+            $out = [];
+            foreach ($this->rows(
+                "SELECT id, entry_date, document_no, posted_at FROM journal_entries
+                  WHERE supplier_id = ? AND id IN ({$in})",
+                array_merge([$supplierId], $ids)
+            ) as $r) {
+                $out[(int) $r['id']] = [
+                    'id'          => (int) $r['id'],
+                    'entry_date'  => (string) $r['entry_date'],
+                    'document_no' => $r['document_no'] !== null ? (string) $r['document_no'] : null,
+                    'posted_at'   => $r['posted_at'] !== null ? (string) $r['posted_at'] : null,
+                ];
+            }
+            return $out;
+        }
+
         // Doklad může mít víc zápisů (storno + přeúčtování). Panel má ukázat ten
         // aktuální, proto ROW_NUMBER() přes source_id, ne prostý JOIN.
         $rows = $this->rows(

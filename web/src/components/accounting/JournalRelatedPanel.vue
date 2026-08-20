@@ -92,6 +92,17 @@ function typeLabel(type: string): string {
   return v === key ? type : v
 }
 
+/**
+ * Barva odznaku podle druhu hrany. Odvozené hrany (úhrada / hrazený doklad) plynou
+ * z evidence plateb, ruční vazba (migrace 1514) je tvrzení uživatele — při kontrole
+ * je to zásadní rozdíl, takže nesmí vypadat stejně.
+ */
+function relationBadge(relation: JournalRelatedItem['relation']): string {
+  if (relation === 'payment') return 'bg-success-50 text-success-600'
+  if (relation === 'document') return 'bg-primary-100 text-primary-700'
+  return 'bg-accent-50 text-accent-700'
+}
+
 /** Alokovaná částka se ukazuje jen když se liší od celkové (splátka, souhrnná platba). */
 function showsAllocation(it: JournalRelatedItem): boolean {
   return it.allocated_amount !== null && it.amount !== null
@@ -138,8 +149,9 @@ function onEntryClick(e: MouseEvent, entryId: number): void {
       <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span class="rounded px-1.5 py-0.5 text-xs font-medium"
-                  :class="it.relation === 'payment' ? 'bg-success-50 text-success-600' : 'bg-primary-100 text-primary-700'">
+            <!-- Ruční vazba má vlastní barvu: odvozená hrana (úhrada/doklad) plyne
+                 z evidence plateb, tuhle někdo zadal — a to je při kontrole rozdíl. -->
+            <span class="rounded px-1.5 py-0.5 text-xs font-medium" :class="relationBadge(it.relation)">
               {{ t(`accounting.journal.related.relation.${it.relation}`) }}
             </span>
             <span class="text-xs text-neutral-500">{{ typeLabel(it.source_type) }}</span>

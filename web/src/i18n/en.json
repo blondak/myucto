@@ -6060,7 +6060,9 @@
                 "title": "Related",
                 "relation": {
                     "payment": "Payment",
-                    "document": "Document"
+                    "document": "Document",
+                    "linked_document": "Linked document",
+                    "linked_entry": "Linked entry"
                 },
                 "allocated": "allocated",
                 "not_posted": "Not posted",
@@ -6300,7 +6302,8 @@
                 "stock": "Stock",
                 "offset": "Mutual set-off",
                 "settlement": "Set-off against account",
-                "vat_clearing": "VAT clearing"
+                "vat_clearing": "VAT clearing",
+                "journal_entry": "Journal entry"
             },
             "history": {
                 "title": "History",
@@ -6311,7 +6314,20 @@
                 "no_changes": "The entry has not been modified since it was created."
             },
             "att_preview": "Open preview",
-            "net_on_account": "Net effect on {account}"
+            "net_on_account": "Net effect on {account}",
+            "links": {
+                "title": "Linked documents",
+                "hint": "An informational link: the entry stays a manual entry and the document is not posted by it. It documents the connection (accrual, FX difference, reallocation, correction).",
+                "add": "Link a document",
+                "remove": "Remove link",
+                "empty": "This entry is not linked to any document yet.",
+                "added": "Document linked.",
+                "search_placeholder": "Search documents (number, VS, partner)…",
+                "no_candidates": "No matching document.",
+                "already_linked": "Already linked",
+                "note_placeholder": "Link note (optional)",
+                "missing_document": "Document missing"
+            }
         },
         "manual": {
             "title": "Manual journal entry",

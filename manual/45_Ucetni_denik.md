@@ -152,6 +152,11 @@ je to typický důvod, proč saldo nesedí s deníkem, takže se záměrně neza
 Ikona řetězu ve sloupci **Zdroj** ukazuje, které zápisy protějšek mají, ještě než
 řádek rozbalíš.
 
+Kromě takto **odvozených** vazeb panel ukazuje i **ruční vazby na doklad** (viz
+[Vazba na doklad](#vazba-na-doklad)) — mají vlastní barvu štítku, protože nevznikly
+z evidence plateb, ale zadal je uživatel. Vidíš je z obou stran: u ručního zápisu
+jako *Navázaný doklad*, u zaúčtování dokladu jako *Navázaný zápis*.
+
 ### Filtry
 
 Nad tabulkou je filtrační lišta:
@@ -554,6 +559,30 @@ nikoli přepis historie účetního zápisu.
 > Poznámka slouží pro pracovní vysvětlení a předání případu kolegovi. Nenahrazuje
 > účetní doklad ani přílohu, která tvrzení prokazuje. Role jen pro čtení poznámky
 > vidí, ale nemůže je měnit.
+
+### Vazba na doklad
+
+Interní zápis často *souvisí* s konkrétním dokladem, aniž by byl jeho zaúčtováním —
+dohadná položka k faktuře, kurzový rozdíl, přeúčtování, oprava. V rozbaleném detailu
+zápisu je proto sekce **Vazba na doklad**: tlačítkem **Navázat doklad** otevřeš
+našeptávač, který hledá napříč vydanými i přijatými fakturami, pokladními doklady
+a bankovními pohyby (podle čísla dokladu, variabilního symbolu nebo názvu partnera).
+K vazbě lze připsat **poznámku**, proč spolu doklady souvisejí.
+
+Vazbu jde založit i rovnou při zakládání [ručního zápisu](#454-ruční-zápis) — sekce
+Vazba na doklad je i ve formuláři nového zápisu a uloží se jedním krokem se zápisem.
+Při akci **Kopírovat jako nový** se vazby zkopírují spolu s řádky.
+
+Co vazba **není**: doklad se jí nezaúčtuje ani neoznačí za vyřízený. Zápis zůstává
+ručním zápisem, doklad si dál vede vlastní zaúčtování a nic se nemění na kontrolách
+salda ani na tom, které doklady systém považuje za nezaúčtované. Je to čistě
+dohledávací informace — zato obousměrná: navázaný doklad se objeví v panelu
+**Souvisí** u zápisu i naopak, včetně prokliku na doklad a na jeho zaúčtování.
+
+Jeden zápis může být navázaný na víc dokladů a jeden doklad na víc zápisů. Vazbu
+zrušíš tlačítkem **Zrušit vazbu**; zápisu ani dokladu se tím nic nestane. Pokud byl
+doklad mezitím smazaný, vazba zůstane vypsaná se štítkem *Doklad neexistuje*, ať ji
+máš jak uklidit.
 
 ## 45.7 Historie zápisu
 

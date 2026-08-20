@@ -209,6 +209,46 @@ export interface PostingPreview {
 
 export interface JournalEntryDetail extends JournalEntry {
   lines: JournalLine[]
+  /** Měkké vazby na doklady (migrace 1514); chodí s detailem zápisu. */
+  links?: JournalDocumentLink[]
+}
+
+// ── Měkká vazba zápisu na doklad (migrace 1514) ────────────────────────────
+/**
+ * Typ dokladu, na který lze zápis navázat. ZÁMĚRNĚ se nepromítá do
+ * `source_type` zápisu: ta dvojice (source_type, source_id) znamená „zápis JE
+ * zaúčtování dokladu" a drží na ní idempotence deníku. Vazba je informativní.
+ */
+export type LinkableDocType = 'invoice' | 'purchase_invoice' | 'cash' | 'bank'
+
+export interface JournalDocumentLink {
+  id: number
+  entry_id: number
+  doc_type: LinkableDocType
+  doc_id: number
+  note: string | null
+  created_by: number | null
+  created_by_name: string | null
+  created_at: string
+  /** Popis navázaného dokladu; null = doklad byl mezitím smazán. */
+  document?: JournalRelatedItem | null
+}
+
+/** Kandidát našeptávače „navázat doklad". */
+export interface LinkCandidate {
+  doc_type: LinkableDocType
+  doc_id: number
+  label: string
+  sublabel: string | null
+  date: string | null
+  amount: number | null
+  currency: string
+}
+
+export interface JournalLinkPayload {
+  doc_type: LinkableDocType
+  doc_id: number
+  note?: string
 }
 
 // ── Přílohy účetního zápisu §33a (Epic F7) ─────────────────────────────────
@@ -304,11 +344,13 @@ export interface SourceAction {
 // ── Protějšky zápisu: doklad ↔ úhrada (banka / pokladna / zápočet) ──────────
 /**
  * Jedna položka panelu „Souvisí". `relation` říká, na které straně případu protějšek
- * stojí: 'payment' = úhrada tohoto dokladu, 'document' = doklad, který tento pohyb hradí.
+ * stojí: 'payment' = úhrada tohoto dokladu, 'document' = doklad, který tento pohyb hradí,
+ * 'linked_document' = doklad ručně navázaný na tenhle zápis a 'linked_entry' = opačný
+ * směr téže ruční vazby, tedy zápis, který si tenhle doklad navázal (migrace 1514).
  */
 export interface JournalRelatedItem {
-  relation: 'payment' | 'document'
-  source_type: 'invoice' | 'purchase_invoice' | 'bank' | 'cash' | 'settlement'
+  relation: 'payment' | 'document' | 'linked_document' | 'linked_entry'
+  source_type: 'invoice' | 'purchase_invoice' | 'bank' | 'cash' | 'settlement' | 'journal_entry'
   source_id: number
   /** Právo, které FE ověří přes auth.canRead() než vykreslí proklik na doklad. */
   permission: string
@@ -488,6 +530,8 @@ export interface ManualEntryPayload {
   description?: string
   document_no?: string
   lines: ManualLinePayload[]
+  /** Doklady, se kterými zápis souvisí. Neplatná vazba zápis vůbec nezaloží. */
+  links?: JournalLinkPayload[]
 }
 
 // ── Šablony ručních zápisů (Fáze F, mzdový můstek, audit 2026-07) ──────────
@@ -1465,6 +1509,25 @@ export const accountingApi = {
    */
   getJournalRelated: (id: number) =>
     api.get<JournalRelated>(`/accounting/journal/${id}/related`).then(r => r.data),
+
+  // Měkké vazby zápisu na doklady (migrace 1514). Mutace vracejí rovnou celý
+  // aktuální seznam, aby si UI nemuselo stav skládat samo a nemohlo se rozejít.
+  listJournalLinks: (id: number) =>
+    api.get<{ entry_id: number; items: JournalDocumentLink[] }>(`/accounting/journal/${id}/links`)
+      .then(r => r.data.items ?? []),
+  createJournalLink: (id: number, payload: JournalLinkPayload) =>
+    api.post<{ entry_id: number; link: JournalDocumentLink; items: JournalDocumentLink[] }>(
+      `/accounting/journal/${id}/links`, payload,
+    ).then(r => r.data),
+  deleteJournalLink: (id: number, linkId: number) =>
+    api.delete<{ entry_id: number; deleted: number; items: JournalDocumentLink[] }>(
+      `/accounting/journal/${id}/links/${linkId}`,
+    ).then(r => r.data),
+  /** Našeptávač dokladů k navázání; server pod dva znaky nic nevrací. */
+  searchLinkCandidates: (q: string, types?: LinkableDocType[]) =>
+    api.get<{ query: string; items: LinkCandidate[] }>('/accounting/journal/link-candidates', {
+      params: { q, ...(types?.length ? { types: types.join(',') } : {}) },
+    }).then(r => r.data.items ?? []),
 
   // Šablony ručních zápisů (Fáze F, mzdový můstek)
   listJournalTemplates: () =>

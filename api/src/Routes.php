@@ -275,6 +275,7 @@ use MyInvoice\Action\Accounting\Closing\DocumentSeriesAction;
 use MyInvoice\Action\Accounting\Closing\JournalTransferAction;
 use MyInvoice\Action\Accounting\Closing\TaxBaseReportAction;
 use MyInvoice\Action\Accounting\JournalAction;
+use MyInvoice\Action\Accounting\JournalDocumentLinkAction;
 use MyInvoice\Action\Accounting\JournalTemplateAction;
 use MyInvoice\Action\Accounting\PayrollAction;
 use MyInvoice\Action\Accounting\PayrollEmployeeAction;
@@ -1369,6 +1370,12 @@ final class Routes
             $g->get   ('/journal/{id:[0-9]+}/source',         JournalSourceAction::class);
             // Protějšky zápisu (doklad ↔ úhrada) — KONKRÉTNÍ cesta PŘED generickým /journal/{id}.
             $g->get   ('/journal/{id:[0-9]+}/related',        JournalRelatedAction::class);
+            // Měkká vazba zápisu na doklad (migrace 1514) — KONKRÉTNÍ cesty PŘED generickým /journal/{id}.
+            // `link-candidates` je našeptávač dokladů; nekoliduje s /journal/{id}, který je číselný.
+            $g->get   ('/journal/link-candidates',                        [JournalDocumentLinkAction::class, 'candidates']);
+            $g->get   ('/journal/{id:[0-9]+}/links',                      [JournalDocumentLinkAction::class, 'list']);
+            $g->post  ('/journal/{id:[0-9]+}/links',                      [JournalDocumentLinkAction::class, 'create']);
+            $g->delete('/journal/{id:[0-9]+}/links/{linkId:[0-9]+}',      [JournalDocumentLinkAction::class, 'delete']);
             // SYSTEM VERSIONING auditní historie (audit 2026-07) — KONKRÉTNÍ cesta PŘED generickým /journal/{id}.
             $g->get   ('/journal/{id:[0-9]+}/history',        [JournalAction::class, 'history']);
             $g->get   ('/journal/{id:[0-9]+}',                [JournalAction::class, 'get']);

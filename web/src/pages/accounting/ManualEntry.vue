@@ -6,12 +6,14 @@ import {
   accountingApi,
   type ChartAccount, type CostCenter, type JournalSide, type ManualLinePayload,
   type JournalTemplateSummary, type JournalTemplateLinePayload,
+  type LinkCandidate, type JournalLinkPayload,
 } from '@/api/accounting'
 import { transferApi } from '@/api/closing'
 import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { formatDate, formatMoney } from '@/composables/useFormat'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import DocumentLinkPicker from '@/components/accounting/DocumentLinkPicker.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
@@ -43,6 +45,29 @@ const form = reactive({
 })
 const lines = ref<LineRow[]>([emptyLine('debit'), emptyLine('credit')])
 
+/**
+ * Doklady, se kterými zápis souvisí (migrace 1514).
+ *
+ * Ukládají se AŽ SE ZÁPISEM, jedním requestem: neplatná vazba pak nenechá
+ * v deníku zápis, o kterém si uživatel myslí, že doklad nese. Se `source_type`
+ * zápisu to nemá nic společného — ten zůstává 'manual' se source_id NULL,
+ * jinak by zápis kolidoval se skutečným zaúčtováním dokladu.
+ */
+interface PickedLink extends LinkCandidate { note: string }
+const pickedLinks = ref<PickedLink[]>([])
+const pickedKeys = computed(() => pickedLinks.value.map(l => `${l.doc_type}:${l.doc_id}`))
+
+function addPickedLink(c: LinkCandidate) {
+  if (pickedKeys.value.includes(`${c.doc_type}:${c.doc_id}`)) return
+  pickedLinks.value.push({ ...c, note: '' })
+}
+function removePickedLink(i: number) { pickedLinks.value.splice(i, 1) }
+function docTypeLabel(type: string): string {
+  const key = `accounting.journal.source.${type}`
+  const v = t(key)
+  return v === key ? type : v
+}
+
 // Jen aktivní, neaktivní se v novém zápisu nenabízí; syntetika i analytika lze účtovat.
 const pickable = computed(() =>
   accounts.value.filter(a => a.is_active).sort((a, b) => a.account_code.localeCompare(b.account_code)),
@@ -72,6 +97,20 @@ onMounted(async () => {
         amount: l.amount,
         cost_center: l.cost_center ?? '',
       }))
+      // Vazby na doklady jedou s kopií: opravný zápis se skoro vždy váže na tentýž
+      // doklad jako ten původní. Doklad mezitím smazaný (bez popisu) se vynechá.
+      pickedLinks.value = (src.links ?? [])
+        .filter(l => l.document)
+        .map(l => ({
+          doc_type: l.doc_type,
+          doc_id: l.doc_id,
+          label: l.document!.title || `#${l.doc_id}`,
+          sublabel: l.document!.subtitle,
+          date: l.document!.date,
+          amount: l.document!.amount,
+          currency: l.document!.currency || 'CZK',
+          note: l.note ?? '',
+        }))
     } catch { /* neexistující/cizí zápis — pokračuje prázdný formulář */ }
     return
   }
@@ -124,6 +163,12 @@ async function save(andNew = false) {
     return line
   })
 
+  const payloadLinks: JournalLinkPayload[] = pickedLinks.value.map(l => ({
+    doc_type: l.doc_type,
+    doc_id: l.doc_id,
+    ...(l.note.trim() ? { note: l.note.trim() } : {}),
+  }))
+
   saving.value = true
   try {
     const entry = await accountingApi.createEntry({
@@ -131,11 +176,13 @@ async function save(andNew = false) {
       description: form.description.trim() || undefined,
       document_no: form.document_no.trim() || undefined,
       lines: payloadLines,
+      ...(payloadLinks.length ? { links: payloadLinks } : {}),
     })
     toast.success(t('accounting.manual.saved', { id: entry.id }))
     if (andNew) {
       form.document_no = ''
       lines.value = [emptyLine('debit'), emptyLine('credit')]
+      pickedLinks.value = []
     } else {
       router.push('/accounting/journal')
     }
@@ -411,6 +458,39 @@ async function submitTransfer(force = false) {
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.manual.description') }}</label>
           <input v-model="form.description" type="text" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
         </div>
+      </div>
+
+      <!-- Vazba na doklad (migrace 1514) — informativní, zápis zůstává ručním
+           zápisem (source_type 'manual'), takže nekoliduje se zaúčtováním dokladu. -->
+      <div class="border-t border-neutral-200 pt-4">
+        <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.journal.links.title') }}</label>
+        <p class="text-xs text-neutral-500 mb-2">{{ t('accounting.journal.links.hint') }}</p>
+
+        <ul v-if="pickedLinks.length" class="mb-2 divide-y divide-neutral-200 rounded-lg border border-neutral-200">
+          <li v-for="(l, i) in pickedLinks" :key="`${l.doc_type}:${l.doc_id}`"
+            class="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-3 py-2 text-sm">
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span class="text-xs text-neutral-500">{{ docTypeLabel(l.doc_type) }}</span>
+                <span class="font-medium">{{ l.label }}</span>
+                <span v-if="l.date" class="text-xs text-neutral-500">{{ formatDate(l.date) }}</span>
+                <span class="font-mono text-xs text-neutral-600">{{ formatMoney(l.amount ?? 0, l.currency || 'CZK') }}</span>
+              </div>
+              <p v-if="l.sublabel" class="mt-0.5 truncate text-xs text-neutral-500">{{ l.sublabel }}</p>
+              <input v-model="l.note" type="text" maxlength="255"
+                :placeholder="t('accounting.journal.links.note_placeholder')"
+                class="mt-1.5 h-8 w-full rounded-md border border-neutral-300 px-2 text-xs" />
+            </div>
+            <button type="button" :class="btnOutlineSm('danger')" @click="removePickedLink(i)">
+              <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" />
+              </svg>
+              {{ t('accounting.journal.links.remove') }}
+            </button>
+          </li>
+        </ul>
+
+        <DocumentLinkPicker :excluded="pickedKeys" @select="addPickedLink" />
       </div>
 
       <!-- Řádky -->

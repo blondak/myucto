@@ -6,6 +6,9 @@
  *    ∉ manual/closing/opening) je edit skrytý (backend by vrátil 409 description_managed_by_source).
  *  - panel Přílohy §33a — list + drag&drop multi-upload + download + delete + inline edit popisku.
  *    `readonly` role = jen list + download.
+ *  - panel Vazba na doklad (migrace 1514) — měkká, informativní vazba na existující
+ *    doklad. Se `source_type`/`source_id` nemá nic společného (ta dvojice znamená
+ *    „zápis JE zaúčtování dokladu"), takže ji lze doplnit i k ručnímu zápisu.
  */
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -19,9 +22,14 @@ import {
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import JournalEntryHistory from '@/components/accounting/JournalEntryHistory.vue'
 import JournalEntryNotes from '@/components/accounting/JournalEntryNotes.vue'
+import JournalDocumentLinks from '@/components/accounting/JournalDocumentLinks.vue'
 
 const props = defineProps<{ entry: JournalEntryDetail }>()
-const emit = defineEmits<{ (e: 'description-updated', description: string, rowVersion: number): void }>()
+const emit = defineEmits<{
+  (e: 'description-updated', description: string, rowVersion: number): void
+  /** Změna vazeb na doklady — volající překreslí panel „Souvisí". */
+  (e: 'links-changed'): void
+}>()
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -238,6 +246,12 @@ onMounted(loadAttachments)
         </div>
       </div>
     </div>
+
+    <!-- ── vazba na doklad (migrace 1514) ──
+         Hned za popisem: u ručního zápisu je „ke kterému dokladu to patří" ta
+         první otázka, kterou po přečtení popisu účetní řeší. -->
+    <JournalDocumentLinks :entry-id="entry.id" :initial-links="entry.links ?? null"
+      @changed="emit('links-changed')" />
 
     <!-- ── přílohy §33a ── -->
     <div class="border-t border-neutral-200 pt-3">
