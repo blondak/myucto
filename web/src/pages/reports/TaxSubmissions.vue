@@ -311,22 +311,79 @@ function latestAttempt(item: TaxSubmission): EpoAttempt | null {
   return item.attempts[0] ?? null
 }
 
+/** Nedokončený asistovaný pokus, který ještě může skončit podáním na portálu. */
+const ASSISTED_OPEN_STATUSES = ['prepared', 'handoff_created', 'awaiting_confirmation']
+/** Založený, ale neotevřený odkaz — portál ho po pár minutách stejně nevezme. */
+const ASSISTED_PREPARED_WINDOW_MS = 5 * 60_000
+/**
+ * Záchranné okno pro pokusy BEZ `handoff_expires_at`. Bez něj by takový záznam
+ * platil navždy a přímé podání by zůstalo zašedlé už napořád (portál nám reálnou
+ * životnost odkazu neřekne, takže se řídíme poslední změnou stavu).
+ */
+const ASSISTED_FALLBACK_WINDOW_MS = 30 * 60_000
+
+/** Okamžik, do kterého má smysl asistovaný pokus považovat za živý. */
+function assistedAttemptDeadline(attempt: EpoAttempt): number {
+  if (attempt.handoff_expires_at) {
+    return new Date(attempt.handoff_expires_at).getTime()
+  }
+  if (attempt.status === 'prepared') {
+    return new Date(attempt.requested_at).getTime() + ASSISTED_PREPARED_WINDOW_MS
+  }
+  return new Date(attempt.updated_at || attempt.requested_at).getTime() + ASSISTED_FALLBACK_WINDOW_MS
+}
+
+/** Asistovaná předání, u kterých ještě běží okno platnosti. */
+function liveAssistedAttempts(item: TaxSubmission): EpoAttempt[] {
+  return item.attempts.filter(attempt =>
+    attempt.epo_environment === 'production'
+    && attempt.channel === 'epo_assisted'
+    && ASSISTED_OPEN_STATUSES.includes(attempt.status)
+    && assistedAttemptDeadline(attempt) > Date.now(),
+  )
+}
+
 function hasActiveAttempt(item: TaxSubmission): boolean {
-  return item.attempts.some((attempt) => {
-    if (
-      attempt.epo_environment !== 'production'
-      ||
-      attempt.channel !== 'epo_assisted'
-      || !['prepared', 'handoff_created', 'awaiting_confirmation'].includes(attempt.status)
-    ) {
-      return false
-    }
-    if (attempt.handoff_expires_at) {
-      return new Date(attempt.handoff_expires_at).getTime() > Date.now()
-    }
-    return attempt.status !== 'prepared'
-      || new Date(attempt.requested_at).getTime() + 5 * 60_000 > Date.now()
-  })
+  return liveAssistedAttempts(item).length > 0
+}
+
+/**
+ * Asistované předání, které smí blokovat PŘÍMÉ podání.
+ *
+ * Rozpracované předání na portálu blokovat má — dvakrát podané hlášení je horší
+ * problém než zašedlé tlačítko. Jenže když uživatel POTÉ vědomě spustil přímý
+ * test se ZAREP a ten prošel, rozhodl se pro druhou cestu; starší asistovaný
+ * záznam už jen visí v tabulce a jeho okno by tlačítko drželo zašedlé, aniž by
+ * se s tím dalo cokoliv udělat. Novější úspěšný test proto starší asistovaný
+ * pokus překlápí na neaktuální. Ochrana proti dvojímu ODESLÁNÍ tím nemizí — tu
+ * drží `hasUnresolvedDirectAttempt()` a `hasUnresolvedProductionDirectAttempt()`
+ * nad skutečně odeslanými pokusy, plus stejná brána na backendu.
+ */
+function blockingAssistedAttempt(item: TaxSubmission): EpoAttempt | null {
+  const supersededBefore = lastPassedDirectTestAt(item)
+  return liveAssistedAttempts(item).find(attempt =>
+    // `>=`, ne `>`: časy v DB mají vteřinovou přesnost a při shodě musí vyhrát
+    // opatrnější varianta (blokovat). Stejnou hranici drží i backendová brána.
+    supersededBefore === null
+    || new Date(attempt.requested_at).getTime() >= supersededBefore,
+  ) ?? null
+}
+
+/**
+ * Čas posledního ÚSPĚŠNÉHO přímého testu v aktuálním prostředí. Počítá se z časů,
+ * ne z pořadí v poli — API sice vrací pokusy sestupně (`ORDER BY a.created_at DESC,
+ * a.id DESC`), ale opřít o to blokaci ostrého podání by byla zbytečná past.
+ */
+function lastPassedDirectTestAt(item: TaxSubmission): number | null {
+  const times = item.attempts
+    .filter(attempt =>
+      attempt.channel === 'epo_direct'
+      && attempt.status === 'test_passed'
+      && (epoEnvironment.value === null || attempt.epo_environment === epoEnvironment.value),
+    )
+    .map(attempt => new Date(attempt.requested_at).getTime())
+    .filter(time => !Number.isNaN(time))
+  return times.length > 0 ? Math.max(...times) : null
 }
 
 /**
@@ -406,17 +463,41 @@ function canResolveDirectAttempt(attempt: EpoAttempt | null): boolean {
 function canDirectSubmit(item: TaxSubmission): boolean {
   return canOfferDirectActions(item)
     && latestDirectAttempt(item)?.status === 'test_passed'
-    && !hasActiveAttempt(item)
+    && !blockingAssistedAttempt(item)
     && !directBusy.value
 }
 
+/**
+ * Pravdivý důvod, proč je „Podepsat a podat" zašedlé. Obecná hláška uživatele
+ * nechá hádat, tak se rozpadá na konkrétní překážky v pořadí, v jakém je řeší
+ * `canOfferDirectActions()` a `canDirectSubmit()`.
+ */
 function directSubmitDisabledReason(item: TaxSubmission): string | undefined {
   if (canDirectSubmit(item) || directBusy.value) return undefined
-  if (latestDirectAttempt(item)?.status !== 'test_passed') {
-    return t('reports.submissions.direct_hint')
+  if (!canOfferDirectActions(item)) {
+    if (!canWrite.value) return t('reports.submissions.direct_reason_readonly')
+    if (isMossOssForm(item)) return t('reports.submissions.direct_reason_moss_oss')
+    if (epoEnvironment.value === null) return t('reports.submissions.direct_hint_unknown')
+    if (enabledCredentials.value.length === 0 || selectedCredentialId.value === null) {
+      return t('reports.submissions.direct_reason_no_credential')
+    }
+    if (item.validation_status !== 'passed') return t('reports.submissions.direct_reason_validation')
+    return t('reports.submissions.direct_reason_already_submitted')
   }
-  if (hasActiveAttempt(item)) {
-    return t('reports.submissions.handoff_window')
+  if (hasUnresolvedDirectAttempt(item)) {
+    return t('reports.submissions.direct_reason_unresolved')
+  }
+  const direct = latestDirectAttempt(item)
+  if (!direct) return t('reports.submissions.direct_reason_test_missing')
+  if (direct.status !== 'test_passed') {
+    return t('reports.submissions.direct_reason_test_required', { status: lifecycleLabel(direct.status) })
+  }
+  const blocking = blockingAssistedAttempt(item)
+  if (blocking) {
+    return t('reports.submissions.direct_reason_handoff_active', {
+      status: lifecycleLabel(blocking.status),
+      until: formatDate(blocking.handoff_expires_at),
+    })
   }
   return t('reports.submissions.direct_hint_unknown')
 }

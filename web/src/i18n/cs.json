@@ -13311,7 +13311,16 @@
             "submit_direct_sandbox_hint": "Stejný otestovaný XML snapshot se odešle na zkus.mojedane.gov.cz a výsledek se kompletně archivuje.",
             "submit_direct_sandbox_warning": "Jde pouze o zkušební prostředí Finanční správy. Výsledek nebude právně účinným daňovým podáním a lokální snapshot zůstane nepodaný.",
             "submit_now": "Skutečně podat",
-            "submit_now_sandbox": "Podat do testu"
+            "submit_now_sandbox": "Podat do testu",
+            "direct_reason_readonly": "Nemáte oprávnění podávat za tuto firmu. Požádejte o roli s právem zápisu.",
+            "direct_reason_moss_oss": "OSS přiznání se přímým EPO API podat nedá. Stáhněte XML a nahrajte ho v aplikaci MOSS/OSS na Daňovém portálu.",
+            "direct_reason_no_credential": "Není vybraný podpisový certifikát. Nejdřív nahrajte a povolte certifikát ZAREP pro tuto firmu.",
+            "direct_reason_validation": "XML neprošlo lokální XSD validací. Nejdřív opravte data a vygenerujte snapshot znovu.",
+            "direct_reason_already_submitted": "Tento XML snapshot už je podaný. Další odeslání by vytvořilo duplicitu.",
+            "direct_reason_unresolved": "Předchozí přímý pokus má nedořešený výsledek. Nejdřív obnovte jeho stav nebo ho vyřešte v nabídce „…“.",
+            "direct_reason_test_missing": "Nejdřív spusťte „Otestovat v EPO“ — ostré odeslání se odemkne až po úspěšném testu.",
+            "direct_reason_test_required": "Poslední přímý pokus je ve stavu „{status}“. Ostré odeslání se odemkne až po úspěšném testu v EPO.",
+            "direct_reason_handoff_active": "Po úspěšném testu jste založili asistované předání do EPO (stav „{status}“, odkaz platí do {until}). Dokončete ho, nebo počkejte na vypršení odkazu — jinak hrozí dvojí podání."
         },
         "income_tax": {
             "title": "Daň z příjmů",

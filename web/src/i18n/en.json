@@ -13311,7 +13311,16 @@
             "submit_direct_sandbox_hint": "The same validated XML snapshot will be sent to zkus.mojedane.gov.cz and the result fully archived.",
             "submit_direct_sandbox_warning": "This is only the Financial Administration sandbox. The result is not a legally effective tax filing and the local snapshot remains unfiled.",
             "submit_now": "Submit for real",
-            "submit_now_sandbox": "Submit to sandbox"
+            "submit_now_sandbox": "Submit to sandbox",
+            "direct_reason_readonly": "You are not allowed to file for this company. Ask for a role with write permission.",
+            "direct_reason_moss_oss": "An OSS return cannot be filed through the direct EPO API. Download the XML and upload it in the MOSS/OSS application on the tax portal.",
+            "direct_reason_no_credential": "No signing certificate is selected. Upload and enable a ZAREP certificate for this company first.",
+            "direct_reason_validation": "The XML failed local XSD validation. Fix the data and regenerate the snapshot first.",
+            "direct_reason_already_submitted": "This XML snapshot has already been filed. Submitting again would create a duplicate.",
+            "direct_reason_unresolved": "A previous direct attempt has an unresolved outcome. Refresh or resolve its status in the “…” menu first.",
+            "direct_reason_test_missing": "Run “Test in EPO” first — live submission unlocks only after a successful test.",
+            "direct_reason_test_required": "The latest direct attempt is in state “{status}”. Live submission unlocks only after a successful EPO test.",
+            "direct_reason_handoff_active": "After the successful test you started an assisted EPO handoff (state “{status}”, link valid until {until}). Finish it or wait for the link to expire — otherwise you risk filing twice."
         },
         "income_tax": {
             "title": "Income tax",

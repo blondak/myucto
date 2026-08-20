@@ -93,33 +93,48 @@ final class EpoDirectSubmissionRepository
                 return false;
             }
 
+            // Stejná brána jako {@see self::hasUnresolvedLiveAttempt()} — včetně toho,
+            // že asistovaný pokus překonaný pozdějším úspěšným přímým testem už
+            // ostré odeslání neblokuje. Kdyby se rozešly, UI by tlačítko nabídlo
+            // a tenhle claim by ho tiše odmítl.
             $active = $pdo->prepare(
                 "SELECT 1
-                   FROM tax_submission_attempts
-                  WHERE tax_submission_id = ? AND supplier_id = ?
-                    AND id <> ?
-                    AND (epo_environment = 'production' OR epo_environment = ?)
+                   FROM tax_submission_attempts a
+                  WHERE a.tax_submission_id = ? AND a.supplier_id = ?
+                    AND a.id <> ?
+                    AND (a.epo_environment = 'production' OR a.epo_environment = ?)
                     AND (
-                      (channel = 'epo_direct'
+                      (a.channel = 'epo_direct'
                         AND (
-                          status IN ('submitting','processing','uncertain')
-                          OR (status = 'confirmed' AND epo_environment = 'production')
+                          a.status IN ('submitting','processing','uncertain')
+                          OR (a.status = 'confirmed' AND a.epo_environment = 'production')
                         ))
                       OR
-                      (channel = 'epo_assisted'
-                        AND status IN ('prepared','handoff_created','awaiting_confirmation')
+                      (a.channel = 'epo_assisted'
+                        AND a.status IN ('prepared','handoff_created','awaiting_confirmation')
                         AND (
-                          (status = 'prepared'
-                            AND requested_at > CURRENT_TIMESTAMP - INTERVAL 5 MINUTE)
+                          (a.status = 'prepared'
+                            AND a.requested_at > CURRENT_TIMESTAMP - INTERVAL 5 MINUTE)
                           OR
-                          (status <> 'prepared'
-                            AND (handoff_expires_at IS NULL
-                              OR handoff_expires_at > CURRENT_TIMESTAMP))
+                          (a.status <> 'prepared'
+                            AND (a.handoff_expires_at > CURRENT_TIMESTAMP
+                              OR (a.handoff_expires_at IS NULL
+                                AND a.updated_at > CURRENT_TIMESTAMP - INTERVAL 30 MINUTE)))
+                        )
+                        AND NOT EXISTS (
+                          SELECT 1
+                            FROM tax_submission_attempts d
+                           WHERE d.tax_submission_id = a.tax_submission_id
+                             AND d.supplier_id = a.supplier_id
+                             AND d.channel = 'epo_direct'
+                             AND d.status = 'test_passed'
+                             AND (d.epo_environment = 'production' OR d.epo_environment = ?)
+                             AND d.requested_at > a.requested_at
                         ))
                     )
                   LIMIT 1"
             );
-            $active->execute([$submissionId, $supplierId, $attemptId, $environment]);
+            $active->execute([$submissionId, $supplierId, $attemptId, $environment, $environment]);
             if ($active->fetchColumn() !== false) {
                 if ($ownsTransaction) {
                     $pdo->rollBack();
@@ -157,6 +172,22 @@ final class EpoDirectSubmissionRepository
         }
     }
 
+    /**
+     * Běží na tomtéž snapshotu něco, co ještě může skončit podáním?
+     *
+     * Asistované předání (odkaz do EPO) blokuje jen dokud reálně žije:
+     *  - `prepared` 5 minut od založení,
+     *  - dál podle `handoff_expires_at`; když ho záznam nemá, platí náhradních
+     *    30 minut od poslední změny stavu. Bez toho by takový řádek blokoval
+     *    přímé podání navždy, protože `NULL > NOW()` nikdy nenastane.
+     *  - a vůbec ne, pokud po jeho založení proběhl ÚSPĚŠNÝ přímý test
+     *    (`epo_direct` / `test_passed`) — tím uživatel vědomě zvolil druhou
+     *    cestu a starší asistovaný záznam je překonaný.
+     *
+     * Ochrana proti dvojímu ODESLÁNÍ tím nemizí: přímé pokusy ve stavech
+     * `submitting`/`processing`/`uncertain` a potvrzené produkční podání
+     * blokují beze změny.
+     */
     public function hasUnresolvedLiveAttempt(
         int $submissionId,
         int $supplierId,
@@ -166,30 +197,41 @@ final class EpoDirectSubmissionRepository
         $environment = $this->normalizeEnvironment($environment);
         $stmt = $this->db->pdo()->prepare(
             "SELECT 1
-               FROM tax_submission_attempts
-              WHERE tax_submission_id = ? AND supplier_id = ?
-                AND (epo_environment = 'production' OR epo_environment = ?)
+               FROM tax_submission_attempts a
+              WHERE a.tax_submission_id = ? AND a.supplier_id = ?
+                AND (a.epo_environment = 'production' OR a.epo_environment = ?)
                 AND (
-                  (channel = 'epo_direct'
+                  (a.channel = 'epo_direct'
                     AND (
-                      status IN ('submitting','processing','uncertain')
-                      OR (status = 'confirmed' AND epo_environment = 'production')
+                      a.status IN ('submitting','processing','uncertain')
+                      OR (a.status = 'confirmed' AND a.epo_environment = 'production')
                     ))
                   OR
-                  (channel = 'epo_assisted'
-                    AND status IN ('prepared','handoff_created','awaiting_confirmation')
+                  (a.channel = 'epo_assisted'
+                    AND a.status IN ('prepared','handoff_created','awaiting_confirmation')
                     AND (
-                      (status = 'prepared'
-                        AND requested_at > CURRENT_TIMESTAMP - INTERVAL 5 MINUTE)
+                      (a.status = 'prepared'
+                        AND a.requested_at > CURRENT_TIMESTAMP - INTERVAL 5 MINUTE)
                       OR
-                      (status <> 'prepared'
-                        AND (handoff_expires_at IS NULL
-                          OR handoff_expires_at > CURRENT_TIMESTAMP))
+                      (a.status <> 'prepared'
+                        AND (a.handoff_expires_at > CURRENT_TIMESTAMP
+                          OR (a.handoff_expires_at IS NULL
+                            AND a.updated_at > CURRENT_TIMESTAMP - INTERVAL 30 MINUTE)))
+                    )
+                    AND NOT EXISTS (
+                      SELECT 1
+                        FROM tax_submission_attempts d
+                       WHERE d.tax_submission_id = a.tax_submission_id
+                         AND d.supplier_id = a.supplier_id
+                         AND d.channel = 'epo_direct'
+                         AND d.status = 'test_passed'
+                         AND (d.epo_environment = 'production' OR d.epo_environment = ?)
+                         AND d.requested_at > a.requested_at
                     ))
                 )
               LIMIT 1"
         );
-        $stmt->execute([$submissionId, $supplierId, $environment]);
+        $stmt->execute([$submissionId, $supplierId, $environment, $environment]);
         return $stmt->fetchColumn() !== false;
     }
 
