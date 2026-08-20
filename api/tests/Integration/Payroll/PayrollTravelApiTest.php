@@ -477,8 +477,10 @@ final class PayrollTravelApiTest extends TestCase
             'employee_id' => $this->employeeId,
             'employment_id' => $this->employmentId,
             'country_code' => 'CZ',
-            'departure_at' => '2026-06-10 08:00',
-            'arrival_at' => '2026-06-10 16:00',
+            // ISO 8601 s offsetem + IANA zóna, stejně jako u směn.
+            'departure_at' => '2026-06-10T08:00:00+02:00',
+            'arrival_at' => '2026-06-10T16:00:00+02:00',
+            'timezone' => 'Europe/Prague',
             'origin_place' => 'Praha',
             'destination_place' => 'Brno',
             'purpose' => 'Syntetické jednání',

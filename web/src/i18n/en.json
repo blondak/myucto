@@ -15653,7 +15653,8 @@
             "approved": "The settlement was approved.",
             "materialized": "Posted to payroll: {created} new, {replayed} unchanged.",
             "load_failed_hint": "Business trips for this period did not load. Please try again.",
-            "save_blocked_readonly": "You do not have permission to change business trips; you can only view them."
+            "save_blocked_readonly": "You do not have permission to change business trips; you can only view them.",
+            "invalid_moment": "The departure or arrival time does not exist in this time zone (the hour skipped by daylight saving). Please pick another time."
         }
     },
     "payroll_absence": {

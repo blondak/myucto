@@ -116,7 +116,12 @@ final class PayrollEmploymentAgendaSummaryRepository
             'pairs' => 1,
             'sql' => <<<'SQL'
                 SELECT COUNT(*) AS record_count,
-                       MAX(DATE(departure_at)) AS last_on,
+                       -- Datum z UTC instantu, stejně jako `DATE(starts_at_utc)`
+                       -- u směn výše: rozcestník ukazuje orientační „poslední
+                       -- záznam", nic nepočítá. U odjezdu krátce po půlnoci
+                       -- proto může ukázat předchozí den — vědomě, protože
+                       -- CONVERT_TZ tu vrací NULL (nenačtené tabulky zón).
+                       MAX(DATE(departure_at_utc)) AS last_on,
                        COALESCE(SUM(entitlement_total_minor), 0) AS amount_minor
                   FROM payroll_business_trips
                  WHERE supplier_id = ? AND employment_id = ? AND status <> 'cancelled'

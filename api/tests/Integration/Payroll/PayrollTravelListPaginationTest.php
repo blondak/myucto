@@ -234,10 +234,11 @@ final class PayrollTravelListPaginationTest extends TestCase
         $pdo->prepare(
             'INSERT INTO payroll_business_trips
                 (supplier_id, employee_id, employment_id, country_code,
-                 departure_at, arrival_at, origin_place, destination_place,
+                 departure_at_utc, arrival_at_utc, timezone_name,
+                 origin_place, destination_place,
                  purpose, transport_mode, advance_minor,
                  settlement_period_start, created_by)
-             VALUES (?, ?, ?, "CZ", ?, ?, "Praha", "Brno", "Syntetická cesta",
+             VALUES (?, ?, ?, "CZ", ?, ?, "Europe/Prague", "Praha", "Brno", "Syntetická cesta",
                      "public_transport", 0, "2026-06-01", ?)'
         )->execute([
             $this->supplierId,

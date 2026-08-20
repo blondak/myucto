@@ -111,7 +111,8 @@ final class PayrollBusinessTripDeletionRepository extends PayrollRowDeletionRepo
             'employment_id',
             'status',
             'settlement_period_start',
-            'departure_at',
+            'departure_at_utc',
+            'timezone_name',
             'destination_place',
             'row_version',
         ];
@@ -124,7 +125,8 @@ final class PayrollBusinessTripDeletionRepository extends PayrollRowDeletionRepo
             'employment_id' => (int) ($row['employment_id'] ?? 0),
             'status' => (string) ($row['status'] ?? ''),
             'settlement_period_start' => $row['settlement_period_start'] ?? null,
-            'departure_at' => $row['departure_at'] ?? null,
+            'departure_at_utc' => $row['departure_at_utc'] ?? null,
+            'timezone_name' => $row['timezone_name'] ?? null,
             'destination_place' => $row['destination_place'] ?? null,
             'row_version' => (int) ($row['row_version'] ?? 0),
         ];

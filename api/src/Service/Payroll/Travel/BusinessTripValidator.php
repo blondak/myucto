@@ -4,14 +4,29 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Travel;
 
+use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Service\Payroll\Time\PayrollTimeInterval;
+
 /**
  * Validace pracovní cesty z požadavku. Vstupy chodí v uživatelských jednotkách
  * (koruny, kilometry, litry na 100 km) a překládají se na interní celočíselné
  * jednotky (haléře, metry, mililitry na 100 km).
+ *
+ * Odjezd a příjezd chodí STEJNĚ JAKO U SMĚN: ISO 8601 s UTC offsetem plus IANA
+ * `timezone`, a převod na uložený instant dělá {@see PayrollTimeInterval} —
+ * tedy tentýž kód, ne vlastní kopie. Do databáze jde UTC instant + název zóny,
+ * do výpočtu stravného naopak MÍSTNÍ čas: § 163 zákoníku práce počítá pásma
+ * podle místních kalendářních dnů, ne podle UTC.
  */
 final class BusinessTripValidator
 {
     private const MAX_ITEMS = 100;
+
+    /**
+     * Strop délky jedné cesty. Sedmidenní strop směny sem nepatří — vyslat
+     * zaměstnance na měsíc je běžné; delší než rok je překlep v datu.
+     */
+    private const MAX_TRIP_DAYS = 366;
 
     /**
      * @param array<string,mixed> $input
@@ -26,8 +41,7 @@ final class BusinessTripValidator
                 'employment_id',
             ),
             'country_code' => $this->countryCode($input['country_code'] ?? 'CZ'),
-            'departure_at' => $this->moment($input['departure_at'] ?? null, 'departure_at'),
-            'arrival_at' => $this->moment($input['arrival_at'] ?? null, 'arrival_at'),
+            ...$this->interval($input),
             'origin_place' => $this->text($input['origin_place'] ?? null, 'origin_place', 190),
             'destination_place' => $this->text(
                 $input['destination_place'] ?? null,
@@ -61,10 +75,6 @@ final class BusinessTripValidator
             'free_meals' => $this->freeMeals($input['free_meals'] ?? []),
         ];
 
-        if ($data['arrival_at'] <= $data['departure_at']) {
-            throw new \InvalidArgumentException('Návrat musí být později než odjezd.');
-        }
-
         return $data;
     }
 
@@ -75,9 +85,11 @@ final class BusinessTripValidator
      */
     public static function toDomain(array $data, array $items, array $freeMeals): BusinessTrip
     {
+        // Do výpočtu jde MÍSTNÍ čas: pásma stravného se počítají podle místních
+        // kalendářních dnů, takže UTC instant by na přelomu dne pásmo posunul.
         return new BusinessTrip(
-            (string) $data['departure_at'],
-            (string) $data['arrival_at'],
+            (string) $data['departure_at_local'],
+            (string) $data['arrival_at_local'],
             (string) $data['country_code'],
             TravelTransportMode::from((string) $data['transport_mode']),
             self::nullableInt($data['meal_rate_band_1_minor'] ?? null),
@@ -298,18 +310,40 @@ final class BusinessTripValidator
         return $value;
     }
 
-    private function moment(mixed $value, string $field): string
+    /**
+     * Odjezd a příjezd → UTC instant + zóna + místní čas.
+     *
+     * Zóna je povinná a vstup musí nést UTC offset, protože bez něj by místní
+     * čas v hodině přechodu letního času neoznačoval jediný okamžik. Kontrolu
+     * i převod dělá {@see PayrollTimeInterval}, tedy tentýž kód jako u směn.
+     *
+     * @param array<string,mixed> $input
+     * @return array{departure_at_utc:string, arrival_at_utc:string, timezone_name:string, departure_at_local:string, arrival_at_local:string}
+     */
+    private function interval(array $input): array
     {
-        if (!is_string($value)) {
-            throw new \InvalidArgumentException("Pole {$field} musí být datum a čas.");
-        }
-        $normalized = str_replace('T', ' ', trim($value));
-        $normalized = substr($normalized, 0, 16);
-        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d H:i', $normalized);
-        if ($parsed === false || $parsed->format('Y-m-d H:i') !== $normalized) {
-            throw new \InvalidArgumentException("Pole {$field} musí být ve tvaru YYYY-MM-DD HH:MM.");
-        }
-        return $normalized . ':00';
+        $interval = PayrollTimeInterval::fromIso(
+            $this->text($input['departure_at'] ?? null, 'departure_at', 40),
+            $this->text($input['arrival_at'] ?? null, 'arrival_at', 40),
+            PayrollTimeInterval::timezoneName($input['timezone'] ?? null),
+            self::MAX_TRIP_DAYS,
+            'departure_at',
+            'arrival_at',
+        );
+
+        return [
+            'departure_at_utc' => $interval->startsAtUtc,
+            'arrival_at_utc' => $interval->endsAtUtc,
+            'timezone_name' => $interval->timezoneName,
+            'departure_at_local' => PayrollTimeValue::localMoment(
+                $interval->startsAtUtc,
+                $interval->timezoneName,
+            ),
+            'arrival_at_local' => PayrollTimeValue::localMoment(
+                $interval->endsAtUtc,
+                $interval->timezoneName,
+            ),
+        ];
     }
 
     private function date(mixed $value, string $field): string

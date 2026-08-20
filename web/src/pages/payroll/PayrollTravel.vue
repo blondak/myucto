@@ -9,6 +9,7 @@ import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, 
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { localPayrollPeriod } from './payrollComponentsUi'
+import { payrollWallTimeToIso } from './payrollTime'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -100,6 +101,13 @@ const COLUMNS: ColumnDef[] = [
 ]
 const tbl = useTablePrefs('payroll-travel', COLUMNS)
 
+/**
+ * Zóna, ve které uživatel odjezd a příjezd zadává. Nová cesta ji bere z
+ * prohlížeče (stejně jako editor docházky), rozeditovaná z uložené cesty —
+ * jinak by se čas zapsaný v jiné zóně při první úpravě posunul.
+ */
+const timezone = ref(Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Prague')
+
 const form = reactive({
   employee_id: null as number | null,
   employment_id: null as number | null,
@@ -177,8 +185,15 @@ function hours(minutes: number) {
   return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`
 }
 
+/**
+ * Místní čas z formuláře → ISO 8601 s UTC offsetem, stejně jako u směn.
+ *
+ * Bez offsetu by server hodinu přechodu letního času neuměl jednoznačně
+ * zařadit; `payrollWallTimeToIso` je tentýž převod, jaký používá docházka,
+ * a vrátí prázdný řetězec pro čas, který v zóně neexistuje.
+ */
 function moment(value: string) {
-  return value.replace('T', ' ').slice(0, 16)
+  return payrollWallTimeToIso(value, timezone.value)
 }
 
 function newItem(): ItemForm {
@@ -208,6 +223,7 @@ function resetForm(trip: TravelTrip | null) {
     form.employment_id = null
     if (focusEmploymentId.value !== null) selectEmployment(focusEmploymentId.value)
     form.country_code = 'CZ'
+    timezone.value = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Prague'
     form.departure_at = `${period.value}-01T08:00`
     form.arrival_at = `${period.value}-01T16:00`
     form.origin_place = ''
@@ -223,11 +239,12 @@ function resetForm(trip: TravelTrip | null) {
     meals.value = []
     return
   }
+  timezone.value = trip.timezone_name
   form.employee_id = trip.employee_id
   form.employment_id = trip.employment_id
   form.country_code = trip.country_code
-  form.departure_at = trip.departure_at.replace(' ', 'T').slice(0, 16)
-  form.arrival_at = trip.arrival_at.replace(' ', 'T').slice(0, 16)
+  form.departure_at = trip.departure_at_local.replace(' ', 'T').slice(0, 16)
+  form.arrival_at = trip.arrival_at_local.replace(' ', 'T').slice(0, 16)
   form.origin_place = trip.origin_place
   form.destination_place = trip.destination_place
   form.purpose = trip.purpose
@@ -267,6 +284,7 @@ function payload(): TravelTripPayload {
     country_code: form.country_code.toUpperCase(),
     departure_at: moment(form.departure_at),
     arrival_at: moment(form.arrival_at),
+    timezone: timezone.value,
     origin_place: form.origin_place,
     destination_place: form.destination_place,
     purpose: form.purpose,
@@ -358,8 +376,22 @@ function selectEmployment(id: number | null) {
   form.employee_id = found ? found.employee_id : null
 }
 
+/**
+ * Odjezd i příjezd musí v zadané zóně existovat. Neexistují jen v hodině, která
+ * se na jaře přeskakuje — bez téhle kontroly by na server odešel prázdný řetězec
+ * a uživatel dostal hlášku o ISO 8601, kterou nikdy nepsal.
+ */
+function momentsValid(): boolean {
+  if (moment(form.departure_at) === '' || moment(form.arrival_at) === '') {
+    formError.value = t('payroll_travel.messages.invalid_moment')
+    return false
+  }
+  return true
+}
+
 async function runPreview() {
   formError.value = ''
+  if (!momentsValid()) return
   previewing.value = true
   try {
     preview.value = await payrollTravelApi.preview(payload())
@@ -373,6 +405,7 @@ async function runPreview() {
 
 async function save() {
   formError.value = ''
+  if (!momentsValid()) return
   saving.value = true
   try {
     if (editingTrip.value === null) {
@@ -555,8 +588,8 @@ onMounted(load)
                   <div class="text-xs text-neutral-500">{{ trip.purpose }}</div>
                 </td>
                 <td v-if="tbl.isVisible('interval')" class="px-4 py-3 text-neutral-700">
-                  <div>{{ trip.departure_at.slice(0, 16) }}</div>
-                  <div>{{ trip.arrival_at.slice(0, 16) }}</div>
+                  <div>{{ trip.departure_at_local.slice(0, 16) }}</div>
+                  <div>{{ trip.arrival_at_local.slice(0, 16) }}</div>
                 </td>
                 <td v-if="tbl.isVisible('entitlement')" class="px-4 py-3 text-right font-medium">{{ money(trip.entitlement_total_minor) }}</td>
                 <td v-if="tbl.isVisible('exempt')" class="px-4 py-3 text-right text-success-700">{{ money(trip.exempt_total_minor) }}</td>
@@ -647,7 +680,7 @@ onMounted(load)
               <div>
                 <dt class="text-neutral-500">{{ t('payroll_travel.table.interval') }}</dt>
                 <dd class="break-words font-medium text-neutral-900">
-                  {{ trip.departure_at.slice(0, 16) }} – {{ trip.arrival_at.slice(0, 16) }}
+                  {{ trip.departure_at_local.slice(0, 16) }} – {{ trip.arrival_at_local.slice(0, 16) }}
                 </dd>
               </div>
               <div>

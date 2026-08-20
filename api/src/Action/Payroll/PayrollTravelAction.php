@@ -378,11 +378,16 @@ final class PayrollTravelAction
         $meals = $trip['free_meals'] ?? [];
 
         return $this->calculate([
-            'departure_at' => PayrollTimeValue::string(
-                $trip['departure_at'] ?? null,
-                'departure_at',
+            // Přepočet uložené cesty jede z MÍSTNÍHO času, ne z UTC instantu:
+            // pásma stravného se počítají podle místních kalendářních dnů.
+            'departure_at_local' => PayrollTimeValue::string(
+                $trip['departure_at_local'] ?? null,
+                'departure_at_local',
             ),
-            'arrival_at' => PayrollTimeValue::string($trip['arrival_at'] ?? null, 'arrival_at'),
+            'arrival_at_local' => PayrollTimeValue::string(
+                $trip['arrival_at_local'] ?? null,
+                'arrival_at_local',
+            ),
             'country_code' => PayrollTimeValue::string(
                 $trip['country_code'] ?? null,
                 'country_code',

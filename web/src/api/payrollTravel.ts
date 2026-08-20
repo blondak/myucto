@@ -90,8 +90,14 @@ export interface TravelTrip {
   employment_code: string
   relation_type: string
   country_code: string
-  departure_at: string
-  arrival_at: string
+  /** Uložený okamžik v UTC — vzor směn (`starts_at_utc` + `timezone_name`). */
+  departure_at_utc: string
+  arrival_at_utc: string
+  /** IANA zóna, ve které byl čas zadán. */
+  timezone_name: string
+  /** Místní čas odvozený serverem z UTC instantu a zóny — to, co uživatel zadal. */
+  departure_at_local: string
+  arrival_at_local: string
   origin_place: string
   destination_place: string
   purpose: string
@@ -130,8 +136,11 @@ export interface TravelTripPayload {
   employee_id: number | null
   employment_id: number | null
   country_code: string
+  /** ISO 8601 včetně UTC offsetu — stejně jako u směny. */
   departure_at: string
   arrival_at: string
+  /** IANA zóna, ve které uživatel čas zadal. */
+  timezone: string
   origin_place: string
   destination_place: string
   purpose: string

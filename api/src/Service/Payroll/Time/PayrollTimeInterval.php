@@ -4,8 +4,17 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Time;
 
+/**
+ * SSOT pro převod „uživatelem zadaný okamžik + IANA zóna" na uložitelný UTC
+ * instant. Používá ji docházka (směna, odpracovaný čas) i evidence pracovních
+ * cest — jediný rozdíl je strop délky intervalu, protože směna delší než týden
+ * je překlep, kdežto pracovní cesta na tři týdny je běžná.
+ */
 final readonly class PayrollTimeInterval
 {
+    /** Strop pro směnu a odpracovaný čas. */
+    public const MAX_DAYS_SHIFT = 7;
+
     public function __construct(
         public string $startsAtUtc,
         public string $endsAtUtc,
@@ -13,10 +22,29 @@ final readonly class PayrollTimeInterval
         public int $durationMinutes,
     ) {}
 
+    /**
+     * Povinná IANA zóna z požadavku. SSOT — volá ji docházka i evidence
+     * pracovních cest, aby „timezone" znamenalo v obou agendách totéž.
+     */
+    public static function timezoneName(mixed $raw): string
+    {
+        if (!is_string($raw) || trim($raw) === '') {
+            throw new \InvalidArgumentException('timezone je povinné.');
+        }
+        try {
+            return (new \DateTimeZone(trim($raw)))->getName();
+        } catch (\Throwable) {
+            throw new \InvalidArgumentException('timezone musí být platný IANA název.');
+        }
+    }
+
     public static function fromIso(
         string $startsAt,
         string $endsAt,
         string $timezoneName,
+        int $maxDays = self::MAX_DAYS_SHIFT,
+        string $startField = 'starts_at',
+        string $endField = 'ends_at',
     ): self {
         try {
             $timezone = new \DateTimeZone($timezoneName);
@@ -24,22 +52,27 @@ final readonly class PayrollTimeInterval
             throw new \InvalidArgumentException('timezone musí být platný IANA název.');
         }
 
-        $start = self::parseInstant($startsAt, 'starts_at');
-        $end = self::parseInstant($endsAt, 'ends_at');
-        self::assertTimezoneOffset($start, $timezone, 'starts_at', str_ends_with($startsAt, 'Z'));
-        self::assertTimezoneOffset($end, $timezone, 'ends_at', str_ends_with($endsAt, 'Z'));
+        $start = self::parseInstant($startsAt, $startField);
+        $end = self::parseInstant($endsAt, $endField);
+        self::assertTimezoneOffset($start, $timezone, $startField, str_ends_with($startsAt, 'Z'));
+        self::assertTimezoneOffset($end, $timezone, $endField, str_ends_with($endsAt, 'Z'));
 
         $seconds = $end->getTimestamp() - $start->getTimestamp();
         if ($seconds <= 0) {
             throw new \InvalidArgumentException(
-                'ends_at musí označovat okamžik po starts_at; směna přes půlnoc musí obsahovat další datum.'
+                "{$endField} musí označovat okamžik po {$startField}; interval přes půlnoc musí obsahovat další datum."
             );
         }
         if ($seconds % 60 !== 0) {
             throw new \InvalidArgumentException('Časové intervaly musí být zadány na celé minuty.');
         }
-        if ($seconds > 7 * 24 * 3600) {
-            throw new \InvalidArgumentException('Jeden časový interval nesmí být delší než 7 dní.');
+        if ($maxDays < 1) {
+            throw new \InvalidArgumentException('Strop délky intervalu musí být aspoň 1 den.');
+        }
+        if ($seconds > $maxDays * 24 * 3600) {
+            throw new \InvalidArgumentException(
+                "Jeden časový interval nesmí být delší než {$maxDays} dní."
+            );
         }
 
         $utc = new \DateTimeZone('UTC');

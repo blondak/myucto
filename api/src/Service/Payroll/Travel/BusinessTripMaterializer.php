@@ -134,11 +134,16 @@ final class BusinessTripMaterializer
                 $trip['country_code'] ?? null,
                 'country_code',
             ),
+            // Ve snímku zůstává MÍSTNÍ čas pod původními klíči — je to to, co
+            // uživatel zadal, a hash už zmaterializovaných vstupů se tím nemění.
             'departure_at' => PayrollTimeValue::string(
-                $trip['departure_at'] ?? null,
-                'departure_at',
+                $trip['departure_at_local'] ?? null,
+                'departure_at_local',
             ),
-            'arrival_at' => PayrollTimeValue::string($trip['arrival_at'] ?? null, 'arrival_at'),
+            'arrival_at' => PayrollTimeValue::string(
+                $trip['arrival_at_local'] ?? null,
+                'arrival_at_local',
+            ),
             'entitlement_total_minor' => (int) $trip['entitlement_total_minor'],
             'exempt_total_minor' => (int) $trip['exempt_total_minor'],
             'taxable_total_minor' => (int) $trip['taxable_total_minor'],

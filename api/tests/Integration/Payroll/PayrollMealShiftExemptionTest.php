@@ -450,18 +450,21 @@ final class PayrollMealShiftExemptionTest extends TestCase
     {
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_business_trips
-                (supplier_id, employee_id, employment_id, departure_at, arrival_at,
+                (supplier_id, employee_id, employment_id, timezone_name,
+                 departure_at_utc, arrival_at_utc,
                  origin_place, destination_place, purpose, settlement_period_start,
                  status, entitlement_total_minor, exempt_total_minor,
                  taxable_total_minor, ruleset_id, calculation_json, calculation_hash)
-             VALUES (?, ?, ?, ?, ?, "Praha", "Brno", "Jednání", ?, "approved", ?, ?, 0,
+             VALUES (?, ?, ?, "Europe/Prague", ?, ?, "Praha", "Brno", "Jednání", ?,
+                     "approved", ?, ?, 0,
                      "cz-payroll-2026.travel-allowances.v1", ?, ?)'
         )->execute([
             $this->supplierId,
             $this->employeeId,
             $this->employmentId,
-            $from,
-            $to,
+            // Cesta nese UTC instant + zónu, stejně jako směna výše.
+            $this->utc($from),
+            $this->utc($to),
             self::PERIOD_START,
             $entitlementMinor,
             $entitlementMinor,

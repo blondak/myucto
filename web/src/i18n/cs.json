@@ -15653,7 +15653,8 @@
             "approved": "Vyúčtování bylo schváleno.",
             "materialized": "Promítnuto do mzdy: {created} nových, {replayed} beze změny.",
             "load_failed_hint": "Pracovní cesty za toto období se nenačetly. Zkuste to prosím znovu.",
-            "save_blocked_readonly": "Nemáte oprávnění měnit pracovní cesty, můžete si je jen prohlížet."
+            "save_blocked_readonly": "Nemáte oprávnění měnit pracovní cesty, můžete si je jen prohlížet.",
+            "invalid_moment": "Zadaný čas odjezdu nebo příjezdu v této časové zóně neexistuje (hodina přechodu na letní čas). Zvolte prosím jiný čas."
         }
     },
     "payroll_absence": {

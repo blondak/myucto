@@ -82,7 +82,7 @@ final class PayrollBusinessTripRepository
                     employment.code AS employment_code,
                     employment.relation_type
                ' . $from . '
-              ORDER BY trip.departure_at DESC, trip.id DESC
+              ORDER BY trip.departure_at_utc DESC, trip.id DESC
               LIMIT ? OFFSET ?'
         );
         $position = 1;
@@ -149,19 +149,21 @@ final class PayrollBusinessTripRepository
             $stmt = $pdo->prepare(
                 'INSERT INTO payroll_business_trips
                     (supplier_id, employee_id, employment_id, country_code,
-                     departure_at, arrival_at, origin_place, destination_place,
+                     timezone_name, departure_at_utc, arrival_at_utc,
+                     origin_place, destination_place,
                      purpose, transport_mode, meal_rate_band_1_minor,
                      meal_rate_band_2_minor, meal_rate_band_3_minor, advance_minor,
                      settlement_period_start, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
                 $data['employee_id'],
                 $data['employment_id'],
                 $data['country_code'],
-                $data['departure_at'],
-                $data['arrival_at'],
+                $data['timezone_name'],
+                $data['departure_at_utc'],
+                $data['arrival_at_utc'],
                 $data['origin_place'],
                 $data['destination_place'],
                 $data['purpose'],
@@ -214,7 +216,8 @@ final class PayrollBusinessTripRepository
             $stmt = $pdo->prepare(
                 'UPDATE payroll_business_trips
                     SET employee_id = ?, employment_id = ?, country_code = ?,
-                        departure_at = ?, arrival_at = ?, origin_place = ?,
+                        timezone_name = ?,
+                        departure_at_utc = ?, arrival_at_utc = ?, origin_place = ?,
                         destination_place = ?, purpose = ?, transport_mode = ?,
                         meal_rate_band_1_minor = ?, meal_rate_band_2_minor = ?,
                         meal_rate_band_3_minor = ?, advance_minor = ?,
@@ -227,8 +230,9 @@ final class PayrollBusinessTripRepository
                 $data['employee_id'],
                 $data['employment_id'],
                 $data['country_code'],
-                $data['departure_at'],
-                $data['arrival_at'],
+                $data['timezone_name'],
+                $data['departure_at_utc'],
+                $data['arrival_at_utc'],
                 $data['origin_place'],
                 $data['destination_place'],
                 $data['purpose'],
@@ -457,6 +461,17 @@ final class PayrollBusinessTripRepository
             if (($row[$key] ?? null) !== null) {
                 $row[$key] = PayrollTimeValue::int($row[$key], $key);
             }
+        }
+        // Uložený je UTC instant + zóna (vzor směn). Místní čas — to, co uživatel
+        // do formuláře napsal — se z nich odvozuje TADY, na jediném místě: čte ho
+        // jak výpočet stravného (pásma podle místních kalendářních dnů), tak
+        // seznam cest v prohlížeči.
+        $timezone = PayrollTimeValue::string($row['timezone_name'] ?? null, 'timezone_name');
+        foreach (['departure_at', 'arrival_at'] as $moment) {
+            $row[$moment . '_local'] = PayrollTimeValue::localMoment(
+                PayrollTimeValue::string($row[$moment . '_utc'] ?? null, $moment . '_utc'),
+                $timezone,
+            );
         }
         unset($row['calculation_hash']);
         $row['calculation'] = $row['calculation_json'] === null

@@ -120,8 +120,13 @@ final class PayrollMealShiftEvidenceRepository
      * a ve stavu, který už není koncept: zákon vylučuje směnu, ve které nárok na
      * stravné VZNIKL, ne tu, u které si někdo cestu rozepsal.
      *
+     * Cesta nese od migrace 1518 pravý UTC instant plus svou IANA zónu, stejně
+     * jako směna — do vyloučení směny jde tedy TÝŽ druh hodnoty na obou stranách.
+     * Dřív se tu vracel holý místní čas označený za UTC a vyloučení se trefovalo
+     * o 1 (SEČ) až 2 (SELČ) hodiny vedle.
+     *
      * @param list<int> $employmentIds
-     * @return list<array{starts_at_utc:string, ends_at_utc:string}>
+     * @return list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string}>
      */
     public function mealAllowanceTrips(
         int $supplierId,
@@ -134,20 +139,21 @@ final class PayrollMealShiftEvidenceRepository
         [$from, $to] = $this->window($periodStart);
         $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
         $stmt = $this->db->pdo()->prepare(
-            'SELECT departure_at, arrival_at
+            'SELECT departure_at_utc, arrival_at_utc, timezone_name
                FROM payroll_business_trips
               WHERE supplier_id = ?
                 AND status IN ("approved", "settled")
                 AND entitlement_total_minor > 0
                 AND employment_id IN (' . $placeholders . ')
-                AND arrival_at >= ? AND departure_at < ?'
+                AND arrival_at_utc >= ? AND departure_at_utc < ?'
         );
         $stmt->execute([$supplierId, ...$employmentIds, $from, $to]);
         $rows = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             $rows[] = [
-                'starts_at_utc' => (string) $row['departure_at'],
-                'ends_at_utc' => (string) $row['arrival_at'],
+                'starts_at_utc' => (string) $row['departure_at_utc'],
+                'ends_at_utc' => (string) $row['arrival_at_utc'],
+                'timezone_name' => (string) $row['timezone_name'],
             ];
         }
 

@@ -213,12 +213,13 @@ final class PayrollTravelDeletionApiTest extends TestCase
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO payroll_business_trips
                 (supplier_id, employee_id, employment_id, country_code,
-                 departure_at, arrival_at, origin_place, destination_place,
+                 departure_at_utc, arrival_at_utc, timezone_name,
+                 origin_place, destination_place,
                  purpose, transport_mode, advance_minor, settlement_period_start,
                  status, entitlement_total_minor, exempt_total_minor,
                  taxable_total_minor, ruleset_id, calculation_json, calculation_hash)
-             VALUES (?, ?, ?, "CZ", "2026-02-02 08:00:00", "2026-02-02 18:00:00",
-                     "Praha", "Brno", "Jednání", "public_transport", 0, "2026-02-01",
+             VALUES (?, ?, ?, "CZ", "2026-02-02 07:00:00", "2026-02-02 17:00:00",
+                     "Europe/Prague", "Praha", "Brno", "Jednání", "public_transport", 0, "2026-02-01",
                      ?, ?, ?, ?, ?, ?, ' . ($settled ? 'NULL' : 'UNHEX(SHA2("trip", 256))') . ')'
         );
         $stmt->execute([

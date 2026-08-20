@@ -170,7 +170,7 @@ final class PayrollMealShiftEvidenceService
      *
      * @param list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string, break_minutes:int}> $shifts
      * @param list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string, break_minutes:int}> $worked
-     * @param list<array{starts_at_utc:string, ends_at_utc:string}> $trips
+     * @param list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string}> $trips
      * @return array{0:int,1:int}
      */
     private function byShift(
@@ -212,7 +212,7 @@ final class PayrollMealShiftEvidenceService
      * Větev kalendářních dnů — výkon práce není rozvržen na směny.
      *
      * @param list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string, break_minutes:int}> $worked
-     * @param list<array{starts_at_utc:string, ends_at_utc:string}> $trips
+     * @param list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string}> $trips
      * @return array{0:int,1:int}
      */
     private function byCalendarDay(
@@ -291,7 +291,7 @@ final class PayrollMealShiftEvidenceService
         ];
     }
 
-    /** @param list<array{starts_at_utc:string, ends_at_utc:string}> $trips */
+    /** @param list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string}> $trips */
     private function overlapsTrip(int $start, int $end, array $trips): bool
     {
         foreach ($trips as $trip) {

@@ -618,7 +618,10 @@ načti aktuální měsíc tlačítkem **Obnovit** a změny zkontroluj.
 
 V **Mzdy → Cestovní náhrady** vedeš tuzemské pracovní cesty a jejich vyúčtování.
 U cesty zadej pracovní vztah, odjezd a návrat s časem, místo, účel a dopravní
-prostředek. K vyúčtování přidáš doložené výdaje (jízdné, ubytování, nutné
+prostředek. Čas zadáváš místní, tak jak ho vidíš na hodinách; systém si k němu
+uloží časovou zónu, takže cesta a rozvržená směna na sebe sedí i v období změny
+letního času. Hodinu, která se na jaře přeskakuje, formulář nepřijme — v místním
+čase totiž neexistuje. K vyúčtování přidáš doložené výdaje (jízdné, ubytování, nutné
 vedlejší výdaje), jízdy soukromým vozidlem v kilometrech a spotřebě na 100 km,
 bezplatná jídla po dnech a poskytnutou zálohu.
 

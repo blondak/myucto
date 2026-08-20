@@ -1019,16 +1019,10 @@ final class PayrollTimeService
         return $value;
     }
 
+    /** Sdílená kontrola s evidencí pracovních cest, viz PayrollTimeInterval. */
     private function timezone(mixed $raw): string
     {
-        if (!is_string($raw) || trim($raw) === '') {
-            throw new \InvalidArgumentException('timezone je povinné.');
-        }
-        try {
-            return (new \DateTimeZone(trim($raw)))->getName();
-        } catch (\Throwable) {
-            throw new \InvalidArgumentException('timezone musí být platný IANA název.');
-        }
+        return PayrollTimeInterval::timezoneName($raw);
     }
 
     private function date(mixed $raw, string $field): string
