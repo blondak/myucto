@@ -107,6 +107,32 @@ final class PayrollPersonCreateValidatorTest extends TestCase
         self::assertSame('40.00', $result['employment']['terms']['weekly_hours']);
     }
 
+    /**
+     * Pojišťovna je nepovinná — bez ní musí zakládání fungovat dál (zpětná
+     * kompatibilita s klienty, které o poli nevědí).
+     */
+    public function testHealthInsurerCodeIsOptional(): void
+    {
+        self::assertNull(self::validator()->validate(self::baseInput())['health_insurer_code']);
+        self::assertNull(
+            self::validator()->validate(['health_insurer_code' => ' '] + self::baseInput())
+                ['health_insurer_code'],
+        );
+    }
+
+    /**
+     * Kód se jen převezme; platnost proti číselníku ověřuje až zákonná evidence,
+     * aby pravidlo zůstalo na jednom místě.
+     */
+    public function testPassesHealthInsurerCodeThroughUntouched(): void
+    {
+        $result = self::validator()->validate(
+            ['health_insurer_code' => ' 111 '] + self::baseInput(),
+        );
+
+        self::assertSame('111', $result['health_insurer_code']);
+    }
+
     /** Meze i tvar hlídá jediný validátor podmínek — tady se jen předává dál. */
     public function testRejectsWeeklyHoursOverTheLegalCeiling(): void
     {

@@ -151,8 +151,9 @@ do historie vztahu spadl interval, který nikdy neplatil. Mzdová účtárna se
 nabízí firmě s víc než jednou aktivní účtárnou; ostatním ji aplikace dosadí
 z výchozí účtárny zaměstnavatele. Zdravotní pojišťovna se předvyplní tou, kterou
 má firma v nastavení jako výchozí, a zapíše se do **zákonné evidence osoby**
-k datu nástupu. Když se ten zápis nepovede, zaměstnanec zůstane založený
-a aplikace řekne, že pojišťovnu je potřeba doplnit v Zákonné evidenci na kartě. Zaměstnance bez českého rodného čísla lze založit bez náhradní hodnoty.
+k datu nástupu — týmž uložením jako zaměstnanec, takže nemůže vzniknout karta
+bez ní. Neznámý kód pojišťovny proto celé založení odmítne a nic se neuloží.
+Zaměstnance bez českého rodného čísla lze založit bez náhradní hodnoty.
 EČP, VČP a zahraniční identifikátor se vedou samostatně a lze je doplnit
 přímo v běžné editaci; úplná osobní evidence dál uchovává jejich 1:N historii.
 Rodné číslo se v seznamu nezobrazuje. Tlačítko zůstává viditelné

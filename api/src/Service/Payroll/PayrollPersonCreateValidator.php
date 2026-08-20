@@ -23,7 +23,8 @@ namespace MyInvoice\Service\Payroll;
  * }
  * @phpstan-type PayrollPersonCreateInput array{
  *   employee:SharedEmployeeCreateInput,
- *   employment:EmploymentCreateInput
+ *   employment:EmploymentCreateInput,
+ *   health_insurer_code:?string
  * }
  */
 final class PayrollPersonCreateValidator
@@ -83,6 +84,14 @@ final class PayrollPersonCreateValidator
         if ($weeklyHours === '') {
             $weeklyHours = null;
         }
+        /*
+         * Kód zdravotní pojišťovny je nepovinný a jen se převezme. Jeho platnost
+         * proti číselníku (`HealthInsurers`) ověří až zákonná evidence osoby
+         * — pravidlo tak zůstává na jednom místě a chybný kód shodí celé
+         * založení, protože všechno běží v jedné transakci.
+         */
+        $insurerCode = trim($this->string($input['health_insurer_code'] ?? null));
+
         $employment = $this->employmentValidator->create([
             'code' => 'ZAM-PENDING',
             'relation_type' => $relationType,
@@ -153,6 +162,7 @@ final class PayrollPersonCreateValidator
                 'is_active' => true,
             ],
             'employment' => $employment,
+            'health_insurer_code' => $insurerCode === '' ? null : $insurerCode,
         ];
     }
 

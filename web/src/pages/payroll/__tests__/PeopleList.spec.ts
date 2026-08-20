@@ -444,36 +444,15 @@ describe('PeopleList toolbar and shared employee creation', () => {
     await wrapper.get('[data-test="new-employee-form"]').trigger('submit')
     await flushPromises()
 
+    // Pojišťovna je zákonná evidence osoby, ne sloupec karty — jde ale TÝMŽ
+    // požadavkem, aby ji nemohl minout zaměstnanec založený druhým voláním.
     expect(m.createPerson).toHaveBeenCalledWith(expect.objectContaining({
       weekly_hours: '20.00',
       office_id: 2,
       planned_start_on: '2026-09-01',
+      health_insurer_code: '111',
     }))
-    // Pojišťovna je zákonná evidence osoby, ne sloupec karty — jde vlastním zápisem.
-    const [personId, payload] = m.saveStatutoryEvidence.mock.calls[0]
-    expect(personId).toBe(4)
-    expect(payload.effective_on).toBe('2026-09-01')
-    expect(payload.sections.health_coverages).toEqual([expect.objectContaining({
-      effective_from: '2026-09-01',
-      insurer_code: '111',
-      insurer_status: 'verified',
-    })])
-  })
-
-  /** Selhání zápisu pojišťovny NERUŠÍ založeného zaměstnance — jen řekne, co doplnit. */
-  it('neztratí založeného zaměstnance, když zápis pojišťovny selže', async () => {
-    m.employerSettings.mockResolvedValue({ default_health_insurer_code: '111', offices: [] })
-    m.saveStatutoryEvidence.mockRejectedValue(new Error('nope'))
-    const wrapper = mountPage()
-    await flushPromises()
-    await wrapper.get('[data-test="add-employee"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-test="new-employee-name"]').setValue('Delta Nová')
-    await wrapper.get('[data-test="new-employee-form"]').trigger('submit')
-    await flushPromises()
-
-    expect(m.toastWarning).toHaveBeenCalledWith('payroll.people.create.insurer_failed')
-    expect(wrapper.find('[data-test="employee-created-next"]').exists()).toBe(true)
+    expect(m.saveStatutoryEvidence).not.toHaveBeenCalled()
   })
 
   it('names the edited person in the header even without a structured name', async () => {
@@ -641,6 +620,7 @@ describe('PeopleList toolbar and shared employee creation', () => {
       office_id: null,
       // Úvazek jde nově rovnou ze zakládacího formuláře, ne až z nové verze podmínek.
       weekly_hours: '40.00',
+      health_insurer_code: null,
     })
     // Nová osoba musí být vidět i tehdy, když ji předchozí zúžení schovalo.
     expect(m.peoplePage).toHaveBeenLastCalledWith({

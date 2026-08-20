@@ -300,6 +300,12 @@ export interface PayrollPersonCreatePayload {
   office_id?: number | null
   /** Týdenní pracovní doba; bez ní dosadí server plný úvazek 40.00. */
   weekly_hours?: string | null
+  /**
+   * Zdravotní pojišťovna osoby. Server ji zapíše jako zákonnou evidenci
+   * (`health_coverages`) v TÉŽE transakci jako zaměstnance — neplatný kód proto
+   * nezaloží ani osobu.
+   */
+  health_insurer_code?: string | null
 }
 
 export type PayrollPersonProfileStatus = 'missing' | 'legacy' | 'setup' | 'ready'

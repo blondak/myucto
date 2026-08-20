@@ -19,6 +19,7 @@ final class PayrollPersonCreateService
         private readonly PayrollEmploymentRepository $employments,
         private readonly PayrollPeopleRepository $people,
         private readonly ActivityLogger $activityLogger,
+        private readonly PayrollPersonHealthInsurerSeedService $healthInsurer,
     ) {}
 
     /**
@@ -71,6 +72,23 @@ final class PayrollPersonCreateService
                 $userAgent,
                 $supplierId,
             );
+
+            /*
+             * Zdravotní pojišťovna patří do TÉHOŽ zápisu jako zaměstnanec.
+             * Jde o zákonnou evidenci — kdyby se dopisovala až druhým
+             * požadavkem, jeho selhání by nechalo osobu bez ní.
+             */
+            if ($validated['health_insurer_code'] !== null) {
+                $this->healthInsurer->seed(
+                    $supplierId,
+                    $employeeId,
+                    $validated['health_insurer_code'],
+                    (string) $employment['terms']['planned_start_on'],
+                    $userId,
+                    $ip,
+                    $userAgent,
+                );
+            }
 
             return $this->people->findForTenant($supplierId, $employeeId)
                 ?? throw new \LogicException('Nově založený zaměstnanec nebyl nalezen.');

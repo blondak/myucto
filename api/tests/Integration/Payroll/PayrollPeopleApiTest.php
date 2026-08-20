@@ -358,6 +358,109 @@ final class PayrollPeopleApiTest extends TestCase
         self::assertSame(0, (int) $count->fetchColumn());
     }
 
+    /**
+     * Zdravotní pojišťovna je zákonná evidence osoby — musí vzniknout TÝMŽ
+     * požadavkem jako zaměstnanec. Dřív ji dopisoval prohlížeč druhým voláním
+     * a jeho selhání skončilo jen varovným toastem: osoba zůstala bez ní.
+     */
+    public function testCreateWritesHealthInsurerEvidenceInTheSameRequest(): void
+    {
+        if (!$this->db->hasTable('payroll_person_health_coverage_history')) {
+            self::markTestSkipped('Migrace zákonné evidence osoby neproběhla.');
+        }
+
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                '/api/payroll/people',
+                'accountant',
+                'session',
+                [
+                    ...$this->validCreatePayload('Pojištěná Testovací'),
+                    'planned_start_on' => '2026-09-15',
+                    'health_insurer_code' => '111',
+                ],
+            ),
+            new Response(),
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $personId = $this->json($response)['person']['id'];
+
+        $coverage = $this->db->pdo()->prepare(
+            'SELECT jurisdiction, insurer_status, insurer_code,
+                    insurer_evidence_reference, effective_from, effective_to
+               FROM payroll_person_health_coverage_history
+              WHERE supplier_id = ? AND employee_id = ?'
+        );
+        $coverage->execute([$this->supplierId, $personId]);
+        self::assertSame([
+            'jurisdiction' => 'czech_regime_verified',
+            'insurer_status' => 'verified',
+            'insurer_code' => '111',
+            'insurer_evidence_reference' => 'health:insurer-registration',
+            // Evidence se vede po celých měsících, nástup 15. 9. tedy začíná 1. 9.
+            'effective_from' => '2026-09-01',
+            'effective_to' => null,
+        ], $coverage->fetch(\PDO::FETCH_ASSOC));
+
+        // Auditní stopa musí být táž jako u panelu Zákonná evidence.
+        $log = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM activity_log
+              WHERE supplier_id = ? AND entity_id = ? AND action = ?'
+        );
+        $log->execute([
+            $this->supplierId,
+            $personId,
+            'payroll.person_statutory_evidence.saved',
+        ]);
+        self::assertSame(1, (int) $log->fetchColumn());
+    }
+
+    /**
+     * Neznámý kód pojišťovny nesmí nechat vzniknout ani zaměstnance. Kdyby to
+     * byla dvě volání, osoba by existovala bez zákonné evidence — a kód `999`
+     * je přesně ten případ, kvůli kterému číselník `HealthInsurers` vznikl.
+     */
+    public function testCreateRollsBackTheWholePersonWhenHealthInsurerCodeIsUnknown(): void
+    {
+        if (!$this->db->hasTable('payroll_person_health_coverage_history')) {
+            self::markTestSkipped('Migrace zákonné evidence osoby neproběhla.');
+        }
+
+        $response = $this->action->create(
+            $this->request(
+                'POST',
+                '/api/payroll/people',
+                'accountant',
+                'session',
+                [
+                    ...$this->validCreatePayload('Neplatná Pojišťovna'),
+                    'health_insurer_code' => '999',
+                ],
+            ),
+            new Response(),
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(
+            'validation_failed',
+            $this->json($response)['error']['code'],
+        );
+        self::assertStringContainsString(
+            '999',
+            $this->json($response)['error']['message'],
+        );
+
+        $count = $this->db->pdo()->prepare(
+            'SELECT COUNT(*)
+               FROM payroll_employees
+              WHERE supplier_id = ? AND full_name = ?'
+        );
+        $count->execute([$this->supplierId, 'Neplatná Pojišťovna']);
+        self::assertSame(0, (int) $count->fetchColumn());
+    }
+
     public function testCreateUsesOnlyPersonWritePermissionAndReturnsExactValidationErrors(): void
     {
         $employmentOnly = new EffectiveRole(

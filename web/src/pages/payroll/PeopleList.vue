@@ -16,8 +16,6 @@ import {
   type PayrollPersonSetupGap,
   type PayrollPersonQuickEditResponse,
   type PayrollRelationType,
-  type PayrollStatutoryEvidenceRow,
-  type PayrollStatutoryEvidenceSection,
 } from '@/api/payroll'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -27,7 +25,6 @@ import { loadDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultIns
 import { loadPayrollOffices } from '@/composables/usePayrollOffices'
 import { useToast } from '@/composables/useToast'
 import { healthInsurerOptions } from '@/utils/healthInsurers'
-import { defaultRow, STATUTORY_SECTIONS } from './statutoryEvidenceForm'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -552,39 +549,6 @@ function updateEmployment(personId: number, updated: PayrollEmployment) {
   if (index >= 0) employments[index] = updated
 }
 
-/**
- * Zdravotní pojišťovna zvolená při zakládání.
- *
- * Vede se jako zákonná evidence osoby (`health_coverages`), ne jako sloupec
- * na kartě — proto se zapisuje samostatným požadavkem přes tentýž endpoint,
- * který používá panel Zákonná evidence, a řádek staví stejné `defaultRow`,
- * jaké tam vznikne tlačítkem „Přidat záznam". Jeden zdroj pravdy, jeden tvar.
- *
- * Selhání NERUŠÍ založeného zaměstnance: osoba i vztah už existují a účetní
- * má vědět, co přesně zbývá doplnit, ne přijít o celý formulář.
- */
-async function seedHealthInsurer(personId: number) {
-  const code = employeeForm.health_insurer_code.trim()
-  if (code === '') return
-  const from = employeeForm.planned_start_on
-  const section = STATUTORY_SECTIONS.find(item => item.key === 'health_coverages')
-  if (!section) return
-
-  const sections = {} as Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
-  for (const item of STATUTORY_SECTIONS) sections[item.key] = []
-  sections.health_coverages = [defaultRow(section, `${from.slice(0, 7)}-01`, {
-    effectiveOn: from,
-    defaultInsurerCode: code,
-    employerReferences: [],
-  })]
-
-  try {
-    await payrollApi.saveStatutoryEvidence(personId, { effective_on: from, sections })
-  } catch {
-    toast.warning(t('payroll.people.create.insurer_failed'))
-  }
-}
-
 async function createEmployee() {
   if (savingEmployee.value) return
   const fullName = employeeForm.full_name.trim()
@@ -606,10 +570,15 @@ async function createEmployee() {
       : null,
     office_id: employeeForm.office_id,
     weekly_hours: employeeForm.weekly_hours.trim() || null,
+    /*
+     * Pojišťovna je zákonná evidence osoby, ne sloupec karty — zapisuje ji ale
+     * TENTÝŽ požadavek, a to v jedné transakci se zaměstnancem. Druhé volání by
+     * po svém selhání nechalo osobu bez zákonem vyžadované evidence.
+     */
+    health_insurer_code: employeeForm.health_insurer_code.trim() || null,
   }
   try {
     const created = await payrollApi.createPerson(payload)
-    await seedHealthInsurer(created.id)
     showEmployeeForm.value = false
     // Nová osoba musí být vidět bez ohledu na to, co bylo v hledání a filtru —
     // zúžení se proto srovná JEŠTĚ před načtením, ne po něm.
