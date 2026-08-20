@@ -31,8 +31,10 @@ final class AutomationCockpitContractTest extends TestCase
         self::assertStringContainsString("['GET', '#^/api/automation(/|$)#', 'accounting', AccessLevel::READ]", $permissions);
         self::assertStringContainsString("['GET', '#^/api/bank-ai-suggestion-availability$#', 'bank.post', AccessLevel::WRITE]", $permissions);
 
+        $workspaceRoutes = $this->read('web/src/router/workspaceRoutes.ts');
+        self::assertStringContainsString("name: 'automation-cockpit'", $workspaceRoutes);
+
         $router = $this->read('web/src/router/index.ts');
-        self::assertStringContainsString("name: 'automation-cockpit'", $router);
         self::assertStringContainsString("'automation-cockpit': ['accounting']", $router);
     }
 

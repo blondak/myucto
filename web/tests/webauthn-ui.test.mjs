@@ -134,12 +134,13 @@ test('security management renders inside the shared profile tabs', async () => {
 test('passkey management fields have visible associated labels', async () => {
   const passkeys = await readFile(new URL('pages/Passkeys.vue', root), 'utf8')
 
-  assert.match(passkeys, /<label for="passkey-label"[\s\S]*?passkeys\.credential_label/)
-  assert.match(passkeys, /<input id="passkey-label"/)
-  assert.match(passkeys, /<label for="passkey-current-password"[\s\S]*?auth\.current_password/)
-  assert.match(passkeys, /<input id="passkey-current-password"/)
-  assert.match(passkeys, /<label for="passkey-totp"[\s\S]*?passkeys\.totp_label/)
-  assert.match(passkeys, /<input id="passkey-totp"/)
+  assert.match(passkeys, /const pageId = useId\(\)/)
+  assert.match(passkeys, /<label :for="`\$\{pageId\}-passkey-label`"[\s\S]*?passkeys\.credential_label/)
+  assert.match(passkeys, /<input :id="`\$\{pageId\}-passkey-label`"/)
+  assert.match(passkeys, /<label :for="`\$\{pageId\}-passkey-current-password`"[\s\S]*?auth\.current_password/)
+  assert.match(passkeys, /<input :id="`\$\{pageId\}-passkey-current-password`"/)
+  assert.match(passkeys, /<label :for="`\$\{pageId\}-passkey-totp`"[\s\S]*?passkeys\.totp_label/)
+  assert.match(passkeys, /<input :id="`\$\{pageId\}-passkey-totp`"/)
 })
 
 test('passkey changes refresh the shared user profile independently of CSRF rotation', async () => {
