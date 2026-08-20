@@ -16,6 +16,7 @@ import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/butt
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { healthInsurerName, healthInsurerOptions } from '@/utils/healthInsurers'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import RequiredMark from '@/components/ui/RequiredMark.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { usePaneDom } from '@/composables/usePaneDom'
@@ -49,11 +50,16 @@ const institutionTypes: PayrollInstitutionType[] = [
   'statutory_insurance',
   'other_recipient',
 ]
+/**
+ * Účet a variabilní symbol jsou to, kvůli čemu se přehled otevírá — proto stojí
+ * hned za institucí a nejdou schovat (účet) ani nejsou skryté ve výchozím stavu
+ * (VS). Typ instituce je odvoditelný z názvu, takže se posunul za ně.
+ */
 const COLUMNS: ColumnDef[] = [
-  { key: 'institution_type', labelKey: 'payroll.employer.health_accounts.institution_type' },
   { key: 'institution', labelKey: 'payroll.employer.health_accounts.institution', required: true },
-  { key: 'account', labelKey: 'payroll.employer.health_accounts.account' },
-  { key: 'variable_symbol', labelKey: 'payroll.employer.health_accounts.variable_symbol', defaultHidden: true },
+  { key: 'account', labelKey: 'payroll.employer.health_accounts.account', required: true },
+  { key: 'variable_symbol', labelKey: 'payroll.employer.health_accounts.variable_symbol' },
+  { key: 'institution_type', labelKey: 'payroll.employer.health_accounts.institution_type' },
   { key: 'validity', labelKey: 'payroll.employer.health_accounts.validity' },
   { key: 'verification', labelKey: 'payroll.employer.health_accounts.verification', defaultHidden: true },
   { key: 'actions', labelKey: 'common.actions', required: true },
@@ -161,6 +167,11 @@ function symbolValid(value: string | null, maxLength: number, exact = false): bo
     && (!exact || normalized.length === maxLength)
 }
 
+/**
+ * Reference zdroje je nepovinná dohledávka (číslo sdělení pojišťovny apod.).
+ * Povinný zůstává druh zdroje a datum ověření — ty nesou informaci, odkud účet
+ * pochází a kdy byl naposledy potvrzený. Kontroluje se tedy jen délka.
+ */
 function commonValid(form: {
   institution_name: string
   variable_symbol: string | null
@@ -176,10 +187,17 @@ function commonValid(form: {
     && symbolValid(form.specific_symbol, 10)
     && symbolValid(form.constant_symbol, 4, true)
     && validDate(form.valid_to, false)
-    && form.source_reference.trim().length > 0
     && form.source_reference.trim().length <= 500
     && validDate(form.verified_on)
     && form.verified_on <= localToday()
+}
+
+/**
+ * Číslo účtu instituce je veřejný údaj, takže se ukazuje celé. Maskovaná podoba
+ * zbývá jen pro záznam, u kterého se plaintext nepodařilo přečíst.
+ */
+function accountNumber(account: PayrollInstitutionAccount): string {
+  return account.bank_account ?? account.bank_account_masked
 }
 
 const createValid = computed(() =>
@@ -420,10 +438,10 @@ onMounted(async () => {
           <table class="min-w-[1080px] divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th v-if="tbl.isVisible('institution_type')" class="px-3 py-2">{{ t('payroll.employer.health_accounts.institution_type') }}</th>
                 <th v-if="tbl.isVisible('institution')" class="px-3 py-2">{{ t('payroll.employer.health_accounts.institution') }}</th>
                 <th v-if="tbl.isVisible('account')" class="px-3 py-2">{{ t('payroll.employer.health_accounts.account') }}</th>
                 <th v-if="tbl.isVisible('variable_symbol')" class="px-3 py-2">{{ t('payroll.employer.health_accounts.variable_symbol') }}</th>
+                <th v-if="tbl.isVisible('institution_type')" class="px-3 py-2">{{ t('payroll.employer.health_accounts.institution_type') }}</th>
                 <th v-if="tbl.isVisible('validity')" class="px-3 py-2">{{ t('payroll.employer.health_accounts.validity') }}</th>
                 <th v-if="tbl.isVisible('verification')" class="px-3 py-2">{{ t('payroll.employer.health_accounts.verification') }}</th>
                 <th v-if="tbl.isVisible('actions')" class="px-3 py-2"><span class="sr-only">{{ t('common.actions') }}</span></th>
@@ -431,17 +449,20 @@ onMounted(async () => {
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="account in institutionAccounts" :key="account.id">
-                <td v-if="tbl.isVisible('institution_type')" class="px-3 py-3 text-neutral-700">{{ institutionTypeLabel(account.institution_type) }}</td>
                 <td v-if="tbl.isVisible('institution')" class="px-3 py-3">
                   <p class="font-medium text-neutral-900">{{ account.institution_name }}</p>
                   <p class="font-mono text-xs text-neutral-500">{{ account.institution_code }}</p>
                 </td>
-                <td v-if="tbl.isVisible('account')" class="px-3 py-3 font-mono text-neutral-700">{{ account.bank_account_masked }} / {{ account.currency_code }}</td>
-                <td v-if="tbl.isVisible('variable_symbol')" class="px-3 py-3 font-mono text-neutral-700">{{ account.variable_symbol || '—' }}</td>
+                <td v-if="tbl.isVisible('account')" class="px-3 py-3">
+                  <p class="font-mono text-base font-semibold text-neutral-900" data-testid="account-number">{{ accountNumber(account) }}</p>
+                  <p class="text-xs text-neutral-500">{{ account.currency_code }}</p>
+                </td>
+                <td v-if="tbl.isVisible('variable_symbol')" class="px-3 py-3 font-mono font-medium text-neutral-900" data-testid="account-vs">{{ account.variable_symbol || '—' }}</td>
+                <td v-if="tbl.isVisible('institution_type')" class="px-3 py-3 text-neutral-700">{{ institutionTypeLabel(account.institution_type) }}</td>
                 <td v-if="tbl.isVisible('validity')" class="px-3 py-3 text-neutral-700">{{ account.valid_from }} – {{ account.valid_to || t('payroll.employer.health_accounts.open_ended') }}</td>
                 <td v-if="tbl.isVisible('verification')" class="px-3 py-3">
                   <p class="text-neutral-700">{{ sourceLabel(account.source_kind) }}</p>
-                  <p class="text-xs text-neutral-500">{{ account.verified_on }} · {{ account.source_reference }}</p>
+                  <p class="text-xs text-neutral-500">{{ account.verified_on }}<template v-if="account.source_reference"> · {{ account.source_reference }}</template></p>
                 </td>
                 <td v-if="tbl.isVisible('actions')" class="px-3 py-3">
                   <button v-if="canWrite" type="button" :class="btnOutlineSm('neutral')" @click="startEdit(account)">
@@ -471,11 +492,11 @@ onMounted(async () => {
           <dl class="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
             <div>
               <dt class="text-xs text-neutral-500">{{ t('payroll.employer.health_accounts.account') }}</dt>
-              <dd class="font-mono text-neutral-700">{{ account.bank_account_masked }} / {{ account.currency_code }}</dd>
+              <dd class="font-mono text-base font-semibold text-neutral-900" data-testid="account-number-mobile">{{ accountNumber(account) }} <span class="text-xs font-normal text-neutral-500">{{ account.currency_code }}</span></dd>
             </div>
             <div>
               <dt class="text-xs text-neutral-500">{{ t('payroll.employer.health_accounts.variable_symbol') }}</dt>
-              <dd class="font-mono text-neutral-700">{{ account.variable_symbol || '—' }}</dd>
+              <dd class="font-mono font-medium text-neutral-900">{{ account.variable_symbol || '—' }}</dd>
             </div>
             <div>
               <dt class="text-xs text-neutral-500">{{ t('payroll.employer.health_accounts.validity') }}</dt>
@@ -486,7 +507,7 @@ onMounted(async () => {
               <dd class="text-neutral-700">{{ sourceLabel(account.source_kind) }} · {{ account.verified_on }}</dd>
             </div>
           </dl>
-          <p class="mt-2 break-words text-xs text-neutral-500">{{ account.source_reference }}</p>
+          <p v-if="account.source_reference" class="mt-2 break-words text-xs text-neutral-500">{{ account.source_reference }}</p>
         </article>
       </div>
 
@@ -494,10 +515,11 @@ onMounted(async () => {
         <div class="mb-4">
           <h3 class="font-semibold text-neutral-900">{{ t('payroll.employer.health_accounts.create_title') }}</h3>
           <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.employer.health_accounts.create_hint') }}</p>
+          <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.employer.health_accounts.required_legend') }}</p>
         </div>
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <label class="block">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_type') }}</span>
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_type') }}<RequiredMark /></span>
             <SearchableSelect
               data-testid="institution-create-type"
               :model-value="createForm.institution_type"
@@ -511,7 +533,7 @@ onMounted(async () => {
           <!-- Ne <label>: nese vlastní tlačítko a klik na něj by přes label
                zároveň otevřel nabídku výběru. Přístupný název dává aria-label. -->
           <div v-if="insurerPickerActive" class="block md:col-span-2 xl:col-span-2">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.insurer') }}</span>
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.insurer') }}<RequiredMark /></span>
             <SearchableSelect
               data-testid="health-create-insurer"
               :model-value="selectedInsurerCode"
@@ -533,16 +555,16 @@ onMounted(async () => {
           </div>
           <template v-else>
             <label class="block">
-              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_code') }}</span>
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_code') }}<RequiredMark /></span>
               <input v-model="createForm.institution_code" data-testid="health-create-code" type="text" maxlength="32" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
             </label>
             <label class="block">
-              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_name') }}</span>
+              <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_name') }}<RequiredMark /></span>
               <input v-model="createForm.institution_name" data-testid="health-create-name" type="text" maxlength="190" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
             </label>
           </template>
           <label class="block">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.bank_account') }}</span>
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.bank_account') }}<RequiredMark /></span>
             <input v-model="createForm.bank_account" data-testid="health-create-account" type="text" maxlength="191" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
             <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.health_accounts.bank_account_hint') }}</span>
           </label>
@@ -559,7 +581,7 @@ onMounted(async () => {
             <input v-model="createForm.constant_symbol" type="text" inputmode="numeric" maxlength="4" autocomplete="off" :aria-invalid="showValidation && !symbolValid(createForm.constant_symbol, 4, true)" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
           </label>
           <label class="block">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.valid_from') }}</span>
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.valid_from') }}<RequiredMark /></span>
             <input v-model="createForm.valid_from" type="date" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
           </label>
           <label class="block">
@@ -567,7 +589,7 @@ onMounted(async () => {
             <input v-model="createForm.valid_to" type="date" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
           </label>
           <label class="block">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.source') }}</span>
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.source') }}<RequiredMark /></span>
             <SearchableSelect
               :model-value="createForm.source_kind"
               :options="sourceOptions"
@@ -580,9 +602,10 @@ onMounted(async () => {
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.source_reference') }}</span>
             <input v-model="createForm.source_reference" data-testid="health-create-source-reference" type="text" maxlength="500" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.health_accounts.source_reference_hint') }}</span>
           </label>
           <label class="block">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.verified_on') }}</span>
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.verified_on') }}<RequiredMark /></span>
             <input v-model="createForm.verified_on" type="date" :max="localToday()" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
           </label>
         </div>
@@ -603,6 +626,7 @@ onMounted(async () => {
         <div class="mb-4">
           <h3 class="font-semibold text-neutral-900">{{ t('payroll.employer.health_accounts.edit_title') }}</h3>
           <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.employer.health_accounts.edit_hint') }}</p>
+          <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.employer.health_accounts.required_legend') }}</p>
         </div>
         <div v-if="conflictId === editingId" class="mb-4 rounded-md border border-warning-500/40 bg-warning-50 p-3 text-sm text-warning-700" role="alert">
           <p>{{ t('payroll.employer.health_accounts.conflict') }}</p>
@@ -613,7 +637,7 @@ onMounted(async () => {
         </div>
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <label class="block">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_name') }}</span>
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.institution_name') }}<RequiredMark /></span>
             <input v-model="editForm.institution_name" data-testid="health-edit-name" type="text" maxlength="190" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
           </label>
           <label class="block">
@@ -633,7 +657,7 @@ onMounted(async () => {
             <input v-model="editForm.valid_to" type="date" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
           </label>
           <label class="block">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.source') }}</span>
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.source') }}<RequiredMark /></span>
             <SearchableSelect
               :model-value="editForm.source_kind"
               :options="sourceOptions"
@@ -645,10 +669,11 @@ onMounted(async () => {
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.source_reference') }}</span>
-            <input v-model="editForm.source_reference" type="text" maxlength="500" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+            <input v-model="editForm.source_reference" data-testid="health-edit-source-reference" type="text" maxlength="500" autocomplete="off" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.health_accounts.source_reference_hint') }}</span>
           </label>
           <label class="block">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.verified_on') }}</span>
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.health_accounts.verified_on') }}<RequiredMark /></span>
             <input v-model="editForm.verified_on" type="date" :max="localToday()" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
           </label>
         </div>

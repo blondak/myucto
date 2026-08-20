@@ -156,14 +156,19 @@ final class PayrollInstitutionAccountValidator
         if ($sourceKind === null) {
             throw new \InvalidArgumentException('Druh ověřovacího zdroje není podporovaný.');
         }
-        $sourceReference = trim($this->requiredString(
+        /**
+         * Reference zdroje je nepovinná dohledávka („Sdělení VZP 3/2025", číslo
+         * dopisu). Zákon ji nevyžaduje a druh zdroje (`source_kind`) i datum
+         * ověření se evidují zvlášť, takže prázdná hodnota nic nerozbije.
+         * Ukládá se jako prázdný řetězec — sloupec je NOT NULL a přepis na NULL
+         * by znamenal migraci nad existujícími daty i úpravu integritního
+         * triggeru z 1275.
+         */
+        $sourceReference = trim($this->optionalString(
             $input['source_reference'] ?? null,
             'source_reference',
         ));
-        if ($sourceReference === ''
-            || mb_strlen($sourceReference) > 500
-            || $this->hasControlCharacter($sourceReference)
-        ) {
+        if (mb_strlen($sourceReference) > 500 || $this->hasControlCharacter($sourceReference)) {
             throw new \InvalidArgumentException('Reference ověřovacího zdroje není platná.');
         }
 

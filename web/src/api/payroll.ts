@@ -2240,6 +2240,11 @@ export interface PayrollInstitutionAccount {
   institution_type: PayrollInstitutionType
   institution_code: string
   institution_name: string
+  /**
+   * Čitelné číslo účtu instituce. `null` jen u poškozeného nebo nedokončeného
+   * záznamu — pak zbývá maskovaná podoba.
+   */
+  bank_account: string | null
   bank_account_masked: string
   currency_code: string
   variable_symbol: string | null

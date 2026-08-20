@@ -57,6 +57,7 @@ function account(overrides: Partial<PayrollInstitutionAccount> = {}): PayrollIns
     institution_type: 'health_insurer',
     institution_code: 'SYNTH-111',
     institution_name: 'Syntetická zdravotní pojišťovna',
+    bank_account: '1000000005/0100',
     bank_account_masked: '••••0005/0100',
     currency_code: 'CZK',
     variable_symbol: '0012345678',
@@ -102,13 +103,55 @@ describe('HealthInsurerAccounts', () => {
     document.body.innerHTML = ''
   })
 
-  it('zobrazuje pouze maskovaný účet a údaje o účinnosti a ověření', async () => {
+  it('ukazuje číslo účtu i variabilní symbol rovnou v přehledu, bez rozklikávání', async () => {
     const wrapper = await mountComponent()
 
-    expect(wrapper.text()).toContain('••••0005/0100')
-    expect(wrapper.text()).toContain('0012345678')
-    expect(wrapper.text()).toContain('SYNTHETIC-DOCUMENT-001')
-    expect(wrapper.text()).not.toContain('1000000005/0100')
+    const numbers = wrapper.findAll('[data-testid="account-number"]')
+    expect(numbers).not.toHaveLength(0)
+    expect(numbers[0].text()).toBe('1000000005/0100')
+    expect(wrapper.get('[data-testid="account-vs"]').text()).toBe('0012345678')
+
+    wrapper.unmount()
+  })
+
+  it('u nedočtelného šifrovaného účtu spadne zpět na maskovanou podobu', async () => {
+    const wrapper = await mountComponent([account({ bank_account: null })])
+
+    expect(wrapper.get('[data-testid="account-number"]').text()).toBe('••••0005/0100')
+
+    wrapper.unmount()
+  })
+
+  it('uloží účet i s prázdnou referencí zdroje', async () => {
+    m.updateInstitutionAccount.mockResolvedValue(account({ source_reference: '', row_version: 4 }))
+    const wrapper = await mountComponent()
+
+    const edit = wrapper.findAll('button').find(button => button.text() === 'common.edit')
+    await edit!.trigger('click')
+    await wrapper.get('[data-testid="health-edit-source-reference"]').setValue('')
+    const save = wrapper.get('[data-testid="health-account-edit"]').findAll('button')
+      .find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.updateInstitutionAccount).toHaveBeenCalledTimes(1)
+    expect(m.updateInstitutionAccount.mock.calls[0][1]).toMatchObject({ source_reference: '' })
+
+    wrapper.unmount()
+  })
+
+  it('označí povinná pole hvězdičkou a nepovinná nechá bez značky', async () => {
+    const wrapper = await mountComponent([])
+
+    const add = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.employer.health_accounts.add')
+    await add!.trigger('click')
+
+    const marked = wrapper.findAll('[data-required-mark]')
+      .map(node => node.element.parentElement?.textContent ?? '')
+    expect(marked.some(label => label.includes('health_accounts.bank_account'))).toBe(true)
+    expect(marked.some(label => label.includes('health_accounts.source_reference'))).toBe(false)
+    expect(marked.some(label => label.includes('health_accounts.specific_symbol'))).toBe(false)
 
     wrapper.unmount()
   })
@@ -118,6 +161,7 @@ describe('HealthInsurerAccounts', () => {
       id: 8,
       institution_type: 'social_security',
       institution_code: 'SYNTH-201',
+      bank_account: '1000000005/0300',
       bank_account_masked: '••••0005/0300',
     })
     m.createInstitutionAccount.mockResolvedValue(created)
@@ -158,7 +202,7 @@ describe('HealthInsurerAccounts', () => {
       source_reference: 'SYNTHETIC-NOTICE-002',
     })
     expect(m.createInstitutionAccount.mock.calls[0][0]).not.toHaveProperty('bank_account_masked')
-    expect(wrapper.text()).toContain('••••0005/0300')
+    expect(wrapper.text()).toContain('1000000005/0300')
 
     wrapper.unmount()
   })

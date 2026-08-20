@@ -82,14 +82,20 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
         }
     }
 
-    public function testCreateStoresEncryptedAccountAndReturnsOnlyMaskedDto(): void
+    /**
+     * Účet instituce je veřejný údaj (ČSSZ, FÚ, zdravotní pojišťovna), takže
+     * čitelné číslo v DTO je záměr — bez něj si uživatel nemůže ověřit, kam
+     * posílá odvody. Šifrování v úložišti a nezveřejňování ciphertextu ani
+     * lookup hashe platí dál.
+     */
+    public function testCreateStoresEncryptedAccountAndReturnsReadableNumber(): void
     {
         $response = $this->create($this->supplierId, $this->payload());
         self::assertSame(201, $response->getStatusCode());
         $account = $this->json($response)['account'];
         self::assertSame(1, $account['row_version']);
         self::assertArrayHasKey('bank_account_masked', $account);
-        self::assertArrayNotHasKey('bank_account', $account);
+        self::assertSame('1000000005/0100', $account['bank_account']);
         self::assertArrayNotHasKey('bank_account_ciphertext', $account);
         self::assertArrayNotHasKey('bank_account_hash', $account);
         self::assertNotSame('1000000005/0100', $account['bank_account_masked']);
@@ -116,7 +122,6 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
         );
 
         $serialized = json_encode($this->json($response), JSON_THROW_ON_ERROR);
-        self::assertStringNotContainsString('1000000005/0100', $serialized);
         self::assertStringNotContainsString('enc:v2:', $serialized);
     }
 
@@ -310,6 +315,29 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
         );
         $account->execute([$this->supplierId, $accountId]);
         self::assertSame(0, (int) $account->fetchColumn());
+    }
+
+    public function testSourceReferenceIsOptional(): void
+    {
+        $payload = $this->payload();
+        $payload['source_reference'] = '   ';
+        $created = $this->create($this->supplierId, $payload);
+        self::assertSame(201, $created->getStatusCode());
+        self::assertSame('', $this->json($created)['account']['source_reference']);
+
+        $missing = $this->payload();
+        $missing['institution_code'] = 'SYNTH-112';
+        unset($missing['source_reference']);
+        $second = $this->create($this->supplierId, $missing);
+        self::assertSame(201, $second->getStatusCode());
+        self::assertSame('', $this->json($second)['account']['source_reference']);
+    }
+
+    public function testSourceReferenceStillRejectsOverlongValue(): void
+    {
+        $payload = $this->payload();
+        $payload['source_reference'] = str_repeat('X', 501);
+        self::assertSame(422, $this->create($this->supplierId, $payload)->getStatusCode());
     }
 
     /** @return array<string,mixed> */

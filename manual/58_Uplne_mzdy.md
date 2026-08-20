@@ -70,8 +70,11 @@ variabilním symbolem platby.
 V části **Platební účty institucí** se evidují účty ČSSZ, finančního úřadu,
 zdravotních pojišťoven, zákonného pojištění a dalších příjemců. Pro každý účet
 vyber typ instituce a ulož zaměstnavatelský variabilní symbol, měnu, období
-platnosti, druh ověřovacího zdroje, jeho referenci a datum ověření. V seznamu se
-bankovní účet zobrazuje jen maskovaně. Změnu samotného účtu, typu nebo kódu
+platnosti, druh ověřovacího zdroje a datum ověření; reference zdroje (číslo
+sdělení nebo dopisu) je nepovinná. Povinná pole jsou ve formuláři označená
+hvězdičkou. V seznamu jsou celé číslo účtu a variabilní symbol vidět hned
+v prvních sloupcích, bez rozklikávání; v úložišti zůstává účet šifrovaný.
+Změnu samotného účtu, typu nebo kódu
 instituce či začátku platnosti založ jako nový historický záznam; u existujícího
 záznamu lze bezpečně upravit název, platební symboly, konec platnosti a údaje
 o ověření. Období stejné instituce a měny se nesmějí překrývat.
