@@ -19,6 +19,7 @@ import HealthInsurerAccounts from './HealthInsurerAccounts.vue'
 import EmployerPolicies from './EmployerPolicies.vue'
 import PayrollDimensions from './PayrollDimensions.vue'
 import RegzelProfileSettings from './RegzelProfileSettings.vue'
+import { codeFromName, OFFICE_CODE_MAX_LENGTH } from '@/utils/slugifyCode'
 import {
   PAYROLL_ACCOUNT_TYPES,
   normalizedPayrollAccountCode,
@@ -44,7 +45,11 @@ const activeTab = ref<SettingsTab>(initialTab === 'submissions' ? 'submissions' 
 const tabs: SettingsTab[] = ['employer', 'institutions', 'accounting', 'policies', 'dimensions', 'submissions']
 
 type AccountKey = PayrollAccountKey
-type FormOffice = PayrollEmployerSettings['offices'][number] & { is_new?: boolean }
+type FormOffice = PayrollEmployerSettings['offices'][number] & {
+  is_new?: boolean
+  /** true = uživatel do kódu sáhl ručně, přestaň ho odvozovat z názvu */
+  code_manual?: boolean
+}
 type EmployerSettingsForm = Omit<PayrollEmployerSettingsPayload, 'offices'>
 
 const accountRows: Array<{
@@ -173,7 +178,7 @@ function fillForm(value: PayrollEmployerSettings) {
   form.payroll_contact_email = value.payroll_contact_email
   form.payroll_contact_phone = value.payroll_contact_phone
   form.accounts = { ...value.accounts }
-  formOffices.value = value.offices.map(office => ({ ...office }))
+  formOffices.value = value.offices.map(office => ({ ...office, code_manual: true }))
   showValidation.value = false
 }
 
@@ -246,7 +251,29 @@ function addOffice() {
     is_active: true,
     row_version: 0,
     is_new: true,
+    code_manual: false,
   })
+}
+
+/**
+ * Uživatel píše NÁZEV účtárny → kód se z něj odvodí sám (verzálkový slug),
+ * dokud do něj ručně nesáhl. Kolize s existující účtárnou řeší suffix `_2`,
+ * aby to nespadlo až na serverové unikátní validaci.
+ */
+function onOfficeNameInput(index: number) {
+  const office = formOffices.value[index]
+  if (!office?.is_new || office.code_manual) return
+  const taken = formOffices.value
+    .filter((_row, position) => position !== index)
+    .map(row => row.code)
+  office.code = codeFromName(office.name, taken, OFFICE_CODE_MAX_LENGTH)
+}
+
+/** Ruční zásah do kódu vypne odvozování; smazání kódu ho zase zapne. */
+function onOfficeCodeInput(index: number) {
+  const office = formOffices.value[index]
+  if (!office) return
+  office.code_manual = office.code.trim() !== ''
 }
 
 function removeNewOffice(index: number) {
@@ -562,8 +589,8 @@ onMounted(load)
           <table class="min-w-[1040px] divide-y divide-neutral-200 text-sm">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th class="px-3 py-2">{{ t('payroll.employer.office_code') }}</th>
-                <th class="px-3 py-2">{{ t('payroll.employer.office_name') }}</th>
+                <th class="px-3 py-2">{{ t('payroll.employer.office_name') }} <span class="text-danger-600">*</span></th>
+                <th class="px-3 py-2">{{ t('payroll.employer.office_code') }} <span class="text-danger-600">*</span></th>
                 <th class="px-3 py-2">{{ t('payroll.employer.office_social_security_variable_symbol') }}</th>
                 <th class="px-3 py-2">{{ t('payroll.employer.office_status') }}</th>
                 <th class="w-10 px-3 py-2"><span class="sr-only">{{ t('common.actions') }}</span></th>
@@ -572,12 +599,13 @@ onMounted(load)
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="(office, index) in formOffices" :key="office.id || `new-${index}`">
                 <td class="px-3 py-3 align-top">
-                  <input v-model="office.code" type="text" maxlength="32" :disabled="!canWrite || !office.is_new" :aria-invalid="showValidation && officeCodeError(index) !== null" class="h-9 w-36 rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500" @blur="normalizeOfficeCode(index)">
-                  <span v-if="showValidation && officeCodeError(index)" class="mt-1 block max-w-48 text-xs text-danger-600">{{ officeCodeError(index) }}</span>
+                  <input v-model="office.name" data-office-name type="text" maxlength="190" :disabled="!canWrite" :aria-invalid="showValidation && officeNameError(index) !== null" class="h-9 min-w-64 rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500" @input="onOfficeNameInput(index)">
+                  <span v-if="showValidation && officeNameError(index)" class="mt-1 block text-xs text-danger-600">{{ officeNameError(index) }}</span>
                 </td>
                 <td class="px-3 py-3 align-top">
-                  <input v-model="office.name" type="text" maxlength="190" :disabled="!canWrite" :aria-invalid="showValidation && officeNameError(index) !== null" class="h-9 min-w-64 rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
-                  <span v-if="showValidation && officeNameError(index)" class="mt-1 block text-xs text-danger-600">{{ officeNameError(index) }}</span>
+                  <input v-model="office.code" data-office-code type="text" maxlength="32" :disabled="!canWrite || !office.is_new" :aria-invalid="showValidation && officeCodeError(index) !== null" class="h-9 w-36 rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500" @input="onOfficeCodeInput(index)" @blur="normalizeOfficeCode(index)">
+                  <span v-if="showValidation && officeCodeError(index)" class="mt-1 block max-w-48 text-xs text-danger-600">{{ officeCodeError(index) }}</span>
+                  <span v-else-if="office.is_new" class="mt-1 block max-w-48 text-xs text-neutral-500">{{ t('payroll.employer.office_code_hint') }}</span>
                 </td>
                 <td class="px-3 py-3 align-top">
                   <input v-model="office.social_security_variable_symbol" data-office-social-vs type="text" inputmode="numeric" maxlength="10" autocomplete="off" :disabled="!canWrite" :aria-invalid="showValidation && officeSocialSecurityVariableSymbolError(index) !== null" class="h-9 w-40 rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
@@ -611,14 +639,15 @@ onMounted(load)
             </div>
             <div class="mt-3 grid grid-cols-1 gap-3">
               <label class="block">
-                <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_code') }}</span>
-                <input v-model="office.code" type="text" maxlength="32" :disabled="!canWrite || !office.is_new" :aria-invalid="showValidation && officeCodeError(index) !== null" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500" @blur="normalizeOfficeCode(index)">
-                <span v-if="showValidation && officeCodeError(index)" class="mt-1 block text-xs text-danger-600">{{ officeCodeError(index) }}</span>
+                <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_name') }} <span class="text-danger-600">*</span></span>
+                <input v-model="office.name" type="text" maxlength="190" :disabled="!canWrite" :aria-invalid="showValidation && officeNameError(index) !== null" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500" @input="onOfficeNameInput(index)">
+                <span v-if="showValidation && officeNameError(index)" class="mt-1 block text-xs text-danger-600">{{ officeNameError(index) }}</span>
               </label>
               <label class="block">
-                <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_name') }}</span>
-                <input v-model="office.name" type="text" maxlength="190" :disabled="!canWrite" :aria-invalid="showValidation && officeNameError(index) !== null" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
-                <span v-if="showValidation && officeNameError(index)" class="mt-1 block text-xs text-danger-600">{{ officeNameError(index) }}</span>
+                <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_code') }} <span class="text-danger-600">*</span></span>
+                <input v-model="office.code" type="text" maxlength="32" :disabled="!canWrite || !office.is_new" :aria-invalid="showValidation && officeCodeError(index) !== null" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500" @input="onOfficeCodeInput(index)" @blur="normalizeOfficeCode(index)">
+                <span v-if="showValidation && officeCodeError(index)" class="mt-1 block text-xs text-danger-600">{{ officeCodeError(index) }}</span>
+                <span v-else-if="office.is_new" class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_code_hint') }}</span>
               </label>
               <label class="block">
                 <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_social_security_variable_symbol') }}</span>

@@ -184,6 +184,10 @@ const jmhzMappings = ref<Record<number, PayrollComponentJmhzMappingState>>({})
 const jmhzTargetId = ref<string | null>(null)
 const jmhzLoading = ref(true)
 const componentForm = ref<ComponentForm>(newComponentForm())
+/** Obsazené kódy pro automatické odvození kódu z názvu (kolize → `_2`, `_3`). */
+const takenComponentCodes = computed(() => components.value
+  .filter(item => item.id !== editingComponent.value?.id)
+  .map(item => item.code))
 const recurringEditorOpen = ref(false)
 const editingRecurring = ref<PayrollRecurringComponent | null>(null)
 const recurringForm = ref<RecurringForm>(newRecurringForm())
@@ -1188,6 +1192,9 @@ onMounted(load)
               :code-disabled="!!editingComponent"
               :code-maxlength="64"
               :name-maxlength="255"
+              code-mode="code"
+              :taken-codes="takenComponentCodes"
+              :code-hint="editingComponent ? undefined : t('payroll.components.fields.code_hint')"
               name-container-class="sm:col-span-2"
               code-testid="payroll-component-code"
               name-testid="payroll-component-name"

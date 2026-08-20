@@ -62,8 +62,13 @@ V **Mzdy → Nastavení zaměstnavatele** se evidují registrační a kontaktní
 pro mzdovou agendu. Stránka používá čtyři samostatné záložky:
 **Zaměstnavatel a účtárny**, **Účty institucí**, **Automatické účtování** a
 **Politiky a připravenost**. Firma může mít více mzdových účtáren, ale právě jedna
-aktivní účtárna musí být označena jako výchozí. Každá účtárna má vlastní kód,
-název a vlastní variabilní symbol pro platby sociálního pojištění. Pole
+aktivní účtárna musí být označena jako výchozí. Každá účtárna má vlastní název,
+kód a vlastní variabilní symbol pro platby sociálního pojištění. Vyplňuje se
+**název**; kód se z něj předvyplní sám (bez diakritiky, velkými písmeny) a
+při shodě s existující účtárnou se odliší číselnou příponou. Přepsat ho můžete
+kdykoli — jakmile do něj sáhnete, přestane se z názvu odvozovat. Stejně se
+chová kód mzdové složky, dimenze (středisko/zakázka/činnost) i ručně zadávané
+instituce. Pole
 **Registrační číslo zaměstnavatele** slouží pro evidenci a podání; není
 variabilním symbolem platby.
 

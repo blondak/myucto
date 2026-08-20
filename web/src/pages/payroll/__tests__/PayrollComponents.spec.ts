@@ -476,22 +476,40 @@ describe('PayrollComponents', () => {
       .find(button => button.text() === 'payroll.components.catalog.add')
     await addButton!.trigger('click')
 
-    vi.useFakeTimers()
+    // Číselník mezd vyžaduje verzálkový kód (`^[A-Z0-9][A-Z0-9._-]{0,63}$`),
+    // proto se odvozuje klientsky a synchronně — bez serverového /api/slug.
     await wrapper.get('[data-testid="payroll-component-name"]').setValue('Česká odměna')
-    await vi.advanceTimersByTimeAsync(301)
     await flushPromises()
 
-    expect(m.slugify).toHaveBeenCalledWith('Česká odměna')
+    expect(m.slugify).not.toHaveBeenCalled()
     const codeInput = wrapper.get('[data-testid="payroll-component-code"]')
-    expect((codeInput.element as HTMLInputElement).value).toBe('CESKA-ODMENA')
+    expect((codeInput.element as HTMLInputElement).value).toBe('CESKA_ODMENA')
 
     await codeInput.setValue('VLASTNI_KOD')
     await wrapper.get('[data-testid="payroll-component-name"]').setValue('Jiný název')
-    await vi.advanceTimersByTimeAsync(301)
     await flushPromises()
 
     expect((codeInput.element as HTMLInputElement).value).toBe('VLASTNI_KOD')
-    vi.useRealTimers()
+    wrapper.unmount()
+  })
+
+  it('při kolizi s existující složkou přidá k odvozenému kódu suffix', async () => {
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.catalog')!
+      .trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.catalog.add')!
+      .trigger('click')
+
+    // V katalogu už existuje složka s kódem SYN_BONUS — tenhle název na něj
+    // slugifikuje, takže se musí odlišit suffixem, ne spadnout na serveru.
+    await wrapper.get('[data-testid="payroll-component-name"]').setValue('Syn bonus')
+    await flushPromises()
+
+    const codeInput = wrapper.get('[data-testid="payroll-component-code"]')
+    expect((codeInput.element as HTMLInputElement).value).toBe('SYN_BONUS_2')
     wrapper.unmount()
   })
 

@@ -3,10 +3,13 @@ import { watch } from 'vue'
 import { useAutoSlug } from '@/composables/useAutoSlug'
 
 /**
- * Dvojice polí „Kód" + „Název" pro číselníky. Když uživatel píše název a kód
- * zatím needitoval ručně, kód se automaticky předvyplní slugem (serverový
- * Slugifier — jediný zdroj pravdy, aby preview == uložená hodnota). Jakmile
- * uživatel do kódu sáhne, auto-generování se vypne; když kód smaže, zas zapne.
+ * Dvojice polí „Název" + „Kód" pro číselníky. Hlavní a první pole je NÁZEV;
+ * kód se z něj automaticky odvodí, takže si ho uživatel nemusí vymýšlet.
+ * Jakmile do kódu sáhne, auto-generování se vypne; když kód smaže, zas zapne.
+ *
+ * Tvar kódu řídí `codeMode`: `'slug'` = serverový Slugifier (lowercase-pomlčka,
+ * e-shopové číselníky, kde je kód zároveň URL slug), `'code'` = klientský
+ * VERZÁLKOVÝ identifikátor s podtržítkem (číselníky mezd). Viz `useAutoSlug`.
  */
 const props = withDefaults(defineProps<{
   code: string
@@ -22,6 +25,12 @@ const props = withDefaults(defineProps<{
   nameContainerClass?: string
   codeTestid?: string
   nameTestid?: string
+  /** Tvar generovaného kódu — viz komentář nahoře. */
+  codeMode?: 'slug' | 'code'
+  /** Už obsazené kódy; při kolizi se v režimu `'code'` přidá `_2`, `_3`. */
+  takenCodes?: readonly string[]
+  /** Popisek pod polem „Kód" (vysvětlení, že se předvyplňuje sám). */
+  codeHint?: string
 }>(), {
   editing: false,
   codeDisabled: false,
@@ -31,6 +40,9 @@ const props = withDefaults(defineProps<{
   nameContainerClass: '',
   codeTestid: undefined,
   nameTestid: undefined,
+  codeMode: 'slug',
+  takenCodes: () => [],
+  codeHint: undefined,
 })
 
 const emit = defineEmits<{
@@ -38,7 +50,11 @@ const emit = defineEmits<{
   'update:name': [value: string]
 }>()
 
-const auto = useAutoSlug((slug) => emit('update:code', slug), { maxLen: props.codeMaxlength })
+const auto = useAutoSlug((slug) => emit('update:code', slug), {
+  maxLen: props.codeMaxlength,
+  mode: props.codeMode,
+  taken: () => props.takenCodes,
+})
 auto.init(props.code, props.editing)
 
 function onName(e: Event) {
@@ -79,5 +95,6 @@ watch(() => props.editing, (v) => auto.init(props.code, v))
       :data-testid="codeTestid"
       class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100"
     />
+    <span v-if="codeHint" class="mt-1 block text-xs text-neutral-500">{{ codeHint }}</span>
   </div>
 </template>

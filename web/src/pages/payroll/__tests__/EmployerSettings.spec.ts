@@ -434,4 +434,51 @@ describe('EmployerSettings — účtová osnova', () => {
 
     wrapper.unmount()
   })
+
+  it('odvodí kód nové účtárny z názvu, dokud do něj uživatel nesáhne', async () => {
+    const wrapper = await mountPage()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.employer.add_office')!
+      .trigger('click')
+
+    // Index 1 = nově přidaný řádek (index 0 je načtená účtárna MAIN).
+    const names = wrapper.findAll('[data-office-name]')
+    const codes = wrapper.findAll('[data-office-code]')
+    await names[1].setValue('Účtárna Brno')
+
+    expect((codes[1].element as HTMLInputElement).value).toBe('UCTARNA_BRNO')
+
+    // Ruční zásah do kódu auto-generování vypne.
+    await codes[1].setValue('BRNO2')
+    await names[1].setValue('Účtárna Ostrava')
+    expect((codes[1].element as HTMLInputElement).value).toBe('BRNO2')
+
+    wrapper.unmount()
+  })
+
+  it('kód nové účtárny odliší suffixem, když se trefí do existujícího', async () => {
+    const wrapper = await mountPage()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.employer.add_office')!
+      .trigger('click')
+
+    // Účtárna MAIN už existuje — kolizi musí vyřešit UI, ne až server.
+    await wrapper.findAll('[data-office-name]')[1].setValue('Main')
+    expect((wrapper.findAll('[data-office-code]')[1].element as HTMLInputElement).value)
+      .toBe('MAIN_2')
+
+    wrapper.unmount()
+  })
+
+  it('kód existující účtárny se přepisem názvu nemění', async () => {
+    const wrapper = await mountPage()
+    const names = wrapper.findAll('[data-office-name]')
+    const codes = wrapper.findAll('[data-office-code]')
+
+    await names[0].setValue('Přejmenovaná účtárna')
+
+    expect((codes[0].element as HTMLInputElement).value).toBe('MAIN')
+
+    wrapper.unmount()
+  })
 })

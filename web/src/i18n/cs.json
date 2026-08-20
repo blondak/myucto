@@ -1499,6 +1499,7 @@
             },
             "fields": {
                 "code": "Kód",
+                "code_hint": "Předvyplní se z názvu, můžete ho přepsat.",
                 "name": "Název",
                 "kind": "Druh složky",
                 "value_kind": "Povaha plnění",
@@ -3548,6 +3549,7 @@
             "add_first_office": "Založit první účtárnu",
             "remove_office": "Odebrat novou účtárnu",
             "office_code": "Kód",
+            "office_code_hint": "Předvyplní se z názvu, můžete ho přepsat.",
             "office_name": "Název",
             "office_social_security_variable_symbol": "Variabilní symbol ČSSZ",
             "office_status": "Stav",
@@ -3709,6 +3711,7 @@
                 "institution_type": "Typ instituce",
                 "institution": "Instituce",
                 "institution_code": "Kód instituce",
+                "institution_code_hint": "Předvyplní se z názvu, můžete ho přepsat.",
                 "insurer": "Zdravotní pojišťovna",
                 "select_insurer": "Vyberte pojišťovnu ze seznamu",
                 "insurer_hint": "Výběrem se doplní kód i název pojišťovny.",
@@ -3799,6 +3802,7 @@
                 "retry": "Zkusit znovu",
                 "type": "Typ",
                 "code": "Kód",
+                "code_hint": "Předvyplní se z názvu, můžete ho přepsat.",
                 "name": "Název",
                 "validity": "Platnost",
                 "account": "Výchozí účet",
@@ -3824,6 +3828,7 @@
                 "validation": {
                     "title": "Zkontrolujte prosím zvýrazněná pole.",
                     "code": "Kód musí mít 1–50 znaků: velká písmena, číslice, tečku, podtržítko nebo pomlčku.",
+                    "code_duplicate": "Tento kód už jiná dimenze používá.",
                     "name": "Název musí mít 1–190 znaků.",
                     "dates": "Konec platnosti nesmí předcházet začátku.",
                     "account": "Výchozí účet musí mít formát účtové osnovy, např. 518 nebo 518.001."

@@ -230,6 +230,26 @@ describe('HealthInsurerAccounts', () => {
     wrapper.unmount()
   })
 
+  it('v ruční větvi odvodí kód instituce z názvu, dokud do něj uživatel nesáhne', async () => {
+    const wrapper = await mountComponent([])
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.employer.health_accounts.add')!
+      .trigger('click')
+    await wrapper.get('[data-testid="health-create-manual-code"]').trigger('click')
+
+    const name = wrapper.get('[data-testid="health-create-name"]')
+    const code = wrapper.get('[data-testid="health-create-code"]')
+    await name.setValue('Nová zdravotní pojišťovna')
+
+    expect((code.element as HTMLInputElement).value).toBe('NOVA_ZDRAVOTNI_POJISTOVNA')
+
+    await code.setValue('299')
+    await name.setValue('Jiný název pojišťovny')
+    expect((code.element as HTMLInputElement).value).toBe('299')
+
+    wrapper.unmount()
+  })
+
   it('existující účet s kódem mimo číselník zůstane čitelný i editovatelný', async () => {
     m.updateInstitutionAccount.mockResolvedValue(account({
       institution_name: 'Přejmenovaná pojišťovna',

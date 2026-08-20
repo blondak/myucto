@@ -1499,6 +1499,7 @@
             },
             "fields": {
                 "code": "Code",
+                "code_hint": "Prefilled from the name; you can override it.",
                 "name": "Name",
                 "kind": "Component type",
                 "value_kind": "Value type",
@@ -3548,6 +3549,7 @@
             "add_first_office": "Create first office",
             "remove_office": "Remove new office",
             "office_code": "Code",
+            "office_code_hint": "Prefilled from the name; you can override it.",
             "office_name": "Name",
             "office_social_security_variable_symbol": "Social security variable symbol",
             "office_status": "Status",
@@ -3709,6 +3711,7 @@
                 "institution_type": "Institution type",
                 "institution": "Institution",
                 "institution_code": "Institution code",
+                "institution_code_hint": "Prefilled from the name; you can override it.",
                 "insurer": "Health insurer",
                 "select_insurer": "Select an insurer from the list",
                 "insurer_hint": "Selecting an insurer fills in both the code and the name.",
@@ -3799,6 +3802,7 @@
                 "retry": "Try again",
                 "type": "Type",
                 "code": "Code",
+                "code_hint": "Prefilled from the name; you can override it.",
                 "name": "Name",
                 "validity": "Validity",
                 "account": "Default account",
@@ -3824,6 +3828,7 @@
                 "validation": {
                     "title": "Please check the highlighted fields.",
                     "code": "Code must be 1–50 characters: uppercase letters, digits, dot, underscore or hyphen.",
+                    "code_duplicate": "Another dimension already uses this code.",
                     "name": "Name must be 1–190 characters.",
                     "dates": "The validity end cannot precede its start.",
                     "account": "The default account must match the chart-of-accounts format, e.g. 518 or 518.001."
