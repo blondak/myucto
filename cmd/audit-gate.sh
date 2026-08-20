@@ -53,7 +53,7 @@ run_step 'Invarianty a fuzz (L3)' \
     php "$API_DIR/vendor/bin/phpunit" --no-coverage --testsuite Invariants
 
 run_step 'Plná testovací sada' \
-    php "$API_DIR/vendor/bin/phpunit" --no-coverage
+    php "$API_DIR/bin/test-parallel.php" --application
 
 if [ "$SKIP_DATA" -eq 0 ]; then
     run_step 'Invarianty nad daty (read-only)' \

@@ -19,7 +19,12 @@ if (-not (Test-Path 'vendor/bin/phpunit')) {
     Write-Error "vendor/bin/phpunit chybi. Spust: cd api ; composer install"
 }
 
-& php vendor/phpunit/phpunit/phpunit --colors=auto @Args
+if ($Args.Count -eq 0) {
+    & php bin/test-parallel.php
+}
+else {
+    & php vendor/phpunit/phpunit/phpunit --colors=auto @Args
+}
 if ($LASTEXITCODE -ne 0) {
     Write-Error "PHPUnit failed (exit $LASTEXITCODE)"
 }

@@ -15,6 +15,7 @@ use PHPUnit\Framework\TestCase;
  * Spustit s: TEST_URL=https://dev.myinvoice.cz vendor/bin/phpunit --testsuite=Integration
  */
 #[Group('integration')]
+#[Group('http-integration')]
 final class UnauthenticatedAccessTest extends TestCase
 {
     private string $baseUrl;

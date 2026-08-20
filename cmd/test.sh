@@ -16,4 +16,8 @@ if [[ ! -f vendor/bin/phpunit ]]; then
   exit 1
 fi
 
-vendor/bin/phpunit --colors=auto "$@"
+if [ "$#" -eq 0 ]; then
+  php bin/test-parallel.php
+else
+  vendor/bin/phpunit --colors=auto "$@"
+fi

@@ -173,7 +173,7 @@ jobs:
         working-directory: api
         env:
           MYINVOICE_TEST_URL: http://localhost:8080
-        run: vendor/bin/phpunit --no-coverage
+        run: php bin/test-parallel.php --processes=4 --application
 
   frontend:
     name: Frontend (Vue + TypeScript)

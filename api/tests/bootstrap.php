@@ -206,6 +206,33 @@ if (!is_string($__chosenDb)) {
     $__chosenDb = '';
 }
 
+// ParaTest dává každému workeru unikátní TEST_TOKEN. Paralelní runner mu přes
+// prefix přiřadí vlastní klon testovací DB, takže testy s pevnými ID i sdílené
+// Connection::pdo() nikdy nemíchají data mezi procesy. Prefix nastavuje pouze
+// api/bin/test-parallel.php; běžné PHPUnit spuštění se chová beze změny.
+$__parallelPrefix = getenv('MYINVOICE_PARALLEL_DB_PREFIX');
+$__testToken = getenv('TEST_TOKEN');
+if (is_string($__parallelPrefix) && $__parallelPrefix !== '') {
+    // ParaTest nejdřív načte konfiguraci v řídicím procesu bez tokenu; ten testy
+    // nespouští. Worker má TEST_TOKEN vždy, jinak by volba --no-test-tokens byla
+    // nebezpečná a runner ji nepoužívá.
+    if (is_string($__testToken) && $__testToken !== '' && preg_match('/^[A-Za-z0-9_]+$/D', $__testToken) !== 1) {
+        fwrite(STDERR, "[TEST SAFETY] ParaTest worker nemá bezpečný TEST_TOKEN.\n");
+        exit(1);
+    }
+    if (is_string($__testToken) && $__testToken !== '') {
+        $__chosenDb = $__parallelPrefix . '_' . $__testToken . '_test';
+        if (strlen($__chosenDb) > 64 || preg_match('/^[A-Za-z0-9_]+$/D', $__chosenDb) !== 1) {
+            fwrite(STDERR, "[TEST SAFETY] Neplatné jméno paralelní testovací DB.\n");
+            exit(1);
+        }
+        putenv('MYINVOICE_DB_NAME=' . $__chosenDb);
+        $_ENV['MYINVOICE_DB_NAME'] = $__chosenDb;
+        $_SERVER['MYINVOICE_DB_NAME'] = $__chosenDb;
+    }
+}
+unset($__parallelPrefix, $__testToken);
+
 // Bez cfg.php a bez explicitní MYINVOICE_DB_NAME (typicky CI) přeskoč celou
 // izolační logiku i kontrolu migrací — není žádná DB, integrační testy se
 // soft-skipnou samy. Pojistka i migrace se aktivují jen když je co chránit.

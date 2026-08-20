@@ -62,7 +62,7 @@ Invoke-Step 'Invarianty a fuzz (L3)' {
 }
 
 Invoke-Step 'Plná testovací sada' {
-    & php (Join-Path $apiDir 'vendor/bin/phpunit') --no-coverage
+    & php (Join-Path $apiDir 'bin/test-parallel.php') --application
 }
 
 if (-not $SkipData) {

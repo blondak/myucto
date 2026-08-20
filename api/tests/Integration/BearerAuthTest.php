@@ -21,6 +21,7 @@ use PHPUnit\Framework\TestCase;
  * Spustit: vendor/bin/phpunit --testsuite=Integration --filter=BearerAuthTest
  */
 #[Group('integration')]
+#[Group('http-integration')]
 final class BearerAuthTest extends TestCase
 {
     private string $baseUrl;
