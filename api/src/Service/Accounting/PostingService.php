@@ -9,6 +9,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
+use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Report\VatLedgerService;
@@ -93,6 +94,9 @@ final class PostingService
     /** @var array<int, array<string,string>> per-request cache supplier_id => [syntetika => jediná analytika]. */
     private array $singleAnalyticCache = [];
 
+    /** @var array<string,string> per-request cache "supplierId|code" => výsledný nedaňový účet. */
+    private array $nonDeductibleAccountCache = [];
+
     /**
      * Syntetiky, u kterých analytiku vybírá KONTEXT dokladu, ne osnova — proto se na ně
      * automatický přesměr {@see singleAnalyticMap()} nikdy nepoužije:
@@ -118,6 +122,7 @@ final class PostingService
         private readonly JournalEntryRepository $journal,
         private readonly VatLedgerService $vatLedger,
         private readonly ActivityLogger $activity,
+        private readonly ExpenseClassificationService $expenseClassification,
     ) {}
 
     /**
@@ -896,6 +901,7 @@ final class PostingService
         $totalCzk     = round((float) $pi['total_with_vat'] * $rate, 2);
         $isRc         = (bool) $pi['reverse_charge'];
         $isFixedAsset = (bool) ($pi['is_fixed_asset'] ?? false);
+        $taxDeductible = (bool) ($pi['tax_deductible'] ?? true);
         $vatDeduction = (string) ($pi['vat_deduction'] ?? 'full');
         $isCreditNote = ((string) ($pi['document_kind'] ?? 'invoice') === 'credit_note') || $totalCzk < 0.0;
 
@@ -938,6 +944,9 @@ final class PostingService
         $defaultKey = $isFixedAsset ? 'invoice.dhm.received' : 'invoice.services.received';
         $rule = $this->rules->resolve($supplierId, $opts['rule_key'] ?? $defaultKey);
         $expense = $debitOverride ?? ($rule['debit_account_code'] ?? ($isFixedAsset ? '042' : '518'));
+        if (!$taxDeductible) {
+            $expense = $this->nonDeductibleExpenseAccount($supplierId, $expense);
+        }
         $payable = $rule['credit_account_code'] ?? '321';
         $cc = $opts['cost_center'] ?? null;
 
@@ -949,7 +958,16 @@ final class PostingService
         // Ruční/AI override účtu je adresný pokyn pro CELÝ doklad → rozpad se pak nedělá.
         $weights = $debitOverride !== null
             ? null
-            : $this->purchaseExpenseWeights($supplierId, $purchaseInvoiceId, $rate, $isRc, $vatDeduction, $pct, $expense);
+            : $this->purchaseExpenseWeights(
+                $supplierId,
+                $purchaseInvoiceId,
+                $rate,
+                $isRc,
+                $vatDeduction,
+                $pct,
+                $expense,
+                $taxDeductible,
+            );
 
         // Normálně 5xx/042 MD + 343 MD / 321 D; dobropis obrací obě strany.
         $expenseSide   = $isCreditNote ? 'credit' : 'debit';
@@ -1089,9 +1107,11 @@ final class PostingService
         string $vatDeduction,
         float $pct,
         string $defaultAccount,
+        bool $taxDeductible,
     ): ?array {
+        $suggestions = $this->expenseClassification->suggestForInvoice($supplierId, $purchaseInvoiceId);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT expense_kind, expense_account_code, total_without_vat, total_vat
+            'SELECT id, expense_kind, expense_account_code, total_without_vat, total_vat
                FROM purchase_invoice_items
               WHERE purchase_invoice_id = ?'
         );
@@ -1104,14 +1124,24 @@ final class PostingService
         $anyClassified = false;
         $weights = [];
         foreach ($items as $row) {
-            $kind = ExpenseKind::tryFromNullable($row['expense_kind'] !== null ? (string) $row['expense_kind'] : null);
+            $kindValue = $row['expense_kind'] !== null ? (string) $row['expense_kind'] : null;
+            $override = trim((string) ($row['expense_account_code'] ?? ''));
+            $override = $override === '' ? null : $override;
+
+            // Náhled i samotné zaúčtování musí použít jistý návrh stejně jako auto-post,
+            // ale bez zápisu do dokladu. Ručně zvolený účet má vždy přednost.
+            $suggestion = $suggestions[(int) $row['id']] ?? null;
+            if ($override === null && $suggestion !== null && !empty($suggestion['auto'])) {
+                $kindValue = (string) $suggestion['expense_kind'];
+                $suggestedAccount = trim((string) ($suggestion['expense_account_code'] ?? ''));
+                $override = $suggestedAccount === '' ? null : $suggestedAccount;
+            }
+            $kind = ExpenseKind::tryFromNullable($kindValue);
 
             // Dvě různé osy: `expense_kind` = CO to je (evidence, sestavy, práh §26/2),
             // `expense_account_code` = KAM to jde. Pojistné je druhem SLUŽBA, ale vyhláška
             // 500/2002 ho řadí na 548 (F.5. Jiné provozní náklady), ne na 518 (A.3. Služby).
             // Účet na řádku proto přebíjí odvození z druhu.
-            $override = trim((string) ($row['expense_account_code'] ?? ''));
-            $override = $override === '' ? null : $override;
             if ($override !== null) {
                 $anyClassified = true;   // adresný účet je klasifikace sám o sobě
             } elseif ($kind !== null) {
@@ -1120,6 +1150,9 @@ final class PostingService
             $account = $override !== null
                 ? $this->validatePurchaseDebitOverride($supplierId, $override)
                 : ($kind !== null ? $this->accountForExpenseKind($supplierId, $kind) : $defaultAccount);
+            if (!$taxDeductible) {
+                $account = $this->nonDeductibleExpenseAccount($supplierId, $account);
+            }
 
             $net = round((float) $row['total_without_vat'] * $rate, 2);
             $vat = round((float) $row['total_vat'] * $rate, 2);
@@ -1317,6 +1350,47 @@ final class PostingService
     }
 
     /**
+     * Zachová věcný druh nákladu a přepne pouze jeho daňovou analytiku. Konkrétní
+     * účet již označený jako nedaňový (např. 513/528/543) má vždy přednost.
+     * Chybějící nebo uživatelem jinak klasifikovaná .990 analytika znamená bezpečný
+     * fallback na původní účet; hlavička dokladu stále zajistí přičtení v DPFO/DPPO.
+     */
+    private function nonDeductibleExpenseAccount(int $supplierId, string $accountCode): string
+    {
+        $cacheKey = $supplierId . '|' . $accountCode;
+        if (isset($this->nonDeductibleAccountCache[$cacheKey])) {
+            return $this->nonDeductibleAccountCache[$cacheKey];
+        }
+
+        $candidate = ChartOfAccountsTemplate::nonDeductibleAnalyticFor($accountCode);
+        if ($candidate === null || $candidate === $accountCode) {
+            return $this->nonDeductibleAccountCache[$cacheKey] = $accountCode;
+        }
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT source.tax_deductibility AS source_tax_deductibility,
+                    target.account_code AS target_account_code
+               FROM chart_of_accounts source
+          LEFT JOIN chart_of_accounts target
+                 ON target.supplier_id = source.supplier_id
+                AND target.account_code = ?
+                AND target.account_type = "expense"
+                AND target.tax_deductibility = "non_deductible"
+                AND target.is_active = 1
+              WHERE source.supplier_id = ? AND source.account_code = ? AND source.is_active = 1
+              LIMIT 1'
+        );
+        $stmt->execute([$candidate, $supplierId, $accountCode]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || (string) $row['source_tax_deductibility'] === 'non_deductible') {
+            return $this->nonDeductibleAccountCache[$cacheKey] = $accountCode;
+        }
+
+        $target = $row['target_account_code'] !== null ? (string) $row['target_account_code'] : $accountCode;
+        return $this->nonDeductibleAccountCache[$cacheKey] = $target;
+    }
+
+    /**
      * @param array<string,mixed> $pi
      * @param list<array<string,mixed>> $allocations
      * @param array{cost_center?:?string} $opts
@@ -1350,7 +1424,12 @@ final class PostingService
             };
             $accountAmount = round($base + ($vat - $deductibleVat), 2);
             if ($accountAmount !== 0.0) {
-                $lines[] = $this->line((string) $allocation['account_code'], $debitSide, abs($accountAmount), $cc);
+                $accountCode = (string) $allocation['account_code'];
+                if (!(bool) ($pi['tax_deductible'] ?? true)
+                    || (string) ($allocation['tax_treatment'] ?? '') === 'non_deductible') {
+                    $accountCode = $this->nonDeductibleExpenseAccount($supplierId, $accountCode);
+                }
+                $lines[] = $this->line($accountCode, $debitSide, abs($accountAmount), $cc);
             }
             if ($deductibleVat !== 0.0) {
                 $lines[] = $this->line($this->inputVatAccount($supplierId), $debitSide, abs($deductibleVat), $cc);
@@ -1751,7 +1830,7 @@ final class PostingService
     }
 
     /**
-     * Mapa „trojmístná syntetika → její JEDINÁ aktivní analytika" pro firmu.
+     * Mapa „trojmístná syntetika → její JEDINÁ aktivní daňová analytika" pro firmu.
      *
      * PROČ. Jakmile syntetika dostane potomka, nesmí se na ni dál účtovat — součet
      * analytik by neseděl na syntetiku a v hlavní knize by účet měl vlastní zůstatek
@@ -1763,7 +1842,8 @@ final class PostingService
      *
      * KDY SE PŘESMĚR NEDĚLÁ (a proč se to nedá zjednodušit):
      *  - firma přepínač vypnula (`accounting_supplier_settings.single_analytic_redirect`),
-     *  - syntetika má 0 nebo 2+ aktivních analytik → volba není jednoznačná, řeší ji
+     *  - nedaňová analytika se nepočítá — tu smí vybrat jen daňový příznak dokladu,
+     *  - syntetika má 0 nebo 2+ aktivních daňových analytik → volba není jednoznačná, řeší ji
      *    kontace nebo kontext (proto se nic nemění firmám bez analytik — ty mají 0),
      *  - jde o {@see CONTEXT_DRIVEN_SYNTHETICS} (221/211/343/345),
      *  - analytika NENÍ v tečkovaném tvaru `NNN.NNN`. Tahle podmínka je zásadní:
@@ -1793,6 +1873,7 @@ final class PostingService
                 AND p.is_active = 1
                 AND p.account_code REGEXP '^[0-9]{3}$'
                 AND p.account_code NOT IN ({$excluded})
+                AND c.tax_deductibility = 'deductible'
               GROUP BY p.id, p.account_code
              HAVING COUNT(*) = 1
                 AND MIN(c.account_code) REGEXP '^[0-9]{3}[.][0-9]{1,6}$'"
@@ -2178,6 +2259,7 @@ final class PostingService
                         ? 'd.advance_purchase_invoice_id, NULL AS parent_invoice_id, d.parent_purchase_invoice_id'
                         : 'd.parent_invoice_id, NULL AS advance_purchase_invoice_id, NULL AS parent_purchase_invoice_id') . ",
                     " . ($isPurchase ? 'd.vat_deduction, d.vat_deduction_percent' : "'full' AS vat_deduction, 100 AS vat_deduction_percent") . ",
+                    " . ($isPurchase ? 'd.tax_deductible' : '1 AS tax_deductible') . ",
                     " . ($isPurchase ? 'd.received_at, d.received_at_source' : 'NULL AS received_at, NULL AS received_at_source') . ",
                     " . ($isPurchase ? 'NULL AS revenue_rule_key' : 'd.revenue_rule_key') . "
                FROM {$table} d

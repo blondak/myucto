@@ -33,7 +33,8 @@ Přepínač **Zobrazit neaktivní** načte i vyřazené účty. Neaktivní úče
 
 Při zahájení aktivace podvojného účetnictví server idempotentně naseeduje
 standardní syntetické účty, vybrané analytiky (mimo jiné **343.100 / 343.200 /
-343.900** — viz [§ 62.3.2](#6232-analytiky-dph-343100-343200-a-343900)) a systémové
+343.900** — viz [§ 62.3.2](#6232-analytiky-dph-343100-343200-a-343900), a nedaňové
+nákladové analytiky **501.990 / 511.990 / 518.990 / 548.990**) a systémové
 předkontace. Stejný seed lze bezpečně
 spustit znovu: existující firemní účty ani jejich názvy se neduplikují.
 Aktivační průvodce je popsán v kapitole
@@ -77,10 +78,13 @@ takže i účty jako `311D` nebo `461K` ze standardní šablony zůstávají pla
 Tečkovaný tvar má ale dva praktické důsledky:
 
 - **Přesměrování z holé syntetiky.** Když má předkontace zadaný jen syntetický
-  účet a firma pod ním má **právě jednu aktivní tečkovanou analytiku**, zápis se
+  účet a firma pod ním má **právě jednu aktivní daňovou tečkovanou analytiku**, zápis se
   provede na tu analytiku. Řeší to naráz všechna místa, kde byl účet v enginu
   zadaný natvrdo (kurzové rozdíly, opravy a udržování, zaokrouhlení) a odpadá
   díky tomu ruční kontace pro každou drobnost.
+- **Nedaňová analytika `.990` se do obecného přesměrování nepočítá.** Použije se
+  pouze u nedaňového přijatého dokladu nebo nedaňové účetní alokace; její samotná
+  existence proto nemůže změnit kontaci daňově uznatelných nákladů.
 - **Víceznačné účty se nepřesměrovávají nikdy.** U **`211`, `221`, `343`, `336`,
   `315`, `345` a `501`** rozhoduje o analytice kontext dokladu — bankovní účet
   výpisu, pokladní registr nebo mzdové nastavení — ne osnova. Kdyby se

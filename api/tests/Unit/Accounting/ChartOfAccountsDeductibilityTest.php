@@ -28,6 +28,16 @@ final class ChartOfAccountsDeductibilityTest extends TestCase
         self::assertSame('deductible', ChartOfAccountsTemplate::taxDeductibility('518001'));
     }
 
+    public function testExplicitNonDeductibleAnalyticsOverrideSyntheticClassification(): void
+    {
+        foreach (['501.990', '511.990', '518.990', '548.990'] as $code) {
+            self::assertSame('non_deductible', ChartOfAccountsTemplate::taxDeductibility($code), $code);
+        }
+        self::assertSame('518.990', ChartOfAccountsTemplate::nonDeductibleAnalyticFor('518'));
+        self::assertSame('518.990', ChartOfAccountsTemplate::nonDeductibleAnalyticFor('518.100'));
+        self::assertNull(ChartOfAccountsTemplate::nonDeductibleAnalyticFor('042'));
+    }
+
     public function testDeductibleAndSpecialAccounts(): void
     {
         // Běžné náklady jsou daňové.

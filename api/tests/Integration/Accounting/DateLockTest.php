@@ -319,6 +319,7 @@ final class DateLockTest extends TestCase
             $this->container->get(JournalEntryRepository::class),
             $this->container->get(VatLedgerService::class),
             $this->container->get(ActivityLogger::class),
+            $this->container->get(\MyInvoice\Service\Accounting\Expense\ExpenseClassificationService::class),
         );
     }
 

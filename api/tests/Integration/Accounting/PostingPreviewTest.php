@@ -124,6 +124,71 @@ final class PostingPreviewTest extends TestCase
         self::assertNull($booked->fetchColumn(), 'Náhled nesmí označit doklad za zaúčtovaný.');
     }
 
+    /** Jisté nákladové pravidlo se musí promítnout do náhledu, aniž by změnilo položku. */
+    public function testPreviewUsesCertainExpenseRuleWithoutPersistingSuggestion(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO chart_of_accounts
+                (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id)
+             SELECT ?, "548.100", "Pojistné", "expense", "debit", 0, id
+               FROM chart_of_accounts
+              WHERE supplier_id = ? AND account_code = "548"'
+        )->execute([$this->supplierId, $this->supplierId]);
+        $pdo->prepare(
+            'INSERT INTO expense_classification_rules
+                (supplier_id, name, description_contains, expense_kind, target_account_code, priority, created_by)
+             VALUES (?, "Pojistné → 548.100", "pojist", "service", "548.100", 10, ?)'
+        )->execute([$this->supplierId, $this->userId]);
+
+        $id = $this->purchase(35_485.0, 'Roční pojistné odpovědnosti');
+        $item = $pdo->prepare(
+            'SELECT expense_kind, expense_account_code
+               FROM purchase_invoice_items WHERE purchase_invoice_id = ?'
+        );
+        $item->execute([$id]);
+        $before = $item->fetch(\PDO::FETCH_ASSOC);
+
+        $lines = $this->preview($id)['lines'];
+
+        self::assertContains('548.100', array_column($lines, 'account_code'));
+        $item->execute([$id]);
+        self::assertSame($before, $item->fetch(\PDO::FETCH_ASSOC), 'GET náhled nesmí návrh uložit do položky.');
+    }
+
+    /** Nedaňový doklad zachová druh nákladu, ale použije jeho nedaňovou analytiku. */
+    public function testNonDeductiblePurchaseUsesMatchingNonDeductibleAnalytic(): void
+    {
+        $id = $this->purchase(773.50, 'Informace o radarech a dopravních kamerách', false);
+        $lines = $this->preview($id)['lines'];
+
+        self::assertContains('518.990', array_column($lines, 'account_code'));
+        self::assertNotContains('518', array_column($lines, 'account_code'));
+    }
+
+    /** Konkrétní nedaňový druh má přednost před obecnou analytikou 518.990. */
+    public function testSpecificNonDeductibleAccountIsPreserved(): void
+    {
+        $id = $this->purchase(1_210.0, 'Občerstvení pro obchodní jednání', false);
+        $this->db->pdo()->prepare(
+            'UPDATE purchase_invoice_items SET expense_account_code = "513" WHERE purchase_invoice_id = ?'
+        )->execute([$id]);
+
+        $lines = $this->preview($id)['lines'];
+
+        self::assertContains('513', array_column($lines, 'account_code'));
+        self::assertNotContains('518.990', array_column($lines, 'account_code'));
+    }
+
+    /** Samotná existence .990 nesmí přesměrovat běžný daňově uznatelný doklad. */
+    public function testDeductiblePurchaseDoesNotUseNonDeductibleAnalytic(): void
+    {
+        $id = $this->purchase(1_210.0);
+        $lines = $this->preview($id)['lines'];
+
+        self::assertNotContains('518.990', array_column($lines, 'account_code'));
+    }
+
     /**
      * Náhled a skutečné zaúčtování musí dát TYTÉŽ řádky.
      *
@@ -159,7 +224,7 @@ final class PostingPreviewTest extends TestCase
 
     // ── fixtures ─────────────────────────────────────────────────────────────
 
-    private function purchase(float $withVat): int
+    private function purchase(float $withVat, string $description = 'Služby', bool $taxDeductible = true): int
     {
         $vat = round($withVat - $withVat / 1.21, 2);
         $this->db->pdo()->prepare(
@@ -167,12 +232,12 @@ final class PostingPreviewTest extends TestCase
                 (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date,
                  due_date, received_at, currency_id, reverse_charge, vendor_snapshot,
                  total_without_vat, total_vat, total_with_vat, status, vat_classification_code,
-                 vat_deduction, created_by)
+                 vat_deduction, tax_deductible, created_by)
              VALUES (?, ?, "PP-1", "invoice", "2026-03-01", "2026-03-01", "2026-03-15", "2026-03-01",
-                     ?, 0, "{}", ?, ?, ?, "received", "1", "full", ?)'
+                     ?, 0, "{}", ?, ?, ?, "received", "1", "full", ?, ?)'
         )->execute([
             $this->supplierId, $this->vendorId, $this->currencyId,
-            round($withVat - $vat, 2), $vat, $withVat, $this->userId,
+            round($withVat - $vat, 2), $vat, $withVat, $taxDeductible ? 1 : 0, $this->userId,
         ]);
         $id = (int) $this->db->pdo()->lastInsertId();
 
@@ -181,8 +246,8 @@ final class PostingPreviewTest extends TestCase
             'INSERT INTO purchase_invoice_items
                 (purchase_invoice_id, description, quantity, unit_price_without_vat,
                  vat_rate_id, vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index)
-             VALUES (?, "Služby", 1, ?, ?, 21.00, ?, ?, ?, 1)'
-        )->execute([$id, round($withVat - $vat, 2), $this->vatRateId, round($withVat - $vat, 2), $vat, $withVat]);
+             VALUES (?, ?, 1, ?, ?, 21.00, ?, ?, ?, 1)'
+        )->execute([$id, $description, round($withVat - $vat, 2), $this->vatRateId, round($withVat - $vat, 2), $vat, $withVat]);
 
         return $id;
     }

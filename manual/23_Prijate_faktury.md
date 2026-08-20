@@ -203,7 +203,14 @@ V boxu **Klasifikace** jsou dva nezávislé příznaky řídící, jak faktura v
   - **Bez nároku** — faktura **vůbec nevstupuje** do DPH evidence (Kniha DPH, DPHDP3, KH); je to jen účetní náklad. Typicky reprezentace, osobní spotřeba.
   - **Krácený (poměrný §75)** — odpočet jen v poměrné výši (např. auto 70 % pro ekonomickou činnost). Po výběru zadáš **Odpočet %** a o toto procento se zkrátí základ i daň odpočtu v Knize DPH a DPHDP3 (ř. 40–45); zbytek je nedaňová část.
   - **Krácený (koeficientem §76)** — pro **společné vstupy** používané zároveň pro plnění s nárokem na odpočet i pro plnění osvobozená bez nároku (§ 51) — typicky nájem, energie, účetní služby u firem, které mají i osvobozené příjmy (pronájem, finanční nebo zdravotní služby). Na rozdíl od §75 se procento **nezadává na dokladu** — je to jeden **koeficient za celou firmu a rok**, spočtený z poměru zdanitelných a osvobozených plnění (podrobně viz [Výkazy DPH § Krácený odpočet § 76](36_Vykazy_DPH.md#kraceny-odpocet-76-koeficient)). Než administrátor/účetní pro daný rok nastaví **zálohový koeficient**, doklad s touto volbou nejde **ani zaúčtovat, ani zahrnout do přiznání** — systém to odmítne srozumitelnou chybou.
-- **Daňově uznatelný náklad** — řídí pouze daň z příjmů: když je vypnuto, náklad se nezahrne do orientačního hospodářského výsledku (DPFO/DPPO). S DPH to nesouvisí (faktura může mít odpočitatelné DPH a být daňově neuznatelná, i naopak).
+- **Daňově uznatelný náklad** — řídí pouze daň z příjmů. V podvojném účetnictví se
+  náklad vždy normálně projeví ve výsledku hospodaření; když je příznak vypnutý,
+  DPFO/DPPO jej přičte zpět jako nedaňový. Při automatickém zaúčtování aplikace
+  zachová věcný druh nákladu a použije jeho nedaňovou analytiku: `501.990`,
+  `511.990`, `518.990` nebo `548.990`. Konkrétní pravidlo či ruční účet má přednost,
+  takže reprezentace zůstane na `513`, sociální náklad na `528` a dar na `543`.
+  S DPH to nesouvisí (faktura může mít odpočitatelné DPH a být daňově
+  neuznatelná, i naopak).
 
 Oba příznaky jsou vidět i v **detailu** přijaté faktury (box Měna/DPH).
 

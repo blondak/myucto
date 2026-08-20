@@ -119,6 +119,28 @@ final class ChartOfAccountsSeederTest extends TestCase
         self::assertSame('offbalance', $offbalance['account_type']);
     }
 
+    public function testSeedIncludesNonDeductibleExpenseAnalytics(): void
+    {
+        $this->seeder->seedForSupplier($this->supplierId);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT account_code, tax_deductibility
+               FROM chart_of_accounts
+              WHERE supplier_id = ? AND account_code IN ("501.990", "511.990", "518.990", "548.990")
+              ORDER BY account_code'
+        );
+        $stmt->execute([$this->supplierId]);
+
+        self::assertSame(
+            [
+                ['account_code' => '501.990', 'tax_deductibility' => 'non_deductible'],
+                ['account_code' => '511.990', 'tax_deductibility' => 'non_deductible'],
+                ['account_code' => '518.990', 'tax_deductibility' => 'non_deductible'],
+                ['account_code' => '548.990', 'tax_deductibility' => 'non_deductible'],
+            ],
+            $stmt->fetchAll(\PDO::FETCH_ASSOC),
+        );
+    }
+
     public function testGlobalPostingRulesSeeded(): void
     {
         // Globální seed z migrace 1006 — resolve funguje i pro suppliera bez override.

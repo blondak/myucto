@@ -13,10 +13,15 @@ use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
  * Fáze E nález N1: FO s podvojným účetnictvím musí nedaňové náklady přičíst zpět k základu,
  * stejně jako PO — jinak podá systematicky podhodnocený §7 základ).
  *
- * Účty s `chart_of_accounts.tax_deductibility='non_deductible'` (513 reprezentace, 543 dary,
- * 545 pokuty apod.). Vylučuje JEN close_books zápis (source_id < STOCK_SLOT_BASE) a 59x (daň
- * z příjmů je z VH vyloučena, přidávat ji by ji do základu započetlo dvakrát); slotovaná
- * skladová manka §3.4 na neuznatelném 549 (source_id >= STOCK_SLOT_BASE) se POČÍTAJÍ.
+ * Nedaňovost nese buď účet (`chart_of_accounts.tax_deductibility='non_deductible'` — 513,
+ * 543, 545…), nebo hlavička přijaté faktury (`tax_deductible=0`). Jsou to dvě nezávislé
+ * osy: starší nebo ručně účtovaná nedaňová služba může věcně zůstat na daňovém účtu 518,
+ * ale pro DPFO/DPPO se přičte zpět. Podmínka je OR, takže nedaňový doklad na nedaňovém
+ * účtu se nezapočítá dvakrát.
+ *
+ * Vylučuje JEN close_books zápis (source_id < STOCK_SLOT_BASE) a 59x (daň z příjmů je z VH
+ * vyloučena, přidávat ji by ji do základu započetlo dvakrát); slotovaná skladová manka §3.4
+ * na neuznatelném 549 (source_id >= STOCK_SLOT_BASE) se POČÍTAJÍ.
  */
 final class NonDeductibleCostsService
 {
@@ -29,12 +34,15 @@ final class NonDeductibleCostsService
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                JOIN chart_of_accounts a ON a.id = l.account_id
+          LEFT JOIN purchase_invoices pi ON e.source_type = 'purchase_invoice'
+                                         AND pi.id = e.source_id
+                                         AND pi.supplier_id = e.supplier_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?
                 AND NOT (e.source_type = 'closing' AND e.source_id < ?)
                 AND a.account_type = 'expense'
                 AND a.account_code NOT LIKE '59%'
-                AND a.tax_deductibility = 'non_deductible'"
+                AND (a.tax_deductibility = 'non_deductible' OR COALESCE(pi.tax_deductible, 1) = 0)"
         );
         $stmt->execute([$supplierId, $startsOn, $endsOn, ClosingSourceId::STOCK_SLOT_BASE]);
         return round((float) $stmt->fetchColumn(), 2);

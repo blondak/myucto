@@ -159,6 +159,14 @@ final class SingleAnalyticRedirectTest extends TestCase
         self::assertSame('311', $codes['credit']);
     }
 
+    /** Nedaňová .990 se nikdy nesmí stát obecným cílem pro daňové zápisy. */
+    public function testSingleNonDeductibleAnalyticDoesNotCaptureSynthetic(): void
+    {
+        $codes = $this->postAndReadCodes('518', '311');
+
+        self::assertSame('518', $codes['debit']);
+    }
+
     /** Dvě analytiky = volba není jednoznačná → rozhoduje dál kontace/kontext. */
     public function testTwoAnalyticsLeaveTheSyntheticAlone(): void
     {

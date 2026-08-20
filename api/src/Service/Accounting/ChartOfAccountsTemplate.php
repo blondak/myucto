@@ -196,15 +196,18 @@ final class ChartOfAccountsTemplate
         // předkontace v ChartOfAccountsSeeder::seedAnalyticPostingRules().
         ['code' => '501.100', 'name' => 'PHM — pohonné hmoty', 'type' => 'expense', 'normal_side' => 'debit', 'parent_code' => '501'],
         ['code' => '501.900', 'name' => 'Ostatní materiál', 'type' => 'expense', 'normal_side' => 'debit', 'parent_code' => '501'],
+        ['code' => '501.990', 'name' => 'Spotřeba materiálu — daňově neuznatelné', 'type' => 'expense', 'normal_side' => 'debit', 'parent_code' => '501'],
         ['code' => '502', 'name' => 'Spotřeba energie', 'type' => 'expense', 'normal_side' => 'debit'],
         ['code' => '503', 'name' => 'Spotřeba ostatních neskladovatelných dodávek', 'type' => 'expense', 'normal_side' => 'debit'],
         ['code' => '504', 'name' => 'Prodané zboží', 'type' => 'expense', 'normal_side' => 'debit'],
         ['code' => '511', 'name' => 'Opravy a udržování', 'type' => 'expense', 'normal_side' => 'debit'],
         ['code' => '511.100', 'name' => 'Servis a opravy vozidel', 'type' => 'expense', 'normal_side' => 'debit', 'parent_code' => '511'],
         ['code' => '511.900', 'name' => 'Ostatní opravy', 'type' => 'expense', 'normal_side' => 'debit', 'parent_code' => '511'],
+        ['code' => '511.990', 'name' => 'Opravy a udržování — daňově neuznatelné', 'type' => 'expense', 'normal_side' => 'debit', 'parent_code' => '511'],
         ['code' => '512', 'name' => 'Cestovné', 'type' => 'expense', 'normal_side' => 'debit'],
         ['code' => '513', 'name' => 'Náklady na reprezentaci', 'type' => 'expense', 'normal_side' => 'debit'],
         ['code' => '518', 'name' => 'Ostatní služby', 'type' => 'expense', 'normal_side' => 'debit'],
+        ['code' => '518.990', 'name' => 'Ostatní služby — daňově neuznatelné', 'type' => 'expense', 'normal_side' => 'debit', 'parent_code' => '518'],
         ['code' => '521', 'name' => 'Mzdové náklady', 'type' => 'expense', 'normal_side' => 'debit'],
         ['code' => '522', 'name' => 'Příjmy společníků obchodní korporace ze závislé činnosti', 'type' => 'expense', 'normal_side' => 'debit'],
         ['code' => '523', 'name' => 'Odměny členům orgánů obchodní korporace', 'type' => 'expense', 'normal_side' => 'debit'],
@@ -223,6 +226,7 @@ final class ChartOfAccountsTemplate
         ['code' => '545', 'name' => 'Ostatní pokuty a penále', 'type' => 'expense', 'normal_side' => 'debit'],
         ['code' => '546', 'name' => 'Odpis pohledávky', 'type' => 'expense', 'normal_side' => 'debit'],
         ['code' => '548', 'name' => 'Ostatní provozní náklady', 'type' => 'expense', 'normal_side' => 'debit'],
+        ['code' => '548.990', 'name' => 'Ostatní provozní náklady — daňově neuznatelné', 'type' => 'expense', 'normal_side' => 'debit', 'parent_code' => '548'],
         ['code' => '549', 'name' => 'Manka a škody z provozní činnosti', 'type' => 'expense', 'normal_side' => 'debit'],
         ['code' => '551', 'name' => 'Odpisy dlouhodobého nehmotného a hmotného majetku', 'type' => 'expense', 'normal_side' => 'debit'],
         ['code' => '552', 'name' => 'Tvorba a zúčtování zákonných rezerv', 'type' => 'expense', 'normal_side' => null],
@@ -304,15 +308,35 @@ final class ChartOfAccountsTemplate
     public const NON_DEDUCTIBLE_SYNTHETICS = ['513', '528', '543', '545', '549', '554', '559'];
 
     /**
-     * Daňová uznatelnost daného syntetického kódu (fallback pro analytiky = první
-     * 3 znaky kódu). 'non_deductible' pro §25 syntetiky, jinak 'deductible'.
+     * Nedaňové analytiky zachovávající věcný druh nákladu. Automatika je použije,
+     * když je celý přijatý doklad označen jako daňově neuznatelný a konkrétnější
+     * nedaňový účet (513, 528, 543…) nebyl určen pravidlem nebo účetní.
+     *
+     * @var array<string,string> syntetika => nedaňová analytika
+     */
+    public const NON_DEDUCTIBLE_ANALYTICS = [
+        '501' => '501.990',
+        '511' => '511.990',
+        '518' => '518.990',
+        '548' => '548.990',
+    ];
+
+    /**
+     * Daňová uznatelnost účtu. Explicitní nedaňové analytiky mají přednost,
+     * ostatní analytiky dědí klasifikaci z prvních tří znaků syntetiky.
      */
     public static function taxDeductibility(string $accountCode): string
     {
         $synthetic = substr($accountCode, 0, 3);
-        return in_array($synthetic, self::NON_DEDUCTIBLE_SYNTHETICS, true)
+        return in_array($accountCode, self::NON_DEDUCTIBLE_ANALYTICS, true)
+            || in_array($synthetic, self::NON_DEDUCTIBLE_SYNTHETICS, true)
             ? 'non_deductible'
             : 'deductible';
+    }
+
+    public static function nonDeductibleAnalyticFor(string $accountCode): ?string
+    {
+        return self::NON_DEDUCTIBLE_ANALYTICS[substr($accountCode, 0, 3)] ?? null;
     }
 
     /**

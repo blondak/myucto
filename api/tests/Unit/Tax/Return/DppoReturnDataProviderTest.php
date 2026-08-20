@@ -15,6 +15,7 @@ use PHPUnit\Framework\TestCase;
 final class DppoReturnDataProviderTest extends TestCase
 {
     private PDO $pdo;
+    private Connection $db;
     private DppoReturnDataProvider $provider;
 
     protected function setUp(): void
@@ -26,11 +27,31 @@ final class DppoReturnDataProviderTest extends TestCase
         $config = $this->createStub(\MyInvoice\Infrastructure\Config\Config::class);
         $db = new Connection($config);
         (new \ReflectionClass($db))->getProperty('pdo')->setValue($db, $this->pdo);
+        $this->db = $db;
         // ClosingService (4. arg) se v unit testu nepředává → projekce VH se přeskočí (null).
         $this->provider = new DppoReturnDataProvider(
             $db,
             new AccountingPeriodRepository($db),
             new NonDeductibleCostsService($db),
+        );
+    }
+
+    /** Uznatelnost dokladu je samostatná osa: nedaňová služba smí zůstat na účtu 518. */
+    public function testPurchaseHeaderNonDeductibleFlagIsAddedBackIndependentlyOfAccount(): void
+    {
+        $this->pdo->exec("INSERT INTO chart_of_accounts VALUES
+            (1,'518','expense','deductible','Ostatní služby'),
+            (2,'513','expense','non_deductible','Reprezentace')");
+        $this->pdo->exec('INSERT INTO purchase_invoices VALUES (100,1,0),(101,1,1),(102,1,0)');
+
+        $this->plEntry(100, '2025-06-01', 'purchase_invoice', 1, 'debit', 773.50);
+        $this->plEntry(101, '2025-06-02', 'purchase_invoice', 1, 'debit', 100.00);
+        $this->plEntry(102, '2025-06-03', 'purchase_invoice', 2, 'debit', 50.00);
+
+        self::assertSame(
+            823.50,
+            (new NonDeductibleCostsService($this->db))->sum(1, '2025-01-01', '2025-12-31'),
+            'Nedaňový příznak dokladu přičte 518, nedaňový účet 513 se přitom nesmí započítat dvakrát.',
         );
     }
 
@@ -231,6 +252,7 @@ final class DppoReturnDataProviderTest extends TestCase
         $this->pdo->exec('CREATE TABLE chart_of_accounts (id INTEGER PRIMARY KEY, account_code TEXT, account_type TEXT, tax_deductibility TEXT, name TEXT)');
         $this->pdo->exec('CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_date TEXT, source_type TEXT, source_id INTEGER, posted_at TEXT, reversed_by INTEGER)');
         $this->pdo->exec('CREATE TABLE journal_entry_lines (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_id INTEGER, account_id INTEGER, side TEXT, amount REAL)');
+        $this->pdo->exec('CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, tax_deductible INTEGER)');
         $this->pdo->exec('CREATE TABLE assets (id INTEGER PRIMARY KEY, supplier_id INTEGER, inventory_number TEXT, name TEXT, disposal_date TEXT, disposal_type TEXT, input_price REAL, opening_tax_amount REAL, status TEXT)');
         $this->pdo->exec('CREATE TABLE asset_improvements (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, amount REAL)');
         $this->pdo->exec('CREATE TABLE depreciation_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, kind TEXT, fiscal_year INTEGER, amount REAL, residual_value_end REAL)');
