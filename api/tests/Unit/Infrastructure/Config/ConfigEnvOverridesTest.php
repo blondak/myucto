@@ -83,6 +83,15 @@ PHP);
         self::assertSame(3307, $cfg->get('db.port'));
     }
 
+    public function testBuildRevisionEnvironmentOverrideApplies(): void
+    {
+        $this->setEnv('MYINVOICE_BUILD_REVISION', 'git:0123456789abcdef');
+
+        $cfg = Config::load($this->tmpDir);
+
+        self::assertSame('git:0123456789abcdef', $cfg->get('app.build_revision'));
+    }
+
     public function testSessionLockDefaultsToDisabledWithoutExplicitConfiguration(): void
     {
         $this->unsetEnv('MYINVOICE_SESSION_LOCK_AFTER_MINUTES');

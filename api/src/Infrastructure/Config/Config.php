@@ -277,6 +277,7 @@ final class Config
             'MYINVOICE_APP_ENV'     => ['app.env', 'string'],
             'MYINVOICE_APP_DEBUG'   => ['app.debug', 'bool'],
             'MYINVOICE_APP_URL'     => ['app.url', 'string'],
+            'MYINVOICE_BUILD_REVISION' => ['app.build_revision', 'string'],
             'MYINVOICE_DOMAINS_ENABLED' => ['domains.enabled', 'bool'],
             'MYINVOICE_PEPPER'      => ['app.pepper', 'string'],
             'MYINVOICE_SECRET_KEY'  => ['app.secret_encryption_key', 'string'],
