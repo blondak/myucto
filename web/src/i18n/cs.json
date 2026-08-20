@@ -9368,7 +9368,8 @@
             "amount_mismatch": "částka nesedí",
             "counterparty_mismatch": "protistrana nesedí",
             "currency_mismatch": "měna nesedí",
-            "fx_on_czk_czk": "kurzový rozdíl na korunové platbě"
+            "fx_on_czk_czk": "kurzový rozdíl na korunové platbě",
+            "marked_paid_unposted": "označeno jako uhrazené ručně — úhrada není zaúčtovaná (např. zápočet)"
         },
         "open_list": "Otevřít v seznamu",
         "field": {

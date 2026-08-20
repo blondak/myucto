@@ -9368,7 +9368,8 @@
             "amount_mismatch": "amount does not match",
             "counterparty_mismatch": "counterparty does not match",
             "currency_mismatch": "currency does not match",
-            "fx_on_czk_czk": "FX difference on a CZK payment"
+            "fx_on_czk_czk": "FX difference on a CZK payment",
+            "marked_paid_unposted": "marked paid manually — no payment posted (e.g. set-off)"
         },
         "open_list": "Open in list",
         "field": {
