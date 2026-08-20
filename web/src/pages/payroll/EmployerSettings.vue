@@ -14,6 +14,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnIconSm, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import RequiredMark from '@/components/ui/RequiredMark.vue'
 import { healthInsurerOptions, isHealthInsurerCode } from '@/utils/healthInsurers'
 import HealthInsurerAccounts from './HealthInsurerAccounts.vue'
 import EmployerPolicies from './EmployerPolicies.vue'
@@ -492,7 +493,7 @@ onMounted(load)
           </label>
 
           <label class="block">
-            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.default_office') }}</span>
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.default_office') }}<RequiredMark /></span>
             <SearchableSelect
               :model-value="form.default_office_code || null"
               :options="officeOptions"
@@ -562,8 +563,8 @@ onMounted(load)
           <table class="min-w-[1040px] divide-y divide-neutral-200 text-sm">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th class="px-3 py-2">{{ t('payroll.employer.office_code') }}</th>
-                <th class="px-3 py-2">{{ t('payroll.employer.office_name') }}</th>
+                <th class="px-3 py-2">{{ t('payroll.employer.office_code') }}<RequiredMark /></th>
+                <th class="px-3 py-2">{{ t('payroll.employer.office_name') }}<RequiredMark /></th>
                 <th class="px-3 py-2">{{ t('payroll.employer.office_social_security_variable_symbol') }}</th>
                 <th class="px-3 py-2">{{ t('payroll.employer.office_status') }}</th>
                 <th class="w-10 px-3 py-2"><span class="sr-only">{{ t('common.actions') }}</span></th>
@@ -611,12 +612,12 @@ onMounted(load)
             </div>
             <div class="mt-3 grid grid-cols-1 gap-3">
               <label class="block">
-                <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_code') }}</span>
+                <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_code') }}<RequiredMark /></span>
                 <input v-model="office.code" type="text" maxlength="32" :disabled="!canWrite || !office.is_new" :aria-invalid="showValidation && officeCodeError(index) !== null" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm uppercase text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500" @blur="normalizeOfficeCode(index)">
                 <span v-if="showValidation && officeCodeError(index)" class="mt-1 block text-xs text-danger-600">{{ officeCodeError(index) }}</span>
               </label>
               <label class="block">
-                <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_name') }}</span>
+                <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_name') }}<RequiredMark /></span>
                 <input v-model="office.name" type="text" maxlength="190" :disabled="!canWrite" :aria-invalid="showValidation && officeNameError(index) !== null" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
                 <span v-if="showValidation && officeNameError(index)" class="mt-1 block text-xs text-danger-600">{{ officeNameError(index) }}</span>
               </label>
@@ -656,7 +657,7 @@ onMounted(load)
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="row in accountRows" :key="row.key">
-                <th class="px-3 py-3 text-left font-medium text-neutral-900">{{ accountLabel(row.key) }}</th>
+                <th class="px-3 py-3 text-left font-medium text-neutral-900">{{ accountLabel(row.key) }}<RequiredMark /></th>
                 <td class="px-3 py-3">
                   <div v-if="row.debit" :data-account-key="row.debit" class="min-w-56 max-w-80">
                     <SearchableSelect
@@ -710,7 +711,7 @@ onMounted(load)
 
         <div class="grid grid-cols-1 gap-3 md:hidden">
           <article v-for="row in accountRows" :key="row.key" class="rounded-lg border border-neutral-200 p-4">
-            <h3 class="font-medium text-neutral-900">{{ accountLabel(row.key) }}</h3>
+            <h3 class="font-medium text-neutral-900">{{ accountLabel(row.key) }}<RequiredMark /></h3>
             <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div v-if="row.debit" :data-account-key="row.debit" class="min-w-0">
                 <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.debit') }}</span>
