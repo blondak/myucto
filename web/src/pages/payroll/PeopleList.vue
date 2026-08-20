@@ -16,13 +16,18 @@ import {
   type PayrollPersonSetupGap,
   type PayrollPersonQuickEditResponse,
   type PayrollRelationType,
+  type PayrollStatutoryEvidenceRow,
+  type PayrollStatutoryEvidenceSection,
 } from '@/api/payroll'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import { loadDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultInsurer'
 import { loadPayrollOffices } from '@/composables/usePayrollOffices'
 import { useToast } from '@/composables/useToast'
+import { healthInsurerOptions } from '@/utils/healthInsurers'
+import { defaultRow, STATUTORY_SECTIONS } from './statutoryEvidenceForm'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -120,11 +125,20 @@ const officeOptions = computed(() => (offices.value.length > 1
     secondary: office.code,
   }))
   : []))
+function officeOption(id: number | null | undefined) {
+  return officeOptions.value.find(option => option.value === id) ?? null
+}
 const selectedOfficeOption = computed(
-  () => officeOptions.value.find(
-    option => option.value === newEmployment.value?.terms.office_id,
-  ) ?? null,
+  () => officeOption(newEmployment.value?.terms.office_id),
 )
+/**
+ * Zakládání zaměstnance je JEDEN formulář, ne dva kroky.
+ *
+ * Nahoře je minimum, které server vyžaduje (jméno, druh vztahu, nástup);
+ * ve sbalitelné části „Další údaje" je zbytek, který dřív šlo doplnit až
+ * po založení na kartě: rodné číslo, datum narození, mzda, úvazek, mzdová
+ * účtárna a zdravotní pojišťovna. Nic z toho uložení neblokuje.
+ */
 const employeeForm = reactive({
   full_name: '',
   birth_date: '',
@@ -132,7 +146,12 @@ const employeeForm = reactive({
   relation_type: 'employment' as PayrollRelationType,
   planned_start_on: todayIso(),
   monthly_gross: null as number | null,
+  weekly_hours: '40.00',
+  office_id: null as number | null,
+  health_insurer_code: '',
 })
+const insurerOptions = healthInsurerOptions()
+const selectedNewEmployeeOffice = computed(() => officeOption(employeeForm.office_id))
 /**
  * Editace osoby je vlastní POHLED, ne panel nad seznamem.
  *
@@ -286,6 +305,9 @@ function resetEmployeeForm() {
   employeeForm.relation_type = 'employment'
   employeeForm.planned_start_on = todayIso()
   employeeForm.monthly_gross = null
+  employeeForm.weekly_hours = '40.00'
+  employeeForm.office_id = null
+  employeeForm.health_insurer_code = ''
   employeeError.value = ''
 }
 
@@ -294,6 +316,17 @@ function openEmployeeForm() {
   resetEmployeeForm()
   createdEmployeeId.value = null
   showEmployeeForm.value = true
+  // Účtárna i výchozí pojišťovna se drží v paměti aplikace — otevření formuláře
+  // proto nestojí požadavek navíc a předvyplní se tím, co firma opravdu používá.
+  void loadPayrollOffices().then((value) => {
+    offices.value = value
+    employeeForm.office_id = value.length === 1 ? value[0].id : null
+  })
+  void loadDefaultHealthInsurerCode().then((code) => {
+    if (employeeForm.health_insurer_code === '') {
+      employeeForm.health_insurer_code = code ?? ''
+    }
+  })
 }
 
 function closeEmployeeForm() {
@@ -519,6 +552,39 @@ function updateEmployment(personId: number, updated: PayrollEmployment) {
   if (index >= 0) employments[index] = updated
 }
 
+/**
+ * Zdravotní pojišťovna zvolená při zakládání.
+ *
+ * Vede se jako zákonná evidence osoby (`health_coverages`), ne jako sloupec
+ * na kartě — proto se zapisuje samostatným požadavkem přes tentýž endpoint,
+ * který používá panel Zákonná evidence, a řádek staví stejné `defaultRow`,
+ * jaké tam vznikne tlačítkem „Přidat záznam". Jeden zdroj pravdy, jeden tvar.
+ *
+ * Selhání NERUŠÍ založeného zaměstnance: osoba i vztah už existují a účetní
+ * má vědět, co přesně zbývá doplnit, ne přijít o celý formulář.
+ */
+async function seedHealthInsurer(personId: number) {
+  const code = employeeForm.health_insurer_code.trim()
+  if (code === '') return
+  const from = employeeForm.planned_start_on
+  const section = STATUTORY_SECTIONS.find(item => item.key === 'health_coverages')
+  if (!section) return
+
+  const sections = {} as Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
+  for (const item of STATUTORY_SECTIONS) sections[item.key] = []
+  sections.health_coverages = [defaultRow(section, `${from.slice(0, 7)}-01`, {
+    effectiveOn: from,
+    defaultInsurerCode: code,
+    employerReferences: [],
+  })]
+
+  try {
+    await payrollApi.saveStatutoryEvidence(personId, { effective_on: from, sections })
+  } catch {
+    toast.warning(t('payroll.people.create.insurer_failed'))
+  }
+}
+
 async function createEmployee() {
   if (savingEmployee.value) return
   const fullName = employeeForm.full_name.trim()
@@ -538,9 +604,12 @@ async function createEmployee() {
     monthly_gross: Number(employeeForm.monthly_gross) > 0
       ? Number(employeeForm.monthly_gross)
       : null,
+    office_id: employeeForm.office_id,
+    weekly_hours: employeeForm.weekly_hours.trim() || null,
   }
   try {
     const created = await payrollApi.createPerson(payload)
+    await seedHealthInsurer(created.id)
     showEmployeeForm.value = false
     // Nová osoba musí být vidět bez ohledu na to, co bylo v hledání a filtru —
     // zúžení se proto srovná JEŠTĚ před načtením, ne po něm.
@@ -679,7 +748,13 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-6">
-    <header v-if="!editing" class="flex flex-wrap items-start justify-between gap-3">
+    <!--
+      Zakládání zaměstnance schová seznam stejně jako editace osoby.
+      Formulář se sice kreslil nad seznamem, ale „Přidat zaměstnance" je
+      i uvnitř prázdného stavu dole — kdo klikl tam, zůstal odscrollovaný
+      u seznamu a formulář nahoře vůbec neviděl.
+    -->
+    <header v-if="!editing && !showEmployeeForm" class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h1 class="text-2xl font-semibold text-neutral-900">{{ t('payroll.people.title') }}</h1>
         <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.people.subtitle') }}</p>
@@ -697,7 +772,7 @@ onMounted(async () => {
       </button>
     </header>
 
-    <section v-if="!editing" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
+    <section v-if="!editing && !showEmployeeForm" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
       {{ t('payroll.people.shared_recap_hint') }}
     </section>
 
@@ -730,17 +805,6 @@ onMounted(async () => {
           <input v-model="employeeForm.full_name" required class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employee-name">
         </label>
         <label class="min-w-0 text-xs text-neutral-600">
-          {{ t('payroll.people.create.birth_number') }}
-          <input v-model="employeeForm.birth_number" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" inputmode="numeric" autocomplete="off" data-test="new-employee-birth-number">
-          <span class="mt-1 block text-xs text-neutral-500">
-            {{ t('payroll.people.quick_edit.sensitive_replace_hint') }}
-          </span>
-        </label>
-        <label class="min-w-0 text-xs text-neutral-600">
-          {{ t('payroll.people.create.birth_date') }}
-          <input v-model="employeeForm.birth_date" type="date" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
-        </label>
-        <label class="min-w-0 text-xs text-neutral-600">
           {{ t('payroll.people.create.relation_type') }} <RequiredMark />
           <SearchableSelect
             v-model="employeeForm.relation_type"
@@ -755,11 +819,76 @@ onMounted(async () => {
           {{ t('payroll.people.create.planned_start') }} <RequiredMark />
           <input v-model="employeeForm.planned_start_on" required type="date" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employee-planned-start">
         </label>
-        <label class="min-w-0 text-xs text-neutral-600">
-          {{ t('payroll.people.create.monthly_gross') }}
-          <input v-model.number="employeeForm.monthly_gross" type="number" min="0" step="1" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
-        </label>
       </div>
+
+      <!--
+        Detaily, které se dřív doplňovaly až po založení na kartě zaměstnance:
+        rodné číslo, datum narození, mzda, úvazek, účtárna a pojišťovna.
+        Sekce je otevřená — kdo zakládá zaměstnance, obvykle je po ruce má —
+        ale sbalitelná, aby formulář nevypadal jako dotazník.
+      -->
+      <details class="group mt-4 rounded-lg border border-neutral-200" open data-test="new-employee-advanced">
+        <summary class="flex cursor-pointer list-none items-center gap-2 px-3 py-2">
+          <svg class="h-4 w-4 shrink-0 text-neutral-500 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+          <span class="min-w-0">
+            <span class="block text-xs font-semibold text-neutral-900">{{ t('payroll.people.create.advanced_title') }}</span>
+            <span class="mt-0.5 block text-xs text-neutral-500">{{ t('payroll.people.create.advanced_hint') }}</span>
+          </span>
+        </summary>
+        <div class="grid min-w-0 grid-cols-1 gap-3 border-t border-neutral-200 p-3 sm:grid-cols-2 lg:grid-cols-3">
+          <label class="min-w-0 text-xs text-neutral-600">
+            {{ t('payroll.people.create.birth_number') }}
+            <input v-model="employeeForm.birth_number" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" inputmode="numeric" autocomplete="off" data-test="new-employee-birth-number">
+            <span class="mt-1 block text-xs text-neutral-500">
+              {{ t('payroll.people.quick_edit.birth_number_optional_hint') }}
+            </span>
+          </label>
+          <label class="min-w-0 text-xs text-neutral-600">
+            {{ t('payroll.people.create.birth_date') }}
+            <input v-model="employeeForm.birth_date" type="date" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+          </label>
+          <label class="min-w-0 text-xs text-neutral-600">
+            {{ t('payroll.people.create.monthly_gross') }}
+            <input v-model.number="employeeForm.monthly_gross" type="number" min="0" step="1" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+          </label>
+          <!--
+            Úvazek se dosud dosazoval natvrdo na 40 hodin, takže poloviční
+            úvazek se musel hned po založení přepsat novou verzí podmínek —
+            a do historie vztahu tím spadl interval, který nikdy neplatil.
+          -->
+          <label class="min-w-0 text-xs text-neutral-600">
+            {{ t('payroll.people.weekly_hours') }}
+            <input v-model="employeeForm.weekly_hours" inputmode="decimal" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employee-weekly-hours">
+          </label>
+          <label v-if="officeOptions.length > 0" class="min-w-0 text-xs text-neutral-600">
+            {{ t('payroll.people.office_label') }}
+            <SearchableSelect
+              :model-value="employeeForm.office_id"
+              :options="officeOptions"
+              :selected-option="selectedNewEmployeeOffice"
+              :clearable="false"
+              :placeholder="t('payroll.people.office_select')"
+              accent="payroll"
+              class="mt-1"
+              data-test="new-employee-office"
+              @update:model-value="employeeForm.office_id = $event === null ? null : Number($event)"
+            />
+          </label>
+          <!--
+            Pojišťovna se vede jako zákonná evidence osoby, ne jako sloupec
+            karty — zapisuje se proto samostatným požadavkem hned po založení.
+            Doplnit ji jde kdykoli později v panelu Zákonná evidence.
+          -->
+          <label class="min-w-0 text-xs text-neutral-600">
+            {{ t('payroll.people.create.health_insurer') }}
+            <select v-model="employeeForm.health_insurer_code" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employee-insurer">
+              <option value="">{{ t('payroll.people.statutory_evidence.insurer_unset') }}</option>
+              <option v-for="insurer in insurerOptions" :key="insurer.value" :value="insurer.value">{{ insurer.label }}</option>
+            </select>
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.create.health_insurer_hint') }}</span>
+          </label>
+        </div>
+      </details>
       <p v-if="employeeError" class="mt-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert" data-test="new-employee-error">
         {{ employeeError }}
       </p>
@@ -793,7 +922,7 @@ onMounted(async () => {
       <p class="mt-1 text-xs">{{ t('payroll.people.create.next_steps_hint') }}</p>
     </section>
 
-    <section v-if="!editing" class="rounded-xl border border-neutral-200 bg-surface p-3 shadow-sm sm:p-4">
+    <section v-if="!editing && !showEmployeeForm" class="rounded-xl border border-neutral-200 bg-surface p-3 shadow-sm sm:p-4">
       <div class="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div class="grid min-w-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
           <label class="min-w-0 text-xs font-medium text-neutral-600">
@@ -996,7 +1125,7 @@ onMounted(async () => {
     </div>
 
     <!-- Během editace se seznam schová — jinak by u upravované osoby svítily i ostatní. -->
-    <section v-if="!editing" class="rounded-xl border border-neutral-200 bg-surface shadow-sm" data-test="people-list">
+    <section v-if="!editing && !showEmployeeForm" class="rounded-xl border border-neutral-200 bg-surface shadow-sm" data-test="people-list">
       <div v-if="loading" class="space-y-3 p-4 sm:p-6">
         <div v-for="index in 5" :key="index" class="h-16 animate-pulse rounded-lg bg-neutral-100" />
       </div>

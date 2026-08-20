@@ -2070,7 +2070,12 @@
                 "permission_required": "Pro založení zaměstnance nemáte oprávnění.",
                 "next_steps": "Zaměstnanec i pracovní vztah jsou založeni. Nyní můžete doplnit osobní profil.",
                 "next_steps_hint": "Detail nového zaměstnance je otevřený níže; nevznikla žádná duplicitní payroll osoba.",
-                "required_hint": "Hvězdičkou je označené jen to, co musíte vyplnit teď. Rodné číslo, datum narození i mzdu jde doplnit kdykoli později."
+                "required_hint": "Hvězdičkou je označené jen to, co musíte vyplnit teď. Rodné číslo, datum narození i mzdu jde doplnit kdykoli později.",
+                "advanced_title": "Další údaje",
+                "advanced_hint": "Nepovinné — jde doplnit i později na kartě zaměstnance.",
+                "health_insurer": "Zdravotní pojišťovna",
+                "health_insurer_hint": "Zapíše se do zákonné evidence osoby k datu nástupu. Bez ní se nedá podat hromadné oznámení pojišťovně.",
+                "insurer_failed": "Zaměstnanec je založený, ale zdravotní pojišťovnu se nepodařilo zapsat. Doplňte ji na kartě v části Zákonná evidence."
             },
             "empty_title": "Zatím tu nejsou žádní zaměstnanci",
             "empty_description": "Jakmile budou ve mzdové agendě dostupné osoby, zobrazí se zde jejich pracovní vztahy.",

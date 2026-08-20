@@ -129,11 +129,22 @@ rekapitulace. Změna jména nebo aktivního stavu v původní agendě se proto t
 téže osoby; žádné slučování duplicitních karet není potřeba.
 
 Primárním tlačítkem **Přidat zaměstnance** založíš právě tuto společnou kartu,
-nikoli druhou osobu jen pro úplné mzdy. Krátký formulář obsahuje nejčastější
-vstupní údaje: jméno, volitelné rodné číslo, datum narození, druh vztahu,
-plánovaný nástup a základní mzdu. Jedno uložení založí kartu i první pracovní
-vztah; nový zaměstnanec se pak otevře k doplnění osobního profilu a podrobností
-vztahu. Zaměstnance bez českého rodného čísla lze založit bez náhradní hodnoty.
+nikoli druhou osobu jen pro úplné mzdy. Formulář se otevře místo seznamu, takže
+nemusíš nikam scrollovat ani hledat založenou osobu. Nahoře je jen to, bez čeho
+uložení neprojde — jméno, druh vztahu a plánovaný nástup. Zbytek je hned pod
+tím ve sbalitelné části **Další údaje**: rodné číslo, datum narození, základní
+mzda, týdenní pracovní doba, mzdová účtárna a zdravotní pojišťovna. Jedno
+uložení tak založí kartu, první pracovní vztah i jeho podmínky; nový zaměstnanec
+se pak otevře k doplnění zbytku osobního profilu.
+
+Týdenní pracovní doba je součástí formuláře schválně: dřív se dosazoval plný
+úvazek a poloviční se musel hned po založení přepsat novou verzí podmínek, čímž
+do historie vztahu spadl interval, který nikdy neplatil. Mzdová účtárna se
+nabízí firmě s víc než jednou aktivní účtárnou; ostatním ji aplikace dosadí
+z výchozí účtárny zaměstnavatele. Zdravotní pojišťovna se předvyplní tou, kterou
+má firma v nastavení jako výchozí, a zapíše se do **zákonné evidence osoby**
+k datu nástupu. Když se ten zápis nepovede, zaměstnanec zůstane založený
+a aplikace řekne, že pojišťovnu je potřeba doplnit v Zákonné evidenci na kartě. Zaměstnance bez českého rodného čísla lze založit bez náhradní hodnoty.
 EČP, VČP a zahraniční identifikátor se vedou samostatně a lze je doplnit
 přímo v běžné editaci; úplná osobní evidence dál uchovává jejich 1:N historii.
 Rodné číslo se v seznamu nezobrazuje. Tlačítko zůstává viditelné

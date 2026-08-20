@@ -10,11 +10,13 @@ const m = vi.hoisted(() => ({
   createEmployment: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  toastWarning: vi.fn(),
   routeQuery: {} as Record<string, string>,
   routerReplace: vi.fn(),
   deletePerson: vi.fn(),
   capabilities: vi.fn(),
   employerSettings: vi.fn(),
+  saveStatutoryEvidence: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -33,8 +35,9 @@ vi.mock('@/api/payroll', () => ({
     // Bez toho neexistovala jako funkce a `onMounted` házel TypeError JEŠTĚ před
     // `.catch()` — každý test skončil nezachycenou chybou v protokolu běhu.
     capabilities: m.capabilities,
-    // Nabídka mzdových účtáren pro nový pracovní vztah.
+    // Nabídka mzdových účtáren a výchozí pojišťovny pro nového zaměstnance.
     employerSettings: m.employerSettings,
+    saveStatutoryEvidence: m.saveStatutoryEvidence,
   },
 }))
 
@@ -49,6 +52,7 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({
     success: m.toastSuccess,
     error: m.toastError,
+    warning: m.toastWarning,
   }),
 }))
 
@@ -74,6 +78,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 
 import PeopleList from '@/pages/payroll/PeopleList.vue'
 import { resetPayrollOffices } from '@/composables/usePayrollOffices'
+import { resetDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultInsurer'
 
 /** Velikost stránky, se kterou obrazovka chodí na server. */
 const PAGE_SIZE = 25
@@ -166,8 +171,9 @@ function mountPage() {
 describe('PeopleList toolbar and shared employee creation', () => {
   beforeEach(() => {
     vi.resetAllMocks()
-    // Nabídka účtáren se drží v paměti modulu na celý běh aplikace.
+    // Nabídka účtáren i výchozí pojišťovna se drží v paměti modulu na celý běh.
     resetPayrollOffices()
+    resetDefaultHealthInsurerCode()
     for (const key of Object.keys(m.routeQuery)) delete m.routeQuery[key]
     roster = [
       person(1, 'Alfa Aktivní', true, false),
@@ -194,6 +200,8 @@ describe('PeopleList toolbar and shared employee creation', () => {
       relation_type: 'employment',
     })
     m.capabilities.mockResolvedValue({ state: { start_period: '2026-01-01' } })
+    m.employerSettings.mockResolvedValue({ offices: [], default_health_insurer_code: null })
+    m.saveStatutoryEvidence.mockResolvedValue({})
   })
 
   /*
@@ -384,6 +392,90 @@ describe('PeopleList toolbar and shared employee creation', () => {
       .toBeUndefined()
   })
 
+  /**
+   * „Přidat zaměstnance" je i uvnitř prázdného stavu dole, takže kdo klikl tam,
+   * zůstal odscrollovaný u seznamu a formulář nahoře vůbec neviděl. Formulář
+   * proto seznam schová — stejně jako editace osoby.
+   */
+  it('při zakládání zaměstnance schová seznam i toolbar', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('[data-test="people-list"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="add-employee"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="new-employee-form"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="people-list"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="people-search"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="new-employee-form"]').get('button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="people-list"]').exists()).toBe(true)
+  })
+
+  /**
+   * Detaily (rodné číslo, nástup, úvazek, účtárna, pojišťovna) patří do TÉHOŽ
+   * formuláře — dřív se úvazek dosazoval natvrdo na 40 hodin a pojišťovnu bylo
+   * nutné doplnit až v zákonné evidenci na kartě.
+   */
+  it('založí zaměstnance i s úvazkem, účtárnou a zdravotní pojišťovnou najednou', async () => {
+    m.employerSettings.mockResolvedValue({
+      default_health_insurer_code: '111',
+      offices: [
+        { id: 1, code: 'O1', name: 'Praha', social_security_variable_symbol: null, is_active: true, row_version: 1 },
+        { id: 2, code: 'O2', name: 'Brno', social_security_variable_symbol: null, is_active: true, row_version: 1 },
+      ],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="add-employee"]').trigger('click')
+    await flushPromises()
+
+    // Výchozí pojišťovna zaměstnavatele se předvyplní.
+    expect((wrapper.get('[data-test="new-employee-insurer"]').element as HTMLSelectElement).value)
+      .toBe('111')
+    await wrapper.get('[data-test="new-employee-name"]').setValue('Delta Nová')
+    await wrapper.get('[data-test="new-employee-planned-start"]').setValue('2026-09-01')
+    await wrapper.get('[data-test="new-employee-weekly-hours"]').setValue('20.00')
+    wrapper.findAllComponents({ name: 'SearchableSelect' })
+      .find(component => component.attributes('data-test') === 'new-employee-office')!
+      .vm.$emit('update:modelValue', 2)
+    await wrapper.get('[data-test="new-employee-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.createPerson).toHaveBeenCalledWith(expect.objectContaining({
+      weekly_hours: '20.00',
+      office_id: 2,
+      planned_start_on: '2026-09-01',
+    }))
+    // Pojišťovna je zákonná evidence osoby, ne sloupec karty — jde vlastním zápisem.
+    const [personId, payload] = m.saveStatutoryEvidence.mock.calls[0]
+    expect(personId).toBe(4)
+    expect(payload.effective_on).toBe('2026-09-01')
+    expect(payload.sections.health_coverages).toEqual([expect.objectContaining({
+      effective_from: '2026-09-01',
+      insurer_code: '111',
+      insurer_status: 'verified',
+    })])
+  })
+
+  /** Selhání zápisu pojišťovny NERUŠÍ založeného zaměstnance — jen řekne, co doplnit. */
+  it('neztratí založeného zaměstnance, když zápis pojišťovny selže', async () => {
+    m.employerSettings.mockResolvedValue({ default_health_insurer_code: '111', offices: [] })
+    m.saveStatutoryEvidence.mockRejectedValue(new Error('nope'))
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="add-employee"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="new-employee-name"]').setValue('Delta Nová')
+    await wrapper.get('[data-test="new-employee-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.toastWarning).toHaveBeenCalledWith('payroll.people.create.insurer_failed')
+    expect(wrapper.find('[data-test="employee-created-next"]').exists()).toBe(true)
+  })
+
   it('names the edited person in the header even without a structured name', async () => {
     // Osoba „test" má vyplněné jen zobrazované jméno — strukturované pole je
     // prázdné a formulář by bez hlavičky vypadal anonymně.
@@ -546,6 +638,9 @@ describe('PeopleList toolbar and shared employee creation', () => {
       relation_type: 'employment',
       planned_start_on: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       monthly_gross: null,
+      office_id: null,
+      // Úvazek jde nově rovnou ze zakládacího formuláře, ne až z nové verze podmínek.
+      weekly_hours: '40.00',
     })
     // Nová osoba musí být vidět i tehdy, když ji předchozí zúžení schovalo.
     expect(m.peoplePage).toHaveBeenLastCalledWith({
