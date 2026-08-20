@@ -617,15 +617,35 @@ final class Bootstrap
             ]),
 
             // Kanál datové schránky. PHP-DI neumí autowire interface → explicitní
-            // bind. Zatím míří na `UnavailableIsdsTransport`, protože rozhodnutí
-            // o ISDS knihovně ještě nepadlo (audit skončil verdiktem „go
-            // s výhradami", ale verze je čerstvá přestavba a bus factor je 1).
+            // bind, a je to jediné místo, kde se volba dopravy rozhoduje. Zbytek
+            // modulu — fronta, ledger, číselník, trezor, inbox, cron i UI —
+            // o žádné knihovně ani bráně neví a vědět nesmí.
             //
-            // ⚠️ Až rozhodnutí padne, mění se JEN tenhle řádek. Zbytek modulu —
-            // fronta, ledger, číselník, trezor, inbox, cron i UI — o knihovně
-            // neví a vědět nesmí; proto je celý postavený nad `IsdsTransport`.
-            \MyInvoice\Service\Submission\Channel\Isds\IsdsTransport::class => fn (ContainerInterface $c)
-                => $c->get(\MyInvoice\Service\Submission\Channel\Isds\UnavailableIsdsTransport::class),
+            // ── Fail-closed rozcestník ──────────────────────────────────────
+            // Je-li zaregistrovaná a zapnutá odesílací brána VČETNĚ certifikátu,
+            // bindne se `GatewayIsdsTransport`. Ten neodesílá (nemůže — mezi
+            // přípravou a odesláním stojí člověk, viz jeho docblock), ale říká
+            // pravdu o tom, kudy cesta ven vede a že po bráně NEVEDE čtení
+            // schránky. Jinak zůstává `UnavailableIsdsTransport`: nenastavená
+            // instalace nesmí spadnout, ale musí hlásit srozumitelnou překážku.
+            //
+            // Rozhodnutí ovlivňuje jen TEXT překážky. Povolení cokoliv odeslat
+            // dává až `IsdsGatewayRegistrationService::load()` v okamžiku
+            // odesílání — a ten hází pojmenované chyby.
+            \MyInvoice\Service\Submission\Channel\Isds\IsdsTransport::class => function (ContainerInterface $c) {
+                $registrations = $c->get(
+                    \MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService::class,
+                );
+
+                return \MyInvoice\Service\Submission\Channel\Isds\Gateway\GatewayIsdsTransport::isConfigured($registrations)
+                    ? $c->get(\MyInvoice\Service\Submission\Channel\Isds\Gateway\GatewayIsdsTransport::class)
+                    : $c->get(\MyInvoice\Service\Submission\Channel\Isds\UnavailableIsdsTransport::class);
+            },
+
+            // Testovací šev registrace brány — bez něj by se `GatewayIsdsTransport`
+            // nedal otestovat bez databázového schématu.
+            \MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationSource::class => fn (ContainerInterface $c)
+                => $c->get(\MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService::class),
 
             // Odesílací brána ISDS (`SetConcept`). Vědomě NENÍ implementací
             // `IsdsTransport` výš: brána umí JEN odesílat, a to s člověkem

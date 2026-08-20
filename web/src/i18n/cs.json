@@ -15995,6 +15995,19 @@
             "production": "Ostrý provoz",
             "test": "Testovací prostředí"
         },
+        "gateway": {
+            "prepare": "Připravit v datové schránce",
+            "receiptManual": "Doručenku k této zprávě nahrajte ručně — odesílací brána ji stáhnout neumí.",
+            "state": {
+                "awaiting_login": "Přihlášení do datové schránky",
+                "awaiting_approval": "Zpráva čeká na vaše schválení",
+                "approved": "Zpráva odešla z vaší datové schránky",
+                "rejected": "Odeslání jste zamítli",
+                "failed": "Datová schránka zprávu neodeslala",
+                "uncertain": "Nevíme, jestli zpráva odešla",
+                "expired": "Odeslání vypršelo"
+            }
+        },
         "tabs": {
             "access": "Přístup",
             "outbox": "Odchozí podání",

@@ -317,6 +317,67 @@ export interface ReceiptUploadResult {
   }
 }
 
+/**
+ * Registrace odesílací brány ISDS — provozovatelská, ne zákaznická.
+ *
+ * Certifikát platí provozovatel a je jeden pro celou službu, takže tenhle
+ * výpis vidí jen účet s právem na `settings.signing`. Zákazník k odesílání
+ * přes bránu nenastavuje nic.
+ */
+export interface IsdsGatewayRegistration {
+  id: number
+  environment: 'production' | 'test'
+  ats_id: string
+  label: string
+  return_url: string
+  error_url: string | null
+  concept_ttl_seconds: number
+  portal_host: string
+  service_host: string
+  user_login_policy: 'unknown' | 'password_required' | 'portal_sso_or_password'
+  certificate_fingerprint: string | null
+  certificate_valid_to: string | null
+  is_active: boolean
+}
+
+/** Odpověď na zahájení odeslání — kam poslat prohlížeč a co uživateli říct. */
+export interface GatewayStart {
+  session_id: number
+  app_token: string
+  redirect_url: string
+  /** Text PŘED přesměrováním. Nikdy netvrdí víc, než je doloženo. */
+  login_guidance: string
+  login_policy_documented: boolean
+  expires_at: string
+  /** Uživatel se vrací do relace, kterou už má rozpracovanou (dvojí kliknutí). */
+  resumed: boolean
+}
+
+/**
+ * Stav relace po návratu z ISDS.
+ *
+ * `awaiting_approval` = koncept leží v datové schránce a čeká na schválení.
+ * `uncertain` = NEVÍME, jestli zpráva odešla; podání se nesmí odeslat znovu,
+ * dokud si to uživatel neověří v odeslaných zprávách své schránky.
+ */
+export type GatewaySessionState =
+  | 'awaiting_login'
+  | 'awaiting_approval'
+  | 'approved'
+  | 'rejected'
+  | 'failed'
+  | 'uncertain'
+  | 'expired'
+
+export interface GatewayComplete {
+  state: GatewaySessionState
+  outbox_id: number
+  /** Kam poslat prohlížeč dál (schvalovací obrazovka konceptu), nebo `null`. */
+  redirect_url: string | null
+  external_message_id: string | null
+  message: string
+}
+
 export const dataBoxApi = {
   credentials: () =>
     api.get<{ items: DataBoxCredential[] }>('/settings/databox').then(r => r.data.items),
@@ -371,6 +432,32 @@ export const dataBoxApi = {
 
   cancel: (id: number) =>
     api.post<OutboxSubmission>(`/submissions/outbox/${id}/cancel`, {}).then(r => r.data),
+
+  // ── Odesílací brána ISDS ───────────────────────────────────────────────────
+
+  /**
+   * Registrace brány. Bez práva `settings.signing` vrátí 403 — volající to
+   * musí umět přejít mlčky: nepřítomnost výpisu znamená „nevím", ne „není".
+   */
+  gatewayRegistrations: () =>
+    api.get<{ items: IsdsGatewayRegistration[] }>('/settings/isds-gateway').then(r => r.data.items),
+
+  /**
+   * Zahájí odeslání přes bránu. Server sám nepřesměrovává — vrátí adresu,
+   * aby šlo uživateli nejdřív ukázat, co ho v datové schránce čeká.
+   */
+  gatewayStart: (id: number) =>
+    api.post<GatewayStart>(`/submissions/outbox/${id}/gateway`, {}).then(r => r.data),
+
+  /**
+   * Návrat z ISDS. Volá se pro OBĚ přesměrování — o tom, která fáze to je,
+   * rozhoduje stav relace na serveru, ne parametr z prohlížeče.
+   */
+  gatewayComplete: (appToken: string, sessionId: string) =>
+    api.post<GatewayComplete>('/submissions/gateway/callback', {
+      app_token: appToken,
+      session_id: sessionId,
+    }).then(r => r.data),
 
   inbox: (environment: string, classification?: InboxClassification) =>
     api.get<{ items: InboxMessage[]; state: InboxPollState | null }>('/submissions/inbox', {
