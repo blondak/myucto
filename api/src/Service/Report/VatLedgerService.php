@@ -48,8 +48,8 @@ use MyInvoice\Service\Accounting\PostingException;
  */
 final class VatLedgerService
 {
-    /** Cache SQL seznamu RC kódů přijaté strany (per instance). */
-    private ?string $rcPurchaseCodesSql = null;
+    /** @var array<int,string> Cache SQL seznamu RC kódů přijaté strany, per tenant. */
+    private array $rcPurchaseCodesSql = [];
 
     public function __construct(
         private readonly Connection $db,
@@ -271,11 +271,17 @@ final class VatLedgerService
                    COALESCE(
                        ii.vat_classification_code, i.vat_classification_code,
                        CASE
-                           -- Zahraniční EU odběratel + RC = dodání do JČS → ř.20 (dod_zb).
-                           -- (Fallback nerozliší zboží vs službu; služba do JČS je kód 22/ř.21 —
-                           -- pokud jde o službu, uživatel má zvolit kód ručně.)
+                           -- Zahraniční EU odběratel + RC → poskytnutí služby do JČS
+                           -- (kód 22, ř.21 + SH kód plnění 3). Zboží od služby fallback
+                           -- nerozliší, takže drží TÝŽ statistický default jako SSOT
+                           -- (InvoiceRepository::defaultSaleClassificationCode) — u typického
+                           -- uživatele jsou přeshraniční služby častější než dodání zboží.
+                           -- Dřív tu bylo natvrdo '20' (zboží), takže se doklad bez kódu vykázal
+                           -- jinak podle toho, KUDY do výkazu vstoupil. Rozhoduje jednotka
+                           -- položky, kterou vidí jen SSOT; fallback řeší už jen legacy řádky
+                           -- úplně bez kódu a hlásí je příznakem code_estimated.
                            WHEN i.reverse_charge = 1
-                                AND COALESCE(co.is_eu, 0) = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ' THEN '20'
+                                AND COALESCE(co.is_eu, 0) = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ' THEN '22'
                            -- Odběratel ze 3. země + RC = plnění s místem plnění mimo EU (bez české
                            -- DPH) → kód '26' (ř.22, MIMO KH). NESMÍ spadnout na '25s' (to je tuzemský
                            -- §92 → KH A.1 + ř.25) — jinak zahraniční plnění chybně leakuje do KH.
@@ -501,19 +507,25 @@ final class VatLedgerService
      * dvěma dotazy), takže se propouští jen bezpečný tvar — cokoli jiného se ignoruje.
      * Prázdný výsledek by seznam degradoval na „nic", proto fallback na seed.
      */
-    private function reverseChargePurchaseCodesSql(): string
+    private function reverseChargePurchaseCodesSql(int $supplierId): string
     {
-        if ($this->rcPurchaseCodesSql !== null) {
-            return $this->rcPurchaseCodesSql;
+        if (isset($this->rcPurchaseCodesSql[$supplierId])) {
+            return $this->rcPurchaseCodesSql[$supplierId];
         }
         $codes = [];
         try {
-            $rows = $this->db->pdo()->query(
+            // Multi-tenant scope jako v classificationMap(): globální seed + vlastní kódy
+            // tenanta, NIKDY kódy cizí firmy — jinak by si tenant bez vlastního číselníku
+            // natáhl do evidence samovyměření podle kódu, který nikdy nezaložil.
+            $stmt = $this->db->pdo()->prepare(
                 "SELECT DISTINCT code FROM vat_classifications
                   WHERE is_reverse_charge = 1
                     AND direction IN ('purchase', 'both')
-                    AND archived = 0"
-            )->fetchAll(\PDO::FETCH_COLUMN) ?: [];
+                    AND archived = 0
+                    AND (supplier_id IS NULL OR supplier_id = ?)"
+            );
+            $stmt->execute([$supplierId]);
+            $rows = $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: [];
             foreach ($rows as $code) {
                 if (preg_match('/^[A-Za-z0-9_-]{1,8}$/', (string) $code) === 1) {
                     $codes[] = (string) $code;
@@ -525,7 +537,7 @@ final class VatLedgerService
         if ($codes === []) {
             $codes = ['5', '23', '24', '24e', '25'];
         }
-        return $this->rcPurchaseCodesSql = "'" . implode("','", $codes) . "'";
+        return $this->rcPurchaseCodesSql[$supplierId] = "'" . implode("','", $codes) . "'";
     }
 
     /**
@@ -553,7 +565,7 @@ final class VatLedgerService
 
         // § 72 filtr plátcovství k DUZP dokladu (viz komentář ve WHERE). Fallback 1
         // (firmy bez historie) i chybějící tabulka (SQLite unit schémata) = beze změny.
-        $rcCodes = $this->reverseChargePurchaseCodesSql();
+        $rcCodes = $this->reverseChargePurchaseCodesSql($supplierId);
         $payerFilter = '';
         if ($this->db->hasTable('supplier_vat_status_history')) {
             $payerAtDuzp = \MyInvoice\Service\Vat\VatStatusService::payerAtExpr(
@@ -875,7 +887,14 @@ final class VatLedgerService
         // Cross-check to neodhalí, protože porovnává jen součet obou sazeb. Rozhoduje
         // sazba na řádku, ne kód: sazba je snapshot z dokladu a tu daň dodavatel opravdu
         // účtoval. Krácené klíče (přípona „k") tu být nemůžou — přiřazují se až níž.
-        if (!$isRc && $vatRate > 0) {
+        // Spouští se JEN při rozporu mezi sazbou klasifikace a sazbou řádku. Samotná
+        // dvojice řádek/sazba nestačí: per-tenant override smí kód '40' vědomě namapovat
+        // na ř. 41 (číselník to umožňuje) a takové mapování se přebít nesmí — tam sazba
+        // kódu se sazbou řádku SOUHLASÍ, rozchází se až s výchozím významem řádku.
+        $clsfRate = $clsf !== null && ($clsf['vat_rate'] ?? null) !== null ? (float) $clsf['vat_rate'] : null;
+        $rateContradictsCode = $clsfRate !== null && $clsfRate > 0
+            && (($clsfRate >= $bucket) !== ($vatRate >= $bucket));
+        if (!$isRc && $vatRate > 0 && $rateContradictsCode) {
             $domesticPairs = $vatRate < $bucket
                 ? ['1' => '2', '40' => '41']   // kód pro základní sazbu na sníženém řádku
                 : ['2' => '1', '41' => '40'];  // a obráceně

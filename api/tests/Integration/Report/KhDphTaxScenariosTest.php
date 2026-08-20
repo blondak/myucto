@@ -943,9 +943,15 @@ final class KhDphTaxScenariosTest extends TestCase
      * Country-aware RC klasifikace vystavených plnění (fix 2026-05-29): příznak reverse_charge
      * se klasifikuje podle ZEMĚ odběratele —
      *   • tuzemský odběratel (CZ) → tuzemský §92a dodavatel → kód '25s' → DPHDP3 ř.25 (pln_rez_pren)
-     *   • zahraniční EU odběratel  → dodání zboží do JČS    → kód '20'  → DPHDP3 ř.20 (dod_zb)
+     *   • zahraniční EU odběratel  → plnění do JČS          → kód '22'  → DPHDP3 ř.21 (pln_sluzby)
      * Dříve oba končily na '20'/ř.20 → tuzemský RC (stavební práce ap.) se chybně vykázal jako
      * dodání do EU. Ani jeden nepřidává výstupní daň (ř.1).
+     *
+     * Doklad tu vzniká přímým zápisem do DB (bez kódu), takže rozhoduje fallback ve
+     * VatLedgerService. Ten od auditu VAT klasifikací (L-5) drží TÝŽ statistický default
+     * jako SSOT — služba (ř.21), ne zboží (ř.20). Dřív se doklad bez kódu vykázal jinak
+     * podle toho, kudy do výkazu vstoupil; zboží od služby rozliší jednotka položky,
+     * kterou vidí jen SSOT.
      */
     public function testReverseChargeClassifiedByCustomerCountry(): void
     {
@@ -959,7 +965,8 @@ final class KhDphTaxScenariosTest extends TestCase
 
         $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
         $this->assertSame('12000', (string) $dp->Veta2['pln_rez_pren'], 'tuzemský RC → ř.25 (pln_rez_pren)');
-        $this->assertSame('34000', (string) $dp->Veta2['dod_zb'],       'EU RC → ř.20 (dod_zb)');
+        $this->assertSame('34000', (string) $dp->Veta2['pln_sluzby'],   'EU RC bez kódu → ř.21 (pln_sluzby)');
+        $this->assertSame('', (string) $dp->Veta2['dod_zb'],            'ř.20 zůstane prázdný — zboží se z dat nepozná');
         $this->assertSame('', (string) $dp->Veta1['obrat23'], 'RC plnění nepatří do ř.1 (výstupní daň)');
     }
 
