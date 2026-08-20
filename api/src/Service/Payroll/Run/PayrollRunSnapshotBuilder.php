@@ -212,7 +212,8 @@ final class PayrollRunSnapshotBuilder
             // zaměstnavatele pro sociální pojistné vychází výhradně
             // z `payroll_offices`, takže odvod za vztah bez účtárny není čím
             // vykázat, a běh zúžený na účtárnu by takový vztah navíc tiše
-            // vynechal. Zápisová cesta ji od migrace 1680 doplňuje z výchozí
+            // vynechal. Zápisová cesta ji od migrace
+            // 1503_payroll_employment_office_backfill doplňuje z výchozí
             // účtárny zaměstnavatele; tohle je pojistka pro data, která
             // vznikla dřív nebo mimo ni — musí se ozvat tady, dokud se dá
             // vztah opravit, ne až kontrolními součty při schvalování.
