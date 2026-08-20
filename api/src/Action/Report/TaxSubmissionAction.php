@@ -29,7 +29,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   DELETE /api/reports/submissions/{id}        → smazat archiv (admin)
  *
  * Mazání: blokuje jen to, co PROKAZATELNĚ odešlo, plus nedořešená předání — ta jde
- * uvolnit vědomým potvrzením `not_submitted_note`. Pravidlo drží
+ * uvolnit vědomým smazáním; nepovinný `not_submitted_note` navíc odliší,
+ * že uživatel v portálu EPO ověřil, že podání nevzniklo. Pravidlo drží
  * {@see TaxSubmissionEpoRepository::deletionBlocker()}.
  */
 final class TaxSubmissionAction
@@ -241,9 +242,8 @@ final class TaxSubmissionAction
                 TaxSubmissionEpoRepository::BLOCK_UNRESOLVED => Json::error(
                     $response,
                     'submission_outcome_unresolved',
-                    'Snapshot má předání do EPO, u kterého nevíme, jak dopadlo. Ověřte v portálu '
-                        . 'EPO, jestli podání prošlo. Pokud ne, uzavřete ho jako nepodané '
-                        . '(uveďte, jak jste to ověřili) a teprve pak snapshot smažte.',
+                    'Snapshot má předání do EPO, u kterého se nepodařilo doložit, '
+                        . 'že nevzniklo. Ověřte v portálu EPO, jestli podání prošlo.',
                     409,
                     ['attempts' => $unresolved],
                 ),
@@ -269,7 +269,13 @@ final class TaxSubmissionAction
             'xml_sha256'      => $snapshot['xml_sha256'] ?? null,
             'purged'          => $outcome['purged'],
             'released_attempts' => $outcome['released_attempts'],
-            'not_submitted_note' => $outcome['released_attempts'] > 0 ? $note : null,
+            'not_submitted_note' => $outcome['released_attempts'] > 0 && $note !== '' ? $note : null,
+            // Čím se nedořešené předání uzavřelo. Poznámka znamená, že uživatel ověřil
+            // v portálu EPO, že podání nevzniklo; bez ní víme jen to, že smazání vědomě
+            // potvrdil. Auditní stopa to nesmí slévat dohromady.
+            'closed_as' => $outcome['released_attempts'] > 0
+                ? ($note !== '' ? 'verified_not_submitted' : 'discarded_by_user')
+                : null,
             'unresolved_attempts' => $outcome['released_attempts'] > 0 ? $unresolved : [],
         ], null, null, $supplierId);
 

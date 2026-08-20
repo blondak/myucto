@@ -176,9 +176,11 @@ final class TaxSubmissionDeletionTest extends TestCase
 
     /**
      * Asistované předání čekající na P7S: aplikace NEVÍ, jestli uživatel v portálu podal.
-     * Blokuje, ale existuje cesta ven — vědomé uzavření jako „nepodáno".
+     * Smazat to jde, protože doložené podání to není — uživatel to potvrdí v dialogu.
+     * Auditní stopa přitom musí rozlišit vědomé zahození od skutečného ověření v portálu:
+     * tvrdit „ověřeno" u někoho, kdo jen odklikl potvrzení, by bylo nepravdivé.
      */
-    public function testUnresolvedHandoffBlocksUntilExplicitlyClosed(): void
+    public function testUnresolvedHandoffIsDeletableAndRecordsHowItWasClosed(): void
     {
         $submissionId = $this->archiveSnapshot(2020, 11);
         $attemptId = $this->epo->insertAttempt(
@@ -195,24 +197,45 @@ final class TaxSubmissionDeletionTest extends TestCase
             TaxSubmissionEpoRepository::BLOCK_UNRESOLVED,
             $this->epo->deletionBlocker($submissionId, $this->supplierId),
         );
-        $blocked = $this->deleteRequest($submissionId);
-        self::assertSame(409, $blocked->getStatusCode());
-        self::assertSame('submission_outcome_unresolved', $this->errorCode($blocked));
-        self::assertNotNull($this->submissions->find($submissionId, $this->supplierId));
-
         $enriched = $this->epo->enrich(
             [$this->submissions->find($submissionId, $this->supplierId)],
             $this->supplierId,
         )[0];
-        self::assertFalse($enriched['deletable']);
+        // Uživateli se ukáže varovné znění dialogu, ale akce zůstává dostupná.
         self::assertTrue($enriched['delete_needs_acknowledgement']);
+
+        self::assertSame(200, $this->deleteRequest($submissionId)->getStatusCode());
+        self::assertNull($this->submissions->find($submissionId, $this->supplierId));
+        self::assertSame('discarded_by_user', $this->closedAs());
+    }
+
+    /** Poznámka není povinná, ale když ji uživatel napíše, audit ji odliší jako ověření. */
+    public function testUnresolvedHandoffWithNoteIsRecordedAsVerified(): void
+    {
+        $submissionId = $this->archiveSnapshot(2021, 3);
+        $attemptId = $this->epo->insertAttempt(
+            $this->supplierId,
+            $submissionId,
+            bin2hex(random_bytes(16)),
+            hash('sha256', 'synthetic-verified'),
+            $this->userId,
+            'production',
+        );
+        self::assertTrue($this->epo->markHandoffCreated($attemptId, 200, '2030-06-25 10:00:00'));
 
         $ok = $this->deleteRequest(
             $submissionId,
             'V portálu EPO jsem ověřil, že podání za období není evidované.',
         );
         self::assertSame(200, $ok->getStatusCode());
-        self::assertNull($this->submissions->find($submissionId, $this->supplierId));
+        self::assertSame('verified_not_submitted', $this->closedAs());
+    }
+
+    /** Pokus kaskáda smazala spolu se snapshotem, takže se čte z auditní stopy. */
+    private function closedAs(): ?string
+    {
+        $payload = json_decode((string) $this->latestActivityLogPayload(), true);
+        return $payload['closed_as'] ?? null;
     }
 
     /**

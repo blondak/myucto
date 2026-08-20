@@ -894,20 +894,14 @@ async function confirmRecovery() {
 }
 
 async function deleteItem(item: TaxSubmission) {
-  let note: string | undefined
-  if (item.delete_needs_acknowledgement) {
-    // Nedořešené předání nemazat potichu: aplikace neví, jestli uživatel v portálu
-    // EPO nakonec podal, takže to musí vědomě uzavřít on — a napsat, jak to ověřil.
-    const answer = window.prompt(t('reports.submissions.delete_not_submitted_prompt'), '')
-    if (answer === null) return
-    if (answer.trim().length < 10) {
-      toast.error(t('reports.submissions.delete_not_submitted_note_required'))
-      return
-    }
-    note = answer.trim()
-  } else if (!confirm(t('reports.submissions.delete_confirm'))) {
-    return
-  }
+  // Smazat jde všechno, co nemá doložené podání. U nedořešeného předání aplikace neví,
+  // jestli uživatel v portálu EPO nakonec podal, takže mu to řekneme — ale nevymáháme
+  // po něm text. Auditní stopa rozliší vědomé zahození od skutečného ověření.
+  const question = item.delete_needs_acknowledgement
+    ? t('reports.submissions.delete_confirm_unresolved')
+    : t('reports.submissions.delete_confirm')
+  if (!confirm(question)) return
+  const note: string | undefined = undefined
   try {
     await epoSubmissionsApi.remove(item.id, note)
     if (expandedId.value === item.id) expandedId.value = null
@@ -1073,9 +1067,7 @@ const submissionActions = computed<ActionItem[]>(() => {
     },
     {
       key: 'delete',
-      label: s.delete_needs_acknowledgement
-        ? t('reports.submissions.delete_after_closing')
-        : t('common.delete'),
+      label: t('common.delete'),
       icon: 'trash',
       tier: 'advanced',
       variant: 'danger',

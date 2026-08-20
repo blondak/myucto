@@ -402,13 +402,13 @@ final class TaxSubmissionEpoRepository
         int $submissionId,
         int $supplierId,
         ?int $resolvedBy,
-        string $note,
+        ?string $note,
     ): int {
         $placeholders = implode(',', array_fill(0, count(self::UNRESOLVED_ATTEMPT_STATUSES), '?'));
         $stmt = $this->db->pdo()->prepare(
             "UPDATE tax_submission_attempts
                 SET status = 'cancelled',
-                    resolution_code = 'verified_not_submitted',
+                    resolution_code = ?,
                     resolution_note = ?,
                     resolved_by = ?,
                     resolved_at = CURRENT_TIMESTAMP,
@@ -421,7 +421,11 @@ final class TaxSubmissionEpoRepository
                 AND offline_transfer_id IS NULL"
         );
         $stmt->execute([
-            mb_substr(trim($note), 0, 500),
+            // Rozlišujeme, co se skutečně stalo. Poznámka znamená, že uživatel ověřil
+            // v portálu EPO, že podání nevzniklo. Bez ní víme jen to, že smazání
+            // vědomě potvrdil — tvrdit v auditní stopě „ověřeno" by bylo nepravdivé.
+            $note !== null && trim($note) !== '' ? 'verified_not_submitted' : 'discarded_by_user',
+            $note !== null && trim($note) !== '' ? mb_substr(trim($note), 0, 500) : null,
             $resolvedBy,
             $submissionId,
             $supplierId,
@@ -473,7 +477,7 @@ final class TaxSubmissionEpoRepository
 
             $released = 0;
             $blocker = $this->deletionBlocker($submissionId, $supplierId);
-            if ($blocker === self::BLOCK_UNRESOLVED && $acknowledgeNote !== null) {
+            if ($blocker === self::BLOCK_UNRESOLVED) {
                 $released = $this->releaseUnresolvedAttempts(
                     $submissionId,
                     $supplierId,
