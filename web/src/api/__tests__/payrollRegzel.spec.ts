@@ -145,16 +145,20 @@ describe('payroll REGZEL API', () => {
   })
 
   it('načte a potvrdí ordinary evidence s přesnými false fakty', async () => {
-    m.get.mockResolvedValueOnce({ data: { evidence: null } })
-    expect(await payrollApi.jmhzOrdinaryEvidence(18)).toBeNull()
+    const scopes = [
+      { employee_id: 11, employment_id: 101, employee_name: 'Osoba A', confirmed: false },
+      { employee_id: 12, employment_id: 102, employee_name: 'Osoba B', confirmed: true },
+    ]
+    m.get.mockResolvedValueOnce({ data: { scopes, evidences: [] } })
+    expect(await payrollApi.jmhzOrdinaryEvidence(18)).toEqual({ scopes, evidences: [] })
     expect(m.get).toHaveBeenCalledWith(
       '/payroll/submissions/jmhz-ordinary-evidence/18',
     )
 
     m.post.mockResolvedValueOnce({ data: { id: 31, created: true } })
-    await payrollApi.confirmJmhzOrdinaryEvidence(18, 'synthetic-idempotency-key')
+    await payrollApi.confirmJmhzOrdinaryEvidence(18, 101, 'synthetic-idempotency-key')
     expect(m.post).toHaveBeenCalledWith(
-      '/payroll/submissions/jmhz-ordinary-evidence/18',
+      '/payroll/submissions/jmhz-ordinary-evidence/18/101',
       {
         facts: {
           reportable_wage_deductions_recorded: false,

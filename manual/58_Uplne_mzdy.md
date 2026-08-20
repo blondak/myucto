@@ -1255,16 +1255,20 @@ rozhoduje až ČSSZ proti svému registru — ty se nikdy nevykazují jako spln�
 jen se počítají zvlášť. Panel zároveň ukazuje lhůtu pro podání za vykazované
 období, včetně posunu na nejbližší pracovní den.
 
-Pro běžný profil JMHZ lze u každé schválené revize samostatně potvrdit pět
+Pro běžný profil JMHZ se u každé schválené revize samostatně potvrzuje pět
 právních skutečností: evidované srážky ze mzdy, slevu zaměstnance pro sezónní
 práci, specifickou právní skutečnost, podporu zaměstnávání osob se zdravotním
-postižením a hlubinné hornictví. Každou odpověď **Ne** je nutné zaškrtnout
-výslovně; nic se nepředvyplňuje ani neodvozuje z chybějících dat. Aplikace
-současně ověří, že schválená revize neobsahuje známý rozpor, například aktivní
-exekuci, insolvenci, dohodu o srážkách nebo skutečně sraženou částku. Potvrzení
-se uloží jako neměnný šifrovaný důkaz svázaný s přesnou revizí. Pokud některá
-skutečnost nastala, tento první běžný profil ji nepodporuje a přípravu uzavře
-bez falešného výchozího **Ne**.
+postižením a hlubinné hornictví. Potvrzuje se **za každý pracovní vztah zvlášť**,
+takže revize s víc lidmi (a každá revize přes dvě mzdové účtárny) má tolik
+potvrzení, kolik má vztahů; panel ukazuje, kolik vztahů ještě na potvrzení čeká
+a kterých se to týká. Každou odpověď **Ne** je nutné zaškrtnout výslovně; nic se
+nepředvyplňuje ani neodvozuje z chybějících dat. Aplikace současně ověří, že
+schválená revize neobsahuje známý rozpor, například aktivní exekuci, insolvenci,
+dohodu o srážkách nebo skutečně sraženou částku. Potvrzení se uloží jako neměnný
+šifrovaný důkaz svázaný s přesnou revizí a přesným pracovním vztahem. Vztah bez
+potvrzení zůstává adresným nálezem přípravy — je z něj vidět, komu evidence
+chybí. Pokud některá skutečnost nastala, tento první běžný profil ji nepodporuje
+a přípravu uzavře bez falešného výchozího **Ne**.
 
 U schválených mzdových běhů připraví záložka zdravotních pojišťoven také
 interní měsíční přehled samostatně pro každý kód pojišťovny a každou aktuální

@@ -54,16 +54,29 @@ final class JmhzOrdinaryEvidenceBuilder
     }
 
     /**
+     * Ordinary evidence se zmrazuje ZA PRACOVNÍ VZTAH, ne za revizi.
+     *
+     * Úložiště je unikátní na `(supplier_id, source_revision_id, employee_id,
+     * employment_id)`, takže jedna revize nese jednu evidenci za každý vztah.
+     * Dřív si builder vztah odvozoval z toho, že revize má právě jednu osobu
+     * s právě jedním vztahem — firma s víc zaměstnanci proto ordinary evidenci
+     * nezmrazila vůbec. Cíl vztahu je proto explicitní parametr; přísnost
+     * kontrol zůstává, jen se přestalo vyžadovat, že je vztah v revizi jediný.
+     *
      * @param array<string,mixed> $source
      * @param array<string,bool> $facts
      */
     public function build(
         int $supplierId,
         array $source,
+        int $targetEmploymentId,
         array $facts,
         int $confirmedBy,
         string $confirmedAt,
     ): JmhzOrdinaryEvidenceSnapshot {
+        if ($targetEmploymentId <= 0) {
+            throw new \InvalidArgumentException('Pracovní vztah musí být kladné číslo.');
+        }
         $facts = self::normalizeFacts($facts);
         $revision = $this->object($source['revision'] ?? null, 'revision');
         $revisionId = $this->positiveInt($revision['id'] ?? null, 'revision.id');
@@ -100,7 +113,10 @@ final class JmhzOrdinaryEvidenceBuilder
         ) {
             $this->invalid('jmhz_ordinary_evidence_source_mismatch', 'Zmrazený vstup neodpovídá firmě nebo období.');
         }
-        [$employeeId, $employmentId, $person, $employment] = $this->singleEmployment($input);
+        [$employeeId, $employmentId, $person, $employment] = $this->targetEmployment(
+            $input,
+            $targetEmploymentId,
+        );
         $this->assertNoKnownDeductionConflict($person, $result, $employeeId);
         $term = $this->object($employment['term'] ?? null, 'term');
         $selection = JmhzScenario1SelectorResolver::load()->resolve(
@@ -187,29 +203,49 @@ final class JmhzOrdinaryEvidenceBuilder
     }
 
     /**
+     * Najde ve zmrazeném vstupu právě ten vztah, za který se evidence potvrzuje.
+     *
      * @param array<string,mixed> $input
      * @return array{int,int,array<string,mixed>,array<string,mixed>}
      */
-    private function singleEmployment(array $input): array
+    private function targetEmployment(array $input, int $targetEmploymentId): array
     {
         $people = $input['people'] ?? null;
-        if (!is_array($people) || !array_is_list($people) || count($people) !== 1) {
-            $this->invalid('jmhz_ordinary_evidence_scope_unsupported', 'První ordinary profil vyžaduje právě jednu osobu.');
+        if (!is_array($people) || !array_is_list($people) || $people === []) {
+            $this->invalid('jmhz_ordinary_evidence_source_invalid', 'Zmrazený vstup neobsahuje žádnou osobu.');
         }
-        $person = $this->object($people[0], 'person');
-        $employee = $this->object($person['employee'] ?? null, 'employee');
-        $employeeId = $this->positiveInt($employee['id'] ?? null, 'employee.id');
-        $employments = $person['employments'] ?? null;
-        if (!is_array($employments) || !array_is_list($employments) || count($employments) !== 1) {
-            $this->invalid('jmhz_ordinary_evidence_scope_unsupported', 'První ordinary profil vyžaduje právě jeden pracovní vztah.');
+        $found = null;
+        foreach ($people as $candidate) {
+            $person = $this->object($candidate, 'person');
+            $employee = $this->object($person['employee'] ?? null, 'employee');
+            $employeeId = $this->positiveInt($employee['id'] ?? null, 'employee.id');
+            $employments = $person['employments'] ?? null;
+            if (!is_array($employments) || !array_is_list($employments)) {
+                $this->invalid('jmhz_ordinary_evidence_source_invalid', 'Pracovní vztahy osoby nejsou seznam.');
+            }
+            foreach ($employments as $candidateEntry) {
+                $entry = $this->object($candidateEntry, 'employment entry');
+                $employment = $this->object($entry['employment'] ?? null, 'employment');
+                $employmentId = $this->positiveInt($employment['id'] ?? null, 'employment.id');
+                if ($employmentId !== $targetEmploymentId) {
+                    continue;
+                }
+                if (($employment['employee_id'] ?? null) !== $employeeId) {
+                    $this->invalid('jmhz_ordinary_evidence_scope_mismatch', 'Pracovní vztah nepatří zmrazené osobě.');
+                }
+                if ($found !== null) {
+                    $this->invalid('jmhz_ordinary_evidence_scope_mismatch', 'Zmrazený vstup obsahuje pracovní vztah vícekrát.');
+                }
+                $found = [$employeeId, $employmentId, $person, $entry];
+            }
         }
-        $entry = $this->object($employments[0], 'employment entry');
-        $employment = $this->object($entry['employment'] ?? null, 'employment');
-        $employmentId = $this->positiveInt($employment['id'] ?? null, 'employment.id');
-        if (($employment['employee_id'] ?? null) !== $employeeId) {
-            $this->invalid('jmhz_ordinary_evidence_scope_mismatch', 'Pracovní vztah nepatří zmrazené osobě.');
+        if ($found === null) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_scope_mismatch',
+                'Zmrazená revize neobsahuje zvolený pracovní vztah.',
+            );
         }
-        return [$employeeId, $employmentId, $person, $entry];
+        return $found;
     }
 
     /**
@@ -239,9 +275,12 @@ final class JmhzOrdinaryEvidenceBuilder
         ) {
             $this->invalid('jmhz_ordinary_evidence_deduction_conflict', 'Revize obsahuje exekuční nebo insolvenční evidenci.');
         }
+        // Kontroluje se osoba, za jejíž vztah se evidence potvrzuje. Ostatní
+        // osoby revize mají vlastní evidenci a vlastní kontrolu, takže se
+        // nevyžaduje, aby byla v revizi osoba jediná.
         $resultPeople = $result['people'] ?? null;
-        if (!is_array($resultPeople) || !array_is_list($resultPeople) || count($resultPeople) !== 1) {
-            $this->invalid('jmhz_ordinary_evidence_result_mismatch', 'Výsledek musí obsahovat právě jednu osobu.');
+        if (!is_array($resultPeople) || !array_is_list($resultPeople) || $resultPeople === []) {
+            $this->invalid('jmhz_ordinary_evidence_result_mismatch', 'Výsledek neobsahuje žádnou osobu.');
         }
         $resultPerson = null;
         foreach ($resultPeople as $candidate) {

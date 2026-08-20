@@ -5,6 +5,7 @@ import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
   type PayrollJmhzOrdinaryEvidence,
+  type PayrollJmhzOrdinaryEvidenceScope,
   type PayrollRun,
 } from '@/api/payroll'
 import { btnFilled } from '@/components/ui/buttonStyles'
@@ -20,12 +21,19 @@ type FactKey =
   | 'ozp_employment_support_claimed'
   | 'deep_mining_work_occurred'
 
-interface EvidenceState {
-  loading: boolean
+/** Ordinary evidence se potvrzuje ZA PRACOVNÍ VZTAH, ne za revizi. */
+interface ScopeState {
+  scope: PayrollJmhzOrdinaryEvidenceScope
   saving: boolean
   error: string
   evidence: PayrollJmhzOrdinaryEvidence | null
   checks: Record<FactKey, boolean>
+}
+
+interface EvidenceState {
+  loading: boolean
+  error: string
+  scopes: ScopeState[]
 }
 
 const factKeys: FactKey[] = [
@@ -41,8 +49,12 @@ const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 const states = ref<Record<number, EvidenceState>>({})
 
 function emptyState(): EvidenceState {
+  return { loading: true, error: '', scopes: [] }
+}
+
+function emptyScopeState(scope: PayrollJmhzOrdinaryEvidenceScope): ScopeState {
   return {
-    loading: true,
+    scope,
     saving: false,
     error: '',
     evidence: null,
@@ -65,9 +77,27 @@ function state(run: PayrollRun): EvidenceState | null {
   return id === null ? null : states.value[id] ?? null
 }
 
-function allChecked(run: PayrollRun): boolean {
-  const current = state(run)
-  return current !== null && factKeys.every(key => current.checks[key])
+function confirmed(entry: ScopeState): boolean {
+  return entry.evidence !== null || entry.scope.confirmed
+}
+
+function pendingCount(run: PayrollRun): number {
+  return state(run)?.scopes.filter(entry => !confirmed(entry)).length ?? 0
+}
+
+function allChecked(entry: ScopeState): boolean {
+  return factKeys.every(key => entry.checks[key])
+}
+
+function scopeLabel(entry: ScopeState): string {
+  return entry.scope.employee_name === ''
+    ? t('payroll.submissions.overview.jmhz_evidence_scope_unnamed', {
+        employment: entry.scope.employment_id,
+      })
+    : t('payroll.submissions.overview.jmhz_evidence_scope', {
+        name: entry.scope.employee_name,
+        employment: entry.scope.employment_id,
+      })
 }
 
 async function load() {
@@ -81,7 +111,14 @@ async function load() {
     const id = revisionId(run)
     if (id === null) return
     try {
-      states.value[id].evidence = await payrollApi.jmhzOrdinaryEvidence(id)
+      const result = await payrollApi.jmhzOrdinaryEvidence(id)
+      states.value[id].scopes = result.scopes.map(scope => {
+        const entry = emptyScopeState(scope)
+        entry.evidence = result.evidences.find(
+          evidence => evidence.employment_id === scope.employment_id,
+        ) ?? null
+        return entry
+      })
     } catch (exception) {
       states.value[id].error = apiErrorMessage(
         exception,
@@ -93,24 +130,24 @@ async function load() {
   }))
 }
 
-async function confirm(run: PayrollRun) {
+async function confirm(run: PayrollRun, entry: ScopeState) {
   const id = revisionId(run)
-  const current = state(run)
-  if (id === null || current === null || current.saving || !allChecked(run)) return
-  current.saving = true
-  current.error = ''
+  if (id === null || entry.saving || !allChecked(entry)) return
+  entry.saving = true
+  entry.error = ''
   try {
-    current.evidence = await payrollApi.confirmJmhzOrdinaryEvidence(
+    entry.evidence = await payrollApi.confirmJmhzOrdinaryEvidence(
       id,
+      entry.scope.employment_id,
       crypto.randomUUID(),
     )
   } catch (exception) {
-    current.error = apiErrorMessage(
+    entry.error = apiErrorMessage(
       exception,
       t('payroll.submissions.overview.jmhz_evidence_save_failed'),
     )
   } finally {
-    current.saving = false
+    entry.saving = false
   }
 }
 
@@ -157,51 +194,79 @@ watch(() => props.runs, load, { immediate: true, deep: true })
         <p v-if="state(run)?.loading" class="mt-3 text-sm text-neutral-500">
           {{ t('common.loading') }}
         </p>
-        <template v-else-if="state(run)?.evidence">
-          <div class="mt-3 rounded-lg border border-success-500/30 bg-success-50 p-3">
-            <div class="flex flex-wrap items-center gap-2 text-sm font-medium text-success-700">
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path :d="ICONS.check" />
-              </svg>
-              {{ t('payroll.submissions.overview.jmhz_evidence_confirmed') }}
+        <template v-else>
+          <p
+            v-if="pendingCount(run) > 0"
+            class="mt-2 text-sm text-warning-700"
+            data-test="jmhz-ordinary-evidence-pending"
+          >
+            {{ t('payroll.submissions.overview.jmhz_evidence_pending', pendingCount(run)) }}
+          </p>
+          <p v-if="state(run)?.scopes.length === 0" class="mt-3 text-sm text-neutral-500">
+            {{ t('payroll.submissions.overview.jmhz_evidence_no_scopes') }}
+          </p>
+          <div
+            v-for="entry in state(run)?.scopes ?? []"
+            :key="entry.scope.employment_id"
+            class="mt-4 border-t border-neutral-200 pt-4 first:mt-3 first:border-t-0 first:pt-0"
+            data-test="jmhz-ordinary-evidence-scope"
+          >
+            <p class="text-sm font-semibold text-neutral-900">{{ scopeLabel(entry) }}</p>
+            <div
+              v-if="confirmed(entry)"
+              class="mt-2 rounded-lg border border-success-500/30 bg-success-50 p-3"
+            >
+              <div class="flex flex-wrap items-center gap-2 text-sm font-medium text-success-700">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.check" />
+                </svg>
+                {{ t('payroll.submissions.overview.jmhz_evidence_confirmed') }}
+              </div>
+              <p v-if="entry.evidence" class="mt-1 text-xs text-success-700">
+                {{ formatTimestamp(entry.evidence.confirmed_at) }} ·
+                {{ entry.evidence.source_manifest_sha256.slice(0, 12) }}…
+              </p>
             </div>
-            <p class="mt-1 text-xs text-success-700">
-              {{ formatTimestamp(state(run)!.evidence!.confirmed_at) }} ·
-              {{ state(run)!.evidence!.source_manifest_sha256.slice(0, 12) }}…
+            <template v-else>
+              <p class="mt-2 text-sm font-medium text-neutral-700">
+                {{ t('payroll.submissions.overview.jmhz_evidence_confirm_each') }}
+              </p>
+              <div class="mt-3 space-y-3">
+                <label
+                  v-for="key in factKeys"
+                  :key="key"
+                  class="flex items-start gap-3 text-sm text-neutral-700"
+                >
+                  <input
+                    v-model="entry.checks[key]"
+                    type="checkbox"
+                    class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-success-600 focus:ring-success-500"
+                    :disabled="!canWrite || entry.saving"
+                  >
+                  <span>{{ t(`payroll.submissions.overview.jmhz_evidence_facts.${key}`) }}</span>
+                </label>
+              </div>
+              <button
+                type="button"
+                :class="btnFilled('success')"
+                class="mt-4"
+                :disabled="!canWrite || !allChecked(entry) || entry.saving"
+                @click="confirm(run, entry)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.check" />
+                </svg>
+                {{ t('payroll.submissions.overview.jmhz_evidence_confirm') }}
+              </button>
+            </template>
+            <p
+              v-if="entry.error"
+              class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+              role="alert"
+            >
+              {{ entry.error }}
             </p>
           </div>
-        </template>
-        <template v-else>
-          <p class="mt-3 text-sm font-medium text-neutral-700">
-            {{ t('payroll.submissions.overview.jmhz_evidence_confirm_each') }}
-          </p>
-          <div class="mt-3 space-y-3">
-            <label
-              v-for="key in factKeys"
-              :key="key"
-              class="flex items-start gap-3 text-sm text-neutral-700"
-            >
-              <input
-                v-model="state(run)!.checks[key]"
-                type="checkbox"
-                class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-success-600 focus:ring-success-500"
-                :disabled="!canWrite || state(run)!.saving"
-              >
-              <span>{{ t(`payroll.submissions.overview.jmhz_evidence_facts.${key}`) }}</span>
-            </label>
-          </div>
-          <button
-            type="button"
-            :class="btnFilled('success')"
-            class="mt-4"
-            :disabled="!canWrite || !allChecked(run) || state(run)!.saving"
-            @click="confirm(run)"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path :d="ICONS.check" />
-            </svg>
-            {{ t('payroll.submissions.overview.jmhz_evidence_confirm') }}
-          </button>
         </template>
         <p
           v-if="state(run)?.error"

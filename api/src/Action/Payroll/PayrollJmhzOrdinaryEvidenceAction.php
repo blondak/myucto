@@ -31,7 +31,7 @@ final class PayrollJmhzOrdinaryEvidenceAction
             return $error;
         }
         try {
-            $evidence = $this->service->evidence(
+            $state = $this->service->evidence(
                 $this->currentSupplierId($request),
                 $this->revisionId($args),
             );
@@ -41,12 +41,12 @@ final class PayrollJmhzOrdinaryEvidenceAction
             return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
         }
 
-        return Json::ok($response, ['evidence' => $evidence])
+        return Json::ok($response, $state)
             ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
     }
 
-    /** @param array{revisionId:string} $args */
+    /** @param array{revisionId:string,employmentId:string} $args */
     public function confirm(Request $request, Response $response, array $args): Response
     {
         if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
@@ -82,6 +82,7 @@ final class PayrollJmhzOrdinaryEvidenceAction
             $result = $this->service->confirm(
                 $this->currentSupplierId($request),
                 $this->revisionId($args),
+                $this->positiveId($args['employmentId'] ?? '', 'employmentId'),
                 $body['facts'],
                 $idempotencyKey,
                 $actor,
@@ -128,12 +129,16 @@ final class PayrollJmhzOrdinaryEvidenceAction
         return null;
     }
 
-    /** @param array{revisionId:string} $args */
+    /** @param array<string,string> $args */
     private function revisionId(array $args): int
     {
-        $value = $args['revisionId'];
+        return $this->positiveId($args['revisionId'] ?? '', 'revisionId');
+    }
+
+    private function positiveId(string $value, string $field): int
+    {
         if (preg_match('/^[1-9][0-9]*$/D', $value) !== 1) {
-            throw new \InvalidArgumentException('revisionId musí být kladné celé číslo.');
+            throw new \InvalidArgumentException("{$field} musí být kladné celé číslo.");
         }
         return (int) $value;
     }

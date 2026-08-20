@@ -386,6 +386,10 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             'part_time_employer_discount' => 'not_claimed',
         ];
         $payload['people'][] = $second;
+        $payload['ordinary_evidence'][] = [
+            'scope' => ['employee_id' => 12, 'employment_id' => 102],
+            'attribute_values' => ['10116' => false, '10546' => false],
+        ];
 
         $result = (new JmhzScenario1XmlValidator())->dryRun(
             $this->resolutionFor($payload),
@@ -593,9 +597,10 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                 'employer' => ['identification_number' => '00000019'],
                 'office' => ['social_security_variable_symbol' => '1234567890'],
             ],
-            'ordinary_evidence' => [
+            'ordinary_evidence' => [[
+                'scope' => ['employee_id' => 11, 'employment_id' => 101],
                 'attribute_values' => ['10116' => false, '10546' => false],
-            ],
+            ]],
             'people' => [[
                 'employee_id' => 11,
                 'person_summary' => [
@@ -713,11 +718,12 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             'source_versions' => [
                 'office_id' => 9,
                 'employments' => [],
-                'ordinary_evidence' => [
+                'ordinary_evidence' => [[
+                    'employment_id' => 101,
                     'id' => 601,
                     'source_manifest_sha256' => str_repeat('4', 64),
                     'snapshot_fingerprint' => str_repeat('5', 64),
-                ],
+                ]],
             ],
             'readiness_issue_codes' => [],
             'readiness_issues' => [],

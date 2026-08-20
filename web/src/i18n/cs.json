@@ -3442,7 +3442,11 @@
                     "pikr": "PIKR",
                     "health_portal": "Portál pojišťovny",
                     "other": "Jiný kanál"
-                }
+                },
+                "jmhz_evidence_scope": "{name} · vztah č. {employment}",
+                "jmhz_evidence_scope_unnamed": "Pracovní vztah č. {employment}",
+                "jmhz_evidence_pending": "žádný vztah nečeká na potvrzení | 1 vztah čeká na potvrzení | {n} vztahy čekají na potvrzení | {n} vztahů čeká na potvrzení",
+                "jmhz_evidence_no_scopes": "Revize neobsahuje žádný pracovní vztah k potvrzení."
             }
         },
         "eldp": {

@@ -25,25 +25,96 @@ final readonly class JmhzOrdinaryEvidenceService
         private ActivityLogger $logger,
     ) {}
 
-    /** @return array<string,mixed>|null */
-    public function evidence(int $supplierId, int $revisionId): ?array
+    /**
+     * Stav ordinary evidence revize: co je zmrazené a KOMU to ještě chybí.
+     *
+     * @return array{scopes:list<array<string,mixed>>,evidences:list<array<string,mixed>>}
+     */
+    public function evidence(int $supplierId, int $revisionId): array
     {
         if ($supplierId <= 0 || $revisionId <= 0) {
             throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_not_found', 'Ordinary evidence nebyla nalezena.');
         }
-        return $this->repository->transaction(function () use ($supplierId, $revisionId): ?array {
-            if ($this->repository->lockSource($supplierId, $revisionId) === null) {
+        return $this->repository->transaction(function () use ($supplierId, $revisionId): array {
+            $source = $this->repository->lockSource($supplierId, $revisionId);
+            if ($source === null) {
                 throw new JmhzOrdinaryEvidenceException(
                     'jmhz_ordinary_evidence_not_found',
                     'Zdrojová revize nebyla nalezena.',
                 );
             }
-            $stored = $this->repository->findByRevision($supplierId, $revisionId);
-            if ($stored === null) {
-                return null;
+            $evidences = [];
+            $confirmed = [];
+            foreach ($this->repository->findAllByRevision($supplierId, $revisionId) as $stored) {
+                $evidences[] = $this->publicResult($stored, $this->verifyStored($stored), false);
+                $confirmed[(int) $stored['employment_id']] = true;
             }
-            return $this->publicResult($stored, $this->verifyStored($stored), false);
+            $scopes = [];
+            foreach ($this->frozenScopes($source) as $scope) {
+                $scopes[] = $scope + [
+                    'confirmed' => isset($confirmed[$scope['employment_id']]),
+                ];
+            }
+            return ['scopes' => $scopes, 'evidences' => $evidences];
         });
+    }
+
+    /**
+     * Pracovní vztahy zmrazené v revizi — rozsah, za který se evidence potvrzuje.
+     *
+     * @param array<string,mixed> $source
+     * @return list<array{employee_id:int,employment_id:int,employee_name:string}>
+     */
+    private function frozenScopes(array $source): array
+    {
+        $revision = $source['revision'] ?? null;
+        $json = is_array($revision) ? ($revision['input_snapshot_json'] ?? null) : null;
+        if (!is_string($json)) {
+            return [];
+        }
+        $input = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+        $people = is_array($input) ? ($input['people'] ?? null) : null;
+        if (!is_array($people) || !array_is_list($people)) {
+            return [];
+        }
+        $scopes = [];
+        foreach ($people as $person) {
+            if (!is_array($person) || array_is_list($person)) {
+                continue;
+            }
+            $employee = $person['employee'] ?? null;
+            $employeeId = is_array($employee) && is_int($employee['id'] ?? null)
+                ? $employee['id']
+                : 0;
+            $name = is_array($employee) && is_string($employee['full_name'] ?? null)
+                ? $employee['full_name']
+                : '';
+            $employments = $person['employments'] ?? null;
+            if ($employeeId <= 0 || !is_array($employments) || !array_is_list($employments)) {
+                continue;
+            }
+            foreach ($employments as $entry) {
+                $employment = is_array($entry) ? ($entry['employment'] ?? null) : null;
+                $employmentId = is_array($employment) && is_int($employment['id'] ?? null)
+                    ? $employment['id']
+                    : 0;
+                if ($employmentId <= 0) {
+                    continue;
+                }
+                $scopes[] = [
+                    'employee_id' => $employeeId,
+                    'employment_id' => $employmentId,
+                    'employee_name' => $name,
+                ];
+            }
+        }
+        usort(
+            $scopes,
+            static fn (array $left, array $right): int =>
+                [$left['employee_id'], $left['employment_id']]
+                <=> [$right['employee_id'], $right['employment_id']],
+        );
+        return $scopes;
     }
 
     /**
@@ -53,14 +124,15 @@ final readonly class JmhzOrdinaryEvidenceService
     public function confirm(
         int $supplierId,
         int $revisionId,
+        int $employmentId,
         array $facts,
         string $idempotencyKey,
         int $confirmedBy,
         ?string $ip,
         ?string $userAgent,
     ): array {
-        if ($supplierId <= 0 || $revisionId <= 0 || $confirmedBy <= 0) {
-            throw new \InvalidArgumentException('Firma, revize a potvrzující uživatel musí být kladná čísla.');
+        if ($supplierId <= 0 || $revisionId <= 0 || $confirmedBy <= 0 || $employmentId <= 0) {
+            throw new \InvalidArgumentException('Firma, revize, vztah a potvrzující uživatel musí být kladná čísla.');
         }
         $idempotencyKey = trim($idempotencyKey);
         if ($idempotencyKey === '' || strlen($idempotencyKey) > 190) {
@@ -73,6 +145,7 @@ final readonly class JmhzOrdinaryEvidenceService
                 'schema_reference' => self::REQUEST_SCHEMA,
                 'supplier_id' => $supplierId,
                 'source_revision_id' => $revisionId,
+                'employment_id' => $employmentId,
                 'facts' => $facts,
             ]),
             'jmhz-ordinary-confirmation',
@@ -82,6 +155,7 @@ final readonly class JmhzOrdinaryEvidenceService
         return $this->repository->transaction(function () use (
             $supplierId,
             $revisionId,
+            $employmentId,
             $facts,
             $idempotencyHash,
             $confirmationFingerprint,
@@ -96,6 +170,7 @@ final readonly class JmhzOrdinaryEvidenceService
             $preview = $this->builder->build(
                 $supplierId,
                 $source,
+                $employmentId,
                 $facts,
                 $confirmedBy,
                 '2000-01-01T00:00:00Z',
@@ -143,6 +218,7 @@ final readonly class JmhzOrdinaryEvidenceService
             $snapshot = $this->builder->build(
                 $supplierId,
                 $source,
+                $employmentId,
                 $facts,
                 $confirmedBy,
                 $confirmedAt,
@@ -169,11 +245,16 @@ final readonly class JmhzOrdinaryEvidenceService
                 'source_revision_id' => $revisionId,
                 'source_manifest_sha256' => $manifestHash,
             ]));
-            $existing = $this->repository->findByRevisionForUpdate($supplierId, $revisionId);
+            $existing = $this->repository->findByScopeForUpdate(
+                $supplierId,
+                $revisionId,
+                $employeeId,
+                $employmentId,
+            );
             if ($existing !== null) {
                 $existingPayload = $this->verifyStored($existing);
                 if (!hash_equals((string) $existing['request_fingerprint'], $requestFingerprint)) {
-                    throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_scope_already_frozen', 'Revize už má jiné immutable ordinary evidence.');
+                    throw new JmhzOrdinaryEvidenceException('jmhz_ordinary_evidence_scope_already_frozen', 'Pracovní vztah už má jiné immutable ordinary evidence.');
                 }
                 $this->repository->bindClaim($supplierId, $idempotencyHash, (int) $existing['id']);
                 return $this->publicResult($existing, $existingPayload, false);
@@ -221,19 +302,29 @@ final readonly class JmhzOrdinaryEvidenceService
         });
     }
 
-    /** @return array<string,mixed>|null */
-    public function snapshotForPreparation(int $supplierId, int $revisionId): ?array
+    /**
+     * Ordinary evidence revize podle pracovního vztahu.
+     *
+     * Klíčem je `employment_id` a mapa je seřazená, aby z ní příprava stavěla
+     * deterministický (a tedy stabilně otisknutelný) snapshot.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function snapshotsForPreparation(int $supplierId, int $revisionId): array
     {
-        $stored = $this->repository->findByRevision($supplierId, $revisionId);
-        if ($stored === null) {
-            return null;
+        $sources = [];
+        foreach ($this->repository->findAllByRevision($supplierId, $revisionId) as $stored) {
+            $sources[(int) $stored['employment_id']] = [
+                'id' => $stored['id'],
+                'employee_id' => $stored['employee_id'],
+                'employment_id' => $stored['employment_id'],
+                'source_manifest_sha256' => $stored['source_manifest_sha256'],
+                'snapshot_fingerprint' => $stored['snapshot_fingerprint'],
+                'payload' => $this->verifyStored($stored),
+            ];
         }
-        return [
-            'id' => $stored['id'],
-            'source_manifest_sha256' => $stored['source_manifest_sha256'],
-            'snapshot_fingerprint' => $stored['snapshot_fingerprint'],
-            'payload' => $this->verifyStored($stored),
-        ];
+        ksort($sources, SORT_NUMERIC);
+        return $sources;
     }
 
     /**
@@ -321,6 +412,8 @@ final readonly class JmhzOrdinaryEvidenceService
             'run_id' => $stored['run_id'],
             'revision_id' => $stored['source_revision_id'],
             'revision_no' => $payload['scope']['revision_no'],
+            'employee_id' => $stored['employee_id'],
+            'employment_id' => $stored['employment_id'],
             'period_start' => $stored['period_start'],
             'schema_reference' => $stored['schema_reference'],
             'source_manifest_sha256' => $stored['source_manifest_sha256'],

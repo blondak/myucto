@@ -1063,7 +1063,7 @@ final class Routes
                 [PayrollJmhzOrdinaryEvidenceAction::class, 'get'],
             );
             $g->post(
-                '/submissions/jmhz-ordinary-evidence/{revisionId:[0-9]+}',
+                '/submissions/jmhz-ordinary-evidence/{revisionId:[0-9]+}/{employmentId:[0-9]+}',
                 [PayrollJmhzOrdinaryEvidenceAction::class, 'confirm'],
             );
             $g->post(

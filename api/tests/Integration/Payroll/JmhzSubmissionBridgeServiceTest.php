@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPvpojPreview;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Blocker;
@@ -471,6 +472,54 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
     }
 
     /**
+     * Víceúčtárenský běh dojde až ke zmrazení podání i s ordinary evidencí.
+     *
+     * Tohle je smysl celé změny: revize přes dvě účtárny má vždy ≥2 pracovní
+     * vztahy, takže dokud se ordinary evidence zmrazovala jen jedna na revizi
+     * (a příprava navíc trvala na jediné osobě s jediným vztahem), nebyla
+     * taková příprava z reálných dat dosažitelná. Každá registrace teď dostane
+     * vlastní osobu s vlastní evidencí a vlastní podání.
+     */
+    public function testMultiOfficeRunWithPerEmploymentEvidenceReachesFrozenSubmission(): void
+    {
+        $first = $this->resolutionForOffice(4, '1234567890');
+        $second = $this->resolutionForOffice(5, '9990001234');
+
+        self::assertSame([], $first->blockers);
+        self::assertSame([], $second->blockers);
+        self::assertSame(
+            [11],
+            array_column($first->candidate?->payload['people'] ?? [], 'employee_id'),
+        );
+        self::assertSame(
+            [12],
+            array_column($second->candidate?->payload['people'] ?? [], 'employee_id'),
+        );
+        // Evidence každé osoby se promítla do jejího řádku, ne z cizí evidence.
+        self::assertFalse(
+            $first->candidate?->payload['people'][0]['summary']['deductions_recorded'],
+        );
+        self::assertFalse(
+            $second->candidate?->payload['people'][0]['summary']['deductions_recorded'],
+        );
+        self::assertSame(
+            ['IN13' => false, 'IN28' => false, 'IN30' => false, 'IN36' => false],
+            $second->candidate?->payload['interactions'],
+        );
+
+        $frozen = $this->officeBridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(5),
+            self::ENVIRONMENT,
+            $this->userId,
+            5,
+        );
+        self::assertTrue($frozen['created']);
+        self::assertSame('9990001234', $frozen['variable_symbol']);
+    }
+
+    /**
      * Most, který dokument řeší podle zvolené mzdové účtárny — stejně jako
      * skutečný `JmhzScenario1DocumentService`.
      */
@@ -574,7 +623,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         string $variableSymbol,
     ): JmhzScenario1Resolution {
         $payload = $this->payload();
-        $payload['schema_reference'] = 'payroll-jmhz-preparation-source.v6';
+        $payload['schema_reference'] = JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE;
         $payload['employer_summary']['office'] = null;
         $payload['employer_summary']['offices'] = [
             [
@@ -590,8 +639,28 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
                 'social_security_variable_symbol' => '9990001234',
             ],
         ];
-        $payload['people'][0]['employments'][0]['employment']['office_id']
-            = $officeId;
+        // Revize přes DVĚ účtárny: každá osoba má vlastní vztah, vlastní
+        // registraci a vlastní ordinary evidenci. Dokud šla evidence zmrazit
+        // jen za revizi s jedinou osobou, takový běh se k podání nedostal.
+        $payload['people'][0]['employments'][0]['employment']['office_id'] = 4;
+        $second = $payload['people'][0];
+        $second['employee_id'] = 12;
+        $second['employments'][0]['employment_id'] = 102;
+        $second['employments'][0]['employment']['office_id'] = 5;
+        $second['employments'][0]['insurance']['relationship_id'] = 'employment:102';
+        $second['person_summary']['statutory']['net_pay']['relationships']
+            = [['relationship_id' => 'employment:102']];
+        $payload['people'][] = $second;
+        $payload['ordinary_evidence'][] = [
+            'scope' => ['employee_id' => 12, 'employment_id' => 102],
+            'attribute_values' => ['10116' => false, '10546' => false],
+        ];
+        $payload['source_versions']['ordinary_evidence'][] = [
+            'employment_id' => 102,
+            'id' => 602,
+            'source_manifest_sha256' => str_repeat('6', 64),
+            'snapshot_fingerprint' => str_repeat('7', 64),
+        ];
 
         return $this->resolutionFor(
             $this->pvpoj(officeId: $officeId, variableSymbol: $variableSymbol),
@@ -715,9 +784,10 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
                 'employer' => ['identification_number' => '00000019'],
                 'office' => ['social_security_variable_symbol' => '1234567890'],
             ],
-            'ordinary_evidence' => [
+            'ordinary_evidence' => [[
+                'scope' => ['employee_id' => 11, 'employment_id' => 101],
                 'attribute_values' => ['10116' => false, '10546' => false],
-            ],
+            ]],
             'people' => [[
                 'employee_id' => 11,
                 'person_summary' => [
@@ -840,11 +910,12 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             'source_versions' => [
                 'office_id' => 9,
                 'employments' => [],
-                'ordinary_evidence' => [
+                'ordinary_evidence' => [[
+                    'employment_id' => 101,
                     'id' => 601,
                     'source_manifest_sha256' => str_repeat('4', 64),
                     'snapshot_fingerprint' => str_repeat('5', 64),
-                ],
+                ]],
             ],
             'readiness_issue_codes' => [],
             'readiness_issues' => [],

@@ -119,23 +119,58 @@ final class JmhzOrdinaryEvidenceRepository
         }
     }
 
-    /** @return array<string,mixed>|null */
-    public function findByRevision(int $supplierId, int $revisionId): ?array
+    /**
+     * Všechny zmrazené ordinary evidence revize.
+     *
+     * Tabulka je unikátní na `(supplier_id, source_revision_id, employee_id,
+     * employment_id)`, takže na jednu revizi patří jedna evidence za KAŽDÝ
+     * pracovní vztah. Řazení je deterministické, aby z něj šlo stavět stabilní
+     * otisk přípravy.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function findAllByRevision(int $supplierId, int $revisionId): array
     {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_jmhz_ordinary_evidence_snapshots
+              WHERE supplier_id = ? AND source_revision_id = ?
+              ORDER BY employee_id, employment_id'
+        );
+        $statement->execute([$supplierId, $revisionId]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $rows[] = $this->normalizeRow($row);
+        }
+        return $rows;
+    }
+
+    /** @return array<string,mixed>|null */
+    public function findByScope(
+        int $supplierId,
+        int $revisionId,
+        int $employeeId,
+        int $employmentId,
+    ): ?array {
         return $this->findOne(
             'SELECT * FROM payroll_jmhz_ordinary_evidence_snapshots
-              WHERE supplier_id = ? AND source_revision_id = ?',
-            [$supplierId, $revisionId],
+              WHERE supplier_id = ? AND source_revision_id = ?
+                AND employee_id = ? AND employment_id = ?',
+            [$supplierId, $revisionId, $employeeId, $employmentId],
         );
     }
 
     /** @return array<string,mixed>|null */
-    public function findByRevisionForUpdate(int $supplierId, int $revisionId): ?array
-    {
+    public function findByScopeForUpdate(
+        int $supplierId,
+        int $revisionId,
+        int $employeeId,
+        int $employmentId,
+    ): ?array {
         return $this->findOne(
             'SELECT * FROM payroll_jmhz_ordinary_evidence_snapshots
-              WHERE supplier_id = ? AND source_revision_id = ? FOR UPDATE',
-            [$supplierId, $revisionId],
+              WHERE supplier_id = ? AND source_revision_id = ?
+                AND employee_id = ? AND employment_id = ? FOR UPDATE',
+            [$supplierId, $revisionId, $employeeId, $employmentId],
         );
     }
 
@@ -186,6 +221,15 @@ final class JmhzOrdinaryEvidenceRepository
         if ($row === false) {
             return null;
         }
+        return $this->normalizeRow($row);
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function normalizeRow(array $row): array
+    {
         foreach ([
             'id', 'supplier_id', 'run_id', 'source_revision_id', 'employee_id',
             'employment_id', 'confirmed_by', 'evidence_snapshot_id',

@@ -1880,11 +1880,31 @@ export interface PayrollJmhzOrdinaryEvidenceFacts {
   deep_mining_work_occurred: false
 }
 
+/**
+ * Pracovní vztah revize, za který se ordinary evidence potvrzuje.
+ *
+ * Evidence je zmrazená per vztah, takže revize s víc lidmi (a každá revize
+ * přes dvě mzdové účtárny) potřebuje jedno potvrzení na každý řádek.
+ */
+export interface PayrollJmhzOrdinaryEvidenceScope {
+  employee_id: number
+  employment_id: number
+  employee_name: string
+  confirmed: boolean
+}
+
+export interface PayrollJmhzOrdinaryEvidenceState {
+  scopes: PayrollJmhzOrdinaryEvidenceScope[]
+  evidences: PayrollJmhzOrdinaryEvidence[]
+}
+
 export interface PayrollJmhzOrdinaryEvidence {
   id: number
   run_id: number
   revision_id: number
   revision_no: number
+  employee_id: number
+  employment_id: number
   period_start: string
   schema_reference: 'payroll-jmhz-ordinary-evidence.v1'
   source_manifest_sha256: string
@@ -3711,14 +3731,15 @@ export const payrollApi = {
       officeId == null ? undefined : { params: { office: officeId } },
     ).then(response => response.data),
   jmhzOrdinaryEvidence: (revisionId: number) =>
-    api.get<{ evidence: PayrollJmhzOrdinaryEvidence | null }>(
+    api.get<PayrollJmhzOrdinaryEvidenceState>(
       `/payroll/submissions/jmhz-ordinary-evidence/${revisionId}`,
-    ).then(response => response.data.evidence),
+    ).then(response => response.data),
   confirmJmhzOrdinaryEvidence: (
     revisionId: number,
+    employmentId: number,
     idempotencyKey: string,
   ) => api.post<PayrollJmhzOrdinaryEvidence>(
-    `/payroll/submissions/jmhz-ordinary-evidence/${revisionId}`,
+    `/payroll/submissions/jmhz-ordinary-evidence/${revisionId}/${employmentId}`,
     {
       facts: {
         reportable_wage_deductions_recorded: false,

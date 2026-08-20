@@ -16,6 +16,7 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
         $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(
             7,
             $this->source(),
+            101,
             $this->facts(),
             12,
             '2026-08-13T12:00:00.000000Z',
@@ -42,6 +43,7 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
             (new JmhzOrdinaryEvidenceBuilder())->build(
                 7,
                 $source,
+                101,
                 $this->facts(),
                 12,
                 '2026-08-13T12:00:00Z',
@@ -65,6 +67,7 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
             (new JmhzOrdinaryEvidenceBuilder())->build(
                 7,
                 $source,
+                101,
                 $this->facts(),
                 12,
                 '2026-08-13T12:00:00Z',
@@ -73,6 +76,70 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
         } catch (JmhzOrdinaryEvidenceException $exception) {
             self::assertSame('jmhz_ordinary_evidence_deduction_conflict', $exception->validationCode);
         }
+    }
+
+    /**
+     * Revize se dvěma osobami zmrazí evidenci za KAŽDÝ vztah zvlášť.
+     *
+     * Bez opravy tady builder skončil `jmhz_ordinary_evidence_scope_unsupported`
+     * ("První ordinary profil vyžaduje právě jednu osobu"), takže firma s víc
+     * zaměstnanci ordinary evidenci nezmrazila vůbec.
+     */
+    public function testEachEmploymentOfATwoPersonRevisionGetsItsOwnEvidence(): void
+    {
+        $source = $this->sourceWithTwoPeople();
+        $builder = new JmhzOrdinaryEvidenceBuilder();
+
+        $first = $builder->build(7, $source, 101, $this->facts(), 12, '2026-08-13T12:00:00Z');
+        $second = $builder->build(7, $source, 102, $this->facts(), 12, '2026-08-13T12:00:00Z');
+
+        self::assertSame(11, $first->payload['scope']['employee_id']);
+        self::assertSame(101, $first->payload['scope']['employment_id']);
+        self::assertSame(12, $second->payload['scope']['employee_id']);
+        self::assertSame(102, $second->payload['scope']['employment_id']);
+    }
+
+    /** Vztah, který v revizi není, musí být pojmenovaná chyba. */
+    public function testEvidenceForAnEmploymentOutsideTheRevisionIsRejected(): void
+    {
+        try {
+            (new JmhzOrdinaryEvidenceBuilder())->build(
+                7,
+                $this->sourceWithTwoPeople(),
+                999,
+                $this->facts(),
+                12,
+                '2026-08-13T12:00:00Z',
+            );
+            self::fail('Vztah mimo revizi musí být odmítnut.');
+        } catch (JmhzOrdinaryEvidenceException $exception) {
+            self::assertSame('jmhz_ordinary_evidence_scope_mismatch', $exception->validationCode);
+        }
+    }
+
+    /** @return array{revision:array<string,mixed>} */
+    private function sourceWithTwoPeople(): array
+    {
+        $source = $this->source();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        self::assertIsArray($result);
+
+        $person = $input['people'][0];
+        $person['employee']['id'] = 12;
+        $person['employments'][0]['employment'] = ['id' => 102, 'employee_id' => 12];
+        $input['people'][] = $person;
+
+        $resultPerson = $result['people'][0];
+        $resultPerson['employee_id'] = 12;
+        $result['people'][] = $resultPerson;
+
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
+        $this->replaceInput($source, $input);
+
+        return $source;
     }
 
     /** @return array<string,false> */

@@ -39,7 +39,15 @@ describe('PayrollJmhzOrdinaryEvidencePanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)
-    m.get.mockResolvedValue(null)
+    m.get.mockResolvedValue({
+      scopes: [{
+        employee_id: 11,
+        employment_id: 101,
+        employee_name: 'Osoba A',
+        confirmed: false,
+      }],
+      evidences: [],
+    })
     m.confirm.mockResolvedValue({
       id: 31,
       revision_id: 18,
@@ -65,9 +73,47 @@ describe('PayrollJmhzOrdinaryEvidencePanel', () => {
     await button.trigger('click')
     await flushPromises()
 
-    expect(m.confirm).toHaveBeenCalledWith(18, expect.any(String))
+    expect(m.confirm).toHaveBeenCalledWith(18, 101, expect.any(String))
     expect(wrapper.text()).toContain('jmhz_evidence_confirmed')
     expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(0)
+  })
+
+  /**
+   * Regrese: dokud šla evidence potvrdit jen za revizi, firma s víc lidmi
+   * neměla kde potvrdit druhého — panel uměl jednu sadu zaškrtávátek na revizi.
+   */
+  it('nabídne potvrzení za každý pracovní vztah zvlášť a ukáže, komu chybí', async () => {
+    m.get.mockResolvedValue({
+      scopes: [
+        { employee_id: 11, employment_id: 101, employee_name: 'Osoba A', confirmed: false },
+        { employee_id: 12, employment_id: 102, employee_name: 'Osoba B', confirmed: false },
+      ],
+      evidences: [{
+        id: 30,
+        employee_id: 12,
+        employment_id: 102,
+        confirmed_at: '2026-08-13T12:00:00Z',
+        source_manifest_sha256: 'b'.repeat(64),
+      }],
+    })
+    const wrapper = mount(PayrollJmhzOrdinaryEvidencePanel, {
+      props: { runs: [run] as never[] },
+    })
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-test="jmhz-ordinary-evidence-scope"]')).toHaveLength(2)
+    // Potvrzený vztah 102 už zaškrtávátka nemá, chybějící 101 ano.
+    expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(5)
+    expect(wrapper.get('[data-test="jmhz-ordinary-evidence-pending"]').text())
+      .toContain('jmhz_evidence_pending')
+
+    for (const check of wrapper.findAll('input[type="checkbox"]')) {
+      await check.setValue(true)
+    }
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+
+    expect(m.confirm).toHaveBeenCalledWith(18, 101, expect.any(String))
   })
 
   it('v režimu jen pro čtení nepovolí potvrzení', async () => {

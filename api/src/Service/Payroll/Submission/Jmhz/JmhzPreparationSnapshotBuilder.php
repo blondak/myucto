@@ -14,7 +14,8 @@ final class JmhzPreparationSnapshotBuilder
     public const PREVIOUS_BUILDER_VERSION = 'jmhz-preparation-source.v3';
     public const PREVIOUS_V4_BUILDER_VERSION = 'jmhz-preparation-source.v4';
     public const PREVIOUS_V5_BUILDER_VERSION = 'jmhz-preparation-source.v5';
-    public const BUILDER_VERSION = 'jmhz-preparation-source.v6';
+    public const PREVIOUS_V6_BUILDER_VERSION = 'jmhz-preparation-source.v6';
+    public const BUILDER_VERSION = 'jmhz-preparation-source.v7';
 
     private ?JmhzScenario1SelectorResolver $scenarioSelector = null;
 
@@ -24,7 +25,12 @@ final class JmhzPreparationSnapshotBuilder
      * @param array<int,array<string,mixed>> $mappingSources
      * @param list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $sourceIssues
      * @param array<int,array<string,mixed>> $eldpSources
-     * @param array<string,mixed>|null $ordinaryEvidence
+     * @param array<int,array<string,mixed>> $ordinaryEvidenceSources ordinary
+     *        evidence podle `employment_id` — jedna na KAŽDÝ pracovní vztah
+     *        revize, protože se zmrazuje per vztah (viz
+     *        {@see JmhzOrdinaryEvidenceBuilder::build()}). Revize přes dvě
+     *        mzdové účtárny má vždy ≥2 vztahy, takže jediná evidence na revizi
+     *        by víceúčtárenské podání znemožnila.
      */
     public function build(
         int $supplierId,
@@ -34,7 +40,7 @@ final class JmhzPreparationSnapshotBuilder
         array $mappingSources,
         array $sourceIssues = [],
         array $eldpSources = [],
-        ?array $ordinaryEvidence = null,
+        array $ordinaryEvidenceSources = [],
     ): JmhzPreparationSnapshot {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException('Firma musi byt kladne cislo.');
@@ -103,6 +109,7 @@ final class JmhzPreparationSnapshotBuilder
         $normalizedPeople = [];
         $sourceVersions = [];
         $seenEmployments = [];
+        $usedOrdinaryEvidence = [];
         foreach ($this->rows($input['people'] ?? null, 'input.people') as $personIndex => $person) {
             $employee = $this->object($person['employee'] ?? null, "input.people.{$personIndex}.employee");
             $employeeId = $this->positiveInt($employee['id'] ?? null, 'employee.id');
@@ -198,6 +205,36 @@ final class JmhzPreparationSnapshotBuilder
                         $workSummary,
                     );
                 }
+                // Ordinary evidence je stejně jako ELDP zmrazená per vztah:
+                // chybějící evidence je ADRESNÝ nález na vztahu, ne globální
+                // nález na revizi — účetní tak ví, komu ji má doplnit.
+                $ordinary = $ordinaryEvidenceSources[$employmentId] ?? null;
+                if (!is_array($ordinary)) {
+                    $issues[] = $this->issue(
+                        'jmhz_ordinary_evidence_missing',
+                        'employment',
+                        $employmentId,
+                        [
+                            '10116', '10546', '10408', '10409', '10410',
+                            '10347', '10348', '10349', '10270', '10271', '10272',
+                        ],
+                    );
+                    $ordinary = null;
+                } else {
+                    $this->assertOrdinaryEvidence(
+                        $ordinary,
+                        $supplierId,
+                        $runId,
+                        $revisionId,
+                        $revisionNo,
+                        $periodStart,
+                        $periodEnd,
+                        $revision,
+                        $employeeId,
+                        $employmentId,
+                    );
+                    $usedOrdinaryEvidence[$employmentId] = $ordinary;
+                }
                 $componentMappings = [];
                 $earnings = [];
                 foreach ($this->rows($entry['inputs'] ?? null, 'employment.inputs') as $inputRow) {
@@ -290,6 +327,7 @@ final class JmhzPreparationSnapshotBuilder
                     'term' => $term,
                     'scenario_resolution' => $scenarioResolution,
                     'eldp' => is_array($eldp) ? $eldp['payload'] : null,
+                    'ordinary_evidence' => is_array($ordinary) ? $ordinary['payload'] : null,
                     'work_month' => $entry['time_month'] ?? null,
                     'average_earning' => $averageEarning,
                     'earnings_by_attribute_minor' => $earnings,
@@ -362,6 +400,15 @@ final class JmhzPreparationSnapshotBuilder
                     'eldp_snapshot_fingerprint' => is_array($eldp)
                         ? ($eldp['snapshot_fingerprint'] ?? null)
                         : null,
+                    'ordinary_evidence_id' => is_array($ordinary)
+                        ? ($ordinary['id'] ?? null)
+                        : null,
+                    'ordinary_evidence_source_manifest_sha256' => is_array($ordinary)
+                        ? ($ordinary['source_manifest_sha256'] ?? null)
+                        : null,
+                    'ordinary_evidence_snapshot_fingerprint' => is_array($ordinary)
+                        ? ($ordinary['snapshot_fingerprint'] ?? null)
+                        : null,
                     'identity' => $identityVersions,
                     'mappings' => $mappingVersions,
                 ];
@@ -399,28 +446,26 @@ final class JmhzPreparationSnapshotBuilder
                 'Vysledek revize obsahuje jinou mnozinu osob.',
             );
         }
-        if ($ordinaryEvidence === null) {
-            $issues[] = $this->issue(
-                'jmhz_ordinary_evidence_missing',
-                'revision',
-                $revisionId,
-                [
-                    '10116', '10546', '10408', '10409', '10410',
-                    '10347', '10348', '10349', '10270', '10271', '10272',
-                ],
+        // Evidence, která patří k vztahu mimo tuhle revizi, je chyba — ne nález.
+        // Nesmí projít tiše: zmrazila by se příprava s cizí právní skutečností.
+        $foreignEvidence = array_diff_key($ordinaryEvidenceSources, $usedOrdinaryEvidence);
+        if ($foreignEvidence !== []) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_scope_mismatch',
+                'Ordinary evidence patri k pracovnimu vztahu mimo pripravovanou revizi.',
             );
-        } else {
-            $this->assertOrdinaryEvidence(
-                $ordinaryEvidence,
-                $supplierId,
-                $runId,
-                $revisionId,
-                $revisionNo,
-                $periodStart,
-                $periodEnd,
-                $revision,
-                $normalizedPeople,
-            );
+        }
+        ksort($usedOrdinaryEvidence, SORT_NUMERIC);
+        $ordinaryPayloads = [];
+        $ordinaryVersions = [];
+        foreach ($usedOrdinaryEvidence as $employmentId => $ordinary) {
+            $ordinaryPayloads[] = $ordinary['payload'];
+            $ordinaryVersions[] = [
+                'employment_id' => $employmentId,
+                'id' => $ordinary['id'] ?? null,
+                'source_manifest_sha256' => $ordinary['source_manifest_sha256'] ?? null,
+                'snapshot_fingerprint' => $ordinary['snapshot_fingerprint'] ?? null,
+            ];
         }
         $registrations = $this->officeRegistrations(
             $source['offices'] ?? null,
@@ -471,22 +516,12 @@ final class JmhzPreparationSnapshotBuilder
                 'offices' => $registrations,
             ],
             'people' => $normalizedPeople,
-            'ordinary_evidence' => is_array($ordinaryEvidence)
-                ? $ordinaryEvidence['payload']
-                : null,
+            'ordinary_evidence' => $ordinaryPayloads,
             'source_versions' => [
                 'office_id' => is_array($office) ? ($office['id'] ?? null) : null,
                 'office_ids' => array_column($registrations, 'id'),
                 'employments' => $sourceVersions,
-                'ordinary_evidence' => is_array($ordinaryEvidence)
-                    ? [
-                        'id' => $ordinaryEvidence['id'] ?? null,
-                        'source_manifest_sha256' =>
-                            $ordinaryEvidence['source_manifest_sha256'] ?? null,
-                        'snapshot_fingerprint' =>
-                            $ordinaryEvidence['snapshot_fingerprint'] ?? null,
-                    ]
-                    : null,
+                'ordinary_evidence' => $ordinaryVersions,
             ],
             'readiness_issue_codes' => array_column($issues, 'code'),
             'readiness_issues' => $issues,
@@ -608,7 +643,6 @@ final class JmhzPreparationSnapshotBuilder
     /**
      * @param array<string,mixed> $evidence
      * @param array<string,mixed> $revision
-     * @param list<array<string,mixed>> $people
      */
     private function assertOrdinaryEvidence(
         array $evidence,
@@ -619,7 +653,8 @@ final class JmhzPreparationSnapshotBuilder
         string $periodStart,
         string $periodEnd,
         array $revision,
-        array $people,
+        int $employeeId,
+        int $employmentId,
     ): void {
         $this->positiveInt($evidence['id'] ?? null, 'ordinary_evidence.id');
         $this->hash(
@@ -652,14 +687,8 @@ final class JmhzPreparationSnapshotBuilder
                 'Ordinary evidence neodpovida pripravovane mzdove revizi.',
             );
         }
-        if (count($people) !== 1
-            || !is_int($people[0]['employee_id'] ?? null)
-            || !is_array($people[0]['employments'] ?? null)
-            || count($people[0]['employments']) !== 1
-            || !is_int($people[0]['employments'][0]['employment_id'] ?? null)
-            || ($scope['employee_id'] ?? null) !== $people[0]['employee_id']
-            || ($scope['employment_id'] ?? null)
-                !== $people[0]['employments'][0]['employment_id']
+        if (($scope['employee_id'] ?? null) !== $employeeId
+            || ($scope['employment_id'] ?? null) !== $employmentId
         ) {
             $this->invalid(
                 'jmhz_ordinary_evidence_scope_mismatch',

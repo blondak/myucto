@@ -5,8 +5,13 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzOrdinaryEvidenceBuilder;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzOrdinaryEvidenceSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotException;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioRequirementSourceCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
 use PHPUnit\Framework\TestCase;
 
 final class JmhzPreparationSnapshotBuilderTest extends TestCase
@@ -22,7 +27,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
 
         self::assertSame(
-            'payroll-jmhz-preparation-source.v6',
+            'payroll-jmhz-preparation-source.v7',
             $snapshot->payload['schema_reference'],
         );
         self::assertSame('blocked', $snapshot->readiness()['status']);
@@ -641,6 +646,193 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
             $snapshot->payload['employer_summary']['offices'][1]
                 ['social_security_variable_symbol'],
         );
+    }
+
+    /**
+     * Revize se dvěma osobami a evidencí za KAŽDÝ vztah se připraví.
+     *
+     * Bez opravy sem builder vůbec nedošel: `assertOrdinaryEvidence()` končil
+     * `jmhz_ordinary_evidence_scope_mismatch`, protože trval na tom, že revize
+     * má právě jednu osobu s právě jedním vztahem.
+     */
+    public function testTwoPeopleWithTheirOwnOrdinaryEvidenceArePrepared(): void
+    {
+        $source = $this->sourceWithTwoOffices();
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $source,
+            [],
+            [],
+            [],
+            [],
+            [
+                101 => $this->ordinaryEvidenceSource($source, 11, 101, 701),
+                102 => $this->ordinaryEvidenceSource($source, 12, 102, 702),
+            ],
+        );
+
+        self::assertNotContains(
+            'jmhz_ordinary_evidence_missing',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+        // Evidence sedí každá na svůj vztah a nese se deterministicky seřazená.
+        self::assertSame(
+            [101, 102],
+            array_map(
+                static fn (array $payload): int => $payload['scope']['employment_id'],
+                $snapshot->payload['ordinary_evidence'],
+            ),
+        );
+        self::assertSame(
+            [101, 102],
+            array_column($snapshot->payload['source_versions']['ordinary_evidence'], 'employment_id'),
+        );
+        self::assertSame(
+            [701, 702],
+            array_column($snapshot->payload['source_versions']['ordinary_evidence'], 'id'),
+        );
+    }
+
+    /**
+     * Vztah bez evidence je ADRESNÝ nález na vztahu, ne výjimka a ne nález
+     * na revizi — účetní musí vědět, komu evidenci doplnit.
+     */
+    public function testEmploymentWithoutOrdinaryEvidenceIsAnAddressedFinding(): void
+    {
+        $source = $this->sourceWithTwoOffices();
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $source,
+            [],
+            [],
+            [],
+            [],
+            [101 => $this->ordinaryEvidenceSource($source, 11, 101, 701)],
+        );
+
+        $missing = array_values(array_filter(
+            $snapshot->payload['readiness_issues'],
+            static fn (array $issue): bool =>
+                $issue['code'] === 'jmhz_ordinary_evidence_missing',
+        ));
+        self::assertCount(1, $missing);
+        self::assertSame('employment', $missing[0]['entity_type']);
+        self::assertSame(102, $missing[0]['entity_id']);
+        self::assertSame('blocked', $snapshot->readiness()['status']);
+    }
+
+    /** Evidence patřící vztahu mimo revizi je pojmenovaná chyba, ne nález. */
+    public function testOrdinaryEvidenceForAForeignEmploymentIsRejected(): void
+    {
+        $source = $this->sourceWithTwoOffices();
+
+        try {
+            (new JmhzPreparationSnapshotBuilder())->build(
+                7,
+                'test',
+                $source,
+                [],
+                [],
+                [],
+                [],
+                [
+                    101 => $this->ordinaryEvidenceSource($source, 11, 101, 701),
+                    102 => $this->ordinaryEvidenceSource($source, 12, 102, 702),
+                    999 => $this->ordinaryEvidenceSource($source, 13, 999, 703),
+                ],
+            );
+            self::fail('Evidence cizího vztahu musí být odmítnuta.');
+        } catch (JmhzPreparationSnapshotException $exception) {
+            self::assertSame(
+                'jmhz_ordinary_evidence_scope_mismatch',
+                $exception->validationCode,
+            );
+        }
+    }
+
+    /**
+     * Ordinary evidence ve tvaru, v jakém ji do přípravy podává
+     * {@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzOrdinaryEvidenceService::snapshotsForPreparation()}.
+     *
+     * @param array<string,mixed> $source
+     * @return array<string,mixed>
+     */
+    private function ordinaryEvidenceSource(
+        array $source,
+        int $employeeId,
+        int $employmentId,
+        int $id,
+    ): array {
+        $revision = $source['revision'];
+        $catalog = JmhzScenarioRequirementSourceCatalog::load();
+        $requirements = [];
+        foreach ($catalog->requirementsForMatrix('scenario_1') as $requirement) {
+            if (in_array($requirement->attributeId, ['10116', '10546'], true)) {
+                $requirements[$requirement->attributeId] = $requirement->rowHash;
+            }
+        }
+        $interactions = [];
+        foreach (['IN13', 'IN28', 'IN30'] as $interactionId) {
+            $interactions[] = [
+                'interaction_id' => $interactionId,
+                'triggered' => false,
+                'row_sha256' => $catalog->interaction($interactionId)->rowHash,
+            ];
+        }
+
+        return [
+            'id' => $id,
+            'employee_id' => $employeeId,
+            'employment_id' => $employmentId,
+            'source_manifest_sha256' => hash('sha256', "manifest:{$id}"),
+            'snapshot_fingerprint' => hash('sha256', "fingerprint:{$id}"),
+            'payload' => [
+                'schema_reference' => JmhzOrdinaryEvidenceSnapshot::SCHEMA_REFERENCE,
+                'builder_version' => JmhzOrdinaryEvidenceBuilder::BUILDER_VERSION,
+                'scope' => [
+                    'supplier_id' => 7,
+                    'run_id' => $revision['run_id'],
+                    'source_revision_id' => $revision['id'],
+                    'revision_no' => $revision['revision_no'],
+                    'employee_id' => $employeeId,
+                    'employment_id' => $employmentId,
+                    'period_start' => '2026-07-01',
+                    'period_end' => '2026-07-31',
+                    'scenario_key' => 'scenario_1',
+                ],
+                'specification' => [
+                    'package_key' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
+                    'spec_manifest_sha256' => JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
+                    'scenario_catalog_key' => JmhzScenarioRequirementSourceCatalog::CATALOG_KEY,
+                    'scenario_manifest_sha256' => JmhzScenarioRequirementSourceCatalog::MANIFEST_SHA256,
+                    'control_catalog_key' => JmhzControlSourceCatalog::CATALOG_KEY,
+                    'control_manifest_sha256' => JmhzControlSourceCatalog::MANIFEST_SHA256,
+                    'attribute_requirement_row_sha256' => $requirements,
+                ],
+                'source_revision' => [
+                    'input_snapshot_hash' => $revision['input_snapshot_hash'],
+                    'result_snapshot_hash' => $revision['result_snapshot_hash'],
+                    'ruleset_manifest_hash' => $revision['ruleset_manifest_hash'],
+                ],
+                'attribute_values' => ['10116' => false, '10546' => false],
+                'interaction_decisions' => $interactions,
+                'derived_interactions' => [[
+                    'interaction_id' => 'IN36',
+                    'triggered' => false,
+                    'source_attribute_id' => '10546',
+                    'row_sha256' => $catalog->interaction('IN36')->rowHash,
+                ]],
+                'confirmation' => [
+                    'source_kind' => 'explicit_confirmation',
+                    'confirmed_by_user_id' => 12,
+                    'confirmed_at' => '2026-08-13T12:00:00.000000Z',
+                ],
+            ],
+        ];
     }
 
     /**

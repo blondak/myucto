@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPvpojPreview;
@@ -59,16 +60,18 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
     {
         $preparation = $this->preparation();
         $payload = $preparation->payload;
-        $payload['schema_reference'] = 'payroll-jmhz-preparation-source.v5';
+        $payload['schema_reference'] = JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE;
         $payload['builder_version'] = JmhzPreparationSnapshotBuilder::BUILDER_VERSION;
-        $payload['ordinary_evidence'] = [
+        $payload['ordinary_evidence'] = [[
+            'scope' => ['employee_id' => 11, 'employment_id' => 101],
             'attribute_values' => ['10116' => false, '10546' => false],
-        ];
-        $payload['source_versions']['ordinary_evidence'] = [
+        ]];
+        $payload['source_versions']['ordinary_evidence'] = [[
+            'employment_id' => 101,
             'id' => 601,
             'source_manifest_sha256' => str_repeat('4', 64),
             'snapshot_fingerprint' => str_repeat('5', 64),
-        ];
+        ]];
         $preparation = new JmhzVerifiedPreparationSnapshot(
             $preparation->id,
             $preparation->supplierId,
@@ -513,22 +516,38 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
     }
 
     /**
-     * Příprava v6 se dvěma registracemi: employee 11 v účtárně 4,
-     * employee 12 v účtárně 5.
+     * Příprava v7 se dvěma registracemi: employee 11 v účtárně 4,
+     * employee 12 v účtárně 5 — a s ordinary evidencí za KAŽDÝ vztah.
      */
     private function multiOfficePreparation(): JmhzVerifiedPreparationSnapshot
     {
         $preparation = $this->preparation();
         $payload = $preparation->payload;
-        $payload['schema_reference'] = 'payroll-jmhz-preparation-source.v6';
+        $payload['schema_reference'] = JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE;
         $payload['builder_version'] = JmhzPreparationSnapshotBuilder::BUILDER_VERSION;
         $payload['ordinary_evidence'] = [
-            'attribute_values' => ['10116' => false, '10546' => false],
+            [
+                'scope' => ['employee_id' => 11, 'employment_id' => 101],
+                'attribute_values' => ['10116' => false, '10546' => false],
+            ],
+            [
+                'scope' => ['employee_id' => 12, 'employment_id' => 102],
+                'attribute_values' => ['10116' => false, '10546' => false],
+            ],
         ];
         $payload['source_versions']['ordinary_evidence'] = [
-            'id' => 601,
-            'source_manifest_sha256' => str_repeat('4', 64),
-            'snapshot_fingerprint' => str_repeat('5', 64),
+            [
+                'employment_id' => 101,
+                'id' => 601,
+                'source_manifest_sha256' => str_repeat('4', 64),
+                'snapshot_fingerprint' => str_repeat('5', 64),
+            ],
+            [
+                'employment_id' => 102,
+                'id' => 602,
+                'source_manifest_sha256' => str_repeat('6', 64),
+                'snapshot_fingerprint' => str_repeat('7', 64),
+            ],
         ];
         $payload['employer_summary']['office'] = null;
         $payload['employer_summary']['offices'] = [

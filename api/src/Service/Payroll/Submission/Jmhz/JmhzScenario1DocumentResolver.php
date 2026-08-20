@@ -16,8 +16,41 @@ final class JmhzScenario1DocumentResolver
     public const SUPPORTED_BUILDER_VERSIONS = [
         JmhzPreparationSnapshotBuilder::PREVIOUS_V4_BUILDER_VERSION,
         JmhzPreparationSnapshotBuilder::PREVIOUS_V5_BUILDER_VERSION,
+        JmhzPreparationSnapshotBuilder::PREVIOUS_V6_BUILDER_VERSION,
         JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
     ];
+
+    /**
+     * Ordinary evidence přípravy podle `employment_id`.
+     *
+     * Do v6 včetně nesla příprava JEDNU evidenci (objekt), protože se dala
+     * zmrazit jen revize s jedinou osobou a jediným vztahem. Od v7 je to
+     * SEZNAM — jedna evidence na každý vztah revize. Obě čteme, aby dřív
+     * zmrazené přípravy zůstaly zpracovatelné.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function ordinaryEvidenceByEmployment(
+        JmhzVerifiedPreparationSnapshot $preparation,
+    ): array {
+        $raw = $preparation->payload['ordinary_evidence'] ?? null;
+        if (!is_array($raw) || $raw === []) {
+            return [];
+        }
+        $entries = array_is_list($raw) ? $raw : [$raw];
+        $byEmployment = [];
+        foreach ($entries as $entry) {
+            if (!is_array($entry) || array_is_list($entry)) {
+                continue;
+            }
+            $scope = $entry['scope'] ?? null;
+            $employmentId = is_array($scope) ? ($scope['employment_id'] ?? null) : null;
+            if (is_int($employmentId) && $employmentId > 0) {
+                $byEmployment[$employmentId] = $entry;
+            }
+        }
+        return $byEmployment;
+    }
 
     /**
      * @param int|null $officeId mzdová účtárna, za jejíž REGISTRACI u OSSZ se
@@ -76,12 +109,7 @@ final class JmhzScenario1DocumentResolver
         $sourceRevision = $this->object(
             $preparation->payload['source_revision'] ?? null,
         );
-        $ordinaryEvidence = in_array($preparation->builderVersion, [
-            JmhzPreparationSnapshotBuilder::PREVIOUS_V5_BUILDER_VERSION,
-            JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
-        ], true)
-            ? $this->object($preparation->payload['ordinary_evidence'] ?? null)
-            : [];
+        $ordinaryEvidence = $this->ordinaryEvidenceByEmployment($preparation);
         $registration = $this->registration(
             $preparation,
             $officeId,
@@ -109,11 +137,27 @@ final class JmhzScenario1DocumentResolver
         }
 
         $normalizedPeople = [];
+        // Bez osob není co potvrzovat — a hlavně není čím právní skutečnosti
+        // doložit, takže prázdná příprava zůstává blokovaná jako dřív.
+        $ordinaryEvidenceComplete = $people !== [];
         foreach ($people as $person) {
             $employeeId = is_int($person['employee_id'] ?? null)
                 ? $person['employee_id']
                 : null;
             $employments = $this->rows($person['employments'] ?? null);
+            // Ordinary evidence se zmrazuje per pracovní vztah; scénář 1 už výš
+            // blokuje osobu s víc vztahy, takže se bere evidence toho jediného.
+            $personEvidence = [];
+            foreach ($employments as $employmentRow) {
+                $employmentKey = $employmentRow['employment_id'] ?? null;
+                if (is_int($employmentKey) && isset($ordinaryEvidence[$employmentKey])) {
+                    $personEvidence = $ordinaryEvidence[$employmentKey];
+                    break;
+                }
+            }
+            if ($personEvidence === []) {
+                $ordinaryEvidenceComplete = false;
+            }
             if (count($employments) !== 1) {
                 $blockers[] = $this->blocker(
                     'jmhz_scenario1_multiple_employments_unsupported',
@@ -313,9 +357,9 @@ final class JmhzScenario1DocumentResolver
                         $employeeId,
                         $blockers,
                     ),
-                    'deductions_recorded' => $ordinaryEvidence === []
+                    'deductions_recorded' => $personEvidence === []
                         ? null
-                        : ($ordinaryEvidence['attribute_values']['10116'] ?? null),
+                        : ($personEvidence['attribute_values']['10116'] ?? null),
                     'taxpayer_declaration_signed' => $declarationSigned,
                     'advance_tax_czk' => $advanceTaxCzk,
                     'tax_credits_czk' => $taxCreditsCzk,
@@ -392,7 +436,11 @@ final class JmhzScenario1DocumentResolver
             $variableSymbol = $previewSymbol;
         }
 
-        if ($ordinaryEvidence === []) {
+        // Nálezy zůstávají na revizi (ne na osobě): adresnost už nese readiness
+        // přípravy, která chybějící evidenci hlásí na konkrétním vztahu, a tyhle
+        // blockery se do dokumentu kopírují z ní. Tady je to jen pojistka, aby
+        // dokument bez kompletní evidence nikdy neprošel.
+        if (!$ordinaryEvidenceComplete) {
             $blockers[] = $this->blocker(
                 'jmhz_attribute_10116_unresolved',
                 'revision',
@@ -458,10 +506,10 @@ final class JmhzScenario1DocumentResolver
             ],
             'people' => $normalizedPeople,
             'interactions' => [
-                'IN13' => $ordinaryEvidence === [] ? null : false,
-                'IN28' => $ordinaryEvidence === [] ? null : false,
-                'IN30' => $ordinaryEvidence === [] ? null : false,
-                'IN36' => $ordinaryEvidence === [] ? null : false,
+                'IN13' => $ordinaryEvidenceComplete ? false : null,
+                'IN28' => $ordinaryEvidenceComplete ? false : null,
+                'IN30' => $ordinaryEvidenceComplete ? false : null,
+                'IN36' => $ordinaryEvidenceComplete ? false : null,
             ],
         ]);
 
