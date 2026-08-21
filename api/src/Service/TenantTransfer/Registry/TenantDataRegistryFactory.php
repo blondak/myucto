@@ -340,6 +340,7 @@ final class TenantDataRegistryFactory
             ...TenantDataJobCatalog::definitions(),
             ...TenantDataBankMatchingCatalog::definitions(),
             ...TenantDataBankAutomationCatalog::definitions(),
+            ...TenantDataStatementCatalog::definitions(),
             ...TenantDataBusinessCatalog::definitions(),
             ...TenantDataPurchaseOrderCatalog::definitions(),
             ...TenantDataEshopCatalog::definitions(),
