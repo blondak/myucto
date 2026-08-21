@@ -38,11 +38,20 @@ return [
         'locale_default' => 'cs',                    // jazyk UI při prvním načtení (před přihlášením)
     ],
     'epo' => [
-        // Volitelný spravovaný PEM bundle pro ověřování pečeti dodejek EPO.
+        // Spravovaný PEM bundle pro ověřování pečeti dodejek EPO. V ostrém provozu
+        // je POVINNÝ: `confirm()` u produkčního podání vyžaduje platný certifikační
+        // řetězec potvrzenky, a systémový CA store (Mozilla bundle pro TLS) žádnou
+        // českou kvalifikovanou autoritu neobsahuje — ověření by vždy selhalo a
+        // reálně podané hlášení by skončilo ve stavu `uncertain`.
+        // Pečeť EPO vydává I.CA (CN=I.CA EU Qualified CA2/RSA, O=První certifikační
+        // autorita, a.s.); přiložený bundle drží kořeny i podřízené CA I.CA
+        // a PostSignum. Cesta je relativní ke kořeni aplikace.
         // Je-li vyplněn a soubor chybí, ověření selže uzavřeně; jinak se použije systémový CA store.
-        'ca_bundle_path' => '',
+        'ca_bundle_path' => 'api/resources/epo/epo-ca-bundle.pem',
         // SHA-256 otisky právě platných podpisových certifikátů dodejek EPO.
         // Při vyplnění musí sedět jak identita GFŘ v certifikátu, tak jeden z otisků.
+        // Prázdné = kontroluje se jen identita GFŘ a řetězec z bundlu výše.
+        // Otisk produkční pečeti doplňte po prvním úspěšném ostrém podání.
         'receipt_signer_fingerprints_sha256' => [],
         // Sandbox nemá produkční důvěryhodný řetězec, proto je zde shoda s konkrétním
         // SHA-256 otiskem povinná. Bez otisku zůstane testovací dodejka neověřená.

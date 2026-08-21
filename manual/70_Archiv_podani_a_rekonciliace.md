@@ -168,9 +168,20 @@ na osobní trezor. Připojení vyžaduje stejné ověření jako výše. Dokud
 certifikát používá aktivní podpisový profil, nelze ho z trezoru smazat ani
 odebrat z příslušné firmy.
 
-Správce může pro dodejky nastavit vlastní CA bundle v `epo.ca_bundle_path` a
-allowlist SHA-256 otisků podpisových certifikátů EPO v
-`epo.receipt_signer_fingerprints_sha256`. Je-li vlastní bundle nastaven, ale
+Dodejky se ověřují proti CA bundlu z `epo.ca_bundle_path`. Ve výchozí konfiguraci
+míří na `api/resources/epo/epo-ca-bundle.pem`, který se nasazuje spolu s aplikací
+a obsahuje kořeny i podřízené kvalifikované autority I.CA a PostSignum. Pečeť EPO
+vydává I.CA (`CN=I.CA EU Qualified CA2/RSA`, `O=První certifikační autorita, a.s.`).
+
+Systémový CA store se pro tohle použít nedá: bundly pro TLS (Mozilla) žádnou
+českou kvalifikovanou autoritu neobsahují. Ostré podání přitom platný řetězec
+potvrzenky vyžaduje, takže bez bundlu by reálně podané hlášení skončilo ve stavu
+`uncertain` a v Dokumentech by chybělo potvrzení. Stav je z toho zotavitelný —
+potvrzenka zůstává bezpečně uložená a *Obnovit stav* ji po nápravě konfigurace
+znovu ověří a pokus dotáhne do `confirmed`, bez opakovaného podání.
+
+Volitelně lze doplnit allowlist SHA-256 otisků podpisových certifikátů EPO
+v `epo.receipt_signer_fingerprints_sha256`. Je-li bundle nastaven, ale
 není dostupný, ověření selže bezpečně; aplikace nespadne zpět na jiný trust store.
 Pro zkušební prostředí je kvůli testovacímu certifikátu bez produkčního řetězce
 povinný samostatný allowlist
