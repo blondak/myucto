@@ -335,6 +335,7 @@ final class TenantDataRegistryFactory
             ...TenantDataGlobalCatalog::definitions(),
             ...TenantDataSigningCatalog::definitions(),
             ...TenantDataDocumentCatalog::definitions(),
+            ...TenantDataDocumentIntakeCatalog::definitions(),
             ...TenantDataBusinessCatalog::definitions(),
             ...TenantDataPurchaseOrderCatalog::definitions(),
             ...TenantDataEshopCatalog::definitions(),
