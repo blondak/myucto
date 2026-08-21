@@ -17,6 +17,7 @@ use MyInvoice\Service\Auth\WebAuthnConfig;
 use MyInvoice\Service\Ares\SupplierRegistryEnricher;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Config\CfgLocalWriter;
+use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Setup\PasswordSetupLinkIssuer;
 use MyInvoice\Service\Setup\ProvisionTokenGuard;
@@ -52,6 +53,8 @@ final class SetupAction
         // H-01 / H-33 — spravovaný (SaaS) provoz; pro self-hosted instalace no-op.
         private readonly ProvisionTokenGuard $provisionTokens,
         private readonly PasswordSetupLinkIssuer $passwordSetupLinks,
+        // H-02 — ve spravované instalaci drží konfiguraci provozovatel, ne setup.
+        private readonly ManagedModeGuard $managed,
     ) {}
 
     /**
@@ -271,7 +274,14 @@ final class SetupAction
         if ($methodsProvided || $usesLegacyRequest) {
             $keysToWrite['auth.allowed_mfa_methods'] = $allowedMfaMethods;
         }
-        if ($willWriteDetectedUrl) {
+        // ⚠️ Ve spravované instalaci `app.url` NEZAPISUJEME, i kdyby v konfiguraci
+        // chybělo. Vlastní ho provisioning šablona a musí být správně dřív, než na
+        // instanci dorazí první požadavek — visí na něm tenantový host gate.
+        // Kdybychom sem dopsali hodnotu odvozenou z požadavku (například když nám
+        // setup projde přes IP nebo přes interní jméno), gate bychom instanci
+        // zamkli na adresu, na kterou zákazník nikdy nepřijde. Chybějící `app.url`
+        // je v tomhle režimu chyba zřízení a má se řešit tam, ne přepsat naslepo.
+        if ($willWriteDetectedUrl && !$this->managed->isLocked(ManagedModeGuard::KEY_APP_URL)) {
             $keysToWrite['app.url'] = $detectedUrl;
         }
         $cfgLocalWritten = false;
