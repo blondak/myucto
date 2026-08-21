@@ -100,6 +100,7 @@ final class TenantDataSigningCatalog
                             'strategy' => 'polymorphic_tenant_entity',
                             'type_column' => 'entity_type',
                             'id_column' => 'entity_id',
+                            'unknown_value' => 'block',
                             'targets' => [
                                 'invoice' => 'invoices',
                                 'work_report' => 'work_reports',

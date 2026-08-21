@@ -22,12 +22,16 @@ final readonly class TenantSchemaTableInventory
     /** @var list<string> */
     public array $nullableColumns;
 
+    /** @var array<string,list<string>> */
+    public array $enumValues;
+
     /**
      * @param array<mixed> $columns
      * @param array<mixed> $primaryKey
      * @param array<mixed> $foreignKeys
      * @param array<mixed> $uniqueKeys
      * @param array<mixed> $nullableColumns
+     * @param array<mixed> $enumValues
      */
     public function __construct(
         public string $name,
@@ -37,6 +41,7 @@ final readonly class TenantSchemaTableInventory
         array $foreignKeys,
         array $uniqueKeys = [],
         array $nullableColumns = [],
+        array $enumValues = [],
     ) {
         if (preg_match('/^[a-z][a-z0-9_]{0,63}$/D', $name) !== 1) {
             throw new \InvalidArgumentException('Inventura obsahuje neplatný název tabulky.');
@@ -165,5 +170,37 @@ final readonly class TenantSchemaTableInventory
             $validatedNullable[] = $column;
         }
         $this->nullableColumns = $validatedNullable;
+
+        $validatedEnums = [];
+        foreach ($enumValues as $column => $values) {
+            if (!is_string($column)
+                || !in_array($column, $validated, true)
+            ) {
+                throw new \InvalidArgumentException(
+                    'ENUM hodnoty inventury odkazují na neznámý sloupec.',
+                );
+            }
+            if (!is_array($values)
+                || !array_is_list($values)
+                || $values === []
+            ) {
+                throw new \InvalidArgumentException(
+                    'Inventura obsahuje neplatný seznam ENUM hodnot.',
+                );
+            }
+            $seenValues = [];
+            $validatedValues = [];
+            foreach ($values as $value) {
+                if (!is_string($value) || isset($seenValues[$value])) {
+                    throw new \InvalidArgumentException(
+                        'Inventura obsahuje neplatný seznam ENUM hodnot.',
+                    );
+                }
+                $seenValues[$value] = true;
+                $validatedValues[] = $value;
+            }
+            $validatedEnums[$column] = $validatedValues;
+        }
+        $this->enumValues = $validatedEnums;
     }
 }

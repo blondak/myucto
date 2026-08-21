@@ -106,6 +106,138 @@ final class TenantDataRegistryCoverageValidatorTest extends TestCase
         );
     }
 
+    public function testFileAreaCoverageParticipatesInRegistryValidation(): void
+    {
+        $files = new TenantDataDefinition(
+            'file_area:documents',
+            TenantDataObjectKind::FileArea,
+            TenantDataPolicy::TenantOwnedIndirect,
+            [TenantDataRegistry::TRANSFER_PROFILE],
+            [
+                'source' => [
+                    'base' => 'runtime_paths.storage',
+                    'relative_root' => 'documents',
+                    'path_strategy' => 'template_from_columns',
+                    'path_template' => 'sup-{supplier_id}/{filename}',
+                    'row_references' => [[
+                        'table' => 'supplier',
+                        'columns' => ['ghost_filename'],
+                        'include_when' => 'all_rows',
+                    ]],
+                    'require_relative_path' => true,
+                    'containment' => 'case_insensitive',
+                    'outside_symlink' => 'reject',
+                ],
+                'target' => [
+                    'strategy' => 'regenerate_from_mapped_ids',
+                    'template' => 'documents/sup-{supplier_id}/{filename}',
+                    'posix_mode' => '0600',
+                    'windows_acl' => 'owner_only',
+                ],
+                'validation' => ['content_hash' => 'sha256'],
+            ],
+        );
+
+        self::assertSame(
+            [
+                'file_area_reference_column_missing:'
+                    . 'file_area:documents.supplier.ghost_filename',
+            ],
+            (new TenantDataRegistryCoverageValidator())->issues(
+                $this->registry([
+                    $this->definition('supplier'),
+                    $files,
+                ]),
+                [new TenantSchemaTableInventory(
+                    'supplier',
+                    'BASE TABLE',
+                    ['id'],
+                    ['id'],
+                    [],
+                    [['id']],
+                )],
+            ),
+        );
+    }
+
+    public function testMixedOwnershipAndCodeReferencesParticipate(): void
+    {
+        $providers = new TenantDataDefinition(
+            'table:bank_email_notice_providers',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::TRANSFER_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'ownership' => [
+                    'strategy' => 'supplier_id_or_global_reference',
+                    'column' => 'supplier_id',
+                    'tenant_rows' => 'transfer',
+                    'global_rows' => [
+                        'selector' => 'supplier_id_is_null',
+                        'mapping' => [
+                            'strategy' => 'natural_key',
+                            'keys' => ['code'],
+                            'values' => [
+                                'strategy' => 'require_equal',
+                                'columns' => ['parser_type'],
+                            ],
+                            'missing' => 'block',
+                            'ambiguous' => 'block',
+                        ],
+                    ],
+                ],
+                'secrets' => [],
+                'code_references' => [
+                    'parser_type' => [
+                        'strategy' => 'application_registry_code',
+                        'registry' => 'bank_email_notice_parsers',
+                        'unknown_value' => 'preserve',
+                        'null_value' => 'forbid',
+                    ],
+                ],
+            ],
+        );
+
+        self::assertSame(
+            [
+                'code_reference_unknown_value_not_blocked:'
+                    . 'bank_email_notice_providers.parser_type',
+                'mixed_global_mapping_not_unique:'
+                    . 'bank_email_notice_providers',
+            ],
+            (new TenantDataRegistryCoverageValidator())->issues(
+                $this->registry([
+                    $this->definition('supplier'),
+                    $providers,
+                ]),
+                [
+                    new TenantSchemaTableInventory(
+                        'supplier',
+                        'BASE TABLE',
+                        ['id'],
+                        ['id'],
+                        [],
+                        [['id']],
+                    ),
+                    new TenantSchemaTableInventory(
+                        'bank_email_notice_providers',
+                        'BASE TABLE',
+                        ['id', 'supplier_id', 'code', 'parser_type'],
+                        ['id'],
+                        [new TenantSchemaForeignKeyInventory(
+                            'supplier_id',
+                            'supplier',
+                            'id',
+                        )],
+                        [['id']],
+                        ['supplier_id'],
+                    ),
+                ],
+            ),
+        );
+    }
+
     public function testOwnershipSelectorsAreCheckedAgainstActualColumns(): void
     {
         $registry = $this->registry([

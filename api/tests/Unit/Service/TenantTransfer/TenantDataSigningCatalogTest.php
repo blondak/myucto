@@ -197,6 +197,12 @@ final class TenantDataSigningCatalogTest extends TestCase
             $definitions['signing_credentials']->details['post_import']
                 ?? null,
         );
+        self::assertSame(
+            'block',
+            $definitions['signature_document_overrides']
+                ->details['soft_references']['entity']['unknown_value']
+                ?? null,
+        );
     }
 
     public function testTenantCertificateFilesStayUnderRuntimeStorage(): void

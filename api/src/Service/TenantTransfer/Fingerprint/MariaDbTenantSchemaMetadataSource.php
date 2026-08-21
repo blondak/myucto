@@ -32,7 +32,7 @@ final class MariaDbTenantSchemaMetadataSource implements TenantSchemaMetadataSou
             $rows = $this->rows(
                 $pdo,
                 'SELECT t.TABLE_NAME, t.TABLE_TYPE, c.COLUMN_NAME,
-                        c.ORDINAL_POSITION, c.IS_NULLABLE
+                        c.ORDINAL_POSITION, c.IS_NULLABLE, c.COLUMN_TYPE
                    FROM information_schema.TABLES t
                    JOIN information_schema.COLUMNS c
                      ON c.TABLE_SCHEMA = t.TABLE_SCHEMA
@@ -53,6 +53,7 @@ final class MariaDbTenantSchemaMetadataSource implements TenantSchemaMetadataSou
                         'foreign_keys' => [],
                         'unique_keys' => [],
                         'nullable_columns' => [],
+                        'enum_values' => [],
                     ];
                 } elseif ($tables[$name]['type'] !== $type) {
                     throw new TenantSchemaUnavailable(
@@ -64,6 +65,12 @@ final class MariaDbTenantSchemaMetadataSource implements TenantSchemaMetadataSou
                 $tables[$name]['columns'][] = $column;
                 if (self::yesNo($row, 'IS_NULLABLE')) {
                     $tables[$name]['nullable_columns'][] = $column;
+                }
+                $enumValues = self::enumValues(
+                    self::text($row, 'COLUMN_TYPE'),
+                );
+                if ($enumValues !== null) {
+                    $tables[$name]['enum_values'][$column] = $enumValues;
                 }
             }
             if ($tables === []) {
@@ -166,6 +173,7 @@ final class MariaDbTenantSchemaMetadataSource implements TenantSchemaMetadataSou
                     $table['primary_key'],
                     $table['foreign_keys'],
                     $table['nullable_columns'],
+                    $table['enum_values'],
                 )) {
                     throw new TenantSchemaUnavailable(
                         'invalid_schema_inventory',
@@ -180,6 +188,7 @@ final class MariaDbTenantSchemaMetadataSource implements TenantSchemaMetadataSou
                     $table['foreign_keys'],
                     $table['unique_keys'],
                     $table['nullable_columns'],
+                    $table['enum_values'],
                 );
             }
             return $inventory;
@@ -579,5 +588,25 @@ final class MariaDbTenantSchemaMetadataSource implements TenantSchemaMetadataSou
             );
         }
         return $value === 'YES';
+    }
+
+    /** @return list<string>|null */
+    private static function enumValues(string $columnType): ?array
+    {
+        if (preg_match('/^enum\((.*)\)$/isD', $columnType, $matches) !== 1) {
+            return null;
+        }
+        $parsed = str_getcsv($matches[1], ',', "'", '\\');
+        $values = [];
+        foreach ($parsed as $value) {
+            if (!is_string($value)) {
+                throw new TenantSchemaUnavailable(
+                    'invalid_schema_inventory',
+                    'Databázové schéma obsahuje neplatnou definici ENUM.',
+                );
+            }
+            $values[] = $value;
+        }
+        return $values;
     }
 }

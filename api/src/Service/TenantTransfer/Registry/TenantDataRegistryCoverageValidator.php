@@ -9,6 +9,32 @@ use MyInvoice\Service\TenantTransfer\Fingerprint\TenantSchemaTableInventory;
 /** Fail-closed kontrola úplnosti tabulek a politik citlivých sloupců. */
 final class TenantDataRegistryCoverageValidator
 {
+    private readonly TenantDataFileAreaCoverageValidator $fileAreas;
+    private readonly TenantDataSoftReferenceCoverageValidator $softReferences;
+    private readonly TenantDataConditionalActorCoverageValidator
+        $conditionalActors;
+    private readonly TenantDataMixedOwnershipCoverageValidator $mixedOwnership;
+    private readonly TenantDataCodeReferenceCoverageValidator $codeReferences;
+
+    public function __construct(
+        ?TenantDataFileAreaCoverageValidator $fileAreas = null,
+        ?TenantDataSoftReferenceCoverageValidator $softReferences = null,
+        ?TenantDataConditionalActorCoverageValidator $conditionalActors = null,
+        ?TenantDataMixedOwnershipCoverageValidator $mixedOwnership = null,
+        ?TenantDataCodeReferenceCoverageValidator $codeReferences = null,
+    ) {
+        $this->fileAreas = $fileAreas
+            ?? new TenantDataFileAreaCoverageValidator();
+        $this->softReferences = $softReferences
+            ?? new TenantDataSoftReferenceCoverageValidator();
+        $this->conditionalActors = $conditionalActors
+            ?? new TenantDataConditionalActorCoverageValidator();
+        $this->mixedOwnership = $mixedOwnership
+            ?? new TenantDataMixedOwnershipCoverageValidator();
+        $this->codeReferences = $codeReferences
+            ?? new TenantDataCodeReferenceCoverageValidator();
+    }
+
     /** @param array<mixed> $inventory */
     public function assertComplete(
         TenantDataRegistry $registry,
@@ -41,8 +67,10 @@ final class TenantDataRegistryCoverageValidator
 
         $tables = $this->validatedInventory($inventory);
         $definitions = [];
+        $fileAreas = [];
         foreach ($registry->definitionsFor($profile) as $definition) {
-            if ($definition->kind !== TenantDataObjectKind::Table) {
+            if ($definition->kind === TenantDataObjectKind::FileArea) {
+                $fileAreas[] = $definition;
                 continue;
             }
             if (!str_starts_with($definition->key, 'table:')) {
@@ -81,10 +109,28 @@ final class TenantDataRegistryCoverageValidator
                     $table,
                     $definitions,
                 ),
+                ...$this->softReferences->issues(
+                    $definition,
+                    $table,
+                    $tables,
+                    $definitions,
+                ),
+                ...$this->codeReferences->issues($definition, $table),
+                ...$this->conditionalActors->issues($definition, $table),
             );
         }
         foreach (array_diff(array_keys($definitions), array_keys($tables)) as $tableName) {
             $issues[] = 'registered_table_missing:' . $tableName;
+        }
+        foreach ($fileAreas as $fileArea) {
+            array_push(
+                $issues,
+                ...$this->fileAreas->issues(
+                    $fileArea,
+                    $tables,
+                    $definitions,
+                ),
+            );
         }
 
         sort($issues, SORT_STRING);
@@ -147,11 +193,9 @@ final class TenantDataRegistryCoverageValidator
                 'selected_supplier',
                 'id',
             ),
-            TenantDataPolicy::TenantOwned => $this->directOwnershipIssues(
+            TenantDataPolicy::TenantOwned => $this->tenantOwnedIssues(
                 $definition,
                 $table,
-                'supplier_id',
-                'supplier_id',
             ),
             TenantDataPolicy::TenantOwnedIndirect => $this->indirectOwnershipIssues(
                 $definition,
@@ -178,6 +222,26 @@ final class TenantDataRegistryCoverageValidator
                 $definitions,
             ),
         };
+    }
+
+    /** @return list<string> */
+    private function tenantOwnedIssues(
+        TenantDataDefinition $definition,
+        TenantSchemaTableInventory $table,
+    ): array {
+        $ownership = $definition->details['ownership'] ?? null;
+        if (is_array($ownership)
+            && ($ownership['strategy'] ?? null)
+                === 'supplier_id_or_global_reference'
+        ) {
+            return $this->mixedOwnership->issues($definition, $table);
+        }
+        return $this->directOwnershipIssues(
+            $definition,
+            $table,
+            'supplier_id',
+            'supplier_id',
+        );
     }
 
     /** @return list<string> */
