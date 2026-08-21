@@ -27,6 +27,15 @@ final class LicenseClient
 {
     private readonly LoggerInterface $logger;
 
+    /**
+     * Kolik čekat na volání, které STRHÁVÁ z karty.
+     *
+     * Víc než u ostatních: server při něm jde na platební bránu a hned
+     * vystavuje doklad. Marné čekání tady nestojí jen čas — uživatel dostane
+     * „nevíme, jak platba dopadla", i když peníze odešly.
+     */
+    private const CHARGE_TIMEOUT = 25;
+
     public function __construct(
         private readonly Config $config,
         ?LoggerInterface $logger = null,
@@ -133,7 +142,10 @@ final class LicenseClient
 
     /**
      * Navýšení počtu uživatelů (in-place) — strhne poměrný doplatek z uložené karty.
-     * Delší timeout (10 s) — jde o platbu, server může čekat na platební bránu.
+     *
+     * ⚠️ Delší timeout: server v jednom požadavku strhne z karty A vystaví
+     * doklad. Když se vystavení zdrží, kratší čekání by skončilo hláškou
+     * „nevíme, jak platba dopadla" u platby, která proběhla.
      *
      * @return array<string,mixed> {ok,new_users,amount_charged} / {error}
      * @throws LicenseNetworkException
@@ -143,7 +155,7 @@ final class LicenseClient
         return $this->post('/api/license/upgrade', [
             'license_key' => $licenseKey,
             'users'       => $users,
-        ], 10);
+        ], self::CHARGE_TIMEOUT);
     }
 
     /**
@@ -168,7 +180,7 @@ final class LicenseClient
 
     /**
      * Rozšíření úložiště — strhne poměrný doplatek z uložené karty.
-     * Delší timeout (10 s) jako u navýšení míst: server čeká na platební bránu.
+     * Delší timeout jako u navýšení míst — viz {@see upgrade()}.
      *
      * @return array<string,mixed> {ok,new_quota_gb,amount_charged,provisioning_pending} / {error}
      * @throws LicenseNetworkException
@@ -178,7 +190,7 @@ final class LicenseClient
         return $this->post('/api/license/quota', [
             'license_key' => $licenseKey,
             'quota_gb'    => $quotaGb,
-        ], 10);
+        ], self::CHARGE_TIMEOUT);
     }
 
     /**

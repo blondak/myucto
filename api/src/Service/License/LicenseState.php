@@ -26,6 +26,18 @@ final class LicenseState
     public const BLOCK_NO_LICENSE = 'no_license';
     public const BLOCK_SEAT_LIMIT = 'seat_limit';
 
+    /**
+     * Kolik uživatelů s právem zápisu unese instalace BEZ licence.
+     *
+     * Jeden — živnostník nebo firma, která si vede fakturaci sama. Druhý
+     * uživatel už znamená víc lidí nad jedněmi daty a to je placená funkce.
+     *
+     * ⚠️ Nepočítají se sem účty s právem jen pro čtení ani klientské účty:
+     * ty licenční místo nezabírají a jde jich založit kolik je potřeba
+     * ({@see \MyInvoice\Action\Admin\UserAdminAction::roleCountsAsSeat()}).
+     */
+    public const FREE_SEATS = 1;
+
     public function __construct(
         public readonly string $state,
         public readonly string $instanceId,
@@ -132,13 +144,15 @@ final class LicenseState
         if ($this->state === self::TRIAL) {
             return null;
         }
-        // ⚠️ Bez platné licence jen účty pro čtení. Provozní uživatel je
-        // placené místo — po skončení zkušební doby nebo předplatného tedy
-        // nový nevznikne, ale STÁVAJÍCÍ uživatelé pracují dál. Zamykat lidem
-        // přístup do jejich vlastních dat by bylo něco úplně jiného než
-        // neprodat další místo.
+        // ⚠️ Bez platné licence JEDEN uživatel s právem zápisu, dál už jen
+        // účty pro čtení. Druhý zapisující uživatel znamená víc lidí nad
+        // jedněmi daty a to je placená funkce.
+        //
+        // STÁVAJÍCÍ uživatelé pracují dál i nad tímhle počtem — po vypršení
+        // licence se nikomu nezamyká přístup do jeho vlastních dat, jen se
+        // neprodá další místo.
         if (!$this->licenseLive()) {
-            return self::BLOCK_NO_LICENSE;
+            return $this->usersActive < self::FREE_SEATS ? null : self::BLOCK_NO_LICENSE;
         }
         if ($this->state === self::ACTIVE) {
             return ($this->usersLicensed <= 0 || $this->usersActive < $this->usersLicensed)

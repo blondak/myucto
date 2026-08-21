@@ -49,12 +49,31 @@ final class LicenseStateTest extends TestCase
      * ({@see \MyInvoice\Action\Admin\UserAdminAction::roleCountsAsSeat()}).
      * Stávající uživatelé pracují dál; blokuje se jen přírůstek.
      */
-    public function testExpiredLicenseBlocksNewSeatUsers(): void
+    public function testExpiredLicenseBlocksSeatUsersBeyondTheFreeOne(): void
     {
         foreach ([LicenseState::TRIAL_EXPIRED, LicenseState::DEGRADED] as $kind) {
             $s = $this->state($kind, maxCompanies: 1, usersLicensed: 1, usersActive: 99, companiesActive: 99);
             self::assertFalse($s->allowsNewUser(), $kind);
             self::assertSame(LicenseState::BLOCK_NO_LICENSE, $s->newUserBlockReason(), $kind);
+        }
+    }
+
+    /**
+     * ⚠️ Jeden zapisující uživatel je zdarma — teprve druhý se platí.
+     *
+     * Bez téhle výjimky by instalace, která přišla o licenci a zároveň
+     * nemá žádného aktivního uživatele (odešel jediný admin), nešla vůbec
+     * zprovoznit: nový by se nedal založit a starý neexistuje.
+     */
+    public function testFirstWriteUserIsFreeWithoutLicense(): void
+    {
+        foreach ([LicenseState::TRIAL_EXPIRED, LicenseState::DEGRADED] as $kind) {
+            self::assertNull($this->state($kind, usersActive: 0)->newUserBlockReason(), $kind . ': první je zdarma');
+            self::assertSame(
+                LicenseState::BLOCK_NO_LICENSE,
+                $this->state($kind, usersActive: LicenseState::FREE_SEATS)->newUserBlockReason(),
+                $kind . ': druhý už se platí',
+            );
         }
     }
 
@@ -167,7 +186,7 @@ final class LicenseStateTest extends TestCase
      */
     public function testBlockReasonsAreDistinguishable(): void
     {
-        $noLicense = $this->state(LicenseState::DEGRADED, usersLicensed: 1, usersActive: 0);
+        $noLicense = $this->state(LicenseState::DEGRADED, usersLicensed: 1, usersActive: LicenseState::FREE_SEATS);
         $seatsFull = $this->state(LicenseState::ACTIVE, usersLicensed: 2, usersActive: 2);
 
         self::assertSame(LicenseState::BLOCK_NO_LICENSE, $noLicense->newUserBlockReason());
