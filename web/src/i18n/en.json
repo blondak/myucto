@@ -26,6 +26,7 @@
         "panel_number": "Panel {number}",
         "resize_panels": "Resize panels",
         "close_content": "Close panel content",
+        "close_panel": "Close panel",
         "drop_link_here": "Open link in this panel",
         "drag_row": "Drag to another panel"
     },

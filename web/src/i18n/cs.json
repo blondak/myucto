@@ -26,6 +26,7 @@
         "panel_number": "Panel {number}",
         "resize_panels": "Změnit šířku panelů",
         "close_content": "Zavřít obsah panelu",
+        "close_panel": "Zavřít panel",
         "drop_link_here": "Otevřít odkaz v tomto panelu",
         "drag_row": "Přetáhnout do jiného panelu"
     },
