@@ -12,6 +12,17 @@ export interface LicenseSummary {
   /** Doživotní licence — neomezená platnost (valid_until je jen TTL tokenu). */
   perpetual: boolean
   commercial_features: boolean
+  /**
+   * Stav předplatného na licenčním serveru, ne stav licence.
+   *
+   * Licence může být pořád platná, a přitom je zákazník po splatnosti: token
+   * doběhne až na konci zaplaceného období. Bez toho by se výzva k úhradě
+   * objevila teprve ve chvíli, kdy se komerční moduly zavřou.
+   *
+   * `null` = server stav neposlal (starší instalace, nebo se instalace ještě
+   * nedovolala) — není to „zaplaceno".
+   */
+  subscription_state: string | null
   /** Počty pro overage banner — kolik aktivních vs. licencováno. */
   users_active: number
   users_licensed: number

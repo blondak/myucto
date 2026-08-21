@@ -118,6 +118,18 @@ final class LicenseState
             'last_check_at'   => $this->lastCheckAt,
             'last_check_ok'   => $this->lastCheckOk,
             'commercial_features' => $this->hasCommercialFeatures(),
+            // ⚠️ Stav předplatného, ne jen stav licence.
+            //
+            // Licence může být pořád platná, a přitom má zákazník po splatnosti:
+            // token doběhne až na konci zaplaceného období. Bez tohohle pole by
+            // se výzva k úhradě objevila teprve ve chvíli, kdy se komerční
+            // moduly zavřou — tedy až když je pozdě.
+            //
+            // Nese se jen stav, žádná částka ani číslo dokladu: aplikace o nich
+            // nic neví a vědět nepotřebuje.
+            'subscription_state'  => isset($this->subscription['state'])
+                ? (string) $this->subscription['state']
+                : null,
             'buy_url'         => $buyUrl,
             // Stav předplatného ze serveru: {state, period, auto_renew, next_charge_at,
             // cancelled_at, valid_until}. null = licence se automaticky neprodlužuje

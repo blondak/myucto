@@ -39,6 +39,11 @@ const reasons = computed<InstanceAlertReason[]>(() => resolveInstanceAlerts({
   managed: auth.isManagedInstallation,
   storageExhausted: storageQuota.isCriticallyExhausted.value,
   licenseState: auth.license?.state ?? null,
+  // ⚠️ Stav předplatného, ne jen licence. Licence může být pořád platná,
+  // a přitom je zákazník po splatnosti — token doběhne až na konci
+  // zaplaceného období. Bez tohohle by se výzva k úhradě objevila teprve
+  // ve chvíli, kdy se komerční moduly zavřou, tedy až když je pozdě.
+  subscriptionState: auth.license?.subscription_state ?? null,
 }))
 
 const visible = computed(() => reasons.value.length > 0)
