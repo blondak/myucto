@@ -609,7 +609,9 @@
         "eshop_locales": "Jazyky",
         "eshop_currencies": "Měny",
         "instance_export": "Kompletní export dat",
-        "hosting": "Hosting"
+        "hosting": "Hosting",
+        "attention_danger": "Vyžaduje řešení",
+        "attention_warning": "Vyžaduje pozornost"
     },
     "instance_alert": {
         "storage_exhausted_title": "Instalace nepřijímá nové zápisy",
@@ -724,6 +726,16 @@
             "label_suspended": "Provoz pozastaven",
             "label_expired": "Předplatné vypršelo",
             "label_cancelled": "Obnova zrušena"
+        },
+        "action": {
+            "storage_exhausted_title": "Místo došlo — nic se neuloží",
+            "storage_exhausted_hint": "Zaplacený prostor je plný ({percent} %), takže nový doklad, příloha ani import neprojdou. Uvolněte místo, nebo si prostor rozšiřte.",
+            "storage_exhausted_pending_hint": "Zaplacený prostor je plný ({percent} %), takže se zatím nic neuloží. Rozšíření je zaplacené a zavádíme ho — jakmile naběhne, zápis se obnoví sám.",
+            "storage_low_title": "Místo dochází",
+            "storage_low_hint": "Obsazeno {percent} %. Rozšiřte prostor dřív, než vás zastaví uprostřed práce.",
+            "storage_provisioning_title": "Rozšíření místa se zavádí",
+            "storage_provisioning_hint": "Rozšíření na {gb} GB je zaplacené a právě ho zavádíme. Objednávat ho znovu netřeba.",
+            "storage_provisioning_hint_nogb": "Zaplacené rozšíření právě zavádíme. Objednávat ho znovu netřeba."
         }
     },
     "payroll": {

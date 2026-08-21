@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { crmApi, type ActionItem, type ActionItemsResult } from '@/api/crm'
 import { apiErrorMessage } from '@/api/errors'
+import { ensureInstanceStatus, instanceStatus } from '@/api/instanceStatus'
+import { resolveHostingActions, type HostingActionSeverity } from '@/api/hostingActions'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -13,6 +15,44 @@ const toast = useToast()
 
 const actionItems = ref<ActionItemsResult | null>(null)
 const openMenuIdx = ref<number | null>(null)
+
+/**
+ * Provoz instalace — nahoře a barevně.
+ *
+ * Proč mimo seznam ze serveru: tyhle položky nejsou úkoly z účetnictví, které
+ * si jde odložit na příště. Neuhrazená platba a zaplněný disk jsou stavy, které
+ * uživateli něco ZAVÍRAJÍ, takže se nedají odkliknout ani odložit — a musí být
+ * první, protože když nejde zaplatit, je jedno, kolik faktur čeká na zaúčtování.
+ *
+ * ⚠️ Na self-hosted instalaci je seznam prázdný a nevykreslí se ani řádek;
+ * `instanceStatus` tam nic nenačte (viz `ensureInstanceStatus`).
+ */
+const hostingItems = computed(() => resolveHostingActions(instanceStatus.instance.value))
+
+watch(
+  () => [auth.isManagedInstallation, auth.isSuperadmin] as const,
+  ([managed, superadmin]) => { void ensureInstanceStatus({ managed, superadmin }) },
+  { immediate: true },
+)
+
+/** Barvy podle závažnosti. `info` je oznámení, ne poplach — proto brand, ne jantar. */
+const HOSTING_TONE: Record<HostingActionSeverity, { row: string; dot: string; title: string }> = {
+  high:   { row: 'bg-danger-50 border-l-4 border-danger-500',      dot: 'bg-danger-500',  title: 'text-danger-600' },
+  medium: { row: 'bg-warning-50 border-l-4 border-warning-500',    dot: 'bg-warning-500', title: 'text-warning-600' },
+  info:   { row: 'bg-primary-50/60 border-l-4 border-primary-400', dot: 'bg-primary-400', title: 'text-primary-800' },
+}
+
+/** Termín se formátuje až tady; `null` znamená, že v textu žádný nebude. */
+function hostingHint(item: { hintKey: string; at: number | null; percent: number | null; quotaGb: number | null }): string {
+  return t(item.hintKey, {
+    date: item.at === null ? '' : new Date(item.at * 1000).toLocaleDateString(),
+    percent: item.percent === null ? '' : new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(item.percent),
+    gb: item.quotaGb ?? '',
+  })
+}
+
+/** Kolik toho celkem čeká — hostingové položky se počítají taky. */
+const totalCount = computed(() => (actionItems.value?.total ?? 0) + hostingItems.value.length)
 
 function toggleMenu(idx: number) {
   openMenuIdx.value = openMenuIdx.value === idx ? null : idx
@@ -91,20 +131,38 @@ onMounted(async () => {
   <!-- Pozor: kontejner NESMÍ mít `overflow-hidden`. Nabídka odložení je `absolute`
        uvnitř řádku, takže u posledního řádku přesahuje pod kartu a `overflow-hidden`
        ji uřízne. Zaoblení proto drží přímo hlavička a poslední řádek. -->
-  <div v-if="actionItems && actionItems.total > 0" class="bg-surface-raised border border-primary-500/25 rounded-xl shadow-md">
+  <div v-if="totalCount > 0" class="bg-surface-raised border border-primary-500/25 rounded-xl shadow-md">
     <header class="px-5 py-3.5 border-b border-neutral-200 flex items-center justify-between gap-3 bg-gradient-to-r from-primary-50 to-surface rounded-t-xl">
       <h3 class="flex items-center gap-2 text-[13px] font-semibold uppercase tracking-[0.12em] text-primary-700">
         <span aria-hidden="true">⚡</span>
         {{ t('crm.action_items.title') }}
-        <span class="inline-flex items-center justify-center min-w-5 h-5 px-1.5 bg-primary-600 text-white rounded-full text-xs font-semibold tabular-nums">{{ actionItems.total }}</span>
+        <span class="inline-flex items-center justify-center min-w-5 h-5 px-1.5 bg-primary-600 text-white rounded-full text-xs font-semibold tabular-nums">{{ totalCount }}</span>
       </h3>
-      <button v-if="actionItems.dismissed_count > 0 && auth.canWrite('dashboard')" type="button" @click="restoreAllDismissed"
+      <button v-if="actionItems && actionItems.dismissed_count > 0 && auth.canWrite('dashboard')" type="button" @click="restoreAllDismissed"
         class="text-xs text-neutral-500 hover:text-primary-600 underline decoration-dotted">
         {{ t('crm.action_items.restore_n', { n: actionItems.dismissed_count }) }}
       </button>
     </header>
     <div class="divide-y divide-neutral-100">
-      <div v-for="(item, idx) in actionItems.items" :key="idx"
+      <!-- ═══ Provoz instalace — vždy první a barevně ═══
+           ⚠️ Bez nabídky odložení: neuhrazená platba ani plný disk nejsou úkol,
+           který jde odsunout na příště, a zaváděné rozšíření není výzva k nákupu. -->
+      <RouterLink
+        v-for="hosting in hostingItems" :key="hosting.kind"
+        :to="hosting.link"
+        class="flex items-center gap-3 px-5 py-3 hover:brightness-[0.98]"
+        :class="HOSTING_TONE[hosting.severity].row"
+        :data-hosting-action="hosting.kind"
+      >
+        <span class="inline-block w-2.5 h-2.5 rounded-full shrink-0" :class="HOSTING_TONE[hosting.severity].dot"></span>
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-semibold" :class="HOSTING_TONE[hosting.severity].title">{{ t(hosting.titleKey) }}</div>
+          <div class="text-xs text-neutral-600 mt-0.5">{{ hostingHint(hosting) }}</div>
+        </div>
+        <svg class="w-4 h-4 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+      </RouterLink>
+
+      <div v-for="(item, idx) in (actionItems?.items ?? [])" :key="idx"
         class="relative px-5 py-3 hover:bg-neutral-50 last:rounded-b-xl">
         <div class="flex items-center justify-between">
         <RouterLink :to="item.link" class="flex items-center gap-3 flex-1 min-w-0">

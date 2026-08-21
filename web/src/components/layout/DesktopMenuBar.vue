@@ -12,6 +12,10 @@ interface NavItem {
   newTo?: string
   badge?: number
   dividerBefore?: boolean
+  /** Odlišení jedné položky uvnitř sekce (viz NavItem v AppLayout). */
+  accent?: NavSection['accent']
+  /** Tečka „je co řešit" — táž data jako v postranním menu a na dashboardu. */
+  attention?: 'danger' | 'warning' | null
 }
 
 interface NavSection {
@@ -30,6 +34,23 @@ interface NavSection {
  * přemapované jen u primary a success — barevný text by v tmavém režimu u daní, peněz
  * nebo dokumentů spadl na kontrast pod 3:1. Barvu tak nese pozadí, čitelnost text.
  */
+/**
+ * Accent JEDNÉ položky v rozbalené nabídce. Tint jako u pilulky sekce, jen
+ * s barevným textem — v nabídce není nic jiného, co by barvu neslo, takže
+ * samotné pozadí by se ztratilo.
+ */
+const ACCENT_ITEM: Record<NonNullable<NavSection['accent']>, string> = {
+  primary:     'bg-primary-50 text-primary-700',
+  primaryDeep: 'bg-primary-100 text-primary-700',
+  warning:     'bg-warning-50 text-warning-600',
+  success:     'bg-success-50 text-success-600',
+  danger:      'bg-danger-50 text-danger-600',
+  neutral:     'bg-neutral-100 text-neutral-700',
+  accent:      'bg-accent-50 text-accent-600',
+  teal:        'bg-teal-50 text-teal-600',
+  payroll:     'bg-payroll-50 text-payroll-600',
+}
+
 const ACCENT_PILL: Record<NonNullable<NavSection['accent']>, string> = {
   primary: 'bg-primary-50',
   primaryDeep: 'bg-primary-100',
@@ -211,15 +232,24 @@ onBeforeUnmount(() => {
               <WorkspaceNavLink
                 :to="item.to"
                 class="flex items-center gap-2.5 px-3 py-2 text-sm transition-colors"
-                :class="props.isActive(item) ? 'bg-primary-50 text-primary-700 font-medium' : 'text-neutral-700 hover:bg-neutral-50 hover:text-primary-700'"
+                :class="props.isActive(item)
+                  ? 'bg-primary-50 text-primary-700 font-medium'
+                  : item.accent
+                    ? [ACCENT_ITEM[item.accent], 'font-medium']
+                    : 'text-neutral-700 hover:bg-neutral-50 hover:text-primary-700'"
                 role="menuitem"
                 @click="close"
               >
-                <svg class="w-4 h-4 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <svg class="w-4 h-4 shrink-0" :class="item.accent ? '' : 'text-neutral-400'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
                 </svg>
                 <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
-                <span v-if="item.badge" class="min-w-5 rounded-full bg-warning-100 px-1.5 py-0.5 text-center text-[10px] font-semibold text-warning-700">{{ item.badge }}</span>
+                <span
+                  v-if="item.attention"
+                  class="inline-block h-2 w-2 shrink-0 rounded-full"
+                  :class="item.attention === 'danger' ? 'bg-danger-500' : 'bg-warning-500'"
+                ></span>
+                <span v-else-if="item.badge" class="min-w-5 rounded-full bg-warning-500/20 px-1.5 py-0.5 text-center text-[10px] font-semibold text-warning-600">{{ item.badge }}</span>
                 <!--
                   Zkratka sedí na témže místě jako tlačítko „+" (to je absolutně
                   pozicované na right-2 a naskakuje na hover), takže při hoveru

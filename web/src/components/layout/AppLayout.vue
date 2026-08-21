@@ -19,6 +19,8 @@ import LanguageToggle from './LanguageToggle.vue'
 import DesktopMenuBar from './DesktopMenuBar.vue'
 import StorageQuotaBanner from './StorageQuotaBanner.vue'
 import InstanceCriticalBar from './InstanceCriticalBar.vue'
+import { instanceStatus } from '@/api/instanceStatus'
+import { hostingNavAttention, resolveHostingActions } from '@/api/hostingActions'
 import WorkspaceHost from '@/components/workspace/WorkspaceHost.vue'
 import WorkspaceLayoutToggle from '@/components/workspace/WorkspaceLayoutToggle.vue'
 import WorkspaceNavLink from '@/components/workspace/WorkspaceNavLink.vue'
@@ -123,6 +125,18 @@ interface NavItem {
   newPermission?: PermissionKey
   badge?: number
   dividerBefore?: boolean
+  /**
+   * Barevné odlišení JEDNÉ položky uvnitř sekce — pro položku, která do sekce
+   * patří, ale nemá s ní splynout (Hosting v Systému: je to placená služba, ne
+   * další nastavení). Jantarová odlišuje; červená je vyhrazená stavu, kdy je
+   * něco potřeba řešit — na to je {@link NavItem.attention}.
+   */
+  accent?: NavSection['accent']
+  /**
+   * Tečka „něco je k řešení". Bere se ze {@link resolveHostingActions}, takže
+   * říká totéž co dashboard. `undefined` = klid.
+   */
+  attention?: 'danger' | 'warning' | null
 }
 interface NavSection {
   /** Stabilní jazykově-nezávislý klíč sekce — identita pro §10 nav.order. */
@@ -167,6 +181,35 @@ const ACCENT_RAIL: Record<NonNullable<NavSection['accent']>, string> = {
   teal:    'border-teal-500/40',
   payroll: 'border-payroll-500/40',
 }
+
+/**
+ * Accent JEDNÉ položky (neaktivní stav) — tlumená výplň v barvě accentu.
+ *
+ * Proč tak málo: aktivní položka si drží `bg-primary-50` a musí zůstat
+ * nejsilnějším prvkem v menu. Odlišená položka má jít poznat na první pohled,
+ * ale nesmí přebít to, kde uživatel právě je.
+ */
+const ACCENT_ITEM: Record<NonNullable<NavSection['accent']>, string> = {
+  primary:     'text-primary-700 bg-primary-500/8 hover:bg-primary-500/15',
+  primaryDeep: 'text-primary-700 bg-primary-600/8 hover:bg-primary-600/15',
+  warning:     'text-warning-600 bg-warning-500/10 hover:bg-warning-500/20',
+  success:     'text-success-600 bg-success-500/10 hover:bg-success-500/20',
+  danger:      'text-danger-600 bg-danger-500/10 hover:bg-danger-500/20',
+  neutral:     'text-neutral-600 bg-neutral-500/10 hover:bg-neutral-500/20',
+  accent:      'text-accent-600 bg-accent-500/10 hover:bg-accent-500/20',
+  teal:        'text-teal-600 bg-teal-500/10 hover:bg-teal-500/20',
+  payroll:     'text-payroll-600 bg-payroll-500/10 hover:bg-payroll-500/20',
+}
+
+/**
+ * Je s provozem něco k řešení? Totéž, co uvidí uživatel na dashboardu —
+ * seznam se počítá na jednom místě, aby menu a dashboard nemohly tvrdit
+ * každý něco jiného.
+ *
+ * ⚠️ Na self-hosted instalaci je `instance` null a vrací se `null`: položka
+ * Hosting tam stejně není.
+ */
+const hostingAttention = computed(() => hostingNavAttention(resolveHostingActions(instanceStatus.instance.value)))
 
 /** Outline icon paths — Heroicons style, stroke 2, viewBox 24, currentColor */
 const ICONS = {
@@ -624,7 +667,17 @@ const navSections = computed<NavSection[]>(() => {
           // Hosting — JEN spravovaná (hostovaná) instalace. Na self-hosted se
           // položka nesmí objevit vůbec: stránka mluví o zaplaceném prostoru,
           // tarifu a předplaceném provozu, což tam nic neznamená.
-          ...(auth.isManagedInstallation ? [{ to: '/hosting', label: t('nav.hosting'), icon: ICONS.stock_warehouses, dividerBefore: true }] : []),
+          // Odlišená jantarovou: je to placená služba, ne další nastavení, a mezi
+          // ostatními položkami Systému splývala. Červená sem NEPATŘÍ — ta je pro
+          // stav, kdy je něco potřeba řešit, a ten nese tečka `attention`.
+          ...(auth.isManagedInstallation ? [{
+            to: '/hosting',
+            label: t('nav.hosting'),
+            icon: ICONS.stock_warehouses,
+            dividerBefore: true,
+            accent: 'warning' as const,
+            attention: hostingAttention.value,
+          }] : []),
           { to: '/activation/license',  label: t('nav.license'),               icon: ICONS.approvals, dividerBefore: true },
           { to: '/activation/terms',    label: t('nav.terms'),                 icon: ICONS.documents },
           { to: '/activation/purchase', label: t('nav.purchase_subscription'), icon: ICONS.coin },
@@ -1607,7 +1660,9 @@ onBeforeUnmount(() => {
                   :class="[
                     isActive(item)
                       ? 'bg-primary-50 text-primary-700 font-medium'
-                      : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100',
+                      : item.accent
+                        ? [ACCENT_ITEM[item.accent], 'font-medium']
+                        : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100',
                     canCreate(item) ? 'pr-8' : '',
                   ]"
                 >
@@ -1615,7 +1670,16 @@ onBeforeUnmount(() => {
                     <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
                   </svg>
                   {{ item.label }}
-                  <span v-if="item.badge" class="ml-auto min-w-5 rounded-full bg-warning-100 px-1.5 py-0.5 text-center text-[10px] font-semibold text-warning-700">{{ item.badge }}</span>
+                  <!-- Tečka „je co řešit". Barvu určuje závažnost, ne položka —
+                       viz `hostingNavAttention`. -->
+                  <span
+                    v-if="item.attention"
+                    class="ml-auto inline-block h-2 w-2 shrink-0 rounded-full"
+                    :class="item.attention === 'danger' ? 'bg-danger-500' : 'bg-warning-500'"
+                    :title="t(`nav.attention_${item.attention}`)"
+                    :aria-label="t(`nav.attention_${item.attention}`)"
+                  ></span>
+                  <span v-else-if="item.badge" class="ml-auto min-w-5 rounded-full bg-warning-500/20 px-1.5 py-0.5 text-center text-[10px] font-semibold text-warning-600">{{ item.badge }}</span>
                 </WorkspaceNavLink>
                 <!-- Rychlé „+" (vytvořit nový) — skryté, odhalí se až při hoveru nad položkou -->
                 <WorkspaceNavLink

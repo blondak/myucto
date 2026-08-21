@@ -609,7 +609,9 @@
         "eshop_locales": "Languages",
         "eshop_currencies": "Currencies",
         "instance_export": "Full data export",
-        "hosting": "Hosting"
+        "hosting": "Hosting",
+        "attention_danger": "Needs action",
+        "attention_warning": "Needs attention"
     },
     "instance_alert": {
         "storage_exhausted_title": "Instalace nepřijímá nové zápisy",
@@ -724,6 +726,16 @@
             "label_suspended": "Service suspended",
             "label_expired": "Subscription expired",
             "label_cancelled": "Renewal cancelled"
+        },
+        "action": {
+            "storage_exhausted_title": "Out of space — nothing will save",
+            "storage_exhausted_hint": "The paid space is full ({percent} %), so no document, attachment or import will go through. Free up space or expand it.",
+            "storage_exhausted_pending_hint": "The paid space is full ({percent} %), so nothing saves right now. The expansion is paid and being provisioned — writing resumes on its own once it lands.",
+            "storage_low_title": "Space is running out",
+            "storage_low_hint": "{percent} % used. Expand the space before it stops you mid-work.",
+            "storage_provisioning_title": "Storage expansion in progress",
+            "storage_provisioning_hint": "The expansion to {gb} GB is paid and being provisioned. No need to order it again.",
+            "storage_provisioning_hint_nogb": "The paid expansion is being provisioned. No need to order it again."
         }
     },
     "payroll": {
