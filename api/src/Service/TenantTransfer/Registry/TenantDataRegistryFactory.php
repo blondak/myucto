@@ -336,6 +336,7 @@ final class TenantDataRegistryFactory
             ...TenantDataSigningCatalog::definitions(),
             ...TenantDataDocumentCatalog::definitions(),
             ...TenantDataDocumentIntakeCatalog::definitions(),
+            ...TenantDataAiCatalog::definitions(),
             ...TenantDataBusinessCatalog::definitions(),
             ...TenantDataPurchaseOrderCatalog::definitions(),
             ...TenantDataEshopCatalog::definitions(),
@@ -541,6 +542,11 @@ final class TenantDataRegistryFactory
                 'secrets' => self::supplierSecretPolicies(),
                 'post_import' => [
                     'disable_integrations' => true,
+                    'force_columns' => [
+                        'ai_assist_enabled' => false,
+                        'ai_pseudo_salt' => null,
+                        'ai_dpa_confirmations' => null,
+                    ],
                 ],
             ],
         );
@@ -666,6 +672,7 @@ final class TenantDataRegistryFactory
     {
         return [
             'idoklad_client_secret_enc' => ['policy' => 'reencrypt_v1'],
+            'ai_pseudo_salt' => ['policy' => 'omit_and_reconfigure'],
             // Legacy iDoklad access token je plaintext cache. Do snapshotu
             // nepatří; cíl si vyžádá novou autorizaci.
             'idoklad_access_token' => ['policy' => 'omit_and_reconfigure'],

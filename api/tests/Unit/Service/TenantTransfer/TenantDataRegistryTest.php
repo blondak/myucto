@@ -114,6 +114,7 @@ final class TenantDataRegistryTest extends TestCase
 
         self::assertSame(
             [
+                'ai_pseudo_salt',
                 'anthropic_api_key_enc',
                 'azure_openai_api_key_enc',
                 'fakturoid_access_token_enc',
@@ -135,6 +136,10 @@ final class TenantDataRegistryTest extends TestCase
         self::assertSame(
             'omit_and_reconfigure',
             $secrets['fakturoid_access_token_enc']['policy'] ?? null,
+        );
+        self::assertSame(
+            'omit_and_reconfigure',
+            $secrets['ai_pseudo_salt']['policy'] ?? null,
         );
     }
 

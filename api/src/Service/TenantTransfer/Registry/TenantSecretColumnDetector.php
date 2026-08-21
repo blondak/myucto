@@ -7,7 +7,7 @@ namespace MyInvoice\Service\TenantTransfer\Registry;
 /** Jediná heuristika názvů sloupců, které vyžadují explicitní secret politiku. */
 final class TenantSecretColumnDetector
 {
-    private const PATTERN = '/(?:_enc|_ciphertext|password|secret|token|private_key|credential)/i';
+    private const PATTERN = '/(?:_enc|_ciphertext|password|secret|token|private_key|credential|salt)/i';
 
     public static function matches(string $column): bool
     {
