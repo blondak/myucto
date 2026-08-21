@@ -389,6 +389,80 @@ final class LicenseService
     }
 
     /**
+     * Kolik by stálo rozšíření úložiště na `$quotaGb` GiB (bez stržení).
+     *
+     * @return array{ok:bool,error?:string,current_quota_gb?:int,new_quota_gb?:int,amount?:mixed,recurring_delta?:mixed,currency?:string,period_end?:mixed}
+     */
+    public function storageQuote(int $quotaGb): array
+    {
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+
+        try {
+            $resp = $this->client->storageQuote($key, $quotaGb);
+        } catch (LicenseNetworkException $e) {
+            $this->logger->info('license.storage_quote.network_error', ['error' => $e->getMessage()]);
+            return ['ok' => false, 'error' => 'server_unreachable'];
+        }
+
+        if (($resp['ok'] ?? false) !== true) {
+            return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'not_upgradable')];
+        }
+
+        return $resp;
+    }
+
+    /**
+     * Rozšíření úložiště — server strhne poměrný doplatek z uložené karty a
+     * zvedne kvótu u dodavatele.
+     *
+     * ⚠️ `provisioning_pending` znamená ZAPLACENO, ale kvóta se u dodavatele
+     * ještě nezvedla. Uživateli se to NESMÍ ukázat jako chyba: peníze odešly.
+     * Obrazovka řekne, že se rozšíření zavádí, a nenabídne nákup znovu.
+     *
+     * Po úspěchu se vynutí obnova licence — s ní přijde nový rozsah zaplacené
+     * služby ({@see \MyInvoice\Service\System\InstanceEntitlement}), takže se
+     * nová kvóta projeví hned, ne až při zítřejší kontrole.
+     *
+     * @return array{ok:bool,error?:string,new_quota_gb?:int,amount_charged?:mixed,provisioning_pending?:bool,state?:LicenseState}
+     */
+    public function storageUpgrade(int $quotaGb): array
+    {
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+
+        try {
+            $resp = $this->client->storageUpgrade($key, $quotaGb);
+        } catch (LicenseNetworkException $e) {
+            // ⚠️ Odpověď se ztratila, ale platba mohla proběhnout. Nepobízet
+            // k opakování — druhý pokus by strhl podruhé.
+            $this->logger->warning('license.storage_upgrade.network_error', ['error' => $e->getMessage()]);
+            return ['ok' => false, 'error' => 'result_unknown'];
+        }
+
+        if (($resp['ok'] ?? false) !== true) {
+            $this->logger->warning('license.storage_upgrade.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
+            return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'upgrade_failed')];
+        }
+
+        $this->forceRenew();
+
+        return [
+            'ok'                   => true,
+            'new_quota_gb'         => (int) ($resp['new_quota_gb'] ?? $quotaGb),
+            'amount_charged'       => $resp['amount_charged'] ?? null,
+            'provisioning_pending' => (bool) ($resp['provisioning_pending'] ?? false),
+            'state'                => $this->current(),
+        ];
+    }
+
+    /**
      * Okamžitá obnova tokenu mimo denní cyklus — resetuje mutex (`last_check_at`)
      * a spustí `renewIfDue()`. Používá se po in-place upgradu, ať se nový limit
      * promítne hned, ne až při další denní kontrole.

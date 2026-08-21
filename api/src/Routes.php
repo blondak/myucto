@@ -298,6 +298,8 @@ use MyInvoice\Action\License\LicenseStatusAction;
 use MyInvoice\Action\License\ActivateLicenseAction;
 use MyInvoice\Action\License\DeactivateLicenseAction;
 use MyInvoice\Action\License\CancelRenewalLicenseAction;
+use MyInvoice\Action\License\StorageQuoteAction;
+use MyInvoice\Action\License\StorageUpgradeAction;
 use MyInvoice\Action\License\UpgradeQuoteLicenseAction;
 use MyInvoice\Action\License\UpgradeLicenseAction;
 use MyInvoice\Action\License\SupportLinkAction;
@@ -415,6 +417,9 @@ final class Routes
         // In-place navýšení počtu uživatelů (poměrný doplatek z uložené karty).
         $app->post('/api/license/upgrade/quote', UpgradeQuoteLicenseAction::class);
         $app->post('/api/license/upgrade',       UpgradeLicenseAction::class);
+        // Rozšíření úložiště hostované instance (poměrný doplatek z karty).
+        $app->post('/api/license/storage/quote', StorageQuoteAction::class);
+        $app->post('/api/license/storage',       StorageUpgradeAction::class);
         // Přihlášený přechod na portál podpory (myucto.cz/support) — jednorázový token.
         $app->post('/api/license/support-link',  SupportLinkAction::class);
 

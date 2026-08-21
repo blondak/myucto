@@ -147,6 +147,41 @@ final class LicenseClient
     }
 
     /**
+     * Kolik by stálo rozšíření úložiště na `$quotaGb` GiB (bez stržení).
+     *
+     * ⚠️ `$quotaGb` je CÍLOVÁ hodnota z výčtu 2/7/22/102, ne přírůstek —
+     * „+5 GB" se posílá jako 7. Server jinou hodnotu odmítne; tichá oprava na
+     * nejbližší povolenou by zákazníkovi strhla peníze za jiný objem, než
+     * potvrdil.
+     *
+     * @return array<string,mixed> {ok,current_quota_gb,new_quota_gb,amount,recurring_delta,period_end} / {error}
+     * @throws LicenseNetworkException
+     */
+    public function storageQuote(string $licenseKey, int $quotaGb): array
+    {
+        return $this->post('/api/license/storage', [
+            'license_key' => $licenseKey,
+            'quota_gb'    => $quotaGb,
+            'quote'       => true,
+        ]);
+    }
+
+    /**
+     * Rozšíření úložiště — strhne poměrný doplatek z uložené karty.
+     * Delší timeout (10 s) jako u navýšení míst: server čeká na platební bránu.
+     *
+     * @return array<string,mixed> {ok,new_quota_gb,amount_charged,provisioning_pending} / {error}
+     * @throws LicenseNetworkException
+     */
+    public function storageUpgrade(string $licenseKey, int $quotaGb): array
+    {
+        return $this->post('/api/license/storage', [
+            'license_key' => $licenseKey,
+            'quota_gb'    => $quotaGb,
+        ], 10);
+    }
+
+    /**
      * Jednorázový přihlašovací odkaz na portál podpory (myucto.cz/support). Zákazník
      * je na portálu rovnou identifikovaný jako firma, která licenci platí — token
      * v odkazu je jednorázový a krátkodobý (~10 minut).
