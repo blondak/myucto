@@ -407,6 +407,88 @@ final class MonthlyCheckTest extends TestCase
     }
 
     /**
+     * ZÁLOHA UHRAZENÁ PŘÍMO NA SALDOKONTNÍ ÚČET (bez 314) není otevřené saldo.
+     *
+     * Reálný nález: dodavatel poslal zálohovou fakturu a po ní konečnou. Výpis se spároval
+     * se ZÁLOHOU — variabilní symbol nesla ona — kdežto předpis na 321 má konečná faktura.
+     * Kontrola hledala úhradu jen pod `payment_matches.purchase_invoice_id` konečné faktury,
+     * kde nikdy nebyla, a hlásila plně předplacený doklad jako otevřené saldo v plné výši.
+     * V hlavní knize se přitom obojí potkalo na 321 a vyrušilo se na nulu.
+     *
+     * Přepárovat výpis na konečnou fakturu by šlo proti tomu, co je na výpisu — a v uzavřeném
+     * období by to ani nešlo. Kontrola tedy musí umět přečíst vazbu `advance_purchase_invoice_id`.
+     */
+    public function testAdvancePaidOnSaldoAccountSettlesFinalPurchaseInvoice(): void
+    {
+        $vendorId = $this->createClient();
+        $entryDate = self::YEAR . '-06-16';
+
+        $advanceId = $this->createAdvancePurchase($vendorId, 'K3-PF-ADV', $entryDate);
+        $finalId = $this->createPaidPurchase($vendorId, 'K3-PF-FINAL', $entryDate);
+        $this->db->pdo()
+            ->prepare('UPDATE purchase_invoices SET advance_purchase_invoice_id = ? WHERE id = ?')
+            ->execute([$advanceId, $finalId]);
+
+        // Předpis visí na konečné faktuře, ...
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $finalId, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 1000],
+            ['account_code' => '343', 'side' => 'debit', 'amount' => 210],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 1210],
+        ], ['entry_date' => $entryDate, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        // ... zatímco úhrada (321 MD / 221 D) se páruje se zálohou.
+        $this->bookPurchaseBankSettlement($advanceId, 1210.0, $entryDate);
+
+        $byId = $this->paidPurchaseFindingsById();
+        self::assertArrayNotHasKey(
+            $finalId,
+            $byId,
+            'Konečná faktura krytá zálohou uhrazenou na 321 není otevřené saldo.'
+        );
+    }
+
+    /**
+     * Zrcadlo předchozího testu na kontrole `paid_advances_no_payment`.
+     *
+     * Ta se ptá „je zaplacená záloha vidět v deníku?" a uznávala jedinou odpověď: debet
+     * na 314. Záloha zaúčtovaná rovnou na saldokontní 321 je ale legitimní varianta —
+     * deník o penězích ví, jen jinou nohou — a hlásit ji jako nezaúčtovanou je falešný
+     * poplach. Zároveň nález musí nést DATUM: bez něj zůstával v detailu kontroly prázdný
+     * sloupec a účetní musela každý řádek dohledávat ručně.
+     */
+    public function testAdvancePaidOntoSaldoAccountIsNotReportedAsUnbooked(): void
+    {
+        $vendorId = $this->createClient();
+        $entryDate = self::YEAR . '-06-18';
+
+        // Záloha uhrazená na 321 — do nálezů nepatří.
+        $onSaldo = $this->createAdvancePurchase($vendorId, 'K3-ADV-321', $entryDate);
+        $this->bookPurchaseBankSettlement($onSaldo, 1210.0, $entryDate);
+
+        // Záloha označená jako zaplacená bez jakéhokoli zápisu — pravý nález.
+        $unbooked = $this->createAdvancePurchase($vendorId, 'K3-ADV-NIC', $entryDate);
+
+        $check = $this->checkByKey('paid_advances_no_payment');
+        $byId = array_column($check['value']['findings'], null, 'doc_id');
+
+        self::assertArrayNotHasKey(
+            $onSaldo,
+            $byId,
+            'Záloha uhrazená na 321 je v deníku vidět — nález být nesmí.'
+        );
+        self::assertArrayHasKey(
+            $unbooked,
+            $byId,
+            'Záloha bez jakéhokoli zápisu zůstává nálezem.'
+        );
+        self::assertSame(
+            $entryDate,
+            $byId[$unbooked]['doc_date'],
+            'Nález musí nést datum, jinak zůstane sloupec Datum prázdný.'
+        );
+    }
+
+    /**
      * Faktura vyrovnaná NAVÁZANÝM DOBROPISEM není otevřené saldo. Opravný doklad nese na
      * 321 opačné znaménko, takže dvojice účet vynuluje i bez pohybu peněz (vrácené zboží
      * prostě sníží závazek) — dřív kontrola hlásila obě strany dvojice, každou v plné výši.
@@ -530,6 +612,22 @@ final class MonthlyCheckTest extends TestCase
         $stmt = $this->db->pdo()->prepare('SELECT status FROM purchase_invoices WHERE id = ?');
         $stmt->execute([$purchaseInvoiceId]);
         return (string) ($stmt->fetchColumn() ?: '');
+    }
+
+    /**
+     * Jedna kontrola měsíční sestavy podle klíče.
+     *
+     * @return array<string,mixed>
+     */
+    private function checkByKey(string $key): array
+    {
+        $result = $this->closing->monthlyCheck($this->supplierId, $this->periodId, self::YEAR . '-06-01', self::YEAR . '-06-30');
+        foreach ($result['checks'] as $c) {
+            if ($c['key'] === $key) {
+                return $c;
+            }
+        }
+        self::fail('Kontrola ' . $key . ' v sestavě chybí.');
     }
 
     /** Nálezy kontroly `paid_purchases_open_saldo` naklíčované podle doc_id. */
@@ -762,6 +860,26 @@ final class MonthlyCheckTest extends TestCase
                  total_without_vat, total_vat, total_with_vat, status, paid_at,
                  vat_classification_code, vat_deduction, created_by)
              VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, ?, 0, "{}", 1000, 210, 1210, "paid", ?, "1", "full", ?)'
+        );
+        $stmt->execute([$this->supplierId, $vendorId, $number, $date, $date, $date, $date, $currencyId, $date, $this->userId]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    /**
+     * Zálohová přijatá faktura (`document_kind='advance'`). Vlastní předpis na 321 nedostává —
+     * zálohová faktura není daňový doklad, na saldokontě visí až konečná faktura.
+     */
+    private function createAdvancePurchase(int $vendorId, string $number, string $date): int
+    {
+        $pdo = $this->db->pdo();
+        $currencyId = (int) $pdo->query("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn();
+        $stmt = $pdo->prepare(
+            'INSERT INTO purchase_invoices
+                (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date,
+                 due_date, received_at, currency_id, reverse_charge, vendor_snapshot,
+                 total_without_vat, total_vat, total_with_vat, status, paid_at,
+                 vat_classification_code, vat_deduction, created_by)
+             VALUES (?, ?, ?, "advance", ?, ?, ?, ?, ?, 0, "{}", 1000, 210, 1210, "paid", ?, "1", "full", ?)'
         );
         $stmt->execute([$this->supplierId, $vendorId, $number, $date, $date, $date, $date, $currencyId, $date, $this->userId]);
         return (int) $pdo->lastInsertId();

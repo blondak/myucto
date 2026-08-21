@@ -1082,6 +1082,55 @@ final class ClosingRepository
                    AND (e.reversed_by IS NULL OR rev.entry_date > ?)
                    AND (ca.account_code LIKE '321%' OR COALESCE(pa.account_code, '') LIKE '321%')
                  GROUP BY stl.doc_id
+            ), agreement_debit AS (
+                -- Vzájemný zápočet FV↔PF (offset_agreements): JEDEN zápis 321 MD / 311 D
+                -- za celou dohodu, ne za položku. Rozpouští se proto poměrem stejně jako
+                -- bankovní pohyb rozdělený mezi víc faktur — bez toho by dohoda pokrývající
+                -- dvě přijaté faktury přiznala každé z nich celý debet.
+                SELECT e.source_id AS agreement_id,
+                       SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS net_debit
+                  FROM journal_entries e
+                  JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+                  JOIN chart_of_accounts ca ON ca.id = l.account_id
+                  LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
+                  LEFT JOIN journal_entries rev ON rev.id = e.reversed_by
+                 WHERE e.supplier_id = ? AND e.source_type = 'offset'
+                   AND e.posted_at IS NOT NULL AND e.entry_date <= ?
+                   AND (e.reversed_by IS NULL OR rev.entry_date > ?)
+                   AND (ca.account_code LIKE '321%' OR COALESCE(pa.account_code, '') LIKE '321%')
+                 GROUP BY e.source_id
+            ), agreement_alloc AS (
+                SELECT oi.agreement_id, SUM(oi.amount) AS total_alloc
+                  FROM offset_agreement_items oi
+                 WHERE oi.supplier_id = ? AND oi.doc_type = 'purchase_invoice'
+                 GROUP BY oi.agreement_id
+            ), settled_agreement AS (
+                SELECT oi.doc_id AS purchase_invoice_id,
+                       SUM(ad.net_debit * oi.amount / NULLIF(aa.total_alloc, 0)) AS settled
+                  FROM offset_agreement_items oi
+                  JOIN agreement_alloc aa ON aa.agreement_id = oi.agreement_id
+                  JOIN agreement_debit ad ON ad.agreement_id = oi.agreement_id
+                 WHERE oi.supplier_id = ? AND oi.doc_type = 'purchase_invoice'
+                 GROUP BY oi.doc_id
+            ), settled_advance AS (
+                -- ZÁLOHA UHRAZENÁ PŘÍMO NA SALDOKONTNÍ ÚČET (bez 314). Zálohová faktura je
+                -- samostatný doklad a výpis se páruje NA NI (variabilní symbol nese ona),
+                -- kdežto na 321 visí předpis až konečné faktury. Bez tohohle kanálu se
+                -- úhrada a závazek nikdy nepotkají a plně předplacená faktura se hlásí jako
+                -- otevřené saldo v plné výši. Zrcadlo SaldoRepository::advanceOnAccountSql.
+                --
+                -- Podmínka „záloha nemá vlastní předpis na 321\" brání dvojímu započtení:
+                -- když účetní zálohu na saldokonto předepsala, vyrovná si ji sama ve své
+                -- vlastní skupině a konečná faktura si na ni nesmí sáhnout podruhé.
+                SELECT pi.id AS purchase_invoice_id,
+                       COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0) AS settled
+                  FROM purchase_invoices pi
+                  JOIN purchase_invoices adv
+                    ON adv.id = pi.advance_purchase_invoice_id AND adv.supplier_id = pi.supplier_id
+                  LEFT JOIN settled_bank sb ON sb.purchase_invoice_id = adv.id
+                  LEFT JOIN settled_cash sc ON sc.purchase_invoice_id = adv.id
+                 WHERE pi.supplier_id = ?
+                   AND NOT EXISTS (SELECT 1 FROM booked ba WHERE ba.purchase_invoice_id = adv.id)
             ), doc AS (
                 -- Doklad = předpis + jeho vlastní peněžní vyrovnání. Dobropis se přiřadí
                 -- ke skupině svého RODIČE: opravný doklad nese na 321 opačné znaménko,
@@ -1092,12 +1141,15 @@ final class ClosingRepository
                        CASE WHEN pi.document_kind = 'credit_note' AND pi.parent_purchase_invoice_id IS NOT NULL
                             THEN pi.parent_purchase_invoice_id ELSE pi.id END AS group_id,
                        b.booked,
-                       COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0) + COALESCE(so.settled, 0) AS settled
+                       COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0) + COALESCE(so.settled, 0)
+                       + COALESCE(sg.settled, 0) + COALESCE(sa.settled, 0) AS settled
                   FROM booked b
                   JOIN purchase_invoices pi ON pi.id = b.purchase_invoice_id AND pi.supplier_id = ?
                   LEFT JOIN settled_bank sb ON sb.purchase_invoice_id = pi.id
                   LEFT JOIN settled_cash sc ON sc.purchase_invoice_id = pi.id
                   LEFT JOIN settled_offset so ON so.purchase_invoice_id = pi.id
+                  LEFT JOIN settled_agreement sg ON sg.purchase_invoice_id = pi.id
+                  LEFT JOIN settled_advance sa ON sa.purchase_invoice_id = pi.id
             ), grp AS (
                 SELECT group_id, SUM(booked) AS booked, SUM(settled) AS settled
                   FROM doc
@@ -1132,6 +1184,10 @@ final class ClosingRepository
             $supplierId,                        // settled_bank
             $supplierId, $asOf, $asOf,          // settled_cash
             $supplierId, $asOf, $asOf,          // settled_offset
+            $supplierId, $asOf, $asOf,          // agreement_debit
+            $supplierId,                        // agreement_alloc
+            $supplierId,                        // settled_agreement
+            $supplierId,                        // settled_advance
             $supplierId,                        // doc
             $supplierId, $asOf,                 // final SELECT
         ]);
@@ -1230,8 +1286,14 @@ final class ClosingRepository
      *
      * Vazba úhrady na zálohu: payment_matches.purchase_invoice_id (banka) /
      * cash_documents.purchase_invoice_id (pokladna). Konzervativně jen EXISTENČNÍ kontrola
-     * (žádný 314 debet navázaný na doklad), bez dopočtu částky — částečné zálohy by jinak
+     * (žádný debet navázaný na doklad), bez dopočtu částky — částečné zálohy by jinak
      * dělaly falešné poplachy.
+     *
+     * Uznává se debet na 314 NEBO na saldokontní 321. Účtovat zálohu rovnou na 321 je
+     * legitimní varianta — na 321 pak visí předpis konečné faktury a úhrada zálohy ho
+     * vyruší, takže deník o penězích ví a saldo sedí (zrcadlo
+     * {@see SaldoRepository::advanceOnAccountSql}). Trvat jen na 314 znamenalo hlásit
+     * takovou zálohu jako „deník o úhradě neví", přestože o ní ví — jen jinou nohou.
      *
      * @return list<array{id:int, doc_no:string, partner_name:string, booked:float, settled:float, saldo:float}>
      */
@@ -1240,6 +1302,7 @@ final class ClosingRepository
         $sql =
             "SELECT p.id,
                     COALESCE(NULLIF(p.vendor_invoice_number, ''), NULLIF(p.varsymbol, ''), CONCAT('#', p.id)) AS doc_no,
+                    p.issue_date AS doc_date,
                     cl.company_name AS partner_name,
                     ROUND(p.total_with_vat, 2) AS booked,
                     0 AS settled,
@@ -1257,7 +1320,8 @@ final class ClosingRepository
                       JOIN chart_of_accounts ca ON ca.id = l.account_id
                       LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
                      WHERE pm.supplier_id = p.supplier_id AND pm.purchase_invoice_id = p.id AND l.side = 'debit'
-                       AND (ca.account_code LIKE '314%' OR COALESCE(pa.account_code, '') LIKE '314%')
+                       AND (ca.account_code LIKE '314%' OR COALESCE(pa.account_code, '') LIKE '314%'
+                            OR ca.account_code LIKE '321%' OR COALESCE(pa.account_code, '') LIKE '321%')
                 )
                 AND NOT EXISTS (
                     SELECT 1 FROM cash_documents cd
@@ -1268,7 +1332,8 @@ final class ClosingRepository
                       JOIN chart_of_accounts ca ON ca.id = l.account_id
                       LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
                      WHERE cd.supplier_id = p.supplier_id AND cd.purchase_invoice_id = p.id AND l.side = 'debit'
-                       AND (ca.account_code LIKE '314%' OR COALESCE(pa.account_code, '') LIKE '314%')
+                       AND (ca.account_code LIKE '314%' OR COALESCE(pa.account_code, '') LIKE '314%'
+                            OR ca.account_code LIKE '321%' OR COALESCE(pa.account_code, '') LIKE '321%')
                 )
               ORDER BY p.id";
         $stmt = $this->db->pdo()->prepare($sql);
