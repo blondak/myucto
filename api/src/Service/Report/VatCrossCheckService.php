@@ -665,7 +665,7 @@ final class VatCrossCheckService
         // se nepřepisuje — je to datum zápisu MIMO období, tedy jiná informace než datum
         // vystavení dokladu.
         $meta = [];
-        foreach (['invoice', 'purchase_invoice', 'cash'] as $docType) {
+        foreach (['invoice', 'purchase_invoice', 'cash', 'journal_entry'] as $docType) {
             $ids = [];
             foreach ($documents as $d) {
                 if ($d['doc_type'] === $docType) {
@@ -892,6 +892,13 @@ final class VatCrossCheckService
                                      FROM purchase_invoices d LEFT JOIN clients c ON c.id = d.vendor_id',
             'cash' => 'SELECT d.id, d.doc_number, d.issue_date AS doc_date, d.partner_name
                          FROM cash_documents d',
+            // Ruční zápis na 343 (přeúčtování analytik, haléřové vyrovnání) doklad nemá,
+            // takže se hlásí sám za sebe — ale datum a číslo zápisu v deníku JSOU. Bez
+            // téhle větve zůstal jediný takový řádek rozpisu bez data i bez označení
+            // a účetní neměla podle čeho ten zápis v deníku najít.
+            'journal_entry' => 'SELECT d.id, d.document_no AS doc_number, d.entry_date AS doc_date,
+                                       NULL AS partner_name
+                                  FROM journal_entries d',
             default => null,
         };
         if ($sql === null) {

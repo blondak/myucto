@@ -431,6 +431,17 @@ final class VatCrossCheckTest extends TestCase
         self::assertSame('extra_entry', $doc['reason']);
         self::assertSame($entryId, $doc['invoice_id']);
 
+        // Ruční zápis doklad nemá, takže se hlásí sám za sebe — datum a označení zápisu
+        // v deníku ale existují a rozpis je musí nést. Doplňování metadat je dlouho
+        // pokrývalo jen pro faktury a pokladnu, takže jediný takový řádek zůstával bez
+        // data i bez čísla a účetní ho neměla podle čeho v deníku najít. V ostrých datech
+        // to byl zápis „INT 15 — převod dph" s haléřovým vyrovnáním na 343.
+        self::assertSame(
+            sprintf('%04d-%02d-20', self::YEAR, self::MONTH),
+            $doc['doc_date'],
+            'Řádek rozpisu musí nést datum zápisu z deníku.'
+        );
+
         $res = $this->download();
         self::assertSame(409, $res['status'], 'Nevysvětlený rozdíl → 409 gate beze změny.');
         self::assertSame('vat_cross_check_mismatch', $res['body']['error']['code'] ?? null);
