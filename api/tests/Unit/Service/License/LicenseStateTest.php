@@ -41,12 +41,33 @@ final class LicenseStateTest extends TestCase
         self::assertTrue($s->allowsNewCompany());
     }
 
-    public function testFreeCoreHasNoUserOrCompanyLimitsAfterLicenseExpires(): void
+    /**
+     * ⚠️ Bez platné licence nevznikne další uživatel na licencovaném MÍSTĚ.
+     *
+     * Netýká se to účtů s právem jen pro čtení a klientských účtů — ty licenční
+     * místo nezabírají a otázka se na ně vůbec nepokládá
+     * ({@see \MyInvoice\Action\Admin\UserAdminAction::roleCountsAsSeat()}).
+     * Stávající uživatelé pracují dál; blokuje se jen přírůstek.
+     */
+    public function testExpiredLicenseBlocksNewSeatUsers(): void
     {
         foreach ([LicenseState::TRIAL_EXPIRED, LicenseState::DEGRADED] as $kind) {
             $s = $this->state($kind, maxCompanies: 1, usersLicensed: 1, usersActive: 99, companiesActive: 99);
-            self::assertTrue($s->allowsNewUser());
-            self::assertTrue($s->allowsNewCompany());
+            self::assertFalse($s->allowsNewUser(), $kind);
+            self::assertSame(LicenseState::BLOCK_NO_LICENSE, $s->newUserBlockReason(), $kind);
+        }
+    }
+
+    /**
+     * Firmy zůstávají bez licence neomezené. Je to jiná osa než uživatelé:
+     * bezplatný základ má vést účetnictví dál, včetně založení další agendy —
+     * omezit to by znamenalo sáhnout na data, která už zákazník má.
+     */
+    public function testFreeCoreKeepsCompaniesUnlimited(): void
+    {
+        foreach ([LicenseState::TRIAL_EXPIRED, LicenseState::DEGRADED] as $kind) {
+            $s = $this->state($kind, maxCompanies: 1, usersLicensed: 1, usersActive: 99, companiesActive: 99);
+            self::assertTrue($s->allowsNewCompany(), $kind);
         }
     }
 
@@ -128,14 +149,30 @@ final class LicenseStateTest extends TestCase
         self::assertTrue($room->allowsNewCompany());
     }
 
-    /** Propadlá licence na bezplatném tarifu = bezplatný základ bez stropů. */
-    public function testExpiredFreeTierFallsBackToUnlimitedFreeCore(): void
+    /** Propadlá licence na bezplatném tarifu: moduly zavřené, další místo se neprodá. */
+    public function testExpiredFreeTierClosesModulesAndSeats(): void
     {
         $s = $this->state(LicenseState::DEGRADED, maxCompanies: 1, usersLicensed: 1, usersActive: 99, companiesActive: 99, commercial: false);
 
         self::assertFalse($s->hasCommercialFeatures());
-        self::assertTrue($s->allowsNewUser());
+        self::assertFalse($s->allowsNewUser());
+        self::assertSame(LicenseState::BLOCK_NO_LICENSE, $s->newUserBlockReason());
         self::assertTrue($s->allowsNewCompany());
+    }
+
+    /**
+     * Důvody se nesmí slít do jednoho: „nemáte licenci" vede k aktivaci,
+     * „došla místa" k navýšení. Kdyby to byla jedna hláška, polovina adminů
+     * by dělala špatnou věc.
+     */
+    public function testBlockReasonsAreDistinguishable(): void
+    {
+        $noLicense = $this->state(LicenseState::DEGRADED, usersLicensed: 1, usersActive: 0);
+        $seatsFull = $this->state(LicenseState::ACTIVE, usersLicensed: 2, usersActive: 2);
+
+        self::assertSame(LicenseState::BLOCK_NO_LICENSE, $noLicense->newUserBlockReason());
+        self::assertSame(LicenseState::BLOCK_SEAT_LIMIT, $seatsFull->newUserBlockReason());
+        self::assertNull($this->state(LicenseState::TRIAL, usersLicensed: 1, usersActive: 99)->newUserBlockReason());
     }
 
     /**

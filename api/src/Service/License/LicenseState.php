@@ -22,6 +22,10 @@ final class LicenseState
     public const OVERAGE       = 'overage';
     public const DEGRADED      = 'degraded';
 
+    /** Důvody, proč nejde přidat uživatele na licencované místo. */
+    public const BLOCK_NO_LICENSE = 'no_license';
+    public const BLOCK_SEAT_LIMIT = 'seat_limit';
+
     public function __construct(
         public readonly string $state,
         public readonly string $instanceId,
@@ -100,22 +104,50 @@ final class LicenseState
     }
 
     /**
-     * Smí vzniknout nový (nebo aktivovaný) uživatel s rolí != readonly?
+     * Smí vzniknout nový (nebo aktivovaný) uživatel na licencovaném místě?
      *
      * ⚠️ Ptá se na PLATNOST licence, ne na přístup k placeným modulům. Kdyby
      * se ptal na `hasCommercialFeatures()`, bezplatný tarif by měl uživatele
      * bez omezení — a přitom je to tarif, kde se za ně platí.
+     *
+     * ⚠️ Týká se JEN rolí, které zabírají licenční místo. Uživatele s právem
+     * jen pro čtení a klientské účty tahle otázka nezajímá — ti jdou zakládat
+     * vždycky ({@see \MyInvoice\Action\Admin\UserAdminAction::roleCountsAsSeat()}).
      */
     public function allowsNewUser(): bool
     {
-        if ($this->state === self::TRIAL || !$this->licenseLive()) {
-            return true;
+        return $this->newUserBlockReason() === null;
+    }
+
+    /**
+     * Proč nejde založit další uživatele na licencovaném místě, nebo `null`.
+     *
+     * Rozlišení má smysl kvůli tomu, co se řekne adminovi: „dosáhli jste počtu
+     * podle licence" a „nemáte licenci" vedou k úplně jiné akci a splynout
+     * do jedné hlášky nesmí.
+     */
+    public function newUserBlockReason(): ?string
+    {
+        // Zkušební období běží v plném rozsahu, včetně počtu uživatelů.
+        if ($this->state === self::TRIAL) {
+            return null;
+        }
+        // ⚠️ Bez platné licence jen účty pro čtení. Provozní uživatel je
+        // placené místo — po skončení zkušební doby nebo předplatného tedy
+        // nový nevznikne, ale STÁVAJÍCÍ uživatelé pracují dál. Zamykat lidem
+        // přístup do jejich vlastních dat by bylo něco úplně jiného než
+        // neprodat další místo.
+        if (!$this->licenseLive()) {
+            return self::BLOCK_NO_LICENSE;
         }
         if ($this->state === self::ACTIVE) {
-            return $this->usersLicensed <= 0 || $this->usersActive < $this->usersLicensed;
+            return ($this->usersLicensed <= 0 || $this->usersActive < $this->usersLicensed)
+                ? null
+                : self::BLOCK_SEAT_LIMIT;
         }
+
         // Overage přes limit → blok do navýšení nebo srovnání počtů.
-        return false;
+        return self::BLOCK_SEAT_LIMIT;
     }
 
     /** Smí vzniknout nová firma (supplier)? Viz {@see allowsNewUser()}. */
@@ -198,6 +230,10 @@ final class LicenseState
             'perpetual'        => $this->perpetual,
             'commercial_features' => $this->hasCommercialFeatures(),
             'tier_commercial'  => $this->commercial,
+            // Proč nejde přidat dalšího uživatele na licencované místo:
+            // `no_license` / `seat_limit` / null. Obrazovka správy uživatelů
+            // podle toho varuje dřív, než admin vyplní celý formulář.
+            'new_user_blocked' => $this->newUserBlockReason(),
             // Počty pro přehledný overage banner (aktivní vs. licencováno).
             'users_active'     => $this->usersActive,
             'users_licensed'   => $this->usersLicensed,

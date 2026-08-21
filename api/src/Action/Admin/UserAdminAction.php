@@ -12,6 +12,7 @@ use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\LicenseService;
+use MyInvoice\Service\License\LicenseState;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -52,10 +53,11 @@ final class UserAdminAction
         $role = $this->activeRole($roleId);
         if ($role === null) return Json::error($response, 'validation_failed', 'Vybraná role neexistuje nebo není aktivní.', 400);
         // Licenční limit (E4): nový aktivní uživatel na licencovaném místě (role != readonly/client).
-        if ($this->roleCountsAsSeat((string) ($role['system_key'] ?? ''), (string) $role['role_type'])
-            && !$this->license->current()->allowsNewUser()) {
-            return Json::error($response, 'license_user_limit',
-                'Byl dosažen počet uživatelů podle vaší licence. Rozšiřte předplatné na myucto.cz.', 403);
+        if ($this->roleCountsAsSeat((string) ($role['system_key'] ?? ''), (string) $role['role_type'])) {
+            $blocked = $this->license->current()->newUserBlockReason();
+            if ($blocked !== null) {
+                return Json::error($response, self::blockCode($blocked), self::blockMessage($blocked), 403);
+            }
         }
         try {
             $this->hasher->validate($password);
@@ -115,9 +117,11 @@ final class UserAdminAction
         $newRoleType = $newRole !== null ? (string) $newRole['role_type'] : (string) $row['role']['type'];
         $willCount = $willBeActive && $this->roleCountsAsSeat($newSysKey, $newRoleType);
         $wasCount  = (bool) $row['is_active'] && $this->roleCountsAsSeat((string) ($row['role']['system_key'] ?? ''), (string) $row['role']['type']);
-        if ($willCount && !$wasCount && !$this->license->current()->allowsNewUser()) {
-            return Json::error($response, 'license_user_limit',
-                'Byl dosažen počet uživatelů podle vaší licence. Rozšiřte předplatné na myucto.cz.', 403);
+        if ($willCount && !$wasCount) {
+            $blocked = $this->license->current()->newUserBlockReason();
+            if ($blocked !== null) {
+                return Json::error($response, self::blockCode($blocked), self::blockMessage($blocked), 403);
+            }
         }
 
         $sets = [];
@@ -283,6 +287,28 @@ final class UserAdminAction
      * vlastní staff role); ne pro systémovou roli readonly a všechny client role.
      * Zrcadlí LicenseService::countActiveUsers().
      */
+    /**
+     * Kód chyby podle důvodu. ⚠️ Dva různé kódy schválně: frontend na ně reaguje
+     * jinak — u chybějící licence vede k aktivaci, u vyčerpaných míst k navýšení.
+     */
+    private static function blockCode(string $reason): string
+    {
+        return $reason === LicenseState::BLOCK_NO_LICENSE ? 'license_required' : 'license_user_limit';
+    }
+
+    /**
+     * ⚠️ Hláška musí říct, co s tím — ne jen že to nejde. A musí být zřejmé,
+     * že se to týká jen provozních rolí: účet s právem jen pro čtení jde
+     * založit i bez licence a často je to přesně to, co admin potřebuje.
+     */
+    private static function blockMessage(string $reason): string
+    {
+        return $reason === LicenseState::BLOCK_NO_LICENSE
+            ? 'Bez platné licence lze zakládat jen uživatele s právem jen pro čtení. '
+                . 'Aktivujte licenci v sekci Aktivace, nebo uživateli přidělte roli jen pro čtení.'
+            : 'Byl dosažen počet uživatelů podle vaší licence. Rozšiřte předplatné, '
+                . 'nebo uvolněte místo deaktivací jiného uživatele.';
+    }
     private function roleCountsAsSeat(string $systemKey, string $roleType): bool
     {
         return $roleType !== 'client' && $systemKey !== 'readonly';
