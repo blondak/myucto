@@ -783,15 +783,20 @@ final class InstanceExportService
     /** @return list<array<string,mixed>> */
     private function fetchPurchaseInvoices(int $supplierId, ?string $from, ?string $to): array
     {
-        $sql = 'SELECT id, varsymbol, vendor_invoice_number, vendor_company_name, issue_date, pdf_path
-                  FROM purchase_invoices WHERE supplier_id = ?';
+        // Jméno dodavatele je na kontaktu, ne na dokladu. LEFT JOIN schválně: chybějící
+        // kontakt smí zhoršit jen pojmenování souboru, nikdy vypustit doklad z archivu.
+        $sql = 'SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.issue_date, pi.pdf_path,
+                       c.company_name AS vendor_company_name
+                  FROM purchase_invoices pi
+             LEFT JOIN clients c ON c.id = pi.vendor_id
+                 WHERE pi.supplier_id = ?';
         $params = [$supplierId];
         if ($from !== null && $to !== null) {
-            $sql .= ' AND issue_date BETWEEN ? AND ?';
+            $sql .= ' AND pi.issue_date BETWEEN ? AND ?';
             $params[] = $from;
             $params[] = $to;
         }
-        $stmt = $this->db->pdo()->prepare($sql . ' ORDER BY issue_date, id');
+        $stmt = $this->db->pdo()->prepare($sql . ' ORDER BY pi.issue_date, pi.id');
         $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
