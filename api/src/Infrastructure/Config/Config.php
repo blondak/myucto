@@ -229,6 +229,21 @@ final class Config
             'app' => [
                 'name'   => 'MyÚčto.cz',
                 'domain' => 'myucto.cz',
+                // Spravovaná instalace (SaaS): konfiguraci drží provozovatel, ne
+                // uživatel. Výchozí false = self-hosted chování beze změny.
+                'managed'          => false,
+                'managed_provider' => '',
+            ],
+            // První nastavení instance. Ve spravovaném režimu je token POVINNÝ —
+            // pravidlo visí na app.managed, ne na přítomnosti klíče, aby selhání
+            // zápisu do cfg.local.php setup neotevřelo komukoli.
+            'setup' => [
+                'provision_token' => '',
+            ],
+            // Zámek údržby. Prázdná cesta = ${MYINVOICE_DATA_DIR}/storage/maintenance.lock.
+            'maintenance' => [
+                'lock_file'   => '',
+                'retry_after' => 300,
             ],
             // Vlastní domény firem (#11) jsou opt-in a defaultně VYPNUTÉ.
             // Zapnutí mění hostname na tenantovou hranici: jiný host než ten
@@ -284,6 +299,10 @@ final class Config
             'MYINVOICE_APP_DEBUG'   => ['app.debug', 'bool'],
             'MYINVOICE_APP_URL'     => ['app.url', 'string'],
             'MYINVOICE_DOMAINS_ENABLED' => ['domains.enabled', 'bool'],
+            'MYINVOICE_APP_MANAGED'  => ['app.managed', 'bool'],
+            'MYINVOICE_APP_MANAGED_PROVIDER' => ['app.managed_provider', 'string'],
+            'MYINVOICE_SETUP_PROVISION_TOKEN' => ['setup.provision_token', 'string'],
+            'MYINVOICE_MAINTENANCE_LOCK_FILE' => ['maintenance.lock_file', 'string'],
             'MYINVOICE_PEPPER'      => ['app.pepper', 'string'],
             'MYINVOICE_SECRET_KEY'  => ['app.secret_encryption_key', 'string'],
             'MYINVOICE_PAYROLL_HASH_KEY' => ['app.payroll_hash_key', 'string'],

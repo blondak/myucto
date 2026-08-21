@@ -36,6 +36,47 @@ return [
         'payroll_hash_key' => '',                    // volitelný oddělený 32B base64 klíč pro HMAC citlivých mzdových identifikátorů; fallback je doménově oddělený HKDF z pepperu
         'timezone' => 'Europe/Prague',               // PHP date_default_timezone_set
         'locale_default' => 'cs',                    // jazyk UI při prvním načtení (před přihlášením)
+
+        // SPRAVOVANÁ INSTALACE (SaaS). true = konfiguraci drží provozovatel, ne
+        // uživatel: zamkne se self-update, změna app.url, SMTP nastavení, cesty
+        // do souborového systému (bank_import.scan_root, purchase_invoice.inbox_dir),
+        // epo_test, app.debug, demo režim a vlastní domény. UI místo tlačítka
+        // Aktualizovat ukáže „spravovaná instalace".
+        //
+        // Přepínač se ZÁMĚRNĚ nejmenuje po dodavateli — aplikace nesmí vědět,
+        // kdo ji hostuje, jen že si nesmí sahat na vlastní konfiguraci. Ve
+        // spravovaném provozu ho zapisuje provisioning šablona do cfg.local.php.
+        'managed' => false,
+
+        // Volitelný DIAGNOSTICKÝ údaj do /api/health — kdo instanci provozuje.
+        // Na hodnotě NESMÍ viset žádné chování; jedna větev podle dodavatele
+        // je začátek konce přenositelnosti.
+        'managed_provider' => '',
+    ],
+
+    // První nastavení instance (POST /api/auth/setup).
+    'setup' => [
+        // Jednorázový token, kterým se prokazuje ten, kdo smí instanci poprvé
+        // nastavit. Ve spravovaném provozu ho do cfg.local.php zapisuje hosting
+        // už při zřízení a v callbacku ho pošle nám.
+        //
+        // ⚠️ Ve spravovaném režimu (app.managed = true) je token POVINNÝ: když
+        // chybí, setup odmítne úplně. Pravidlo záměrně nezní „je-li klíč
+        // vyplněný, vyžaduj shodu" — to by při selhání zápisu do cfg.local.php
+        // setup otevřelo komukoli, tedy fail-open přesně ve chvíli, kdy něco
+        // selhalo. Bez app.managed se chování self-hosted instalací nemění.
+        'provision_token' => '',
+    ],
+
+    // Údržba instance. Existuje-li zámek, dispatcher nespustí žádnou novou úlohu
+    // (běžící nechá doběhnout) a web vrací 503 s Retry-After na všechno kromě
+    // /api/health. Zámek zakládá a maže provozovatel; odstranění souboru je
+    // konec údržby, nic se nerestartuje.
+    'maintenance' => [
+        // Absolutní cesta k zámku. Prázdné = ${MYINVOICE_DATA_DIR}/storage/maintenance.lock
+        // (tedy vedle cfg.local.php, mimo veřejný datový prostor).
+        'lock_file'    => '',
+        'retry_after'  => 300,                       // sekundy do hlavičky Retry-After u 503
     ],
     'epo' => [
         // Spravovaný PEM bundle pro ověřování pečeti dodejek EPO. V ostrém provozu
@@ -444,6 +485,13 @@ return [
 
     // Cron retention (api/bin/cron-cleanup.php + cron-backup.php)
     'cron' => [
+        // Úlohy, které se na téhle instalaci nemají spouštět vůbec — seznam
+        // jmen z katalogu (`cron-backup-pdf`, `cron-backup-documents`, …).
+        // Dispatcher je přeskočí a v přehledu úloh se ukážou jako vypnuté
+        // konfigurací, ne jako zmeškané. Ve spravovaném provozu se tím vypínají
+        // zálohy, které si dělá hosting sám.
+        'disabled_jobs' => [],
+
         'cleanup' => [
             'login_attempts_hours' => 24,            // po N hodinách smaž záznamy z login_attempts
             'password_resets_days' => 7,             // po N dnech smaž expirované reset tokeny
