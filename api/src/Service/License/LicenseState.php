@@ -48,6 +48,20 @@ final class LicenseState
          * @var array<string,mixed>|null
          */
         public readonly ?array $subscription = null,
+        /**
+         * Odemyká TARIF placené moduly?
+         *
+         * ⚠️ Není to totéž co „licence platí". Klíč se vydává i na bezplatný
+         * tarif — je to jediný kanál, kterým se instance dozví o zaplacené
+         * kvótě, stavu předplatného a počtu uživatelů. Platná licence proto
+         * sama o sobě účetnictví neodemyká.
+         *
+         * Výchozí `true` je nutný pro zpětnou kompatibilitu: token vydaný před
+         * zavedením příznaku ho nenese a všechny takové licence jsou placené.
+         * Kdyby se defaultovalo na false, zavřelo by to účetnictví každému
+         * platícímu zákazníkovi až do příští obnovy tokenu.
+         */
+        public readonly bool $commercial = true,
     ) {}
 
     /** Prodlužuje se licence automaticky (chystá se další stržení)? */
@@ -56,16 +70,45 @@ final class LicenseState
         return (bool) ($this->subscription['auto_renew'] ?? false);
     }
 
-    /** Je dostupná komerční účetní nadstavba MyÚčto? */
+    /**
+     * Je dostupná komerční účetní nadstavba MyÚčto?
+     *
+     * Dvě nezávislé podmínky, a musí platit obě:
+     *  1. licence platí (není propadlá ani chybějící),
+     *  2. tarif placené moduly vůbec odemyká.
+     *
+     * ⚠️ Druhou podmínku sem přidal bezplatný tarif „Fakturace a DPH". Ten má
+     * platnou licenci — potřebuje ji, aby se instance dozvěděla o kvótě
+     * a platbách — ale účetnictví, mzdy, sklad ani přiznání si nezaplatil.
+     */
     public function hasCommercialFeatures(): bool
+    {
+        return $this->commercial && $this->licenseLive();
+    }
+
+    /**
+     * Platí licence? Odpověď na otázku „známe rozsah, který si zákazník
+     * zaplatil", ne „na co má nárok".
+     *
+     * Na tomhle stojí LIMITY (uživatelé, firmy): dokud licence neplatí, běží
+     * instalace na bezplatném základu bez stropů — to je slib MIT verze
+     * a nesmí ho zrušit tarif, který zrovna neodemyká placené moduly.
+     */
+    private function licenseLive(): bool
     {
         return $this->state !== self::DEGRADED && $this->state !== self::TRIAL_EXPIRED;
     }
 
-    /** Smí vzniknout nový (nebo aktivovaný) uživatel s rolí != readonly? */
+    /**
+     * Smí vzniknout nový (nebo aktivovaný) uživatel s rolí != readonly?
+     *
+     * ⚠️ Ptá se na PLATNOST licence, ne na přístup k placeným modulům. Kdyby
+     * se ptal na `hasCommercialFeatures()`, bezplatný tarif by měl uživatele
+     * bez omezení — a přitom je to tarif, kde se za ně platí.
+     */
     public function allowsNewUser(): bool
     {
-        if ($this->state === self::TRIAL || !$this->hasCommercialFeatures()) {
+        if ($this->state === self::TRIAL || !$this->licenseLive()) {
             return true;
         }
         if ($this->state === self::ACTIVE) {
@@ -75,10 +118,10 @@ final class LicenseState
         return false;
     }
 
-    /** Smí vzniknout nová firma (supplier)? */
+    /** Smí vzniknout nová firma (supplier)? Viz {@see allowsNewUser()}. */
     public function allowsNewCompany(): bool
     {
-        if ($this->state === self::TRIAL || !$this->hasCommercialFeatures()) {
+        if ($this->state === self::TRIAL || !$this->licenseLive()) {
             return true;
         }
         if ($this->state === self::ACTIVE) {
@@ -118,6 +161,11 @@ final class LicenseState
             'last_check_at'   => $this->lastCheckAt,
             'last_check_ok'   => $this->lastCheckOk,
             'commercial_features' => $this->hasCommercialFeatures(),
+            // ⚠️ Rozdíl proti `commercial_features`: tohle říká, jestli
+            // placené moduly odemyká TARIF. Bez toho by obrazovka nedokázala
+            // rozlišit „licence propadla, zaplaťte" od „tenhle tarif to nikdy
+            // neměl" — a nabízela by zaplacení něčeho, co je zaplacené.
+            'tier_commercial' => $this->commercial,
             // ⚠️ Stav předplatného, ne jen stav licence.
             //
             // Licence může být pořád platná, a přitom má zákazník po splatnosti:
@@ -149,6 +197,7 @@ final class LicenseState
             'overage_deadline' => $this->overageDeadline,
             'perpetual'        => $this->perpetual,
             'commercial_features' => $this->hasCommercialFeatures(),
+            'tier_commercial'  => $this->commercial,
             // Počty pro přehledný overage banner (aktivní vs. licencováno).
             'users_active'     => $this->usersActive,
             'users_licensed'   => $this->usersLicensed,

@@ -782,12 +782,17 @@ final class LicenseService
         // Doživotní licence — server přidal do payloadu bool `perpetual`. Neomezená platnost;
         // valid_until je jen 14denní TTL tokenu, který se denně obnovuje (renew u perpetual vždy projde).
         $perpetual = (bool) ($payload['perpetual'] ?? false);
+        // ⚠️ Odemyká tarif placené moduly? Chybějící pole = ANO, ne NE.
+        // Token vydaný před zavedením příznaku ho nenese a všechny takové
+        // licence jsou placené — opačný default by zavřel účetnictví každému
+        // platícímu zákazníkovi až do příští obnovy tokenu.
+        $commercial = (bool) ($payload['commercial'] ?? true);
 
         if ($now > $validUntil) {
             return new LicenseState(
                 LicenseState::DEGRADED, $instanceId, $tier, $maxCompanies, $usersLicensed,
                 $usersActive, $companiesActive, $validUntil, null, $overageDeadline, $key, $lastCheckAt, $lastCheckOk,
-                $perpetual, $subscription,
+                $perpetual, $subscription, $commercial,
             );
         }
 
@@ -798,7 +803,7 @@ final class LicenseService
         return new LicenseState(
             $state, $instanceId, $tier, $maxCompanies, $usersLicensed,
             $usersActive, $companiesActive, $validUntil, null, $overageDeadline, $key, $lastCheckAt, $lastCheckOk,
-            $perpetual, $subscription,
+            $perpetual, $subscription, $commercial,
         );
     }
 

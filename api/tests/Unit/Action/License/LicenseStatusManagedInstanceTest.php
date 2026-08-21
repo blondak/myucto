@@ -14,6 +14,7 @@ use MyInvoice\Service\License\LicenseClient;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseState;
 use MyInvoice\Service\License\LicenseTokenVerifier;
+use MyInvoice\Service\System\InstanceEntitlement;
 use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\System\StorageQuotaPolicy;
 use MyInvoice\Service\System\StorageQuotaStatus;
@@ -365,15 +366,17 @@ final class LicenseStatusManagedInstanceTest extends TestCase
             $config,
             new ManagedModeGuard($config),
             new StorageUsageMeter(new Connection($config), $config),
+            new InstanceEntitlement(new Connection($config), $config),
             $snapshot,
         ) extends StorageQuotaPolicy {
             public function __construct(
                 Config $config,
                 ManagedModeGuard $managed,
                 StorageUsageMeter $meter,
+                InstanceEntitlement $entitlement,
                 private readonly StorageUsageSnapshot $snapshot,
             ) {
-                parent::__construct($config, $managed, $meter);
+                parent::__construct($config, $managed, $meter, $entitlement);
             }
 
             public function evaluate(): StorageQuotaStatus
@@ -393,6 +396,7 @@ final class LicenseStatusManagedInstanceTest extends TestCase
             new ManagedModeGuard($config),
             $this->policy($config, $snapshot),
             $config,
+            new InstanceEntitlement($db, $config),
         );
     }
 
