@@ -11,6 +11,29 @@ final class TaxSubmissionEpoRepository
 {
     public function __construct(private readonly Connection $db) {}
 
+    /**
+     * Kdy má smysl nabídnout „Obnovit stav".
+     *
+     * Musí odpovídat větvím, které {@see \MyInvoice\Service\Epo\EpoDirectSubmissionService::refreshStatus}
+     * skutečně umí zpracovat:
+     *   - dotaz na stav podání (podací číslo + heslo) nebo vyzvednutí off-line výsledku,
+     *   - ZNOVUOVĚŘENÍ bezpečně uložené potvrzenky, která poprvé neprošla.
+     *
+     * Ta poslední větev v podmínce chyběla a byla to past. Potvrzenka se ukládá DŘÍV, než
+     * se zapíše podací číslo a heslo — pokus, u kterého ověření selhalo, tedy nikdy nemá
+     * `remote_submission_ref`, tlačítko se nezobrazilo a jediná cesta ven vedla přes ruční
+     * nahrání souboru, který uživatel nemá odkud vzít (leží zašifrovaný v databázi).
+     * Přesně to potkalo ostré kontrolní hlášení, kde na serveru chyběl CA bundle:
+     * podání bylo přijaté, aplikace o tom měla důkaz, a přesto ho nešlo dotáhnout.
+     */
+    private const REFRESH_AVAILABLE_SQL =
+        "((remote_submission_ref IS NOT NULL AND state_password_ciphertext IS NOT NULL)
+           OR (offline_transfer_id IS NOT NULL AND offline_password_ciphertext IS NOT NULL)
+           OR (status = 'uncertain'
+               AND error_code IN ('invalid_confirmation', 'confirmation_trust_store_unavailable')
+               AND confirmation_ciphertext IS NOT NULL
+               AND submitted_signed_ciphertext IS NOT NULL))";
+
     /** @return array{vat_root_folder_id:?int,income_tax_root_folder_id:?int} */
     public function settings(int $supplierId): array
     {
@@ -559,10 +582,7 @@ final class TaxSubmissionEpoRepository
                     resolution_code, resolution_note, resolved_by, resolved_at,
                     (remote_submission_ref IS NOT NULL
                       AND state_password_ciphertext IS NOT NULL) AS status_query_available,
-                    ((remote_submission_ref IS NOT NULL
-                      AND state_password_ciphertext IS NOT NULL)
-                      OR (offline_transfer_id IS NOT NULL
-                        AND offline_password_ciphertext IS NOT NULL)) AS refresh_available,
+                    ' . self::REFRESH_AVAILABLE_SQL . ' AS refresh_available,
                     (submitted_signed_ciphertext IS NOT NULL) AS confirmation_recovery_available,
                     updated_at
                FROM tax_submission_attempts
@@ -731,10 +751,7 @@ final class TaxSubmissionEpoRepository
                     resolution_code, resolution_note, resolved_by, resolved_at,
                     (remote_submission_ref IS NOT NULL
                       AND state_password_ciphertext IS NOT NULL) AS status_query_available,
-                    ((remote_submission_ref IS NOT NULL
-                      AND state_password_ciphertext IS NOT NULL)
-                      OR (offline_transfer_id IS NOT NULL
-                        AND offline_password_ciphertext IS NOT NULL)) AS refresh_available,
+                    " . self::REFRESH_AVAILABLE_SQL . " AS refresh_available,
                     (submitted_signed_ciphertext IS NOT NULL) AS confirmation_recovery_available,
                     updated_at
                FROM tax_submission_attempts

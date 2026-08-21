@@ -211,6 +211,77 @@ final class EpoDirectSubmissionRepositoryTest extends TestCase
         self::assertSame('encrypted-confirmation', $attempt['confirmation_ciphertext']);
     }
 
+    /**
+     * Pokus, u kterého se potvrzenku nepodařilo ověřit, musí jít dotáhnout přes „Obnovit stav".
+     *
+     * Potvrzenka se ukládá DŘÍV, než se zapíše podací číslo a heslo, takže takový pokus
+     * nikdy nemá `remote_submission_ref` — a podmínka, která na ně spoléhala, tlačítko
+     * schovala. Uživateli pak zbývalo jen ruční nahrání souboru, který nemá odkud vzít:
+     * leží zašifrovaný v databázi. V ostrém provozu to znamenalo přijaté kontrolní hlášení,
+     * které aplikace uměla doložit, ale ne uzavřít.
+     */
+    public function testUnverifiableConfirmationStillOffersRefresh(): void
+    {
+        $xml = '<Pisemnost><DPHKH1/></Pisemnost>';
+        $submissionId = $this->submissions->archive(
+            $this->supplierId,
+            'dphkh1',
+            2026,
+            7,
+            null,
+            $xml,
+            [],
+            'passed',
+            [],
+            $this->userId,
+            'B',
+            'downloaded',
+        );
+        $fingerprint = hash('sha256', 'refresh-flag-' . random_bytes(8));
+        $credentialId = $this->credentials->create($this->userId, [
+            'label' => 'Syntetický certifikát pro obnovu stavu',
+            'pfx_ciphertext' => 'enc:v1:synthetic',
+            'passphrase_ciphertext' => 'enc:v1:synthetic',
+            'fingerprint_sha256' => $fingerprint,
+            'subject_dn' => 'CN=Synthetic Refresh Signer',
+            'issuer_dn' => 'CN=Synthetic Test CA',
+            'serial_hex' => '04',
+            'valid_from' => '2026-01-01 00:00:00',
+            'valid_to' => '2027-01-01 00:00:00',
+            'ik_mpsv_present' => false,
+        ]);
+        $attemptId = $this->direct->createAttempt(
+            $this->supplierId,
+            $submissionId,
+            $credentialId,
+            $fingerprint,
+            hash('sha256', $xml),
+            $this->userId,
+            'production',
+        );
+
+        // Přesně stav z produkce: odeslaný balíček i potvrzenka uložené, podací číslo ne.
+        $this->direct->storeEncryptedSubmittedPayload($attemptId, 'encrypted-submit');
+        $this->direct->storeEncryptedConfirmationPayload($attemptId, 'encrypted-confirmation', 200);
+        $this->direct->setStatus(
+            $attemptId,
+            'uncertain',
+            200,
+            'invalid_confirmation',
+            'EPO vrátilo potvrzení, které se nepodařilo bezpečně ověřit.',
+        );
+
+        $attempts = array_column($this->epo->attempts($submissionId, $this->supplierId), null, 'id');
+        self::assertArrayHasKey($attemptId, $attempts);
+        $attempt = $attempts[$attemptId];
+
+        self::assertNull($attempt['remote_submission_ref'], 'Předpoklad testu: podací číslo chybí.');
+        self::assertTrue(
+            (bool) $attempt['refresh_available'],
+            'Uložená potvrzenka + odeslaný balíček stačí na znovuověření — tlačítko musí být k dispozici.'
+        );
+    }
+
     public function testProductionAttemptCannotBeSubmittedWhileClientIsInSandbox(): void
     {
         $xml = '<Pisemnost><DPHDP3/></Pisemnost>';
