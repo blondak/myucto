@@ -338,6 +338,7 @@ final class TenantDataRegistryFactory
             ...TenantDataDocumentIntakeCatalog::definitions(),
             ...TenantDataAiCatalog::definitions(),
             ...TenantDataJobCatalog::definitions(),
+            ...TenantDataBankMatchingCatalog::definitions(),
             ...TenantDataBusinessCatalog::definitions(),
             ...TenantDataPurchaseOrderCatalog::definitions(),
             ...TenantDataEshopCatalog::definitions(),
