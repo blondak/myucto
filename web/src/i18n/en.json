@@ -617,7 +617,8 @@
         "storage_exhausted_cta": "Uvolnit nebo rozšířit prostor",
         "unpaid_title": "Předplatné není uhrazené",
         "unpaid_desc": "Komerční moduly (účetnictví, mzdy, sklad) jsou proto zavřené; fakturaci ani čtení dat to nezastavuje. Uhraďte předplatné a moduly se otevřou samy.",
-        "unpaid_cta": "Uhradit předplatné"
+        "unpaid_cta": "Uhradit předplatné",
+        "unpaid_desc_open": "Paid modules still work for now, but they will close without payment. Details and dates are in Subscription and hosting."
     },
     "hosting": {
         "title": "Subscription and hosting",
@@ -717,7 +718,12 @@
             "milestone_next_attempt": "Next charge attempt",
             "milestone_suspend": "Service suspension",
             "milestone_access_end": "End of paid features",
-            "milestone_data_end": "End of data retention"
+            "milestone_data_end": "End of data retention",
+            "label_active": "Paid",
+            "label_past_due": "Payment failed",
+            "label_suspended": "Service suspended",
+            "label_expired": "Subscription expired",
+            "label_cancelled": "Renewal cancelled"
         }
     },
     "payroll": {

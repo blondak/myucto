@@ -109,6 +109,24 @@ const nextText = computed(() => {
   return t(n.nextKey, { date: fmtDate(n.nextAt) })
 })
 
+/**
+ * Popis u neuhrazení.
+ *
+ * ⚠️ Nesmí tvrdit, že jsou moduly zavřené, když zavřené NEJSOU. Po první
+ * neúspěšné platbě (`past_due`) licence pořád běží a účetnictví i mzdy fungují
+ * dál — kdo si v tu chvíli přečte „účetnictví je zavřené", buď zpanikaří,
+ * nebo (hůř) zjistí, že linka lže, a přestane jí věřit i ve chvíli, kdy má
+ * pravdu. O tom, co je zavřené, rozhoduje stav licence, ne dluh.
+ */
+const unpaidDescKey = computed(() => {
+  const n = narrative.value
+  // Stav neznáme (běžný uživatel bez práva na /license/status) → původní,
+  // obecná formulace. Ta odpovídá stavu, ve kterém se linka rozsvítí nejčastěji.
+  if (!n) return 'instance_alert.unpaid_desc'
+
+  return n.featuresLocked ? 'instance_alert.unpaid_desc' : 'instance_alert.unpaid_desc_open'
+})
+
 /** Kam vede „co s tím". Obojí je vnitřní stránka s vysvětlením i cestou k nápravě. */
 const TARGET: Record<InstanceAlertReason, string> = {
   storage_exhausted: '/hosting',
@@ -183,7 +201,7 @@ onBeforeUnmount(() => {
       >{{ t('hosting.preview_badge') }}</span>
       <span class="font-semibold whitespace-nowrap">{{ t(`instance_alert.${reason}_title`) }}</span>
       <span class="min-w-0 flex-1 text-white/90">
-        {{ t(`instance_alert.${reason}_desc`) }}
+        {{ reason === 'unpaid' ? t(unpaidDescKey) : t(`instance_alert.${reason}_desc`) }}
         <!-- Co se stalo a co bude — jen u neuhrazení a jen když to server řekl.
              Bez dat se tu nesmí objevit žádný termín. -->
         <template v-if="reason === 'unpaid' && happenedText">

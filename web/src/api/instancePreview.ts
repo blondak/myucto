@@ -200,7 +200,7 @@ export function buildPreviewStatus(
         phase: 'expired',
         valid_until: now - 5 * DAY,
         access_until: now - 5 * DAY,
-        data_until: now + 85 * DAY,
+        data_until: now + 30 * DAY,
       }, 'degraded')
 
     case 'overage':
@@ -235,7 +235,7 @@ export function buildPreviewStatus(
         attempt: 4,
         max_attempts: 4,
         access_until: now - 1 * DAY,
-        data_until: now + 60 * DAY,
+        data_until: now + 30 * DAY,
       }, 'degraded')
 
     case 'expired':
@@ -246,7 +246,7 @@ export function buildPreviewStatus(
         phase: 'expired',
         valid_until: now - 9 * DAY,
         access_until: now - 9 * DAY,
-        data_until: now + 81 * DAY,
+        data_until: now + 30 * DAY,
       }, 'degraded')
 
     // Zrušená obnova — zaplaceno je, ale doběhne to. Záměrně NENÍ „unpaid".
@@ -256,7 +256,7 @@ export function buildPreviewStatus(
         subscription_state: 'cancelled',
         phase: 'cancelled',
         access_until: now + 46 * DAY,
-        data_until: now + 136 * DAY,
+        data_until: now + 76 * DAY,
       })
 
     case 'storage_80':

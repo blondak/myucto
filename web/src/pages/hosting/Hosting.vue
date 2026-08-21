@@ -241,6 +241,22 @@ const billingTone = computed<Tone>(() => {
   return n.severity === 'critical' ? 'critical' : 'warning'
 })
 
+/**
+ * Krátký popis stavu platby do přehledu.
+ *
+ * ⚠️ Stav LICENCE tu nestačí. Po první neúspěšné platbě licence pořád běží,
+ * takže by v řádku „Stav platby" stálo „Aktivní" — přesně to, co zákazník
+ * potřebuje NEvidět, když se mu právě nepodařilo strhnout kartu. Vede fáze;
+ * na stav licence se spadne, jen když fázi neznáme.
+ */
+const billingLabel = computed(() => {
+  const n = narrative.value
+  if (!n) return t('hosting.billing_ok')
+  if (n.phase !== null) return t(`hosting.phase.label_${n.phase}`)
+
+  return t(`license.state_${billing.value?.license_state ?? 'active'}`)
+})
+
 /** Věta „co se stalo" (+ kolikátý pokus, když to server poslal). */
 const happenedText = computed(() => {
   const n = narrative.value
@@ -632,8 +648,7 @@ const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).ma
             <p class="text-xs uppercase tracking-wider text-neutral-500">{{ t('hosting.row_billing') }}</p>
             <p class="mt-0.5 text-base font-semibold text-neutral-900">
               <template v-if="status.state === 'trial'">{{ t('license.state_trial') }}</template>
-              <template v-else-if="narrative">{{ t('license.state_' + (billing?.license_state ?? 'active')) }}</template>
-              <template v-else>{{ t('hosting.billing_ok') }}</template>
+              <template v-else>{{ billingLabel }}</template>
             </p>
             <p class="mt-1 text-sm text-neutral-600">
               <template v-if="status.state === 'trial'">
