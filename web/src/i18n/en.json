@@ -607,7 +607,8 @@
         "section_finance": "Finance",
         "mcp_server": "MCP server",
         "eshop_locales": "Languages",
-        "eshop_currencies": "Currencies"
+        "eshop_currencies": "Currencies",
+        "instance_export": "Full data export"
     },
     "payroll": {
         "agendas": {
@@ -8437,7 +8438,9 @@
             "not_imported_title": "{n} invoice(s) could not be imported",
             "file": "File",
             "status_label": "Status",
-            "reason": "Reason"
+            "reason": "Reason",
+            "managed_title": "Managed installation",
+            "managed_desc": "In this mode, the operator sets the path to the received-invoices directory — scanning can't be started here."
         },
         "export": {
             "page_title": "Export received invoices",
@@ -12981,11 +12984,13 @@
         "health_never_ran": "Never ran",
         "health_idle": "Idle",
         "health_pending": "Waiting for first run",
+        "health_disabled": "Disabled by configuration",
         "tooltip_overdue": "Last successful run is older than {hours} h.",
         "tooltip_failing": "The last run ended with an error.",
         "tooltip_never_ran": "Script never ran — most likely it isn't scheduled in crontab / Task Scheduler.",
         "tooltip_idle": "This job only runs when there is work to do, and right now there isn't — that's why the last run is ageing. {script} is what proves scheduling still works.",
         "tooltip_pending": "The installation is new and this job hasn't had a full period ({hours} h) yet — not a problem for now.",
+        "tooltip_disabled": "The installation's configuration (cron.disabled_jobs) disabled this job — it won't run until the admin/operator re-enables it. Not a malfunction.",
         "freq_daily_0030": "daily at 00:30",
         "freq_daily_0200": "daily at 02:00",
         "freq_daily_0230": "daily at 02:30",
@@ -16419,5 +16424,60 @@
         "create_failed": "The domain could not be added.",
         "verify_failed": "Domain verification failed.",
         "activate_failed": "The domain could not be activated."
+    },
+    "instance_export": {
+        "title": "Full data export",
+        "subtitle": "Download all of the company data in a single archive — the database, documents as PDF and uploaded attachments.",
+        "info": "The archive is built to be usable without this application: data is in machine-readable JSON Lines, documents are PDFs in folders by year and agenda, attachments are plain files. Inside you will find a manifest (what the archive holds, how much of it, as of when and from which version) and SHA-256 checksums to verify the download is complete.",
+        "no_restore_note": "The export is for downloading and archiving your data. It is not a backup and not a restore — we do not load archive data back into the application.",
+        "not_encrypted": "The archive is not encrypted because no backup password is configured (cron.backup.password). It holds the complete accounting of the company — store it somewhere safe.",
+        "new_export": "New export",
+        "part": {
+            "data": "Data (database)",
+            "documents": "Documents as PDF",
+            "files": "Attachments and uploads"
+        },
+        "part_hint": {
+            "data": "Every agenda table as JSON Lines — documents, contacts, stock, assets, payroll, the journal and VAT source data.",
+            "documents": "Issued invoices (PDF + ISDOC), received invoices and bank statements, in folders by year.",
+            "files": "Scans of received documents, journal attachments, documents and payroll files."
+        },
+        "date_from": "Documents from",
+        "date_to": "Documents to",
+        "range_hint": "Optional. Limits only the PDF documents — the database is always exported in full.",
+        "start": "Start export",
+        "starting": "Starting…",
+        "started": "The export is running in the background. It will appear in the list once finished.",
+        "already_running": "An export for this company is already running. You can start another once it finishes.",
+        "pick_part": "Pick at least one part of the export.",
+        "ttl_hint": "The finished archive stays available for {days} days, then it is deleted.",
+        "preparing": "Preparing…",
+        "progress_unknown": "Still working out the progress…",
+        "cancelling": "Cancelling…",
+        "cancel_requested": "Cancellation sent — the export will stop at the next step.",
+        "empty": "You have not run an export yet.",
+        "col_created": "Created",
+        "col_status": "Status",
+        "col_file": "File",
+        "col_size": "Size",
+        "col_checksum": "SHA-256",
+        "col_expires": "Expires",
+        "download": "Download",
+        "detail": "Detail",
+        "detail_title": "Export #{id} detail",
+        "delete_confirm": "Really delete export {file}? The archive will be removed and can no longer be downloaded.",
+        "checksum_copied": "Checksum copied.",
+        "sum_entries": "Entries in archive",
+        "sum_tables": "Tables",
+        "sum_files": "Files",
+        "sum_encrypted": "Encryption",
+        "no_log": "There is no log for this run.",
+        "status": {
+            "queued": "Queued",
+            "running": "Running",
+            "completed": "Done",
+            "failed": "Failed",
+            "cancelled": "Cancelled"
+        }
     }
 }

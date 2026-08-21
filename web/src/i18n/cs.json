@@ -607,7 +607,8 @@
         "section_finance": "Finance",
         "mcp_server": "MCP server",
         "eshop_locales": "Jazyky",
-        "eshop_currencies": "Měny"
+        "eshop_currencies": "Měny",
+        "instance_export": "Kompletní export dat"
     },
     "payroll": {
         "agendas": {
@@ -8437,7 +8438,9 @@
             "not_imported_title": "{n} faktur(y) nebylo možné importovat",
             "file": "Soubor",
             "status_label": "Stav",
-            "reason": "Důvod"
+            "reason": "Důvod",
+            "managed_title": "Spravovaná instalace",
+            "managed_desc": "Cestu k adresáři s přijatými fakturami v tomto režimu nastavuje provozovatel — scan tady spustit nejde."
         },
         "export": {
             "page_title": "Export přijatých faktur",
@@ -12981,11 +12984,13 @@
         "health_never_ran": "Neběželo",
         "health_idle": "Nemá práci",
         "health_pending": "Čeká na první běh",
+        "health_disabled": "Vypnuto konfigurací",
         "tooltip_overdue": "Poslední úspěšný běh je starší než {hours} h.",
         "tooltip_failing": "Poslední běh skončil chybou.",
         "tooltip_never_ran": "Skript nikdy neběžel — pravděpodobně není naplánovaný v crontab / Task Scheduleru.",
         "tooltip_idle": "Úloha se spouští jen když má co dělat, a teď nemá — proto poslední běh stárne. Že plánování funguje, hlídá {script}.",
         "tooltip_pending": "Instalace je nová a tahle úloha ještě nestihla ani jednu periodu ({hours} h) — zatím nejde o problém.",
+        "tooltip_disabled": "Úlohu vypnula konfigurace instalace (cron.disabled_jobs) — nespustí se, dokud ji admin/provozovatel znovu nezapne. Nejde o poruchu.",
         "freq_daily_0030": "denně v 00:30",
         "freq_daily_0200": "denně v 02:00",
         "freq_daily_0230": "denně v 02:30",
@@ -16419,5 +16424,60 @@
         "create_failed": "Doménu se nepodařilo přidat.",
         "verify_failed": "Ověření domény selhalo.",
         "activate_failed": "Doménu se nepodařilo aktivovat."
+    },
+    "instance_export": {
+        "title": "Kompletní export dat",
+        "subtitle": "Stáhni si všechna data firmy v jednom archivu — databázi, doklady v PDF i nahrané přílohy.",
+        "info": "Archiv je navržený tak, aby byl použitelný i bez této aplikace: data jsou ve strojově čitelném formátu JSON Lines, doklady jako PDF ve složkách po letech a agendách, přílohy jako běžné soubory. Uvnitř je manifest (co v archivu je, kolik toho je, k jakému datu a z jaké verze) a kontrolní součty SHA-256, podle kterých ověříš, že se archiv stáhl celý.",
+        "no_restore_note": "Export slouží ke stažení a archivaci dat. Není to záloha ani obnova — data z archivu zpátky do aplikace nenahrajeme.",
+        "not_encrypted": "Archiv se nešifruje, protože v konfiguraci není nastavené heslo záloh (cron.backup.password). Obsahuje kompletní účetnictví firmy — ulož ho na bezpečné místo.",
+        "new_export": "Nový export",
+        "part": {
+            "data": "Data (databáze)",
+            "documents": "Doklady v PDF",
+            "files": "Přílohy a nahrané soubory"
+        },
+        "part_hint": {
+            "data": "Všechny agendy po tabulkách ve formátu JSON Lines — doklady, kontakty, sklad, majetek, mzdy, deník i podklady k DPH.",
+            "documents": "Vydané faktury (PDF + ISDOC), přijaté faktury a výpisy z účtu, ve složkách po letech.",
+            "files": "Skeny přijatých dokladů, přílohy účetního deníku, dokumenty a mzdové doklady."
+        },
+        "date_from": "Doklady od",
+        "date_to": "Doklady do",
+        "range_hint": "Nepovinné. Omezí jen doklady v PDF — databáze se exportuje vždy celá.",
+        "start": "Spustit export",
+        "starting": "Spouštím…",
+        "started": "Export běží na pozadí. Až doběhne, objeví se v seznamu ke stažení.",
+        "already_running": "Export téhle firmy už běží. Další se dá spustit, až doběhne.",
+        "pick_part": "Vyber aspoň jednu část exportu.",
+        "ttl_hint": "Hotový archiv zůstane ke stažení {days} dnů, pak se smaže.",
+        "preparing": "Připravuji…",
+        "progress_unknown": "Průběh se ještě počítá…",
+        "cancelling": "Ruším…",
+        "cancel_requested": "Zrušení odesláno — export se ukončí u nejbližšího kroku.",
+        "empty": "Zatím jsi žádný export nespustil.",
+        "col_created": "Vytvořeno",
+        "col_status": "Stav",
+        "col_file": "Soubor",
+        "col_size": "Velikost",
+        "col_checksum": "SHA-256",
+        "col_expires": "Expiruje",
+        "download": "Stáhnout",
+        "detail": "Detail",
+        "detail_title": "Detail exportu #{id}",
+        "delete_confirm": "Opravdu smazat export {file}? Archiv se smaže a už nepůjde stáhnout.",
+        "checksum_copied": "Kontrolní součet zkopírován.",
+        "sum_entries": "Položek v archivu",
+        "sum_tables": "Tabulek",
+        "sum_files": "Souborů",
+        "sum_encrypted": "Šifrování",
+        "no_log": "K tomuhle běhu není žádný záznam.",
+        "status": {
+            "queued": "Ve frontě",
+            "running": "Běží",
+            "completed": "Hotovo",
+            "failed": "Selhalo",
+            "cancelled": "Zrušeno"
+        }
     }
 }

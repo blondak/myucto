@@ -618,6 +618,8 @@ const navSections = computed<NavSection[]>(() => {
           { to: '/activation/license',  label: t('nav.license'),               icon: ICONS.approvals, dividerBefore: true },
           { to: '/activation/terms',    label: t('nav.terms'),                 icon: ICONS.documents },
           { to: '/activation/purchase', label: t('nav.purchase_subscription'), icon: ICONS.coin },
+          // Kompletní export dat firmy — stažení všeho v jednom archivu (H-14).
+          { to: '/admin/instance-export', label: t('nav.instance_export'),     icon: ICONS.exports, dividerBefore: true },
           // Podklady k incidentu a rozcestník podpory — vlastní skupina na konci.
           { to: '/admin/diagnostics',   label: t('nav.diagnostics'),           icon: ICONS.diagnostics, dividerBefore: true },
           { to: '/admin/support',       label: t('nav.support'),               icon: ICONS.help },
