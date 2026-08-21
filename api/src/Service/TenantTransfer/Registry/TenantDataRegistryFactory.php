@@ -337,6 +337,7 @@ final class TenantDataRegistryFactory
         $definitions = [
             self::supplier(),
             ...TenantDataSystemCatalog::definitions(),
+            ...TenantDataIdentityCatalog::definitions(),
             ...TenantDataGlobalCatalog::definitions(),
             ...TenantDataSigningCatalog::definitions(),
             ...TenantDataDocumentCatalog::definitions(),

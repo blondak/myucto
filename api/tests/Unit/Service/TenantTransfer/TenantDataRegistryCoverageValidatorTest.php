@@ -1115,6 +1115,11 @@ final class TenantDataRegistryCoverageValidatorTest extends TestCase
                     ],
                 ],
                 'personal_attachment_references' => $personalReferences,
+                'relation_import' => [
+                    'strategy' => 'recreate_from_mapped_references',
+                    'raw_insert' => false,
+                    'unresolved_row' => 'skip',
+                ],
             ],
         );
     }

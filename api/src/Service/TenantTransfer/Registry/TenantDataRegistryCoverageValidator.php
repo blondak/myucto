@@ -15,6 +15,9 @@ final class TenantDataRegistryCoverageValidator
         $conditionalActors;
     private readonly TenantDataMixedOwnershipCoverageValidator $mixedOwnership;
     private readonly TenantDataCodeReferenceCoverageValidator $codeReferences;
+    private readonly TenantDataInstanceReferenceCoverageValidator
+        $instanceReferences;
+    private readonly TenantDataRelationCoverageValidator $relations;
 
     public function __construct(
         ?TenantDataFileAreaCoverageValidator $fileAreas = null,
@@ -22,6 +25,8 @@ final class TenantDataRegistryCoverageValidator
         ?TenantDataConditionalActorCoverageValidator $conditionalActors = null,
         ?TenantDataMixedOwnershipCoverageValidator $mixedOwnership = null,
         ?TenantDataCodeReferenceCoverageValidator $codeReferences = null,
+        ?TenantDataInstanceReferenceCoverageValidator $instanceReferences = null,
+        ?TenantDataRelationCoverageValidator $relations = null,
     ) {
         $this->fileAreas = $fileAreas
             ?? new TenantDataFileAreaCoverageValidator();
@@ -33,6 +38,10 @@ final class TenantDataRegistryCoverageValidator
             ?? new TenantDataMixedOwnershipCoverageValidator();
         $this->codeReferences = $codeReferences
             ?? new TenantDataCodeReferenceCoverageValidator();
+        $this->instanceReferences = $instanceReferences
+            ?? new TenantDataInstanceReferenceCoverageValidator();
+        $this->relations = $relations
+            ?? new TenantDataRelationCoverageValidator();
     }
 
     /** @param array<mixed> $inventory */
@@ -117,6 +126,13 @@ final class TenantDataRegistryCoverageValidator
                 ),
                 ...$this->codeReferences->issues($definition, $table),
                 ...$this->conditionalActors->issues($definition, $table),
+                ...$this->instanceReferences->issues(
+                    $definition,
+                    $table,
+                    $tables,
+                    $definitions,
+                ),
+                ...$this->relations->issues($definition, $table),
             );
         }
         foreach (array_diff(array_keys($definitions), array_keys($tables)) as $tableName) {
@@ -852,8 +868,8 @@ final class TenantDataRegistryCoverageValidator
             }
             if ($target->policy === TenantDataPolicy::InstanceOwned) {
                 if ($foreignKey->referencedTable !== 'users') {
-                    $issues[] = 'instance_reference_policy_missing:'
-                        . $table->name . '.' . $foreignKey->column;
+                    // Samostatný validator ověřuje přesnou mapovací politiku
+                    // i přirozený klíč cílového instančního číselníku.
                     continue;
                 }
                 $actualActorColumns[$foreignKey->column] = true;

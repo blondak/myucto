@@ -147,6 +147,27 @@ final class TenantDataSigningCatalogTest extends TestCase
     {
         $definitions = self::tableDefinitions();
 
+        $relationImport = [
+            'strategy' => 'recreate_from_mapped_references',
+            'raw_insert' => false,
+            'unresolved_row' => 'skip',
+        ];
+        self::assertSame(
+            $relationImport,
+            $definitions['signature_user_profiles']
+                ->details['relation_import'] ?? null,
+        );
+        self::assertSame(
+            $relationImport,
+            $definitions['epo_signing_credential_suppliers']
+                ->details['relation_import'] ?? null,
+        );
+        self::assertSame(
+            $relationImport,
+            $definitions['payroll_submission_signing_profiles']
+                ->details['relation_import'] ?? null,
+        );
+
         self::assertSame(
             [
                 'vault_credential_id' => [
@@ -197,12 +218,12 @@ final class TenantDataSigningCatalogTest extends TestCase
             $definitions['signing_credentials']->details['post_import']
                 ?? null,
         );
-        self::assertSame(
-            'block',
-            $definitions['signature_document_overrides']
-                ->details['soft_references']['entity']['unknown_value']
-                ?? null,
-        );
+        $softReferences = $definitions['signature_document_overrides']
+            ->details['soft_references'] ?? null;
+        self::assertIsArray($softReferences);
+        $entityReference = $softReferences['entity'] ?? null;
+        self::assertIsArray($entityReference);
+        self::assertSame('block', $entityReference['unknown_value'] ?? null);
     }
 
     public function testTenantCertificateFilesStayUnderRuntimeStorage(): void

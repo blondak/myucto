@@ -249,6 +249,19 @@ final class TenantDataSigningCatalog
         array $postImport = [],
         array $additionalDetails = [],
     ): TenantDataDefinition {
+        if (array_key_exists('relation_import', $additionalDetails)) {
+            throw new \LogicException(
+                'Podpisový katalog nesmí přepsat politiku obnovy vazby.',
+            );
+        }
+        $additionalDetails = [
+            'relation_import' => [
+                'strategy' => 'recreate_from_mapped_references',
+                'raw_insert' => false,
+                'unresolved_row' => 'skip',
+            ],
+            ...$additionalDetails,
+        ];
         return self::table(
             $table,
             $primaryKey,
