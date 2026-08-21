@@ -13,6 +13,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseState;
+use MyInvoice\Service\System\InstanceEntitlement;
 use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\System\StorageQuotaPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -48,6 +49,7 @@ final class LicenseStatusAction
         private readonly ManagedModeGuard $managed,
         private readonly StorageQuotaPolicy $quota,
         private readonly Config $config,
+        private readonly InstanceEntitlement $entitlement,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -79,13 +81,16 @@ final class LicenseStatusAction
         $status     = $this->quota->evaluate();
         $usageBytes = $status->usageBytes;              // ⚠️ null = neměřeno, ne nula
         $contracted = $this->quota->contractedBytes();  // ⚠️ null = neznámý objem
+        $raw        = $this->entitlement->deliveredRaw();
 
         return [
             'billing'          => $this->billing($state),
             'links'            => $this->links(),
             'managed'          => true,
-            'plan'             => $this->stringOrNull('instance.plan'),
-            'managed_since'    => $this->stringOrNull('instance.managed_since'),
+            // ⚠️ Ne z konfigurace: po dokoupení místa nebo změně tarifu je
+            // čerstvý údaj ten, který doručil licenční server.
+            'plan'             => $this->entitlement->plan(),
+            'managed_since'    => $this->entitlement->managedSince(),
             'subscription_url' => $this->subscriptionUrl(),
             'storage'          => [
                 // `measured` je jediná legální otázka na „máme čím počítat".
@@ -104,6 +109,16 @@ final class LicenseStatusAction
                 // Skutečný stav vynucení (z provozního limitu) — obrazovka podle
                 // něj neslibuje zápis, který middleware odmítne.
                 'blocks_writes'     => $status->blocksWrites(),
+
+                // ⚠️ Zaplacené rozšíření, které provozovatel ještě nezavedl.
+                // Dokud to platí, obrazovka NESMÍ nabízet dokoupení znovu —
+                // zákazník už zaplatil a druhé kliknutí by strhlo podruhé.
+                'change_pending'    => (bool) ($raw['quota_change_pending'] ?? false),
+                // Objem, který si zákazník objednal (může být větší než ten,
+                // proti kterému se dnes měří).
+                'quota_gb_ordered'  => isset($raw['quota_gb_ordered']) ? (int) $raw['quota_gb_ordered'] : null,
+                // Odkud se ví, kolik má zaplaceno: `license` / `config` / `none`.
+                'quota_source'      => $this->entitlement->quotaSource(),
             ],
         ];
     }
@@ -134,6 +149,8 @@ final class LicenseStatusAction
             || $state->state === LicenseState::TRIAL_EXPIRED;
         $subscriptionUnpaid = $subscriptionState === 'past_due' || $subscriptionState === 'expired';
 
+        $sub = is_array($state->subscription) ? $state->subscription : [];
+
         return [
             // Jediná otázka, na kterou obrazovka i linka smí odpovídat ano/ne.
             'unpaid'             => $licenseUnpaid || $subscriptionUnpaid,
@@ -144,6 +161,22 @@ final class LicenseStatusAction
             // mohlo znamenat jen „týden jsme se nedovolali".
             'last_check_at'      => $state->lastCheckAt,
             'last_check_ok'      => $state->lastCheckOk,
+
+            // ── V JAKÉ FÁZI JSME A CO SE STANE DÁL ────────────────────────
+            // Všechno počítá licenční server; instalace to jen podává dál.
+            // ⚠️ Žádné z těch dat se tu NESMÍ dopočítávat: termín, který si
+            // aplikace vymyslí, je slib, který nikdo nedodrží. Když ho server
+            // neposlal, zůstane null a obrazovka řekne „ozveme se".
+            'phase'              => $this->subValue($sub, 'phase'),
+            'attempt'            => $this->subInt($sub, 'attempt'),
+            'max_attempts'       => $this->subInt($sub, 'max_attempts'),
+            'next_attempt_at'    => $this->subInt($sub, 'next_attempt_at'),
+            // Kdy se pozastaví provoz instance, když se nezaplatí.
+            'suspend_at'         => $this->subInt($sub, 'suspend_at'),
+            // Dokdy fungují placené funkce (konec období + odklad).
+            'access_until'       => $this->subInt($sub, 'access_until'),
+            // Dokdy po pozastavení držíme data.
+            'data_until'         => $this->subInt($sub, 'data_until'),
         ];
     }
 
@@ -186,6 +219,26 @@ final class LicenseStatusAction
         return $server === null ? null : rtrim($server, '/') . '/predplatne';
     }
 
+    /**
+     * Hodnota z bloku předplatného, jak ji poslal server. Nic se nedopočítává
+     * ani nenahrazuje výchozí hodnotou — chybějící údaj je `null`, ne nula.
+     *
+     * @param array<string,mixed> $sub
+     */
+    private function subValue(array $sub, string $key): ?string
+    {
+        $value = $sub[$key] ?? null;
+
+        return is_string($value) && trim($value) !== '' ? $value : null;
+    }
+
+    /** @param array<string,mixed> $sub */
+    private function subInt(array $sub, string $key): ?int
+    {
+        $value = $sub[$key] ?? null;
+
+        return is_int($value) || (is_string($value) && ctype_digit($value)) ? (int) $value : null;
+    }
     private function stringOrNull(string $key): ?string
     {
         $value = trim((string) $this->config->get($key, ''));
