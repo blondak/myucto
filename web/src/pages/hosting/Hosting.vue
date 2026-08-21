@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -84,7 +84,13 @@ function syncPreviewFromRoute(): void {
 }
 
 watch(() => route.query.nahled, syncPreviewFromRoute, { immediate: true })
-onBeforeUnmount(stopPreview)
+
+// ⚠️ Náhled se ZÁMĚRNĚ neruší při odchodu ze stránky: hostingové stavy se
+// promítají i do menu a do „Akcí pro tebe" na dashboardu, a právě tam je
+// potřeba je proklikat. Aby z toho nevznikl zapomenutý falešný stav, drží se
+// nad celou aplikací pruh „NÁHLED" (viz InstancePreviewBar) a náhled žije jen
+// v paměti — obnovení stránky ho zahodí. Návrat na /hosting bez `?nahled=`
+// ho vypne taky (viz syncPreviewFromRoute).
 
 // ─── Načtení ───────────────────────────────────────────────────────────────
 

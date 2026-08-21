@@ -200,7 +200,11 @@ onBeforeUnmount(() => {
         class="shrink-0 rounded bg-white/25 px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider"
       >{{ t('hosting.preview_badge') }}</span>
       <span class="font-semibold whitespace-nowrap">{{ t(`instance_alert.${reason}_title`) }}</span>
-      <span class="min-w-0 flex-1 text-white/90">
+      <!-- Na úzkém displeji se text ořízne na tři řádky: linka sedí uvnitř
+           připnuté lišty, takže by jinak na mobilu ukousla třetinu obrazovky
+           a odsunula aplikaci pod okraj. Celé znění je na obrazovce, kam vede
+           tlačítko vedle. -->
+      <span class="min-w-0 flex-1 text-white/90 line-clamp-3 sm:line-clamp-none">
         {{ reason === 'unpaid' ? t(unpaidDescKey) : t(`instance_alert.${reason}_desc`) }}
         <!-- Co se stalo a co bude — jen u neuhrazení a jen když to server řekl.
              Bez dat se tu nesmí objevit žádný termín. -->

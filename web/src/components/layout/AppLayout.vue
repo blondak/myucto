@@ -19,6 +19,7 @@ import LanguageToggle from './LanguageToggle.vue'
 import DesktopMenuBar from './DesktopMenuBar.vue'
 import StorageQuotaBanner from './StorageQuotaBanner.vue'
 import InstanceCriticalBar from './InstanceCriticalBar.vue'
+import InstancePreviewBar from './InstancePreviewBar.vue'
 import { instanceStatus } from '@/api/instanceStatus'
 import { hostingNavAttention, resolveHostingActions } from '@/api/hostingActions'
 import WorkspaceHost from '@/components/workspace/WorkspaceHost.vue'
@@ -1340,6 +1341,7 @@ onBeforeUnmount(() => {
            připnuté lišty, takže nejde odrolovat. Nemá zavírací prvek a na
            self-hosted instalaci se nezobrazí vůbec. Výšku hlásí do
            `--instance-alert-h`, o kterou se odsadí připnutý sidebar. -->
+      <InstancePreviewBar />
       <InstanceCriticalBar />
       <div class="h-12 px-3 flex items-center gap-1">
         <WorkspaceNavLink to="/" class="flex h-10 items-center gap-2 shrink-0 px-1.5 rounded-md hover:bg-neutral-100" @click="mobileOpen = false">
