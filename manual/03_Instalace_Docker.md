@@ -24,8 +24,8 @@ ani několikaminutový build.
 # Linux / macOS
 cmd/docker-ghcr.sh
 
-# Windows PowerShell
-.\cmd\docker-ghcr.ps1
+# Windows — v PowerShellu 7 (pwsh); Windows PowerShell 5.1 skript odmítne
+pwsh -File .\cmd\docker-ghcr.ps1
 ```
 
 Skript `docker-ghcr` postupně:
@@ -51,8 +51,8 @@ takže další compose příkazy vyžadují flag `-f docker-compose.production.y
 # Linux / macOS
 cmd/docker-update.sh
 
-# Windows PowerShell
-.\cmd\docker-update.ps1
+# Windows — v PowerShellu 7 (pwsh); Windows PowerShell 5.1 skript odmítne
+pwsh -File .\cmd\docker-update.ps1
 ```
 
 Skript v registry módu sám zavolá `docker compose pull app` (stáhne nový
@@ -96,8 +96,8 @@ Postaví image lokálně z repa — vhodné pro vývoj a vlastní úpravy.
 # Linux / macOS
 cmd/docker-install.sh
 
-# Windows PowerShell
-.\cmd\docker-install.ps1
+# Windows — v PowerShellu 7 (pwsh); Windows PowerShell 5.1 skript odmítne
+pwsh -File .\cmd\docker-install.ps1
 ```
 
 Skript `docker-install` postupně:
