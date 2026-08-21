@@ -27,10 +27,16 @@ final class LicenseState
     public const BLOCK_SEAT_LIMIT = 'seat_limit';
 
     /**
-     * Kolik uživatelů s právem zápisu unese instalace BEZ licence.
+     * Kolik uživatelů s právem zápisu unese SPRAVOVANÁ instalace BEZ licence.
      *
      * Jeden — živnostník nebo firma, která si vede fakturaci sama. Druhý
      * uživatel už znamená víc lidí nad jedněmi daty a to je placená funkce.
+     *
+     * ⚠️ Platí JEN ve spravovaném provozu ({@see $managed}). Instalace, kterou
+     * si zákazník provozuje sám a nemá licenci, běží bez stropu — to je slib
+     * bezplatné verze a čl. 1.12 licenčního ujednání, který říká, že bezplatné
+     * funkce zůstanou plně funkční včetně vytváření a změn dat. Jakmile si
+     * licenci koupí, platí počet míst z ní.
      *
      * ⚠️ Nepočítají se sem účty s právem jen pro čtení ani klientské účty:
      * ty licenční místo nezabírají a jde jich založit kolik je potřeba
@@ -78,6 +84,13 @@ final class LicenseState
          * platícímu zákazníkovi až do příští obnovy tokenu.
          */
         public readonly bool $commercial = true,
+        /**
+         * Provozuje instalaci někdo jiný než zákazník (`app.managed`)?
+         *
+         * Rozhoduje o tom, jestli platí strop {@see FREE_SEATS}. Aplikace se
+         * NESMÍ ptát, KDO ji hostuje — jen jestli je hostovaná.
+         */
+        public readonly bool $managed = false,
     ) {}
 
     /** Prodlužuje se licence automaticky (chystá se další stržení)? */
@@ -144,14 +157,22 @@ final class LicenseState
         if ($this->state === self::TRIAL) {
             return null;
         }
-        // ⚠️ Bez platné licence JEDEN uživatel s právem zápisu, dál už jen
-        // účty pro čtení. Druhý zapisující uživatel znamená víc lidí nad
-        // jedněmi daty a to je placená funkce.
+        // ⚠️ Bez platné licence platí strop JEN ve spravovaném provozu: jeden
+        // uživatel s právem zápisu, dál už jen účty pro čtení.
+        //
+        // Instalace, kterou si zákazník provozuje sám, běží bez stropu. Nic
+        // jsme mu neprodali, nic mu neplatí a bezplatná verze slibuje plnou
+        // funkčnost včetně vytváření dat; zavřít mu zakládání uživatelů by
+        // znamenalo vzít funkci, kterou měl. Jakmile si licenci koupí, platí
+        // počet míst z ní (větev níž).
         //
         // STÁVAJÍCÍ uživatelé pracují dál i nad tímhle počtem — po vypršení
         // licence se nikomu nezamyká přístup do jeho vlastních dat, jen se
         // neprodá další místo.
         if (!$this->licenseLive()) {
+            if (!$this->managed) {
+                return null;
+            }
             return $this->usersActive < self::FREE_SEATS ? null : self::BLOCK_NO_LICENSE;
         }
         if ($this->state === self::ACTIVE) {

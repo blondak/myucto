@@ -9,6 +9,10 @@ use PHPUnit\Framework\TestCase;
 
 final class LicenseStateTest extends TestCase
 {
+    /**
+     * Výchozí je SPRAVOVANÁ instalace: limity míst platí jen tam, takže by
+     * self-hosted přípravek většinu těchhle testů udělal bezzubými.
+     */
     private function state(
         string $kind,
         ?int $maxCompanies = null,
@@ -17,11 +21,12 @@ final class LicenseStateTest extends TestCase
         int $companiesActive = 0,
         ?string $key = null,
         bool $commercial = true,
+        bool $managed = true,
     ): LicenseState {
         return new LicenseState(
             $kind, 'iid-1', 'single', $maxCompanies, $usersLicensed, $usersActive,
             $companiesActive, null, null, null, $key, null, true,
-            false, null, $commercial,
+            false, null, $commercial, $managed,
         );
     }
 
@@ -58,6 +63,41 @@ final class LicenseStateTest extends TestCase
         }
     }
 
+    /**
+     * ⚠️ Instalace, kterou si zákazník provozuje sám, nemá strop na uživatele.
+     *
+     * Nic jsme jí neprodali a čl. 1.12 licenčního ujednání slibuje, že bezplatné
+     * funkce zůstanou plně funkční včetně vytváření a změn dat. Strop
+     * {@see LicenseState::FREE_SEATS} je součást hostované služby, ne aplikace —
+     * kdyby platil i tady, vzali bychom stávajícím instalacím funkci, kterou
+     * měly, a admin by po deaktivaci kolegy nemohl účet vrátit zpátky.
+     */
+    public function testSelfHostedWithoutLicenseHasNoSeatLimit(): void
+    {
+        foreach ([LicenseState::TRIAL_EXPIRED, LicenseState::DEGRADED] as $kind) {
+            $s = $this->state($kind, usersActive: 99, managed: false);
+            self::assertTrue($s->allowsNewUser(), $kind . ': self-hosted bez licence bez stropu');
+            self::assertNull($s->newUserBlockReason(), $kind);
+        }
+    }
+
+    /**
+     * Jakmile si self-hosted zákazník licenci koupí, platí počet míst z ní.
+     * Bez licence neomezeně, s licencí přesně tolik, kolik zaplatil — jinak by
+     * se dala koupit licence na jedno místo a používat na deset.
+     */
+    public function testSelfHostedWithLicenseRespectsItsSeatCount(): void
+    {
+        $s = $this->state(
+            LicenseState::ACTIVE,
+            usersLicensed: 2,
+            usersActive: 2,
+            key: 'MYU-TEST',
+            managed: false,
+        );
+        self::assertFalse($s->allowsNewUser(), 'zaplacená místa jsou vyčerpaná');
+        self::assertSame(LicenseState::BLOCK_SEAT_LIMIT, $s->newUserBlockReason());
+    }
     /**
      * ⚠️ Jeden zapisující uživatel je zdarma — teprve druhý se platí.
      *

@@ -89,6 +89,7 @@ final class LicenseService
             return new LicenseState(
                 LicenseState::TRIAL, '', null, null, 0, 0, 0, null,
                 time() + self::TRIAL_DAYS * 86400, null, null, null, true,
+                false, null, true, $this->isManaged(),
             );
         }
         $row = $this->loadRow();
@@ -765,6 +766,7 @@ final class LicenseService
             return new LicenseState(
                 $state, $instanceId, null, null, 0, $usersActive, $companiesActive,
                 null, $trialEndsAt, null, null, $lastCheckAt, $lastCheckOk,
+                false, null, true, $this->isManaged(),
             );
         }
 
@@ -778,6 +780,7 @@ final class LicenseService
             return new LicenseState(
                 LicenseState::DEGRADED, $instanceId, null, null, 0, $usersActive, $companiesActive,
                 null, null, null, $key, $lastCheckAt, $lastCheckOk, false, $subscription,
+                true, $this->isManaged(),
             );
         }
 
@@ -803,7 +806,7 @@ final class LicenseService
             return new LicenseState(
                 LicenseState::DEGRADED, $instanceId, $tier, $maxCompanies, $usersLicensed,
                 $usersActive, $companiesActive, $validUntil, null, $overageDeadline, $key, $lastCheckAt, $lastCheckOk,
-                $perpetual, $subscription, $commercial,
+                $perpetual, $subscription, $commercial, $this->isManaged(),
             );
         }
 
@@ -814,10 +817,21 @@ final class LicenseService
         return new LicenseState(
             $state, $instanceId, $tier, $maxCompanies, $usersLicensed,
             $usersActive, $companiesActive, $validUntil, null, $overageDeadline, $key, $lastCheckAt, $lastCheckOk,
-            $perpetual, $subscription, $commercial,
+            $perpetual, $subscription, $commercial, $this->isManaged(),
         );
     }
 
+    /**
+     * Provozuje instalaci někdo jiný než zákazník?
+     *
+     * Jediná otázka, kterou si aplikace o svém provozu smí položit. NIKDY se
+     * neptá, KDO ji hostuje — `app.managed_provider` je čistě diagnostický údaj
+     * a žádné chování na něm viset nesmí.
+     */
+    private function isManaged(): bool
+    {
+        return (bool) $this->config->get('app.managed', false);
+    }
     /**
      * Fingerprint = sha256(hostname + DB name + app URL). Uloží se lazily do řádku,
      * pokud ještě chybí (např. po seedu migrace).
