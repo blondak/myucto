@@ -3,9 +3,10 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { licenseApi, type LicenseStatus, type LicenseStateKind, type UpgradeQuote } from '@/api/license'
+import { formatQuotaBytes } from '@/api/storageQuota'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
-const { t } = useI18n()
+const { t, te, tm, rt } = useI18n()
 const auth = useAuthStore()
 
 const status = ref<LicenseStatus | null>(null)
@@ -21,6 +22,89 @@ const alreadyBound = ref(false)
 const transfersRemaining = ref<number | null>(null)
 
 const isAdmin = computed(() => auth.isSuperadmin)
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Spravovaná instalace (SaaS)
+//
+//  Přepínač je PŘÍTOMNOST bloku `instance` v odpovědi, ne příznak z /me:
+//  backend ho posílá jen když `app.managed` platí, takže self-hosted instalace
+//  se na tuhle větev nedostane ani ve chvíli, kdy setup-status ještě nedorazil.
+//  Self-hosted obrazovka je hlavní cesta k nákupu licence a nesmí se změnit.
+// ─────────────────────────────────────────────────────────────────────────────
+const managedInstance = computed(() => status.value?.instance ?? null)
+const isManaged = computed(() => managedInstance.value !== null)
+const storage = computed(() => managedInstance.value?.storage ?? null)
+
+/**
+ * ⚠️ Tři stavy místa, které se nesmí slít do jednoho:
+ *  - `unmeasured` — spotřeba se ještě neměřila. NENÍ to nula: prázdná
+ *    a nezměřená instalace vypadají v datech stejně a znamenají opak.
+ *  - `unknown_quota` — víme, kolik je obsazeno, ale ne z kolika. Procenta ani
+ *    pruh se nekreslí; vydělit něčím, co neznáme, znamená vymyslet si číslo.
+ *  - `known` — obojí známe, teprve tady má smysl poměr.
+ */
+const storageMode = computed<'unmeasured' | 'unknown_quota' | 'known'>(() => {
+  const s = storage.value
+  if (!s || !s.measured || s.usage_bytes === null) return 'unmeasured'
+  if (s.quota_bytes === null || s.percent === null) return 'unknown_quota'
+  return 'known'
+})
+
+/** Úroveň pro barvu a výzvu. Skutečné vynucení (blocks_writes) přebíjí poměr. */
+const storageLevel = computed<'none' | 'ok' | 'warning' | 'exhausted'>(() => {
+  const s = storage.value
+  if (!s) return 'none'
+  if (s.blocks_writes) return 'exhausted'
+  if (storageMode.value !== 'known' || s.percent === null) return 'none'
+  if (s.percent >= s.read_only_percent) return 'exhausted'
+  if (s.percent >= s.warn_percent) return 'warning'
+  return 'ok'
+})
+
+const STORAGE_STYLE: Record<'none' | 'ok' | 'warning' | 'exhausted', { card: string; bar: string }> = {
+  none:      { card: 'border-neutral-200 bg-surface',            bar: 'bg-neutral-300' },
+  ok:        { card: 'border-neutral-200 bg-surface',            bar: 'bg-success-500' },
+  warning:   { card: 'border-warning-300 bg-warning-50/40',      bar: 'bg-warning-500' },
+  exhausted: { card: 'border-danger-300 bg-danger-50/40',        bar: 'bg-danger-500' },
+}
+const storageStyle = computed(() => STORAGE_STYLE[storageLevel.value])
+
+/** Šířka pruhu. Přes 100 % se pruh nepřetáčí, poměr v textu zůstává pravdivý. */
+const storageBarWidth = computed(() => {
+  const p = storage.value?.percent
+  if (storageMode.value !== 'known' || p === null || p === undefined) return 0
+  return Math.max(0, Math.min(100, p))
+})
+
+const usedLabel = computed(() => formatQuotaBytes(storage.value?.usage_bytes ?? null))
+const quotaLabel = computed(() => formatQuotaBytes(storage.value?.quota_bytes ?? null))
+
+function fmtPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—'
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)} %`
+}
+
+/** Tarif provozu. Neznámý kód se ukáže tak, jak přišel — nevymýšlíme mu název. */
+const planLabel = computed(() => {
+  const plan = managedInstance.value?.plan
+  if (!plan) return t('license.managed_plan_unknown')
+  const key = `license.managed_plan_${plan}`
+  return te(key) ? t(key) : plan
+})
+
+/** Správa předplatného na webu; null = adresa není nakonfigurovaná → kontakt. */
+const subscriptionUrl = computed(() => managedInstance.value?.subscription_url ?? null)
+
+const managedSinceLabel = computed(() => {
+  const raw = managedInstance.value?.managed_since
+  if (!raw) return null
+  const parsed = new Date(raw)
+  return Number.isNaN(parsed.getTime()) ? raw : parsed.toLocaleDateString()
+})
+
+/** Co provoz zahrnuje / co v něm není — pole překladů přes tm() + rt(). */
+const managedIncluded = computed(() => (tm('license.managed_included') as unknown[]).map(item => rt(item as string)))
+const managedExcluded = computed(() => (tm('license.managed_excluded') as unknown[]).map(item => rt(item as string)))
 
 /** Veřejný portál podpory — fallback, když identita přes licenční server nevyjde. */
 const SUPPORT_PORTAL_URL = 'https://myucto.cz/support'
@@ -291,8 +375,12 @@ onMounted(load)
 <template>
   <div class="max-w-3xl mx-auto">
     <header class="mb-6">
-      <h1 class="text-2xl font-semibold text-neutral-900">{{ t('license.purchase_title') }}</h1>
-      <p class="text-sm text-neutral-500 mt-0.5">{{ t('license.purchase_subtitle') }}</p>
+      <h1 class="text-2xl font-semibold text-neutral-900">
+        {{ isManaged ? t('license.managed_title') : t('license.purchase_title') }}
+      </h1>
+      <p class="text-sm text-neutral-500 mt-0.5">
+        {{ isManaged ? t('license.managed_subtitle') : t('license.purchase_subtitle') }}
+      </p>
     </header>
 
     <div v-if="!isAdmin" class="rounded-md bg-warning-50 border border-warning-200 p-4 text-sm text-warning-800">
@@ -300,6 +388,155 @@ onMounted(load)
     </div>
 
     <div v-else-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
+
+    <!-- ═══ Spravovaná instalace (SaaS) — stav služby místo nabídky koupit licenci ═══ -->
+    <div v-else-if="status && managedInstance" class="space-y-6">
+      <!-- Co spravovaný provoz znamená -->
+      <section class="rounded-lg border border-primary-200 bg-primary-50/30 p-5">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-primary-100 px-3 py-1 text-xs font-medium text-primary-700">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.badgeCheck" /></svg>
+            {{ t('license.managed_badge') }}
+          </span>
+        </div>
+        <p class="mt-3 text-sm text-neutral-700">{{ t('license.managed_intro') }}</p>
+
+        <div class="mt-4 grid gap-4 sm:grid-cols-2">
+          <div>
+            <h3 class="text-xs uppercase tracking-wider text-neutral-500">{{ t('license.managed_included_title') }}</h3>
+            <ul class="mt-2 space-y-1 text-sm text-neutral-700">
+              <li v-for="(item, i) in managedIncluded" :key="'inc' + i" class="flex gap-2">
+                <svg class="w-4 h-4 mt-0.5 shrink-0 text-success-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                <span>{{ item }}</span>
+              </li>
+            </ul>
+          </div>
+          <div>
+            <h3 class="text-xs uppercase tracking-wider text-neutral-500">{{ t('license.managed_excluded_title') }}</h3>
+            <ul class="mt-2 space-y-1 text-sm text-neutral-600">
+              <li v-for="(item, i) in managedExcluded" :key="'exc' + i" class="flex gap-2">
+                <svg class="w-4 h-4 mt-0.5 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                <span>{{ item }}</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Rozsah služby -->
+      <section class="rounded-lg border border-neutral-200 bg-surface p-5">
+        <h2 class="text-lg font-semibold text-neutral-900">{{ t('license.managed_service_title') }}</h2>
+
+        <dl class="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+          <div>
+            <dt class="text-xs uppercase tracking-wider text-neutral-500">{{ t('license.managed_plan') }}</dt>
+            <dd class="mt-0.5 font-medium text-neutral-900">{{ planLabel }}</dd>
+          </div>
+          <div>
+            <dt class="text-xs uppercase tracking-wider text-neutral-500">{{ t('license.managed_users') }}</dt>
+            <dd class="mt-0.5 font-medium" :class="usersOverage ? 'text-danger-600' : 'text-neutral-900'">
+              {{ status.users_active }} / {{ status.users_licensed > 0 ? status.users_licensed : '∞' }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-xs uppercase tracking-wider text-neutral-500">{{ t('license.managed_valid_until') }}</dt>
+            <dd class="mt-0.5 font-medium text-neutral-900">
+              <template v-if="status.state === 'trial'">{{ fmtDate(status.trial_ends_at) }}</template>
+              <template v-else-if="status.perpetual">{{ t('license.perpetual_validity') }}</template>
+              <template v-else>{{ fmtDate(paidUntil) }}</template>
+            </dd>
+          </div>
+          <div v-if="managedSinceLabel">
+            <dt class="text-xs uppercase tracking-wider text-neutral-500">{{ t('license.managed_since') }}</dt>
+            <dd class="mt-0.5 text-neutral-700">{{ managedSinceLabel }}</dd>
+          </div>
+          <div v-if="subscription">
+            <dt class="text-xs uppercase tracking-wider text-neutral-500">{{ t('license.renewal_title') }}</dt>
+            <dd class="mt-0.5 font-medium" :class="subscription.auto_renew ? 'text-success-700' : 'text-warning-800'">
+              {{ subscription.auto_renew ? t('license.renewal_on') : t('license.renewal_off') }}
+            </dd>
+          </div>
+        </dl>
+
+        <div v-if="usersOverage" class="mt-4 rounded-md border border-warning-300 bg-warning-50/60 p-3 text-sm text-warning-800">
+          {{ t('license.managed_users_overage') }}
+        </div>
+      </section>
+
+      <!-- Místo -->
+      <section class="rounded-lg border p-5" :class="storageStyle.card">
+        <h2 class="text-lg font-semibold text-neutral-900">{{ t('license.managed_storage_title') }}</h2>
+
+        <!-- ⚠️ Nezměřeno NENÍ nula — žádná procenta, žádný pruh, žádné „vše v pořádku". -->
+        <p v-if="storageMode === 'unmeasured'" class="mt-2 text-sm text-neutral-600">
+          {{ t('license.managed_storage_unmeasured') }}
+        </p>
+
+        <!-- ⚠️ Neznámý zaplacený objem — jen absolutní obsazení, poměr si nevymýšlíme. -->
+        <template v-else-if="storageMode === 'unknown_quota'">
+          <p class="mt-2 text-2xl font-semibold text-neutral-900">{{ usedLabel }}</p>
+          <p class="mt-1 text-sm text-neutral-600">{{ t('license.managed_storage_quota_unknown') }}</p>
+        </template>
+
+        <template v-else>
+          <p class="mt-2 text-sm text-neutral-700">
+            <span class="text-2xl font-semibold text-neutral-900">{{ usedLabel }}</span>
+            <span class="text-neutral-500"> / {{ quotaLabel }}</span>
+            <span class="ml-2 font-medium">{{ fmtPercent(storage?.percent) }}</span>
+          </p>
+          <div
+            class="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-neutral-200"
+            role="progressbar" :aria-valuenow="Math.round(storageBarWidth)" aria-valuemin="0" aria-valuemax="100"
+          >
+            <div class="h-full rounded-full transition-all" :class="storageStyle.bar" :style="{ width: storageBarWidth + '%' }"></div>
+          </div>
+        </template>
+
+        <p v-if="storage?.measured_at" class="mt-2 text-xs text-neutral-500">
+          {{ t('license.managed_storage_measured_at', { at: fmtDateTime(storage?.measured_at ?? null) }) }}
+        </p>
+
+        <!-- 100 % — vysvětlení, proč nejde zapisovat a co s tím -->
+        <div v-if="storageLevel === 'exhausted'" class="mt-4 rounded-md border border-danger-300 bg-danger-50/60 p-3 text-sm text-danger-700">
+          <p class="font-medium">{{ t('license.managed_storage_exhausted_title') }}</p>
+          <p class="mt-1 text-danger-600">{{ t('license.managed_storage_exhausted_desc') }}</p>
+        </div>
+
+        <!-- 90 % — výzva k rozšíření prostoru, zapisovat se zatím dál smí -->
+        <div v-else-if="storageLevel === 'warning'" class="mt-4 rounded-md border border-warning-300 bg-warning-50/60 p-3 text-sm text-warning-800">
+          <p class="font-medium">{{ t('license.managed_storage_warning_title') }}</p>
+          <p class="mt-1">{{ t('license.managed_storage_warning_desc', { percent: storage?.read_only_percent ?? 100 }) }}</p>
+        </div>
+
+        <div class="mt-5 flex flex-wrap gap-2">
+          <!-- Odkaz jen když adresu opravdu známe — mrtvé tlačítko je horší než žádné. -->
+          <a
+            v-if="subscriptionUrl" :href="subscriptionUrl" target="_blank" rel="noopener"
+            :class="btnFilled(storageLevel === 'exhausted' ? 'danger' : 'primary')"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
+            {{ t('license.managed_subscription_cta') }}
+          </a>
+          <button
+            type="button" @click="openSupportPortal" :disabled="supportLinkBusy"
+            :class="btnOutline('primary')" :title="t('support.help_title')"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.help" /></svg>
+            {{ t('support.help_paid') }}
+          </button>
+        </div>
+
+        <p v-if="!subscriptionUrl" class="mt-3 text-sm text-neutral-600">
+          {{ t('license.managed_subscription_contact') }}
+        </p>
+      </section>
+
+      <p class="text-xs text-neutral-500">
+        <RouterLink to="/activation/license" class="text-primary-600 hover:text-primary-800 hover:underline">{{ t('nav.license') }}</RouterLink>
+        ·
+        <RouterLink to="/activation/terms" class="text-primary-600 hover:text-primary-800 hover:underline">{{ t('nav.terms') }}</RouterLink>
+      </p>
+    </div>
 
     <div v-else-if="status" class="space-y-6">
       <!-- Karta stavu -->

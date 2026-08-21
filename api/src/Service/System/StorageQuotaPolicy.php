@@ -23,8 +23,9 @@ use MyInvoice\Infrastructure\Config\Config;
  *   2. `app.managed` — spravovaná instalace ({@see ManagedModeGuard}). Na
  *      self-hosted instalaci žádnou kvótu nikdo nenastavil a zamykat cizímu
  *      člověku jeho vlastní server je nepřijatelné.
- *   3. `storage_quota.limit_mb > 0` — nastavená kvóta. Bez čísla není proti
- *      čemu poměřovat.
+ *   3. nastavená kvóta — `storage_quota.limit_mb > 0`, a když ta chybí, tak
+ *      zaplacený objem `instance.quota_gb` ({@see quotaBytes()}). Bez čísla
+ *      není proti čemu poměřovat.
  *
  * NENÍ to navázané na volné místo na disku. Filesystémová kvóta hostingu je
  * „zaplacený objem + rezerva na dumpy" a dumpy z ní technicky vyjmout nejde;
@@ -58,6 +59,10 @@ class StorageQuotaPolicy
      */
     public const HTTP_STATUS = 507;
 
+    /** Zdroje kvóty — viz {@see quotaSource()}. Provozní nastavení vs. smluvní objem. */
+    public const SOURCE_LIMIT_MB   = 'storage_quota.limit_mb';
+    public const SOURCE_CONTRACTED = 'instance.quota_gb';
+
     public function __construct(
         private readonly Config $config,
         private readonly ManagedModeGuard $managed,
@@ -87,8 +92,87 @@ class StorageQuotaPolicy
         ) !== false;
     }
 
-    /** Kvóta v bajtech, nebo null když není nastavená. Nula = nenastaveno. */
+    /**
+     * Kvóta v bajtech, nebo null když není nastavená. Nula = nenastaveno.
+     *
+     * ── ⚠️ Dva zdroje, které se NESMÍ tiše přebíjet ───────────────────────────
+     * `storage_quota.limit_mb` je PROVOZNÍ nastavení: číslo, proti kterému se
+     * doopravdy zamyká zápis. `instance.quota_gb` je SMLUVNÍ objem — co si
+     * zákazník koupil ({@see contractedBytes()}).
+     *
+     * Vyhrává explicitní provozní hodnota; smluvní objem je fallback, když ji
+     * nikdo nenastavil. Důvod: zámek se musí opírat o číslo, které provozovatel
+     * vědomě zapsal — zamknout instalaci proti menšímu smluvnímu objemu ve chvíli,
+     * kdy provozovatel vědomě povolil víc, znamená odmítat zápisy, které platforma
+     * dovolí. Opačné pořadí by naopak z jednoho provozního přepisu udělalo tiché
+     * přepsání toho, co zákazník zaplatil.
+     *
+     * Který zdroj je zrovna v platnosti, říká {@see quotaSource()} — aby přepis
+     * byl vidět, ne aby se na něj přišlo až podle chování.
+     *
+     * ⚠️ ÚDAJ PRO ZÁKAZNÍKA (obsazeno z kolika zaplacených) se počítá ZE
+     * SMLUVNÍHO objemu, ne odtud: disková kvóta hostingu je „zaplacený objem
+     * + rezerva na dumpy" a instalace by z ní hlásila víc, než si zákazník koupil.
+     */
     public function quotaBytes(): ?int
+    {
+        return $this->limitMbBytes() ?? $this->contractedBytes();
+    }
+
+    /**
+     * Odkud se bere {@see quotaBytes()} — `storage_quota.limit_mb`,
+     * `instance.quota_gb`, nebo null když kvóta není nastavená vůbec.
+     */
+    public function quotaSource(): ?string
+    {
+        if ($this->limitMbBytes() !== null) {
+            return self::SOURCE_LIMIT_MB;
+        }
+
+        return $this->contractedBytes() === null ? null : self::SOURCE_CONTRACTED;
+    }
+
+    /**
+     * ZAPLACENÝ objem instalace v bajtech (`instance.quota_gb`), nebo null když
+     * ho provisioning nezapsal.
+     *
+     * ⚠️ null tady znamená „nevíme, kolik má zákazník zaplaceno" — v takovém
+     * případě se NESMÍ počítat procenta ani kreslit pruh. Dělit něčím, co
+     * neznáme, znamená vymyslet si číslo.
+     */
+    public function contractedBytes(): ?int
+    {
+        $raw = $this->config->get('instance.quota_gb', '');
+        if (!is_int($raw) && !is_float($raw) && (!is_string($raw) || trim($raw) === '')) {
+            return null;
+        }
+
+        $gb = filter_var($raw, FILTER_VALIDATE_FLOAT);
+        if ($gb === false || $gb <= 0.0) {
+            return null;
+        }
+
+        return (int) round($gb * 1024 * 1024 * 1024);
+    }
+
+    /**
+     * Poměr spotřeby k ZAPLACENÉMU objemu v procentech.
+     *
+     * ⚠️ Vrací null ve dvou různých případech a ani jeden se nesmí zaokrouhlit
+     * na nulu: nezměřeno (`$usageBytes === null`) a neznámý zaplacený objem.
+     */
+    public function contractedPercent(?int $usageBytes): ?float
+    {
+        $quota = $this->contractedBytes();
+        if ($usageBytes === null || $quota === null || $quota <= 0) {
+            return null;
+        }
+
+        return round(($usageBytes / $quota) * 100.0, 2);
+    }
+
+    /** Provozní limit v bajtech (`storage_quota.limit_mb`); null = nenastaveno. */
+    private function limitMbBytes(): ?int
     {
         $mb = filter_var($this->config->get('storage_quota.limit_mb', 0), FILTER_VALIDATE_INT);
         if ($mb === false || $mb <= 0) {

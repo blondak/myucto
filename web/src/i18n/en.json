@@ -9179,7 +9179,42 @@
         ],
         "terms_summary_note": "This is a summary. The full text is binding:",
         "full_terms_link": "Terms of Service at myucto.cz",
-        "terms_effective": "Effective from 24 July 2026."
+        "terms_effective": "Effective from 24 July 2026.",
+        "managed_title": "Managed installation",
+        "managed_subtitle": "Status of your service — scope, subscription validity and used space.",
+        "managed_badge": "Managed installation",
+        "managed_intro": "We run this installation for you. No server, backups, updates or certificate to take care of — the licence and the hosting are one subscription.",
+        "managed_included_title": "Included in the service",
+        "managed_included": [
+            "Running the application on our infrastructure",
+            "Regular data backups; restores are handled by support",
+            "Application updates deployed by us",
+            "HTTPS certificate including renewals"
+        ],
+        "managed_excluded_title": "Not part of the managed service",
+        "managed_excluded": [
+            "Self-service restore to an arbitrary point in time",
+            "A custom domain for the installation",
+            "SSH access to the server",
+            "Direct database access"
+        ],
+        "managed_service_title": "Service scope",
+        "managed_plan": "Hosting plan",
+        "managed_plan_unknown": "Not specified",
+        "managed_users": "Licensed users",
+        "managed_valid_until": "Subscription valid until",
+        "managed_since": "Provisioned",
+        "managed_users_overage": "There are more active users than the subscription covers. Write to us and we will raise the limit.",
+        "managed_storage_title": "Used space",
+        "managed_storage_unmeasured": "Not measured yet. Usage is measured periodically in the background; until the first measurement we know nothing about it — that is not the same as zero.",
+        "managed_storage_quota_unknown": "The purchased volume is not recorded in this installation, so we show neither the ratio nor a percentage. Support can tell you how much you have prepaid.",
+        "managed_storage_measured_at": "Last measured: {at}",
+        "managed_storage_warning_title": "Running out of space",
+        "managed_storage_warning_desc": "Please extend your space. Once it runs out ({percent} %), the installation switches to read-only mode.",
+        "managed_storage_exhausted_title": "Space is used up — new writes are not being saved",
+        "managed_storage_exhausted_desc": "Documents remain available for reading, printing and export. Free up space by deleting data you no longer need, or order more space; writing resumes on its own once usage drops.",
+        "managed_subscription_cta": "Manage subscription",
+        "managed_subscription_contact": "No subscription management address is configured here. Support will handle extra space or a plan change — just write to us."
     },
     "updates": {
         "title": "Updates",

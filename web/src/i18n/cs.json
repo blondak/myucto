@@ -9179,7 +9179,42 @@
         ],
         "terms_summary_note": "Toto je shrnutí. Závazné je úplné znění:",
         "full_terms_link": "Obchodní podmínky na myucto.cz",
-        "terms_effective": "Účinné od 24. 7. 2026."
+        "terms_effective": "Účinné od 24. 7. 2026.",
+        "managed_title": "Spravovaná instalace",
+        "managed_subtitle": "Stav vaší služby — rozsah, platnost předplatného a obsazené místo.",
+        "managed_badge": "Spravovaná instalace",
+        "managed_intro": "Tuhle instalaci provozujeme za vás. Server, zálohy, aktualizace ani certifikát řešit nemusíte — licence i provoz jsou v jednom předplatném.",
+        "managed_included_title": "V provozu je zahrnuto",
+        "managed_included": [
+            "Provoz aplikace na naší infrastruktuře",
+            "Pravidelné zálohování dat; obnovu ze zálohy vyřídí podpora",
+            "Aktualizace aplikace nasazujeme my",
+            "HTTPS certifikát včetně jeho obnovy"
+        ],
+        "managed_excluded_title": "Co ve spravovaném provozu není",
+        "managed_excluded": [
+            "Samoobslužná obnova dat k libovolnému okamžiku",
+            "Vlastní doména instalace",
+            "Přístup na server přes SSH",
+            "Přímý přístup do databáze"
+        ],
+        "managed_service_title": "Rozsah služby",
+        "managed_plan": "Tarif provozu",
+        "managed_plan_unknown": "Neuvedeno",
+        "managed_users": "Licencovaní uživatelé",
+        "managed_valid_until": "Předplatné platí do",
+        "managed_since": "Zřízeno",
+        "managed_users_overage": "Aktivních uživatelů je víc, než kolik jich předplatné pokrývá. Napište nám a rozsah navýšíme.",
+        "managed_storage_title": "Obsazené místo",
+        "managed_storage_unmeasured": "Zatím neměřeno. Spotřebu měříme pravidelně na pozadí; do prvního měření o obsazení nevíme nic — není to nula.",
+        "managed_storage_quota_unknown": "Zaplacený objem není v instalaci uvedený, takže poměr ani procenta neukazujeme. Kolik máte předplaceno, vám řekne podpora.",
+        "managed_storage_measured_at": "Poslední měření: {at}",
+        "managed_storage_warning_title": "Místo dochází",
+        "managed_storage_warning_desc": "Rozšiřte prosím prostor. Po vyčerpání ({percent} %) přejde instalace do režimu jen pro čtení.",
+        "managed_storage_exhausted_title": "Prostor je vyčerpaný — nové zápisy se neukládají",
+        "managed_storage_exhausted_desc": "Doklady zůstávají dostupné ke čtení, tisku i exportu. Uvolněte místo smazáním nepotřebných dat, nebo si objednejte větší prostor; jakmile obsazení klesne, zápis se obnoví sám.",
+        "managed_subscription_cta": "Správa předplatného",
+        "managed_subscription_contact": "Adresa pro správu předplatného tu není nastavená. Rozšíření prostoru i změnu tarifu vyřídí podpora — napište nám."
     },
     "updates": {
         "title": "Aktualizace",

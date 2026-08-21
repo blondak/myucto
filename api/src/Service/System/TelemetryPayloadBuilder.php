@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\System;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use MyInvoice\Infrastructure\Cache\RedisProbe;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -41,6 +43,31 @@ use Throwable;
  * Zdrojem hodnot je {@see InstanceHealthProbe} — tentýž sběr, ze kterého žije
  * `/api/health`. Druhá implementace téhož by se s ním nutně rozešla.
  *
+ * ── Obsazení místa (H-10 × H-21) ──────────────────────────────────────────
+ * Součástí payloadu je i poslední ZMĚŘENÉ obsazení instance a stav kvóty.
+ * Důvod není diagnostika, ale doložitelnost: totéž číslo měří i hosting
+ * (`GET /v1/instances/{id}` → `usage`) a dokud se obě strany nesejdou na jednom
+ * místě, nemá při sporu o kvótu ani jedna čím doložit, které číslo platí.
+ * Porovnává je licenční server ({@see \UsageReconciliation} na prodejním webu).
+ *
+ * Tři pravidla, bez kterých je to porovnání k ničemu:
+ *
+ *   1. ⚠️ **`null` znamená „neměřeno", ne nulu.** Nezměřená instance nesmí
+ *      dorazit na server jako „0 bajtů, vše v pořádku" — pak by porovnání
+ *      hlásilo obří neshodu tam, kde jen chybí měření. Žádný `(int)` cast,
+ *      žádné `?? 0`.
+ *   2. **`usage_truncated`** říká, že měření narazilo na strop
+ *      ({@see StorageUsageMeter::MAX_ENTRIES} / `MAX_SECONDS`) a je to DOLNÍ
+ *      ODHAD. Bez toho příznaku by useknuté měření vypadalo jako rozejitá
+ *      definice, přestože je to jen nedoběhlý průchod.
+ *   3. **Zálohy jdou zvlášť** (`usage_backup_bytes`) a do `usage_bytes`
+ *      NEVSTUPUJÍ — přesně jako u hostingu. Kdyby vstupovaly, vycházel by
+ *      rozdíl proti hostingu právě o velikost záloh a nikdo by nepoznal proč.
+ *
+ * ⚠️ Čte se HOTOVÉ číslo z databáze ({@see StorageQuotaPolicy::evaluate()} →
+ * {@see StorageUsageMeter::latest()}). Telemetrie běží v cronu při obnově
+ * licence a NESMÍ spustit průchod stromem — od měření je vlastní úloha.
+ *
  * ⚠️ Stáří dispatcheru se čte z DATABÁZE, ne z logu: hosting náš wrapper
  * `cmd/cron-dispatch.sh` obchází a `log/cron/dispatch-*.log` na jejich instanci
  * vůbec nevzniká. O to se stará probe.
@@ -58,8 +85,10 @@ final class TelemetryPayloadBuilder
      * poznat, jestli chybějící pole znamená „starší instance" nebo „porucha".
      *
      * Zvyš při KAŽDÉ změně {@see self::FIELDS}.
+     *
+     * 2 = přibylo obsazení místa a stav kvóty (`usage_*`, `quota_*`).
      */
-    public const PAYLOAD_VERSION = 1;
+    public const PAYLOAD_VERSION = 2;
 
     /**
      * Uzavřený seznam klíčů, které smí odejít z instance. Pořadí je zároveň
@@ -82,6 +111,20 @@ final class TelemetryPayloadBuilder
         'maintenance',
         'managed',
         'managed_provider',
+        // Obsazení místa — poslední ULOŽENÉ měření, nic se tu neměří znovu.
+        // ⚠️ Všechno nullable: null = „neměřeno", nikdy ne nula.
+        'usage_bytes',
+        'usage_db_bytes',
+        'usage_files_bytes',
+        'usage_backup_bytes',
+        'usage_measured_at',
+        'usage_truncated',
+        // Kvóta tak, jak ji vidí instance. `quota_state` odlišuje „změřeno a je
+        // to v pořádku" (`ok`) od „nezměřeno" (`unknown`) a od „režim se tu
+        // neuplatňuje" (`disabled`) — na dálku se to jinak nerozezná.
+        'quota_limit_bytes',
+        'quota_percent',
+        'quota_state',
     ];
 
     /** Konfigurační klíč přepínače. */
@@ -98,6 +141,13 @@ final class TelemetryPayloadBuilder
         private readonly InstanceHealthProbe $probe,
         private readonly VersionService $version,
         private readonly ManagedModeGuard $managed,
+        /**
+         * Vyhodnocení kvóty nad POSLEDNÍM ULOŽENÝM měřením. Volitelná schválně:
+         * dvojníci v testech i starší volání staví builder bez ní a payload pak
+         * jen drží tvar s `null` — což je správná odpověď na „neměřeno".
+         * V provozu ji vždycky dodá {@see self::forRuntime()}.
+         */
+        private readonly ?StorageQuotaPolicy $quota = null,
     ) {}
 
     /**
@@ -124,7 +174,14 @@ final class TelemetryPayloadBuilder
             new EnvironmentCheckService($db, $config, new RedisProbe($config), $version, $appUrl),
         );
 
-        return new self($config, $probe, $version, new ManagedModeGuard($config));
+        $managed = new ManagedModeGuard($config);
+
+        // ⚠️ Meter se sem předává JEN kvůli `latest()` — jednomu indexovanému
+        // řádku. Průchod stromem spouští výhradně vlastní cronová úloha; obnova
+        // licence si ho dovolit nesmí.
+        $quota = new StorageQuotaPolicy($config, $managed, new StorageUsageMeter($db, $config));
+
+        return new self($config, $probe, $version, $managed, $quota);
     }
 
     /**
@@ -165,7 +222,35 @@ final class TelemetryPayloadBuilder
                 $this->probe->summary(),
                 $this->probe->managed(),
                 $this->version->getCurrentVersion(),
+                $this->usageStatus(),
             );
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Stav kvóty nad posledním uloženým měřením, nebo `null`, když se ho
+     * nepodařilo zjistit.
+     *
+     * ⚠️ `evaluate()` je ČTECÍ cesta — {@see StorageQuotaPolicy::evaluate()}
+     * se ptá {@see StorageUsageMeter::latest()}. Nikdy tu nesmí být `measure()`
+     * ani `measureIfStale()`: telemetrie se veze s obnovou licence a spustit
+     * jí průchod souborovým stromem by z levné noční úlohy udělalo minuty I/O.
+     *
+     * `null` z výjimky je správně: „nevím" se pak projeví jako `null` v každém
+     * `usage_*` poli, ne jako nula.
+     *
+     * @return array<string,mixed>|null
+     */
+    private function usageStatus(): ?array
+    {
+        if ($this->quota === null) {
+            return null;
+        }
+
+        try {
+            return $this->quota->evaluate()->toArray();
         } catch (Throwable) {
             return null;
         }
@@ -183,13 +268,27 @@ final class TelemetryPayloadBuilder
      *
      * @param array<string,mixed> $summary {@see InstanceHealthProbe::summary()}
      * @param array<string,mixed> $managed {@see InstanceHealthProbe::managed()}
+     * @param array<string,mixed>|null $usage {@see StorageQuotaStatus::toArray()};
+     *        `null` = kvótu se nepodařilo vyhodnotit → všechna `usage_*` pole
+     *        zůstanou `null`, tedy „neměřeno".
      * @return array<string,scalar|null>
      */
-    public static function fromSummary(array $summary, array $managed, ?string $appVersion): array
+    public static function fromSummary(array $summary, array $managed, ?string $appVersion, ?array $usage = null): array
     {
         $migrations = is_array($summary['migrations'] ?? null) ? $summary['migrations'] : [];
         $backup     = is_array($summary['backup'] ?? null) ? $summary['backup'] : [];
         $cron       = is_array($summary['cron'] ?? null) ? $summary['cron'] : [];
+
+        $usage       = $usage ?? [];
+        $measurement = is_array($usage['measurement'] ?? null) ? $usage['measurement'] : [];
+
+        // ⚠️ Jediná legální otázka na „máme čím počítat".
+        //
+        // Nezměřený snapshot má `usage_bytes = null`, ale `truncated = false` —
+        // kdyby se `usage_truncated` odvozovalo přímo z něj, poslala by nezměřená
+        // instance „změřeno celé, neuseknuto" o čísle, které neexistuje. Proto
+        // se VŠECHNA měřená pole čtou až za touhle branou.
+        $measured = ($measurement['measured'] ?? null) === true;
 
         $raw = [
             'telemetry_version'     => self::PAYLOAD_VERSION,
@@ -205,6 +304,24 @@ final class TelemetryPayloadBuilder
             'maintenance'           => self::bool($summary['maintenance'] ?? null) ?? false,
             'managed'               => self::bool($managed['managed'] ?? null) ?? false,
             'managed_provider'      => self::text($managed['managed_provider'] ?? null),
+
+            // ⚠️ Živá data = soubory BEZ adresáře záloh + databáze. Zálohy mají
+            // vlastní pole a do `usage_bytes` se NEPŘIČÍTAJÍ — hosting je počítá
+            // stejně a rozdíl přesně o jejich velikost by nikdo nerozklíčoval.
+            'usage_bytes'           => $measured ? self::int($measurement['usage_bytes'] ?? null) : null,
+            'usage_db_bytes'        => $measured ? self::int($measurement['database_bytes'] ?? null) : null,
+            'usage_files_bytes'     => $measured ? self::int($measurement['files_bytes'] ?? null) : null,
+            'usage_backup_bytes'    => $measured ? self::int($measurement['backup_bytes'] ?? null) : null,
+            'usage_measured_at'     => $measured ? self::timestamp($measurement['measured_at'] ?? null) : null,
+            // Změřeno, ale useknuto = DOLNÍ ODHAD. `false` smí vzniknout jen
+            // tehdy, když měření opravdu proběhlo celé.
+            'usage_truncated'       => $measured ? (self::bool($measurement['truncated'] ?? null) ?? false) : null,
+
+            // Kvóta je konfigurace, ne měření — hlásí se i tehdy, když se ještě
+            // neměřilo (a naopak `quota_percent` bez měření zůstává null).
+            'quota_limit_bytes'     => self::int($usage['quota_bytes'] ?? null),
+            'quota_percent'         => self::float($usage['percent'] ?? null),
+            'quota_state'           => self::state($usage['state'] ?? null),
         ];
 
         // Whitelist, ne blacklist: co není ve FIELDS, ven nejde — a co ve FIELDS
@@ -225,6 +342,61 @@ final class TelemetryPayloadBuilder
     private static function bool(mixed $value): ?bool
     {
         return is_bool($value) ? $value : null;
+    }
+
+    /**
+     * Procenta jdou jako číslo, ne jako text — a bez `?? 0`. NAN/INF by se
+     * v JSONu nezakódovaly a celé hlášení by zmizelo, proto padají na null.
+     */
+    private static function float(mixed $value): ?float
+    {
+        if (is_bool($value) || (!is_int($value) && !is_float($value))) {
+            return null;
+        }
+        $value = (float) $value;
+        if (is_nan($value) || is_infinite($value)) {
+            return null;
+        }
+
+        return round($value, 2);
+    }
+
+    /**
+     * Čas měření jako ISO-8601 v UTC.
+     *
+     * ⚠️ Vstup se NEKOPÍRUJE, ale PŘEPARSUJE a přeformátuje. Je to jediné pole
+     * payloadu, které nese čas, a zároveň jediná cesta, kterou by se dal textem
+     * protlačit obsah, o kterém nikdo nerozhodl — po přeformátování má výsledek
+     * pevný tvar `2026-08-21T04:15:00Z` a nic jiného z něj nevyleze. Co se
+     * nepodaří přečíst jako čas, je `null`, tedy „neměřeno".
+     */
+    private static function timestamp(mixed $value): ?string
+    {
+        if (!is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        try {
+            $at = new DateTimeImmutable(trim($value));
+        } catch (Throwable) {
+            return null;
+        }
+
+        return $at->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z');
+    }
+
+    /**
+     * Stav kvóty smí být jen některá z hodnot {@see StorageQuotaState} —
+     * whitelist i uvnitř textového pole. Neznámý kód je „nevím", ne text
+     * k přeposlání.
+     */
+    private static function state(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+
+        return StorageQuotaState::tryFrom(trim($value))?->value;
     }
 
     /**

@@ -234,6 +234,28 @@ final class Config
                 'managed'          => false,
                 'managed_provider' => '',
             ],
+            // Zaplacený rozsah instalace. Zapisuje ho při zřízení provisioning,
+            // aplikace ho jen ČTE — sama si ho odvodit nedokáže: disková kvóta
+            // nastavená na hostingu je „zaplacený objem + rezerva na dumpy", takže
+            // by z ní instalace hlásila víc, než si zákazník koupil.
+            //
+            // ⚠️ Klíče jsou pojmenované OBECNĚ, nikdy po dodavateli. Aplikace nesmí
+            // vědět, KDO ji hostuje (to je diagnostické `app.managed_provider`
+            // v /api/health) — jen CO má zaplaceno. Jedna větev podle dodavatele
+            // je začátek konce přenositelnosti.
+            //
+            //   quota_gb      — zaplacený objem v GB (prázdné = neznámý; pak se
+            //                   NIKDE nepočítají procenta, viz StorageQuotaPolicy)
+            //   plan          — kód tarifu provozu (prázdné = neuvedeno)
+            //   managed_since — datum zřízení (ISO), volitelné
+            //   portal_url    — adresa správy předplatného; prázdné = odkaz se
+            //                   neukáže vůbec (raději kontakt než mrtvý odkaz)
+            'instance' => [
+                'quota_gb'      => '',
+                'plan'          => '',
+                'managed_since' => '',
+                'portal_url'    => '',
+            ],
             // První nastavení instance. Ve spravovaném režimu je token POVINNÝ —
             // pravidlo visí na app.managed, ne na přítomnosti klíče, aby selhání
             // zápisu do cfg.local.php setup neotevřelo komukoli.
@@ -301,6 +323,12 @@ final class Config
             'MYINVOICE_DOMAINS_ENABLED' => ['domains.enabled', 'bool'],
             'MYINVOICE_APP_MANAGED'  => ['app.managed', 'bool'],
             'MYINVOICE_APP_MANAGED_PROVIDER' => ['app.managed_provider', 'string'],
+            // Zaplacený rozsah instalace (zapisuje provisioning; obecné názvy,
+            // nikdy po dodavateli — viz baselineDefaults()).
+            'MYINVOICE_INSTANCE_QUOTA_GB'      => ['instance.quota_gb', 'float'],
+            'MYINVOICE_INSTANCE_PLAN'          => ['instance.plan', 'string'],
+            'MYINVOICE_INSTANCE_MANAGED_SINCE' => ['instance.managed_since', 'string'],
+            'MYINVOICE_INSTANCE_PORTAL_URL'    => ['instance.portal_url', 'string'],
             'MYINVOICE_SETUP_PROVISION_TOKEN' => ['setup.provision_token', 'string'],
             'MYINVOICE_MAINTENANCE_LOCK_FILE' => ['maintenance.lock_file', 'string'],
             'MYINVOICE_PEPPER'      => ['app.pepper', 'string'],

@@ -34,6 +34,45 @@ export interface SubscriptionInfo {
   valid_until: number | null
 }
 
+/**
+ * Obsazení místa spravované instalace.
+ *
+ * ⚠️ `null` znamená „nevím", NIKDY nulu:
+ *  - `measured === false` → spotřeba se ještě neměřila; `usage_bytes` je null
+ *    a obrazovka musí říct „zatím neměřeno", ne „0 %, vše v pořádku".
+ *  - `quota_bytes === null` → neznáme zaplacený objem; pak se NEKRESLÍ pruh
+ *    ani procenta, jen absolutní obsazení. Dělit něčím, co neznáme, znamená
+ *    vymyslet si číslo.
+ */
+export interface ManagedStorageInfo {
+  measured: boolean
+  measured_at: string | null
+  usage_bytes: number | null
+  /** ZAPLACENÝ objem (ne disková kvóta hostingu, ta obsahuje rezervu na dumpy). */
+  quota_bytes: number | null
+  percent: number | null
+  warn_percent: number
+  read_only_percent: number
+  /** Skutečný stav vynucení — instalace je právě teď jen pro čtení. */
+  blocks_writes: boolean
+}
+
+/**
+ * Stav spravované instalace (SaaS). Přítomné POUZE ve spravovaném režimu —
+ * na self-hosted instalaci klíč v odpovědi vůbec není a obrazovka aktivace
+ * zůstává beze změny.
+ */
+export interface ManagedInstanceInfo {
+  managed: true
+  /** Kód tarifu provozu; null = neuvedeno. */
+  plan: string | null
+  /** Datum zřízení (ISO); null = neuvedeno. */
+  managed_since: string | null
+  /** Správa předplatného na webu; null = adresa není nakonfigurovaná → kontakt. */
+  subscription_url: string | null
+  storage: ManagedStorageInfo
+}
+
 /** Plný stav licence z /api/license/status (admin). */
 export interface LicenseStatus {
   state: LicenseStateKind
@@ -57,6 +96,8 @@ export interface LicenseStatus {
   subscription: SubscriptionInfo | null
   /** Fakturační údaje aktuální firmy — předvyplnění webového checkoutu (nevynucené). */
   company: LicenseCompany
+  /** Jen spravovaná instalace; na self-hosted klíč v odpovědi není. */
+  instance?: ManagedInstanceInfo
 }
 
 export interface LicenseCompany {
