@@ -159,7 +159,7 @@ final class LicenseClient
      */
     public function storageQuote(string $licenseKey, int $quotaGb): array
     {
-        return $this->post('/api/license/storage', [
+        return $this->post('/api/license/quota', [
             'license_key' => $licenseKey,
             'quota_gb'    => $quotaGb,
             'quote'       => true,
@@ -175,7 +175,7 @@ final class LicenseClient
      */
     public function storageUpgrade(string $licenseKey, int $quotaGb): array
     {
-        return $this->post('/api/license/storage', [
+        return $this->post('/api/license/quota', [
             'license_key' => $licenseKey,
             'quota_gb'    => $quotaGb,
         ], 10);

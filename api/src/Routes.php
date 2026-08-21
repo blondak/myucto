@@ -418,8 +418,8 @@ final class Routes
         $app->post('/api/license/upgrade/quote', UpgradeQuoteLicenseAction::class);
         $app->post('/api/license/upgrade',       UpgradeLicenseAction::class);
         // Rozšíření úložiště hostované instance (poměrný doplatek z karty).
-        $app->post('/api/license/storage/quote', StorageQuoteAction::class);
-        $app->post('/api/license/storage',       StorageUpgradeAction::class);
+        $app->post('/api/license/quota/quote', StorageQuoteAction::class);
+        $app->post('/api/license/quota',       StorageUpgradeAction::class);
         // Přihlášený přechod na portál podpory (myucto.cz/support) — jednorázový token.
         $app->post('/api/license/support-link',  SupportLinkAction::class);
 
