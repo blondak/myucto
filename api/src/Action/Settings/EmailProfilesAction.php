@@ -18,6 +18,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Mail\MailDeliveredArchiveException;
 use MyInvoice\Service\Mail\Mailer;
 use MyInvoice\Service\Mail\SentMailImapAppender;
+use MyInvoice\Service\System\ManagedModeGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -31,7 +32,29 @@ final class EmailProfilesAction
         private readonly SentMailImapAppender $imap,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        // H-02: ve spravované instalaci píše SMTP účet hosting a obálku určuje
+        // jeho MTA — na ní stojí SPF. Vlastní transport by prošel jen napůl.
+        private readonly ManagedModeGuard $managed,
     ) {}
+
+    /**
+     * Vlastní odesílací transport (`smtp`, `sendmail`) je ve spravované instalaci
+     * zamčený; `global` = odesílá hosting, což je jediná varianta, u které sedí SPF.
+     *
+     * Kontroluje se hodnota z těla požadavku, ne jen to, co ukáže UI: zamčené
+     * pole ve formuláři není zámek.
+     *
+     * @param array<string,mixed> $body
+     */
+    private function denyCustomTransport(Response $response, array $body): ?Response
+    {
+        $transport = strtolower(trim((string) ($body['transport_type'] ?? 'global')));
+        if ($transport === '' || $transport === 'global') {
+            return null;
+        }
+
+        return $this->managed->deny($response, ManagedModeGuard::CAPABILITY_MAIL_TRANSPORT);
+    }
 
     public function list(Request $request, Response $response): Response
     {
@@ -50,6 +73,9 @@ final class EmailProfilesAction
 
         $supplierId = $this->supplierId($request);
         $body = (array) ($request->getParsedBody() ?? []);
+        if (($locked = $this->denyCustomTransport($response, $body)) !== null) {
+            return $locked;
+        }
 
         try {
             $id = $this->profiles->createProfile($supplierId, $body, $this->userId($request));
@@ -94,6 +120,9 @@ final class EmailProfilesAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        if (($locked = $this->denyCustomTransport($response, $body)) !== null) {
+            return $locked;
+        }
         try {
             $this->profiles->updateProfile($supplierId, $profileId, $body);
         } catch (\InvalidArgumentException $e) {

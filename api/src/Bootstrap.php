@@ -19,6 +19,7 @@ use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Middleware\FirstRunLockMiddleware;
 use MyInvoice\Middleware\IpAllowlistMiddleware;
 use MyInvoice\Middleware\LicenseMiddleware;
+use MyInvoice\Middleware\MaintenanceModeMiddleware;
 use MyInvoice\Middleware\RateLimitMiddleware;
 use MyInvoice\Middleware\PermissionMiddleware;
 use MyInvoice\Middleware\RequireMfaMiddleware;
@@ -744,7 +745,7 @@ final class Bootstrap
 
         // Slim 4 LIFO: poslední `add()` = NEJVĚTŠÍ vrstva = běží JAKO PRVNÍ.
         // Cílový order běhu (outside → inside):
-        //   IpAllowlist → FirstRunLock → TenantDomain → Auth → ApiRequestLog → SessionLock → RequireMfa → License → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
+        //   ApiVersionRewrite → MaintenanceMode → IpAllowlist → FirstRunLock → TenantDomain → Auth → ApiRequestLog → SessionLock → RequireMfa → License → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
         // → add() v opačném pořadí (innermost první):
         //
         // ⚠️ Middleware se předávají jako CLASS-STRING, ne jako instance. Slim je pak
@@ -770,6 +771,10 @@ final class Bootstrap
         $app->add(TenantDomainMiddleware::class);                   // Host autoritativně určí tenant před autentizací
         $app->add(FirstRunLockMiddleware::class);                    // 423 pokud users prázdná
         $app->add(IpAllowlistMiddleware::class);                     // outermost user mw
+        // H-03: zámek údržby musí být PŘED autentizací (503 dostane i nepřihlášený)
+        // a zároveň UVNITŘ ApiVersionRewrite, aby se výjimka pro /api/health testovala
+        // na už přepsané cestě (jinak by /api/v1/health v údržbě spadlo na 503).
+        $app->add(MaintenanceModeMiddleware::class);                 // 503 + Retry-After na vše kromě /api/health
         $app->add(new ApiVersionRewriteMiddleware());                // /api/v1/* → /api/* před vším ostatním
 
         $displayErrors = (bool) $config->get('app.debug', false);

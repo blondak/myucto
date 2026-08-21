@@ -54,9 +54,22 @@ final class TenantDomainMiddleware implements MiddlewareInterface
         $context = $this->resolver->resolve($request);
         if ($context->mode === TenantDomainContext::CONFIGURATION_ERROR) {
             $this->appUrl->hostnameConflictStatus();
-            if ($isReadOnlyHealth) {
-                return $handler->handle($request->withAttribute(self::ATTR_CONTEXT, $context));
-            }
+        }
+
+        // Monitoring i akceptační testy hostingu volají health přes hostname
+        // instance, ne přes canonical `app.url` — a při diagnostice i přes něco,
+        // co v `supplier_domains` nikdy nebude. Host gate proto read-only health
+        // nezavírá tam, kde by jinak vrátil 421. Bez téhle výjimky by se
+        // nedostupnost a špatně nastavené `app.url` navenek tvářily stejně.
+        //
+        // Vlastní domény firem (CUSTOM / VERIFICATION) výjimku NEDOSTÁVAJÍ:
+        // health je mimo klientské rozhraní a verze ani stav instalace na
+        // klientskou doménu nepatří — tam dál platí verdikt politiky.
+        if ($isReadOnlyHealth && in_array($context->mode, [
+            TenantDomainContext::UNKNOWN,
+            TenantDomainContext::CONFIGURATION_ERROR,
+        ], true)) {
+            return $handler->handle($request->withAttribute(self::ATTR_CONTEXT, $context));
         }
 
         $denial = $this->policy->denial($context, $request->getMethod(), $path);

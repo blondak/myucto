@@ -32,7 +32,22 @@ if (!defined('STDOUT')) {
     define('STDOUT', fopen('php://stdout', 'wb'));
 }
 
+use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Update\NativeUpdateService;
+
+// H-02 — spravovaná instalace: verzi nasazuje provozovatel, aby na celé flotile
+// běžela jedna. Zámek je i na `POST /api/admin/update/trigger`, ale ten worker
+// spouští detached proces — a tenhle skript jde zavolat i ručně z shellu, takže
+// kontrola musí být i tady. Odmítnutí je hlasité: uživatel se musí dozvědět
+// PROČ, ne jen že se nic nestalo.
+$managed = new ManagedModeGuard(Config::load(Bootstrap::rootDir()));
+if ($managed->isLocked(ManagedModeGuard::CAPABILITY_SELF_UPDATE)) {
+    fwrite(STDERR, $managed->explain(ManagedModeGuard::CAPABILITY_SELF_UPDATE) . "\n");
+    fwrite(STDERR, "Spravovaný režim je zapnutý (cfg app.managed = true); self-update se nespustí.\n");
+    exit(3);
+}
 
 $target      = null;
 $requestedBy = 'cli';

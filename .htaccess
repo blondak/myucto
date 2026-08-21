@@ -43,6 +43,32 @@ Options -Indexes -MultiViews
     # IIS to řeší přes hiddenSegments (web.config), Docker přes .dockerignore.
     RewriteRule (^|/)\.(git|svn|hg|bzr)(/|$) - [F,L]
 
+    # 2d) Zámek údržby (H-03) — VRSTVA NAVÍC, ne bezpečnostní hranice.
+    #
+    # Hlavní kontrola je v PHP (MaintenanceModeMiddleware + inline brána ve
+    # front controlleru); ta ale nikdy neuvidí požadavky, které webserver
+    # odbaví sám — statiku pod /assets/, /fonts/, /styles/ a PWA soubory.
+    # Tohle pravidlo tu díru zavírá tím, že je v údržbě pošle na front
+    # controller. Odpověď (503, Retry-After, HTML pro prohlížeč vs. JSON podle
+    # `Accept`) proto pořád tvoří PHP na jednom místě — kdyby se tady vracelo
+    # `- [R=503]`, přišel by API klient o JSON a o Retry-After.
+    #
+    # Zámek leží MIMO docroot, takže se na něj míří relativně od něj. Testují se
+    # obě rozložení: data dir = rodič docrootu (spravovaná instalace) i data dir
+    # = docroot (self-hosted default, kde je `storage/` blokované pravidlem 2).
+    # `RewriteRule`/`RewriteCond` spadají do FileInfo, takže se to vejde do
+    # `AllowOverride fileinfo indexes limit AuthConfig options=…`.
+    #
+    # /api/health musí zůstat dostupný i v údržbě — jinak hosting nepozná rozdíl
+    # mezi plánovanou údržbou a výpadkem instance.
+    # Druhá podmínka je pojistka proti smyčce: per-directory rewrite se v
+    # .htaccess vyhodnocuje znovu, takže cíl sám sebe nesmí matchnout.
+    RewriteCond %{REQUEST_URI} !^/api/(v1/)?health/?$
+    RewriteCond %{REQUEST_URI} !^/api/public/index\.php$
+    RewriteCond %{DOCUMENT_ROOT}/../storage/maintenance.lock -f [OR]
+    RewriteCond %{DOCUMENT_ROOT}/storage/maintenance.lock -f
+    RewriteRule ^ api/public/index.php [L,QSA]
+
     # Přímá cesta k SPA entry nesmí obejít hostname gate. Hashed assety pod
     # web/dist zůstávají statické, ale index i adresářový default jdou přes PHP.
     RewriteRule ^web/dist(?:/index\.html)?/?$ api/public/index.php [L,QSA]

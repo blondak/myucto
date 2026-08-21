@@ -15,6 +15,7 @@ use MyInvoice\Service\Auth\MfaStepUpService;
 use MyInvoice\Service\Auth\OneTimeTokenException;
 use MyInvoice\Service\Auth\StepUpOperationException;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Tenant\SupplierDomainHostnameCollisionException;
 use MyInvoice\Service\Tenant\SupplierDomainRegistrationService;
 use MyInvoice\Service\Tenant\SupplierDomainVerificationService;
@@ -33,6 +34,10 @@ final class SupplierDomainAction
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
         private readonly TenantDomainFeature $feature,
+        // H-30: featura je v buildu i na spravovaných instancích, ale zákazník
+        // by tu založil doménu, kterou nikdy neověří — certifikát ani směrování
+        // pro cizí hostname na cizí infrastruktuře nikdo nezřídí.
+        private readonly ManagedModeGuard $managed,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -229,6 +234,12 @@ final class SupplierDomainAction
         // ne 403 — s vypnutými doménami tahle plocha prostě neexistuje.
         if (!$this->feature->isEnabled()) {
             return Json::error($response, 'not_found', 'Vlastní domény nejsou v této instalaci zapnuté.', 404);
+        }
+        // Na rozdíl od vypnuté featury tady odpověď plochu POJMENUJE: doména
+        // existovat může, jen ji nezakládá zákazník. 404 by vypadalo jako chyba.
+        // Zamčené je i čtení — jinak by UI muselo hádat, co smí zobrazit.
+        if (($locked = $this->managed->deny($response, ManagedModeGuard::CAPABILITY_CUSTOM_DOMAINS)) !== null) {
+            return $locked;
         }
         if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
             return Json::error($response, 'forbidden_via_token', 'Domény lze spravovat jen z webového rozhraní.', 403);

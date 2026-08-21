@@ -12,6 +12,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Import\PurchaseInvoiceInboxScanner;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\System\ManagedModeGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -29,6 +30,9 @@ final class ScanInboxAction
         private readonly PurchaseInvoiceInboxScanner $scanner,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        // H-02: `purchase_invoice.inbox_dir` je cesta do souborového systému.
+        // V multi-tenant provozu je skenování čtením mimo vlastní instanci.
+        private readonly ManagedModeGuard $managed,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -36,6 +40,10 @@ final class ScanInboxAction
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         if (!RequestAuthorization::allows($request, 'purchase_invoices.scan', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin nebo účetní.', 403);
+        }
+
+        if (($locked = $this->managed->deny($response, ManagedModeGuard::CAPABILITY_FILESYSTEM_SCAN)) !== null) {
+            return $locked;
         }
 
         $supplierId = SupplierGuard::currentId($request);

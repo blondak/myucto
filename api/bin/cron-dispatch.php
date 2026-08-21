@@ -33,6 +33,7 @@ use MyInvoice\Service\Cron\CronDispatcher;
 use MyInvoice\Service\Cron\CronJobGate;
 use MyInvoice\Service\Cron\CronRun;
 use MyInvoice\Service\Cron\CronScheduleMode;
+use MyInvoice\Service\System\MaintenanceLock;
 
 $dryRun = false;
 $at = null;
@@ -75,10 +76,14 @@ try {
         exit(0);
     }
 
+    // Zámek údržby zastavuje SPOUŠTĚNÍ nových úloh, ne dispatcher samotný:
+    // heartbeat se posouvá dál, aby hosting po celou dobu údržby viděl, že
+    // instalace žije, a aby po odstranění zámku nic nezůstalo hlášené jako mrtvé.
     $dispatcher = new CronDispatcher(
         $pdo,
         new CronJobGate($config, $pdo),
         new BackgroundCronProcessLauncher($config->dataDir()),
+        new MaintenanceLock($config),
     );
 
     $report = $dispatcher->tick($now, $dryRun);

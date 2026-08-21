@@ -27,6 +27,11 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => user.value !== null)
   const needsSetup = computed(() => setupStatus.value?.needs_setup === true)
   const isDemo = computed(() => setupStatus.value?.demo?.enabled === true)
+  // Spravovaná instalace (H-02). Fail-open na `false` je tu správně: zámek drží
+  // backend a UI podle tohohle příznaku jen VYSVĚTLUJE, proč akce není. Kdyby
+  // se fail-closed tvářilo jako spravované, self-hosted instalace by přišla
+  // o tlačítko Aktualizovat vždycky, když setup-status ještě nedorazil.
+  const isManagedInstallation = computed(() => setupStatus.value?.managed === true)
   const mustSetupTotp = computed(() => user.value?.must_setup_totp === true)
   const mustSetupMfa = computed(() => user.value?.must_setup_mfa === true)
   const hasCommercialFeatures = computed(() => license.value?.commercial_features !== false)
@@ -234,6 +239,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     needsSetup,
     isDemo,
+    isManagedInstallation,
     mustSetupTotp,
     mustSetupMfa,
     hasCommercialFeatures,

@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Update\VersionService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -25,8 +26,17 @@ final class UpdateAction
     public function __construct(
         private readonly VersionService $version,
         private readonly ActivityLogger $logger,
+        // H-02: na spravované flotile nasazuje verzi provozovatel. Self-update
+        // by ji rozešel, proto tady končí všechno kromě čtení stavu — a končí
+        // to na endpointu, ne až v UI.
+        private readonly ManagedModeGuard $managed,
     ) {}
 
+    /**
+     * Stav zůstává čitelný i ve spravované instalaci — UI z něj skládá větu
+     * „běží verze X, aktualizuje provozovatel". Skrytá obrazovka by vypadala
+     * jako rozbitá funkce.
+     */
     public function status(Request $request, Response $response): Response
     {
         if (!$this->isAdmin($request, $response, $err)) return $err;
@@ -41,6 +51,7 @@ final class UpdateAction
     public function preflight(Request $request, Response $response): Response
     {
         if (!$this->isAdmin($request, $response, $err)) return $err;
+        if (($locked = $this->denyManaged($response)) !== null) return $locked;
         $target = $request->getQueryParams()['target_version'] ?? null;
         return Json::ok($response, $this->version->nativePreflight(
             is_string($target) && $target !== '' ? $target : null
@@ -50,6 +61,7 @@ final class UpdateAction
     public function refresh(Request $request, Response $response): Response
     {
         if (!$this->isAdmin($request, $response, $err)) return $err;
+        if (($locked = $this->denyManaged($response)) !== null) return $locked;
         $status = $this->version->refreshLatestVersion();
         return Json::ok($response, $status);
     }
@@ -57,6 +69,7 @@ final class UpdateAction
     public function trigger(Request $request, Response $response): Response
     {
         if (!$this->isAdmin($request, $response, $err)) return $err;
+        if (($locked = $this->denyManaged($response)) !== null) return $locked;
         $user = $request->getAttribute(AuthMiddleware::ATTR_USER);
         $body = (array) ($request->getParsedBody() ?? []);
         $target = isset($body['target_version']) ? (string) $body['target_version'] : null;
@@ -81,12 +94,18 @@ final class UpdateAction
     public function cancel(Request $request, Response $response): Response
     {
         if (!$this->isAdmin($request, $response, $err)) return $err;
+        if (($locked = $this->denyManaged($response)) !== null) return $locked;
         $user = $request->getAttribute(AuthMiddleware::ATTR_USER);
         $result = $this->version->cancelUpgrade();
         $this->logger->log('system.upgrade.cancel', (int) ($user['id'] ?? 0), null, null, [
             'cleared' => $result['cleared'] ?? false,
         ]);
         return Json::ok($response, $result);
+    }
+
+    private function denyManaged(Response $response): ?Response
+    {
+        return $this->managed->deny($response, ManagedModeGuard::CAPABILITY_SELF_UPDATE);
     }
 
     private function isAdmin(Request $request, Response $response, ?Response &$err): bool

@@ -196,17 +196,25 @@ paths:
   /api/v1/health:
     description: |
       Veřejná provozní diagnostika, interně přepsaná na přesnou cestu
-      `/api/health`. Běžný monitoring instalace musí volat `GET` nebo `HEAD`
-      přes origin a hostname nakonfigurovaný v `app.url`; recovery volání přes
-      jiný request hostname je určeno jen pro stav, kdy canonical origin není
-      použitelný pro routování.
+      `/api/health`. Monitoring má volat `GET` nebo `HEAD` přes hostname
+      instalace, ne přes IP.
 
-      Pokud `app.url` obsahuje jen whitespace nebo jinou neprázdnou neplatnou
-      hodnotu, tenant host gate propustí přes cizí hostname výhradně přesné
-      `GET`/`HEAD /api/health`. Ostatní metody a cesty zůstávají odmítnuté.
-      Chybějící nebo přesně prázdná hodnota zachovává legacy fallback, ve kterém
-      se platný request hostname považuje za canonical; tento fallback se
-      nerozšiřuje na whitespace ani na jinou neprázdnou chybnou hodnotu.
+      Tenant host gate propustí přesné read-only `GET`/`HEAD /api/health` i přes
+      hostname, který se neshoduje s `app.url` a není registrovanou doménou —
+      jinak by monitoring přes servisní hostname skončil na `421` a nešlo by
+      odlišit výpadek od chybné konfigurace. Zda hostname požadavku odpovídá
+      `app.url`, hlásí odpověď v `configuration.app_url_matches_host`. Výjimka se
+      NEvztahuje na vlastní domény firem: na aktivní ani ověřované doméně zůstává
+      health mimo klientské rozhraní. Ostatní metody a cesty zůstávají odmítnuté.
+      Chybějící nebo přesně prázdná hodnota `app.url` zachovává legacy fallback,
+      ve kterém se platný request hostname považuje za canonical; tento fallback
+      se nerozšiřuje na whitespace ani na jinou neprázdnou chybnou hodnotu.
+
+      Health zůstává dostupný i při zapnutém zámku údržby, kdy všechny ostatní
+      cesty vrací `503` s hlavičkou `Retry-After`. Je to jediný způsob, jak
+      provozovatel odliší plánovanou údržbu od výpadku a jak zjistí, kdy
+      doběhly rozpracované úlohy (`jobs.running` = 0).
+
       Health je veřejný jen z hlediska autentizace: neobchází reverse proxy ani
       zapnutý IP allowlist. Během nedokončeného first-run setupu používej `GET`;
       setup allowlist metodu `HEAD` nepovoluje.
@@ -219,26 +227,106 @@ paths:
           description: |
             Endpoint odpověděl. `status` neagreguje stav závislostí; monitor musí
             samostatně vyhodnotit `db`, podle nasazení `redis` a
-            `configuration.app_url`. Diagnostika canonical URL obsahuje jen
-            stabilní stav, reason code a capability booleany, nikdy původní
-            hodnotu ani její části.
+            `configuration.app_url`. `status` zůstává `ok` i v údržbě — instance
+            odpovídá; údržbu nese samostatný příznak `maintenance`.
+
+            Bez autentizace se vrací pouze SOUHRN: booleany, počty a stáří.
+            Jména skriptů, seznamy nedoběhlých migrací, cesty, hostname ani
+            chybové hlášky ven nejdou. `null` znamená „nevím" (typicky
+            nedostupná databáze nebo tabulka, která ještě nevznikla) a nikdy se
+            nezaměňuje s nulou. Diagnostika canonical URL obsahuje jen stabilní
+            stav, reason code a capability booleany, nikdy původní hodnotu ani
+            její části.
           content:
             application/json:
               schema:
                 type: object
-                required: [status, version, db, redis, time, configuration]
+                required: [status, version, db, redis, time, maintenance, jobs, cron, backup, migrations, configuration]
                 properties:
                   status: { type: string, enum: [ok] }
                   version: { type: string, example: "4.3.1" }
                   db: { type: boolean }
                   redis: { type: boolean }
                   time: { type: string, format: date-time }
+                  maintenance:
+                    type: boolean
+                    description: |
+                      Je položený zámek údržby? Při `true` vrací všechny ostatní
+                      cesty `503` s `Retry-After`.
+                  jobs:
+                    type: object
+                    additionalProperties: false
+                    required: [running]
+                    properties:
+                      running:
+                        type: integer
+                        nullable: true
+                        minimum: 0
+                        description: |
+                          Počet rozpracovaných úloh — nárokované a ještě
+                          nedoběhlé cron úlohy plus frontové úlohy ve stavu
+                          `running`. Teprve nula znamená, že je bezpečné
+                          nasazovat. `null` = nedostupná databáze.
+                  cron:
+                    type: object
+                    additionalProperties: false
+                    required: [mode, dispatcher_age_sec, dispatcher_fresh, dispatcher_status, last_tick_age_sec]
+                    description: |
+                      Čerstvost plánovače se čte z databáze (`cron_heartbeat`),
+                      ne z logu — wrapper v `cmd/` nemusí být na cílovém hostingu
+                      vůbec použitý.
+                    properties:
+                      mode: { type: string, nullable: true, enum: [individual, dispatcher, null] }
+                      dispatcher_age_sec: { type: integer, nullable: true, minimum: 0 }
+                      dispatcher_fresh:
+                        type: boolean
+                        nullable: true
+                        description: |
+                          `null` v režimu `individual`, kde dispatcher záměrně
+                          neběží — použij `last_tick_age_sec`.
+                      dispatcher_status: { type: string, nullable: true, enum: [ok, noop, error, null] }
+                      last_tick_age_sec: { type: integer, nullable: true, minimum: 0 }
+                  backup:
+                    type: object
+                    additionalProperties: false
+                    required: [age_sec, fresh]
+                    properties:
+                      age_sec: { type: integer, nullable: true, minimum: 0 }
+                      fresh: { type: boolean, nullable: true }
+                  migrations:
+                    type: object
+                    additionalProperties: false
+                    required: [applied, pending, up_to_date]
+                    description: Jen počty; seznam nedoběhlých migrací je za autentizací.
+                    properties:
+                      applied: { type: integer, nullable: true, minimum: 0 }
+                      pending: { type: integer, nullable: true, minimum: 0 }
+                      up_to_date: { type: boolean, nullable: true }
                   configuration:
                     type: object
                     additionalProperties: false
-                    required: [app_url]
+                    required: [app_url, app_url_configured, app_url_matches_host, host_gate_enforced, managed, managed_provider]
                     properties:
                       app_url: { $ref: '#/components/schemas/AppUrlConfigurationDiagnostic' }
+                      app_url_configured:
+                        type: boolean
+                        description: |
+                          Je `app.url` vůbec vyplněné? Prázdná hodnota host gate
+                          TIŠE VYPNE (canonical origin je prázdný, takže projde
+                          každý hostname), chybná ho naopak zamkne — proto se
+                          hlásí zvlášť od `app_url.state`.
+                      app_url_matches_host:
+                        type: boolean
+                        nullable: true
+                        description: |
+                          Shoduje se hostname požadavku s `app.url`? `null` =
+                          nelze rozhodnout (nepoužitelné `app.url`, request bez
+                          hostname). Nikdy nevrací hostname samotný.
+                      host_gate_enforced:
+                        type: boolean
+                        description: Vynucuje se host gate reálně (`domains.enabled` a neprázdné `app.url`)?
+                      managed: { type: boolean, description: Spravovaná (SaaS) instalace. }
+                      managed_provider: { type: string, nullable: true, description: "`app.managed_provider` — čistě diagnostický údaj." }
                   warnings:
                     type: array
                     description: Diagnostika dostupná pouze přihlášenému uživateli.
@@ -4119,6 +4207,10 @@ paths:
                 items: { $ref: '#/components/schemas/SupplierDomain' }
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: |
+            `managed_installation` — ve spravované instalaci (cfg `app.managed`)
+            nastavuje doménu provozovatel; plocha je zamčená včetně čtení.
 
   /api/v1/settings/supplier:
     parameters:
@@ -5825,6 +5917,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/InboxScanResult' }
         '403': { description: Pouze admin/accountant }
+        '409': { description: '`managed_installation` — spravovaná instalace (cfg `app.managed`) skenování adresářů na serveru nepovoluje' }
 
   /api/v1/reports/dphdp3/preview:
     get:
@@ -15051,6 +15144,7 @@ paths:
         '200': { description: 'OK — souhrn naskenovaných/naimportovaných souborů' }
         '400': { description: cfg.bank_import.scan_root není nastaveno nebo adresář neexistuje }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: '`managed_installation` — spravovaná instalace (cfg `app.managed`) skenování adresářů na serveru nepovoluje' }
   /api/v1/bank-statements/account-balances:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'

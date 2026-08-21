@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\FirstRunLockMiddleware;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\PasskeyService;
+use MyInvoice\Service\System\ManagedModeGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -23,6 +24,12 @@ final class SetupStatusAction
         private readonly Config $config,
         private readonly PasskeyService $passkeys,
         private readonly MfaPolicyService $mfaPolicy,
+        // H-02: tenhle payload čte SPA při startu, takže je to jediné místo,
+        // odkud se rozhraní dozví, že si instance nesmí sahat na konfiguraci.
+        // Vědomě se nese jen `managed` (ano/ne) — kdo instanci hostuje,
+        // aplikace vědět nesmí a `app.managed_provider` zůstává diagnostikou
+        // v /api/health.
+        private readonly ManagedModeGuard $managed,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -34,6 +41,7 @@ final class SetupStatusAction
         return Json::ok($response, [
             'needs_setup' => $this->lockProbe->needsSetup(),
             'version'     => '0.1.0',
+            'managed'     => $this->managed->isManaged(),
             'passwordless_login_enabled' =>
                 (bool) $this->config->get('auth.passwordless_login.enabled', false)
                 && $this->passkeys->isAvailable()

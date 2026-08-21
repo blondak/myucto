@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Cron;
 
 use DateTimeImmutable;
+use MyInvoice\Service\System\MaintenanceLock;
 use PDO;
 use Throwable;
 
@@ -13,6 +14,9 @@ use Throwable;
  * a spustí je. Srdce režimu {@see CronScheduleMode::DISPATCHER}.
  *
  * Postup jednoho ticku:
+ *   0. je-li položený zámek údržby ({@see \MyInvoice\Service\System\MaintenanceLock}),
+ *      nespouštěj NIC nového — už běžící úlohy ale nech doběhnout, viz
+ *      {@see self::SKIP_MAINTENANCE},
  *   1. projdi katalog (bez sebe sama) a nech si jen úlohy, jejichž `linux_cron`
  *      sedí na tuhle minutu,
  *   2. zahoď ty, které u téhle instalace nedávají smysl ({@see CronJobGate}),
@@ -56,10 +60,22 @@ final class CronDispatcher
     /** Nelze zaručit jedinečnost → raději nespouštět. */
     public const CLAIM_UNAVAILABLE = 'claim_unavailable';
 
+    /**
+     * Instalace je v údržbě — úloha se v tomhle ticku nespustí.
+     *
+     * ⚠️ Zámek zastavuje jen SPOUŠTĚNÍ nových úloh. Už běžící procesy se
+     * nechávají doběhnout a nikdy se nezabíjejí: záloha spuštěná ve 02:00 může
+     * u velké instance běžet ještě v okamžiku, kdy provozovatel zámek položí,
+     * a údržba nesmí zabít dump uprostřed. Že je ještě co dobíhat, se hosting
+     * dozví z `/api/health` (`jobs.running`).
+     */
+    public const SKIP_MAINTENANCE = 'maintenance';
+
     public function __construct(
         private readonly PDO $pdo,
         private readonly CronJobGate $gate,
         private readonly CronProcessLauncher $launcher,
+        private readonly ?MaintenanceLock $maintenance = null,
     ) {}
 
     /**
@@ -92,6 +108,11 @@ final class CronDispatcher
             'errors'   => [],
         ];
 
+        // Zámek se čte JEDNOU za tick, ne u každé úlohy: v rámci jedné minuty
+        // musí být rozhodnutí konzistentní, aby se půlka katalogu nespustila
+        // a půlka ne. Odstranění zámku se projeví hned v dalším ticku.
+        $maintenance = $this->maintenance?->isActive() ?? false;
+
         foreach (CronCatalog::dispatchable() as $job) {
             $script = (string) $job['script'];
 
@@ -107,6 +128,14 @@ final class CronDispatcher
             }
 
             $report['due'][] = $script;
+
+            // Údržba se vyhodnocuje hned po „je na řadě" a před vším ostatním:
+            // gate ani preflight nemají v údržbě co dělat v databázi, kterou
+            // možná zrovna přepisuje migrace provozovatele.
+            if ($maintenance) {
+                $report['skipped'][$script] = self::SKIP_MAINTENANCE;
+                continue;
+            }
 
             if (!$this->gate->isSchedulable($job)) {
                 $report['skipped'][$script] = 'not_configured';
@@ -137,7 +166,9 @@ final class CronDispatcher
             }
         }
 
-        if (!$dryRun) {
+        // V údržbě se nezapisuje ani úklidový DELETE — retence claimů počká,
+        // tabulka je malá a hodina navíc jí neublíží.
+        if (!$dryRun && !$maintenance) {
             $this->purgeOldClaims($now);
         }
 

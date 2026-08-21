@@ -126,6 +126,52 @@ final class AppUrlConfiguration
     }
 
     /**
+     * Je `app.url` vůbec vyplněné?
+     *
+     * ⚠️ Rozdíl proti `routing_compatible` je zásadní a health ho musí hlásit
+     * zvlášť: PRÁZDNÉ `app.url` tiše VYPNE host gate (canonical origin je
+     * prázdný, takže `TenantDomainResolver` propustí každý hostname), kdežto
+     * neprázdné, ale chybné ho naopak zamkne. Obě selhání jsou tichá a jdou
+     * proti sobě, takže „nastavené / nenastavené" je samostatná informace.
+     */
+    public function isConfigured(): bool
+    {
+        return $this->status()['state'] !== self::STATE_MISSING;
+    }
+
+    /**
+     * Sedí hostname požadavku s canonical `app.url`?
+     *
+     * `null` = nelze rozhodnout (nepoužitelné `app.url`, request bez hostname).
+     * Nikdy nevrací ani část hodnoty — monitoring i health jsou veřejné, a
+     * `app.url` může obsahovat userinfo nebo token (viz PHPDoc třídy).
+     */
+    public function matchesHost(string $requestHost): ?bool
+    {
+        if (!$this->status()['routing_compatible']) {
+            return null;
+        }
+
+        $configured = $this->config->get('app.url');
+        if (!is_string($configured)) {
+            return null;
+        }
+        $canonicalHost = parse_url(rtrim($configured, '/'), PHP_URL_HOST);
+        if (!is_string($canonicalHost) || $canonicalHost === '' || trim($requestHost) === '') {
+            return null;
+        }
+
+        try {
+            return hash_equals(
+                $this->hostnames->normalizeRequestHost($canonicalHost),
+                $this->hostnames->normalizeRequestHost($requestHost),
+            );
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
+    }
+
+    /**
      * Resolver jako jediný zná současně canonical host a uložené tenant domény.
      * Jakmile zjistí kolizi, přepíše syntakticky platný verdict tímto bezpečným
      * stavem. Opakované čtení už znovu neloguje a health nikdy neechoje hostname.
