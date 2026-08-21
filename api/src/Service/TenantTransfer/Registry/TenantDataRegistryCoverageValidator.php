@@ -15,6 +15,8 @@ final class TenantDataRegistryCoverageValidator
         $conditionalActors;
     private readonly TenantDataMixedOwnershipCoverageValidator $mixedOwnership;
     private readonly TenantDataCodeReferenceCoverageValidator $codeReferences;
+    private readonly TenantDataNaturalKeyReferenceCoverageValidator
+        $naturalKeyReferences;
     private readonly TenantDataInstanceReferenceCoverageValidator
         $instanceReferences;
     private readonly TenantDataRelationCoverageValidator $relations;
@@ -25,6 +27,8 @@ final class TenantDataRegistryCoverageValidator
         ?TenantDataConditionalActorCoverageValidator $conditionalActors = null,
         ?TenantDataMixedOwnershipCoverageValidator $mixedOwnership = null,
         ?TenantDataCodeReferenceCoverageValidator $codeReferences = null,
+        ?TenantDataNaturalKeyReferenceCoverageValidator
+            $naturalKeyReferences = null,
         ?TenantDataInstanceReferenceCoverageValidator $instanceReferences = null,
         ?TenantDataRelationCoverageValidator $relations = null,
     ) {
@@ -38,6 +42,8 @@ final class TenantDataRegistryCoverageValidator
             ?? new TenantDataMixedOwnershipCoverageValidator();
         $this->codeReferences = $codeReferences
             ?? new TenantDataCodeReferenceCoverageValidator();
+        $this->naturalKeyReferences = $naturalKeyReferences
+            ?? new TenantDataNaturalKeyReferenceCoverageValidator();
         $this->instanceReferences = $instanceReferences
             ?? new TenantDataInstanceReferenceCoverageValidator();
         $this->relations = $relations
@@ -125,6 +131,12 @@ final class TenantDataRegistryCoverageValidator
                     $definitions,
                 ),
                 ...$this->codeReferences->issues($definition, $table),
+                ...$this->naturalKeyReferences->issues(
+                    $definition,
+                    $table,
+                    $tables,
+                    $definitions,
+                ),
                 ...$this->conditionalActors->issues($definition, $table),
                 ...$this->instanceReferences->issues(
                     $definition,
