@@ -64,6 +64,56 @@ final class PurchaseSettledExpr
     }
 
     /**
+     * Σ započtené části přijaté faktury K DATU — jen obě ZÁPOČTOVÉ cesty, BEZ banky.
+     *
+     * Pro čtecí stranu (saldo, konfrontace s hlavní knihou), která se ptá „jak to vypadalo
+     * k rozvahovému dni". {@see settled()} je oproti tomu stav K TEĎ a banku obsahuje —
+     * saldo si ji počítá vlastním, přesnějším datem uznání (`SaldoRepository::MATCH_SETTLEMENT_DATE`
+     * bere `entry_date` zaúčtovaného bankovního zápisu), takže by se tudy jen zdvojila.
+     *
+     * Datum uznání zápočtu je `settled_on` / `agreement_date` — přesně to, s čím se zakládá
+     * účetní zápis (`InvoiceSettlementService`, `OffsetService`), takže hlavní kniha zná týž den.
+     *
+     * STORNO je časově uvědomělé, stejně jako všude jinde v saldu: zrušený zápočet se k datu
+     * PŘED protizápisem pořád počítá, jinak by dnešní storno zpětně otevřelo minulé saldo.
+     * Zápočet bez účetního zápisu (daňová evidence, ještě nedoúčtovaný) protizápis nemá,
+     * takže o něm rozhoduje jen jeho stav.
+     *
+     * Obsahuje ČTYŘI placeholdery v pořadí: agreement_date, storno dohody, settled_on,
+     * storno zápočtu — všechny jsou `asOf`.
+     *
+     * @param string $alias alias tabulky `purchase_invoices` v okolním dotazu
+     */
+    public static function offsetSettledAsOf(string $alias = 'pi'): string
+    {
+        $a = $alias === '' ? '' : $alias . '.';
+
+        // „Byl zápočet k asOf ještě živý?" — buď platí dosud, nebo ho protizápis zrušil až potom.
+        $liveAsOf = static fn (string $head): string =>
+            "({$head}.status = 'confirmed'
+              OR EXISTS (SELECT 1
+                           FROM journal_entries oe
+                           JOIN journal_entries orev ON orev.id = oe.reversed_by
+                          WHERE oe.id = {$head}.journal_entry_id
+                            AND oe.supplier_id = {$head}.supplier_id
+                            AND orev.entry_date > ?))";
+
+        return sprintf(
+            'COALESCE((SELECT SUM(oi.amount) FROM offset_agreement_items oi
+                        JOIN offset_agreements oa ON oa.id = oi.agreement_id
+                       WHERE oi.supplier_id = %1$ssupplier_id AND oi.doc_type = %2$s
+                         AND oi.doc_id = %1$sid AND oa.agreement_date <= ? AND %3$s), 0)
+           + COALESCE((SELECT SUM(s.amount) FROM invoice_settlements s
+                       WHERE s.supplier_id = %1$ssupplier_id AND s.doc_type = %2$s
+                         AND s.doc_id = %1$sid AND s.settled_on <= ? AND %4$s), 0)',
+            $a,
+            "'purchase_invoice'",
+            $liveAsOf('oa'),
+            $liveAsOf('s'),
+        );
+    }
+
+    /**
      * Zbytek k úhradě = `amount_to_pay` − {@see settled()}. Záporný nevzniká sám od sebe,
      * ale přeplatek (banka poslala víc) ho udělat může — volající si ho ořízne, když
      * potřebuje „kolik ještě smím započíst".

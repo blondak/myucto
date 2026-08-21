@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
 /**
@@ -33,8 +34,14 @@ use PDO;
  *   - purchase_invoices: nemají obdobu `invoice_payments` — `status='paid'`
  *     je plně krytý až od `paid_at`
  *     (nastaví ho i hotovostní úhrada přes CashDocumentService::applySideEffects)
- *     = plně kryto; jinak best-effort odhad ze Σ `payment_matches.amount` (jen
- *     bankovní párování). KNOWN GAP (H3): `payment_matches.amount` je uložen
+ *     = plně kryto; jinak se poměr skládá ze Σ `payment_matches.amount` (banka)
+ *     a Σ obou ZÁPOČTOVÝCH cest k asOf ({@see \MyInvoice\Support\Sql\PurchaseSettledExpr::offsetSettledAsOf}
+ *     — `offset_agreement_items` a `invoice_settlements`). Na `status='paid'` se
+ *     u zápočtu spolehnout NELZE: doúčtování zápočtu bez účetní stopy stav dokladu
+ *     záměrně nepřestavuje (`InvoiceSettlementService::postRow`) a ČÁSTEČNÝ zápočet
+ *     doklad na `paid` nepřeklápí vůbec — bez téhle složky by vyrovnaná faktura
+ *     svítila jako celá otevřená a částečně započtená celou částkou místo zbytkem.
+ *     KNOWN GAP (H3): `payment_matches.amount` je uložen
  *     v MĚNĚ TRANSAKCE (StatementMatcher::matchPurchase ukládá `$absAmount` bez
  *     převodu na měnu PF), ne nutně v měně PF — u cizoměnové PF s ČÁSTEČNOU
  *     bankovní úhradou proto může poměr vyjít nepřesně (zůstane vidět jako
@@ -582,6 +589,7 @@ final class SaldoRepository
                        JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
                       WHERE pm.supplier_id = d.supplier_id AND pm.purchase_invoice_id = d.id
                         AND " . self::MATCH_SETTLEMENT_DATE . " > ?) AS matches_after_as_of,
+                    " . PurchaseSettledExpr::offsetSettledAsOf('d') . " AS settled_by_offsets,
                     " . $this->advanceOnAccountSql('debit') . " AS advance_on_account,
                     SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS booked_signed,
                     SUM(CASE WHEN l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
@@ -608,6 +616,7 @@ final class SaldoRepository
         $stmt->execute([
             $asOf, $asOf,                         // paid_from_matches
             $asOf, $asOf,                         // matches_after_as_of
+            $asOf, $asOf, $asOf, $asOf,           // settled_by_offsets (datum + storno, obě cesty)
             $asOf, $asOf, $accountId, $accountId, // advance_on_account
             $supplierId, $asOf, $asOf, $accountId, $accountId, $asOf,
         ]);
@@ -638,12 +647,13 @@ final class SaldoRepository
                 'currency_code'  => (string) $r['currency_code'],
                 'booked_signed'  => round((float) $r['booked_signed'], 2),
                 'foreign_signed' => round((float) $r['foreign_signed'], 2),
-                // status='paid' je autoritativní až od paid_at; jinak best-effort ze Σ payment_matches
-                // (jen bankovní párování — KNOWN GAP H3, viz doc-komentář třídy). Zálohová PF
+                // status='paid' je autoritativní až od paid_at; jinak se poměr skládá z kanálů,
+                // kterými se přijatá faktura umí vyrovnat: banka (payment_matches, KNOWN GAP H3)
+                // a oba zápočty ({@see PurchaseSettledExpr::offsetSettledAsOf}). Zálohová PF
                 // uhrazená přímo na 321 (bez 314) vstupuje do poměru zrcadlově k vydané větvi.
                 'paid_ratio'     => $this->paidRatio(
                     $paidByStatusAsOf,
-                    (float) $r['paid_from_matches'] + $advance,
+                    (float) $r['paid_from_matches'] + (float) $r['settled_by_offsets'] + $advance,
                     (float) $r['amount_to_pay'] + $advance,
                 ),
             ];

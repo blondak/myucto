@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Repository\SaldoRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\InvoiceSettlementService;
 use MyInvoice\Service\Accounting\SettlementException;
@@ -34,6 +35,7 @@ final class InvoiceSettlementServiceTest extends TestCase
     private JournalEntryRepository $journal;
     private AccountingPeriodRepository $periods;
     private ChartOfAccountsRepository $accounts;
+    private SaldoRepository $saldo;
 
     private int $supplierId = 0;
     private int $currencyId = 0;
@@ -54,6 +56,7 @@ final class InvoiceSettlementServiceTest extends TestCase
             $this->journal  = $container->get(JournalEntryRepository::class);
             $this->periods  = $container->get(AccountingPeriodRepository::class);
             $this->accounts = $container->get(ChartOfAccountsRepository::class);
+            $this->saldo    = $container->get(SaldoRepository::class);
             $seeder         = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -234,6 +237,70 @@ final class InvoiceSettlementServiceTest extends TestCase
         // Storno prvního (na už otevřeném dokladu) status nemění a nespadne.
         $this->service->cancel($this->supplierId, (int) $first['id'], ['entry_date' => self::YEAR . '-06-30']);
         self::assertNotSame('paid', $this->purchaseStatus($pfId));
+    }
+
+    /**
+     * Zápočet musí vidět i SALDO — a to i tehdy, když stav dokladu o něm mlčí.
+     *
+     * Reálný nález: přijatá faktura vyrovnaná zápočtem proti 365 svítila v kontrole
+     * úplnosti dokladů jako 168 dní po splatnosti, přestože 321 bylo na nulu.
+     * `SaldoRepository` skládal poměr úhrady jen z bankovního párování a jinak se
+     * spoléhal na `status='paid'`. Ten je u zápočtu nespolehlivý ze dvou stran:
+     * doúčtování zápočtu bez účetní stopy stav dokladu záměrně nepřestavuje
+     * ({@see \MyInvoice\Service\Accounting\InvoiceSettlementService}) a ČÁSTEČNÝ
+     * zápočet ho na `paid` nepřeklápí vůbec.
+     *
+     * Hranice je časová: k datu PŘED zápočtem musí doklad zůstat otevřený, jinak by
+     * dnešní zápočet zpětně přepsal loňské saldo.
+     */
+    public function testSettlementClosesPurchaseInvoiceInSaldoEvenWhenStatusDoesNot(): void
+    {
+        $vendor = $this->client('Dodavatel saldo', false, true);
+        $pfId = $this->purchaseInvoice('PF-2099-700', $vendor, 5000.00);
+        $this->postPurchasePredpis($pfId, 5000.00);
+
+        $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
+            'settled_on' => self::YEAR . '-06-30', 'amount' => 5000.00, 'account_id' => $this->accountId('365'),
+        ], $this->userId);
+
+        // Doklad, jehož status o zápočtu nic neříká — přesně stav z produkčního nálezu.
+        $reset = $this->db->pdo()->prepare(
+            'UPDATE purchase_invoices SET status = "received", paid_at = NULL WHERE id = ?'
+        );
+        $reset->execute([$pfId]);
+
+        self::assertEqualsWithDelta(
+            0.0,
+            $this->purchasePaidRatio($pfId, self::YEAR . '-06-29'),
+            0.0001,
+            'Den před zápočtem je závazek pořád otevřený.'
+        );
+        self::assertEqualsWithDelta(
+            1.0,
+            $this->purchasePaidRatio($pfId, self::YEAR . '-06-30'),
+            0.0001,
+            'Ode dne zápočtu je vyrovnaný, i když status dál tvrdí „received".'
+        );
+    }
+
+    /** Částečný zápočet snižuje otevřenou položku o svou část, ne o celou fakturu. */
+    public function testPartialSettlementReducesSaldoProportionally(): void
+    {
+        $vendor = $this->client('Dodavatel saldo částečně', false, true);
+        $pfId = $this->purchaseInvoice('PF-2099-701', $vendor, 5000.00);
+        $this->postPurchasePredpis($pfId, 5000.00);
+
+        $this->service->create($this->supplierId, 'purchase_invoice', $pfId, [
+            'settled_on' => self::YEAR . '-06-30', 'amount' => 2000.00, 'account_id' => $this->accountId('365'),
+        ], $this->userId);
+
+        self::assertNotSame('paid', $this->purchaseStatus($pfId));
+        self::assertEqualsWithDelta(
+            0.4,
+            $this->purchasePaidRatio($pfId, self::YEAR . '-06-30'),
+            0.0001,
+            'Otevřený zbytek je 3 000 z 5 000, ne celá faktura.'
+        );
     }
 
     /**
@@ -441,5 +508,41 @@ final class InvoiceSettlementServiceTest extends TestCase
         $stmt = $this->db->pdo()->prepare('SELECT status FROM purchase_invoices WHERE id = ?');
         $stmt->execute([$id]);
         return (string) $stmt->fetchColumn();
+    }
+
+    /** Předpis přijaté faktury (501 MD / 321 D) — bez něj doklad na saldokontě vůbec není. */
+    private function postPurchasePredpis(int $pfId, float $amount): int
+    {
+        $map = $this->accounts->codeToIdMap($this->supplierId);
+        $periodId = (int) ($this->periods->findByYear($this->supplierId, self::YEAR)['id'] ?? 0);
+
+        return $this->journal->insert([
+            'supplier_id' => $this->supplierId,
+            'period_id'   => $periodId,
+            'entry_date'  => self::YEAR . '-06-10',
+            'document_no' => 'PREDPIS-PF-' . $pfId,
+            'description' => 'Předpis přijaté faktury',
+            'source_type' => 'purchase_invoice',
+            'source_id'   => $pfId,
+            'posted_at'   => date('Y-m-d H:i:s'),
+            'posted_by'   => $this->userId,
+        ], [
+            ['account_id' => $map['501']['id'], 'side' => 'debit', 'amount' => $amount],
+            ['account_id' => $map['321']['id'], 'side' => 'credit', 'amount' => $amount],
+        ]);
+    }
+
+    /** `paid_ratio` přijaté faktury na účtu 321 tak, jak ho k datu vidí saldo. */
+    private function purchasePaidRatio(int $pfId, string $asOf): float
+    {
+        $account = $this->saldo->resolveAccount($this->supplierId, '321');
+        self::assertNotNull($account, 'Účet 321 chybí v osnově.');
+
+        foreach ($this->saldo->openItems($this->supplierId, (int) $account['id'], $asOf, '321') as $item) {
+            if ($item['doc_type'] === 'purchase_invoice' && (int) $item['doc_id'] === $pfId) {
+                return (float) $item['paid_ratio'];
+            }
+        }
+        self::fail('Přijatá faktura ' . $pfId . ' není k ' . $asOf . ' mezi otevřenými položkami 321.');
     }
 }
