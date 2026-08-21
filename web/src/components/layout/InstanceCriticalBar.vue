@@ -5,6 +5,9 @@ import { RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { storageQuota } from '@/api/storageQuota'
 import { resolveInstanceAlerts, type InstanceAlertReason } from '@/api/instanceAlert'
+import { ensureInstanceStatus, instanceStatus } from '@/api/instanceStatus'
+import { instancePreview } from '@/api/instancePreview'
+import { resolveBillingNarrative } from '@/api/instanceHealth'
 import { ICONS } from '@/components/ui/buttonStyles'
 
 /**
@@ -31,22 +34,80 @@ import { ICONS } from '@/components/ui/buttonStyles'
  *
  * Varování na 90 % sem ZÁMĚRNĚ nepatří — to zůstává žlutým, neblokujícím
  * pruhem `StorageQuotaBanner`.
+ *
+ * ── Co se stalo a co bude ─────────────────────────────────────────────────
+ * „Není zaplaceno" samo o sobě nikomu neřekne, jestli má den nebo dva měsíce.
+ * Linka proto k důvodu přidává dvě věty z {@link resolveBillingNarrative}:
+ * co se stalo a co bude, a kdy. Termíny počítá licenční server; co neposlal,
+ * se NEDOPOČÍTÁVÁ — místo vymyšleného data se řekne, že se ozveme.
  */
 const { t } = useI18n()
 const auth = useAuthStore()
 
+/**
+ * Náhled stavů (jen superadmin, jen na vyžádání — viz `@/api/instancePreview`).
+ * Přebarvuje linku, aby šlo ukázat, jak vypadá; na oprávnění nesahá.
+ */
+const previewing = instancePreview.isActive
+
+/**
+ * Podrobnosti o platbě zná jen `/api/license/status` (admin). Načte se líně
+ * a jednou; běžný uživatel ani self-hosted instalace ho nezavolají vůbec
+ * a linka se pak chová jako dřív — jen bez dvou vět navíc.
+ */
+watch(
+  () => [auth.isManagedInstallation, auth.isSuperadmin] as const,
+  ([managed, superadmin]) => { void ensureInstanceStatus({ managed, superadmin }) },
+  { immediate: true },
+)
+
+const billing = instanceStatus.billing
+
 const reasons = computed<InstanceAlertReason[]>(() => resolveInstanceAlerts({
-  managed: auth.isManagedInstallation,
-  storageExhausted: storageQuota.isCriticallyExhausted.value,
-  licenseState: auth.license?.state ?? null,
+  managed: previewing.value ? true : auth.isManagedInstallation,
+  // ⚠️ Mimo náhled zůstává zdrojem LEPKAVÝ stav z hlaviček odpovědí, ne
+  // načtený status: ten se dotahuje jednou a spadlý dotaz nesmí linku zhasnout.
+  storageExhausted: previewing.value
+    ? (instanceStatus.storage.value?.blocks_writes ?? false)
+    : storageQuota.isCriticallyExhausted.value,
+  licenseState: previewing.value
+    ? (billing.value?.license_state ?? null)
+    : (auth.license?.state ?? null),
   // ⚠️ Stav předplatného, ne jen licence. Licence může být pořád platná,
   // a přitom je zákazník po splatnosti — token doběhne až na konci
   // zaplaceného období. Bez tohohle by se výzva k úhradě objevila teprve
   // ve chvíli, kdy se komerční moduly zavřou, tedy až když je pozdě.
-  subscriptionState: auth.license?.subscription_state ?? null,
+  subscriptionState: previewing.value
+    ? (billing.value?.subscription_state ?? null)
+    : (auth.license?.subscription_state ?? null),
 }))
 
 const visible = computed(() => reasons.value.length > 0)
+
+/** Dvě věty k neuhrazení. `null` = stav neznáme a nic si nedomýšlíme. */
+const narrative = computed(() => resolveBillingNarrative(billing.value))
+
+function fmtDate(ts: number | null): string {
+  return ts === null ? '' : new Date(ts * 1000).toLocaleDateString()
+}
+
+/** Věta „co se stalo" (+ kolikátý pokus, když to server poslal). */
+const happenedText = computed(() => {
+  const n = narrative.value
+  if (!n) return null
+  const base = t(n.happenedKey)
+  if (n.attempt === null || n.maxAttempts === null) return base
+
+  return `${base} ${t('hosting.phase.attempt_of', { attempt: n.attempt, max: n.maxAttempts })}`
+})
+
+/** Věta „co bude a kdy". Bez termínu se použije varianta, která žádný neslibuje. */
+const nextText = computed(() => {
+  const n = narrative.value
+  if (!n) return null
+
+  return t(n.nextKey, { date: fmtDate(n.nextAt) })
+})
 
 /** Kam vede „co s tím". Obojí je vnitřní stránka s vysvětlením i cestou k nápravě. */
 const TARGET: Record<InstanceAlertReason, string> = {
@@ -116,8 +177,20 @@ onBeforeUnmount(() => {
       <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
         <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" />
       </svg>
+      <span
+        v-if="previewing"
+        class="shrink-0 rounded bg-white/25 px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider"
+      >{{ t('hosting.preview_badge') }}</span>
       <span class="font-semibold whitespace-nowrap">{{ t(`instance_alert.${reason}_title`) }}</span>
-      <span class="min-w-0 flex-1 text-white/90">{{ t(`instance_alert.${reason}_desc`) }}</span>
+      <span class="min-w-0 flex-1 text-white/90">
+        {{ t(`instance_alert.${reason}_desc`) }}
+        <!-- Co se stalo a co bude — jen u neuhrazení a jen když to server řekl.
+             Bez dat se tu nesmí objevit žádný termín. -->
+        <template v-if="reason === 'unpaid' && happenedText">
+          <span class="ml-1">{{ happenedText }}</span>
+          <span class="ml-1">{{ nextText }}</span>
+        </template>
+      </span>
       <RouterLink
         :to="TARGET[reason]"
         class="shrink-0 whitespace-nowrap rounded-md bg-white/15 px-3 py-1 font-medium underline underline-offset-2 hover:bg-white/25"
