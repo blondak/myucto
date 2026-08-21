@@ -47,6 +47,8 @@ final class InstanceExportIsolationTest extends TestCase
 
     private int $supplierId = 0;
     private int $otherSupplierId = 0;
+    private int $czId = 0;
+    private int $currencyId = 0;
     private bool $inTx = false;
 
     /** @var list<string> */
@@ -76,6 +78,9 @@ final class InstanceExportIsolationTest extends TestCase
             $this->markTestSkipped('Chybí základní data (currency/vat_rate/country) v DB.');
         }
 
+        $this->czId = $czId;
+        $this->currencyId = $currencyId;
+
         $pdo->beginTransaction();
         $this->inTx = true;
 
@@ -91,8 +96,8 @@ final class InstanceExportIsolationTest extends TestCase
         $this->otherSupplierId = $createSupplier('H14 export cizi s.r.o.', 'h14-cizi@example.com');
 
         // Data OBOU firem — bez cizích dat by test nic neověřoval.
-        $this->createClient($this->supplierId, self::OWN_MARKER);
-        $this->createClient($this->otherSupplierId, self::FOREIGN_MARKER);
+        $this->createTenantData($this->supplierId, self::OWN_MARKER);
+        $this->createTenantData($this->otherSupplierId, self::FOREIGN_MARKER);
     }
 
     protected function tearDown(): void
@@ -344,12 +349,47 @@ final class InstanceExportIsolationTest extends TestCase
         return $stmt->fetchColumn() !== false;
     }
 
-    private function createClient(int $supplierId, string $marker): void
+    /**
+     * Data firmy ve VÍC agendách, ne jen v `clients`.
+     *
+     * Jedna tabulka by test izolace udělala falešně klidným: prošel by i tehdy,
+     * kdyby se filtr rozpadl u všech ostatních. Vybrané tabulky pokrývají různé
+     * tvary scopu (přímý `supplier_id` napříč moduly) a marker nesou v názvu,
+     * takže se prosáknutí pozná v kterémkoli z exportovaných JSONL.
+     */
+    private function createTenantData(int $supplierId, string $marker): void
     {
-        $stmt = $this->db->pdo()->prepare(
-            'INSERT INTO clients (supplier_id, company_name, street, city, zip, email)
-             VALUES (?, ?, "Testovaci 2", "Brno", "60200", ?)'
+        $pdo = $this->db->pdo();
+
+        $client = $pdo->prepare(
+            'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, currency_default_id, main_email)
+             VALUES (?, ?, "Testovaci 2", "Brno", "60200", ?, ?, ?)'
         );
-        $stmt->execute([$supplierId, $marker, strtolower(substr($marker, 0, 20)) . '@example.com']);
+        $client->execute([
+            $supplierId,
+            $marker,
+            $this->czId,
+            $this->currencyId,
+            strtolower(substr($marker, 0, 20)) . '@example.com',
+        ]);
+
+        // (tabulka, sloupec s názvem) — všechny berou jen supplier_id + název.
+        $named = [
+            'document_folders'         => 'name',
+            'document_tags'            => 'name',
+            'cash_registers'           => 'name',
+            'journal_entry_templates'  => 'name',
+            'branding_profiles'        => 'name',
+        ];
+        foreach ($named as $table => $column) {
+            if (!$this->tableExists($table)) {
+                continue;
+            }
+            $stmt = $pdo->prepare(
+                'INSERT INTO ' . $table . ' (supplier_id, ' . $column . ') VALUES (?, ?)'
+            );
+            // document_tags má název kratší; marker se do 64 znaků vejde celý.
+            $stmt->execute([$supplierId, $marker]);
+        }
     }
 }

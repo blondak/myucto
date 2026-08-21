@@ -66,10 +66,23 @@ final class InstanceExportManifestTest extends TestCase
 
         for ($i = 1; $i <= 3; $i++) {
             $c = $pdo->prepare(
-                'INSERT INTO clients (supplier_id, company_name, street, city, zip, email)
-                 VALUES (?, ?, "Testovaci 2", "Brno", "60200", ?)'
+                'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, currency_default_id, main_email)
+                 VALUES (?, ?, "Testovaci 2", "Brno", "60200", ?, ?, ?)'
             );
-            $c->execute([$this->supplierId, 'H14 odberatel ' . $i, "h14-odberatel-{$i}@example.com"]);
+            $c->execute([
+                $this->supplierId,
+                'H14 odberatel ' . $i,
+                $czId,
+                $currencyId,
+                "h14-odberatel-{$i}@example.com",
+            ]);
+        }
+
+        // Víc agend, ať manifest popisuje víc než dvě tabulky — jinak by
+        // „checksumy sedí" znamenalo jen to, že archiv skoro nic neobsahuje.
+        foreach (['document_folders', 'document_tags', 'cash_registers', 'journal_entry_templates'] as $table) {
+            $pdo->prepare('INSERT INTO ' . $table . ' (supplier_id, name) VALUES (?, ?)')
+                ->execute([$this->supplierId, 'H14 manifest ' . $table]);
         }
     }
 

@@ -18,6 +18,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Setup\PasswordSetupLinkIssuer;
 use MyInvoice\Service\Setup\ProvisionTokenGuard;
 use MyInvoice\Service\System\AppUrlConfiguration;
+use MyInvoice\Service\System\ManagedModeGuard;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
@@ -194,6 +195,7 @@ final class SetupProvisionTokenTest extends TestCase
             $this->container->get(SessionCookieFactory::class),
             $guard,
             new PasswordSetupLinkIssuer(),
+            $this->container->get(ManagedModeGuard::class),
         );
     }
 
