@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Service\System;
 use DateTimeImmutable;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\System\InstanceEntitlement;
 use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\System\StorageQuotaPolicy;
 use MyInvoice\Service\System\StorageQuotaState;
@@ -40,6 +41,7 @@ final class StorageQuotaPolicyTest extends TestCase
             $config,
             new ManagedModeGuard($config),
             new StorageUsageMeter(new Connection($config), $config),
+            new InstanceEntitlement(new Connection($config), $config),
         );
     }
 
@@ -278,6 +280,7 @@ final class StorageQuotaPolicyTest extends TestCase
             $config,
             new ManagedModeGuard($config),
             new StorageUsageMeter(new Connection($config), $config),
+            new InstanceEntitlement(new Connection($config), $config),
         );
 
         self::assertFalse($policy->isEnforceable());

@@ -152,6 +152,7 @@ final class LicenseService
         // Aktivace je nový začátek — stav předplatného z předchozího klíče nesmí
         // přežít, proto se ukládá i prázdná hodnota (server ho nemusí hlásit).
         $this->storeSubscription(['subscription' => $resp['subscription'] ?? null]);
+        $this->storeInstanceInfo(['instance' => $resp['instance'] ?? null]);
 
         return ['ok' => true, 'state' => $this->current()];
     }
@@ -267,6 +268,7 @@ final class LicenseService
                 [$token, json_encode($payload, JSON_UNESCAPED_UNICODE), $this->nonceOf($payload), $counter],
             );
             $this->storeSubscription($resp);
+            $this->storeInstanceInfo($resp);
             return;
         }
 
@@ -600,6 +602,44 @@ final class LicenseService
         $this->writeLicense(
             'UPDATE license SET subscription_info = ? WHERE id = 1',
             [is_array($sub) ? json_encode($sub, JSON_UNESCAPED_UNICODE) : null],
+        );
+    }
+
+    /**
+     * ROZSAH ZAPLACENÉ SLUŽBY doručený licenčním serverem (`instance`).
+     *
+     * Zákazník si dokupuje místo a mění tarif na webu; instance se to jinak
+     * nedozví — do `cfg.local.php` zapisuje zřizování jednou a pak už nikdy.
+     * Vozí se to tedy s obnovou licence a čte přes {@see InstanceEntitlement}.
+     *
+     * Ukládá se JEN když ho odpověď opravdu nese: odmítnutá obnova ani starší
+     * server bez tohoto pole nesmí přepsat poslední známý rozsah nulou. Prázdná
+     * hodnota se uloží jen tehdy, když ji server výslovně pošle jako `null` —
+     * to znamená „tahle instalace není spravovaná", ne „nevíme".
+     *
+     * @param array<string,mixed> $resp
+     */
+    private function storeInstanceInfo(array $resp): void
+    {
+        if (!array_key_exists('instance', $resp)) {
+            return;
+        }
+        // Instalace, kde ještě neproběhla migrace 1524 — doplní se po ní.
+        if (!$this->db->hasColumn('license', 'instance_info')) {
+            return;
+        }
+
+        $info = $resp['instance'];
+        if (is_array($info)) {
+            // Kdy jsme rozsah dostali MY. Čas serveru by nešlo porovnat s ničím,
+            // co instalace zná, a obrazovka potřebuje říct, jak čerstvý údaj
+            // ukazuje — ne kdy si ho server poznamenal.
+            $info['delivered_at'] = date(\DateTimeInterface::ATOM);
+        }
+
+        $this->writeLicense(
+            'UPDATE license SET instance_info = ? WHERE id = 1',
+            [is_array($info) ? json_encode($info, JSON_UNESCAPED_UNICODE) : null],
         );
     }
 

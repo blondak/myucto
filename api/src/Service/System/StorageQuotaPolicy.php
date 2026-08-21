@@ -67,6 +67,7 @@ class StorageQuotaPolicy
         private readonly Config $config,
         private readonly ManagedModeGuard $managed,
         private readonly StorageUsageMeter $meter,
+        private readonly InstanceEntitlement $entitlement,
     ) {}
 
     /**
@@ -133,8 +134,11 @@ class StorageQuotaPolicy
     }
 
     /**
-     * ZAPLACENÝ objem instalace v bajtech (`instance.quota_gb`), nebo null když
-     * ho provisioning nezapsal.
+     * ZAPLACENÝ objem instalace v bajtech, nebo null když ho neznáme.
+     *
+     * Nečte se z konfigurace napřímo — rozhoduje {@see InstanceEntitlement},
+     * protože po dokoupení místa je čerstvý údaj na licenčním serveru a
+     * v `instance.quota_gb` zůstává hodnota ze zřizování instance.
      *
      * ⚠️ null tady znamená „nevíme, kolik má zákazník zaplaceno" — v takovém
      * případě se NESMÍ počítat procenta ani kreslit pruh. Dělit něčím, co
@@ -142,17 +146,7 @@ class StorageQuotaPolicy
      */
     public function contractedBytes(): ?int
     {
-        $raw = $this->config->get('instance.quota_gb', '');
-        if (!is_int($raw) && !is_float($raw) && (!is_string($raw) || trim($raw) === '')) {
-            return null;
-        }
-
-        $gb = filter_var($raw, FILTER_VALIDATE_FLOAT);
-        if ($gb === false || $gb <= 0.0) {
-            return null;
-        }
-
-        return (int) round($gb * 1024 * 1024 * 1024);
+        return $this->entitlement->quotaBytes();
     }
 
     /**

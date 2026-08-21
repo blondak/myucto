@@ -179,7 +179,12 @@ final class TelemetryPayloadBuilder
         // ⚠️ Meter se sem předává JEN kvůli `latest()` — jednomu indexovanému
         // řádku. Průchod stromem spouští výhradně vlastní cronová úloha; obnova
         // licence si ho dovolit nesmí.
-        $quota = new StorageQuotaPolicy($config, $managed, new StorageUsageMeter($db, $config));
+        $quota = new StorageQuotaPolicy(
+            $config,
+            $managed,
+            new StorageUsageMeter($db, $config),
+            new InstanceEntitlement($db, $config),
+        );
 
         return new self($config, $probe, $version, $managed, $quota);
     }
