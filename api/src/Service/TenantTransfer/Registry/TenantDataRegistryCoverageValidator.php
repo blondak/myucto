@@ -69,7 +69,12 @@ final class TenantDataRegistryCoverageValidator
             array_push(
                 $issues,
                 ...$this->primaryKeyIssues($definition, $table),
-                ...$this->policyCoverageIssues($definition, $table, $tables),
+                ...$this->policyCoverageIssues(
+                    $definition,
+                    $table,
+                    $tables,
+                    $definitions,
+                ),
                 ...$this->secretCoverageIssues($definition, $table),
                 ...$this->referenceCoverageIssues(
                     $definition,
@@ -126,12 +131,14 @@ final class TenantDataRegistryCoverageValidator
 
     /**
      * @param array<string,TenantSchemaTableInventory> $tables
+     * @param array<string,TenantDataDefinition> $definitions
      * @return list<string>
      */
     private function policyCoverageIssues(
         TenantDataDefinition $definition,
         TenantSchemaTableInventory $table,
         array $tables,
+        array $definitions,
     ): array {
         return match ($definition->policy) {
             TenantDataPolicy::TenantRoot => $this->directOwnershipIssues(
@@ -167,6 +174,8 @@ final class TenantDataRegistryCoverageValidator
             TenantDataPolicy::PersonalSecretAttachment => $this->personalSecretIssues(
                 $definition,
                 $table,
+                $tables,
+                $definitions,
             ),
         };
     }
@@ -368,17 +377,282 @@ final class TenantDataRegistryCoverageValidator
         return [];
     }
 
-    /** @return list<string> */
+    /**
+     * @param array<string,TenantSchemaTableInventory> $tables
+     * @param array<string,TenantDataDefinition> $definitions
+     * @return list<string>
+     */
     private function personalSecretIssues(
         TenantDataDefinition $definition,
         TenantSchemaTableInventory $table,
+        array $tables,
+        array $definitions,
     ): array {
-        if (($definition->details['consent'] ?? null) !== 'source_and_target_owner'
-            || ($definition->details['default_selected'] ?? null) !== false
+        $issues = [];
+        if (($definition->details['consent'] ?? null)
+            !== 'source_and_target_owner'
         ) {
-            return ['invalid_personal_secret_policy:' . $table->name];
+            $issues[] = 'invalid_personal_secret_consent:' . $table->name;
         }
-        return [];
+        if (($definition->details['default_selected'] ?? null) !== false) {
+            $issues[] = 'personal_secret_default_selected:' . $table->name;
+        }
+
+        $ownerColumn = $definition->details['owner_column'] ?? null;
+        if (!is_string($ownerColumn)
+            || !in_array($ownerColumn, $table->columns, true)
+        ) {
+            $issues[] = 'invalid_personal_secret_owner:' . $table->name;
+        } elseif (in_array($ownerColumn, $table->nullableColumns, true)) {
+            $issues[] = 'personal_secret_owner_nullable:'
+                . $table->name . '.' . $ownerColumn;
+        }
+
+        array_push(
+            $issues,
+            ...$this->personalSecretDeduplicationIssues(
+                $definition,
+                $table,
+                $ownerColumn,
+            ),
+        );
+        if (!$this->personalSecretSelectorIsValid(
+            $definition,
+            $table,
+            $tables,
+            $definitions,
+        )) {
+            $issues[] = 'invalid_personal_secret_selector:' . $table->name;
+        }
+
+        $secrets = $definition->details['secrets'] ?? null;
+        if (is_array($secrets)) {
+            foreach ($secrets as $column => $declaration) {
+                if (!is_string($column)
+                    || !TenantSecretColumnDetector::matches($column)
+                    || !is_array($declaration)
+                    || ($declaration['policy'] ?? null)
+                        === TenantSecretPolicy::ReencryptPersonalWithDualConsent
+                            ->value
+                ) {
+                    continue;
+                }
+                $issues[] = 'personal_secret_policy_mismatch:'
+                    . $table->name . '.' . $column;
+            }
+        }
+        return $issues;
+    }
+
+    /** @return list<string> */
+    private function personalSecretDeduplicationIssues(
+        TenantDataDefinition $definition,
+        TenantSchemaTableInventory $table,
+        mixed $ownerColumn,
+    ): array {
+        $deduplication = $definition->details['deduplication'] ?? null;
+        $rawKeys = is_array($deduplication)
+            ? ($deduplication['keys'] ?? null)
+            : null;
+        $keys = $this->uniqueStringList($rawKeys, 2);
+        if (!is_array($deduplication)
+            || ($deduplication['strategy'] ?? null)
+                !== 'target_owner_fingerprint'
+            || ($deduplication['active_collision'] ?? null)
+                !== 'reuse_without_overwrite'
+            || ($deduplication['soft_deleted_collision'] ?? null)
+                !== 'require_target_owner_decision'
+            || $keys === null
+            || !is_string($ownerColumn)
+            || $keys[0] !== $ownerColumn
+        ) {
+            return [
+                'invalid_personal_secret_deduplication:' . $table->name,
+            ];
+        }
+
+        $issues = [];
+        foreach ($keys as $key) {
+            if (!in_array($key, $table->columns, true)) {
+                $issues[] = 'personal_secret_deduplication_column_missing:'
+                    . $table->name . '.' . $key;
+                continue;
+            }
+            if (in_array($key, $table->nullableColumns, true)) {
+                $issues[] = 'personal_secret_deduplication_nullable_key:'
+                    . $table->name . '.' . $key;
+            }
+        }
+        if (!in_array($keys, $table->uniqueKeys, true)) {
+            $issues[] = 'personal_secret_deduplication_not_unique:'
+                . $table->name;
+        }
+        return $issues;
+    }
+
+    /**
+     * @param array<string,TenantSchemaTableInventory> $tables
+     * @param array<string,TenantDataDefinition> $definitions
+     */
+    private function personalSecretSelectorIsValid(
+        TenantDataDefinition $definition,
+        TenantSchemaTableInventory $table,
+        array $tables,
+        array $definitions,
+    ): bool {
+        $selector = $definition->details['candidate_selector'] ?? null;
+        $references = is_array($selector)
+            ? ($selector['references'] ?? null)
+            : null;
+        if (!is_array($selector)
+            || ($selector['strategy'] ?? null) !== 'tenant_reference_union'
+            || !is_array($references)
+            || !array_is_list($references)
+            || $references === []
+            || count($table->primaryKey) !== 1
+        ) {
+            return false;
+        }
+
+        $seen = [];
+        foreach ($references as $reference) {
+            if (!is_array($reference) || array_is_list($reference)) {
+                return false;
+            }
+            $sourceTable = $reference['table'] ?? null;
+            $sourceColumn = $reference['column'] ?? null;
+            if (!is_string($sourceTable) || !is_string($sourceColumn)) {
+                return false;
+            }
+            $signature = $sourceTable . "\0" . $sourceColumn;
+            if (isset($seen[$signature])) {
+                return false;
+            }
+            $seen[$signature] = true;
+
+            $source = $tables[$sourceTable] ?? null;
+            $sourceDefinition = $definitions[$sourceTable] ?? null;
+            $filters = $reference['filters'] ?? [];
+            if (!is_array($filters)) {
+                return false;
+            }
+            if ($source === null
+                || $sourceDefinition === null
+                || !in_array($sourceDefinition->policy, [
+                    TenantDataPolicy::TenantOwned,
+                    TenantDataPolicy::TenantOwnedIndirect,
+                    TenantDataPolicy::TenantRelation,
+                ], true)
+                || !in_array($sourceColumn, $source->columns, true)
+                || !$this->hasForeignKey(
+                    $source,
+                    $sourceColumn,
+                    $table->name,
+                    $table->primaryKey[0],
+                )
+                || !$this->personalSecretSelectorFiltersAreValid(
+                    $filters,
+                    $sourceTable,
+                    $sourceDefinition,
+                    $tables,
+                    $definitions,
+                )
+            ) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** @return list<string>|null */
+    private function uniqueStringList(mixed $value, int $length): ?array
+    {
+        if (!is_array($value)
+            || !array_is_list($value)
+            || count($value) !== $length
+        ) {
+            return null;
+        }
+        $strings = [];
+        foreach ($value as $item) {
+            if (!is_string($item) || in_array($item, $strings, true)) {
+                return null;
+            }
+            $strings[] = $item;
+        }
+        return $strings;
+    }
+
+    /**
+     * @param array<mixed> $filters
+     * @param array<string,TenantSchemaTableInventory> $tables
+     * @param array<string,TenantDataDefinition> $definitions
+     */
+    private function personalSecretSelectorFiltersAreValid(
+        array $filters,
+        string $sourceTable,
+        TenantDataDefinition $sourceDefinition,
+        array $tables,
+        array $definitions,
+    ): bool {
+        if (!array_is_list($filters)) {
+            return false;
+        }
+        $seen = [];
+        foreach ($filters as $filter) {
+            if (!is_array($filter) || array_is_list($filter)) {
+                return false;
+            }
+            $filterTable = $filter['table'] ?? null;
+            $column = $filter['column'] ?? null;
+            if (!is_string($filterTable)
+                || !is_string($column)
+                || ($filter['operator'] ?? null) !== 'is_null'
+                || !$this->selectorFilterTableIsInScope(
+                    $sourceTable,
+                    $sourceDefinition,
+                    $filterTable,
+                )
+            ) {
+                return false;
+            }
+            $filterInventory = $tables[$filterTable] ?? null;
+            $filterDefinition = $definitions[$filterTable] ?? null;
+            $signature = $filterTable . "\0" . $column;
+            if (isset($seen[$signature])
+                || $filterInventory === null
+                || $filterDefinition === null
+                || !in_array($column, $filterInventory->columns, true)
+                || !in_array($column, $filterInventory->nullableColumns, true)
+            ) {
+                return false;
+            }
+            $seen[$signature] = true;
+        }
+        return true;
+    }
+
+    private function selectorFilterTableIsInScope(
+        string $sourceTable,
+        TenantDataDefinition $sourceDefinition,
+        string $filterTable,
+    ): bool {
+        if ($sourceTable === $filterTable) {
+            return true;
+        }
+        $ownership = $sourceDefinition->details['ownership'] ?? null;
+        $path = is_array($ownership) ? ($ownership['path'] ?? null) : null;
+        if (!is_array($path) || !array_is_list($path)) {
+            return false;
+        }
+        foreach ($path as $step) {
+            if (is_array($step)
+                && ($step['to_table'] ?? null) === $filterTable
+            ) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** @return list<string> */
@@ -467,8 +741,18 @@ final class TenantDataRegistryCoverageValidator
         if ($softActorReferences === null) {
             return ['invalid_soft_actor_reference_registry:' . $table->name];
         }
+        $personalAttachmentReferences = $this->personalAttachmentReferences(
+            $definition,
+        );
+        if ($personalAttachmentReferences === null) {
+            return [
+                'invalid_personal_attachment_reference_registry:'
+                    . $table->name,
+            ];
+        }
         $issues = [];
         $actualActorColumns = [];
+        $actualPersonalAttachmentColumns = [];
         foreach ($table->foreignKeys as $foreignKey) {
             $target = $definitions[$foreignKey->referencedTable] ?? null;
             if ($target === null) {
@@ -476,6 +760,30 @@ final class TenantDataRegistryCoverageValidator
                     . $table->name . '.' . $foreignKey->column
                     . '->' . $foreignKey->referencedTable
                     . '.' . $foreignKey->referencedColumn;
+                continue;
+            }
+            if ($target->policy
+                === TenantDataPolicy::PersonalSecretAttachment
+            ) {
+                $actualPersonalAttachmentColumns[$foreignKey->column] = true;
+                $strategy = $personalAttachmentReferences[
+                    $foreignKey->column
+                ] ?? null;
+                $expected = in_array(
+                    $foreignKey->column,
+                    $table->nullableColumns,
+                    true,
+                )
+                    ? 'map_selected_or_null'
+                    : 'require_selected_or_skip_row';
+                if ($strategy === null) {
+                    $issues[] = 'personal_attachment_reference_policy_missing:'
+                        . $table->name . '.' . $foreignKey->column;
+                } elseif ($strategy !== $expected) {
+                    $issues[] =
+                        'personal_attachment_reference_policy_mismatch:'
+                            . $table->name . '.' . $foreignKey->column;
+                }
                 continue;
             }
             if ($target->policy === TenantDataPolicy::InstanceOwned) {
@@ -512,6 +820,12 @@ final class TenantDataRegistryCoverageValidator
         foreach (array_keys($actorReferences) as $column) {
             if (!isset($actualActorColumns[$column])) {
                 $issues[] = 'actor_reference_fk_missing:'
+                    . $table->name . '.' . $column;
+            }
+        }
+        foreach (array_keys($personalAttachmentReferences) as $column) {
+            if (!isset($actualPersonalAttachmentColumns[$column])) {
+                $issues[] = 'personal_attachment_reference_fk_missing:'
                     . $table->name . '.' . $column;
             }
         }
@@ -563,6 +877,37 @@ final class TenantDataRegistryCoverageValidator
                 || !in_array($strategy, [
                     'map_existing_user_required',
                     'map_existing_user_or_null',
+                ], true)
+            ) {
+                $references[$column] = 'invalid';
+                continue;
+            }
+            $references[$column] = $strategy;
+        }
+        return $references;
+    }
+
+    /** @return array<string,string>|null */
+    private function personalAttachmentReferences(
+        TenantDataDefinition $definition,
+    ): ?array {
+        $raw = $definition->details['personal_attachment_references'] ?? [];
+        if (!is_array($raw) || (array_is_list($raw) && $raw !== [])) {
+            return null;
+        }
+        $references = [];
+        foreach ($raw as $column => $declaration) {
+            if (!is_string($column)
+                || !is_array($declaration)
+                || array_is_list($declaration)
+            ) {
+                return null;
+            }
+            $strategy = $declaration['strategy'] ?? null;
+            if (!is_string($strategy)
+                || !in_array($strategy, [
+                    'map_selected_or_null',
+                    'require_selected_or_skip_row',
                 ], true)
             ) {
                 $references[$column] = 'invalid';

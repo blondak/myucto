@@ -16,7 +16,6 @@ final class TenantDataBusinessCatalogTest extends TestCase
     public function testBusinessBoundaryHasExplicitPoliciesAndPrimaryKeys(): void
     {
         $expected = [
-            'signing_profiles' => [TenantDataPolicy::TenantOwned, ['id']],
             'email_profiles' => [TenantDataPolicy::TenantOwned, ['id']],
             'branding_profiles' => [TenantDataPolicy::TenantOwned, ['id']],
             'revenue_categories' => [TenantDataPolicy::TenantOwned, ['id']],
@@ -153,18 +152,6 @@ final class TenantDataBusinessCatalogTest extends TestCase
                 'imap_password_enc' => ['policy' => 'reencrypt_v1'],
             ],
             $definitions['email_profiles']->details['secrets'] ?? null,
-        );
-        self::assertSame(
-            [
-                'owner_user_id' => [
-                    'strategy' => 'map_existing_user_or_null',
-                ],
-                'created_by' => [
-                    'strategy' => 'map_existing_user_or_null',
-                ],
-            ],
-            $definitions['signing_profiles']->details['actor_references']
-                ?? null,
         );
         self::assertSame(
             ['created_by' => ['strategy' => 'map_existing_user_required']],

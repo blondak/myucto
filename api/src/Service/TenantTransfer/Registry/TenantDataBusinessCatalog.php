@@ -12,22 +12,6 @@ final class TenantDataBusinessCatalog
     {
         return [
             self::owned(
-                'signing_profiles',
-                ['id'],
-                'signing',
-                secrets: [
-                    'pdf_tsa_password_enc' => self::reencrypt(),
-                ],
-                actorReferences: [
-                    'owner_user_id' => 'map_existing_user_or_null',
-                    'created_by' => 'map_existing_user_or_null',
-                ],
-                postImport: [
-                    'force_columns' => ['is_active' => false],
-                    'reason' => 'signing_requires_manual_reactivation',
-                ],
-            ),
-            self::owned(
                 'email_profiles',
                 ['id'],
                 'email',

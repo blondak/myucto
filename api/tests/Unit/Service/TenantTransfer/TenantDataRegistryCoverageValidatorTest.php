@@ -605,6 +605,292 @@ final class TenantDataRegistryCoverageValidatorTest extends TestCase
         );
     }
 
+    public function testPersonalSecretRequiresUniqueDedupeAndDualConsentPolicy(): void
+    {
+        $users = $this->instanceUsers();
+        $vault = $this->personalVault([
+            'pfx_ciphertext' => ['policy' => 'reencrypt_v1'],
+        ], [
+            [
+                'table' => 'certificate_links',
+                'column' => 'credential_id',
+            ],
+        ]);
+        $links = $this->tenantRelation(
+            'certificate_links',
+            ['credential_id', 'supplier_id'],
+            [
+                'credential_id' => [
+                    'strategy' => 'require_selected_or_skip_row',
+                ],
+            ],
+        );
+
+        self::assertSame(
+            [
+                'personal_secret_deduplication_not_unique:'
+                    . 'epo_signing_credentials',
+                'personal_secret_policy_mismatch:'
+                    . 'epo_signing_credentials.pfx_ciphertext',
+            ],
+            (new TenantDataRegistryCoverageValidator())->issues(
+                $this->registry([
+                    $this->definition('supplier'),
+                    $users,
+                    $vault,
+                    $links,
+                ]),
+                [
+                    new TenantSchemaTableInventory(
+                        'supplier',
+                        'BASE TABLE',
+                        ['id'],
+                        ['id'],
+                        [],
+                        [['id']],
+                    ),
+                    new TenantSchemaTableInventory(
+                        'users',
+                        'BASE TABLE',
+                        ['id'],
+                        ['id'],
+                        [],
+                        [['id']],
+                    ),
+                    new TenantSchemaTableInventory(
+                        'epo_signing_credentials',
+                        'BASE TABLE',
+                        [
+                            'id',
+                            'owner_user_id',
+                            'pfx_ciphertext',
+                            'fingerprint_sha256',
+                        ],
+                        ['id'],
+                        [new TenantSchemaForeignKeyInventory(
+                            'owner_user_id',
+                            'users',
+                            'id',
+                        )],
+                        [['id']],
+                    ),
+                    new TenantSchemaTableInventory(
+                        'certificate_links',
+                        'BASE TABLE',
+                        ['credential_id', 'supplier_id'],
+                        ['credential_id', 'supplier_id'],
+                        [
+                            new TenantSchemaForeignKeyInventory(
+                                'credential_id',
+                                'epo_signing_credentials',
+                                'id',
+                            ),
+                            new TenantSchemaForeignKeyInventory(
+                                'supplier_id',
+                                'supplier',
+                                'id',
+                            ),
+                        ],
+                        [['credential_id', 'supplier_id']],
+                    ),
+                ],
+            ),
+        );
+    }
+
+    public function testPersonalSecretSelectorCannotExpandToWholeOwnerVault(): void
+    {
+        $vault = $this->personalVault(
+            [
+                'pfx_ciphertext' => [
+                    'policy' => 'reencrypt_personal_with_dual_consent',
+                ],
+            ],
+            [],
+        );
+        $details = $vault->details;
+        $details['candidate_selector'] = [
+            'strategy' => 'owner_vault',
+            'references' => [],
+        ];
+        $vault = new TenantDataDefinition(
+            $vault->key,
+            $vault->kind,
+            $vault->policy,
+            $vault->profiles,
+            $details,
+        );
+
+        self::assertSame(
+            ['invalid_personal_secret_selector:epo_signing_credentials'],
+            (new TenantDataRegistryCoverageValidator())->issues(
+                $this->registry([
+                    $this->definition('supplier'),
+                    $this->instanceUsers(),
+                    $vault,
+                ]),
+                [
+                    new TenantSchemaTableInventory(
+                        'supplier',
+                        'BASE TABLE',
+                        ['id'],
+                        ['id'],
+                        [],
+                        [['id']],
+                    ),
+                    new TenantSchemaTableInventory(
+                        'users',
+                        'BASE TABLE',
+                        ['id'],
+                        ['id'],
+                        [],
+                        [['id']],
+                    ),
+                    new TenantSchemaTableInventory(
+                        'epo_signing_credentials',
+                        'BASE TABLE',
+                        [
+                            'id',
+                            'owner_user_id',
+                            'pfx_ciphertext',
+                            'fingerprint_sha256',
+                        ],
+                        ['id'],
+                        [new TenantSchemaForeignKeyInventory(
+                            'owner_user_id',
+                            'users',
+                            'id',
+                        )],
+                        [
+                            ['id'],
+                            ['owner_user_id', 'fingerprint_sha256'],
+                        ],
+                    ),
+                ],
+            ),
+        );
+    }
+
+    public function testPersonalAttachmentReferencesMatchFkNullability(): void
+    {
+        $vault = $this->personalVault(
+            [
+                'pfx_ciphertext' => [
+                    'policy' => 'reencrypt_personal_with_dual_consent',
+                ],
+            ],
+            [
+                ['table' => 'optional_links', 'column' => 'credential_id'],
+                ['table' => 'required_links', 'column' => 'credential_id'],
+            ],
+        );
+        $optional = $this->tenantRelation(
+            'optional_links',
+            ['id'],
+            [
+                'credential_id' => [
+                    'strategy' => 'require_selected_or_skip_row',
+                ],
+            ],
+        );
+        $required = $this->tenantRelation('required_links', ['id'], []);
+
+        self::assertSame(
+            [
+                'personal_attachment_reference_policy_mismatch:'
+                    . 'optional_links.credential_id',
+                'personal_attachment_reference_policy_missing:'
+                    . 'required_links.credential_id',
+            ],
+            (new TenantDataRegistryCoverageValidator())->issues(
+                $this->registry([
+                    $this->definition('supplier'),
+                    $this->instanceUsers(),
+                    $vault,
+                    $optional,
+                    $required,
+                ]),
+                [
+                    new TenantSchemaTableInventory(
+                        'supplier',
+                        'BASE TABLE',
+                        ['id'],
+                        ['id'],
+                        [],
+                        [['id']],
+                    ),
+                    new TenantSchemaTableInventory(
+                        'users',
+                        'BASE TABLE',
+                        ['id'],
+                        ['id'],
+                        [],
+                        [['id']],
+                    ),
+                    new TenantSchemaTableInventory(
+                        'epo_signing_credentials',
+                        'BASE TABLE',
+                        [
+                            'id',
+                            'owner_user_id',
+                            'pfx_ciphertext',
+                            'fingerprint_sha256',
+                        ],
+                        ['id'],
+                        [new TenantSchemaForeignKeyInventory(
+                            'owner_user_id',
+                            'users',
+                            'id',
+                        )],
+                        [
+                            ['id'],
+                            ['owner_user_id', 'fingerprint_sha256'],
+                        ],
+                    ),
+                    new TenantSchemaTableInventory(
+                        'optional_links',
+                        'BASE TABLE',
+                        ['id', 'supplier_id', 'credential_id'],
+                        ['id'],
+                        [
+                            new TenantSchemaForeignKeyInventory(
+                                'supplier_id',
+                                'supplier',
+                                'id',
+                            ),
+                            new TenantSchemaForeignKeyInventory(
+                                'credential_id',
+                                'epo_signing_credentials',
+                                'id',
+                            ),
+                        ],
+                        [['id']],
+                        ['credential_id'],
+                    ),
+                    new TenantSchemaTableInventory(
+                        'required_links',
+                        'BASE TABLE',
+                        ['id', 'supplier_id', 'credential_id'],
+                        ['id'],
+                        [
+                            new TenantSchemaForeignKeyInventory(
+                                'supplier_id',
+                                'supplier',
+                                'id',
+                            ),
+                            new TenantSchemaForeignKeyInventory(
+                                'credential_id',
+                                'epo_signing_credentials',
+                                'id',
+                            ),
+                        ],
+                        [['id']],
+                    ),
+                ],
+            ),
+        );
+    }
+
     /**
      * @param list<TenantDataDefinition> $definitions
      */
@@ -614,6 +900,90 @@ final class TenantDataRegistryCoverageValidatorTest extends TestCase
             1,
             $definitions,
             [TenantDataRegistry::TRANSFER_PROFILE],
+        );
+    }
+
+    private function instanceUsers(): TenantDataDefinition
+    {
+        return new TenantDataDefinition(
+            'table:users',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::InstanceOwned,
+            [TenantDataRegistry::TRANSFER_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'reason' => 'instance_identity',
+            ],
+        );
+    }
+
+    /**
+     * @param array<string,array<string,string>> $secrets
+     * @param list<array{table:string,column:string}> $candidateReferences
+     */
+    private function personalVault(
+        array $secrets,
+        array $candidateReferences,
+    ): TenantDataDefinition {
+        return new TenantDataDefinition(
+            'table:epo_signing_credentials',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::PersonalSecretAttachment,
+            [TenantDataRegistry::TRANSFER_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'owner_column' => 'owner_user_id',
+                'consent' => 'source_and_target_owner',
+                'default_selected' => false,
+                'candidate_selector' => [
+                    'strategy' => 'tenant_reference_union',
+                    'references' => $candidateReferences,
+                ],
+                'deduplication' => [
+                    'strategy' => 'target_owner_fingerprint',
+                    'keys' => ['owner_user_id', 'fingerprint_sha256'],
+                    'active_collision' => 'reuse_without_overwrite',
+                    'soft_deleted_collision' =>
+                        'require_target_owner_decision',
+                ],
+                'secrets' => $secrets,
+                'actor_references' => [
+                    'owner_user_id' => [
+                        'strategy' => 'map_existing_user_required',
+                    ],
+                ],
+            ],
+        );
+    }
+
+    /**
+     * @param list<string> $primaryKey
+     * @param array<string,array<string,string>> $personalReferences
+     */
+    private function tenantRelation(
+        string $table,
+        array $primaryKey,
+        array $personalReferences,
+    ): TenantDataDefinition {
+        return new TenantDataDefinition(
+            'table:' . $table,
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantRelation,
+            [TenantDataRegistry::TRANSFER_PROFILE],
+            [
+                'primary_key' => $primaryKey,
+                'ownership' => [
+                    'strategy' => 'supplier_relation',
+                    'column' => 'supplier_id',
+                ],
+                'secrets' => [
+                    'credential_id' => [
+                        'policy' => 'not_secret',
+                        'reason' => 'foreign_key_identifier_only',
+                    ],
+                ],
+                'personal_attachment_references' => $personalReferences,
+            ],
         );
     }
 
