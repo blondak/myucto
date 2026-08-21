@@ -31,7 +31,11 @@ final class StorageQuotaReadOnlyMiddlewareTest extends TestCase
 {
     private const MB = 1024 * 1024;
 
-    private function status(StorageQuotaState $state, ?float $percent, bool $enforceable = true): StorageQuotaStatus
+    // ⚠️ Nesmí se jmenovat `status()`: `PHPUnit\Framework\TestCase::status()`
+    // je final a překrytí shodí načtení CELÉ testové sady fatální chybou —
+    // ne jenom tenhle soubor. Cílený běh přes --filter to nechytí, protože
+    // se ostatní soubory nenačítají.
+    private function quotaStatus(StorageQuotaState $state, ?float $percent, bool $enforceable = true): StorageQuotaStatus
     {
         return new StorageQuotaStatus(
             state:       $state,
@@ -57,7 +61,7 @@ final class StorageQuotaReadOnlyMiddlewareTest extends TestCase
     ): StorageQuotaReadOnlyMiddleware {
         $policy = $this->createMock(StorageQuotaPolicy::class);
         $policy->method('isEnforceable')->willReturn($enforceable);
-        $policy->method('evaluate')->willReturn($this->status($state, $percent, $enforceable));
+        $policy->method('evaluate')->willReturn($this->quotaStatus($state, $percent, $enforceable));
         $policy->method('readOnlyMessage')->willReturn('Vyčerpali jste přidělený prostor instalace.');
 
         return new StorageQuotaReadOnlyMiddleware($policy, new ResponseFactory());

@@ -71,6 +71,38 @@ export interface ManagedInstanceInfo {
   /** Správa předplatného na webu; null = adresa není nakonfigurovaná → kontakt. */
   subscription_url: string | null
   storage: ManagedStorageInfo
+  billing: ManagedBillingInfo
+  links: ManagedLinks
+}
+
+/**
+ * Co instalace SKUTEČNĚ ví o (ne)uhrazení — nic víc.
+ *
+ * ⚠️ Není tu částka, splatnost ani datum přijetí platby: instalace je nezná
+ * a dopočítat se nedají. `unpaid` je jediná otázka, na kterou smí odpovídat.
+ */
+export interface ManagedBillingInfo {
+  /** Komerční moduly jsou zavřené / server hlásí nezaplacené předplatné. */
+  unpaid: boolean
+  license_state: LicenseStateKind
+  /** Stav předplatného ze serveru; null = nehlásí ho (trial, doživotní). */
+  subscription_state: SubscriptionInfo['state'] | null
+  valid_until: number | null
+  /** Kdy se instalace naposledy ptala serveru — bez toho „neuhrazeno" nelze číst. */
+  last_check_at: string | null
+  last_check_ok: boolean
+}
+
+/**
+ * Adresy na myucto.cz z konfigurace (`license.server_url`). `null` = adresa
+ * není nastavená a obrazovka odkaz NEKRESLÍ — mrtvý odkaz je horší než žádný.
+ */
+export interface ManagedLinks {
+  subscription: string | null
+  expand_storage: string | null
+  support: string | null
+  terms: string | null
+  privacy: string | null
 }
 
 /** Plný stav licence z /api/license/status (admin). */

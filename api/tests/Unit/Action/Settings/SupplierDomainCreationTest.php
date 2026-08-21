@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Action\Settings;
 
 use MyInvoice\Action\Settings\SupplierDomainAction;
+use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -143,6 +144,7 @@ final class SupplierDomainCreationTest extends TestCase
             $activity,
             $this->createStub(IpMatcher::class),
             new TenantDomainFeature(new Config(['domains' => ['enabled' => true]])),
+            new ManagedModeGuard(new Config([])),
         );
     }
 

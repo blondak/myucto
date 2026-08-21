@@ -62,7 +62,7 @@ final class SetupProvisionTokenTest extends TestCase
     {
         $before = $this->userCount();
 
-        $response = $this->run(
+        $response = $this->invokeSetup(
             $this->guard(managed: true, configured: ''),
             $this->fullSetupBody(),
             ProvisionTokenGuard::HEADER,
@@ -79,7 +79,7 @@ final class SetupProvisionTokenTest extends TestCase
     {
         $before = $this->userCount();
 
-        $response = $this->run(
+        $response = $this->invokeSetup(
             $this->guard(managed: true, configured: self::TOKEN),
             $this->fullSetupBody(),
             ProvisionTokenGuard::HEADER,
@@ -94,7 +94,7 @@ final class SetupProvisionTokenTest extends TestCase
 
     public function testRejectionRevealsNothingAboutTheConfiguredToken(): void
     {
-        $response = $this->run(
+        $response = $this->invokeSetup(
             $this->guard(managed: true, configured: self::TOKEN),
             $this->fullSetupBody(),
             ProvisionTokenGuard::HEADER,
@@ -112,7 +112,7 @@ final class SetupProvisionTokenTest extends TestCase
     {
         // Prázdné tělo → akce se musí dostat až k validaci (400), ne skončit na 403.
         // Dál v integračním běhu nedojdeme: úspěšný setup vyžaduje prázdnou `users`.
-        $response = $this->run(
+        $response = $this->invokeSetup(
             $this->guard(managed: true, configured: self::TOKEN),
             [],
             ProvisionTokenGuard::HEADER,
@@ -125,7 +125,7 @@ final class SetupProvisionTokenTest extends TestCase
 
     public function testManagedInstanceAcceptsTokenFromBody(): void
     {
-        $response = $this->run(
+        $response = $this->invokeSetup(
             $this->guard(managed: true, configured: self::TOKEN),
             [ProvisionTokenGuard::BODY_FIELD => self::TOKEN],
             null,
@@ -138,7 +138,7 @@ final class SetupProvisionTokenTest extends TestCase
 
     public function testSelfHostedSetupNeedsNoToken(): void
     {
-        $response = $this->run($this->guard(managed: false, configured: ''), [], null, null);
+        $response = $this->invokeSetup($this->guard(managed: false, configured: ''), [], null, null);
 
         self::assertSame(400, $response->getStatusCode(), 'Self-hosted instalace se nesmí změnit.');
         self::assertSame('validation_failed', $this->errorCode($response));
@@ -147,7 +147,7 @@ final class SetupProvisionTokenTest extends TestCase
     /**
      * @param array<string,mixed> $body
      */
-    private function run(
+    private function invokeSetup(
         ProvisionTokenGuard $guard,
         array $body,
         ?string $header,

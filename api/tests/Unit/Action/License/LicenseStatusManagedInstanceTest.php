@@ -114,7 +114,7 @@ final class LicenseStatusManagedInstanceTest extends TestCase
         $empty      = $this->storage($config, $this->measured(0));
 
         self::assertNull($unmeasured['percent']);
-        self::assertSame(0.0, $empty['percent']);
+        $this->assertPercent(0.0, $empty['percent']);
         self::assertSame(0, $empty['usage_bytes']);
         self::assertTrue($empty['measured']);
     }
@@ -153,7 +153,7 @@ final class LicenseStatusManagedInstanceTest extends TestCase
     {
         $storage = $this->storage($this->config(instance: ['quota_gb' => 10]), $this->measured(9 * self::GB));
 
-        self::assertSame(90.0, $storage['percent']);
+        $this->assertPercent(90.0, $storage['percent']);
         self::assertSame(90, $storage['warn_percent']);
         self::assertSame(100, $storage['read_only_percent']);
         self::assertGreaterThanOrEqual($storage['warn_percent'], $storage['percent']);
@@ -166,7 +166,7 @@ final class LicenseStatusManagedInstanceTest extends TestCase
     {
         $storage = $this->storage($this->config(instance: ['quota_gb' => 10]), $this->measured((int) (8.5 * self::GB)));
 
-        self::assertSame(85.0, $storage['percent']);
+        $this->assertPercent(85.0, $storage['percent']);
         self::assertLessThan($storage['warn_percent'], $storage['percent']);
         self::assertFalse($storage['blocks_writes']);
     }
@@ -176,7 +176,7 @@ final class LicenseStatusManagedInstanceTest extends TestCase
     {
         $storage = $this->storage($this->config(instance: ['quota_gb' => 10]), $this->measured(10 * self::GB));
 
-        self::assertSame(100.0, $storage['percent']);
+        $this->assertPercent(100.0, $storage['percent']);
         self::assertGreaterThanOrEqual($storage['read_only_percent'], $storage['percent']);
         self::assertTrue($storage['blocks_writes'], 'Vyčerpaný prostor musí být hlášený jako zámek zápisu.');
     }
@@ -186,7 +186,7 @@ final class LicenseStatusManagedInstanceTest extends TestCase
     {
         $storage = $this->storage($this->config(instance: ['quota_gb' => 10]), $this->measured(15 * self::GB));
 
-        self::assertSame(150.0, $storage['percent']);
+        $this->assertPercent(150.0, $storage['percent']);
         self::assertTrue($storage['blocks_writes']);
     }
 
@@ -418,6 +418,22 @@ final class LicenseStatusManagedInstanceTest extends TestCase
      *
      * @return array<string,mixed>
      */
+    /**
+     * Srovnání procenta z odpovědi.
+     *
+     * ⚠️ Nesmí to být `assertSame(90.0, …)`. Odpověď projde `json_encode` a
+     * zpátky, a JSON zná jediný číselný typ — celé procento se tedy vrátí jako
+     * `int`, desetinné jako `float`. Trvat na `float` by znamenalo testovat
+     * vlastnost, kterou formát nemá, ne chování aplikace. Rozdíl mezi
+     * „změřeno na nulu" a „neměřeno" drží `assertNotNull` níž, ne typ.
+     */
+    private function assertPercent(float $expected, mixed $actual): void
+    {
+        self::assertNotNull($actual, 'procento chybí — nezměřeno se pozná podle null, ne podle nuly');
+        self::assertIsNumeric($actual);
+        self::assertEqualsWithDelta($expected, (float) $actual, 0.001);
+    }
+
     private function storage(Config $config, StorageUsageSnapshot $snapshot): array
     {
         $payload = $this->invoke($config, $this->state(), $snapshot);

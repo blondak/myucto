@@ -68,6 +68,12 @@ final class LicenseMiddlewareTest extends TestCase
             'degraded payroll capabilities' => [LicenseState::DEGRADED, 'GET', '/api/payroll/capabilities'],
             'expired OSS return'            => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/reports/oss/preview'],
             'degraded OSS bulk assign'      => [LicenseState::DEGRADED, 'POST', '/api/invoices/bulk-oss'],
+            // Daň z příjmů: základ daně se počítá z výsledku hospodaření nebo
+            // z peněžního deníku, a obojí je za licencí. Přiznání nad daty,
+            // která nemá čím naplnit, by se jen tvářilo, že jde vystavit.
+            'expired income tax return'     => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/tax-return/dppo/preview'],
+            'degraded income tax inputs'    => [LicenseState::DEGRADED, 'PUT', '/api/tax-return/dpfo/2026/inputs'],
+            'degraded tax optimizer'        => [LicenseState::DEGRADED, 'GET', '/api/tax/analysis'],
         ];
     }
 
@@ -89,7 +95,6 @@ final class LicenseMiddlewareTest extends TestCase
             'client create'       => ['POST', '/api/clients'],
             'bank import'         => ['POST', '/api/bank-statements/upload'],
             'VAT report'          => ['GET', '/api/reports/dphdp3/preview'],
-            'income tax report'   => ['GET', '/api/tax-return/dppo/preview'],
             // Pokladna a bankovní účty zůstávají v bezplatném základu i po vypršení:
             // jsou to evidence dokladů, ne účetní nadstavba (ta je o kus výš mezi
             // omezenými cestami včetně daňové evidence).

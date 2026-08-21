@@ -43,6 +43,23 @@ final class ExplicitDiBindingArityTest extends TestCase
         \MyInvoice\Action\Auth\MeAction::class,
     ];
 
+    /**
+     * Závislosti, které se ZÁMĚRNĚ staví líně až při prvním použití, ne v DI.
+     *
+     * Klíč je `Třída::$parametr`, hodnota důvod — bez důvodu se sem nic
+     * nepřidává, jinak by se výjimka stala odpadkovým košem na cokoli, co
+     * zrovna padá.
+     *
+     * @var array<string,string>
+     */
+    private const LAZY_BY_DESIGN = [
+        'MyInvoice\Service\License\LicenseService::$telemetry' =>
+            'Telemetrie se staví až při prvním odeslání (LicenseService::telemetry() → '
+            . 'TelemetryPayloadBuilder::forRuntime). Vyplňovat ji v DI by znamenalo skládat '
+            . 'sondu nad databází při každém sestavení kontejneru, i když se telemetrie '
+            . 'vůbec neodešle — a její selhání nesmí ovlivnit obnovu licence.',
+    ];
+
     public function testExplicitlyBoundServicesGetAllConstructorDependencies(): void
     {
         if (!is_file(dirname(__DIR__, 3) . '/cfg.php')) {
@@ -66,8 +83,28 @@ final class ExplicitDiBindingArityTest extends TestCase
                 if (!$type instanceof \ReflectionNamedType || $type->isBuiltin()) {
                     continue;
                 }
+                $key = $class . '::$' . $param->getName();
+                if (isset(self::LAZY_BY_DESIGN[$key])) {
+                    continue;
+                }
+
+                // Parametr nemusí být promovaný na stejnojmennou vlastnost.
+                // Bez téhle větve skončí kontrola ReflectionException a padne
+                // jako chyba testu, ne jako srozumitelný nález.
+                if (!property_exists($class, $param->getName())) {
+                    $missing[] = sprintf(
+                        '%s::$%s (%s) — parametr se nejmenuje stejně jako vlastnost, '
+                            . 'takže se nedá ověřit; přejmenuj vlastnost, nebo parametr '
+                            . 'zapiš do LAZY_BY_DESIGN i s důvodem',
+                        $class,
+                        $param->getName(),
+                        $type->getName()
+                    );
+                    continue;
+                }
+
                 $prop = new \ReflectionProperty($class, $param->getName());
-                if ($prop->getValue($instance) === null) {
+                if (!$prop->isInitialized($instance) || $prop->getValue($instance) === null) {
                     $missing[] = sprintf('%s::$%s (%s)', $class, $param->getName(), $type->getName());
                 }
             }

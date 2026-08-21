@@ -18,6 +18,7 @@ import ThemeToggle from './ThemeToggle.vue'
 import LanguageToggle from './LanguageToggle.vue'
 import DesktopMenuBar from './DesktopMenuBar.vue'
 import StorageQuotaBanner from './StorageQuotaBanner.vue'
+import InstanceCriticalBar from './InstanceCriticalBar.vue'
 import WorkspaceHost from '@/components/workspace/WorkspaceHost.vue'
 import WorkspaceLayoutToggle from '@/components/workspace/WorkspaceLayoutToggle.vue'
 import WorkspaceNavLink from '@/components/workspace/WorkspaceNavLink.vue'
@@ -416,7 +417,11 @@ const navSections = computed<NavSection[]>(() => {
         // OSS hned za souhrnným hlášením: obojí je hlášení plnění do jiných členských
         // států, účetní je vyplňuje ve stejné části měsíce.
         ...(ossEnabled ? [{ to: '/reports/oss', label: t('nav.reports_oss'), icon: ICONS.tax_shv }] : []),
-        { to: '/reports/income-tax',  label: t('nav.reports_income_tax'),  icon: ICONS.tax_income },
+        // Daň z příjmů je komerční modul: základ daně se počítá z výsledku
+        // hospodaření nebo z peněžního deníku a obojí je za licencí.
+        ...(auth.hasCommercialFeatures ? [
+          { to: '/reports/income-tax',  label: t('nav.reports_income_tax'),  icon: ICONS.tax_income },
+        ] : []),
         // Oprava odpočtu §74b se přesunula do Účetních nástrojů za Spojené osoby
         // (vedle §46 — obě jsou korekce DPH nad saldem, ne běžná měsíční agenda).
         ...(auth.hasCommercialFeatures ? [
@@ -424,7 +429,7 @@ const navSections = computed<NavSection[]>(() => {
         ] : []),
         { to: '/reports/cnb-rate-audit', label: t('nav.reports_cnb_audit'), icon: ICONS.coin },
         { to: '/reports/invoice-series-completeness', label: t('nav.reports_series_completeness'), icon: ICONS.logbook },
-        ...(isOsvc ? [{ to: '/tax', label: t('nav.tax_optimizer'), icon: ICONS.tax_optimizer }] : []),
+        ...(isOsvc && auth.hasCommercialFeatures ? [{ to: '/tax', label: t('nav.tax_optimizer'), icon: ICONS.tax_optimizer }] : []),
         { to: '/reports/monthly-export', label: t('nav.reports_monthly_export'), icon: ICONS.exports, permission: 'reports.export' },
       ],
     },
@@ -616,6 +621,10 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/admin/cron-jobs',        label: t('nav.cron_jobs'),       icon: ICONS.cron },
         { to: '/admin/update',           label: t('nav.updates'),         icon: ICONS.updates },
         ...(isAdmin ? [
+          // Hosting — JEN spravovaná (hostovaná) instalace. Na self-hosted se
+          // položka nesmí objevit vůbec: stránka mluví o zaplaceném prostoru,
+          // tarifu a předplaceném provozu, což tam nic neznamená.
+          ...(auth.isManagedInstallation ? [{ to: '/hosting', label: t('nav.hosting'), icon: ICONS.stock_warehouses, dividerBefore: true }] : []),
           { to: '/activation/license',  label: t('nav.license'),               icon: ICONS.approvals, dividerBefore: true },
           { to: '/activation/terms',    label: t('nav.terms'),                 icon: ICONS.documents },
           { to: '/activation/purchase', label: t('nav.purchase_subscription'), icon: ICONS.coin },
@@ -1274,6 +1283,11 @@ onBeforeUnmount(() => {
 
     <!-- ═════════════════════ TOPBAR ═════════════════════ -->
     <header class="nav-inverted sticky top-0 z-30 bg-surface border-b border-neutral-200 shadow-md">
+      <!-- Blokující stav instalace (H-31) — červená linka úplně nahoře, uvnitř
+           připnuté lišty, takže nejde odrolovat. Nemá zavírací prvek a na
+           self-hosted instalaci se nezobrazí vůbec. Výšku hlásí do
+           `--instance-alert-h`, o kterou se odsadí připnutý sidebar. -->
+      <InstanceCriticalBar />
       <div class="h-12 px-3 flex items-center gap-1">
         <WorkspaceNavLink to="/" class="flex h-10 items-center gap-2 shrink-0 px-1.5 rounded-md hover:bg-neutral-100" @click="mobileOpen = false">
           <img src="/styles/logo.svg" alt="MyÚčto" class="w-7 h-7" />
@@ -1486,13 +1500,16 @@ onBeforeUnmount(() => {
         aria-hidden="true"
       ></div>
 
-      <!-- ── SIDEBAR ── -->
+      <!-- ── SIDEBAR ──
+           `--instance-alert-h` = výška červené linky nad aplikací (0 px, když
+           není). Bez ní by připnutý sidebar začínal o linku výš a přišel
+           o první položku menu. -->
       <aside
         :class="[
-          'fixed z-30 lg:sticky lg:top-12 lg:h-[calc(100vh-3rem)]',
+          'fixed z-30 lg:sticky lg:top-[calc(var(--instance-alert-h,0px)+3rem)] lg:h-[calc(100vh-3rem-var(--instance-alert-h,0px))]',
           supplierStore.hasMultiple && supplierStore.currentSupplier
-            ? 'top-[5.125rem] h-[calc(100vh-5.125rem)]'
-            : 'top-12 h-[calc(100vh-3rem)]',
+            ? 'top-[calc(var(--instance-alert-h,0px)+5.125rem)] h-[calc(100vh-5.125rem-var(--instance-alert-h,0px))]'
+            : 'top-[calc(var(--instance-alert-h,0px)+3rem)] h-[calc(100vh-3rem-var(--instance-alert-h,0px))]',
           'w-full lg:w-60 shrink-0',
           'nav-inverted bg-surface border-r border-neutral-200 shadow-lg lg:shadow-none',
           'flex flex-col',

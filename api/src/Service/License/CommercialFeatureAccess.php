@@ -31,6 +31,16 @@ final class CommercialFeatureAccess
         // Daňová evidence je druhá tvář téhož modulu „Vést účetnictví" —
         // peněžní deník a přehled pohledávek/závazků stojí a padají s ním.
         '#^/api/tax-evidence(/|$)#',
+        // Přiznání k dani z příjmů (DPPO/DPFO) včetně příloh, přehledů pro
+        // pojišťovny a záloh. Bez účetnictví nedává smysl: základ daně se
+        // počítá z výsledku hospodaření nebo z peněžního deníku, a obojí je
+        // za licencí. Vydávat přiznání nad daty, která nemá čím naplnit,
+        // by znamenalo tvářit se, že to jde.
+        '#^/api/tax-return(/|$)#',
+        // Daňový optimalizátor a daňový profil — srovnání režimů a predikce
+        // limitů. `-` za `tax` sem nespadá, takže /api/tax-evidence
+        // a /api/tax-return si tenhle vzorec nepřebírají.
+        '#^/api/tax(/|$)#',
         '#^/api/invoices/[0-9]+/stock-documents(/|$)#',
         '#^/api/invoices/[0-9]+/book$#',
         '#^/api/purchase-invoices/[0-9]+/stock-receipts?(/|$)#',

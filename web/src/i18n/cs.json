@@ -608,7 +608,37 @@
         "mcp_server": "MCP server",
         "eshop_locales": "Jazyky",
         "eshop_currencies": "Měny",
-        "instance_export": "Kompletní export dat"
+        "instance_export": "Kompletní export dat",
+        "hosting": "Hosting"
+    },
+    "instance_alert": {
+        "storage_exhausted_title": "Instalace nepřijímá nové zápisy",
+        "storage_exhausted_desc": "Zaplacený prostor je zaplněný, takže se nový doklad, příloha ani import neuloží. Uvolněte místo smazáním nepotřebných dat, nebo si prostor rozšiřte — jakmile obsazení klesne, zápis se obnoví sám.",
+        "storage_exhausted_cta": "Uvolnit nebo rozšířit prostor",
+        "unpaid_title": "Předplatné není uhrazené",
+        "unpaid_desc": "Komerční moduly (účetnictví, mzdy, sklad) jsou proto zavřené; fakturaci ani čtení dat to nezastavuje. Uhraďte předplatné a moduly se otevřou samy.",
+        "unpaid_cta": "Uhradit předplatné"
+    },
+    "hosting": {
+        "title": "Hosting",
+        "subtitle": "Provoz vaší instalace — tarif, obsazené místo, platnost předplatného a kam se obrátit.",
+        "load_failed": "Stav provozu se nepodařilo načíst.",
+        "self_hosted_title": "Tahle instalace u nás neběží",
+        "self_hosted_desc": "Provozujete si ji sami, takže tarif, zaplacený prostor ani zálohy tady nemáme odkud vzít. Licenci a předplatné najdete v Aktivaci.",
+        "unpaid_title": "Předplatné není uhrazené",
+        "unpaid_desc": "Komerční moduly jsou zavřené, dokud platba nedojde. Data zůstávají dostupná ke čtení, tisku i exportu.",
+        "unpaid_source": "Stav licence: {state}. Poslední kontrola u licenčního serveru: {checked}.",
+        "unpaid_cta": "Uhradit předplatné",
+        "service_title": "Rozsah provozu",
+        "subscription_managed_elsewhere": "Předplatné, licenční klíč a počet uživatelů se spravují v Aktivaci:",
+        "scope_title": "Co provoz zahrnuje",
+        "restore_note": "Obnovu dat ze zálohy vyřídí podpora — samoobslužné obnovení k libovolnému okamžiku ve spravovaném provozu není.",
+        "links_title": "Kam se obrátit",
+        "expand_storage_cta": "Rozšířit prostor",
+        "report_outage_cta": "Nahlásit výpadek provozu",
+        "terms_block_title": "Hostovaná instalace",
+        "terms_block_desc": "Tuhle instalaci provozujeme za vás na naší infrastruktuře: server, zálohování dat, aktualizace aplikace i HTTPS certifikát držíme my. Obnovu ze zálohy vyřídí podpora.",
+        "privacy_link": "Ochrana osobních údajů"
     },
     "payroll": {
         "agendas": {

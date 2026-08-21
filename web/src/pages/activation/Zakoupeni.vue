@@ -531,7 +531,11 @@ onMounted(load)
         </p>
       </section>
 
+      <!-- Rozsah provozu (co je v ceně, kam hlásit výpadek) žije na /hosting —
+           tahle obrazovka zůstává u licence a předplatného. -->
       <p class="text-xs text-neutral-500">
+        <RouterLink to="/hosting" class="text-primary-600 hover:text-primary-800 hover:underline">{{ t('nav.hosting') }}</RouterLink>
+        ·
         <RouterLink to="/activation/license" class="text-primary-600 hover:text-primary-800 hover:underline">{{ t('nav.license') }}</RouterLink>
         ·
         <RouterLink to="/activation/terms" class="text-primary-600 hover:text-primary-800 hover:underline">{{ t('nav.terms') }}</RouterLink>

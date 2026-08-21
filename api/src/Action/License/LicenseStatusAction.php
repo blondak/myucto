@@ -12,6 +12,7 @@ use MyInvoice\Middleware\LicenseMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\License\LicenseService;
+use MyInvoice\Service\License\LicenseState;
 use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\System\StorageQuotaPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -62,7 +63,7 @@ final class LicenseStatusAction
         // Pozor na pořadí: klíč se přidává JEN ve spravovaném režimu, aby
         // self-hosted odpověď zůstala nezměněná.
         if ($this->managed->isManaged()) {
-            $payload['instance'] = $this->instance();
+            $payload['instance'] = $this->instance($state);
         }
 
         return Json::ok($response, $payload);
@@ -73,13 +74,15 @@ final class LicenseStatusAction
      *
      * @return array<string,mixed>
      */
-    private function instance(): array
+    private function instance(LicenseState $state): array
     {
         $status     = $this->quota->evaluate();
         $usageBytes = $status->usageBytes;              // ⚠️ null = neměřeno, ne nula
         $contracted = $this->quota->contractedBytes();  // ⚠️ null = neznámý objem
 
         return [
+            'billing'          => $this->billing($state),
+            'links'            => $this->links(),
             'managed'          => true,
             'plan'             => $this->stringOrNull('instance.plan'),
             'managed_since'    => $this->stringOrNull('instance.managed_since'),
@@ -102,6 +105,68 @@ final class LicenseStatusAction
                 // něj neslibuje zápis, který middleware odmítne.
                 'blocks_writes'     => $status->blocksWrites(),
             ],
+        ];
+    }
+
+    /**
+     * Co instalace SKUTEČNĚ ví o (ne)uhrazení. Nic víc — pole, které by muselo
+     * vzniknout dohadem (částka, splatnost, kdy nám platba dojde), tu záměrně
+     * není: červená linka nad aplikací se o něj nesmí opřít a tvrdit číslo,
+     * které jsme si vymysleli.
+     *
+     * Dva nezávislé zdroje, oba z licenčního serveru:
+     *  - STAV LICENCE — `degraded` (token propadl / chybí) a `trial_expired`
+     *    znamenají zavřené komerční moduly. To je tvrdý dopad, na který uživatel
+     *    narazí, a proto je to hlavní signál.
+     *  - STAV PŘEDPLATNÉHO — `past_due` / `expired` hlásí server dřív, než
+     *    licence propadne. Je to jediné pole, které o platbě mluví přímo, takže
+     *    ho posíláme ven i tehdy, když licence zatím běží.
+     *
+     * @return array<string,mixed>
+     */
+    private function billing(LicenseState $state): array
+    {
+        $subscriptionState = isset($state->subscription['state'])
+            ? (string) $state->subscription['state']
+            : null;
+
+        $licenseUnpaid = $state->state === LicenseState::DEGRADED
+            || $state->state === LicenseState::TRIAL_EXPIRED;
+        $subscriptionUnpaid = $subscriptionState === 'past_due' || $subscriptionState === 'expired';
+
+        return [
+            // Jediná otázka, na kterou obrazovka i linka smí odpovídat ano/ne.
+            'unpaid'             => $licenseUnpaid || $subscriptionUnpaid,
+            'license_state'      => $state->state,
+            'subscription_state' => $subscriptionState,
+            'valid_until'        => $state->validUntil,
+            // Kdy se instalace naposledy ptala serveru — bez toho by „neuhrazeno"
+            // mohlo znamenat jen „týden jsme se nedovolali".
+            'last_check_at'      => $state->lastCheckAt,
+            'last_check_ok'      => $state->lastCheckOk,
+        ];
+    }
+
+    /**
+     * Adresy na myucto.cz. Berou se z `license.server_url`, aby šly přepnout
+     * konfigurací (test/staging) — v kódu ani v šabloně nesmí být zadrátované.
+     * null = adresa není nakonfigurovaná; obrazovka pak odkaz nekreslí.
+     *
+     * @return array<string,?string>
+     */
+    private function links(): array
+    {
+        $server = $this->stringOrNull('license.server_url');
+        $at = static fn(?string $base, string $path): ?string
+            => $base === null ? null : rtrim($base, '/') . $path;
+
+        return [
+            'subscription' => $this->subscriptionUrl(),
+            // Rozšíření prostoru se objednává tam, kde se spravuje předplatné.
+            'expand_storage' => $at($server, '/predplatne'),
+            'support'      => $at($server, '/support'),
+            'terms'        => $at($server, '/obchodni-podminky'),
+            'privacy'      => $at($server, '/ochrana-osobnich-udaju'),
         ];
     }
 

@@ -126,7 +126,7 @@ final class TelemetryUsagePayloadTest extends TestCase
 
     public function testMeasuredAtIsReformattedAndNeverCarriesArbitraryText(): void
     {
-        $payload = TelemetryPayloadBuilder::fromSummary([], [], null, $this->status(
+        $payload = TelemetryPayloadBuilder::fromSummary([], [], null, $this->statusArray(
             new StorageUsageSnapshot(
                 measuredAt: new DateTimeImmutable('2026-08-21 06:15:00', new DateTimeZone('Europe/Prague')),
                 usageBytes: 10 * self::MB,
@@ -146,7 +146,7 @@ final class TelemetryUsagePayloadTest extends TestCase
 
     public function testUnmeasuredUsageStaysNullAllTheWayIntoThePayload(): void
     {
-        $payload = TelemetryPayloadBuilder::fromSummary([], [], '5.21.0', $this->status(
+        $payload = TelemetryPayloadBuilder::fromSummary([], [], '5.21.0', $this->statusArray(
             StorageUsageSnapshot::unmeasured(),
             state: StorageQuotaState::UNKNOWN,
             quotaBytes: 2048 * self::MB,
@@ -186,7 +186,7 @@ final class TelemetryUsagePayloadTest extends TestCase
     public function testEmptySchemaIsZeroButUnreadableSchemaIsNull(): void
     {
         // Prázdná databáze SMÍ být nula — katalog odpověděl. Nečitelná ne.
-        $payload = TelemetryPayloadBuilder::fromSummary([], [], null, $this->status(
+        $payload = TelemetryPayloadBuilder::fromSummary([], [], null, $this->statusArray(
             new StorageUsageSnapshot(
                 measuredAt:    new DateTimeImmutable('2026-08-21 04:00:00', new DateTimeZone('UTC')),
                 databaseBytes: 0,
@@ -208,7 +208,7 @@ final class TelemetryUsagePayloadTest extends TestCase
         $files   = 60 * self::MB;
         $backups = 900 * self::MB;
 
-        $payload = TelemetryPayloadBuilder::fromSummary([], [], null, $this->status(
+        $payload = TelemetryPayloadBuilder::fromSummary([], [], null, $this->statusArray(
             new StorageUsageSnapshot(
                 measuredAt:    new DateTimeImmutable('2026-08-21 04:00:00', new DateTimeZone('UTC')),
                 databaseBytes: $db,
@@ -232,7 +232,7 @@ final class TelemetryUsagePayloadTest extends TestCase
 
     public function testTruncatedMeasurementIsFlaggedAsALowerBound(): void
     {
-        $payload = TelemetryPayloadBuilder::fromSummary([], [], null, $this->status(
+        $payload = TelemetryPayloadBuilder::fromSummary([], [], null, $this->statusArray(
             new StorageUsageSnapshot(
                 measuredAt: new DateTimeImmutable('2026-08-21 04:00:00', new DateTimeZone('UTC')),
                 usageBytes: 700 * self::MB,
@@ -249,7 +249,7 @@ final class TelemetryUsagePayloadTest extends TestCase
         // Nezměřený snapshot má `truncated = false`. Kdyby se ten příznak četl
         // přímo, hlásila by nezměřená instance „změřeno celé" o čísle, které
         // vůbec neexistuje — a druhá strana by to brala jako porovnatelné.
-        $payload = TelemetryPayloadBuilder::fromSummary([], [], null, $this->status(
+        $payload = TelemetryPayloadBuilder::fromSummary([], [], null, $this->statusArray(
             StorageUsageSnapshot::unmeasured(),
             state: StorageQuotaState::UNKNOWN,
         ));
@@ -370,8 +370,14 @@ final class TelemetryUsagePayloadTest extends TestCase
 
     // ---- Pomocníci -------------------------------------------------------------
 
-    /** @return array<string,mixed> `StorageQuotaStatus::toArray()` nad daným měřením. */
-    private function status(
+    /**
+     * @return array<string,mixed> `StorageQuotaStatus::toArray()` nad daným měřením.
+     *
+     * ⚠️ Nesmí se jmenovat `status()` — v `PHPUnit\Framework\TestCase` je
+     * final a překrytí shodí načtení CELÉ testové sady, ne jen tohohle souboru.
+     * Cílený běh přes --filter to nechytí, protože ostatní soubory se nenačítají.
+     */
+    private function statusArray(
         StorageUsageSnapshot $snapshot,
         StorageQuotaState $state = StorageQuotaState::OK,
         ?float $percent = null,
