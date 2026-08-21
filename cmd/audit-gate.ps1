@@ -26,6 +26,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $apiDir = Join-Path $repoRoot 'api'
+$PhpBin = if ($env:MYINVOICE_PHP_BIN) { $env:MYINVOICE_PHP_BIN } else { 'php' }
 $failed = @()
 
 # PHPUnit čte phpunit.xml z PRACOVNÍHO adresáře, ne z cesty k binárce — bez tohohle
@@ -54,29 +55,29 @@ if ($Database) {
 }
 
 Invoke-Step 'Guardy (L0)' {
-    & php (Join-Path $apiDir 'vendor/bin/phpunit') --no-coverage --testsuite Architecture
+    & $PhpBin (Join-Path $apiDir 'vendor/bin/phpunit') --no-coverage --testsuite Architecture
 }
 
 Invoke-Step 'Invarianty a fuzz (L3)' {
-    & php (Join-Path $apiDir 'vendor/bin/phpunit') --no-coverage --testsuite Invariants
+    & $PhpBin (Join-Path $apiDir 'vendor/bin/phpunit') --no-coverage --testsuite Invariants
 }
 
 Invoke-Step 'Plná testovací sada' {
-    & php (Join-Path $apiDir 'bin/test-parallel.php') --application
+    & $PhpBin (Join-Path $apiDir 'bin/test-parallel.php') --application
 }
 
 if (-not $SkipData) {
     Invoke-Step 'Invarianty nad daty (read-only)' {
-        & php (Join-Path $apiDir 'bin/check-invariants.php')
+        & $PhpBin (Join-Path $apiDir 'bin/check-invariants.php')
     }
 
     Invoke-Step 'Křížové kontroly (read-only)' {
-        & php (Join-Path $apiDir 'bin/cross-check.php')
+        & $PhpBin (Join-Path $apiDir 'bin/cross-check.php')
     }
 
     $compareDph = Join-Path $repoRoot 'private/scripts/compare_dph.php'
     if (Test-Path $compareDph) {
-        Invoke-Step 'Smír DPH proti podaným XML' { & php $compareDph }
+        Invoke-Step 'Smír DPH proti podaným XML' { & $PhpBin $compareDph }
     }
     else {
         Write-Host ''
@@ -88,7 +89,7 @@ if (-not $SkipData) {
     # s dvouřádkovými zápisy a jedním nálezem. Sweep čte, nic nezapisuje.
     $checksSweep = Join-Path $repoRoot 'private/scripts/checks_shape_sweep.php'
     if (Test-Path $checksSweep) {
-        Invoke-Step 'Tvar nálezů kontrol (počet = vypsané řádky, datum, čeština)' { & php $checksSweep }
+        Invoke-Step 'Tvar nálezů kontrol (počet = vypsané řádky, datum, čeština)' { & $PhpBin $checksSweep }
     }
     else {
         Write-Host ''

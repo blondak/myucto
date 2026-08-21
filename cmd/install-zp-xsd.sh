@@ -8,10 +8,11 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd "${script_dir}/.." && pwd)"
+php_bin="${MYINVOICE_PHP_BIN:-php}"
 
-if ! command -v php >/dev/null 2>&1; then
-    echo "PHP CLI nebylo nalezeno na PATH." >&2
+if ! command -v "$php_bin" >/dev/null 2>&1; then
+    echo "PHP CLI ('$php_bin') nebylo nalezeno na PATH." >&2
     exit 1
 fi
 
-exec php "${project_root}/tools/installZpXsd.php" "$1"
+exec "$php_bin" "${project_root}/tools/installZpXsd.php" "$1"

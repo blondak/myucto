@@ -23,6 +23,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
+PHP_BIN="${MYINVOICE_PHP_BIN:-php}"
 
 REBUILD=0
 for arg in "$@"; do
@@ -57,8 +58,8 @@ fi
 # 2. manual HTML + PDF
 if [ ${REBUILD} -eq 1 ] || [ ! -f manual/manual.pdf ] || [ ! -f manual/generated/INDEX.html ]; then
   echo "[build] manual HTML + PDF"
-  php tools/generateManualHtml.php
-  php tools/exportManualToPdf.php
+  "$PHP_BIN" tools/generateManualHtml.php
+  "$PHP_BIN" tools/exportManualToPdf.php
 else
   echo "[skip] manual už vygenerovaný (--rebuild pro fresh)"
 fi

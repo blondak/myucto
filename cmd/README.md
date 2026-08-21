@@ -10,6 +10,38 @@ Skripty samy detekují cestu k projektu (`PROJECT_ROOT`) podle umístění
 samotného skriptu, takže jsou přenositelné mezi `C:\inetpub\wwwroot\…`,
 `C:\work\…` (junction), `/var/www/…` na Linuxu apod.
 
+### Volba PHP interpretu — `MYINVOICE_PHP_BIN`
+
+Všechny skripty, které volají PHP (cron wrappery, `test.{sh,ps1}`,
+`audit-gate.{sh,ps1}`, `release-bundle.sh`, `license-*`, `download-*`,
+`install-zp-xsd.*`), defaultně volají `php` z `PATH`. Na hostingu s **víc
+nainstalovanými verzemi PHP** nemusí být ta z `PATH` ta správná (nebo tam
+žádná není) — nastav proměnnou prostředí, ať skript použije konkrétní
+binárku, aniž by se dotýkal `PATH`:
+
+```bash
+# Linux / macOS
+export MYINVOICE_PHP_BIN=/opt/php8.5/bin/php
+cmd/cron-dispatch.sh
+```
+
+```powershell
+# Windows PowerShell
+$env:MYINVOICE_PHP_BIN = 'C:\inetpub\php85\php.exe'
+.\cmd\cron-dispatch.cmd
+```
+
+```cmd
+REM Windows Task Scheduler (proměnnou nastav v definici úlohy, ne globálně)
+set MYINVOICE_PHP_BIN=C:\inetpub\php85\php.exe
+```
+
+Kdo proměnnou nenastaví, dostane přesně dnešní chování (`php` z `PATH`) —
+default se nemění. `download-jmhz-xsd.*`, `download-jmhz-codebooks.*` a
+`install-zp-xsd.*` navíc mají fallback na `C:\inetpub\php\php.exe`, pokud
+`php` není v `PATH` ani `MYINVOICE_PHP_BIN` není nastavená; `MYINVOICE_PHP_BIN`
+má vždy přednost před oběma.
+
 ## Přehled všech skriptů
 
 ### Cron — plánované úlohy
@@ -103,6 +135,43 @@ se záměrně nevytvoří a úloha skončí chybou (vidět v **Systém → Plán
 Logy se ukládají do `log/cron/<nazev>-YYYY-MM-DD.log`. Stav úloh sleduj
 v admin/activity-log (každý cron sám zapíše záznam `cron.<nazev>`).
 
+### Vypnutí jednotlivé úlohy — `cron.disabled_jobs`
+
+Na spravovaných instalacích (cizí hosting) dává smysl vypnout úlohy, které
+duplikují něco, co si hosting dělá sám — typicky `cron-backup-pdf` a
+`cron-backup-documents`, pokud hosting zálohuje celý filesystém a naše
+záloha by jen zbytečně žrala kvótu. V `cfg.php` nastav:
+
+```php
+'cron' => [
+    'disabled_jobs' => ['cron-backup-pdf', 'cron-backup-documents'],
+],
+```
+
+Jména musí přesně sedět na `script` z katalogu (`CronCatalog::all()`) —
+neznámé jméno je považováno za překlep a zaloguje se jako varování, aby se
+nedalo přehlédnout. Vypnutá úloha se v přehledu **Systém → Plánované úlohy**
+ukáže jako „vypnuto konfigurací" (ne jako zmeškaná) a health-check ji
+nepočítá do `stale`/`inactive` poplachů. Vypnutí přebije všechny ostatní
+důvody (i chybějící `requires_config` adresář nebo nezapnutou funkci) a
+nesahá kvůli tomu do databáze.
+
+⚠️ `cron.disabled_jobs` je (zatím) jediný zdroj pravdy pro **UI přehled a
+health check** (`CronJobGate::inactiveReason()`), NE pro skutečné spouštění.
+Samotný běh úlohy nastavení zatím nekontroluje:
+- **Individuální crontab/Task Scheduler** (podle tabulek výše) spustí skript,
+  dokud má vlastní řádek/úlohu zaregistrovanou — vypnutou úlohu z crontabu
+  ručně odeber.
+- **Docker vestavěný cron** generuje crontab z `CronJobGate::schedulableJobs()`
+  (`isSchedulable()`), která `cron.disabled_jobs` zatím nečte — vypnutá úloha
+  se tedy v kontejneru pořád naplánuje.
+- **Dispatcher** (`cron-dispatch`) taky zatím `cron.disabled_jobs` nekontroluje.
+
+Než se tohle dotáhne (viz TODO u `CronDispatcher`/`DockerCrontabGenerator`),
+vypnutí přes `cron.disabled_jobs` je *viditelný signál v UI*, ne tvrdý kill
+switch — pro skutečné zastavení běhu vypnutou úlohu ještě vyřaď z
+crontabu/Task Scheduleru (nebo z Docker image).
+
 ### Windows — Task Scheduler
 
 ```cmd
@@ -148,8 +217,10 @@ REM schtasks /create /tn "MyUcto Dispatch" /tr "C:\inetpub\wwwroot\myucto.cz\cmd
 
 > ⚠️ PHP musí být v `PATH` účtu, pod kterým úloha běží (typicky `SYSTEM`
 > nemá uživatelský PATH — ověř `where php` v cmd spuštěném jako SYSTEM přes
-> `PsExec -s -i cmd`). Případně uprav `.cmd` skripty a doplň absolutní cestu
-> k `php.exe`.
+> `PsExec -s -i cmd`). Případně nastav proměnnou prostředí `MYINVOICE_PHP_BIN`
+> na absolutní cestu k `php.exe` (v definici `schtasks` úlohy, ne globálně) —
+> viz [Volba PHP interpretu](#volba-php-interpretu--myinvoice_php_bin) výš.
+> Skripty samotné se díky tomu nemusí upravovat.
 >
 > ⚠️ `cron-backup` potřebuje `mariadb-dump` (nebo `mysqldump`). Skript zkouší
 > `PATH` a běžné Windows lokace (`C:\Program Files\MariaDB*\bin`,
