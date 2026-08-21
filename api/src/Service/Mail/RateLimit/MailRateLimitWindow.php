@@ -56,10 +56,21 @@ final class MailRateLimitWindow
      * Začátek okna. Zprávy se počítají jako `sent_at > start` (ostrá
      * nerovnost — odeslání přesně na hraně už z okna vypadlo, stejně jako
      * u hostingu).
+     *
+     * ⚠️ Posun jde přes `setTimestamp()`, NE přes `modify('-3600 seconds')`.
+     * `modify()` počítá po nástěnných hodinách, takže na přechodu času dá
+     * nesmysl: `2026-03-29 03:30 Europe/Prague` minus 3 600 sekund vrátí
+     * TÝŽ okamžik (02:30 ten den neexistuje, PHP ho normalizuje zpět na 03:30)
+     * a minus 86 400 sekund posune jen o 82 800 sekund. Okno by se tu noc
+     * jednou za rok zkrátilo na nulu, respektive protáhlo o hodinu — a přesně
+     * tehdy by brzda buď nesepnula, nebo sepla o hodinu dřív.
+     *
+     * Sub-sekundová část se posunem ztrácí. To je vědomé a bezpečné: hranice
+     * se zaokrouhlí DOLŮ, takže okno je nejvýš o sekundu širší, nikdy užší.
      */
     public static function start(DateTimeImmutable $now, string $window): DateTimeImmutable
     {
-        return $now->modify('-' . self::seconds($window) . ' seconds');
+        return $now->setTimestamp($now->getTimestamp() - self::seconds($window));
     }
 
     /**
@@ -67,9 +78,15 @@ final class MailRateLimitWindow
      * Přesně tenhle okamžik jde dát do fronty jako `not_before` — odhad
      * „zkus to za čtvrt hodiny" by frontu buď zbytečně brzdil, nebo pouštěl
      * do dalšího 451.
+     *
+     * Zaokrouhluje se NAHORU (o sekundu, když měla zpráva sub-sekundovou
+     * část), aby fronta nikdy nezkusila odeslat o chlup dřív, než se okno
+     * doopravdy uvolní.
      */
     public static function freesAt(DateTimeImmutable $oldest, string $window): DateTimeImmutable
     {
-        return $oldest->modify('+' . self::seconds($window) . ' seconds');
+        $ceil = $oldest->format('u') === '000000' ? 0 : 1;
+
+        return $oldest->setTimestamp($oldest->getTimestamp() + self::seconds($window) + $ceil);
     }
 }

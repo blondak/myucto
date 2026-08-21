@@ -30,8 +30,18 @@ final class RedisProbe
             $params['password'] = $auth;
         }
 
+        // H-08: probe sice sahá jen na PING (bez klíčů), ale klienta staví se
+        // stejným prefixem jako {@see RedisFactory}. Kdyby ho postavil bez něj,
+        // vznikla by druhá cesta k Redisu s jinou konvencí klíčů — a příště by
+        // ji někdo rozšířil o `->get()`. Invariant „každý klient nese prefix"
+        // musí platit bez výjimek, protože výjimka je přesně to místo, kde
+        // vznikne klíč mimo jmenný prostor instance.
+        if (RedisKeyspace::unsafeReason($this->config) !== null) {
+            return false;
+        }
+
         try {
-            $client = new RedisClient($params);
+            $client = new RedisClient($params, ['prefix' => RedisKeyspace::prefix($this->config)]);
             $client->ping();
             return true;
         } catch (\Throwable) {

@@ -4,12 +4,18 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Mail;
 
+use DateTimeImmutable;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\EmailProfileRepository;
 use MyInvoice\Repository\EmailTemplateRepository;
 use MyInvoice\Service\Branding\AccentColor;
+use MyInvoice\Service\Mail\RateLimit\MailOutbox;
+use MyInvoice\Service\Mail\RateLimit\MailRateLimitEventLog;
+use MyInvoice\Service\Mail\RateLimit\MailRateLimiter;
+use MyInvoice\Service\Mail\RateLimit\MailRecipientBatcher;
+use MyInvoice\Service\Mail\RateLimit\MailSendCounter;
 use MyInvoice\Service\Signing\Email\EmailSigningService;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\Envelope;
@@ -51,6 +57,12 @@ final class Mailer
     private ?Environment $twig = null;
     private ?array $supplierFooter = null;
 
+    /** Brzda odchozí pošty (H-16) — staví se líně, viz {@see self::throttle()}. */
+    private ?MailRateLimiter $throttle = null;
+    private ?MailOutbox $outbox = null;
+    /** Reentrance guard: vyprazdňování fronty volá zpátky sendTemplateDetailed(). */
+    private bool $draining = false;
+
     public function __construct(
         private readonly Config $config,
         private readonly LoggerInterface $logger,
@@ -59,7 +71,14 @@ final class Mailer
         private readonly ?EmailSigningService $emailSigning = null,
         private readonly ?EmailProfileRepository $emailProfiles = null,
         private readonly ?SentMailAppenderInterface $sentMailImap = null,
-    ) {}
+        ?MailRateLimiter $rateLimiter = null,
+    ) {
+        // ⚠️ Vědomě NENÍ promoted readonly property: PHP-DI optional class-param
+        // nevyplní, takže by tu při ručním bindingu v Bootstrapu zůstal null a
+        // brzda by TIŠE nedělala nic. Null tady proto neznamená „vypnuto", jen
+        // „postav si výchozí" — viz throttle().
+        $this->throttle = $rateLimiter;
+    }
 
     /**
      * @param string[]      $to
@@ -130,6 +149,106 @@ final class Mailer
     ): array {
         if ((bool) $this->config->get('demo.enabled', false)) {
             throw new DemoModeMailBlockedException('Demo režim neodesílá e-maily.');
+        }
+
+        // ── H-16: brzda odchozí pošty ────────────────────────────────────────
+        // Pořadí NENÍ libovolné: nejdřív dělení dávky, teprve pak brzda.
+        // Limit hostingu počítá ZPRÁVY (SMTP transakce), takže kolik jich
+        // z dávky vznikne musíme vědět dřív, než se ptáme, jestli se vejdou.
+        $throttle = $this->throttle();
+        $now = new DateTimeImmutable('now');
+
+        $batches = MailRecipientBatcher::split($to, $cc, $bcc, $throttle->maxRecipientsPerMessage());
+        if (count($batches) > 1) {
+            // ⚠️ Nad 100 příjemců je odmítnutí TRVALÉ — fronta by zprávu jen
+            // po hodině ztratila. Dělení proto musí proběhnout tady, ne až
+            // v reakci na chybu.
+            $this->logger->info('mail.batch_split', [
+                'template'      => $code,
+                'recipients'    => MailRecipientBatcher::envelopeSize($to, $cc, $bcc),
+                'messages'      => count($batches),
+                'max_per_message' => $throttle->maxRecipientsPerMessage(),
+            ]);
+
+            $last = null;
+            $deferred = 0;
+            foreach ($batches as $batch) {
+                $result = $this->sendTemplateDetailed(
+                    $code,
+                    $locale,
+                    $batch['to'],
+                    $vars,
+                    $subjectOverride,
+                    $batch['cc'],
+                    $batch['bcc'],
+                    $attachments,
+                    $userId,
+                    $emailProfileOverride,
+                );
+                if (($result['deferred'] ?? false) === true) {
+                    $deferred++;
+                }
+                $last = $result;
+            }
+
+            return [
+                'smtp_response' => (string) ($last['smtp_response'] ?? ''),
+                'imap_append'   => $last['imap_append'] ?? ['status' => 'skipped', 'folder' => null, 'error' => null],
+                'batches'       => count($batches),
+                'deferred'      => $deferred > 0,
+            ];
+        }
+
+        $envelopeSize = MailRecipientBatcher::envelopeSize($to, $cc, $bcc);
+
+        // Odložené zprávy odcházejí při dalším průchodu cronu. Pod webem se
+        // fronta nevyprazdňuje ZÁMĚRNĚ — uživatel by čekal na odeslání cizích
+        // e-mailů uprostřed svého requestu.
+        $this->drainDeferredIfCli($now);
+
+        $decision = $throttle->decide($now);
+        if ($decision->isDeferred()) {
+            $queuedId = $this->outbox()->enqueue(
+                $now,
+                $decision->retryAt ?? $now,
+                $code,
+                $locale,
+                $envelopeSize,
+                $decision->window,
+                [
+                    'to'               => array_values($to),
+                    'cc'               => array_values($cc),
+                    'bcc'              => array_values($bcc),
+                    'vars'             => $vars,
+                    'subject_override' => $subjectOverride,
+                    'attachments'      => $attachments,
+                    'user_id'          => $userId,
+                    'email_profile'    => $emailProfileOverride,
+                ],
+            );
+
+            if ($queuedId !== null) {
+                $this->logger->warning('mail.deferred', [
+                    'template'   => $code,
+                    'outbox_id'  => $queuedId,
+                    'recipients' => $envelopeSize,
+                    'retry_at'   => $decision->retryAt?->format('Y-m-d H:i:s'),
+                ] + $decision->toArray());
+
+                return [
+                    'smtp_response' => $decision->smtpResponse(),
+                    'imap_append'   => ['status' => 'skipped', 'folder' => null, 'error' => null],
+                    'deferred'      => true,
+                    'outbox_id'     => $queuedId,
+                ];
+            }
+
+            // Fronta nepřijala zprávu (chybí tabulka, neserializovatelné
+            // proměnné). Pošli ji rovnou — 451 od hostingu ji podrží ve
+            // FRONTĚ, kdežto zahození by ji ztratilo.
+            $this->logger->error('mail.defer_enqueue_failed_sending_anyway', [
+                'template' => $code,
+            ] + $decision->toArray());
         }
 
         $twig = $this->twig();
@@ -343,6 +462,16 @@ final class Mailer
                 $transport->stop();
             }
         }
+        // H-16: jedno odeslání = JEDEN zápis do počítadla, bez ohledu na to,
+        // kolik adres nese obálka. Kdyby se počítali příjemci, brzdila by
+        // jedna hromadná upomínka padesátkrát dřív, než je potřeba.
+        $throttle->recordSent(
+            $now,
+            $envelopeSize,
+            $code,
+            $emailProfile !== null ? (string) ($emailProfile['code'] ?? '') : null,
+        );
+
         $debug = $sent !== null ? $sent->getDebug() : '';
         $smtpResponse = $this->extractLastServerResponse($debug);
         $imapAppend = $this->sentMailImap !== null
@@ -400,6 +529,193 @@ final class Mailer
             'smtp_response' => $smtpResponse,
             'imap_append' => $imapAppend,
         ];
+    }
+
+    // ── H-16: brzda odchozí pošty ────────────────────────────────────────────
+
+    /**
+     * Brzda. Staví se líně z Configu a otevřeného spojení, aby nebyla potřeba
+     * změna v ručním DI bindingu v Bootstrapu — a hlavně aby chybějící binding
+     * nemohl brzdu tiše vypnout.
+     */
+    private function throttle(): MailRateLimiter
+    {
+        if ($this->throttle === null) {
+            $pdo = $this->db->pdo();
+            $this->throttle = new MailRateLimiter(
+                $this->config,
+                new MailSendCounter($pdo),
+                $this->logger,
+                new MailRateLimitEventLog(
+                    $pdo,
+                    $this->config,
+                    // Upozornění správci jde MIMO brzdu a mimo šablony: kdyby
+                    // šlo přes sendTemplate(), zablokovala by ho tatáž brzda,
+                    // o které má informovat.
+                    fn (string $to, string $subject, string $body): bool
+                        => $this->sendPlainAlert($to, $subject, $body),
+                ),
+            );
+
+            foreach ($this->throttle->configurationWarnings() as $warning) {
+                $this->logger->warning('mail.rate_limit_config', ['warning' => $warning]);
+            }
+        }
+
+        return $this->throttle;
+    }
+
+    private function outbox(): MailOutbox
+    {
+        return $this->outbox ??= new MailOutbox($this->db->pdo(), $this->logger);
+    }
+
+    /**
+     * Kolik zpráv čeká ve frontě brzdy — pro diagnostiku a pro UI.
+     */
+    public function deferredCount(): int
+    {
+        return $this->outbox()->pendingCount();
+    }
+
+    /**
+     * Pošli, na co už došla řada. Vrací počty, ne obsah.
+     *
+     * Volá se z CLI (cron) — každá další odeslaná zpráva se normálně započítá
+     * do klouzavých oken, takže se fronta vyprazdňuje přesně tempem, které
+     * limit dovolí, a nikdy se z ní nestane nová dávka přes limit.
+     *
+     * @return array{sent:int,deferred:int,failed:int}
+     */
+    public function flushDeferred(?DateTimeImmutable $now = null, ?int $max = null): array
+    {
+        $now ??= new DateTimeImmutable('now');
+        $max ??= (int) $this->config->get('smtp.rate_limit.drain_batch', 25);
+
+        $report = ['sent' => 0, 'deferred' => 0, 'failed' => 0];
+        if ($this->draining) {
+            return $report;
+        }
+
+        $this->draining = true;
+        try {
+            foreach ($this->outbox()->due($now, $max) as $item) {
+                $payload = $item['payload'];
+                try {
+                    $result = $this->sendTemplateDetailed(
+                        $item['template'],
+                        $item['locale'],
+                        array_values((array) ($payload['to'] ?? [])),
+                        (array) ($payload['vars'] ?? []),
+                        isset($payload['subject_override']) ? (string) $payload['subject_override'] : null,
+                        array_values((array) ($payload['cc'] ?? [])),
+                        array_values((array) ($payload['bcc'] ?? [])),
+                        array_values((array) ($payload['attachments'] ?? [])),
+                        isset($payload['user_id']) ? (int) $payload['user_id'] : null,
+                        is_array($payload['email_profile'] ?? null) ? $payload['email_profile'] : null,
+                    );
+                } catch (MailDeliveredArchiveException) {
+                    // Zpráva JE doručená, selhalo jen uložení kopie do IMAP —
+                    // opakovat by znamenalo poslat ji příjemci podruhé.
+                    $this->outbox()->markSent($item['id'], $now);
+                    $report['sent']++;
+                    continue;
+                } catch (\Throwable $e) {
+                    $this->outbox()->markRetry(
+                        $item['id'],
+                        $now->setTimestamp($now->getTimestamp()
+                            + max(60, (int) $this->config->get('smtp.rate_limit.defer_retry_seconds', 900))),
+                        $e->getMessage(),
+                        $item['attempts'],
+                    );
+                    $report['failed']++;
+                    continue;
+                }
+
+                if (($result['deferred'] ?? false) === true) {
+                    // Brzda sepla znovu — ve frontě je NOVÝ řádek s pozdějším
+                    // časem, tenhle se uzavírá jako přesunutý (ne odeslaný,
+                    // ne chybný).
+                    $this->outbox()->markRequeued(
+                        $item['id'],
+                        $now,
+                        isset($result['outbox_id']) ? (int) $result['outbox_id'] : null,
+                    );
+                    $report['deferred']++;
+                    continue;
+                }
+
+                $this->outbox()->markSent($item['id'], $now);
+                $report['sent']++;
+            }
+        } finally {
+            $this->draining = false;
+        }
+
+        return $report;
+    }
+
+    private function drainDeferredIfCli(DateTimeImmutable $now): void
+    {
+        if ($this->draining || PHP_SAPI !== 'cli') {
+            return;
+        }
+        if (!(bool) $this->config->get('smtp.rate_limit.drain_on_cli', true)) {
+            return;
+        }
+
+        $report = $this->flushDeferred($now);
+        if ($report['sent'] > 0 || $report['failed'] > 0) {
+            $this->logger->info('mail.outbox_drained', $report);
+        }
+
+        // Počítadlo drží nejvýš denní okno, takže starší řádky jsou už jen
+        // historie spotřeby kvóty. Úklid jede tady (jednou za běh cronu),
+        // ne v každém requestu — a nikdy pod webem.
+        (new MailSendCounter($this->db->pdo()))->prune(
+            $now,
+            max(1, (int) $this->config->get('smtp.rate_limit.log_retention_days', 3)),
+        );
+    }
+
+    /**
+     * Prostý textový e-mail mimo šablony a mimo brzdu — jen pro upozornění
+     * správci instance na stav limitu. Odstup mezi upozorněními hlídá
+     * {@see MailRateLimitEventLog}, takže tohle nemůže samo zahltit kvótu.
+     */
+    private function sendPlainAlert(string $to, string $subject, string $body): bool
+    {
+        try {
+            $from = (string) $this->config->get('smtp.from_email', '');
+            if ($from === '' || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
+                return false;
+            }
+
+            $email = (new Email())
+                ->from(new Address($from, (string) $this->config->get('smtp.from_name', 'MyÚčto.cz')))
+                ->to($to)
+                ->subject($subject)
+                ->text($body);
+
+            $transport = $this->transport(null);
+            try {
+                $transport->send($email, Envelope::create($email));
+            } finally {
+                if (!$this->keepaliveEnabled(null) && method_exists($transport, 'stop')) {
+                    $transport->stop();
+                }
+            }
+
+            // Upozornění je taky zpráva a hosting ji do kvóty započítá —
+            // musí ji tedy vidět i naše počítadlo, jinak se stavy rozejdou.
+            $this->throttle?->recordSent(new DateTimeImmutable('now'), 1, 'rate_limit_alert', null);
+
+            return true;
+        } catch (\Throwable $e) {
+            $this->logger->error('mail.rate_limit_alert_failed', ['error' => $e->getMessage()]);
+
+            return false;
+        }
     }
 
     /**

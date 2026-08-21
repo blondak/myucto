@@ -57,9 +57,22 @@ final class MailRateLimiter
         private readonly ?MailRateLimitEventLog $events = null,
     ) {}
 
+    /**
+     * Brzda je ve výchozím stavu zapnutá jen ve SPRAVOVANÉM provozu.
+     *
+     * Limity jsou vlastnost hostingu, ne aplikace. Self-hoster má vlastní MTA
+     * a žádnou kvótu — kdyby mu odesílání začalo po aktualizaci samo od sebe
+     * váznout na 160 zprávách za hodinu, byla by to regrese, ne ochrana.
+     * `smtp.rate_limit.enabled` obojí přebije v obou směrech.
+     */
     public function enabled(): bool
     {
-        return (bool) $this->config->get('smtp.rate_limit.enabled', true);
+        $configured = $this->config->get('smtp.rate_limit.enabled');
+        if ($configured === null) {
+            return (bool) $this->config->get('app.managed', false);
+        }
+
+        return (bool) $configured;
     }
 
     public function limitHour(): int
@@ -214,9 +227,11 @@ final class MailRateLimiter
             }
         }
 
+        // setTimestamp, ne modify() — viz past s přechodem času
+        // v {@see MailRateLimitWindow::start()}.
         $fallback = max(60, (int) $this->config->get('smtp.rate_limit.defer_retry_seconds', 900));
 
-        return $now->modify('+' . $fallback . ' seconds');
+        return $now->setTimestamp($now->getTimestamp() + $fallback);
     }
 
     /**
