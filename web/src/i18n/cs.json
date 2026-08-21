@@ -736,7 +736,19 @@
             "storage_provisioning_title": "Rozšíření místa se zavádí",
             "storage_provisioning_hint": "Rozšíření na {gb} GB je zaplacené a právě ho zavádíme. Objednávat ho znovu netřeba.",
             "storage_provisioning_hint_nogb": "Zaplacené rozšíření právě zavádíme. Objednávat ho znovu netřeba."
-        }
+        },
+        "row_key": "Licenční klíč",
+        "row_key_hint": "Hostovaná instalace ho dostává při zřízení. Když se to nepovede, jde zadat ručně.",
+        "badge_no_key": "Chybí",
+        "change_key_cta": "Vyměnit klíč",
+        "preview_name_no_license": "Bez licenčního klíče",
+        "preview_name_manual_key": "Klíč zadaný ručně",
+        "preview_name_users_offer": "Uživatelé — kalkulace",
+        "preview_name_users_done": "Uživatelé — navýšeno",
+        "preview_name_storage_offer": "Místo — kalkulace",
+        "preview_name_storage_done": "Místo — rozšířeno",
+        "preview_name_card_declined": "Odmítnutá karta",
+        "preview_name_result_unknown": "Neznámý výsledek platby"
     },
     "payroll": {
         "agendas": {

@@ -26,7 +26,13 @@
  */
 
 import { computed, ref } from 'vue'
-import type { LicenseStatus, ManagedBillingInfo, ManagedStorageInfo } from './license'
+import type {
+  LicenseStatus,
+  ManagedBillingInfo,
+  ManagedStorageInfo,
+  StorageQuote,
+  UpgradeQuote,
+} from './license'
 
 /** Scénáře, které jde ukázat. Hodnota je zároveň to, co se píše do `?nahled=`. */
 export const PREVIEW_SCENARIOS = [
@@ -41,6 +47,17 @@ export const PREVIEW_SCENARIOS = [
   'storage_95',
   'storage_100',
   'provisioning',
+  // Licence: chybí úplně / je zadaná ručně (ne ze zřízení).
+  'no_license',
+  'manual_key',
+  // Nákupní toky — nabídka, výsledek i chybová cesta. Bez nich se dá ověřit
+  // jen ta polovina, kde všechno vyjde.
+  'users_offer',
+  'users_done',
+  'storage_offer',
+  'storage_done',
+  'card_declined',
+  'result_unknown',
 ] as const
 
 export type PreviewScenario = (typeof PREVIEW_SCENARIOS)[number]
@@ -74,6 +91,76 @@ export const instancePreview = {
   isActive: computed(() => activeScenario.value !== null),
 }
 
+
+/**
+ * Stav NÁKUPNÍHO FORMULÁŘE pro náhled — kalkulace, výsledek, chyba.
+ *
+ * Proč zvlášť od {@link buildPreviewStatus}: tohle nejsou data instalace, ale
+ * to, co má obrazovka zrovna rozepsané. Bez toho by šlo ukázat jen stavy, do
+ * kterých se zákazník dostane sám od sebe — ne to, jak vypadá odmítnutá karta
+ * nebo ztracená odpověď, tedy přesně ty dvě situace, kde se nejsnáz udělá
+ * škoda.
+ *
+ * ⚠️ Je to POŘÁD jen zobrazení: nic z toho se neodesílá a tlačítka zůstávají
+ * v náhledu zamčená.
+ */
+export interface PreviewUiState {
+  storageQuote?: StorageQuote
+  userQuote?: UpgradeQuote
+  /** Hotovo — hláška o úspěchu (`done`) nebo o zavádění (`pending`). */
+  outcome?: 'storage_done' | 'storage_pending' | 'users_done'
+  /** Chybová hláška ze serveru, jak by přišla. */
+  error?: string
+  /** Nabídka se po nejistém výsledku zavírá — „zkusit znovu" se NENABÍZÍ. */
+  offerClosed?: boolean
+}
+
+const PREVIEW_STORAGE_QUOTE: StorageQuote = {
+  current_quota_gb: 7,
+  new_quota_gb: 22,
+  amount: 249,
+  recurring_delta: 120,
+  currency: 'CZK',
+  period_end: null,
+}
+
+const PREVIEW_USER_QUOTE: UpgradeQuote = {
+  current_users: 3,
+  new_users: 5,
+  amount: 430,
+  currency: 'CZK',
+  period_end: null,
+}
+
+/** Co má mít formulář rozepsané. `null` = nic, obrazovka je ve výchozím stavu. */
+export function previewUiState(scenario: PreviewScenario): PreviewUiState | null {
+  switch (scenario) {
+    case 'storage_offer':
+      return { storageQuote: PREVIEW_STORAGE_QUOTE }
+    case 'storage_done':
+      return { outcome: 'storage_done', offerClosed: true }
+    case 'users_offer':
+      return { userQuote: PREVIEW_USER_QUOTE }
+    case 'users_done':
+      return { outcome: 'users_done' }
+    case 'card_declined':
+      // Kartu lze zkusit znovu — nabídka zůstává otevřená.
+      return {
+        storageQuote: PREVIEW_STORAGE_QUOTE,
+        error: 'Platbu se nepodařilo strhnout, zkontrolujte platební kartu.',
+      }
+    case 'result_unknown':
+      // ⚠️ Peníze MOHLY odejít. Nabídka se zavírá a nikde se nepobízí k opakování.
+      return {
+        offerClosed: true,
+        error: 'Nevíme, jak platba dopadla. Nezkoušejte to prosím znovu — '
+          + 'za chvíli obnovte stránku, a pokud se nic nezmění, ozvěte se podpoře.',
+      }
+    default:
+      return null
+  }
+}
+
 /** Syntetický základ — náhled nesmí záviset na tom, co zrovna vrací server. */
 function baseStatus(now: number): LicenseStatus {
   return {
@@ -89,7 +176,7 @@ function baseStatus(now: number): LicenseStatus {
     overage_deadline: null,
     perpetual: false,
     commercial_features: true,
-    license_key_masked: null,
+    license_key_masked: 'MYU-••••-••••-7C2A',
     last_check_at: new Date(now * 1000).toISOString(),
     last_check_ok: true,
     buy_url: '',
@@ -142,18 +229,20 @@ function baseStatus(now: number): LicenseStatus {
 
 function withStorage(status: LicenseStatus, percent: number, over: Partial<ManagedStorageInfo> = {}): LicenseStatus {
   const storage = status.instance!.storage
-  const quota = storage.quota_bytes ?? 7 * GB
+  const next = { ...storage, ...over }
+  // ⚠️ Z kvóty PO přepisu: scénář „rozšířeno na 22 GB" by jinak spočítal
+  // obsazení ze sedmi a sám by si odporoval.
+  const quota = next.quota_bytes ?? 7 * GB
 
   return {
     ...status,
     instance: {
       ...status.instance!,
       storage: {
-        ...storage,
+        ...next,
         percent,
         usage_bytes: Math.round((percent / 100) * quota),
-        blocks_writes: percent >= storage.read_only_percent,
-        ...over,
+        blocks_writes: percent >= next.read_only_percent,
       },
     },
   }
@@ -271,5 +360,27 @@ export function buildPreviewStatus(
     // Zaplacené rozšíření, které se právě zavádí — nabídka nákupu musí zmizet.
     case 'provisioning':
       return withStorage(base, 94, { change_pending: true, quota_gb_ordered: 22 })
+
+    // Klíč chybí — zřízení se nepovedlo. Nákup nemá o co opřít, jediná cesta
+    // ven je klíč zadat ručně.
+    case 'no_license':
+      return { ...base, license_key_masked: null }
+
+    case 'manual_key':
+      return { ...base, license_key_masked: 'MYU-••••-••••-3F91' }
+
+    // Nákupní toky mění jen to, co má obrazovka rozepsané (viz previewUiState);
+    // stav instalace zůstává zdravý, aby bylo vidět samotný formulář.
+    case 'users_offer':
+    case 'users_done':
+      return { ...base, users_active: 3, users_licensed: 3 }
+
+    case 'storage_offer':
+    case 'card_declined':
+    case 'result_unknown':
+      return withStorage(base, 84)
+
+    case 'storage_done':
+      return withStorage(base, 27, { quota_bytes: 22 * GB, quota_gb_ordered: 22 })
   }
 }

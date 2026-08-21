@@ -736,7 +736,19 @@
             "storage_provisioning_title": "Storage expansion in progress",
             "storage_provisioning_hint": "The expansion to {gb} GB is paid and being provisioned. No need to order it again.",
             "storage_provisioning_hint_nogb": "The paid expansion is being provisioned. No need to order it again."
-        }
+        },
+        "row_key": "Licence key",
+        "row_key_hint": "A hosted installation gets one at provisioning. If that fails, it can be entered by hand.",
+        "badge_no_key": "Missing",
+        "change_key_cta": "Replace key",
+        "preview_name_no_license": "No licence key",
+        "preview_name_manual_key": "Key entered by hand",
+        "preview_name_users_offer": "Users — quote",
+        "preview_name_users_done": "Users — increased",
+        "preview_name_storage_offer": "Storage — quote",
+        "preview_name_storage_done": "Storage — expanded",
+        "preview_name_card_declined": "Card declined",
+        "preview_name_result_unknown": "Unknown payment result"
     },
     "payroll": {
         "agendas": {

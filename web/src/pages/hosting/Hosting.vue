@@ -10,6 +10,7 @@ import {
   PREVIEW_SCENARIOS,
   instancePreview,
   isPreviewScenario,
+  previewUiState,
   startPreview,
   stopPreview,
 } from '@/api/instancePreview'
@@ -310,13 +311,24 @@ const userQuote = ref<UpgradeQuote | null>(null)
 const userError = ref<string | null>(null)
 const userDone = ref<string | null>(null)
 
-/** Navýšení má smysl jen u aktivního placeného předplatného. */
+/**
+ * Navýšení má smysl jen u aktivního placeného předplatného s klíčem.
+ *
+ * ⚠️ Bez klíče se nabídka NEKRESLÍ — server by nákup odmítl a jediné, co
+ * uživateli pomůže, je klíč zadat (řádek „Licenční klíč" níž).
+ */
 const canBuyUsers = computed(() => {
   const s = status.value
-  if (!s) return false
+  if (!s || !s.license_key_masked) return false
 
   return s.state === 'active' || s.state === 'overage'
 })
+
+/**
+ * Licenční klíč. Hostovaná instance ho dostává při zřízení, ale musí jít
+ * opravit ručně — když se zřízení nepovede, je tohle jediná cesta ven.
+ */
+const licenseKeyTone = computed<Tone>(() => (status.value?.license_key_masked ? 'ok' : 'critical'))
 
 watch(status, (s) => {
   if (s && !userQuote.value) upgradeUsers.value = Math.max(s.users_active, s.users_licensed, 1)
@@ -449,6 +461,45 @@ async function buyStorage(): Promise<void> {
 
 const included = computed(() => (tm('license.managed_included') as unknown[]).map(i => rt(i as string)))
 const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).map(i => rt(i as string)))
+
+// ─── Náhled nákupních toků ─────────────────────────────────────────────────
+//
+// Scénáře jako „odmítnutá karta" nebo „nevíme, jak platba dopadla" se jinak
+// ukázat nedají — musely by se doopravdy stát. Náhled proto umí předepsat i to,
+// co má formulář rozepsané.
+//
+// ⚠️ Pořád jen zobrazení: tlačítka zůstávají v náhledu zamčená (`previewing`),
+// takže se odsud nedá nic objednat.
+watch(previewScenario, (scenario) => {
+  // Odchod z náhledu vrátí formuláře do výchozího stavu — jinak by na obrazovce
+  // zůstala viset kalkulace, kterou nikdo nevyžádal.
+  storageQuote.value = null
+  userQuote.value = null
+  storageDone.value = null
+  userDone.value = null
+  storageError.value = null
+  userError.value = null
+  offerClosed.value = false
+  selectedGb.value = null
+  if (scenario === null) return
+
+  const ui = previewUiState(scenario)
+  if (!ui) return
+
+  if (ui.storageQuote) {
+    storageQuote.value = ui.storageQuote
+    selectedGb.value = ui.storageQuote.new_quota_gb
+  }
+  if (ui.userQuote) userQuote.value = ui.userQuote
+  if (ui.outcome === 'storage_done') storageDone.value = t('hosting.storage_done', { gb: 22 })
+  if (ui.outcome === 'storage_pending') storageDone.value = t('hosting.storage_pending', { gb: 22 })
+  if (ui.outcome === 'users_done') userDone.value = t('license.upgrade_success', { n: 5 })
+  if (ui.error) storageError.value = ui.error
+  if (ui.offerClosed) offerClosed.value = true
+// ⚠️ `immediate`: scénář z `?nahled=` je nastavený UŽ při setupu (viz
+// `syncPreviewFromRoute` výš), takže se nikdy „nezmění" a bez tohohle by se
+// formulář nenaplnil — odkaz na odmítnutou kartu by ukázal prázdnou obrazovku.
+}, { immediate: true })
 </script>
 
 <template>
@@ -609,7 +660,13 @@ const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).ma
               <span class="rounded px-2 py-0.5 text-xs font-medium" :class="TONE_BADGE[companiesTone]">
                 {{ t(companiesTone === 'critical' ? 'hosting.badge_over' : 'hosting.badge_at_limit') }}
               </span>
-              <RouterLink to="/activation/purchase" :class="btnOutline('primary')">
+              <!-- ⚠️ Jediná akce, která vede ven: mění se PRODUKT, ne rozsah.
+                   Uživatele i místo si zákazník dokoupí tady v aplikaci. -->
+              <a v-if="links?.subscription" :href="links.subscription" target="_blank" rel="noopener" :class="btnOutline('primary')">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
+                {{ t('hosting.change_tier_cta') }}
+              </a>
+              <RouterLink v-else to="/activation/purchase" :class="btnOutline('primary')">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
                 {{ t('hosting.change_tier_cta') }}
               </RouterLink>
@@ -631,6 +688,24 @@ const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).ma
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.user" /></svg>
                 {{ t('hosting.buy_users_cta') }}
               </a>
+            </div>
+          </li>
+
+          <!-- Licenční klíč -->
+          <li id="klic" class="rounded-lg border p-4" :class="TONE_ROW[licenseKeyTone]" data-hosting-row="key">
+            <p class="text-xs uppercase tracking-wider text-neutral-500">{{ t('hosting.row_key') }}</p>
+            <p class="mt-0.5 text-base font-semibold text-neutral-900 font-mono">
+              {{ status.license_key_masked ?? '—' }}
+            </p>
+            <p class="mt-1 text-sm text-neutral-600">{{ t('hosting.row_key_hint') }}</p>
+            <div class="mt-3 flex flex-wrap items-center gap-2">
+              <span v-if="licenseKeyTone !== 'ok'" class="rounded px-2 py-0.5 text-xs font-medium" :class="TONE_BADGE[licenseKeyTone]">
+                {{ t('hosting.badge_no_key') }}
+              </span>
+              <RouterLink to="/activation/purchase#activate" :class="licenseKeyTone === 'ok' ? btnOutline('neutral') : btnFilled('danger')">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
+                {{ status.license_key_masked ? t('hosting.change_key_cta') : t('license.activate') }}
+              </RouterLink>
             </div>
           </li>
 
@@ -893,7 +968,7 @@ const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).ma
 
       <!-- Kam se obrátit. Odkaz kreslíme JEN když adresu známe — mrtvé tlačítko
            je horší než žádné. -->
-      <section class="rounded-lg border border-neutral-200 bg-surface p-5">
+      <section v-if="links?.subscription || links?.support" class="rounded-lg border border-neutral-200 bg-surface p-5">
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('hosting.links_title') }}</h2>
         <div class="mt-4 flex flex-wrap gap-2">
           <a v-if="links?.subscription" :href="links.subscription" target="_blank" rel="noopener" :class="btnOutline('primary')">

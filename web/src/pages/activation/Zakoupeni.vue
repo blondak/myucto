@@ -509,10 +509,20 @@ onMounted(load)
         </div>
 
         <div class="mt-5 flex flex-wrap gap-2">
+          <!-- ⚠️ Hlavní akce vede DOVNITŘ aplikace. Rozšířit místo i navýšit
+               uživatele jde tady; ven se odchází jen na to, co aplikace neumí
+               (změna tarifu, faktury, platební karta), a to je sekundární. -->
+          <RouterLink
+            to="/hosting#misto"
+            :class="btnFilled(storageLevel === 'exhausted' ? 'danger' : 'primary')"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.box" /></svg>
+            {{ t('hosting.storage_order_title') }}
+          </RouterLink>
           <!-- Odkaz jen když adresu opravdu známe — mrtvé tlačítko je horší než žádné. -->
           <a
             v-if="subscriptionUrl" :href="subscriptionUrl" target="_blank" rel="noopener"
-            :class="btnFilled(storageLevel === 'exhausted' ? 'danger' : 'primary')"
+            :class="btnOutline('primary')"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
             {{ t('license.managed_subscription_cta') }}
@@ -531,15 +541,6 @@ onMounted(load)
         </p>
       </section>
 
-      <!-- Rozsah provozu (co je v ceně, kam hlásit výpadek) žije na /hosting —
-           tahle obrazovka zůstává u licence a předplatného. -->
-      <p class="text-xs text-neutral-500">
-        <RouterLink to="/hosting" class="text-primary-600 hover:text-primary-800 hover:underline">{{ t('nav.hosting') }}</RouterLink>
-        ·
-        <RouterLink to="/activation/license" class="text-primary-600 hover:text-primary-800 hover:underline">{{ t('nav.license') }}</RouterLink>
-        ·
-        <RouterLink to="/activation/terms" class="text-primary-600 hover:text-primary-800 hover:underline">{{ t('nav.terms') }}</RouterLink>
-      </p>
     </div>
 
     <div v-else-if="status" class="space-y-6">
@@ -671,6 +672,17 @@ onMounted(load)
         </div>
       </section>
 
+
+    </div>
+
+    <!-- ═══ Nákupní akce — pro OBĚ instalace ═══
+         ⚠️ Spravovaná instalace znamená „server řešíme my", NE „nemůžete si
+         přikoupit". Dokud tyhle sekce visely jen ve self-hosted větvi, dostal
+         hostovaný zákazník místo nákupu souhrn „Spravovaná instalace" a neměl
+         KUDY navýšit uživatele ani opravit licenční klíč. Klíč navíc hostovaná
+         instance dostává při zřízení automaticky — o důvod víc, aby šel opravit
+         ručně, když se to nepovede. -->
+    <div v-if="status && isAdmin && !loading" class="space-y-6 mt-6">
       <!-- In-place navýšení počtu uživatelů -->
       <section v-if="canUpgrade" id="upgrade" class="rounded-lg border border-primary-200 bg-primary-50/30 p-5">
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('license.upgrade_title') }}</h2>
@@ -719,7 +731,7 @@ onMounted(load)
       </section>
 
       <!-- Aktivace klíče -->
-      <section class="rounded-lg border border-neutral-200 bg-surface p-5">
+      <section id="activate" class="rounded-lg border border-neutral-200 bg-surface p-5">
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('license.activate_title') }}</h2>
         <p class="text-sm text-neutral-600 mt-1">{{ t('license.activate_desc') }}</p>
         <form class="mt-3 flex flex-wrap items-start gap-2" @submit.prevent="activate()">
@@ -754,7 +766,11 @@ onMounted(load)
         </div>
       </section>
 
+      <!-- Rozšíření místa i celý přehled provozu žijí na /hosting; tahle
+           obrazovka zůstává u licence a předplatného. -->
       <p class="text-xs text-neutral-500">
+        <RouterLink v-if="isManaged" to="/hosting" class="text-primary-600 hover:text-primary-800 hover:underline">{{ t('nav.hosting') }}</RouterLink>
+        <span v-if="isManaged"> · </span>
         <RouterLink to="/activation/license" class="text-primary-600 hover:text-primary-800 hover:underline">{{ t('nav.license') }}</RouterLink>
         ·
         <RouterLink to="/activation/terms" class="text-primary-600 hover:text-primary-800 hover:underline">{{ t('nav.terms') }}</RouterLink>
