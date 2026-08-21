@@ -17,6 +17,8 @@ final class TenantDataRegistryCoverageValidator
     private readonly TenantDataCodeReferenceCoverageValidator $codeReferences;
     private readonly TenantDataNaturalKeyReferenceCoverageValidator
         $naturalKeyReferences;
+    private readonly TenantDataStructuredReferenceCoverageValidator
+        $structuredReferences;
     private readonly TenantDataInstanceReferenceCoverageValidator
         $instanceReferences;
     private readonly TenantDataRelationCoverageValidator $relations;
@@ -29,6 +31,8 @@ final class TenantDataRegistryCoverageValidator
         ?TenantDataCodeReferenceCoverageValidator $codeReferences = null,
         ?TenantDataNaturalKeyReferenceCoverageValidator
             $naturalKeyReferences = null,
+        ?TenantDataStructuredReferenceCoverageValidator
+            $structuredReferences = null,
         ?TenantDataInstanceReferenceCoverageValidator $instanceReferences = null,
         ?TenantDataRelationCoverageValidator $relations = null,
     ) {
@@ -44,6 +48,8 @@ final class TenantDataRegistryCoverageValidator
             ?? new TenantDataCodeReferenceCoverageValidator();
         $this->naturalKeyReferences = $naturalKeyReferences
             ?? new TenantDataNaturalKeyReferenceCoverageValidator();
+        $this->structuredReferences = $structuredReferences
+            ?? new TenantDataStructuredReferenceCoverageValidator();
         $this->instanceReferences = $instanceReferences
             ?? new TenantDataInstanceReferenceCoverageValidator();
         $this->relations = $relations
@@ -132,6 +138,12 @@ final class TenantDataRegistryCoverageValidator
                 ),
                 ...$this->codeReferences->issues($definition, $table),
                 ...$this->naturalKeyReferences->issues(
+                    $definition,
+                    $table,
+                    $tables,
+                    $definitions,
+                ),
+                ...$this->structuredReferences->issues(
                     $definition,
                     $table,
                     $tables,

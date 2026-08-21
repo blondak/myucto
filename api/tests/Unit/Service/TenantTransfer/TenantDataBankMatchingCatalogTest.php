@@ -82,6 +82,70 @@ final class TenantDataBankMatchingCatalogTest extends TestCase
         );
     }
 
+    public function testDecisionAuditPreservesJsonTargetsAndDropsQueueLink(): void
+    {
+        $audit = self::definitions()['bank_match_audit'];
+
+        self::assertSame(TenantDataPolicy::TenantOwned, $audit->policy);
+        self::assertSame(['id'], $audit->details['primary_key'] ?? null);
+        self::assertSame('bank', $audit->details['feature_group'] ?? null);
+        self::assertSame(
+            [
+                'strategy' => 'supplier_id',
+                'column' => 'supplier_id',
+            ],
+            $audit->details['ownership'] ?? null,
+        );
+        self::assertSame([], $audit->details['secrets'] ?? null);
+        self::assertSame(
+            [
+                'created_by' => [
+                    'strategy' => 'map_existing_user_or_null',
+                ],
+            ],
+            $audit->details['actor_references'] ?? null,
+        );
+        self::assertSame(
+            [
+                'purchase_invoice' => [
+                    'strategy' => 'direct_tenant_entity',
+                    'id_column' => 'purchase_invoice_id',
+                    'target_table' => 'purchase_invoices',
+                    'target_column' => 'id',
+                    'null_value' => 'preserve',
+                    'unresolved' => 'block',
+                ],
+                'match_suggestion' => [
+                    'strategy' => 'runtime_derived_entity',
+                    'id_column' => 'suggestion_id',
+                    'target_table' => 'bank_match_suggestions',
+                    'target_column' => 'id',
+                    'null_value' => 'preserve',
+                    'target_omitted' => 'set_null',
+                ],
+            ],
+            $audit->details['soft_references'] ?? null,
+        );
+        self::assertSame(
+            [
+                'invoice_ids' => [
+                    'strategy' => 'json_id_list',
+                    'column' => 'invoice_ids',
+                    'target_table' => 'invoices',
+                    'target_column' => 'id',
+                    'null_value' => 'preserve',
+                    'invalid_value' => 'block',
+                    'unresolved' => 'block',
+                ],
+            ],
+            $audit->details['structured_references'] ?? null,
+        );
+        self::assertSame(
+            'preserve_bank_match_decision_audit',
+            $audit->details['transfer_invariant'] ?? null,
+        );
+    }
+
     public function testScoredCandidateQueueIsRegenerated(): void
     {
         $suggestion = self::definitions()['bank_match_suggestions'];
@@ -115,6 +179,7 @@ final class TenantDataBankMatchingCatalogTest extends TestCase
         foreach ([
             'bank_counterparty_map',
             'bank_counterparty_observations',
+            'bank_match_audit',
             'bank_match_suggestions',
             'bank_transfer_matches',
         ] as $table) {
@@ -141,6 +206,7 @@ final class TenantDataBankMatchingCatalogTest extends TestCase
             [
                 'bank_counterparty_map',
                 'bank_counterparty_observations',
+                'bank_match_audit',
                 'bank_match_suggestions',
                 'bank_transfer_matches',
             ],

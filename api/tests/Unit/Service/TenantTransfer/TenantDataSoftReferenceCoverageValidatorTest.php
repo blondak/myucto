@@ -164,6 +164,56 @@ final class TenantDataSoftReferenceCoverageValidatorTest extends TestCase
         );
     }
 
+    public function testRuntimeDerivedReferenceCanBeExplicitlyNullified(): void
+    {
+        self::assertSame(
+            [],
+            (new TenantDataSoftReferenceCoverageValidator())->issues(
+                self::runtimeSource(),
+                self::runtimeSourceInventory(),
+                [
+                    'bank_match_suggestions' => self::targetInventory(
+                        'bank_match_suggestions',
+                    ),
+                ],
+                [
+                    'bank_match_suggestions' => self::runtimeTarget(
+                        'bank_match_suggestions',
+                    ),
+                ],
+            ),
+        );
+    }
+
+    public function testRuntimeDerivedReferenceRequiresExplicitNullification(): void
+    {
+        self::assertSame(
+            [
+                'soft_reference_omitted_value_not_nullified:'
+                    . 'bank_match_audit.match_suggestion',
+                'soft_reference_target_not_runtime_derived:'
+                    . 'bank_match_audit.match_suggestion'
+                    . '->bank_match_suggestions.id',
+            ],
+            (new TenantDataSoftReferenceCoverageValidator())->issues(
+                self::runtimeSource([
+                    'target_omitted' => 'preserve_source_id',
+                ]),
+                self::runtimeSourceInventory(),
+                [
+                    'bank_match_suggestions' => self::targetInventory(
+                        'bank_match_suggestions',
+                    ),
+                ],
+                [
+                    'bank_match_suggestions' => self::target(
+                        'bank_match_suggestions',
+                    ),
+                ],
+            ),
+        );
+    }
+
     /** @param array<string,string> $targets */
     private static function source(array $targets): TenantDataDefinition
     {
@@ -204,6 +254,22 @@ final class TenantDataSoftReferenceCoverageValidatorTest extends TestCase
         );
     }
 
+    private static function runtimeTarget(
+        string $table,
+    ): TenantDataDefinition {
+        return new TenantDataDefinition(
+            'table:' . $table,
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::RuntimeDerived,
+            [TenantDataRegistry::TRANSFER_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'reason' => 'runtime_regenerated_queue',
+                'secrets' => [],
+            ],
+        );
+    }
+
     /** @param array<string,string> $overrides */
     private static function directSource(array $overrides = []): TenantDataDefinition
     {
@@ -222,6 +288,32 @@ final class TenantDataSoftReferenceCoverageValidatorTest extends TestCase
                         'target_column' => 'id',
                         'null_value' => 'preserve',
                         'unresolved' => 'block',
+                        ...$overrides,
+                    ],
+                ],
+            ],
+        );
+    }
+
+    /** @param array<string,string> $overrides */
+    private static function runtimeSource(
+        array $overrides = [],
+    ): TenantDataDefinition {
+        return new TenantDataDefinition(
+            'table:bank_match_audit',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::TRANSFER_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'soft_references' => [
+                    'match_suggestion' => [
+                        'strategy' => 'runtime_derived_entity',
+                        'id_column' => 'suggestion_id',
+                        'target_table' => 'bank_match_suggestions',
+                        'target_column' => 'id',
+                        'null_value' => 'preserve',
+                        'target_omitted' => 'set_null',
                         ...$overrides,
                     ],
                 ],
@@ -269,6 +361,19 @@ final class TenantDataSoftReferenceCoverageValidatorTest extends TestCase
             [],
             [['id']],
             ['source_item_id'],
+        );
+    }
+
+    private static function runtimeSourceInventory(): TenantSchemaTableInventory
+    {
+        return new TenantSchemaTableInventory(
+            'bank_match_audit',
+            'BASE TABLE',
+            ['id', 'supplier_id', 'suggestion_id'],
+            ['id'],
+            [],
+            [['id']],
+            ['suggestion_id'],
         );
     }
 }

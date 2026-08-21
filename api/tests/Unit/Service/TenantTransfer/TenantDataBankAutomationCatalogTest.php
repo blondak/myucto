@@ -121,6 +121,91 @@ final class TenantDataBankAutomationCatalogTest extends TestCase
         );
     }
 
+    public function testPostingSuggestionsPreserveQueueAndProvenance(): void
+    {
+        $suggestion = self::definitions()['bank_posting_suggestions'];
+
+        self::assertSame(TenantDataPolicy::TenantOwned, $suggestion->policy);
+        self::assertSame(['id'], $suggestion->details['primary_key'] ?? null);
+        self::assertSame('bank', $suggestion->details['feature_group'] ?? null);
+        self::assertSame(
+            [
+                'strategy' => 'supplier_id',
+                'column' => 'supplier_id',
+            ],
+            $suggestion->details['ownership'] ?? null,
+        );
+        self::assertSame([], $suggestion->details['secrets'] ?? null);
+        self::assertSame(
+            [
+                'reviewed_by' => [
+                    'strategy' => 'map_existing_user_or_null',
+                ],
+                'snoozed_by' => [
+                    'strategy' => 'map_existing_user_or_null',
+                ],
+            ],
+            $suggestion->details['actor_references'] ?? null,
+        );
+        self::assertSame(
+            [
+                'operation_type' => self::codeReference(
+                    'accounting_operation_types',
+                    'preserve',
+                ),
+            ],
+            $suggestion->details['code_references'] ?? null,
+        );
+        self::assertSame(
+            [
+                'debit_account' => self::accountReference(
+                    'debit_account_code',
+                ),
+                'credit_account' => self::accountReference(
+                    'credit_account_code',
+                ),
+            ],
+            $suggestion->details['natural_key_references'] ?? null,
+        );
+        self::assertSame(
+            [
+                'note_reference' => [
+                    'strategy' => 'tagged_decimal_id',
+                    'column' => 'note',
+                    'targets' => [
+                        'corrected_from:#' => [
+                            'target_table' => 'bank_transactions',
+                            'target_column' => 'id',
+                        ],
+                        'looks_like:#' => [
+                            'target_table' => 'bank_transactions',
+                            'target_column' => 'id',
+                        ],
+                        'duplicate_suspect:#' => [
+                            'target_table' => 'journal_entries',
+                            'target_column' => 'id',
+                        ],
+                        'duplicate_suspect:' => [
+                            'target_table' => 'journal_entries',
+                            'target_column' => 'id',
+                        ],
+                    ],
+                    'tag_matching' => 'longest_prefix',
+                    'null_value' => 'preserve',
+                    'unmatched_value' => 'preserve',
+                    'unknown_tag' => 'block',
+                    'invalid_value' => 'block',
+                    'unresolved' => 'block',
+                ],
+            ],
+            $suggestion->details['structured_references'] ?? null,
+        );
+        self::assertSame(
+            'preserve_bank_posting_queue_and_provenance',
+            $suggestion->details['transfer_invariant'] ?? null,
+        );
+    }
+
     public function testChartOfAccountsHasStableImportIdentity(): void
     {
         $chart = self::factoryDefinition('table:chart_of_accounts');
@@ -169,7 +254,11 @@ final class TenantDataBankAutomationCatalogTest extends TestCase
         }
         ksort($definitions, SORT_STRING);
         self::assertSame(
-            ['auto_posting_policy', 'bank_posting_rules'],
+            [
+                'auto_posting_policy',
+                'bank_posting_rules',
+                'bank_posting_suggestions',
+            ],
             array_keys($definitions),
         );
         return $definitions;

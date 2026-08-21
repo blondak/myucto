@@ -13,6 +13,7 @@ final class TenantDataBankAutomationCatalog
         return [
             self::automationPolicy(),
             self::postingRules(),
+            self::postingSuggestions(),
         ];
     }
 
@@ -78,6 +79,65 @@ final class TenantDataBankAutomationCatalog
                 ],
                 'transfer_invariant' =>
                     'preserve_bank_posting_rules_and_learning_state',
+            ],
+        );
+    }
+
+    private static function postingSuggestions(): TenantDataDefinition
+    {
+        return self::owned(
+            'bank_posting_suggestions',
+            [
+                'actor_references' => self::references([
+                    'reviewed_by' => 'map_existing_user_or_null',
+                    'snoozed_by' => 'map_existing_user_or_null',
+                ]),
+                'code_references' => [
+                    'operation_type' => self::codeReference(
+                        'accounting_operation_types',
+                        'preserve',
+                    ),
+                ],
+                'natural_key_references' => [
+                    'debit_account' => self::accountReference(
+                        'debit_account_code',
+                    ),
+                    'credit_account' => self::accountReference(
+                        'credit_account_code',
+                    ),
+                ],
+                'structured_references' => [
+                    'note_reference' => [
+                        'strategy' => 'tagged_decimal_id',
+                        'column' => 'note',
+                        'targets' => [
+                            'corrected_from:#' => [
+                                'target_table' => 'bank_transactions',
+                                'target_column' => 'id',
+                            ],
+                            'looks_like:#' => [
+                                'target_table' => 'bank_transactions',
+                                'target_column' => 'id',
+                            ],
+                            'duplicate_suspect:#' => [
+                                'target_table' => 'journal_entries',
+                                'target_column' => 'id',
+                            ],
+                            'duplicate_suspect:' => [
+                                'target_table' => 'journal_entries',
+                                'target_column' => 'id',
+                            ],
+                        ],
+                        'tag_matching' => 'longest_prefix',
+                        'null_value' => 'preserve',
+                        'unmatched_value' => 'preserve',
+                        'unknown_tag' => 'block',
+                        'invalid_value' => 'block',
+                        'unresolved' => 'block',
+                    ],
+                ],
+                'transfer_invariant' =>
+                    'preserve_bank_posting_queue_and_provenance',
             ],
         );
     }

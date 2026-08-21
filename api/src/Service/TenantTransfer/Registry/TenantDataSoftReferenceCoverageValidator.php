@@ -64,11 +64,94 @@ final class TenantDataSoftReferenceCoverageValidator
                 );
                 continue;
             }
+            if ($strategy === 'runtime_derived_entity') {
+                array_push(
+                    $issues,
+                    ...$this->runtimeDerivedIssues(
+                        $name,
+                        $reference,
+                        $table,
+                        $tables,
+                        $definitions,
+                    ),
+                );
+                continue;
+            }
             $issues[] = 'invalid_soft_reference:'
                 . $table->name . '.' . $name;
         }
 
         sort($issues, SORT_STRING);
+        return $issues;
+    }
+
+    /**
+     * @param array<mixed> $reference
+     * @param array<string,TenantSchemaTableInventory> $tables
+     * @param array<string,TenantDataDefinition> $definitions
+     * @return list<string>
+     */
+    private function runtimeDerivedIssues(
+        string $name,
+        array $reference,
+        TenantSchemaTableInventory $table,
+        array $tables,
+        array $definitions,
+    ): array {
+        $idColumn = $reference['id_column'] ?? null;
+        $targetTable = $reference['target_table'] ?? null;
+        $targetColumn = $reference['target_column'] ?? null;
+        if (!is_string($idColumn)
+            || !is_string($targetTable)
+            || !is_string($targetColumn)
+            || !$this->isIdentifier($idColumn)
+            || !$this->isIdentifier($targetTable)
+            || !$this->isIdentifier($targetColumn)
+        ) {
+            return ['invalid_soft_reference:' . $table->name . '.' . $name];
+        }
+
+        $issues = [];
+        $sourceColumnExists = in_array($idColumn, $table->columns, true);
+        if (!$sourceColumnExists) {
+            $issues[] = 'soft_reference_column_missing:'
+                . $table->name . '.' . $idColumn;
+        } elseif ($this->hasForeignKey($table, $idColumn)) {
+            $issues[] = 'soft_reference_has_fk:'
+                . $table->name . '.' . $idColumn;
+        }
+        if ($sourceColumnExists) {
+            if (!in_array($idColumn, $table->nullableColumns, true)) {
+                $issues[] = 'soft_reference_runtime_target_not_nullable:'
+                    . $table->name . '.' . $name;
+            }
+            if (($reference['null_value'] ?? null) !== 'preserve') {
+                $issues[] = 'soft_reference_null_policy_mismatch:'
+                    . $table->name . '.' . $name;
+            }
+        }
+        if (($reference['target_omitted'] ?? null) !== 'set_null') {
+            $issues[] = 'soft_reference_omitted_value_not_nullified:'
+                . $table->name . '.' . $name;
+        }
+
+        $targetInventory = $tables[$targetTable] ?? null;
+        $targetDefinition = $definitions[$targetTable] ?? null;
+        $target = $table->name . '.' . $name . '->'
+            . $targetTable . '.' . $targetColumn;
+        if ($targetInventory === null || $targetDefinition === null) {
+            $issues[] = 'soft_reference_target_unregistered:' . $target;
+            return $issues;
+        }
+        if ($targetDefinition->policy !== TenantDataPolicy::RuntimeDerived) {
+            $issues[] = 'soft_reference_target_not_runtime_derived:' . $target;
+        }
+        if (!in_array($targetColumn, $targetInventory->columns, true)) {
+            $issues[] = 'soft_reference_target_column_missing:' . $target;
+        }
+        if ($targetInventory->primaryKey !== [$targetColumn]) {
+            $issues[] = 'soft_reference_target_not_primary:' . $target;
+        }
         return $issues;
     }
 
