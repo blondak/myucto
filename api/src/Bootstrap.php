@@ -580,6 +580,18 @@ final class Bootstrap
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
             ),
 
+            // ⚠️ `?InstanceHealthProbe $probe = null` v HealthAction je test seam
+            // (health musí odpovědět kompletním tvarem i bez DB). PHP-DI ale
+            // VOLITELNÉ parametry autowiringem přeskakuje — bez tohohle bindu by
+            // probe zůstal null a `/api/health` by v provozu vracel samé null
+            // u údržby, běžících úloh, cronu, zálohy i migrací. Tiché selhání
+            // přesně toho, kvůli čemu endpoint vznikl (H-09).
+            \MyInvoice\Action\System\HealthAction::class => \DI\autowire()
+                ->constructorParameter(
+                    'probe',
+                    \DI\get(\MyInvoice\Service\System\InstanceHealthProbe::class),
+                ),
+
             // Licenční klient (E4) má volitelný `?GuzzleHttp\Client $http = null` (test
             // seam). Autowire by ho vyplnil bare Guzzle (bez base_uri/verify z cfg) →
             // definujeme explicitně s $http = null, ať si klient postaví vlastní klienta.

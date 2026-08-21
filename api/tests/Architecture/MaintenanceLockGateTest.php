@@ -58,17 +58,18 @@ final class MaintenanceLockGateTest extends TestCase
     {
         $src = self::read('api/public/index.php');
 
-        $gate  = strpos($src, 'MaintenanceLock(');
-        $index = strpos($src, "web/dist/index.html");
+        $gate = strpos($src, 'MaintenanceLock(');
+        // Záměrně se hledá VÝDEJ souboru, ne cesta k němu — tu zmiňují i komentáře.
+        $serve = strpos($src, 'readfile($indexFile)');
 
         self::assertIsInt(
             $gate,
             'SPA fallback nemá bránu údržby — do Slim pipeline se nikdy nedostane, '
             . 'takže by v údržbě vydal normální aplikaci.',
         );
-        self::assertIsInt($index);
+        self::assertIsInt($serve, 'V index.php chybí výdej SPA entry.');
         self::assertLessThan(
-            $index,
+            $serve,
             $gate,
             'Brána údržby musí být nad vydáním web/dist/index.html, ne pod ním.',
         );
