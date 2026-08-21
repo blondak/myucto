@@ -8,11 +8,23 @@ import { purchaseInvoicesApi, type InboxScanResult } from '@/api/purchaseInvoice
 import { integrationsApi, type AnthropicCredentialsStatus } from '@/api/integrations'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
+import { useAuthStore } from '@/stores/auth'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const router = useRouter()
 const toast = useToast()
+const auth = useAuthStore()
+
+/**
+ * Spravovaná instalace (vzor Update.vue): cestu do souborového systému
+ * (`purchase_invoice.inbox_dir`) nastavuje provozovatel, ne uživatel — scan
+ * proto backend odmítá (409 `managed_installation`). Pojmenovaný box místo
+ * zmizelého tlačítka, ať je to vidět dřív, než uživatel klikne a dostane chybu.
+ * Bankovní strana (`ImportBank.vue`) tenhle problém nemá — `scan_configured`
+ * tam vrací false, takže se tlačítko skrývá jinou cestou.
+ */
+const isManaged = computed(() => auth.isManagedInstallation)
 
 // ── Upload (multipart, kind=purchase) ───────────────────────────────────────
 const files = ref<File[]>([])
@@ -202,21 +214,39 @@ async function runScan() {
             </div>
           </div>
 
-          <label class="inline-flex items-center gap-2 text-sm mb-3">
-            <input v-model="scanDryRun" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
-            <span>{{ t('purchase_invoice.scan_inbox.dry_run') }}</span>
-          </label>
+          <template v-if="!isManaged">
+            <label class="inline-flex items-center gap-2 text-sm mb-3">
+              <input v-model="scanDryRun" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+              <span>{{ t('purchase_invoice.scan_inbox.dry_run') }}</span>
+            </label>
 
-          <div class="flex gap-2">
-            <button
-              type="button"
-              @click="runScan"
-              :disabled="scanRunning"
-              :class="btnFilled('primary')"
-            >
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.inbox"/></svg>
-              {{ scanRunning ? t('purchase_invoice.scan_inbox.running') : t('purchase_invoice.scan_inbox.trigger') }}
-            </button>
+            <div class="flex gap-2">
+              <button
+                type="button"
+                @click="runScan"
+                :disabled="scanRunning"
+                :class="btnFilled('primary')"
+              >
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.inbox"/></svg>
+                {{ scanRunning ? t('purchase_invoice.scan_inbox.running') : t('purchase_invoice.scan_inbox.trigger') }}
+              </button>
+            </div>
+          </template>
+
+          <!--
+            Spravovaná instalace: místo tlačítka „Skenovat" pojmenovaná
+            informace (vzor Update.vue). Zmizelé tlačítko bez vysvětlení
+            vypadá jako rozbitá funkce.
+          -->
+          <div
+            v-else
+            class="rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 flex gap-2.5"
+          >
+            <svg class="w-4 h-4 mt-0.5 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
+            <div>
+              <div class="font-medium text-neutral-800">{{ t('purchase_invoice.scan_inbox.managed_title') }}</div>
+              <p class="mt-0.5">{{ t('purchase_invoice.scan_inbox.managed_desc') }}</p>
+            </div>
           </div>
         </div>
 

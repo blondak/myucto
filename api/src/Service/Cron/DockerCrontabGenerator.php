@@ -52,7 +52,14 @@ final class DockerCrontabGenerator
                 ? array_values(array_filter(CronCatalog::all(), static fn (array $j): bool => ($j['dispatcher_only'] ?? false) === true))
                 : CronCatalog::dispatchable();
         } else {
-            $jobs = $gate->schedulableJobs($mode);
+            // `schedulableJobs()` řeší jen restart-stabilní `requires_config`;
+            // explicitní vypnutí přes `cron.disabled_jobs` je nutné odfiltrovat
+            // navíc, jinak by se vypnutá úloha (spravovaná instalace) do
+            // vygenerovaného crontabu přesto dostala.
+            $jobs = array_values(array_filter(
+                $gate->schedulableJobs($mode),
+                static fn (array $j): bool => !$gate->isDisabledByConfig((string) $j['script']),
+            ));
         }
 
         $candidates = $mode === CronScheduleMode::DISPATCHER ? count($jobs) : count(CronCatalog::dispatchable());

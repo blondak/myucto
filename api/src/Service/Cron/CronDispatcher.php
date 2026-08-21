@@ -137,6 +137,15 @@ final class CronDispatcher
                 continue;
             }
 
+            // Admin/spravovaná instalace úlohu výslovně vypnula přes
+            // `cron.disabled_jobs` — to musí vyhrát nad vším ostatním (i nad
+            // "not_configured"), stejně jako v CronJobGate::inactiveReason().
+            // Vlastní důvod v reportu, ať je vidět, že jde o záměr, ne o poruchu.
+            if ($this->gate->isDisabledByConfig($script)) {
+                $report['skipped'][$script] = 'disabled_by_config';
+                continue;
+            }
+
             if (!$this->gate->isSchedulable($job)) {
                 $report['skipped'][$script] = 'not_configured';
                 continue;
