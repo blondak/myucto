@@ -108,7 +108,10 @@ final class DemoProvisioner
 
     private function assertSafeTarget(): void
     {
-        if ($this->config->get('demo.enabled', false) !== true) {
+        if (!(new \MyInvoice\Service\System\ManagedModeGuard($this->config))->effectiveFlag(
+            \MyInvoice\Service\System\ManagedModeGuard::KEY_DEMO_ENABLED,
+            $this->config->get('demo.enabled', false) === true,
+        )) {
             throw new \RuntimeException('Demo provisioning vyžaduje demo.enabled=true.');
         }
         $expectedDatabase = trim((string) $this->config->get('demo.expected_database', ''));

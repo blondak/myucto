@@ -604,9 +604,16 @@ final class Bootstrap
             \MyInvoice\Service\Epo\EpoClient::class => fn () => new \MyInvoice\Service\Epo\EpoClient(
                 null,
             ),
+            // ⚠️ `epo_test` prochází zámkem spravovaného režimu, a to PRÁVĚ TADY,
+            // protože tohle je jediné místo, které rozhoduje o skutečném prostředí.
+            // Zkušební prostředí daňové správy v ostré zákaznické instanci znamená
+            // tiše nepodaná hlášení — a poznat se to dá až po termínu.
             \MyInvoice\Service\Epo\EpoDirectClient::class => fn () => new \MyInvoice\Service\Epo\EpoDirectClient(
                 null,
-                $config->get('epo_test', false) ? 'test' : 'production',
+                (new \MyInvoice\Service\System\ManagedModeGuard($config))->effectiveFlag(
+                    \MyInvoice\Service\System\ManagedModeGuard::KEY_EPO_TEST,
+                    (bool) $config->get('epo_test', false),
+                ) ? 'test' : 'production',
             ),
 
             // IpMatcher má v konstruktoru volitelný `?Config $config = null`. Autowiring
@@ -789,7 +796,13 @@ final class Bootstrap
         $app->add(MaintenanceModeMiddleware::class);                 // 503 + Retry-After na vše kromě /api/health
         $app->add(new ApiVersionRewriteMiddleware());                // /api/v1/* → /api/* před vším ostatním
 
-        $displayErrors = (bool) $config->get('app.debug', false);
+        // Stack trace v odpovědích API na cizí infrastruktuře nemá co dělat,
+        // takže `app.debug` ve spravované instalaci neplatí, i kdyby se do
+        // konfigurace dostal.
+        $displayErrors = (new \MyInvoice\Service\System\ManagedModeGuard($config))->effectiveFlag(
+            \MyInvoice\Service\System\ManagedModeGuard::KEY_APP_DEBUG,
+            (bool) $config->get('app.debug', false),
+        );
         $app->addErrorMiddleware($displayErrors, true, true, $container->get(LoggerInterface::class));
 
         return $app;

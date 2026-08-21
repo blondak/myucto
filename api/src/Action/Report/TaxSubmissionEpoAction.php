@@ -413,7 +413,12 @@ final class TaxSubmissionEpoAction
                 }
             }
         }
-        return $this->config->get('epo_test', false) ? 'test' : 'production';
+        // Musí odpovídat tomu, co se skutečně použije v Bootstrapu — jinak by UI
+        // hlásilo „production" a podávalo se do zkušebního prostředí.
+        return (new \MyInvoice\Service\System\ManagedModeGuard($this->config))->effectiveFlag(
+            \MyInvoice\Service\System\ManagedModeGuard::KEY_EPO_TEST,
+            (bool) $this->config->get('epo_test', false),
+        ) ? 'test' : 'production';
     }
 
     private function nullableInt(mixed $value): ?int
