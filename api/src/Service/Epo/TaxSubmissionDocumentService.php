@@ -258,6 +258,26 @@ final class TaxSubmissionDocumentService
             $sha256,
         );
         if ($existing !== null) {
+            // Soubor je bajtově týž (klíčem je jeho hash), ale to, co o něm aplikace VÍ, se
+            // mohlo zpřesnit — odvozování metadat je kód a ten se vyvíjí. Bez přepisu by
+            // dodejka archivovaná starší verzí zůstala navždy bez podacího čísla i identity
+            // podepisujícího a detail podání by tvrdil, že v ní nic není.
+            $current = is_array($existing['verification'] ?? null) ? $existing['verification'] : null;
+            $wanted = $verification === [] ? null : $verification;
+            if (
+                $wanted !== null
+                && ($wanted !== $current
+                    || (string) ($existing['verification_status'] ?? '') !== $verificationStatus)
+            ) {
+                $this->epo->refreshArtifactVerification(
+                    (int) $existing['id'],
+                    $supplierId,
+                    $verificationStatus,
+                    $wanted,
+                );
+                $existing['verification'] = $wanted;
+                $existing['verification_status'] = $verificationStatus;
+            }
             return $existing;
         }
 

@@ -209,6 +209,64 @@ final class TaxSubmissionEpoRepositoryTest extends TestCase
         ));
     }
 
+    /**
+     * Metadata artefaktu se dají zpřesnit i u souboru, který už v archivu je.
+     *
+     * Klíčem je hash obsahu, takže tentýž soubor se podruhé nezaloží — jenže to, co o něm
+     * aplikace VÍ, se odvozuje kódem a ten se vyvíjí. Dodejka archivovaná dřív, než uměla
+     * aplikace vytáhnout podací číslo a identitu podepisujícího, by jinak zůstala navždy
+     * bez nich a detail podání by tvrdil, že v ní nic není. Přesně to nastalo v ostrém
+     * provozu u prvního kontrolního hlášení.
+     */
+    public function testArtifactVerificationCanBeRefreshedForAnAlreadyStoredFile(): void
+    {
+        $xml = '<?xml version="1.0"?><Pisemnost nazevSW="refresh"/>';
+        $submissionId = $this->submissions->archive(
+            $this->supplierId,
+            'dphkh1',
+            2020,
+            9,
+            null,
+            $xml,
+            [],
+            'passed',
+            [],
+            $this->userId,
+            'B',
+            'downloaded',
+        );
+        $sha = hash('sha256', 'synthetic-confirmation-xml');
+        $artifactId = $this->epo->addArtifact(
+            $this->supplierId,
+            $submissionId,
+            null,
+            $this->insertDocument('confirmation.xml', $sha),
+            'confirmation_xml',
+            $sha,
+            'valid',
+            // Stav "z dřívější verze": soubor tam je, ale nic se z něj nevyčetlo.
+            ['derived_from' => 'confirmation_p7s'],
+            $this->userId,
+        );
+
+        $this->epo->refreshArtifactVerification(
+            $artifactId,
+            $this->supplierId,
+            'valid',
+            ['derived_from' => 'confirmation_p7s', 'receipt' => ['reference' => '568467011', 'zarep' => true]],
+        );
+
+        $stored = array_column($this->epo->artifacts($submissionId, $this->supplierId), null, 'id');
+        self::assertArrayHasKey($artifactId, $stored);
+        self::assertSame('valid', $stored[$artifactId]['verification_status']);
+        self::assertSame(
+            '568467011',
+            $stored[$artifactId]['verification']['receipt']['reference'] ?? null,
+            'Doplněné shrnutí musí být čitelné z artefaktu.'
+        );
+        self::assertTrue($stored[$artifactId]['verification']['receipt']['zarep'] ?? false);
+    }
+
     public function testSubmittedSnapshotCountsAsEvidenceWithoutAttempt(): void
     {
         $submissionId = $this->submissions->archive(

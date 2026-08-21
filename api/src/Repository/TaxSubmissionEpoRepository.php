@@ -596,6 +596,37 @@ final class TaxSubmissionEpoRepository
         );
     }
 
+    /**
+     * Přepíše výsledek ověření u JIŽ ULOŽENÉHO artefaktu.
+     *
+     * Soubor se nemění (klíč je hash obsahu), mění se to, co o něm aplikace ví. Metadata
+     * se totiž odvozují kódem, a ten se vyvíjí: dodejka archivovaná dřív, než uměla
+     * aplikace vytáhnout podací číslo nebo identitu podepisujícího, by jinak zůstala
+     * navždy bez nich a detail podání by tvářil, že v ní nic není.
+     *
+     * @param array<string,mixed>|null $verification
+     */
+    public function refreshArtifactVerification(
+        int $artifactId,
+        int $supplierId,
+        string $verificationStatus,
+        ?array $verification,
+    ): void {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE tax_submission_artifacts
+                SET verification_status = ?, verification_json = ?
+              WHERE id = ? AND supplier_id = ?'
+        );
+        $stmt->execute([
+            $verificationStatus,
+            $verification === null || $verification === []
+                ? null
+                : json_encode($verification, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            $artifactId,
+            $supplierId,
+        ]);
+    }
+
     public function addArtifact(
         int $supplierId,
         int $submissionId,

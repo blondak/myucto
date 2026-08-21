@@ -487,6 +487,34 @@ final class EpoDirectSubmissionService
             true,
             $environment,
         );
+        // „Obnovit stav" srovná i ODVOZENÉ soubory z dodejky. Aplikace je umí vytáhnout až
+        // od jisté verze, takže podání archivovaná dřív mají v Dokumentech buď jen samotnou
+        // P7S, nebo rozbalené části bez shrnutí. Doplnit se to nemá jak jinak: archivace
+        // běží pouze při potvrzování a to už u hotového podání znovu neproběhne.
+        // Idempotentní — stejné soubory se podle hashe nezaloží podruhé.
+        if (
+            (string) $attempt['status'] === 'confirmed'
+            && !empty($attempt['confirmation_ciphertext'])
+        ) {
+            try {
+                $this->archiveConfirmationParts(
+                    $this->decryptBinaryPayload(
+                        (string) $attempt['confirmation_ciphertext'],
+                        'confirmation_recovery_failed',
+                        'Bezpečně uložené potvrzení EPO nelze obnovit.',
+                        'epo:confirmation',
+                    ),
+                    $submission,
+                    $supplierId,
+                    $attemptId,
+                    $userId,
+                    $environment,
+                );
+            } catch (\Throwable) {
+                // Doplnění příloh je pohodlí, ne důkaz — potvrzené podání kvůli němu neshodíme.
+            }
+        }
+
         if (
             (string) $attempt['status'] === 'uncertain'
             && in_array(
