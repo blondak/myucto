@@ -11,6 +11,7 @@ use MyInvoice\Repository\EpoSigningCredentialRepository;
 use MyInvoice\Repository\TaxSubmissionEpoRepository;
 use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Epo\EpoConfirmationExtractor;
 use MyInvoice\Service\Epo\EpoDirectClient;
 use MyInvoice\Service\Epo\EpoDirectResponseParser;
 use MyInvoice\Service\Epo\EpoDirectSubmissionService;
@@ -265,6 +266,7 @@ final class EpoDirectSubmissionRepositoryTest extends TestCase
             $this->container->get(EpoDirectResponseParser::class),
             $this->container->get(TaxSubmissionDocumentService::class),
             $this->container->get(SecretEncryption::class),
+            $this->container->get(EpoConfirmationExtractor::class),
         );
 
         try {

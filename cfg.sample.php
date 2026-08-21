@@ -46,7 +46,14 @@ return [
         // Pečeť EPO vydává I.CA (CN=I.CA EU Qualified CA2/RSA, O=První certifikační
         // autorita, a.s.); přiložený bundle drží kořeny i podřízené CA I.CA
         // a PostSignum. Cesta je relativní ke kořeni aplikace.
-        // Je-li vyplněn a soubor chybí, ověření selže uzavřeně; jinak se použije systémový CA store.
+        //
+        // Tuhle hodnotu už nese i baseline default v Config.php, takže instalace, která
+        // sekci `epo` vůbec nemá, ověří dodejku správně. Uvedená je tu pro přehlednost
+        // a jako místo, kam sáhnout, když má provozovatel vlastní bundle.
+        //
+        // POZOR fail-closed: je-li cesta vyplněná a soubor chybí, ověření selže a
+        // NESPADNE zpět na systémový CA store. Aplikace to hlásí jako chybu konfigurace
+        // (`confirmation_trust_store_unavailable`), ne jako vadnou dodejku.
         'ca_bundle_path' => 'api/resources/epo/epo-ca-bundle.pem',
         // SHA-256 otisky právě platných podpisových certifikátů dodejek EPO.
         // Při vyplnění musí sedět jak identita GFŘ v certifikátu, tak jeden z otisků.

@@ -8,6 +8,10 @@ export type AttemptStatus =
   | 'submitted' | 'rejected' | 'uncertain' | 'failed' | 'expired' | 'cancelled'
 export type ArtifactKind =
   | 'source_xml' | 'epo_xml' | 'signed_submission_p7s' | 'confirmation_p7s'
+  // Odvozené z potvrzenky přímého podání — aplikace je vytáhne sama, u asistovaného
+  // podání je uživatel nahrává ručně přes „Nahrát výstupy z EPO".
+  | 'confirmation_xml' | 'epo_echo'
+  | 'confirmation_signer_cert' | 'submission_signer_cert'
   | 'epo_error_xml' | 'epo_status_xml' | 'receipt_pdf' | 'other'
 export type VerificationStatus = 'not_applicable' | 'pending' | 'valid' | 'warning' | 'invalid'
 

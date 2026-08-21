@@ -296,6 +296,23 @@ final class EpoDirectResponseParser
         }
     }
 
+    /**
+     * Je nakonfigurovaný trust store nedostupný?
+     *
+     * `epo.ca_bundle_path` je záměrně fail-closed — nastavená, ale chybějící cesta NESMÍ
+     * propadnout na jiný trust store. Jenže výsledek je pak k nerozeznání od skutečně
+     * vadné potvrzenky: účetní vidí „potvrzení se nepodařilo bezpečně ověřit" u podání,
+     * které správce daně bez potíží přijal, a hrozí, že ho ze strachu odešle podruhé.
+     *
+     * Volající proto tuhle příčinu rozliší a pojmenuje ji jako chybu KONFIGURACE.
+     */
+    public function trustStoreUnavailable(): bool
+    {
+        return $this->caBundlePath !== null
+            && trim($this->caBundlePath) !== ''
+            && $this->caInfo() === [];
+    }
+
     /** @return list<string> */
     private function caInfo(): array
     {

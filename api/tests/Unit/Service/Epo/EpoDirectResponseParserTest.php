@@ -220,6 +220,34 @@ XML;
         self::assertTrue($result['chain_valid']);
     }
 
+    /**
+     * Nastavený, ale chybějící `epo.ca_bundle_path` je chyba KONFIGURACE, ne vadná dodejka.
+     *
+     * Reálný případ z produkce: cesta k bundlu se nastavila dřív, než na server dorazil
+     * samotný soubor. Ověření řetězce správně selhalo fail-closed, jenže výsledek byl
+     * k nerozeznání od zfalšované potvrzenky — účetní viděla „potvrzení se nepodařilo
+     * bezpečně ověřit" u kontrolního hlášení, které správce daně přijal, a odeslat ho
+     * podruhé by znamenalo duplicitní podání.
+     */
+    public function testReportsConfiguredTrustStoreAsUnavailableWhenFileIsMissing(): void
+    {
+        $missing = sys_get_temp_dir() . '/epo-ca-bundle-neexistuje-' . bin2hex(random_bytes(6)) . '.pem';
+        self::assertFileDoesNotExist($missing);
+
+        self::assertTrue(
+            (new EpoDirectResponseParser($missing))->trustStoreUnavailable(),
+            'Nastavená cesta bez souboru musí být hlášená jako nedostupný trust store.'
+        );
+        self::assertFalse(
+            (new EpoDirectResponseParser($this->lastCertificatePath))->trustStoreUnavailable(),
+            'Dostupný bundle nedostupný není.'
+        );
+        self::assertFalse(
+            (new EpoDirectResponseParser())->trustStoreUnavailable(),
+            'Bez nastavené cesty se používá systémový store — to není chyba konfigurace.'
+        );
+    }
+
     public function testRecognizesSandboxSignerOnlyInTestEnvironment(): void
     {
         if (!function_exists('openssl_cms_sign')) {

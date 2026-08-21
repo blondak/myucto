@@ -55,6 +55,7 @@ final class EpoDirectSubmissionService
         private readonly EpoDirectResponseParser $parser,
         private readonly TaxSubmissionDocumentService $documents,
         private readonly SecretEncryption $crypto,
+        private readonly EpoConfirmationExtractor $confirmationExtractor,
     ) {}
 
     /** @return array<string,mixed> */
@@ -488,7 +489,14 @@ final class EpoDirectSubmissionService
         );
         if (
             (string) $attempt['status'] === 'uncertain'
-            && (string) ($attempt['error_code'] ?? '') === 'invalid_confirmation'
+            && in_array(
+                (string) ($attempt['error_code'] ?? ''),
+                // `confirmation_trust_store_unavailable` je tatáž situace, jen s pojmenovanou
+                // příčinou na naší straně — po doplnění CA bundlu se pokus dotáhne ze stejně
+                // uložené potvrzenky, bez opakovaného odeslání.
+                ['invalid_confirmation', 'confirmation_trust_store_unavailable'],
+                true,
+            )
             && !empty($attempt['confirmation_ciphertext'])
             && !empty($attempt['submitted_signed_ciphertext'])
         ) {
@@ -1042,13 +1050,20 @@ final class EpoDirectSubmissionService
             || !$verification['epo_signer_valid']
             || !$verification['is_confirmation']
         ) {
-            $this->direct->setStatus(
-                $attemptId,
-                'uncertain',
-                $httpStatus,
-                'invalid_confirmation',
-                'EPO vrátilo potvrzení, které se nepodařilo bezpečně ověřit.',
-            );
+            // Nastavený, ale nedostupný `epo.ca_bundle_path` vypadá navlas stejně jako vadná
+            // potvrzenka — ověření řetězce selže fail-closed a hláška mlčí o tom, že chyba
+            // je na naší straně. Účetní pak řeší „přijal to finanční úřad?" u podání, které
+            // je dávno podané, a hrozí, že ho ze strachu odešle podruhé. Konfigurační
+            // příčinu proto pojmenujeme zvlášť; stav zůstává `uncertain`, protože po nápravě
+            // se pokus dotáhne přes „Obnovit stav" ze stejně uložené potvrzenky.
+            $misconfigured = $this->parser->trustStoreUnavailable();
+            $errorCode = $misconfigured ? 'confirmation_trust_store_unavailable' : 'invalid_confirmation';
+            $message = $misconfigured
+                ? 'Potvrzení EPO nelze ověřit, protože nastavený CA bundle (epo.ca_bundle_path)'
+                    . ' na serveru chybí. Podání je pravděpodobně přijaté — NEODESÍLEJTE ho znovu.'
+                    . ' Doplňte soubor a použijte „Obnovit stav".'
+                : 'EPO vrátilo potvrzení, které se nepodařilo bezpečně ověřit.';
+            $this->direct->setStatus($attemptId, 'uncertain', $httpStatus, $errorCode, $message);
             $this->event(
                 $supplierId,
                 (int) $submission['id'],
@@ -1062,12 +1077,13 @@ final class EpoDirectSubmissionService
                     'epo_signer_valid' => $verification['epo_signer_valid'],
                     'is_confirmation' => $verification['is_confirmation'],
                     'content_match' => $verification['content_match'],
+                    'trust_store_unavailable' => $misconfigured,
                 ],
                 $userId,
             );
             throw new EpoSubmissionException(
-                'invalid_confirmation',
-                'EPO vrátilo potvrzení, které se nepodařilo bezpečně ověřit.',
+                $errorCode,
+                $message,
                 502,
                 ['attempt_id' => $attemptId],
             );
@@ -1132,6 +1148,14 @@ final class EpoDirectSubmissionService
                 ['attempt_id' => $attemptId],
             );
         }
+        $this->archiveConfirmationParts(
+            $confirmationBytes,
+            $submission,
+            $supplierId,
+            $attemptId,
+            $userId,
+            $environment,
+        );
         if (!$contentVerified) {
             $this->direct->setStatus(
                 $attemptId,
@@ -1194,6 +1218,86 @@ final class EpoDirectSubmissionService
             'artifacts' => $this->epo->artifacts((int) $submission['id'], $supplierId),
             'attempts' => $this->epo->attempts((int) $submission['id'], $supplierId),
         ];
+    }
+
+    /**
+     * Rozbalí dodejku a uloží její čitelné části k podání.
+     *
+     * U asistovaného podání nahraje účetní tyhle soubory ručně přes „Nahrát výstupy
+     * z EPO"; u přímého je aplikace umí vytáhnout sama, takže by bylo divné nechat
+     * uživatele otevírat binární P7S v hex editoru.
+     *
+     * BEST-EFFORT ZÁMĚRNĚ: právně rozhodující doklad o přijetí je P7S, a ta je v tomhle
+     * místě už archivovaná. Kdyby selhání DOPROVODNÉHO souboru shodilo potvrzené podání
+     * do „nejistého" stavu, vyrobili bychom si paniku kvůli příloze. Neúspěch se proto
+     * jen zaznamená do auditu a pokus doběhne.
+     *
+     * @param array<string,mixed> $submission
+     */
+    private function archiveConfirmationParts(
+        string $confirmationBytes,
+        array $submission,
+        int $supplierId,
+        int $attemptId,
+        ?int $userId,
+        string $environment,
+    ): void {
+        try {
+            $parts = $this->confirmationExtractor->extract($confirmationBytes);
+        } catch (\Throwable) {
+            $parts = [];
+        }
+
+        // Přípona echa se řídí tím, co v něm SKUTEČNĚ je: ověřené je hexem kódované XML
+        // u kontrolního hlášení, ale u DPH přiznání, souhrnného hlášení či DPPO může EPO
+        // vrátit jinou obálku (base64, ZIP). Natvrdo `.xml` by u takového souboru lhalo.
+        $echo = $parts['echo'] ?? null;
+        $files = [
+            // suffix                  => [artifact_kind, obsah]
+            'confirmation.xml'         => ['confirmation_xml', $parts['confirmation_xml'] ?? null],
+            'epo-echo.' . (is_array($echo) ? $echo['suffix'] : 'xml')
+                                       => ['epo_echo', is_array($echo) ? $echo['bytes'] : null],
+            'epo-seal.pem'             => ['confirmation_signer_cert', $parts['seal_certificate_pem'] ?? null],
+            'signing-certificate.pem'  => ['submission_signer_cert', $parts['submission_certificate_pem'] ?? null],
+        ];
+
+        $stored = [];
+        $failed = [];
+        foreach ($files as $suffix => [$kind, $bytes]) {
+            if (!is_string($bytes) || $bytes === '') {
+                $failed[] = $kind;
+                continue;
+            }
+            try {
+                $this->documents->storeGeneratedArtifact(
+                    $bytes,
+                    $this->filename($submission, $attemptId, $suffix),
+                    $kind,
+                    $submission,
+                    $supplierId,
+                    $attemptId,
+                    $userId,
+                    'valid',
+                    ['derived_from' => 'confirmation_p7s', 'epo_environment' => $environment],
+                );
+                $stored[] = $kind;
+            } catch (\Throwable) {
+                $failed[] = $kind;
+            }
+        }
+
+        if ($failed !== []) {
+            $this->event(
+                $supplierId,
+                (int) $submission['id'],
+                $attemptId,
+                'confirmation_parts_incomplete',
+                'confirmed',
+                null,
+                ['stored' => $stored, 'failed' => $failed],
+                $userId,
+            );
+        }
     }
 
     /** @param array<string,mixed> $submission */

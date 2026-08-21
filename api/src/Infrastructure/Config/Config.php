@@ -206,7 +206,13 @@ final class Config
         return [
             'epo_test' => false,
             'epo' => [
-                'ca_bundle_path' => '',
+                // Bundle se nasazuje spolu s aplikací, takže výchozí instalace ověří pečeť
+                // dodejky bez jakéhokoli setupu. Prázdná hodnota tady byla past: ostré podání
+                // platný řetězec VYŽADUJE, systémový CA store (bundle pro TLS) žádnou českou
+                // kvalifikovanou autoritu neobsahuje, a tak reálně podaný výkaz skončil jako
+                // `uncertain`. Cesta je relativní ke kořeni aplikace; kdo má vlastní bundle,
+                // přebije ji v cfg.php.
+                'ca_bundle_path' => 'api/resources/epo/epo-ca-bundle.pem',
                 'receipt_signer_fingerprints_sha256' => [],
                 'test_receipt_signer_fingerprints_sha256' => [],
             ],
