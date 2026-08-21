@@ -341,6 +341,7 @@ final class TenantDataRegistryFactory
             ...TenantDataBankMatchingCatalog::definitions(),
             ...TenantDataBankAutomationCatalog::definitions(),
             ...TenantDataStatementCatalog::definitions(),
+            ...TenantDataJournalCatalog::definitions(),
             ...TenantDataBusinessCatalog::definitions(),
             ...TenantDataPurchaseOrderCatalog::definitions(),
             ...TenantDataEshopCatalog::definitions(),
@@ -678,6 +679,12 @@ final class TenantDataRegistryFactory
             'chart_of_accounts' => [
                 'strategy' => 'tenant_natural_key',
                 'keys' => ['supplier_id', 'account_code'],
+                'missing_row' => 'create_with_mapped_tenant',
+                'existing_row' => 'reuse_target_id_and_apply_source',
+            ],
+            'cost_centers' => [
+                'strategy' => 'tenant_natural_key',
+                'keys' => ['supplier_id', 'code'],
                 'missing_row' => 'create_with_mapped_tenant',
                 'existing_row' => 'reuse_target_id_and_apply_source',
             ],

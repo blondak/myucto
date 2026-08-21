@@ -42,6 +42,7 @@ final class TenantDataNaturalKeyReferenceCoverageValidator
             }
 
             $sourceScope = $reference['source_scope_column'] ?? null;
+            $inheritedScope = $reference['source_scope'] ?? null;
             $sourceColumns = $this->identifierList(
                 $reference['source_columns'] ?? null,
             );
@@ -50,8 +51,16 @@ final class TenantDataNaturalKeyReferenceCoverageValidator
             $targetColumns = $this->identifierList(
                 $reference['target_columns'] ?? null,
             );
-            if (!is_string($sourceScope)
-                || !$this->isIdentifier($sourceScope)
+            $usesDirectScope = is_string($sourceScope)
+                && $this->isIdentifier($sourceScope)
+                && !array_key_exists('source_scope', $reference);
+            $usesInheritedScope = !array_key_exists(
+                'source_scope_column',
+                $reference,
+            ) && $inheritedScope === [
+                'strategy' => 'ownership_tenant',
+            ];
+            if ((!$usesDirectScope && !$usesInheritedScope)
                 || !is_string($targetTable)
                 || !$this->isIdentifier($targetTable)
                 || !is_string($targetScope)
@@ -64,11 +73,17 @@ final class TenantDataNaturalKeyReferenceCoverageValidator
                 continue;
             }
 
-            if (!in_array($sourceScope, $table->columns, true)) {
+            if ($usesDirectScope
+                && !in_array($sourceScope, $table->columns, true)
+            ) {
                 $issues[] = 'natural_key_reference_source_column_missing:'
                     . $prefix . '.' . $sourceScope;
             }
-            if ($this->ownershipColumn($definition) !== $sourceScope) {
+            if (($usesDirectScope
+                    && $this->ownershipColumn($definition) !== $sourceScope)
+                || ($usesInheritedScope
+                    && !$this->hasTenantOwnershipPath($definition))
+            ) {
                 $issues[] = 'natural_key_reference_source_scope_mismatch:'
                     . $prefix;
             }
@@ -183,6 +198,33 @@ final class TenantDataNaturalKeyReferenceCoverageValidator
         }
         $column = $ownership['column'] ?? null;
         return is_string($column) ? $column : null;
+    }
+
+    private function hasTenantOwnershipPath(
+        TenantDataDefinition $definition,
+    ): bool {
+        if ($definition->policy !== TenantDataPolicy::TenantOwnedIndirect) {
+            return false;
+        }
+        $ownership = $definition->details['ownership'] ?? null;
+        $path = is_array($ownership) ? ($ownership['path'] ?? null) : null;
+        if (!is_array($ownership)
+            || !in_array(
+                $ownership['strategy'] ?? null,
+                ['foreign_key_path', 'soft_reference_path'],
+                true,
+            )
+            || !is_array($path)
+            || !array_is_list($path)
+            || $path === []
+        ) {
+            return false;
+        }
+        $root = $path[array_key_last($path)];
+        return is_array($root)
+            && !array_is_list($root)
+            && ($root['to_table'] ?? null) === 'supplier'
+            && ($root['to_column'] ?? null) === 'id';
     }
 
     /** @param list<string> $targetKey */
