@@ -34,3 +34,8 @@ api/resources/payroll/cz-isco/**/*.json text eol=lf
 # seděl jen na Windows checkoutu a v Linuxovém CI padal na koncích řádků.
 api/resources/payroll/cssz-insurance-rates/**/*.csv -text -diff
 api/resources/payroll/cssz-insurance-rates/SHA256SUMS text eol=lf
+
+# CA bundle pro ověření pečeti dodejek EPO je vendorovaný artefakt stažený
+# z I.CA a PostSignum. Konce řádků drží tak, jak přišly, a do diffů nepatří —
+# je to 500 řádků base64, ne text k revizi.
+api/resources/epo/*.pem -text -diff
