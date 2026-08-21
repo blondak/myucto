@@ -337,6 +337,7 @@ final class TenantDataRegistryFactory
             ...TenantDataDocumentCatalog::definitions(),
             ...TenantDataDocumentIntakeCatalog::definitions(),
             ...TenantDataAiCatalog::definitions(),
+            ...TenantDataJobCatalog::definitions(),
             ...TenantDataBusinessCatalog::definitions(),
             ...TenantDataPurchaseOrderCatalog::definitions(),
             ...TenantDataEshopCatalog::definitions(),
@@ -546,6 +547,11 @@ final class TenantDataRegistryFactory
                         'ai_assist_enabled' => false,
                         'ai_pseudo_salt' => null,
                         'ai_dpa_confirmations' => null,
+                    ],
+                    'state_transforms' => [
+                        'accounting_activation_status' => [
+                            'running' => 'failed',
+                        ],
                     ],
                 ],
             ],
