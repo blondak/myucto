@@ -54,6 +54,11 @@ Automaticky vytvořené názvy obsahují formulář, období, ID archivního sna
 vygenerování DPH za stejné čtvrtletí ani opakovaný stavový dokument proto
 nepřepíše předchozí soubor.
 
+Z dodejky P7S se — bez ohledu na to, jestli dorazila z API, nebo ji účetní nahrála
+ručně — ukládají i její rozbalené části: čitelný přepis potvrzení, echo podání tak,
+jak si ho eviduje finanční správa, certifikát pečeti a certifikát podepisující osoby.
+Díky tomu jde podpis ověřit i za několik let, až vydávající autorita certifikát vymění.
+
 Přímé rozhraní automaticky uloží podepsaný odchozí balíček, XML odpovědi a
 vrácené potvrzení P7S. Dokumentované odesílací API neposkytuje ZFO ani
 renderovaný PDF opis. PDF nebo P7S/P7M získané později z portálu lze přidat
@@ -318,12 +323,32 @@ zastoupení, funkci nebo plné moci.
    poté podání odešli.
 6. Z EPO stáhni odeslané XML a potvrzení. Přetáhni je do vyznačené plochy
    detailu podání; složka v Dokumentech se vytvoří automaticky.
-7. U podporovaného podepsaného potvrzení aplikace ověří dostupné vlastnosti
-   podpisu a vazbu na archivovaný formulář. Protože samotný důvěryhodný
-   certifikační řetězec ještě neprokazuje identitu EPO pečeti, po kontrole
-   doručenky označ snapshot jako odeslaný ručně.
-8. Teprve potvrzené podání používej jako poslední známý stav pro další opravné
+7. Z nahrané dodejky (`.p7s`/`.p7m`) aplikace ověří podpis, vazbu na archivovaný
+   formulář a přečte její obsah — stejně jako u přímého podání. Dodejku rozbalí
+   na čitelné části (přepis potvrzení, echo podání, certifikát pečeti i podepisující
+   osoby) a v detailu podání ukáže shrnutí: podací číslo, rozhodný čas, příznak
+   ZAREP, kontrolní součet odeslaného souboru, kód finančního úřadu a identitu
+   pečeti. Podací číslo a čas zároveň předvyplní do formuláře **Označit jako
+   podané** — potvrzení zůstává tvým úkonem, aplikace ho jen neuhádne za tebe.
+8. Spolu s tím si aplikace z dodejky převezme **heslo pro dotaz na stav** a uloží
+   ho zašifrované k předání. Díky tomu je i u asistovaného podání dostupné
+   **Obnovit stav** (dotaz na `epo_stav`) a odhalení hesla pro opis na Daňovém
+   portálu — to je samostatná akce se silným ověřením a záznamem v auditu.
+9. Teprve potvrzené podání používej jako poslední známý stav pro další opravné
    nebo dodatečné tvrzení.
+
+> [!NOTE]
+> **PDF opis podání se čte jen jako nápověda.** Pokud z portálu odneseš pouze tisk,
+> aplikace se z jeho textové vrstvy pokusí přečíst podací číslo a čas a předvyplní
+> jimi formulář — panel u toho výslovně říká, že jde o odečtený text, ne o podepsaný
+> důkaz. Heslo pro dotaz na stav v tisku není, takže dotaz na stav odemkne až dodejka.
+> U skenovaného PDF bez textové vrstvy se soubor jen archivuje.
+
+> [!TIP]
+> **Nahrané XML aplikace porovná s archivovaným snapshotem.** Když se otisky
+> neshodují, nezůstane u konstatování „neodpovídá": vypíše počet rozdílných údajů,
+> případně upozorní, že jde o úplně jiný formulář. Rozdíl v hodnotě znamená, že se
+> podání v EPO upravovalo a archiv už neodpovídá tomu, co bylo podáno.
 
 Odkaz vrácený EPO si ponechá jen aktuální prohlížeč — server ho neukládá do
 databáze ani do logu. Odkaz je **jednorázový**: portál jej spotřebuje prvním

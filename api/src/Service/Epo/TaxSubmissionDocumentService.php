@@ -23,6 +23,8 @@ final class TaxSubmissionDocumentService
         private readonly DocumentIngestService $ingest,
         private readonly DocumentStorage $storage,
         private readonly EpoConfirmationParser $confirmationParser,
+        private readonly EpoSubmissionXmlComparator $xmlComparator,
+        private readonly EpoReceiptPdfReader $pdfReader,
     ) {}
 
     /**
@@ -140,8 +142,19 @@ final class TaxSubmissionDocumentService
     }
 
     /**
+     * Uloží ručně nahraný výstup z EPO a přečte z něj, co jde.
+     *
+     * `confirmation` v odpovědi nese to, co dodejka DOKAZUJE (podací číslo, rozhodný čas
+     * a heslo pro dotaz na stav), `hint` naopak jen to, co se povedlo VYČÍST z tisku
+     * (PDF opis). Rozdíl je podstatný: podle prvního se smí posunout stav pokusu, druhé
+     * slouží výhradně k předvyplnění formuláře.
+     *
      * @param array<string,mixed> $submission
-     * @return array{artifact:array<string,mixed>}
+     * @return array{
+     *   artifact:array<string,mixed>,
+     *   confirmation:?array<string,mixed>,
+     *   hint:?array<string,mixed>
+     * }
      */
     public function ingestArtifact(
         string $tmpPath,
@@ -150,6 +163,7 @@ final class TaxSubmissionDocumentService
         int $supplierId,
         ?int $attemptId,
         ?int $userId,
+        string $environment = 'production',
     ): array {
         $kind = $this->artifactKind($originalName);
         $sha256 = hash_file('sha256', $tmpPath);
@@ -163,24 +177,64 @@ final class TaxSubmissionDocumentService
             $sha256,
         );
         if ($existing !== null) {
+            // Týž soubor podruhé. Metadata z něj už jednou přečtená leží u artefaktu,
+            // takže se znovu neparsuje — ale to, co z nich potřebuje volající, se vrátí
+            // i teď: účetní, která dodejku nahraje podruhé, musí dostat stejné předvyplnění.
             @unlink($tmpPath);
-            return ['artifact' => $existing];
+            return [
+                'artifact' => $existing,
+                'confirmation' => $this->confirmationFromExisting($existing),
+                'hint' => $this->hintFromExisting($existing),
+            ];
         }
 
         $verification = null;
         $verificationStatus = 'not_applicable';
+        $confirmation = null;
+        $hint = null;
         if ($kind === 'confirmation_p7s') {
             $verification = $this->confirmationParser->parse(
                 $tmpPath,
                 (string) $submission['xml_content'],
                 (string) $submission['form_code'],
+                $environment,
             );
+            // Heslo pro dotaz na stav se do metadat artefaktu NESMÍ dostat — ta API vrací
+            // u KAŽDÉHO souboru v seznamu. Volající si ho odsud vezme a uloží zvlášť,
+            // zašifrované ({@see \MyInvoice\Service\Epo\EpoAssistedConfirmationService}).
+            $statePassword = $verification['state_password'];
+            unset($verification['state_password']);
+            $verification['epo_environment'] = $environment;
             $verificationStatus = $this->verificationStatus($verification);
-        } elseif ($kind === 'epo_xml') {
-            $verification = [
-                'snapshot_sha256_match' => hash_equals((string) $submission['xml_sha256'], $sha256),
+            $confirmation = [
+                'reference' => $verification['reference'],
+                'submitted_at' => $verification['submitted_at'],
+                'state_password' => is_string($statePassword) && $statePassword !== ''
+                    ? $statePassword
+                    : null,
+                'verification_status' => $verificationStatus,
+                'is_confirmation' => (bool) $verification['is_confirmation'],
+                'receipt' => $verification['receipt'] ?? [],
             ];
-            $verificationStatus = $verification['snapshot_sha256_match'] ? 'valid' : 'warning';
+        } elseif ($kind === 'epo_xml') {
+            $snapshotMatch = hash_equals((string) $submission['xml_sha256'], $sha256);
+            $verification = ['snapshot_sha256_match' => $snapshotMatch];
+            if (!$snapshotMatch) {
+                // Samotná neshoda otisku je slepá ulička — teprve rozdíl po položkách
+                // ukáže, jestli se v EPO upravila hodnota (pak snapshot neodpovídá
+                // podanému), nebo jestli byl nahrán soubor od jiného podání.
+                $verification['diff'] = $this->xmlComparator->compare(
+                    (string) $submission['xml_content'],
+                    (string) file_get_contents($tmpPath),
+                );
+            }
+            $verificationStatus = $snapshotMatch ? 'valid' : 'warning';
+        } elseif ($kind === 'receipt_pdf') {
+            $read = $this->pdfReader->read($tmpPath);
+            if ($read['reference'] !== null || $read['submitted_at'] !== null) {
+                $hint = $read;
+                $verification = ['hint' => $read];
+            }
         }
 
         $folderId = $this->ensureSubmissionFolder($submission, $supplierId, $userId);
@@ -228,7 +282,44 @@ final class TaxSubmissionDocumentService
             $sha256,
         ) ?? ['document_id' => $documentId, 'folder_id' => $folderId];
 
-        return ['artifact' => $artifact];
+        return ['artifact' => $artifact, 'confirmation' => $confirmation, 'hint' => $hint];
+    }
+
+    /**
+     * Co o dodejce víme z DŘÍV uloženého artefaktu. Heslo pro dotaz na stav mezi tím
+     * není a být nemůže — do metadat se zásadně neukládá, takže opakované nahrání téhož
+     * souboru umí předvyplnit formulář, ale heslo doplní jen to první.
+     *
+     * @param array<string,mixed> $artifact
+     * @return array<string,mixed>|null
+     */
+    private function confirmationFromExisting(array $artifact): ?array
+    {
+        if ((string) ($artifact['artifact_kind'] ?? '') !== 'confirmation_p7s') {
+            return null;
+        }
+        $verification = is_array($artifact['verification'] ?? null) ? $artifact['verification'] : [];
+        if ($verification === []) {
+            return null;
+        }
+        return [
+            'reference' => $verification['reference'] ?? null,
+            'submitted_at' => $verification['submitted_at'] ?? null,
+            'state_password' => null,
+            'verification_status' => (string) ($artifact['verification_status'] ?? 'not_applicable'),
+            'is_confirmation' => (bool) ($verification['is_confirmation'] ?? false),
+            'receipt' => is_array($verification['receipt'] ?? null) ? $verification['receipt'] : [],
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $artifact
+     * @return array<string,mixed>|null
+     */
+    private function hintFromExisting(array $artifact): ?array
+    {
+        $verification = is_array($artifact['verification'] ?? null) ? $artifact['verification'] : [];
+        return is_array($verification['hint'] ?? null) ? $verification['hint'] : null;
     }
 
     /**
@@ -242,7 +333,7 @@ final class TaxSubmissionDocumentService
         string $kind,
         array $submission,
         int $supplierId,
-        int $attemptId,
+        ?int $attemptId,
         ?int $userId,
         string $verificationStatus = 'not_applicable',
         ?array $verification = null,
@@ -380,7 +471,7 @@ final class TaxSubmissionDocumentService
         return $this->ingest->ensureFolderPath($supplierId, $root, $segments, $userId);
     }
 
-    private function artifactKind(string $filename): string
+    public function artifactKind(string $filename): string
     {
         $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
         return match ($ext) {

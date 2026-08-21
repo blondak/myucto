@@ -558,18 +558,57 @@ final class EpoDirectSubmissionRepository
         )->execute([$status, $submissionId, $supplierId]);
     }
 
-    /** @return array<string,mixed>|null */
-    public function findAttempt(int $attemptId, int $submissionId, int $supplierId): ?array
-    {
+    /**
+     * @param bool $anyChannel Pustí i ASISTOVANÉ předání. Dotaz na stav podání
+     *     (podací číslo + heslo) a odhalení hesla fungují stejně pro oba kanály — obě
+     *     hodnoty pocházejí z téhož dokumentu, z dodejky EPO. Odesílání a obnova
+     *     potvrzenky zůstávají výhradně přímé, proto to není výchozí chování.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function findAttempt(
+        int $attemptId,
+        int $submissionId,
+        int $supplierId,
+        bool $anyChannel = false,
+    ): ?array {
         $stmt = $this->db->pdo()->prepare(
             "SELECT *
                FROM tax_submission_attempts
               WHERE id = ? AND tax_submission_id = ? AND supplier_id = ?
-                AND channel = 'epo_direct'"
+                AND (channel = 'epo_direct' OR ? = 1)"
         );
-        $stmt->execute([$attemptId, $submissionId, $supplierId]);
+        $stmt->execute([$attemptId, $submissionId, $supplierId, $anyChannel ? 1 : 0]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $row !== false ? $row : null;
+    }
+
+    /**
+     * Výsledek dotazu na stav u ASISTOVANÉHO předání.
+     *
+     * Stav pokusu se přepisuje jen tehdy, když o něm EPO řekne něco definitivního
+     * (přijato / zamítnuto). Průběžné „zpracovává se" by u asistovaného pokusu shodilo
+     * stav z `awaiting_confirmation` a účetní by tím přišla o možnost označit podání
+     * za podané — a to je u tohohle kanálu pořád její úkon, ne náš.
+     *
+     * @param array<string,mixed> $status
+     */
+    public function recordAssistedRemoteStatus(
+        int $attemptId,
+        ?string $lifecycle,
+        array $status,
+    ): void {
+        $sql = $lifecycle !== null
+            ? "UPDATE tax_submission_attempts
+                  SET status = ?, last_status_json = ?, last_status_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND channel = 'epo_assisted'"
+            : "UPDATE tax_submission_attempts
+                  SET last_status_json = ?, last_status_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND channel = 'epo_assisted'";
+        $json = json_encode($status, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $this->db->pdo()->prepare($sql)->execute(
+            $lifecycle !== null ? [$lifecycle, $json, $attemptId] : [$json, $attemptId],
+        );
     }
 
     /** @param array<string,mixed> $details */

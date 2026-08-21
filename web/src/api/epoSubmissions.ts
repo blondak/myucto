@@ -85,6 +85,28 @@ export interface EpoReceiptSummary {
   submitted_by?: EpoCertificateSummary
 }
 
+/**
+ * Co se povedlo přečíst z PDF opisu staženého z portálu. Na rozdíl od dodejky je to
+ * jen odečtený text, ne podepsaný důkaz — slouží k předvyplnění, nikdy k doložení.
+ */
+export interface EpoReceiptHint {
+  text_available: boolean
+  reference: string | null
+  submitted_at: string | null
+  checksum: string | null
+  office_code: string | null
+}
+
+/** Rozdíl ručně nahraného XML proti archivovanému snapshotu. */
+export interface EpoXmlDiff {
+  comparable: boolean
+  form_code: string | null
+  expected_form_code: string | null
+  form_match: boolean | null
+  difference_count: number
+  differences: Array<{ path: string; expected: string | null; actual: string | null }>
+}
+
 export interface EpoArtifact {
   id: number
   tax_submission_id: number
@@ -104,6 +126,8 @@ export interface EpoArtifact {
     form_match?: boolean | null
     snapshot_sha256_match?: boolean
     receipt?: EpoReceiptSummary
+    diff?: EpoXmlDiff
+    hint?: EpoReceiptHint
   } | null
   title: string
   original_name: string
@@ -221,6 +245,18 @@ export interface ArtifactUploadResult {
   errors: Array<{ name: string; code: string; message?: string }>
   artifacts: EpoArtifact[]
   attempts: EpoAttempt[]
+  /** Z ověřené dodejky: podací číslo, rozhodný čas a zda z ní šlo převzít heslo. */
+  confirmation: {
+    reference: string | null
+    submitted_at: string | null
+    verification_status: VerificationStatus
+    is_confirmation: boolean
+    receipt: EpoReceiptSummary
+    attempt_id: number | null
+    status_query_available: boolean
+  } | null
+  /** Z PDF opisu — pouze jako předvyplnění, když dodejka není. */
+  hint: EpoReceiptHint | null
 }
 
 /**

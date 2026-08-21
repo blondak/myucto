@@ -4,10 +4,12 @@ import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
   epoSubmissionsApi,
+  type ArtifactUploadResult,
   type EpoArtifact,
   type EpoAttempt,
   type EpoFolder,
   type EpoMessage,
+  type EpoReceiptHint,
   type EpoReceiptSummary,
   type EpoSigningCredential,
   type TaxSubmission,
@@ -56,6 +58,10 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const handoffLinks = ref<Record<number, CachedEpoHandoffLink>>({})
 const manualDate = ref('')
 const manualRef = ref('')
+/** Otevřený panel „Označit jako podané" po přečtení údajů z nahraných souborů. */
+const manualOpen = ref(false)
+/** Odkud se předvyplnilo — dodejka je důkaz, PDF opis jen odečtený text. */
+const prefillSource = ref<'receipt' | 'pdf' | null>(null)
 const manualBusy = ref(false)
 const credentials = ref<EpoSigningCredential[]>([])
 const selectedCredentialId = ref<number | null>(null)
@@ -254,8 +260,19 @@ async function load(showLoader = true) {
 
 function toggleDetail(item: TaxSubmission) {
   expandedId.value = expandedId.value === item.id ? null : item.id
-  manualDate.value = toLocalInput(item.submitted_at ?? new Date().toISOString())
-  manualRef.value = item.submission_ref ?? ''
+  // Co už je u podání doložené, má přednost: nejdřív samotné podání, pak dodejka
+  // a teprve nakonec PDF opis. Bez toho účetní přepisovala podací číslo, které
+  // aplikace měla přečtené a zobrazovala ho o dva panely výš.
+  const summary = receipt(item)
+  const hint = pdfHint(item)
+  manualRef.value = item.submission_ref ?? summary?.reference ?? hint?.reference ?? ''
+  manualDate.value = toLocalInput(
+    item.submitted_at ?? summary?.submitted_at ?? hint?.submitted_at ?? new Date().toISOString(),
+  )
+  prefillSource.value = item.submission_ref || item.submitted_at
+    ? null
+    : (summary?.reference || summary?.submitted_at ? 'receipt' : (hint ? 'pdf' : null))
+  manualOpen.value = false
 }
 
 function formCodeLabel(code: string): string {
@@ -568,13 +585,32 @@ function artifactsFolderId(item: TaxSubmission): number | null {
 
 /**
  * Shrnutí dodejky, které si aplikace odložila při rozbalení potvrzenky.
- * Visí na čitelném přepisu (`confirmation_xml`), protože právě z něj pochází.
+ *
+ * Primárně visí na čitelném přepisu (`confirmation_xml`), protože právě z něj pochází.
+ * Záložně se bere z ověření samotné P7S: u ručně nahrané dodejky se rozbalení může
+ * nepovést (chybějící OpenSSL CMS, zkomolený soubor), ale podací číslo a rozhodný čas
+ * z ověření známe — a nechat kvůli tomu panel prázdný by účetní poslalo do hex editoru.
  */
 function receipt(item: TaxSubmission): EpoReceiptSummary | null {
+  for (const kind of ['confirmation_xml', 'confirmation_p7s'] as const) {
+    for (const artifact of item.artifacts) {
+      if (artifact.artifact_kind !== kind) continue
+      const summary = artifact.verification?.receipt
+      if (summary && Object.keys(summary).length) return summary
+    }
+  }
+  return null
+}
+
+/**
+ * Co se přečetlo z PDF opisu. Je to jen odečtený text, ne důkaz — používá se
+ * k předvyplnění tehdy, když dodejka chybí.
+ */
+function pdfHint(item: TaxSubmission): EpoReceiptHint | null {
   for (const artifact of item.artifacts) {
-    if (artifact.artifact_kind !== 'confirmation_xml') continue
-    const summary = (artifact.verification as { receipt?: EpoReceiptSummary } | null)?.receipt
-    if (summary && Object.keys(summary).length) return summary
+    if (artifact.artifact_kind !== 'receipt_pdf') continue
+    const hint = artifact.verification?.hint
+    if (hint && (hint.reference || hint.submitted_at)) return hint
   }
   return null
 }
@@ -592,8 +628,35 @@ function testProtocolMessages(item: TaxSubmission): EpoMessage[] {
   return messages.filter(m => (m.code ?? '').toUpperCase() !== 'TEST_REZIM')
 }
 
+/**
+ * Co se z artefaktu povedlo PŘEČÍST — na rozdíl od {@link artifactVerificationHint}
+ * to není problém, ale nález. Proto vlastní funkce i vlastní, neutrální styl:
+ * v amber řádku vedle chyb podpisu by odečtené podací číslo vypadalo jako závada.
+ */
+function artifactReadHint(artifact: EpoArtifact): string {
+  if (artifact.artifact_kind !== 'receipt_pdf') return ''
+  const hint = artifact.verification?.hint
+  return hint?.reference
+    ? t('reports.submissions.pdf_hint_reference', { reference: hint.reference })
+    : ''
+}
+
 function artifactVerificationHint(artifact: EpoArtifact): string {
-  if (artifact.artifact_kind !== 'confirmation_p7s' || !artifact.verification) return ''
+  if (!artifact.verification) return ''
+  if (artifact.artifact_kind === 'epo_xml') {
+    if (artifact.verification.snapshot_sha256_match !== false) return ''
+    const diff = artifact.verification.diff
+    if (diff?.comparable && diff.form_match === false) {
+      return t('reports.submissions.verify_problem_xml_other_form', {
+        form: (diff.form_code ?? '?').toUpperCase(),
+      })
+    }
+    if (diff?.comparable && diff.difference_count > 0) {
+      return t('reports.submissions.verify_problem_xml_diff', { count: diff.difference_count })
+    }
+    return t('reports.submissions.verify_problem_xml_mismatch')
+  }
+  if (artifact.artifact_kind !== 'confirmation_p7s') return ''
   const verification = artifact.verification
   if (!verification.signature_valid) return t('reports.submissions.verify_problem_signature')
   if (!verification.chain_valid) return t('reports.submissions.verify_problem_chain')
@@ -747,6 +810,7 @@ async function uploadFiles(files: File[]) {
     if (result.errors.length > 0) {
       toast.warning(t('reports.submissions.upload_partial', { count: result.errors.length }))
     }
+    applyReadValues(result.confirmation, result.hint)
     await load(false)
   } catch (e) {
     toast.error(apiErrorMessage(e))
@@ -768,6 +832,31 @@ function onDrop(event: DragEvent) {
 function onFileChange(event: Event) {
   const input = event.target as HTMLInputElement
   if (input.files) void uploadFiles(Array.from(input.files))
+}
+
+/**
+ * Přenese do formuláře „Označit jako podané", co aplikace z nahraných souborů přečetla.
+ *
+ * Přepisuje se jen prázdné pole, ne to, co už uživatel vyplnil — jinak by nahrání
+ * dalšího souboru přemazalo ručně opravenou hodnotu. Rozlišení zdroje je záměrné:
+ * z dodejky je to podepsaný údaj, z PDF opisu jen odečtený text.
+ */
+function applyReadValues(
+  confirmation: ArtifactUploadResult['confirmation'],
+  hint: ArtifactUploadResult['hint'],
+): void {
+  const reference = confirmation?.reference ?? hint?.reference ?? null
+  const submittedAt = confirmation?.submitted_at ?? hint?.submitted_at ?? null
+  if (!reference && !submittedAt) return
+
+  prefillSource.value = confirmation?.reference || confirmation?.submitted_at ? 'receipt' : 'pdf'
+  if (reference && !manualRef.value.trim()) manualRef.value = reference
+  if (submittedAt) manualDate.value = toLocalInput(submittedAt)
+  manualOpen.value = true
+
+  if (confirmation?.status_query_available) {
+    toast.success(t('reports.submissions.state_password_stored'))
+  }
 }
 
 async function markSubmittedManually() {
@@ -958,8 +1047,8 @@ function confirmDirectOperation() {
   else void submitDirect()
 }
 
-async function refreshDirectStatus(item: TaxSubmission) {
-  const attempt = latestDirectAttempt(item)
+async function refreshDirectStatus(item: TaxSubmission, forced: EpoAttempt | null = null) {
+  const attempt = forced ?? latestDirectAttempt(item)
   if (!attempt || directBusy.value) return
   directBusy.value = true
   try {
@@ -973,10 +1062,24 @@ async function refreshDirectStatus(item: TaxSubmission) {
   }
 }
 
-/** Pokus, ke kterému EPO vydalo heslo pro dotaz na stav. */
+/**
+ * Pokus, ke kterému EPO vydalo heslo pro dotaz na stav.
+ *
+ * Bez ohledu na kanál: heslo i podací číslo vydává EPO v dodejce, a ta u asistovaného
+ * podání dorazí ručním nahráním. Omezení na přímý kanál znamenalo, že účetní, která
+ * dodejku nahrála, se ke stavu ani k opisu na portálu nedostala.
+ */
 function statePasswordAttemptId(item: TaxSubmission): number | null {
-  const attempt = item.attempts.find(a => a.channel === 'epo_direct' && a.status_query_available)
-  return attempt?.id ?? null
+  return item.attempts.find(a => a.status_query_available)?.id ?? null
+}
+
+/** Asistované předání, u kterého jde dotáhnout stav z dodejky. */
+function assistedStatusAttempt(item: TaxSubmission): EpoAttempt | null {
+  return item.attempts.find(a =>
+    a.channel === 'epo_assisted'
+    && a.status_query_available
+    && (epoEnvironment.value === null || a.epo_environment === epoEnvironment.value),
+  ) ?? null
 }
 
 /**
@@ -1216,6 +1319,18 @@ const submissionActions = computed<ActionItem[]>(() => {
       show: attempt?.refresh_available,
       disabled: directBusy.value,
       run: () => refreshDirectStatus(s),
+    },
+    {
+      // Asistované předání s nahranou dodejkou. Vlastní položka, protože předchozí
+      // visí na přímém pokusu — kdyby se sloučily, u snapshotu s oběma kanály by
+      // se tlačítko vázalo k jinému pokusu, než ke kterému patří podací číslo.
+      key: 'refresh_status_assisted',
+      label: t('reports.submissions.refresh_epo_status'),
+      icon: 'cycle',
+      tier: 'overflow',
+      show: !attempt?.refresh_available && assistedStatusAttempt(s) !== null,
+      disabled: directBusy.value,
+      run: () => refreshDirectStatus(s, assistedStatusAttempt(s)),
     },
     {
       key: 'recover_confirmation',
@@ -1663,6 +1778,9 @@ onMounted(async () => {
                   <div v-if="artifactVerificationHint(artifact)" class="text-xs text-warning-700 mt-1">
                     {{ artifactVerificationHint(artifact) }}
                   </div>
+                  <div v-if="artifactReadHint(artifact)" class="text-xs text-neutral-600 mt-1">
+                    {{ artifactReadHint(artifact) }}
+                  </div>
                 </div>
                 <div class="flex gap-2">
                   <a :href="epoSubmissionsApi.artifactDownloadUrl(selected.id, artifact.id)" :class="btnOutlineSm('neutral')">
@@ -1793,9 +1911,19 @@ onMounted(async () => {
             </ol>
           </div>
 
-          <details v-if="canWrite && !['submitted', 'accepted'].includes(selected.status)" class="rounded-lg border border-neutral-200 p-3">
+          <details v-if="canWrite && !['submitted', 'accepted'].includes(selected.status)"
+            :open="manualOpen" class="rounded-lg border border-neutral-200 p-3"
+            @toggle="manualOpen = ($event.target as HTMLDetailsElement).open">
             <summary class="cursor-pointer font-medium text-sm">{{ t('reports.submissions.manual_fallback') }}</summary>
             <p class="text-xs text-neutral-500 mt-2">{{ t('reports.submissions.manual_fallback_hint') }}</p>
+            <p v-if="prefillSource" class="mt-2 rounded border px-2 py-1.5 text-xs"
+              :class="prefillSource === 'receipt'
+                ? 'border-success-500/30 bg-success-50 text-success-800'
+                : 'border-warning-500/30 bg-warning-50 text-warning-800'">
+              {{ prefillSource === 'receipt'
+                ? t('reports.submissions.prefilled_from_receipt')
+                : t('reports.submissions.prefilled_from_pdf') }}
+            </p>
             <label class="block text-xs text-neutral-600 mt-3">
               {{ t('reports.submissions.submitted_at') }}
               <input v-model="manualDate" type="datetime-local" class="mt-1 w-full h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm">

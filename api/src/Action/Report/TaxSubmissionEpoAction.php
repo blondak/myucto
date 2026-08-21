@@ -16,6 +16,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Document\DocumentStorage;
+use MyInvoice\Service\Epo\EpoAssistedConfirmationService;
 use MyInvoice\Service\Epo\EpoException;
 use MyInvoice\Service\Epo\EpoSubmissionException;
 use MyInvoice\Service\Epo\EpoSubmissionService;
@@ -36,6 +37,7 @@ final class TaxSubmissionEpoAction
         private readonly TaxSubmissionEpoRepository $epo,
         private readonly EpoSubmissionService $service,
         private readonly TaxSubmissionDocumentService $documents,
+        private readonly EpoAssistedConfirmationService $assisted,
         private readonly DocumentStorage $storage,
         private readonly DocumentFolderRepository $folders,
         private readonly ActivityLogger $logger,
@@ -189,9 +191,15 @@ final class TaxSubmissionEpoAction
             return Json::error($response, 'attempt_not_found', 'Pokus o předání nebyl nalezen.', 404);
         }
         $userId = $this->userId($request);
+        // Prostředí se bere z pokusu, ke kterému se soubory přikládají — jen tak se
+        // zkušební dodejka („Testovací zařízení – nelze učinit platné podání") porovná
+        // proti správné identitě pečeti. Bez pokusu platí současné nastavení instance.
+        $environment = $this->attemptEnvironment($submissionId, $supplierId, $attemptId);
         $source = null;
         $created = [];
         $errors = [];
+        $confirmation = null;
+        $hint = null;
         foreach ($files as $file) {
             if (!$file instanceof UploadedFileInterface) {
                 continue;
@@ -228,18 +236,28 @@ final class TaxSubmissionEpoAction
                         $userId,
                     );
                 }
-                $result = $this->documents->ingestArtifact(
+                $result = $this->assisted->ingest(
                     $tmp,
                     $originalName,
                     $submission,
                     $supplierId,
                     $attemptId,
                     $userId,
+                    $environment,
                 );
                 if ($ownsTransaction) {
                     $pdo->commit();
                 }
                 $created[] = $result['artifact'];
+                // Dodejka má přednost před tiskem: PDF opis je jen odečtený text,
+                // zatímco P7S je podepsaný důkaz. Když přijde obojí, předvyplní se
+                // podle dodejky.
+                if (is_array($result['confirmation'] ?? null)) {
+                    $confirmation = $result['confirmation'];
+                }
+                if ($hint === null && is_array($result['hint'] ?? null)) {
+                    $hint = $result['hint'];
+                }
                 $this->logger->log(
                     'report.epo_artifact_uploaded',
                     $userId,
@@ -250,6 +268,10 @@ final class TaxSubmissionEpoAction
                         'document_id' => $result['artifact']['document_id'] ?? null,
                         'artifact_kind' => $result['artifact']['artifact_kind'] ?? null,
                         'verification_status' => $result['artifact']['verification_status'] ?? null,
+                        // Heslo pro dotaz na stav se do auditu NEZAPISUJE — stačí, že je
+                        // vidět, jestli se ho podařilo převzít.
+                        'reference' => $result['confirmation']['reference'] ?? null,
+                        'state_password_stored' => $result['confirmation']['status_query_available'] ?? null,
                     ],
                     $this->clientIp($request),
                     $request->getHeaderLine('User-Agent'),
@@ -302,6 +324,11 @@ final class TaxSubmissionEpoAction
             'created' => $created,
             'errors' => $errors,
             'source_artifact' => $source,
+            // Co se z nahraných souborů přečetlo. `confirmation` pochází z ověřené
+            // dodejky, `hint` jen z textu PDF opisu — UI podle toho předvyplní
+            // „Označit jako podané" a rozliší, čím si je aplikace jistá.
+            'confirmation' => $confirmation,
+            'hint' => $hint,
             'artifacts' => $this->epo->artifacts($submissionId, $supplierId),
             'attempts' => $this->epo->attempts($submissionId, $supplierId),
         ]);
@@ -372,6 +399,21 @@ final class TaxSubmissionEpoAction
     private function clientIp(Request $request): ?string
     {
         return $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+    }
+
+    private function attemptEnvironment(int $submissionId, int $supplierId, ?int $attemptId): string
+    {
+        if ($attemptId !== null) {
+            foreach ($this->epo->attempts($submissionId, $supplierId) as $attempt) {
+                if ((int) $attempt['id'] === $attemptId) {
+                    $environment = strtolower(trim((string) ($attempt['epo_environment'] ?? '')));
+                    if ($environment === 'test' || $environment === 'production') {
+                        return $environment;
+                    }
+                }
+            }
+        }
+        return $this->config->get('epo_test', false) ? 'test' : 'production';
     }
 
     private function nullableInt(mixed $value): ?int

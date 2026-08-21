@@ -201,6 +201,84 @@ final class TaxSubmissionEpoRepository
         return $stmt->rowCount() > 0;
     }
 
+    /**
+     * Poslední asistované předání snapshotu.
+     *
+     * Vazba dodejky na konkrétní pokus je prvotně z `attempt_id` v uploadu. Když chybí
+     * (účetní nahrává soubory k podání, které se v aplikaci nezakládalo přes tlačítko),
+     * je nejblíž pravdě poslední asistovaný pokus — jiný kanál by dodejce neseděl
+     * a vymyslet nový pokus by znamenalo zapsat historii, která se nestala.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function latestAssistedAttempt(int $submissionId, int $supplierId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, status, epo_environment, remote_submission_ref, submitted_at
+               FROM tax_submission_attempts
+              WHERE tax_submission_id = ? AND supplier_id = ? AND channel = 'epo_assisted'
+                AND status NOT IN ('cancelled','failed','expired')
+              ORDER BY id DESC
+              LIMIT 1"
+        );
+        $stmt->execute([$submissionId, $supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $row['id'] = (int) $row['id'];
+        return $row;
+    }
+
+    /**
+     * Zapíše k asistovanému pokusu, co se přečetlo z ručně nahrané dodejky.
+     *
+     * Heslo pro dotaz na stav se přepisuje jen tehdy, když nějaké přišlo — opakované
+     * nahrání téhož souboru už ho nenese (z metadat artefaktu se zásadně neukládá),
+     * a přepsat ho NULLem by znamenalo přijít o jedinou kopii, kterou EPO vydává jednou.
+     *
+     * Stav pokusu se ZÁMĚRNĚ nemění: nahrání dodejky je důkaz, ne právní úkon. Podání
+     * označí za podané až účetní přes `TaxSubmissionAction::submit()`.
+     */
+    public function recordAssistedConfirmation(
+        int $attemptId,
+        int $submissionId,
+        int $supplierId,
+        string $reference,
+        string $submittedAt,
+        ?string $statePasswordCiphertext,
+    ): bool {
+        // Existence se ověřuje zvlášť: MySQL u UPDATE hlásí POČET ZMĚNĚNÝCH řádků, takže
+        // opakované nahrání téže dodejky (stejné hodnoty) by vrátilo 0 a volající by si
+        // myslel, že pokus neexistuje — a přestal by ho v odpovědi nabízet.
+        $guard = $this->db->pdo()->prepare(
+            "SELECT id FROM tax_submission_attempts
+              WHERE id = ? AND tax_submission_id = ? AND supplier_id = ?
+                AND channel = 'epo_assisted'"
+        );
+        $guard->execute([$attemptId, $submissionId, $supplierId]);
+        if ($guard->fetchColumn() === false) {
+            return false;
+        }
+
+        $this->db->pdo()->prepare(
+            "UPDATE tax_submission_attempts
+                SET remote_submission_ref = ?,
+                    submitted_at = ?,
+                    state_password_ciphertext = COALESCE(?, state_password_ciphertext)
+              WHERE id = ? AND tax_submission_id = ? AND supplier_id = ?
+                AND channel = 'epo_assisted'"
+        )->execute([
+            mb_substr($reference, 0, 100),
+            $submittedAt,
+            $statePasswordCiphertext,
+            $attemptId,
+            $submissionId,
+            $supplierId,
+        ]);
+        return true;
+    }
+
     public function markAttemptConfirmed(int $attemptId, string $confirmedAt): bool
     {
         $stmt = $this->db->pdo()->prepare(

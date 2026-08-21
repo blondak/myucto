@@ -55,7 +55,8 @@ final class EpoDirectSubmissionService
         private readonly EpoDirectResponseParser $parser,
         private readonly TaxSubmissionDocumentService $documents,
         private readonly SecretEncryption $crypto,
-        private readonly EpoConfirmationExtractor $confirmationExtractor,
+        private readonly EpoConfirmationPartsArchiver $confirmationParts,
+        private readonly EpoAssistedConfirmationService $assistedConfirmations,
     ) {}
 
     /** @return array<string,mixed> */
@@ -475,7 +476,7 @@ final class EpoDirectSubmissionService
         int $userId,
         int $attemptId,
     ): array {
-        $attempt = $this->direct->findAttempt($attemptId, $submissionId, $supplierId);
+        $attempt = $this->direct->findAttempt($attemptId, $submissionId, $supplierId, true);
         if ($attempt === null) {
             throw new EpoSubmissionException('attempt_not_found', 'Pokus nebyl nalezen.', 404);
         }
@@ -487,6 +488,15 @@ final class EpoDirectSubmissionService
             true,
             $environment,
         );
+        if ((string) ($attempt['channel'] ?? '') === 'epo_assisted') {
+            return $this->refreshAssistedStatus(
+                $submission,
+                $supplierId,
+                $userId,
+                $attempt,
+                $environment,
+            );
+        }
         // „Obnovit stav" srovná i ODVOZENÉ soubory z dodejky. Aplikace je umí vytáhnout až
         // od jisté verze, takže podání archivovaná dřív mají v Dokumentech buď jen samotnou
         // P7S, nebo rozbalené části bez shrnutí. Doplnit se to nemá jak jinak: archivace
@@ -882,6 +892,130 @@ final class EpoDirectSubmissionService
         ];
     }
 
+    /**
+     * Dotaz na stav u ASISTOVANÉHO předání.
+     *
+     * Podací číslo i heslo pocházejí z ručně nahrané dodejky, takže `epo_stav` odpoví
+     * stejně jako u přímého podání — endpoint neřeší, kterým kanálem podání došlo.
+     * Pustí se jen ta část, kterou asistovaný kanál může mít: žádný off-line transfer,
+     * žádná obnova potvrzenky z uloženého balíčku (ten neexistuje) a žádné plánování
+     * dalšího pollu (cron chodí jen po přímých pokusech).
+     *
+     * @param array<string,mixed> $submission
+     * @param array<string,mixed> $attempt
+     * @return array<string,mixed>
+     */
+    private function refreshAssistedStatus(
+        array $submission,
+        int $supplierId,
+        int $userId,
+        array $attempt,
+        string $environment,
+    ): array {
+        $attemptId = (int) $attempt['id'];
+        $submissionId = (int) $submission['id'];
+
+        // Části dodejky umí aplikace vytáhnout až od jisté verze a děje se to při
+        // nahrání souboru. Podání archivovaná dřív by proto zůstala navždy bez shrnutí;
+        // tady se doplní z už uložené P7S. Idempotentní, best-effort.
+        try {
+            $this->assistedConfirmations->backfillParts(
+                $submission,
+                $supplierId,
+                $userId,
+                $environment,
+            );
+        } catch (\Throwable) {
+            // Doplnění příloh je pohodlí, ne důkaz — dotaz na stav kvůli němu neshodíme.
+        }
+
+        $reference = trim((string) ($attempt['remote_submission_ref'] ?? ''));
+        $encryptedPassword = (string) ($attempt['state_password_ciphertext'] ?? '');
+        if ($reference === '' || $encryptedPassword === '') {
+            throw new EpoSubmissionException(
+                'status_unavailable',
+                'K tomuto předání nejsou dostupné údaje pro dotaz na stav.'
+                . ' Nahrajte dodejku (.p7s) staženou z Daňového portálu.',
+                409,
+            );
+        }
+
+        $response = $this->client->status(
+            $reference,
+            $this->crypto->decryptFor($encryptedPassword, 'epo:state-password'),
+            $environment,
+        );
+        $status = $this->parser->status($response['body']);
+        $remoteApplicationStatus = (string) ($status['stav_podapl'] ?? '');
+        $lifecycle = match ($remoteApplicationStatus) {
+            '2' => 'rejected',
+            '3' => 'confirmed',
+            default => null,
+        };
+        $this->direct->recordAssistedRemoteStatus($attemptId, $lifecycle, $status);
+
+        if ($remoteApplicationStatus === '2' && $environment === 'production') {
+            $this->direct->setSubmissionRemoteStatus($submissionId, $supplierId, 'rejected');
+        } elseif ($remoteApplicationStatus === '3') {
+            // EPO potvrdilo, že podání zpracovalo. Tím je prokazatelně podané i bez
+            // ručního označení — týž závěr dělá přímý kanál ve `finalizeConfirmationState`.
+            $submittedAt = trim((string) ($attempt['submitted_at'] ?? ''));
+            if ($environment === 'production' && $submittedAt !== '') {
+                $this->archiver->markSubmitted(
+                    $submissionId,
+                    $supplierId,
+                    $submittedAt,
+                    $reference,
+                    (int) ($attempt['requested_by'] ?? $userId),
+                );
+                $this->direct->setSubmissionRemoteStatus($submissionId, $supplierId, 'accepted');
+            }
+            if ($submittedAt !== '') {
+                $this->epo->markAttemptConfirmed($attemptId, $submittedAt);
+            }
+        }
+
+        try {
+            $this->documents->storeGeneratedArtifact(
+                $response['body'],
+                $this->filename($submission, $attemptId, 'status.xml'),
+                'epo_status_xml',
+                $submission,
+                $supplierId,
+                $attemptId,
+                $userId,
+                'valid',
+                [
+                    'remote_application_status' => $remoteApplicationStatus,
+                    'epo_environment' => $environment,
+                ],
+            );
+        } catch (\Throwable) {
+            // Protokol o stavu je doprovodný soubor; jeho neuložení nesmí zahodit
+            // odpověď, kterou už má uživatel na obrazovce.
+        }
+
+        $this->event(
+            $supplierId,
+            $submissionId,
+            $attemptId,
+            'status_refreshed',
+            $lifecycle ?? (string) $attempt['status'],
+            $response['http_status'],
+            ['remote_application_status' => $remoteApplicationStatus, 'channel' => 'epo_assisted'],
+            $userId,
+        );
+
+        return [
+            'attempt_id' => $attemptId,
+            'status' => $lifecycle ?? (string) $attempt['status'],
+            'remote_status' => $status,
+            'environment' => $environment,
+            'artifacts' => $this->epo->artifacts($submissionId, $supplierId),
+            'attempts' => $this->epo->attempts($submissionId, $supplierId),
+        ];
+    }
+
     /** @return array<string,mixed> */
     public function recoverConfirmation(
         int $submissionId,
@@ -952,7 +1086,9 @@ final class EpoDirectSubmissionService
         int $supplierId,
         int $attemptId,
     ): array {
-        $attempt = $this->direct->findAttempt($attemptId, $submissionId, $supplierId);
+        // I u asistovaného předání: heslo vydává EPO v dodejce bez ohledu na to, kudy
+        // podání došlo, a účetní ho potřebuje k opisu na portálu úplně stejně.
+        $attempt = $this->direct->findAttempt($attemptId, $submissionId, $supplierId, true);
         if ($attempt === null || empty($attempt['state_password_ciphertext'])) {
             throw new EpoSubmissionException(
                 'state_password_unavailable',
@@ -1322,61 +1458,16 @@ final class EpoDirectSubmissionService
         ?int $userId,
         string $environment,
     ): void {
-        try {
-            $parts = $this->confirmationExtractor->extract($confirmationBytes);
-        } catch (\Throwable) {
-            $parts = [];
-        }
+        $result = $this->confirmationParts->archive(
+            $confirmationBytes,
+            $submission,
+            $supplierId,
+            $attemptId,
+            $userId,
+            $environment,
+        );
 
-        // Přípona echa se řídí tím, co v něm SKUTEČNĚ je: ověřené je hexem kódované XML
-        // u kontrolního hlášení, ale u DPH přiznání, souhrnného hlášení či DPPO může EPO
-        // vrátit jinou obálku (base64, ZIP). Natvrdo `.xml` by u takového souboru lhalo.
-        $echo = $parts['echo'] ?? null;
-        $files = [
-            // suffix                  => [artifact_kind, obsah]
-            'confirmation.xml'         => ['confirmation_xml', $parts['confirmation_xml'] ?? null],
-            'epo-echo.' . (is_array($echo) ? $echo['suffix'] : 'xml')
-                                       => ['epo_echo', is_array($echo) ? $echo['bytes'] : null],
-            'epo-seal.pem'             => ['confirmation_signer_cert', $parts['seal_certificate_pem'] ?? null],
-            'signing-certificate.pem'  => ['submission_signer_cert', $parts['submission_certificate_pem'] ?? null],
-        ];
-
-        // Shrnutí dodejky (podací číslo, rozhodný čas, kontrolní součty, kdo podal a čí
-        // pečetí je to potvrzené) visí na čitelném přepisu potvrzenky — detail podání ho
-        // odtud čte, aby účetní nemusela otevírat XML. Heslo pro dotaz na stav v něm
-        // ZÁMĚRNĚ není, viz EpoConfirmationExtractor::receipt().
-        $receipt = is_array($parts['receipt'] ?? null) ? $parts['receipt'] : [];
-
-        $stored = [];
-        $failed = [];
-        foreach ($files as $suffix => [$kind, $bytes]) {
-            if (!is_string($bytes) || $bytes === '') {
-                $failed[] = $kind;
-                continue;
-            }
-            try {
-                $this->documents->storeGeneratedArtifact(
-                    $bytes,
-                    $this->filename($submission, $attemptId, $suffix),
-                    $kind,
-                    $submission,
-                    $supplierId,
-                    $attemptId,
-                    $userId,
-                    'valid',
-                    [
-                        'derived_from' => 'confirmation_p7s',
-                        'epo_environment' => $environment,
-                        ...($kind === 'confirmation_xml' && $receipt !== [] ? ['receipt' => $receipt] : []),
-                    ],
-                );
-                $stored[] = $kind;
-            } catch (\Throwable) {
-                $failed[] = $kind;
-            }
-        }
-
-        if ($failed !== []) {
+        if ($result['failed'] !== []) {
             $this->event(
                 $supplierId,
                 (int) $submission['id'],
@@ -1384,7 +1475,7 @@ final class EpoDirectSubmissionService
                 'confirmation_parts_incomplete',
                 'confirmed',
                 null,
-                ['stored' => $stored, 'failed' => $failed],
+                ['stored' => $result['stored'], 'failed' => $result['failed']],
                 $userId,
             );
         }
