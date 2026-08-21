@@ -342,6 +342,7 @@ final class TenantDataRegistryFactory
             ...TenantDataSigningCatalog::definitions(),
             ...TenantDataDocumentCatalog::definitions(),
             ...TenantDataBusinessCatalog::definitions(),
+            ...TenantDataLogbookCatalog::definitions(),
             ...TenantDataIntegrationCatalog::definitions(),
         ];
         foreach (self::DIRECT_TABLE_GROUPS as $featureGroup => $tables) {

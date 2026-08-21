@@ -108,6 +108,62 @@ final class TenantDataSoftReferenceCoverageValidatorTest extends TestCase
         );
     }
 
+    public function testDirectNullableTenantReferencePasses(): void
+    {
+        $source = self::directSource();
+        $item = self::target('purchase_invoice_items');
+
+        self::assertSame(
+            [],
+            (new TenantDataSoftReferenceCoverageValidator())->issues(
+                $source,
+                self::directInventory(),
+                [
+                    'purchase_invoice_items' => self::targetInventory(
+                        'purchase_invoice_items',
+                    ),
+                ],
+                ['purchase_invoice_items' => $item],
+            ),
+        );
+    }
+
+    public function testDirectReferenceChecksTargetNullAndUnresolvedPolicy(): void
+    {
+        $source = self::directSource([
+            'target_column' => 'ghost_id',
+            'null_value' => 'forbid',
+            'unresolved' => 'preserve',
+        ]);
+
+        self::assertSame(
+            [
+                'soft_reference_null_policy_mismatch:'
+                    . 'fuelings.source_item',
+                'soft_reference_target_column_missing:'
+                    . 'fuelings.source_item->purchase_invoice_items.ghost_id',
+                'soft_reference_target_not_primary:'
+                    . 'fuelings.source_item->purchase_invoice_items.ghost_id',
+                'soft_reference_unresolved_not_blocked:'
+                    . 'fuelings.source_item',
+            ],
+            (new TenantDataSoftReferenceCoverageValidator())->issues(
+                $source,
+                self::directInventory(),
+                [
+                    'purchase_invoice_items' => self::targetInventory(
+                        'purchase_invoice_items',
+                    ),
+                ],
+                [
+                    'purchase_invoice_items' => self::target(
+                        'purchase_invoice_items',
+                    ),
+                ],
+            ),
+        );
+    }
+
     /** @param array<string,string> $targets */
     private static function source(array $targets): TenantDataDefinition
     {
@@ -148,6 +204,31 @@ final class TenantDataSoftReferenceCoverageValidatorTest extends TestCase
         );
     }
 
+    /** @param array<string,string> $overrides */
+    private static function directSource(array $overrides = []): TenantDataDefinition
+    {
+        return new TenantDataDefinition(
+            'table:fuelings',
+            TenantDataObjectKind::Table,
+            TenantDataPolicy::TenantOwned,
+            [TenantDataRegistry::TRANSFER_PROFILE],
+            [
+                'primary_key' => ['id'],
+                'soft_references' => [
+                    'source_item' => [
+                        'strategy' => 'direct_tenant_entity',
+                        'id_column' => 'source_item_id',
+                        'target_table' => 'purchase_invoice_items',
+                        'target_column' => 'id',
+                        'null_value' => 'preserve',
+                        'unresolved' => 'block',
+                        ...$overrides,
+                    ],
+                ],
+            ],
+        );
+    }
+
     /** @param list<string> $entityTypes */
     private static function inventory(
         array $entityTypes = ['client'],
@@ -175,6 +256,19 @@ final class TenantDataSoftReferenceCoverageValidatorTest extends TestCase
             ['id'],
             [],
             [['id']],
+        );
+    }
+
+    private static function directInventory(): TenantSchemaTableInventory
+    {
+        return new TenantSchemaTableInventory(
+            'fuelings',
+            'BASE TABLE',
+            ['id', 'supplier_id', 'source_item_id'],
+            ['id'],
+            [],
+            [['id']],
+            ['source_item_id'],
         );
     }
 }
