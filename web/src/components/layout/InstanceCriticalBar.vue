@@ -127,6 +127,17 @@ const unpaidDescKey = computed(() => {
   return n.featuresLocked ? 'instance_alert.unpaid_desc' : 'instance_alert.unpaid_desc_open'
 })
 
+/**
+ * Má tenhle důvod konkrétní vyprávění (co se stalo / co bude)?
+ *
+ * Když ano, obecné vysvětlení se na mobilu schová — konkrétní fakta jsou
+ * užitečnější než věta, kterou uživatel zná z minula. Když ne, obecný text
+ * je jediné, co má, a zůstává i na mobilu.
+ */
+function hasNarrative(reason: string): boolean {
+  return reason === 'unpaid' && !!happenedText.value
+}
+
 /** Kam vede „co s tím". Obojí je vnitřní stránka s vysvětlením i cestou k nápravě. */
 const TARGET: Record<InstanceAlertReason, string> = {
   storage_exhausted: '/hosting',
@@ -200,16 +211,20 @@ onBeforeUnmount(() => {
         class="shrink-0 rounded bg-white/25 px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider"
       >{{ t('hosting.preview_badge') }}</span>
       <span class="font-semibold whitespace-nowrap">{{ t(`instance_alert.${reason}_title`) }}</span>
-      <!-- Na úzkém displeji se text ořízne na tři řádky: linka sedí uvnitř
-           připnuté lišty, takže by jinak na mobilu ukousla třetinu obrazovky
-           a odsunula aplikaci pod okraj. Celé znění je na obrazovce, kam vede
-           tlačítko vedle. -->
+      <!-- ⚠️ Na mobilu jen KONKRÉTNÍ fakta, obecné vysvětlení až na širším
+           displeji. Linka sedí uvnitř připnuté lišty, takže celý odstavec
+           ukousne třetinu obrazovky a odsune aplikaci pod okraj — a zrovna
+           obecná věta je ta část, kterou uživatel při druhém zobrazení
+           přeskakuje. Co se stalo a kdy to zhasne, zůstává vždycky.
+           Celé znění je na obrazovce, kam vede tlačítko vedle. -->
       <span class="min-w-0 flex-1 text-white/90 line-clamp-3 sm:line-clamp-none">
-        {{ reason === 'unpaid' ? t(unpaidDescKey) : t(`instance_alert.${reason}_desc`) }}
+        <span :class="hasNarrative(reason) ? 'hidden sm:inline' : ''">
+          {{ reason === 'unpaid' ? t(unpaidDescKey) : t(`instance_alert.${reason}_desc`) }}
+        </span>
         <!-- Co se stalo a co bude — jen u neuhrazení a jen když to server řekl.
              Bez dat se tu nesmí objevit žádný termín. -->
-        <template v-if="reason === 'unpaid' && happenedText">
-          <span class="ml-1">{{ happenedText }}</span>
+        <template v-if="hasNarrative(reason)">
+          <span class="sm:ml-1">{{ happenedText }}</span>
           <span class="ml-1">{{ nextText }}</span>
         </template>
       </span>
