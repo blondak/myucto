@@ -909,6 +909,58 @@ final class EpoDirectSubmissionService
         );
     }
 
+    /**
+     * Heslo, kterým se na Daňovém portálu dohledá stav podání a stáhne opis.
+     *
+     * EPO ho vydá jednou, v dodejce. Aplikace ho drží šifrovaně pro `epo_stav` a nikde
+     * ho nezobrazuje — jenže bez něj se účetní k oficiálnímu PDF opisu nedostane, protože
+     * portál chce podací číslo A heslo. Odemyká se proto vědomě: samostatná akce, step-up
+     * ověření a záznam v auditu. Do metadat artefaktů ani do logů se heslo nekopíruje.
+     *
+     * @return array{attempt_id:int,reference:?string,state_password:string}
+     */
+    public function revealStatePassword(
+        int $submissionId,
+        int $supplierId,
+        int $attemptId,
+    ): array {
+        $attempt = $this->direct->findAttempt($attemptId, $submissionId, $supplierId);
+        if ($attempt === null || empty($attempt['state_password_ciphertext'])) {
+            throw new EpoSubmissionException(
+                'state_password_unavailable',
+                'K tomuto pokusu není uložené heslo pro dotaz na stav.',
+                404,
+            );
+        }
+        try {
+            $password = $this->crypto->decryptFor(
+                (string) $attempt['state_password_ciphertext'],
+                'epo:state-password',
+            );
+        } catch (\RuntimeException) {
+            throw new EpoSubmissionException(
+                'state_password_unavailable',
+                'Uložené heslo pro dotaz na stav nelze dešifrovat.',
+                500,
+            );
+        }
+        if ($password === '') {
+            throw new EpoSubmissionException(
+                'state_password_unavailable',
+                'Uložené heslo pro dotaz na stav je prázdné.',
+                404,
+            );
+        }
+
+        return [
+            'attempt_id' => $attemptId,
+            'reference' => $attempt['remote_submission_ref'] !== null
+                ? (string) $attempt['remote_submission_ref']
+                : null,
+            'state_password' => $password,
+        ];
+    }
+
     /** @return array{attempt_id:int,status:string,environment:string} */
     public function resolveAsNotSubmitted(
         int $submissionId,
@@ -1261,6 +1313,12 @@ final class EpoDirectSubmissionService
             'signing-certificate.pem'  => ['submission_signer_cert', $parts['submission_certificate_pem'] ?? null],
         ];
 
+        // Shrnutí dodejky (podací číslo, rozhodný čas, kontrolní součty, kdo podal a čí
+        // pečetí je to potvrzené) visí na čitelném přepisu potvrzenky — detail podání ho
+        // odtud čte, aby účetní nemusela otevírat XML. Heslo pro dotaz na stav v něm
+        // ZÁMĚRNĚ není, viz EpoConfirmationExtractor::receipt().
+        $receipt = is_array($parts['receipt'] ?? null) ? $parts['receipt'] : [];
+
         $stored = [];
         $failed = [];
         foreach ($files as $suffix => [$kind, $bytes]) {
@@ -1278,7 +1336,11 @@ final class EpoDirectSubmissionService
                     $attemptId,
                     $userId,
                     'valid',
-                    ['derived_from' => 'confirmation_p7s', 'epo_environment' => $environment],
+                    [
+                        'derived_from' => 'confirmation_p7s',
+                        'epo_environment' => $environment,
+                        ...($kind === 'confirmation_xml' && $receipt !== [] ? ['receipt' => $receipt] : []),
+                    ],
                 );
                 $stored[] = $kind;
             } catch (\Throwable) {

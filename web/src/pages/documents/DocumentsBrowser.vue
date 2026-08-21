@@ -107,6 +107,21 @@ const allFolders = ref<DocFolder[]>([])
 const moveTargetIds = ref<number[]>([])
 const moveTargetFolders = ref<number[]>([])
 
+/**
+ * Datum a čas nahrání. Server posílá `YYYY-MM-DD HH:MM:SS` i ISO s `T`, proto se čte
+ * podle pozice, ne parsováním do Date — to by hodnotu bez zóny posunulo o offset
+ * prohlížeče a soubor nahraný v 00:30 by se zobrazil s předchozím datem.
+ * Samotné datum nestačí: v jedné složce vzniká během podání víc souborů za sebou
+ * a bez času se nedá poznat jejich pořadí.
+ */
+function uploadedDate(value: string): string {
+  return value.slice(0, 10)
+}
+function uploadedTime(value: string): string {
+  const time = value.slice(11, 16)
+  return /^\d{2}:\d{2}$/.test(time) ? time : ''
+}
+
 // řazení (client-side; default dle názvu vzestupně)
 const sortKey = ref<'name' | 'size' | 'created'>('name')
 const sortDir = ref<'asc' | 'desc'>('asc')
@@ -903,7 +918,7 @@ onMounted(() => {
                 <span v-if="sortKey === 'size'">{{ sortDir === 'asc' ? '↑' : '↓' }}</span>
               </button>
             </th>
-            <th class="py-2 w-28 pl-2">
+            <th class="py-2 w-36 pl-2">
               <button type="button" class="cursor-pointer inline-flex items-center gap-1 hover:text-neutral-700" @click="setSort('created')">
                 {{ t('documents.uploaded') }}
                 <span v-if="sortKey === 'created'">{{ sortDir === 'asc' ? '↑' : '↓' }}</span>
@@ -918,7 +933,9 @@ onMounted(() => {
               </td>
               <td class="py-2"><span :class="['px-1.5 py-0.5 rounded text-[10px] font-semibold', docTypeBadge(d.doc_type).class]">{{ docTypeBadge(d.doc_type).label }}</span></td>
               <td class="py-2 text-right text-neutral-500 tabular-nums pr-8">{{ formatBytes(d.size_bytes) }}</td>
-              <td class="py-2 text-neutral-500 pl-2">{{ d.created_at.slice(0, 10) }}</td>
+              <td class="py-2 text-neutral-500 pl-2 tabular-nums whitespace-nowrap">
+                {{ uploadedDate(d.created_at) }}<span v-if="uploadedTime(d.created_at)" class="ml-1.5 text-neutral-400">{{ uploadedTime(d.created_at) }}</span>
+              </td>
             </tr>
           </tbody>
         </table>

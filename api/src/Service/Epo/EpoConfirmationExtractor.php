@@ -40,7 +40,8 @@ final class EpoConfirmationExtractor
      * @return array{
      *   confirmation_xml:?string,
      *   echo:?array{bytes:string, suffix:string},
-     *   seal_certificate_pem:?string, submission_certificate_pem:?string
+     *   seal_certificate_pem:?string, submission_certificate_pem:?string,
+     *   receipt:array<string,mixed>
      * }
      */
     public function extract(string $confirmationBytes): array
@@ -50,6 +51,7 @@ final class EpoConfirmationExtractor
             'echo' => null,
             'seal_certificate_pem' => null,
             'submission_certificate_pem' => null,
+            'receipt' => [],
         ];
         if (
             $confirmationBytes === ''
@@ -86,11 +88,15 @@ final class EpoConfirmationExtractor
 
             $xml = (string) file_get_contents($content);
 
+            $seal = $this->sealCertificate($certs);
+            $submitter = $this->submissionCertificates($xml);
+
             return [
                 'confirmation_xml' => $xml === '' ? null : $xml,
                 'echo' => $this->embeddedSubmission($xml),
-                'seal_certificate_pem' => $this->sealCertificate($certs),
-                'submission_certificate_pem' => $this->submissionCertificates($xml),
+                'seal_certificate_pem' => $seal,
+                'submission_certificate_pem' => $submitter,
+                'receipt' => $this->receipt($xml, $seal, $submitter),
             ];
         } catch (\Throwable) {
             return $empty;
@@ -151,6 +157,138 @@ final class EpoConfirmationExtractor
         }
 
         return ['bytes' => $decoded, 'suffix' => self::payloadSuffix($decoded)];
+    }
+
+    /**
+     * Čitelné shrnutí dodejky pro detail podání — to podstatné z rozbalených částí
+     * na jednom místě, aby účetní nemusela otevírat XML.
+     *
+     * HESLO pro dotaz na stav se sem ZÁMĚRNĚ nedává. Uvnitř potvrzenky je (a v jejím
+     * čitelném přepisu taky), ale tenhle blok se ukládá do metadat artefaktu, která
+     * API vrací u KAŽDÉHO souboru v seznamu — to je podstatně širší expozice než
+     * stažení jednoho souboru. Heslo má vlastní, auditovanou cestu ven; drží se dál
+     * jen zašifrované v `state_password_ciphertext`.
+     *
+     * @return array<string,mixed>
+     */
+    private function receipt(string $xml, ?string $sealPem, ?string $submitterPem): array
+    {
+        $out = [];
+
+        $dom = new \DOMDocument();
+        libxml_use_internal_errors(true);
+        libxml_clear_errors();
+        $loaded = $dom->loadXML($xml, LIBXML_NONET);
+        libxml_clear_errors();
+        libxml_use_internal_errors(false);
+
+        if ($loaded) {
+            $xp = new \DOMXPath($dom);
+
+            $podani = $xp->query('//*[local-name()="Podani"]')->item(0);
+            if ($podani instanceof \DOMElement) {
+                foreach (['Cislo' => 'reference', 'Datum' => 'submitted_at', 'KC' => 'receipt_checksum'] as $attr => $key) {
+                    $value = trim($podani->getAttribute($attr));
+                    if ($value !== '') {
+                        $out[$key] = mb_substr($value, 0, 200);
+                    }
+                }
+                $zarep = strtolower(trim($podani->getAttribute('ZAREP')));
+                if ($zarep !== '') {
+                    // EPO tím potvrzuje, že podání přijalo jako podepsané uznávaným podpisem.
+                    $out['zarep'] = $zarep === 'true' || $zarep === '1';
+                }
+            }
+
+            $soubor = $xp->query('//*[local-name()="Kontrola"]//*[local-name()="Soubor"]')->item(0);
+            if ($soubor instanceof \DOMElement) {
+                foreach (['KC' => 'submitted_md5', 'Nazev' => 'submitted_name', 'c_ufo' => 'office_code'] as $attr => $key) {
+                    $value = trim($soubor->getAttribute($attr));
+                    if ($value !== '') {
+                        $out[$key] = mb_substr($value, 0, 200);
+                    }
+                }
+            }
+        }
+
+        $seal = $this->certificateSummary($sealPem);
+        if ($seal !== []) {
+            $out['seal'] = $seal;
+        }
+        $submitter = $this->certificateSummary($submitterPem);
+        if ($submitter !== []) {
+            $out['submitted_by'] = $submitter;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Identita z certifikátu. `openssl_x509_parse()` u certifikátů s `organizationIdentifier`
+     * (což české kvalifikované CA mají) `subject` nenaplní, proto se čte i ze zploštělého
+     * `name` — bez toho by v panelu zůstaly prázdné řádky.
+     *
+     * @return array<string,mixed>
+     */
+    private function certificateSummary(?string $pem): array
+    {
+        if ($pem === null || $pem === '') {
+            return [];
+        }
+        $parsed = @openssl_x509_parse($pem, false);
+        if (!is_array($parsed)) {
+            return [];
+        }
+        $name = (string) ($parsed['name'] ?? '');
+        $pick = static function (string $key) use ($parsed, $name): ?string {
+            $value = $parsed['subject'][$key] ?? null;
+            if (is_array($value)) {
+                $value = reset($value);
+            }
+            if (is_scalar($value) && (string) $value !== '') {
+                return mb_substr((string) $value, 0, 200);
+            }
+            if ($name !== '' && preg_match('#/' . preg_quote($key, '#') . '=((?:[^/\\\\]|\\\\.)+)#', $name, $m)) {
+                return mb_substr(self::unescapeDn($m[1]), 0, 200);
+            }
+            return null;
+        };
+        // Vydavatele hlásí OpenSSL jednou jako `CN`, jednou jako `commonName` — podle toho,
+        // jestli si s DN poradil. Bez obou variant zůstával řádek „vydal" prázdný.
+        $issuer = $parsed['issuer']['CN'] ?? $parsed['issuer']['commonName'] ?? null;
+        if (is_array($issuer)) {
+            $issuer = reset($issuer);
+        }
+
+        return array_filter([
+            'common_name' => $pick('CN'),
+            'organization' => $pick('O'),
+            'serial_number' => $pick('serialNumber'),
+            'issuer' => is_scalar($issuer) && (string) $issuer !== '' ? mb_substr((string) $issuer, 0, 200) : null,
+            'valid_from' => isset($parsed['validFrom_time_t']) ? date('Y-m-d', (int) $parsed['validFrom_time_t']) : null,
+            'valid_to' => isset($parsed['validTo_time_t']) ? date('Y-m-d', (int) $parsed['validTo_time_t']) : null,
+            'fingerprint_sha256' => is_string($fp = @openssl_x509_fingerprint($pem, 'sha256'))
+                ? strtolower(str_replace(':', '', $fp))
+                : null,
+        ], static fn (?string $v): bool => $v !== null && $v !== '');
+    }
+
+    /**
+     * OpenSSL ve zploštělém DN escapuje jak lomítko uvnitř hodnoty, tak každý ne-ASCII
+     * bajt zápisem `\xHH`. Bez rozbalení by v panelu stálo „Spole\xC4\x8Dn\xC3\xA9…"
+     * místo „Společné…".
+     */
+    private static function unescapeDn(string $value): string
+    {
+        $value = str_replace('\\/', '/', $value);
+        $decoded = preg_replace_callback(
+            '/\\\\x([0-9A-Fa-f]{2})/',
+            static fn (array $m): string => chr((int) hexdec($m[1])),
+            $value,
+        ) ?? $value;
+
+        // Když se z toho nesloží platné UTF-8, radši vrátíme původní zápis než rozbitý text.
+        return mb_check_encoding($decoded, 'UTF-8') ? $decoded : $value;
     }
 
     /** Přípona podle skutečného obsahu, ne podle přání. */

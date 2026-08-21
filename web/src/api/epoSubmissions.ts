@@ -58,6 +58,33 @@ export interface EpoAttempt {
   updated_at: string
 }
 
+/** Identita z certifikátu, jak ji aplikace vytáhla z dodejky. */
+export interface EpoCertificateSummary {
+  common_name?: string
+  organization?: string
+  serial_number?: string
+  issuer?: string
+  valid_from?: string
+  valid_to?: string
+  fingerprint_sha256?: string
+}
+
+/**
+ * Shrnutí dodejky EPO. Heslo pro dotaz na stav v něm ZÁMĚRNĚ není — má vlastní,
+ * auditovanou cestu ven (`revealStatePassword`).
+ */
+export interface EpoReceiptSummary {
+  reference?: string
+  submitted_at?: string
+  receipt_checksum?: string
+  zarep?: boolean
+  submitted_md5?: string
+  submitted_name?: string
+  office_code?: string
+  seal?: EpoCertificateSummary
+  submitted_by?: EpoCertificateSummary
+}
+
 export interface EpoArtifact {
   id: number
   tax_submission_id: number
@@ -76,6 +103,7 @@ export interface EpoArtifact {
     content_match?: boolean | null
     form_match?: boolean | null
     snapshot_sha256_match?: boolean
+    receipt?: EpoReceiptSummary
   } | null
   title: string
   original_name: string
@@ -323,6 +351,20 @@ export const epoSubmissionsApi = {
       note,
       ...stepUpProofBody(proof),
     },
+  ).then(r => r.data),
+
+  /**
+   * Odhalí heslo, kterým se na Daňovém portálu dohledá stav podání a stáhne opis.
+   * EPO ho vydá jen jednou v dodejce; aplikace ho jinak drží zašifrované. Proto POST
+   * se step-up ověřením — server odhalení zapíše do auditu.
+   */
+  revealStatePassword: (
+    id: number,
+    attemptId: number,
+    proof: EpoStepUpProof,
+  ) => api.post<{ attempt_id: number; reference: string | null; state_password: string }>(
+    `/reports/submissions/${id}/epo-attempts/${attemptId}/state-password`,
+    stepUpProofBody(proof),
   ).then(r => r.data),
 
   uploadArtifacts: (

@@ -8,6 +8,7 @@ import {
   type EpoAttempt,
   type EpoFolder,
   type EpoMessage,
+  type EpoReceiptSummary,
   type EpoSigningCredential,
   type TaxSubmission,
 } from '@/api/epoSubmissions'
@@ -70,11 +71,17 @@ const submitAttemptId = ref<number | null>(null)
 const submitPassword = ref('')
 const submitTotpCode = ref('')
 const recoveryModalOpen = ref(false)
-const recoveryMode = ref<'confirmation' | 'not_submitted'>('confirmation')
+const recoveryMode = ref<'confirmation' | 'not_submitted' | 'state_password'>('confirmation')
 const recoveryAttemptId = ref<number | null>(null)
 const recoveryFile = ref<File | null>(null)
 const recoveryNote = ref('')
 const recoveryVerified = ref(false)
+/**
+ * Odhalená hesla pro dotaz na stav, jen v paměti záložky. Záměrně se nikam neukládají —
+ * po reloadu je potřeba se ověřit znovu.
+ */
+const revealedPassword = ref<Record<number, string>>({})
+const passwordBusy = computed(() => directBusy.value)
 const recoveryPassword = ref('')
 const recoveryTotpCode = ref('')
 
@@ -538,6 +545,53 @@ function artifactKindLabel(kind: string): string {
   return t(`reports.submissions.artifact_${kind}`)
 }
 
+/**
+ * Složka v Dokumentech, kam podání ukládá své soubory.
+ *
+ * Bere se z artefaktů, ne z nastavení: cílová složka se odvozuje od období a typu
+ * výkazu, takže nastavení říká jen kořen. Nejčastější složka vyhrává — kdyby se
+ * archiv mezi pokusy přenastavil, odkaz vede tam, kde je většina důkazů.
+ */
+function artifactsFolderId(item: TaxSubmission): number | null {
+  const counts = new Map<number, number>()
+  for (const artifact of item.artifacts) {
+    if (artifact.folder_id == null) continue
+    counts.set(artifact.folder_id, (counts.get(artifact.folder_id) ?? 0) + 1)
+  }
+  let best: number | null = null
+  let bestCount = 0
+  for (const [folderId, count] of counts) {
+    if (count > bestCount) { best = folderId; bestCount = count }
+  }
+  return best
+}
+
+/**
+ * Shrnutí dodejky, které si aplikace odložila při rozbalení potvrzenky.
+ * Visí na čitelném přepisu (`confirmation_xml`), protože právě z něj pochází.
+ */
+function receipt(item: TaxSubmission): EpoReceiptSummary | null {
+  for (const artifact of item.artifacts) {
+    if (artifact.artifact_kind !== 'confirmation_xml') continue
+    const summary = (artifact.verification as { receipt?: EpoReceiptSummary } | null)?.receipt
+    if (summary && Object.keys(summary).length) return summary
+  }
+  return null
+}
+
+/**
+ * Zprávy z ověřovacího testu bez `TEST_REZIM`.
+ *
+ * EPO tuhle informativní hlášku vrací u KAŽDÉHO úspěšného testu — je to konstatování,
+ * že test nic nepodává. Vedle už potvrzeného podání ale čte jako „vaše hlášení nebylo
+ * přijato", což je přesný opak pravdy. Ostatní hlášky (varování z věcných kontrol)
+ * zůstávají, ty nesou informaci.
+ */
+function testProtocolMessages(item: TaxSubmission): EpoMessage[] {
+  const messages = directMessages.value[item.id] ?? latestDirectAttempt(item)?.test_messages ?? []
+  return messages.filter(m => (m.code ?? '').toUpperCase() !== 'TEST_REZIM')
+}
+
 function artifactVerificationHint(artifact: EpoArtifact): string {
   if (artifact.artifact_kind !== 'confirmation_p7s' || !artifact.verification) return ''
   const verification = artifact.verification
@@ -919,6 +973,31 @@ async function refreshDirectStatus(item: TaxSubmission) {
   }
 }
 
+/** Pokus, ke kterému EPO vydalo heslo pro dotaz na stav. */
+function statePasswordAttemptId(item: TaxSubmission): number | null {
+  const attempt = item.attempts.find(a => a.channel === 'epo_direct' && a.status_query_available)
+  return attempt?.id ?? null
+}
+
+/**
+ * Otevře odhalení hesla. Reuse modalu je záměrný: je to táž třída akce jako obnova
+ * potvrzenky nebo uvolnění pokusu — vyžaduje čerstvé ověření a nechává auditní stopu.
+ */
+function openStatePassword(item: TaxSubmission) {
+  const attemptId = statePasswordAttemptId(item)
+  if (attemptId === null) return
+  expandedId.value = item.id
+  recoveryMode.value = 'state_password'
+  recoveryAttemptId.value = attemptId
+  recoveryFile.value = null
+  recoveryNote.value = ''
+  recoveryVerified.value = false
+  recoveryPassword.value = ''
+  recoveryTotpCode.value = ''
+  recoveryPasskeyToken.value = ''
+  recoveryModalOpen.value = true
+}
+
 function openRecoveryModal(item: TaxSubmission, mode: 'confirmation' | 'not_submitted') {
   const attempt = latestDirectAttempt(item)
   if (!attempt) return
@@ -943,6 +1022,19 @@ async function confirmRecovery() {
   if (!item || recoveryAttemptId.value === null || directBusy.value) return
   directBusy.value = true
   try {
+    if (recoveryMode.value === 'state_password') {
+      const result = await epoSubmissionsApi.revealStatePassword(
+        item.id,
+        recoveryAttemptId.value,
+        recoveryProof(),
+      )
+      revealedPassword.value = { ...revealedPassword.value, [item.id]: result.state_password }
+      recoveryModalOpen.value = false
+      recoveryPassword.value = ''
+      recoveryTotpCode.value = ''
+      recoveryPasskeyToken.value = ''
+      return
+    }
     if (recoveryMode.value === 'confirmation') {
       if (!recoveryFile.value) return
       await epoSubmissionsApi.recoverDirectConfirmation(
@@ -1455,12 +1547,15 @@ onMounted(async () => {
                 {{ t('reports.submissions.next_status_check') }} {{ formatDate(latestDirectAttempt(selected)?.next_poll_at ?? null) }}
               </span>
             </div>
+            <div v-if="testProtocolMessages(selected).length" class="mt-3 text-xs text-neutral-500">
+              {{ t('reports.submissions.test_protocol_heading') }}
+            </div>
             <ul
-              v-if="(directMessages[selected.id] ?? latestDirectAttempt(selected)?.test_messages ?? []).length"
-              class="mt-3 space-y-2"
+              v-if="testProtocolMessages(selected).length"
+              class="mt-1 space-y-2"
             >
               <li
-                v-for="(message, index) in (directMessages[selected.id] ?? latestDirectAttempt(selected)?.test_messages ?? [])"
+                v-for="(message, index) in testProtocolMessages(selected)"
                 :key="`${message.code}-${index}`"
                 class="rounded border px-3 py-2 text-xs"
                 :class="['S', 'K', 'E'].includes(message.type ?? '') ? 'border-danger-500/30 bg-danger-50 text-danger-700' : 'border-warning-500/30 bg-warning-50 text-warning-800'"
@@ -1533,7 +1628,19 @@ onMounted(async () => {
           <div>
             <div class="flex items-center justify-between gap-3">
               <h3 class="font-medium text-sm">{{ t('reports.submissions.artifacts_title') }}</h3>
-              <span class="text-xs text-neutral-500">{{ selected.artifacts.length }}</span>
+              <div class="flex items-center gap-3">
+                <RouterLink
+                  v-if="artifactsFolderId(selected)"
+                  :to="{ name: 'documents', query: { folder: String(artifactsFolderId(selected)) } }"
+                  class="text-xs text-primary-600 hover:text-primary-700 hover:underline inline-flex items-center gap-1"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
+                  </svg>
+                  {{ t('reports.submissions.open_documents_folder') }}
+                </RouterLink>
+                <span class="text-xs text-neutral-500">{{ selected.artifacts.length }}</span>
+              </div>
             </div>
             <div v-if="selected.artifacts.length === 0" class="mt-2 text-sm text-neutral-500 border border-dashed border-neutral-300 rounded-lg p-4">
               {{ t('reports.submissions.no_artifacts') }}
@@ -1582,6 +1689,71 @@ onMounted(async () => {
             <div class="mt-3">
               <div class="text-xs text-neutral-500">SHA-256</div>
               <code class="block mt-1 text-[11px] break-all rounded bg-neutral-50 p-2">{{ selected.xml_sha256 }}</code>
+            </div>
+          </div>
+
+          <!-- Údaje z rozbalené dodejky: to podstatné z potvrzenky bez otevírání XML. -->
+          <div v-if="receipt(selected)" class="rounded-lg border border-neutral-200 p-3">
+            <div class="flex items-center justify-between gap-2">
+              <h3 class="font-medium text-sm">{{ t('reports.submissions.receipt_title') }}</h3>
+              <span
+                v-if="receipt(selected)?.zarep"
+                class="rounded-full border border-success-500/30 bg-success-50 px-2 py-0.5 text-[11px] font-medium text-success-700"
+              >ZAREP</span>
+            </div>
+            <dl class="mt-3 space-y-2 text-xs">
+              <div v-if="receipt(selected)?.reference" class="flex justify-between gap-3">
+                <dt class="text-neutral-500">{{ t('reports.submissions.reference') }}</dt>
+                <dd class="text-right tabular-nums">{{ receipt(selected)?.reference }}</dd>
+              </div>
+              <div v-if="receipt(selected)?.submitted_at" class="flex justify-between gap-3">
+                <dt class="text-neutral-500">{{ t('reports.submissions.receipt_decisive_time') }}</dt>
+                <dd class="text-right">{{ formatDate(receipt(selected)?.submitted_at ?? null) }}</dd>
+              </div>
+              <div v-if="receipt(selected)?.office_code" class="flex justify-between gap-3">
+                <dt class="text-neutral-500">{{ t('reports.submissions.receipt_office') }}</dt>
+                <dd class="text-right tabular-nums">{{ receipt(selected)?.office_code }}</dd>
+              </div>
+              <div v-if="receipt(selected)?.submitted_name" class="flex justify-between gap-3">
+                <dt class="text-neutral-500">{{ t('reports.submissions.receipt_file') }}</dt>
+                <dd class="text-right break-all">{{ receipt(selected)?.submitted_name }}</dd>
+              </div>
+            </dl>
+
+            <div v-if="receipt(selected)?.submitted_by" class="mt-3 border-t border-neutral-100 pt-3">
+              <div class="text-xs text-neutral-500">{{ t('reports.submissions.receipt_submitted_by') }}</div>
+              <div class="mt-1 text-xs font-medium text-neutral-800">{{ receipt(selected)?.submitted_by?.common_name }}</div>
+              <div class="text-[11px] text-neutral-500">
+                <template v-if="receipt(selected)?.submitted_by?.issuer">{{ receipt(selected)?.submitted_by?.issuer }}</template>
+                <template v-if="receipt(selected)?.submitted_by?.serial_number"> · {{ receipt(selected)?.submitted_by?.serial_number }}</template>
+              </div>
+            </div>
+
+            <div v-if="receipt(selected)?.seal" class="mt-3 border-t border-neutral-100 pt-3">
+              <div class="text-xs text-neutral-500">{{ t('reports.submissions.receipt_seal') }}</div>
+              <div class="mt-1 text-xs text-neutral-800">{{ receipt(selected)?.seal?.common_name }}</div>
+              <div class="text-[11px] text-neutral-500">
+                <template v-if="receipt(selected)?.seal?.issuer">{{ receipt(selected)?.seal?.issuer }}</template>
+                <template v-if="receipt(selected)?.seal?.valid_to"> · {{ t('reports.submissions.receipt_valid_to') }} {{ receipt(selected)?.seal?.valid_to }}</template>
+              </div>
+            </div>
+
+            <!-- Heslo pro dotaz na stav: bez něj se na Daňovém portálu nedá stáhnout opis.
+                 Odhaluje se vědomě, přes step-up a se záznamem v auditu. -->
+            <div v-if="statePasswordAttemptId(selected)" class="mt-3 border-t border-neutral-100 pt-3">
+              <div class="text-xs text-neutral-500">{{ t('reports.submissions.state_password') }}</div>
+              <div class="mt-1 flex items-center gap-2">
+                <code v-if="revealedPassword[selected.id]" class="rounded bg-neutral-50 px-2 py-1 text-xs tracking-wider">{{ revealedPassword[selected.id] }}</code>
+                <span v-else class="text-xs text-neutral-400 tracking-widest">••••••••</span>
+                <button
+                  v-if="!revealedPassword[selected.id]"
+                  type="button"
+                  class="cursor-pointer text-xs text-primary-600 hover:text-primary-700 hover:underline disabled:opacity-50"
+                  :disabled="passwordBusy"
+                  @click="openStatePassword(selected)"
+                >{{ t('reports.submissions.state_password_reveal') }}</button>
+              </div>
+              <div class="mt-1 text-[11px] text-neutral-400">{{ t('reports.submissions.state_password_hint') }}</div>
             </div>
           </div>
 
@@ -1825,7 +1997,13 @@ onMounted(async () => {
               {{ t(recoveryMode === 'confirmation' ? 'reports.submissions.recover_confirmation_title' : 'reports.submissions.resolve_not_submitted_title') }}
             </h2>
             <p class="text-xs text-neutral-500 mt-1">
-              {{ t(recoveryMode === 'confirmation' ? 'reports.submissions.recover_confirmation_hint' : 'reports.submissions.resolve_not_submitted_hint') }}
+              {{ t(
+                recoveryMode === 'confirmation'
+                  ? 'reports.submissions.recover_confirmation_hint'
+                  : recoveryMode === 'state_password'
+                    ? 'reports.submissions.state_password_hint'
+                    : 'reports.submissions.resolve_not_submitted_hint'
+              ) }}
             </p>
           </div>
           <button type="button" class="p-2 text-neutral-500 hover:text-neutral-900" @click="recoveryModalOpen = false">
@@ -1835,14 +2013,17 @@ onMounted(async () => {
           </button>
         </div>
         <div class="p-5 space-y-4">
-          <div v-if="recoveryMode === 'not_submitted'" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700">
+          <div v-if="recoveryMode === 'state_password'" class="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-600">
+            {{ t('reports.submissions.state_password_reveal_note') }}
+          </div>
+          <div v-else-if="recoveryMode === 'not_submitted'" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700">
             {{ t('reports.submissions.resolve_not_submitted_warning') }}
           </div>
           <label v-if="recoveryMode === 'confirmation'" class="block text-sm">
             {{ t('reports.submissions.confirmation_file') }}
             <input type="file" accept=".p7s,.p7m" class="mt-2 block w-full text-sm" @change="onRecoveryFile">
           </label>
-          <template v-else>
+          <template v-else-if="recoveryMode === 'not_submitted'">
             <label class="block text-sm">
               {{ t('reports.submissions.resolution_note') }}
               <textarea v-model="recoveryNote" rows="3" maxlength="500" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2"/>
@@ -1883,14 +2064,20 @@ onMounted(async () => {
           <button type="button" :class="btnOutline('neutral')" @click="recoveryModalOpen = false">{{ t('common.cancel') }}</button>
           <button
             type="button"
-            :class="btnFilled(recoveryMode === 'confirmation' ? 'warning' : 'danger')"
-            :disabled="directBusy || !recoveryStepUpReady || (recoveryMode === 'confirmation' ? !recoveryFile : !recoveryVerified || recoveryNote.trim().length < 10)"
+            :class="btnFilled(recoveryMode === 'confirmation' ? 'warning' : recoveryMode === 'state_password' ? 'primary' : 'danger')"
+            :disabled="directBusy || !recoveryStepUpReady || (recoveryMode === 'confirmation' ? !recoveryFile : recoveryMode === 'not_submitted' ? (!recoveryVerified || recoveryNote.trim().length < 10) : false)"
             @click="confirmRecovery"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" :d="recoveryMode === 'confirmation' ? ICONS.upload : ICONS.check"/>
             </svg>
-            {{ t(recoveryMode === 'confirmation' ? 'reports.submissions.verify_confirmation' : 'reports.submissions.release_attempt') }}
+            {{ t(
+              recoveryMode === 'confirmation'
+                ? 'reports.submissions.verify_confirmation'
+                : recoveryMode === 'state_password'
+                  ? 'reports.submissions.state_password_reveal'
+                  : 'reports.submissions.release_attempt'
+            ) }}
           </button>
         </div>
       </div>

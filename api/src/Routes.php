@@ -1860,6 +1860,9 @@ final class Routes
         $app->post   ('/api/reports/submissions/{id:[0-9]+}/epo-status', [\MyInvoice\Action\Report\EpoDirectSubmissionAction::class, 'refreshStatus']);
         $app->post   ('/api/reports/submissions/{id:[0-9]+}/epo-attempts/{attemptId:[0-9]+}/confirmation', [\MyInvoice\Action\Report\EpoDirectSubmissionAction::class, 'recoverConfirmation']);
         $app->post   ('/api/reports/submissions/{id:[0-9]+}/epo-attempts/{attemptId:[0-9]+}/resolve-not-submitted', [\MyInvoice\Action\Report\EpoDirectSubmissionAction::class, 'resolveAsNotSubmitted']);
+        // POST, ne GET: odhalení hesla pro dotaz na stav je vědomá akce se step-up ověřením
+        // a auditní stopou, ne čtení, které by se dalo předvyplnit do odkazu nebo nacachovat.
+        $app->post   ('/api/reports/submissions/{id:[0-9]+}/epo-attempts/{attemptId:[0-9]+}/state-password', [\MyInvoice\Action\Report\EpoDirectSubmissionAction::class, 'revealStatePassword']);
         $app->post   ('/api/reports/submissions/{id:[0-9]+}/artifacts', [\MyInvoice\Action\Report\TaxSubmissionEpoAction::class, 'uploadArtifacts']);
         $app->get    ('/api/reports/submissions/{id:[0-9]+}/artifacts/{artifactId:[0-9]+}/download', [\MyInvoice\Action\Report\TaxSubmissionEpoAction::class, 'downloadArtifact']);
         $app->post   ('/api/reports/submissions/{id:[0-9]+}/submit', [\MyInvoice\Action\Report\TaxSubmissionAction::class, 'submit']);

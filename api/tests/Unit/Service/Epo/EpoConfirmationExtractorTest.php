@@ -77,12 +77,31 @@ final class EpoConfirmationExtractorTest extends TestCase
             (string) ($parsed['name'] ?? ''),
             'Vytažený certifikát musí být ten z <Certifikaty>, ne pečeť z podpisu CMS.'
         );
+
+        // Shrnutí pro detail podání — a bez hesla, které se sem dostat nesmí.
+        $receipt = $parts['receipt'];
+        self::assertSame('568467011', $receipt['reference'] ?? null);
+        self::assertSame('2026-08-21T10:36:43', $receipt['submitted_at'] ?? null);
+        self::assertTrue($receipt['zarep'] ?? false, 'ZAREP="true" znamená přijetí podepsaného podání.');
+        self::assertSame(md5($submission), $receipt['submitted_md5'] ?? null);
+        self::assertStringContainsString(
+            'Podepsala Ucetni',
+            (string) ($receipt['submitted_by']['common_name'] ?? ''),
+        );
+        self::assertNotEmpty($receipt['seal']['common_name'] ?? null, 'Pečeť patří do shrnutí taky.');
+        self::assertStringNotContainsString(
+            'tajne123',
+            json_encode($receipt, JSON_UNESCAPED_UNICODE) ?: '',
+            'Heslo pro dotaz na stav se do metadat artefaktů kopírovat NESMÍ — má vlastní auditovanou cestu.'
+        );
     }
 
     public function testReturnsNothingForBytesThatAreNotACmsEnvelope(): void
     {
         $parts = (new EpoConfirmationExtractor())->extract('tohle rozhodne neni CMS');
 
+        self::assertSame([], $parts['receipt'], 'Shrnutí je prázdné, ne částečně vyplněné.');
+        unset($parts['receipt']);
         foreach ($parts as $key => $value) {
             self::assertNull($value, $key . ' nesmí nic vrátit pro nesmyslný vstup.');
         }
@@ -96,6 +115,7 @@ final class EpoConfirmationExtractorTest extends TestCase
         self::assertNull($parts['echo']);
         self::assertNull($parts['seal_certificate_pem']);
         self::assertNull($parts['submission_certificate_pem']);
+        self::assertSame([], $parts['receipt']);
     }
 
     /** @param array<string,string> $dn */

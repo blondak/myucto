@@ -325,6 +325,44 @@ final class EpoDirectSubmissionAction
         }
     }
 
+    /**
+     * Odhalení hesla pro dotaz na stav podání.
+     *
+     * Heslo vydá EPO jednou, v dodejce, a bez něj se na Daňovém portálu nedá dohledat
+     * stav ani stáhnout oficiální opis. Aplikace ho jinak drží jen zašifrované, takže
+     * jediná cesta ven vede tudy: vědomá akce se step-up ověřením a záznamem v auditu.
+     * Odpověď se proto nesmí cachovat.
+     */
+    public function revealStatePassword(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->guard($request, $response)) !== null) {
+            return $denied;
+        }
+        $userId = $this->userId($request);
+        $supplierId = SupplierGuard::currentId($request);
+        $submissionId = (int) ($args['id'] ?? 0);
+        $attemptId = (int) ($args['attemptId'] ?? 0);
+        $body = (array) ($request->getParsedBody() ?? []);
+        try {
+            $this->stepUp->verify($request, $userId, $body, 'state_password_reveal');
+            $result = $this->submissions->revealStatePassword($submissionId, $supplierId, $attemptId);
+            $this->audit(
+                $request,
+                'report.epo_state_password_revealed',
+                $userId,
+                $supplierId,
+                $submissionId,
+                // Samotné heslo se do auditu NEZAPISUJE — stačí, že je vidět KDO a KDY.
+                ['attempt_id' => $attemptId, 'reference' => $result['reference']],
+            );
+            return Json::ok($response, $result)
+                ->withHeader('Cache-Control', 'private, no-store');
+        } catch (EpoSubmissionException $e) {
+            $this->auditFailure($request, $userId, $supplierId, $submissionId, $e);
+            return $this->error($response, $e);
+        }
+    }
+
     public function resolveAsNotSubmitted(Request $request, Response $response, array $args): Response
     {
         if (($denied = $this->guard($request, $response)) !== null) {
