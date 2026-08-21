@@ -123,6 +123,46 @@ return [
         'server_url'  => 'https://myucto.cz',   // licenční server (aktivace/obnova/deaktivace)
         'public_key'  => '',                    // base64 Ed25519 veřejný klíč; prázdné = zabudovaný default
         'verify_tls'  => true,                  // ověřovat TLS certifikát serveru (false jen pro lokální .web dev doménu)
+
+        // Provozní telemetrie (H-21): verze, stav migrací, stáří zálohy
+        // a dispatcheru, režim údržby. Veze se s denní obnovou licence, žádný
+        // nový kanál ani cron. NEODESÍLÁ nic osobního ani identifikujícího —
+        // whitelist polí je uzavřený a hlídá ho test.
+        //
+        // null = podle režimu instalace (spravovaná zapnuto, self-hosted
+        // vypnuto); true/false přebije obojí. Ponechat null: jinak by
+        // spravovaná flotila musela klíč přepisovat.
+        'telemetry' => ['enabled' => null],
+    ],
+
+    // Co má instance zaplaceno. Zapisuje to provisioning při zřízení; aplikace
+    // se tím dozví, CO má zaplaceno, ne KDO ji hostuje.
+    //
+    // ⚠️ Zaplacený objem si aplikace odvodit nemůže: disková kvóta, kterou
+    // nastavuje hosting, je „zaplacený objem + rezerva na dumpy", takže by
+    // hlásila víc, než si zákazník koupil.
+    'instance' => [
+        'quota_gb'      => '',   // zaplacený objem v GB; prázdné = neznámý (neukazují se procenta ani pruh)
+        'plan'          => '',   // kód tarifu provozu
+        'managed_since' => '',   // datum zřízení (ISO), volitelné
+        'portal_url'    => '',   // správa předplatného; prázdné = odvodí se z license.server_url, jinak kontakt
+    ],
+
+    // Disková kvóta spravované instalace (H-10). Bez `app.managed` a bez
+    // `limit_mb` je celý blok no-op — self-hosted instalace se nikdy nezamkne
+    // sama.
+    //
+    // ⚠️ `limit_mb` je PROVOZNÍ mez a má přednost před `instance.quota_gb`:
+    // zámek zápisu musí stát na hodnotě, kterou provozovatel vědomě zapsal.
+    // Zákazníkovi se naopak poměr počítá ze SMLUVNÍHO objemu, jinak by viděl
+    // víc místa, než zaplatil.
+    'storage_quota' => [
+        'enabled'                  => true,  // vypínač funkční na KTERÉKOLI instalaci
+        'limit_mb'                 => 0,     // 0 = nenastaveno → odvodí se z instance.quota_gb
+        'warn_percent'             => 90,    // upozornění správci
+        'read_only_percent'        => 100,   // režim jen pro čtení (nikdy nespadne pod warn_percent)
+        'min_measure_interval_sec' => 300,   // brzda proti opakovanému měření
+        'exclude_dirs'             => [],    // další vyloučené podstromy (zálohy jsou vyloučené vždy)
     ],
     'db' => [
         'host'    => '127.0.0.1',
@@ -297,6 +337,24 @@ return [
         'max_files' => 60,                           // strop počtu souborů (nejnovější dle data)
         'max_bytes' => 20971520,                     // strop velikosti čteného souboru (20 MB; větší se čte od konce)
         'window_events' => 5000,                     // bez filtru data parsuj od nejnovějšího jen dokud nepřekročíš tolik událostí (výkon u velkých serverů; starší se doberou filtrem data)
+    ],
+
+    // Brzda odchozí pošty (H-16). Hosting spravované instalace počítá ZPRÁVY
+    // (SMTP transakce), ne příjemce, a obě okna jsou KLOUZAVÁ — půlnoc
+    // počítadlo nenuluje. Nad limit odpovídá dočasným odmítnutím, takže
+    // zpráva zůstane ve frontě a odejde později; nic se nezahazuje.
+    'smtp_rate_limit' => [
+        'enabled'                    => null,  // null = zapnuto jen při app.managed; true/false přebije
+        'per_hour'                   => 160,   // mez hostingu je 200 — rezerva na souběh procesů
+        'per_day'                    => 800,   // mez hostingu je 1000
+        'max_recipients_per_message' => 100,   // ⚠️ TVRDÝ strop: nad něj je odmítnutí TRVALÉ a fronta nepomůže. Konfigurace ho smí jen SNÍŽIT.
+        'warn_percent'               => 90,    // od kolika % naplnění varovat správce
+        'defer_retry_seconds'        => 900,   // záložní odstup, když nejde spočítat, kdy se okno uvolní
+        'alert_email'                => '',    // kam upozornit správce; prázdné = jen do logu
+        'alert_cooldown_minutes'     => 60,
+        'drain_on_cli'               => true,  // vyprazdňovat frontu při běhu cronu (pod webem nikdy)
+        'drain_batch'                => 25,
+        'log_retention_days'         => 3,     // okno je nejvýš den, delší historie není potřeba
     ],
 
     'ares' => [
@@ -501,6 +559,16 @@ return [
         'backup' => [
             'daily_retention_days'   => 30,          // drž denní mysqldump zálohy N dnů
             'monthly_retention_days' => 365,         // drž 1. v měsíci jako "monthly" zálohu N dnů
+
+            // ⚠️ JEDNOTKA JE SOUČÁST NASTAVENÍ. Při 4× denním dumpu (H-25) je
+            // „7 dnů" 28 souborů, ale „7 kusů" necelé dva dny. Spravovaná
+            // instalace chce to druhé — zálohy si dělá hosting a naše jen
+            // ujídají zaplacenou kvótu.
+            'retention_profile'        => 'default', // 'default' = 30/365 dnů | 'managed' = 7 KUSŮ / 0
+            'retention_mode'           => 'days',    // 'days' = kalendářní dny | 'copies' = počet souborů
+            'daily_retention_copies'   => 7,         // platí jen při retention_mode='copies'
+            'monthly_retention_copies' => 0,         // 0 = měsíční zálohy nedržet vůbec (NE „drž všechno")
+
             'output_dir'             => __DIR__ . '/storage/backup', // absolutní cesta! (relativní by se ukotvila k rootu aplikace, ne k CWD cronu)
             'password'               => '',          // volitelné heslo ZIP záloh (DB + PDF + Dokumenty), AES-256. Prázdné = bez šifrování.
                                                      // Rozbalení: 7-Zip / WinRAR / `unzip -P` — Průzkumník Windows AES-256 neumí.

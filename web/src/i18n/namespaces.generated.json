@@ -8,6 +8,7 @@
     "common",
     "crm",
     "demo",
+    "instance_alert",
     "invoice",
     "keyboard_shortcuts",
     "license",
@@ -54,7 +55,9 @@
     "eshop",
     "expense_categories",
     "export",
+    "hosting",
     "imports",
+    "instance_export",
     "integrations",
     "lock",
     "logbook",
@@ -128,7 +131,9 @@
       "eshop",
       "expense_categories",
       "export",
+      "hosting",
       "imports",
+      "instance_export",
       "integrations",
       "lock",
       "logbook",
@@ -789,6 +794,15 @@
     ],
     "admin-support": [
       "support_page"
+    ],
+    "admin-instance-export": [
+      "instance_export"
+    ],
+    "hosting": [
+      "hosting"
+    ],
+    "activation-terms": [
+      "hosting"
     ],
     "profile-password": [
       "domain_login",
