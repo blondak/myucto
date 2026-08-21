@@ -301,6 +301,11 @@ async function activate(takeover = false) {
   if (!key || activating.value) return
   // Přenos vazby z jiné instalace potvrdíme (počítá se do limitu 2/30 dní).
   if (takeover && !confirm(t('license.takeover_confirm'))) return
+  // ⚠️ Licence se NESČÍTAJÍ. Instalace nese vždy jeden klíč; aktivací dalšího
+  // ten původní přestane platit. Kdo si koupil druhou licenci v domnění, že tím
+  // získá dalšího uživatele, by jinak o tu první tiše přišel — a zjistil by to
+  // až podle toho, že má míst pořád stejně.
+  if (!takeover && status.value?.license_key_masked && !confirm(t('license.replace_confirm'))) return
   activating.value = true
   activateError.value = null
   try {

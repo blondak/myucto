@@ -9369,7 +9369,8 @@
             "Bank and cash register",
             "VAT returns and the control statement",
             "Company settings, users and data exports"
-        ]
+        ],
+        "replace_confirm": "This installation already has an active license. Activating a new key deactivates the current one — licenses do not add up. If you need more users, increase the count on the existing license. Replace anyway?"
     },
     "updates": {
         "title": "Updates",
