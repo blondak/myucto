@@ -148,14 +148,14 @@ type Tone = 'ok' | 'notice' | 'warning' | 'critical'
 const TONE_ROW: Record<Tone, string> = {
   ok:       'border-neutral-200 bg-surface',
   notice:   'border-primary-300 bg-primary-50/40',
-  warning:  'border-warning-300 bg-warning-50/40',
-  critical: 'border-danger-300 bg-danger-50/50',
+  warning:  'border-warning-500/40 bg-warning-50/40',
+  critical: 'border-danger-500/40 bg-danger-50/50',
 }
 const TONE_BADGE: Record<Tone, string> = {
   ok:       '',
   notice:   'bg-primary-100 text-primary-800',
-  warning:  'bg-warning-100 text-warning-800',
-  critical: 'bg-danger-100 text-danger-700',
+  warning:  'bg-warning-500/20 text-warning-600',
+  critical: 'bg-danger-500/15 text-danger-600',
 }
 
 /** Tarif licence. Neznámý kód se ukáže tak, jak přišel — nevymýšlíme mu název. */
@@ -448,13 +448,13 @@ const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).ma
         <span class="rounded bg-accent-600 px-2 py-0.5 text-xs font-bold uppercase tracking-wider text-white">
           {{ t('hosting.preview_badge') }}
         </span>
-        <span class="text-sm font-medium text-accent-800">{{ t('hosting.preview_warning') }}</span>
+        <span class="text-sm font-medium text-neutral-800">{{ t('hosting.preview_warning') }}</span>
         <RouterLink :to="{ path: '/hosting' }" :class="[btnOutline('neutral'), 'ml-auto']">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
           {{ t('hosting.preview_stop') }}
         </RouterLink>
       </div>
-      <p class="mt-2 text-xs text-accent-800/80">
+      <p class="mt-2 text-xs text-neutral-800/80">
         {{ t('hosting.preview_scenario', { name: t(`hosting.preview_name_${previewScenario}`) }) }}
       </p>
     </div>
@@ -498,7 +498,7 @@ const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).ma
           ><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" /></svg>
           <div class="min-w-0">
             <h2 class="text-lg font-semibold text-neutral-900">{{ happenedText }}</h2>
-            <p class="mt-1 text-sm" :class="billingTone === 'critical' ? 'text-danger-700' : 'text-warning-800'">
+            <p class="mt-1 text-sm" :class="billingTone === 'critical' ? 'text-danger-600' : 'text-warning-600'">
               {{ nextText }}
             </p>
           </div>
@@ -516,8 +516,8 @@ const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).ma
         <!-- Zavřené placené moduly: uživatel musí vidět, CO konkrétně nejde
              a co dál funguje. „Komerční funkce nedostupné" nikomu neřekne nic. -->
         <div v-if="featuresLocked" class="mt-4 grid gap-4 sm:grid-cols-2" data-hosting-locked>
-          <div class="rounded-md border border-danger-300 bg-surface p-3">
-            <h3 class="text-xs uppercase tracking-wider text-danger-700">{{ t('hosting.locked_title') }}</h3>
+          <div class="rounded-md border border-danger-500/40 bg-surface p-3">
+            <h3 class="text-xs uppercase tracking-wider text-danger-600">{{ t('hosting.locked_title') }}</h3>
             <ul class="mt-2 space-y-1 text-sm text-neutral-700">
               <li v-for="(item, i) in lockedFeatures" :key="'lf' + i" class="flex gap-2">
                 <svg class="w-4 h-4 mt-0.5 shrink-0 text-danger-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
@@ -525,7 +525,7 @@ const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).ma
               </li>
             </ul>
           </div>
-          <div class="rounded-md border border-success-300 bg-surface p-3">
+          <div class="rounded-md border border-success-500/40 bg-surface p-3">
             <h3 class="text-xs uppercase tracking-wider text-success-700">{{ t('hosting.open_title') }}</h3>
             <ul class="mt-2 space-y-1 text-sm text-neutral-700">
               <li v-for="(item, i) in openFeatures" :key="'of' + i" class="flex gap-2">
@@ -559,10 +559,10 @@ const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).ma
            Kreslí se jen tehdy, když je co řešit. -->
       <section
         v-if="attention.length"
-        class="rounded-lg border border-warning-300 bg-warning-50/40 px-4 py-3"
+        class="rounded-lg border border-warning-500/40 bg-warning-50/40 px-4 py-3"
         data-hosting-attention
       >
-        <p class="text-sm font-medium text-warning-800">{{ t('hosting.attention_title') }}</p>
+        <p class="text-sm font-medium text-warning-600">{{ t('hosting.attention_title') }}</p>
         <ul class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
           <li v-for="item in attention" :key="item.key">
             <a :href="item.anchor" class="text-primary-700 hover:text-primary-900 hover:underline">
@@ -642,7 +642,7 @@ const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).ma
               <template v-else-if="status.perpetual">{{ t('license.perpetual_validity') }}</template>
               <template v-else>{{ t('hosting.paid_until', { date: fmtDate(paidUntil) }) }}</template>
             </p>
-            <div v-if="subscription" class="mt-1 text-sm" :class="subscription.auto_renew ? 'text-neutral-600' : 'text-warning-800'">
+            <div v-if="subscription" class="mt-1 text-sm" :class="subscription.auto_renew ? 'text-neutral-600' : 'text-warning-600'">
               {{ subscription.auto_renew ? t('license.renewal_on') : t('license.renewal_off') }}
             </div>
           </li>
@@ -694,10 +694,10 @@ const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).ma
               {{ t('license.managed_storage_measured_at', { at: fmtDateTime(storage?.measured_at ?? null) }) }}
             </p>
 
-            <p v-if="storageLevel === 'exhausted'" class="mt-3 text-sm text-danger-700">
+            <p v-if="storageLevel === 'exhausted'" class="mt-3 text-sm text-danger-600">
               {{ t('license.managed_storage_exhausted_desc') }}
             </p>
-            <p v-else-if="storageLevel === 'warning'" class="mt-3 text-sm text-warning-800">
+            <p v-else-if="storageLevel === 'warning'" class="mt-3 text-sm text-warning-600">
               {{ t('license.managed_storage_warning_desc', { percent: storage?.read_only_percent ?? 100 }) }}
             </p>
             <p v-else-if="storageLevel === 'notice'" class="mt-3 text-sm text-primary-800">
@@ -780,7 +780,7 @@ const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).ma
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
                 {{ buyingStorage ? t('hosting.storage_ordering') : t('hosting.storage_order_cta') }}
               </button>
-              <p v-if="previewing" class="mt-2 text-xs text-accent-800">{{ t('hosting.preview_no_orders') }}</p>
+              <p v-if="previewing" class="mt-2 text-xs text-neutral-800">{{ t('hosting.preview_no_orders') }}</p>
             </div>
           </template>
 
@@ -789,7 +789,7 @@ const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).ma
           </p>
         </template>
 
-        <div v-if="storageDone" class="mt-4 rounded-md border border-success-300 bg-success-50 p-3 text-sm text-success-700" data-hosting-storage-done>
+        <div v-if="storageDone" class="mt-4 rounded-md border border-success-500/40 bg-success-50 p-3 text-sm text-success-700" data-hosting-storage-done>
           {{ storageDone }}
         </div>
         <div v-if="storageError" class="mt-4 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600" data-hosting-storage-error>
@@ -842,10 +842,10 @@ const excluded = computed(() => (tm('license.managed_excluded') as unknown[]).ma
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
             {{ upgradingUsers ? t('license.upgrading') : t('license.upgrade_pay_cta') }}
           </button>
-          <p v-if="previewing" class="mt-2 text-xs text-accent-800">{{ t('hosting.preview_no_orders') }}</p>
+          <p v-if="previewing" class="mt-2 text-xs text-neutral-800">{{ t('hosting.preview_no_orders') }}</p>
         </div>
 
-        <div v-if="userDone" class="mt-4 rounded-md border border-success-300 bg-success-50 p-3 text-sm text-success-700">{{ userDone }}</div>
+        <div v-if="userDone" class="mt-4 rounded-md border border-success-500/40 bg-success-50 p-3 text-sm text-success-700">{{ userDone }}</div>
         <div v-if="userError" class="mt-4 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">{{ userError }}</div>
       </section>
 

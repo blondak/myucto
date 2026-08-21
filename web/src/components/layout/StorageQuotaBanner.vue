@@ -83,8 +83,8 @@ const detail = computed(() =>
 )
 
 const tone = computed(() => {
-  if (level.value === 'exhausted') return 'border-danger-300 bg-danger-50 text-danger-700'
-  if (level.value === 'warning') return 'border-warning-300 bg-warning-50 text-warning-800'
+  if (level.value === 'exhausted') return 'border-danger-500/40 bg-danger-50 text-danger-600'
+  if (level.value === 'warning') return 'border-warning-500/40 bg-warning-50 text-warning-600'
 
   return 'border-primary-300 bg-primary-50/60 text-primary-800'
 })
@@ -108,7 +108,7 @@ const tone = computed(() => {
            odkazu je jen konstatování. -->
       <RouterLink
         to="/hosting#misto"
-        class="whitespace-nowrap rounded-md border border-current/40 px-2.5 py-1 text-xs font-medium hover:bg-black/5"
+        class="whitespace-nowrap rounded-md border border-neutral-300 px-2.5 py-1 text-xs font-medium hover:bg-neutral-100"
       >
         {{ t('common.storage_quota.expand_cta') }}
       </RouterLink>
