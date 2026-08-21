@@ -175,6 +175,14 @@ export interface JournalEntry {
   _warnings?: Array<'entry_date_outside_document_year'>
 }
 
+/** Doklad, ke kterému se hledá zaúčtování — segment URL /journal/for-document/{source}/{id}. */
+export type JournalDocumentSource = 'invoices' | 'purchase-invoices'
+
+/** Zápis i s řádky, jak ho vrací /journal/for-document/{source}/{id}. */
+export interface JournalEntryWithLines extends JournalEntry {
+  lines: JournalLine[]
+}
+
 /** Jeden navržený řádek kontace — MD/DAL s názvem účtu, ať uživatel nepotvrzuje holá čísla. */
 export interface PostingPreviewLine {
   account_code: string
@@ -1502,6 +1510,16 @@ export const accountingApi = {
    */
   getJournalSource: (id: number) =>
     api.get<JournalSourceSummary>(`/accounting/journal/${id}/source`).then(r => r.data),
+
+  /**
+   * Zaúčtování prvotního dokladu (sekce „Zaúčtování" na detailu faktury).
+   * Vrací všechny zápisy dokladu — původní i storno — i s řádky. Prázdný
+   * seznam znamená „nezaúčtováno" nebo firmu mimo podvojné účetnictví; sekce
+   * se v obou případech nezobrazí.
+   */
+  journalForDocument: (source: JournalDocumentSource, docId: number) =>
+    api.get<{ items: JournalEntryWithLines[] }>(`/accounting/journal/for-document/${source}/${docId}`)
+      .then(r => r.data.items ?? []),
 
   /**
    * Protějšky zápisu (doklad ↔ úhrada) i s jejich zaúčtováním. Klíčem je opět

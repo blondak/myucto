@@ -6393,6 +6393,13 @@
                 "already_linked": "Už navázáno",
                 "note_placeholder": "Poznámka k vazbě (nepovinné)",
                 "missing_document": "Doklad neexistuje"
+            },
+            "document_posting": {
+                "title": "Zaúčtování",
+                "entry": "Zápis",
+                "reversal": "Storno",
+                "open_in_journal": "Otevřít v deníku",
+                "load_failed": "Zaúčtování se nepodařilo načíst."
             }
         },
         "manual": {

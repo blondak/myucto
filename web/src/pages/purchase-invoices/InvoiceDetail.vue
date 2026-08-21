@@ -17,6 +17,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import PostingPreviewModal from '@/components/accounting/PostingPreviewModal.vue'
+import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
 import StockReceiptModal from '@/components/stock/StockReceiptModal.vue'
 import { stockApi, type StockReceiptProposal } from '@/api/stock'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
@@ -1110,6 +1111,9 @@ const purchaseActions = computed<ActionItem[]>(() => {
         </dl>
       </div>
     </div>
+
+    <!-- Zaúčtování — sbalené, načítá se na pozadí a zobrazí se jen u zaúčtovaného dokladu. -->
+    <DocumentPostingPanel source="purchase-invoices" :doc-id="invoice.id" />
 
     <!-- ═══ Položky ═══ -->
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">

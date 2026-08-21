@@ -6393,6 +6393,13 @@
                 "already_linked": "Already linked",
                 "note_placeholder": "Link note (optional)",
                 "missing_document": "Document missing"
+            },
+            "document_posting": {
+                "title": "Posting",
+                "entry": "Entry",
+                "reversal": "Reversal",
+                "open_in_journal": "Open in journal",
+                "load_failed": "Could not load the posting."
             }
         },
         "manual": {

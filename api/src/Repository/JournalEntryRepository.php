@@ -348,6 +348,61 @@ final class JournalEntryRepository
     }
 
     /**
+     * VŠECHNY zápisy zdrojového dokladu, i s řádky — podklad pro sekci „Zaúčtování"
+     * na detailu dokladu. Na rozdíl od {@see findBySource()} nevrací jen poslední
+     * zápis: doklad se dá přeúčtovat i stornovat a účetní musí vidět celý případ.
+     *
+     * Protizápis se dohledá přes `reversed_by`, ne přes zdroj: storno má source_id
+     * ZÁMĚRNĚ NULL (jinak by ho findBySource() vydával za zaúčtování dokladu), takže
+     * by jinak ze sekce vypadlo právě to, co doklad odúčtovalo.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listBySourceWithLines(int $supplierId, string $sourceType, int $sourceId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, supplier_id, period_id, entry_date, document_date, document_no, description,
+                    source_type, source_id, posted_at, posted_by, reversed_by, row_version,
+                    created_at, updated_at
+               FROM journal_entries
+              WHERE supplier_id = ? AND source_type = ? AND source_id = ?
+              ORDER BY id ASC'
+        );
+        $stmt->execute([$supplierId, $sourceType, $sourceId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($rows === []) {
+            return [];
+        }
+
+        $reversalIds = array_values(array_filter(array_map(
+            static fn (array $r): ?int => $r['reversed_by'] === null ? null : (int) $r['reversed_by'],
+            $rows,
+        )));
+        if ($reversalIds !== []) {
+            $place = implode(',', array_fill(0, count($reversalIds), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT id, supplier_id, period_id, entry_date, document_date, document_no, description,
+                        source_type, source_id, posted_at, posted_by, reversed_by, row_version,
+                        created_at, updated_at
+                   FROM journal_entries
+                  WHERE supplier_id = ? AND id IN ({$place})"
+            );
+            $stmt->execute([$supplierId, ...$reversalIds]);
+            $rows = [...$rows, ...$stmt->fetchAll(PDO::FETCH_ASSOC)];
+            usort($rows, static fn (array $a, array $b): int => (int) $a['id'] <=> (int) $b['id']);
+        }
+
+        $entries = [];
+        foreach ($rows as $row) {
+            $entry = $this->cast($row);
+            $entry['lines'] = $this->linesForEntry((int) $entry['id'], $supplierId);
+            $entries[] = $entry;
+        }
+
+        return $entries;
+    }
+
+    /**
      * Existující zápis pro zdrojový doklad (idempotence zaúčtování).
      */
     public function findBySource(int $supplierId, string $sourceType, int $sourceId): ?array

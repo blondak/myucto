@@ -258,6 +258,7 @@ use MyInvoice\Action\Accounting\Attachment\DownloadJournalAttachmentAction;
 use MyInvoice\Action\Accounting\Attachment\ListJournalAttachmentsAction;
 use MyInvoice\Action\Accounting\Attachment\PatchJournalAttachmentDescriptionAction;
 use MyInvoice\Action\Accounting\Attachment\UploadJournalAttachmentAction;
+use MyInvoice\Action\Accounting\JournalForDocumentAction;
 use MyInvoice\Action\Accounting\JournalRelatedAction;
 use MyInvoice\Action\Accounting\JournalSourceAction;
 use MyInvoice\Action\Accounting\Note\CreateJournalNoteAction;
@@ -1372,6 +1373,10 @@ final class Routes
             $g->delete('/journal/{id:[0-9]+}/notes/{noteId:[0-9]+}',      DeleteJournalNoteAction::class);
             // Náhled zdrojového dokladu pro drawer — KONKRÉTNÍ cesta PŘED generickým /journal/{id}.
             $g->get   ('/journal/{id:[0-9]+}/source',         JournalSourceAction::class);
+            // Zaúčtování prvotního dokladu pro sekci „Zaúčtování" na detailu faktury —
+            // KONKRÉTNÍ cesta PŘED generickým /journal/{id} (segment 'for-document' není číselný).
+            $g->get   ('/journal/for-document/{source:invoices|purchase-invoices}/{id:[0-9]+}',
+                                                             JournalForDocumentAction::class);
             // Protějšky zápisu (doklad ↔ úhrada) — KONKRÉTNÍ cesta PŘED generickým /journal/{id}.
             $g->get   ('/journal/{id:[0-9]+}/related',        JournalRelatedAction::class);
             // Měkká vazba zápisu na doklad (migrace 1514) — KONKRÉTNÍ cesty PŘED generickým /journal/{id}.

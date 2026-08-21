@@ -24,6 +24,7 @@ import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
+import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
 import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 
@@ -2011,6 +2012,9 @@ const invoiceActions = computed<ActionItem[]>(() => {
       <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-2">{{ t('invoice.note') }}</h3>
       <p class="text-sm text-neutral-700 whitespace-pre-wrap">{{ invoice.note_above_items }}</p>
     </div>
+
+    <!-- Zaúčtování — sbalené, načítá se na pozadí a zobrazí se jen u zaúčtovaného dokladu. -->
+    <DocumentPostingPanel source="invoices" :doc-id="invoice.id" />
 
     <!-- Položky -->
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
