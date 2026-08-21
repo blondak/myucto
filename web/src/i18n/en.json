@@ -9177,8 +9177,8 @@
         "banner_trial": "Trial ends in {days} days — activate a license to keep double-entry accounting, stock and other commercial modules available.",
         "banner_overage": "You have exceeded your license scope. Upgrade your subscription within {days} days, otherwise renewal will be paused.",
         "banner_overage_nodeadline": "You have exceeded your license scope. Please upgrade your subscription.",
-        "banner_trial_expired": "Your trial has ended — commercial accounting modules are unavailable. The free MyInvoice features remain fully operational.",
-        "banner_degraded": "Your license has expired — commercial accounting modules are unavailable. The free MyInvoice features remain fully operational.",
+        "banner_trial_expired": "Your trial has ended — paid accounting modules are unavailable. Invoicing and the free foundation keep working.",
+        "banner_degraded": "Your license has expired — paid accounting modules are unavailable. Invoicing and the free foundation keep working.",
         "banner_cta": "Buy / activate",
         "purchase_title": "Purchase and activation",
         "purchase_subtitle": "License status, key activation and subscription.",
@@ -9250,10 +9250,10 @@
         "renewal_cancel_already": "Automatic renewal had already been cancelled. The license runs until {date}.",
         "renewal_cancel_failed": "Cancelling automatic renewal failed. Please try again.",
         "model_title": "License model",
-        "model_subtitle": "Every MyInvoice feature free forever + a commercial accounting extension.",
-        "model_intro": "MyÚčto is the successor to the MyInvoice project. Every feature of the original system remains free in MyÚčto forever; a commercial license unlocks the additional accounting modules.",
+        "model_subtitle": "A free foundation forever, with a paid accounting extension on top.",
+        "model_intro": "Invoicing, documents, contacts, bank and cash are free in MyÚčto and will stay free. A license unlocks the accounting extension built on top of them.",
         "model_points": [
-            "Every feature of MyInvoice remains available free of charge after the trial ends.",
+            "The free foundation stays available after the trial ends.",
             "A commercial license unlocks double-entry accounting, accounting tools and closing, stock and e-commerce, asset records, EPO integration and advanced VAT corrections.",
             "Pricing is per active user and month; read-only and deactivated accounts do not count.",
             "The license is bound to a unique installation identifier; one key runs on one installation.",
@@ -9261,11 +9261,11 @@
             "Only technical data is transmitted (identifier, key, version, counts). No accounting or personal data."
         ],
         "trial_title": "Trial period",
-        "trial_body": "For the first 60 days after first launch you have full access for free, without registration or payment. Afterwards the commercial accounting modules are hidden and their pages and APIs are unavailable until you activate a license. The free MyInvoice features remain fully usable.",
+        "trial_body": "For the first 60 days after first launch you have full access for free, without registration or payment. Afterwards the paid accounting modules are hidden and their pages and APIs are unavailable until you activate a license. The free foundation remains fully usable.",
         "tiers_title": "Plans",
         "tiers_body": "Single company (1 agenda), Accounting office (up to 10 agendas) and Unlimited (no company limit). An annual subscription costs 10 monthly payments.",
         "readonly_title": "Scope without an active license",
-        "readonly_body": "After the license expires (and a 14-day grace period), invoicing and the entire free MyInvoice foundation remain fully operational. Double-entry accounting, Tools and closing, stock and e-commerce, asset records, EPO integration and advanced VAT corrections are unavailable. Their data remains unchanged in the database and becomes available again after activation.",
+        "readonly_body": "After the license expires (and a 14-day grace period), invoicing and the entire free foundation remain fully operational. Double-entry accounting, Tools and closing, stock and e-commerce, asset records, EPO integration, income tax and advanced VAT corrections are unavailable. Their data remains unchanged in the database and becomes available again after activation.",
         "full_license_link": "Full license text at myucto.cz/licence",
         "terms_title": "Terms of Service",
         "terms_subtitle": "Summary of the main articles. The full text at myucto.cz is binding.",
@@ -9294,7 +9294,7 @@
             },
             {
                 "title": "6. Trial period and unlicensed scope",
-                "body": "60 days free from first launch. After the subscription expires and a 14-day grace period, the commercial accounting modules become unavailable; the free MyInvoice foundation remains fully operational and commercial-module data is not deleted."
+                "body": "60 days free from first launch. After the subscription expires and a 14-day grace period, the paid accounting modules become unavailable; the free foundation remains fully operational and paid-module data is not deleted."
             },
             {
                 "title": "7. Support and liability",
@@ -14769,7 +14769,7 @@
         "intro": "Before continuing to the application, activate one of the allowed security methods.",
         "passkey": "Passkey",
         "totp": "TOTP",
-        "passkey_hint": "A passkey uses secure device unlock on your phone or computer. MyInvoice never receives or stores biometric data.",
+        "passkey_hint": "A passkey uses secure device unlock on your phone or computer. The application never receives or stores biometric data.",
         "passkey_unsupported": "This browser or connection does not support passkeys. Choose TOTP if allowed, use a supported device, or ask an administrator to reset MFA.",
         "passkey_label": "Name, e.g. Phone",
         "default_passkey_label": "My passkey",

@@ -9177,8 +9177,8 @@
         "banner_trial": "Zkušební období končí za {days} dní — aktivujte licenci, aby zůstaly dostupné podvojné účetnictví, sklad a další komerční moduly.",
         "banner_overage": "Překročili jste rozsah licence. Rozšiřte předplatné do {days} dní, jinak se obnova pozastaví.",
         "banner_overage_nodeadline": "Překročili jste rozsah licence. Rozšiřte prosím předplatné.",
-        "banner_trial_expired": "Zkušební období skončilo — komerční účetní moduly nejsou dostupné. Bezplatné funkce MyInvoice zůstávají plně funkční.",
-        "banner_degraded": "Licence vypršela — komerční účetní moduly nejsou dostupné. Bezplatné funkce MyInvoice zůstávají plně funkční.",
+        "banner_trial_expired": "Zkušební období skončilo — placené účetní moduly nejsou dostupné. Fakturace a bezplatný základ fungují dál.",
+        "banner_degraded": "Licence vypršela — placené účetní moduly nejsou dostupné. Fakturace a bezplatný základ fungují dál.",
         "banner_cta": "Zakoupit / aktivovat",
         "purchase_title": "Zakoupení a aktivace",
         "purchase_subtitle": "Stav licence, aktivace klíčem a předplatné.",
@@ -9250,10 +9250,10 @@
         "renewal_cancel_already": "Automatické prodlužování už bylo zrušené. Licence běží do {date}.",
         "renewal_cancel_failed": "Zrušení automatického prodlužování se nezdařilo. Zkuste to prosím znovu.",
         "model_title": "Licenční model",
-        "model_subtitle": "Všechny funkce MyInvoice navždy zdarma + komerční účetní nadstavba.",
-        "model_intro": "MyÚčto je nástupcem projektu MyInvoice. Všechny funkce původního systému zůstávají v MyÚčtu navždy bezplatné; komerční licence zpřístupňuje navazující účetní moduly.",
+        "model_subtitle": "Bezplatný základ napořád, placená účetní nadstavba k němu.",
+        "model_intro": "Fakturace, doklady, kontakty, banka a pokladna jsou v MyÚčtu zdarma a zůstanou zdarma. Licence zpřístupňuje účetní nadstavbu, která na ně navazuje.",
         "model_points": [
-            "Všechny funkce systému MyInvoice zůstávají dostupné zdarma i po skončení zkušebního období.",
+            "Bezplatný základ zůstává dostupný i po skončení zkušebního období.",
             "Komerční licence zpřístupňuje podvojné účetnictví, účetní nástroje a uzávěrky, sklad a e-shop, evidenci majetku, EPO napojení a rozšířené opravy DPH.",
             "Cena je za jednoho aktivního uživatele a měsíc; uživatelé s rolí jen pro čtení a deaktivované účty se nepočítají.",
             "Licence se váže na jedinečný identifikátor instalace; jeden klíč běží na jedné instalaci.",
@@ -9261,11 +9261,11 @@
             "Přenáší se jen technické údaje (identifikátor, klíč, verze, počty). Žádná účetní ani osobní data."
         ],
         "trial_title": "Zkušební období",
-        "trial_body": "Prvních 60 dní od prvního spuštění máte plný přístup zdarma, bez registrace a platby. Poté se komerční účetní moduly skryjí a jejich stránky ani API nejsou dostupné, dokud licenci neaktivujete. Bezplatné funkce MyInvoice lze dál plně používat.",
+        "trial_body": "Prvních 60 dní od prvního spuštění máte plný přístup zdarma, bez registrace a platby. Poté se placené účetní moduly skryjí a jejich stránky ani API nejsou dostupné, dokud licenci neaktivujete. Bezplatný základ lze dál plně používat.",
         "tiers_title": "Tarify",
         "tiers_body": "Jedna firma (1 agenda), Účetní kancelář (až 10 agend) a Neomezeně (bez limitu firem). Roční předplatné vyjde na 10 měsíčních plateb.",
         "readonly_title": "Rozsah bez aktivní licence",
-        "readonly_body": "Po vypršení licence (a 14denní ochranné lhůtě) zůstává fakturace a celý bezplatný základ MyInvoice plně funkční. Nedostupné jsou podvojné účetnictví, Nástroje a uzávěrky, sklad a e-shop, evidence majetku, EPO napojení a rozšířené opravy DPH. Jejich data zůstávají v databázi beze změny a po aktivaci se znovu zpřístupní.",
+        "readonly_body": "Po vypršení licence (a 14denní ochranné lhůtě) zůstává fakturace i celý bezplatný základ plně funkční. Nedostupné jsou podvojné účetnictví, Nástroje a uzávěrky, sklad a e-shop, evidence majetku, EPO napojení, daň z příjmů a rozšířené opravy DPH. Jejich data zůstávají v databázi beze změny a po aktivaci se znovu zpřístupní.",
         "full_license_link": "Úplné znění licence na myucto.cz/licence",
         "terms_title": "Obchodní podmínky",
         "terms_subtitle": "Shrnutí hlavních článků. Závazné je plné znění na myucto.cz.",
@@ -9294,7 +9294,7 @@
             },
             {
                 "title": "6. Zkušební období a rozsah bez licence",
-                "body": "60 dní zdarma od prvního spuštění. Po vypršení předplatného a 14denní ochranné lhůtě přestanou být komerční účetní moduly dostupné; bezplatný základ MyInvoice zůstává plně funkční a data komerčních modulů se nemažou."
+                "body": "60 dní zdarma od prvního spuštění. Po vypršení předplatného a 14denní ochranné lhůtě přestanou být placené účetní moduly dostupné; bezplatný základ zůstává plně funkční a data placených modulů se nemažou."
             },
             {
                 "title": "7. Podpora a odpovědnost",
@@ -14769,7 +14769,7 @@
         "intro": "Než budeš pokračovat do aplikace, aktivuj jednu z povolených bezpečnostních metod.",
         "passkey": "Přístupový klíč",
         "totp": "TOTP",
-        "passkey_hint": "Přístupový klíč využije bezpečné odemknutí telefonu nebo počítače. MyInvoice biometrická data nedostává ani neukládá.",
+        "passkey_hint": "Přístupový klíč využije bezpečné odemknutí telefonu nebo počítače. Aplikace biometrická data nedostává ani neukládá.",
         "passkey_unsupported": "Tento prohlížeč nebo připojení přístupové klíče nepodporuje. Zvolte TOTP, pokud je povolené, použijte podporované zařízení nebo požádejte správce o obnovení MFA.",
         "passkey_label": "Název, např. Telefon",
         "default_passkey_label": "Můj přístupový klíč",
