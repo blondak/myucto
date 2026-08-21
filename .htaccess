@@ -35,7 +35,7 @@ Options -Indexes -MultiViews
     # 2b) Blokovat cfg.php, tooling manifesty a zdrojové dokumenty.
     # `(?:(?:api|web)/)?` — `api/composer.json` a `api/composer.lock` jsou reálné
     # soubory a root-kotvený regex je minul.
-    RewriteRule ^(?:(?:api|web)/)?(cfg\.php|cfg\.local\.php|composer\.(json|lock)|package\.json|pnpm-lock\.yaml|(?:vite|tsconfig|eslint|tailwind|postcss)\.config\.[^/]+|phpunit\.xml(?:\.dist)?|Dockerfile(?:\..*)?|docker-compose[^/]*|\.gitignore|\.env.*|[^/]*\.md|[^/]*\.sql)$ - [F,L]
+    RewriteRule ^(?:(?:api|web)/)?(cfg\.sample\.php|cfg\.docker\.php|VERSION|web\.config|portainer-template\.json|cfg\.php|cfg\.local\.php|composer\.(json|lock)|package\.json|pnpm-lock\.yaml|(?:vite|tsconfig|eslint|tailwind|postcss)\.config\.[^/]+|phpunit\.xml(?:\.dist)?|Dockerfile(?:\..*)?|docker-compose[^/]*|\.gitignore|\.env.*|[^/]*\.md|[^/]*\.sql)$ - [F,L]
 
     # 2c) VCS metadata KDEKOLI v cestě. `.git/config` + `.git/HEAD` stačí na
     # rekonstrukci celého repa (zdrojáky, historie, dřív commitnuté secrety).
@@ -163,7 +163,9 @@ Options -Indexes -MultiViews
 # Pozn.: `yaml|yml` schválně NENÍ v seznamu — `api/openapi.yaml` je veřejný
 # OpenAPI spec a musí jít fetchnout (Swagger UI / Redoc). Ostatní .yaml soubory
 # jsou v `api/vendor/` a `web/node_modules/`, kde je blokuje rewrite rule výše.
-<FilesMatch "\.(env|sql|pem|log|lock|md)$">
+# `.cmd`, `.ps1` a `.sh` sem přibyly s docrootem v kořeni bundlu: pomocné
+# skripty leží ve veřejném prostoru a prozrazují cesty i postup nasazení.
+<FilesMatch "\.(env|sql|pem|log|lock|md|cmd|ps1|sh)$">
     Require all denied
 </FilesMatch>
 
