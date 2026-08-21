@@ -88,8 +88,15 @@ final class StorageQuotaReadOnlyMiddleware implements MiddlewareInterface
      */
     private const ESCAPE_PATHS = [
         // Objednání většího prostoru / navýšení tarifu.
+        //
+        // ⚠️ Cesty pro dokup MÍSTA se jmenují `quota`, ne `storage`: IIS má
+        // `storage` mezi hidden segmenty, takže by na ně vracel 404. Kdo je tady
+        // přejmenuje, musí je přejmenovat i v Routes.php — a naopak. Chybějící
+        // řádek tady zamkne zákazníkovi právě to tlačítko, kterým se odemyká.
         '/api/license/upgrade',
         '/api/license/upgrade/quote',
+        '/api/license/quota',
+        '/api/license/quota/quote',
         '/api/license/activate',
         // Export instance — jediná cesta, jak zákazník dostane data ven.
         '/api/admin/instance-export/start',

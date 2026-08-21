@@ -138,6 +138,63 @@ final class LicenseRenewTest extends TestCase
         self::assertSame(LicenseState::DEGRADED, $this->service->current()->state);
     }
 
+    /**
+     * Odmítnutá obnova musí uložit stav předplatného, který server posílá s ní.
+     *
+     * Bez toho drží `subscription_info` poslední ÚSPĚŠNOU obnovu, takže instalace
+     * ve fázi `expired` hlásí `phase: active` — tedy „vše v pořádku" zákazníkovi,
+     * kterému běží retenční lhůta na smazání dat. Právě tehdy je ten údaj
+     * nejcennější a jinou cestou se na instalaci nedostane.
+     */
+    public function testRejectedRenewStillStoresSubscriptionState(): void
+    {
+        if (!$this->db->hasColumn('license', 'subscription_info')) {
+            $this->markTestSkipped('Migrace se sloupcem subscription_info neproběhla.');
+        }
+        $this->prime(null);
+        $this->db->pdo()->prepare('UPDATE license SET subscription_info = ? WHERE id = 1')
+            ->execute([json_encode(['phase' => 'active'], JSON_UNESCAPED_UNICODE)]);
+
+        $this->client->expects($this->once())->method('renew')->willReturn([
+            'ok'           => false,
+            'error'        => 'subscription_expired',
+            'subscription' => [
+                'phase'      => 'expired',
+                'data_until' => '2026-11-05',
+            ],
+        ]);
+
+        $this->service->renewIfDue();
+
+        $stored = json_decode((string) $this->row()['subscription_info'], true);
+        self::assertIsArray($stored, 'Stav předplatného se uložil.');
+        self::assertSame('expired', $stored['phase'], 'Fáze je ta z odmítnuté obnovy, ne stará.');
+        self::assertSame('2026-11-05', $stored['data_until'], 'Dokdy držíme data se propsalo.');
+        self::assertSame(0, (int) $this->row()['last_check_ok'], 'Odmítnutí zůstává neúspěšnou kontrolou.');
+    }
+
+    /**
+     * Odmítnutí naopak NESMÍ přepsat rozsah zaplacené služby. `instance` v něm
+     * nechodí a prázdná kvóta znamená 100 % plno, tedy okamžitý read-only.
+     */
+    public function testRejectedRenewDoesNotWipeInstanceEntitlement(): void
+    {
+        if (!$this->db->hasColumn('license', 'instance_info')) {
+            $this->markTestSkipped('Migrace 1524 (instance_info) neproběhla.');
+        }
+        $this->prime(null);
+        $delivered = json_encode(['quota_gb' => 22, 'plan' => 'accounting_10'], JSON_UNESCAPED_UNICODE);
+        $this->db->pdo()->prepare('UPDATE license SET instance_info = ? WHERE id = 1')->execute([$delivered]);
+
+        $this->client->expects($this->once())->method('renew')
+            ->willReturn(['ok' => false, 'error' => 'subscription_expired']);
+
+        $this->service->renewIfDue();
+
+        $kept = json_decode((string) $this->row()['instance_info'], true);
+        self::assertIsArray($kept, 'Poslední známý rozsah zůstal.');
+        self::assertSame(22, (int) $kept['quota_gb'], 'Kvóta se odmítnutím nepřepsala.');
+    }
     public function testTrialWithoutKeyDoesNotCallNetwork(): void
     {
         $this->db->pdo()->prepare(

@@ -275,6 +275,17 @@ final class LicenseService
         // Server odmítl (not_bound / clone_suspected / subscription_expired / overage_expired) —
         // stávající token necháme doběhnout, stav se degraduje až vyprší.
         $this->writeLicense('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1', [$counter]);
+
+        // ⚠️ I ODMÍTNUTÁ obnova nese stav předplatného — server ho posílá schválně.
+        // Právě ve fázi `expired` potřebuje zákazník nejvíc vědět, dokolika se
+        // platí, kdy se instalace pozastaví a dokdy držíme data; jinou cestou se
+        // to na instalaci nedozví. Bez tohohle řádku by `subscription_info` držela
+        // poslední ÚSPĚŠNOU obnovu, takže by UI hlásilo `phase: active` někomu,
+        // komu běží retenční lhůta na smazání dat.
+        //
+        // `storeInstanceInfo()` se tu naopak NEVOLÁ: `instance` v odmítnutí nechodí
+        // a přepsat rozsah na prázdno by instalaci uvrhlo do read-only.
+        $this->storeSubscription($resp);
         $this->logger->warning('license.renew.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
     }
 

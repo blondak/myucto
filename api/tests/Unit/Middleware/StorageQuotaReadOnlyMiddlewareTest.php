@@ -171,7 +171,16 @@ final class StorageQuotaReadOnlyMiddlewareTest extends TestCase
     {
         $middleware = $this->middleware(StorageQuotaState::EXHAUSTED, 100.0);
 
-        foreach (['/api/license/upgrade/quote', '/api/license/upgrade', '/api/license/activate'] as $path) {
+        // `quota*` jsou cesty pro dokup MÍSTA — tedy přesně ty, které musí projít,
+        // když je plno. Jmenují se jinak než `upgrade*` kvůli hidden segmentu v IIS.
+        $paths = [
+            '/api/license/upgrade/quote',
+            '/api/license/upgrade',
+            '/api/license/quota/quote',
+            '/api/license/quota',
+            '/api/license/activate',
+        ];
+        foreach ($paths as $path) {
             self::assertSame(
                 204,
                 $middleware->process($this->request('POST', $path), $this->okHandler())->getStatusCode(),
