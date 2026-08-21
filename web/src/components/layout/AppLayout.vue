@@ -17,6 +17,7 @@ import FooterTip from './FooterTip.vue'
 import ThemeToggle from './ThemeToggle.vue'
 import LanguageToggle from './LanguageToggle.vue'
 import DesktopMenuBar from './DesktopMenuBar.vue'
+import StorageQuotaBanner from './StorageQuotaBanner.vue'
 import WorkspaceHost from '@/components/workspace/WorkspaceHost.vue'
 import WorkspaceLayoutToggle from '@/components/workspace/WorkspaceLayoutToggle.vue'
 import WorkspaceNavLink from '@/components/workspace/WorkspaceNavLink.vue'
@@ -1689,6 +1690,10 @@ onBeforeUnmount(() => {
           <div v-if="auth.isDemo" class="mb-5 rounded-lg border border-primary-200 bg-primary-50 px-4 py-3 text-sm text-primary-800">
             {{ t('demo.banner') }}
           </div>
+          <!-- H-10: docházející / vyčerpaný diskový prostor. Sám se skryje,
+               dokud backend nic nehlásí (zdravá instalace, vypnutý režim nebo
+               zatím NEZMĚŘENÁ spotřeba). -->
+          <StorageQuotaBanner />
           <div
             v-if="licenseBanner"
             class="mb-5 rounded-lg border px-4 py-3 text-sm flex flex-wrap items-center justify-between gap-2"

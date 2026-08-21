@@ -75,6 +75,7 @@ má vždy přednost před oběma.
 | `license-deactivate.{cmd,sh}` | Deaktivace licence (E4) — uvolní vazbu na serveru a smaže klíč/token lokálně |
 | `cron-cnb-rates.{cmd,sh}` | Denní stažení kurzovního lístku ČNB do `exchange_rates` (`--days=N`, `--dry-run`). Bez ní se tabulka plní jen jako ad-hoc cache prvního dotazu, historie zůstává děravá a cizoměnová úhrada ke dni bez kurzu nemá čím ocenit pohyb. Dohání i mezery za posledních 30 dnů; dny, které kurz už mají, přeskočí bez HTTP volání. Jednorázové doplnění celé historie: `api/bin/backfill-cnb-rates.php` |
 | `cron-version-check.{cmd,sh}` | Denní kontrola GitHub Releases API; cachuje poslední dostupnou verzi + release notes pro **Systém → Aktualizace** |
+| `cron-storage-usage.{cmd,sh}` | Hodinové měření spotřeby místa instance (velikost databáze z `information_schema` + datový prostor **bez adresáře záloh**) do `instance_storage_usage`. Jediné místo, kde se prochází strom souborů — web i `/api/health` pak čtou hotové číslo. Podklad pro upozornění na 90 % a režim jen pro čtení při vyčerpané kvótě (`--force`, `--json`) |
 | `cron-dispatch.{cmd,sh}` | **Plánovač** pro režim „jeden dispatcher" (Systém → Plánované úlohy). Jediná položka běžící každou minutu, která spustí právě ty úlohy, které jsou na řadě a mají co dělat. V default režimu „jednotlivé úlohy" se neplánuje (`--dry-run`, `--at="RRRR-MM-DD HH:MM"`) |
 
 Všechny tři backup ZIPy (DB, PDF, Dokumenty) lze volitelně šifrovat heslem
@@ -173,6 +174,7 @@ chrání sám, na Apache to řeší až přidání do `.htaccess` výše):
 | `cron-license-renew` | 1× denně | 05:00 |
 | `cron-cnb-rates` | 1× denně (po vyhlášení kurzu ČNB ~14:30) | 15:00 |
 | `cron-version-check` | 1× denně | 06:00 |
+| `cron-storage-usage` | 1× za hodinu | 15. minuta (`15 * * * *`) |
 | `cron-dispatch` | každou minutu — **jen v režimu dispatcher**, kde nahrazuje všechny položky výše | `* * * * *` |
 
 Logy se ukládají do `log/cron/<nazev>-YYYY-MM-DD.log`. Stav úloh sleduj
@@ -242,6 +244,7 @@ schtasks /create /tn "MyUcto VatClearing"       /tr "C:\inetpub\wwwroot\myucto.c
 schtasks /create /tn "MyUcto LicenseRenew"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-license-renew.cmd"          /sc daily /st 05:00 /ru SYSTEM
 schtasks /create /tn "MyUcto CnbRates"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-cnb-rates.cmd"             /sc daily /st 15:00 /ru SYSTEM
 schtasks /create /tn "MyUcto VersionCheck"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-version-check.cmd"           /sc daily /st 06:00 /ru SYSTEM
+schtasks /create /tn "MyUcto StorageUsage"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-storage-usage.cmd"           /sc hourly /mo 1 /ru SYSTEM
 
 REM Režim "jeden dispatcher" — MÍSTO všech úloh výše zaregistruj jen tuhle jednu.
 REM Nikdy obojí najednou: úlohy by běžely dvakrát.
@@ -301,6 +304,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
   0  5  *   *   *    /var/www/myucto.cz/cmd/cron-license-renew.sh
   0 15  *   *   *    /var/www/myucto.cz/cmd/cron-cnb-rates.sh
   0  6  *   *   *    /var/www/myucto.cz/cmd/cron-version-check.sh
+ 15  *  *   *   *    /var/www/myucto.cz/cmd/cron-storage-usage.sh
 ```
 
 `*.sh` skripty musí být spustitelné: `chmod +x cmd/*.sh`.

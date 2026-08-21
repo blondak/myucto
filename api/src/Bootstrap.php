@@ -24,6 +24,7 @@ use MyInvoice\Middleware\RateLimitMiddleware;
 use MyInvoice\Middleware\PermissionMiddleware;
 use MyInvoice\Middleware\RequireMfaMiddleware;
 use MyInvoice\Middleware\SessionLockMiddleware;
+use MyInvoice\Middleware\StorageQuotaReadOnlyMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Middleware\WebAuthnBodyLimitMiddleware;
@@ -764,7 +765,7 @@ final class Bootstrap
 
         // Slim 4 LIFO: poslední `add()` = NEJVĚTŠÍ vrstva = běží JAKO PRVNÍ.
         // Cílový order běhu (outside → inside):
-        //   ApiVersionRewrite → MaintenanceMode → IpAllowlist → FirstRunLock → TenantDomain → Auth → ApiRequestLog → SessionLock → RequireMfa → License → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
+        //   ApiVersionRewrite → MaintenanceMode → IpAllowlist → FirstRunLock → TenantDomain → Auth → ApiRequestLog → SessionLock → RequireMfa → License → StorageQuotaReadOnly → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
         // → add() v opačném pořadí (innermost první):
         //
         // ⚠️ Middleware se předávají jako CLASS-STRING, ne jako instance. Slim je pak
@@ -782,6 +783,12 @@ final class Bootstrap
         $app->add(PermissionMiddleware::class);                      // jemnozrnná route permission kontrola
         $app->add(SupplierScopeMiddleware::class);                   // multi-supplier scope (X-Supplier-Id / token's supplier_id)
         $app->add(DemoReadOnlyMiddleware::class);                    // demo: globální zákaz business mutací
+        // H-10: vyčerpaná disková kvóta → 507 na zápisy, čtení projde. Sedí ZA
+        // autentizací schválně: údaje o zaplnění se tak nedostanou anonymnímu
+        // volajícímu a přihlášení (výjimka) stihne proběhnout dřív, než se
+        // pravidlo uplatní. Bez `app.managed` a bez nastavené kvóty je to
+        // konfigurační no-op — self-hosted instalace se nikdy nezamkne sama.
+        $app->add(StorageQuotaReadOnlyMiddleware::class);            // 507 + X-Storage-Quota-* hlavičky
         $app->add(LicenseMiddleware::class);                         // E4: denní obnova tokenu + blokace komerčních modulů po expiraci
         $app->add(RequireMfaMiddleware::class);                      // assurance + povinný MFA setup (bearer skip)
         $app->add(SessionLockMiddleware::class);                     // autoritativní idle/manual lock browser session

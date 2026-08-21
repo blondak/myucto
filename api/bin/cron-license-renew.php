@@ -31,6 +31,7 @@ use MyInvoice\Service\Cron\CronRun;
 use MyInvoice\Service\License\LicenseClient;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseTokenVerifier;
+use MyInvoice\Service\System\TelemetryPayloadBuilder;
 
 $rootDir = Bootstrap::rootDir();
 $config  = Config::load($rootDir);
@@ -38,16 +39,36 @@ $conn    = new Connection($config);
 
 $run = CronRun::start($conn->pdo(), 'cron-license-renew');
 
-$service = new LicenseService($conn, $config, new LicenseTokenVerifier(), new LicenseClient($config));
+// Telemetrie (H-21) se přiváží s obnovou, ne vlastním kanálem. Builder se sem
+// předává explicitně jen proto, aby šel jeho stav vypsat do logu úlohy —
+// bez něj si ho služba postaví sama. Ani jeho sestavení nesmí shodit obnovu.
+try {
+    $telemetry = TelemetryPayloadBuilder::forRuntime($conn, $config);
+} catch (\Throwable) {
+    $telemetry = null;
+}
+
+$service = new LicenseService(
+    $conn,
+    $config,
+    new LicenseTokenVerifier(),
+    new LicenseClient($config),
+    null,
+    null,
+    $telemetry,
+);
 
 try {
     $service->renewIfDue();
     $state = $service->current();
-    echo "[cron-license-renew] OK state={$state->state} last_check_ok=" . ($state->lastCheckOk ? '1' : '0') . "\n";
+    $telemetryOn = $telemetry !== null && $telemetry->isEnabled();
+    echo "[cron-license-renew] OK state={$state->state} last_check_ok=" . ($state->lastCheckOk ? '1' : '0')
+        . ' telemetry=' . ($telemetryOn ? '1' : '0') . "\n";
     $run->finish('ok', [
         'state'         => $state->state,
         'valid_until'   => $state->validUntil,
         'last_check_ok' => $state->lastCheckOk,
+        'telemetry'     => $telemetryOn,
     ]);
 } catch (\Throwable $e) {
     fwrite(STDERR, "[cron-license-renew] FAILED: {$e->getMessage()}\n");

@@ -9531,6 +9531,13 @@
         "entry": "zápis"
     },
     "common": {
+        "storage_quota": {
+            "warning": "Přidělený prostor instalace se blíží ke konci ({percent} %).",
+            "warning_no_percent": "Přidělený prostor instalace se blíží ke konci.",
+            "exhausted": "Přidělený prostor instalace je vyčerpaný — nové zápisy se neukládají.",
+            "usage_detail": "Využito {used} z {limit}.",
+            "hint": "Doklady zůstávají ke čtení, tisku i exportu. Uvolněte místo smazáním nepotřebných dat, nebo si objednejte větší prostor."
+        },
         "empty_state": {
             "title": "Zatím tu nic není",
             "filtered_title": "Filtru neodpovídá žádný záznam",
@@ -13005,6 +13012,7 @@
         "freq_every_1_min": "každou minutu",
         "freq_every_10_min": "každých 10 min",
         "freq_every_30_min": "každých 30 min",
+        "freq_hourly_15": "každou hodinu v 15. minutě",
         "freq_weekdays_0900": "Po–Pá v 09:00",
         "freq_weekdays_0915": "Po–Pá v 09:15",
         "freq_weekdays_0930": "Po–Pá v 09:30",

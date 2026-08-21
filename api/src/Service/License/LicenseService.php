@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\System\TelemetryPayloadBuilder;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -56,6 +57,13 @@ final class LicenseService
      */
     private ?array $rowCache = null;
 
+    /**
+     * Sběrač provozní telemetrie (H-21). Staví se LÍNĚ až při první obnově —
+     * kontejner licenční službu skládá explicitním výčtem argumentů a volitelný
+     * parametr by v provozu zůstal null, takže by telemetrie tiše nikdy neodešla.
+     */
+    private ?TelemetryPayloadBuilder $telemetryBuilder = null;
+
     public function __construct(
         private readonly Connection $db,
         private readonly Config $config,
@@ -63,11 +71,13 @@ final class LicenseService
         private readonly LicenseClient $client,
         ?LoggerInterface $logger = null,
         ?EntityCache $cache = null,
+        ?TelemetryPayloadBuilder $telemetry = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
         // Volitelná kvůli testovacím dvojníkům, které službu staví ručně.
         // NullEntityCache je průchozí, takže bez ní se chování nemění.
         $this->cache = $cache ?? EntityCache::disabled();
+        $this->telemetryBuilder = $telemetry;
     }
 
     private readonly EntityCache $cache;
@@ -233,6 +243,7 @@ final class LicenseService
                 $usersActive,
                 $companiesActive,
                 $this->appVersion(),
+                $this->telemetry(),
             );
         } catch (LicenseNetworkException $e) {
             $this->writeLicense('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1', [$counter]);
@@ -763,6 +774,32 @@ final class LicenseService
             return trim((string) file_get_contents($path));
         }
         return '0.0.0';
+    }
+
+    /**
+     * Provozní telemetrie přibalená k obnově licence (H-21).
+     *
+     * ⚠️ **Selhání telemetrie nesmí ovlivnit obnovu licence.** Licence je to, na
+     * čem stojí provoz zákazníka; diagnostika je to, co chceme my. Proto je celý
+     * sběr — včetně sestavení builderu — obalený tak, aby z něj nemohla probublat
+     * žádná výjimka: nejhorší možný výsledek je `null`, tedy obnova bez telemetrie.
+     *
+     * Payload neobsahuje nic osobního ani identifikujícího; co smí odejít, drží
+     * uzavřený whitelist {@see TelemetryPayloadBuilder::FIELDS}.
+     *
+     * @return array<string,scalar|null>|null
+     */
+    private function telemetry(): ?array
+    {
+        try {
+            $this->telemetryBuilder ??= TelemetryPayloadBuilder::forRuntime($this->db, $this->config);
+
+            return $this->telemetryBuilder->build();
+        } catch (\Throwable $e) {
+            $this->logger->info('license.telemetry.failed', ['error' => $e->getMessage()]);
+
+            return null;
+        }
     }
 
     /** @param array<string,mixed> $row */

@@ -54,6 +54,12 @@ final class LicenseClient
     }
 
     /**
+     * @param array<string,scalar|null>|null $telemetry Volitelná provozní telemetrie
+     *        instance (H-21) — verze, stav migrací, stáří zálohy a dispatcheru, režim
+     *        údržby. Sestavuje ji {@see \MyInvoice\Service\System\TelemetryPayloadBuilder}
+     *        a neobsahuje NIC identifikujícího. `null` = telemetrie vypnutá nebo se ji
+     *        nepodařilo sestavit; do požadavku se pak vůbec nepřikládá a obnova licence
+     *        proběhne přesně jako dřív. Starší licenční server pole prostě ignoruje.
      * @return array<string,mixed>
      * @throws LicenseNetworkException
      */
@@ -65,8 +71,9 @@ final class LicenseClient
         int $usersActive,
         int $companiesActive,
         string $appVersion,
+        ?array $telemetry = null,
     ): array {
-        return $this->post('/api/license/renew', [
+        $body = [
             'license_key'      => $licenseKey,
             'instance_id'      => $instanceId,
             'counter'          => $counter,
@@ -74,7 +81,12 @@ final class LicenseClient
             'users_active'     => $usersActive,
             'companies_active' => $companiesActive,
             'app_version'      => $appVersion,
-        ]);
+        ];
+        if ($telemetry !== null) {
+            $body['telemetry'] = $telemetry;
+        }
+
+        return $this->post('/api/license/renew', $body);
     }
 
     /**
