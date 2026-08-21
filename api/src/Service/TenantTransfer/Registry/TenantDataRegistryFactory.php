@@ -339,6 +339,7 @@ final class TenantDataRegistryFactory
             ...TenantDataAiCatalog::definitions(),
             ...TenantDataJobCatalog::definitions(),
             ...TenantDataBankMatchingCatalog::definitions(),
+            ...TenantDataBankAutomationCatalog::definitions(),
             ...TenantDataBusinessCatalog::definitions(),
             ...TenantDataPurchaseOrderCatalog::definitions(),
             ...TenantDataEshopCatalog::definitions(),
@@ -586,6 +587,10 @@ final class TenantDataRegistryFactory
         if ($softActorReferences !== []) {
             $details['soft_actor_references'] = $softActorReferences;
         }
+        $importIdentity = self::importIdentity($table);
+        if ($importIdentity !== null) {
+            $details['import_identity'] = $importIdentity;
+        }
         return new TenantDataDefinition(
             'table:' . $table,
             TenantDataObjectKind::Table,
@@ -656,6 +661,27 @@ final class TenantDataRegistryFactory
             $references[$column] = ['strategy' => $strategy];
         }
         return $references;
+    }
+
+    /**
+     * @return array{
+     *   strategy:string,
+     *   keys:list<string>,
+     *   missing_row:string,
+     *   existing_row:string
+     * }|null
+     */
+    private static function importIdentity(string $table): ?array
+    {
+        return match ($table) {
+            'chart_of_accounts' => [
+                'strategy' => 'tenant_natural_key',
+                'keys' => ['supplier_id', 'account_code'],
+                'missing_row' => 'create_with_mapped_tenant',
+                'existing_row' => 'reuse_target_id_and_apply_source',
+            ],
+            default => null,
+        };
     }
 
     /** @return array<string,array<string,string>> */
