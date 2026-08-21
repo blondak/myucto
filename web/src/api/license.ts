@@ -66,6 +66,17 @@ export interface ManagedStorageInfo {
   read_only_percent: number
   /** Skutečný stav vynucení — instalace je právě teď jen pro čtení. */
   blocks_writes: boolean
+  /**
+   * Zaplacené rozšíření, které provozovatel ještě nezavedl.
+   *
+   * ⚠️ Dokud platí, obrazovka NESMÍ nabízet dokoupení znovu — zákazník už
+   * zaplatil a druhé kliknutí by strhlo podruhé.
+   */
+  change_pending: boolean
+  /** Objednaný objem v GB (může být větší než ten, proti kterému se dnes měří). */
+  quota_gb_ordered: number | null
+  /** Odkud se ví, kolik má zaplaceno. `none` = nevíme. */
+  quota_source: 'license' | 'config' | 'none'
 }
 
 /**
@@ -102,6 +113,27 @@ export interface ManagedBillingInfo {
   /** Kdy se instalace naposledy ptala serveru — bez toho „neuhrazeno" nelze číst. */
   last_check_at: string | null
   last_check_ok: boolean
+
+  /**
+   * ── V jaké fázi jsme a co se stane dál ──────────────────────────────────
+   * Všechno počítá licenční server; instalace to jen podává dál.
+   *
+   * ⚠️ Nic z toho se NEDOPOČÍTÁVÁ. Termín, který si aplikace vymyslí, je slib,
+   * který nikdo nedodrží — když server údaj neposlal, zůstane `null`
+   * a obrazovka o termínu MLČÍ (viz `resolveBillingNarrative`).
+   */
+  phase: 'active' | 'past_due' | 'suspended' | 'expired' | 'cancelled' | string | null
+  /** Kolikátý pokus o stržení karty selhal. */
+  attempt: number | null
+  max_attempts: number | null
+  /** Kdy se karta zkusí znovu (unix). */
+  next_attempt_at: number | null
+  /** Kdy se pozastaví provoz instance (unix). */
+  suspend_at: number | null
+  /** Dokdy fungují placené funkce (unix). */
+  access_until: number | null
+  /** Dokdy po pozastavení držíme data (unix). */
+  data_until: number | null
 }
 
 /**
@@ -183,6 +215,36 @@ export interface UpgradeResult {
 }
 
 /**
+ * Kalkulace rozšíření úložiště. Nic se nestrhává — jen se počítá.
+ *
+ * ⚠️ Dvě čísla, a obě se musí ukázat: `amount` je JEDNORÁZOVÝ poměrný doplatek
+ * do konce období, `recurring_delta` je o kolik se natrvalo zvedne pravidelná
+ * platba. Ukázat jen jedno z nich znamená zamlčet polovinu ceny.
+ */
+export interface StorageQuote {
+  current_quota_gb: number | null
+  new_quota_gb: number
+  amount: number | null
+  recurring_delta: number | null
+  currency: string | null
+  period_end: number | string | null
+}
+
+/**
+ * Výsledek rozšíření úložiště.
+ *
+ * ⚠️ `provisioning_pending: true` NENÍ chyba: zaplaceno, jen se kvóta
+ * u provozovatele ještě nezvedla. Obrazovka v tu chvíli nesmí nabídnout nákup
+ * znovu — druhé kliknutí by strhlo podruhé.
+ */
+export interface StorageUpgradeResult {
+  new_quota_gb: number
+  amount_charged: number | null
+  provisioning_pending: boolean
+  state: LicenseStatus
+}
+
+/**
  * Odkaz na portál podpory na myucto.cz. U placené licence nese jednorázový
  * token, kterým se zákazník na portálu rovnou identifikuje; jinak je to prostý
  * veřejný odkaz.
@@ -215,6 +277,25 @@ export const licenseApi = {
   /** Admin — in-place navýšení na `users` (strhne doplatek z uložené karty). */
   upgrade: (users: number) =>
     api.post<UpgradeResult>('/license/upgrade', { users }).then((r) => r.data),
+
+  /**
+   * Admin — kolik by stálo rozšíření úložiště na `quota_gb`. Nic nestrhává.
+   *
+   * ⚠️ `quota_gb` je CÍLOVÁ velikost z výčtu {@link STORAGE_SIZES_GB}, ne
+   * přírůstek: „+5 GB" nad dvěma se posílá jako `7`.
+   */
+  storageQuote: (quota_gb: number) =>
+    api.post<StorageQuote>('/license/quota/quote', { quota_gb }).then((r) => r.data),
+
+  /**
+   * Admin — rozšíření úložiště na `quota_gb` (strhne doplatek z uložené karty).
+   *
+   * ⚠️ Routa je `/license/quota`, NE `/license/storage`: IIS má segment
+   * `storage` mezi skrytými kvůli datovému adresáři a požadavek by skončil
+   * na 404.8 dřív, než se dostane k routeru.
+   */
+  storageUpgrade: (quota_gb: number) =>
+    api.post<StorageUpgradeResult>('/license/quota', { quota_gb }).then((r) => r.data),
 
   /** Admin — přihlášený přechod na portál podpory (jednorázový token v URL). */
   supportLink: () => api.post<SupportLink>('/license/support-link').then((r) => r.data),
