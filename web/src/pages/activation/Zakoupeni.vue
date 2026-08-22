@@ -175,8 +175,8 @@ const tierLabel = computed(() => {
  *  Vše jen jako výchozí hodnoty — zákazník je na webu může změnit (tam proběhne ARES). */
 const buyUrl = computed(() => {
   const s = status.value
-  if (!s) return 'https://myucto.cz/objednavka'
-  const base = s.buy_url || 'https://myucto.cz/objednavka'
+  if (!s) return 'https://myucto.cz/objednavka?src=app'
+  const base = s.buy_url || 'https://myucto.cz/objednavka?src=app'
   const c = s.company
   const raw: Record<string, string> = {
     instance: s.instance_id,

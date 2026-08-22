@@ -508,9 +508,28 @@ final class LicenseService
         $this->renewIfDue();
     }
 
+    /**
+     * Odkaz na objednávku předplatného pro TUHLE instalaci.
+     *
+     * ⚠️ `src=app` není kosmetika. Web podle něj pozná, že zákazník už aplikaci
+     * provozuje, a nenabízí mu hostovaný provoz — ten je pro někoho, kdo
+     * instalaci teprve chce. Bez toho parametru dostal majitel vlastního serveru
+     * jako první otázku objednávky volbu provozu u nás, a to předvolenou.
+     *
+     * `instance` posílá identifikátor instalace k předvyplnění; web si podle něj
+     * spáruje objednávku s běžící instalací.
+     */
     public function buyUrl(): string
     {
-        return rtrim((string) $this->config->get('license.server_url', 'https://myucto.cz'), '/') . '/objednavka';
+        $base = rtrim((string) $this->config->get('license.server_url', 'https://myucto.cz'), '/') . '/objednavka';
+        $params = ['src' => 'app'];
+
+        $instanceId = (string) ($this->loadRow()['instance_id'] ?? '');
+        if ($instanceId !== '') {
+            $params['instance'] = $instanceId;
+        }
+
+        return $base . '?' . http_build_query($params);
     }
 
     public function supportUrl(): string
