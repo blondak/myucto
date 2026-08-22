@@ -140,10 +140,25 @@ final class ManagedProxyHeaderInvariantTest extends TestCase
         );
     }
 
-    /** Distribuovaná cfg nesmí přednastavit důvěryhodnou proxy. */
+    /**
+     * Distribuovaná cfg nesmí přednastavit důvěryhodnou proxy.
+     *
+     * ⚠️ `cfg.docker.php` v repozitáři NENÍ a nikdy nebude: je v `.gitignore`,
+     * generuje ho `cmd/docker-ghcr.ps1` z `cfg.sample.php` a publikovaný image
+     * ho výslovně vylučuje. Jediná skutečně distribuovaná konfigurace je tedy
+     * vzorek — ten se kontroluje vždy a lokálně vygenerovaný soubor jen navíc,
+     * když existuje. Protože z vzorku vzniká, kontrola tím neslábne.
+     *
+     * Bez toho brána padala na CI, kde ten soubor nemá jak vzniknout.
+     */
     public function testShippedConfigsKeepTrustedProxiesEmpty(): void
     {
-        foreach (['cfg.sample.php', 'cfg.docker.php'] as $file) {
+        $shipped = ['cfg.sample.php'];
+        if (is_file($this->path('cfg.docker.php'))) {
+            $shipped[] = 'cfg.docker.php';
+        }
+
+        foreach ($shipped as $file) {
             $code = $this->source($file);
             self::assertSame(
                 1,
@@ -173,9 +188,14 @@ final class ManagedProxyHeaderInvariantTest extends TestCase
 
     private function source(string $relative): string
     {
-        $path = rtrim(str_replace('\\', '/', Bootstrap::rootDir()), '/') . '/' . $relative;
+        $path = $this->path($relative);
         self::assertFileExists($path);
 
         return (string) file_get_contents($path);
+    }
+
+    private function path(string $relative): string
+    {
+        return rtrim(str_replace('\\', '/', Bootstrap::rootDir()), '/') . '/' . $relative;
     }
 }
