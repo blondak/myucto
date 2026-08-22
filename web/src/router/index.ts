@@ -176,7 +176,6 @@ const commercialOnlyRouteNames = new Set([
   'reports-s74b',
   'reports-related-parties',
   'reports-vat-corrections',
-  'reports-submissions',
   'templates',
   'tools',
 ])

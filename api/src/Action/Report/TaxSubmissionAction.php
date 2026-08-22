@@ -9,6 +9,8 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\RetentionHoldRepository;
+use MyInvoice\Service\License\CommercialFeatureAccess;
+use MyInvoice\Service\License\TaxSubmissionAccess;
 use MyInvoice\Repository\TaxSubmissionEpoRepository;
 use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Security\AccessLevel;
@@ -42,6 +44,7 @@ final class TaxSubmissionAction
         private readonly ActivityLogger $logger,
         private readonly Connection $db,
         private readonly RetentionHoldRepository $holds,
+        private readonly CommercialFeatureAccess $commercial,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -51,7 +54,35 @@ final class TaxSubmissionAction
         }
         $supplierId = SupplierGuard::currentId($request);
         $rows = $this->epo->enrich($this->repo->list($supplierId), $supplierId);
+        // Bez licence se ukážou jen výkazy bezplatné části. Zbytek se
+        // nevypisuje vůbec — nabízet detail, který skončí 403, je horší
+        // než ho neukázat.
+        if (!$this->commercial->isAvailable()) {
+            $rows = array_values(array_filter(
+                $rows,
+                static fn (array $row): bool => TaxSubmissionAccess::isFreeForm($row['form_code'] ?? null),
+            ));
+        }
         return Json::ok($response, $rows);
+    }
+
+    /**
+     * Smí se na tenhle konkrétní výkaz sáhnout?
+     *
+     * Cesta o typu výkazu nic neví, takže licenční middleware to rozhodnout
+     * nemůže; archiv je společný pro bezplatné i placené výkazy.
+     */
+    private function deniedByLicense(array $row, Response $response): ?Response
+    {
+        if (TaxSubmissionAccess::isFreeForm($row['form_code'] ?? null) || $this->commercial->isAvailable()) {
+            return null;
+        }
+        return Json::error(
+            $response,
+            'license_commercial_feature_unavailable',
+            'Tenhle výkaz patří do účetní nadstavby a vyžaduje aktivní licenci.',
+            403,
+        );
     }
 
     public function detail(Request $request, Response $response, array $args): Response
@@ -62,6 +93,7 @@ final class TaxSubmissionAction
         $supplierId = SupplierGuard::currentId($request);
         $row = $this->repo->find((int) ($args['id'] ?? 0), $supplierId);
         if ($row === null) return Json::error($response, 'not_found', 'Záznam nenalezen.', 404);
+        if (($denied = $this->deniedByLicense($row, $response)) !== null) return $denied;
         $row = $this->epo->enrich([$row], $supplierId)[0];
         return Json::ok($response, $row);
     }
@@ -74,6 +106,8 @@ final class TaxSubmissionAction
         $supplierId = SupplierGuard::currentId($request);
         $row = $this->repo->find((int) ($args['id'] ?? 0), $supplierId);
         if ($row === null) return Json::error($response, 'not_found', 'Záznam nenalezen.', 404);
+
+        if (($denied = $this->deniedByLicense($row, $response)) !== null) return $denied;
 
         $filename = TaxSubmissionFilename::forSnapshot($row, 'archive.xml');
 

@@ -60,7 +60,12 @@ final class LicenseMiddlewareTest extends TestCase
             'expired VAT section 43'        => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/reports/s43'],
             'degraded VAT section 46'       => [LicenseState::DEGRADED, 'GET', '/api/reports/s46/candidates'],
             'expired VAT section 79'        => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/reports/s79'],
-            'degraded EPO archive'          => [LicenseState::DEGRADED, 'GET', '/api/reports/submissions'],
+            // Archiv podání sám zamčený NENÍ — bezplatná část zahrnuje DPH i KH
+            // a zákazník se k jejich XML musí dostat. Zamčené je až PODÁNÍ do EPO,
+            // což je služba, kterou provozujeme my. Rozhodnutí podle konkrétního
+            // výkazu dělá TaxSubmissionAction, cesta o typu výkazu nic neví.
+            'degraded EPO submit'           => [LicenseState::DEGRADED, 'POST', '/api/reports/submissions/12/epo-submit'],
+            'degraded EPO credentials'      => [LicenseState::DEGRADED, 'GET', '/api/reports/submissions/epo-credentials'],
             'expired accounting activation' => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/settings/accounting-activation/status'],
             // Čtyři licencované moduly: účetnictví (obě jeho tváře), mzdy, sklad, OSS.
             'degraded tax evidence'         => [LicenseState::DEGRADED, 'POST', '/api/tax-evidence/cash-journal'],

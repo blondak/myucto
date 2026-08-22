@@ -64,7 +64,16 @@ final class CommercialFeatureAccess
         '#^/api/ai/suggestions(/|$)#',
         '#^/api/purchase-ai-suggestion-availability$#',
         '#^/api/settings/accounting-activation(/|$)#',
-        '#^/api/reports/(s74b|s43|s46|s79|related-parties|closing-package|submissions)(/|$)#',
+        '#^/api/reports/(s74b|s43|s46|s79|related-parties|closing-package)(/|$)#',
+        // ⚠️ Archiv podání NENÍ zamčený celý — viz {@see TaxSubmissionAccess}.
+        // Bezplatná část výslovně zahrnuje DPH i kontrolní hlášení a zákazník
+        // se k jejich XML musí dostat; dělicí čára je až u ODESLÁNÍ. Přímé
+        // podání do EPO včetně certifikátů a potvrzenek je služba, kterou
+        // provozujeme my, a rozhodnutí podle KONKRÉTNÍHO výkazu dělá akce,
+        // protože cesta sama o typu výkazu nic neví.
+        '#^/api/reports/submissions/settings(/|$)#',
+        '#^/api/reports/submissions/epo-credentials(/|$)#',
+        '#^/api/reports/submissions/[0-9]+/epo-#',
     ];
 
     public function __construct(private readonly LicenseService $license) {}
