@@ -1,5 +1,5 @@
 MYÚČTO.CZ — LICENČNÍ UJEDNÁNÍ A OZNÁMENÍ O PRÁVECH
-Verze 1.3, účinná od 22. srpna 2026
+Verze 1.4, účinná od 22. září 2026
 
 Aktuální znění tohoto dokumentu je trvale dostupné na adrese:
 https://myucto.cz/licence
@@ -308,7 +308,8 @@ nepřerušovaně, bez chyb a bez bezpečnostních zranitelností, že bude bez o
 funkční v jakémkoli technickém prostředí, ani že bude nepřetržitě dostupné
 online ověřování licence, aktualizace nebo služby třetích stran (čl. 10.2).
 Není-li písemně sjednána SLA, neposkytuje se žádná garantovaná dostupnost ani
-reakční doba.
+reakční doba. U Hostované instance se rozsah provozu, dostupnosti, podpory,
+záloh a nápravných opatření řídí článkem 12 Obchodních podmínek.
 
 11.5 Produkt je nástrojem pro zpracování účetních a daňových dat. Nenahrazuje
 odborný úsudek účetní, auditora, daňového poradce ani právníka. Provozovatel a
@@ -318,11 +319,12 @@ osobám. Odpovědnost za správnost a včasnost účetnictví, daňových tvrzen
 dalších podání nese v plném rozsahu provozovatel Instalace, resp. osoba, která
 podání činí.
 
-11.6 Odpovědnost provozovatele. Provozovatel Instalace odpovídá zejména za
-zálohování a obnovitelnost dat, zabezpečení serveru a přístupů, správu
+11.6 Odpovědnost provozovatele. Provozovatel Vlastní instalace odpovídá zejména
+za zálohování a obnovitelnost dat, zabezpečení serveru a přístupů, správu
 uživatelských oprávnění a za ověření správné funkce Produktu ve svém prostředí
-po instalaci i po každé aktualizaci (čl. 10.1). Držitel práv Instalaci ani data
-Zákazníka neprovozuje, nedrží a nezálohuje, není-li písemně sjednáno jinak.
+po instalaci i po každé aktualizaci (čl. 10.1). Držitel práv Vlastní instalaci
+ani data Zákazníka neprovozuje, nedrží a nezálohuje, není-li písemně sjednáno
+jinak. U Hostované instance se použije článek 12 Obchodních podmínek.
 
 11.7 Vyloučení nepřímých a následných škod. V rozsahu dovoleném právními
 předpisy Držitel práv neodpovídá za nepřímou, následnou nebo zvláštní újmu
@@ -339,23 +341,25 @@ e) náklady na náhradní řešení, opětovné zpracování dat, externí porad
 
 To platí i tehdy, byl-li Držitel práv na možnost vzniku takové újmy upozorněn.
 
-11.8 Omezení výše náhrady škody. Celková souhrnná povinnost Držitele práv
-k náhradě újmy vzniklé v souvislosti s Produktem je omezena částkou, kterou
-provozovatel Instalace za Předplatné k dotčené Instalaci skutečně uhradil za
-dvanáct (12) měsíců bezprostředně předcházejících události, která újmu
-způsobila. Je-li Produkt užíván bezplatně (Bezplatné funkce, zkušební období)
-nebo bez platného Předplatného, náhrada újmy se v rozsahu dovoleném právními
-předpisy neposkytuje. S ohledem na cenu Předplatného strany výslovně
-prohlašují, že újmu přesahující tento limit nebylo možné při vzniku
-závazkového vztahu předvídat jako možný důsledek porušení povinnosti
-(§ 2894 a násl. zákona č. 89/2012 Sb.).
+11.8 Omezení výše náhrady škody. Celková souhrnná povinnost Držitele práv ze
+všech nároků provozovatele, bez ohledu na jejich právní titul, je za každou
+dotčenou Instalaci omezena částkou, kterou provozovatel za Předplatné k této
+Instalaci skutečně uhradil za dvanáct (12) měsíců bezprostředně předcházejících
+události, která újmu způsobila. Limit je společný pro všechny nároky vzniklé z
+téže nebo souvisejících událostí; započítávají se do něj poskytnuté slevy,
+dobropisy a jiná peněžitá plnění Držitele práv. Je-li Produkt užíván bezplatně
+(Bezplatné funkce, zkušební období) nebo bez platného Předplatného, náhrada
+újmy se v rozsahu dovoleném právními předpisy neposkytuje. S ohledem na cenu
+Předplatného strany výslovně prohlašují, že újmu přesahující tento limit nebylo
+možné při vzniku závazkového vztahu předvídat jako možný důsledek porušení
+povinnosti (§ 2894 a násl. zákona č. 89/2012 Sb.).
 
 11.9 Meze omezení. Omezení podle čl. 11.7 a 11.8 se neuplatní na újmu
 způsobenou úmyslně nebo z hrubé nedbalosti, na újmu způsobenou člověku na jeho
 přirozených právech (§ 2898 zákona č. 89/2012 Sb.) a dále v rozsahu, v němž je
 takové omezení vyloučeno kogentním ustanovením právního předpisu, zejména
-jde-li o práva spotřebitele. Práva z vadného plnění podle Obchodních podmínek
-zůstávají nedotčena.
+jde-li o práva spotřebitele nebo slabší strany. Práva z vadného plnění podle
+Obchodních podmínek zůstávají nedotčena.
 
 11.10 Nárok na náhradu újmy je třeba uplatnit u Držitele práv bez zbytečného
 odkladu poté, co se oprávněný o újmě a jejím rozsahu dozvěděl. Ustanovení
@@ -363,9 +367,12 @@ tohoto článku trvají i po zániku Předplatného nebo Komerční smlouvy.
 
 12. PŘEDNOST UJEDNÁNÍ A ZMĚNY
 
-12.1 Pokud je mezi tímto dokumentem a podepsanou Komerční smlouvou rozpor, má
-pro Proprietární část přednost Komerční smlouva. Licence MIT má vždy přednost
-pro MIT část a nelze ji tímto dokumentem zpětně odejmout nebo omezit.
+12.1 Pokud je mezi tímto dokumentem a Komerční smlouvou včetně Předplatného a
+Obchodních podmínek rozpor, má přednost individuálně sjednaná Komerční smlouva.
+U Hostované instance má pro otázky provozu, dostupnosti, záloh, dat po skončení
+služby, podpory a odpovědnosti přednost článek 12 Obchodních podmínek. Licence
+MIT má vždy přednost pro MIT část a nelze ji tímto dokumentem zpětně odejmout
+nebo omezit.
 
 12.2 Neplatnost nebo nevymahatelnost jednoho ustanovení nemá vliv na ostatní
 ustanovení v rozsahu dovoleném právními předpisy.
