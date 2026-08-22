@@ -27,7 +27,8 @@ $rootDir = Bootstrap::rootDir();
 $config  = Config::load($rootDir);
 $dbName  = (string) $config->get('db.name');
 
-$run = CronRun::start((new Connection($config))->pdo(), 'cron-backup-documents');
+$db = new Connection($config);
+$run = CronRun::start($db->pdo(), 'cron-backup-documents');
 
 // Resolve backup output dir — stejné pořadí jako cron-backup-pdf.php (issue #34).
 $backupDir = (string) $config->get('cron.backup.output_dir', '');
@@ -55,24 +56,7 @@ if (($msg = BackupEncryption::unsupportedReason($zipPassword)) !== null) {
     exit(1);
 }
 
-// Dvojice [adresář, prefix uvnitř ZIPu].
-//
-// `storage/journal` nese PŘÍLOHY ÚČETNÍHO DENÍKU (§ 33a ZoÚ — účetní záznamy
-// dokládající zápis). Dosud nebyly v ŽÁDNÉ záloze: tenhle skript uměl jen
-// storage/documents a cron-backup-pdf.php filtruje podle přípony, kterou
-// content-addressed soubory (`sup-{id}/{sha[0:2]}/{sha256}`) nemají.
-// Zachytil je jen per-firma export přes ArchiveService, který se cronem nespouští.
-//
-// Cesta uvnitř ZIPu se ořezává VLASTNÍM zdrojovým adresářem a doplňuje pevným
-// prefixem, ne substr($abs, strlen($rootDir)): při nastaveném MYINVOICE_DATA_DIR
-// (Docker/PaaS) leží storage/ mimo kořen aplikace, takže by substr() uřízl špatný
-// počet znaků a v ZIPu by byly useknuté cesty. Rozbalovacím kořenem je vždy kořen
-// aplikace. Stejný vzorec jako v cron-backup-pdf.php.
-$sources = [
-    [RuntimePaths::storage('documents'), 'storage/documents'],
-    [RuntimePaths::storage('journal'),   'storage/journal'],
-];
-if (!array_filter($sources, static fn (array $s): bool => is_dir($s[0]))) {
+if (!is_dir(RuntimePaths::storage('documents')) && !is_dir(RuntimePaths::storage('journal'))) {
     echo "[" . date('Y-m-d H:i:s') . "] backup-documents: storage/documents/ ani storage/journal/ neexistuje, nic k záloze.\n";
     $run->finish('ok', ['files' => 0, 'note' => 'no documents dir']);
     exit(0);
@@ -81,15 +65,10 @@ if (!array_filter($sources, static fn (array $s): bool => is_dir($s[0]))) {
 $date = date('Y-m-d_H-i');
 $file = "$backupDir/$dbName-documents-$date.zip";
 
-// Sesbírej všechny soubory (kromě _thumbs/, _jobs/ a .tmp-*) — sdílená logika
-// s cron-backup-pdf.php (BackupFileCollector). Přípony se tu nefiltrují: přílohy
-// deníku jsou content-addressed (`sup-{id}/{sha[0:2]}/{sha256}`) a příponu nemají.
-$files = \MyInvoice\Service\Backup\BackupFileCollector::collect(
-    array_map(static fn (array $s): array => [$s[0], null, $s[1]], $sources),
-    ['/_thumbs/', '/_jobs/'],
-    ['.tmp-'],
-    static fn (string $abs): int => fprintf(STDERR, "  ✗ soubor mimo zdrojový adresář, přeskočen: %s\n", $abs),
-);
+// Content-addressed cesty nejsou užitečné pro člověka ani pro ruční obnovu.
+// Sdílený layout je proto překládá přes metadata DB do složek a původních názvů;
+// bez metadata zůstanou v explicitní složce _neprirazene, aby se neztratil bajt.
+$files = (new \MyInvoice\Service\Backup\ReadableDocumentArchiveLayout($db->pdo()))->all();
 
 if (count($files) === 0) {
     echo "[" . date('Y-m-d H:i:s') . "] backup-documents: žádné dokumenty k záloze.\n";
@@ -104,23 +83,23 @@ if ($zip->open($file, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
     $run->finish('error', null, 'cannot create zip', 1);
     exit(1);
 }
-foreach ($files as $abs => $rel) {
-    if (!$zip->addFile($abs, $rel)) {
-        fwrite(STDERR, "Cannot add to ZIP: $abs\n");
+foreach ($files as $item) {
+    if (!$zip->addFile($item['source'], $item['entry'])) {
+        fwrite(STDERR, "Cannot add to ZIP: " . $item['source'] . "\n");
         $zip->close();
         @unlink($file);
         $run->finish('error', null, 'cannot add file', 1);
         exit(1);
     }
-    if (!\MyInvoice\Service\Backup\BackupZipPermissions::neutralize($zip, $rel)) {
-        fwrite(STDERR, "Cannot normalize ZIP entry permissions: $rel\n");
+    if (!\MyInvoice\Service\Backup\BackupZipPermissions::neutralize($zip, $item['entry'])) {
+        fwrite(STDERR, "Cannot normalize ZIP entry permissions: " . $item['entry'] . "\n");
         $zip->close();
         @unlink($file);
         $run->finish('error', null, 'zip permission normalization failed', 1);
         exit(1);
     }
-    if (!BackupEncryption::encryptEntry($zip, $rel, $zipPassword)) {
-        fwrite(STDERR, "Cannot encrypt ZIP entry: $rel\n");
+    if (!BackupEncryption::encryptEntry($zip, $item['entry'], $zipPassword)) {
+        fwrite(STDERR, "Cannot encrypt ZIP entry: " . $item['entry'] . "\n");
         $zip->close();
         @unlink($file);
         $run->finish('error', null, 'zip encryption failed', 1);

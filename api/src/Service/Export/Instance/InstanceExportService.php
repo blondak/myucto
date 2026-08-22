@@ -11,9 +11,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Service\Accounting\Archive\ArchiveService;
 use MyInvoice\Service\Backup\BackupFileCollector;
+use MyInvoice\Service\Backup\ReadableDocumentArchiveLayout;
 use MyInvoice\Service\Cron\BackupEncryption;
-use MyInvoice\Service\Document\DocumentStorage;
-use MyInvoice\Service\Document\JournalAttachmentStorage;
 use MyInvoice\Service\Export\ClosingPackageService;
 use MyInvoice\Service\Export\ExportFilename;
 use MyInvoice\Service\Export\IsdocExporter;
@@ -1017,9 +1016,9 @@ final class InstanceExportService
      * a mzdové doklady.
      *
      * Izolaci tu dělá CESTA: každé z těch úložišť má per-firma adresář `sup-{id}`,
-     * takže se sbírá jen ten. Sběr souborů se nekopíruje — používá se
-     * {@see BackupFileCollector}, sdílený se zálohovacími skripty (a mimo jiné
-     * ošetřuje symlinky ven z kořene i `MYINVOICE_DATA_DIR`).
+     * takže se sbírá jen ten. DMS a deník před vložením přeloží
+     * {@see ReadableDocumentArchiveLayout} z interních SHA cest do složek a
+     * původních názvů; surový sběrač zůstává jen pro ostatní typy příloh.
      *
      * @param null|callable(string):void $progress
      * @return array<string,mixed>
@@ -1030,9 +1029,12 @@ final class InstanceExportService
         ?int $jobId,
         ?callable $progress,
     ): array {
+        $readableFiles = (new ReadableDocumentArchiveLayout($this->db->pdo()))->forSupplier(
+            $supplierId,
+            'prilohy/dokumenty',
+            'prilohy/denik',
+        );
         $sources = [
-            [DocumentStorage::baseDir($supplierId), null, 'prilohy/dokumenty'],
-            [JournalAttachmentStorage::baseDir($supplierId), null, 'prilohy/denik'],
             [RuntimePaths::storage('payroll-documents/sup-' . $supplierId), null, 'prilohy/mzdy'],
             [RuntimePaths::storage('invoices') . '/sup-' . $supplierId . '/_archive', null, 'prilohy/vydane-faktury-archiv'],
         ];
@@ -1045,9 +1047,18 @@ final class InstanceExportService
             static function (string $abs) use (&$skipped): void { $skipped[] = $abs; },
         );
 
-        $total = count($files);
+        $total = count($readableFiles) + count($files);
         $done = 0;
         $bytes = 0;
+        foreach ($readableFiles as $file) {
+            $this->assertNotCancelled($jobId);
+            $archive->addFile($file['entry'], $file['source']);
+            $bytes += (int) (@filesize($file['source']) ?: 0);
+            $done++;
+            if ($done % 50 === 0) {
+                $this->step($jobId, $progress, sprintf('Přílohy %d/%d', $done, $total));
+            }
+        }
         foreach ($files as $abs => $entry) {
             $this->assertNotCancelled($jobId);
             $archive->addFile($entry, $abs);
@@ -1062,7 +1073,7 @@ final class InstanceExportService
         return [
             'files' => $done,
             'bytes' => $bytes,
-            'sources' => array_map(static fn (array $s): string => $s[2], $sources),
+            'sources' => ['prilohy/dokumenty', 'prilohy/denik', ...array_map(static fn (array $s): string => $s[2], $sources)],
             'skipped_outside_root' => count($skipped),
         ];
     }

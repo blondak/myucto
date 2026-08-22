@@ -111,7 +111,7 @@ final class ArchiveService
      */
     private const SUPPLIER_SECRET_PATTERNS = [
         '_enc', 'password', 'secret', 'access_token', 'refresh_token',
-        'api_key', 'client_id', 'private_key',
+        'api_key', 'client_id', 'private_key', 'ai_pseudo_salt',
     ];
 
     public function __construct(

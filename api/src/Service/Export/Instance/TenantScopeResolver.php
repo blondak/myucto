@@ -88,7 +88,7 @@ final class TenantScopeResolver
      */
     private const SECRET_COLUMN_PATTERNS = [
         '_enc', 'password', 'secret', 'access_token', 'refresh_token',
-        'api_key', 'private_key', 'token_hash', 'totp_',
+        'api_key', 'private_key', 'token_hash', 'totp_', 'ai_pseudo_salt',
     ];
 
     /**

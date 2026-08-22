@@ -351,13 +351,29 @@ final class ArchiveRestoreService
                 if (!isset($tables[$table])) {
                     continue;
                 }
-                $counts[$table] = $this->importTable(
-                    $table,
-                    $tmpDir . '/' . $table . '.jsonl',
-                    $newSupplierId,
-                    $processedTables,
-                    $warnings,
-                );
+                // supplier.default_currency_id a currencies.supplier_id tvoří povinný
+                // cyklus. Při obnově do prázdné DB nemá supplier kam ukázat, dokud
+                // nevzniknou jeho měny; povolíme proto FK jen pro vložení tohoto
+                // jednoho řádku a v druhém průchodu ho vždy přepíšeme remapovanou
+                // měnou. Chybějící měna pak skončí chybou při UPDATE, ne tichým
+                // cizím odkazem.
+                $supplierCurrencyCycle = $table === 'supplier';
+                if ($supplierCurrencyCycle) {
+                    $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+                }
+                try {
+                    $counts[$table] = $this->importTable(
+                        $table,
+                        $tmpDir . '/' . $table . '.jsonl',
+                        $newSupplierId,
+                        $processedTables,
+                        $warnings,
+                    );
+                } finally {
+                    if ($supplierCurrencyCycle) {
+                        $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+                    }
+                }
                 $processedTables[] = $table;
                 if ($table === 'supplier') {
                     $newSupplierId = $this->maps['supplier'][$oldSupplierId]
@@ -507,12 +523,28 @@ final class ArchiveRestoreService
             if ($col === 'id') {
                 continue; // AUTO_INCREMENT přidělí nové
             }
+            // Starší archivy mohly ještě nést instanční AI salt. Není to data
+            // firmy ani přenositelný credential; v nové instalaci jej vygeneruje
+            // vlastní konfigurace. Při obnově ho proto vždy ignorujeme.
+            if ($table === 'supplier' && $col === 'ai_pseudo_salt') {
+                continue;
+            }
             if (isset($this->generated[$table][$col])) {
                 continue; // dopočítá si ho server; explicitní hodnota = chyba 1906
             }
             if ($col === 'supplier_id') {
                 $cols[] = $col;
                 $vals[] = $target;
+                continue;
+            }
+
+            // Povinný cyklus supplier.default_currency_id ↔ currencies.supplier_id.
+            // Vloží se dočasně původní ID při vypnuté FK kontrole pro JEDEN řádek;
+            // po importu currencies druhý průchod vyžaduje platnou remapovanou hodnotu.
+            if ($table === 'supplier' && $col === 'default_currency_id' && $val !== null) {
+                $defers[] = ['col' => $col, 'ref' => 'currencies', 'old' => (int) $val];
+                $cols[] = $col;
+                $vals[] = (int) $val;
                 continue;
             }
 
