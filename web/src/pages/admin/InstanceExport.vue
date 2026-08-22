@@ -215,8 +215,8 @@ function statusClass(status: string): string {
         <li>{{ t('instance_export.restore.step_dry_run') }}</li>
         <li>{{ t('instance_export.restore.step_restore') }}</li>
       </ol>
-      <code class="block mt-3 rounded bg-neutral-900 text-neutral-100 px-3 py-2 text-xs break-all">php api/bin/archive-restore.php --file=obnova/myucto-archiv-pro-obnovu.zip --dry-run</code>
-      <code class="block mt-2 rounded bg-neutral-900 text-neutral-100 px-3 py-2 text-xs break-all">php api/bin/archive-restore.php --file=obnova/myucto-archiv-pro-obnovu.zip --restore</code>
+      <code class="block mt-3 rounded bg-neutral-900 text-neutral-100 px-3 py-2 text-xs break-all">php api/bin/archive-restore.php --file=export.zip --database=prazdna_migrovana_db --dry-run</code>
+      <code class="block mt-2 rounded bg-neutral-900 text-neutral-100 px-3 py-2 text-xs break-all">php api/bin/archive-restore.php --file=export.zip --database=prazdna_migrovana_db --restore --storage=cesta-k-novym-datum</code>
       <p class="mt-3 text-xs text-neutral-500">{{ t('instance_export.restore.note') }}</p>
     </section>
 

@@ -9,7 +9,6 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ImportJobRepository;
-use MyInvoice\Service\Accounting\Archive\ArchiveService;
 use MyInvoice\Service\Backup\BackupFileCollector;
 use MyInvoice\Service\Backup\ReadableDocumentArchiveLayout;
 use MyInvoice\Service\Cron\BackupEncryption;
@@ -66,7 +65,7 @@ final class InstanceExportService
     public const PART_DATA = 'data';
     public const PART_DOCUMENTS = 'documents';
     public const PART_FILES = 'files';
-    /** Vnořený, verzovaný archiv, který umí `archive-restore.php` obnovit do novější MyÚčto instance. */
+    /** Úplný archiv lze obnovit přímo do čisté databáze přes `archive-restore.php`. */
     public const PART_RESTORE = 'restore';
     /** DPH podklady po kalendářních měsících (a pro kvartální plátce i čtvrtletích). */
     public const PART_VAT_EXPORTS = 'vat_exports';
@@ -84,7 +83,7 @@ final class InstanceExportService
     ];
 
     /** Verze formátu archivu — čtečky se podle ní mají rozhodovat. */
-    private const FORMAT_VERSION = 2;
+    private const FORMAT_VERSION = 3;
 
     /** Řádků na dávku při čtení tabulky. */
     private const BATCH = 1000;
@@ -101,7 +100,6 @@ final class InstanceExportService
         private readonly LoggerInterface $log,
         private readonly TenantScopeResolver $scopes,
         private readonly InstanceExportJobStore $jobs,
-        private readonly ArchiveService $restoreArchive,
         private readonly ImportJobRepository $reportJobs,
         private readonly MonthlyExportService $monthlyExports,
         private readonly ClosingPackageService $closingPackages,
@@ -119,7 +117,16 @@ final class InstanceExportService
     public static function normalizeParts(array $requested): array
     {
         $valid = array_values(array_intersect(self::ALL_PARTS, $requested));
-        return $valid !== [] ? $valid : self::ALL_PARTS;
+        if ($valid === []) {
+            return self::ALL_PARTS;
+        }
+        // Obnovitelný export není druhý vložený ZIP: je to tento archiv. Proto
+        // vždy nese databázi, binární výpisy i nahrané soubory, bez nichž by
+        // obnova nebyla úplná. Ostatní části si uživatel volí samostatně.
+        if (in_array(self::PART_RESTORE, $valid, true)) {
+            $valid = [...$valid, self::PART_DATA, self::PART_DOCUMENTS, self::PART_FILES];
+        }
+        return array_values(array_unique($valid));
     }
 
     /**
@@ -352,21 +359,17 @@ final class InstanceExportService
         $startedAt = date('Y-m-d H:i:s');
         $archive = new InstanceExportArchive($absPath, $password, $this->maxBytes());
         $sections = [];
+        $restoreAssets = ['files' => [], 'blobs' => []];
 
         try {
-            if (in_array(self::PART_RESTORE, $parts, true)) {
-                $sections['obnova'] = $this->exportRestorableArchive(
-                    $archive, $supplierId, $userId, $jobId, $progress,
-                );
-            }
             if (in_array(self::PART_DATA, $parts, true)) {
                 $sections['data'] = $this->exportData($archive, $supplierId, $jobId, $progress, $workDir);
             }
             if (in_array(self::PART_DOCUMENTS, $parts, true)) {
-                $sections['doklady'] = $this->exportDocuments($archive, $supplierId, $dateFrom, $dateTo, $jobId, $progress, $workDir);
+                $sections['doklady'] = $this->exportDocuments($archive, $supplierId, $dateFrom, $dateTo, $jobId, $progress, $workDir, $restoreAssets['blobs']);
             }
             if (in_array(self::PART_FILES, $parts, true)) {
-                $sections['prilohy'] = $this->exportFiles($archive, $supplierId, $jobId, $progress);
+                $sections['prilohy'] = $this->exportFiles($archive, $supplierId, $jobId, $progress, $restoreAssets['files']);
             }
             if (in_array(self::PART_VAT_EXPORTS, $parts, true)) {
                 $sections['dph'] = $this->exportVatPackages(
@@ -397,10 +400,11 @@ final class InstanceExportService
                     'vat_period' => $supplier['vat_period'] ?? null,
                 ],
                 'restore' => [
-                    'entry' => 'obnova/myucto-archiv-pro-obnovu.zip',
-                    'format' => 'myucto-archive',
-                    'compatibility' => 'Obnova do stejné nebo novější verze MyÚčto jako nová firma; ověřuje ji archive-restore.php.',
-                    'available' => isset($sections['obnova']),
+                    'format' => 'myucto-instance-export',
+                    'compatibility' => 'Obnova do čisté, předem migrované databáze stejné nebo novější verze MyÚčto.',
+                    'available' => in_array(self::PART_RESTORE, $parts, true),
+                    'files' => $restoreAssets['files'],
+                    'blobs' => $restoreAssets['blobs'],
                 ],
                 'range' => ['from' => $dateFrom, 'to' => $dateTo],
                 'parts' => $parts,
@@ -449,46 +453,6 @@ final class InstanceExportService
             'encrypted' => $password !== '',
             'manifest' => $manifest,
         ];
-    }
-
-    /**
-     * Vloží ověřený účetní archiv do nadřazeného balíčku. Tento vnořený ZIP je
-     * jediný JSONL kontrakt určený k importu: `archive-restore.php` jej validuje
-     * a bezpečně obnoví jako novou firmu i do novějšího schématu aplikace.
-     *
-     * ArchiveService kvůli kompatibilitě vytvoří standardní řádek/accounting ZIP;
-     * po vložení do balíčku jej hned smažeme. Uživatel tak nemá dvě oddělené
-     * historie exportů ani na disku nezůstane zbytečná kopie.
-     *
-     * @return array<string,mixed>
-     */
-    private function exportRestorableArchive(
-        InstanceExportArchive $archive,
-        int $supplierId,
-        ?int $userId,
-        ?int $jobId,
-        ?callable $progress,
-    ): array {
-        $this->step($jobId, $progress, 'Obnovitelný archiv dat');
-        $archiveRow = $this->restoreArchive->export($supplierId, $userId);
-        $path = $this->restoreArchive->filePath($supplierId, $archiveRow);
-        try {
-            if (!is_file($path)) {
-                throw new InstanceExportException('restore_archive_missing', 'Obnovitelný archiv se nevytvořil.');
-            }
-            $entry = 'obnova/myucto-archiv-pro-obnovu.zip';
-            $archive->addFile($entry, $path);
-            $archive->flushNow();
-            return [
-                'entry' => $entry,
-                'format' => 'myucto-archive',
-                'version' => 2,
-                'restore_command' => 'php api/bin/archive-restore.php --file=myucto-archiv-pro-obnovu.zip --restore',
-                'compatibility' => 'Stejná nebo novější verze MyÚčto; obnova vždy vytvoří novou firmu a remapuje interní ID.',
-            ];
-        } finally {
-            $this->restoreArchive->delete($supplierId, (int) $archiveRow['id']);
-        }
     }
 
     /**
@@ -732,16 +696,132 @@ final class InstanceExportService
                 'redacted_columns' => $scope->redacted,
             ];
         }
+        $identity = $this->exportIdentity($archive, $supplierId, $workDir);
         // Dočasné soubory drží ZipArchive až do close — vynutíme zápis, ať se uvolní.
         $archive->flushNow();
 
         return [
             'format' => 'JSON Lines (UTF-8, jeden JSON objekt na řádek)',
             'tables' => $tables,
+            'identity' => $identity,
             'skipped_tables' => $this->scopes->skipped(),
             'skipped_note' => 'Vynechané tabulky jsou systémové, globální číselníky, '
                 . 'nebo se je nepodařilo jednoznačně přiřadit této firmě. Data firmy v nich nejsou.',
         ];
+    }
+
+    /**
+     * Přihlašovací tajemství se nepřenáší, ale členové firmy ano. Po obnově jsou
+     * všichni zablokovaní, dokud jim správce cílové instance neposílí pozvánku či
+     * reset hesla. Uchování jejich ID zachovává účetní auditní stopu.
+     *
+     * @return array<string,mixed>
+     */
+    private function exportIdentity(InstanceExportArchive $archive, int $supplierId, string $workDir): array
+    {
+        $pdo = $this->db->pdo();
+        $rows = [
+            'users' => [],
+            'user_suppliers' => [],
+            'roles' => [],
+            'role_permissions' => [],
+        ];
+        $userIds = [];
+        $members = $pdo->prepare('SELECT user_id FROM user_suppliers WHERE supplier_id = ?');
+        $members->execute([$supplierId]);
+        foreach ($members->fetchAll(PDO::FETCH_COLUMN) ?: [] as $id) {
+            $userIds[(int) $id] = true;
+        }
+        // Auditní sloupce v tenantových agendách nebývají všude fyzickým FK. Jejich
+        // uživatele ale přeneseme také, aby historické created_by/posted_by odkazy
+        // nezůstaly v nové databázi viset.
+        foreach ($this->scopes->resolveAll($supplierId) as $scope) {
+            foreach ($scope->columns as $column) {
+                if ($column !== 'user_id' && !str_ends_with($column, '_by')) {
+                    continue;
+                }
+                $sql = 'SELECT DISTINCT `' . $column . '` FROM `' . $scope->table . '` WHERE ' . $scope->where
+                    . ' AND `' . $column . '` IS NOT NULL';
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($scope->params);
+                foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) ?: [] as $id) {
+                    $userIds[(int) $id] = true;
+                }
+            }
+        }
+        $roleIds = [];
+        if ($userIds !== []) {
+            $marks = implode(',', array_fill(0, count($userIds), '?'));
+            $members = $pdo->prepare('SELECT id, email, name, role, role_id, locale, created_at, updated_at FROM users WHERE id IN (' . $marks . ') ORDER BY id');
+            $members->execute(array_keys($userIds));
+        } else {
+            $members = null;
+        }
+        foreach ($members?->fetchAll(PDO::FETCH_ASSOC) ?: [] as $member) {
+            $rows['users'][] = array_filter([
+                'id' => $member['id'], 'email' => $member['email'], 'name' => $member['name'],
+                'role' => $member['role'], 'role_id' => $member['role_id'], 'locale' => $member['locale'],
+                'is_active' => 0, 'created_at' => $member['created_at'], 'updated_at' => $member['updated_at'],
+            ], static fn (mixed $value): bool => $value !== null);
+            foreach ([$member['role_id']] as $roleId) {
+                if ($roleId !== null) {
+                    $roleIds[(int) $roleId] = true;
+                }
+            }
+        }
+        $members = $pdo->prepare('SELECT user_id, supplier_id, role, role_id, created_at FROM user_suppliers WHERE supplier_id = ? ORDER BY user_id');
+        $members->execute([$supplierId]);
+        foreach ($members->fetchAll(PDO::FETCH_ASSOC) ?: [] as $membership) {
+            $rows['user_suppliers'][] = array_filter($membership, static fn (mixed $value): bool => $value !== null);
+            if ($membership['role_id'] !== null) {
+                $roleIds[(int) $membership['role_id']] = true;
+            }
+        }
+        if ($roleIds !== []) {
+            $marks = implode(',', array_fill(0, count($roleIds), '?'));
+            $stmt = $pdo->prepare('SELECT id, system_key, name, role_type, is_active, created_at, updated_at FROM roles WHERE id IN (' . $marks . ')');
+            $stmt->execute(array_keys($roleIds));
+            $rows['roles'] = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            $stmt = $pdo->prepare('SELECT role_id, permission_key, access_level FROM role_permissions WHERE role_id IN (' . $marks . ')');
+            $stmt->execute(array_keys($roleIds));
+            $rows['role_permissions'] = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        }
+
+        $entries = [];
+        foreach ($rows as $name => $data) {
+            $entry = 'identity/' . $name . '.jsonl';
+            $tmp = $workDir . DIRECTORY_SEPARATOR . 'identity-' . $name . '.jsonl';
+            $count = $this->writeRowsJsonl($data, $tmp);
+            if ($count > 0) {
+                $archive->addFile($entry, $tmp, deleteAfterFlush: true);
+                $entries[$name] = ['entry' => $entry, 'rows' => $count];
+            } else {
+                @unlink($tmp);
+                $entries[$name] = ['entry' => null, 'rows' => 0];
+            }
+        }
+        return ['entries' => $entries, 'passwords_restored' => false, 'users_restored_disabled' => true];
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private function writeRowsJsonl(array $rows, string $filePath): int
+    {
+        $fh = fopen($filePath, 'wb');
+        if ($fh === false) {
+            throw new InstanceExportException('storage_failed', 'Nelze zapsat ' . $filePath);
+        }
+        try {
+            foreach ($rows as $row) {
+                $line = json_encode($row, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRESERVE_ZERO_FRACTION);
+                if ($line === false) {
+                    throw new InstanceExportException('encode_failed', 'JSON encode selhal pro identitu uživatele.');
+                }
+                fwrite($fh, $line . "\n");
+            }
+        } finally {
+            fclose($fh);
+        }
+        return count($rows);
     }
 
     /**
@@ -836,6 +916,7 @@ final class InstanceExportService
         ?int $jobId,
         ?callable $progress,
         string $workDir,
+        array &$restoreBlobs,
     ): array {
         $summary = ['vydane_pdf' => 0, 'vydane_isdoc' => 0, 'prijate_pdf' => 0, 'vypisy' => 0];
         $warnings = [];
@@ -926,7 +1007,7 @@ final class InstanceExportService
         // 3) Výpisy z účtu — obsah je BLOB, takže se tahá PO JEDNOM řádku a jde rovnou
         //    do dočasného souboru. Načíst celý sloupec do pole by u roku provozu
         //    znamenalo stovky MB v paměti.
-        $summary['vypisy'] = $this->exportBankStatementFiles($archive, $supplierId, $dateFrom, $dateTo, $jobId, $progress, $workDir, $warnings);
+        $summary['vypisy'] = $this->exportBankStatementFiles($archive, $supplierId, $dateFrom, $dateTo, $jobId, $progress, $workDir, $warnings, $restoreBlobs);
 
         if ($warnings !== []) {
             foreach (array_slice($warnings, 0, 50) as $w) {
@@ -948,6 +1029,7 @@ final class InstanceExportService
         ?callable $progress,
         string $workDir,
         array &$warnings,
+        array &$restoreBlobs,
     ): int {
         $scopes = $this->scopes->resolveAll($supplierId);
         $scope = $scopes['bank_statements'] ?? null;
@@ -998,7 +1080,12 @@ final class InstanceExportService
                 $tmp = $workDir . DIRECTORY_SEPARATOR . 'stmt-' . $id . '.' . $ext;
                 file_put_contents($tmp, $content);
                 unset($content, $row[$contentCol]);
-                $archive->addFile("doklady/{$year}/vypisy-z-uctu/{$name}", $tmp, deleteAfterFlush: true);
+                // Dva zdrojové soubory jednoho výpisu mohou mít stejný původní
+                // název. ID i typ je proto součástí cesty — položka ZIPu je pak
+                // jednoznačný obnovovací zdroj pro konkrétní BLOB.
+                $entry = "doklady/{$year}/vypisy-z-uctu/vypis-{$id}-{$contentCol}-{$name}";
+                $archive->addFile($entry, $tmp, deleteAfterFlush: true);
+                $restoreBlobs[] = ['entry' => $entry, 'table' => 'bank_statements', 'id' => $id, 'column' => $contentCol];
                 $count++;
             }
             unset($row);
@@ -1028,6 +1115,7 @@ final class InstanceExportService
         int $supplierId,
         ?int $jobId,
         ?callable $progress,
+        array &$restoreFiles,
     ): array {
         $readableFiles = (new ReadableDocumentArchiveLayout($this->db->pdo()))->forSupplier(
             $supplierId,
@@ -1053,6 +1141,10 @@ final class InstanceExportService
         foreach ($readableFiles as $file) {
             $this->assertNotCancelled($jobId);
             $archive->addFile($file['entry'], $file['source']);
+            $restoreFiles[] = [
+                'entry' => $file['entry'], 'storage_path' => $file['storage_path'],
+                'sha256' => $file['sha256'], 'kind' => $file['kind'],
+            ];
             $bytes += (int) (@filesize($file['source']) ?: 0);
             $done++;
             if ($done % 50 === 0) {
@@ -1062,6 +1154,18 @@ final class InstanceExportService
         foreach ($files as $abs => $entry) {
             $this->assertNotCancelled($jobId);
             $archive->addFile($entry, $abs);
+            $storagePath = null;
+            foreach ($sources as [$sourceRoot]) {
+                $root = rtrim(str_replace('\\', '/', $sourceRoot), '/');
+                $normalized = str_replace('\\', '/', $abs);
+                if (str_starts_with(strtolower($normalized), strtolower($root . '/'))) {
+                    $storagePath = ltrim(substr($normalized, strlen(RuntimePaths::storage()) + 1), '/');
+                    break;
+                }
+            }
+            if ($storagePath !== null) {
+                $restoreFiles[] = ['entry' => $entry, 'storage_path' => $storagePath, 'sha256' => null, 'kind' => 'attachment'];
+            }
             $bytes += (int) (@filesize($abs) ?: 0);
             $done++;
             if ($done % 50 === 0) {
@@ -1223,9 +1327,9 @@ final class InstanceExportService
             '',
             'CO V ARCHIVU JE',
             str_repeat('-', 60),
-            'obnova/        Verzionovaný obnovitelný účetní archiv firmy (je-li zvolený). Tento ZIP',
-            '               je jediná část určená k importu přes archive-restore.php; lze jej',
-            '               obnovit do stejné nebo NOVĚJŠÍ verze MyÚčto jako novou firmu.',
+            'obnova         Tento ZIP je přímo obnovitelný (je-li zvolený); nevzniká druhý archiv.',
+            '               Lze jej obnovit do prázdné, předem migrované databáze stejné nebo',
+            '               NOVĚJŠÍ verze MyÚčto přes archive-restore.php.',
             'data/          Strojově čitelný export databáze — jeden soubor na tabulku,',
             '               formát JSON Lines (JSONL): jeden JSON objekt na řádek, UTF-8.',
             '               Otevře ho Excel/LibreOffice přes import, Python (pandas.read_json',
@@ -1272,11 +1376,11 @@ final class InstanceExportService
         $lines[] = '';
         $lines[] = 'OBNOVA';
         $lines[] = str_repeat('-', 60);
-        $lines[] = 'Po rozbalení nadřazeného ZIPu spusť v cílové, stejné nebo NOVĚJŠÍ instalaci:';
-        $lines[] = '  php api/bin/archive-restore.php --file=obnova/myucto-archiv-pro-obnovu.zip --dry-run';
-        $lines[] = 'a po úspěšné kontrole stejný příkaz s `--restore`. Obnova nikdy nepřepisuje';
-        $lines[] = 'existující firmu: založí novou a bezpečně remapuje interní ID.';
-        $lines[] = 'Obecné JSONL soubory v data/ jsou kontrolní a přenosový export, ne vstup pro import.';
+        $lines[] = 'V cílové, stejné nebo NOVĚJŠÍ instalaci nejdřív připrav prázdnou migrovanou databázi';
+        $lines[] = 'a prázdný datový adresář. Nad TÍMTO ZIPem spusť:';
+        $lines[] = '  php api/bin/archive-restore.php --file=export.zip --database=prazdna_db --dry-run';
+        $lines[] = 'a po úspěšné kontrole stejný příkaz s `--restore --storage=cesta-k-novym-datum`.';
+        $lines[] = 'Obnova zachová interní ID a vazby; nepřepíše proto existující data.';
         $lines[] = '';
         $lines[] = 'Data se čtou průběžně, ne v jednom okamžiku (viz read_started_at /';
         $lines[] = 'read_finished_at v manifestu) — archiv vznikl v tomhle časovém okně.';

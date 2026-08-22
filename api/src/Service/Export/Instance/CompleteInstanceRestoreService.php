@@ -1,0 +1,409 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Export\Instance;
+
+use PDO;
+use ZipArchive;
+
+/** Obnova jediného kompletního exportu do čisté, předem migrované databáze. */
+final class CompleteInstanceRestoreService
+{
+    private const FORMAT = 'myucto-instance-export';
+    private const VERSION = 3;
+    private const DISABLED_PASSWORD_HASH = '$2y$10$K6q6A1qORRMi5gzg1me.bO4w0NqJGb9jY36Tv1azcLYtKpIwZxjua';
+
+    public function __construct(
+        private readonly PDO $pdo,
+        private readonly string $storageRoot,
+        private readonly string $password = '',
+    ) {}
+
+    /** @return array{manifest:array<string,mixed>,counts:array<string,int>,files:int,blobs:int} */
+    public function validate(string $archivePath): array
+    {
+        $dir = $this->extract($archivePath);
+        try {
+            $manifest = $this->manifest($dir);
+            $counts = $this->validateContents($dir, $manifest);
+            $this->assertTargetSchema($manifest);
+            return ['manifest' => $manifest, 'counts' => $counts, 'files' => count($manifest['restore']['files'] ?? []), 'blobs' => count($manifest['restore']['blobs'] ?? [])];
+        } finally {
+            $this->removeDir($dir);
+        }
+    }
+
+    /** @return array{manifest:array<string,mixed>,counts:array<string,int>,files:int,blobs:int} */
+    public function restore(string $archivePath): array
+    {
+        $dir = $this->extract($archivePath);
+        try {
+            $manifest = $this->manifest($dir);
+            $counts = $this->validateContents($dir, $manifest);
+            $this->assertTargetSchema($manifest);
+            $this->assertEmptyTarget();
+            $this->assertEmptyStorage();
+
+            $this->pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+            $this->pdo->beginTransaction();
+            try {
+                $identity = (array) ($manifest['sections']['data']['identity']['entries'] ?? []);
+                foreach (['roles', 'role_permissions', 'users'] as $table) {
+                    $this->restoreEntry($dir, $table, $identity[$table]['entry'] ?? null, $counts, $table === 'roles' || $table === 'role_permissions');
+                }
+                foreach ((array) ($manifest['sections']['data']['tables'] ?? []) as $table => $info) {
+                    $this->restoreEntry($dir, (string) $table, $info['entry'] ?? null, $counts);
+                }
+                $this->restoreEntry($dir, 'user_suppliers', $identity['user_suppliers']['entry'] ?? null, $counts);
+                $this->restoreBlobs($dir, (array) ($manifest['restore']['blobs'] ?? []));
+                $this->nullReferencesToOmittedSecrets($manifest);
+                $this->pdo->commit();
+            } catch (\Throwable $e) {
+                if ($this->pdo->inTransaction()) {
+                    $this->pdo->rollBack();
+                }
+                throw $e;
+            } finally {
+                $this->pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+            }
+
+            $violations = $this->foreignKeyViolations();
+            if ($violations !== []) {
+                throw new InstanceExportException('restore_fk_invalid', 'Obnova vytvořila neplatné vazby: ' . implode('; ', $violations));
+            }
+            $files = $this->restoreFiles($dir, (array) ($manifest['restore']['files'] ?? []));
+            return ['manifest' => $manifest, 'counts' => $counts, 'files' => $files, 'blobs' => count($manifest['restore']['blobs'] ?? [])];
+        } finally {
+            $this->removeDir($dir);
+        }
+    }
+
+    private function manifest(string $dir): array
+    {
+        $path = $dir . DIRECTORY_SEPARATOR . 'manifest.json';
+        $manifest = is_file($path) ? json_decode((string) file_get_contents($path), true) : null;
+        if (!is_array($manifest) || ($manifest['format'] ?? null) !== self::FORMAT || (int) ($manifest['version'] ?? 0) !== self::VERSION) {
+            throw new InstanceExportException('restore_format_invalid', 'Archiv není kompletní obnovitelný export aktuálního formátu.');
+        }
+        if (($manifest['restore']['available'] ?? false) !== true || !isset($manifest['sections']['data']['tables'])) {
+            throw new InstanceExportException('restore_incomplete', 'Archiv neobsahuje obnovitelná data; při exportu zvolte „Úplný obnovitelný archiv“.');
+        }
+        return $manifest;
+    }
+
+    /** @param array<string,mixed> $manifest @return array<string,int> */
+    private function validateContents(string $dir, array $manifest): array
+    {
+        $checksums = (array) ($manifest['checksums'] ?? []);
+        foreach ($checksums as $entry => $expected) {
+            $path = $this->entryPath($dir, (string) $entry);
+            if (!is_file($path) || hash_file('sha256', $path) !== (string) ($expected['sha256'] ?? '') || filesize($path) !== (int) ($expected['size'] ?? -1)) {
+                throw new InstanceExportException('restore_checksum_invalid', 'Kontrolní součet nebo velikost nesedí: ' . $entry);
+            }
+        }
+        $counts = [];
+        foreach ((array) ($manifest['sections']['data']['tables'] ?? []) as $table => $info) {
+            $counts[(string) $table] = $this->validateJsonl($dir, $info['entry'] ?? null, (int) ($info['rows'] ?? 0), (string) $table);
+        }
+        foreach ((array) ($manifest['sections']['data']['identity']['entries'] ?? []) as $table => $info) {
+            $counts[(string) $table] = $this->validateJsonl($dir, $info['entry'] ?? null, (int) ($info['rows'] ?? 0), (string) $table);
+        }
+        foreach (array_merge((array) ($manifest['restore']['files'] ?? []), (array) ($manifest['restore']['blobs'] ?? [])) as $asset) {
+            if (!is_array($asset) || !isset($asset['entry']) || !is_file($this->entryPath($dir, (string) $asset['entry']))) {
+                throw new InstanceExportException('restore_asset_missing', 'V archivu chybí soubor pro obnovu.');
+            }
+        }
+        return $counts;
+    }
+
+    private function validateJsonl(string $dir, mixed $entry, int $expectedRows, string $table): int
+    {
+        if ($entry === null) {
+            return $expectedRows === 0 ? 0 : throw new InstanceExportException('restore_jsonl_missing', "Chybí JSONL tabulky {$table}.");
+        }
+        $path = $this->entryPath($dir, (string) $entry);
+        if (!is_file($path)) {
+            throw new InstanceExportException('restore_jsonl_missing', "Chybí JSONL tabulky {$table}.");
+        }
+        $count = 0;
+        $fh = fopen($path, 'rb');
+        while (($line = fgets($fh)) !== false) {
+            if (trim($line) === '') {
+                continue;
+            }
+            if (!is_array(json_decode($line, true))) {
+                throw new InstanceExportException('restore_jsonl_invalid', "Neplatný JSONL řádek: {$table}.");
+            }
+            $count++;
+        }
+        fclose($fh);
+        if ($count !== $expectedRows) {
+            throw new InstanceExportException('restore_row_count_invalid', "Počet řádků nesedí: {$table}.");
+        }
+        return $count;
+    }
+
+    /** @param array<string,int> $counts */
+    private function restoreEntry(string $dir, string $table, mixed $entry, array &$counts, bool $ignoreDuplicates = false): void
+    {
+        if ($entry === null || !isset($counts[$table])) {
+            return;
+        }
+        $columns = $this->tableColumns($table);
+        $fh = fopen($this->entryPath($dir, (string) $entry), 'rb');
+        while (($line = fgets($fh)) !== false) {
+            $row = json_decode($line, true);
+            if (!is_array($row)) {
+                continue;
+            }
+            if ($table === 'users') {
+                $row['password_hash'] = self::DISABLED_PASSWORD_HASH;
+                $row['totp_enabled'] = 0;
+                $row['totp_secret'] = null;
+                $row['is_active'] = 0;
+            }
+            $row = array_intersect_key($row, $columns);
+            if ($row === []) {
+                continue;
+            }
+            $names = array_keys($row);
+            $sql = 'INSERT ' . ($ignoreDuplicates ? 'IGNORE ' : '') . 'INTO `' . $table . '` (`'
+                . implode('`, `', $names) . '`) VALUES (' . implode(', ', array_fill(0, count($names), '?')) . ')';
+            $this->pdo->prepare($sql)->execute(array_values($row));
+        }
+        fclose($fh);
+    }
+
+    /** @param list<array<string,mixed>> $assets */
+    private function restoreBlobs(string $dir, array $assets): void
+    {
+        foreach ($assets as $asset) {
+            $table = (string) ($asset['table'] ?? '');
+            $column = (string) ($asset['column'] ?? '');
+            if (!$this->safeIdentifier($table) || !$this->safeIdentifier($column) || !isset($this->tableColumns($table)[$column])) {
+                throw new InstanceExportException('restore_blob_invalid', 'Neplatná definice binárního souboru v archivu.');
+            }
+            $data = file_get_contents($this->entryPath($dir, (string) ($asset['entry'] ?? '')));
+            $stmt = $this->pdo->prepare("UPDATE `{$table}` SET `{$column}` = ? WHERE id = ?");
+            $stmt->bindValue(1, $data, PDO::PARAM_LOB);
+            $stmt->bindValue(2, (int) ($asset['id'] ?? 0), PDO::PARAM_INT);
+            $stmt->execute();
+            if ($stmt->rowCount() !== 1) {
+                throw new InstanceExportException('restore_blob_target_missing', 'Cíl binárního souboru v databázi chybí.');
+            }
+        }
+    }
+
+    /** @param list<array<string,mixed>> $assets */
+    private function restoreFiles(string $dir, array $assets): int
+    {
+        $count = 0;
+        $root = rtrim($this->storageRoot, '/\\');
+        foreach ($assets as $asset) {
+            $relative = str_replace('\\', '/', (string) ($asset['storage_path'] ?? ''));
+            if ($relative === '' || str_contains($relative, '..') || str_starts_with($relative, '/')) {
+                throw new InstanceExportException('restore_file_path_invalid', 'Neplatná cílová cesta přílohy.');
+            }
+            $target = $root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative);
+            $targetDir = dirname($target);
+            if (!is_dir($targetDir) && !mkdir($targetDir, 0775, true) && !is_dir($targetDir)) {
+                throw new InstanceExportException('restore_file_write_failed', 'Nelze vytvořit adresář přílohy.');
+            }
+            $source = $this->entryPath($dir, (string) ($asset['entry'] ?? ''));
+            if (!copy($source, $target)) {
+                throw new InstanceExportException('restore_file_write_failed', 'Nelze obnovit přílohu.');
+            }
+            if (($asset['sha256'] ?? null) !== null && hash_file('sha256', $target) !== (string) $asset['sha256']) {
+                throw new InstanceExportException('restore_file_checksum_invalid', 'Kontrolní součet obnovené přílohy nesedí.');
+            }
+            $count++;
+        }
+        return $count;
+    }
+
+    /** @param array<string,mixed> $manifest */
+    private function assertTargetSchema(array $manifest): void
+    {
+        foreach ((array) ($manifest['sections']['data']['tables'] ?? []) as $table => $info) {
+            // Prázdná tabulka ze starší instance nemusí v cílové novější verzi
+            // existovat; není co ztratit. Řádky ale nikdy tiše nezahodíme.
+            if ((int) ($info['rows'] ?? 0) > 0) {
+                $this->tableColumns((string) $table);
+            }
+        }
+        foreach (['roles', 'role_permissions', 'users', 'user_suppliers'] as $table) {
+            $this->tableColumns($table);
+        }
+    }
+
+    private function assertEmptyTarget(): void
+    {
+        foreach (['supplier', 'users', 'user_suppliers'] as $table) {
+            if ((int) $this->pdo->query("SELECT COUNT(*) FROM `{$table}`")->fetchColumn() > 0) {
+                throw new InstanceExportException('restore_target_not_empty', 'Cílová databáze není prázdná (tabulka ' . $table . ').');
+            }
+        }
+    }
+
+    private function assertEmptyStorage(): void
+    {
+        if (!is_dir($this->storageRoot) && !mkdir($this->storageRoot, 0775, true) && !is_dir($this->storageRoot)) {
+            throw new InstanceExportException('restore_storage_unavailable', 'Nelze vytvořit cílový datový adresář.');
+        }
+        foreach (scandir($this->storageRoot) ?: [] as $item) {
+            if ($item !== '.' && $item !== '..') {
+                throw new InstanceExportException('restore_storage_not_empty', 'Cílový datový adresář není prázdný.');
+            }
+        }
+    }
+
+    /** @return array<string,true> */
+    private function tableColumns(string $table): array
+    {
+        if (!$this->safeIdentifier($table)) {
+            throw new InstanceExportException('restore_table_invalid', 'Neplatný název tabulky v archivu.');
+        }
+        $stmt = $this->pdo->prepare('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND (GENERATION_EXPRESSION IS NULL OR GENERATION_EXPRESSION = "")');
+        $stmt->execute([$table]);
+        $columns = array_fill_keys(array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []), true);
+        if ($columns === []) {
+            throw new InstanceExportException('restore_schema_missing', 'Cílové schéma nemá tabulku ' . $table . '.');
+        }
+        return $columns;
+    }
+
+    /** @return list<string> */
+    private function foreignKeyViolations(): array
+    {
+        $sql = 'SELECT k.CONSTRAINT_NAME, k.TABLE_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME
+                  FROM information_schema.KEY_COLUMN_USAGE k
+                 WHERE k.TABLE_SCHEMA = DATABASE() AND k.REFERENCED_TABLE_NAME IS NOT NULL
+                 ORDER BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.ORDINAL_POSITION';
+        $violations = [];
+        $constraints = [];
+        foreach ($this->pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [] as $fk) {
+            $key = $fk['TABLE_NAME'] . ':' . $fk['CONSTRAINT_NAME'];
+            $constraints[$key][] = $fk;
+        }
+        foreach ($constraints as $parts) {
+            $first = $parts[0];
+            foreach ($parts as $fk) {
+                foreach (['TABLE_NAME', 'COLUMN_NAME', 'REFERENCED_TABLE_NAME', 'REFERENCED_COLUMN_NAME'] as $key) {
+                    if (!$this->safeIdentifier((string) $fk[$key])) {
+                        continue 3;
+                    }
+                }
+            }
+            $joins = implode(' AND ', array_map(static fn (array $fk): string => 'c.`' . $fk['COLUMN_NAME'] . '` = p.`' . $fk['REFERENCED_COLUMN_NAME'] . '`', $parts));
+            $present = implode(' AND ', array_map(static fn (array $fk): string => 'c.`' . $fk['COLUMN_NAME'] . '` IS NOT NULL', $parts));
+            $missing = 'p.`' . $first['REFERENCED_COLUMN_NAME'] . '` IS NULL';
+            $query = sprintf('SELECT COUNT(*) FROM `%s` c LEFT JOIN `%s` p ON %s WHERE %s AND %s', $first['TABLE_NAME'], $first['REFERENCED_TABLE_NAME'], $joins, $present, $missing);
+            $count = (int) $this->pdo->query($query)->fetchColumn();
+            if ($count > 0) {
+                $violations[] = $first['TABLE_NAME'] . '.' . $first['CONSTRAINT_NAME'] . ' (' . $count . ')';
+            }
+        }
+        return $violations;
+    }
+
+    /** @param array<string,mixed> $manifest */
+    private function nullReferencesToOmittedSecrets(array $manifest): void
+    {
+        $included = array_fill_keys(array_keys((array) ($manifest['sections']['data']['tables'] ?? [])), true);
+        $included += array_fill_keys(['roles', 'role_permissions', 'users', 'user_suppliers'], true);
+        $sql = 'SELECT k.TABLE_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, c.IS_NULLABLE
+                  FROM information_schema.KEY_COLUMN_USAGE k
+                  JOIN information_schema.COLUMNS c
+                    ON c.TABLE_SCHEMA = k.TABLE_SCHEMA AND c.TABLE_NAME = k.TABLE_NAME AND c.COLUMN_NAME = k.COLUMN_NAME
+                 WHERE k.TABLE_SCHEMA = DATABASE() AND k.REFERENCED_TABLE_NAME IS NOT NULL
+                   AND k.CONSTRAINT_NAME IN (
+                       SELECT constraint_name FROM information_schema.KEY_COLUMN_USAGE
+                        WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL
+                        GROUP BY TABLE_NAME, constraint_name HAVING COUNT(*) = 1
+                   )';
+        foreach ($this->pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [] as $fk) {
+            $child = (string) $fk['TABLE_NAME'];
+            $column = (string) $fk['COLUMN_NAME'];
+            $parent = (string) $fk['REFERENCED_TABLE_NAME'];
+            if (isset($included[$parent]) || strtoupper((string) $fk['IS_NULLABLE']) !== 'YES'
+                || !$this->safeIdentifier($child) || !$this->safeIdentifier($column) || !$this->safeIdentifier($parent)) {
+                continue;
+            }
+            if ((int) $this->pdo->query("SELECT COUNT(*) FROM `{$parent}`")->fetchColumn() !== 0) {
+                continue;
+            }
+            $this->pdo->exec("UPDATE `{$child}` SET `{$column}` = NULL WHERE `{$column}` IS NOT NULL");
+        }
+    }
+
+    private function extract(string $archivePath): string
+    {
+        $zip = new ZipArchive();
+        if ($zip->open($archivePath) !== true) {
+            throw new InstanceExportException('restore_zip_invalid', 'Archiv nelze otevřít.');
+        }
+        if ($this->password !== '') {
+            $zip->setPassword($this->password);
+        }
+        $dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'myucto-restore-' . bin2hex(random_bytes(8));
+        if (!mkdir($dir, 0700, true)) {
+            $zip->close();
+            throw new InstanceExportException('restore_temp_failed', 'Nelze vytvořit pracovní adresář obnovy.');
+        }
+        try {
+            for ($i = 0; $i < $zip->numFiles; $i++) {
+                $name = (string) $zip->getNameIndex($i);
+                if ($name === '' || str_starts_with($name, '/') || str_contains(str_replace('\\', '/', $name), '../')) {
+                    throw new InstanceExportException('restore_zip_path_invalid', 'Archiv obsahuje nebezpečnou cestu.');
+                }
+                if (str_ends_with($name, '/')) {
+                    continue;
+                }
+                $target = $this->entryPath($dir, $name);
+                if (!is_dir(dirname($target)) && !mkdir(dirname($target), 0700, true) && !is_dir(dirname($target))) {
+                    throw new InstanceExportException('restore_temp_failed', 'Nelze rozbalit archiv.');
+                }
+                $in = $zip->getStream($name);
+                $out = $in === false ? false : fopen($target, 'wb');
+                if ($in === false || $out === false) {
+                    throw new InstanceExportException('restore_zip_read_failed', 'Položku archivu nelze přečíst (zkontrolujte heslo).');
+                }
+                stream_copy_to_stream($in, $out);
+                fclose($in);
+                fclose($out);
+            }
+        } catch (\Throwable $e) {
+            $this->removeDir($dir);
+            throw $e;
+        } finally {
+            $zip->close();
+        }
+        return $dir;
+    }
+
+    private function entryPath(string $base, string $entry): string
+    {
+        return $base . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $entry);
+    }
+
+    private function safeIdentifier(string $value): bool
+    {
+        return preg_match('/^[A-Za-z0-9_]+$/', $value) === 1;
+    }
+
+    private function removeDir(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+        foreach (scandir($dir) ?: [] as $item) {
+            if ($item === '.' || $item === '..') {
+                continue;
+            }
+            $path = $dir . DIRECTORY_SEPARATOR . $item;
+            is_dir($path) ? $this->removeDir($path) : @unlink($path);
+        }
+        @rmdir($dir);
+    }
+}

@@ -158,10 +158,9 @@ Smazání používané historické sazby může znemožnit reprodukovat starší
 
 ## 69.6 Obnovitelný archiv v kompletním exportu
 
-Kompletní export v **Administrace → Kompletní export dat** může obsahovat
-per-firemní technický ZIP pro uschování a forenzní obnovu účetní stopy. Není
-pro něj samostatná obrazovka: je jednou z volitelných částí jediného exportního
-balíčku.
+Kompletní export v **Administrace → Kompletní export dat** může být přímo
+obnovitelný. Není pro něj samostatná obrazovka ani druhý ZIP: je jednou z
+volitelných částí jediného exportního balíčku.
 
 Export obsahuje JSON Lines data firmy, mimo jiné:
 
@@ -181,26 +180,28 @@ faktur nejsou součástí technického archivu; pro ně slouží samostatný exp
 Obnova není dostupná ve webu. Administrátor serveru použije:
 
 ```text
-php api/bin/archive-restore.php --file=<cesta.zip> --dry-run
-php api/bin/archive-restore.php --file=<cesta.zip> --restore
+php api/bin/archive-restore.php --file=<export.zip> --database=<prazdna_migrovana_db> --dry-run
+php api/bin/archive-restore.php --file=<export.zip> --database=<prazdna_migrovana_db> --restore --storage=<prazdny_datovy_adresar>
 ```
 
-Dry-run ověří hash a počet každé části, přílohy, verzi migrací a vazby bez
-zápisu. Ostrá obnova vždy založí **novou firmu**, přemapuje interní ID a vše
-provede v jedné databázové transakci. Existující firma se nepřepisuje.
+Databáze musí být předem migrovaná cílovou, stejnou nebo novější verzí MyÚčto a
+spolu s datovým adresářem prázdná. Dry-run ověří hash a počet každé části i
+přílohy bez zápisu. Ostrá obnova zachová interní ID, obnoví vše v jedné
+databázové transakci a nepřepíše proto žádná existující data.
 
-Po importu se znovu ověří podvojnost po obdobích a vypíše rozdílový report.
-Přílohy se uloží do datového adresáře nové firmy. Hesla a klíče je nutné
-nastavit znovu. Automatický round-trip test hlídá základní počty a součty, ale
-archiv stále nenahrazuje celoinstanční zálohu databáze.
+Po importu se znovu ověří všechny cizí klíče. Přílohy se uloží do zadaného
+datového adresáře. Přihlašovací tajemství, tokeny a klíče se neobnovují;
+uživatelé jsou zablokovaní a správce jim pošle pozvánku nebo reset hesla.
+Automatický round-trip test hlídá počty, vazby a hashe souborů, ale archiv stále
+nenahrazuje celoinstanční zálohu databáze.
 
 ### 69.6.2 Obsah kompletního exportu
 
 Správce instalace najde v nabídce **Administrace → Kompletní export dat** jeden
 nadřazený ZIP. U jednotlivých částí si zvolí, co do něj patří:
 
-- **Obnovitelný archiv** — stejný verzovaný archiv jako na této stránce, uložený
-  v `obnova/myucto-archiv-pro-obnovu.zip`;
+- **Úplný obnovitelný archiv** — hlavní ZIP s databází, binárními výpisy a
+  přílohami; volba automaticky zapne nutné části;
 - **Data, doklady a přílohy** — přenositelný JSON Lines export, PDF/ISDOC doklady,
   bankovní výpisy a nahrané soubory;
 - u plátce DPH **podklady po měsících** (Kniha DPH v PDF a kontrolní hlášení v XML),

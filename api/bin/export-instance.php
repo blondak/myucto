@@ -67,7 +67,8 @@ $usage = <<<TXT
 Kompletní export dat firmy (H-14).
 
   --supplier=N            ID firmy (povinné mimo --job-id / --cleanup)
-  --parts=a,b,c           části: data,documents,files (výchozí: všechny)
+  --parts=a,b,c           části: restore,data,documents,files,vat_exports,closing_packages (výchozí: všechny)
+                          restore automaticky přidá data, documents a files
   --from=YYYY-MM-DD       omezení dokladů (obojí, nebo ani jedno)
   --to=YYYY-MM-DD
   --out=DIR               cíl místo storage/instance-exports/sup-N

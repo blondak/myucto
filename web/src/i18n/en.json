@@ -16634,14 +16634,14 @@
     "instance_export": {
         "title": "Full data export",
         "subtitle": "Build one company package: restorable data, documents, VAT records and accounting closing packages.",
-        "info": "The package contains machine-readable data, documents and an optional versioned archive for safe restoration. The manifest and SHA-256 checksums describe the exact content and verify a complete download.",
-        "no_restore_note": "After extraction, the restorable archive is explicitly restored by CLI into the same or a newer MyÚčto version. It always creates a new company and never overwrites existing data.",
+        "info": "The package contains machine-readable data, documents and an optional complete archive for safe restoration. The manifest and SHA-256 checksums describe the exact content and verify a complete download.",
+        "no_restore_note": "The restorable archive is run directly by CLI into an empty, pre-migrated database of the same or a newer MyÚčto version. It never overwrites existing data.",
         "restore": {
             "title": "How to restore data",
-            "step_extract": "Include the Restorable accounting archive part and extract the downloaded outer ZIP.",
-            "step_dry_run": "In a target installation of the same or a newer version, first run the validation without writing data.",
+            "step_extract": "Include the Restorable accounting archive part and prepare an empty database migrated by the target MyÚčto version.",
+            "step_dry_run": "Run validation against the downloaded main ZIP before writing data.",
             "step_restore": "Only after validation succeeds, run the same command with the --restore parameter.",
-            "note": "Restoration always creates a new company and remaps its internal IDs; it never overwrites existing data. JSONL under data/ is a portable export, not restore input."
+            "note": "Restoration preserves IDs and every relationship, so the target database and data directory must be empty. Users are restored disabled, without passwords or MFA; an administrator sends an invitation or password reset."
         },
         "retention": {
             "title": "Retention of accounting and tax records",
@@ -16650,7 +16650,7 @@
         "not_encrypted": "The archive is not encrypted because no backup password is configured (cron.backup.password). It holds the complete accounting of the company — store it somewhere safe.",
         "new_export": "New export",
         "part": {
-            "restore": "Restorable accounting archive",
+            "restore": "Complete restorable archive",
             "data": "Data (database)",
             "documents": "Documents as PDF",
             "files": "Attachments and uploads",
@@ -16658,7 +16658,7 @@
             "closing_packages": "Closing packages"
         },
         "part_hint": {
-            "restore": "Versioned accounting JSONL archive for archive-restore.php; restores its supported scope into a newer application version too.",
+            "restore": "One complete ZIP for archive-restore.php. It automatically includes data, statements and attachments; restore it into an empty database of the same or newer version.",
             "data": "Every agenda table as JSON Lines — documents, contacts, stock, assets, payroll, the journal and VAT source data.",
             "documents": "Issued invoices (PDF + ISDOC), received invoices and bank statements, in folders by year.",
             "files": "Scans of received documents, journal attachments, documents and payroll files.",

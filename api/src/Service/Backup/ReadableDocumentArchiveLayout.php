@@ -153,7 +153,7 @@ final class ReadableDocumentArchiveLayout
                 $items[] = [
                     'source' => $source,
                     'entry' => $entry,
-                    'storage_path' => 'documents/' . substr($sha, 0, 2) . '/' . $filename,
+                    'storage_path' => 'documents/sup-' . $supplierId . '/' . substr($sha, 0, 2) . '/' . $filename,
                     'sha256' => $sha,
                     'kind' => 'document',
                 ];
@@ -203,7 +203,7 @@ final class ReadableDocumentArchiveLayout
             $items[] = [
                 'source' => $source,
                 'entry' => $entry,
-                'storage_path' => 'journal/' . substr($sha, 0, 2) . '/' . $filename,
+                'storage_path' => 'journal/sup-' . $supplierId . '/' . substr($sha, 0, 2) . '/' . $filename,
                 'sha256' => $sha,
                 'kind' => 'journal_attachment',
             ];
@@ -228,7 +228,7 @@ final class ReadableDocumentArchiveLayout
                 $items[] = [
                     'source' => $source,
                     'entry' => $entry,
-                    'storage_path' => $namespace . '/' . ltrim(str_replace('\\', '/', substr($source, strlen($sourceDir))), '/'),
+                    'storage_path' => $namespace . '/sup-' . $supplierId . '/' . ltrim(str_replace('\\', '/', substr($source, strlen($sourceDir))), '/'),
                     'sha256' => null,
                     'kind' => 'orphaned_file',
                 ];
