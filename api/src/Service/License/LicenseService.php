@@ -134,7 +134,7 @@ final class LicenseService
         }
 
         $token = (string) $resp['token'];
-        $payload = $this->verifier->verify($token, $this->publicKey());
+        $payload = $this->verifier->verify($token, $this->publicKeys());
         if ($payload === null) {
             $this->logger->warning('license.activate.bad_signature');
             return ['ok' => false, 'error' => 'invalid_token'];
@@ -257,7 +257,7 @@ final class LicenseService
 
         if (($resp['ok'] ?? false) === true && !empty($resp['token'])) {
             $token = (string) $resp['token'];
-            $payload = $this->verifier->verify($token, $this->publicKey());
+            $payload = $this->verifier->verify($token, $this->publicKeys());
             if ($payload === null) {
                 $this->writeLicense('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1', [$counter]);
                 $this->logger->warning('license.renew.bad_signature');
@@ -798,7 +798,7 @@ final class LicenseService
         }
 
         $token = (string) ($row['token'] ?? '');
-        $payload = $token !== '' ? $this->verifier->verify($token, $this->publicKey()) : null;
+        $payload = $token !== '' ? $this->verifier->verify($token, $this->publicKeys()) : null;
         // Poslední známý stav předplatného ze serveru (automatické prodlužování).
         $subscription = $this->subscriptionOf($row);
 
@@ -946,6 +946,50 @@ final class LicenseService
     {
         $key = trim((string) $this->config->get('license.public_key', ''));
         return $key !== '' ? $key : self::DEFAULT_PUBLIC_KEY;
+    }
+
+    /**
+     * Veřejné klíče, kterými se ověřuje token — `kid => klíč`.
+     *
+     * Kromě činného klíče (`license.public_key`, jinak zabudovaný) se dají
+     * nastavit další přes `license.public_keys`. Díky tomu jde podepisovací
+     * klíč vyměnit BEZ vydání nové verze aplikace: po přechodnou dobu se drží
+     * starý i nový vedle sebe a token řekne přes `kid`, kterým je podepsaný.
+     *
+     * Identifikátor se z klíče odvozuje ({@see keyId()}), ne konfiguruje —
+     * dvě nezávislé hodnoty by se dřív nebo později rozešly.
+     *
+     * @return array<string,string>
+     */
+    private function publicKeys(): array
+    {
+        $keys = [];
+
+        $extra = $this->config->get('license.public_keys', []);
+        if (is_array($extra)) {
+            foreach ($extra as $key) {
+                $key = trim((string) $key);
+                if ($key !== '') {
+                    $keys[self::keyId($key)] = $key;
+                }
+            }
+        }
+
+        $active = $this->publicKey();
+        $keys[self::keyId($active)] = $active;
+
+        return $keys;
+    }
+
+    /**
+     * Identifikátor klíče: prvních 16 hex znaků SHA-256 veřejného klíče.
+     *
+     * Odvozuje se, aby nešlo mít v konfiguraci `kid`, který k danému klíči
+     * nepatří. Obě strany počítají totéž z téhož vstupu.
+     */
+    public static function keyId(string $publicKeyBase64): string
+    {
+        return substr(hash('sha256', trim($publicKeyBase64)), 0, 16);
     }
 
     private function appVersion(): string
