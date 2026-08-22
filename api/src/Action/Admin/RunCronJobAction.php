@@ -47,7 +47,15 @@ final class RunCronJobAction
         $rootDir = Bootstrap::rootDir();
         $scriptPath = $rootDir . '/api/bin/' . $script . '.php';
         if (!is_file($scriptPath)) {
-            return Json::error($response, 'not_found', 'Soubor skriptu neexistuje: ' . $scriptPath, 404);
+            // ⚠️ Cesta jde do LOGU, ne do odpovědi. Ve spravovaném provozu je to
+            // rozložení serveru provozovatele, a to nájemníkovi nepatří —
+            // nepřímo z něj plyne i to, kdo instalaci hostuje.
+            $this->appendLog($this->logPath($script), sprintf(
+                "[%s] chybí soubor skriptu: %s\n",
+                date('Y-m-d H:i:s'),
+                $scriptPath,
+            ));
+            return Json::error($response, 'not_found', 'Soubor cron skriptu chybí. Detail je v logu instalace.', 404);
         }
 
         $phpBin = $this->resolveCliPhpBinary();
@@ -55,7 +63,7 @@ final class RunCronJobAction
             return Json::error(
                 $response,
                 'no_php_cli',
-                'PHP CLI binárka nenalezena (PHP_BINARY=' . PHP_BINARY . '). Nastav prosím cestu k php.exe.',
+                'PHP CLI binárka nenalezena. Nastav prosím cestu k php.exe; detail je v logu instalace.',
                 500
             );
         }
