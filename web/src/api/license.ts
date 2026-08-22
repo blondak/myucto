@@ -13,6 +13,22 @@ export interface LicenseSummary {
   perpetual: boolean
   commercial_features: boolean
   /**
+   * Odemyká placené moduly TARIF?
+   *
+   * ⚠️ Není to totéž co `commercial_features`. Klíč se vydává i na bezplatný
+   * tarif — je to jediný kanál, kterým se instalace dozví o zaplacené kvótě
+   * a stavu předplatného. Bez tohohle pole obrazovka nerozliší „licence
+   * propadla, zaplaťte" od „tenhle tarif to nikdy neměl" a nabízí zaplatit
+   * něco, co je zaplacené.
+   */
+  tier_commercial: boolean
+  /**
+   * Proč nejde přidat dalšího uživatele na licencované místo:
+   * `no_license` / `seat_limit` / `null`. Obrazovka správy uživatelů podle
+   * toho varuje dřív, než admin vyplní celý formulář.
+   */
+  new_user_blocked: 'no_license' | 'seat_limit' | null
+  /**
    * Stav předplatného na licenčním serveru, ne stav licence.
    *
    * Licence může být pořád platná, a přitom je zákazník po splatnosti: token
@@ -163,6 +179,8 @@ export interface LicenseStatus {
   /** Doživotní licence — neomezená platnost (valid_until je jen TTL tokenu). */
   perpetual: boolean
   commercial_features: boolean
+  /** Odemyká placené moduly TARIF? Viz LicenseSummary.tier_commercial. */
+  tier_commercial: boolean
   license_key_masked: string | null
   last_check_at: string | null
   last_check_ok: boolean

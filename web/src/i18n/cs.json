@@ -12977,6 +12977,8 @@
         "deactivate": "Deaktivovat",
         "edit_title": "Upravit {email}",
         "new_title": "Nový uživatel",
+        "seat_blocked_no_license": "Bez platné licence jde založit jen účet s právem jen pro čtení. Účty pro čtení a klientské účty licenční místo nezabírají.",
+        "seat_blocked_limit": "Licencovaná místa jsou obsazená. Dalšího zapisujícího uživatele přidáte po rozšíření předplatného, nebo po deaktivaci jiného účtu.",
         "name_required": "Jméno *",
         "email_required": "E-mail *",
         "password_required": "Heslo je povinné při vytváření.",

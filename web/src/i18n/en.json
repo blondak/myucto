@@ -12977,6 +12977,8 @@
         "deactivate": "Deactivate",
         "edit_title": "Edit {email}",
         "new_title": "New user",
+        "seat_blocked_no_license": "Without a valid licence you can only create a read-only account. Read-only and client accounts do not take up a licensed seat.",
+        "seat_blocked_limit": "All licensed seats are taken. To add another writing user, extend your subscription or deactivate an existing account.",
         "name_required": "Name *",
         "email_required": "Email *",
         "password_required": "Password required when creating.",

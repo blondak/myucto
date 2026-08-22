@@ -4,10 +4,26 @@ import { useI18n } from 'vue-i18n'
 import { adminApi, type AdminSupplierSearchItem, type AdminUser, type UserSupplierAssignment } from '@/api/admin'
 import { rolesApi, type RoleListItem } from '@/api/roles'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const toast = useToast()
+const auth = useAuthStore()
+
+/**
+ * Proč nejde přidat dalšího ZAPISUJÍCÍHO uživatele.
+ *
+ * ⚠️ Backend to posílá odjakživa, obrazovka to nečetla: admin vyplnil celý
+ * formulář včetně hesla a teprve uložení skončilo na 403. Účty jen pro
+ * čtení a klientské účty licenční místo nezabírají, takže je to varování,
+ * ne zámek — kterou roli zvolit, ví admin líp než my.
+ */
+const seatWarning = computed(() => {
+  if (auth.newUserBlocked === 'no_license') return t('users.seat_blocked_no_license')
+  if (auth.newUserBlocked === 'seat_limit') return t('users.seat_blocked_limit')
+  return ''
+})
 const users = ref<AdminUser[]>([])
 const roles = ref<RoleListItem[]>([])
 const loading = ref(false)
@@ -123,6 +139,7 @@ onMounted(load)
 <template>
   <div>
     <header class="flex flex-wrap items-center justify-between gap-3 mb-4"><div><h1 class="text-2xl font-semibold">{{ t('users.title') }}</h1><p class="text-sm text-neutral-500">{{ t('users.subtitle') }}</p></div><button :class="btnFilled('primary')" @click="openCreate"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.plus" /></svg>{{ t('users.new') }}</button></header>
+    <p v-if="seatWarning" class="mb-4 rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">{{ seatWarning }}</p>
     <div v-if="loading" class="py-12 text-center text-neutral-500">{{ t('common.loading') }}</div>
     <div v-else class="bg-surface border border-neutral-200 rounded-lg overflow-hidden">
       <div v-for="user in users" :key="user.id" class="p-3 border-b border-neutral-100 flex flex-wrap items-center gap-3" :class="{ 'opacity-50': !user.is_active }">
@@ -138,6 +155,7 @@ onMounted(load)
     <div v-if="showForm" class="fixed inset-0 z-50 bg-black/40 p-4 overflow-y-auto" @click.self="showForm=false">
       <form class="bg-surface max-w-2xl mx-auto my-6 rounded-xl shadow-lg p-5 space-y-4" @submit.prevent="save">
         <h2 class="text-lg font-semibold">{{ form.id === null ? t('users.new_title') : t('users.edit_title', { email: form.email }) }}</h2>
+        <p v-if="seatWarning && form.id === null" class="rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">{{ seatWarning }}</p>
         <div class="grid sm:grid-cols-2 gap-3">
           <label class="text-sm"><span class="block font-medium mb-1">{{ t('settings.email') }}</span><input v-model="form.email" :disabled="form.id !== null" type="email" class="w-full h-10 px-3 border border-neutral-300 rounded-md" /></label>
           <label class="text-sm"><span class="block font-medium mb-1">{{ t('users.name') }}</span><input v-model="form.name" class="w-full h-10 px-3 border border-neutral-300 rounded-md" /></label>

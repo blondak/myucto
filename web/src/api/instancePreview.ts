@@ -176,6 +176,7 @@ function baseStatus(now: number): LicenseStatus {
     overage_deadline: null,
     perpetual: false,
     commercial_features: true,
+    tier_commercial: true,
     license_key_masked: 'MYU-••••-••••-7C2A',
     last_check_at: new Date(now * 1000).toISOString(),
     last_check_ok: true,
@@ -256,7 +257,12 @@ function withBilling(status: LicenseStatus, over: Partial<ManagedBillingInfo>, s
     // ⚠️ `state` na kořeni je jen ZOBRAZENÍ na téhle obrazovce; přístup
     // k modulům se řídí `auth.license`, na které náhled nesahá.
     state: state ?? status.state,
-    commercial_features: billing.license_state !== 'degraded' && billing.license_state !== 'trial_expired',
+    // I tarif musí moduly odemykat — bezplatný „Fakturace a DPH" má platnou
+    // licenci, ale účetnictví si nezaplatil. Bez téhle podmínky náhled
+    // bezplatného tarifu ukazoval moduly jako dostupné.
+    commercial_features: status.tier_commercial !== false
+      && billing.license_state !== 'degraded'
+      && billing.license_state !== 'trial_expired',
     instance: { ...status.instance!, billing },
   }
 }
