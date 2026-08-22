@@ -47,6 +47,10 @@ final class ManagedModeLockCoverageTest extends TestCase
                 'api/src/Action/PurchaseInvoice/ScanInboxAction.php',
                 'CAPABILITY_FILESYSTEM_SCAN',
             ],
+            'ruční spuštění cronů se skenováním adresářů' => [
+                'api/src/Action/Admin/RunCronJobAction.php',
+                'CAPABILITY_FILESYSTEM_SCAN',
+            ],
             'vlastní SMTP transport' => [
                 'api/src/Action/Settings/EmailProfilesAction.php',
                 'CAPABILITY_MAIL_TRANSPORT',

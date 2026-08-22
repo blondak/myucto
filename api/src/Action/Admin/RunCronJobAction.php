@@ -11,6 +11,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Cron\CronCatalog;
+use MyInvoice\Service\System\ManagedModeGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -27,9 +28,13 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class RunCronJobAction
 {
+    /** Tyto cron skripty obcházejí HTTP akce, které už mají vlastní zámek. */
+    private const FILESYSTEM_SCAN_SCRIPTS = ['cron-bank-scan', 'cron-scan-purchase-inbox'];
+
     public function __construct(
         private readonly ActivityLogger $logger,
         private readonly Config $config,
+        private readonly ManagedModeGuard $managed,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -42,6 +47,10 @@ final class RunCronJobAction
         $script = (string) ($args['script'] ?? '');
         if (!in_array($script, CronCatalog::scripts(), true)) {
             return Json::error($response, 'not_found', 'Neznámý cron skript.', 404);
+        }
+        if (in_array($script, self::FILESYSTEM_SCAN_SCRIPTS, true)
+            && ($locked = $this->managed->deny($response, ManagedModeGuard::CAPABILITY_FILESYSTEM_SCAN)) !== null) {
+            return $locked;
         }
 
         $rootDir = Bootstrap::rootDir();

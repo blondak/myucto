@@ -169,7 +169,8 @@ databázi a po opětovné aktivaci se znovu zpřístupní.
 funkce zůstávají v MyÚčto bezplatné. Vyjmenovaná účetní nadstavba je
 proprietární a dostupná formou online předplatného nebo individuální smlouvy.
 Detaily upravují články 5–7 souboru
-[LICENCE.txt](LICENCE.txt) a [obchodní podmínky](https://myucto.cz/obchodni-podminky).
+[LICENCE.txt](LICENCE.txt) ([myucto.cz/licence](https://myucto.cz/licence)) a
+[obchodní podmínky](https://myucto.cz/obchodni-podminky).
 
 **Do světa jde jen technika, ne účetnictví.** Licenční mechanismus ověřuje
 platnost licence vůči serveru myucto.cz a předává výhradně technické údaje —
@@ -333,7 +334,9 @@ MyÚčto.cz jako celek **není open-source**. MIT část (základ z projektu
 MyInvoice) se řídí licencí MIT a všechny koncové funkce původního MyInvoice lze
 v MyÚčto používat navždy zdarma. Vyjmenovaná proprietární nadstavba vyžaduje po
 60denním zkušebním období platné předplatné nebo komerční smlouvu. Úplné znění
-obsahuje [LICENCE.txt](LICENCE.txt).
+obsahuje [LICENCE.txt](LICENCE.txt); vždy aktuální verze je na
+[myucto.cz/licence](https://myucto.cz/licence), podmínky prodeje předplatného na
+[myucto.cz/obchodni-podminky](https://myucto.cz/obchodni-podminky).
 
 Provozovatel odpovídá zejména za správnost účetních a daňových údajů, nastavení
 firmy, ochranu přístupových údajů, zákonné archivační lhůty, zálohování a bezpečné

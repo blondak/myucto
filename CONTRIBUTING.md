@@ -12,7 +12,8 @@ Pull requesty, hlášení chyb i náměty vítáme. Díky, že chcete MyÚčto z
   a že neobsahuje kód třetích stran pod licencí neslučitelnou s MIT.
 - Pravidlo platí i pro příspěvky do proprietárních částí produktu: váš
   příspěvek je licencován MIT, výsledný celek zůstává v kombinovaném licenčním
-  režimu podle [LICENCE.txt](LICENCE.txt).
+  režimu podle [LICENCE.txt](LICENCE.txt) — vždy aktuální znění je na
+  [myucto.cz/licence](https://myucto.cz/licence).
 - Pull requesty, které tato pravidla nesplňují, nemůžeme přijmout.
 
 ## Odměna za významné příspěvky

@@ -25,6 +25,8 @@ final class UpgradeLicenseAction
         'no_parent_payment'     => 'Navýšení je možné jen u předplatného s uloženou kartou.',
         'charge_failed'         => 'Platbu se nepodařilo strhnout, zkontrolujte platební kartu.',
         'charge_pending'        => 'Platba se zpracovává. Zkuste to prosím za chvíli znovu.',
+        'instance_required'     => 'U hostovaného provozu je pro navýšení nutné ověření této instalace.',
+        'not_bound'             => 'Tato instalace není k licenci aktivně přiřazená.',
         'server_unreachable'    => 'Licenční server je nedostupný. Zkuste to prosím za chvíli.',
         'upgrade_failed'        => 'Navýšení se nezdařilo. Zkuste to prosím znovu.',
     ];

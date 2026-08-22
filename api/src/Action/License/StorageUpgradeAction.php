@@ -29,6 +29,8 @@ final class StorageUpgradeAction
         'not_managed'           => 'Úložiště se dokupuje jen u provozu zajištěného námi.',
         'instance_missing'      => 'K licenci není vedená žádná instance.',
         'instance_not_active'   => 'Instance právě neběží. Rozšíření je možné až po jejím obnovení.',
+        'instance_required'     => 'U hostovaného provozu je pro rozšíření nutné ověření této instalace.',
+        'not_bound'             => 'Tato instalace není k licenci aktivně přiřazená.',
         'invalid_quota'         => 'Zvolte prosím jednu z nabízených velikostí úložiště.',
         'not_an_upgrade'        => 'Zvolená velikost není větší než ta, kterou už máte.',
         'subscription_inactive' => 'Předplatné není aktivní. Nejdřív je potřeba srovnat platbu.',

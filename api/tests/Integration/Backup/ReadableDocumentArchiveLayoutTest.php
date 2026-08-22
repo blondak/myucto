@@ -78,7 +78,7 @@ final class ReadableDocumentArchiveLayoutTest extends TestCase
         $pdo->prepare(
             'INSERT INTO documents
                 (supplier_id, folder_id, title, original_name, filename, sha256, mime_type, size_bytes, doc_type)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)' 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $this->supplierId,
             $folderId,

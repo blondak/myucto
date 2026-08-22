@@ -40,7 +40,9 @@ nezakládá právo produkt jako celek provozovat bez licence.
 Cena předplatného je **za jednoho aktivního uživatele a měsíc**; celková cena
 je násobkem tarifu a počtu aktivních uživatelů (viz [§ 79.3](#793-zkusebni-obdobi-a-stavy-licence)
 ke způsobu započítání). Úplné znění licenčního ujednání je v souboru
-`LICENCE.txt` v rootu instalace a na `myucto.cz/licence`.
+`LICENCE.txt` v rootu instalace a na <https://myucto.cz/licence>; podmínky
+prodeje předplatného upravují obchodní podmínky na
+<https://myucto.cz/obchodni-podminky>.
 
 ## 79.2 Kde licenci spravovat
 
