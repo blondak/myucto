@@ -18,9 +18,10 @@ final class CompleteInstanceRestoreService
         private readonly PDO $pdo,
         private readonly string $storageRoot,
         private readonly string $password = '',
+        private readonly bool $restoreDocuments = false,
     ) {}
 
-    /** @return array{manifest:array<string,mixed>,counts:array<string,int>,files:int,blobs:int} */
+    /** @return array{manifest:array<string,mixed>,counts:array<string,int>,files:int,documents:int,blobs:int} */
     public function validate(string $archivePath): array
     {
         $dir = $this->extract($archivePath);
@@ -28,13 +29,19 @@ final class CompleteInstanceRestoreService
             $manifest = $this->manifest($dir);
             $counts = $this->validateContents($dir, $manifest);
             $this->assertTargetSchema($manifest);
-            return ['manifest' => $manifest, 'counts' => $counts, 'files' => count($manifest['restore']['files'] ?? []), 'blobs' => count($manifest['restore']['blobs'] ?? [])];
+            return [
+                'manifest' => $manifest,
+                'counts' => $counts,
+                'files' => count($manifest['restore']['files'] ?? []),
+                'documents' => count($manifest['restore']['documents'] ?? []),
+                'blobs' => count($manifest['restore']['blobs'] ?? []),
+            ];
         } finally {
             $this->removeDir($dir);
         }
     }
 
-    /** @return array{manifest:array<string,mixed>,counts:array<string,int>,files:int,blobs:int} */
+    /** @return array{manifest:array<string,mixed>,counts:array<string,int>,files:int,documents:int,blobs:int} */
     public function restore(string $archivePath): array
     {
         $dir = $this->extract($archivePath);
@@ -73,7 +80,16 @@ final class CompleteInstanceRestoreService
                 throw new InstanceExportException('restore_fk_invalid', 'Obnova vytvořila neplatné vazby: ' . implode('; ', $violations));
             }
             $files = $this->restoreFiles($dir, (array) ($manifest['restore']['files'] ?? []));
-            return ['manifest' => $manifest, 'counts' => $counts, 'files' => $files, 'blobs' => count($manifest['restore']['blobs'] ?? [])];
+            $documents = $this->restoreDocuments
+                ? $this->restoreDocumentFiles($dir, (array) ($manifest['restore']['documents'] ?? []))
+                : 0;
+            return [
+                'manifest' => $manifest,
+                'counts' => $counts,
+                'files' => $files,
+                'documents' => $documents,
+                'blobs' => count($manifest['restore']['blobs'] ?? []),
+            ];
         } finally {
             $this->removeDir($dir);
         }
@@ -109,7 +125,11 @@ final class CompleteInstanceRestoreService
         foreach ((array) ($manifest['sections']['data']['identity']['entries'] ?? []) as $table => $info) {
             $counts[(string) $table] = $this->validateJsonl($dir, $info['entry'] ?? null, (int) ($info['rows'] ?? 0), (string) $table);
         }
-        foreach (array_merge((array) ($manifest['restore']['files'] ?? []), (array) ($manifest['restore']['blobs'] ?? [])) as $asset) {
+        foreach (array_merge(
+            (array) ($manifest['restore']['files'] ?? []),
+            (array) ($manifest['restore']['documents'] ?? []),
+            (array) ($manifest['restore']['blobs'] ?? []),
+        ) as $asset) {
             if (!is_array($asset) || !isset($asset['entry']) || !is_file($this->entryPath($dir, (string) $asset['entry']))) {
                 throw new InstanceExportException('restore_asset_missing', 'V archivu chybí soubor pro obnovu.');
             }
@@ -218,6 +238,36 @@ final class CompleteInstanceRestoreService
                 throw new InstanceExportException('restore_file_checksum_invalid', 'Kontrolní součet obnovené přílohy nesedí.');
             }
             $count++;
+        }
+        return $count;
+    }
+
+    /** Obnoví PDF dokladů a až po úspěšném zápisu je propojí s jejich DB řádky. */
+    private function restoreDocumentFiles(string $dir, array $assets): int
+    {
+        $count = $this->restoreFiles($dir, $assets);
+        foreach ($assets as $asset) {
+            $link = $asset['link'] ?? null;
+            if ($link === null) {
+                continue;
+            }
+            if (!is_array($link)) {
+                throw new InstanceExportException('restore_document_link_invalid', 'Neplatná vazba dokladu v archivu.');
+            }
+            $table = (string) ($link['table'] ?? '');
+            $column = (string) ($link['column'] ?? '');
+            $value = str_replace('\\', '/', (string) ($link['value'] ?? ''));
+            if (!in_array([$table, $column], [['invoices', 'pdf_path']], true)
+                || $value === '' || str_contains($value, '..') || str_starts_with($value, '/')) {
+                throw new InstanceExportException('restore_document_link_invalid', 'Neplatná vazba dokladu v archivu.');
+            }
+            $stmt = $this->pdo->prepare('UPDATE `invoices` SET `pdf_path` = ? WHERE `id` = ?');
+            $stmt->execute([$value, (int) ($link['id'] ?? 0)]);
+            $target = $this->pdo->prepare('SELECT COUNT(*) FROM `invoices` WHERE `id` = ?');
+            $target->execute([(int) ($link['id'] ?? 0)]);
+            if ((int) $target->fetchColumn() !== 1) {
+                throw new InstanceExportException('restore_document_target_missing', 'Cíl vazby dokladu v databázi chybí.');
+            }
         }
         return $count;
     }

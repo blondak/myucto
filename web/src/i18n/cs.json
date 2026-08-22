@@ -16640,8 +16640,8 @@
             "title": "Jak obnovit data",
             "step_extract": "Do exportu zahrňte část Obnovitelný účetní archiv a připravte prázdnou databázi migrovanou cílovou verzí MyÚčto.",
             "step_dry_run": "Nad hlavním staženým ZIPem nejdřív spusťte kontrolu bez zápisu.",
-            "step_restore": "Teprve po úspěšné kontrole spusťte obnovení stejným příkazem s parametrem --restore.",
-            "note": "Obnova zachová ID a všechny vazby; cílová databáze i datový adresář proto musí být prázdné. Uživatelé se obnoví zablokovaní, bez hesel a MFA — správce jim pošle pozvánku nebo reset hesla."
+            "step_restore": "Teprve po úspěšné kontrole spusťte obnovení stejným příkazem s parametrem --restore. Parametr --documents navíc vrátí PDF přijatých i vydaných faktur do aplikace a znovu je s doklady propojí.",
+            "note": "Obnova zachová ID a všechny vazby; cílová databáze i datový adresář proto musí být prázdné. Bez --documents se obnoví data a přílohy, ale PDF doklady se do aplikace nezapíší. Uživatelé se obnoví zablokovaní, bez hesel a MFA — správce jim pošle pozvánku nebo reset hesla."
         },
         "retention": {
             "title": "Retence účetních a daňových záznamů",

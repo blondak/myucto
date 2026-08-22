@@ -234,6 +234,7 @@ final class InstanceExportManifestTest extends TestCase
 
         self::assertTrue((bool) ($result['manifest']['restore']['available'] ?? false));
         self::assertSame('myucto-instance-export', $result['manifest']['restore']['format'] ?? null);
+        self::assertArrayHasKey('documents', $result['manifest']['restore'], 'Manifest nese mapu PDF dokladů pro volitelnou obnovu.');
         self::assertArrayHasKey('identity', $result['manifest']['sections']['data']);
     }
 

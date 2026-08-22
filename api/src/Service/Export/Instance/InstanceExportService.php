@@ -359,14 +359,24 @@ final class InstanceExportService
         $startedAt = date('Y-m-d H:i:s');
         $archive = new InstanceExportArchive($absPath, $password, $this->maxBytes());
         $sections = [];
-        $restoreAssets = ['files' => [], 'blobs' => []];
+        $restoreAssets = ['files' => [], 'blobs' => [], 'documents' => []];
 
         try {
             if (in_array(self::PART_DATA, $parts, true)) {
                 $sections['data'] = $this->exportData($archive, $supplierId, $jobId, $progress, $workDir);
             }
             if (in_array(self::PART_DOCUMENTS, $parts, true)) {
-                $sections['doklady'] = $this->exportDocuments($archive, $supplierId, $dateFrom, $dateTo, $jobId, $progress, $workDir, $restoreAssets['blobs']);
+                $sections['doklady'] = $this->exportDocuments(
+                    $archive,
+                    $supplierId,
+                    $dateFrom,
+                    $dateTo,
+                    $jobId,
+                    $progress,
+                    $workDir,
+                    $restoreAssets['blobs'],
+                    $restoreAssets['documents'],
+                );
             }
             if (in_array(self::PART_FILES, $parts, true)) {
                 $sections['prilohy'] = $this->exportFiles($archive, $supplierId, $jobId, $progress, $restoreAssets['files']);
@@ -405,6 +415,7 @@ final class InstanceExportService
                     'available' => in_array(self::PART_RESTORE, $parts, true),
                     'files' => $restoreAssets['files'],
                     'blobs' => $restoreAssets['blobs'],
+                    'documents' => $restoreAssets['documents'],
                 ],
                 'range' => ['from' => $dateFrom, 'to' => $dateTo],
                 'parts' => $parts,
@@ -917,8 +928,9 @@ final class InstanceExportService
         ?callable $progress,
         string $workDir,
         array &$restoreBlobs,
+        array &$restoreDocuments,
     ): array {
-        $summary = ['vydane_pdf' => 0, 'vydane_isdoc' => 0, 'prijate_pdf' => 0, 'vypisy' => 0];
+        $summary = ['vydane_pdf' => 0, 'vydane_original_pdf' => 0, 'vydane_isdoc' => 0, 'prijate_pdf' => 0, 'vypisy' => 0];
         $warnings = [];
 
         // 1) Vydané doklady — PDF (z archivu/cache, jinak vyrenderuje) + ISDOC.
@@ -935,15 +947,43 @@ final class InstanceExportService
                 'tax_document' => 'DanovyDoklad',
                 default => 'Faktura',
             };
-            $base = $kind . '-' . ExportFilename::sanitize((string) ($row['varsymbol'] ?? ('navrh-' . $id)), 'doklad-' . $id);
+            $base = $kind . '-' . ExportFilename::sanitize((string) ($row['varsymbol'] ?? ('navrh-' . $id)), 'doklad-' . $id) . '-' . $id;
             try {
                 $pdfPath = $this->invoicePdf->render($id);
                 if (is_file($pdfPath)) {
-                    $archive->addFile("doklady/{$year}/vydane-faktury/{$base}.pdf", $pdfPath);
+                    $entry = "doklady/{$year}/vydane-faktury/{$base}.pdf";
+                    $archive->addFile($entry, $pdfPath);
+                    // Export dat vzniká před renderem PDF. Proto při obnově nenásledujeme
+                    // případně zastaralé `pdf_path` z JSONL, ale explicitně jej přepojíme
+                    // na právě exportovanou podobu dokladu.
+                    $relativePath = 'sup-' . $supplierId . '/restored/invoice-' . $id . '.pdf';
+                    $restoreDocuments[] = [
+                        'entry' => $entry,
+                        'storage_path' => 'invoices/' . $relativePath,
+                        'sha256' => hash_file('sha256', $pdfPath) ?: null,
+                        'kind' => 'issued_invoice_pdf',
+                        'link' => ['table' => 'invoices', 'id' => $id, 'column' => 'pdf_path', 'value' => $relativePath],
+                    ];
                     $summary['vydane_pdf']++;
                 }
             } catch (\Throwable $e) {
                 $warnings[] = "Vydaná {$base}: PDF — " . $e->getMessage();
+            }
+            $imported = $this->archiveDocumentSource($this->invoiceImportArchiveRoot(), (string) ($row['imported_pdf_path'] ?? ''));
+            if ($imported !== null) {
+                try {
+                    $entry = "doklady/{$year}/vydane-faktury-original/{$base}-original.pdf";
+                    $archive->addFile($entry, $imported);
+                    $restoreDocuments[] = [
+                        'entry' => $entry,
+                        'storage_path' => 'invoices-imported/' . (string) $row['imported_pdf_path'],
+                        'sha256' => hash_file('sha256', $imported) ?: null,
+                        'kind' => 'issued_invoice_original_pdf',
+                    ];
+                    $summary['vydane_original_pdf']++;
+                } catch (\Throwable $e) {
+                    $warnings[] = "Vydaná {$base}: originál PDF — " . $e->getMessage();
+                }
             }
             try {
                 $invoice = $this->invoiceRepo->find($id);
@@ -975,19 +1015,19 @@ final class InstanceExportService
                 . '-' . (string) ($row['vendor_company_name'] ?? 'dodavatel'),
                 'prijata-' . $id,
             );
-            $label = substr($label, 0, 100);
+            $label = substr($label, 0, 100) . '-' . $id;
 
-            $original = null;
-            if (!empty($row['pdf_path']) && $archiveRootReal !== false) {
-                $candidate = realpath($archiveRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, (string) $row['pdf_path']));
-                if ($candidate !== false && is_file($candidate)
-                    && str_starts_with(strtolower($candidate), strtolower($archiveRootReal . DIRECTORY_SEPARATOR))) {
-                    $original = $candidate;
-                }
-            }
+            $original = $archiveRootReal === false ? null : $this->archiveDocumentSource($archiveRoot, (string) ($row['pdf_path'] ?? ''));
             try {
                 if ($original !== null) {
-                    $archive->addFile("doklady/{$year}/prijate-faktury/Prijata-{$label}.pdf", $original);
+                    $entry = "doklady/{$year}/prijate-faktury/Prijata-{$label}.pdf";
+                    $archive->addFile($entry, $original);
+                    $restoreDocuments[] = [
+                        'entry' => $entry,
+                        'storage_path' => 'purchase-invoices/' . (string) $row['pdf_path'],
+                        'sha256' => hash_file('sha256', $original) ?: null,
+                        'kind' => 'purchase_invoice_original_pdf',
+                    ];
                 } else {
                     $archive->addString(
                         "doklady/{$year}/prijate-faktury/Prijata-{$label}-rekonstrukce.pdf",
@@ -1125,6 +1165,7 @@ final class InstanceExportService
         $sources = [
             [RuntimePaths::storage('payroll-documents/sup-' . $supplierId), null, 'prilohy/mzdy'],
             [RuntimePaths::storage('invoices') . '/sup-' . $supplierId . '/_archive', null, 'prilohy/vydane-faktury-archiv'],
+            [RuntimePaths::storage('invoices') . '/sup-' . $supplierId . '/attachments', null, 'prilohy/vydane-faktury-prilohy'],
         ];
         $skipped = [];
         $files = BackupFileCollector::collect(
@@ -1187,7 +1228,7 @@ final class InstanceExportService
     /** @return list<array<string,mixed>> */
     private function fetchIssuedInvoices(int $supplierId, ?string $from, ?string $to): array
     {
-        $sql = 'SELECT id, varsymbol, invoice_type, issue_date FROM invoices WHERE supplier_id = ?';
+        $sql = 'SELECT id, varsymbol, invoice_type, issue_date, imported_pdf_path FROM invoices WHERE supplier_id = ?';
         $params = [$supplierId];
         if ($from !== null && $to !== null) {
             $sql .= ' AND issue_date BETWEEN ? AND ?';
@@ -1243,6 +1284,38 @@ final class InstanceExportService
             return dirname($uploads) . '/purchase-invoices';
         }
         return RuntimePaths::storage('purchase-invoices');
+    }
+
+    /** Stejná konfigurace jako DownloadImportedPdfAction a oba importéry vydaných faktur. */
+    private function invoiceImportArchiveRoot(): string
+    {
+        $dir = (string) $this->config->get('invoice.import_archive_storage', '');
+        if ($dir !== '') {
+            return $dir;
+        }
+        $uploads = (string) $this->config->get('storage.uploads_dir', '');
+        if ($uploads !== '') {
+            return dirname($uploads) . '/invoices-imported';
+        }
+        return RuntimePaths::storage('invoices-imported');
+    }
+
+    /** Vrátí soubor pouze tehdy, když relativní DB cesta bezpečně míří pod archive root. */
+    private function archiveDocumentSource(string $archiveRoot, string $relativePath): ?string
+    {
+        if ($relativePath === '') {
+            return null;
+        }
+        $root = realpath($archiveRoot);
+        if ($root === false) {
+            return null;
+        }
+        $candidate = realpath($root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath));
+        if ($candidate === false || !is_file($candidate)) {
+            return null;
+        }
+        $needle = strtolower(rtrim($root, '/\\') . DIRECTORY_SEPARATOR);
+        return str_starts_with(strtolower($candidate), $needle) ? $candidate : null;
     }
 
     // ── pomocné ───────────────────────────────────────────────────────────────
@@ -1379,8 +1452,10 @@ final class InstanceExportService
         $lines[] = 'V cílové, stejné nebo NOVĚJŠÍ instalaci nejdřív připrav prázdnou migrovanou databázi';
         $lines[] = 'a prázdný datový adresář. Nad TÍMTO ZIPem spusť:';
         $lines[] = '  php api/bin/archive-restore.php --file=export.zip --database=prazdna_db --dry-run';
-        $lines[] = 'a po úspěšné kontrole stejný příkaz s `--restore --storage=cesta-k-novym-datum`.';
-        $lines[] = 'Obnova zachová interní ID a vazby; nepřepíše proto existující data.';
+        $lines[] = 'a po úspěšné kontrole stejný příkaz s `--restore --storage=cesta-k-novym-datum --documents`.';
+        $lines[] = 'Přepínač --documents vrátí PDF přijatých i vydaných faktur do úložiště aplikace';
+        $lines[] = 'a vydané PDF znovu propojí s doklady. Obnova zachová interní ID a vazby;';
+        $lines[] = 'nepřepíše proto existující data.';
         $lines[] = '';
         $lines[] = 'Data se čtou průběžně, ne v jednom okamžiku (viz read_started_at /';
         $lines[] = 'read_finished_at v manifestu) — archiv vznikl v tomhle časovém okně.';

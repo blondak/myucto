@@ -16640,8 +16640,8 @@
             "title": "How to restore data",
             "step_extract": "Include the Restorable accounting archive part and prepare an empty database migrated by the target MyÚčto version.",
             "step_dry_run": "Run validation against the downloaded main ZIP before writing data.",
-            "step_restore": "Only after validation succeeds, run the same command with the --restore parameter.",
-            "note": "Restoration preserves IDs and every relationship, so the target database and data directory must be empty. Users are restored disabled, without passwords or MFA; an administrator sends an invitation or password reset."
+            "step_restore": "Only after validation succeeds, run the same command with the --restore parameter. The optional --documents parameter also restores received and issued invoice PDFs into the application and reconnects them to their records.",
+            "note": "Restoration preserves IDs and every relationship, so the target database and data directory must be empty. Without --documents, data and attachments are restored but invoice PDFs are not written into the application. Users are restored disabled, without passwords or MFA; an administrator sends an invitation or password reset."
         },
         "retention": {
             "title": "Retention of accounting and tax records",

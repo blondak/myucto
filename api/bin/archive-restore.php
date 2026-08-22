@@ -6,7 +6,7 @@ declare(strict_types=1);
  * Obnova jediného kompletního exportu MyÚčto do čisté, předem migrované DB.
  *
  * php api/bin/archive-restore.php --file=<export.zip> --database=<prazdna_db> --dry-run
- * php api/bin/archive-restore.php --file=<export.zip> --database=<prazdna_db> --restore --storage=<data_dir>
+ * php api/bin/archive-restore.php --file=<export.zip> --database=<prazdna_db> --restore --storage=<data_dir> [--documents]
  */
 
 require __DIR__ . '/../vendor/autoload.php';
@@ -25,6 +25,7 @@ $file = null;
 $database = null;
 $storage = null;
 $mode = null;
+$restoreDocuments = false;
 foreach (array_slice($argv, 1) as $arg) {
     if (str_starts_with($arg, '--file=')) {
         $file = substr($arg, 7);
@@ -34,13 +35,15 @@ foreach (array_slice($argv, 1) as $arg) {
         $storage = substr($arg, 10);
     } elseif (in_array($arg, ['--dry-run', '--restore'], true)) {
         $mode = $arg;
+    } elseif ($arg === '--documents') {
+        $restoreDocuments = true;
     } else {
         fwrite(STDERR, "Neznámý argument: {$arg}\n");
         exit(EXIT_USAGE);
     }
 }
 if ($file === null || !is_file($file) || $database === null || preg_match('/^[A-Za-z0-9_]+$/', $database) !== 1 || $mode === null) {
-    fwrite(STDERR, "Použití: php api/bin/archive-restore.php --file=<export.zip> --database=<prázdná_migrovaná_db> --dry-run|--restore [--storage=<data_dir>]\n");
+    fwrite(STDERR, "Použití: php api/bin/archive-restore.php --file=<export.zip> --database=<prázdná_migrovaná_db> --dry-run|--restore [--storage=<data_dir>] [--documents]\n");
     exit(EXIT_USAGE);
 }
 if ($mode === '--restore' && $storage === null) {
@@ -60,6 +63,7 @@ try {
         $pdo,
         $storage ?? sys_get_temp_dir(),
         BackupEncryption::passwordFromConfig($config),
+        $restoreDocuments,
     );
     $report = $mode === '--restore' ? $service->restore($file) : $service->validate($file);
 } catch (InstanceExportException $e) {
@@ -73,8 +77,11 @@ try {
 $manifest = $report['manifest'];
 echo ($mode === '--restore' ? '== Obnova dokončena ==' : '== Archiv je validní ==') . "\n";
 echo 'Firma: #' . (string) ($manifest['supplier']['id'] ?? '?') . ' ' . (string) ($manifest['supplier']['name'] ?? '?') . "\n";
-echo 'Tabulek: ' . count($report['counts']) . ', souborů: ' . $report['files'] . ', binárních výpisů: ' . $report['blobs'] . "\n";
+echo 'Tabulek: ' . count($report['counts']) . ', příloh: ' . $report['files'] . ', dokladů: ' . $report['documents'] . ', binárních výpisů: ' . $report['blobs'] . "\n";
 if ($mode === '--restore') {
     echo "Uživatelé jsou obnoveni zablokovaní; správce jim musí poslat pozvánku nebo reset hesla.\n";
+    if (!$restoreDocuments && count((array) ($manifest['restore']['documents'] ?? [])) > 0) {
+        echo "PDF doklady nebyly zapsány do aplikace; pro jejich obnovu spusťte příkaz s --documents.\n";
+    }
 }
 exit(EXIT_OK);

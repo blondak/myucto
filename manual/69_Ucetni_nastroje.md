@@ -173,7 +173,7 @@ Export obsahuje JSON Lines data firmy, mimo jiné:
 
 Manifest uvádí verzi schématu, počty řádků a SHA-256 každé datové části i
 přílohy. Hesla, API klíče a jiné provozní tajné hodnoty se neexportují. PDF
-faktur nejsou součástí technického archivu; pro ně slouží samostatný export.
+faktur jsou součástí exportu a lze je při obnově volitelně vrátit do aplikace.
 
 ### 69.6.1 Obnova ze serveru
 
@@ -181,7 +181,7 @@ Obnova není dostupná ve webu. Administrátor serveru použije:
 
 ```text
 php api/bin/archive-restore.php --file=<export.zip> --database=<prazdna_migrovana_db> --dry-run
-php api/bin/archive-restore.php --file=<export.zip> --database=<prazdna_migrovana_db> --restore --storage=<prazdny_datovy_adresar>
+php api/bin/archive-restore.php --file=<export.zip> --database=<prazdna_migrovana_db> --restore --storage=<prazdny_datovy_adresar> --documents
 ```
 
 Databáze musí být předem migrovaná cílovou, stejnou nebo novější verzí MyÚčto a
@@ -190,7 +190,11 @@ přílohy bez zápisu. Ostrá obnova zachová interní ID, obnoví vše v jedné
 databázové transakci a nepřepíše proto žádná existující data.
 
 Po importu se znovu ověří všechny cizí klíče. Přílohy se uloží do zadaného
-datového adresáře. Přihlašovací tajemství, tokeny a klíče se neobnovují;
+datového adresáře. Volitelný parametr `--documents` navíc uloží originály přijatých
+faktur, importované originály vydaných faktur i aktuální PDF vydaných faktur do
+jejich aplikačních úložišť; PDF vydané faktury přitom znovu propojí přes
+`invoices.pdf_path`. Bez tohoto parametru se obnoví databáze, výpisy a přílohy,
+ale PDF dokladů zůstávají jen v exportním ZIPu. Přihlašovací tajemství, tokeny a klíče se neobnovují;
 uživatelé jsou zablokovaní a správce jim pošle pozvánku nebo reset hesla.
 Automatický round-trip test hlídá počty, vazby a hashe souborů, ale archiv stále
 nenahrazuje celoinstanční zálohu databáze.
@@ -201,7 +205,8 @@ Správce instalace najde v nabídce **Administrace → Kompletní export dat** j
 nadřazený ZIP. U jednotlivých částí si zvolí, co do něj patří:
 
 - **Úplný obnovitelný archiv** — hlavní ZIP s databází, binárními výpisy a
-  přílohami; volba automaticky zapne nutné části;
+  přílohami; volba automaticky zapne nutné části, včetně podkladů pro volitelnou
+  obnovu PDF dokladů;
 - **Data, doklady a přílohy** — přenositelný JSON Lines export, PDF/ISDOC doklady,
   bankovní výpisy a nahrané soubory;
 - u plátce DPH **podklady po měsících** (Kniha DPH v PDF a kontrolní hlášení v XML),
@@ -209,7 +214,7 @@ nadřazený ZIP. U jednotlivých částí si zvolí, co do něj patří:
 - v podvojném účetnictví **uzávěrkové balíčky** za vybraná účetní období.
 
 Zadaný rozsah omezuje doklady a výkazy; obnovitelný archiv a JSONL data jsou vždy
-kompletní pro jednu firmu. Obnovu provádějte pouze z vnořeného archivu příkazem
+kompletní pro jednu firmu. Obnovu provádějte přímo z tohoto ZIPu příkazem
 uvedeným v předchozí kapitole — jeho formát je kompatibilní se stejnou i novější
 verzí MyÚčto. Obecné soubory `data/*.jsonl` jsou kontrolní a přenosový export,
 nikoli vstup pro import.
