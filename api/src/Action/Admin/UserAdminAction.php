@@ -54,7 +54,8 @@ final class UserAdminAction
         if (!in_array($locale, ['cs', 'en'], true)) return Json::error($response, 'validation_failed', 'Neplatný locale.', 400);
         $role = $this->activeRole($roleId);
         if ($role === null) return Json::error($response, 'validation_failed', 'Vybraná role neexistuje nebo není aktivní.', 400);
-        // Licenční limit (E4): nový aktivní uživatel na licencovaném místě.
+        // Licenční limit (E4): rychlá odpověď dřív, než se počítá hash hesla.
+        // ZÁVAZNÁ kontrola je až v transakci níž — tahle jen šetří práci.
         if ($this->roleCountsAsSeat($roleId)) {
             $state = $this->license->current();
             $blocked = $state->newUserBlockReason();
@@ -68,18 +69,49 @@ final class UserAdminAction
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
 
+        // ⚠️ Kontrola licenčního místa a samotný zápis musí být JEDNA operace.
+        //
+        // Kontrola výš čte počet obsazených míst z cache, takže dva souběžné
+        // požadavky oba viděly volno a oba prošly — licence na jedno místo
+        // skončila se dvěma zapisujícími uživateli. Kontrola posledního
+        // superadmina v téhle třídě zámek používá odjakživa (`guardedUserUpdate`),
+        // licenční limit ne.
+        //
+        // Uvnitř transakce se počet zjišťuje ZNOVU a přímo z databáze — cache
+        // by tu byla k ničemu, protože právě ji ten souběh obchází.
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
         try {
-            $stmt = $this->db->pdo()->prepare(
+            if ($this->roleCountsAsSeat($roleId)) {
+                $pdo->query('SELECT id FROM users WHERE is_active = 1 FOR UPDATE')->fetchAll();
+                $state = $this->license->current()->withActiveUsers($this->seats->countActiveSeats());
+                $blocked = $state->newUserBlockReason();
+                if ($blocked !== null) {
+                    $pdo->rollBack();
+                    return Json::error($response, self::blockCode($blocked), self::blockMessage($blocked, $state), 403);
+                }
+            }
+
+            $stmt = $pdo->prepare(
                 'INSERT INTO users (email, password_hash, name, role, role_id, locale, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)'
             );
             $stmt->execute([$email, $this->hasher->hash($password), $name, $this->legacyRole($role), $roleId, $locale]);
+            $id = (int) $pdo->lastInsertId();
+            $pdo->commit();
         } catch (\PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             if (str_contains($e->getMessage(), 'uq_users_email')) {
                 return Json::error($response, 'email_taken', 'Email je už registrovaný.', 409);
             }
             throw $e;
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
         }
-        $id = (int) $this->db->pdo()->lastInsertId();
         $this->log($request, 'user.created', $id, ['email' => $email, 'role_id' => $roleId]);
         return Json::ok($response, $this->fetchUser($id), 201);
     }

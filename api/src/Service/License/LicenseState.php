@@ -185,6 +185,24 @@ final class LicenseState
         return self::BLOCK_SEAT_LIMIT;
     }
 
+    /**
+     * Kopie stavu s ČERSTVÝM počtem obsazených míst.
+     *
+     * Počet se jinak čte z cache, což při souběhu nestačí: dva požadavky
+     * zároveň by oba viděly volno. Zakládání uživatele si proto uvnitř
+     * transakce spočítá místa znovu a dosadí je sem.
+     */
+    public function withActiveUsers(int $usersActive): self
+    {
+        return new self(
+            $this->state, $this->instanceId, $this->tier, $this->maxCompanies,
+            $this->usersLicensed, $usersActive, $this->companiesActive,
+            $this->validUntil, $this->trialEndsAt, $this->overageDeadline,
+            $this->licenseKey, $this->lastCheckAt, $this->lastCheckOk,
+            $this->perpetual, $this->subscription, $this->commercial, $this->managed,
+        );
+    }
+
     /** Smí vzniknout nová firma (supplier)? Viz {@see allowsNewUser()}. */
     public function allowsNewCompany(): bool
     {
