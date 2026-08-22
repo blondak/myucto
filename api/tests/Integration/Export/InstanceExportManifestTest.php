@@ -238,14 +238,80 @@ final class InstanceExportManifestTest extends TestCase
         self::assertArrayHasKey('identity', $result['manifest']['sections']['data']);
     }
 
+    // ── CLI obnovy: exit kódy 0 / 1 / 2 ──────────────────────────────────────
+
     /**
-     * @return array<string,mixed>
+     * `api/bin/archive-restore.php` je jediná cesta, jak archiv obnovit, takže
+     * jeho návratové kódy jsou kontrakt — podle nich se pozná rozdíl mezi
+     * „archiv je v pořádku", „archiv je poškozený" a „spustil jsi to špatně".
+     *
+     * ⚠️ `--database` je povinné i pro dry-run: validace se neptá jen na
+     * kontrolní součty uvnitř archivu, ale i na to, jestli CÍLOVÉ schéma archiv
+     * unese ({@see \MyInvoice\Service\Export\Instance\CompleteInstanceRestoreService})
+     * — a na to potřebuje `information_schema` nad konkrétní databází.
      */
+    public function testRestoreCliReportsValidCorruptAndMisuseApart(): void
+    {
+        // ⚠️ PART_RESTORE, ne PART_DATA: samotný datový export obnovitelný
+        // NENÍ a skript ho odmítne (`restore_incomplete`). Kontrolovat exit
+        // kódy nad archivem, který se stejně obnovit nedá, by neověřilo nic.
+        $result = $this->export->runForSupplier($this->supplierId, [InstanceExportService::PART_RESTORE]);
+        $archive = (string) $result['abs_path'];
+        $this->tempPaths[] = $archive;
+        $this->tempPaths[] = $archive . '.sha256';
+
+        $script = dirname(__DIR__, 3) . '/bin/archive-restore.php';
+        self::assertFileExists($script);
+
+        $database = (string) $this->db->pdo()->query('SELECT DATABASE()')->fetchColumn();
+        self::assertNotSame('', $database, 'Test potřebuje znát jméno testovací databáze.');
+
+        // Platný archiv → 0
+        [$code, $output] = $this->runCli([$script, '--file=' . $archive, '--database=' . $database, '--dry-run']);
+        self::assertSame(0, $code, "Dry-run platného archivu → exit 0. Výstup:\n" . $output);
+        self::assertStringContainsString('Archiv je validní', $output);
+
+        // Poškozený obsah (sha256 nesedí) → 1
+        $corrupt = $archive . '.corrupt.zip';
+        copy($archive, $corrupt);
+        $this->tempPaths[] = $corrupt;
+        $zip = new ZipArchive();
+        self::assertTrue($zip->open($corrupt) === true);
+        $zip->addFromString('manifest.json', '{"format":"myucto-instance-export","poskozeno":true}');
+        $zip->close();
+        [$code, $output] = $this->runCli([$script, '--file=' . $corrupt, '--database=' . $database, '--dry-run']);
+        self::assertSame(1, $code, "Poškozený archiv → exit 1. Výstup:\n" . $output);
+
+        // Bez režimu → 2. Obnova se nesmí rozjet jinak než s explicitním --restore.
+        [$code, $output] = $this->runCli([$script, '--file=' . $archive, '--database=' . $database]);
+        self::assertSame(2, $code, "Bez režimu → exit 2 (usage). Výstup:\n" . $output);
+        self::assertStringContainsString('--dry-run|--restore', $output);
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
     private function exportData(): array
     {
         $result = $this->export->runForSupplier($this->supplierId, [InstanceExportService::PART_DATA]);
         $this->tempPaths[] = (string) $result['abs_path'];
         $this->tempPaths[] = (string) $result['abs_path'] . '.sha256';
         return $result;
+    }
+
+    /**
+     * @param list<string> $args
+     * @return array{0:int, 1:string} [exit code, výstup]
+     */
+    private function runCli(array $args): array
+    {
+        $cmd = escapeshellarg(PHP_BINARY);
+        foreach ($args as $arg) {
+            $cmd .= ' ' . escapeshellarg($arg);
+        }
+        $outputLines = [];
+        $exitCode = 0;
+        exec($cmd . ' 2>&1', $outputLines, $exitCode);
+
+        return [$exitCode, implode("\n", $outputLines)];
     }
 }

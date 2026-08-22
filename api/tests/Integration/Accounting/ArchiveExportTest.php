@@ -16,9 +16,8 @@ use PHPUnit\Framework\TestCase;
 use ZipArchive;
 
 /**
- * Integrační testy per-firma archivace (Epic F4, §6.2 I23–I24, R15): export ZIP
- * s manifestem (sha256, počty řádků), tenant izolace exportovaných dat, delete,
- * a CLI dry-run validátor api/bin/archive-restore.php (exit kódy 0/1/2).
+ * Integrační testy per-firma archivace (Epic F4, §6.2 I23, R15): export ZIP
+ * s manifestem (sha256, počty řádků), tenant izolace exportovaných dat a delete.
  *
  * DB část běží v transakci s rollbackem; soubory na disku (storage/archives)
  * uklízí tearDown. Izolovaný supplier, soft-skip bez cfg.php.
@@ -198,38 +197,11 @@ final class ArchiveExportTest extends TestCase
         self::assertNotNull($this->archive->find($this->supplierId, (int) $meta['id']), 'Archiv vlastníka zůstává.');
     }
 
-    // ── I24: CLI dry-run validátor ───────────────────────────────────────────
-
-    public function testI24RestoreDryRunValidatesExitCodes(): void
-    {
-        $meta = $this->archive->export($this->supplierId, $this->userId);
-        $zipPath = $this->archive->filePath($this->supplierId, $meta);
-        $this->tempFiles[] = $zipPath;
-
-        $script = dirname(__DIR__, 3) . '/bin/archive-restore.php';
-        self::assertFileExists($script);
-
-        // Validní archiv → exit 0
-        [$code, $output] = $this->runCli([$script, '--file=' . $zipPath, '--dry-run']);
-        self::assertSame(0, $code, "Dry-run validního archivu → exit 0. Výstup:\n" . $output);
-        self::assertStringContainsString('Archiv je validní', $output);
-
-        // Poškozený obsah (sha256 nesouhlasí) → exit 1
-        $corrupt = $zipPath . '.corrupt.zip';
-        copy($zipPath, $corrupt);
-        $this->tempFiles[] = $corrupt;
-        $zip = new ZipArchive();
-        self::assertTrue($zip->open($corrupt));
-        $zip->addFromString('journal_entries.jsonl', '{"id": 1, "poskozeno": true}' . "\n");
-        $zip->close();
-        [$code, $output] = $this->runCli([$script, '--file=' . $corrupt, '--dry-run']);
-        self::assertSame(1, $code, "Poškozený archiv → exit 1. Výstup:\n" . $output);
-
-        // Bez režimu → exit 2 (bezpečnost — obnova jen s explicitním --restore)
-        [$code, $output] = $this->runCli([$script, '--file=' . $zipPath]);
-        self::assertSame(2, $code, 'Bez režimu → exit 2 (usage).');
-        self::assertStringContainsString('Zadej režim', $output);
-    }
+    // ⚠️ Dřívější test I24 pouštěl `api/bin/archive-restore.php` nad TÍMHLE
+    // per-firemním archivem. Skript ale od 5.23.0 obnovuje kompletní export
+    // instance (formát `myucto-instance-export`) a per-firemní ZIP odmítá.
+    // Jeho exit kódy proto hlídá InstanceExportManifestTest, kde vzniká
+    // archiv, kterému skript rozumí.
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -239,19 +211,5 @@ final class ArchiveExportTest extends TestCase
             ['account_code' => '311', 'side' => 'debit', 'amount' => $amount],
             ['account_code' => '602', 'side' => 'credit', 'amount' => $amount],
         ], ['entry_date' => self::YEAR . '-05-01', 'posted_by' => $this->userId]);
-    }
-
-    /**
-     * @param list<string> $args
-     * @return array{0:int, 1:string} [exit code, output]
-     */
-    private function runCli(array $args): array
-    {
-        $cmd = escapeshellarg(PHP_BINARY);
-        foreach ($args as $arg) {
-            $cmd .= ' ' . escapeshellarg($arg);
-        }
-        exec($cmd . ' 2>&1', $outputLines, $exitCode);
-        return [$exitCode, implode("\n", $outputLines)];
     }
 }
