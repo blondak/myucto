@@ -442,18 +442,6 @@ export interface AssistedEntryPayload {
   counter_account?: string
 }
 
-// ── Archiv (R15) ───────────────────────────────────────────────────────────
-export interface ArchiveItem {
-  id: number
-  supplier_id?: number
-  filename: string
-  size_bytes: number
-  sha256: string
-  scope?: Record<string, unknown> | null
-  created_by: number | null
-  created_at: string
-}
-
 // ── Číselné řady (R13) ─────────────────────────────────────────────────────
 export type SeriesCode =
   | 'closing' | 'opening' | 'fx' | 'transfer' | 'manual'
@@ -695,14 +683,6 @@ export const periodLockApi = {
   get: () => api.get<PeriodLock>('/accounting/period-lock').then(r => r.data),
   update: (lockedUntil: string | null, reason: string) =>
     api.put<PeriodLock>('/accounting/period-lock', { locked_until: lockedUntil, reason }).then(r => r.data),
-}
-
-export const archiveApi = {
-  list: () => api.get<ArchiveItem[]>('/accounting/archive').then(r => r.data),
-  export: () => api.post<ArchiveItem>('/accounting/archive/export', {}).then(r => r.data),
-  download: (id: number) =>
-    api.get<Blob>(`/accounting/archive/${id}/download`, { responseType: 'blob' }),
-  remove: (id: number) => api.delete(`/accounting/archive/${id}`).then(r => r.data),
 }
 
 export const seriesApi = {

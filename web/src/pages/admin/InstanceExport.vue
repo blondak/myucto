@@ -13,18 +13,14 @@ import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/butt
 import EmptyState from '@/components/ui/EmptyState.vue'
 
 /**
- * Kompletní export dat firmy (H-14).
- *
- * Běží na pozadí (může trvat i hodiny), takže se stav polluje. Záměrně tu NIKDE
- * není slovo „obnova" ani „záloha" — export je stažení dat pro archiv nebo pro
- * odchod ze služby; samoobslužnou obnovu neposkytujeme a v podmínkách ji
- * neslibujeme. Text v hlavičce to říká rovnou, ať si to zákazník nesplete.
+ * Balíček firmy složený z obnovitelného archivu a volitelných účetních podkladů.
+ * Běží na pozadí, protože jednotlivé části mohou obsahovat celé roky dokladů.
  */
 
 const { t } = useI18n()
 const toast = useToast()
 
-const ALL_PARTS: InstanceExportPart[] = ['data', 'documents', 'files']
+const ALL_PARTS: InstanceExportPart[] = ['restore', 'data', 'documents', 'files', 'vat_exports', 'closing_packages']
 
 const overview = ref<InstanceExportOverview | null>(null)
 const loading = ref(false)
@@ -34,6 +30,7 @@ const selectedParts = ref<InstanceExportPart[]>([...ALL_PARTS])
 const dateFrom = ref('')
 const dateTo = ref('')
 const detail = ref<InstanceExportJob | null>(null)
+const partsInitialized = ref(false)
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -48,6 +45,11 @@ const progressPercent = computed(() => {
   if (!job?.total_steps) return null
   return Math.min(100, Math.round((job.processed_steps / job.total_steps) * 100))
 })
+const visibleParts = computed(() => ALL_PARTS.filter(part => {
+  if (part === 'vat_exports') return overview.value?.profile?.is_vat_payer ?? true
+  if (part === 'closing_packages') return overview.value?.profile?.accounting_mode === 'double_entry'
+  return true
+}))
 
 function errorMessage(e: any): string {
   return e?.response?.data?.error?.message || t('common.error')
@@ -57,6 +59,10 @@ async function load() {
   loading.value = true
   try {
     overview.value = await instanceExportApi.overview()
+    if (!partsInitialized.value) {
+      selectedParts.value = [...visibleParts.value]
+      partsInitialized.value = true
+    }
   } catch (e: any) {
     toast.error(errorMessage(e))
   } finally {
@@ -189,7 +195,7 @@ function statusClass(status: string): string {
       <p class="text-sm text-neutral-500 mt-0.5">{{ t('instance_export.subtitle') }}</p>
     </div>
 
-    <!-- Co export je a co NENÍ. Bez tohohle si zákazník archiv splete se zálohou. -->
+    <!-- Kontrakt balíčku: přenositelná data i bezpečně obnovitelný archiv. -->
     <div class="bg-primary-50/50 border border-primary-100 rounded-lg p-3 mb-4 text-sm text-neutral-700">
       {{ t('instance_export.info') }}
       <span class="block text-xs text-neutral-500 mt-1">{{ t('instance_export.no_restore_note') }}</span>
@@ -205,7 +211,7 @@ function statusClass(status: string): string {
       <h2 class="text-sm font-medium text-neutral-700 mb-3">{{ t('instance_export.new_export') }}</h2>
 
       <div class="flex flex-wrap gap-4 mb-4">
-        <label v-for="part in ALL_PARTS" :key="part"
+        <label v-for="part in visibleParts" :key="part"
           class="flex items-start gap-2 cursor-pointer max-w-xs">
           <input type="checkbox" class="mt-1" :checked="selectedParts.includes(part)"
             :disabled="isBusy" @change="togglePart(part)" />

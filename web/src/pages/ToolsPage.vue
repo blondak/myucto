@@ -2,21 +2,17 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import PostingRules from '@/pages/accounting/PostingRules.vue'
 import FxRateSettings from '@/pages/accounting/FxRateSettings.vue'
 import RepoRates from '@/pages/accounting/RepoRates.vue'
-import AccountingArchive from '@/pages/accounting/AccountingArchive.vue'
 import CostCenters from '@/pages/accounting/CostCenters.vue'
 import DocumentSeries from '@/pages/accounting/DocumentSeries.vue'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const auth = useAuthStore()
 const supplierStore = useSupplierStore()
-const isAdmin = computed(() => auth.isSuperadmin)
 const isDoubleEntry = computed(() => supplierStore.currentSupplier?.accounting_mode === 'double_entry')
 
 // Nástroje (reorg menu, audit 2026-07) — jedna položka menu, uvnitř záložky pro
@@ -28,7 +24,7 @@ const isDoubleEntry = computed(() => supplierStore.currentSupplier?.accounting_m
 // Účetní období (Uzávěrka) se vytáhla do vlastní top-level položky menu
 // /accounting/periods — už tady není záložka; číselné řady deníku naopak přišly
 // z modalu Uzávěrky sem jako vlastní záložka (jen podvojné účetnictví).
-type Tab = 'cost-centers' | 'posting-rules' | 'fx-rates' | 'repo-rates' | 'document-series' | 'archive'
+type Tab = 'cost-centers' | 'posting-rules' | 'fx-rates' | 'repo-rates' | 'document-series'
 const DOUBLE_ENTRY_TABS: Tab[] = ['posting-rules', 'cost-centers', 'fx-rates', 'repo-rates', 'document-series']
 // Číselné řady používá i daňová evidence: pokladní doklady se v ní číslují z týchž
 // řad, takže bez téhle záložky si firma vlastní řadu pokladny zapne, ale prefix už
@@ -36,7 +32,6 @@ const DOUBLE_ENTRY_TABS: Tab[] = ['posting-rules', 'cost-centers', 'fx-rates', '
 const TAX_EVIDENCE_TABS: Tab[] = ['document-series']
 const visibleTabs = computed<Tab[]>(() => [
   ...(isDoubleEntry.value ? DOUBLE_ENTRY_TABS : TAX_EVIDENCE_TABS),
-  ...((isDoubleEntry.value && isAdmin.value) ? ['archive'] as Tab[] : []),
 ])
 
 function tabFromQuery(q: unknown): Tab | null {
@@ -44,7 +39,7 @@ function tabFromQuery(q: unknown): Tab | null {
   return (visibleTabs.value as string[]).includes(v) ? (v as Tab) : (visibleTabs.value[0] ?? null)
 }
 const section = ref<Tab | null>(null)
-watch([() => route.query.section, () => supplierStore.currentSupplier?.accounting_mode, isAdmin], ([q, accountingMode]) => {
+watch([() => route.query.section, () => supplierStore.currentSupplier?.accounting_mode], ([q, accountingMode]) => {
   if (String(q ?? '') === 'submissions') {
     void router.replace({ name: 'reports-submissions' })
     return
@@ -70,8 +65,7 @@ function tabLabel(v: Tab): string {
     : v === 'posting-rules' ? t('nav.accounting_rules')
     : v === 'fx-rates' ? t('nav.accounting_fx_rates')
     : v === 'repo-rates' ? t('nav.accounting_repo_rates')
-    : v === 'document-series' ? t('accounting.closing.series.title')
-    : t('nav.accounting_archive')
+    : t('accounting.closing.series.title')
 }
 </script>
 
@@ -97,6 +91,5 @@ function tabLabel(v: Tab): string {
     <FxRateSettings       v-else-if="section === 'fx-rates'"        embedded />
     <RepoRates            v-else-if="section === 'repo-rates'"      embedded />
     <DocumentSeries       v-else-if="section === 'document-series'" embedded />
-    <AccountingArchive    v-else-if="section === 'archive'"         embedded />
   </div>
 </template>

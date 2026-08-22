@@ -153,7 +153,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // Pravidla zaúčtování nákladů se přesunula pod Šablony (záložka „Pravidla nákladů").
       // Původní cesta se zachovává jako redirect kvůli starým odkazům/záložkám.
       { path: 'accounting/expense-rules', redirect: { path: '/templates', query: { section: 'expense' } } },
-      // Uzávěrka období + archiv (Epic F4)
+      // Uzávěrka období
       { path: 'accounting/periods/:id(\\d+)/closing', name: 'accounting-period-closing', component: () => import('@/pages/accounting/PeriodClosing.vue'),     meta: { requiresDoubleEntry: true } },
       // Uzávěrkový balíček — ZIP se všemi sestavami uzávěrky daného účetního období.
       { path: 'accounting/periods/:id(\\d+)/closing-package', name: 'accounting-closing-package', component: () => import('@/pages/accounting/ClosingPackage.vue'), meta: { requiresDoubleEntry: true } },
@@ -166,7 +166,8 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // Bez mode-guardu: v menu je jen u firem na daňové evidenci (chystaný přechod),
       // ale po přechodu na podvojné musí zůstat dostupná přes URL — BE si směr ohlídá.
       { path: 'accounting/transition-report', name: 'accounting-transition-report', component: () => import('@/pages/accounting/TransitionReport.vue') },
-      { path: 'accounting/archive',                   name: 'accounting-archive',        redirect: '/utilities?section=archive' },
+      // Staré odkazy na samostatný účetní archiv vedou do jediného exportního místa.
+      { path: 'accounting/archive',                   name: 'accounting-archive',        redirect: '/admin/instance-export' },
       // Pokladna (mini-epic POKLADNA #14) — dostupná v OBOU účetních režimech: podvojné
       // účetnictví i daňová evidence (Epic DE §6, no-journal cash path). requiresCashMode
       // povolí double_entry i tax_evidence; ostatní /accounting/* zůstávají double_entry-only.

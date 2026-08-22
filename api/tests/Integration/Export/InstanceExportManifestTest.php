@@ -216,6 +216,41 @@ final class InstanceExportManifestTest extends TestCase
     }
 
     /**
+     * Nadřazený export nesmí vymýšlet druhý obnovovací formát. Musí vložit přesně
+     * standardní `myucto-archive`, který ArchiveRestoreService podporuje i při
+     * obnově do novější verze schématu.
+     */
+    public function testRestorePartEmbedsTheVersionedRestoreArchive(): void
+    {
+        $result = $this->export->runForSupplier($this->supplierId, [InstanceExportService::PART_RESTORE]);
+        $this->tempPaths[] = (string) $result['abs_path'];
+        $this->tempPaths[] = (string) $result['abs_path'] . '.sha256';
+
+        $outer = new ZipArchive();
+        self::assertTrue($outer->open((string) $result['abs_path']) === true);
+        $innerBytes = $outer->getFromName('obnova/myucto-archiv-pro-obnovu.zip');
+        self::assertNotFalse($innerBytes, 'Balíček obsahuje vnořený obnovitelný archiv.');
+        $outer->close();
+
+        $innerPath = tempnam(sys_get_temp_dir(), 'myucto-restore-');
+        self::assertNotFalse($innerPath);
+        file_put_contents($innerPath, $innerBytes);
+        $this->tempPaths[] = $innerPath;
+
+        $inner = new ZipArchive();
+        self::assertTrue($inner->open($innerPath) === true);
+        $manifest = json_decode((string) $inner->getFromName('manifest.json'), true);
+        self::assertIsArray($manifest);
+        self::assertSame('myucto-archive', $manifest['format']);
+        self::assertSame(2, $manifest['version']);
+        self::assertArrayHasKey('supplier', $manifest);
+        $inner->close();
+
+        self::assertTrue((bool) ($result['manifest']['restore']['available'] ?? false));
+        self::assertSame('myucto-archive', $result['manifest']['restore']['format'] ?? null);
+    }
+
+    /**
      * @return array<string,mixed>
      */
     private function exportData(): array

@@ -13262,7 +13262,7 @@
         "subtitle": "Bulk export of issued invoices for a given month or quarter in various formats.",
         "format": "Format",
         "format_pdf_zip": "PDF (ZIP archive)",
-        "format_pdf_zip_hint": "Each invoice as a PDF inside one ZIP — for accounting/archive.",
+        "format_pdf_zip_hint": "Each invoice as a PDF inside one ZIP — for accounting.",
         "format_pohoda": "Pohoda XML",
         "format_pohoda_hint": "XML data package for import into Stormware Pohoda.",
         "format_stereo": "Stereo XML",
@@ -14000,7 +14000,8 @@
                 "purchase_isdoc": "Received invoices — ISDOC",
                 "bank_pdf": "Bank statements — PDF",
                 "bank_gpc": "Bank statements — GPC",
-                "dph_book": "VAT ledger — PDF"
+                "dph_book": "VAT ledger — PDF",
+                "vat_control_statement": "VAT control statement — XML"
             }
         },
         "dph": {
@@ -16632,24 +16633,30 @@
     },
     "instance_export": {
         "title": "Full data export",
-        "subtitle": "Download all of the company data in a single archive — the database, documents as PDF and uploaded attachments.",
-        "info": "The archive is built to be usable without this application: data is in machine-readable JSON Lines, documents are PDFs in folders by year and agenda, attachments are plain files. Inside you will find a manifest (what the archive holds, how much of it, as of when and from which version) and SHA-256 checksums to verify the download is complete.",
-        "no_restore_note": "The export is for downloading and archiving your data. It is not a backup and not a restore — we do not load archive data back into the application.",
+        "subtitle": "Build one company package: restorable data, documents, VAT records and accounting closing packages.",
+        "info": "The package contains machine-readable data, documents and an optional versioned archive for safe restoration. The manifest and SHA-256 checksums describe the exact content and verify a complete download.",
+        "no_restore_note": "After extraction, the restorable archive is explicitly restored by CLI into the same or a newer MyÚčto version. It always creates a new company and never overwrites existing data.",
         "not_encrypted": "The archive is not encrypted because no backup password is configured (cron.backup.password). It holds the complete accounting of the company — store it somewhere safe.",
         "new_export": "New export",
         "part": {
+            "restore": "Restorable accounting archive",
             "data": "Data (database)",
             "documents": "Documents as PDF",
-            "files": "Attachments and uploads"
+            "files": "Attachments and uploads",
+            "vat_exports": "VAT records by period",
+            "closing_packages": "Closing packages"
         },
         "part_hint": {
+            "restore": "Versioned accounting JSONL archive for archive-restore.php; restores its supported scope into a newer application version too.",
             "data": "Every agenda table as JSON Lines — documents, contacts, stock, assets, payroll, the journal and VAT source data.",
             "documents": "Issued invoices (PDF + ISDOC), received invoices and bank statements, in folders by year.",
-            "files": "Scans of received documents, journal attachments, documents and payroll files."
+            "files": "Scans of received documents, journal attachments, documents and payroll files.",
+            "vat_exports": "VAT book as PDF and VAT control statement as XML by month; also by quarter for quarterly periods.",
+            "closing_packages": "Complete PDF/XLSX/XML package for every accounting period in the selected range."
         },
         "date_from": "Documents from",
         "date_to": "Documents to",
-        "range_hint": "Optional. Limits only the PDF documents — the database is always exported in full.",
+        "range_hint": "Optional. It limits documents, monthly/quarterly VAT records and closing packages; data and the restorable archive always cover the whole company.",
         "start": "Start export",
         "starting": "Starting…",
         "started": "The export is running in the background. It will appear in the list once finished.",

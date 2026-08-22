@@ -156,10 +156,12 @@ nevymyslí. Více viz [Upomínky](22_Upominky.md).
 Editaci sazeb svěř administrátorovi nebo účetnímu, který doloží zdroj ČNB.
 Smazání používané historické sazby může znemožnit reprodukovat starší výpočet.
 
-## 69.6 Archiv účetnictví
+## 69.6 Obnovitelný archiv v kompletním exportu
 
-Archiv je per-firemní technický ZIP pro uschování a forenzní obnovu účetní
-stopy. Je dostupný jen administrátorovi v podvojném účetnictví.
+Kompletní export v **Administrace → Kompletní export dat** může obsahovat
+per-firemní technický ZIP pro uschování a forenzní obnovu účetní stopy. Není
+pro něj samostatná obrazovka: je jednou z volitelných částí jediného exportního
+balíčku.
 
 Export obsahuje JSON Lines data firmy, mimo jiné:
 
@@ -173,9 +175,6 @@ Export obsahuje JSON Lines data firmy, mimo jiné:
 Manifest uvádí verzi schématu, počty řádků a SHA-256 každé datové části i
 přílohy. Hesla, API klíče a jiné provozní tajné hodnoty se neexportují. PDF
 faktur nejsou součástí technického archivu; pro ně slouží samostatný export.
-
-Tabulka ukazuje datum vytvoření, název, velikost a kontrolní součet. **Smazat**
-odstraní metadata i ZIP. Zdrojová účetní data v databázi tím nezmizí.
 
 ### 69.6.1 Obnova ze serveru
 
@@ -194,6 +193,25 @@ Po importu se znovu ověří podvojnost po obdobích a vypíše rozdílový repo
 Přílohy se uloží do datového adresáře nové firmy. Hesla a klíče je nutné
 nastavit znovu. Automatický round-trip test hlídá základní počty a součty, ale
 archiv stále nenahrazuje celoinstanční zálohu databáze.
+
+### 69.6.2 Obsah kompletního exportu
+
+Správce instalace najde v nabídce **Administrace → Kompletní export dat** jeden
+nadřazený ZIP. U jednotlivých částí si zvolí, co do něj patří:
+
+- **Obnovitelný archiv** — stejný verzovaný archiv jako na této stránce, uložený
+  v `obnova/myucto-archiv-pro-obnovu.zip`;
+- **Data, doklady a přílohy** — přenositelný JSON Lines export, PDF/ISDOC doklady,
+  bankovní výpisy a nahrané soubory;
+- u plátce DPH **podklady po měsících** (Kniha DPH v PDF a kontrolní hlášení v XML),
+  při čtvrtletní periodě také ZIP za každé čtvrtletí;
+- v podvojném účetnictví **uzávěrkové balíčky** za vybraná účetní období.
+
+Zadaný rozsah omezuje doklady a výkazy; obnovitelný archiv a JSONL data jsou vždy
+kompletní pro jednu firmu. Obnovu provádějte pouze z vnořeného archivu příkazem
+uvedeným v předchozí kapitole — jeho formát je kompatibilní se stejnou i novější
+verzí MyÚčto. Obecné soubory `data/*.jsonl` jsou kontrolní a přenosový export,
+nikoli vstup pro import.
 
 ## 69.7 Retence a právní zadržení na backendu
 

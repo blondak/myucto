@@ -11077,60 +11077,6 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
-  /api/v1/accounting/archive:
-    get:
-      tags: [Accounting]
-      summary: Seznam per-firma archivů účetnictví (R15)
-      description: Admin-only.
-      parameters:
-        - $ref: '#/components/parameters/SupplierIdHeader'
-      responses:
-        '200': { description: OK, content: { application/json: { schema: { type: array, items: { type: object } } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  /api/v1/accounting/archive/export:
-    post:
-      tags: [Accounting]
-      summary: Vytvoření archivu firmy (ZIP s manifestem)
-      description: |
-        Admin-only, synchronní. JSONL dump tenant dat + manifest.json (schema_version,
-        sha256 per tabulka). PDF binárky nejsou součástí (kryjí je systémové zálohy).
-        Obnova jen podpůrným CLI nástrojem (api/bin/archive-restore.php --dry-run).
-      parameters:
-        - $ref: '#/components/parameters/SupplierIdHeader'
-      requestBody:
-        required: false
-        content: { application/json: { schema: { type: object } } }
-      responses:
-        '201': { description: Metadata archivu, content: { application/json: { schema: { type: object } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  /api/v1/accounting/archive/{id}/download:
-    get:
-      tags: [Accounting]
-      summary: Stažení ZIP archivu
-      description: Admin-only. Streamuje soubor dohledaný přes id (tenant-scoped).
-      parameters:
-        - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: path, name: id, required: true, schema: { type: integer } }
-      responses:
-        '200': { description: ZIP, content: { application/zip: { schema: { type: string, format: binary } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /api/v1/accounting/archive/{id}:
-    delete:
-      tags: [Accounting]
-      summary: Smazání archivu (soubor + metadata)
-      description: Admin-only, auditované.
-      parameters:
-        - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: path, name: id, required: true, schema: { type: integer } }
-      responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
   # F5: per-user UI stav — ukládané filtry a preference tabulek (všechny role vč. readonly)
   /api/v1/user/filters:
     get:

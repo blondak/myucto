@@ -8,14 +8,19 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\ImportJobRepository;
+use MyInvoice\Service\Accounting\Archive\ArchiveService;
 use MyInvoice\Service\Backup\BackupFileCollector;
 use MyInvoice\Service\Cron\BackupEncryption;
 use MyInvoice\Service\Document\DocumentStorage;
 use MyInvoice\Service\Document\JournalAttachmentStorage;
+use MyInvoice\Service\Export\ClosingPackageService;
 use MyInvoice\Service\Export\ExportFilename;
 use MyInvoice\Service\Export\IsdocExporter;
+use MyInvoice\Service\Export\MonthlyExportService;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Pdf\PurchaseInvoicePdfRenderer;
+use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Repository\InvoiceRepository;
 use PDO;
 use Psr\Log\LoggerInterface;
@@ -62,12 +67,25 @@ final class InstanceExportService
     public const PART_DATA = 'data';
     public const PART_DOCUMENTS = 'documents';
     public const PART_FILES = 'files';
+    /** Vnořený, verzovaný archiv, který umí `archive-restore.php` obnovit do novější MyÚčto instance. */
+    public const PART_RESTORE = 'restore';
+    /** DPH podklady po kalendářních měsících (a pro kvartální plátce i čtvrtletích). */
+    public const PART_VAT_EXPORTS = 'vat_exports';
+    /** Uzávěrkové balíčky za účetní období — jen pro podvojné účetnictví. */
+    public const PART_CLOSING_PACKAGES = 'closing_packages';
 
     /** @var list<string> */
-    public const ALL_PARTS = [self::PART_DATA, self::PART_DOCUMENTS, self::PART_FILES];
+    public const ALL_PARTS = [
+        self::PART_RESTORE,
+        self::PART_DATA,
+        self::PART_DOCUMENTS,
+        self::PART_FILES,
+        self::PART_VAT_EXPORTS,
+        self::PART_CLOSING_PACKAGES,
+    ];
 
     /** Verze formátu archivu — čtečky se podle ní mají rozhodovat. */
-    private const FORMAT_VERSION = 1;
+    private const FORMAT_VERSION = 2;
 
     /** Řádků na dávku při čtení tabulky. */
     private const BATCH = 1000;
@@ -84,6 +102,11 @@ final class InstanceExportService
         private readonly LoggerInterface $log,
         private readonly TenantScopeResolver $scopes,
         private readonly InstanceExportJobStore $jobs,
+        private readonly ArchiveService $restoreArchive,
+        private readonly ImportJobRepository $reportJobs,
+        private readonly MonthlyExportService $monthlyExports,
+        private readonly ClosingPackageService $closingPackages,
+        private readonly VatStatusService $vatStatus,
         private readonly InvoiceRepository $invoiceRepo,
         private readonly InvoicePdfRenderer $invoicePdf,
         private readonly PurchaseInvoicePdfRenderer $purchasePdf,
@@ -115,6 +138,18 @@ final class InstanceExportService
     {
         return $this->storageBaseDir() . DIRECTORY_SEPARATOR
             . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $relative);
+    }
+
+    /** @return array{accounting_mode:string,is_vat_payer:bool,vat_period:?string} */
+    public function supplierProfile(int $supplierId): array
+    {
+        $supplier = $this->fetchSupplier($supplierId) ?? [];
+        $vatPeriod = $supplier['vat_period'] ?? null;
+        return [
+            'accounting_mode' => (string) ($supplier['accounting_mode'] ?? 'tax_evidence'),
+            'is_vat_payer' => (bool) ($supplier['is_vat_payer'] ?? false),
+            'vat_period' => in_array($vatPeriod, ['monthly', 'quarterly'], true) ? $vatPeriod : null,
+        ];
     }
 
     /**
@@ -151,6 +186,7 @@ final class InstanceExportService
                 $job['date_from'] === null ? null : (string) $job['date_from'],
                 $job['date_to'] === null ? null : (string) $job['date_to'],
                 $jobId,
+                isset($job['created_by']) ? (int) $job['created_by'] : null,
                 null,
             );
             $this->jobs->setResult(
@@ -211,7 +247,7 @@ final class InstanceExportService
             );
         }
         try {
-            return $this->build($supplierId, self::normalizeParts($parts), $dateFrom, $dateTo, null, $progress, $targetDir);
+            return $this->build($supplierId, self::normalizeParts($parts), $dateFrom, $dateTo, null, null, $progress, $targetDir);
         } finally {
             $lock->release();
         }
@@ -275,6 +311,7 @@ final class InstanceExportService
         ?string $dateFrom,
         ?string $dateTo,
         ?int $jobId,
+        ?int $userId,
         ?callable $progress,
         ?string $targetDirOverride = null,
     ): array {
@@ -318,6 +355,11 @@ final class InstanceExportService
         $sections = [];
 
         try {
+            if (in_array(self::PART_RESTORE, $parts, true)) {
+                $sections['obnova'] = $this->exportRestorableArchive(
+                    $archive, $supplierId, $userId, $jobId, $progress,
+                );
+            }
             if (in_array(self::PART_DATA, $parts, true)) {
                 $sections['data'] = $this->exportData($archive, $supplierId, $jobId, $progress, $workDir);
             }
@@ -326,6 +368,16 @@ final class InstanceExportService
             }
             if (in_array(self::PART_FILES, $parts, true)) {
                 $sections['prilohy'] = $this->exportFiles($archive, $supplierId, $jobId, $progress);
+            }
+            if (in_array(self::PART_VAT_EXPORTS, $parts, true)) {
+                $sections['dph'] = $this->exportVatPackages(
+                    $archive, $supplierId, $supplier, $dateFrom, $dateTo, $userId, $jobId, $progress,
+                );
+            }
+            if (in_array(self::PART_CLOSING_PACKAGES, $parts, true)) {
+                $sections['uzaverky'] = $this->exportClosingPackages(
+                    $archive, $supplierId, $supplier, $dateFrom, $dateTo, $userId, $jobId, $progress,
+                );
             }
 
             $this->step($jobId, $progress, 'Manifest a kontrolní součty');
@@ -339,6 +391,17 @@ final class InstanceExportService
                     'name' => (string) $supplier['company_name'],
                     'ico' => $supplier['ic'] ?? null,
                     'dic' => $supplier['dic'] ?? null,
+                ],
+                'profile' => [
+                    'accounting_mode' => (string) ($supplier['accounting_mode'] ?? 'tax_evidence'),
+                    'is_vat_payer' => (bool) ($supplier['is_vat_payer'] ?? false),
+                    'vat_period' => $supplier['vat_period'] ?? null,
+                ],
+                'restore' => [
+                    'entry' => 'obnova/myucto-archiv-pro-obnovu.zip',
+                    'format' => 'myucto-archive',
+                    'compatibility' => 'Obnova do stejné nebo novější verze MyÚčto jako nová firma; ověřuje ji archive-restore.php.',
+                    'available' => isset($sections['obnova']),
                 ],
                 'range' => ['from' => $dateFrom, 'to' => $dateTo],
                 'parts' => $parts,
@@ -387,6 +450,247 @@ final class InstanceExportService
             'encrypted' => $password !== '',
             'manifest' => $manifest,
         ];
+    }
+
+    /**
+     * Vloží ověřený účetní archiv do nadřazeného balíčku. Tento vnořený ZIP je
+     * jediný JSONL kontrakt určený k importu: `archive-restore.php` jej validuje
+     * a bezpečně obnoví jako novou firmu i do novějšího schématu aplikace.
+     *
+     * ArchiveService kvůli kompatibilitě vytvoří standardní řádek/accounting ZIP;
+     * po vložení do balíčku jej hned smažeme. Uživatel tak nemá dvě oddělené
+     * historie exportů ani na disku nezůstane zbytečná kopie.
+     *
+     * @return array<string,mixed>
+     */
+    private function exportRestorableArchive(
+        InstanceExportArchive $archive,
+        int $supplierId,
+        ?int $userId,
+        ?int $jobId,
+        ?callable $progress,
+    ): array {
+        $this->step($jobId, $progress, 'Obnovitelný archiv dat');
+        $archiveRow = $this->restoreArchive->export($supplierId, $userId);
+        $path = $this->restoreArchive->filePath($supplierId, $archiveRow);
+        try {
+            if (!is_file($path)) {
+                throw new InstanceExportException('restore_archive_missing', 'Obnovitelný archiv se nevytvořil.');
+            }
+            $entry = 'obnova/myucto-archiv-pro-obnovu.zip';
+            $archive->addFile($entry, $path);
+            $archive->flushNow();
+            return [
+                'entry' => $entry,
+                'format' => 'myucto-archive',
+                'version' => 2,
+                'restore_command' => 'php api/bin/archive-restore.php --file=myucto-archiv-pro-obnovu.zip --restore',
+                'compatibility' => 'Stejná nebo novější verze MyÚčto; obnova vždy vytvoří novou firmu a remapuje interní ID.',
+            ];
+        } finally {
+            $this->restoreArchive->delete($supplierId, (int) $archiveRow['id']);
+        }
+    }
+
+    /**
+     * Měsíční/čtvrtletní podklady DPH vložené jako samostatné ZIPy. Využívá stejný
+     * MonthlyExportService jako obrazovka hromadného exportu, takže kritické datum
+     * nároku na odpočet a formát KH mají jeden zdroj pravdy.
+     *
+     * @param array<string,mixed> $supplier
+     * @return array<string,mixed>
+     */
+    private function exportVatPackages(
+        InstanceExportArchive $archive,
+        int $supplierId,
+        array $supplier,
+        ?string $dateFrom,
+        ?string $dateTo,
+        ?int $userId,
+        ?int $jobId,
+        ?callable $progress,
+    ): array {
+        [$from, $to] = $this->exportRange($supplierId, $dateFrom, $dateTo);
+        if ($from === null || $to === null) {
+            return ['status' => 'skipped', 'reason' => 'no_dated_documents', 'packages' => []];
+        }
+        if (!$this->vatStatus->wasPayerDuring($supplierId, $from, $to)) {
+            return ['status' => 'skipped', 'reason' => 'not_vat_payer', 'packages' => []];
+        }
+
+        $packages = [];
+        $quarters = [];
+        foreach ($this->monthsBetween($from, $to) as [$year, $month]) {
+            $start = sprintf('%04d-%02d-01', $year, $month);
+            $end = (new \DateTimeImmutable($start))->modify('last day of this month')->format('Y-m-d');
+            if (!$this->vatStatus->wasPayerDuring($supplierId, $start, $end)) {
+                continue;
+            }
+            $label = sprintf('%04d-%02d', $year, $month);
+            $this->step($jobId, $progress, 'DPH podklady ' . $label);
+            $result = $this->runNestedReport(
+                $archive,
+                $supplierId,
+                'monthly_export',
+                ['period' => 'monthly', 'year' => $year, 'month' => $month, 'parts' => ['dph_book', 'vat_control_statement']],
+                $userId,
+                'dph/mesice/' . $label . '.zip',
+            );
+            $packages[] = ['period' => $label] + $result;
+            if ((string) ($supplier['vat_period'] ?? 'monthly') === 'quarterly') {
+                $quarters[sprintf('%04d-Q%d', $year, (int) ceil($month / 3))] = [$year, (int) ceil($month / 3)];
+            }
+        }
+
+        foreach ($quarters as $label => [$year, $quarter]) {
+            $this->step($jobId, $progress, 'Čtvrtletní DPH podklady ' . $label);
+            $result = $this->runNestedReport(
+                $archive,
+                $supplierId,
+                'monthly_export',
+                ['period' => 'quarterly', 'year' => $year, 'quarter' => $quarter, 'parts' => ['dph_book', 'vat_control_statement']],
+                $userId,
+                'dph/ctvrtleti/' . $label . '.zip',
+            );
+            $packages[] = ['period' => $label] + $result;
+        }
+
+        return ['status' => 'completed', 'range' => ['from' => $from, 'to' => $to], 'packages' => $packages];
+    }
+
+    /**
+     * Kompletní uzávěrky za období spadající do rozsahu. Zvolení části u firmy
+     * bez podvojného účetnictví je legitimní konfigurace — manifest pak namísto
+     * tichého vynechání vysvětlí, proč žádný balíček nevznikl.
+     *
+     * @param array<string,mixed> $supplier
+     * @return array<string,mixed>
+     */
+    private function exportClosingPackages(
+        InstanceExportArchive $archive,
+        int $supplierId,
+        array $supplier,
+        ?string $dateFrom,
+        ?string $dateTo,
+        ?int $userId,
+        ?int $jobId,
+        ?callable $progress,
+    ): array {
+        if ((string) ($supplier['accounting_mode'] ?? '') !== 'double_entry') {
+            return ['status' => 'skipped', 'reason' => 'not_double_entry', 'packages' => []];
+        }
+        $sql = 'SELECT id, fiscal_year, starts_on, ends_on FROM accounting_periods WHERE supplier_id = ?';
+        $params = [$supplierId];
+        if ($dateFrom !== null && $dateTo !== null) {
+            $sql .= ' AND starts_on <= ? AND ends_on >= ?';
+            $params[] = $dateTo;
+            $params[] = $dateFrom;
+        }
+        $sql .= ' ORDER BY starts_on, id';
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        $periods = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $packages = [];
+        foreach ($periods as $period) {
+            $label = (string) $period['fiscal_year'];
+            $this->step($jobId, $progress, 'Uzávěrkový balíček ' . $label);
+            $result = $this->runNestedReport(
+                $archive,
+                $supplierId,
+                'closing_package',
+                ['period_id' => (int) $period['id'], 'fiscal_year' => (int) $period['fiscal_year'], 'parts' => ClosingPackageService::ALL_PARTS, 'include_xlsx' => true],
+                $userId,
+                'uzaverky/' . $label . '.zip',
+            );
+            $packages[] = ['period_id' => (int) $period['id'], 'fiscal_year' => (int) $period['fiscal_year']] + $result;
+        }
+        return ['status' => 'completed', 'packages' => $packages];
+    }
+
+    /**
+     * Spustí existující background službu synchronně v kontextu nadřazeného
+     * exportu, vloží její výsledek do něj a uklidí dočasný import_job i ZIP.
+     *
+     * @param array<string,mixed> $params
+     * @return array<string,mixed>
+     */
+    private function runNestedReport(
+        InstanceExportArchive $archive,
+        int $supplierId,
+        string $source,
+        array $params,
+        ?int $userId,
+        string $entry,
+    ): array {
+        $effectiveUserId = $userId ?? $this->fallbackUserId();
+        if ($effectiveUserId === null) {
+            return ['status' => 'skipped', 'reason' => 'no_user_context'];
+        }
+        $id = $this->reportJobs->create($supplierId, $source, $params, $effectiveUserId);
+        $resultPath = null;
+        try {
+            if ($source === 'monthly_export') {
+                $this->monthlyExports->run($id);
+            } else {
+                $this->closingPackages->run($id);
+            }
+            $job = $this->reportJobs->find($id, $supplierId);
+            $status = (string) ($job['status'] ?? 'failed');
+            if (!in_array($status, ['completed', 'completed_with_warnings'], true) || empty($job['result_path'])) {
+                return ['status' => $status, 'error' => $job['last_error'] ?? 'Dílčí export nevytvořil soubor.'];
+            }
+            $resultPath = $source === 'monthly_export'
+                ? $this->monthlyExports->resolveResultPath((string) $job['result_path'])
+                : $this->closingPackages->resolveResultPath((string) $job['result_path']);
+            if (!is_file($resultPath)) {
+                return ['status' => 'failed', 'error' => 'Dílčí exportní soubor chybí.'];
+            }
+            $archive->addFile($entry, $resultPath);
+            $archive->flushNow();
+            return ['status' => $status, 'entry' => $entry, 'size_bytes' => (int) filesize($resultPath)];
+        } finally {
+            if ($resultPath !== null && is_file($resultPath)) {
+                @unlink($resultPath);
+            }
+            $this->reportJobs->delete($id, $supplierId);
+        }
+    }
+
+    /** @return array{0:?string,1:?string} */
+    private function exportRange(int $supplierId, ?string $from, ?string $to): array
+    {
+        if ($from !== null && $to !== null) {
+            return [$from, $to];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT MIN(d) AS min_date, MAX(d) AS max_date FROM (
+                SELECT effective_tax_date AS d FROM invoices WHERE supplier_id = ?
+                UNION ALL SELECT issue_date AS d FROM purchase_invoices WHERE supplier_id = ?
+                UNION ALL SELECT issue_date AS d FROM cash_documents WHERE supplier_id = ?
+            ) dates WHERE d IS NOT NULL'
+        );
+        $stmt->execute([$supplierId, $supplierId, $supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        return [($row['min_date'] ?? null) ?: null, ($row['max_date'] ?? null) ?: null];
+    }
+
+    /** @return list<array{0:int,1:int}> */
+    private function monthsBetween(string $from, string $to): array
+    {
+        $current = new \DateTimeImmutable(substr($from, 0, 7) . '-01');
+        $last = new \DateTimeImmutable(substr($to, 0, 7) . '-01');
+        $months = [];
+        while ($current <= $last) {
+            $months[] = [(int) $current->format('Y'), (int) $current->format('n')];
+            $current = $current->modify('+1 month');
+        }
+        return $months;
+    }
+
+    private function fallbackUserId(): ?int
+    {
+        $id = $this->db->pdo()->query('SELECT id FROM users ORDER BY id LIMIT 1')?->fetchColumn();
+        return $id === false || $id === null ? null : (int) $id;
     }
 
     /**
@@ -804,7 +1108,9 @@ final class InstanceExportService
     /** @return array<string,mixed>|null */
     private function fetchSupplier(int $supplierId): ?array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT id, company_name, ic, dic FROM supplier WHERE id = ?');
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, company_name, ic, dic, accounting_mode, is_vat_payer, vat_period FROM supplier WHERE id = ?'
+        );
         $stmt->execute([$supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false ? null : $row;
@@ -906,6 +1212,9 @@ final class InstanceExportService
             '',
             'CO V ARCHIVU JE',
             str_repeat('-', 60),
+            'obnova/        Verzionovaný obnovitelný účetní archiv firmy (je-li zvolený). Tento ZIP',
+            '               je jediná část určená k importu přes archive-restore.php; lze jej',
+            '               obnovit do stejné nebo NOVĚJŠÍ verze MyÚčto jako novou firmu.',
             'data/          Strojově čitelný export databáze — jeden soubor na tabulku,',
             '               formát JSON Lines (JSONL): jeden JSON objekt na řádek, UTF-8.',
             '               Otevře ho Excel/LibreOffice přes import, Python (pandas.read_json',
@@ -915,6 +1224,10 @@ final class InstanceExportService
             '               v praxi potřebuješ nejčastěji — otevře ji jakákoli čtečka PDF.',
             'prilohy/       Nahrané soubory: skeny, přílohy účetního deníku, dokumenty, mzdové',
             '               doklady.',
+            'dph/           Hromadné podklady DPH po měsících; u čtvrtletního plátce i',
+            '               za čtvrtletí (Kniha DPH v PDF a Kontrolní hlášení v XML).',
+            'uzaverky/      Kompletní uzávěrkové balíčky za účetní období firmy vedené',
+            '               v podvojném účetnictví.',
             'manifest.json  Co v archivu je, kolik toho je, k jakému datu a z jaké verze',
             '               aplikace. Obsahuje i seznam tabulek, které v archivu ZÁMĚRNĚ nejsou.',
             'CHECKSUMS.txt  SHA-256 každé položky archivu.',
@@ -945,6 +1258,14 @@ final class InstanceExportService
         $lines[] = 'Přihlašovací údaje, tokeny a klíče k integracím v archivu ZÁMĚRNĚ nejsou —';
         $lines[] = 'nejsou to účetní záznamy a archiv opouští instalaci. Seznam vynechaných';
         $lines[] = 'sloupců je v manifest.json.';
+        $lines[] = '';
+        $lines[] = 'OBNOVA';
+        $lines[] = str_repeat('-', 60);
+        $lines[] = 'Po rozbalení nadřazeného ZIPu spusť v cílové, stejné nebo NOVĚJŠÍ instalaci:';
+        $lines[] = '  php api/bin/archive-restore.php --file=obnova/myucto-archiv-pro-obnovu.zip --dry-run';
+        $lines[] = 'a po úspěšné kontrole stejný příkaz s `--restore`. Obnova nikdy nepřepisuje';
+        $lines[] = 'existující firmu: založí novou a bezpečně remapuje interní ID.';
+        $lines[] = 'Obecné JSONL soubory v data/ jsou kontrolní a přenosový export, ne vstup pro import.';
         $lines[] = '';
         $lines[] = 'Data se čtou průběžně, ne v jednom okamžiku (viz read_started_at /';
         $lines[] = 'read_finished_at v manifestu) — archiv vznikl v tomhle časovém okně.';

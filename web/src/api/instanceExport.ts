@@ -6,11 +6,11 @@ import { api } from './client'
  * Endpointy jsou pod `/api/admin/`, takže je middleware pouští jen superadminovi —
  * archiv je celé účetnictví firmy včetně příloh.
  *
- * Pozor na názvosloví v UI: tohle je EXPORT (stažení dat), ne záloha a ne obnova.
- * Samoobslužná obnova neexistuje a v podmínkách se neslibuje.
+ * Volitelná část `restore` je verzovaný archiv pro explicitní CLI obnovu jako
+ * nová firma. Ostatní části zůstávají přenositelným exportem ke čtení.
  */
 
-export type InstanceExportPart = 'data' | 'documents' | 'files'
+export type InstanceExportPart = 'restore' | 'data' | 'documents' | 'files' | 'vat_exports' | 'closing_packages'
 
 export type InstanceExportStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 
@@ -39,6 +39,9 @@ export interface InstanceExportJob {
     tables: number
     documents: Record<string, number> | null
     files: number | null
+    restore: Record<string, unknown> | null
+    vat: Record<string, unknown> | null
+    closing: Record<string, unknown> | null
   } | null
 }
 
@@ -48,6 +51,11 @@ export interface InstanceExportOverview {
   encrypted: boolean
   /** Za kolik dnů se hotový archiv smaže. */
   ttl_days: number
+  profile?: {
+    accounting_mode: 'tax_evidence' | 'double_entry'
+    is_vat_payer: boolean
+    vat_period: 'monthly' | 'quarterly' | null
+  }
   active: InstanceExportJob | null
   items: InstanceExportJob[]
 }

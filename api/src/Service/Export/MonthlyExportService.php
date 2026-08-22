@@ -15,6 +15,7 @@ use MyInvoice\Service\Pdf\DphBookPdfRenderer;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Pdf\PurchaseInvoicePdfRenderer;
 use MyInvoice\Service\Report\DphBookBuilder;
+use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Report\VatLedgerService;
 use ZipArchive;
 
@@ -32,7 +33,8 @@ use ZipArchive;
  *
  * Struktura ZIPu:
  *   Vystavene-faktury/PDF|ISDOC/…   Prijate-faktury/PDF|ISDOC/…
- *   Vypisy-z-uctu/PDF|GPC/…         Kniha-DPH/kniha-dph-YYYY-MM.pdf   README.txt
+ *   Vypisy-z-uctu/PDF|GPC/…         Kniha-DPH/kniha-dph-YYYY-MM.pdf
+ *   Kontrolni-hlaseni/dphkh1-…xml   README.txt
  *   (kvartálně je Kniha DPH per měsíc — tři PDF.)
  */
 final class MonthlyExportService
@@ -40,7 +42,7 @@ final class MonthlyExportService
     /** Všechny podporované části (a zároveň default, když uživatel nic nezvolí). */
     public const ALL_PARTS = [
         'sales_pdf', 'sales_isdoc', 'purchase_pdf', 'purchase_isdoc',
-        'bank_pdf', 'bank_gpc', 'dph_book',
+        'bank_pdf', 'bank_gpc', 'dph_book', 'vat_control_statement',
     ];
 
     public function __construct(
@@ -55,6 +57,7 @@ final class MonthlyExportService
         private readonly PurchaseInvoiceExportService $purchaseExport,
         private readonly DphBookBuilder $dphBookBuilder,
         private readonly DphBookPdfRenderer $dphBookRenderer,
+        private readonly KontrolniHlaseniBuilder $vatControlStatement,
         private readonly ExportPeriodResolver $periodResolver,
     ) {}
 
@@ -91,6 +94,10 @@ final class MonthlyExportService
             'bank_pdf'       => $bankPdf,
             'bank_gpc'       => $bankGpc,
             'dph_book'       => ($sales + $purchase) > 0 ? 1 : 0,
+            // KH může mít i jiné řádky než běžné faktury (např. pokladní doklady),
+            // proto jej nenulujeme podle zjednodušeného počtu dokladů. Přesný obsah
+            // ověřuje builder při skutečném exportu.
+            'vat_control_statement' => 1,
         ];
     }
 
@@ -167,7 +174,8 @@ final class MonthlyExportService
             }
             $dphMonths = $this->monthsInPeriod($period);
             $total = count($salesIds) * $salesParts + count($purchRows) * $purchParts + $bankFiles
-                + (in_array('dph_book', $parts, true) ? count($dphMonths) : 0);
+                + (in_array('dph_book', $parts, true) ? count($dphMonths) : 0)
+                + (in_array('vat_control_statement', $parts, true) ? 1 : 0);
             $this->jobs->updateProgress($jobId, ['total_items' => $total, 'current_step' => 'Příprava…']);
 
             $added = 0;
@@ -294,6 +302,29 @@ final class MonthlyExportService
                     } catch (\Throwable $e) { $warnings[] = sprintf('Kniha DPH %04d-%02d: %s', $bookYear, $bookMon, $e->getMessage()); }
                     $bump('Kniha DPH');
                 }
+            }
+
+            // 5) Kontrolní hlášení — měsíční nebo čtvrtletní XML podle zvoleného
+            // ExportPeriod. Nearchivuje se jako podání (to je vedlejší efekt ručního
+            // downloadu); tady jde o reprodukovatelný podklad uvnitř hromadného ZIPu.
+            if (in_array('vat_control_statement', $parts, true)) {
+                try {
+                    $khPeriod = $period->type === 'quarterly' ? 'quarterly' : 'monthly';
+                    $kh = $this->vatControlStatement->build(
+                        $supplierId,
+                        $period->year,
+                        $period->type === 'quarterly' ? (((int) $period->quarter - 1) * 3) + 1 : (int) $period->month,
+                        $khPeriod,
+                    );
+                    $zip->addFromString(
+                        sprintf('Kontrolni-hlaseni/dphkh1-%s.xml', $period->label),
+                        (string) $kh['xml'],
+                    );
+                    $added++; $summary['vat_control_statement'] = 1;
+                } catch (\Throwable $e) {
+                    $warnings[] = 'Kontrolní hlášení: ' . $e->getMessage();
+                }
+                $bump('Kontrolní hlášení');
             }
 
             if ($added === 0) {
@@ -543,6 +574,7 @@ final class MonthlyExportService
             'purchase_pdf' => 'Přijaté faktury (PDF)', 'purchase_isdoc' => 'Přijaté faktury (ISDOC)',
             'bank_pdf' => 'Výpisy z účtu (PDF)', 'bank_gpc' => 'Výpisy z účtu (GPC)',
             'dph_book' => 'Kniha DPH (PDF)',
+            'vat_control_statement' => 'Kontrolní hlášení DPH (XML)',
         ];
         $lines = [
             'Hromadný export MyÚčto.cz', '=========================',

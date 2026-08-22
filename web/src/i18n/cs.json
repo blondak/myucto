@@ -14000,7 +14000,8 @@
                 "purchase_isdoc": "Přijaté faktury — ISDOC",
                 "bank_pdf": "Výpisy z účtu — PDF",
                 "bank_gpc": "Výpisy z účtu — GPC",
-                "dph_book": "Kniha DPH — PDF"
+                "dph_book": "Kniha DPH — PDF",
+                "vat_control_statement": "Kontrolní hlášení DPH — XML"
             }
         },
         "dph": {
@@ -16632,24 +16633,30 @@
     },
     "instance_export": {
         "title": "Kompletní export dat",
-        "subtitle": "Stáhni si všechna data firmy v jednom archivu — databázi, doklady v PDF i nahrané přílohy.",
-        "info": "Archiv je navržený tak, aby byl použitelný i bez této aplikace: data jsou ve strojově čitelném formátu JSON Lines, doklady jako PDF ve složkách po letech a agendách, přílohy jako běžné soubory. Uvnitř je manifest (co v archivu je, kolik toho je, k jakému datu a z jaké verze) a kontrolní součty SHA-256, podle kterých ověříš, že se archiv stáhl celý.",
-        "no_restore_note": "Export slouží ke stažení a archivaci dat. Není to záloha ani obnova — data z archivu zpátky do aplikace nenahrajeme.",
+        "subtitle": "Slož si jeden balíček firmy: obnovitelná data, doklady, DPH podklady i účetní uzávěrky.",
+        "info": "Balíček obsahuje strojově čitelná data, doklady a volitelný verzovaný archiv pro bezpečnou obnovu. Manifest a SHA-256 součty popisují přesný obsah a ověří úplnost stažení.",
+        "no_restore_note": "Obnovitelný archiv se po rozbalení spouští explicitně přes CLI do stejné nebo novější verze MyÚčto. Vždy založí novou firmu; nepřepisuje existující data.",
         "not_encrypted": "Archiv se nešifruje, protože v konfiguraci není nastavené heslo záloh (cron.backup.password). Obsahuje kompletní účetnictví firmy — ulož ho na bezpečné místo.",
         "new_export": "Nový export",
         "part": {
+            "restore": "Obnovitelný účetní archiv",
             "data": "Data (databáze)",
             "documents": "Doklady v PDF",
-            "files": "Přílohy a nahrané soubory"
+            "files": "Přílohy a nahrané soubory",
+            "vat_exports": "DPH podklady po obdobích",
+            "closing_packages": "Uzávěrkové balíčky"
         },
         "part_hint": {
+            "restore": "Verzovaný účetní JSONL archiv pro archive-restore.php; obnoví jeho podporovaný rozsah i do novější verze aplikace.",
             "data": "Všechny agendy po tabulkách ve formátu JSON Lines — doklady, kontakty, sklad, majetek, mzdy, deník i podklady k DPH.",
             "documents": "Vydané faktury (PDF + ISDOC), přijaté faktury a výpisy z účtu, ve složkách po letech.",
-            "files": "Skeny přijatých dokladů, přílohy účetního deníku, dokumenty a mzdové doklady."
+            "files": "Skeny přijatých dokladů, přílohy účetního deníku, dokumenty a mzdové doklady.",
+            "vat_exports": "Kniha DPH v PDF a Kontrolní hlášení v XML po měsících; při čtvrtletní periodě i za čtvrtletí.",
+            "closing_packages": "Kompletní PDF/XLSX/XML balíček pro každé účetní období v zadaném rozsahu."
         },
         "date_from": "Doklady od",
         "date_to": "Doklady do",
-        "range_hint": "Nepovinné. Omezí jen doklady v PDF — databáze se exportuje vždy celá.",
+        "range_hint": "Nepovinné. Omezí doklady, měsíční/čtvrtletní DPH podklady a uzávěrky; data a obnovitelný archiv jsou vždy celé firmy.",
         "start": "Spustit export",
         "starting": "Spouštím…",
         "started": "Export běží na pozadí. Až doběhne, objeví se v seznamu ke stažení.",

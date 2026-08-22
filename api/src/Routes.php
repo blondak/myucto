@@ -271,7 +271,6 @@ use MyInvoice\Action\Accounting\Assets\AssetLifecycleAction;
 use MyInvoice\Action\Accounting\Assets\DepreciationAction;
 use MyInvoice\Action\Accounting\ChartOfAccountsAction;
 use MyInvoice\Action\Accounting\CostCenterAction;
-use MyInvoice\Action\Accounting\Closing\ArchiveAction;
 use MyInvoice\Action\Accounting\Closing\ClosingAction;
 use MyInvoice\Action\Accounting\Closing\DocumentSeriesAction;
 use MyInvoice\Action\Accounting\Closing\JournalTransferAction;
@@ -1589,10 +1588,6 @@ final class Routes
             $g->get   ('/reports/tax-base-adjustments',                         [TaxBaseReportAction::class, 'get']);
             $g->get   ('/document-series',                                      [DocumentSeriesAction::class, 'list']);
             $g->put   ('/document-series/{code:[a-z_]+}/{year:[0-9]+}',         [DocumentSeriesAction::class, 'update']);
-            $g->get   ('/archive',                                              [ArchiveAction::class, 'list']);
-            $g->post  ('/archive/export',                                       [ArchiveAction::class, 'export']);
-            $g->get   ('/archive/{id:[0-9]+}/download',                         [ArchiveAction::class, 'download']);
-            $g->delete('/archive/{id:[0-9]+}',                                  [ArchiveAction::class, 'delete']);
             // Retenční lhůty § 31/§ 32 ZoÚ a § 35a ZDPH. Přehled je informativní —
             // uplynulá lhůta je konec povinnosti uchovávat, ne pokyn ke skartaci.
             $g->get   ('/retention',                        [\MyInvoice\Action\Accounting\RetentionAction::class, 'overview']);

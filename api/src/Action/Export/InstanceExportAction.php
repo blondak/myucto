@@ -42,9 +42,9 @@ use Slim\Psr7\Stream;
  * endpointem. Stahuje se VÝHRADNĚ soubor dohledaný přes id v `instance_exports`
  * omezené na aktuální firmu — z requestu se nikdy nebere cesta ani název.
  *
- * Vědomě tu NENÍ obnova. Export je stažení dat, ne „vrátit instanci k datu";
- * samoobslužnou obnovu neposkytujeme a v podmínkách ji neslibujeme. UI to říká
- * stejně, aby si zákazník nespletl archiv se zálohou.
+ * Export obsahuje volitelný verzovaný obnovitelný archiv. Obnova se spouští jen
+ * explicitně z CLI do NOVÉ firmy; webový export proto nemůže přepsat existující
+ * data ani se stát cestou k nechtěnému rollbacku.
  */
 final class InstanceExportAction
 {
@@ -67,10 +67,12 @@ final class InstanceExportAction
         // Ukliď mrtvé běhy, ať UI neukazuje věčné „běží" a nebrání spuštění dalšího.
         $this->jobs->reapStale($sid);
 
+        $profile = $this->supplierProfile($sid);
         return Json::ok($response, [
             'parts' => InstanceExportService::ALL_PARTS,
             'encrypted' => BackupEncryption::passwordFromConfig($this->config) !== '',
             'ttl_days' => (int) $this->config->get('export.instance.ttl_days', 14),
+            'profile' => $profile,
             'active' => $this->present($this->jobs->activeFor($sid)),
             'items' => array_map(fn (?array $j): ?array => $this->present($j), $this->jobs->listForSupplier($sid, 20)),
         ]);
@@ -310,9 +312,18 @@ final class InstanceExportAction
                 'tables' => count($manifest['sections']['data']['tables'] ?? []),
                 'documents' => $manifest['sections']['doklady'] ?? null,
                 'files' => $manifest['sections']['prilohy']['files'] ?? null,
+                'restore' => $manifest['sections']['obnova'] ?? null,
+                'vat' => $manifest['sections']['dph'] ?? null,
+                'closing' => $manifest['sections']['uzaverky'] ?? null,
             ];
         }
         return $out;
+    }
+
+    /** @return array{accounting_mode:string,is_vat_payer:bool,vat_period:?string} */
+    private function supplierProfile(int $supplierId): array
+    {
+        return $this->export->supplierProfile($supplierId);
     }
 
     /** @param array<string,mixed> $payload */
