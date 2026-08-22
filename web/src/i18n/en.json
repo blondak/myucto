@@ -621,7 +621,10 @@
         "unpaid_title": "Předplatné není uhrazené",
         "unpaid_desc": "Komerční moduly (účetnictví, mzdy, sklad) jsou proto zavřené; fakturaci ani čtení dat to nezastavuje. Uhraďte předplatné a moduly se otevřou samy.",
         "unpaid_cta": "Uhradit předplatné",
-        "unpaid_desc_open": "Paid modules still work for now, but they will close without payment. Details and dates are in Subscription and hosting."
+        "unpaid_desc_open": "Paid modules still work for now, but they will close without payment. Details and dates are in Subscription and hosting.",
+        "pay_cta": "Pay now",
+        "pay_cta_amount": "Pay {amount}",
+        "unpaid_detail": "Details"
     },
     "hosting": {
         "title": "Subscription and hosting",
@@ -9371,7 +9374,11 @@
             "VAT returns and the control statement",
             "Company settings, users and data exports"
         ],
-        "replace_confirm": "This installation already has an active license. Activating a new key deactivates the current one — licenses do not add up. If you need more users, increase the count on the existing license. Replace anyway?"
+        "replace_confirm": "This installation already has an active license. Activating a new key deactivates the current one — licenses do not add up. If you need more users, increase the count on the existing license. Replace anyway?",
+        "dunning_amount_due": "Amount due:",
+        "dunning_pay": "Pay now",
+        "dunning_pay_amount": "Pay {amount}",
+        "dunning_change_card": "Change payment card"
     },
     "updates": {
         "title": "Updates",

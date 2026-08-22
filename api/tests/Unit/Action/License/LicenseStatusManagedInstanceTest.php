@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\LicenseMiddleware;
+use MyInvoice\Service\License\BillingSnapshot;
 use MyInvoice\Service\License\LicenseClient;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseState;
@@ -397,6 +398,7 @@ final class LicenseStatusManagedInstanceTest extends TestCase
             $this->policy($config, $snapshot),
             $config,
             new InstanceEntitlement($db, $config),
+            new BillingSnapshot($config),
         );
     }
 

@@ -621,7 +621,10 @@
         "unpaid_title": "Předplatné není uhrazené",
         "unpaid_desc": "Komerční moduly (účetnictví, mzdy, sklad) jsou proto zavřené; fakturaci ani čtení dat to nezastavuje. Uhraďte předplatné a moduly se otevřou samy.",
         "unpaid_cta": "Uhradit předplatné",
-        "unpaid_desc_open": "Placené moduly zatím fungují dál, ale bez úhrady se zavřou. Podrobnosti a termíny najdete v Předplatném a provozu."
+        "unpaid_desc_open": "Placené moduly zatím fungují dál, ale bez úhrady se zavřou. Podrobnosti a termíny najdete v Předplatném a provozu.",
+        "pay_cta": "Zaplatit",
+        "pay_cta_amount": "Zaplatit {amount}",
+        "unpaid_detail": "Podrobnosti"
     },
     "hosting": {
         "title": "Předplatné a provoz",
@@ -9371,7 +9374,11 @@
             "Přiznání k DPH a kontrolní hlášení",
             "Nastavení firmy, uživatelé a exporty dat"
         ],
-        "replace_confirm": "Tahle instalace už má aktivní licenci. Aktivací nového klíče ta stávající přestane platit — licence se nesčítají. Chcete-li víc uživatelů, navyšte počet u stávající licence. Opravdu nahradit?"
+        "replace_confirm": "Tahle instalace už má aktivní licenci. Aktivací nového klíče ta stávající přestane platit — licence se nesčítají. Chcete-li víc uživatelů, navyšte počet u stávající licence. Opravdu nahradit?",
+        "dunning_amount_due": "K úhradě:",
+        "dunning_pay": "Zaplatit",
+        "dunning_pay_amount": "Zaplatit {amount}",
+        "dunning_change_card": "Změnit platební kartu"
     },
     "updates": {
         "title": "Aktualizace",

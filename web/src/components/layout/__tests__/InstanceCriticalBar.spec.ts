@@ -4,6 +4,7 @@ import { mount } from '@vue/test-utils'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import cs from '@/i18n/cs.json'
 import { readStorageQuotaHeaders } from '@/api/storageQuota'
+import { startPreview, stopPreview } from '@/api/instancePreview'
 
 /**
  * Červená linka nad aplikací (H-31) — tvrzení nad KOMPONENTOU, ne nad snímkem.
@@ -66,6 +67,7 @@ beforeEach(() => {
   readStorageQuotaHeaders({})
   auth.isManagedInstallation = true
   auth.license = null
+  stopPreview()
 })
 
 describe('InstanceCriticalBar', () => {
@@ -167,6 +169,27 @@ describe('InstanceCriticalBar', () => {
     expect(line.findAll('button')).toHaveLength(0)
     expect(line.findAll('[data-close], [data-dismiss]')).toHaveLength(0)
     expect(line.html()).not.toMatch(/dismiss|zavřít|rozumím/i)
+  })
+
+  /**
+   * ⚠️ PROČ BY TENHLE TEST BEZ OPRAVY PADAL: linka dřív vedla jen na vnitřní
+   * obrazovku, ta na správu předplatného a teprve odtud se dalo doplatit —
+   * tři skoky bez jediné částky. Kdo se v nich ztratil, nezaplatil. Když
+   * licenční server pošle podepsaný odkaz, musí být hlavní tlačítko PŘÍMO on.
+   */
+  it('u neuhrazení vede hlavní tlačítko rovnou na platbu', async () => {
+    startPreview('past_due')
+
+    const wrapper = await mountBar()
+    const pay = wrapper.find('[data-instance-critical-pay]')
+
+    expect(pay.exists()).toBe(true)
+    expect(pay.attributes('href')).toBe('https://myucto.cz/platba/nahled')
+    // Částka na tlačítku — bez ní se člověk nedozví, o kolik jde. (Mock `t()`
+    // interpolaci nedělá, takže se hlídá zvolená varianta klíče.)
+    expect(pay.text()).toBe(cs.instance_alert.pay_cta_amount)
+    // Proklik na rekapitulaci zůstává vedle jako sekundární.
+    expect(wrapper.find('a[href="/activation/purchase"]').exists()).toBe(true)
   })
 
   /** Oba důvody najednou = dva řádky, ne jeden schovaný. */

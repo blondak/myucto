@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { licenseApi, type LicenseStatus, type LicenseStateKind, type UpgradeQuote } from '@/api/license'
 import { formatQuotaBytes } from '@/api/storageQuota'
+import { ensureInstanceDunning, instanceStatus } from '@/api/instanceStatus'
+import { resolveBillingNarrative } from '@/api/instanceHealth'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t, te, tm, rt } = useI18n()
@@ -208,6 +210,13 @@ async function load() {
   loading.value = true
   errorMsg.value = null
   try {
+    // ⚠️ Bez superadmin práv je `/license/status` zavřený. Dřív se tím obrazovka
+    // vyčerpala („nemáte oprávnění") a admin, který instalaci spravuje, neměl
+    // z aplikace jak doplatit. Dunning stav je proto vlastní, užší dotaz.
+    if (!isAdmin.value) {
+      await ensureInstanceDunning({ managed: auth.isManagedInstallation })
+      return
+    }
     status.value = await licenseApi.status()
     // Výchozí cílový počet = aktuální aktivní počet uživatelů.
     upgradeUsers.value = Math.max(status.value.users_active, 1)
@@ -217,6 +226,62 @@ async function load() {
     loading.value = false
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Neuhrazená platba — rekapitulace a přímá cesta zaplatit
+//
+//  „Z aplikace musí jít doplatit." Dřív odsud vedl jediný odkaz na správu
+//  předplatného na webu, bez částky a bez termínů — tři skoky, než se zákazník
+//  dostal k platbě. Tahle sekce říká, co se stalo, kolik se dluží a dokdy,
+//  a dává jedno primární tlačítko, které jde rovnou na úhradu.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Dunning stav. Plný z `/license/status`, jinak užší z `/license/billing`. */
+const dunning = computed(() => status.value?.instance?.billing ?? instanceStatus.dunning.value)
+
+/** Co se stalo a co bude. `null` = není co hlásit → sekce se nekreslí. */
+const narrative = computed(() => resolveBillingNarrative(dunning.value))
+
+const dunningMilestones = computed(() => narrative.value?.milestones ?? [])
+
+/** Věta „co se stalo" (+ kolikátý pokus, když to server poslal). */
+const happenedText = computed(() => {
+  const n = narrative.value
+  if (!n) return null
+  const base = t(n.happenedKey)
+  if (n.attempt === null || n.maxAttempts === null) return base
+
+  return `${base} ${t('hosting.phase.attempt_of', { attempt: n.attempt, max: n.maxAttempts })}`
+})
+
+/** Věta „co bude a kdy". Bez termínu varianta, která žádný neslibuje. */
+const nextText = computed(() => {
+  const n = narrative.value
+
+  return n ? t(n.nextKey, { date: fmtDate(n.nextAt) }) : null
+})
+
+/** Dlužná částka. `null` = server ji neposlal a obrazovka o ní MLČÍ. */
+const amountDueText = computed(() => {
+  const amount = dunning.value?.amount_due
+  if (amount === null || amount === undefined) return null
+
+  return fmtAmount(amount, dunning.value?.currency ?? null)
+})
+
+/**
+ * Kam vede „Zaplatit". Podepsaný odkaz z licenčního serveru; backend za něj
+ * v nejhorším dosadí správu předplatného, takže tlačítko má kam vést vždycky.
+ */
+const payUrl = computed(() => dunning.value?.pay_url ?? subscriptionUrl.value ?? null)
+
+/** Sekundárně „Změnit kartu" — jen když se liší od hlavního cíle. */
+const changeCardUrl = computed(() => {
+  const url = subscriptionUrl.value
+  return url !== null && url !== payUrl.value ? url : null
+})
+
+const dunningCritical = computed(() => narrative.value?.severity === 'critical')
 
 function fmtAmount(amount: number | null, currency: string | null): string {
   if (amount === null || amount === undefined) return '—'
@@ -388,6 +453,74 @@ onMounted(load)
       </p>
     </header>
 
+    <!-- ═══ NEUHRAZENÁ PLATBA — rekapitulace a přímá cesta zaplatit ═══
+         Vykresluje se PŘED vším ostatním a bez ohledu na práva: dluh je jediná
+         věc, kvůli které tahle obrazovka opravdu spěchá, a doplatit ho musí jít
+         i adminovi bez superadmin práv. Termíny počítá licenční server; co
+         neposlal, se tu neobjeví ani náhodou. -->
+    <section
+      v-if="narrative"
+      class="mb-6 rounded-lg border p-5"
+      :class="dunningCritical ? 'border-danger-300 bg-danger-50/40' : 'border-warning-300 bg-warning-50/40'"
+      data-purchase-dunning
+    >
+      <div class="flex items-start gap-3">
+        <svg
+          class="w-5 h-5 mt-0.5 shrink-0"
+          :class="dunningCritical ? 'text-danger-600' : 'text-warning-600'"
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"
+        ><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" /></svg>
+        <div class="min-w-0">
+          <h2 class="text-lg font-semibold text-neutral-900">{{ happenedText }}</h2>
+          <p class="mt-1 text-sm" :class="dunningCritical ? 'text-danger-600' : 'text-warning-600'">
+            {{ nextText }}
+          </p>
+        </div>
+      </div>
+
+      <!-- Kolik se dluží. Bez čísla ze serveru se řádek nekreslí — vymyšlená
+           částka u tlačítka „Zaplatit" je horší než žádná. -->
+      <p v-if="amountDueText" class="mt-4 text-sm text-neutral-700">
+        {{ t('license.dunning_amount_due') }}
+        <span class="ml-1 text-2xl font-semibold text-neutral-900">{{ amountDueText }}</span>
+      </p>
+
+      <!-- Časová osa: dokdy to jde zaplatit, kdy se instalace pozastaví a kdy
+           se smažou data. Chybějící milník se prostě nevykreslí. -->
+      <ol v-if="dunningMilestones.length" class="mt-4 space-y-1.5 text-sm" data-purchase-milestones>
+        <li v-for="m in dunningMilestones" :key="m.kind" class="flex flex-wrap items-baseline gap-x-2">
+          <span class="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-neutral-400" aria-hidden="true"></span>
+          <span class="text-neutral-700">{{ t(`hosting.phase.milestone_${m.kind}`) }}</span>
+          <span class="font-medium text-neutral-900 whitespace-nowrap">{{ fmtDate(m.at) }}</span>
+        </li>
+      </ol>
+
+      <div class="mt-5 flex flex-wrap gap-2">
+        <a
+          v-if="payUrl" :href="payUrl" target="_blank" rel="noopener"
+          :class="btnFilled(dunningCritical ? 'danger' : 'warning')"
+          data-purchase-pay
+        >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
+          {{ amountDueText ? t('license.dunning_pay_amount', { amount: amountDueText }) : t('license.dunning_pay') }}
+        </a>
+        <a
+          v-if="changeCardUrl" :href="changeCardUrl" target="_blank" rel="noopener"
+          :class="btnOutline('primary')"
+        >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
+          {{ t('license.dunning_change_card') }}
+        </a>
+      </div>
+
+      <!-- Nenakonfigurovaná adresa → kontakt, ne mrtvé tlačítko. -->
+      <p v-if="!payUrl" class="mt-3 text-sm text-neutral-600">
+        {{ t('license.managed_subscription_contact') }}
+      </p>
+    </section>
+
+    <!-- Zbytek obrazovky (klíč, tarif, počty míst) zůstává superadminovi.
+         Doplatit ale musí jít i bez toho — sekce výš je nad touhle větví. -->
     <div v-if="!isAdmin" class="rounded-md bg-warning-50 border border-warning-200 p-4 text-sm text-warning-800">
       {{ t('license.no_admin') }}
     </div>

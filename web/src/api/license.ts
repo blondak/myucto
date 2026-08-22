@@ -114,21 +114,19 @@ export interface ManagedInstanceInfo {
 }
 
 /**
- * Co instalace SKUTEČNĚ ví o (ne)uhrazení — nic víc.
+ * Dunning stav — co dlužím, dokdy to jde zaplatit a kde.
  *
- * ⚠️ Není tu částka, splatnost ani datum přijetí platby: instalace je nezná
- * a dopočítat se nedají. `unpaid` je jediná otázka, na kterou smí odpovídat.
+ * ⚠️ Jediná část licenčního API, kterou vidí i BĚŽNÝ admin (GET
+ * `/api/license/billing`). Rozsah je proto úmyslně krátký: nikdy licenční
+ * klíč, fakturační údaje ani počty míst. Rozšiřovat se dá jen vědomě
+ * a na obou stranách (`BillingSnapshot::DUNNING_KEYS`).
  */
-export interface ManagedBillingInfo {
+export interface BillingDunningInfo {
   /** Komerční moduly jsou zavřené / server hlásí nezaplacené předplatné. */
   unpaid: boolean
   license_state: LicenseStateKind
   /** Stav předplatného ze serveru; null = nehlásí ho (trial, doživotní). */
   subscription_state: SubscriptionInfo['state'] | null
-  valid_until: number | null
-  /** Kdy se instalace naposledy ptala serveru — bez toho „neuhrazeno" nelze číst. */
-  last_check_at: string | null
-  last_check_ok: boolean
 
   /**
    * ── V jaké fázi jsme a co se stane dál ──────────────────────────────────
@@ -150,6 +148,28 @@ export interface ManagedBillingInfo {
   access_until: number | null
   /** Dokdy po pozastavení držíme data (unix). */
   data_until: number | null
+
+  /**
+   * Dlužná částka. `null` = server ji neposlal a obrazovka o ní MLČÍ —
+   * vymyšlené číslo u tlačítka „Zaplatit" je horší než žádné.
+   */
+  amount_due: number | null
+  /** Měna dlužné částky; bez ní se částka needituje na koruny. */
+  currency: string | null
+  /**
+   * Kam vede „Zaplatit". Podepsaný odkaz z licenčního serveru; když ho
+   * neposlal, backend sem dosadí správu předplatného, takže tlačítko má
+   * vždycky kam vést. `null` jen tehdy, když není nakonfigurovaná ani ta.
+   */
+  pay_url: string | null
+}
+
+/** Plný stav (ne)uhrazení pro obrazovku Hostingu — jen pro superadmina. */
+export interface ManagedBillingInfo extends BillingDunningInfo {
+  valid_until: number | null
+  /** Kdy se instalace naposledy ptala serveru — bez toho „neuhrazeno" nelze číst. */
+  last_check_at: string | null
+  last_check_ok: boolean
 }
 
 /**
@@ -274,6 +294,15 @@ export interface SupportLink {
 export const licenseApi = {
   /** Admin — kompletní stav licence + počty. */
   status: () => api.get<LicenseStatus>('/license/status').then((r) => r.data),
+
+  /**
+   * Dunning stav — dostupný i BĚŽNÉMU adminovi, ne jen superadminovi.
+   *
+   * `null` = self-hosted instalace (nic se tu neplatí). Klientské účty dostanou
+   * 403 a volající to musí umlčet stejně jako každé jiné „nevíme".
+   */
+  dunning: () =>
+    api.get<{ billing: BillingDunningInfo | null }>('/license/billing').then((r) => r.data.billing),
 
   /** Admin — aktivace licenčním klíčem. `takeover` vynutí přenos vazby z jiné instalace
    *  (po chybě already_bound); počítá se do limitu přenosů 2/30 dní. */

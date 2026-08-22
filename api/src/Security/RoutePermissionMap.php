@@ -558,6 +558,14 @@ final class RoutePermissionMap
             }
             return new RoutePermission(self::SUPERADMIN);
         }
+        // ⚠️ Dunning stav (co dlužím, dokdy, kde zaplatit) je jediná výjimka
+        // z licenční superadmin brány: admin, který instalaci spravuje, musí
+        // vidět, že se nezdařila platba — jinak se to dozví až tím, že aplikace
+        // přestane fungovat. Rozsah drží {@see BillingSnapshot::dunning()},
+        // klientské účty odmítá sama akce ({@see LicenseBillingAction}).
+        if ($method === 'GET' && $path === '/api/license/billing') {
+            return new RoutePermission(self::SELF_SERVICE);
+        }
         // Licencování a aktivace (E4) — admin only.
         if (str_starts_with($path, '/api/license/')) {
             return new RoutePermission(self::SUPERADMIN);

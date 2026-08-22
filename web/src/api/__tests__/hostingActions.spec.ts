@@ -26,6 +26,9 @@ function instance(over: Partial<ManagedInstanceInfo> = {}): ManagedInstanceInfo 
       suspend_at: null,
       access_until: null,
       data_until: null,
+      amount_due: null,
+      currency: null,
+      pay_url: null,
     },
     storage: {
       measured: true,

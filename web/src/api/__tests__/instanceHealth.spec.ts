@@ -45,6 +45,9 @@ function billing(over: Partial<ManagedBillingInfo> = {}): ManagedBillingInfo {
     suspend_at: null,
     access_until: null,
     data_until: null,
+    amount_due: null,
+    currency: null,
+    pay_url: null,
     ...over,
   }
 }

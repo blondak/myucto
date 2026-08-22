@@ -161,6 +161,13 @@ export function previewUiState(scenario: PreviewScenario): PreviewUiState | null
   }
 }
 
+/** Co by u dluhu poslal licenční server — částka a podepsaný odkaz na úhradu. */
+const PREVIEW_DUE = {
+  amount_due: 890,
+  currency: 'CZK',
+  pay_url: 'https://myucto.cz/platba/nahled',
+} as const
+
 /** Syntetický základ — náhled nesmí záviset na tom, co zrovna vrací server. */
 function baseStatus(now: number): LicenseStatus {
   return {
@@ -210,6 +217,11 @@ function baseStatus(now: number): LicenseStatus {
         suspend_at: null,
         access_until: null,
         data_until: null,
+        amount_due: null,
+        currency: null,
+        // Zdravá instalace nic nedluží — odkaz je jen správa předplatného,
+        // stejně jako ho v tu chvíli dosadí backend.
+        pay_url: null,
       },
       storage: {
         measured: true,
@@ -296,6 +308,7 @@ export function buildPreviewStatus(
         valid_until: now - 5 * DAY,
         access_until: now - 5 * DAY,
         data_until: now + 30 * DAY,
+        ...PREVIEW_DUE,
       }, 'degraded')
 
     case 'overage':
@@ -319,6 +332,7 @@ export function buildPreviewStatus(
         next_attempt_at: now + 3 * DAY,
         suspend_at: now + 14 * DAY,
         access_until: now + 14 * DAY,
+        ...PREVIEW_DUE,
       })
 
     case 'suspended':
@@ -331,6 +345,7 @@ export function buildPreviewStatus(
         max_attempts: 4,
         access_until: now - 1 * DAY,
         data_until: now + 30 * DAY,
+        ...PREVIEW_DUE,
       }, 'degraded')
 
     case 'expired':
@@ -342,6 +357,7 @@ export function buildPreviewStatus(
         valid_until: now - 9 * DAY,
         access_until: now - 9 * DAY,
         data_until: now + 30 * DAY,
+        ...PREVIEW_DUE,
       }, 'degraded')
 
     // Zrušená obnova — zaplaceno je, ale doběhne to. Záměrně NENÍ „unpaid".

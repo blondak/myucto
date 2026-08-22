@@ -293,6 +293,7 @@ use MyInvoice\Action\Accounting\Reports\ReportingSettingsAction;
 use MyInvoice\Action\Accounting\Reports\SaldoAction;
 use MyInvoice\Action\Accounting\Reports\SmallAssetReportAction;
 use MyInvoice\Action\Accounting\Reports\TrialBalanceAction;
+use MyInvoice\Action\License\LicenseBillingAction;
 use MyInvoice\Action\License\LicenseStatusAction;
 use MyInvoice\Action\License\ActivateLicenseAction;
 use MyInvoice\Action\License\DeactivateLicenseAction;
@@ -409,6 +410,10 @@ final class Routes
 
         // Licencování a aktivace (E4) — admin only (RoutePermissionMap → superadmin).
         $app->get ('/api/license/status',        LicenseStatusAction::class);
+        // ⚠️ Jediná výjimka z té brány: dunning stav (co dlužím, dokdy, kde zaplatit)
+        // vidí i běžný admin — jinak se o neúspěšné platbě dozví až tím, že
+        // instalace přestane fungovat. Rozsah viz BillingSnapshot::dunning().
+        $app->get ('/api/license/billing',       LicenseBillingAction::class);
         $app->post('/api/license/activate',      ActivateLicenseAction::class);
         $app->post('/api/license/deactivate',    DeactivateLicenseAction::class);
         // Vypnutí automatického prodlužování — licence doběhne do valid_until.

@@ -20,7 +20,7 @@
  *     varianta věty BEZ termínu (`*_nodate`) — mlčet je lepší než lhát.
  */
 
-import type { ManagedBillingInfo, ManagedStorageInfo } from './license'
+import type { BillingDunningInfo, ManagedStorageInfo } from './license'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Místo na disku
@@ -185,8 +185,8 @@ function isUpcoming(at: number | null | undefined): at is number {
 
 /** První termín, který server opravdu poslal a který ještě nenastal. */
 function firstKnown(
-  billing: ManagedBillingInfo,
-  order: Array<keyof Pick<ManagedBillingInfo, 'next_attempt_at' | 'suspend_at' | 'access_until' | 'data_until'>>,
+  billing: BillingDunningInfo,
+  order: Array<keyof Pick<BillingDunningInfo, 'next_attempt_at' | 'suspend_at' | 'access_until' | 'data_until'>>,
 ): { field: string; at: number } | null {
   for (const field of order) {
     const at = billing[field]
@@ -202,7 +202,7 @@ const NEXT_KEY_BY_FIELD: Record<string, string> = {
   data_until: `${I18N_PREFIX}.next_data_end`,
 }
 
-function milestones(billing: ManagedBillingInfo): BillingMilestone[] {
+function milestones(billing: BillingDunningInfo): BillingMilestone[] {
   const raw: Array<[BillingMilestone['kind'], number | null]> = [
     ['next_attempt', billing.next_attempt_at],
     ['suspend', billing.suspend_at],
@@ -217,7 +217,7 @@ function milestones(billing: ManagedBillingInfo): BillingMilestone[] {
 }
 
 /** Stavy licence, ve kterých jsou placené moduly zavřené. */
-export function areFeaturesLocked(billing: ManagedBillingInfo | null | undefined): boolean {
+export function areFeaturesLocked(billing: BillingDunningInfo | null | undefined): boolean {
   return billing?.license_state === 'degraded' || billing?.license_state === 'trial_expired'
 }
 
@@ -230,7 +230,7 @@ export function areFeaturesLocked(billing: ManagedBillingInfo | null | undefined
  * u pozastavené instance už jen to, dokdy držíme data.
  */
 export function resolveBillingNarrative(
-  billing: ManagedBillingInfo | null | undefined,
+  billing: BillingDunningInfo | null | undefined,
 ): BillingNarrative | null {
   if (!billing) return null
 

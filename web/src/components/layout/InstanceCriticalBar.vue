@@ -5,7 +5,7 @@ import { RouterLink } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { storageQuota } from '@/api/storageQuota'
 import { resolveInstanceAlerts, type InstanceAlertReason } from '@/api/instanceAlert'
-import { ensureInstanceStatus, instanceStatus } from '@/api/instanceStatus'
+import { ensureInstanceDunning, ensureInstanceStatus, instanceStatus } from '@/api/instanceStatus'
 import { instancePreview } from '@/api/instancePreview'
 import { resolveBillingNarrative } from '@/api/instanceHealth'
 import { ICONS } from '@/components/ui/buttonStyles'
@@ -51,17 +51,23 @@ const auth = useAuthStore()
 const previewing = instancePreview.isActive
 
 /**
- * Podrobnosti o platbě zná jen `/api/license/status` (admin). Načte se líně
- * a jednou; běžný uživatel ani self-hosted instalace ho nezavolají vůbec
- * a linka se pak chová jako dřív — jen bez dvou vět navíc.
+ * Podrobnosti o platbě. Superadmin je má v `/api/license/status`, běžný admin
+ * v užším `/api/license/billing` — obojí líně a jednou.
+ *
+ * ⚠️ Druhý dotaz existuje proto, že linka byla adminovi bez superadmin práv
+ * k ničemu: viděl „není zaplaceno" bez částky, bez termínů a bez cesty
+ * k úhradě. Self-hosted instalace nezavolá ani jedno.
  */
 watch(
   () => [auth.isManagedInstallation, auth.isSuperadmin] as const,
-  ([managed, superadmin]) => { void ensureInstanceStatus({ managed, superadmin }) },
+  ([managed, superadmin]) => {
+    void ensureInstanceStatus({ managed, superadmin })
+    if (!superadmin) void ensureInstanceDunning({ managed })
+  },
   { immediate: true },
 )
 
-const billing = instanceStatus.billing
+const billing = instanceStatus.dunning
 
 const reasons = computed<InstanceAlertReason[]>(() => resolveInstanceAlerts({
   managed: previewing.value ? true : auth.isManagedInstallation,
@@ -120,12 +126,42 @@ const nextText = computed(() => {
  */
 const unpaidDescKey = computed(() => {
   const n = narrative.value
-  // Stav neznáme (běžný uživatel bez práva na /license/status) → původní,
-  // obecná formulace. Ta odpovídá stavu, ve kterém se linka rozsvítí nejčastěji.
+  // Stav neznáme (klientský účet, spadlý dotaz) → původní, obecná formulace.
   if (!n) return 'instance_alert.unpaid_desc'
 
   return n.featuresLocked ? 'instance_alert.unpaid_desc' : 'instance_alert.unpaid_desc_open'
 })
+
+/**
+ * ── DOPLATIT PŘÍMO ODSUD ─────────────────────────────────────────────────
+ * Odkaz vydává licenční server (`pay_url`); backend za něj v nejhorším dosadí
+ * správu předplatného, takže tlačítko má vždycky kam vést. `null` znamená, že
+ * není nakonfigurovaná ani ta — pak zůstává jen proklik na vnitřní obrazovku.
+ */
+const payUrl = computed(() => billing.value?.pay_url ?? null)
+
+/** Dlužná částka. Když ji server neposlal, tlačítko o ní MLČÍ. */
+const amountDueText = computed(() => {
+  const amount = billing.value?.amount_due
+  if (amount === null || amount === undefined) return null
+  const currency = billing.value?.currency
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: currency || 'CZK',
+      maximumFractionDigits: 2,
+    }).format(amount)
+  } catch {
+    return `${amount} ${currency ?? ''}`.trim()
+  }
+})
+
+/** Popisek platebního tlačítka — s částkou, když ji známe. */
+const payLabel = computed(() => (
+  amountDueText.value === null
+    ? t('instance_alert.pay_cta')
+    : t('instance_alert.pay_cta_amount', { amount: amountDueText.value })
+))
 
 /**
  * Má tenhle důvod konkrétní vyprávění (co se stalo / co bude)?
@@ -228,11 +264,25 @@ onBeforeUnmount(() => {
           <span class="ml-1">{{ nextText }}</span>
         </template>
       </span>
+      <!-- ⚠️ U dluhu vede HLAVNÍ tlačítko rovnou na platbu, ne na obrazovku,
+           odkud se teprve odchází na web. Doplatit z aplikace byla dosud cesta
+           přes tři prokliky bez jediné částky; kdo se v ní ztratil, nezaplatil.
+           Proklik na vnitřní rekapitulaci zůstává vedle jako sekundární. -->
+      <a
+        v-if="reason === 'unpaid' && payUrl"
+        :href="payUrl"
+        target="_blank"
+        rel="noopener"
+        class="shrink-0 whitespace-nowrap rounded-md bg-white px-3 py-1 font-semibold text-danger-700 hover:bg-white/90"
+        data-instance-critical-pay
+      >
+        {{ payLabel }}
+      </a>
       <RouterLink
         :to="TARGET[reason]"
         class="shrink-0 whitespace-nowrap rounded-md bg-white/15 px-3 py-1 font-medium underline underline-offset-2 hover:bg-white/25"
       >
-        {{ t(`instance_alert.${reason}_cta`) }}
+        {{ reason === 'unpaid' && payUrl ? t('instance_alert.unpaid_detail') : t(`instance_alert.${reason}_cta`) }}
       </RouterLink>
     </div>
   </div>
