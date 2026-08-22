@@ -337,6 +337,7 @@ v MyÚčto používat navždy zdarma. Vyjmenovaná proprietární nadstavba vyž
 obsahuje [LICENCE.txt](LICENCE.txt); vždy aktuální verze je na
 [myucto.cz/licence](https://myucto.cz/licence), podmínky prodeje předplatného na
 [myucto.cz/obchodni-podminky](https://myucto.cz/obchodni-podminky).
+Aktuální licence je verze 1.4, účinná od 22. srpna 2026.
 
 Provozovatel odpovídá zejména za správnost účetních a daňových údajů, nastavení
 firmy, ochranu přístupových údajů, zákonné archivační lhůty, zálohování a bezpečné
