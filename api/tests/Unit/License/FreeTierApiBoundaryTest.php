@@ -29,6 +29,8 @@ final class FreeTierApiBoundaryTest extends TestCase
         yield 'dokumenty'         => ['/api/documents'];
         yield 'bankovní výpisy'   => ['/api/bank-statements'];
         yield 'pokladna'          => ['/api/accounting/cash-documents'];
+        yield 'pokladní doklad'   => ['/api/accounting/cash-documents/12'];
+        yield 'pokladny'          => ['/api/accounting/cash-registers'];
         yield 'bankovní účty'     => ['/api/accounting/bank-accounts'];
         yield 'přiznání k DPH'    => ['/api/reports/dph'];
         yield 'kontrolní hlášení' => ['/api/reports/kh'];
@@ -48,6 +50,10 @@ final class FreeTierApiBoundaryTest extends TestCase
         yield 'zaúčtování faktury'  => ['/api/invoices/12/book'];
         yield 'výdejka k faktuře'   => ['/api/invoices/12/stock-documents'];
         yield 'zaúčtování banky'    => ['/api/bank-transactions/5/post'];
+        // Vést pokladnu je zdarma, zaúčtovat doklad je účetnictví — zakládá
+        // zápis v deníku, který si zákazník bez licence nesmí ani přečíst.
+        yield 'zaúčtování pokladny' => ['/api/accounting/cash-documents/12/post'];
+        yield 'storno zaúčtování'   => ['/api/accounting/cash-documents/12/reverse'];
         yield 'automatizace'        => ['/api/automation/queue'];
         yield 'přehled firem'       => ['/api/portfolio/summary'];
         yield 'daňová evidence'     => ['/api/tax-evidence/cash-journal'];

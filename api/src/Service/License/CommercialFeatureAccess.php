@@ -46,6 +46,18 @@ final class CommercialFeatureAccess
         '#^/api/purchase-invoices/[0-9]+/stock-receipts?(/|$)#',
         '#^/api/purchase-invoices/[0-9]+/ai-suggest$#',
         '#^/api/bank-transactions/[0-9]+/(post|unpost|ai-suggest)$#',
+        // ⚠️ Pokladní doklad se VEDE zdarma, ale ZAÚČTOVAT ho je účetnictví.
+        //
+        // Výjimka pro `cash-*` níž je celoprefixová, takže z ní vypadávalo
+        // i zaúčtování a jeho storno — a ty zakládají zápis v deníku. Zákazník
+        // po vypršení licence tedy zapisoval do knihy, kterou si nesmí přečíst
+        // (GET /api/accounting/journal vrací 403). Bankovní protějšek o řádek
+        // výš i zaúčtování faktury zamčené odjakživa byly.
+        //
+        // Samostatný vzorec, ne zúžení té výjimky: vyhodnocuje se nezávisle
+        // a vyhrává, takže se do negativního lookaheadu nemusí přidávat další
+        // patro závorek, ve kterém se za rok nikdo nevyzná.
+        '#^/api/accounting/cash-documents/[0-9]+/(post|reverse)$#',
         '#^/api/bank-ai-suggestion-availability$#',
         '#^/api/accounting(?:$|/(?!cash-(?:documents|registers)(?:/|$)|bank-accounts(?:/|$)))#',
         '#^/api/(automation|portfolio)(/|$)#',
