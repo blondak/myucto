@@ -213,6 +213,10 @@ uvedeným v předchozí kapitole — jeho formát je kompatibilní se stejnou i 
 verzí MyÚčto. Obecné soubory `data/*.jsonl` jsou kontrolní a přenosový export,
 nikoli vstup pro import.
 
+V podvojném účetnictví export slouží také jako praktický podklad pro zákonnou
+retenci účetních a daňových záznamů. Přehled lhůt a zadržení skartace najdete v
+sekci **Účetnictví → Retence**.
+
 ## 69.7 Retence a právní zadržení na backendu
 
 Aktuální web Nástrojů nemá samostatnou záložku **Retence**, backend však

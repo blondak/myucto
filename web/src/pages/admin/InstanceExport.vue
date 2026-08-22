@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   instanceExportApi,
@@ -50,6 +51,7 @@ const visibleParts = computed(() => ALL_PARTS.filter(part => {
   if (part === 'closing_packages') return overview.value?.profile?.accounting_mode === 'double_entry'
   return true
 }))
+const hasAccountingRetention = computed(() => overview.value?.profile?.accounting_mode === 'double_entry')
 
 function errorMessage(e: any): string {
   return e?.response?.data?.error?.message || t('common.error')
@@ -205,6 +207,24 @@ function statusClass(status: string): string {
       class="bg-warning-50 border border-warning-200 rounded-lg p-3 mb-4 text-sm text-warning-800">
       {{ t('instance_export.not_encrypted') }}
     </div>
+
+    <section class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 mb-4 text-sm text-neutral-700">
+      <h2 class="font-medium text-neutral-800 mb-2">{{ t('instance_export.restore.title') }}</h2>
+      <ol class="list-decimal list-inside space-y-1 text-sm text-neutral-600">
+        <li>{{ t('instance_export.restore.step_extract') }}</li>
+        <li>{{ t('instance_export.restore.step_dry_run') }}</li>
+        <li>{{ t('instance_export.restore.step_restore') }}</li>
+      </ol>
+      <code class="block mt-3 rounded bg-neutral-900 text-neutral-100 px-3 py-2 text-xs break-all">php api/bin/archive-restore.php --file=obnova/myucto-archiv-pro-obnovu.zip --dry-run</code>
+      <code class="block mt-2 rounded bg-neutral-900 text-neutral-100 px-3 py-2 text-xs break-all">php api/bin/archive-restore.php --file=obnova/myucto-archiv-pro-obnovu.zip --restore</code>
+      <p class="mt-3 text-xs text-neutral-500">{{ t('instance_export.restore.note') }}</p>
+    </section>
+
+    <RouterLink v-if="hasAccountingRetention" :to="{ name: 'accounting-retention' }"
+      class="block bg-primary-50/50 border border-primary-100 rounded-lg p-4 mb-4 hover:border-primary-300 transition-colors">
+      <span class="block text-sm font-medium text-primary-800">{{ t('instance_export.retention.title') }}</span>
+      <span class="block text-xs text-primary-700 mt-1">{{ t('instance_export.retention.description') }}</span>
+    </RouterLink>
 
     <!-- Zadání exportu -->
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 mb-4">

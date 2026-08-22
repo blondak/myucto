@@ -16636,6 +16636,17 @@
         "subtitle": "Slož si jeden balíček firmy: obnovitelná data, doklady, DPH podklady i účetní uzávěrky.",
         "info": "Balíček obsahuje strojově čitelná data, doklady a volitelný verzovaný archiv pro bezpečnou obnovu. Manifest a SHA-256 součty popisují přesný obsah a ověří úplnost stažení.",
         "no_restore_note": "Obnovitelný archiv se po rozbalení spouští explicitně přes CLI do stejné nebo novější verze MyÚčto. Vždy založí novou firmu; nepřepisuje existující data.",
+        "restore": {
+            "title": "Jak obnovit data",
+            "step_extract": "Do exportu zahrňte část Obnovitelný účetní archiv a po stažení rozbalte hlavní ZIP.",
+            "step_dry_run": "V cílové instalaci stejné nebo novější verze nejdřív spusťte kontrolu bez zápisu.",
+            "step_restore": "Teprve po úspěšné kontrole spusťte obnovení stejným příkazem s parametrem --restore.",
+            "note": "Obnova vždy vytvoří novou firmu a přemapuje její interní ID; nepřepíše žádná existující data. JSONL ve složce data/ je přenositelný export, ne vstup pro obnovu."
+        },
+        "retention": {
+            "title": "Retence účetních a daňových záznamů",
+            "description": "Export je praktickým podkladem pro zákonnou povinnost uchovávat záznamy. V Retenci najdete lhůty podle § 31 a § 32 zákona o účetnictví a můžete evidovat zadržení skartace."
+        },
         "not_encrypted": "Archiv se nešifruje, protože v konfiguraci není nastavené heslo záloh (cron.backup.password). Obsahuje kompletní účetnictví firmy — ulož ho na bezpečné místo.",
         "new_export": "Nový export",
         "part": {
