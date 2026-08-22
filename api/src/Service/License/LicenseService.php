@@ -273,6 +273,24 @@ final class LicenseService
             return;
         }
 
+        // ⚠️ Odmítnutí kvůli PŘETÍŽENÍ není odpověď na otázku, jestli licence platí.
+        //
+        // Denní mutex je zabraný hned na začátku, takže 429 by spotřebovalo
+        // jediný pokus toho dne — a instalace by se o svém stavu nedozvěděla nic
+        // až do zítřka. Na spravovaném hostingu chodí celá flotila z jedné
+        // egress adresy, takže cizí provoz může strop vyčerpat bez našeho
+        // přičinění; po čtrnácti dnech (TTL tokenu) by pak instalace spadla
+        // do degradovaného stavu kvůli cizí smyčce. Mutex se proto vrací
+        // a příští request to zkusí znovu.
+        if (($resp['error'] ?? '') === 'rate_limited') {
+            $this->writeLicense(
+                'UPDATE license SET last_check_at = NULL, last_check_ok = 0, counter = ? WHERE id = 1',
+                [$counter],
+            );
+            $this->logger->info('license.renew.rate_limited');
+            return;
+        }
+
         // Server odmítl (not_bound / clone_suspected / subscription_expired / overage_expired) —
         // stávající token necháme doběhnout, stav se degraduje až vyprší.
         $this->writeLicense('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1', [$counter]);
