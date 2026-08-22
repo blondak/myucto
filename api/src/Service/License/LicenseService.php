@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\System\InstanceEntitlement;
 use MyInvoice\Service\System\TelemetryPayloadBuilder;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -72,6 +73,7 @@ final class LicenseService
         ?LoggerInterface $logger = null,
         ?EntityCache $cache = null,
         ?TelemetryPayloadBuilder $telemetry = null,
+        private readonly ?InstanceEntitlement $entitlement = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
         // Volitelná kvůli testovacím dvojníkům, které službu staví ručně.
@@ -745,6 +747,13 @@ final class LicenseService
             'UPDATE license SET instance_info = ? WHERE id = 1',
             [is_array($info) ? json_encode($info, JSON_UNESCAPED_UNICODE) : null],
         );
+
+        // ⚠️ Zahodit cache. `InstanceEntitlement` je v kontejneru sdílený
+        // a drží si přečtený rozsah po celý request; po vynucené obnově
+        // (nákup místa) by tedy zbytek requestu pracoval se starým číslem.
+        // Dnes to není vidět, protože obrazovka si dělá nový požadavek —
+        // ale je to past pro první odpověď, která rozsah přiloží.
+        $this->entitlement?->forget();
     }
 
     /**

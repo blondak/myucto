@@ -56,9 +56,10 @@ final class UserAdminAction
         if ($role === null) return Json::error($response, 'validation_failed', 'Vybraná role neexistuje nebo není aktivní.', 400);
         // Licenční limit (E4): nový aktivní uživatel na licencovaném místě.
         if ($this->roleCountsAsSeat($roleId)) {
-            $blocked = $this->license->current()->newUserBlockReason();
+            $state = $this->license->current();
+            $blocked = $state->newUserBlockReason();
             if ($blocked !== null) {
-                return Json::error($response, self::blockCode($blocked), self::blockMessage($blocked), 403);
+                return Json::error($response, self::blockCode($blocked), self::blockMessage($blocked, $state), 403);
             }
         }
         try {
@@ -119,9 +120,10 @@ final class UserAdminAction
         $willCount = $willBeActive && $this->roleCountsAsSeat($newRoleId);
         $wasCount  = (bool) $row['is_active'] && $this->roleCountsAsSeat((int) $row['role']['id']);
         if ($willCount && !$wasCount) {
-            $blocked = $this->license->current()->newUserBlockReason();
+            $state = $this->license->current();
+            $blocked = $state->newUserBlockReason();
             if ($blocked !== null) {
-                return Json::error($response, self::blockCode($blocked), self::blockMessage($blocked), 403);
+                return Json::error($response, self::blockCode($blocked), self::blockMessage($blocked, $state), 403);
             }
         }
 
@@ -302,13 +304,23 @@ final class UserAdminAction
      * že se to týká jen provozních rolí: účet s právem jen pro čtení jde
      * založit i bez licence a často je to přesně to, co admin potřebuje.
      */
-    private static function blockMessage(string $reason): string
+    private static function blockMessage(string $reason, LicenseState $state): string
     {
-        return $reason === LicenseState::BLOCK_NO_LICENSE
-            ? 'Bez platné licence lze zakládat jen uživatele s právem jen pro čtení. '
-                . 'Aktivujte licenci v sekci Aktivace, nebo uživateli přidělte roli jen pro čtení.'
-            : 'Byl dosažen počet uživatelů podle vaší licence. Rozšiřte předplatné, '
+        if ($reason !== LicenseState::BLOCK_NO_LICENSE) {
+            return 'Byl dosažen počet uživatelů podle vaší licence. Rozšiřte předplatné, '
                 . 'nebo uvolněte místo deaktivací jiného uživatele.';
+        }
+
+        // ⚠️ „Licence propadla" a „licenci jste nikdy neměli" vyžadují jiný krok.
+        // Posílat zákazníka, který licenci aktivovanou MÁ, do sekce Aktivace je
+        // rada, po které se nic nezmění — jemu propadlo předplatné.
+        if ($state->state === LicenseState::DEGRADED) {
+            return 'Platnost licence vypršela, takže jde zakládat jen uživatele s právem '
+                . 'jen pro čtení. Obnovte předplatné, nebo uživateli přidělte roli jen pro čtení.';
+        }
+
+        return 'Bez platné licence lze zakládat jen uživatele s právem jen pro čtení. '
+            . 'Aktivujte licenci v sekci Aktivace, nebo uživateli přidělte roli jen pro čtení.';
     }
     /**
      * Zabere účet s touhle rolí licenční místo?

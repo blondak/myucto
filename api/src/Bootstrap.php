@@ -537,6 +537,10 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\License\LicenseClient::class),
                 $c->get(LoggerInterface::class),
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
+                // Telemetrie se dopočítá lazily (viz docblock služby), rozsah
+                // zaplacené služby ale musí být TÁŽ instance jako všude jinde —
+                // jinak by se po zápisu nového rozsahu nezahodila jeho cache.
+                entitlement: $c->get(\MyInvoice\Service\System\InstanceEntitlement::class),
             ),
             \MyInvoice\Service\Tenant\SupplierAccessResolver::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Tenant\SupplierAccessResolver(
                 $c->get(Connection::class),

@@ -183,6 +183,11 @@ final class TelemetryPayloadBuilder
             $config,
             $managed,
             new StorageUsageMeter($db, $config),
+            // ⚠️ VLASTNÍ instance, ne ta z kontejneru — a je to schválně.
+            // Telemetrie se sestavuje PŘED obnovou licence, takže potřebuje
+            // stav, jaký platil na začátku requestu. Nesmí se na ni ale
+            // navěsit nic, co by čekalo sdílenou cache: `forget()`
+            // z LicenseService na tuhle kopii nedosáhne.
             new InstanceEntitlement($db, $config),
         );
 
