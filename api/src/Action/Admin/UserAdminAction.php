@@ -13,6 +13,7 @@ use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseState;
+use MyInvoice\Service\License\SeatPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -25,6 +26,7 @@ final class UserAdminAction
         private readonly PasswordHasher $hasher,
         private readonly LicenseService $license,
         private readonly SessionManager $sessions,
+        private readonly SeatPolicy $seats,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -52,8 +54,8 @@ final class UserAdminAction
         if (!in_array($locale, ['cs', 'en'], true)) return Json::error($response, 'validation_failed', 'Neplatný locale.', 400);
         $role = $this->activeRole($roleId);
         if ($role === null) return Json::error($response, 'validation_failed', 'Vybraná role neexistuje nebo není aktivní.', 400);
-        // Licenční limit (E4): nový aktivní uživatel na licencovaném místě (role != readonly/client).
-        if ($this->roleCountsAsSeat((string) ($role['system_key'] ?? ''), (string) $role['role_type'])) {
+        // Licenční limit (E4): nový aktivní uživatel na licencovaném místě.
+        if ($this->roleCountsAsSeat($roleId)) {
             $blocked = $this->license->current()->newUserBlockReason();
             if ($blocked !== null) {
                 return Json::error($response, self::blockCode($blocked), self::blockMessage($blocked), 403);
@@ -113,10 +115,9 @@ final class UserAdminAction
 
         // Licenční limit (E4): blokuj přechod uživatele DO licencovaného místa (aktivace
         // nebo změna z readonly/client na provozní roli), pokud už není volná kapacita.
-        $newSysKey  = $newRole !== null ? (string) ($newRole['system_key'] ?? '') : (string) ($row['role']['system_key'] ?? '');
-        $newRoleType = $newRole !== null ? (string) $newRole['role_type'] : (string) $row['role']['type'];
-        $willCount = $willBeActive && $this->roleCountsAsSeat($newSysKey, $newRoleType);
-        $wasCount  = (bool) $row['is_active'] && $this->roleCountsAsSeat((string) ($row['role']['system_key'] ?? ''), (string) $row['role']['type']);
+        $newRoleId = $newRole !== null ? (int) $newRole['id'] : (int) $row['role']['id'];
+        $willCount = $willBeActive && $this->roleCountsAsSeat($newRoleId);
+        $wasCount  = (bool) $row['is_active'] && $this->roleCountsAsSeat((int) $row['role']['id']);
         if ($willCount && !$wasCount) {
             $blocked = $this->license->current()->newUserBlockReason();
             if ($blocked !== null) {
@@ -309,9 +310,16 @@ final class UserAdminAction
             : 'Byl dosažen počet uživatelů podle vaší licence. Rozšiřte předplatné, '
                 . 'nebo uvolněte místo deaktivací jiného uživatele.';
     }
-    private function roleCountsAsSeat(string $systemKey, string $roleType): bool
+    /**
+     * Zabere účet s touhle rolí licenční místo?
+     *
+     * ⚠️ Rozhoduje právo ZÁPISU, ne název role: vlastní staff role bez zápisu
+     * („Auditor", „Náhled") místo nezabere, zatímco role pojmenovaná
+     * „Pouze pro čtení", které někdo zápis přidal, ano.
+     */
+    private function roleCountsAsSeat(int $roleId): bool
     {
-        return $roleType !== 'client' && $systemKey !== 'readonly';
+        return $this->seats->roleGrantsWrite($roleId);
     }
 
     private function legacyRole(array $role): string

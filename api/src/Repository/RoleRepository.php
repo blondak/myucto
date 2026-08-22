@@ -86,6 +86,7 @@ final class RoleRepository
         if ((string) $current['updated_at'] !== $revision) throw new RoleRevisionConflict();
         $name = $this->validateName($name, (string) $current['role_type'], $id);
         $levels = $this->validatePermissions((string) $current['role_type'], $permissions);
+        $this->guardReadOnlyRole($current, $levels);
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
@@ -134,6 +135,39 @@ final class RoleRepository
         $default = (int) ($row['defaults'] ?? 0);
         $overrides = (int) ($row['overrides'] ?? 0);
         return ['default' => $default, 'overrides' => $overrides, 'total' => $default + $overrides];
+    }
+
+    /**
+     * Role „Pouze pro čtení" musí zůstat jen pro čtení.
+     *
+     * ⚠️ Je to LICENČNÍ pojistka, ne kosmetika. Účty s touhle rolí nezabírají
+     * licenční místo, protože nemají právo zápisu. Kdyby se dala přepsat na
+     * zapisující, dal by se jedním požadavkem vyrobit neomezený počet
+     * plnohodnotných uživatelů zdarma — a nikde by to nebylo vidět, protože
+     * role by se dál jmenovala stejně.
+     *
+     * Jméno, aktivita ani rozsah ČTENÍ se tím nezamykají; upravit se nedá jen
+     * úroveň zápisu. Vlastní zapisující role se zakládají zvlášť a ty místo
+     * zabírají, jak mají.
+     *
+     * @param array<string, mixed> $current
+     * @param array<string, int> $levels
+     */
+    private function guardReadOnlyRole(array $current, array $levels): void
+    {
+        if (($current['system_key'] ?? null) !== 'readonly') {
+            return;
+        }
+        foreach ($levels as $key => $level) {
+            // Vlastní profil je zápis i u role jen pro čtení — jinak by si
+            // uživatel nezměnil ani heslo. Licenční místo z toho neplyne.
+            if ($key === 'profile') {
+                continue;
+            }
+            if ($level >= AccessLevel::WRITE->value) {
+                throw new SystemRoleLocked();
+            }
+        }
     }
 
     /** @param array<string, int|string|AccessLevel> $permissions @return array<string, int> */

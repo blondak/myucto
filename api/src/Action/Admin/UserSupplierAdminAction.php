@@ -10,6 +10,8 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\License\LicenseService;
+use MyInvoice\Service\License\SeatPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -20,6 +22,8 @@ final class UserSupplierAdminAction
         private readonly UserSupplierRepository $repo,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly LicenseService $license,
+        private readonly SeatPolicy $seats,
     ) {}
 
     public function list(Request $request, Response $response, array $args): Response
@@ -73,6 +77,33 @@ final class UserSupplierAdminAction
                 return Json::error($response, 'role_type_mismatch', 'Override role musí mít stejný typ jako výchozí role uživatele.', 400);
             }
             if ($role['role_type'] === 'superadmin') return Json::error($response, 'system_role_locked', 'Superadmin roli nelze použít jako override.', 409);
+        }
+
+        // ⚠️ Licenční limit platí i tady. Přiřazení firem umí z účtu jen pro
+        // čtení udělat plnohodnotného zapisujícího uživatele — override role
+        // se dosud ověřovala jen na shodu `role_type`, a ta je u „Účetní"
+        // i u „Pouze pro čtení" shodně `staff`. Bez téhle kontroly se dal
+        // limit obejít úplně, a to přes běžnou obrazovku, ne přes hack.
+        $overrideRoleIds = [];
+        foreach ($assignments as $assignment) {
+            if ($assignment['role_id'] !== null) $overrideRoleIds[] = (int) $assignment['role_id'];
+        }
+        $occupiedBefore = $this->seats->occupiesSeat(
+            (int) $user['role_id'],
+            $this->repo->overrideRoleIds($id),
+        );
+        $occupiesAfter = $this->seats->occupiesSeat((int) $user['role_id'], $overrideRoleIds);
+        if ($occupiesAfter && !$occupiedBefore) {
+            $blocked = $this->license->current()->newUserBlockReason();
+            if ($blocked !== null) {
+                return Json::error(
+                    $response,
+                    $blocked === 'no_license' ? 'license_required' : 'license_user_limit',
+                    'Tímhle přiřazením by účet získal právo zápisu a zabral licenční místo, '
+                        . 'které teď není volné. Přidělte roli jen pro čtení, nebo rozšiřte předplatné.',
+                    403,
+                );
+            }
         }
 
         $this->repo->replaceForUser($id, $assignments);

@@ -876,20 +876,17 @@ final class LicenseService
         );
     }
 
+    /**
+     * Kolik aktivních uživatelů zabírá licenční místo.
+     *
+     * ⚠️ Rozhoduje SKUTEČNÉ OPRÁVNĚNÍ, ne název role — viz {@see SeatPolicy}.
+     * Počítat podle `system_key <> 'readonly'` se dalo obejít přiřazením
+     * override role přes obrazovku firem i přepsáním systémové role přes API,
+     * a v obou případech měl uživatel plná práva, aniž se objevil v počtu.
+     */
     private function queryActiveUsers(): int
     {
-        // Aktivní uživatelé s rolí != readonly (a != client — portálové účty
-        // zákazníků nejsou provozní licenční místa). Deaktivované se nepočítají.
-        // Přes roles JOIN, protože vlastní staff role mají legacy `role`='readonly'
-        // (coarse bucket) — počítat podle legacy sloupce by je chybně vynechalo.
-        if ($this->db->hasTable('roles') && $this->db->hasColumn('users', 'role_id')) {
-            $sql = "SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id
-                     WHERE u.is_active = 1 AND r.role_type <> 'client'
-                       AND (r.system_key IS NULL OR r.system_key <> 'readonly')";
-            return (int) $this->db->pdo()->query($sql)->fetchColumn();
-        }
-        $sql = "SELECT COUNT(*) FROM users WHERE is_active = 1 AND role NOT IN ('readonly', 'client')";
-        return (int) $this->db->pdo()->query($sql)->fetchColumn();
+        return (new SeatPolicy($this->db))->countActiveSeats();
     }
 
     private function countCompanies(): int

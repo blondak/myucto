@@ -1,0 +1,163 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\License;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Security\AccessLevel;
+
+/**
+ * Kdo zabírá licenční MÍSTO — jediné místo, kde se na to odpovídá.
+ *
+ * ⚠️ Rozhoduje SKUTEČNÉ OPRÁVNĚNÍ, ne název role. Dřív se počítalo podle
+ * `system_key <> 'readonly'`, a to se dalo obejít dvěma cestami, které obě
+ * vedou přes běžné obrazovky administrace:
+ *
+ *  1. účet s rolí „Pouze pro čtení" dostal přes přiřazení firem override roli
+ *     „Účetní" — kontrolovala se jen shoda `role_type`, a ta je u obou `staff`.
+ *     Uživatel měl plná práva a v počtu míst se neobjevil;
+ *  2. systémová role „Pouze pro čtení" se dala přes API přepsat na zapisující.
+ *     Od té chvíle byla plnohodnotná a `system_key` ji dál vyřazoval z počtu.
+ *
+ * Obojí je tady zavřené tím, že se místo počítá podle práva ZÁPISU — a to
+ * napříč výchozí rolí i všemi per-firemními override rolemi.
+ *
+ * Vedlejší efekt, který je taky správně: vlastní role typu „Auditor" nebo
+ * „Náhled" místo nezaberou, protože zápis nemají, a demo účet taky ne.
+ */
+final class SeatPolicy
+{
+    /**
+     * Práva, která z účtu nedělají licenční místo.
+     *
+     * Vlastní profil je zápis, ale ne práce s daty firmy: i účet jen pro čtení
+     * si musí umět změnit jméno a heslo, jinak by se nedal používat. Role
+     * „Pouze pro čtení" má proto v katalogu ({@see \MyInvoice\Security\PermissionCatalog})
+     * `profile` na WRITE jako jedinou výjimku a tenhle výčet ji musí kopírovat.
+     * API token jedná jménem svého uživatele, takže tokenu účtu jen pro čtení
+     * víc práv nedá.
+     *
+     * @var list<string>
+     */
+    private const SELF_SERVICE_KEYS = ['profile', 'profile.tokens'];
+
+    public function __construct(private readonly Connection $db) {}
+
+    /**
+     * Kolik aktivních uživatelů zabírá licenční místo.
+     *
+     * Počítá se `DISTINCT` přes uživatele: účet s právem zápisu nad pěti firmami
+     * je pořád jedno místo.
+     */
+    public function countActiveSeats(): int
+    {
+        if (!$this->supportsPermissionCounting()) {
+            // Instalace před migrací 1074 (dynamické role) — spadne se na
+            // legacy sloupec. Nová pravidla nad ním vyhodnotit nejde.
+            return (int) $this->db->pdo()
+                ->query("SELECT COUNT(*) FROM users WHERE is_active = 1 AND role NOT IN ('readonly', 'client')")
+                ->fetchColumn();
+        }
+
+        $sql = 'SELECT COUNT(DISTINCT u.id) FROM users u
+                 WHERE u.is_active = 1 AND (' . $this->seatConditionSql('u.role_id', 'u.id') . ')';
+
+        return (int) $this->db->pdo()->query($sql)->fetchColumn();
+    }
+
+    /**
+     * Zabírá uživatel místo, kdyby měl tuhle výchozí roli a tyhle override role?
+     *
+     * @param list<int> $overrideRoleIds per-firemní role; prázdné pole = žádné
+     */
+    public function occupiesSeat(?int $defaultRoleId, array $overrideRoleIds = []): bool
+    {
+        if (!$this->supportsPermissionCounting()) {
+            return true;
+        }
+        foreach (array_merge($defaultRoleId === null ? [] : [$defaultRoleId], $overrideRoleIds) as $roleId) {
+            if ($this->roleGrantsWrite((int) $roleId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Dává role právo zápisu k něčemu jinému než k vlastnímu profilu? */
+    public function roleGrantsWrite(int $roleId): bool
+    {
+        if ($roleId <= 0 || !$this->supportsPermissionCounting()) {
+            return false;
+        }
+
+        // Superadmin nemá v `role_permissions` ani řádek — jeho plný přístup je
+        // implicitní. Kdyby se počítalo jen podle uložených práv, jediný účet,
+        // který instalaci opravdu ovládá, by se do počtu nikdy nezapočítal.
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT r.role_type,
+                    EXISTS (
+                        SELECT 1 FROM role_permissions rp
+                         WHERE rp.role_id = r.id
+                           AND rp.access_level >= ?
+                           AND rp.permission_key NOT IN (" . $this->selfServicePlaceholders() . ")
+                    ) AS grants_write
+               FROM roles r WHERE r.id = ? LIMIT 1"
+        );
+        $stmt->execute([AccessLevel::WRITE->value, ...self::SELF_SERVICE_KEYS, $roleId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$row) {
+            return false;
+        }
+        if ((string) $row['role_type'] === 'superadmin') {
+            return true;
+        }
+        if ((string) $row['role_type'] === 'client') {
+            return false;
+        }
+        return (bool) $row['grants_write'];
+    }
+
+    /**
+     * Podmínka „tenhle uživatel zabírá místo" pro použití ve WHERE.
+     *
+     * Sestavuje se jako řetězec, protože se používá i v agregaci nad všemi
+     * uživateli, kde by dotaz na roli po jednom znamenal N+1.
+     */
+    private function seatConditionSql(string $roleIdExpr, string $userIdExpr): string
+    {
+        $keys = "'" . implode("', '", self::SELF_SERVICE_KEYS) . "'";
+        $write = AccessLevel::WRITE->value;
+
+        return "
+            EXISTS (SELECT 1 FROM roles r
+                     WHERE r.id = {$roleIdExpr} AND r.role_type = 'superadmin')
+         OR EXISTS (SELECT 1 FROM roles r
+                      JOIN role_permissions rp ON rp.role_id = r.id
+                     WHERE r.id = {$roleIdExpr}
+                       AND r.role_type <> 'client'
+                       AND rp.access_level >= {$write}
+                       AND rp.permission_key NOT IN ({$keys}))
+         OR EXISTS (SELECT 1 FROM user_suppliers us
+                      JOIN roles r2 ON r2.id = us.role_id
+                      JOIN role_permissions rp2 ON rp2.role_id = r2.id
+                     WHERE us.user_id = {$userIdExpr}
+                       AND r2.role_type <> 'client'
+                       AND rp2.access_level >= {$write}
+                       AND rp2.permission_key NOT IN ({$keys}))";
+    }
+
+    private function selfServicePlaceholders(): string
+    {
+        return implode(', ', array_fill(0, count(self::SELF_SERVICE_KEYS), '?'));
+    }
+
+    private function supportsPermissionCounting(): bool
+    {
+        return $this->db->hasTable('roles')
+            && $this->db->hasTable('role_permissions')
+            && $this->db->hasTable('user_suppliers')
+            && $this->db->hasColumn('users', 'role_id')
+            && $this->db->hasColumn('user_suppliers', 'role_id');
+    }
+}
