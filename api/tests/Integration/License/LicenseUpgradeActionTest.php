@@ -89,7 +89,7 @@ final class LicenseUpgradeActionTest extends TestCase
         $periodEnd = time() + 86400 * 20;
         $this->client->expects($this->once())
             ->method('upgradeQuote')
-            ->with($this->anything(), 5)
+            ->with($this->anything(), $this->logicalNot($this->equalTo('')), 5)
             ->willReturn([
                 'ok' => true, 'current_users' => 3, 'new_users' => 5,
                 'amount' => 250, 'currency' => 'CZK', 'period_end' => $periodEnd,
@@ -146,7 +146,7 @@ final class LicenseUpgradeActionTest extends TestCase
         $this->seedActivated();
         $this->client->expects($this->once())
             ->method('upgrade')
-            ->with($this->anything(), 5)
+            ->with($this->anything(), $this->logicalNot($this->equalTo('')), 5)
             ->willReturn(['ok' => true, 'new_users' => 5, 'amount_charged' => 250]);
         // Po úspěchu se vynutí obnova tokenu → přijde nový token s vyšším limitem.
         $this->client->expects($this->once())

@@ -131,10 +131,11 @@ final class LicenseClient
      * @return array<string,mixed> {ok,current_users,new_users,amount,currency,period_end} / {error}
      * @throws LicenseNetworkException
      */
-    public function upgradeQuote(string $licenseKey, int $users): array
+    public function upgradeQuote(string $licenseKey, string $instanceId, int $users): array
     {
         return $this->post('/api/license/upgrade', [
             'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
             'users'       => $users,
             'quote'       => true,
         ]);
@@ -150,10 +151,11 @@ final class LicenseClient
      * @return array<string,mixed> {ok,new_users,amount_charged} / {error}
      * @throws LicenseNetworkException
      */
-    public function upgrade(string $licenseKey, int $users): array
+    public function upgrade(string $licenseKey, string $instanceId, int $users): array
     {
         return $this->post('/api/license/upgrade', [
             'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
             'users'       => $users,
         ], self::CHARGE_TIMEOUT);
     }
@@ -169,10 +171,11 @@ final class LicenseClient
      * @return array<string,mixed> {ok,current_quota_gb,new_quota_gb,amount,recurring_delta,period_end} / {error}
      * @throws LicenseNetworkException
      */
-    public function storageQuote(string $licenseKey, int $quotaGb): array
+    public function storageQuote(string $licenseKey, string $instanceId, int $quotaGb): array
     {
         return $this->post('/api/license/quota', [
             'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
             'quota_gb'    => $quotaGb,
             'quote'       => true,
         ]);
@@ -185,9 +188,10 @@ final class LicenseClient
      * @return array<string,mixed> {ok,new_quota_gb,amount_charged,provisioning_pending} / {error}
      * @throws LicenseNetworkException
      */
-    public function storageUpgrade(string $licenseKey, int $quotaGb): array
+    public function storageUpgrade(string $licenseKey, string $instanceId, int $quotaGb): array
     {
         return $this->post('/api/license/quota', [
+            'instance_id' => $instanceId,
             'license_key' => $licenseKey,
             'quota_gb'    => $quotaGb,
         ], self::CHARGE_TIMEOUT);

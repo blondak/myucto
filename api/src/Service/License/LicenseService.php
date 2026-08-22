@@ -349,7 +349,7 @@ final class LicenseService
         }
 
         try {
-            $resp = $this->client->upgradeQuote($key, $users);
+            $resp = $this->client->upgradeQuote($key, $this->instanceIdOf($row), $users);
         } catch (LicenseNetworkException $e) {
             $this->logger->info('license.upgrade_quote.network_error', ['error' => $e->getMessage()]);
             return ['ok' => false, 'error' => 'server_unreachable'];
@@ -378,7 +378,7 @@ final class LicenseService
         }
 
         try {
-            $resp = $this->client->upgrade($key, $users);
+            $resp = $this->client->upgrade($key, $this->instanceIdOf($row), $users);
         } catch (LicenseNetworkException $e) {
             $this->logger->info('license.upgrade.network_error', ['error' => $e->getMessage()]);
             return ['ok' => false, 'error' => 'server_unreachable'];
@@ -414,7 +414,7 @@ final class LicenseService
         }
 
         try {
-            $resp = $this->client->storageQuote($key, $quotaGb);
+            $resp = $this->client->storageQuote($key, $this->instanceIdOf($row), $quotaGb);
         } catch (LicenseNetworkException $e) {
             $this->logger->info('license.storage_quote.network_error', ['error' => $e->getMessage()]);
             return ['ok' => false, 'error' => 'server_unreachable'];
@@ -450,7 +450,7 @@ final class LicenseService
         }
 
         try {
-            $resp = $this->client->storageUpgrade($key, $quotaGb);
+            $resp = $this->client->storageUpgrade($key, $this->instanceIdOf($row), $quotaGb);
         } catch (LicenseNetworkException $e) {
             // ⚠️ Odpověď se ztratila, ale platba mohla proběhnout. Nepobízet
             // k opakování — druhý pokus by strhl podruhé.
@@ -831,6 +831,19 @@ final class LicenseService
     private function isManaged(): bool
     {
         return (bool) $this->config->get('app.managed', false);
+    }
+    /**
+     * Identifikace TÉHLE instalace, kterou licenční server zná z aktivace.
+     *
+     * Posílá se i k peněžním cestám (navýšení míst, rozšíření místa). Ty se
+     * dřív autentizovaly pouhým „znám licenční klíč", takže kdo klíč získal,
+     * mohl bez potvrzení zatížit cizí uloženou kartu.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function instanceIdOf(array $row): string
+    {
+        return (string) ($row['instance_id'] ?? '');
     }
     /**
      * Fingerprint = sha256(hostname + DB name + app URL). Uloží se lazily do řádku,
