@@ -390,6 +390,11 @@ final class TenantPredicateTest extends TestCase
         // přestala by pouštět práci ostatním.
         'CronPreflight.php::hasAiWork' => 'instance-wide brána cronu, vrací jen bool',
 
+        // Licence platí pro CELOU instalaci, ne pro jednu firmu: účet s právem
+        // zápisu nad pěti firmami je jedno licenční místo. Zúžit počítání na
+        // jednu firmu by limit rozbilo — každá firma by měla vlastní počet.
+        'SeatPolicy.php::seatConditionSql' => 'licenční místa se počítají za celou instalaci',
+
         // Superadmin-only endpointy (jinak 403) — globální rozsah je jejich smysl.
         'ListSentEmailsAction.php::__invoke'         => 'superadmin přehled odeslaných e-mailů napříč instancí',
         'SetupSampleAction.php::__invoke'            => 'setup wizard nad prázdnou DB, superadmin-only',

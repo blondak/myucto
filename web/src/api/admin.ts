@@ -281,8 +281,12 @@ export interface SampleDataStatus {
  * `pending` = nikdy neběžela, ale instalace ještě nestihla ani jednu její
  * periodu (`max_age_hours`) — čerstvý stav, ne poplach. Teprve když instalace
  * periodu přeroste a heartbeat pořád chybí, přepne se na `never_ran`.
+ *
+ * `disabled` = úlohu výslovně vypnula konfigurace instalace (`cron.disabled_jobs`,
+ * typicky spravovaný hosting) — záměr, ne porucha (`health_source: 'config'`).
  */
-export type CronJobHealth = 'ok' | 'idle' | 'pending' | 'overdue' | 'failing' | 'overdue_and_failing' | 'never_ran'
+export type CronJobHealth =
+  | 'ok' | 'idle' | 'pending' | 'overdue' | 'failing' | 'overdue_and_failing' | 'never_ran' | 'disabled'
 
 export interface CronJob {
   script: string
@@ -293,8 +297,8 @@ export interface CronJob {
   critical: boolean
   max_age_hours: number
   health: CronJobHealth
-  /** Z čeho stav vychází: vlastní heartbeat úlohy, nebo heartbeat dispatcheru. */
-  health_source?: 'self' | 'dispatcher'
+  /** Z čeho stav vychází: vlastní heartbeat úlohy, heartbeat dispatcheru, nebo konfigurace instalace. */
+  health_source?: 'self' | 'dispatcher' | 'config'
   last_started_at: string | null
   last_finished_at: string | null
   last_status: 'running' | 'ok' | 'error' | null

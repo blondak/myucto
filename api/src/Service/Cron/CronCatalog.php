@@ -296,6 +296,27 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // H-10 — měření spotřeby místa (databáze + data BEZ záloh).
+                // Jediné místo, kde se prochází strom souborů; web i telemetrie
+                // pak čtou hotové číslo z `instance_storage_usage`.
+                //
+                // Hodinově: spotřeba neroste skokem, takže častěji nemá smysl,
+                // ale při denní frekvenci by se blížící se kvóta ohlásila pozdě
+                // — a upozornění na 90 % má smysl jen tehdy, když dorazí dřív,
+                // než instalace přestane zapisovat.
+                //
+                // `critical` = false: když měření vypadne, spotřeba zůstane
+                // NEZMĚŘENÁ (null), což NIC nezamyká. Zastavené měření je tedy
+                // ztráta přehledu, ne výpadek provozu.
+                'script' => 'cron-storage-usage',
+                'recommended' => 'hourly_15',
+                'linux_cron' => '15 * * * *',
+                'windows_schtasks' => '/sc hourly /mo 1',
+                'max_age_hours' => 6,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 // Plánovač v režimu CronScheduleMode::DISPATCHER — jediná položka,
                 // která si každou minutu spočítá, které úlohy z tohohle katalogu
                 // jsou na řadě, a spustí jen je. V režimu INDIVIDUAL se NEplánuje

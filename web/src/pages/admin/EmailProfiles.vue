@@ -9,10 +9,22 @@ import {
   type SigningProfile,
 } from '@/api/settings'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
+const auth = useAuthStore()
+
+/**
+ * H-02 — spravovaná instalace: odesílá hosting, obálku určuje jeho MTA a na ní
+ * stojí SPF. Vlastní SMTP/sendmail transport se proto nenabízí, ale pole se
+ * NESKRÝVÁ: uživatel musí vidět, proč tam volba není. Backend odmítá i bez UI.
+ */
+const transportLocked = computed(() => auth.isManagedInstallation)
+const transportLockedHint = computed(() =>
+  transportLocked.value ? t('settings.email_profile_transport_managed') : undefined,
+)
 const toast = useToast()
 const pageId = useId()
 
@@ -786,12 +798,26 @@ function certificateCommonName(subject: string | null | undefined): string | nul
         <div class="md:col-span-2">
           <label class="block text-xs font-medium text-neutral-600">
             {{ t('settings.email_profile_transport') }}
-            <select v-model="draft.transport_type" class="mt-1 block w-full max-w-md rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+            <select
+              v-model="draft.transport_type"
+              :disabled="transportLocked"
+              :title="transportLockedHint"
+              class="mt-1 block w-full max-w-md rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm disabled:bg-neutral-50 disabled:text-neutral-400"
+            >
+              <!--
+                Volby zůstávají i v zamčeném stavu: profil zděděný ze samostatné
+                instalace může mít vlastní transport pořád nastavený a select bez
+                odpovídající položky by ukázal prázdno místo skutečné hodnoty.
+              -->
               <option value="global">{{ t('settings.email_profile_transport_global') }}</option>
               <option value="smtp">{{ t('settings.email_profile_transport_smtp') }}</option>
               <option value="sendmail">{{ t('settings.email_profile_transport_sendmail') }}</option>
             </select>
           </label>
+          <p v-if="transportLocked" class="mt-1.5 flex gap-1.5 text-xs text-neutral-500">
+            <svg class="mt-0.5 h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
+            <span>{{ t('settings.email_profile_transport_managed') }}</span>
+          </p>
           <div v-if="draft.transport_type === 'smtp'" class="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
             <label class="block text-xs font-medium text-neutral-600">
               {{ t('settings.email_profile_smtp_host') }}

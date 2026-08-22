@@ -10,6 +10,38 @@ Skripty samy detekují cestu k projektu (`PROJECT_ROOT`) podle umístění
 samotného skriptu, takže jsou přenositelné mezi `C:\inetpub\wwwroot\…`,
 `C:\work\…` (junction), `/var/www/…` na Linuxu apod.
 
+### Volba PHP interpretu — `MYINVOICE_PHP_BIN`
+
+Všechny skripty, které volají PHP (cron wrappery, `test.{sh,ps1}`,
+`audit-gate.{sh,ps1}`, `release-bundle.sh`, `license-*`, `download-*`,
+`install-zp-xsd.*`), defaultně volají `php` z `PATH`. Na hostingu s **víc
+nainstalovanými verzemi PHP** nemusí být ta z `PATH` ta správná (nebo tam
+žádná není) — nastav proměnnou prostředí, ať skript použije konkrétní
+binárku, aniž by se dotýkal `PATH`:
+
+```bash
+# Linux / macOS
+export MYINVOICE_PHP_BIN=/opt/php8.5/bin/php
+cmd/cron-dispatch.sh
+```
+
+```powershell
+# Windows PowerShell
+$env:MYINVOICE_PHP_BIN = 'C:\inetpub\php85\php.exe'
+.\cmd\cron-dispatch.cmd
+```
+
+```cmd
+REM Windows Task Scheduler (proměnnou nastav v definici úlohy, ne globálně)
+set MYINVOICE_PHP_BIN=C:\inetpub\php85\php.exe
+```
+
+Kdo proměnnou nenastaví, dostane přesně dnešní chování (`php` z `PATH`) —
+default se nemění. `download-jmhz-xsd.*`, `download-jmhz-codebooks.*` a
+`install-zp-xsd.*` navíc mají fallback na `C:\inetpub\php\php.exe`, pokud
+`php` není v `PATH` ani `MYINVOICE_PHP_BIN` není nastavená; `MYINVOICE_PHP_BIN`
+má vždy přednost před oběma.
+
 ## Přehled všech skriptů
 
 ### Cron — plánované úlohy
@@ -43,6 +75,7 @@ samotného skriptu, takže jsou přenositelné mezi `C:\inetpub\wwwroot\…`,
 | `license-deactivate.{cmd,sh}` | Deaktivace licence (E4) — uvolní vazbu na serveru a smaže klíč/token lokálně |
 | `cron-cnb-rates.{cmd,sh}` | Denní stažení kurzovního lístku ČNB do `exchange_rates` (`--days=N`, `--dry-run`). Bez ní se tabulka plní jen jako ad-hoc cache prvního dotazu, historie zůstává děravá a cizoměnová úhrada ke dni bez kurzu nemá čím ocenit pohyb. Dohání i mezery za posledních 30 dnů; dny, které kurz už mají, přeskočí bez HTTP volání. Jednorázové doplnění celé historie: `api/bin/backfill-cnb-rates.php` |
 | `cron-version-check.{cmd,sh}` | Denní kontrola GitHub Releases API; cachuje poslední dostupnou verzi + release notes pro **Systém → Aktualizace** |
+| `cron-storage-usage.{cmd,sh}` | Hodinové měření spotřeby místa instance (velikost databáze z `information_schema` + datový prostor **bez adresáře záloh**) do `instance_storage_usage`. Jediné místo, kde se prochází strom souborů — web i `/api/health` pak čtou hotové číslo. Podklad pro upozornění na 90 % a režim jen pro čtení při vyčerpané kvótě (`--force`, `--json`) |
 | `cron-dispatch.{cmd,sh}` | **Plánovač** pro režim „jeden dispatcher" (Systém → Plánované úlohy). Jediná položka běžící každou minutu, která spustí právě ty úlohy, které jsou na řadě a mají co dělat. V default režimu „jednotlivé úlohy" se neplánuje (`--dry-run`, `--at="RRRR-MM-DD HH:MM"`) |
 
 Všechny tři backup ZIPy (DB, PDF, Dokumenty) lze volitelně šifrovat heslem
@@ -69,6 +102,49 @@ se záměrně nevytvoří a úloha skončí chybou (vidět v **Systém → Plán
 |---|---|
 | `publish.{sh,ps1}` | `cd web && pnpm install && pnpm build` — produkční build frontendu do `web/dist/` (před commitem nebo nasazením na produkční IIS / Apache) |
 | `test.{sh,ps1}`    | `cd api && vendor/bin/phpunit` — spustí testovou sadu (94 testů, ~1 s). Lze passnout filter / testsuite (`cmd/test.sh --filter=GpcParser`) |
+| `verify-instance-hardening.{sh,ps1}` | **H-19** — akceptační test hardeningu NASAZENÉ instance (ne repa). Přes HTTP zkouší sadu citlivých URL (`cfg.php`, `api/src/`, `db/`, `storage/`, `private/`, VCS metadata, …) a ověřuje, že každá vrátí 403 nebo 404; k tomu testuje tenantový host gate (neznámý `Host` → `421`, i na přímý `/web/dist/index.html`) a že reverzní proxy nepřepisuje hlavičku `Host`. Jen GET/HEAD, nic nezapisuje. `cmd/verify-instance-hardening.sh --host=www.myucto.cz [--ip=IP] [--json]` / `pwsh -File cmd/verify-instance-hardening.ps1 -InstanceHost www.myucto.cz [-Ip IP] [-Json]`. Detaily a chybějící `.htaccess`/`web.config` pravidla, na která skript testuje, viz níže |
+
+### `verify-instance-hardening.{sh,ps1}` — chybějící pravidla v `.htaccess` / `web.config`
+
+Skript (H-19) záměrně testuje i na díry, které aktuální konfigurace ještě
+nepokrývá — `cfg.sample.php`, `cfg.docker.php`, skripty s příponou
+`.cmd`/`.ps1`/`.sh` mimo už blokované složky (root: `demo.cmd`,
+`production.cmd`, `docker-entrypoint.sh`), `VERSION`, `web.config` a
+`portainer-template.json`. Dokud pravidla níže nepřibudou, tahle část sady
+bude padat — to je očekávané a správné, ukazuje to skutečný stav instance.
+
+**`.htaccess`** — rozšířit alternaci v pravidle „2b) Blokuj cfg.php, tooling
+manifesty a zdrojové soubory" o `cfg\.sample\.php|cfg\.docker\.php|VERSION|
+web\.config|portainer-template\.json` a rozšířit `<FilesMatch>` blok o
+přípony `cmd|ps1|sh` (ty pak pokryjí skripty kdekoli v cestě, nejen v rootu):
+
+```apache
+RewriteRule ^(?:(?:api|web)/)?(cfg\.php|cfg\.local\.php|cfg\.sample\.php|cfg\.docker\.php|composer\.(json|lock)|package\.json|pnpm-lock\.yaml|(?:vite|tsconfig|eslint|tailwind|postcss)\.config\.[^/]+|phpunit\.xml(?:\.dist)?|Dockerfile(?:\..*)?|docker-compose[^/]*|\.gitignore|\.env.*|VERSION|web\.config|portainer-template\.json|[^/]*\.md|[^/]*\.sql)$ - [F,L]
+```
+
+```apache
+<FilesMatch "\.(env|sql|pem|log|lock|md|cmd|ps1|sh)$">
+    Require all denied
+</FilesMatch>
+```
+
+**`web.config`** — rozšířit `fileExtensions` o `.cmd`/`.ps1`/`.sh` a rozšířit
+regex pravidla „Block sensitive files" o `cfg.sample.php`/`cfg.docker.php`/
+`VERSION`/`portainer-template.json` (`web.config` samotný IIS defaultně
+chrání sám, na Apache to řeší až přidání do `.htaccess` výše):
+
+```xml
+<add fileExtension=".cmd" allowed="false" />
+<add fileExtension=".ps1" allowed="false" />
+<add fileExtension=".sh" allowed="false" />
+```
+
+```xml
+<rule name="Block sensitive files" stopProcessing="true">
+  <match url="^(?:(?:api|web)/)?(cfg\.php|cfg\.local\.php|cfg\.sample\.php|cfg\.docker\.php|composer\.(json|lock)|package\.json|pnpm-lock\.yaml|(?:vite|tsconfig|eslint|tailwind|postcss)\.config\.[^/]+|phpunit\.xml(?:\.dist)?|Dockerfile(?:\..*)?|docker-compose[^/]*|\.gitignore|\.env.*|VERSION|portainer-template\.json|.*\.md|.*\.sql)$" />
+  <action type="CustomResponse" statusCode="403" statusReason="Forbidden" statusDescription="Forbidden" />
+</rule>
+```
 
 ## Cron — doporučené frekvence
 
@@ -98,10 +174,48 @@ se záměrně nevytvoří a úloha skončí chybou (vidět v **Systém → Plán
 | `cron-license-renew` | 1× denně | 05:00 |
 | `cron-cnb-rates` | 1× denně (po vyhlášení kurzu ČNB ~14:30) | 15:00 |
 | `cron-version-check` | 1× denně | 06:00 |
+| `cron-storage-usage` | 1× za hodinu | 15. minuta (`15 * * * *`) |
 | `cron-dispatch` | každou minutu — **jen v režimu dispatcher**, kde nahrazuje všechny položky výše | `* * * * *` |
 
 Logy se ukládají do `log/cron/<nazev>-YYYY-MM-DD.log`. Stav úloh sleduj
 v admin/activity-log (každý cron sám zapíše záznam `cron.<nazev>`).
+
+### Vypnutí jednotlivé úlohy — `cron.disabled_jobs`
+
+Na spravovaných instalacích (cizí hosting) dává smysl vypnout úlohy, které
+duplikují něco, co si hosting dělá sám — typicky `cron-backup-pdf` a
+`cron-backup-documents`, pokud hosting zálohuje celý filesystém a naše
+záloha by jen zbytečně žrala kvótu. V `cfg.php` nastav:
+
+```php
+'cron' => [
+    'disabled_jobs' => ['cron-backup-pdf', 'cron-backup-documents'],
+],
+```
+
+Jména musí přesně sedět na `script` z katalogu (`CronCatalog::all()`) —
+neznámé jméno je považováno za překlep a zaloguje se jako varování, aby se
+nedalo přehlédnout. Vypnutá úloha se v přehledu **Systém → Plánované úlohy**
+ukáže jako „vypnuto konfigurací" (ne jako zmeškaná) a health-check ji
+nepočítá do `stale`/`inactive` poplachů. Vypnutí přebije všechny ostatní
+důvody (i chybějící `requires_config` adresář nebo nezapnutou funkci) a
+nesahá kvůli tomu do databáze.
+
+⚠️ `cron.disabled_jobs` je (zatím) jediný zdroj pravdy pro **UI přehled a
+health check** (`CronJobGate::inactiveReason()`), NE pro skutečné spouštění.
+Samotný běh úlohy nastavení zatím nekontroluje:
+- **Individuální crontab/Task Scheduler** (podle tabulek výše) spustí skript,
+  dokud má vlastní řádek/úlohu zaregistrovanou — vypnutou úlohu z crontabu
+  ručně odeber.
+- **Docker vestavěný cron** generuje crontab z `CronJobGate::schedulableJobs()`
+  (`isSchedulable()`), která `cron.disabled_jobs` zatím nečte — vypnutá úloha
+  se tedy v kontejneru pořád naplánuje.
+- **Dispatcher** (`cron-dispatch`) taky zatím `cron.disabled_jobs` nekontroluje.
+
+Než se tohle dotáhne (viz TODO u `CronDispatcher`/`DockerCrontabGenerator`),
+vypnutí přes `cron.disabled_jobs` je *viditelný signál v UI*, ne tvrdý kill
+switch — pro skutečné zastavení běhu vypnutou úlohu ještě vyřaď z
+crontabu/Task Scheduleru (nebo z Docker image).
 
 ### Windows — Task Scheduler
 
@@ -130,6 +244,7 @@ schtasks /create /tn "MyUcto VatClearing"       /tr "C:\inetpub\wwwroot\myucto.c
 schtasks /create /tn "MyUcto LicenseRenew"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-license-renew.cmd"          /sc daily /st 05:00 /ru SYSTEM
 schtasks /create /tn "MyUcto CnbRates"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-cnb-rates.cmd"             /sc daily /st 15:00 /ru SYSTEM
 schtasks /create /tn "MyUcto VersionCheck"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-version-check.cmd"           /sc daily /st 06:00 /ru SYSTEM
+schtasks /create /tn "MyUcto StorageUsage"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-storage-usage.cmd"           /sc hourly /mo 1 /ru SYSTEM
 
 REM Režim "jeden dispatcher" — MÍSTO všech úloh výše zaregistruj jen tuhle jednu.
 REM Nikdy obojí najednou: úlohy by běžely dvakrát.
@@ -148,8 +263,10 @@ REM schtasks /create /tn "MyUcto Dispatch" /tr "C:\inetpub\wwwroot\myucto.cz\cmd
 
 > ⚠️ PHP musí být v `PATH` účtu, pod kterým úloha běží (typicky `SYSTEM`
 > nemá uživatelský PATH — ověř `where php` v cmd spuštěném jako SYSTEM přes
-> `PsExec -s -i cmd`). Případně uprav `.cmd` skripty a doplň absolutní cestu
-> k `php.exe`.
+> `PsExec -s -i cmd`). Případně nastav proměnnou prostředí `MYINVOICE_PHP_BIN`
+> na absolutní cestu k `php.exe` (v definici `schtasks` úlohy, ne globálně) —
+> viz [Volba PHP interpretu](#volba-php-interpretu--myinvoice_php_bin) výš.
+> Skripty samotné se díky tomu nemusí upravovat.
 >
 > ⚠️ `cron-backup` potřebuje `mariadb-dump` (nebo `mysqldump`). Skript zkouší
 > `PATH` a běžné Windows lokace (`C:\Program Files\MariaDB*\bin`,
@@ -187,6 +304,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
   0  5  *   *   *    /var/www/myucto.cz/cmd/cron-license-renew.sh
   0 15  *   *   *    /var/www/myucto.cz/cmd/cron-cnb-rates.sh
   0  6  *   *   *    /var/www/myucto.cz/cmd/cron-version-check.sh
+ 15  *  *   *   *    /var/www/myucto.cz/cmd/cron-storage-usage.sh
 ```
 
 `*.sh` skripty musí být spustitelné: `chmod +x cmd/*.sh`.

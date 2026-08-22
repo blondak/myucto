@@ -152,6 +152,10 @@ const superadminRouteNames = new Set([
   'admin-price-list', 'admin-price-list-new', 'admin-price-list-edit',
   'activation-license', 'activation-terms', 'activation-purchase',
   'admin-diagnostics', 'admin-support',
+  // Obojí čte administrátorské endpointy (/api/admin/*, /api/license/status),
+  // takže sem patří ze stejného důvodu jako aktivace a diagnostika:
+  // deny-by-default guard by je jinak tiše přesměroval na homepage.
+  'admin-instance-export', 'hosting',
 ])
 
 // Routy, které projdou deny-by-default guardem (:361) bez permission meta jinak než
@@ -172,7 +176,6 @@ const commercialOnlyRouteNames = new Set([
   'reports-s74b',
   'reports-related-parties',
   'reports-vat-corrections',
-  'reports-submissions',
   'templates',
   'tools',
 ])

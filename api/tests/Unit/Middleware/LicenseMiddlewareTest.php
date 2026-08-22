@@ -60,7 +60,12 @@ final class LicenseMiddlewareTest extends TestCase
             'expired VAT section 43'        => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/reports/s43'],
             'degraded VAT section 46'       => [LicenseState::DEGRADED, 'GET', '/api/reports/s46/candidates'],
             'expired VAT section 79'        => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/reports/s79'],
-            'degraded EPO archive'          => [LicenseState::DEGRADED, 'GET', '/api/reports/submissions'],
+            // Archiv podání sám zamčený NENÍ — bezplatná část zahrnuje DPH i KH
+            // a zákazník se k jejich XML musí dostat. Zamčené je až PODÁNÍ do EPO,
+            // což je služba, kterou provozujeme my. Rozhodnutí podle konkrétního
+            // výkazu dělá TaxSubmissionAction, cesta o typu výkazu nic neví.
+            'degraded EPO submit'           => [LicenseState::DEGRADED, 'POST', '/api/reports/submissions/12/epo-submit'],
+            'degraded EPO credentials'      => [LicenseState::DEGRADED, 'GET', '/api/reports/submissions/epo-credentials'],
             'expired accounting activation' => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/settings/accounting-activation/status'],
             // Čtyři licencované moduly: účetnictví (obě jeho tváře), mzdy, sklad, OSS.
             'degraded tax evidence'         => [LicenseState::DEGRADED, 'POST', '/api/tax-evidence/cash-journal'],
@@ -68,6 +73,12 @@ final class LicenseMiddlewareTest extends TestCase
             'degraded payroll capabilities' => [LicenseState::DEGRADED, 'GET', '/api/payroll/capabilities'],
             'expired OSS return'            => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/reports/oss/preview'],
             'degraded OSS bulk assign'      => [LicenseState::DEGRADED, 'POST', '/api/invoices/bulk-oss'],
+            // Daň z příjmů: základ daně se počítá z výsledku hospodaření nebo
+            // z peněžního deníku, a obojí je za licencí. Přiznání nad daty,
+            // která nemá čím naplnit, by se jen tvářilo, že jde vystavit.
+            'expired income tax return'     => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/tax-return/dppo/preview'],
+            'degraded income tax inputs'    => [LicenseState::DEGRADED, 'PUT', '/api/tax-return/dpfo/2026/inputs'],
+            'degraded tax optimizer'        => [LicenseState::DEGRADED, 'GET', '/api/tax/analysis'],
         ];
     }
 
@@ -89,7 +100,6 @@ final class LicenseMiddlewareTest extends TestCase
             'client create'       => ['POST', '/api/clients'],
             'bank import'         => ['POST', '/api/bank-statements/upload'],
             'VAT report'          => ['GET', '/api/reports/dphdp3/preview'],
-            'income tax report'   => ['GET', '/api/tax-return/dppo/preview'],
             // Pokladna a bankovní účty zůstávají v bezplatném základu i po vypršení:
             // jsou to evidence dokladů, ne účetní nadstavba (ta je o kus výš mezi
             // omezenými cestami včetně daňové evidence).

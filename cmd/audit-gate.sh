@@ -22,6 +22,7 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 API_DIR="$REPO_ROOT/api"
+PHP_BIN="${MYINVOICE_PHP_BIN:-php}"
 SKIP_DATA=0
 FAILED=()
 
@@ -47,24 +48,24 @@ run_step() {
 }
 
 run_step 'Guardy (L0)' \
-    php "$API_DIR/vendor/bin/phpunit" --no-coverage --testsuite Architecture
+    "$PHP_BIN" "$API_DIR/vendor/bin/phpunit" --no-coverage --testsuite Architecture
 
 run_step 'Invarianty a fuzz (L3)' \
-    php "$API_DIR/vendor/bin/phpunit" --no-coverage --testsuite Invariants
+    "$PHP_BIN" "$API_DIR/vendor/bin/phpunit" --no-coverage --testsuite Invariants
 
 run_step 'Plná testovací sada' \
-    php "$API_DIR/bin/test-parallel.php" --application
+    "$PHP_BIN" "$API_DIR/bin/test-parallel.php" --application
 
 if [ "$SKIP_DATA" -eq 0 ]; then
     run_step 'Invarianty nad daty (read-only)' \
-        php "$API_DIR/bin/check-invariants.php"
+        "$PHP_BIN" "$API_DIR/bin/check-invariants.php"
 
     run_step 'Křížové kontroly (read-only)' \
-        php "$API_DIR/bin/cross-check.php"
+        "$PHP_BIN" "$API_DIR/bin/cross-check.php"
 
     if [ -f "$REPO_ROOT/private/scripts/compare_dph.php" ]; then
         run_step 'Smír DPH proti podaným XML' \
-            php "$REPO_ROOT/private/scripts/compare_dph.php"
+            "$PHP_BIN" "$REPO_ROOT/private/scripts/compare_dph.php"
     else
         echo
         echo '=== Smír DPH proti podaným XML — přeskočeno (private/scripts chybí)'

@@ -8,6 +8,8 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\System\InstanceEntitlement;
+use MyInvoice\Service\System\TelemetryPayloadBuilder;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -56,6 +58,13 @@ final class LicenseService
      */
     private ?array $rowCache = null;
 
+    /**
+     * Sběrač provozní telemetrie (H-21). Staví se LÍNĚ až při první obnově —
+     * kontejner licenční službu skládá explicitním výčtem argumentů a volitelný
+     * parametr by v provozu zůstal null, takže by telemetrie tiše nikdy neodešla.
+     */
+    private ?TelemetryPayloadBuilder $telemetryBuilder = null;
+
     public function __construct(
         private readonly Connection $db,
         private readonly Config $config,
@@ -63,11 +72,14 @@ final class LicenseService
         private readonly LicenseClient $client,
         ?LoggerInterface $logger = null,
         ?EntityCache $cache = null,
+        ?TelemetryPayloadBuilder $telemetry = null,
+        private readonly ?InstanceEntitlement $entitlement = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
         // Volitelná kvůli testovacím dvojníkům, které službu staví ručně.
         // NullEntityCache je průchozí, takže bez ní se chování nemění.
         $this->cache = $cache ?? EntityCache::disabled();
+        $this->telemetryBuilder = $telemetry;
     }
 
     private readonly EntityCache $cache;
@@ -79,6 +91,7 @@ final class LicenseService
             return new LicenseState(
                 LicenseState::TRIAL, '', null, null, 0, 0, 0, null,
                 time() + self::TRIAL_DAYS * 86400, null, null, null, true,
+                false, null, true, $this->isManaged(),
             );
         }
         $row = $this->loadRow();
@@ -121,7 +134,7 @@ final class LicenseService
         }
 
         $token = (string) $resp['token'];
-        $payload = $this->verifier->verify($token, $this->publicKey());
+        $payload = $this->verifier->verify($token, $this->publicKeys());
         if ($payload === null) {
             $this->logger->warning('license.activate.bad_signature');
             return ['ok' => false, 'error' => 'invalid_token'];
@@ -142,6 +155,7 @@ final class LicenseService
         // Aktivace je nový začátek — stav předplatného z předchozího klíče nesmí
         // přežít, proto se ukládá i prázdná hodnota (server ho nemusí hlásit).
         $this->storeSubscription(['subscription' => $resp['subscription'] ?? null]);
+        $this->storeInstanceInfo(['instance' => $resp['instance'] ?? null]);
 
         return ['ok' => true, 'state' => $this->current()];
     }
@@ -233,6 +247,7 @@ final class LicenseService
                 $usersActive,
                 $companiesActive,
                 $this->appVersion(),
+                $this->telemetry(),
             );
         } catch (LicenseNetworkException $e) {
             $this->writeLicense('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1', [$counter]);
@@ -242,7 +257,7 @@ final class LicenseService
 
         if (($resp['ok'] ?? false) === true && !empty($resp['token'])) {
             $token = (string) $resp['token'];
-            $payload = $this->verifier->verify($token, $this->publicKey());
+            $payload = $this->verifier->verify($token, $this->publicKeys());
             if ($payload === null) {
                 $this->writeLicense('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1', [$counter]);
                 $this->logger->warning('license.renew.bad_signature');
@@ -256,12 +271,42 @@ final class LicenseService
                 [$token, json_encode($payload, JSON_UNESCAPED_UNICODE), $this->nonceOf($payload), $counter],
             );
             $this->storeSubscription($resp);
+            $this->storeInstanceInfo($resp);
+            return;
+        }
+
+        // ⚠️ Odmítnutí kvůli PŘETÍŽENÍ není odpověď na otázku, jestli licence platí.
+        //
+        // Denní mutex je zabraný hned na začátku, takže 429 by spotřebovalo
+        // jediný pokus toho dne — a instalace by se o svém stavu nedozvěděla nic
+        // až do zítřka. Na spravovaném hostingu chodí celá flotila z jedné
+        // egress adresy, takže cizí provoz může strop vyčerpat bez našeho
+        // přičinění; po čtrnácti dnech (TTL tokenu) by pak instalace spadla
+        // do degradovaného stavu kvůli cizí smyčce. Mutex se proto vrací
+        // a příští request to zkusí znovu.
+        if (($resp['error'] ?? '') === 'rate_limited') {
+            $this->writeLicense(
+                'UPDATE license SET last_check_at = NULL, last_check_ok = 0, counter = ? WHERE id = 1',
+                [$counter],
+            );
+            $this->logger->info('license.renew.rate_limited');
             return;
         }
 
         // Server odmítl (not_bound / clone_suspected / subscription_expired / overage_expired) —
         // stávající token necháme doběhnout, stav se degraduje až vyprší.
         $this->writeLicense('UPDATE license SET last_check_ok = 0, counter = ? WHERE id = 1', [$counter]);
+
+        // ⚠️ I ODMÍTNUTÁ obnova nese stav předplatného — server ho posílá schválně.
+        // Právě ve fázi `expired` potřebuje zákazník nejvíc vědět, dokolika se
+        // platí, kdy se instalace pozastaví a dokdy držíme data; jinou cestou se
+        // to na instalaci nedozví. Bez tohohle řádku by `subscription_info` držela
+        // poslední ÚSPĚŠNOU obnovu, takže by UI hlásilo `phase: active` někomu,
+        // komu běží retenční lhůta na smazání dat.
+        //
+        // `storeInstanceInfo()` se tu naopak NEVOLÁ: `instance` v odmítnutí nechodí
+        // a přepsat rozsah na prázdno by instalaci uvrhlo do read-only.
+        $this->storeSubscription($resp);
         $this->logger->warning('license.renew.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
     }
 
@@ -324,7 +369,7 @@ final class LicenseService
         }
 
         try {
-            $resp = $this->client->upgradeQuote($key, $users);
+            $resp = $this->client->upgradeQuote($key, $this->instanceIdOf($row), $users);
         } catch (LicenseNetworkException $e) {
             $this->logger->info('license.upgrade_quote.network_error', ['error' => $e->getMessage()]);
             return ['ok' => false, 'error' => 'server_unreachable'];
@@ -353,7 +398,7 @@ final class LicenseService
         }
 
         try {
-            $resp = $this->client->upgrade($key, $users);
+            $resp = $this->client->upgrade($key, $this->instanceIdOf($row), $users);
         } catch (LicenseNetworkException $e) {
             $this->logger->info('license.upgrade.network_error', ['error' => $e->getMessage()]);
             return ['ok' => false, 'error' => 'server_unreachable'];
@@ -372,6 +417,80 @@ final class LicenseService
             'new_users'      => (int) ($resp['new_users'] ?? $users),
             'amount_charged' => $resp['amount_charged'] ?? null,
             'state'          => $this->current(),
+        ];
+    }
+
+    /**
+     * Kolik by stálo rozšíření úložiště na `$quotaGb` GiB (bez stržení).
+     *
+     * @return array{ok:bool,error?:string,current_quota_gb?:int,new_quota_gb?:int,amount?:mixed,recurring_delta?:mixed,currency?:string,period_end?:mixed}
+     */
+    public function storageQuote(int $quotaGb): array
+    {
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+
+        try {
+            $resp = $this->client->storageQuote($key, $this->instanceIdOf($row), $quotaGb);
+        } catch (LicenseNetworkException $e) {
+            $this->logger->info('license.storage_quote.network_error', ['error' => $e->getMessage()]);
+            return ['ok' => false, 'error' => 'server_unreachable'];
+        }
+
+        if (($resp['ok'] ?? false) !== true) {
+            return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'not_upgradable')];
+        }
+
+        return $resp;
+    }
+
+    /**
+     * Rozšíření úložiště — server strhne poměrný doplatek z uložené karty a
+     * zvedne kvótu u dodavatele.
+     *
+     * ⚠️ `provisioning_pending` znamená ZAPLACENO, ale kvóta se u dodavatele
+     * ještě nezvedla. Uživateli se to NESMÍ ukázat jako chyba: peníze odešly.
+     * Obrazovka řekne, že se rozšíření zavádí, a nenabídne nákup znovu.
+     *
+     * Po úspěchu se vynutí obnova licence — s ní přijde nový rozsah zaplacené
+     * služby ({@see \MyInvoice\Service\System\InstanceEntitlement}), takže se
+     * nová kvóta projeví hned, ne až při zítřejší kontrole.
+     *
+     * @return array{ok:bool,error?:string,new_quota_gb?:int,amount_charged?:mixed,provisioning_pending?:bool,state?:LicenseState}
+     */
+    public function storageUpgrade(int $quotaGb): array
+    {
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+
+        try {
+            $resp = $this->client->storageUpgrade($key, $this->instanceIdOf($row), $quotaGb);
+        } catch (LicenseNetworkException $e) {
+            // ⚠️ Odpověď se ztratila, ale platba mohla proběhnout. Nepobízet
+            // k opakování — druhý pokus by strhl podruhé.
+            $this->logger->warning('license.storage_upgrade.network_error', ['error' => $e->getMessage()]);
+            return ['ok' => false, 'error' => 'result_unknown'];
+        }
+
+        if (($resp['ok'] ?? false) !== true) {
+            $this->logger->warning('license.storage_upgrade.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
+            return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'upgrade_failed')];
+        }
+
+        $this->forceRenew();
+
+        return [
+            'ok'                   => true,
+            'new_quota_gb'         => (int) ($resp['new_quota_gb'] ?? $quotaGb),
+            'amount_charged'       => $resp['amount_charged'] ?? null,
+            'provisioning_pending' => (bool) ($resp['provisioning_pending'] ?? false),
+            'state'                => $this->current(),
         ];
     }
 
@@ -593,6 +712,51 @@ final class LicenseService
     }
 
     /**
+     * ROZSAH ZAPLACENÉ SLUŽBY doručený licenčním serverem (`instance`).
+     *
+     * Zákazník si dokupuje místo a mění tarif na webu; instance se to jinak
+     * nedozví — do `cfg.local.php` zapisuje zřizování jednou a pak už nikdy.
+     * Vozí se to tedy s obnovou licence a čte přes {@see InstanceEntitlement}.
+     *
+     * Ukládá se JEN když ho odpověď opravdu nese: odmítnutá obnova ani starší
+     * server bez tohoto pole nesmí přepsat poslední známý rozsah nulou. Prázdná
+     * hodnota se uloží jen tehdy, když ji server výslovně pošle jako `null` —
+     * to znamená „tahle instalace není spravovaná", ne „nevíme".
+     *
+     * @param array<string,mixed> $resp
+     */
+    private function storeInstanceInfo(array $resp): void
+    {
+        if (!array_key_exists('instance', $resp)) {
+            return;
+        }
+        // Instalace, kde ještě neproběhla migrace 1524 — doplní se po ní.
+        if (!$this->db->hasColumn('license', 'instance_info')) {
+            return;
+        }
+
+        $info = $resp['instance'];
+        if (is_array($info)) {
+            // Kdy jsme rozsah dostali MY. Čas serveru by nešlo porovnat s ničím,
+            // co instalace zná, a obrazovka potřebuje říct, jak čerstvý údaj
+            // ukazuje — ne kdy si ho server poznamenal.
+            $info['delivered_at'] = date(\DateTimeInterface::ATOM);
+        }
+
+        $this->writeLicense(
+            'UPDATE license SET instance_info = ? WHERE id = 1',
+            [is_array($info) ? json_encode($info, JSON_UNESCAPED_UNICODE) : null],
+        );
+
+        // ⚠️ Zahodit cache. `InstanceEntitlement` je v kontejneru sdílený
+        // a drží si přečtený rozsah po celý request; po vynucené obnově
+        // (nákup místa) by tedy zbytek requestu pracoval se starým číslem.
+        // Dnes to není vidět, protože obrazovka si dělá nový požadavek —
+        // ale je to past pro první odpověď, která rozsah přiloží.
+        $this->entitlement?->forget();
+    }
+
+    /**
      * Poslední známý stav předplatného z licenčního serveru.
      *
      * @param array<string,mixed> $row
@@ -629,11 +793,12 @@ final class LicenseService
             return new LicenseState(
                 $state, $instanceId, null, null, 0, $usersActive, $companiesActive,
                 null, $trialEndsAt, null, null, $lastCheckAt, $lastCheckOk,
+                false, null, true, $this->isManaged(),
             );
         }
 
         $token = (string) ($row['token'] ?? '');
-        $payload = $token !== '' ? $this->verifier->verify($token, $this->publicKey()) : null;
+        $payload = $token !== '' ? $this->verifier->verify($token, $this->publicKeys()) : null;
         // Poslední známý stav předplatného ze serveru (automatické prodlužování).
         $subscription = $this->subscriptionOf($row);
 
@@ -642,6 +807,7 @@ final class LicenseService
             return new LicenseState(
                 LicenseState::DEGRADED, $instanceId, null, null, 0, $usersActive, $companiesActive,
                 null, null, null, $key, $lastCheckAt, $lastCheckOk, false, $subscription,
+                true, $this->isManaged(),
             );
         }
 
@@ -657,12 +823,17 @@ final class LicenseService
         // Doživotní licence — server přidal do payloadu bool `perpetual`. Neomezená platnost;
         // valid_until je jen 14denní TTL tokenu, který se denně obnovuje (renew u perpetual vždy projde).
         $perpetual = (bool) ($payload['perpetual'] ?? false);
+        // ⚠️ Odemyká tarif placené moduly? Chybějící pole = ANO, ne NE.
+        // Token vydaný před zavedením příznaku ho nenese a všechny takové
+        // licence jsou placené — opačný default by zavřel účetnictví každému
+        // platícímu zákazníkovi až do příští obnovy tokenu.
+        $commercial = (bool) ($payload['commercial'] ?? true);
 
         if ($now > $validUntil) {
             return new LicenseState(
                 LicenseState::DEGRADED, $instanceId, $tier, $maxCompanies, $usersLicensed,
                 $usersActive, $companiesActive, $validUntil, null, $overageDeadline, $key, $lastCheckAt, $lastCheckOk,
-                $perpetual, $subscription,
+                $perpetual, $subscription, $commercial, $this->isManaged(),
             );
         }
 
@@ -673,10 +844,34 @@ final class LicenseService
         return new LicenseState(
             $state, $instanceId, $tier, $maxCompanies, $usersLicensed,
             $usersActive, $companiesActive, $validUntil, null, $overageDeadline, $key, $lastCheckAt, $lastCheckOk,
-            $perpetual, $subscription,
+            $perpetual, $subscription, $commercial, $this->isManaged(),
         );
     }
 
+    /**
+     * Provozuje instalaci někdo jiný než zákazník?
+     *
+     * Jediná otázka, kterou si aplikace o svém provozu smí položit. NIKDY se
+     * neptá, KDO ji hostuje — `app.managed_provider` je čistě diagnostický údaj
+     * a žádné chování na něm viset nesmí.
+     */
+    private function isManaged(): bool
+    {
+        return (bool) $this->config->get('app.managed', false);
+    }
+    /**
+     * Identifikace TÉHLE instalace, kterou licenční server zná z aktivace.
+     *
+     * Posílá se i k peněžním cestám (navýšení míst, rozšíření místa). Ty se
+     * dřív autentizovaly pouhým „znám licenční klíč", takže kdo klíč získal,
+     * mohl bez potvrzení zatížit cizí uloženou kartu.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function instanceIdOf(array $row): string
+    {
+        return (string) ($row['instance_id'] ?? '');
+    }
     /**
      * Fingerprint = sha256(hostname + DB name + app URL). Uloží se lazily do řádku,
      * pokud ještě chybí (např. po seedu migrace).
@@ -721,20 +916,17 @@ final class LicenseService
         );
     }
 
+    /**
+     * Kolik aktivních uživatelů zabírá licenční místo.
+     *
+     * ⚠️ Rozhoduje SKUTEČNÉ OPRÁVNĚNÍ, ne název role — viz {@see SeatPolicy}.
+     * Počítat podle `system_key <> 'readonly'` se dalo obejít přiřazením
+     * override role přes obrazovku firem i přepsáním systémové role přes API,
+     * a v obou případech měl uživatel plná práva, aniž se objevil v počtu.
+     */
     private function queryActiveUsers(): int
     {
-        // Aktivní uživatelé s rolí != readonly (a != client — portálové účty
-        // zákazníků nejsou provozní licenční místa). Deaktivované se nepočítají.
-        // Přes roles JOIN, protože vlastní staff role mají legacy `role`='readonly'
-        // (coarse bucket) — počítat podle legacy sloupce by je chybně vynechalo.
-        if ($this->db->hasTable('roles') && $this->db->hasColumn('users', 'role_id')) {
-            $sql = "SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id
-                     WHERE u.is_active = 1 AND r.role_type <> 'client'
-                       AND (r.system_key IS NULL OR r.system_key <> 'readonly')";
-            return (int) $this->db->pdo()->query($sql)->fetchColumn();
-        }
-        $sql = "SELECT COUNT(*) FROM users WHERE is_active = 1 AND role NOT IN ('readonly', 'client')";
-        return (int) $this->db->pdo()->query($sql)->fetchColumn();
+        return (new SeatPolicy($this->db))->countActiveSeats();
     }
 
     private function countCompanies(): int
@@ -756,6 +948,50 @@ final class LicenseService
         return $key !== '' ? $key : self::DEFAULT_PUBLIC_KEY;
     }
 
+    /**
+     * Veřejné klíče, kterými se ověřuje token — `kid => klíč`.
+     *
+     * Kromě činného klíče (`license.public_key`, jinak zabudovaný) se dají
+     * nastavit další přes `license.public_keys`. Díky tomu jde podepisovací
+     * klíč vyměnit BEZ vydání nové verze aplikace: po přechodnou dobu se drží
+     * starý i nový vedle sebe a token řekne přes `kid`, kterým je podepsaný.
+     *
+     * Identifikátor se z klíče odvozuje ({@see keyId()}), ne konfiguruje —
+     * dvě nezávislé hodnoty by se dřív nebo později rozešly.
+     *
+     * @return array<string,string>
+     */
+    private function publicKeys(): array
+    {
+        $keys = [];
+
+        $extra = $this->config->get('license.public_keys', []);
+        if (is_array($extra)) {
+            foreach ($extra as $key) {
+                $key = trim((string) $key);
+                if ($key !== '') {
+                    $keys[self::keyId($key)] = $key;
+                }
+            }
+        }
+
+        $active = $this->publicKey();
+        $keys[self::keyId($active)] = $active;
+
+        return $keys;
+    }
+
+    /**
+     * Identifikátor klíče: prvních 16 hex znaků SHA-256 veřejného klíče.
+     *
+     * Odvozuje se, aby nešlo mít v konfiguraci `kid`, který k danému klíči
+     * nepatří. Obě strany počítají totéž z téhož vstupu.
+     */
+    public static function keyId(string $publicKeyBase64): string
+    {
+        return substr(hash('sha256', trim($publicKeyBase64)), 0, 16);
+    }
+
     private function appVersion(): string
     {
         $path = Bootstrap::rootDir() . '/VERSION';
@@ -763,6 +999,32 @@ final class LicenseService
             return trim((string) file_get_contents($path));
         }
         return '0.0.0';
+    }
+
+    /**
+     * Provozní telemetrie přibalená k obnově licence (H-21).
+     *
+     * ⚠️ **Selhání telemetrie nesmí ovlivnit obnovu licence.** Licence je to, na
+     * čem stojí provoz zákazníka; diagnostika je to, co chceme my. Proto je celý
+     * sběr — včetně sestavení builderu — obalený tak, aby z něj nemohla probublat
+     * žádná výjimka: nejhorší možný výsledek je `null`, tedy obnova bez telemetrie.
+     *
+     * Payload neobsahuje nic osobního ani identifikujícího; co smí odejít, drží
+     * uzavřený whitelist {@see TelemetryPayloadBuilder::FIELDS}.
+     *
+     * @return array<string,scalar|null>|null
+     */
+    private function telemetry(): ?array
+    {
+        try {
+            $this->telemetryBuilder ??= TelemetryPayloadBuilder::forRuntime($this->db, $this->config);
+
+            return $this->telemetryBuilder->build();
+        } catch (\Throwable $e) {
+            $this->logger->info('license.telemetry.failed', ['error' => $e->getMessage()]);
+
+            return null;
+        }
     }
 
     /** @param array<string,mixed> $row */

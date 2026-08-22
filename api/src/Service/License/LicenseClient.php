@@ -27,6 +27,15 @@ final class LicenseClient
 {
     private readonly LoggerInterface $logger;
 
+    /**
+     * Kolik čekat na volání, které STRHÁVÁ z karty.
+     *
+     * Víc než u ostatních: server při něm jde na platební bránu a hned
+     * vystavuje doklad. Marné čekání tady nestojí jen čas — uživatel dostane
+     * „nevíme, jak platba dopadla", i když peníze odešly.
+     */
+    private const CHARGE_TIMEOUT = 25;
+
     public function __construct(
         private readonly Config $config,
         ?LoggerInterface $logger = null,
@@ -54,6 +63,12 @@ final class LicenseClient
     }
 
     /**
+     * @param array<string,scalar|null>|null $telemetry Volitelná provozní telemetrie
+     *        instance (H-21) — verze, stav migrací, stáří zálohy a dispatcheru, režim
+     *        údržby. Sestavuje ji {@see \MyInvoice\Service\System\TelemetryPayloadBuilder}
+     *        a neobsahuje NIC identifikujícího. `null` = telemetrie vypnutá nebo se ji
+     *        nepodařilo sestavit; do požadavku se pak vůbec nepřikládá a obnova licence
+     *        proběhne přesně jako dřív. Starší licenční server pole prostě ignoruje.
      * @return array<string,mixed>
      * @throws LicenseNetworkException
      */
@@ -65,8 +80,9 @@ final class LicenseClient
         int $usersActive,
         int $companiesActive,
         string $appVersion,
+        ?array $telemetry = null,
     ): array {
-        return $this->post('/api/license/renew', [
+        $body = [
             'license_key'      => $licenseKey,
             'instance_id'      => $instanceId,
             'counter'          => $counter,
@@ -74,7 +90,12 @@ final class LicenseClient
             'users_active'     => $usersActive,
             'companies_active' => $companiesActive,
             'app_version'      => $appVersion,
-        ]);
+        ];
+        if ($telemetry !== null) {
+            $body['telemetry'] = $telemetry;
+        }
+
+        return $this->post('/api/license/renew', $body);
     }
 
     /**
@@ -110,10 +131,11 @@ final class LicenseClient
      * @return array<string,mixed> {ok,current_users,new_users,amount,currency,period_end} / {error}
      * @throws LicenseNetworkException
      */
-    public function upgradeQuote(string $licenseKey, int $users): array
+    public function upgradeQuote(string $licenseKey, string $instanceId, int $users): array
     {
         return $this->post('/api/license/upgrade', [
             'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
             'users'       => $users,
             'quote'       => true,
         ]);
@@ -121,17 +143,58 @@ final class LicenseClient
 
     /**
      * Navýšení počtu uživatelů (in-place) — strhne poměrný doplatek z uložené karty.
-     * Delší timeout (10 s) — jde o platbu, server může čekat na platební bránu.
+     *
+     * ⚠️ Delší timeout: server v jednom požadavku strhne z karty A vystaví
+     * doklad. Když se vystavení zdrží, kratší čekání by skončilo hláškou
+     * „nevíme, jak platba dopadla" u platby, která proběhla.
      *
      * @return array<string,mixed> {ok,new_users,amount_charged} / {error}
      * @throws LicenseNetworkException
      */
-    public function upgrade(string $licenseKey, int $users): array
+    public function upgrade(string $licenseKey, string $instanceId, int $users): array
     {
         return $this->post('/api/license/upgrade', [
             'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
             'users'       => $users,
-        ], 10);
+        ], self::CHARGE_TIMEOUT);
+    }
+
+    /**
+     * Kolik by stálo rozšíření úložiště na `$quotaGb` GiB (bez stržení).
+     *
+     * ⚠️ `$quotaGb` je CÍLOVÁ hodnota z výčtu 2/7/22/102, ne přírůstek —
+     * „+5 GB" se posílá jako 7. Server jinou hodnotu odmítne; tichá oprava na
+     * nejbližší povolenou by zákazníkovi strhla peníze za jiný objem, než
+     * potvrdil.
+     *
+     * @return array<string,mixed> {ok,current_quota_gb,new_quota_gb,amount,recurring_delta,period_end} / {error}
+     * @throws LicenseNetworkException
+     */
+    public function storageQuote(string $licenseKey, string $instanceId, int $quotaGb): array
+    {
+        return $this->post('/api/license/quota', [
+            'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
+            'quota_gb'    => $quotaGb,
+            'quote'       => true,
+        ]);
+    }
+
+    /**
+     * Rozšíření úložiště — strhne poměrný doplatek z uložené karty.
+     * Delší timeout jako u navýšení míst — viz {@see upgrade()}.
+     *
+     * @return array<string,mixed> {ok,new_quota_gb,amount_charged,provisioning_pending} / {error}
+     * @throws LicenseNetworkException
+     */
+    public function storageUpgrade(string $licenseKey, string $instanceId, int $quotaGb): array
+    {
+        return $this->post('/api/license/quota', [
+            'instance_id' => $instanceId,
+            'license_key' => $licenseKey,
+            'quota_gb'    => $quotaGb,
+        ], self::CHARGE_TIMEOUT);
     }
 
     /**

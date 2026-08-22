@@ -17,7 +17,12 @@ use MyInvoice\Service\Auth\WebAuthnConfig;
 use MyInvoice\Service\Ares\SupplierRegistryEnricher;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Config\CfgLocalWriter;
+use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Setup\PasswordSetupLinkIssuer;
+use MyInvoice\Service\Setup\ProvisionTokenGuard;
+use MyInvoice\Service\Setup\SetupPasswordMode;
+use MyInvoice\Service\Setup\TermsOrigin;
 use MyInvoice\Service\System\AppUrlConfiguration;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -45,6 +50,11 @@ final class SetupAction
         // SEC-01: brání „nárokování" cizího bankovního účtu už při initial setupu.
         private readonly \MyInvoice\Repository\BankStatementOwnershipResolver $bankOwnership,
         private readonly SessionCookieFactory $sessionCookies,
+        // H-01 / H-33 — spravovaný (SaaS) provoz; pro self-hosted instalace no-op.
+        private readonly ProvisionTokenGuard $provisionTokens,
+        private readonly PasswordSetupLinkIssuer $passwordSetupLinks,
+        // H-02 — ve spravované instalaci drží konfiguraci provozovatel, ne setup.
+        private readonly ManagedModeGuard $managed,
     ) {}
 
     /**
@@ -78,8 +88,28 @@ final class SetupAction
 
     public function __invoke(Request $request, Response $response): Response
     {
+        // H-01: zřizovací token se ověřuje jako ÚPLNĚ PRVNÍ věc — dřív, než se
+        // vůbec podíváme na tělo požadavku. Ve spravovaném režimu je okno mezi
+        // zřízením instance a naším setupem jediné, co brání cizímu zabrání účtu.
+        $rejection = $this->provisionTokens->verify($request);
+        if ($rejection !== null) {
+            $this->logger->log(
+                ProvisionTokenGuard::LOG_EVENT,
+                null,
+                null,
+                null,
+                ['reason' => $rejection['reason']],
+                $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                $request->getHeaderLine('User-Agent'),
+            );
+
+            return Json::error($response, $rejection['code'], ProvisionTokenGuard::MESSAGE, 403);
+        }
+
         $body = (array) ($request->getParsedBody() ?? []);
         $admin = (array) ($body['admin'] ?? []);
+        $passwordMode = SetupPasswordMode::fromAdminBlock($admin);
+        $termsOrigin = TermsOrigin::normalize($body[TermsOrigin::REQUEST_FIELD] ?? null);
         $supplier = isset($body['supplier']) && is_array($body['supplier']) ? $body['supplier'] : null;
         $requireTotp = !empty($body['require_totp']);
         // Přijetí licence a obchodních podmínek je podmínkou dokončení setupu;
@@ -87,6 +117,9 @@ final class SetupAction
         $termsAccepted = ($body['terms_accepted'] ?? null) === true;
         if (array_key_exists('require_mfa', $body) && !is_bool($body['require_mfa'])) {
             return Json::error($response, 'validation_failed', 'require_mfa musí být boolean.', 400);
+        }
+        if (array_key_exists(SetupPasswordMode::REQUEST_FIELD, $admin) && !is_bool($admin[SetupPasswordMode::REQUEST_FIELD])) {
+            return Json::error($response, 'validation_failed', 'admin.password_setup_link musí být boolean.', 400);
         }
         $usesLegacyRequest = !array_key_exists('require_mfa', $body);
         $requireMfa = $usesLegacyRequest ? $requireTotp : (bool) $body['require_mfa'];
@@ -129,7 +162,7 @@ final class SetupAction
             }
         }
 
-        $errors = $this->validate($admin, $supplier, $termsAccepted);
+        $errors = $this->validate($admin, $supplier, $termsAccepted, $passwordMode);
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
@@ -142,8 +175,14 @@ final class SetupAction
 
         $pdo = $this->db->pdo();
 
+        // H-33: v režimu odkazu se hashuje náhodné heslo, které nikdo nikdy nepoužije —
+        // cizí heslo tak u nás neleží ani minutu.
+        $plainPassword = $passwordMode->requiresPlainPassword()
+            ? (string) $admin['password']
+            : $this->passwordSetupLinks->randomPassword();
+
         try {
-            $passwordHash = $this->hasher->hash((string) $admin['password']);
+            $passwordHash = $this->hasher->hash($plainPassword);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 400, [
                 'fields' => ['admin.password' => [$e->getMessage()]],
@@ -151,6 +190,9 @@ final class SetupAction
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+
+        /** @var array{token:string,expires_at:\DateTimeImmutable}|null $passwordSetup */
+        $passwordSetup = null;
 
         // Race-safe: jedna transakce s SELECT FOR UPDATE — dva souběžné setup requesty
         // se serializují, druhý vidí prvního usera a odmítne setup.
@@ -177,13 +219,19 @@ final class SetupAction
             ]);
             $userId = (int) $pdo->lastInsertId();
 
+            // H-33: jednorázový odkaz na NASTAVENÍ hesla (zákazník žádné neměl).
+            // Vzniká ve stejné transakci jako admin — buď obojí, nebo nic.
+            if ($passwordMode->returnsSetupToken()) {
+                $passwordSetup = $this->passwordSetupLinks->issue($pdo, $userId, $ip);
+            }
+
             // Volitelně dodavatel
             $createdSupplierId = null;
             if ($supplier !== null) {
                 $createdSupplierId = $this->insertSupplier($pdo, $supplier);
             }
 
-            $this->logger->log('setup.completed', $userId, 'user', $userId, [
+            $this->logger->log('setup.completed', $userId, 'user', $userId, array_filter([
                 'email' => $admin['email'],
                 'has_supplier' => $supplier !== null,
                 'require_totp' => $requireTotp,
@@ -191,7 +239,11 @@ final class SetupAction
                 'allowed_mfa_methods' => $allowedMfaMethods,
                 'terms_accepted' => true,
                 'terms_documents' => self::TERMS_DOCUMENTS,
-            ], $ip, $request->getHeaderLine('User-Agent'));
+                'password_setup_link' => $passwordMode->usesSetupLink(),
+                // Souhlas mohl přijít z objednávky — ať je dohledatelné, že ho
+                // neodklikl uživatel, který u toho nebyl.
+                'terms_origin' => $termsOrigin,
+            ], static fn (mixed $v): bool => $v !== null), $ip, $request->getHeaderLine('User-Agent'));
 
             $pdo->commit();
         } catch (\PDOException $e) {
@@ -222,7 +274,14 @@ final class SetupAction
         if ($methodsProvided || $usesLegacyRequest) {
             $keysToWrite['auth.allowed_mfa_methods'] = $allowedMfaMethods;
         }
-        if ($willWriteDetectedUrl) {
+        // ⚠️ Ve spravované instalaci `app.url` NEZAPISUJEME, i kdyby v konfiguraci
+        // chybělo. Vlastní ho provisioning šablona a musí být správně dřív, než na
+        // instanci dorazí první požadavek — visí na něm tenantový host gate.
+        // Kdybychom sem dopsali hodnotu odvozenou z požadavku (například když nám
+        // setup projde přes IP nebo přes interní jméno), gate bychom instanci
+        // zamkli na adresu, na kterou zákazník nikdy nepřijde. Chybějící `app.url`
+        // je v tomhle režimu chyba zřízení a má se řešit tam, ne přepsat naslepo.
+        if ($willWriteDetectedUrl && !$this->managed->isLocked(ManagedModeGuard::KEY_APP_URL)) {
             $keysToWrite['app.url'] = $detectedUrl;
         }
         $cfgLocalWritten = false;
@@ -237,20 +296,38 @@ final class SetupAction
             ], $ip, $request->getHeaderLine('User-Agent'));
         }
 
-        // Auto-login: vytvoř session pro nově vzniknklého admina (eliminuje public window pro setup-sample)
-        $userAgent = $request->getHeaderLine('User-Agent');
-        $session = $this->sessions->create(
-            $userId,
-            $ip,
-            $userAgent,
-            $requireMfa ? SessionAuthContext::setup('password') : SessionAuthContext::basic('password'),
-        );
+        // H-01: token je jednorázový. Vlastní zápis (ne součást $keysToWrite výše),
+        // aby se o zneplatnění pokusil i tehdy, když zápis MFA politiky selhal.
+        if ($this->provisionTokens->isEnforced()) {
+            try {
+                $this->provisionTokens->consume(CfgLocalWriter::resolveTargetDir(Bootstrap::rootDir()));
+            } catch (\Throwable $e) {
+                $this->logger->log('setup.provision_token_consume_failed', $userId, 'user', $userId, [
+                    'error' => $e->getMessage(),
+                ], $ip, $request->getHeaderLine('User-Agent'));
+            }
+        }
 
-        $response = $response->withHeader(
-            'Set-Cookie',
-            $this->sessionCookies->create($session['token'], $session['expires_at']),
-        );
-        return Json::ok($response, [
+        // Auto-login: vytvoř session pro nově vzniknklého admina (eliminuje public window pro setup-sample).
+        // ⚠️ H-33: v režimu odkazu na nastavení hesla se session ZÁMĚRNĚ nezakládá —
+        // setup voláme my ze serveru, takže by patřila nám, ne zákazníkovi.
+        $userAgent = $request->getHeaderLine('User-Agent');
+        $session = null;
+        if ($passwordMode->issuesSession()) {
+            $session = $this->sessions->create(
+                $userId,
+                $ip,
+                $userAgent,
+                $requireMfa ? SessionAuthContext::setup('password') : SessionAuthContext::basic('password'),
+            );
+
+            $response = $response->withHeader(
+                'Set-Cookie',
+                $this->sessionCookies->create($session['token'], $session['expires_at']),
+            );
+        }
+
+        $payload = [
             'user' => [
                 'id'    => $userId,
                 'email' => $admin['email'],
@@ -270,13 +347,21 @@ final class SetupAction
                 'passkey_count' => 0,
                 'must_setup_mfa' => $requireMfa,
             ],
-            'csrf_token' => $session['csrf_token'],
+            'csrf_token' => $session['csrf_token'] ?? null,
             'next' => $requireMfa ? '/setup-mfa' : '/',
             'require_totp' => $requireTotp,
             'require_mfa' => $requireMfa,
             'allowed_mfa_methods' => $allowedMfaMethods,
             'cfg_local_written' => $cfgLocalWritten,
-        ], 201);
+        ];
+
+        if ($passwordSetup !== null) {
+            // „Nastavení hesla", ne „obnova" — zákazník žádné heslo neměl.
+            $payload['password_setup_token'] = $passwordSetup['token'];
+            $payload['password_setup_expires_at'] = $passwordSetup['expires_at']->format(\DateTimeInterface::ATOM);
+        }
+
+        return Json::ok($response, $payload, 201);
     }
 
     /**
@@ -413,7 +498,7 @@ final class SetupAction
      * @param array<string,mixed>|null $supplier
      * @return array<string,list<string>>
      */
-    private function validate(array $admin, ?array $supplier, bool $termsAccepted): array
+    private function validate(array $admin, ?array $supplier, bool $termsAccepted, SetupPasswordMode $passwordMode): array
     {
         $errors = [];
 
@@ -427,7 +512,9 @@ final class SetupAction
         if (empty($admin['email']) || !filter_var($admin['email'], FILTER_VALIDATE_EMAIL)) {
             $errors['admin.email'][] = 'Platný email je povinný';
         }
-        if (empty($admin['password']) || !is_string($admin['password'])) {
+        // S `admin.password_setup_link` si heslo nastaví zákazník sám přes
+        // jednorázový odkaz, takže ho v požadavku nechceme ani mít.
+        if ($passwordMode->requiresPlainPassword() && (empty($admin['password']) || !is_string($admin['password']))) {
             $errors['admin.password'][] = 'Heslo je povinné';
         }
 

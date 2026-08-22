@@ -109,7 +109,27 @@ final class DiagnosticsConfigAllowlist
         'dkim.private_key_path',
     ];
 
-    public function __construct(private readonly Config $config) {}
+    /**
+     * Klíče, které ve SPRAVOVANÉM provozu prozrazují provozovatele.
+     *
+     * ⚠️ Na self-hostu je jméno databázového a poštovního serveru zákazníkovo
+     * vlastní a při ladění se hodí. Ve spravovaném provozu je to ale naše
+     * infrastruktura: `db.host` a `smtp.host` z ní dají dohromady, kdo
+     * instalaci hostuje — a to je přesně údaj, který aplikace vyzrazovat
+     * nesmí (viz {@see ManagedModeGuard}). Diagnostický balíček navíc
+     * zákazník posílá ven, klidně třetí straně.
+     *
+     * Diagnosticky se tím nic neztrácí: pro „proč nejde pošta" stačí vědět,
+     * že hostitel nastavený JE.
+     *
+     * @var list<string>
+     */
+    private const MANAGED_PRESENCE_ONLY = ['db.host', 'smtp.host', 'redis.host'];
+
+    public function __construct(
+        private readonly Config $config,
+        private readonly ?ManagedModeGuard $managed = null,
+    ) {}
 
     /**
      * Bezpečný výřez konfigurace.
@@ -118,8 +138,13 @@ final class DiagnosticsConfigAllowlist
      */
     public function export(): array
     {
+        $hideInfrastructure = $this->managed?->isManaged() ?? false;
+
         $values = [];
         foreach (self::VALUES as $path) {
+            if ($hideInfrastructure && in_array($path, self::MANAGED_PRESENCE_ONLY, true)) {
+                continue;
+            }
             $value = $this->config->get($path, null);
             if ($value === null) {
                 continue;
@@ -127,8 +152,12 @@ final class DiagnosticsConfigAllowlist
             $values[$path] = self::normalize($value);
         }
 
+        $presenceKeys = self::PRESENCE;
+        if ($hideInfrastructure) {
+            $presenceKeys = array_merge($presenceKeys, self::MANAGED_PRESENCE_ONLY);
+        }
         $presence = [];
-        foreach (self::PRESENCE as $path) {
+        foreach ($presenceKeys as $path) {
             $presence[$path] = self::describePresence($this->config->get($path, null));
         }
 

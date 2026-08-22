@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Service\System;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\System\DiagnosticsConfigAllowlist;
+use MyInvoice\Service\System\ManagedModeGuard;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -197,5 +198,46 @@ final class DiagnosticsConfigAllowlistTest extends TestCase
         $presence = (new DiagnosticsConfigAllowlist($config))->export()['presence'];
 
         self::assertSame('<default:CHANGE-ME>', $presence['app.pepper']);
+    }
+    /**
+     * Ve spravovaném provozu se jméno databázového a poštovního serveru
+     * neposílá.
+     *
+     * ⚠️ Je to NAŠE infrastruktura a diagnostický balíček zákazník posílá ven,
+     * klidně třetí straně. `db.host` a `smtp.host` z něj dají dohromady, kdo
+     * instalaci hostuje — a to je přesně údaj, který aplikace vyzrazovat nesmí.
+     * Na self-hostu jde naopak o zákazníkovy vlastní servery a při ladění se
+     * hodí, takže se rozhoduje podle režimu, ne plošně.
+     */
+    public function testManagedInstallationHidesOperatorInfrastructure(): void
+    {
+        $tree = self::configTree();
+        $tree['app']['managed'] = true;
+        $config = new Config($tree);
+
+        $out = (new DiagnosticsConfigAllowlist($config, new ManagedModeGuard($config)))->export();
+
+        foreach (['db.host', 'smtp.host', 'redis.host'] as $key) {
+            self::assertArrayNotHasKey($key, $out['values'], $key . ' se ve spravovaném provozu neposílá s hodnotou.');
+            self::assertArrayHasKey($key, $out['presence'], $key . ' zůstává jako „je/není nastaveno".');
+        }
+
+        $json = (string) json_encode($out, JSON_UNESCAPED_UNICODE);
+        self::assertStringNotContainsString((string) $config->get('db.host'), $json);
+        self::assertStringNotContainsString((string) $config->get('smtp.host'), $json);
+    }
+
+    /**
+     * Self-hosted instalace je dostane s hodnotou — jinak by test výš prošel
+     * i s implementací, která je schová vždycky, a zákazníkovi bez hostingu
+     * bychom zbytečně ubrali diagnostiku.
+     */
+    public function testSelfHostedInstallationKeepsHostnames(): void
+    {
+        $config = new Config(self::configTree());
+        $out = (new DiagnosticsConfigAllowlist($config, new ManagedModeGuard($config)))->export();
+
+        self::assertArrayHasKey('db.host', $out['values']);
+        self::assertArrayHasKey('smtp.host', $out['values']);
     }
 }

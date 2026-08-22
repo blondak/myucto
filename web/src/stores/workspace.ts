@@ -81,6 +81,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
+  /**
+   * Zahodí POSLEDNÍ slot rozložení.
+   *
+   * Zavřít se dá kterýkoli panel včetně prvního, ale sloty jsou pozicové —
+   * `primary` je jediný, který drží skutečný router aplikace, a tím i adresu
+   * v prohlížeči. Přečíslovat je nejde bez toho, aby se všechny panely
+   * odmountovaly a přišly o svoji historii. Zavření se proto dělá posunem
+   * OBSAHU doleva (viz useWorkspaceNavigation.closePane) a tady se pak odebere
+   * osiřelý slot na konci.
+   */
+  function dropLastPane(): boolean {
+    if (panes.value.length <= 1) return false
+    const removed = panes.value.pop()!
+    paneCount.value = panes.value.length as PaneCount
+    if (activePaneId.value === removed.id) activePaneId.value = panes.value[panes.value.length - 1]!.id
+    return true
+  }
+
   function setMaximumPaneCount(count: PaneCount): void {
     maximumPaneCount.value = count
   }
@@ -98,6 +116,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     resizeLayout,
     updatePane,
     removeEmptyPane,
+    dropLastPane,
     setMaximumPaneCount,
   }
 })

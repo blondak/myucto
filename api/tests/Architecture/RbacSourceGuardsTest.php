@@ -23,6 +23,11 @@ final class RbacSourceGuardsTest extends TestCase
         'Action/Auth/LoginAction.php',
         'Middleware/AuthMiddleware.php',
         'Repository/RoleRepository.php',
+        // Rozhoduje, kdo zabírá licenční MÍSTO. Plný přístup superadmina je
+        // implicitní — v `role_permissions` nemá ani řádek — takže se identita
+        // té role číst musí, jinak by se jediný účet, který instalaci opravdu
+        // ovládá, do počtu nikdy nezapočítal.
+        'Service/License/SeatPolicy.php',
         'Security/EffectiveRole.php',
         'Security/PermissionCatalog.php',
         'Security/PermissionResolver.php',

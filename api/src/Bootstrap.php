@@ -19,10 +19,12 @@ use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Middleware\FirstRunLockMiddleware;
 use MyInvoice\Middleware\IpAllowlistMiddleware;
 use MyInvoice\Middleware\LicenseMiddleware;
+use MyInvoice\Middleware\MaintenanceModeMiddleware;
 use MyInvoice\Middleware\RateLimitMiddleware;
 use MyInvoice\Middleware\PermissionMiddleware;
 use MyInvoice\Middleware\RequireMfaMiddleware;
 use MyInvoice\Middleware\SessionLockMiddleware;
+use MyInvoice\Middleware\StorageQuotaReadOnlyMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Middleware\WebAuthnBodyLimitMiddleware;
@@ -535,6 +537,10 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\License\LicenseClient::class),
                 $c->get(LoggerInterface::class),
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
+                // Telemetrie se dopočítá lazily (viz docblock služby), rozsah
+                // zaplacené služby ale musí být TÁŽ instance jako všude jinde —
+                // jinak by se po zápisu nového rozsahu nezahodila jeho cache.
+                entitlement: $c->get(\MyInvoice\Service\System\InstanceEntitlement::class),
             ),
             \MyInvoice\Service\Tenant\SupplierAccessResolver::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Tenant\SupplierAccessResolver(
                 $c->get(Connection::class),
@@ -579,6 +585,18 @@ final class Bootstrap
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
             ),
 
+            // ⚠️ `?InstanceHealthProbe $probe = null` v HealthAction je test seam
+            // (health musí odpovědět kompletním tvarem i bez DB). PHP-DI ale
+            // VOLITELNÉ parametry autowiringem přeskakuje — bez tohohle bindu by
+            // probe zůstal null a `/api/health` by v provozu vracel samé null
+            // u údržby, běžících úloh, cronu, zálohy i migrací. Tiché selhání
+            // přesně toho, kvůli čemu endpoint vznikl (H-09).
+            \MyInvoice\Action\System\HealthAction::class => \DI\autowire()
+                ->constructorParameter(
+                    'probe',
+                    \DI\get(\MyInvoice\Service\System\InstanceHealthProbe::class),
+                ),
+
             // Licenční klient (E4) má volitelný `?GuzzleHttp\Client $http = null` (test
             // seam). Autowire by ho vyplnil bare Guzzle (bez base_uri/verify z cfg) →
             // definujeme explicitně s $http = null, ať si klient postaví vlastní klienta.
@@ -591,9 +609,16 @@ final class Bootstrap
             \MyInvoice\Service\Epo\EpoClient::class => fn () => new \MyInvoice\Service\Epo\EpoClient(
                 null,
             ),
+            // ⚠️ `epo_test` prochází zámkem spravovaného režimu, a to PRÁVĚ TADY,
+            // protože tohle je jediné místo, které rozhoduje o skutečném prostředí.
+            // Zkušební prostředí daňové správy v ostré zákaznické instanci znamená
+            // tiše nepodaná hlášení — a poznat se to dá až po termínu.
             \MyInvoice\Service\Epo\EpoDirectClient::class => fn () => new \MyInvoice\Service\Epo\EpoDirectClient(
                 null,
-                $config->get('epo_test', false) ? 'test' : 'production',
+                (new \MyInvoice\Service\System\ManagedModeGuard($config))->effectiveFlag(
+                    \MyInvoice\Service\System\ManagedModeGuard::KEY_EPO_TEST,
+                    (bool) $config->get('epo_test', false),
+                ) ? 'test' : 'production',
             ),
 
             // IpMatcher má v konstruktoru volitelný `?Config $config = null`. Autowiring
@@ -744,7 +769,7 @@ final class Bootstrap
 
         // Slim 4 LIFO: poslední `add()` = NEJVĚTŠÍ vrstva = běží JAKO PRVNÍ.
         // Cílový order běhu (outside → inside):
-        //   IpAllowlist → FirstRunLock → TenantDomain → Auth → ApiRequestLog → SessionLock → RequireMfa → License → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
+        //   ApiVersionRewrite → MaintenanceMode → IpAllowlist → FirstRunLock → TenantDomain → Auth → ApiRequestLog → SessionLock → RequireMfa → License → StorageQuotaReadOnly → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → Action
         // → add() v opačném pořadí (innermost první):
         //
         // ⚠️ Middleware se předávají jako CLASS-STRING, ne jako instance. Slim je pak
@@ -762,6 +787,12 @@ final class Bootstrap
         $app->add(PermissionMiddleware::class);                      // jemnozrnná route permission kontrola
         $app->add(SupplierScopeMiddleware::class);                   // multi-supplier scope (X-Supplier-Id / token's supplier_id)
         $app->add(DemoReadOnlyMiddleware::class);                    // demo: globální zákaz business mutací
+        // H-10: vyčerpaná disková kvóta → 507 na zápisy, čtení projde. Sedí ZA
+        // autentizací schválně: údaje o zaplnění se tak nedostanou anonymnímu
+        // volajícímu a přihlášení (výjimka) stihne proběhnout dřív, než se
+        // pravidlo uplatní. Bez `app.managed` a bez nastavené kvóty je to
+        // konfigurační no-op — self-hosted instalace se nikdy nezamkne sama.
+        $app->add(StorageQuotaReadOnlyMiddleware::class);            // 507 + X-Storage-Quota-* hlavičky
         $app->add(LicenseMiddleware::class);                         // E4: denní obnova tokenu + blokace komerčních modulů po expiraci
         $app->add(RequireMfaMiddleware::class);                      // assurance + povinný MFA setup (bearer skip)
         $app->add(SessionLockMiddleware::class);                     // autoritativní idle/manual lock browser session
@@ -770,9 +801,19 @@ final class Bootstrap
         $app->add(TenantDomainMiddleware::class);                   // Host autoritativně určí tenant před autentizací
         $app->add(FirstRunLockMiddleware::class);                    // 423 pokud users prázdná
         $app->add(IpAllowlistMiddleware::class);                     // outermost user mw
+        // H-03: zámek údržby musí být PŘED autentizací (503 dostane i nepřihlášený)
+        // a zároveň UVNITŘ ApiVersionRewrite, aby se výjimka pro /api/health testovala
+        // na už přepsané cestě (jinak by /api/v1/health v údržbě spadlo na 503).
+        $app->add(MaintenanceModeMiddleware::class);                 // 503 + Retry-After na vše kromě /api/health
         $app->add(new ApiVersionRewriteMiddleware());                // /api/v1/* → /api/* před vším ostatním
 
-        $displayErrors = (bool) $config->get('app.debug', false);
+        // Stack trace v odpovědích API na cizí infrastruktuře nemá co dělat,
+        // takže `app.debug` ve spravované instalaci neplatí, i kdyby se do
+        // konfigurace dostal.
+        $displayErrors = (new \MyInvoice\Service\System\ManagedModeGuard($config))->effectiveFlag(
+            \MyInvoice\Service\System\ManagedModeGuard::KEY_APP_DEBUG,
+            (bool) $config->get('app.debug', false),
+        );
         $app->addErrorMiddleware($displayErrors, true, true, $container->get(LoggerInterface::class));
 
         return $app;

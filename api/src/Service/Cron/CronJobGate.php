@@ -33,6 +33,11 @@ use Throwable;
  * Brána je záměrně **fail-open**: když se nedá přečíst config nebo databáze,
  * úloha zůstane naplánovaná. Nedostupná DB při startu kontejneru nesmí vést
  * k tomu, že se cron tiše vypne a nikdo si toho měsíc nevšimne.
+ *
+ * Výjimka z fail-open: `cron.disabled_jobs` (seznam jmen úloh z katalogu) je
+ * explicitní vůle admina/spravované instalace danou úlohu nespouštět — vyhrává
+ * nad vším ostatním v {@see inactiveReason()} a kontroluje se jako úplně první,
+ * ještě před DB-dotazovanými feature probes.
  */
 final class CronJobGate
 {
@@ -42,6 +47,11 @@ final class CronJobGate
     public const INACTIVE_FEATURE_OFF = 'feature_off';
     /** Položka patří do jiného režimu plánování, než v jakém instalace běží. */
     public const INACTIVE_OTHER_MODE = 'other_mode';
+    /** Admin úlohu výslovně vypnul přes `cron.disabled_jobs` (spravovaná instalace, cizí hosting apod.). */
+    public const INACTIVE_DISABLED_BY_CONFIG = 'disabled_by_config';
+
+    /** Cfg klíč se seznamem jmen úloh z {@see CronCatalog}, které mají na téhle instalaci zůstat vypnuté. */
+    private const DISABLED_JOBS_CONFIG_KEY = 'cron.disabled_jobs';
 
     /** Aspoň jeden dodavatel vede podvojné účetnictví. */
     public const FEATURE_DOUBLE_ENTRY = 'double_entry';
@@ -73,6 +83,12 @@ final class CronJobGate
     /** @var array<string,bool> */
     private array $featureCache = [];
 
+    /** @var array<string,true>|null */
+    private ?array $disabledJobsCache = null;
+
+    /** @var list<string>|null */
+    private ?array $unknownDisabledJobNamesCache = null;
+
     public function __construct(
         private readonly Config $config,
         private readonly ?PDO $pdo = null,
@@ -91,6 +107,13 @@ final class CronJobGate
      */
     public function inactiveReason(array $job, string $mode = CronScheduleMode::INDIVIDUAL): ?string
     {
+        // Explicitní vypnutí konfigurací musí přebít všechno ostatní — proto je
+        // to úplně první kontrola, ještě před dispatcher/mode úvahou. Nemá smysl
+        // kvůli vypnuté úloze sahat do databáze na feature probes ani řešit, do
+        // kterého režimu plánování patří.
+        if ($this->isDisabledByConfig((string) ($job['script'] ?? ''))) {
+            return self::INACTIVE_DISABLED_BY_CONFIG;
+        }
         // Položka dispatcheru dává smysl jen v režimu DISPATCHER — v tom druhém
         // se neplánuje, takže by navždy visela jako „nikdy neběželo".
         if (($job['dispatcher_only'] ?? false) === true) {
@@ -165,6 +188,80 @@ final class CronJobGate
                 return $isDispatcher || $this->isSchedulable($job);
             },
         ));
+    }
+
+    /** Je úloha vypnutá přes `cron.disabled_jobs`? */
+    public function isDisabledByConfig(string $script): bool
+    {
+        if ($script === '') {
+            return false;
+        }
+        return isset($this->disabledJobs()[$script]);
+    }
+
+    /**
+     * Jména z `cron.disabled_jobs`, která nesedí na žádný skript v
+     * {@see CronCatalog::all()} — pravděpodobný překlep v konfiguraci. Vystaveno
+     * pro health/diagnostickou vrstvu, ať se to dá najít i bez procházení PHP
+     * error logu (kam se totéž zaloguje jako varování, viz {@see disabledJobs()}).
+     *
+     * @return list<string>
+     */
+    public function unknownDisabledJobNames(): array
+    {
+        $this->disabledJobs(); // naplní i cache neznámých jmen
+        return $this->unknownDisabledJobNamesCache ?? [];
+    }
+
+    /**
+     * Načte a validuje `cron.disabled_jobs` proti katalogu. Jména mimo katalog
+     * se NEIGNORUJÍ tiše — jde o překlep v konfiguraci, který by jinak vypadal
+     * jako fungující vypnutí a nikdo by si nevšiml, že vlastně nic nedělá.
+     *
+     * Fail-open (viz docblock třídy): nečitelná/chybějící konfigurace = nic
+     * není vypnuté.
+     *
+     * @return array<string,true>
+     */
+    private function disabledJobs(): array
+    {
+        if ($this->disabledJobsCache !== null) {
+            return $this->disabledJobsCache;
+        }
+
+        $raw = [];
+        try {
+            $raw = $this->config->get(self::DISABLED_JOBS_CONFIG_KEY, []);
+        } catch (Throwable) {
+            // fail-open
+        }
+        if (!is_array($raw)) {
+            $raw = [];
+        }
+
+        $known    = array_flip(CronCatalog::scripts());
+        $disabled = [];
+        $unknown  = [];
+        foreach ($raw as $name) {
+            if (!is_string($name) || $name === '') {
+                continue;
+            }
+            if (isset($known[$name])) {
+                $disabled[$name] = true;
+            } else {
+                $unknown[] = $name;
+            }
+        }
+
+        if ($unknown !== []) {
+            error_log(sprintf(
+                'CronJobGate: cron.disabled_jobs obsahuje jméno mimo CronCatalog (pravděpodobný překlep): %s',
+                implode(', ', $unknown),
+            ));
+        }
+        $this->unknownDisabledJobNamesCache = $unknown;
+
+        return $this->disabledJobsCache = $disabled;
     }
 
     /**

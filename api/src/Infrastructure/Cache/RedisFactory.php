@@ -33,6 +33,20 @@ final class RedisFactory
             return null;
         }
 
+        // H-08: izolace instancí stojí ČISTĚ na prefixu (hosting dává všem
+        // `db 0`). Když prefix není jedinečný, je běh bez cache jediná bezpečná
+        // varianta — sdílená cache mezi zákazníky není zpomalení, ale únik.
+        $unsafe = RedisKeyspace::unsafeReason($this->config);
+        if ($unsafe !== null) {
+            error_log('[redis] ' . $unsafe);
+
+            return null;
+        }
+        $dbWarning = RedisKeyspace::databaseWarning($this->config);
+        if ($dbWarning !== null) {
+            error_log('[redis] ' . $dbWarning);
+        }
+
         $params = [
             'scheme'   => 'tcp',
             'host'     => (string) $this->config->get('redis.host', '127.0.0.1'),
@@ -61,8 +75,12 @@ final class RedisFactory
         }
 
         try {
+            // ⚠️ Prefix se bere z RedisKeyspace, ne z Configu napřímo. Config
+            // umí vrátit prázdný řetězec (`redis.prefix => ''` v cfg), a ten
+            // Predis chápe jako „neprefixuj" — holé klíče `bf:…`, `rl:…`
+            // v `db 0`, který instance sdílejí. RedisKeyspace to nikdy nepustí.
             $this->client = new RedisClient($params, [
-                'prefix' => (string) $this->config->get('redis.prefix', 'myinvoice:'),
+                'prefix' => RedisKeyspace::prefix($this->config),
             ]);
             $this->client->ping();
         } catch (\Throwable) {

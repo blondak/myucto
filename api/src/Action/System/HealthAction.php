@@ -14,11 +14,26 @@ use MyInvoice\Service\Auth\PasskeyService;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\SessionLockPolicy;
 use MyInvoice\Service\System\AppUrlConfiguration;
+use MyInvoice\Service\System\InstanceHealthProbe;
 use MyInvoice\Service\Tenant\TenantDomainContext;
 use MyInvoice\Service\Update\VersionService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
+/**
+ * Veřejný health endpoint.
+ *
+ * Bez fleet API je tohle jediný kanál, kterým se dá zjistit, co na spravované
+ * instalaci běží — proto sem patří údržba, rozpracovaná práce, čerstvost cronu,
+ * stáří zálohy, verze i stav migrací (H-09). Detaily ale NE: bez autentizace se
+ * vrací jen souhrn (čísla, stáří, booleany), nikdy jména skriptů, seznamy
+ * migrací, hostname ani chybové hlášky. Sběr dělá {@see InstanceHealthProbe}.
+ *
+ * Endpoint musí zůstat dostupný i v údržbě a i přes cizí `Host` — jinak hosting
+ * nepozná rozdíl mezi plánovanou údržbou a výpadkem a monitoring přes IP by
+ * skončil na 421. Výjimky drží {@see \MyInvoice\Middleware\MaintenanceModeMiddleware}
+ * a {@see TenantDomainMiddleware}.
+ */
 final class HealthAction
 {
     public function __construct(
@@ -30,6 +45,9 @@ final class HealthAction
         private readonly MfaPolicyService $mfaPolicy,
         private readonly SessionLockPolicy $sessionLockPolicy,
         private readonly AppUrlConfiguration $appUrl,
+        // Volitelná záměrně: bez probe (a bez DB) musí health pořád odpovědět
+        // kompletním tvarem, jen s neznámými hodnotami.
+        private readonly ?InstanceHealthProbe $probe = null,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -39,16 +57,46 @@ final class HealthAction
             && $domainContext->mode === TenantDomainContext::CONFIGURATION_ERROR
                 ? $this->appUrl->hostnameConflictStatus()
                 : $this->appUrl->status();
+        $summary = $this->probe?->summary() ?? InstanceHealthProbe::unavailableSummary();
+        $managed = $this->probe?->managed() ?? ['managed' => false, 'managed_provider' => null];
         $payload = [
             'status'  => 'ok',
             'version' => $this->version->getCurrentVersion(),
             'db'      => $this->db->ping(),
             'redis'   => $this->redis->isAvailable(),
             'time'    => date(\DateTimeInterface::ATOM),
+            // `status` zůstává 'ok' i v údržbě — instance odpovídá, což je přesně
+            // to, co HTTP status vypovídá. Údržbu nese samostatný příznak, ať
+            // existující healthchecky (Docker, CI) nezačnou restartovat kontejner.
+            'maintenance' => $summary['maintenance'],
+            'jobs'        => $summary['jobs'],
+            'cron'        => $summary['cron'],
+            'backup'      => $summary['backup'],
+            'migrations'  => $summary['migrations'],
             'configuration' => [
                 'app_url' => $appUrlStatus,
+                // Host gate umí selhat tiše v OBOU směrech (viz
+                // AppUrlConfiguration::isConfigured), proto tři samostatné údaje.
+                'app_url_configured'   => $this->appUrl->isConfigured(),
+                'app_url_matches_host' => $this->appUrl->matchesHost($request->getUri()->getHost()),
+                'host_gate_enforced'   => $this->probe?->hostGateEnforced() ?? false,
+                'managed'              => $managed['managed'],
             ],
         ];
+
+        // ⚠️ KDO instalaci hostuje, se anonymnímu volajícímu neříká.
+        //
+        // Aplikace nesmí na svém provozovateli nic stavět a už vůbec ho nesmí
+        // vyzrazovat: `/api/health` je veřejný a záměrně odpovídá i na neznámé
+        // doméně, takže by stačilo projet `*.myucto.online` a mít celý
+        // dodavatelský řetězec i seznam instancí. Zůstává diagnostickým údajem
+        // pro toho, kdo je uvnitř — provozovatel sám sebe zná.
+        //
+        // `managed` (ano/ne) zůstává veřejné: neprozrazuje nikoho a zákaznická
+        // instalace podle něj pozná, že si konfiguraci nemá přenastavovat.
+        if ($request->getAttribute(AuthMiddleware::ATTR_USER) !== null) {
+            $payload['configuration']['managed_provider'] = $managed['managed_provider'];
+        }
 
         // Diagnostické warningy (např. slabý fallback secret_encryption_key) jen
         // pro přihlášené — anonymnímu volajícímu (Docker healthcheck, monitoring)

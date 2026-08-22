@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Action\Auth;
 
 use MyInvoice\Action\Auth\SetupStatusAction;
+use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\FirstRunLockMiddleware;
 use MyInvoice\Service\Auth\MfaPolicyService;
@@ -33,6 +34,7 @@ final class SetupStatusActionTest extends TestCase
             ]),
             $passkeys,
             $policy,
+            new ManagedModeGuard(new Config([])),
         );
 
         $response = $action(
@@ -58,6 +60,7 @@ final class SetupStatusActionTest extends TestCase
             new Config(['captcha' => ['provider' => 'none']]),
             $passkeys,
             $policy,
+            new ManagedModeGuard(new Config([])),
         );
 
         $response = $action(

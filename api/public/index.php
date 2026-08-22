@@ -69,8 +69,10 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Http\MaintenanceResponse;
 use MyInvoice\Http\RequestPath;
 use MyInvoice\Middleware\FirstRunLockMiddleware;
+use MyInvoice\Service\System\MaintenanceLock;
 use MyInvoice\Service\Tenant\TenantDomainPolicy;
 use MyInvoice\Service\Tenant\TenantDomainResolver;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -78,6 +80,40 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 try {
     $requestPath = RequestPath::normalize((string) (parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/'));
     if (!str_starts_with($requestPath, '/api/')) {
+        // H-03: zámek údržby pro SPA fallback.
+        //
+        // Tahle větev se do Slim pipeline NIKDY nedostane — front controller
+        // vydává `web/dist/index.html` ještě před `Bootstrap::buildApp()`, takže
+        // MaintenanceModeMiddleware by ji minul a v údržbě by uživatel dostal
+        // normální aplikaci, která pak na prvním API volání spadne na 503.
+        // Odpověď je proto sdílená ({@see MaintenanceResponse}) a stejná jako
+        // z middlewaru: čitelná stránka pro prohlížeč, JSON pro API klienta.
+        //
+        // Nečitelná konfigurace tady údržbu NEZAPÍNÁ — chybu vyřeší catch níž
+        // s pořádnou hláškou; 503 „údržba" by ji jen zamaskovalo.
+        $maintenanceLock = null;
+        try {
+            $candidate = new MaintenanceLock(Config::load(Bootstrap::rootDir()));
+            $maintenanceLock = $candidate->isActive() ? $candidate : null;
+        } catch (\Throwable) {
+            $maintenanceLock = null;
+        }
+        if ($maintenanceLock !== null) {
+            $retryAfter = $maintenanceLock->retryAfter();
+            $message = $maintenanceLock->message();
+            http_response_code(503);
+            header('Retry-After: ' . $retryAfter);
+            header('Cache-Control: no-store');
+            if (MaintenanceResponse::wantsJson($requestPath, (string) ($_SERVER['HTTP_ACCEPT'] ?? ''))) {
+                header('Content-Type: application/json; charset=utf-8');
+                echo MaintenanceResponse::json($message);
+                exit;
+            }
+            header('Content-Type: text/html; charset=utf-8');
+            echo MaintenanceResponse::html($message, $retryAfter);
+            exit;
+        }
+
         $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
         if (!in_array($method, ['GET', 'HEAD'], true)) {
             http_response_code(405);

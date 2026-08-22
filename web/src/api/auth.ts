@@ -67,6 +67,13 @@ export interface SupplierBrief {
 export interface SetupStatus {
   needs_setup: boolean
   version: string
+  /**
+   * Spravovaná instalace — konfiguraci drží provozovatel, ne uživatel. Zamyká
+   * self-update, adresu aplikace, vlastní SMTP transport, skenování adresářů
+   * na serveru a vlastní domény. Backend to vynucuje sám; UI podle toho jen
+   * POJMENUJE, proč akce chybí. `undefined` = starší backend bez pole.
+   */
+  managed?: boolean
   demo?: {
     enabled: boolean
     auto_login: boolean

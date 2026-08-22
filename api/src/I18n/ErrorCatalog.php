@@ -125,6 +125,18 @@ final class ErrorCatalog
         'Klient nenalezen.' => 'Client not found.',
         'Faktura nenalezena.' => 'Invoice not found.',
         'Validace selhala' => 'Validation failed',
+        // H-02 — spravovaná instalace. Texty jsou SSOT ve
+        // {@see \MyInvoice\Service\System\ManagedModeGuard}; při jejich změně
+        // je nutné přepsat i tenhle překlad, jinak zůstane EN uživatel u CZ věty.
+        'Tohle je spravovaná instalace — aktualizace nasazuje provozovatel, aby na všech instancích běžela stejná verze.' => 'This is a managed installation — updates are deployed by the operator so that every instance runs the same version.',
+        'Adresu aplikace nastavuje ve spravované instalaci provozovatel — je navázaná na směrování požadavků i na licenci.' => 'In a managed installation the application URL is set by the operator — request routing and the licence both depend on it.',
+        'Odesílání e-mailů zajišťuje ve spravované instalaci provozovatel. Vlastní SMTP server ani obálkovou adresu tu nastavit nelze; odesílatele (From, Reply-To) měnit můžete.' => 'In a managed installation e-mail is sent by the operator. A custom SMTP server or envelope address cannot be set here; you can still change the sender (From, Reply-To).',
+        'Skenování adresářů na serveru je ve spravované instalaci vypnuté. Výpisy i doklady nahrávejte souborem nebo e-mailem.' => 'Scanning server directories is disabled in a managed installation. Upload statements and documents as files or send them by e-mail.',
+        'Prostředí daňové správy nastavuje ve spravované instalaci provozovatel — ostrá instalace podává vždy naostro.' => 'In a managed installation the tax authority environment is set by the operator — a production installation always files for real.',
+        'Ladicí režim ve spravované instalaci zapíná provozovatel.' => 'In a managed installation debug mode is switched on by the operator.',
+        'Demo režim ve spravované instalaci není k dispozici.' => 'Demo mode is not available in a managed installation.',
+        'Ve spravované instalaci nastavuje doménu provozovatel — certifikát a směrování pro vlastní doménu je potřeba zřídit na jeho straně.' => 'In a managed installation the domain is set by the operator — the certificate and routing for a custom domain have to be provisioned on their side.',
+        'Tuhle věc drží ve spravované instalaci provozovatel — z aplikace ji změnit nelze.' => 'In a managed installation this is held by the operator — it cannot be changed from the application.',
     ];
 
     /**

@@ -139,6 +139,9 @@ function healthBadgeClass(h: CronJobHealth): string {
     // Čerstvá instalace ještě nestihla ani jednu periodu téhle úlohy — "nikdy
     // neběželo" je tu očekávaný stav, ne poplach (viz never_ran níž).
     case 'pending': return 'bg-neutral-100 text-neutral-600'
+    // Vypnutá konfigurací (cron.disabled_jobs) je záměr admina/spravovaného
+    // hostingu, ne chyba — stejná neutrální barva jako idle/pending.
+    case 'disabled': return 'bg-neutral-100 text-neutral-600'
     case 'overdue': return 'bg-warning-50 text-warning-600'
     case 'failing':
     case 'overdue_and_failing':
@@ -155,6 +158,8 @@ function healthLabel(h: CronJobHealth): string {
 function healthTooltip(j: CronJob): string {
   if (j.health === 'idle') return t('cron_jobs.tooltip_idle', { script: schedule.value?.dispatcher_script ?? 'cron-dispatch' })
   if (j.health === 'pending') return t('cron_jobs.tooltip_pending', { hours: j.max_age_hours })
+  // Vlastní text — nesmí znít jako "nespustila se", ale jako "vypnul ji admin".
+  if (j.health === 'disabled') return t('cron_jobs.tooltip_disabled')
   if (j.health === 'overdue' || j.health === 'overdue_and_failing') {
     return t('cron_jobs.tooltip_overdue', { hours: j.max_age_hours })
   }
@@ -163,8 +168,10 @@ function healthTooltip(j: CronJob): string {
   return ''
 }
 
-// Pending ani idle nejsou problém — jsou to normální provozní/přechodné stavy.
-const hasProblems = computed(() => jobs.value.some(j => j.health !== 'ok' && j.health !== 'idle' && j.health !== 'pending'))
+// Pending, idle a disabled nejsou problém — jsou to normální/záměrné stavy.
+const hasProblems = computed(() => jobs.value.some(j =>
+  j.health !== 'ok' && j.health !== 'idle' && j.health !== 'pending' && j.health !== 'disabled'
+))
 
 // ── Návod na naplánování úloh ───────────────────────────────────────────────
 // Skládá se z KATALOGU (frekvence) a ze SKUTEČNÝCH cest běžícího nasazení
@@ -409,7 +416,7 @@ async function copySetup() {
                     </div>
                   </div>
                   <div
-                    v-if="j.health === 'idle' || j.health === 'pending'"
+                    v-if="j.health === 'idle' || j.health === 'pending' || j.health === 'disabled'"
                     class="mt-2 text-xs text-neutral-500"
                   >
                     {{ healthTooltip(j) }}

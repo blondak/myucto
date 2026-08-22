@@ -892,7 +892,26 @@ function vatCollisionLabel(c: VatStatusCollision): string {
 
       </section>
 
-      <SupplierDomainsSettings v-if="tab === 'company' && auth.domainsFeatureEnabled && auth.canRead('settings.domains')" />
+      <!--
+        H-30 — spravovaná instalace: doménu tu zákazník nezaloží, protože
+        certifikát ani směrování pro cizí hostname na cizí infrastruktuře nikdo
+        nezřídí. Plocha se proto nenabízí, ale POJMENUJE se: prázdné místo by
+        vypadalo jako chybějící funkce. API to odmítá i bez UI (409).
+      -->
+      <section
+        v-if="tab === 'company' && auth.isManagedInstallation && auth.domainsFeatureEnabled && auth.canRead('settings.domains')"
+        class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm"
+      >
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('domains.title') }}</h2>
+        <div class="rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 flex gap-2.5">
+          <svg class="w-4 h-4 mt-0.5 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
+          <div>
+            <div class="font-medium text-neutral-800">{{ t('domains.managed_title') }}</div>
+            <p class="mt-0.5">{{ t('domains.managed_desc') }}</p>
+          </div>
+        </div>
+      </section>
+      <SupplierDomainsSettings v-else-if="tab === 'company' && auth.domainsFeatureEnabled && auth.canRead('settings.domains')" />
 
       <!-- Číslování faktur — samostatný box -->
       <section v-if="tab === 'documents'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">

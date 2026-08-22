@@ -28,6 +28,13 @@ const pollingEnabled = ref(true)
 
 const isAdmin = computed(() => auth.isSuperadmin)
 
+/**
+ * Spravovaná instalace (H-02) — verzi nasazuje provozovatel. Tlačítka tady
+ * nemizí bez vysvětlení: uživatel musí vidět, že to řeší někdo jiný, ne že to
+ * nefunguje. Backend to navíc odmítá i bez UI (409 `managed_installation`).
+ */
+const isManaged = computed(() => auth.isManagedInstallation)
+
 /** Nativní instalace umí update provést sama (Docker jede přes host watcher). */
 const nativeAuto = computed(
   () => status.value?.environment === 'native' && preflight.value?.ok === true,
@@ -44,7 +51,9 @@ async function load(signal?: AbortSignal) {
     health.value = nextHealth
     // Cache je stale (>24h, prázdná, nebo `latest < current`) → background refresh,
     // aby uživatel nemusel mačkat "Zkontrolovat nyní" sám. Tichý fail je OK.
-    if (nextStatus.cache_stale && !checking.value) {
+    // Ve spravované instalaci se neptáme vůbec — backend refresh i preflight
+    // odmítá a jediné, co by z toho bylo, je 409 v konzoli.
+    if (nextStatus.cache_stale && !checking.value && !isManaged.value) {
       void backgroundRefresh()
     }
     // Preflight jen u nativní instalace s dostupným updatem — zapisuje probe
@@ -54,7 +63,8 @@ async function load(signal?: AbortSignal) {
       nextStatus.environment === 'native' &&
       nextStatus.has_update &&
       nextStatus.latest &&
-      preflight.value === null
+      preflight.value === null &&
+      !isManaged.value
     ) {
       try {
         preflight.value = await updateApi.preflight(nextStatus.latest, signal)
@@ -391,8 +401,24 @@ function fmtDate(s?: string | null): string {
           {{ t('updates.last_check_error') }}: <span class="font-mono">{{ status.last_check_error }}</span>
         </div>
 
+        <!--
+          Spravovaná instalace: místo tlačítka „Aktualizovat" pojmenovaná
+          informace. Zmizelé tlačítko bez vysvětlení vypadá jako rozbitá funkce.
+        -->
+        <div
+          v-if="isManaged"
+          class="mt-5 rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 flex gap-2.5"
+        >
+          <svg class="w-4 h-4 mt-0.5 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
+          <div>
+            <div class="font-medium text-neutral-800">{{ t('updates.managed_title') }}</div>
+            <p class="mt-0.5">{{ t('updates.managed_desc') }}</p>
+          </div>
+        </div>
+
         <div class="mt-5 flex flex-wrap gap-2">
           <button
+            v-if="!isManaged"
             type="button"
             @click="refresh"
             :disabled="checking"
@@ -402,7 +428,7 @@ function fmtDate(s?: string | null): string {
             {{ checking ? t('updates.checking') : t('updates.check_now') }}
           </button>
           <button
-            v-if="status.has_update && !status.upgrade_in_progress"
+            v-if="!isManaged && status.has_update && !status.upgrade_in_progress"
             type="button"
             @click="triggerUpgrade"
             :disabled="triggering"
@@ -477,7 +503,7 @@ function fmtDate(s?: string | null): string {
           </div>
           <p class="text-xs text-neutral-500 mt-2">{{ t('updates.step_' + status.upgrade_progress.step) }}</p>
         </div>
-        <div class="mt-3 pt-3 border-t border-primary-200/60 flex items-center gap-3 flex-wrap">
+        <div v-if="!isManaged" class="mt-3 pt-3 border-t border-primary-200/60 flex items-center gap-3 flex-wrap">
           <button type="button" @click="cancelStuckUpgrade" :disabled="cancelling"
             :class="btnOutline('danger')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
@@ -533,7 +559,12 @@ function fmtDate(s?: string | null): string {
       </section>
 
       <!-- How upgrade works — vždy viditelné, environment-specific instrukce -->
-      <section class="rounded-lg border border-neutral-200 bg-surface p-5">
+      <!--
+        Ruční postup (docker-update.sh / nativní worker) je ve spravované
+        instalaci návod k něčemu, co uživatel nemá jak spustit — proto se
+        neukazuje vůbec.
+      -->
+      <section v-if="!isManaged" class="rounded-lg border border-neutral-200 bg-surface p-5">
         <h2 class="text-lg font-semibold text-neutral-900 mb-3">{{ t('updates.how_it_works') }}</h2>
 
         <template v-if="status.environment === 'docker'">

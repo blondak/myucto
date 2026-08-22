@@ -22,8 +22,9 @@ setlocal
 set "SCRIPT_DIR=%~dp0"
 set "PROJECT_ROOT=%SCRIPT_DIR%.."
 if defined MYINVOICE_DATA_DIR (set "LOG_DIR=%MYINVOICE_DATA_DIR%\log\cron") else (set "LOG_DIR=%PROJECT_ROOT%\log\cron")
+if defined MYINVOICE_PHP_BIN (set "PHP_BIN=%MYINVOICE_PHP_BIN%") else (set "PHP_BIN=php")
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd"') do set "TODAY=%%i"
 set "LOG_FILE=%LOG_DIR%\scan-purchase-inbox-%TODAY%.log"
-powershell -NoProfile -Command "& php -d output_buffering=0 -d implicit_flush=1 '%PROJECT_ROOT%\api\bin\cron-scan-purchase-inbox.php' %* 2>&1 | Tee-Object -FilePath '%LOG_FILE%' -Append; exit $LASTEXITCODE"
+powershell -NoProfile -Command "& '%PHP_BIN%' -d output_buffering=0 -d implicit_flush=1 '%PROJECT_ROOT%\api\bin\cron-scan-purchase-inbox.php' %* 2>&1 | Tee-Object -FilePath '%LOG_FILE%' -Append; exit $LASTEXITCODE"
 exit /b %ERRORLEVEL%

@@ -35,13 +35,39 @@ Options -Indexes -MultiViews
     # 2b) Blokovat cfg.php, tooling manifesty a zdrojové dokumenty.
     # `(?:(?:api|web)/)?` — `api/composer.json` a `api/composer.lock` jsou reálné
     # soubory a root-kotvený regex je minul.
-    RewriteRule ^(?:(?:api|web)/)?(cfg\.php|cfg\.local\.php|composer\.(json|lock)|package\.json|pnpm-lock\.yaml|(?:vite|tsconfig|eslint|tailwind|postcss)\.config\.[^/]+|phpunit\.xml(?:\.dist)?|Dockerfile(?:\..*)?|docker-compose[^/]*|\.gitignore|\.env.*|[^/]*\.md|[^/]*\.sql)$ - [F,L]
+    RewriteRule ^(?:(?:api|web)/)?(cfg\.sample\.php|cfg\.docker\.php|VERSION|web\.config|portainer-template\.json|cfg\.php|cfg\.local\.php|composer\.(json|lock)|package\.json|pnpm-lock\.yaml|(?:vite|tsconfig|eslint|tailwind|postcss)\.config\.[^/]+|phpunit\.xml(?:\.dist)?|Dockerfile(?:\..*)?|docker-compose[^/]*|\.gitignore|\.env.*|[^/]*\.md|[^/]*\.sql)$ - [F,L]
 
     # 2c) VCS metadata KDEKOLI v cestě. `.git/config` + `.git/HEAD` stačí na
     # rekonstrukci celého repa (zdrojáky, historie, dřív commitnuté secrety).
     # Pravidlo 2b blokuje jen `.gitignore` v rootu, samotný adresář `.git/` ne.
     # IIS to řeší přes hiddenSegments (web.config), Docker přes .dockerignore.
     RewriteRule (^|/)\.(git|svn|hg|bzr)(/|$) - [F,L]
+
+    # 2d) Zámek údržby (H-03) — VRSTVA NAVÍC, ne bezpečnostní hranice.
+    #
+    # Hlavní kontrola je v PHP (MaintenanceModeMiddleware + inline brána ve
+    # front controlleru); ta ale nikdy neuvidí požadavky, které webserver
+    # odbaví sám — statiku pod /assets/, /fonts/, /styles/ a PWA soubory.
+    # Tohle pravidlo tu díru zavírá tím, že je v údržbě pošle na front
+    # controller. Odpověď (503, Retry-After, HTML pro prohlížeč vs. JSON podle
+    # `Accept`) proto pořád tvoří PHP na jednom místě — kdyby se tady vracelo
+    # `- [R=503]`, přišel by API klient o JSON a o Retry-After.
+    #
+    # Zámek leží MIMO docroot, takže se na něj míří relativně od něj. Testují se
+    # obě rozložení: data dir = rodič docrootu (spravovaná instalace) i data dir
+    # = docroot (self-hosted default, kde je `storage/` blokované pravidlem 2).
+    # `RewriteRule`/`RewriteCond` spadají do FileInfo, takže se to vejde do
+    # `AllowOverride fileinfo indexes limit AuthConfig options=…`.
+    #
+    # /api/health musí zůstat dostupný i v údržbě — jinak hosting nepozná rozdíl
+    # mezi plánovanou údržbou a výpadkem instance.
+    # Druhá podmínka je pojistka proti smyčce: per-directory rewrite se v
+    # .htaccess vyhodnocuje znovu, takže cíl sám sebe nesmí matchnout.
+    RewriteCond %{REQUEST_URI} !^/api/(v1/)?health/?$
+    RewriteCond %{REQUEST_URI} !^/api/public/index\.php$
+    RewriteCond %{DOCUMENT_ROOT}/../storage/maintenance.lock -f [OR]
+    RewriteCond %{DOCUMENT_ROOT}/storage/maintenance.lock -f
+    RewriteRule ^ api/public/index.php [L,QSA]
 
     # Přímá cesta k SPA entry nesmí obejít hostname gate. Hashed assety pod
     # web/dist zůstávají statické, ale index i adresářový default jdou přes PHP.
@@ -137,7 +163,9 @@ Options -Indexes -MultiViews
 # Pozn.: `yaml|yml` schválně NENÍ v seznamu — `api/openapi.yaml` je veřejný
 # OpenAPI spec a musí jít fetchnout (Swagger UI / Redoc). Ostatní .yaml soubory
 # jsou v `api/vendor/` a `web/node_modules/`, kde je blokuje rewrite rule výše.
-<FilesMatch "\.(env|sql|pem|log|lock|md)$">
+# `.cmd`, `.ps1` a `.sh` sem přibyly s docrootem v kořeni bundlu: pomocné
+# skripty leží ve veřejném prostoru a prozrazují cesty i postup nasazení.
+<FilesMatch "\.(env|sql|pem|log|lock|md|cmd|ps1|sh)$">
     Require all denied
 </FilesMatch>
 

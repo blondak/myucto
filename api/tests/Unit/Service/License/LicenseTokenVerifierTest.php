@@ -74,4 +74,68 @@ final class LicenseTokenVerifierTest extends TestCase
 
         self::assertNull($this->verifier->verify($token, $this->publicKeyBase64));
     }
+    // ── Rotace podepisovacího klíče (`kid`) ───────────────────────────────
+
+    /**
+     * ⚠️ Bez rotace by výměna podepisovacího klíče znamenala vydat novou verzi
+     * aplikace — jinak by všechny instalace naráz zahodily platné tokeny.
+     * Token proto nese `kid` a instalace může po přechodnou dobu znát oba klíče.
+     */
+    public function testTokenSignedByASecondKeyVerifiesWhenBothAreKnown(): void
+    {
+        $second = sodium_crypto_sign_keypair();
+        $secondPub = base64_encode(sodium_crypto_sign_publickey($second));
+        $secondSec = sodium_crypto_sign_secretkey($second);
+
+        $kid = substr(hash('sha256', $secondPub), 0, 16);
+        $token = $this->makeToken(['iid' => 'abc', 'kid' => $kid], $secondSec);
+
+        // Sám o sobě starý klíč nestačí…
+        self::assertNull($this->verifier->verify($token, $this->publicKeyBase64));
+
+        // …ale když instalace zná oba, token projde.
+        $decoded = $this->verifier->verify($token, [
+            substr(hash('sha256', $this->publicKeyBase64), 0, 16) => $this->publicKeyBase64,
+            $kid => $secondPub,
+        ]);
+
+        self::assertNotNull($decoded);
+        self::assertSame('abc', $decoded['iid']);
+    }
+
+    /** Starší token bez `kid` musí projít dál — pole je aditivní. */
+    public function testTokenWithoutKidStillVerifies(): void
+    {
+        $token = $this->makeToken(['iid' => 'abc']);
+
+        self::assertNotNull($this->verifier->verify($token, [
+            substr(hash('sha256', $this->publicKeyBase64), 0, 16) => $this->publicKeyBase64,
+        ]));
+    }
+
+    /**
+     * ⚠️ `kid` je NÁPOVĚDA, ne autorita — čte se z ještě neověřeného payloadu.
+     * Podvržený `kid` ukazující na známý klíč nesmí platný podpis nahradit.
+     */
+    public function testForgedKidDoesNotBypassTheSignature(): void
+    {
+        $foreign = sodium_crypto_sign_secretkey(sodium_crypto_sign_keypair());
+        $kid = substr(hash('sha256', $this->publicKeyBase64), 0, 16);
+
+        // Podepsáno CIZÍM klíčem, ale `kid` ukazuje na ten náš.
+        $token = $this->makeToken(['iid' => 'abc', 'kid' => $kid], $foreign);
+
+        self::assertNull($this->verifier->verify($token, [$kid => $this->publicKeyBase64]));
+    }
+
+    /** Překlep v jednom klíči nesmí zneplatnit ty ostatní. */
+    public function testBrokenKeyInTheMapDoesNotBreakTheRest(): void
+    {
+        $token = $this->makeToken(['iid' => 'abc']);
+
+        self::assertNotNull($this->verifier->verify($token, [
+            'rozbity' => 'tohle-neni-base64-klic',
+            'spravny' => $this->publicKeyBase64,
+        ]));
+    }
 }

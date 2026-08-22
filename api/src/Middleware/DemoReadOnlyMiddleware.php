@@ -32,7 +32,13 @@ final class DemoReadOnlyMiddleware implements MiddlewareInterface
 
     public function process(Request $request, Handler $handler): Response
     {
-        if (!(bool) $this->config->get('demo.enabled', false)) {
+        // Demo režim ve spravované zákaznické instalaci nemá co dělat; zámek sedí
+        // tady, u vynucení, ne jen u zobrazení — jinak by přestalo hlásit demo,
+        // ale zápisy by dál blokoval.
+        if (!(new \MyInvoice\Service\System\ManagedModeGuard($this->config))->effectiveFlag(
+            \MyInvoice\Service\System\ManagedModeGuard::KEY_DEMO_ENABLED,
+            (bool) $this->config->get('demo.enabled', false),
+        )) {
             return $handler->handle($request);
         }
 

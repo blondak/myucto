@@ -19,9 +19,21 @@ final class LicenseTokenVerifier
      * podpis sedí a payload je validní JSON objekt; jinak null (neplatný/poškozený
      * token → volající s ním zachází jako s degradovaným stavem).
      *
+     * ── Rotace klíče (`kid`) ──────────────────────────────────────────────
+     * `$publicKeys` může být jeden klíč (jako dřív), nebo mapa `kid => klíč`.
+     * Payload nese `kid`, podle kterého se vybere ten správný — díky tomu jde
+     * podepisovací klíč vyměnit, aniž by se musela vydat nová verze aplikace:
+     * po přechodnou dobu se drží starý i nový vedle sebe.
+     *
+     * ⚠️ `kid` je jen NÁPOVĚDA, ne autorita. Čte se z ještě neověřeného payloadu,
+     * takže si ho útočník může napsat, jaký chce — rozhoduje pořád podpis. Když
+     * `kid` nesedí na žádný známý klíč (nebo chybí, jako u starších tokenů),
+     * zkusí se všechny; podepsat token cizím klíčem tím nejde.
+     *
+     * @param string|array<string,string> $publicKeys
      * @return array<string,mixed>|null
      */
-    public function verify(string $token, string $publicKeyBase64): ?array
+    public function verify(string $token, string|array $publicKeys): ?array
     {
         $token = trim($token);
         if ($token === '' || substr_count($token, '.') !== 1) {
@@ -31,18 +43,12 @@ final class LicenseTokenVerifier
         [$payloadPart, $signaturePart] = explode('.', $token, 2);
         $payloadJson = self::base64UrlDecode($payloadPart);
         $signature   = self::base64UrlDecode($signaturePart);
-        $publicKey   = base64_decode($publicKeyBase64, true);
 
-        if ($payloadJson === null || $signature === null || $publicKey === false) {
+        if ($payloadJson === null || $signature === null) {
             return null;
         }
-        // Ed25519: 64B podpis, 32B veřejný klíč. Špatná délka = odmítnout dřív,
-        // než sodium hodí výjimku.
-        if (strlen($signature) !== 64 || strlen($publicKey) !== 32) {
-            return null;
-        }
-
-        if (!$this->verifyDetached($signature, $payloadJson, $publicKey)) {
+        // Ed25519: 64B podpis. Špatná délka = odmítnout dřív, než sodium hodí výjimku.
+        if (strlen($signature) !== 64) {
             return null;
         }
 
@@ -51,8 +57,54 @@ final class LicenseTokenVerifier
         } catch (\JsonException) {
             return null;
         }
+        if (!is_array($payload)) {
+            return null;
+        }
 
-        return is_array($payload) ? $payload : null;
+        $candidates = self::candidateKeys($publicKeys, $payload['kid'] ?? null);
+        foreach ($candidates as $publicKey) {
+            if ($this->verifyDetached($signature, $payloadJson, $publicKey)) {
+                return $payload;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Klíče, kterými se pokusíme podpis ověřit — v pořadí od nejpravděpodobnějšího.
+     *
+     * @param string|array<string,string> $publicKeys
+     * @return list<string> syrové 32B klíče
+     */
+    private static function candidateKeys(string|array $publicKeys, mixed $kid): array
+    {
+        $map = is_array($publicKeys) ? $publicKeys : ['' => $publicKeys];
+
+        $kid = is_string($kid) ? trim($kid) : '';
+        $matched = $kid !== '' && isset($map[$kid]);
+
+        // Nejdřív klíč, na který ukazuje `kid`, pak zbytek. Když `kid` chybí
+        // nebo nesedí, zkusí se všechny — starší token ho nenese vůbec
+        // a rozhoduje stejně až podpis.
+        $ordered = $matched ? [$map[$kid]] : [];
+        foreach ($map as $id => $key) {
+            if (!$matched || $id !== $kid) {
+                $ordered[] = $key;
+            }
+        }
+
+        $out = [];
+        foreach ($ordered as $base64) {
+            $raw = base64_decode((string) $base64, true);
+            // Špatná délka = klíč, kterým se stejně nedá ověřit; přeskočit,
+            // ať jeden překlep v konfiguraci nezneplatní i ty správné.
+            if ($raw !== false && strlen($raw) === 32) {
+                $out[] = $raw;
+            }
+        }
+
+        return $out;
     }
 
     private function verifyDetached(string $signature, string $message, string $publicKey): bool

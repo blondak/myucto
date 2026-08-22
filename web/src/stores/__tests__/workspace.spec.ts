@@ -108,4 +108,23 @@ describe('workspace store', () => {
     expect(store.removeEmptyPane('secondary-2')).toBe(false)
     expect(store.paneCount).toBe(2)
   })
-})
+
+  it('zahodí poslední slot a přepne aktivní panel, když se zavíral', () => {
+    const store = useWorkspaceStore()
+    store.resetLayout(3, '/invoices')
+    store.activatePane('secondary-3')
+
+    expect(store.dropLastPane()).toBe(true)
+
+    expect(store.panes.map(pane => pane.id)).toEqual(['primary', 'secondary-2'])
+    expect(store.paneCount).toBe(2)
+    expect(store.activePaneId).toBe('secondary-2')
+  })
+
+  it('poslední zbývající panel nezahodí', () => {
+    const store = useWorkspaceStore()
+    store.resetLayout(1, '/invoices')
+
+    expect(store.dropLastPane()).toBe(false)
+    expect(store.panes).toHaveLength(1)
+  })})

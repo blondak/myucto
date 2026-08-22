@@ -83,7 +83,12 @@ final class FirstRunLockMiddleware implements MiddlewareInterface
 
         try {
             $count = (int) $this->db->pdo()
-                ->query('SELECT COUNT(*) FROM users WHERE is_active = 1')
+                // ⚠️ VŠICHNI uživatelé, ne jen aktivní — stejně jako SetupAction.
+                // Instalace, kde jsou všechny účty deaktivované, není nová
+                // instalace. Setup sám 409 vrátí tak jako tak, ale doprovodné
+                // veřejné cesty (audit prostředí, neautentizovaná proxy do ARES
+                // a registru plátců DPH) by se znovu otevřely.
+                ->query('SELECT COUNT(*) FROM users')
                 ->fetchColumn();
             $this->needsSetupCache = $count === 0;
             if ($count > 0) {

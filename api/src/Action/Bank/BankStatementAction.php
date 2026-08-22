@@ -26,6 +26,7 @@ use MyInvoice\Service\Bank\Match\SubsetSumSolver;
 use MyInvoice\Service\Bank\StatementScanner;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
 use MyInvoice\Support\Pagination;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -104,6 +105,8 @@ final class BankStatementAction
         // Registr cizích vazeb, které smazání výpisu blokují (mzdový modul váže
         // `payroll_payment_matches` na výpis i transakci přes RESTRICT).
         private readonly BankStatementDeletionGuard $deletionGuard,
+        // H-02: skenování adresáře na serveru je ve spravované instalaci zamčené.
+        private readonly ManagedModeGuard $managed,
         private readonly ?SubsetSumSolver $subsetSolver = null,
     ) {}
 
@@ -112,6 +115,11 @@ final class BankStatementAction
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         if (!RequestAuthorization::allows($request, 'bank.import', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        }
+        // Zámek MUSÍ být tady, ne jen ve `scan_configured` pro UI: kdo endpoint
+        // zavolá přímo, čte souborový systém mimo svou instanci.
+        if (($locked = $this->managed->deny($response, ManagedModeGuard::CAPABILITY_FILESYSTEM_SCAN)) !== null) {
+            return $locked;
         }
         $root = trim((string) $this->config->get('bank_import.scan_root', ''));
         if (!$this->scanConfigured()) {
@@ -129,6 +137,11 @@ final class BankStatementAction
      */
     private function scanConfigured(): bool
     {
+        // Ve spravované instalaci je adresářové skenování zamčené, takže se
+        // tlačítko nesmí nabízet ani tehdy, když je cesta v cfg vyplněná.
+        if ($this->managed->isLocked(ManagedModeGuard::CAPABILITY_FILESYSTEM_SCAN)) {
+            return false;
+        }
         $root = trim((string) $this->config->get('bank_import.scan_root', ''));
         return $root !== '' && is_dir($root);
     }

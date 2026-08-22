@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { createApp, nextTick, onBeforeUnmount, onMounted, ref, type App } from 'vue'
+import { computed, createApp, nextTick, onBeforeUnmount, onMounted, ref, type App } from 'vue'
 import { getActivePinia } from 'pinia'
 import { isNavigationFailure, NavigationFailureType, type RouteLocationRaw, type Router } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -37,6 +37,12 @@ let unregisterRuntime: (() => void) | null = null
 let removeAfterEach: (() => void) | null = null
 let destroyed = false
 const paneHistory: string[] = []
+// Poslední zbývající panel zavřít nejde — není kam posunout obsah, takže
+// se jen vyprázdní. Popisek to musí říct dřív, než na tlačítko někdo klikne.
+const closeLabel = computed(() => (workspace.panes.length > 1
+  ? t('workspace.close_panel')
+  : t('workspace.close_content')))
+
 const workspaceRouteMime = 'application/x-myucto-route'
 let paneHistoryIndex = -1
 let pendingTraversal: 'back' | 'forward' | null = null
@@ -360,9 +366,9 @@ onBeforeUnmount(() => {
       <button
         type="button"
         class="ml-1 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-neutral-400 transition-all hover:bg-danger-100 hover:text-danger-700 hover:shadow-sm hover:ring-1 hover:ring-danger-200 focus-visible:ring-2 focus-visible:ring-danger-400"
-        :aria-label="t('workspace.close_content')"
-        :title="t('workspace.close_content')"
-        @click.stop="navigation.closePaneContent(paneId)"
+        :aria-label="closeLabel"
+        :title="closeLabel"
+        @click.stop="navigation.closePane(paneId)"
       >
         <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
           <path d="m5 5 10 10M15 5 5 15" stroke-linecap="round" />

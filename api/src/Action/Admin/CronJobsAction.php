@@ -105,13 +105,53 @@ final class CronJobsAction
 
         $rows = [];
         foreach ($catalog as $job) {
+            $reason = $gate->inactiveReason($job, $mode);
+
             // Podmíněné úlohy (bank scan, scan inbox) skryj, dokud není nastaven
             // jejich adresář v cfg — bez něj scan jen tiše skipuje, takže nemá smysl
-            // je v přehledu hlásit jako "nikdy neběžela".
-            if (!$gate->isVisibleInUi($job, $mode)) {
+            // je v přehledu hlásit jako "nikdy neběžela". Výjimka je vypnutí přes
+            // `cron.disabled_jobs` — to je explicitní vůle admina/spravované
+            // instalace, takže se má v přehledu ukázat jako "vypnuto konfigurací",
+            // ne zmizet stejně jako automaticky nerelevantní úlohy.
+            if ($reason !== null && $reason !== CronJobGate::INACTIVE_DISABLED_BY_CONFIG) {
                 continue;
             }
+
             $script = (string) $job['script'];
+
+            if ($reason === CronJobGate::INACTIVE_DISABLED_BY_CONFIG) {
+                $rows[] = [
+                    'script'              => $script,
+                    'recommended'         => $job['recommended'],
+                    'linux_cron'          => $job['linux_cron'],
+                    'windows_schtasks'    => $job['windows_schtasks'],
+                    'weekdays_only'       => (bool) $job['weekdays_only'],
+                    'critical'            => (bool) $job['critical'],
+                    'max_age_hours'       => (int) $job['max_age_hours'],
+                    'health'              => 'disabled',
+                    'health_source'       => 'config',
+                    'last_started_at'     => null,
+                    'last_finished_at'    => null,
+                    'last_status'         => null,
+                    'last_duration_ms'    => null,
+                    'last_exit_code'      => null,
+                    'last_host'           => null,
+                    'last_message'        => null,
+                    'last_report'         => null,
+                    'last_ok_started_at'  => null,
+                    'last_ok_finished_at' => null,
+                    'age_sec_since_ok'    => null,
+                    'counts_24h'          => ['ok' => 0, 'error' => 0, 'total' => 0],
+                    'last_tick_at'        => null,
+                    'last_work_at'        => null,
+                    'noop_ticks'          => 0,
+                    'is_dispatcher'       => ($job['dispatcher_only'] ?? false) === true,
+                    // Vypnutá úloha se nemá registrovat do crontabu/Task Scheduleru.
+                    'scheduled_directly'  => false,
+                ];
+                continue;
+            }
+
             $stmt->execute([$script]);
             $last = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
 

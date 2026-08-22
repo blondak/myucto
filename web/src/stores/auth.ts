@@ -27,9 +27,21 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => user.value !== null)
   const needsSetup = computed(() => setupStatus.value?.needs_setup === true)
   const isDemo = computed(() => setupStatus.value?.demo?.enabled === true)
+  // Spravovaná instalace (H-02). Fail-open na `false` je tu správně: zámek drží
+  // backend a UI podle tohohle příznaku jen VYSVĚTLUJE, proč akce není. Kdyby
+  // se fail-closed tvářilo jako spravované, self-hosted instalace by přišla
+  // o tlačítko Aktualizovat vždycky, když setup-status ještě nedorazil.
+  const isManagedInstallation = computed(() => setupStatus.value?.managed === true)
   const mustSetupTotp = computed(() => user.value?.must_setup_totp === true)
   const mustSetupMfa = computed(() => user.value?.must_setup_mfa === true)
   const hasCommercialFeatures = computed(() => license.value?.commercial_features !== false)
+  // ⚠️ Odemyká placené moduly TARIF? Bez toho obrazovka nerozliší „licence
+  // propadla, zaplaťte" od „tenhle tarif to nikdy neměl" — a bezplatnému
+  // tarifu nabízí zaplatit něco, co má zaplacené. Fail-open na `true` je
+  // tady správně: starší token pole nenese a všechny takové licence jsou placené.
+  const tierUnlocksCommercial = computed(() => license.value?.tier_commercial !== false)
+  /** Proč nejde přidat dalšího zapisujícího uživatele. `null` = jde to. */
+  const newUserBlocked = computed(() => license.value?.new_user_blocked ?? null)
 
   // Vlastní domény jsou opt-in v cfg.php. Než dorazí domain-context, tváříme
   // se jako vypnuté — plocha se raději objeví pozdě než nabídne to, co
@@ -234,9 +246,12 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     needsSetup,
     isDemo,
+    isManagedInstallation,
     mustSetupTotp,
     mustSetupMfa,
     hasCommercialFeatures,
+    tierUnlocksCommercial,
+    newUserBlocked,
     permissions,
     permissionCatalogVersion,
     permissionsLoading,

@@ -352,6 +352,14 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // Diagnostika a podpora — audit prostředí, podklad k incidentu, rozcestník. Admin only.
       { path: 'admin/diagnostics',      name: 'admin-diagnostics', component: () => import('@/pages/admin/Diagnostics.vue'), meta: {  } },
       { path: 'admin/support',          name: 'admin-support',     component: () => import('@/pages/admin/Support.vue'),     meta: {  } },
+      // Kompletní export dat firmy (H-14) — stažení všeho v jednom archivu, pro archivaci
+      // i pro odchod ze služby. API je pod /api/admin/, tedy admin only.
+      { path: 'admin/instance-export',  name: 'admin-instance-export', component: () => import('@/pages/admin/InstanceExport.vue'), meta: { superadminOnly: true } },
+      // Hosting (H-31) — shrnutí spravovaného provozu: tarif, místo, platnost, kam napsat.
+      // Data jsou z /api/license/status (admin only), takže i routa je superadmin only.
+      // V menu se položka objeví JEN při `app.managed`; na self-hosted instalaci se
+      // stránka na přímou URL otevře taky, ale řekne, že tahle instalace neběží u nás.
+      { path: 'hosting',             name: 'hosting',             component: () => import('@/pages/hosting/Hosting.vue'), meta: { superadminOnly: true } },
       // Aktivace (E4) — licenční model, obchodní podmínky, zakoupení/aktivace. Admin only.
       { path: 'activation/license',  name: 'activation-license',  component: () => import('@/pages/activation/Licence.vue'),          meta: {  } },
       { path: 'activation/terms',    name: 'activation-terms',    component: () => import('@/pages/activation/ObchodniPodminky.vue'), meta: {  } },

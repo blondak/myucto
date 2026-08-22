@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { isClientDomainAuthenticatedPath } from '@/security/clientRoutePolicy'
+import { readStorageQuotaHeaders } from '@/api/storageQuota'
 
 export const api = axios.create({
   baseURL: '/api',
@@ -49,10 +50,22 @@ api.interceptors.request.use((config) => {
 
 // 401 → redirect na /login (kromě situace kdy už jsme na /login nebo /setup)
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // H-10: stav diskové kvóty jede v hlavičkách každé odpovědi, ať se admin
+    // o blížícím se zámku dozví dřív, než mu přestane jít uložit doklad.
+    readStorageQuotaHeaders(response.headers)
+    return response
+  },
   (error) => {
     const status = error.response?.status
     const code = error.response?.data?.error?.code
+    // I odmítnutý zápis (507 storage_quota_exhausted) nese stav kvóty — právě
+    // u něj je nejvíc potřeba, aby banner odpovídal skutečnosti.
+    //
+    // `trusted: false`: chybová odpověď smí stav NASTAVIT (hlavičky v ní jsou),
+    // ale její mlčení neznamená „vše v pořádku" — 401 ani 500 o kvótě nevypovídá
+    // nic, takže blokující stav kvůli nim nesmí zhasnout.
+    if (error.response?.headers) readStorageQuotaHeaders(error.response.headers, { trusted: false })
 
     if (status === 401 && [
       'unauthenticated',

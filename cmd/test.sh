@@ -9,6 +9,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PHP_BIN="${MYINVOICE_PHP_BIN:-php}"
 cd "$PROJECT_ROOT/api"
 
 if [[ ! -f vendor/bin/phpunit ]]; then
@@ -17,7 +18,7 @@ if [[ ! -f vendor/bin/phpunit ]]; then
 fi
 
 if [ "$#" -eq 0 ]; then
-  php bin/test-parallel.php
+  "$PHP_BIN" bin/test-parallel.php
 else
-  vendor/bin/phpunit --colors=auto "$@"
+  "$PHP_BIN" vendor/bin/phpunit --colors=auto "$@"
 fi

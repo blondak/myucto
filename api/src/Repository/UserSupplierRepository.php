@@ -37,6 +37,23 @@ final class UserSupplierRepository
     }
 
     /**
+     * Per-firemní override role uživatele.
+     *
+     * Používá se při rozhodování o licenčním místě: účet zabírá místo,
+     * když právo zápisu dává jeho výchozí role NEBO kterákoli override.
+     *
+     * @return list<int>
+     */
+    public function overrideRoleIds(int $userId): array
+    {
+        $ids = [];
+        foreach ($this->assignmentsForUser($userId) as $roleId) {
+            if ($roleId !== null) $ids[] = $roleId;
+        }
+        return array_values(array_unique($ids));
+    }
+
+    /**
      * Seznam povolených supplier id. Prázdné pole = nulový přístup.
      *
      * @return list<int>

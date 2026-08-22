@@ -25,6 +25,14 @@ final class ForgotPasswordAction
     /** Kolik nejnovějších reset tokenů necháváme současně platných (viz úklid níže). */
     private const KEEP_VALID_RESETS = 3;
 
+    /**
+     * Platnost tokenu na OBNOVU hesla. Onboardingový odkaz na *nastavení* hesla má
+     * vlastní, delší lhůtu — viz {@see \MyInvoice\Service\Setup\PasswordSetupLinkIssuer::SETUP_TTL_HOURS}.
+     * Odlišnost je záměr: obnovu si uživatel vyžádal teď, uvítací e-mail může
+     * otevřít až ráno.
+     */
+    public const RESET_TTL_MINUTES = 60;
+
     public function __construct(
         private readonly Connection $db,
         private readonly Mailer $mailer,
@@ -118,7 +126,7 @@ final class ForgotPasswordAction
         // Vygeneruj token
         $tokenRaw = bin2hex(random_bytes(32));
         $tokenHash = hash('sha256', $tokenRaw);
-        $expiresAt = (new \DateTimeImmutable('+60 minutes'))->format('Y-m-d H:i:s');
+        $expiresAt = (new \DateTimeImmutable(sprintf('+%d minutes', self::RESET_TTL_MINUTES)))->format('Y-m-d H:i:s');
 
         $this->db->pdo()->prepare(
             'INSERT INTO password_resets (user_id, token_hash, expires_at, ip) VALUES (?, ?, ?, ?)'
@@ -138,7 +146,7 @@ final class ForgotPasswordAction
                 [
                     'name'      => $user['name'],
                     'resetLink' => $resetLink,
-                    'expiresIn' => '60 minut',
+                    'expiresIn' => self::RESET_TTL_MINUTES . ' minut',
                 ],
             );
         } catch (\Throwable $e) {

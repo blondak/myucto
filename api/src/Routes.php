@@ -30,6 +30,7 @@ use MyInvoice\Action\Approval\RequestApprovalTestAction;
 use MyInvoice\Action\Approval\UpdateApprovalStatusAction;
 use MyInvoice\Action\Admin\ExportAction;
 use MyInvoice\Action\Admin\ImportAction;
+use MyInvoice\Action\Export\InstanceExportAction;
 use MyInvoice\Action\Admin\Import\StartIdokladImportAction;
 use MyInvoice\Action\Admin\Import\StartFakturoidImportAction;
 use MyInvoice\Action\Admin\Import\ImportJobStatusAction;
@@ -297,6 +298,8 @@ use MyInvoice\Action\License\LicenseStatusAction;
 use MyInvoice\Action\License\ActivateLicenseAction;
 use MyInvoice\Action\License\DeactivateLicenseAction;
 use MyInvoice\Action\License\CancelRenewalLicenseAction;
+use MyInvoice\Action\License\StorageQuoteAction;
+use MyInvoice\Action\License\StorageUpgradeAction;
 use MyInvoice\Action\License\UpgradeQuoteLicenseAction;
 use MyInvoice\Action\License\UpgradeLicenseAction;
 use MyInvoice\Action\License\SupportLinkAction;
@@ -414,6 +417,9 @@ final class Routes
         // In-place navýšení počtu uživatelů (poměrný doplatek z uložené karty).
         $app->post('/api/license/upgrade/quote', UpgradeQuoteLicenseAction::class);
         $app->post('/api/license/upgrade',       UpgradeLicenseAction::class);
+        // Rozšíření úložiště hostované instance (poměrný doplatek z karty).
+        $app->post('/api/license/quota/quote', StorageQuoteAction::class);
+        $app->post('/api/license/quota',       StorageUpgradeAction::class);
         // Přihlášený přechod na portál podpory (myucto.cz/support) — jednorázový token.
         $app->post('/api/license/support-link',  SupportLinkAction::class);
 
@@ -1659,6 +1665,17 @@ final class Routes
         $app->get    ('/api/admin/invoices-zip',    InvoicesZipAction::class);  // legacy — drží se kvůli historickým bookmark URL
         $app->get    ('/api/admin/export',          ExportAction::class);       // generic export (?format=pdf-zip|isdoc|pohoda|stereo|money_s3|csv&month=YYYY-MM nebo period=quarterly)
         $app->post   ('/api/admin/import',          ImportAction::class);       // import vystavených faktur z Pohoda XML / ISDOC (single nebo ZIP)
+
+        // Kompletní export dat firmy (H-14) — DB + PDF doklady + přílohy do jednoho
+        // archivu s manifestem a kontrolními součty. Běží na pozadí
+        // (api/bin/export-instance.php), archiv leží mimo docroot a stahuje se jen
+        // odsud. Pod /api/admin/ ⇒ superadmin (fail-closed fallback RoutePermissionMap).
+        $app->get    ('/api/admin/instance-export',                        [InstanceExportAction::class, 'list']);
+        $app->post   ('/api/admin/instance-export/start',                  [InstanceExportAction::class, 'start']);
+        $app->get    ('/api/admin/instance-export/{id:[0-9]+}',            [InstanceExportAction::class, 'status']);
+        $app->get    ('/api/admin/instance-export/{id:[0-9]+}/download',   [InstanceExportAction::class, 'download']);
+        $app->post   ('/api/admin/instance-export/{id:[0-9]+}/cancel',     [InstanceExportAction::class, 'cancel']);
+        $app->delete ('/api/admin/instance-export/{id:[0-9]+}',            [InstanceExportAction::class, 'delete']);
 
         // iDoklad API import (fáze 2a) — credentials + background job lifecycle
         $app->get    ('/api/admin/imports/idoklad/credentials', [IdokladCredentialsAction::class, 'status']);

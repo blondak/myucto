@@ -6,4 +6,5 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-exec php "$PROJECT_ROOT/api/bin/license-activate.php" "$@"
+PHP_BIN="${MYINVOICE_PHP_BIN:-php}"
+exec "$PHP_BIN" "$PROJECT_ROOT/api/bin/license-activate.php" "$@"

@@ -3,8 +3,15 @@
 declare(strict_types=1);
 
 /**
- * Denní DB backup — mariadb-dump → ZIP do storage/backup/.
- * Retention: 30 denních + 12 měsíčních (1. v měsíci se zachová déle).
+ * DB backup — mariadb-dump → ZIP do storage/backup/.
+ *
+ * Rozvrh je v DATABÁZI (`backup_schedule_contract`, migrace 1521), ne tady:
+ * self-host si nechá jeden dump denně, spravovaná instalace jede 4× (H-25).
+ * Kód drží jen smluvní STROP — viz {@see BackupScheduleLimit}.
+ *
+ * Retence je pojmenovaný profil (H-05) — viz {@see BackupRetentionPolicy}.
+ * ⚠️ Profil nese JEDNOTKU: „7" může být 7 dnů (při 4×/den 28 souborů) nebo
+ * 7 kusů (necelé dva dny). Do logu se proto vypisuje i jednotka.
  *
  * Vyžaduje v PATH: mariadb-dump (případně mysqldump) a PHP ext-zip.
  */
@@ -15,13 +22,24 @@ require __DIR__ . '/../vendor/autoload.php';
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Backup\BackupRetentionPolicy;
+use MyInvoice\Service\Backup\BackupSchedule;
 use MyInvoice\Service\Cron\BackupEncryption;
 use MyInvoice\Service\Cron\CronRun;
 
 $rootDir = Bootstrap::rootDir();
 $config  = Config::load($rootDir);
 
-$run = CronRun::start((new Connection($config))->pdo(), 'cron-backup');
+$backupPdo = (new Connection($config))->pdo();
+$run = CronRun::start($backupPdo, 'cron-backup');
+
+// Smluvní strop frekvence (H-25). Rozvrh se sem nezapisuje — jen se hlásí, když
+// se uložený stav rozešel s tím, co je zaplacené. Zálohu to NEZASTAVÍ: neběžet
+// je horší než běžet často, a rozpor se řeší dodatkem, ne přeskočeným dumpem.
+$scheduleIssue = BackupSchedule::inconsistency($backupPdo);
+if ($scheduleIssue !== null) {
+    fwrite(STDERR, "[WARN] rozvrh zálohy: $scheduleIssue\n");
+}
 
 $dbHost = (string) $config->get('db.host');
 $dbName = (string) $config->get('db.name');
@@ -237,27 +255,45 @@ if ($zipPassword !== '') {
     $report['encrypted'] = 'AES-256';
 }
 
-// Retention: smaž denní starší 30 dní (kromě 1. v měsíci, ty drž 365 dní)
-// Bere v potaz i staré .sql.gz formáty z dřívějška.
-// Filtrujeme jen DB dumpy "{dbName}-YYYY-MM-DD.{zip,sql.gz}" — PDF backup
-// (cron-backup-pdf) má vlastní prefix "{dbName}-pdf-" a vlastní retention.
+// Retence (H-05) — profil z konfigurace, ne konstanta v kódu.
+//
+// ⚠️ Do H-05 tu bylo natvrdo 30/365 a cfg klíče `cron.backup.*_retention_days`
+// se NEČETLY VŮBEC — kdo si je nastavil, měl dojem, že něco změnil. Teď je
+// jediným zdrojem pravdy BackupRetentionPolicy.
+//
+// ⚠️ Jednotka je součást nastavení. Při 4× denním dumpu (H-25) znamená „7 dnů"
+// 28 souborů a „7 kusů" necelé dva dny — proto se vypisuje i do logu.
+//
+// Bere v potaz i staré .sql.gz formáty z dřívějška. Filtrujeme jen DB dumpy
+// "{dbName}-YYYY-MM-DD[_HH-MM].{zip,sql.gz}" — PDF backup (cron-backup-pdf)
+// má vlastní prefix "{dbName}-pdf-" a vlastní retention.
+$retention = BackupRetentionPolicy::fromConfig($config);
+$runsPerDay = BackupSchedule::current($backupPdo)['runs_per_day'];
+echo "  - " . $retention->describe()
+    . sprintf(' (při %d×/den drží ~%d denních souborů)', $runsPerDay, $retention->expectedDailyFiles($runsPerDay))
+    . "\n";
+$report['retention'] = $retention->describe();
+
 $files = array_merge(
     glob($backupDir . '/' . $dbName . '-2*.zip')    ?: [],
     glob($backupDir . '/' . $dbName . '-2*.sql.gz') ?: []
 );
-$now = time();
+$dated = [];
 foreach ($files as $f) {
     $base = basename($f);
     if (str_starts_with($base, $dbName . '-pdf-')) continue;
-    if (!preg_match('/-(\d{4}-\d{2}-\d{2})(?:_\d{2}-\d{2})?\.(zip|sql\.gz)$/', $f, $m)) continue;
-    $age = $now - strtotime($m[1]);
-    $isMonthly = str_ends_with($m[1], '-01');
-    $maxAge = $isMonthly ? 365 * 86400 : 30 * 86400;
-    if ($age > $maxAge) {
-        @unlink($f);
-        echo "  - retention: smazáno " . basename($f) . "\n";
-        $report['retention_purged'] = ($report['retention_purged'] ?? 0) + 1;
-    }
+    // Časová část je volitelná — dumpy z doby před H-25 mají jen datum.
+    // Bez ní se za čas bere půlnoc, takže starší soubory nikdy nevytlačí
+    // novější ze stejného dne.
+    if (!preg_match('/-(\d{4}-\d{2}-\d{2})(?:_(\d{2})-(\d{2}))?\.(zip|sql\.gz)$/', $f, $m)) continue;
+    $at = new DateTimeImmutable($m[1] . ' ' . ($m[2] ?? '00') . ':' . ($m[3] ?? '00') . ':00');
+    $dated[$f] = $at;
+}
+
+foreach ($retention->purgeList($dated, new DateTimeImmutable('now')) as $f) {
+    @unlink($f);
+    echo "  - retention: smazáno " . basename($f) . "\n";
+    $report['retention_purged'] = ($report['retention_purged'] ?? 0) + 1;
 }
 
 $run->finish('ok', $report);

@@ -13,6 +13,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
+$PhpBin = if ($env:MYINVOICE_PHP_BIN) { $env:MYINVOICE_PHP_BIN } else { 'php' }
 Set-Location (Join-Path $ProjectRoot 'api')
 
 if (-not (Test-Path 'vendor/bin/phpunit')) {
@@ -20,10 +21,10 @@ if (-not (Test-Path 'vendor/bin/phpunit')) {
 }
 
 if ($Args.Count -eq 0) {
-    & php bin/test-parallel.php
+    & $PhpBin bin/test-parallel.php
 }
 else {
-    & php vendor/phpunit/phpunit/phpunit --colors=auto @Args
+    & $PhpBin vendor/phpunit/phpunit/phpunit --colors=auto @Args
 }
 if ($LASTEXITCODE -ne 0) {
     Write-Error "PHPUnit failed (exit $LASTEXITCODE)"

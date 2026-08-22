@@ -1,0 +1,990 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Export\Instance;
+
+use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Infrastructure\Config\RuntimePaths;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Backup\BackupFileCollector;
+use MyInvoice\Service\Cron\BackupEncryption;
+use MyInvoice\Service\Document\DocumentStorage;
+use MyInvoice\Service\Document\JournalAttachmentStorage;
+use MyInvoice\Service\Export\ExportFilename;
+use MyInvoice\Service\Export\IsdocExporter;
+use MyInvoice\Service\Pdf\InvoicePdfRenderer;
+use MyInvoice\Service\Pdf\PurchaseInvoicePdfRenderer;
+use MyInvoice\Repository\InvoiceRepository;
+use PDO;
+use Psr\Log\LoggerInterface;
+
+/**
+ * H-14 — kompletní export dat jedné firmy do jednoho archivu.
+ *
+ * Proč to existuje: hostovaná služba dává po skončení 60 dnů na stažení dat a
+ * retence měsíčních kopií hostingu je jen 3 měsíce. Chyba, na kterou se přijde při
+ * uzávěrce po víc než třech měsících, se tedy neřeší zálohou hostingu, ale tímhle
+ * exportem — a zákonná archivace účetnictví je na roky. Proto je požadavek tvrdý:
+ * **archiv musí být použitelný BEZ naší aplikace.**
+ *
+ * Co je uvnitř (viz `CTI-MNE.txt` v archivu):
+ *   data/{tabulka}.jsonl   strojově čitelný export všech agend (JSON Lines)
+ *   doklady/{rok}/…        PDF a ISDOC vydaných, PDF přijatých, výpisy z účtu
+ *   prilohy/…              skeny, přílohy deníku (§ 33a), dokumenty DMS, mzdové doklady
+ *   manifest.json          co v archivu je, kolik toho je, k jakému datu, jaká verze
+ *   CHECKSUMS.txt          SHA-256 každé položky
+ *
+ * Čtyři věci, které tenhle kód dělá jinak, než by se čekalo, a proč:
+ *
+ * • **Izolace firem** neřeší tenhle soubor, ale {@see TenantScopeResolver} — a řeší ji
+ *   DEFAULT DENY: co se nepodaří navázat na `supplier_id`, se neexportuje. U účetní
+ *   kanceláře je vydání cizí firmy únik dat, ne chyba v souboru.
+ *
+ * • **Nestaví se kopie a pak ZIP.** Každá tabulka se zapíše do jednoho dočasného
+ *   souboru, ten se vloží do archivu a hned zahodí ({@see InstanceExportArchive}).
+ *   Dočasné místo je tak velikost NEJVĚTŠÍ tabulky, ne celého exportu — jinak by
+ *   export vyčerpal kvótu instance a přepnul ji do režimu jen pro čtení.
+ *
+ * • **Řádky se čtou po dávkách** (keyset přes PK, jinak LIMIT/OFFSET). Celá tabulka
+ *   do pole se nenačítá nikdy; BLOBy bankovních výpisů se navíc tahají po jednom
+ *   řádku a jdou rovnou do souboru.
+ *
+ * • **Data se NEčtou v jedné transakci.** Snapshot držený hodiny (export s PDF tak
+ *   dlouho běží) by na sdílené instanci zapíchl undo log a poškodil všechny ostatní
+ *   firmy víc, než kolik přinese atomicita archivu. Manifest proto nese
+ *   `data_snapshot: "non-atomic"` a časy začátku a konce čtení, aby bylo poznat,
+ *   v jakém okně archiv vznikl.
+ */
+final class InstanceExportService
+{
+    public const PART_DATA = 'data';
+    public const PART_DOCUMENTS = 'documents';
+    public const PART_FILES = 'files';
+
+    /** @var list<string> */
+    public const ALL_PARTS = [self::PART_DATA, self::PART_DOCUMENTS, self::PART_FILES];
+
+    /** Verze formátu archivu — čtečky se podle ní mají rozhodovat. */
+    private const FORMAT_VERSION = 1;
+
+    /** Řádků na dávku při čtení tabulky. */
+    private const BATCH = 1000;
+
+    /** Výchozí platnost hotového archivu (dnů), než ho úklid smaže. */
+    private const DEFAULT_TTL_DAYS = 14;
+
+    /** Výchozí strop velikosti archivu (bajty) — přebije cfg `export.instance.max_bytes`. */
+    private const DEFAULT_MAX_BYTES = 20 * 1024 * 1024 * 1024;
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly Config $config,
+        private readonly LoggerInterface $log,
+        private readonly TenantScopeResolver $scopes,
+        private readonly InstanceExportJobStore $jobs,
+        private readonly InvoiceRepository $invoiceRepo,
+        private readonly InvoicePdfRenderer $invoicePdf,
+        private readonly PurchaseInvoicePdfRenderer $purchasePdf,
+        private readonly IsdocExporter $isdoc,
+    ) {}
+
+    /**
+     * @param list<string> $requested
+     * @return list<string>
+     */
+    public static function normalizeParts(array $requested): array
+    {
+        $valid = array_values(array_intersect(self::ALL_PARTS, $requested));
+        return $valid !== [] ? $valid : self::ALL_PARTS;
+    }
+
+    /**
+     * Kořen úložiště archivů. Mimo docroot (přes {@see RuntimePaths}, takže i mimo
+     * image při `MYINVOICE_DATA_DIR`) — hotový archiv je kompletní účetnictví firmy
+     * a nesmí být stažitelný bez autentizace.
+     */
+    public function storageBaseDir(): string
+    {
+        return RuntimePaths::storage('instance-exports');
+    }
+
+    /** Absolutní cesta k archivu z relativní `sup-N/soubor.zip`. */
+    public function resolveResultPath(string $relative): string
+    {
+        return $this->storageBaseDir() . DIRECTORY_SEPARATOR
+            . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $relative);
+    }
+
+    /**
+     * Entrypoint workeru — běh navázaný na řádek `instance_exports`.
+     * Vlastní try/catch, aby job nikdy nezůstal viset v `running`.
+     */
+    public function run(int $jobId): void
+    {
+        $job = $this->jobs->findById($jobId);
+        if ($job === null) {
+            $this->log->warning('Export instance: job neexistuje', ['job_id' => $jobId]);
+            return;
+        }
+        if (!$this->jobs->markRunning($jobId)) {
+            // Jiný proces nás předběhl (nebo job není queued) — nic nedělej.
+            return;
+        }
+
+        $supplierId = (int) $job['supplier_id'];
+        $parts = self::normalizeParts(array_map('strval', (array) ($job['parts'] ?? [])));
+        $lock = null;
+        try {
+            $lock = InstanceExportLock::tryAcquire($supplierId);
+            if ($lock === null) {
+                throw new InstanceExportException(
+                    'already_running',
+                    'Export téhle firmy už běží v jiném procesu.',
+                    409,
+                );
+            }
+            $result = $this->build(
+                $supplierId,
+                $parts,
+                $job['date_from'] === null ? null : (string) $job['date_from'],
+                $job['date_to'] === null ? null : (string) $job['date_to'],
+                $jobId,
+                null,
+            );
+            $this->jobs->setResult(
+                $jobId,
+                $result['rel_path'],
+                $result['file_name'],
+                $result['size_bytes'],
+                $result['sha256'],
+                $result['encrypted'],
+                $result['manifest'],
+                date('Y-m-d H:i:s', time() + $this->ttlDays() * 86400),
+            );
+            $this->jobs->markCompleted($jobId);
+            // Úklid expirovaných archivů rovnou tady, ne až v cronu. Nový archiv je
+            // přesně ten okamžik, kdy na disku přibylo nejvíc místa navíc — a instance
+            // bez nastaveného cronu by jinak kvótu plnila donekonečna.
+            try {
+                $this->cleanupExpired();
+            } catch (\Throwable $e) {
+                $this->log->warning('Úklid expirovaných exportů selhal: ' . $e->getMessage());
+            }
+        } catch (InstanceExportCancelled) {
+            $this->jobs->appendLog($jobId, 'Export zrušen uživatelem.');
+            $this->jobs->markCancelled($jobId);
+        } catch (InstanceExportException $e) {
+            $this->jobs->appendLog($jobId, 'Chyba: ' . $e->getMessage());
+            $this->jobs->markFailed($jobId, $e->getMessage());
+        } catch (\Throwable $e) {
+            $this->log->error('Export instance selhal: ' . $e->getMessage(), ['exception' => $e, 'job_id' => $jobId]);
+            $this->jobs->markFailed($jobId, 'Export se nepodařilo dokončit: ' . $e->getMessage());
+        } finally {
+            $lock?->release();
+        }
+    }
+
+    /**
+     * Přímý běh bez jobu — pro CLI (`api/bin/export-instance.php`), typicky když se
+     * export pouští ručně při odchodu zákazníka nebo do jiného cíle.
+     *
+     * @param list<string>                $parts
+     * @param null|callable(string):void  $progress
+     * @return array<string,mixed>
+     */
+    public function runForSupplier(
+        int $supplierId,
+        array $parts,
+        ?string $dateFrom = null,
+        ?string $dateTo = null,
+        ?string $targetDir = null,
+        ?callable $progress = null,
+    ): array {
+        $lock = InstanceExportLock::tryAcquire($supplierId);
+        if ($lock === null) {
+            throw new InstanceExportException(
+                'already_running',
+                'Export firmy #' . $supplierId . ' už běží (jiný proces drží zámek).',
+                409,
+            );
+        }
+        try {
+            return $this->build($supplierId, self::normalizeParts($parts), $dateFrom, $dateTo, null, $progress, $targetDir);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Smaže archivy po expiraci (soubor i sidecar se součtem). Historie běhu v DB
+     * zůstane — zákazník má vidět, že export proběhl a kdy vypršel.
+     *
+     * @return int počet smazaných archivů
+     */
+    public function cleanupExpired(): int
+    {
+        $removed = 0;
+        foreach ($this->jobs->expired() as $job) {
+            $rel = (string) ($job['result_path'] ?? '');
+            if ($rel === '') {
+                continue;
+            }
+            $abs = $this->safeResultPath($rel);
+            if ($abs !== null) {
+                @unlink($abs);
+                @unlink($abs . '.sha256');
+            }
+            $this->jobs->forgetResult((int) $job['id']);
+            $removed++;
+        }
+        if ($removed > 0) {
+            $this->log->info('Export instance: uklizeny expirované archivy', ['count' => $removed]);
+        }
+        return $removed;
+    }
+
+    /**
+     * Absolutní cesta k archivu, ověřená proti path traversalu, nebo null.
+     *
+     * Porovnává se case-insensitive: Windows `realpath()` vrací nekonzistentní
+     * casing a citlivé porovnání by tam guard tiše zneplatnilo.
+     */
+    public function safeResultPath(string $relative): ?string
+    {
+        $abs = realpath($this->resolveResultPath($relative));
+        $base = realpath($this->storageBaseDir());
+        if ($abs === false || $base === false || !is_file($abs)) {
+            return null;
+        }
+        $needle = $base . DIRECTORY_SEPARATOR;
+        return str_starts_with(strtolower($abs), strtolower($needle)) ? $abs : null;
+    }
+
+    // ── vlastní běh ───────────────────────────────────────────────────────────
+
+    /**
+     * @param list<string>               $parts
+     * @param null|callable(string):void $progress
+     * @return array<string,mixed>
+     */
+    private function build(
+        int $supplierId,
+        array $parts,
+        ?string $dateFrom,
+        ?string $dateTo,
+        ?int $jobId,
+        ?callable $progress,
+        ?string $targetDirOverride = null,
+    ): array {
+        $supplier = $this->fetchSupplier($supplierId);
+        if ($supplier === null) {
+            throw new InstanceExportException('not_found', 'Firma #' . $supplierId . ' neexistuje.', 404);
+        }
+
+        $password = BackupEncryption::passwordFromConfig($this->config);
+        if (($reason = BackupEncryption::unsupportedReason($password)) !== null) {
+            throw new InstanceExportException('encryption_unsupported', $reason, 500);
+        }
+        if ($password === '') {
+            // Stejná konvence jako u záloh: nešifrovaný archiv je vědomé rozhodnutí,
+            // ale musí být jednou za běh vidět v logu.
+            $this->log->warning(
+                'Export instance běží NEŠIFROVANĚ — cfg `cron.backup.password` není nastavené. '
+                . 'Archiv obsahuje kompletní účetnictví firmy.',
+                ['supplier_id' => $supplierId],
+            );
+            $this->note($jobId, $progress, 'Upozornění: archiv se NEšifruje (cfg cron.backup.password je prázdné).');
+        }
+
+        $relDir = 'sup-' . $supplierId;
+        $absDir = $targetDirOverride ?? ($this->storageBaseDir() . DIRECTORY_SEPARATOR . $relDir);
+        if (!is_dir($absDir) && !@mkdir($absDir, 0775, true) && !is_dir($absDir)) {
+            throw new InstanceExportException('storage_failed', 'Nelze vytvořit úložiště exportů: ' . $absDir);
+        }
+        $workDir = $absDir . DIRECTORY_SEPARATOR . 'tmp-' . bin2hex(random_bytes(6));
+        if (!@mkdir($workDir, 0775, true) && !is_dir($workDir)) {
+            throw new InstanceExportException('storage_failed', 'Nelze vytvořit pracovní adresář: ' . $workDir);
+        }
+
+        $slug = ExportFilename::sanitize((string) $supplier['company_name'], 'firma');
+        $fileName = sprintf('myucto-export-%s-sup%d-%s.zip', substr($slug, 0, 60), $supplierId, date('Ymd-His'));
+        $absPath = $absDir . DIRECTORY_SEPARATOR . $fileName;
+        $relPath = $relDir . '/' . $fileName;
+
+        $startedAt = date('Y-m-d H:i:s');
+        $archive = new InstanceExportArchive($absPath, $password, $this->maxBytes());
+        $sections = [];
+
+        try {
+            if (in_array(self::PART_DATA, $parts, true)) {
+                $sections['data'] = $this->exportData($archive, $supplierId, $jobId, $progress, $workDir);
+            }
+            if (in_array(self::PART_DOCUMENTS, $parts, true)) {
+                $sections['doklady'] = $this->exportDocuments($archive, $supplierId, $dateFrom, $dateTo, $jobId, $progress, $workDir);
+            }
+            if (in_array(self::PART_FILES, $parts, true)) {
+                $sections['prilohy'] = $this->exportFiles($archive, $supplierId, $jobId, $progress);
+            }
+
+            $this->step($jobId, $progress, 'Manifest a kontrolní součty');
+            $manifest = [
+                'format' => 'myucto-instance-export',
+                'version' => self::FORMAT_VERSION,
+                'app_version' => $this->appVersion(),
+                'schema_version' => $this->schemaVersion(),
+                'supplier' => [
+                    'id' => (int) $supplier['id'],
+                    'name' => (string) $supplier['company_name'],
+                    'ico' => $supplier['ic'] ?? null,
+                    'dic' => $supplier['dic'] ?? null,
+                ],
+                'range' => ['from' => $dateFrom, 'to' => $dateTo],
+                'parts' => $parts,
+                'encrypted' => $password !== '' ? 'AES-256' : false,
+                'data_snapshot' => 'non-atomic',
+                'read_started_at' => $startedAt,
+                'read_finished_at' => date('Y-m-d H:i:s'),
+                'sections' => $sections,
+                'totals' => [
+                    'entries' => $archive->entryCount(),
+                    'uncompressed_bytes' => $archive->rawBytes(),
+                ],
+                'checksums' => $archive->entries(),
+            ];
+            $archive->addString('manifest.json', (string) json_encode($manifest, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+            $archive->addString('CHECKSUMS.txt', $this->renderChecksums($archive->entries()));
+            $archive->addString('CTI-MNE.txt', $this->renderReadme($supplier, $manifest, $password !== ''));
+
+            [$sizeBytes, $sha256] = $archive->finish();
+        } catch (\Throwable $e) {
+            $archive->discard();
+            $this->removeDir($workDir);
+            throw $e;
+        }
+        $this->removeDir($workDir);
+
+        // Součet celého archivu nemůže být uvnitř archivu (kroutil by se sám do sebe),
+        // takže jde vedle jako sidecar a do DB. Podle něj zákazník pozná, že se
+        // stáhl celý soubor, ne jen kus.
+        @file_put_contents($absPath . '.sha256', $sha256 . '  ' . $fileName . "\n");
+
+        $this->log->info('Export instance dokončen', [
+            'supplier_id' => $supplierId,
+            'file' => $fileName,
+            'size_bytes' => $sizeBytes,
+            'entries' => $manifest['totals']['entries'],
+            'encrypted' => $password !== '',
+        ]);
+
+        return [
+            'rel_path' => $relPath,
+            'abs_path' => $absPath,
+            'file_name' => $fileName,
+            'size_bytes' => $sizeBytes,
+            'sha256' => $sha256,
+            'encrypted' => $password !== '',
+            'manifest' => $manifest,
+        ];
+    }
+
+    /**
+     * Řádková data všech agend do `data/{tabulka}.jsonl`.
+     *
+     * @param null|callable(string):void $progress
+     * @return array<string,mixed>
+     */
+    private function exportData(
+        InstanceExportArchive $archive,
+        int $supplierId,
+        ?int $jobId,
+        ?callable $progress,
+        string $workDir,
+    ): array {
+        $scopes = $this->scopes->resolveAll($supplierId);
+        $this->setTotal($jobId, count($scopes));
+        $tables = [];
+        $index = 0;
+        foreach ($scopes as $table => $scope) {
+            $this->assertNotCancelled($jobId);
+            $index++;
+            $this->step($jobId, $progress, sprintf('Data %d/%d — %s', $index, count($scopes), $table), $index);
+
+            $tmp = $workDir . DIRECTORY_SEPARATOR . $table . '.jsonl';
+            $rows = $this->writeTableJsonl($scope, $tmp);
+            if ($rows === 0) {
+                // Prázdné tabulky do archivu nedáváme, ale v manifestu je uvedeme —
+                // jinak by nešlo odlišit "nic tam nebylo" od "zapomněli jsme to".
+                @unlink($tmp);
+                $tables[$table] = ['rows' => 0, 'entry' => null, 'scope' => $scope->via];
+                continue;
+            }
+            $entry = 'data/' . $table . '.jsonl';
+            $archive->addFile($entry, $tmp, deleteAfterFlush: true);
+            $tables[$table] = [
+                'rows' => $rows,
+                'entry' => $entry,
+                'scope' => $scope->via,
+                'redacted_columns' => $scope->redacted,
+            ];
+        }
+        // Dočasné soubory drží ZipArchive až do close — vynutíme zápis, ať se uvolní.
+        $archive->flushNow();
+
+        return [
+            'format' => 'JSON Lines (UTF-8, jeden JSON objekt na řádek)',
+            'tables' => $tables,
+            'skipped_tables' => $this->scopes->skipped(),
+            'skipped_note' => 'Vynechané tabulky jsou systémové, globální číselníky, '
+                . 'nebo se je nepodařilo jednoznačně přiřadit této firmě. Data firmy v nich nejsou.',
+        ];
+    }
+
+    /**
+     * Streamovaný zápis jedné tabulky do JSONL. Nikdy nenačte víc než jednu dávku.
+     *
+     * @return int počet řádků
+     */
+    private function writeTableJsonl(TenantTableScope $scope, string $filePath): int
+    {
+        if ($scope->columns === []) {
+            return 0;
+        }
+        $pdo = $this->db->pdo();
+        $columns = implode(', ', array_map(static fn (string $c): string => '`' . $c . '`', $scope->columns));
+        $fh = fopen($filePath, 'wb');
+        if ($fh === false) {
+            throw new InstanceExportException('storage_failed', 'Nelze zapsat ' . $filePath);
+        }
+        $rows = 0;
+        try {
+            $lastKey = null;
+            $offset = 0;
+            while (true) {
+                if ($scope->keysetPk !== null) {
+                    // Keyset: stabilní i při souběžných zápisech a nezpomaluje se
+                    // s rostoucím offsetem (OFFSET 500000 znamená přeskákat 500k řádků).
+                    $sql = 'SELECT ' . $columns . ' FROM `' . $scope->table . '` WHERE ' . $scope->where
+                        . ($lastKey !== null ? ' AND `' . $scope->keysetPk . '` > ?' : '')
+                        . ' ORDER BY `' . $scope->keysetPk . '` LIMIT ' . self::BATCH;
+                    $params = $lastKey !== null ? [...$scope->params, $lastKey] : $scope->params;
+                } else {
+                    $sql = 'SELECT ' . $columns . ' FROM `' . $scope->table . '` WHERE ' . $scope->where
+                        . ' ORDER BY ' . $scope->orderBy . ' LIMIT ' . self::BATCH . ' OFFSET ' . $offset;
+                    $params = $scope->params;
+                }
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($params);
+
+                $batchCount = 0;
+                $lastRow = null;
+                while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+                    $line = json_encode(
+                        $row,
+                        JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRESERVE_ZERO_FRACTION,
+                    );
+                    if ($line === false) {
+                        throw new InstanceExportException(
+                            'encode_failed',
+                            'JSON encode selhal pro ' . $scope->table . ' (řádek ' . ($rows + 1) . ').',
+                        );
+                    }
+                    fwrite($fh, $line . "\n");
+                    $rows++;
+                    $batchCount++;
+                    $lastRow = $row;
+                }
+                $stmt->closeCursor();
+
+                if ($batchCount === 0) {
+                    break;
+                }
+                if ($scope->keysetPk !== null) {
+                    $lastKey = $lastRow[$scope->keysetPk] ?? null;
+                    if ($lastKey === null) {
+                        break;
+                    }
+                } else {
+                    $offset += $batchCount;
+                }
+                if ($batchCount < self::BATCH) {
+                    break;
+                }
+            }
+        } finally {
+            fclose($fh);
+        }
+        return $rows;
+    }
+
+    /**
+     * Doklady jako PDF v adresářích po letech a agendách — tohle je ta část, kterou
+     * zákazník v praxi opravdu otevře.
+     *
+     * @param null|callable(string):void $progress
+     * @return array<string,mixed>
+     */
+    private function exportDocuments(
+        InstanceExportArchive $archive,
+        int $supplierId,
+        ?string $dateFrom,
+        ?string $dateTo,
+        ?int $jobId,
+        ?callable $progress,
+        string $workDir,
+    ): array {
+        $summary = ['vydane_pdf' => 0, 'vydane_isdoc' => 0, 'prijate_pdf' => 0, 'vypisy' => 0];
+        $warnings = [];
+
+        // 1) Vydané doklady — PDF (z archivu/cache, jinak vyrenderuje) + ISDOC.
+        $issued = $this->fetchIssuedInvoices($supplierId, $dateFrom, $dateTo);
+        $done = 0;
+        foreach ($issued as $row) {
+            $this->assertNotCancelled($jobId);
+            $id = (int) $row['id'];
+            $year = substr((string) ($row['issue_date'] ?? ''), 0, 4) ?: 'bez-data';
+            $kind = match ((string) ($row['invoice_type'] ?? 'invoice')) {
+                'proforma' => 'Proforma',
+                'credit_note' => 'Dobropis',
+                'cancellation' => 'Storno',
+                'tax_document' => 'DanovyDoklad',
+                default => 'Faktura',
+            };
+            $base = $kind . '-' . ExportFilename::sanitize((string) ($row['varsymbol'] ?? ('navrh-' . $id)), 'doklad-' . $id);
+            try {
+                $pdfPath = $this->invoicePdf->render($id);
+                if (is_file($pdfPath)) {
+                    $archive->addFile("doklady/{$year}/vydane-faktury/{$base}.pdf", $pdfPath);
+                    $summary['vydane_pdf']++;
+                }
+            } catch (\Throwable $e) {
+                $warnings[] = "Vydaná {$base}: PDF — " . $e->getMessage();
+            }
+            try {
+                $invoice = $this->invoiceRepo->find($id);
+                if ($invoice !== null) {
+                    $archive->addString("doklady/{$year}/vydane-faktury-isdoc/{$base}.isdoc", $this->isdoc->buildXml($invoice));
+                    $summary['vydane_isdoc']++;
+                }
+            } catch (\Throwable $e) {
+                $warnings[] = "Vydaná {$base}: ISDOC — " . $e->getMessage();
+            }
+            $done++;
+            if ($done % 10 === 0) {
+                $this->step($jobId, $progress, sprintf('Vydané doklady %d/%d', $done, count($issued)));
+            }
+        }
+
+        // 2) Přijaté doklady — přednost má ORIGINÁL od dodavatele (průkazný podle
+        //    § 35 ZDPH); rekonstrukce z našich dat je až náhrada, a je tak i pojmenovaná.
+        $purchase = $this->fetchPurchaseInvoices($supplierId, $dateFrom, $dateTo);
+        $archiveRoot = $this->purchaseArchiveRoot();
+        $archiveRootReal = realpath($archiveRoot);
+        $done = 0;
+        foreach ($purchase as $row) {
+            $this->assertNotCancelled($jobId);
+            $id = (int) $row['id'];
+            $year = substr((string) ($row['issue_date'] ?? ''), 0, 4) ?: 'bez-data';
+            $label = ExportFilename::sanitize(
+                (string) ($row['varsymbol'] ?? $row['vendor_invoice_number'] ?? ('id-' . $id))
+                . '-' . (string) ($row['vendor_company_name'] ?? 'dodavatel'),
+                'prijata-' . $id,
+            );
+            $label = substr($label, 0, 100);
+
+            $original = null;
+            if (!empty($row['pdf_path']) && $archiveRootReal !== false) {
+                $candidate = realpath($archiveRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, (string) $row['pdf_path']));
+                if ($candidate !== false && is_file($candidate)
+                    && str_starts_with(strtolower($candidate), strtolower($archiveRootReal . DIRECTORY_SEPARATOR))) {
+                    $original = $candidate;
+                }
+            }
+            try {
+                if ($original !== null) {
+                    $archive->addFile("doklady/{$year}/prijate-faktury/Prijata-{$label}.pdf", $original);
+                } else {
+                    $archive->addString(
+                        "doklady/{$year}/prijate-faktury/Prijata-{$label}-rekonstrukce.pdf",
+                        $this->purchasePdf->render($id, $supplierId),
+                    );
+                }
+                $summary['prijate_pdf']++;
+            } catch (\Throwable $e) {
+                $warnings[] = "Přijatá {$label}: " . $e->getMessage();
+            }
+            $done++;
+            if ($done % 10 === 0) {
+                $this->step($jobId, $progress, sprintf('Přijaté doklady %d/%d', $done, count($purchase)));
+            }
+        }
+
+        // 3) Výpisy z účtu — obsah je BLOB, takže se tahá PO JEDNOM řádku a jde rovnou
+        //    do dočasného souboru. Načíst celý sloupec do pole by u roku provozu
+        //    znamenalo stovky MB v paměti.
+        $summary['vypisy'] = $this->exportBankStatementFiles($archive, $supplierId, $dateFrom, $dateTo, $jobId, $progress, $workDir, $warnings);
+
+        if ($warnings !== []) {
+            foreach (array_slice($warnings, 0, 50) as $w) {
+                $this->note($jobId, $progress, 'Upozornění: ' . $w);
+            }
+        }
+        return $summary + ['warnings' => count($warnings)];
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    private function exportBankStatementFiles(
+        InstanceExportArchive $archive,
+        int $supplierId,
+        ?string $dateFrom,
+        ?string $dateTo,
+        ?int $jobId,
+        ?callable $progress,
+        string $workDir,
+        array &$warnings,
+    ): int {
+        $scopes = $this->scopes->resolveAll($supplierId);
+        $scope = $scopes['bank_statements'] ?? null;
+        if ($scope === null) {
+            // Tabulku se nepodařilo přiřadit firmě → default deny. Radši výpisy
+            // vynechat, než riskovat cizí.
+            $warnings[] = 'Bankovní výpisy nešlo jednoznačně přiřadit firmě — vynechány.';
+            return 0;
+        }
+
+        $where = $scope->where;
+        $params = $scope->params;
+        if ($dateFrom !== null && $dateTo !== null) {
+            $where .= ' AND (statement_date IS NULL OR statement_date BETWEEN ? AND ?)';
+            $params[] = $dateFrom;
+            $params[] = $dateTo;
+        }
+        $pdo = $this->db->pdo();
+        $idStmt = $pdo->prepare('SELECT id FROM bank_statements WHERE ' . $where . ' ORDER BY id');
+        $idStmt->execute($params);
+        $ids = array_map('intval', $idStmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+
+        $count = 0;
+        foreach ($ids as $i => $id) {
+            $this->assertNotCancelled($jobId);
+            // Klíčové: WHERE nese celý tenant scope znovu, ne jen id. I kdyby se
+            // seznam id někde ušpinil, řádek cizí firmy se sem nedostane.
+            $stmt = $pdo->prepare(
+                'SELECT statement_date, account_number, file_name, pdf_name, file_content, pdf_content
+                   FROM bank_statements WHERE id = ? AND (' . $scope->where . ')'
+            );
+            $stmt->execute([$id, ...$scope->params]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stmt->closeCursor();
+            if ($row === false) {
+                continue;
+            }
+            $year = substr((string) ($row['statement_date'] ?? ''), 0, 4) ?: 'bez-data';
+            $account = ExportFilename::sanitize((string) ($row['account_number'] ?? 'ucet'), 'ucet');
+
+            foreach ([['file_content', 'file_name', 'gpc'], ['pdf_content', 'pdf_name', 'pdf']] as [$contentCol, $nameCol, $ext]) {
+                $content = $row[$contentCol] ?? null;
+                if (!is_string($content) || $content === '') {
+                    continue;
+                }
+                $name = (string) ($row[$nameCol] ?? '');
+                $name = $name !== '' ? ExportFilename::sanitize($name) : sprintf('vypis-%s-%d.%s', $account, $id, $ext);
+                $tmp = $workDir . DIRECTORY_SEPARATOR . 'stmt-' . $id . '.' . $ext;
+                file_put_contents($tmp, $content);
+                unset($content, $row[$contentCol]);
+                $archive->addFile("doklady/{$year}/vypisy-z-uctu/{$name}", $tmp, deleteAfterFlush: true);
+                $count++;
+            }
+            unset($row);
+            if (($i + 1) % 10 === 0) {
+                $this->step($jobId, $progress, sprintf('Výpisy z účtu %d/%d', $i + 1, count($ids)));
+                $archive->flushNow();
+            }
+        }
+        $archive->flushNow();
+        return $count;
+    }
+
+    /**
+     * Nahrané soubory — skeny přijatých faktur, přílohy deníku (§ 33a), dokumenty DMS
+     * a mzdové doklady.
+     *
+     * Izolaci tu dělá CESTA: každé z těch úložišť má per-firma adresář `sup-{id}`,
+     * takže se sbírá jen ten. Sběr souborů se nekopíruje — používá se
+     * {@see BackupFileCollector}, sdílený se zálohovacími skripty (a mimo jiné
+     * ošetřuje symlinky ven z kořene i `MYINVOICE_DATA_DIR`).
+     *
+     * @param null|callable(string):void $progress
+     * @return array<string,mixed>
+     */
+    private function exportFiles(
+        InstanceExportArchive $archive,
+        int $supplierId,
+        ?int $jobId,
+        ?callable $progress,
+    ): array {
+        $sources = [
+            [DocumentStorage::baseDir($supplierId), null, 'prilohy/dokumenty'],
+            [JournalAttachmentStorage::baseDir($supplierId), null, 'prilohy/denik'],
+            [RuntimePaths::storage('payroll-documents/sup-' . $supplierId), null, 'prilohy/mzdy'],
+            [RuntimePaths::storage('invoices') . '/sup-' . $supplierId . '/_archive', null, 'prilohy/vydane-faktury-archiv'],
+        ];
+        $skipped = [];
+        $files = BackupFileCollector::collect(
+            $sources,
+            // Náhledy se dají vyrobit znovu; `_jobs` jsou pracovní soubory.
+            ['/_thumbs/', '/_jobs/'],
+            ['.tmp-'],
+            static function (string $abs) use (&$skipped): void { $skipped[] = $abs; },
+        );
+
+        $total = count($files);
+        $done = 0;
+        $bytes = 0;
+        foreach ($files as $abs => $entry) {
+            $this->assertNotCancelled($jobId);
+            $archive->addFile($entry, $abs);
+            $bytes += (int) (@filesize($abs) ?: 0);
+            $done++;
+            if ($done % 50 === 0) {
+                $this->step($jobId, $progress, sprintf('Přílohy %d/%d', $done, $total));
+            }
+        }
+        $archive->flushNow();
+
+        return [
+            'files' => $done,
+            'bytes' => $bytes,
+            'sources' => array_map(static fn (array $s): string => $s[2], $sources),
+            'skipped_outside_root' => count($skipped),
+        ];
+    }
+
+    // ── dotazy ────────────────────────────────────────────────────────────────
+
+    /** @return list<array<string,mixed>> */
+    private function fetchIssuedInvoices(int $supplierId, ?string $from, ?string $to): array
+    {
+        $sql = 'SELECT id, varsymbol, invoice_type, issue_date FROM invoices WHERE supplier_id = ?';
+        $params = [$supplierId];
+        if ($from !== null && $to !== null) {
+            $sql .= ' AND issue_date BETWEEN ? AND ?';
+            $params[] = $from;
+            $params[] = $to;
+        }
+        $stmt = $this->db->pdo()->prepare($sql . ' ORDER BY issue_date, id');
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function fetchPurchaseInvoices(int $supplierId, ?string $from, ?string $to): array
+    {
+        // Jméno dodavatele je na kontaktu, ne na dokladu. LEFT JOIN schválně: chybějící
+        // kontakt smí zhoršit jen pojmenování souboru, nikdy vypustit doklad z archivu.
+        $sql = 'SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.issue_date, pi.pdf_path,
+                       c.company_name AS vendor_company_name
+                  FROM purchase_invoices pi
+             LEFT JOIN clients c ON c.id = pi.vendor_id
+                 WHERE pi.supplier_id = ?';
+        $params = [$supplierId];
+        if ($from !== null && $to !== null) {
+            $sql .= ' AND pi.issue_date BETWEEN ? AND ?';
+            $params[] = $from;
+            $params[] = $to;
+        }
+        $stmt = $this->db->pdo()->prepare($sql . ' ORDER BY pi.issue_date, pi.id');
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** @return array<string,mixed>|null */
+    private function fetchSupplier(int $supplierId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT id, company_name, ic, dic FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : $row;
+    }
+
+    /** Stejné pořadí zdrojů jako v MonthlyExportService — jeden výklad konfigurace. */
+    private function purchaseArchiveRoot(): string
+    {
+        $dir = (string) $this->config->get('purchase_invoice.archive_storage', '');
+        if ($dir !== '') {
+            return $dir;
+        }
+        $uploads = (string) $this->config->get('storage.uploads_dir', '');
+        if ($uploads !== '') {
+            return dirname($uploads) . '/purchase-invoices';
+        }
+        return RuntimePaths::storage('purchase-invoices');
+    }
+
+    // ── pomocné ───────────────────────────────────────────────────────────────
+
+    private function ttlDays(): int
+    {
+        $days = (int) $this->config->get('export.instance.ttl_days', self::DEFAULT_TTL_DAYS);
+        return $days > 0 ? $days : self::DEFAULT_TTL_DAYS;
+    }
+
+    private function maxBytes(): int
+    {
+        $max = (int) $this->config->get('export.instance.max_bytes', self::DEFAULT_MAX_BYTES);
+        return $max > 0 ? $max : self::DEFAULT_MAX_BYTES;
+    }
+
+    private function setTotal(?int $jobId, int $total): void
+    {
+        if ($jobId !== null) {
+            $this->jobs->updateProgress($jobId, ['total_steps' => $total]);
+        }
+    }
+
+    /** @param null|callable(string):void $progress */
+    private function step(?int $jobId, ?callable $progress, string $label, ?int $processed = null): void
+    {
+        if ($jobId !== null) {
+            $updates = ['current_step' => mb_substr($label, 0, 160)];
+            if ($processed !== null) {
+                $updates['processed_steps'] = $processed;
+            }
+            $this->jobs->updateProgress($jobId, $updates);
+        }
+        if ($progress !== null) {
+            $progress($label);
+        }
+    }
+
+    /** @param null|callable(string):void $progress */
+    private function note(?int $jobId, ?callable $progress, string $line): void
+    {
+        if ($jobId !== null) {
+            $this->jobs->appendLog($jobId, $line);
+        }
+        if ($progress !== null) {
+            $progress($line);
+        }
+    }
+
+    private function assertNotCancelled(?int $jobId): void
+    {
+        if ($jobId !== null && $this->jobs->isCancelRequested($jobId)) {
+            throw new InstanceExportCancelled('Export zrušen uživatelem.');
+        }
+    }
+
+    /** @param array<string, array{sha256:string, size:int}> $entries */
+    private function renderChecksums(array $entries): string
+    {
+        $out = "# SHA-256 položek archivu (formát: sha256<mezera><mezera>cesta)\n"
+            . "# Ověření: sha256sum -c CHECKSUMS.txt  (Windows: certutil -hashfile <soubor> SHA256)\n"
+            . "# CHECKSUMS.txt, manifest.json a CTI-MNE.txt tu nejsou — vznikají až po nich.\n";
+        foreach ($entries as $name => $meta) {
+            $out .= $meta['sha256'] . '  ' . $name . "\n";
+        }
+        return $out;
+    }
+
+    /** @param array<string,mixed> $manifest */
+    private function renderReadme(array $supplier, array $manifest, bool $encrypted): string
+    {
+        $sections = $manifest['sections'] ?? [];
+        $tableCount = count($sections['data']['tables'] ?? []);
+        $lines = [
+            'EXPORT DAT — ' . (string) $supplier['company_name'],
+            str_repeat('=', 60),
+            '',
+            'Vytvořeno:      ' . (string) $manifest['read_finished_at'],
+            'Verze aplikace: ' . (string) ($manifest['app_version'] ?? 'neuvedena'),
+            'Formát archivu: ' . (string) $manifest['format'] . ' v' . (string) $manifest['version'],
+            'Položek:        ' . (string) ($manifest['totals']['entries'] ?? 0),
+            '',
+            'CO V ARCHIVU JE',
+            str_repeat('-', 60),
+            'data/          Strojově čitelný export databáze — jeden soubor na tabulku,',
+            '               formát JSON Lines (JSONL): jeden JSON objekt na řádek, UTF-8.',
+            '               Otevře ho Excel/LibreOffice přes import, Python (pandas.read_json',
+            '               s lines=True), jq i běžný textový editor. Tabulek: ' . $tableCount . '.',
+            'doklady/       PDF dokladů po LETECH a agendách (vydané faktury, přijaté faktury,',
+            '               výpisy z účtu) a ISDOC vydaných faktur. Tohle je část, kterou',
+            '               v praxi potřebuješ nejčastěji — otevře ji jakákoli čtečka PDF.',
+            'prilohy/       Nahrané soubory: skeny, přílohy účetního deníku, dokumenty, mzdové',
+            '               doklady.',
+            'manifest.json  Co v archivu je, kolik toho je, k jakému datu a z jaké verze',
+            '               aplikace. Obsahuje i seznam tabulek, které v archivu ZÁMĚRNĚ nejsou.',
+            'CHECKSUMS.txt  SHA-256 každé položky archivu.',
+            '',
+            'JAK OVĚŘIT, ŽE JE ARCHIV CELÝ',
+            str_repeat('-', 60),
+            'Vedle staženého ZIPu je soubor stejného jména s příponou .sha256 — obsahuje',
+            'kontrolní součet CELÉHO archivu. Porovnej ho s tím, co spočítá tvůj počítač:',
+            '  Linux/macOS:  sha256sum <soubor>.zip',
+            '  Windows:      certutil -hashfile <soubor>.zip SHA256',
+            'Jednotlivé položky uvnitř ověříš proti CHECKSUMS.txt.',
+            '',
+        ];
+        if ($encrypted) {
+            $lines[] = 'ŠIFROVÁNÍ';
+            $lines[] = str_repeat('-', 60);
+            $lines[] = 'Archiv je šifrovaný AES-256 (WinZip AE-2), stejně jako zálohy.';
+            $lines[] = 'Vestavěný Průzkumník Windows ho NEOTEVŘE — použij 7-Zip, WinRAR';
+            $lines[] = 'nebo `unzip -P <heslo>`. Heslo je to z konfigurace instance.';
+            $lines[] = '';
+        }
+        $lines[] = 'POZNÁMKA K ROZSAHU';
+        $lines[] = str_repeat('-', 60);
+        $lines[] = 'Archiv obsahuje data JEDNÉ firmy (' . (string) $supplier['company_name'] . ', ID '
+            . (string) $supplier['id'] . '). Pokud vedeš v aplikaci víc firem, vyexportuj';
+        $lines[] = 'každou zvlášť.';
+        $lines[] = '';
+        $lines[] = 'Přihlašovací údaje, tokeny a klíče k integracím v archivu ZÁMĚRNĚ nejsou —';
+        $lines[] = 'nejsou to účetní záznamy a archiv opouští instalaci. Seznam vynechaných';
+        $lines[] = 'sloupců je v manifest.json.';
+        $lines[] = '';
+        $lines[] = 'Data se čtou průběžně, ne v jednom okamžiku (viz read_started_at /';
+        $lines[] = 'read_finished_at v manifestu) — archiv vznikl v tomhle časovém okně.';
+
+        return implode("\r\n", $lines) . "\r\n";
+    }
+
+    private function schemaVersion(): string
+    {
+        try {
+            $version = $this->db->pdo()->query('SELECT MAX(filename) FROM migrations')?->fetchColumn();
+            return $version === false || $version === null ? 'unknown' : (string) $version;
+        } catch (\Throwable) {
+            return 'unknown';
+        }
+    }
+
+    private function appVersion(): ?string
+    {
+        foreach ([Bootstrap::rootDir() . '/VERSION', dirname(Bootstrap::rootDir()) . '/VERSION'] as $path) {
+            if (is_file($path)) {
+                $content = trim((string) file_get_contents($path));
+                return $content === '' ? null : $content;
+            }
+        }
+        return null;
+    }
+
+    private function removeDir(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+        foreach (scandir($dir) ?: [] as $item) {
+            if ($item === '.' || $item === '..') {
+                continue;
+            }
+            $path = $dir . DIRECTORY_SEPARATOR . $item;
+            is_dir($path) ? $this->removeDir($path) : @unlink($path);
+        }
+        @rmdir($dir);
+    }
+}

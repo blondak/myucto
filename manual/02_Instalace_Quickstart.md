@@ -15,7 +15,13 @@ Stačí **Git** a **Docker**. Pokud je ještě nemáš:
 ```powershell
 winget install --id Git.Git -e
 winget install --id Docker.DockerDesktop -e
+winget install --id Microsoft.PowerShell -e
 ```
+
+> ⚠️ **PowerShell 7 je povinný**, ne doporučený. Windows PowerShell 5.1, který
+> je na Windows pořád výchozí, zapisuje soubory s BOM a nezná část syntaxe,
+> takže by tiše vznikla rozbitá konfigurace. Skript to pozná a raději hned
+> skončí s hláškou — spouštěj ho příkazem `pwsh`, ne `powershell`.
 
 **macOS** (přes [Homebrew](https://brew.sh/)):
 
@@ -40,8 +46,8 @@ cd myucto
 # Linux / macOS
 cmd/docker-ghcr.sh
 
-# Windows PowerShell
-.\cmd\docker-ghcr.ps1
+# Windows — v PowerShellu 7 (pwsh), ne ve Windows PowerShellu
+pwsh -File .\cmd\docker-ghcr.ps1
 ```
 
 Skript vygeneruje náhodná hesla + `cfg.docker.php`, stáhne image z GHCR,

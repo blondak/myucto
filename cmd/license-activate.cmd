@@ -6,5 +6,6 @@ REM ============================================================================
 setlocal
 set "SCRIPT_DIR=%~dp0"
 set "PROJECT_ROOT=%SCRIPT_DIR%.."
-php "%PROJECT_ROOT%\api\bin\license-activate.php" %*
+if defined MYINVOICE_PHP_BIN (set "PHP_BIN=%MYINVOICE_PHP_BIN%") else (set "PHP_BIN=php")
+"%PHP_BIN%" "%PROJECT_ROOT%\api\bin\license-activate.php" %*
 exit /b %ERRORLEVEL%
