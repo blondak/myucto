@@ -81,9 +81,22 @@ final class HealthAction
                 'app_url_matches_host' => $this->appUrl->matchesHost($request->getUri()->getHost()),
                 'host_gate_enforced'   => $this->probe?->hostGateEnforced() ?? false,
                 'managed'              => $managed['managed'],
-                'managed_provider'     => $managed['managed_provider'],
             ],
         ];
+
+        // ⚠️ KDO instalaci hostuje, se anonymnímu volajícímu neříká.
+        //
+        // Aplikace nesmí na svém provozovateli nic stavět a už vůbec ho nesmí
+        // vyzrazovat: `/api/health` je veřejný a záměrně odpovídá i na neznámé
+        // doméně, takže by stačilo projet `*.myucto.online` a mít celý
+        // dodavatelský řetězec i seznam instancí. Zůstává diagnostickým údajem
+        // pro toho, kdo je uvnitř — provozovatel sám sebe zná.
+        //
+        // `managed` (ano/ne) zůstává veřejné: neprozrazuje nikoho a zákaznická
+        // instalace podle něj pozná, že si konfiguraci nemá přenastavovat.
+        if ($request->getAttribute(AuthMiddleware::ATTR_USER) !== null) {
+            $payload['configuration']['managed_provider'] = $managed['managed_provider'];
+        }
 
         // Diagnostické warningy (např. slabý fallback secret_encryption_key) jen
         // pro přihlášené — anonymnímu volajícímu (Docker healthcheck, monitoring)

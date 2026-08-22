@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Action\System;
 
 use MyInvoice\Action\System\HealthAction;
+use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Infrastructure\Cache\RedisProbe;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -103,12 +104,13 @@ final class HealthOperationsPayloadTest extends TestCase
     }
 
     /** @param array<string,mixed> $overrides */
-    private function call(string $host = 'app.example.test', array $overrides = []): array
+    private function call(string $host = 'app.example.test', array $overrides = [], bool $signedIn = false): array
     {
-        $response = ($this->action($overrides))(
-            (new ServerRequestFactory())->createServerRequest('GET', 'https://' . $host . '/api/health'),
-            (new ResponseFactory())->createResponse(),
-        );
+        $request = (new ServerRequestFactory())->createServerRequest('GET', 'https://' . $host . '/api/health');
+        if ($signedIn) {
+            $request = $request->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1]);
+        }
+        $response = ($this->action($overrides))($request, (new ResponseFactory())->createResponse());
 
         return (array) json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
     }
@@ -159,9 +161,26 @@ final class HealthOperationsPayloadTest extends TestCase
         self::assertFalse($this->call()['maintenance']);
     }
 
-    public function testManagedProviderIsReported(): void
+    /**
+     * ⚠️ KDO instalaci hostuje, se anonymnímu volajícímu neříká.
+     *
+     * `/api/health` je veřejný a záměrně odpovídá i na neznámé doméně, takže
+     * by stačilo projet `*.myucto.online` a mít celý dodavatelský řetězec
+     * i seznam instancí. Že instalace JE spravovaná, veřejné zůstává —
+     * neprozrazuje nikoho a zákazník podle toho pozná, že si konfiguraci
+     * nemá přenastavovat.
+     */
+    public function testManagedProviderIsHiddenFromAnonymousCallers(): void
     {
         $configuration = $this->call()['configuration'];
+
+        self::assertTrue($configuration['managed'], 'Že je spravovaná, se říct smí.');
+        self::assertArrayNotHasKey('managed_provider', $configuration, 'Kdo ji spravuje, ne.');
+    }
+
+    public function testManagedProviderIsReportedToSignedInUsers(): void
+    {
+        $configuration = $this->call('app.example.test', [], true)['configuration'];
 
         self::assertTrue($configuration['managed']);
         self::assertSame('servermaster', $configuration['managed_provider']);
@@ -171,7 +190,7 @@ final class HealthOperationsPayloadTest extends TestCase
     {
         $configuration = $this->call('app.example.test', [
             'app' => ['managed' => false, 'managed_provider' => ''],
-        ])['configuration'];
+        ], true)['configuration'];
 
         self::assertFalse($configuration['managed']);
         self::assertNull($configuration['managed_provider']);
