@@ -174,7 +174,10 @@ final class CfgLocalWriterTest extends TestCase
 
         $path = $this->cfgLocalPath();
         clearstatcache(true, $path);
-        self::assertSame('0600', decoct(fileperms($path) & 0777));
+        // %04o, ne decoct(): decoct(0600) vrací '600' bez vedoucí nuly, takže
+        // porovnání s '0600' nemohlo projít. Na Windows se test přeskakuje,
+        // takže to spadlo až na CI.
+        self::assertSame('0600', sprintf('%04o', fileperms($path) & 0777));
     }
 
     public function testPreservesPermissionsOfExistingFile(): void
@@ -188,7 +191,7 @@ final class CfgLocalWriterTest extends TestCase
         CfgLocalWriter::setKeys($this->tmpRoot, ['auth.require_totp' => true]);
 
         clearstatcache(true, $path);
-        self::assertSame('0640', decoct(fileperms($path) & 0777));
+        self::assertSame('0640', sprintf('%04o', fileperms($path) & 0777));
     }
 
     /**
