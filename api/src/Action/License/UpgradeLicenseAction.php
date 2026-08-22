@@ -24,7 +24,7 @@ final class UpgradeLicenseAction
         'subscription_inactive' => 'Předplatné není aktivní. Zkontrolujte platbu na myucto.cz.',
         'no_parent_payment'     => 'Navýšení je možné jen u předplatného s uloženou kartou.',
         'charge_failed'         => 'Platbu se nepodařilo strhnout, zkontrolujte platební kartu.',
-        'charge_pending'        => 'Platba se zpracovává. Zkuste to prosím za chvíli znovu.',
+        'charge_pending'        => 'Platba se zpracovává. Nekupujte prosím znovu — jakmile ji brána potvrdí, změna se projeví sama.',
         'instance_required'     => 'U hostovaného provozu je pro navýšení nutné ověření této instalace.',
         'not_bound'             => 'Tato instalace není k licenci aktivně přiřazená.',
         'server_unreachable'    => 'Licenční server je nedostupný. Zkuste to prosím za chvíli.',

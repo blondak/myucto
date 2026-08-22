@@ -37,7 +37,7 @@ final class StorageUpgradeAction
         'no_parent_payment'     => 'Rozšíření je možné jen u předplatného s uloženou kartou.',
         'cannot_prorate'        => 'Doplatek se nepodařilo spočítat. Ozvěte se prosím podpoře.',
         'charge_failed'         => 'Platbu se nepodařilo strhnout, zkontrolujte platební kartu.',
-        'charge_pending'        => 'Platba se zpracovává. Zkuste to prosím za chvíli znovu.',
+        'charge_pending'        => 'Platba se zpracovává. Nekupujte prosím znovu — jakmile ji brána potvrdí, změna se projeví sama.',
         'payments_disabled'     => 'Platby jsou dočasně pozastavené. Zkuste to prosím později.',
         'server_unreachable'    => 'Licenční server je nedostupný. Zkuste to prosím za chvíli.',
         // ⚠️ Nepobízet k opakování: platba mohla proběhnout a ztratila se jen odpověď.
