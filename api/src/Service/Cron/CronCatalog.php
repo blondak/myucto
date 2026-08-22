@@ -26,10 +26,16 @@ final class CronCatalog
      *   weekdays_only:bool,
      *   critical:bool,
      *   requires_config?:string,
+     *   requires_managed?:bool,
      *   requires_ai_opt_in?:bool,
      *   requires_feature?:string,
      *   dispatcher_only?:bool
      * }>
+     *
+     * `requires_managed` (volitelné) = úloha dává smysl jen ve spravovaném
+     * provozu (`app.managed`). Na self-hostu se nenaplánuje ani nezobrazí —
+     * není to volba výkonu, ale relevance: bez kvóty nemá její výsledek
+     * jediného konzumenta.
      *
      * `requires_config` (volitelné) = cfg klíč adresáře, bez kterého úloha nemá
      * co dělat (scan vypnutý). UI ji pak skryje, dokud není nastaven (CronJobsAction).
@@ -308,6 +314,12 @@ final class CronCatalog
                 // `critical` = false: když měření vypadne, spotřeba zůstane
                 // NEZMĚŘENÁ (null), což NIC nezamyká. Zastavené měření je tedy
                 // ztráta přehledu, ne výpadek provozu.
+                // ⚠️ Jen pro spravovaný provoz. Je to JEDINÁ úloha, která
+                // prochází celý datový strom, a na self-hostu by to dělala
+                // každou hodinu pro nikoho: kvóta tam není nastavená, takže
+                // naměřené číslo nic nevynucuje ({@see StorageQuotaPolicy::isEnforceable()}).
+                // Ručnímu spuštění to nebrání — admin si spotřebu změřit může.
+                'requires_managed' => true,
                 'script' => 'cron-storage-usage',
                 'recommended' => 'hourly_15',
                 'linux_cron' => '15 * * * *',

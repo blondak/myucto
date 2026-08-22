@@ -49,6 +49,8 @@ final class CronJobGate
     public const INACTIVE_OTHER_MODE = 'other_mode';
     /** Admin úlohu výslovně vypnul přes `cron.disabled_jobs` (spravovaná instalace, cizí hosting apod.). */
     public const INACTIVE_DISABLED_BY_CONFIG = 'disabled_by_config';
+    /** Úloha dává smysl jen ve spravovaném provozu, a ten tu není zapnutý. */
+    public const INACTIVE_MANAGED_ONLY = 'managed_only';
 
     /** Cfg klíč se seznamem jmen úloh z {@see CronCatalog}, které mají na téhle instalaci zůstat vypnuté. */
     private const DISABLED_JOBS_CONFIG_KEY = 'cron.disabled_jobs';
@@ -119,8 +121,9 @@ final class CronJobGate
         if (($job['dispatcher_only'] ?? false) === true) {
             return $mode === CronScheduleMode::DISPATCHER ? null : self::INACTIVE_OTHER_MODE;
         }
-        if (!$this->isSchedulable($job)) {
-            return self::INACTIVE_NOT_CONFIGURED;
+        $blocked = $this->schedulableBlockReason($job);
+        if ($blocked !== null) {
+            return $blocked;
         }
         if (($job['requires_ai_opt_in'] ?? false) === true && !$this->anySupplierHasAiOptIn()) {
             return self::INACTIVE_FEATURE_OFF;
@@ -151,16 +154,52 @@ final class CronJobGate
      */
     public function isSchedulable(array $job): bool
     {
+        return $this->schedulableBlockReason($job) === null;
+    }
+
+    /**
+     * Proč se úloha nemá dostat do crontabu? `null` = má.
+     *
+     * Odpověď je restart-stabilní (jen konfigurace a existence adresáře), takže
+     * ji smí použít i dispatcher a generátor crontabu. Vrácený klíč je tentýž,
+     * jaký hlásí {@see inactiveReason()} — jinak by přehled úloh a report
+     * dispatcheru mluvily o téže situaci jinak.
+     *
+     * @param array<string,mixed> $job
+     */
+    public function schedulableBlockReason(array $job): ?string
+    {
+        if (($job['requires_managed'] ?? false) === true && !$this->isManagedInstallation()) {
+            return self::INACTIVE_MANAGED_ONLY;
+        }
+
         $key = $job['requires_config'] ?? null;
         if ($key === null) {
-            return true;
+            return null;
         }
         try {
             $path = trim((string) $this->config->get((string) $key, ''));
         } catch (Throwable) {
-            return true; // fail-open
+            return null; // fail-open
         }
-        return $path !== '' && is_dir($path);
+
+        return $path !== '' && is_dir($path) ? null : self::INACTIVE_NOT_CONFIGURED;
+    }
+
+    /**
+     * Běží instalace ve spravovaném provozu?
+     *
+     * ⚠️ Fail-open jako zbytek brány: nečitelná konfigurace úlohu NEVYPÍNÁ.
+     * Tiše nespuštěný cron je horší než úloha, která jednou naprázdno změří
+     * spotřebu místa.
+     */
+    private function isManagedInstallation(): bool
+    {
+        try {
+            return (bool) $this->config->get('app.managed', false);
+        } catch (Throwable) {
+            return true;
+        }
     }
 
     /**

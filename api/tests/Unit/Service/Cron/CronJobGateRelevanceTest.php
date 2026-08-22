@@ -37,6 +37,39 @@ final class CronJobGateRelevanceTest extends TestCase
         self::assertNull($gate->inactiveReason($this->job('cron-bank-scan')));
     }
 
+    /**
+     * Měření spotřeby místa existuje kvůli kvótě spravovaného provozu.
+     * Na self-hostu je to jediná úloha, která by procházela celý datový strom
+     * každou hodinu — a její výsledek by tam neměl jediného konzumenta.
+     */
+    public function testStorageUsageIsInactiveWithoutManagedMode(): void
+    {
+        $gate = new CronJobGate(new Config([]), null);
+
+        self::assertSame(
+            CronJobGate::INACTIVE_MANAGED_ONLY,
+            $gate->inactiveReason($this->job('cron-storage-usage')),
+        );
+        self::assertFalse($gate->isSchedulable($this->job('cron-storage-usage')));
+    }
+
+    public function testStorageUsageIsRelevantInManagedMode(): void
+    {
+        $gate = new CronJobGate(new Config(['app' => ['managed' => true]]), null);
+
+        self::assertNull($gate->inactiveReason($this->job('cron-storage-usage')));
+        self::assertTrue($gate->isSchedulable($this->job('cron-storage-usage')));
+    }
+
+    /** Ostatní úlohy se zámkem spravovaného režimu minout nesmí. */
+    public function testManagedOnlyFlagDoesNotLeakToOtherJobs(): void
+    {
+        $gate = new CronJobGate(new Config([]), null);
+
+        self::assertNull($gate->inactiveReason($this->job('cron-backup')));
+        self::assertNull($gate->inactiveReason($this->job('cron-cnb-rates')));
+    }
+
     public function testJobWithoutAnyConditionIsAlwaysRelevant(): void
     {
         $gate = new CronJobGate(new Config([]), null);

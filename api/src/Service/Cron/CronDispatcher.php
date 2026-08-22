@@ -146,8 +146,11 @@ final class CronDispatcher
                 continue;
             }
 
-            if (!$this->gate->isSchedulable($job)) {
-                $report['skipped'][$script] = 'not_configured';
+            // Důvod se bere od brány, ne se tu odhaduje — tatáž situace se
+            // pak v reportu dispatcheru i v přehledu úloh jmenuje stejně.
+            $blocked = $this->gate->schedulableBlockReason($job);
+            if ($blocked !== null) {
+                $report['skipped'][$script] = $blocked;
                 continue;
             }
 

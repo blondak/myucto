@@ -126,10 +126,37 @@ final class DockerCrontabGeneratorTest extends TestCase
 
         // Nepodmíněné úlohy naopak musí zůstat.
         foreach (CronCatalog::dispatchable() as $job) {
-            if (isset($job['requires_config'])) {
+            if (isset($job['requires_config']) || ($job['requires_managed'] ?? false) === true) {
                 continue;
             }
             self::assertStringContainsString('api/bin/' . $job['script'] . '.php', $crontab);
+        }
+    }
+
+    /**
+     * Úloha jen pro spravovaný provoz se na self-hostu nesmí naplánovat.
+     *
+     * ⚠️ `cron-storage-usage` je jediná úloha, která prochází celý datový
+     * strom. Bez `app.managed` by to dělala každou hodinu pro nikoho — kvóta
+     * není nastavená, takže naměřené číslo nic nevynucuje.
+     */
+    public function testManagedOnlyJobIsDroppedOnSelfHostedAndKeptWhenManaged(): void
+    {
+        $managedOnly = array_filter(
+            CronCatalog::dispatchable(),
+            static fn (array $j): bool => ($j['requires_managed'] ?? false) === true,
+        );
+        self::assertNotEmpty($managedOnly, 'Test ztrácí smysl, pokud katalog nemá úlohu jen pro spravovaný provoz.');
+
+        $selfHosted = DockerCrontabGenerator::generate(new CronJobGate(new Config([]), null));
+        $managed = DockerCrontabGenerator::generate(
+            new CronJobGate(new Config(['app' => ['managed' => true]]), null),
+        );
+
+        foreach ($managedOnly as $job) {
+            $entry = 'api/bin/' . $job['script'] . '.php';
+            self::assertStringNotContainsString($entry, $selfHosted, "{$job['script']} nemá na self-hostu co plánovat.");
+            self::assertStringContainsString($entry, $managed, "{$job['script']} musí ve spravovaném provozu běžet.");
         }
     }
 
