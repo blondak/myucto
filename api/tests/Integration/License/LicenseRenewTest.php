@@ -195,6 +195,59 @@ final class LicenseRenewTest extends TestCase
         self::assertIsArray($kept, 'Poslední známý rozsah zůstal.');
         self::assertSame(22, (int) $kept['quota_gb'], 'Kvóta se odmítnutím nepřepsala.');
     }
+    /**
+     * Odpověď BEZ klíče `instance` nesmí sáhnout na poslední známý rozsah.
+     *
+     * Server ho vynechá, když ho neumí zjistit (spadlý dotaz do evidence),
+     * a starší server ho neposílá vůbec. Přepsat kvůli tomu kvótu na prázdno
+     * by znamenalo nulovou kvótu, tedy sto procent plno a okamžitý režim jen
+     * pro čtení u zákazníka, který má zaplaceno.
+     */
+    public function testRenewWithoutInstanceKeyKeepsTheDeliveredScope(): void
+    {
+        if (!$this->db->hasColumn('license', 'instance_info')) {
+            $this->markTestSkipped('Migrace 1524 (instance_info) neproběhla.');
+        }
+        $this->prime(null);
+        $this->db->pdo()->prepare('UPDATE license SET instance_info = ? WHERE id = 1')
+            ->execute([json_encode(['quota_gb' => 22], JSON_UNESCAPED_UNICODE)]);
+
+        $this->client->expects($this->once())->method('renew')->willReturn([
+            'ok'    => true,
+            'token' => $this->token(),
+            // klíč `instance` schválně chybí
+        ]);
+
+        $this->service->renewIfDue();
+
+        $kept = json_decode((string) $this->row()['instance_info'], true);
+        self::assertSame(22, (int) $kept['quota_gb'], 'Rozsah zůstal.');
+    }
+
+    /**
+     * Výslovné `instance: null` naopak znamená „tahle instalace není
+     * spravovaná" a rozsah se má zahodit.
+     */
+    public function testExplicitNullInstanceClearsTheDeliveredScope(): void
+    {
+        if (!$this->db->hasColumn('license', 'instance_info')) {
+            $this->markTestSkipped('Migrace 1524 (instance_info) neproběhla.');
+        }
+        $this->prime(null);
+        $this->db->pdo()->prepare('UPDATE license SET instance_info = ? WHERE id = 1')
+            ->execute([json_encode(['quota_gb' => 22], JSON_UNESCAPED_UNICODE)]);
+
+        $this->client->expects($this->once())->method('renew')->willReturn([
+            'ok'       => true,
+            'token'    => $this->token(),
+            'instance' => null,
+        ]);
+
+        $this->service->renewIfDue();
+
+        self::assertNull($this->row()['instance_info'], 'Rozsah se zahodil.');
+    }
+
     public function testTrialWithoutKeyDoesNotCallNetwork(): void
     {
         $this->db->pdo()->prepare(
