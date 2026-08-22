@@ -829,6 +829,19 @@ final class LicenseService
         // platícímu zákazníkovi až do příští obnovy tokenu.
         $commercial = (bool) ($payload['commercial'] ?? true);
 
+        // ⚠️ Bezplatný tarif si místa nekupuje. Klíč dostává kvůli kvótě, stavu
+        // předplatného a telemetrii, ale jeho cena je NULA — kdyby v tokenu
+        // přišlo `users` větší než jedna, dostal by zákazník druhé a další
+        // licenční místo zadarmo. Strop se proto uplatní tady, na jednom místě,
+        // ať platí stejně pro rozhodování o zakládání uživatelů i pro čísla,
+        // která se ukazují v aplikaci.
+        //
+        // Nula znamená „neomezeně", takže se nekomerčnímu tarifu nesmí nechat
+        // projít ani ta.
+        if (!$commercial) {
+            $usersLicensed = LicenseState::FREE_SEATS;
+        }
+
         if ($now > $validUntil) {
             return new LicenseState(
                 LicenseState::DEGRADED, $instanceId, $tier, $maxCompanies, $usersLicensed,

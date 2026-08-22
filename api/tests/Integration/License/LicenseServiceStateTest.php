@@ -101,6 +101,41 @@ final class LicenseServiceStateTest extends TestCase
         self::assertTrue($state->hasCommercialFeatures());
     }
 
+    /**
+     * ⚠️ Bezplatný tarif si místa nekupuje — jeho cena je nula.
+     *
+     * Klíč dostává kvůli kvótě, stavu předplatného a telemetrii, ale kdyby
+     * v tokenu přišlo `users` větší než jedna, dostal by zákazník druhé
+     * a další licenční místo zadarmo. Strop se proto uplatní při skládání
+     * stavu, ne až u rozhodování — jinak by aplikace jinde ukazovala jiné
+     * číslo, než jaké vymáhá.
+     */
+    public function testFreeTierNeverGrantsMoreThanOneSeat(): void
+    {
+        $this->setRow('MYU-TEST-0001-AAAA', $this->token(['commercial' => false, 'users' => 5]));
+        $state = $this->service->current();
+
+        self::assertSame(LicenseState::ACTIVE, $state->state);
+        self::assertFalse($state->hasCommercialFeatures());
+        self::assertSame(LicenseState::FREE_SEATS, $state->usersLicensed, 'Bezplatný tarif má jedno místo.');
+    }
+
+    /** Nula v tokenu znamená „neomezeně" — bezplatnému tarifu nesmí projít ani ta. */
+    public function testFreeTierWithUnlimitedSeatsInTokenIsStillCapped(): void
+    {
+        $this->setRow('MYU-TEST-0001-AAAA', $this->token(['commercial' => false, 'users' => 0]));
+
+        self::assertSame(LicenseState::FREE_SEATS, $this->service->current()->usersLicensed);
+    }
+
+    /** Placený tarif si počet míst z tokenu nese beze změny. */
+    public function testPaidTierKeepsItsLicensedSeats(): void
+    {
+        $this->setRow('MYU-TEST-0001-AAAA', $this->token(['commercial' => true, 'users' => 5]));
+
+        self::assertSame(5, $this->service->current()->usersLicensed);
+    }
+
     public function testOverageStatusIsOverage(): void
     {
         $this->setRow('MYU-TEST-0001-AAAA', $this->token(['status' => 'overage']));
