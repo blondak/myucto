@@ -207,15 +207,37 @@ describe('resolveBillingNarrative', () => {
   })
 
   it('milníky jdou chronologicky a chybějící se vynechají', () => {
+    // Termíny musí být v budoucnosti — minulé se schválně nezobrazují.
+    const soon = Math.floor(Date.now() / 1000)
     const n = resolveBillingNarrative(billing({
       unpaid: true, phase: 'past_due',
-      next_attempt_at: 300, suspend_at: 100, access_until: null, data_until: 200,
+      next_attempt_at: soon + 300, suspend_at: soon + 100, access_until: null, data_until: soon + 200,
     }))!
     expect(n.milestones).toEqual([
-      { kind: 'suspend', at: 100 },
-      { kind: 'data_end', at: 200 },
-      { kind: 'next_attempt', at: 300 },
+      { kind: 'suspend', at: soon + 100 },
+      { kind: 'data_end', at: soon + 200 },
+      { kind: 'next_attempt', at: soon + 300 },
     ])
+  })
+
+  /**
+   * ⚠️ PROČ BY TO BEZ OPRAVY PADALO: stav předplatného se v instalaci obnovuje
+   * nejvýš jednou denně. Když vypadne cron plateb nebo se vymáhání zastaví,
+   * implementace, která filtruje jen `> 0`, hlásí ještě týdny „kartu zkusíme
+   * znovu 5. 9." o datu, které dávno minulo. Radši neřekneme nic než nepravdu.
+   */
+  it('termíny v minulosti se neukazují jako nadcházející', () => {
+    const now = Math.floor(Date.now() / 1000)
+    const n = resolveBillingNarrative(billing({
+      unpaid: true, phase: 'past_due', subscription_state: 'past_due',
+      next_attempt_at: now - 86400, suspend_at: now - 3600, access_until: null, data_until: now + 86400,
+    }))!
+    expect(n.milestones).toEqual([{ kind: 'data_end', at: now + 86400 }])
+    // Ve fázi past_due je nejbližší událostí další pokus o stržení. Když je
+    // jeho termín prošlý, aplikace radši neřekne datum žádné — vzít místo něj
+    // konec retence by znamenalo hlásit úplně jinou událost.
+    expect(n.nextAt).toBeNull()
+    expect(n.nextKey).toBe('hosting.phase.next_nodate')
   })
 
   it('zavřené placené funkce hlásí i bez známé fáze', () => {

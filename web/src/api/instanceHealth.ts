@@ -170,14 +170,27 @@ function normalizePhase(phase: string | null | undefined): BillingPhase | null {
   return KNOWN_PHASES.includes(phase as BillingPhase) ? (phase as BillingPhase) : null
 }
 
-/** První termín, který server opravdu poslal. `null` = mlčíme o termínu. */
+/**
+ * Je ten termín ještě před námi?
+ *
+ * ⚠️ Termín v minulosti se NESMÍ ukazovat jako nadcházející. Stav
+ * předplatného se v instalaci obnovuje nejvýš jednou denně, takže když
+ * vypadne cron plateb nebo se vymáhání zastaví, jinak by aplikace ještě
+ * týdny hlásila „kartu zkusíme znovu 5. 9." o datu, které dávno minulo.
+ * Radši neřekneme nic než nepravdu.
+ */
+function isUpcoming(at: number | null | undefined): at is number {
+  return typeof at === 'number' && at > 0 && at * 1000 > Date.now()
+}
+
+/** První termín, který server opravdu poslal a který ještě nenastal. */
 function firstKnown(
   billing: ManagedBillingInfo,
   order: Array<keyof Pick<ManagedBillingInfo, 'next_attempt_at' | 'suspend_at' | 'access_until' | 'data_until'>>,
 ): { field: string; at: number } | null {
   for (const field of order) {
     const at = billing[field]
-    if (typeof at === 'number' && at > 0) return { field, at }
+    if (isUpcoming(at)) return { field, at }
   }
   return null
 }
@@ -198,7 +211,7 @@ function milestones(billing: ManagedBillingInfo): BillingMilestone[] {
   ]
 
   return raw
-    .filter((entry): entry is [BillingMilestone['kind'], number] => typeof entry[1] === 'number' && entry[1] > 0)
+    .filter((entry): entry is [BillingMilestone['kind'], number] => isUpcoming(entry[1]))
     .map(([kind, at]) => ({ kind, at }))
     .sort((a, b) => a.at - b.at)
 }
