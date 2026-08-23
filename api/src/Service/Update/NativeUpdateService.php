@@ -24,8 +24,9 @@ use Throwable;
  *
  * Pipeline (`run()`), spouštěná detached CLI workerem `api/bin/native-update.php`:
  *   1. preflight  — prostředí, práva, místo na disku, PHP CLI, phar
- *   2. download   — release asset podle tagu (host allowlist, HTTPS only)
- *   3. verify     — SHA-256 proti `.sha256` assetu
+ *   2. download   — release asset podle tagu, nebo balíček předaný volajícím
+ *                   ({@see self::useBundleOverride()}); vždy host allowlist, HTTPS only
+ *   3. verify     — SHA-256 proti `.sha256` assetu / předanému otisku
  *   4. extract    — do staging dir, s validací všech cest v archivu
  *   5. backup     — kopie souborů, které swap přepíše (pro rollback)
  *   6. swap       — nakopírování bundlu přes instalaci (bez mazání)
@@ -93,6 +94,13 @@ final class NativeUpdateService
 
     /** Odložené `.myucto-old` soubory, které zatím nešlo smazat (zamčené). */
     private array $parked = [];
+
+    /**
+     * Balíček předaný zvenčí (provozovatelem) místo dohledávání přes GitHub API.
+     * Buď obojí, nebo nic — {@see self::useBundleOverride()}.
+     */
+    private ?string $bundleUrl = null;
+    private ?string $bundleSha256 = null;
 
     public function __construct(?string $rootDir = null, ?string $stateDir = null)
     {
@@ -169,11 +177,61 @@ final class NativeUpdateService
     // ---------- pipeline --------------------------------------------------
 
     /**
+     * Přímý zdroj balíčku místo dohledávání assetu přes GitHub API.
+     *
+     * PROČ TO EXISTUJE: při zřizování posíláme hostingu kontraktní trojici
+     * vydání — `app_version` + `bundle_url` + `bundle_sha256`. Nasazení na už
+     * běžící instanci musí použít TENTÝŽ balíček, ne „nejnovější, co zrovna
+     * leží na GitHubu": mezi zřízením a nasazením může na releasu přibýt jiný
+     * asset, tag se dá přepsat a instance ve flotile by pak nesly různý kód
+     * pod stejným číslem verze. S předanou trojicí je nasazení reprodukovatelné
+     * a otisk je ten, na kterém jsme se dohodli.
+     *
+     * Pravidla:
+     *  - buď OBA parametry, nebo ŽÁDNÝ — neúplná dvojice je chyba, ne částečné
+     *    použití (jinak by šlo stáhnout cizí balíček a nechat si otisk dopočítat
+     *    z něj samotného),
+     *  - `$sha256` musí být 64 hex znaků,
+     *  - `$url` prochází stejným allowlistem hostů jako všechno ostatní
+     *    ({@see self::assertAllowedUrl()}) — allowlist se kvůli operátorovi
+     *    nerozšiřuje,
+     *  - ověření otisku zůstává povinné; při neshodě se balíček maže
+     *    ({@see self::verifyChecksum()}).
+     */
+    public function useBundleOverride(?string $url, ?string $sha256): void
+    {
+        $url    = $url === null ? null : trim($url);
+        $sha256 = $sha256 === null ? null : trim($sha256);
+
+        if (($url === null || $url === '') && ($sha256 === null || $sha256 === '')) {
+            $this->bundleUrl    = null;
+            $this->bundleSha256 = null;
+
+            return;
+        }
+        if ($url === null || $url === '' || $sha256 === null || $sha256 === '') {
+            throw new RuntimeException('Zdroj balíčku se předává vždy jako dvojice bundle_url + bundle_sha256; '
+                . 'jedna hodnota bez druhé se nepoužije.');
+        }
+        if (preg_match('/^[0-9a-f]{64}$/i', $sha256) !== 1) {
+            throw new RuntimeException('bundle_sha256 musí být 64 hexadecimálních znaků, dostal jsem: ' . $sha256);
+        }
+        $this->assertAllowedUrl($url);
+
+        $this->bundleUrl    = $url;
+        $this->bundleSha256 = strtolower($sha256);
+    }
+
+    /**
      * Kompletní update. Volá se z CLI workeru, ne z HTTP requestu.
+     *
+     * `$bundleUrl` + `$bundleSha256` jsou volitelné a platí pro ně pravidla
+     * z {@see self::useBundleOverride()}; bez nich se balíček dohledá v releasu
+     * podle tagu jako dosud.
      *
      * @return array<string,mixed> result payload (zapsaný i do upgrade-result.json)
      */
-    public function run(string $target, string $requestedBy): array
+    public function run(string $target, string $requestedBy, ?string $bundleUrl = null, ?string $bundleSha256 = null): array
     {
         $log = $this->logPath();
 
@@ -188,6 +246,15 @@ final class NativeUpdateService
         $work = $this->stateDir . '/storage/updates/' . $target;
 
         try {
+            // Argumenty přebíjejí dřív nastavený zdroj; když nepřijdou žádné,
+            // platí to, co volající nastavil přes useBundleOverride().
+            if ($bundleUrl !== null || $bundleSha256 !== null) {
+                $this->useBundleOverride($bundleUrl, $bundleSha256);
+            }
+            if ($this->bundleUrl !== null) {
+                $this->appendLog($log, 'Zdroj balíčku předán volajícím: ' . $this->bundleUrl);
+            }
+
             $this->progress($target, 'preflight', 'Kontroluji prostředí…');
             $pf = $this->preflight($target);
             foreach ($pf['warnings'] as $w) {
@@ -253,10 +320,29 @@ final class NativeUpdateService
      * Najde v releasu podle tagu asset `myucto-X.Y.Z.tar.gz` + jeho `.sha256`,
      * stáhne oba.
      *
+     * Když volající předal konkrétní balíček ({@see self::useBundleOverride()}),
+     * GitHub API se vůbec neptáme a stáhneme přesně to, co dostal hosting při
+     * zřizování. Otisk se pak neodvozuje ze staženého souboru, ale je ten
+     * předaný — jinak by kontrola nic neověřovala.
+     *
      * @return array{0:string, 1:string} cesta k bundlu, očekávaný sha256
      */
     private function downloadBundle(string $target, string $work, string $log): array
     {
+        if ($this->bundleUrl !== null && $this->bundleSha256 !== null) {
+            $bundlePath = $work . '/myucto-' . $target . '.tar.gz';
+            $this->appendLog($log, 'Stahuji ' . $this->bundleUrl . ' (zdroj předán volajícím)');
+            $this->downloadToFile($this->bundleUrl, $bundlePath, $target);
+            $actualSize = (int) @filesize($bundlePath);
+            $this->appendLog($log, 'Staženo ' . $this->humanBytes($actualSize));
+            if ($actualSize > self::MAX_BUNDLE_BYTES) {
+                throw new RuntimeException('Bundle je ' . $this->humanBytes($actualSize) . ', limit je '
+                    . $this->humanBytes(self::MAX_BUNDLE_BYTES) . '.');
+            }
+
+            return [$bundlePath, $this->bundleSha256];
+        }
+
         $release = $this->httpGetJson(self::RELEASE_BY_TAG_API . $target);
         $assets  = is_array($release['assets'] ?? null) ? $release['assets'] : [];
 

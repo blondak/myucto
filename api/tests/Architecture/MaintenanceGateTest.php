@@ -89,6 +89,114 @@ final class MaintenanceGateTest extends TestCase
         );
     }
 
+    /**
+     * Zdravotní rozhraní musí přežít okno aktualizace (příloha B.7) — jinak
+     * orchestrátor provozovatele nepozná „nasazuje se" od „instance je mrtvá".
+     *
+     * Testuje se opravdovým procesem nad `index.php`: brána je záměrně inline
+     * closure nad autoloadem, takže jediný poctivý způsob, jak ji ověřit, je
+     * nechat ji doopravdy odpovědět. Runner jen naplní `$_SERVER` a po `exit`
+     * vypíše ze shutdown handleru HTTP kód.
+     */
+    public function testGateKeepsHealthEndpointAvailable(): void
+    {
+        [$code, $body] = $this->requestThroughGate('/api/health');
+
+        self::assertSame(200, $code, 'health musí v údržbě odpovídat 200: ' . $body);
+
+        $payload = json_decode($body, true);
+        self::assertIsArray($payload, 'health musí vrátit JSON: ' . $body);
+        self::assertSame('ok', $payload['status'] ?? null);
+        self::assertTrue($payload['maintenance'] ?? null, 'údržba se musí přiznat příznakem, ne HTTP kódem');
+        self::assertSame('9.9.9', $payload['update']['target'] ?? null);
+        self::assertNotNull($payload['update']['started_at'] ?? null);
+
+        // Neznámé hodnoty jsou explicitní null, ne chybějící klíč — klient se
+        // nesmí muset ptát, jestli hodnotu neznáme, nebo jsme ji zapomněli.
+        foreach (['db', 'version'] as $key) {
+            self::assertArrayHasKey($key, $payload, $key . ' musí být přítomný i jako null');
+            self::assertNull($payload[$key]);
+        }
+    }
+
+    public function testGateStillReturns503ForEverythingElse(): void
+    {
+        foreach (['/api/invoices', '/', '/api/healthz', '/api/health/detail'] as $path) {
+            [$code, $body] = $this->requestThroughGate($path);
+            self::assertSame(503, $code, $path . ' musí v údržbě dostat 503: ' . $body);
+            self::assertStringContainsString('maintenance', $body, $path);
+        }
+    }
+
+    /** Query string nesmí health z výjimky vyřadit. */
+    public function testGateMatchesHealthPathWithQueryString(): void
+    {
+        [$code, $body] = $this->requestThroughGate('/api/health?probe=1');
+
+        self::assertSame(200, $code, 'query string nesmí rozhodovat: ' . $body);
+        self::assertSame('ok', (json_decode($body, true)['status'] ?? null));
+    }
+
+    /**
+     * Pustí `api/public/index.php` samostatným procesem se značkou údržby
+     * v dočasném DATA_DIRu.
+     *
+     * @return array{0:int, 1:string} HTTP kód, tělo odpovědi
+     */
+    private function requestThroughGate(string $requestUri): array
+    {
+        $dir = sys_get_temp_dir() . '/myucto-gate-' . bin2hex(random_bytes(6));
+        mkdir($dir . '/storage', 0775, true);
+        file_put_contents($dir . '/storage/' . MaintenanceMode::FILE, (string) json_encode([
+            'reason'     => 'update',
+            'product'    => 'MyÚčto.cz',
+            'target'     => '9.9.9',
+            'started_at' => date(\DateTimeInterface::ATOM),
+            'expires_at' => date(\DateTimeInterface::ATOM, time() + 600),
+        ]));
+
+        $index  = dirname(__DIR__, 2) . '/public/index.php';
+        $runner = $dir . '/runner.php';
+        file_put_contents($runner, '<?php' . "\n" . <<<PHP
+            \$_SERVER['REQUEST_URI']    = {$this->export($requestUri)};
+            \$_SERVER['REQUEST_METHOD'] = 'GET';
+            \$_SERVER['HTTP_ACCEPT']    = 'application/json';
+            register_shutdown_function(static function (): void {
+                fwrite(STDOUT, "\\n__STATUS__" . http_response_code());
+            });
+            require {$this->export($index)};
+            PHP);
+
+        // MYINVOICE_DATA_DIR přesměruje bránu na dočasnou značku — potomek si
+        // proměnnou zdědí, takže se repozitáře test vůbec nedotkne.
+        $previous = getenv('MYINVOICE_DATA_DIR');
+        putenv('MYINVOICE_DATA_DIR=' . $dir);
+
+        $out = [];
+        $rc  = 0;
+        exec(escapeshellarg(PHP_BINARY) . ' -d display_errors=1 ' . escapeshellarg($runner) . ' 2>&1', $out, $rc);
+        $raw = implode("\n", $out);
+
+        putenv(is_string($previous) ? 'MYINVOICE_DATA_DIR=' . $previous : 'MYINVOICE_DATA_DIR');
+
+        foreach (glob($dir . '/storage/*') ?: [] as $f) {
+            @unlink((string) $f);
+        }
+        @unlink($runner);
+        @rmdir($dir . '/storage');
+        @rmdir($dir);
+
+        $pos = strrpos($raw, '__STATUS__');
+        self::assertIsInt($pos, 'runner nedoběhl: ' . $raw);
+
+        return [(int) substr($raw, $pos + strlen('__STATUS__')), rtrim(substr($raw, 0, $pos))];
+    }
+
+    private function export(string $value): string
+    {
+        return var_export($value, true);
+    }
+
     public function testWriterOpensBeforeSwapAndClosesInFinally(): void
     {
         $src = self::updateService();

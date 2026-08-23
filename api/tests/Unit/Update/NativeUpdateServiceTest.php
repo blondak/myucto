@@ -338,6 +338,97 @@ final class NativeUpdateServiceTest extends TestCase
         }
     }
 
+    // ---------- předaný zdroj balíčku -------------------------------------
+
+    /**
+     * Kontraktní trojice vydání (`app_version` + `bundle_url` + `bundle_sha256`)
+     * se předává vcelku. Půlka dvojice by znamenala buď stažení balíčku bez
+     * ověření, nebo ověření něčeho, co jsme nestáhli — obojí je horší než chyba.
+     */
+    public function testBundleOverrideRejectsIncompletePair(): void
+    {
+        $svc = new NativeUpdateService($this->tmp . '/root', $this->tmp);
+        $url = 'https://github.com/radekhulan/myucto/releases/download/v5.25.1/myucto-5.25.1.tar.gz';
+
+        foreach ([[$url, null], [$url, ''], [null, str_repeat('a', 64)], ['', str_repeat('a', 64)]] as [$u, $s]) {
+            try {
+                $svc->useBundleOverride($u, $s);
+                self::fail('neúplná dvojice musí spadnout: ' . var_export([$u, $s], true));
+            } catch (RuntimeException $e) {
+                self::assertMatchesRegularExpression('/dvojice/u', $e->getMessage());
+            }
+        }
+    }
+
+    public function testBundleOverrideRejectsMalformedChecksum(): void
+    {
+        $svc = new NativeUpdateService($this->tmp . '/root', $this->tmp);
+        $url = 'https://github.com/radekhulan/myucto/releases/download/v5.25.1/myucto-5.25.1.tar.gz';
+
+        foreach ([str_repeat('a', 63), str_repeat('a', 65), str_repeat('z', 64), 'not-a-hash'] as $sha) {
+            try {
+                $svc->useBundleOverride($url, $sha);
+                self::fail('neplatný otisk musí spadnout: ' . $sha);
+            } catch (RuntimeException $e) {
+                self::assertMatchesRegularExpression('/64 hexadecimálních/u', $e->getMessage());
+            }
+        }
+    }
+
+    /** Allowlist hostů platí i pro balíček předaný provozovatelem. */
+    public function testBundleOverrideRejectsUrlOutsideAllowlist(): void
+    {
+        $svc = new NativeUpdateService($this->tmp . '/root', $this->tmp);
+        $sha = str_repeat('a', 64);
+
+        foreach ([
+            'https://evil.example.com/myucto-5.25.1.tar.gz' => '/Nepovolený host/u',
+            'http://github.com/x.tar.gz'                    => '/Povolené je jen HTTPS/u',
+            'file:///tmp/x.tar.gz'                          => '/Povolené je jen HTTPS/u',
+        ] as $url => $pattern) {
+            try {
+                $svc->useBundleOverride($url, $sha);
+                self::fail('mělo být odmítnuto: ' . $url);
+            } catch (RuntimeException $e) {
+                self::assertMatchesRegularExpression($pattern, $e->getMessage(), $url);
+            }
+        }
+    }
+
+    public function testBundleOverrideAcceptsCompleteTripleAndNormalisesChecksum(): void
+    {
+        $svc = new NativeUpdateService($this->tmp . '/root', $this->tmp);
+        $url = 'https://github.com/radekhulan/myucto/releases/download/v5.25.1/myucto-5.25.1.tar.gz';
+        $sha = strtoupper(str_repeat('ab', 32));
+
+        $svc->useBundleOverride($url, $sha);
+
+        self::assertSame($url, $this->readProperty($svc, 'bundleUrl'));
+        self::assertSame(strtolower($sha), $this->readProperty($svc, 'bundleSha256'), 'otisk se porovnává v lowercase');
+
+        // Prázdná dvojice zdroj zase zruší — chování bez override zůstává výchozí.
+        $svc->useBundleOverride(null, null);
+        self::assertNull($this->readProperty($svc, 'bundleUrl'));
+        self::assertNull($this->readProperty($svc, 'bundleSha256'));
+    }
+
+    /** Předaný otisk se používá tak, jak přišel — nedopočítává se ze staženého souboru. */
+    public function testOverriddenChecksumStillGatesTheBundle(): void
+    {
+        $bundle = $this->tmp . '/bundle.tar.gz';
+        $this->write($bundle, 'obsah');
+
+        $svc = new NativeUpdateService($this->tmp . '/root', $this->tmp);
+        $svc->useBundleOverride(
+            'https://github.com/radekhulan/myucto/releases/download/v5.25.1/myucto-5.25.1.tar.gz',
+            str_repeat('ab', 32),
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/Kontrolní součet nesouhlasí/u');
+        $this->invoke($svc, 'verifyChecksum', [$bundle, (string) $this->readProperty($svc, 'bundleSha256'), $this->tmp . '/test.log']);
+    }
+
     // ---------- preflight -------------------------------------------------
 
     public function testPreflightBlocksInvalidTargetVersion(): void
@@ -474,6 +565,13 @@ final class NativeUpdateServiceTest extends TestCase
         $ref = new ReflectionMethod($svc, $method);
 
         return $ref->invokeArgs($svc, $args);
+    }
+
+    private function readProperty(NativeUpdateService $svc, string $name): mixed
+    {
+        $ref = new \ReflectionProperty($svc, $name);
+
+        return $ref->getValue($svc);
     }
 
     /** Cesta jako PHP literál do generovaného skriptu. */

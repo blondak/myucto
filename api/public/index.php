@@ -39,11 +39,40 @@ declare(strict_types=1);
     $message = 'Probíhá aktualizace na ' . $product . ($target !== '' ? ' ' . $target : '')
         . '. Zkus to prosím za chvíli — nasazení souborů a migrace databáze trvají jednotky minut.';
 
+    $uri  = (string) ($_SERVER['REQUEST_URI'] ?? '');
+    $qs   = strpos($uri, '?');
+    $path = $qs === false ? $uri : substr($uri, 0, $qs);
+
+    // Zdravotní rozhraní musí přežít i okno aktualizace (příloha B.7): jinak
+    // orchestrátor na straně provozovatele nepozná rozdíl mezi „nasazuje se"
+    // a „instance je mrtvá" a nemá jak zjistit, jestli nasazení doběhlo.
+    // Odpověď se skládá RUČNĚ, bez autoloaderu a bez DB — v tomhle okně je
+    // mapa tříd nekonzistentní a schéma rozpracované, takže plný health
+    // (HealthAction) není k dispozici.
+    // Klíče jsou proto podmnožinou plného healthu a co neumíme zjistit, je
+    // explicitní `null` — nikdy chybějící klíč, aby se klient nemusel ptát,
+    // jestli hodnotu nezná, nebo mu ji jen tahle větev zapomněla poslat.
+    if ($path === '/api/health') {
+        http_response_code(200);
+        header('Cache-Control: no-store');
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'status'      => 'ok',
+            'maintenance' => true,
+            'update'      => [
+                'target'     => $target !== '' ? $target : null,
+                'started_at' => ($flag['started_at'] ?? null) !== null ? (string) $flag['started_at'] : null,
+            ],
+            'db'      => null,
+            'version' => null,
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     http_response_code(503);
     header('Retry-After: 20');
     header('Cache-Control: no-store');
 
-    $path   = (string) ($_SERVER['REQUEST_URI'] ?? '');
     $accept = (string) ($_SERVER['HTTP_ACCEPT'] ?? '');
     if (str_starts_with($path, '/api/') || stripos($accept, 'application/json') !== false) {
         header('Content-Type: application/json; charset=utf-8');
