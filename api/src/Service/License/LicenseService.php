@@ -524,7 +524,16 @@ final class LicenseService
         $base = rtrim((string) $this->config->get('license.server_url', 'https://myucto.cz'), '/') . '/objednavka';
         $params = ['src' => 'app'];
 
-        $instanceId = (string) ($this->loadRow()['instance_id'] ?? '');
+        // ⚠️ Odkaz na objednávku se NESMÍ rozbít o databázi. `instance` je
+        // pohodlí (web si předvyplní instalaci), ne podmínka — a tenhle odkaz
+        // se staví i v odpovědích, které jinak žádný dotaz do licenční tabulky
+        // nepotřebují. Bez ošetření by výpadek nebo nedostupná konfigurace DB
+        // shodily celou stránku licence kvůli parametru navíc.
+        try {
+            $instanceId = (string) ($this->loadRow()['instance_id'] ?? '');
+        } catch (\Throwable) {
+            $instanceId = '';
+        }
         if ($instanceId !== '') {
             $params['instance'] = $instanceId;
         }

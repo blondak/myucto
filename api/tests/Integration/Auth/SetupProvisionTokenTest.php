@@ -137,6 +137,47 @@ final class SetupProvisionTokenTest extends TestCase
         self::assertSame('validation_failed', $this->errorCode($response));
     }
 
+    /**
+     * ⚠️ `instance_id` přiděluje provozovatel spravovaného provozu a licenční
+     * server proti němu ověřuje, že instalace je opravdu ta, kterou zřídil.
+     * Cokoliv mimo očekávaný tvar je buď překlep v provisioningu, nebo pokus
+     * podstrčit cizí identitu — a projít nesmí ani jedno.
+     */
+    public function testMalformedAssignedInstanceIdIsRefused(): void
+    {
+        $before = $this->userCount();
+
+        $response = $this->invokeSetup(
+            $this->guard(managed: true, configured: self::TOKEN),
+            ['instance_id' => "inst-A\nX: 1"],
+            ProvisionTokenGuard::HEADER,
+            self::TOKEN,
+        );
+
+        self::assertSame(400, $response->getStatusCode());
+        self::assertSame('validation_failed', $this->errorCode($response));
+        self::assertStringContainsString('instance_id', (string) $response->getBody());
+        self::assertSame($before, $this->userCount(), 'Odmítnutý setup nesmí založit uživatele.');
+    }
+
+    /**
+     * Self-hosted setup `instance_id` neposílá a posílat nemusí — instalace
+     * u externího hostingu je pořád nespravovaná a vlastní identifikátor si
+     * generuje sama.
+     */
+    public function testAssignedInstanceIdIsOptional(): void
+    {
+        $response = $this->invokeSetup(
+            $this->guard(managed: false, configured: ''),
+            ['supplier' => ['company_name' => 'Bez identifikátoru s.r.o.']],
+            null,
+            null,
+        );
+
+        self::assertSame(400, $response->getStatusCode(), 'Padá to na chybějícím adminovi, ne na instance_id.');
+        self::assertStringNotContainsString('instance_id', (string) $response->getBody());
+    }
+
     public function testSelfHostedSetupNeedsNoToken(): void
     {
         $response = $this->invokeSetup($this->guard(managed: false, configured: ''), [], null, null);

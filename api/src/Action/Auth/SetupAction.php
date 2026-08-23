@@ -111,6 +111,20 @@ final class SetupAction
         $passwordMode = SetupPasswordMode::fromAdminBlock($admin);
         $termsOrigin = TermsOrigin::normalize($body[TermsOrigin::REQUEST_FIELD] ?? null);
         $supplier = isset($body['supplier']) && is_array($body['supplier']) ? $body['supplier'] : null;
+        // ⚠️ Identifikátor instalace PŘIDĚLENÝ provozovatelem (spravovaný provoz).
+        //
+        // Aplikace si jinak generuje vlastní UUID a licenční server u spravované
+        // instalace ověřuje, že `instance_id` odpovídá řádku v jeho evidenci
+        // instancí — což lokálně vymyšlené UUID nikdy nesplní. Bez tohohle pole
+        // by spravovaná instalace licenci nikdy neaktivovala a nedokoupila by
+        // si ani místo. Volitelné: self-hosted setup ho neposílá a nic se
+        // nemění.
+        $assignedInstanceId = isset($body['instance_id']) && is_string($body['instance_id'])
+            ? trim($body['instance_id'])
+            : '';
+        if ($assignedInstanceId !== '' && !preg_match('/^[A-Za-z0-9._:-]{1,64}$/', $assignedInstanceId)) {
+            return Json::error($response, 'validation_failed', 'instance_id má nepovolený tvar.', 400);
+        }
         $requireTotp = !empty($body['require_totp']);
         // Přijetí licence a obchodních podmínek je podmínkou dokončení setupu;
         // wizard bez zaškrtnutí dál nepustí, tady se to ověřuje znovu server-side.
@@ -225,6 +239,15 @@ final class SetupAction
                 $passwordSetup = $this->passwordSetupLinks->issue($pdo, $userId, $ip);
             }
 
+            // Přidělený identifikátor instalace. Řádek `license` zakládá migrace
+            // se svým UUID, takže se přepisuje — a jen ve stejné transakci jako
+            // admin, ať instance nikdy neběží s identitou, kterou licenční
+            // server nezná.
+            if ($assignedInstanceId !== '') {
+                $pdo->prepare('UPDATE license SET instance_id = ? WHERE id = 1')
+                    ->execute([$assignedInstanceId]);
+            }
+
             // Volitelně dodavatel
             $createdSupplierId = null;
             if ($supplier !== null) {
@@ -243,6 +266,7 @@ final class SetupAction
                 // Souhlas mohl přijít z objednávky — ať je dohledatelné, že ho
                 // neodklikl uživatel, který u toho nebyl.
                 'terms_origin' => $termsOrigin,
+                'assigned_instance_id' => $assignedInstanceId !== '' ? $assignedInstanceId : null,
             ], static fn (mixed $v): bool => $v !== null), $ip, $request->getHeaderLine('User-Agent'));
 
             $pdo->commit();
