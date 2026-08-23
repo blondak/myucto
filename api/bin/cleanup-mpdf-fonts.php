@@ -12,7 +12,19 @@ declare(strict_types=1);
  * nebo PDF s monospace položkami), doplň ho do $keep.
  */
 
-$ttfontsDir = __DIR__ . '/../vendor/mpdf/mpdf/ttfonts';
+// ⚠️ Adresář vendoru NENÍ vždy `api/vendor`. Balíček vydání
+// (`cmd/release-bundle.sh`) instaluje produkční závislosti stranou přes
+// `COMPOSER_VENDOR_DIR`, aby nepoškodil vývojový vendor — a composer pak
+// spustí tenhle skript jako post-install hook. S natvrdo zadanou cestou
+// uklidil vývojový vendor (kde už bylo uklizeno) a do balíčku vydání se
+// dostalo všech 83 fontů, tedy skoro 90 MB navíc. Pořadí je záměrné:
+// argument (ruční spuštění) → COMPOSER_VENDOR_DIR (hook) → výchozí.
+$vendorDir = $argv[1] ?? getenv('COMPOSER_VENDOR_DIR');
+$vendorDir = is_string($vendorDir) && trim($vendorDir) !== ''
+    ? rtrim(trim($vendorDir), "/\\")
+    : __DIR__ . '/../vendor';
+
+$ttfontsDir = $vendorDir . '/mpdf/mpdf/ttfonts';
 if (!is_dir($ttfontsDir)) {
     fwrite(STDERR, "ttfonts adresář nenalezen: {$ttfontsDir}\n");
     exit(0); // no-op (mpdf nenainstalován)
