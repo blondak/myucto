@@ -335,8 +335,8 @@ onBeforeUnmount(() => {
     @dragover.capture="onDragOver"
     @dragleave="onDragLeave"
     @drop.capture="onDrop"
-    @keydown.enter="navigation.activatePane(paneId)"
-    @keydown.space.prevent="navigation.activatePane(paneId)"
+    @keydown.enter.self="navigation.activatePane(paneId)"
+    @keydown.space.self.prevent="navigation.activatePane(paneId)"
   >
     <header
       v-if="showHeader"
