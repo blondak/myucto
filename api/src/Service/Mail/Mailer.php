@@ -326,6 +326,7 @@ final class Mailer
             ->subject((string) $vars['subject'])
             ->html($html)
             ->text($text);
+        $this->stampInstanceHeader($email);
 
         // Per-supplier branding logo jako CID inline image — je-li `email_branding_enabled`
         // a logo soubor existuje. Twig používá `cid:supplier_logo` jako image src.
@@ -683,6 +684,35 @@ final class Mailer
      * správci instance na stav limitu. Odstup mezi upozorněními hlídá
      * {@see MailRateLimitEventLog}, takže tohle nemůže samo zahltit kvótu.
      */
+    /**
+     * Hlavička `X-MyUcto-Instance` — identifikace instance pro complaint smyčky (FBL).
+     *
+     * Proč: všechny spravované instance podepisuje jedna DKIM doména (`myucto.online`),
+     * takže bez rozlišení vidí Seznam i Google stížnosti jako „od myucto.online" a
+     * postihuje reputaci CELÉ flotily. S touhle hlavičkou umí antispam sáhnout jen na tu
+     * instanci, které se stížnosti týkají. Hodnota je proto přesně hostname instance a nic
+     * navíc — na straně FBL z ní regulárním výrazem vzniká id klienta (limit 128 znaků).
+     *
+     * ⚠️ JEN VE SPRAVOVANÉM PROVOZU. Self-hosted instalace posílá pod vlastní doménou a
+     * vlastním DKIM klíčem; naše complaint smyčka se jí netýká, takže by hlavička neměla
+     * jediného konzumenta a jen by cizí poště přidávala náš otisk. Bez nastaveného
+     * `app.url` se nepřidá vůbec — vymyšlená hodnota je horší než žádná.
+     */
+    private function stampInstanceHeader(Email $email): void
+    {
+        if (!$this->config->get('app.managed', false)) {
+            return;
+        }
+        $host = strtolower((string) (parse_url((string) $this->config->get('app.url', ''), PHP_URL_HOST) ?: ''));
+        // Do hlavičky patří jen to, co projde beze změny přes SMTP i přes regulární výraz
+        // na druhé straně — hostname tuhle podmínku splňuje, cokoli jiného je chyba
+        // konfigurace a mlčky ji „opravit" ořezem by dalo nesmyslné id.
+        if ($host === '' || preg_match('/^[a-z0-9.-]{1,128}$/', $host) !== 1) {
+            return;
+        }
+        $email->getHeaders()->addTextHeader('X-MyUcto-Instance', $host);
+    }
+
     private function sendPlainAlert(string $to, string $subject, string $body): bool
     {
         try {
@@ -696,6 +726,7 @@ final class Mailer
                 ->to($to)
                 ->subject($subject)
                 ->text($body);
+            $this->stampInstanceHeader($email);
 
             $transport = $this->transport(null);
             try {
