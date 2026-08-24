@@ -73,4 +73,4 @@ if (!CronScheduleMode::isValid($mode)) {
     $mode = CronScheduleMode::INDIVIDUAL;
 }
 
-echo DockerCrontabGenerator::generate($gate, $mode);
+echo DockerCrontabGenerator::generate($gate, $mode, $pdo ?? null);

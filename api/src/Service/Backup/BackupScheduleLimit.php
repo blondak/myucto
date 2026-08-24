@@ -12,8 +12,8 @@ use Throwable;
  * H-25 — jak často smí běžet `cron-backup`.
  *
  * ZMĚNA: denní dump (`0 2 * * *`) sráží ztrátu dat až na 24 hodin. Rozvrh
- * `0 * / 6 * * *` (4× denně) ji srazí na 6 hodin, což je u účetnictví rozdíl
- * mezi „dopiš si dnešek" a „dopiš si týden".
+ * 4× denně ji srazí na 6 hodin, což je u účetnictví rozdíl mezi „dopiš si
+ * dnešek" a „dopiš si týden".
  *
  * ⚠️ STROP JE SMLUVNÍ, NE TECHNICKÝ. 4× denně je nově maximum, do kterého
  * hosting následuje frekvenci svých vlastních záloh zdarma. Nad něj už ne —
@@ -40,8 +40,18 @@ final class BackupScheduleLimit
     /** Smluvní strop pro `cron-backup`. Zvýšení = dodatek ke smlouvě, ne změna konstanty. */
     public const MAX_RUNS_PER_DAY = 4;
 
-    /** Rozvrh, na který H-25 přechází: 00:00, 06:00, 12:00, 18:00. */
-    public const RECOMMENDED_EXPRESSION = '0 */6 * * *';
+    /**
+     * Rozvrh, na který H-25 přechází: 02:00, 08:00, 14:00, 20:00.
+     *
+     * ⚠️ NE `0 * /6 * * *` — ten sedne na 00/06/12/18, ne na dohodnuté časy. Dřív tu
+     * stál právě on a dokumentace u něj tvrdila „tedy 02:00, 08:00, 14:00, 20:00",
+     * což nesedělo; hosting to našel na běžící instanci. Výčet hodin je proto
+     * explicitní — je delší, ale nedá se přečíst omylem.
+     *
+     * Ranní 02:00 drží noční okno (nejmenší provoz), zbylé tři jsou po šesti
+     * hodinách, takže RPO logického dumpu je 6 h.
+     */
+    public const RECOMMENDED_EXPRESSION = '0 2,8,14,20 * * *';
 
     /** Úlohy, na které se smluvní strop vztahuje. */
     public const CONTRACTED_SCRIPTS = ['cron-backup'];

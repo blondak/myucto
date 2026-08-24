@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Cron;
 
+use MyInvoice\Service\Backup\BackupSchedule;
+use MyInvoice\Service\Backup\BackupScheduleLimit;
+use PDO;
+
 /**
  * Katalog plánovaných úloh — jeden zdroj pravdy pro:
  *   - api/bin/cron-*.php (jméno běhu)
@@ -62,10 +66,16 @@ final class CronCatalog
             ],
             [
                 'script' => 'cron-backup',
-                'recommended' => 'daily_0200',
-                'linux_cron' => '0 2 * * *',
-                'windows_schtasks' => '/sc daily /st 02:00',
-                'max_age_hours' => 36,
+                // 4× denně (02/08/14/20) — RPO logického dumpu 6 h místo 24 h.
+                // Tohle je DEFAULT; skutečný rozvrh instalace je v tabulce
+                // `backup_schedule_contract` a přebíjí se přes
+                // {@see self::withContractedSchedules()}.
+                'recommended' => 'four_times_daily',
+                'linux_cron' => BackupScheduleLimit::RECOMMENDED_EXPRESSION,
+                'windows_schtasks' => '/sc daily /st 02:00 /ri 360 /du 24:00',
+                // Nejdelší mezera mezi běhy je 6 h; 12 h dává rezervu na jeden
+                // vynechaný běh (restart, údržba), aniž by se problém schoval.
+                'max_age_hours' => 12,
                 'weekdays_only' => false,
                 'critical' => true,
             ],
@@ -370,6 +380,38 @@ final class CronCatalog
     public static function scripts(): array
     {
         return array_map(static fn ($e) => (string) $e['script'], self::all());
+    }
+
+    /**
+     * Katalog s rozvrhy PODLE INSTALACE — u smluvně řízených úloh (dnes jediná:
+     * `cron-backup`) nahradí katalogový default hodnotou z `backup_schedule_contract`.
+     *
+     * Proč to takhle: rozvrh záloh je provozní údaj konkrétní instalace (self-host
+     * si nechá jeden dump denně, spravovaná jede 4×), takže patří do databáze, ne do
+     * kódu. Jenže do H-25 tabulka existovala a nikdo z ní neplánoval — plánovač i
+     * generátor crontabu četly výhradně katalog, takže uložený rozvrh byl mrtvý
+     * zápis a instalace zálohovala 1× denně, ať v tabulce stálo cokoli. Tohle je ta
+     * chybějící vazba.
+     *
+     * Bez PDO (build-time generování crontabu do image) se vrátí čistý katalog.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function withContractedSchedules(array $jobs, ?PDO $pdo): array
+    {
+        if ($pdo === null) {
+            return array_values($jobs);
+        }
+        $contract = BackupSchedule::current($pdo);
+        $script = (string) $contract['script'];
+        $expr = (string) $contract['cron_expr'];
+
+        return array_values(array_map(static function (array $job) use ($script, $expr): array {
+            if ((string) $job['script'] === $script && $expr !== '') {
+                $job['linux_cron'] = $expr;
+            }
+            return $job;
+        }, $jobs));
     }
 
     /**

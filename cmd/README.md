@@ -151,7 +151,7 @@ chrání sám, na Apache to řeší až přidání do `.htaccess` výše):
 | Skript | Frekvence | Příklad času |
 |---|---|---|
 | `cron-cleanup` | 1× denně | 03:00 |
-| `cron-backup` | 1× denně | 02:00 (před cleanupem) |
+| `cron-backup` | 4× denně | `0 2,8,14,20 * * *` (ranní běh před cleanupem) |
 | `cron-backup-pdf` | 1× denně | 02:30 (po DB backupu) |
 | `cron-backup-documents` | 1× denně | 02:35 (po PDF backupu) |
 | `cron-bank-scan` | každých 15–30 minut | `*/30 * * * *` |
@@ -221,7 +221,7 @@ crontabu/Task Scheduleru (nebo z Docker image).
 
 ```cmd
 schtasks /create /tn "MyUcto Cleanup"   /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-cleanup.cmd"        /sc daily /st 03:00 /ru SYSTEM
-schtasks /create /tn "MyUcto Backup"    /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup.cmd"         /sc daily /st 02:00 /ru SYSTEM
+schtasks /create /tn "MyUcto Backup"    /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup.cmd"         /sc daily /st 02:00 /ri 360 /du 24:00 /ru SYSTEM
 schtasks /create /tn "MyUcto BackupPDF" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-pdf.cmd"     /sc daily /st 02:30 /ru SYSTEM
 schtasks /create /tn "MyUcto BackupDocs" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-documents.cmd" /sc daily /st 02:35 /ru SYSTEM
 schtasks /create /tn "MyUcto BankScan"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-bank-scan.cmd"      /sc minute /mo 30 /ru SYSTEM

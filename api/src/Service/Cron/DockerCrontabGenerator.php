@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Cron;
 
+use PDO;
+
 /**
  * Generuje obsah `/etc/cron.d/myinvoice` pro vestavěný cron v Docker image.
  *
@@ -42,10 +44,15 @@ final class DockerCrontabGenerator
      * @param string $mode {@see CronScheduleMode} — INDIVIDUAL vypíše jednotlivé
      *                     úlohy (default, beze změny chování), DISPATCHER jediný
      *                     řádek s plánovačem.
+     * @param PDO|null $pdo Připojení k DB kvůli smluvně řízeným rozvrhům
+     *                      ({@see CronCatalog::withContractedSchedules()}). Při BUILDU
+     *                      image DB neexistuje → použije se katalogový default a
+     *                      entrypoint crontab po migracích přegeneruje.
      */
     public static function generate(
         ?CronJobGate $gate = null,
         string $mode = CronScheduleMode::INDIVIDUAL,
+        ?PDO $pdo = null,
     ): string {
         if ($gate === null) {
             $jobs = $mode === CronScheduleMode::DISPATCHER
@@ -61,6 +68,10 @@ final class DockerCrontabGenerator
                 static fn (array $j): bool => !$gate->isDisabledByConfig((string) $j['script']),
             ));
         }
+
+        // Rozvrh záloh řídí `backup_schedule_contract`, ne katalog — jinak by vygenerovaný
+        // crontab tvrdil něco jiného než dispatcher a než uložený kontrakt.
+        $jobs = CronCatalog::withContractedSchedules($jobs, $pdo);
 
         $candidates = $mode === CronScheduleMode::DISPATCHER ? count($jobs) : count(CronCatalog::dispatchable());
         $skipped = $candidates - count($jobs);

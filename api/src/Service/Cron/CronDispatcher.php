@@ -113,7 +113,9 @@ final class CronDispatcher
         // a půlka ne. Odstranění zámku se projeví hned v dalším ticku.
         $maintenance = $this->maintenance?->isActive() ?? false;
 
-        foreach (CronCatalog::dispatchable() as $job) {
+        // Rozvrh smluvně řízených úloh (`cron-backup`) se bere z databáze, ne z katalogu
+        // — viz CronCatalog::withContractedSchedules(). Načítá se jednou za tick.
+        foreach (CronCatalog::withContractedSchedules(CronCatalog::dispatchable(), $this->pdo) as $job) {
             $script = (string) $job['script'];
 
             try {
