@@ -571,6 +571,25 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 
 @layer components {
   /*
+   * Terminálový blok — příkazy k opsání, výpisy logů.
+   * Why: psalo se to jako `bg-neutral-900 text-neutral-100`, jenže neutrální
+   * škála se v tmavém režimu OBRACÍ (viz DARK MODE výš). V dark módu z toho
+   * proto byla svítící bílá plocha uprostřed tmavé stránky — přesný opak
+   * zamýšleného „terminálu". Tahle utilita drží tmavé pozadí v obou režimech
+   * a v tmavém ho navíc ztlumí, aby blok nekřičel víc než okolní karty.
+   * How to apply: class="code-surface" místo bg-neutral-900 text-neutral-100.
+   */
+  .code-surface {
+    background-color: var(--color-neutral-900);
+    color: var(--color-neutral-100);
+  }
+  .dark .code-surface {
+    /* O stupeň tmavší než plocha karty, ne světlejší — blok má ustoupit. */
+    background-color: var(--color-neutral-50);
+    color: var(--color-neutral-800);
+  }
+
+  /*
    * Sticky první sloupec pro list-tabulky.
    * Why: na mobilu (<768px) jsou listové tabulky širší než viewport;
    * uzavíráme scroll dovnitř karty a první sloupec držíme zafixovaný,
