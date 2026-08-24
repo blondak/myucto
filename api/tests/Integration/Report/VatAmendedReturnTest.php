@@ -261,6 +261,12 @@ final class VatAmendedReturnTest extends TestCase
         $this->sale('NK-1', $cust, '1', $this->d(5, 10), [[100000, 21000, 21]]);
 
         $radne   = $this->kh->build($this->supplierId, self::YEAR, 5, 'monthly', 'radne');
+        // Následné KH navazuje na PODANÉ řádné — bez něj ho builder odmítne (první podání
+        // za období je vždy řádné, i po termínu).
+        $this->archiveAndSubmit(
+            $this->supplierId, 'dphkh1', self::YEAR, 5, null,
+            $radne['xml'], $radne['summary'], $this->userId, true, 'B',
+        );
         $nasledne = $this->kh->build($this->supplierId, self::YEAR, 5, 'monthly', 'nasledne', '2092-07-10');
 
         $xmlR = new \SimpleXMLElement($radne['xml']);
@@ -405,7 +411,12 @@ final class VatAmendedReturnTest extends TestCase
         $d = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'dodatecne', '2092-07-01');
         $this->assertValid('dphdp3', $d['xml']);
 
-        // N KH.
+        // N KH — opět proti podanému řádnému KH.
+        $khB = $this->kh->build($this->supplierId, self::YEAR, 5, 'monthly', 'radne');
+        $this->archiveAndSubmit(
+            $this->supplierId, 'dphkh1', self::YEAR, 5, null,
+            $khB['xml'], $khB['summary'], $this->userId, true, 'B',
+        );
         $n = $this->kh->build($this->supplierId, self::YEAR, 5, 'monthly', 'nasledne', '2092-07-01');
         $this->assertValid('dphkh1', $n['xml']);
     }
@@ -508,6 +519,138 @@ final class VatAmendedReturnTest extends TestCase
             if ((int) $d['invoice_id'] === $cashId) {
                 $this->assertSame('cash', $d['source'], 'ID pokladního dokladu nesmí být hlášeno jako faktura');
             }
+        }
+    }
+
+    /**
+     * (g) § 141 DŘ: dodatečné přiznání se podává na ZMĚNU údajů. Když se proti poslední
+     * známé dani nic nezměnilo, nesmí vzniknout prázdné podání — XSD ho pustí (Veta1-6
+     * mají minOccurs=0), správce daně s ním nemá co dělat.
+     */
+    public function testDodatecneWithoutAnyChangeIsRefused(): void
+    {
+        $cust = $this->client('Odběratel beze změny', 'CZ90010053');
+        $this->sale('NC-1', $cust, '1', $this->d(5, 10), [[100000, 21000, 21]]);
+
+        $b = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'radne');
+        $this->archiveAndSubmit(
+            $this->supplierId, 'dphdp3', self::YEAR, 5, null,
+            $b['xml'], $b['summary'], $this->userId, true, 'B',
+        );
+
+        try {
+            $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'dodatecne', '2092-07-01');
+            $this->fail('Očekávána chyba: dodatečné bez jediné změny.');
+        } catch (PostingException $e) {
+            $this->assertSame('vat_amendment_no_change', $e->errorCode, $e->getMessage());
+        }
+    }
+
+    /**
+     * (h) EPO: „Je zadána pouze jedna z hodnot základ daně/daň na ř. 01. Musí být zadány
+     * obě." Změní-li se jen DAŇ (oprava sazby při stejném základu), musí v dodatečném
+     * zůstat i základ — byť s nulovým rozdílem.
+     */
+    public function testDodatecneKeepsBaseTaxPairEvenWhenOnlyTaxChanged(): void
+    {
+        $cust = $this->client('Odběratel sazba', 'CZ90010061');
+        $this->sale('PR-1', $cust, '1', $this->d(5, 10), [[100000, 21000, 21]]);
+
+        $b = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'radne');
+        // Podané XML posuneme jen v DANI — základ zůstává stejný.
+        $xml = str_replace('dan23="21000"', 'dan23="20000"', $b['xml']);
+        $this->assertNotSame($b['xml'], $xml, 'fixture: dan23 se nepodařilo posunout');
+        $this->archiveAndSubmit(
+            $this->supplierId, 'dphdp3', self::YEAR, 5, null,
+            $xml, $b['summary'], $this->userId, true, 'B',
+        );
+
+        $d = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'dodatecne', '2092-07-01');
+        $veta1 = (new \SimpleXMLElement($d['xml']))->DPHDP3->Veta1;
+        $this->assertSame('1000', (string) $veta1['dan23']);
+        $this->assertSame('0', (string) $veta1['obrat23'], 'základ musí zůstat ve dvojici s daní');
+    }
+
+    /** (i) § 141/5: dodatečné přiznání nese důvody podání jako textovou přílohu (kod_sekce='D'). */
+    public function testDodatecneCarriesReasonAttachment(): void
+    {
+        $cust = $this->client('Odběratel důvody', 'CZ90010088');
+        $this->sale('RS-1', $cust, '1', $this->d(5, 10), [[100000, 21000, 21]]);
+
+        $b = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'radne');
+        $this->archiveAndSubmit(
+            $this->supplierId, 'dphdp3', self::YEAR, 5, null,
+            $b['xml'], $b['summary'], $this->userId, true, 'B',
+        );
+        $this->sale('RS-2', $cust, '1', $this->d(5, 20), [[50000, 10500, 21]]);
+
+        $d = $this->dph->build(
+            $this->supplierId, self::YEAR, 5, 'monthly', 'dodatecne', '2092-07-01',
+            'Dodatečně zaúčtována přijatá faktura.',
+        );
+        $xml = new \SimpleXMLElement($d['xml']);
+        $this->assertSame('D', (string) $xml->DPHDP3->VetaR[0]['kod_sekce']);
+        $this->assertSame('Dodatečně zaúčtována přijatá faktura.', (string) $xml->DPHDP3->VetaR[0]['t_prilohy']);
+        $this->assertValid('dphdp3', $d['xml']);
+
+        // Bez zadaných důvodů se doplní obecný text — a builder na to upozorní.
+        $auto = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'dodatecne', '2092-07-01');
+        $autoXml = new \SimpleXMLElement($auto['xml']);
+        $this->assertNotSame('', (string) $autoXml->DPHDP3->VetaR[0]['t_prilohy']);
+        $this->assertNotEmpty(array_filter(
+            $auto['warnings'],
+            static fn (string $w): bool => str_contains($w, 'důvody podání'),
+        ));
+    }
+
+    /**
+     * (j) § 101g: rychlá odpověď na výzvu je KH BEZ oddílů A/B/C, s `vyzva_odp` a č.j. výzvy.
+     * Bez č.j. ji nelze sestavit — správce daně by ji nespároval s výzvou.
+     */
+    public function testKhVyzvaOdpovedHasNoSectionsAndNeedsReference(): void
+    {
+        $cust = $this->client('Odběratel výzva', 'CZ90010096');
+        $this->sale('VY-1', $cust, '1', $this->d(5, 10), [[100000, 21000, 21]]);
+
+        $res = $this->kh->build(
+            $this->supplierId, self::YEAR, 5, 'monthly', 'vyzva_nulove', null,
+            '12345678/12/3001-12345-123456',
+        );
+        $xml = new \SimpleXMLElement($res['xml']);
+        $this->assertSame('B', (string) $xml->DPHKH1->VetaD['khdph_forma']);
+        $this->assertSame('B', (string) $xml->DPHKH1->VetaD['vyzva_odp']);
+        $this->assertSame('12345678/12/3001-12345-123456', (string) $xml->DPHKH1->VetaD['c_jed_vyzvy']);
+        $this->assertCount(0, $xml->DPHKH1->VetaA4, 'odpověď na výzvu nesmí mít řádky oddílu A');
+        $this->assertCount(0, $xml->DPHKH1->VetaC, 'odpověď na výzvu nesmí mít rekapitulaci');
+        $this->assertValid('dphkh1', $res['xml']);
+
+        try {
+            $this->kh->build($this->supplierId, self::YEAR, 5, 'monthly', 'vyzva_nulove');
+            $this->fail('Očekávána chyba: odpověď na výzvu bez č.j.');
+        } catch (PostingException $e) {
+            $this->assertSame('kh_vyzva_ref_required', $e->errorCode, $e->getMessage());
+        }
+    }
+
+    /**
+     * (k) Následné KH bez data zjištění i bez č.j. výzvy je vadné podání (XSD anotace
+     * d_zjist). Dřív to bylo jen varování, které stažení XML vůbec nevrací.
+     */
+    public function testNasledneKhWithoutDateOrNoticeIsRefused(): void
+    {
+        $cust = $this->client('Odběratel KH bez data', 'CZ90010100');
+        $this->sale('ND-1', $cust, '1', $this->d(5, 10), [[100000, 21000, 21]]);
+        $radne = $this->kh->build($this->supplierId, self::YEAR, 5, 'monthly', 'radne');
+        $this->archiveAndSubmit(
+            $this->supplierId, 'dphkh1', self::YEAR, 5, null,
+            $radne['xml'], $radne['summary'], $this->userId, true, 'B',
+        );
+
+        try {
+            $this->kh->build($this->supplierId, self::YEAR, 5, 'monthly', 'nasledne');
+            $this->fail('Očekávána chyba: následné KH bez data zjištění i bez č.j. výzvy.');
+        } catch (PostingException $e) {
+            $this->assertSame('kh_d_zjist_required', $e->errorCode, $e->getMessage());
         }
     }
 

@@ -1371,8 +1371,22 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->sale('2099059101', $cust, '1', false, sprintf('%04d-05-10', self::YEAR), sprintf('%04d-05-10', self::YEAR), [[6000, 1260, 21]]);
         $this->sale('2099069101', $cust, '1', false, sprintf('%04d-06-10', self::YEAR), sprintf('%04d-06-10', self::YEAR), [[7000, 1470, 21]]);
 
-        // MONTH=4 (duben) + 'quarterly' → Q2. Konec období musí být 30.6., ne 30.4.
-        $kh = new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, 4, 'quarterly')['xml']);
+        // Kvartální KH smí podat jen FYZICKÁ osoba (§ 101e odst. 2) — u PO ho builder
+        // odmítne. Testovaný fix se týká hranic období, ne typu poplatníka, takže si
+        // firmu na dobu testu přepneme na FO a hned vrátíme zpátky.
+        $pdo = $this->db->pdo();
+        $original = (string) $pdo->query(
+            'SELECT taxpayer_type FROM supplier WHERE id = ' . $this->supplierId
+        )->fetchColumn();
+        $pdo->prepare('UPDATE supplier SET taxpayer_type = ? WHERE id = ?')
+            ->execute(['fo', $this->supplierId]);
+        try {
+            // MONTH=4 (duben) + 'quarterly' → Q2. Konec období musí být 30.6., ne 30.4.
+            $kh = new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, 4, 'quarterly')['xml']);
+        } finally {
+            $pdo->prepare('UPDATE supplier SET taxpayer_type = ? WHERE id = ?')
+                ->execute([$original, $this->supplierId]);
+        }
         $this->assertSame('18000.00', (string) $kh->DPHKH1->VetaA5['zakl_dane1'],
             'KH Q2: A.5 musí zahrnout duben+květen+červen (5000+6000+7000), ne jen duben');
     }
@@ -1458,6 +1472,76 @@ final class KhDphTaxScenariosTest extends TestCase
      * kódem 'EL', ne ISO 'GR' (VIES používá 'EL'). Kód země patří do k_stat; c_vat
      * nese DIČ BEZ prefixu země.
      */
+    /**
+     * Následné souhrnné hlášení (§ 102 odst. 6) se nepodává jako celý výkaz znovu ani jako
+     * rozdíl částek: změněný řádek se ve VIES ZRUŠÍ storno řádkem (k_storno='A' + párovací
+     * trojice stát/DIČ/kód plnění) a nahradí se řádkem se správnou hodnotou. Nezměněné
+     * řádky se neopakují — VIES by je započetl podruhé.
+     *
+     * Hodnota a počet plnění musí být i na storno řádku (EPO je jinak vytkne — ověřeno
+     * zkušebním předáním na zkus.mojedane.gov.cz).
+     */
+    public function testNasledneShStornosChangedRowAndKeepsUnchangedOut(): void
+    {
+        $skId = $this->countryId('SK');
+        if ($skId === 0) {
+            $this->markTestSkipped('Země SK není v číselníku countries.');
+        }
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        $euCust = $this->client('Slovenský odběratel N', $skId, 'SK1234567890', customer: true);
+        $this->sale('2099068801', $euCust, '22', false, $d(5), $d(5), [[10000, 0, 0]]);
+
+        $pdo = $this->db->pdo();
+        $archiver = \MyInvoice\Bootstrap::buildApp()->getContainer()
+            ->get(\MyInvoice\Service\Report\TaxSubmissionArchiver::class);
+
+        $radne = $this->shv->build($this->supplierId, self::YEAR, self::MONTH, 'monthly', 'radne');
+        $archived = $archiver->archive(
+            $this->supplierId, 'dphshv', self::YEAR, self::MONTH, null,
+            $radne['xml'], $radne['summary'], $this->userId, false, 'R',
+        );
+        $submissionId = (int) $archived['submission_id'];
+        try {
+            $archiver->markSubmitted($submissionId, $this->supplierId, date('Y-m-d H:i:s'), 'TEST-SH', $this->userId);
+
+            // Po podání přibyla další dodávka téže protistraně → řádek se mění.
+            $this->sale('2099068802', $euCust, '22', false, $d(20), $d(20), [[5000, 0, 0]]);
+
+            $nasledne = $this->shv->build(
+                $this->supplierId, self::YEAR, self::MONTH, 'monthly', 'nasledne', $d(28),
+            );
+            $xml = new \SimpleXMLElement($nasledne['xml']);
+            $this->assertSame('N', (string) $xml->DPHSHV->VetaD['shvies_forma']);
+            $rows = $xml->DPHSHV->VetaR;
+            $this->assertCount(2, $rows, 'následné SH: storno původního řádku + nový řádek');
+
+            $this->assertSame('A', (string) $rows[0]['k_storno']);
+            $this->assertSame('SK', (string) $rows[0]['k_stat']);
+            $this->assertSame('1234567890', (string) $rows[0]['c_vat']);
+            $this->assertSame('3', (string) $rows[0]['k_pln_eu']);
+            $this->assertSame('10000', (string) $rows[0]['pln_hodnota'], 'storno nese PŮVODNÍ hodnotu');
+            $this->assertSame('1', (string) $rows[0]['pln_pocet'], 'storno nese PŮVODNÍ počet plnění');
+
+            $this->assertSame('', (string) $rows[1]['k_storno']);
+            $this->assertSame('15000', (string) $rows[1]['pln_hodnota']);
+            $this->assertSame('2', (string) $rows[1]['pln_pocet']);
+            $this->assertSame(1, (int) $nasledne['summary']['storno_rows']);
+        } finally {
+            $pdo->prepare('DELETE FROM tax_submissions WHERE id = ?')->execute([$submissionId]);
+        }
+    }
+
+    /** Bez podaného řádného SH nelze následné sestavit — nemá co stornovat. */
+    public function testNasledneShWithoutFiledRegularIsRefused(): void
+    {
+        try {
+            $this->shv->build($this->supplierId, self::YEAR, self::MONTH, 'monthly', 'nasledne');
+            $this->fail('Očekávána chyba: následné SH bez podaného řádného.');
+        } catch (\MyInvoice\Service\Accounting\PostingException $e) {
+            $this->assertSame('shv_no_prior_submission', $e->errorCode, $e->getMessage());
+        }
+    }
+
     public function testShGreeceReportedAsElNotGr(): void
     {
         $grId = $this->countryId('GR');
