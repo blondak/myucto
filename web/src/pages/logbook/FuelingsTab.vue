@@ -12,6 +12,7 @@ import { useAuthStore } from '@/stores/auth'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { localIsoDate } from '@/utils/date'
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -159,7 +160,7 @@ const open = ref(false)
 const saving = ref(false)
 const odometerHint = ref<number | null>(null) // orientační tachometr z knihy jízd
 const draft = reactive<FuelingPayload & { id: number }>({
-  id: 0, car_id: null, fueled_date: new Date().toISOString().slice(0, 10), fueled_time: '',
+  id: 0, car_id: null, fueled_date: localIsoDate(), fueled_time: '',
   fuel_type: '', quantity: null, unit: 'l', unit_price: null, amount_with_vat: 0, currency: 'CZK',
   odometer: null, station: '', note: '',
 })
@@ -173,7 +174,7 @@ function unitForCar(carId: number | null): string {
 function newFueling() {
   const defCar = cars.value.find(c => c.is_default) ?? (cars.value.length === 1 ? cars.value[0] : null)
   Object.assign(draft, {
-    id: 0, car_id: defCar?.id ?? null, fueled_date: new Date().toISOString().slice(0, 10), fueled_time: '',
+    id: 0, car_id: defCar?.id ?? null, fueled_date: localIsoDate(), fueled_time: '',
     fuel_type: '', quantity: null, unit: unitForCar(defCar?.id ?? null), unit_price: null, amount_with_vat: 0, currency: 'CZK',
     odometer: null, station: '', note: '',
   })

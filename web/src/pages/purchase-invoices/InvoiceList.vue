@@ -38,6 +38,7 @@ import PostingBadge from '@/components/ui/PostingBadge.vue'
 import { useSupplierStore } from '@/stores/supplier'
 import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
 import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
+import { localIsoDate } from '@/utils/date'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -547,7 +548,7 @@ const loadedCount = computed(() =>
 
 const isOverdue = (dueDate: string, status: PurchaseInvoiceStatus): boolean => {
   if (status !== 'received' && status !== 'booked') return false
-  return new Date(dueDate) < new Date(new Date().toISOString().slice(0, 10))
+  return new Date(dueDate) < new Date(localIsoDate())
 }
 
 // Status badge ve stejných tokenech jako Detail (sjednoceno s vystavenou)

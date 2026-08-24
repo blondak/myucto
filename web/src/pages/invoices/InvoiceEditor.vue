@@ -37,6 +37,7 @@ import { smallAssetsApi, type SmallAsset } from '@/api/smallAssets'
 import { assetsApi, type AssetListItem } from '@/api/assets'
 import { priceListApi, type PriceListItem } from '@/api/priceList'
 import { cashApi, type CashRegister } from '@/api/cash'
+import { localIsoDate, addDaysIso } from '@/utils/date'
 
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
@@ -514,13 +515,11 @@ const remindersAvailable = computed(() =>
 )
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10)
+  return localIsoDate()
 }
 
 function addDays(date: string, days: number): string {
-  const d = new Date(date)
-  d.setDate(d.getDate() + days)
-  return d.toISOString().slice(0, 10)
+  return addDaysIso(date, days)
 }
 
 // +N kalendářních měsíců se zachováním dne; pokud cílový měsíc nemá takový den
@@ -1218,15 +1217,17 @@ function generateMonthlySchedule(count: number): void {
   form.value.payment_schedule = rows
 }
 
-/** Stejný den následujícího měsíce; u kratšího měsíce poslední den (31. 1. → 28. 2.). */
+/**
+ * Stejný den následujícího měsíce; u kratšího měsíce poslední den (31. 1. → 28. 2.).
+ *
+ * Počítá se řetězcově přes addMonths(). Dřív se tu stavěla lokální půlnoc a vracelo
+ * se přes toISOString(), tedy v UTC — v Praze to dávalo vždy o den dřív, a protože
+ * generateMonthlySchedule() volá tuhle funkci nad jejím vlastním výstupem, chyba se
+ * sčítala: 1. 3. → 31. 3. → 29. 4. → 28. 5. Datum splátky je přitom podle § 31 ZDPH
+ * DUZP, takže posun přesouval splátky do jiného zdaňovacího období.
+ */
 function nextMonth(date: string): string {
-  const d = new Date(date + 'T00:00:00')
-  const day = d.getDate()
-  d.setDate(1)
-  d.setMonth(d.getMonth() + 1)
-  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
-  d.setDate(Math.min(day, lastDay))
-  return d.toISOString().slice(0, 10)
+  return addMonths(date, 1)
 }
 
 const requiresPositiveAmountToPay = computed(() => {

@@ -12,6 +12,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import { localIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -30,7 +31,7 @@ const totalPages = computed(() => {
 
 function defaultRange(): { from: string; to: string } {
   const year = new Date().getFullYear()
-  return { from: `${year}-01-01`, to: new Date().toISOString().slice(0, 10) }
+  return { from: `${year}-01-01`, to: localIsoDate() }
 }
 const filters = reactive<{ from: string; to: string; q: string; doc_type: '' | 'in' | 'out'; purpose: '' | CashPurpose }>({
   from: defaultRange().from, to: defaultRange().to, q: '', doc_type: '', purpose: '',

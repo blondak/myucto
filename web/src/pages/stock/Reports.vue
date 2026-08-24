@@ -6,6 +6,7 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { localIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -16,7 +17,7 @@ const loading = ref(false)
 
 const filters = reactive({
   warehouse_id: '' as number | '',
-  date: new Date().toISOString().slice(0, 10),
+  date: localIsoDate(),
 })
 
 const statusReport = ref<StockStatusReport | null>(null)

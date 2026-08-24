@@ -76,7 +76,13 @@ export function formatDate(date: string | null | undefined): string {
   // „2026-08-15 10:30:00" (tvar, ve kterém timestampy vrací API) není podle
   // specifikace platný vstup `new Date()` — V8 ho spolkne, jiné enginy z něj
   // udělají NaN. Mezera na „T" to sjednotí; časová složka se stejně zahodí.
-  const d = new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(date) ? date.replace(' ', 'T') : date)
+  // Holé „YYYY-MM-DD" spolkne `new Date()` jako PŮLNOC V UTC, takže v záporných
+  // zónách (uživatel v USA) vyjde o den dřív. Kalendářní datum žádný okamžik nenese,
+  // proto se skládá z lokálních složek.
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
+  const d = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(date) ? date.replace(' ', 'T') : date)
   if (Number.isNaN(d.getTime())) return date
   return new Intl.DateTimeFormat(activeLocale(), { day: '2-digit', month: '2-digit', year: 'numeric' }).format(d)
 }

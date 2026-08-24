@@ -33,7 +33,32 @@ final class ActivityLogHashChain
         'payload', 'ip', 'user_agent', 'created_at',
     ];
 
+    /**
+     * `created_at` je TIMESTAMP, takže ho MariaDB renderuje podle zóny SESSION —
+     * táž řádka vrátí jiný řetězec, jakmile se zóna zapečeťujícího a ověřujícího
+     * spojení liší. To se dělo: `Connection` připínala session na PEVNÝ offset
+     * (`date('P')`), takže po přechodu na zimní čas se všechny letní záznamy
+     * renderovaly o hodinu jinak a `verify()` je hlásil jako pozměněné — auditní
+     * stopa tvrdila, že s ní někdo manipuloval. Do hashe proto vstupuje hodnota
+     * převedená do UTC, která je na zóně spojení nezávislá.
+     */
+    private const CREATED_AT_UTC_SQL =
+        "DATE_FORMAT(CONVERT_TZ(created_at, @@session.time_zone, '+00:00'), '%Y-%m-%d %H:%i:%s') AS created_at";
+
     public function __construct(private readonly Connection $db) {}
+
+    /**
+     * Seznam sloupců do SELECTu — `created_at` kanonizovaný do UTC, ostatní tak, jak jsou.
+     */
+    private static function selectList(): string
+    {
+        $columns = [];
+        foreach (self::HASHED_COLUMNS as $col) {
+            $columns[] = $col === 'created_at' ? self::CREATED_AT_UTC_SQL : $col;
+        }
+
+        return implode(', ', $columns);
+    }
 
     public function isAvailable(): bool
     {
@@ -86,7 +111,7 @@ final class ActivityLogHashChain
         $prevHash = $prev === false || $prev === null ? null : (string) $prev;
 
         $rowStmt = $pdo->prepare(
-            'SELECT ' . implode(', ', self::HASHED_COLUMNS) . ' FROM activity_log WHERE id = ?'
+            'SELECT ' . self::selectList() . ' FROM activity_log WHERE id = ?'
         );
         $rowStmt->execute([$id]);
         $row = $rowStmt->fetch(\PDO::FETCH_ASSOC);
@@ -130,7 +155,7 @@ final class ActivityLogHashChain
         $unprotected = (int) $pdo->query('SELECT COUNT(*) FROM activity_log WHERE hash IS NULL' . $where)->fetchColumn();
 
         $stmt = $pdo->query(
-            'SELECT ' . implode(', ', self::HASHED_COLUMNS) . ', prev_hash, hash
+            'SELECT ' . self::selectList() . ', prev_hash, hash
                FROM activity_log WHERE hash IS NOT NULL' . $where . ' ORDER BY id'
         );
 
@@ -150,7 +175,8 @@ final class ActivityLogHashChain
             }
 
             $data = array_intersect_key($row, array_flip(self::HASHED_COLUMNS));
-            if (self::hashOf($data, $row['prev_hash'] !== null ? (string) $row['prev_hash'] : null) !== (string) $row['hash']) {
+            $prevOfRow = $row['prev_hash'] !== null ? (string) $row['prev_hash'] : null;
+            if (!in_array((string) $row['hash'], self::hashCandidates($data, $prevOfRow), true)) {
                 $broken[] = ['id' => $id, 'reason' => 'obsah záznamu neodpovídá jeho hashi (byl změněn)'];
             }
 
@@ -164,6 +190,43 @@ final class ActivityLogHashChain
             'broken' => $broken,
             'ok' => $broken === [],
         ];
+    }
+
+    /**
+     * Hashe, které se u JIŽ ZAPEČETĚNÉHO článku uznávají.
+     *
+     * Články zapečetěné před kanonizací {@see self::CREATED_AT_UTC_SQL} mají v hashi
+     * `created_at` vyrenderovaný v lokální zóně instalace, ne v UTC. Zpětně je
+     * přepočítat nelze (přepsat hash auditní stopy je přesně to, co má řetěz
+     * znemožnit), takže se u nich uznává i tahle historická podoba. Kandidáti jsou
+     * dva a oba se odvozují z téhož okamžiku — není to tolerance „plus mínus pár
+     * hodin", jen dvě známé reprezentace jednoho času.
+     *
+     * Cena: u starých článků projde i posun `created_at` o přesně ten offset. Pro
+     * nově pečetěné články kandidát zbyde jediný, takže se to s časem samo vytratí.
+     *
+     * @param array<string,mixed> $row  `created_at` už v UTC
+     * @return list<string>
+     */
+    private static function hashCandidates(array $row, ?string $prevHash): array
+    {
+        $candidates = [self::hashOf($row, $prevHash)];
+
+        $utc = $row['created_at'] ?? null;
+        if (is_string($utc) && $utc !== '') {
+            try {
+                $local = (new \DateTimeImmutable($utc, new \DateTimeZone('UTC')))
+                    ->setTimezone(new \DateTimeZone(date_default_timezone_get()))
+                    ->format('Y-m-d H:i:s');
+                if ($local !== $utc) {
+                    $candidates[] = self::hashOf(['created_at' => $local] + $row, $prevHash);
+                }
+            } catch (\Throwable) {
+                // Nečitelné razítko — zůstane jen kanonický kandidát.
+            }
+        }
+
+        return $candidates;
     }
 
     /**

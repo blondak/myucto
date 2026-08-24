@@ -8,6 +8,7 @@ import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { localIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -43,7 +44,7 @@ onMounted(() => document.addEventListener('keydown', onCreateEscape))
 onBeforeUnmount(() => document.removeEventListener('keydown', onCreateEscape))
 const createForm = reactive({
   warehouse_id: null as number | null,
-  take_date: new Date().toISOString().slice(0, 10),
+  take_date: localIsoDate(),
   note: '',
   counting_method: 'physical_count',
   responsible_count_name: '',

@@ -198,6 +198,15 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
         return $out;
     }
 
+    /**
+     * Datum zprávy převedené do zóny aplikace.
+     *
+     * Hlavička `Date:` nese vlastní offset odesílatele — Fio posílá aviza v UTC. Bez
+     * převodu se pak `format('Y-m-d')` v parserech ptá na den v CIZÍ zóně, takže
+     * platba přijatá ve 23:30 dostala datum zaúčtování následujícího dne (a v cronu,
+     * který běžel v UTC, se táž hodnota rozcházela s tím, co ukazoval web).
+     * Převod je tady, u zdroje, aby ho nemusel opakovat každý parser zvlášť.
+     */
     private function messageDate(object $message): ?\DateTimeImmutable
     {
         try {
@@ -205,13 +214,18 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
             if (is_object($date) && method_exists($date, 'toDate')) {
                 $dt = $date->toDate();
                 if ($dt instanceof \DateTimeInterface) {
-                    return \DateTimeImmutable::createFromInterface($dt);
+                    return self::inAppTimezone(\DateTimeImmutable::createFromInterface($dt));
                 }
             }
             $text = trim((string) $date);
-            return $text !== '' ? new \DateTimeImmutable($text) : null;
+            return $text !== '' ? self::inAppTimezone(new \DateTimeImmutable($text)) : null;
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    private static function inAppTimezone(\DateTimeImmutable $date): \DateTimeImmutable
+    {
+        return $date->setTimezone(new \DateTimeZone(date_default_timezone_get()));
     }
 }

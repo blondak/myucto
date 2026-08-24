@@ -24,6 +24,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
+import { localIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -47,7 +48,7 @@ const candTotal = ref(0)
 const loadingMoreCandidates = ref(false)
 
 // Ovládací pole
-const today = new Date().toISOString().slice(0, 10)
+const today = localIsoDate()
 const paymentDate = ref(today)
 const constantSymbol = ref('')
 const note = ref('')

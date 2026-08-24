@@ -24,6 +24,7 @@ import { useAuthStore } from '@/stores/auth'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { localIsoDate } from '@/utils/date'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -66,10 +67,6 @@ const COLUMNS: ColumnDef[] = [
 ]
 const tbl = useTablePrefs('payroll-deduction-agreements', COLUMNS)
 
-function localIsoDate(date = new Date()): string {
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-  return local.toISOString().slice(0, 10)
-}
 const today = localIsoDate()
 
 interface AgreementForm {

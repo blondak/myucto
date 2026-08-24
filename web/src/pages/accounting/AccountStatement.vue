@@ -12,6 +12,7 @@ import { formatDate, formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { journalSourceLink, journalEntryLink } from '@/utils/journalSourceLink'
+import { localIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -32,7 +33,7 @@ const totalPages = computed(() => {
 function defaultRange(): { from: string; to: string } {
   const today = new Date()
   const year = today.getFullYear()
-  return { from: `${year}-01-01`, to: today.toISOString().slice(0, 10) }
+  return { from: `${year}-01-01`, to: localIsoDate(today) }
 }
 
 const filters = reactive({

@@ -43,7 +43,9 @@ final readonly class JmhzCancellationRequest
         // Storno lze podat jen do konce lhůty pro řádné podání; potom už jen
         // opravným hlášením. Po lhůtě je odmítnutí jediná správná odpověď —
         // odeslané storno by u ČSSZ zrušilo víc, než uživatel čeká.
-        $evaluatedOn = $today ?? gmdate('Y-m-d');
+        // Lhůta je kalendářní a čte se českým kalendářem — `gmdate()` by v poslední
+        // den lhůty do 02:00 SELČ hlásil ještě předchozí den a naopak.
+        $evaluatedOn = $today ?? date('Y-m-d');
         if (strcmp($evaluatedOn, $window->dueOn) > 0) {
             throw new JmhzXmlException(
                 'jmhz_cancellation_window_closed',

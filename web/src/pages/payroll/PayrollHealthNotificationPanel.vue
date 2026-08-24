@@ -39,6 +39,7 @@ import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { formatDate } from '@/composables/useFormat'
 import { localPayrollPeriod } from './payrollComponentsUi'
+import { localIsoDate } from '@/utils/date'
 
 const DUTY_KINDS: HealthDutyKind[] = [
   'employment_start',
@@ -159,7 +160,7 @@ function deadlineClass(item: HealthDutyItem): string {
   if (!item.reported_by_employer) return 'bg-neutral-100 text-neutral-600'
   const dueOn = item.deadline?.due_on
   if (!dueOn) return 'bg-neutral-100 text-neutral-600'
-  const today = new Date().toISOString().slice(0, 10)
+  const today = localIsoDate()
   if (dueOn < today) return 'bg-danger-50 text-danger-700'
   return 'bg-payroll-50 text-payroll-700'
 }

@@ -17,6 +17,7 @@ import Modal from '@/components/ui/Modal.vue'
 import { ICONS, btnFilled, btnOutline, btnIconSm } from '@/components/ui/buttonStyles'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { localIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -122,7 +123,7 @@ async function runDeleteDepreciation(row: DepreciationPlanRow) {
 
 // ── Lifecycle: zařazení do užívání ─────────────────────────────────────────
 const showPutIntoUse = ref(false)
-const putIntoUseDate = ref(new Date().toISOString().slice(0, 10))
+const putIntoUseDate = ref(localIsoDate())
 const putIntoUseBook = ref(true)
 const acting = ref(false)
 
@@ -211,7 +212,7 @@ async function runUnpause(year: number) {
 // ── Lifecycle: vyřazení ────────────────────────────────────────────────────
 const showDispose = ref(false)
 const disposeForm = ref({
-  date: new Date().toISOString().slice(0, 10),
+  date: localIsoDate(),
   type: 'sold' as DisposalType,
   price: null as number | null,
 })

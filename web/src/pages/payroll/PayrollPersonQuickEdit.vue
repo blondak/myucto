@@ -20,6 +20,7 @@ import { useToast } from '@/composables/useToast'
 import { todayIso } from './employmentLifecycleUi'
 import PayrollPersonContactQuickFields from './PayrollPersonContactQuickFields.vue'
 import PayrollPersonIdentityQuickFields from './PayrollPersonIdentityQuickFields.vue'
+import { addDaysIso } from '@/utils/date'
 
 const props = defineProps<{
   personId: number
@@ -180,9 +181,7 @@ function nextTermsDate(employment: PayrollEmployment | null): string {
   const today = todayIso()
   const latest = employment?.terms[0]?.effective_from
   if (!latest || latest < today) return today
-  const date = new Date(`${latest}T12:00:00`)
-  date.setDate(date.getDate() + 1)
-  return date.toISOString().slice(0, 10)
+  return addDaysIso(latest, 1)
 }
 
 function minorToInput(value: number | null): string {

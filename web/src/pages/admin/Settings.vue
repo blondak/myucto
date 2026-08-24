@@ -15,6 +15,7 @@ import AutomationPolicyBox from '@/components/settings/AutomationPolicyBox.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SupplierDomainsSettings from '@/components/settings/SupplierDomainsSettings.vue'
+import { localIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -497,7 +498,7 @@ async function saveAutoPostFlags(): Promise<void> {
 // společného Uložit — každá změna hned přepočítá živou cache na backendu.
 type VatStatusKind = 'payer' | 'non_payer' | 'identified'
 const VAT_BASELINE_DATE = '1900-01-01'
-const todayIso = () => new Date().toISOString().slice(0, 10)
+const todayIso = () => localIsoDate()
 
 const vatHistory = computed<VatStatusHistoryEntry[]>(() => supplier.value?.vat_status_history ?? [])
 

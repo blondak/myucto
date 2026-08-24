@@ -49,6 +49,7 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { localIsoDate } from '@/utils/date'
 
 const { t, locale } = useI18n()
 const pageId = useId()
@@ -69,7 +70,7 @@ const assessment = ref<PayrollRetentionAssessment | null>(null)
 const assessmentLoading = ref(true)
 const assessmentFailed = ref(false)
 const assessmentError = ref('')
-const asOf = ref(new Date().toISOString().slice(0, 10))
+const asOf = ref(localIsoDate())
 
 const filters = reactive({ q: '', origin: '' as '' | RetentionOrigin })
 
@@ -355,7 +356,7 @@ const holdForm = reactive({
   employeeId: 0,
   reason: 'enforcement' as PayrollRetentionHoldReason,
   description: '',
-  placedOn: new Date().toISOString().slice(0, 10),
+  placedOn: localIsoDate(),
 })
 
 function openHold(employeeId = 0) {
@@ -364,7 +365,7 @@ function openHold(employeeId = 0) {
   holdForm.employeeId = employeeId
   holdForm.reason = 'enforcement'
   holdForm.description = ''
-  holdForm.placedOn = new Date().toISOString().slice(0, 10)
+  holdForm.placedOn = localIsoDate()
 }
 
 async function saveHold() {

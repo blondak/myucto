@@ -95,7 +95,38 @@ final class Config
         // no-op (data-dir cesty jsou absolutní).
         $merged = self::anchorRelativePaths($merged, $rootDir);
 
+        // Časová zóna se nastavuje TADY, ne až v Bootstrap::buildContainer().
+        //
+        // Důvod: zónu potřebuje mít proces nastavenou dřív, než vznikne první
+        // spojení do databáze — Connection::pdo() z ní odvozuje `SET time_zone`
+        // celé session. Skripty v api/bin/, které si PDO staví ručně a kontejner
+        // nepotřebují (cron-backup, cron-cleanup, cron-license-renew, …), se do
+        // buildContainer() nikdy nedostanou, takže jim session zůstávala v tom,
+        // co má php.ini. Na hostingu bez `date.timezone` je to UTC — a v jedné
+        // instalaci pak vedle sebe žily DATETIME hodnoty ve dvou zónách.
+        // Config::load() je jediné místo, kterým projde úplně každý vstupní bod.
+        $timezone = self::dig($merged, 'app.timezone');
+        date_default_timezone_set(is_string($timezone) && $timezone !== '' ? $timezone : 'Europe/Prague');
+
         return new self($merged, $dataDir);
+    }
+
+    /**
+     * Čtení dot-notation cesty z holého pole — použitelné ještě před vznikem
+     * instance (viz nastavení zóny v {@see self::load()}).
+     */
+    private static function dig(array $data, string $path): mixed
+    {
+        $value = $data;
+
+        foreach (explode('.', $path) as $segment) {
+            if (!is_array($value) || !array_key_exists($segment, $value)) {
+                return null;
+            }
+            $value = $value[$segment];
+        }
+
+        return $value;
     }
 
     public function get(string $path, mixed $default = null): mixed

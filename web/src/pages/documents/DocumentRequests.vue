@@ -6,6 +6,7 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { localIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -104,7 +105,7 @@ function statusBadge(s: DocumentRequestStatus): string {
 }
 
 function isOverdue(item: DocumentRequest): boolean {
-  return item.status === 'requested' && !!item.deadline && item.deadline < new Date().toISOString().slice(0, 10)
+  return item.status === 'requested' && !!item.deadline && item.deadline < localIsoDate()
 }
 </script>
 

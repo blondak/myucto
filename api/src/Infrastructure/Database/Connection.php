@@ -69,6 +69,48 @@ final class Connection
         $this->sharingAllowed = self::$isolationDepth === 0;
     }
 
+    /**
+     * Připne časovou zónu session na `app.timezone`.
+     *
+     * Dřív tu stálo `SET time_zone = date('P')`, což mělo dvě vady. Zóna se brala
+     * z PHP default zóny v okamžiku připojení, takže spojení otevřené před
+     * nastavením zóny (CLI skripty bez kontejneru) skončilo v UTC a v jedné
+     * instalaci pak vedle sebe žily DATETIME hodnoty ve dvou zónách. A protože
+     * `date('P')` je PEVNÝ offset, renderovala se `TIMESTAMP` pole po přechodu
+     * letního času o hodinu jinak než při zápisu — což mimo jiné rozbíjelo
+     * ověření hash-chainu auditního logu.
+     *
+     * Preferuje se proto POJMENOVANÁ zóna, která si přechody řeší sama. Ta ale
+     * vyžaduje naimportované tzinfo tabulky (`mariadb-tzinfo-to-sql`); když
+     * chybí, MariaDB dotaz odmítne a fallbackem je offset spočtený pro tutéž
+     * zónu — pořád deterministický a nezávislý na pořadí volání v PHP.
+     */
+    private function applySessionTimeZone(PDO $pdo): void
+    {
+        $timezone = (string) $this->config->get('app.timezone', 'Europe/Prague');
+        if ($timezone === '') {
+            $timezone = 'Europe/Prague';
+        }
+
+        try {
+            $stmt = $pdo->prepare('SET time_zone = ?');
+            $stmt->execute([$timezone]);
+
+            return;
+        } catch (\Throwable) {
+            // tzinfo tabulky nejsou nahrané — níž se dopočítá offset.
+        }
+
+        try {
+            $offset = (new \DateTimeImmutable('now', new \DateTimeZone($timezone)))->format('P');
+        } catch (\Throwable) {
+            $offset = date('P');
+        }
+
+        $stmt = $pdo->prepare('SET time_zone = ?');
+        $stmt->execute([$offset]);
+    }
+
     public function pdo(): PDO
     {
         if ($this->pdo !== null) {
@@ -111,7 +153,7 @@ final class Connection
         // Sada odpovídá výchozímu sql_mode MariaDB; ONLY_FULL_GROUP_BY se vědomě
         // nepřidává, není ve výchozím režimu a shodil by existující agregační dotazy.
         $pdo->exec("SET SESSION sql_mode = '" . self::SQL_MODE . "'");
-        $pdo->exec("SET time_zone = '" . date('P') . "'");
+        $this->applySessionTimeZone($pdo);
 
         if ($shareable) {
             self::$sharedPdo[$dsn] = $pdo;

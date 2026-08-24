@@ -209,6 +209,34 @@ final class ActivityLogHashChainTest extends TestCase
         return (int) $stmt->fetchColumn();
     }
 
+    /**
+     * Ověření nesmí záviset na zóně spojení.
+     *
+     * `created_at` je TIMESTAMP, takže ho MariaDB renderuje podle zóny session. Dokud
+     * do hashe vstupovala ta renderovaná hodnota, stačil přechod na zimní čas (nebo
+     * cron běžící v UTC) a `verify()` označil VŠECHNY letní záznamy za pozměněné —
+     * auditní stopa tvrdila, že s ní někdo manipuloval. Test to simuluje tvrdě:
+     * po zapečetění přepne zónu session a ověřuje znovu.
+     */
+    public function testVerificationSurvivesSessionTimeZoneChange(): void
+    {
+        $this->write('test.tz.a');
+        $this->write('test.tz.b');
+
+        $pdo = $this->db->pdo();
+        $original = (string) $pdo->query('SELECT @@session.time_zone')->fetchColumn();
+
+        foreach (["+00:00", "+05:45", "-08:00"] as $zone) {
+            $pdo->exec("SET time_zone = '{$zone}'");
+            self::assertTrue(
+                $this->chain->verify($this->from)['ok'],
+                "Řetěz musí projít i v session zóně {$zone}.",
+            );
+        }
+
+        $pdo->exec("SET time_zone = '{$original}'");
+    }
+
     /** @return array<string,mixed> */
     private function row(int $id): array
     {
