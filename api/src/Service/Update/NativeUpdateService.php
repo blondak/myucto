@@ -28,10 +28,21 @@ use Throwable;
  *                   ({@see self::useBundleOverride()}); vždy host allowlist, HTTPS only
  *   3. verify     — SHA-256 proti `.sha256` assetu / předanému otisku
  *   4. extract    — do staging dir, s validací všech cest v archivu
- *   5. backup     — kopie souborů, které swap přepíše (pro rollback)
- *   6. swap       — nakopírování bundlu přes instalaci (bez mazání)
+ *   5. backup     — soubory, které swap přepíše, se PŘESUNOU stranou (pro rollback)
+ *   6. swap       — nasazení bundlu přes instalaci (bez mazání)
  *   7. migrate    — `php api/bin/migrate.php` už novým kódem
  *   8. finish     — teprve teď se přepíše `VERSION`
+ *
+ * ⚠️ **Swap nesmí zvýšit počet souborů na svazku.** Záloha vzniká PŘESUNEM
+ * původního souboru a nová verze se PŘESOUVÁ ze stage, takže co jinde ubude,
+ * jinde přibude; soubory beze změny se ze stage rovnou zahodí, takže bilance
+ * dokonce klesá. Dřív se na obou koncích kopírovalo a na svazku musely naráz
+ * existovat tři stromy — instalace, stage a rostoucí záloha. Sdílený hosting
+ * má strop počtu souborů (inody, kvóta účtu) běžně jen kolem dvojnásobku
+ * instalace, takže první spravovaná instance na to najela hned (2026-08-24:
+ * 1682 zazálohovaných souborů z 12,5 tisíce, pak došly inody, a rollback
+ * neobnovil ani jeden, protože i on si psal dočasnou kopii vedle cíle).
+ * Hlídá to {@see \MyInvoice\Tests\Unit\Service\Update\NativeUpdateSwapTest}.
  *
  * `VERSION` se úmyslně píše jako poslední krok: dokud migrace neproběhnou,
  * instalace se hlásí starou verzí, takže přerušený update nevypadá jako
@@ -476,26 +487,52 @@ final class NativeUpdateService
     {
         $this->swapped = [];
         $files = 0;
+        $skipped = 0;
 
+        // Cesty se seberou PŘEDEM, ne za běhu iterátoru: swap staged soubory
+        // PŘESOUVÁ ({@see self::moveIntoPlace()}), takže by si iterátor
+        // podřezával větev pod sebou.
+        $entries = [];
         $it = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($stage, RecursiveDirectoryIterator::SKIP_DOTS),
             RecursiveIteratorIterator::SELF_FIRST
         );
+        /** @var \SplFileInfo $item */
+        foreach ($it as $item) {
+            $entries[] = [$item->getPathname(), $item->isDir()];
+        }
 
         try {
-            /** @var \SplFileInfo $item */
-            foreach ($it as $item) {
-                $rel = $this->relativePath($stage, $item->getPathname());
+            foreach ($entries as [$path, $isDir]) {
+                $rel = $this->relativePath($stage, $path);
                 if ($rel === null || $rel === 'VERSION' || $this->isProtected($rel)) {
                     continue;
                 }
                 $dest = $this->rootDir . '/' . $rel;
 
-                if ($item->isDir()) {
+                if ($isDir) {
                     $this->ensureDir($dest);
                     continue;
                 }
-                if (!$item->isFile()) {
+                if (!is_file($path)) {
+                    continue;
+                }
+
+                // ⚠️ Beze změny = nesahat na to vůbec.
+                //
+                // Drtivá většina vydání je bajt po bajtu totožná s tím, co na
+                // instalaci leží (samotný `api/vendor` je přes polovinu stromu
+                // a mezi opravnými vydáními se nehne). Zálohovat a přepisovat
+                // takový soubor je práce navíc, která nic nemění — a hlavně
+                // drží v záloze místo i inode za soubor, který by rollback
+                // stejně vrátil ve stejné podobě.
+                //
+                // Staged kopii proto rovnou zahodíme. Počet souborů na svazku
+                // tím během swapu KLESÁ, místo aby jen stagnoval, takže se
+                // aktualizace vejde i na účet, kde by dvojí strom nevyšel.
+                if (is_file($dest) && $this->sameContent($path, $dest)) {
+                    @unlink($path);
+                    $skipped++;
                     continue;
                 }
 
@@ -506,7 +543,7 @@ final class NativeUpdateService
                 // když replaceFile selže napůl (cíl už smazaný, nová verze
                 // nezapsaná), musí ho rollback vrátit ze zálohy taky.
                 $this->swapped[] = $rel;
-                $this->replaceFile($item->getPathname(), $dest);
+                $this->moveIntoPlace($path, $dest);
                 $files++;
 
                 if ($files % 500 === 0) {
@@ -520,18 +557,94 @@ final class NativeUpdateService
                 . $restored . ' souborů ze zálohy ' . $backup . '.', 0, $e);
         }
 
-        $this->appendLog($log, 'Swap OK: ' . $files . ' souborů');
+        $this->appendLog($log, 'Swap OK: ' . $files . ' souborů nasazeno, '
+            . $skipped . ' beze změny (přeskočeno)');
 
         return $files;
     }
 
+    /**
+     * Mají oba soubory totožný obsah?
+     *
+     * Velikost je hrubé síto, které vyřadí většinu rozdílů za jeden `stat`.
+     * Teprve při shodě se počítá otisk — na obsahu, ne na čase změny: staged
+     * strom se právě rozbalil z archivu, takže mtime nesedí NIKDY a jako
+     * kritérium by prohlásil za změněný úplně každý soubor.
+     *
+     * `xxh128` je nekryptografický otisk a je to tady správně: neporovnáváme
+     * se s nedůvěryhodnou stranou, jen hledáme shodu dvou lokálních souborů.
+     * Pravost balíčku řeší podpisem SHA-256 {@see self::verifyChecksum()}.
+     */
+    private function sameContent(string $a, string $b): bool
+    {
+        $sizeA = @filesize($a);
+        $sizeB = @filesize($b);
+        if ($sizeA === false || $sizeB === false || $sizeA !== $sizeB) {
+            return false;
+        }
+
+        $algo = in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'sha256';
+        $hashA = @hash_file($algo, $a);
+        $hashB = @hash_file($algo, $b);
+
+        return $hashA !== false && $hashB !== false && $hashA === $hashB;
+    }
+
+    /**
+     * Odloží původní soubor do zálohy — PŘESUNEM, ne kopií.
+     *
+     * ⚠️ Tohle je rozdíl mezi „aktualizace projde" a „aktualizace nemá kam".
+     * Kopie znamená, že v jednu chvíli existují TŘI stromy naráz: instalace,
+     * rozbalený stage a rostoucí záloha. Na sdíleném hostingu je strop počtu
+     * souborů (inody, kvóta účtu) běžně jen kolem dvojnásobku instalace, takže
+     * záloha narazí po pár tisících souborech a aktualizace spadne uprostřed —
+     * přesně tak, jak to udělala na první spravované instanci (2026-08-24:
+     * 1682 zazálohovaných souborů z 12,5 tisíce, pak došly inody).
+     *
+     * `rename()` jen přepojí jméno na existující inode: záloha nestojí ani
+     * jeden navíc a instalace se o něj na okamžik zmenší. Ve dvojici
+     * s {@see self::moveIntoPlace()} je bilance celého swapu NULOVÁ.
+     *
+     * Kopie zůstává pro případ, že přesun nejde — typicky když stage
+     * a instalace leží na jiném svazku.
+     */
     private function backupFile(string $rel, string $dest, string $backup): void
     {
         $target = $backup . '/' . $rel;
         $this->ensureDir(dirname($target));
-        if (!@copy($dest, $target)) {
-            throw new RuntimeException('Nelze zazálohovat ' . $rel . ' do ' . $target . '.');
+
+        if (@rename($dest, $target)) {
+            return;
         }
+        if (!@copy($dest, $target)) {
+            throw new RuntimeException(
+                'Nelze zazálohovat ' . $rel . ' do ' . $target
+                . '. Na svazku pravděpodobně došlo místo nebo povolený počet souborů (inody/kvóta účtu).'
+            );
+        }
+    }
+
+    /**
+     * Přesune staged soubor na jeho místo v instalaci.
+     *
+     * Protivaha k {@see self::backupFile()}: co se přesunem uvolní ze stage, se
+     * přesunem objeví v instalaci, takže počet souborů zůstává během swapu
+     * plochý. Kdyby se kopírovalo, stage by až do závěrečného úklidu držel
+     * druhou kopii celého stromu.
+     *
+     * Cíl v tuhle chvíli běžně NEEXISTUJE — backupFile ho odstěhoval. Když
+     * přesto existuje (záloha musela padnout na kopii) nebo přesun nejde,
+     * použije se původní opatrná cesta {@see self::replaceFile()} i s celou
+     * windowsí logikou kolem zamčených souborů.
+     */
+    private function moveIntoPlace(string $src, string $dest): void
+    {
+        $this->ensureDir(dirname($dest));
+
+        if (!file_exists($dest) && @rename($src, $dest)) {
+            return;
+        }
+        $this->replaceFile($src, $dest);
     }
 
     /**
@@ -626,7 +739,12 @@ final class NativeUpdateService
                 continue;
             }
             try {
-                $this->replaceFile($src, $this->rootDir . '/' . $rel);
+                // ⚠️ Taky přesunem. Rollback běží typicky PRÁVĚ TEHDY, když
+                // došly inody nebo místo — a `replaceFile()` si zapisuje
+                // dočasnou kopii vedle cíle, takže by v tu chvíli selhal na
+                // každém souboru. Přesně to se stalo 2026-08-24: rollback
+                // vrátil 0 z 1682 souborů. Přesun nic nového nealokuje.
+                $this->restoreFile($src, $this->rootDir . '/' . $rel);
                 $restored++;
             } catch (Throwable $e) {
                 $this->appendLog($log, 'Rollback: nelze obnovit ' . $rel . ' (' . $e->getMessage() . ')');
@@ -635,6 +753,23 @@ final class NativeUpdateService
         $this->appendLog($log, 'Rollback obnovil ' . $restored . ' z ' . count($this->swapped) . ' souborů.');
 
         return $restored;
+    }
+
+    /**
+     * Vrátí soubor ze zálohy na místo. Přesunem — důvod viz {@see self::rollback()};
+     * kopie zůstává jen jako nouzová varianta, když přesun nejde.
+     *
+     * Záloha o soubor přesunem přijde, a je to tak správně: cílem rollbacku je
+     * dostat instalaci zpátky do provozu, ne udržet zálohu pro druhý pokus.
+     */
+    private function restoreFile(string $src, string $dest): void
+    {
+        $this->ensureDir(dirname($dest));
+
+        if (@rename($src, $dest)) {
+            return;
+        }
+        $this->replaceFile($src, $dest);
     }
 
     // ---------- migrace + finish -----------------------------------------
