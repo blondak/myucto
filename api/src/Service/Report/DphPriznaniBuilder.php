@@ -93,6 +93,8 @@ final class DphPriznaniBuilder
      *        radne/opravne = plné přiznání (B/O), dodatecne/dodatecne_opravne = ROZDÍL
      *        proti poslední známé dani (D/E, § 141 daňového řádu).
      * @param ?string $dZjist datum zjištění důvodů pro dodatečné (Y-m-d) — povinné pro D/E.
+     * @param ?string $reason důvody pro podání dodatečného přiznání (§ 141 odst. 5 DŘ) —
+     *        jdou do textové přílohy VetaR (kod_sekce='D'); prázdné = doplní se obecný text.
      * @return array{xml: string, summary: array<string, mixed>, warnings: list<string>, missing_rates: list<array<string,mixed>>}
      */
     public function build(
@@ -102,6 +104,7 @@ final class DphPriznaniBuilder
         ?string $period = null,
         string $variant = 'radne',
         ?string $dZjist = null,
+        ?string $reason = null,
     ): array {
         $forma = self::VARIANT_FORMA[$variant] ?? null;
         if ($forma === null) {
@@ -134,6 +137,34 @@ final class DphPriznaniBuilder
         // i gates korekcí §74b/§46/§43 níže se řídí supplierem se stavem k období
         // (oba flagy z historie — migrace 1181 historizuje i identifikovanou osobu).
         [$rangeStart, $statusDate] = $this->periodRange($year, $month, $period);
+        // §141 DŘ: důvody pro dodatečné přiznání nelze zjistit dřív, než období skončilo,
+        // ani v budoucnu. Dřív se sem propsalo cokoli, co spolkl DateTimeImmutable —
+        // a přitom právě tímhle datem běží lhůta pro podání.
+        if ($isAmendment && $dZjist !== null) {
+            if ($dZjist < $statusDate) {
+                throw new PostingException(
+                    'vat_d_zjist_before_period',
+                    sprintf(
+                        'Datum zjištění důvodů (%s) předchází konci opravovaného období (%s). '
+                            . 'Dodatečné přiznání se podává až po skončení období.',
+                        $dZjist,
+                        $statusDate,
+                    ),
+                    422,
+                );
+            }
+            // „Nesmí být v budoucnu" má smysl jen u období, které skutečně skončilo — tedy
+            // u každého reálného dodatečného přiznání. U období, jehož konec teprve přijde,
+            // by kontrola porovnávala dvě budoucí data a jen překážela.
+            $today = date('Y-m-d');
+            if ($statusDate <= $today && $dZjist > $today) {
+                throw new PostingException(
+                    'vat_d_zjist_future',
+                    'Datum zjištění důvodů nemůže být v budoucnosti.',
+                    422,
+                );
+            }
+        }
         $supplier = $this->loadSupplier($supplierId, $statusDate);
         // Identifikovaná osoba (§ 6g–6l ZDPH, issue #94): přiznání typu 'I' —
         // vyplňuje JEN samovyměření z přeshraničních přijatých plnění (ř. 3-6
@@ -541,11 +572,35 @@ final class DphPriznaniBuilder
         if ($isAmendment) {
             $baseline = $this->loadAmendmentBaseline($supplierId, $year, $month, $quarter, $forma);
             $referenceSubmissionId = (int) $baseline['submission_id'];
-            $veta1Raw = $this->diffElement($veta1Raw, $baseline['veta']['Veta1'] ?? []);
-            $veta2Raw = $this->diffElement($veta2Raw, $baseline['veta']['Veta2'] ?? []);
-            $veta3Raw = $this->diffElement($veta3Raw, $baseline['veta']['Veta3'] ?? []);
-            $veta4Raw = $this->diffElement($veta4Raw, $baseline['veta']['Veta4'] ?? []);
-            $veta5Raw = $this->diffElement($veta5Raw, $baseline['veta']['Veta5'] ?? []);
+            $pairs = self::attributePairs($lineMap);
+            $veta1Raw = $this->diffElement($veta1Raw, $baseline['veta']['Veta1'] ?? [], $pairs);
+            $veta2Raw = $this->diffElement($veta2Raw, $baseline['veta']['Veta2'] ?? [], $pairs);
+            $veta3Raw = $this->diffElement($veta3Raw, $baseline['veta']['Veta3'] ?? [], $pairs);
+            $veta4Raw = $this->diffElement($veta4Raw, $baseline['veta']['Veta4'] ?? [], $pairs);
+            $veta5Raw = $this->diffElement($veta5Raw, $baseline['veta']['Veta5'] ?? [], $pairs);
+        }
+
+        // § 76 odst. 6/9: opravuje-li se rok, který už byl VYPOŘÁDÁN, patří do ř.52
+        // vypořádací (ne zálohový) koeficient. Builder umí jen zálohový koeficient roku
+        // období, takže se nedopočítá sám — ale mlčet o tom nelze, výsledek ř.52 by byl
+        // jiný, než formulář požaduje. Varování jen tehdy, když se krácený odpočet
+        // dodatečného vůbec dotkl.
+        if ($isAmendment && ($totalDanOdpKraceny > 0.0 || isset($veta5Raw['odp_uprav_kf']))) {
+            $coefRow = $this->coefficients->get($supplierId, $year);
+            $settledPercent = ($coefRow !== null && $coefRow['settled_at'] !== null)
+                ? $coefRow['final_percent']
+                : null;
+            if ($settledPercent !== null && (int) $settledPercent !== (int) $provisionalPercent) {
+                $warnings[] = sprintf(
+                    'Dodatečné přiznání za rok %d se dotýká kráceného odpočtu (§ 76), ale rok už '
+                        . 'byl vypořádán koeficientem %d %%. Do ř. 52 patří podle § 76 odst. 6 '
+                        . 'vypořádací koeficient, aplikace počítá se zálohovým (%s %%) — ř. 52 '
+                        . 'ověřte a případně upravte ručně.',
+                    $year,
+                    (int) $settledPercent,
+                    $provisionalPercent === null ? '—' : (string) (int) $provisionalPercent,
+                );
+            }
         }
 
         // ── Emit Veta1-5 (formátování na celé Kč / % až tady) ───────────
@@ -572,13 +627,40 @@ final class DphPriznaniBuilder
         $veta6 = $dom->createElement('Veta6');
         if ($isAmendment) {
             // Dodatečné: ř.62/63 nesou ROZDÍL sum, dano_da/dano_no se NEvyplňují (XSD anotace),
-            // ř.66 dano = nová vlastní daň − poslední známá daň = (Δř.62 − Δř.63).
+            // ř.66 dano = Δř.62 − Δř.63.
+            //
+            // Rozdíl se počítá ze ZAOKROUHLENÝCH složek, ne jako round(vlastní daň) − poslední
+            // známá: round(A−B) ≠ round(A)−round(B), jakmile některá složka není celé číslo
+            // (do odpočtu vstupují `vypor_odp` i `oduprav` jako float). Rekapitulace pak
+            // neseděla sama se sebou — ř.66 se o korunu rozešlo s ř.62 − ř.63.
             $base6 = $baseline['veta']['Veta6'] ?? [];
             $baseVlastni = round((float) ($base6['dan_zocelk'] ?? 0.0)) - round((float) ($base6['odp_zocelk'] ?? 0.0));
             $deltaOutput = round($totalDanZdanitelne) - round((float) ($base6['dan_zocelk'] ?? 0.0));
             $deltaInput  = round($totalDanOdpocitatelne) - round((float) ($base6['odp_zocelk'] ?? 0.0));
             $lastKnownTax  = $baseVlastni;
-            $taxDifference = round($vlastniDan) - $baseVlastni;
+            $taxDifference = $deltaOutput - $deltaInput;
+            // ř.60 úprava odpočtu (§ 78) se i v dodatečném vykazuje — ROZDÍLEM. Bez ní
+            // nesedí kontrola ř.63 = ř.46 + 52 + 53 + 60 a EPO hlásí nekonzistenci
+            // (delta ř.63 úpravu obsahuje, ale ř.60 by zůstal prázdný).
+            $upravOdpDelta = round($upravOdp) - round((float) ($base6['uprav_odp'] ?? 0.0));
+            if ($upravOdpDelta !== 0.0) {
+                $veta6->setAttribute('uprav_odp', $this->formatAmount($upravOdpDelta));
+            }
+            // § 141 DŘ: dodatečné přiznání se podává na ZMĚNU údajů. Když se nezměnilo nic —
+            // žádný rozdíl v Veta1-5 ani v rekapitulaci — vzniklo by prázdné podání, které
+            // XSD propustí (Veta1-6 mají minOccurs=0) a správce daně nemá jak zpracovat.
+            // Tvrdá brzda: prázdné dodatečné se nesmí dostat ven ani ke stažení.
+            $hasDetailDiff = $veta1Raw !== [] || $veta2Raw !== [] || $veta3Raw !== []
+                || $veta4Raw !== [] || $veta5Raw !== [];
+            if (!$hasDetailDiff && $deltaOutput === 0.0 && $deltaInput === 0.0 && $upravOdpDelta === 0.0) {
+                throw new PostingException(
+                    'vat_amendment_no_change',
+                    'Dodatečné přiznání nemá co vykázat — proti poslední známé dani se nezměnil '
+                        . 'žádný údaj. Podle § 141 daňového řádu se dodatečné přiznání podává jen '
+                        . 'na změnu údajů; nejdřív opravte doklady daného období.',
+                    422,
+                );
+            }
             $veta6->setAttribute('dan_zocelk', $this->formatAmount((float) $deltaOutput));
             $veta6->setAttribute('odp_zocelk', $this->formatAmount((float) $deltaInput));
             $veta6->setAttribute('dano', $this->formatAmount((float) $taxDifference));
@@ -586,23 +668,54 @@ final class DphPriznaniBuilder
             $veta6->setAttribute('dan_zocelk', $this->formatAmount($totalDanZdanitelne));
             $veta6->setAttribute('odp_zocelk', $this->formatAmount($totalDanOdpocitatelne));
             // ř.60 úprava odpočtu (§ 78 a násl.) — jen v posledním období roku a jen
-            // když je nenulová. U dodatečného přiznání se neuvádí: tam Veta6 nese
-            // ROZDÍLY proti poslední známé dani a úprava je už v nich obsažená.
+            // když je nenulová.
             if ($upravOdp !== 0.0) {
                 $veta6->setAttribute('uprav_odp', $this->formatAmount($upravOdp));
             }
-            if ($vlastniDan > 0) {
-                $veta6->setAttribute('dano_da', $this->formatAmount($vlastniDan));
-            } elseif ($vlastniDan < 0) {
-                $veta6->setAttribute('dano_no', $this->formatAmount(-$vlastniDan));
+            // Stejný důvod jako u dodatečného: ř.64/65 musí sedět na ř.62 − ř.63 přesně
+            // tak, jak jsou v XML zaokrouhlené, ne na nezaokrouhlený mezivýpočet.
+            $vlastniDanRounded = round($totalDanZdanitelne) - round($totalDanOdpocitatelne);
+            if ($vlastniDanRounded > 0) {
+                $veta6->setAttribute('dano_da', $this->formatAmount($vlastniDanRounded));
+            } elseif ($vlastniDanRounded < 0) {
+                $veta6->setAttribute('dano_no', $this->formatAmount(-$vlastniDanRounded));
             }
         }
         $dphdp3->appendChild($veta6);
 
-        // ── VetaR: poradi (wrapper element, summary attrs jdou jinam) ────
-        $vetaR = $dom->createElement('VetaR');
-        $vetaR->setAttribute('poradi', '1');
-        $dphdp3->appendChild($vetaR);
+        // ── VetaR: textová příloha ────────────────────────────────────────
+        // U dodatečného přiznání sem patří DŮVODY pro jeho podání (§ 141 odst. 5 DŘ):
+        // kod_sekce='D', jeden řádek textu = jedna věta, max. 72 znaků (XSD t_prilohy).
+        // Bez nich EPO hlásí „Přiznání je označeno jako dodatečné a nejsou vyplněny
+        // důvody pro dodatečné podání" (ověřeno zkušebním předáním).
+        if ($isAmendment) {
+            $reasonText = trim((string) $reason);
+            if ($reasonText === '') {
+                // Neutrální, věcně pravdivý text — lepší než prázdná příloha, ale vlastní
+                // formulace účetní je vždycky lepší, proto zároveň varujeme.
+                $reasonText = sprintf(
+                    'Oprava údajů zjištěná dne %s; rozdíl proti poslední známé dani %s Kč.',
+                    (new \DateTimeImmutable((string) $dZjist))->format('d.m.Y'),
+                    $this->formatAmount((float) $taxDifference),
+                );
+                $warnings[] = 'Dodatečné přiznání nemá vyplněné důvody podání (§ 141 odst. 5 DŘ) '
+                    . '— doplnil se obecný text. Popište důvod vlastními slovy, správce daně '
+                    . 'obecnou formulaci může rozporovat.';
+            }
+            $poradi = 0;
+            foreach ($this->wrapAttachmentLines($reasonText) as $line) {
+                $poradi++;
+                $row = $dom->createElement('VetaR');
+                $row->setAttribute('poradi', (string) $poradi);
+                $row->setAttribute('kod_sekce', 'D');
+                $row->setAttribute('t_prilohy', $line);
+                $dphdp3->appendChild($row);
+            }
+        } else {
+            $vetaR = $dom->createElement('VetaR');
+            $vetaR->setAttribute('poradi', '1');
+            $dphdp3->appendChild($vetaR);
+        }
 
         // trans: A = vznikla daňová povinnost (kladná vlastní daň), N = nevznikla
         // (nadměrný odpočet / nulový rozdíl). U dodatečného rozhoduje znaménko rozdílu
@@ -619,6 +732,15 @@ final class DphPriznaniBuilder
         }
         // § 33/4 DŘ: termín padající na víkend/svátek se posouvá na další pracovní den.
         $deadline = CzechWorkingDays::deadline($deadlineYear, $deadlineMonth);
+
+        // Dodatečné přiznání má vlastní lhůtu: do konce měsíce NÁSLEDUJÍCÍHO po měsíci
+        // zjištění (§ 141 odst. 1 DŘ), ne 25. den po skončení zdaňovacího období. Ta by
+        // u dodatečného byla dávno v minulosti a UI ji ukazovalo jako „po termínu".
+        if ($isAmendment && $dZjist !== null) {
+            $deadline = CzechWorkingDays::shiftToWorkingDay(
+                (new \DateTimeImmutable($dZjist))->modify('last day of next month')
+            )->format('Y-m-d');
+        }
 
         $summary = [
             'period'                  => sprintf('%04d-%02d', $year, $month),
@@ -1021,11 +1143,19 @@ final class DphPriznaniBuilder
      * (§ 141 DŘ: „uvádí se pouze rozdíly"); koeficient se ponechá jen když v elementu zbyl
      * nějaký nenulový rozdíl (jinak by osiřel bez odpovídajícího odpočtu).
      *
+     * ── Koeficient musí přežít i to, že krácený odpočet z období ZMIZEL ──────────────
+     * Dřív se koeficient bral VÝHRADNĚ z nových hodnot. Jenže `koef_p20_nov` se plní jen
+     * když `totalDanOdpKraceny > 0`: dodatečné, které jediný krácený doklad vyřadí, tak
+     * vygenerovalo `odp_sum_kr="-10000"` a `odp_uprav_kf="-4000"` BEZ koeficientu, kterým
+     * se ř.52 ověřuje. XSD to propustí (vše optional), EPO ne. Proto fallback na hodnotu
+     * ze základny — procento popisuje období, ne rozdíl, takže převzít to, s čím se ř.52
+     * původně počítal, je věcně správně.
+     *
      * @param array<string,float> $new      nové (přepočtené) absolutní hodnoty
      * @param array<string,float> $baseline  hodnoty z posledního podaného přiznání
      * @return array<string,float>
      */
-    private function diffElement(array $new, array $baseline): array
+    private function diffElement(array $new, array $baseline, array $pairs = []): array
     {
         $out = [];
         $keys = array_unique(array_merge(array_keys($new), array_keys($baseline)));
@@ -1034,6 +1164,8 @@ final class DphPriznaniBuilder
             if (isset(self::NON_DIFF_ATTRS[$k])) {
                 if (isset($new[$k])) {
                     $coef[$k] = (float) $new[$k];
+                } elseif (isset($baseline[$k])) {
+                    $coef[$k] = (float) $baseline[$k];
                 }
                 continue;
             }
@@ -1042,12 +1174,48 @@ final class DphPriznaniBuilder
                 $out[$k] = $delta;
             }
         }
+        // Základ daně a daň tvoří na řádku DVOJICI: opravím-li sazbu, změní se daň, ale
+        // základ zůstane stejný — a jeho nulový rozdíl by z výkazu vypadl. EPO na to hlásí
+        // „Je zadána pouze jedna z hodnot základ daně/daň na ř. 01. Musí být zadány obě."
+        // (ověřeno zkušebním předáním). Nulu proto u protějšku doplníme.
+        // Protějšek se doplní jen tehdy, když na tomhle elementu VŮBEC existuje (v nových
+        // datech nebo v základně). Bez té podmínky by u ř. 40, kde plný i krácený odpočet
+        // sdílejí základ `pln23`, mohl vzniknout atribut, který v přiznání nemá co dělat.
+        foreach ($out as $k => $_) {
+            $partner = $pairs[$k] ?? null;
+            if ($partner === null || array_key_exists($partner, $out)) {
+                continue;
+            }
+            if (array_key_exists($partner, $new) || array_key_exists($partner, $baseline)) {
+                $out[$partner] = 0.0;
+            }
+        }
         if ($out !== []) {
             foreach ($coef as $k => $v) {
                 $out[$k] = $v;
             }
         }
         return $out;
+    }
+
+    /**
+     * Ploché „atribut → jeho protějšek" z mapy řádků ($lineMap): základ ↔ daň.
+     *
+     * @param array<string,array{veta:int, base:string, vat:?string}> $lineMap
+     * @return array<string,string>
+     */
+    private static function attributePairs(array $lineMap): array
+    {
+        $pairs = [];
+        foreach ($lineMap as $line) {
+            $base = $line['base'] ?? null;
+            $vat  = $line['vat'] ?? null;
+            if (is_string($base) && is_string($vat) && $base !== '' && $vat !== '') {
+                $pairs[$base] = $vat;
+                $pairs[$vat]  = $base;
+            }
+        }
+        return $pairs;
     }
 
     /**
@@ -1186,6 +1354,29 @@ final class DphPriznaniBuilder
             $out[$name] = $attrs;
         }
         return $out;
+    }
+
+    /**
+     * Rozseká text přílohy na řádky po 72 znacích (XSD limit t_prilohy), pokud možno na
+     * hranicích slov. Prázdné řádky se vynechávají.
+     *
+     * @return list<string>
+     */
+    private function wrapAttachmentLines(string $text): array
+    {
+        $text = preg_replace('/\s+/u', ' ', trim($text)) ?? '';
+        if ($text === '') {
+            return [];
+        }
+        $wrapped = wordwrap($text, 72, "\n", true);
+        $lines = [];
+        foreach (explode("\n", $wrapped) as $line) {
+            $line = trim($line);
+            if ($line !== '') {
+                $lines[] = mb_substr($line, 0, 72);
+            }
+        }
+        return $lines;
     }
 
     /** Normalizace vstupního data (Y-m-d) — null pokud prázdné/neplatné. */

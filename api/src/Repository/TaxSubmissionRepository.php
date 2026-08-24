@@ -259,22 +259,79 @@ final class TaxSubmissionRepository
         ?int $month,
         ?int $quarter,
     ): array {
+        return $this->findFiledChainForPeriod($supplierId, $formCode, $year, $month, $quarter, ['D', 'E']);
+    }
+
+    /**
+     * PODANÁ podání jednoho období a vybraných druhů, CHRONOLOGICKY (vč. `xml_content`).
+     *
+     * Zobecnění {@see findAmendmentsForPeriod()}: dodatečné přiznání k DPH potřebuje řetězec
+     * D/E, následné souhrnné hlášení řetězec R/N (jeho storno řádky se párují proti stavu,
+     * který ve VIES vznikl řádným hlášením A VŠEMI předchozími následnými). Pravidlo je
+     * u obou stejné — do řetězce patří jen prokazatelně podané a XSD-platné snapshoty.
+     *
+     * @param list<string> $variants
+     * @return list<array<string,mixed>>
+     */
+    public function findFiledChainForPeriod(
+        int $supplierId,
+        string $formCode,
+        int $year,
+        ?int $month,
+        ?int $quarter,
+        array $variants,
+    ): array {
+        $variants = array_values(array_filter($variants, static fn ($v) => $v !== ''));
+        if ($variants === []) {
+            return [];
+        }
         $periodSql = $month !== null
             ? 'period_month = ? AND period_quarter IS NULL'
             : 'period_month IS NULL AND period_quarter = ?';
-        // Audit §2.4: kumulativní řetězec staví jen na prokazatelně PODANÝCH dodatečných.
+        $ph = implode(',', array_fill(0, count($variants), '?'));
+        // Audit §2.4: kumulativní řetězec staví jen na prokazatelně PODANÝCH snapshotech.
         // Přijetí EPO (`accepted`) jejich důkazní sílu dále zvyšuje.
         $sql =
             "SELECT * FROM tax_submissions
               WHERE supplier_id = ? AND form_code = ? AND period_year = ?
                 AND {$periodSql}
-                AND form_variant IN ('D','E')
+                AND form_variant IN ({$ph})
                 AND status IN ('submitted','accepted')
                 AND validation_status <> 'failed'
            ORDER BY submitted_at ASC, generated_at ASC, id ASC";
         $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([$supplierId, $formCode, $year, $month !== null ? $month : $quarter]);
+        $stmt->execute(array_merge(
+            [$supplierId, $formCode, $year, $month !== null ? $month : $quarter],
+            $variants,
+        ));
         return array_map(fn ($r) => $this->normalize($r), $stmt->fetchAll(\PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * ŠPIČKA ŘETĚZCE „poslední známé daně" období — id posledního podaného dodatečného (D/E),
+     * a když žádné není, id podaného řádného/opravného (B/O). Null, když období nemá základnu.
+     *
+     * K čemu to je: builder si při stavbě dodatečného uloží do summary
+     * `reference_submission_id` = špičku, proti které diff počítal. Než se snapshot označí
+     * jako podaný, musí špička být pořád tatáž — jinak by se do kumulativní základny
+     * započetla delta, která už v řetězci je (typicky: XML se stáhne dvakrát a účetní
+     * omylem označí jako podané oba snapshoty). Řádkový zámek chrání jeden řádek,
+     * tenhle invariant celé období.
+     */
+    public function amendmentChainTipId(
+        int $supplierId,
+        string $formCode,
+        int $year,
+        ?int $month,
+        ?int $quarter,
+    ): ?int {
+        $chain = $this->findAmendmentsForPeriod($supplierId, $formCode, $year, $month, $quarter);
+        if ($chain !== []) {
+            $last = $chain[count($chain) - 1];
+            return (int) $last['id'];
+        }
+        $prior = $this->findLatestForPeriod($supplierId, $formCode, $year, $month, $quarter, ['B', 'O']);
+        return $prior !== null ? (int) $prior['id'] : null;
     }
 
     /**

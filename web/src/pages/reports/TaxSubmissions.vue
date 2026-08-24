@@ -864,8 +864,20 @@ async function markSubmittedManually() {
   if (!item || !manualDate.value || manualBusy.value) return
   manualBusy.value = true
   try {
-    await epoSubmissionsApi.markSubmitted(item.id, manualDate.value, manualRef.value.trim())
+    const row = await epoSubmissionsApi.markSubmitted(item.id, manualDate.value, manualRef.value.trim())
     toast.success(t('reports.submissions.marked_submitted'))
+    // Podání spouští zúčtování DPH (343). Když se nezaúčtovalo — typicky dodatečné
+    // přiznání do zamčeného období — nesmí to zapadnout: rozdíl daně by v hlavní knize
+    // chyběl a nikdo by se to nedozvěděl.
+    // Varujeme jen u stavů, kdy doklad CHYBÍ, ač vzniknout měl. `posted`, nulová daň
+    // ani firma mimo podvojné účetnictví problém nejsou.
+    const clearing = row?.vat_clearing
+    const clearingFailed = ['skipped', 'error', 'skipped_missing_accounts', 'skipped_flat_vat_account']
+    if (clearing && clearingFailed.includes(clearing.status)) {
+      toast.warning(t('reports.submissions.vat_clearing_skipped', {
+        reason: clearing.error || clearing.reason || clearing.status,
+      }))
+    }
     await load(false)
   } catch (e) {
     toast.error(apiErrorMessage(e))

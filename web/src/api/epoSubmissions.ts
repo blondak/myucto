@@ -161,6 +161,21 @@ export interface TaxSubmission {
   delete_blocker: SubmissionDeleteBlocker | null
   /** Nedořešené předání jde odemknout vědomým potvrzením „nepodáno". */
   delete_needs_acknowledgement: boolean
+  /**
+   * Výsledek zúčtování DPH (343) spuštěného podáním — vrací ho jen endpoint „označit
+   * jako podané". `skipped`/`error` znamená, že rozdíl daně v hlavní knize NENÍ; typicky
+   * u dodatečného přiznání do období, které je už zamčené (`date_locked`). Musí se
+   * dostat k účetní, jinak o tom nikdo neví.
+   */
+  vat_clearing?: VatClearingOutcome | null
+}
+
+export interface VatClearingOutcome {
+  status: string
+  reason?: string | null
+  error?: string | null
+  period?: string | null
+  entry_id?: number | null
 }
 
 /**

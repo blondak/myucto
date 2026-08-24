@@ -187,6 +187,41 @@ final class TaxSubmissionAction
                 );
             }
 
+            // Dodatečné přiznání (D/E): špička řetězce „poslední známé daně" se od stavby
+            // snapshotu nesměla pohnout. Kdyby ano, započetla by se do kumulativní základny
+            // delta, která už v řetězci je — typicky když se XML stáhne dvakrát a účetní
+            // označí jako podané oba snapshoty. Tichá chyba v ř. 66 dalšího dodatečného.
+            $variant = (string) ($existing['form_variant'] ?? '');
+            // Opakované označení už podaného snapshotu jen aktualizuje metadata — tam je
+            // špička řetězce logicky on sám, takže kontrola neplatí.
+            $alreadyFiled = in_array((string) ($existing['status'] ?? ''), ['submitted', 'accepted'], true);
+            if (in_array($variant, ['D', 'E'], true) && !$alreadyFiled) {
+                $expectedTip = $existing['summary']['reference_submission_id'] ?? null;
+                $currentTip = $this->repo->amendmentChainTipId(
+                    $supplierId,
+                    (string) $existing['form_code'],
+                    (int) $existing['period_year'],
+                    $existing['period_month'] !== null ? (int) $existing['period_month'] : null,
+                    $existing['period_quarter'] !== null ? (int) $existing['period_quarter'] : null,
+                );
+                if ($expectedTip !== null && (int) $expectedTip !== (int) $currentTip) {
+                    if ($ownsTransaction) {
+                        $pdo->rollBack();
+                    }
+                    return Json::error(
+                        $response,
+                        'amendment_baseline_moved',
+                        'Od vytvoření tohoto dodatečného přiznání se změnila poslední známá daň '
+                            . 'období (mezitím bylo označeno jako podané jiné dodatečné přiznání). '
+                            . 'Rozdíl by se započetl dvakrát — vygenerujte dodatečné přiznání znovu '
+                            . 'proti aktuálnímu stavu.',
+                        409,
+                        ['expected_reference_submission_id' => (int) $expectedTip,
+                         'current_reference_submission_id'  => $currentTip],
+                    );
+                }
+            }
+
             $row = $this->archiver->markSubmitted(
                 $id,
                 $supplierId,

@@ -43,6 +43,9 @@ const currentQuarter = computed(() => Math.ceil(month.value / 3))
 // C7' — typ podání. Dodatečné (D/E) vyžaduje datum zjištění důvodů (§141 DŘ).
 const variant = ref<DphVariant>('radne')
 const dZjist = ref('')
+// Důvody pro podání dodatečného přiznání (§ 141 odst. 5 DŘ) — jdou do textové přílohy
+// výkazu. Bez nich EPO podání sice přijme, ale vytkne je.
+const reason = ref('')
 const isAmendment = computed(() => variant.value === 'dodatecne' || variant.value === 'dodatecne_opravne')
 const amendmentReady = computed(() => !isAmendment.value || dZjist.value !== '')
 
@@ -63,6 +66,7 @@ async function loadAll() {
       preview.value = await reportsApi.dphPreview(
         year.value, month.value, periodOverride.value || undefined,
         variant.value, isAmendment.value ? dZjist.value : undefined,
+        isAmendment.value ? reason.value : undefined,
       )
     } else {
       preview.value = null
@@ -193,6 +197,7 @@ async function downloadXml() {
     await downloadApiFile(reportsApi.dphDownloadUrl(
       year.value, month.value, periodOverride.value || undefined, acknowledge,
       variant.value, isAmendment.value ? dZjist.value : undefined,
+      isAmendment.value ? reason.value : undefined,
     ))
     await router.push('/reports/submissions')
   } catch (e) {
@@ -258,7 +263,7 @@ const daysToDeadline = computed(() => {
   return Math.ceil((deadline.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
 })
 
-watch([year, month, periodOverride, variant, dZjist], () => {
+watch([year, month, periodOverride, variant, dZjist, reason], () => {
   postFilingPage.value = 1
   clearingDone.value = ''
   for (const key of Object.keys(crossCheckPages)) delete crossCheckPages[key]
@@ -332,6 +337,9 @@ onMounted(() => {
         <label class="text-sm text-neutral-600">{{ t('reports.dph.variant.d_zjist') }}</label>
         <input type="date" v-model="dZjist"
           class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+        <label class="text-sm text-neutral-600">{{ t('reports.dph.variant.reason') }}</label>
+        <input type="text" v-model="reason" :placeholder="t('reports.dph.variant.reason_placeholder')"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm flex-1 min-w-64" />
       </template>
       <span class="text-xs text-neutral-500">{{ t('reports.dph.variant.hint') }}</span>
     </div>

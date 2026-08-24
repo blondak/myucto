@@ -198,10 +198,12 @@ final class DphPriznaniAction
             return Json::error($response, 'validation_failed', 'Neplatný typ přiznání.', 400);
         }
         $dZjist = (string) ($q['d_zjist'] ?? '') ?: null;
+        // Důvody pro dodatečné přiznání (§ 141 odst. 5) — textová příloha VetaR.
+        $reason = (string) ($q['reason'] ?? '') ?: null;
         try {
-            $result = $this->builder->build($supplierId, $year, $month, $period, $variant, $dZjist);
+            $result = $this->builder->build($supplierId, $year, $month, $period, $variant, $dZjist, $reason);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return ReportBuildError::toJson($response, $e);
         }
 
         // Křížová kontrola DPHDP3↔KH↔SH↔343 (C8') — jen pro řádné/opravné (plné přiznání).
@@ -253,15 +255,17 @@ final class DphPriznaniAction
             return Json::error($response, 'validation_failed', 'Neplatný typ přiznání.', 400);
         }
         $dZjist = (string) ($q['d_zjist'] ?? '') ?: null;
+        // Důvody pro dodatečné přiznání (§ 141 odst. 5) — textová příloha VetaR.
+        $reason = (string) ($q['reason'] ?? '') ?: null;
         try {
-            $result = $this->builder->build($supplierId, $year, $month, $period, $variant, $dZjist);
+            $result = $this->builder->build($supplierId, $year, $month, $period, $variant, $dZjist, $reason);
             // #238: doplň chybějící kurzy z ČNB a přebuildi. Fill JE zápis → v souladu
             // s B8/HIGH#1 (readonly download nemutuje) jen s WRITE oprávněním; READ-only
             // nebo když ČNB kurz nezná → tvrdá chyba 422.
             if (!empty($result['missing_rates'])) {
                 if (RequestAuthorization::allows($request, 'reports.export', AccessLevel::WRITE)) {
                     $this->rateFiller->fill($supplierId, $result['missing_rates']);
-                    $result = $this->builder->build($supplierId, $year, $month, $period, $variant, $dZjist);
+                    $result = $this->builder->build($supplierId, $year, $month, $period, $variant, $dZjist, $reason);
                 }
                 if (!empty($result['missing_rates'])) {
                     $labels = \MyInvoice\Service\Report\VatLedgerService::missingExchangeRateLabels($result['missing_rates']);
@@ -271,7 +275,7 @@ final class DphPriznaniAction
                 }
             }
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return ReportBuildError::toJson($response, $e);
         }
         $forma = (string) ($result['summary']['dapdph_forma'] ?? 'B');
         $isAmendment = (bool) ($result['summary']['is_amendment'] ?? false);
@@ -370,7 +374,7 @@ final class DphPriznaniAction
         try {
             $result = $this->postFilingChanges->changes($supplierId, $year, $month, $period);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return ReportBuildError::toJson($response, $e);
         }
         return Json::ok($response, $result);
     }
