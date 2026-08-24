@@ -37,7 +37,15 @@ final class KontrolniHlaseniAction
      * Povolené typy KH (C7'): řádné, řádné/opravné (§101f/1), následné (§101f/2),
      * následné/opravné. N/E přijímají volitelně datum zjištění a č.j. výzvy správce daně.
      */
-    private const KH_VARIANTS = ['radne', 'opravne', 'nasledne', 'nasledne_opravne'];
+    private const KH_VARIANTS = [
+        'radne', 'opravne', 'nasledne', 'nasledne_opravne',
+        // Rychlá odpověď na výzvu (§ 101g): nulové KH / potvrzení správnosti posledního KH.
+        // Obě vyžadují č.j. výzvy a generují hlášení bez oddílů A/B/C.
+        'vyzva_nulove', 'vyzva_potvrzeni',
+    ];
+
+    /** Varianty, které smí (a musí) nést č.j. výzvy správce daně. */
+    private const KH_VYZVA_VARIANTS = ['nasledne', 'nasledne_opravne', 'vyzva_nulove', 'vyzva_potvrzeni'];
 
     public function preview(Request $request, Response $response): Response
     {
@@ -57,7 +65,7 @@ final class KontrolniHlaseniAction
         try {
             $result = $this->builder->build($supplierId, $year, $month, $period, $variant, $dZjist, $cJedVyzvy);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return ReportBuildError::toJson($response, $e);
         }
         return Json::ok($response, [
             'summary'  => $result['summary'],
@@ -98,7 +106,7 @@ final class KontrolniHlaseniAction
                 }
             }
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return ReportBuildError::toJson($response, $e);
         }
         $forma = (string) ($result['summary']['khdph_forma'] ?? 'B');
         $userId = (int) ($user['id'] ?? 0);
@@ -151,9 +159,10 @@ final class KontrolniHlaseniAction
         }
         $dZjist    = (string) ($q['d_zjist'] ?? '') ?: null;
         $cJedVyzvy = (string) ($q['c_jed_vyzvy'] ?? '') ?: null;
-        $isFollowUp = in_array($variant, ['nasledne', 'nasledne_opravne'], true);
-        if (!$isFollowUp && $cJedVyzvy !== null) {
-            return [$variant, null, null, 'Č.j. výzvy lze uvést jen u následného kontrolního hlášení.'];
+        $acceptsVyzva = in_array($variant, self::KH_VYZVA_VARIANTS, true);
+        if (!$acceptsVyzva && $cJedVyzvy !== null) {
+            return [$variant, null, null, 'Č.j. výzvy lze uvést jen u následného kontrolního hlášení '
+                . 'nebo u rychlé odpovědi na výzvu.'];
         }
         return [$variant, $dZjist, $cJedVyzvy, null];
     }

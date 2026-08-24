@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Repository\TaxSubmissionRepository;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Tax\BadDebt\Section46Service;
 use MyInvoice\Service\Tax\BadDebt\Section74bService;
 
@@ -46,6 +48,8 @@ final class KontrolniHlaseniBuilder
         private readonly Section74bService $section74b,
         // § 46 ZDPH — evidované věřitelské opravy u nedobytné pohledávky (A.4, zdph_44='P').
         private readonly Section46Service $section46,
+        // Archiv podání — základna následného KH (první podání za období je vždy řádné).
+        private readonly TaxSubmissionRepository $submissions,
     ) {}
 
     /**
@@ -59,6 +63,28 @@ final class KontrolniHlaseniBuilder
         'opravne'           => 'O',
         'nasledne'          => 'N',
         'nasledne_opravne'  => 'E',
+        // Rychlá odpověď na výzvu (§ 101g) — viz VARIANT_VYZVA_ODP.
+        'vyzva_nulove'      => 'B',
+        'vyzva_potvrzeni'   => 'N',
+    ];
+
+    /**
+     * RYCHLÁ ODPOVĚĎ NA VÝZVU správce daně (XSD atribut `vyzva_odp`):
+     *   B = nemám povinnost podat KH za období (nulové KH) — je to PRVNÍ podání za období,
+     *       proto khdph_forma = B (řádné),
+     *   P = potvrzuji správnost naposledy podaného KH (nemění se žádná data) — reaguje na
+     *       už podané hlášení, proto khdph_forma = N (následné).
+     *
+     * XSD: „V případě použití této volby nesmějí být vyplněny řádky v oddílech A, B i C" —
+     * odpověď proto neprochází sběrem sekcí vůbec ({@see buildQuickReply()}), a č.j. výzvy
+     * je pro zpracování nezbytné.
+     *
+     * Bez téhle větve zbývala účetní jediná cesta: poslat prázdné řádné KH bez `vyzva_odp`,
+     * což se za odpověď na výzvu nepovažuje (§ 101h odst. 1 písm. b — pokuta 30 000 Kč).
+     */
+    private const VARIANT_VYZVA_ODP = [
+        'vyzva_nulove'    => 'B',
+        'vyzva_potvrzeni' => 'P',
     ];
 
     /**
@@ -78,27 +104,107 @@ final class KontrolniHlaseniBuilder
     ): array {
         $forma = self::VARIANT_FORMA[$variant] ?? null;
         if ($forma === null) {
-            throw new \RuntimeException("Neznámý typ kontrolního hlášení: {$variant}.");
+            throw new PostingException('kh_variant_invalid', "Neznámý typ kontrolního hlášení: {$variant}.", 422);
         }
-        $isFollowUp = $forma === 'N' || $forma === 'E'; // následné — volitelné d_zjist / č.j. výzvy
-        $dZjist    = $isFollowUp ? $this->normalizeDate($dZjist) : null;
-        $cJedVyzvy = $isFollowUp ? $this->normalizeVyzva($cJedVyzvy) : null;
+        $vyzvaOdp   = self::VARIANT_VYZVA_ODP[$variant] ?? null;
+        $isFollowUp = $forma === 'N' || $forma === 'E'; // následné — d_zjist / č.j. výzvy
+        $cJedVyzvy  = ($isFollowUp || $vyzvaOdp !== null) ? $this->normalizeVyzva($cJedVyzvy) : null;
+        $dZjist     = $isFollowUp && $vyzvaOdp === null ? $this->requireValidDate($dZjist) : null;
 
         [$start, $end, $quarter, $endMonth] = self::periodBounds($year, $month, $period);
+
+        // § 101e odst. 1: právnická osoba podává KH VŽDY měsíčně. UI kvartální přepínač
+        // pro PO nezobrazí, ale API se volalo i přímo — a KH s `ctvrt` od PO EPO odmítne.
+        // Tvrdá brzda místo dosavadního varování.
+        $supplierForPeriod = $this->loadSupplier($supplierId, $end);
+        if ($period === 'quarterly' && (string) ($supplierForPeriod['taxpayer_type'] ?? '') === 'po') {
+            throw new PostingException(
+                'kh_quarterly_not_allowed',
+                'Právnická osoba podává kontrolní hlášení vždy měsíčně (§ 101e odst. 1) — '
+                    . 'kvartální kontrolní hlášení nelze sestavit.',
+                422,
+            );
+        }
+
+        // Datum zjištění nelze zjistit dřív, než období skončilo, ani v budoucnu.
+        if ($dZjist !== null) {
+            if ($dZjist < $end) {
+                throw new PostingException(
+                    'kh_d_zjist_before_period',
+                    sprintf(
+                        'Datum zjištění důvodů (%s) předchází konci opravovaného období (%s).',
+                        $dZjist,
+                        $end,
+                    ),
+                    422,
+                );
+            }
+            // Viz DphPriznaniBuilder: u období, které ještě neskončilo, by kontrola
+            // porovnávala dvě budoucí data a jen překážela.
+            $today = date('Y-m-d');
+            if ($end <= $today && $dZjist > $today) {
+                throw new PostingException('kh_d_zjist_future', 'Datum zjištění důvodů nemůže být v budoucnosti.', 422);
+            }
+        }
+
+        // ── Rychlá odpověď na výzvu (§ 101g) — bez oddílů A/B/C, jen záhlaví + plátce ──
+        if ($vyzvaOdp !== null) {
+            if ($cJedVyzvy === null) {
+                throw new PostingException(
+                    'kh_vyzva_ref_required',
+                    'Rychlá odpověď na výzvu vyžaduje č.j. výzvy správce daně (ve tvaru '
+                        . '99999999/99/9999-99999-999999).',
+                    422,
+                );
+            }
+            return $this->buildQuickReply(
+                $supplierId, $year, $month, $period, $variant, $forma, $vyzvaOdp,
+                $cJedVyzvy, $quarter, $endMonth, $end,
+            );
+        }
+
+        // Následné KH navazuje na už podané hlášení — první podání za období je VŽDY řádné,
+        // i po termínu (XSD anotace khdph_forma). Následné bez základny by správce daně
+        // neměl s čím spárovat. Stejná brána, jakou má dodatečné přiznání k DPH.
+        if ($isFollowUp) {
+            $prior = $this->submissions->findLatestForPeriod(
+                $supplierId,
+                'dphkh1',
+                $year,
+                $period === 'quarterly' ? null : $month,
+                $period === 'quarterly' ? $quarter : null,
+                ['B', 'O'],
+            );
+            if ($prior === null) {
+                throw new PostingException(
+                    'kh_no_prior_submission',
+                    'Za dané období není evidováno podané řádné kontrolní hlášení. První podání '
+                        . 'za období je vždy ŘÁDNÉ, i když je po termínu (§ 101e). Pokud jste řádné '
+                        . 'KH podali, označte jeho snapshot v Archivu podání jako podaný.',
+                    422,
+                );
+            }
+        }
 
         // Rozhodný stav plátcovství = POSLEDNÍ DEN období výkazu, ne dnešek (EPIC VH-04)
         // — firma odregistrovaná dnes musí projít validací KH za období, kdy plátcem byla.
         // Zrušení registrace UPROSTŘED období: KH za poslední období plátcovství se pořád
         // podává → warning „není plátce" jen když nebyla plátcem ani jediný den období.
-        $supplier = $this->loadSupplier($supplierId, $end);
+        $supplier = $supplierForPeriod;
         $payerDuring = !empty($supplier['is_vat_payer'])
             || \MyInvoice\Service\Vat\VatStatusService::payerDuring($this->db->pdo(), $supplierId, $start, $end);
         $warnings = $this->validateSupplier($supplier, $period, $payerDuring);
         if ($isFollowUp && $dZjist === null && $cJedVyzvy === null) {
-            // XSD anotace d_zjist: u následného KH musí být vyplněno buď datum zjištění, nebo
-            // č.j. výzvy. Neblokujeme (uživatel může doplnit), ale upozorníme.
-            $warnings[] = 'Následné kontrolní hlášení: doplňte datum zjištění důvodů nebo č.j. výzvy '
-                . 'správce daně (§ 101f odst. 2) — jinak nemusí projít podání na EPO.';
+            // XSD anotace d_zjist: u následného KH MUSÍ být vyplněno buď datum zjištění, nebo
+            // č.j. výzvy. Dřív to bylo jen varování — jenže download endpoint varování vůbec
+            // nevrací (streamuje XML), takže při stažení bez náhledu nebyla žádná zpětná
+            // vazba a ven šlo vadné podání. Tvrdá chyba, stejně jako u dodatečného DPH.
+            throw new PostingException(
+                'kh_d_zjist_required',
+                'Následné kontrolní hlášení vyžaduje datum zjištění důvodů, nebo č.j. výzvy '
+                    . 'správce daně (§ 101f odst. 2).',
+                422,
+            );
         }
 
         // Všechny sekce z jedné projekce kanonických řádků (VatLedgerService).
@@ -361,6 +467,41 @@ final class KontrolniHlaseniBuilder
         if ($deadlineMonth > 12) { $deadlineMonth -= 12; $deadlineYear++; }
         // § 33/4 DŘ: termín padající na víkend/svátek se posouvá na další pracovní den.
         $deadline = CzechWorkingDays::deadline($deadlineYear, $deadlineMonth);
+        $regularDeadline = $deadline;
+
+        // Následné KH má vlastní lhůtu: 5 pracovních dnů ode dne zjištění (§ 101f odst. 2).
+        // Termín řádného hlášení je u něj bezpředmětný — UI ho ukazovalo jako „po termínu,
+        // −N dní", což je u následného vždycky a nic to neříká.
+        if ($isFollowUp && $dZjist !== null) {
+            $deadline = self::addWorkingDays($dZjist, 5);
+        } elseif ($isFollowUp && $cJedVyzvy !== null) {
+            $warnings[] = 'Následné kontrolní hlášení na výzvu se podává do 17 dnů od dodání výzvy '
+                . 'do datové schránky (nebo do 5 pracovních dnů při jiném způsobu oznámení) — '
+                . 'termín podle data dodání výzvy si ohlídejte sami, aplikace ho nezná.';
+        }
+
+        // § 101f: opravné (O) jen PŘED lhůtou pro řádné, následné (N/E) až PO ní. Volba
+        // proti lhůtě je tichá chyba — EPO takové podání může přijmout, ale správce daně
+        // k opravnému po lhůtě nepřihlíží a původní chybné KH zůstane v platnosti.
+        // Varování, ne blok: lhůtu lze individuálně prodloužit a tvrdá brzda těsně před
+        // termínem by byla horší než falešný poplach.
+        $today = date('Y-m-d');
+        if ($forma === 'O' && $today > $regularDeadline) {
+            $warnings[] = sprintf(
+                'Lhůta pro řádné kontrolní hlášení (%s) už uplynula — opravné hlášení (§ 101f '
+                    . 'odst. 1) lze podat jen před ní. Po lhůtě se podává NÁSLEDNÉ kontrolní '
+                    . 'hlášení; zkontrolujte typ podání.',
+                $regularDeadline,
+            );
+        }
+        if ($isFollowUp && $today <= $regularDeadline) {
+            $warnings[] = sprintf(
+                'Lhůta pro řádné kontrolní hlášení (%s) ještě běží — do jejího uplynutí se '
+                    . 'chyba opravuje OPRAVNÝM hlášením (§ 101f odst. 1), ne následným. '
+                    . 'Zkontrolujte typ podání.',
+                $regularDeadline,
+            );
+        }
 
         return [
             'xml'      => $dom->saveXML() ?: '',
@@ -467,8 +608,29 @@ final class KontrolniHlaseniBuilder
     }
 
     /**
-     * Č.j. výzvy správce daně (XSD c_jed_vyzvy, maxLength 32). Prázdné → null. Ořízne na 32 znaků,
-     * formát 99999999/99/9999-99999-999999 validuje uživatel (XSD délku hlídá, tvar ne).
+     * Datum, které MUSÍ být platné. `normalizeDate()` vrací u nesmyslu null, takže zadané
+     * datum tiše zmizelo z XML a uživatel se to nedozvěděl — u data, kterým běží lhůta,
+     * je to nepřijatelné. Prázdný vstup → null (povinnost řeší volající).
+     */
+    private function requireValidDate(?string $date): ?string
+    {
+        if (trim((string) $date) === '') {
+            return null;
+        }
+        $normalized = $this->normalizeDate($date);
+        if ($normalized === null) {
+            throw new PostingException('kh_d_zjist_invalid', 'Neplatné datum zjištění důvodů.', 422);
+        }
+        return $normalized;
+    }
+
+    /**
+     * Č.j. výzvy správce daně (XSD c_jed_vyzvy, maxLength 32). Prázdné → null.
+     *
+     * Tvar 99999999/99/9999-99999-999999 hlídáme sami: XSD kontroluje jen délku, a dřívější
+     * `mb_substr(..., 0, 32)` překlep tiše zkomolil a poslal do XML — správce daně pak
+     * odpověď nespáruje s výzvou. Oddělovače uživatel často vynechá nebo nahradí mezerami,
+     * proto se nejdřív zkusí složit kanonický tvar z holých číslic.
      */
     private function normalizeVyzva(?string $value): ?string
     {
@@ -476,7 +638,132 @@ final class KontrolniHlaseniBuilder
         if ($value === '') {
             return null;
         }
-        return mb_substr($value, 0, 32);
+        $canonical = '/^\d{8}\/\d{2}\/\d{4}-\d{5}-\d{6}$/';
+        if (preg_match($canonical, $value) === 1) {
+            return $value;
+        }
+        $digits = preg_replace('/\D+/', '', $value) ?? '';
+        if (strlen($digits) === 25) {
+            $rebuilt = sprintf(
+                '%s/%s/%s-%s-%s',
+                substr($digits, 0, 8),
+                substr($digits, 8, 2),
+                substr($digits, 10, 4),
+                substr($digits, 14, 5),
+                substr($digits, 19, 6),
+            );
+            if (preg_match($canonical, $rebuilt) === 1) {
+                return $rebuilt;
+            }
+        }
+        throw new PostingException(
+            'kh_vyzva_ref_invalid',
+            'Č.j. výzvy musí být ve tvaru 99999999/99/9999-99999-999999.',
+            422,
+        );
+    }
+
+    /**
+     * Datum + N pracovních dnů (§ 101f odst. 2 — lhůta následného KH). Víkendy a svátky
+     * se nepočítají; výsledek je vždy pracovní den.
+     */
+    private static function addWorkingDays(string $from, int $days): string
+    {
+        $d = new \DateTimeImmutable($from);
+        $added = 0;
+        while ($added < $days) {
+            $d = $d->modify('+1 day');
+            if (CzechWorkingDays::isWorkingDay($d)) {
+                $added++;
+            }
+        }
+        return $d->format('Y-m-d');
+    }
+
+    /**
+     * RYCHLÁ ODPOVĚĎ NA VÝZVU (§ 101g) — KH bez jediného řádku oddílů A/B/C.
+     *
+     * XSD to vyžaduje doslova: „V případě použití této volby nesmějí být vyplněny řádky
+     * v oddílech A, B i C… vyplnění údajů o Plátci a Záhlaví je pro další zpracování
+     * nezbytné." Proto se tahle větev vůbec nedotýká sběru sekcí — ne že by je odfiltrovala,
+     * ona je nesbírá.
+     *
+     * @return array{xml: string, summary: array<string,mixed>, warnings: list<string>, missing_rates: list<array<string,mixed>>}
+     */
+    private function buildQuickReply(
+        int $supplierId,
+        int $year,
+        int $month,
+        string $period,
+        string $variant,
+        string $forma,
+        string $vyzvaOdp,
+        string $cJedVyzvy,
+        ?int $quarter,
+        int $endMonth,
+        string $end,
+    ): array {
+        $supplier = $this->loadSupplier($supplierId, $end);
+        $warnings = $this->validateSupplier($supplier, $period, true);
+        $warnings[] = $vyzvaOdp === 'B'
+            ? 'Rychlá odpověď na výzvu: „Nemám povinnost podat kontrolní hlášení za období." '
+                . 'Hlášení je bez oddílů A/B/C — ověřte, že za období opravdu nevznikla povinnost.'
+            : 'Rychlá odpověď na výzvu: „Potvrzuji správnost naposledy podaného kontrolního '
+                . 'hlášení." Podáním se nemění žádná data.';
+        $warnings[] = 'Odpověď na výzvu se podává do 5 pracovních dnů od oznámení výzvy '
+            . '(resp. do 17 dnů od dodání do datové schránky) — termín si ohlídejte, aplikace '
+            . 'datum dodání výzvy nezná.';
+
+        [$dom, $dphkh] = EpoEnvelope::create('DPHKH1', '03.01');
+
+        $vetaD = $dom->createElement('VetaD');
+        $vetaD->setAttribute('dokument', 'KH1');
+        $vetaD->setAttribute('k_uladis', 'DPH');
+        if ($period === 'quarterly' && $quarter !== null) {
+            $vetaD->setAttribute('ctvrt', (string) $quarter);
+        } else {
+            $vetaD->setAttribute('mesic', (string) $month);
+        }
+        $vetaD->setAttribute('rok', (string) $year);
+        $vetaD->setAttribute('d_poddp', date('d.m.Y'));
+        $vetaD->setAttribute('khdph_forma', $forma);
+        $vetaD->setAttribute('c_jed_vyzvy', $cJedVyzvy);
+        $vetaD->setAttribute('vyzva_odp', $vyzvaOdp);
+        $dphkh->appendChild($vetaD);
+
+        $vetaP = $dom->createElement('VetaP');
+        EpoSupplierBlockBuilder::fillVetaP($vetaP, $supplier);
+        $dphkh->appendChild($vetaP);
+
+        $deadlineMonth = $endMonth + 1;
+        $deadlineYear = $year;
+        if ($deadlineMonth > 12) { $deadlineMonth -= 12; $deadlineYear++; }
+
+        return [
+            'xml'      => $dom->saveXML() ?: '',
+            'summary'  => [
+                'period'              => $period === 'quarterly' && $quarter !== null
+                    ? sprintf('%04d-Q%d', $year, $quarter)
+                    : sprintf('%04d-%02d', $year, $month),
+                'a1_count'            => 0,
+                'a2_count'            => 0,
+                'a4_count'            => 0,
+                'a5_count_aggregated' => 0,
+                'b1_count'            => 0,
+                'b2_count'            => 0,
+                'b3_count_aggregated' => 0,
+                'submission_deadline' => CzechWorkingDays::deadline($deadlineYear, $deadlineMonth),
+                'variant'             => $variant,
+                'khdph_forma'         => $forma,
+                'is_follow_up'        => $forma === 'N' || $forma === 'E',
+                'is_vyzva_odpoved'    => true,
+                'vyzva_odp'           => $vyzvaOdp,
+                'd_zjist'             => null,
+                'c_jed_vyzvy'         => $cJedVyzvy,
+            ],
+            'warnings' => $warnings,
+            'missing_rates' => [],
+        ];
     }
 
     /**

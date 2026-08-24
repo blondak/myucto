@@ -62,6 +62,9 @@ const variant = ref<KhVariant>('radne')
 const dZjist = ref('')
 const cJedVyzvy = ref('')
 const isFollowUp = computed(() => variant.value === 'nasledne' || variant.value === 'nasledne_opravne')
+// Rychlá odpověď na výzvu (§ 101g) — datum zjištění nemá, č.j. výzvy je povinné.
+const isVyzvaOdpoved = computed(() => variant.value === 'vyzva_nulove' || variant.value === 'vyzva_potvrzeni')
+const needsVyzvaRef = computed(() => isFollowUp.value || isVyzvaOdpoved.value)
 
 async function loadPreview() {
   loading.value = true
@@ -71,7 +74,7 @@ async function loadPreview() {
       year.value, month.value, effectivePeriod.value,
       variant.value,
       isFollowUp.value ? dZjist.value : undefined,
-      isFollowUp.value ? cJedVyzvy.value : undefined,
+      needsVyzvaRef.value ? cJedVyzvy.value : undefined,
     )
   } catch (e) {
     error.value = apiErrorMessage(e)
@@ -86,7 +89,7 @@ async function downloadXml() {
       year.value, month.value, effectivePeriod.value,
       variant.value,
       isFollowUp.value ? dZjist.value : undefined,
-      isFollowUp.value ? cJedVyzvy.value : undefined,
+      needsVyzvaRef.value ? cJedVyzvy.value : undefined,
     ))
     await router.push('/reports/submissions')
   } catch (e) {
@@ -169,15 +172,22 @@ onMounted(async () => {
         <option value="opravne">{{ t('reports.kh.variant.opravne') }}</option>
         <option value="nasledne">{{ t('reports.kh.variant.nasledne') }}</option>
         <option value="nasledne_opravne">{{ t('reports.kh.variant.nasledne_opravne') }}</option>
+        <option value="vyzva_nulove">{{ t('reports.kh.variant.vyzva_nulove') }}</option>
+        <option value="vyzva_potvrzeni">{{ t('reports.kh.variant.vyzva_potvrzeni') }}</option>
       </select>
       <template v-if="isFollowUp">
         <label class="text-sm text-neutral-600">{{ t('reports.kh.variant.d_zjist') }}</label>
         <input type="date" v-model="dZjist"
           class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+      </template>
+      <template v-if="needsVyzvaRef">
         <label class="text-sm text-neutral-600">{{ t('reports.kh.variant.c_jed_vyzvy') }}</label>
         <input type="text" v-model="cJedVyzvy" placeholder="99999999/99/9999-99999-999999"
           class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm w-64" />
       </template>
+      <span v-if="isVyzvaOdpoved" class="text-xs text-warning-700">
+        {{ t('reports.kh.variant.vyzva_hint') }}
+      </span>
       <span class="text-xs text-neutral-500">{{ t('reports.kh.variant.hint') }}</span>
     </div>
 
