@@ -72,7 +72,7 @@ final class InstanceHealthProbe
     {
         return [
             'maintenance' => $this->lock->isActive(),
-            'jobs'        => ['running' => $this->runningJobs()],
+            'jobs'        => ['running' => $this->runningJobs(), 'blocking' => $this->blockingJobs()],
             'cron'        => $this->cron(),
             'backup'      => $this->backup(),
             'migrations'  => $this->migrations(),
@@ -90,7 +90,7 @@ final class InstanceHealthProbe
     {
         return [
             'maintenance' => false,
-            'jobs'        => ['running' => null],
+            'jobs'        => ['running' => null, 'blocking' => null],
             'cron'        => [
                 'mode' => null,
                 'dispatcher_age_sec' => null,
@@ -119,6 +119,45 @@ final class InstanceHealthProbe
      *
      * `null` = nedostupná databáze, tedy „nevím" — nikdy se nezaměňuje s nulou.
      */
+    /**
+     * Úlohy, které NESMÍ přerušit nasazení nové verze.
+     *
+     * ⚠️ Není to totéž co {@see self::runningJobs()} a ten rozdíl je celý smysl
+     * téhle metody. `running` počítá i nároky plánovače, a ten tiká každou
+     * minutu — na nulu proto nespadne ani na úplně klidné instalaci. Kdo na ni
+     * čeká, čeká navždy: přesně tak se 24. 8. 2026 zaseklo flotilové vydání,
+     * kde oba cíle donekonečna hlásily „na instanci doběhávají úlohy".
+     *
+     * Blokující je jen dlouhá business úloha uprostřed zápisu — import,
+     * účetní backfill, AI dávka. Cron se nasazení bát nemusí: běží po
+     * minutových ticích, je opakovatelný a režim údržby ho stejně odstaví.
+     *
+     * `null` = nedostupná databáze, tedy „nevím" — nikdy se nezaměňuje s nulou.
+     */
+    /** Dlouhé business úlohy — ty, které nasazení opravdu nesmí přerušit. */
+    private const BLOCKING_JOB_TABLES = ['ai_jobs', 'import_jobs', 'accounting_backfill_jobs'];
+
+    public function blockingJobs(): ?int
+    {
+        $pdo = $this->pdo();
+        if ($pdo === null) {
+            return null;
+        }
+
+        $total = 0;
+        $known = false;
+
+        foreach (self::BLOCKING_JOB_TABLES as $table) {
+            $count = $this->scalarInt($pdo, "SELECT COUNT(*) FROM {$table} WHERE status = 'running'", [], [$table]);
+            if ($count !== null) {
+                $total += $count;
+                $known = true;
+            }
+        }
+
+        return $known ? $total : null;
+    }
+
     public function runningJobs(): ?int
     {
         $pdo = $this->pdo();
@@ -144,7 +183,7 @@ final class InstanceHealthProbe
             $known = true;
         }
 
-        foreach (['ai_jobs', 'import_jobs', 'accounting_backfill_jobs'] as $table) {
+        foreach (self::BLOCKING_JOB_TABLES as $table) {
             $count = $this->scalarInt(
                 $pdo,
                 "SELECT COUNT(*) FROM {$table} WHERE status = 'running'",

@@ -122,7 +122,7 @@ final class HealthOperationsPayloadTest extends TestCase
         foreach (['status', 'version', 'db', 'redis', 'time', 'maintenance', 'jobs', 'cron', 'backup', 'migrations', 'configuration'] as $key) {
             self::assertArrayHasKey($key, $body, "Health musí vždy nést klíč '{$key}'.");
         }
-        self::assertSame(['running'], array_keys($body['jobs']));
+        self::assertSame(['running', 'blocking'], array_keys($body['jobs']));
         self::assertSame(
             ['mode', 'dispatcher_age_sec', 'dispatcher_fresh', 'dispatcher_status', 'last_tick_age_sec'],
             array_keys($body['cron']),
