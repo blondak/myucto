@@ -112,7 +112,7 @@ final class CreditasBankEmailNoticeParser extends AbstractBankEmailNoticeParser
             if (!$message->date instanceof \DateTimeImmutable) {
                 throw new \RuntimeException('CREDITAS parser nenašel datum platby.');
             }
-            $postedAt = $message->date->format('d.m.Y');
+            $postedAt = $message->dateInAppTimezone()->format('d.m.Y');
         }
 
         // Protistrana (jen u příchozích úhrad): účet a kód banky jsou samostatné labely.

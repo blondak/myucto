@@ -651,7 +651,7 @@ final class EnvironmentCheckService
         $dbTz    = (string) ($vars['time_zone'] ?? '');
         $appTz   = (string) ($runtime['app_timezone'] ?? '');
         $sysTz   = (string) ($system['system_timezone'] ?? '');
-        // Aplikace si `time_zone` připíná per session na vlastní offset, takže
+        // Aplikace si `time_zone` připíná per session z `app.timezone`, takže
         // rozdíl na serveru je informace, ne chyba — hlásíme jako varování.
         $tzAligned = $sysTz !== '' && $appTz !== '' && $sysTz === $appTz;
         $checks[] = $this->check(

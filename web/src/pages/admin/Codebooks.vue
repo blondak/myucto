@@ -17,7 +17,7 @@ import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/butt
 import { renderVarsymbolTemplate, hasCounterPlaceholder } from '@/utils/varsymbol'
 import { formatMonth } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -92,7 +92,7 @@ const vatOpen = ref(false)
 
 // Platná sazba = dnešek spadá do intervalu valid_from..valid_to
 function isVatValid(v: VatRate): boolean {
-  const today = localIsoDate()
+  const today = appIsoDate()
   if (v.valid_from && v.valid_from > today) return false
   if (v.valid_to && v.valid_to < today) return false
   return true
@@ -105,7 +105,7 @@ function newVat() {
   Object.assign(vatDraft, {
     id: undefined, code: '', rate_percent: 21, country: 'CZ',
     label_cs: '', label_en: '', is_default: false, is_reverse_charge: false,
-    valid_from: localIsoDate(), valid_to: null, _new: true,
+    valid_from: appIsoDate(), valid_to: null, _new: true,
   })
   vatOpen.value = true
 }

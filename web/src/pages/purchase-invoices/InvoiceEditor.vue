@@ -53,7 +53,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { btnFilled } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const route = useRoute()
 const router = useRouter()
@@ -199,7 +199,7 @@ const accountingAccounts = ref<ChartAccount[]>([])
 const savedReceivedAt = ref<string | null>(null)
 const savedReceivedAtSource = ref<'manual' | 'import' | null>(null)
 
-const today = localIsoDate()
+const today = appIsoDate()
 
 const form = ref<{
   vendor_id: number | null

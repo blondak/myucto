@@ -35,7 +35,7 @@ import { useAuthStore } from '@/stores/auth'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -101,7 +101,7 @@ const recipientOptions = computed(() => {
   }
   return [...seen.values()]
 })
-const today = localIsoDate()
+const today = appIsoDate()
 const evidencePeriod = ref(today.slice(0, 7))
 const monthEvidence = ref<EnforcementMonthEvidence | null>(null)
 const dependants = ref<EnforcementDependant[]>([])

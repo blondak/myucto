@@ -17,7 +17,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { formatMoney } from '@/composables/useFormat'
 import CashVatBreakdown from '@/components/cash/CashVatBreakdown.vue'
 import { ICONS, btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE } from '@/components/ui/buttonStyles'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -30,7 +30,7 @@ const supplierStore = useSupplierStore()
 // je akruální (podvojný) koncept a v tomto režimu nedává smysl, proto se skryje.
 const isTaxEvidence = computed(() => supplierStore.currentSupplier?.accounting_mode === 'tax_evidence')
 
-const today = localIsoDate()
+const today = appIsoDate()
 
 const registers = ref<CashRegister[]>([])
 const accounts = ref<ChartAccount[]>([])

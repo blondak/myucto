@@ -2,7 +2,7 @@ import { api } from './client'
 import type { DocumentLock } from './locks'
 import type { DocItem } from './documents'
 import type { CashSettlementResult, CnbRateDeviationMeta, PaymentMethod, PaymentMethodSource } from './invoices'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 export type PurchaseInvoiceStatus = 'draft' | 'received' | 'booked' | 'paid' | 'cancelled'
 export type PurchaseDocumentKind = 'invoice' | 'receipt' | 'credit_note' | 'advance' | 'tax_document'
@@ -752,7 +752,7 @@ export const purchaseInvoicesApi = {
   transition: (id: number, target: PurchaseInvoiceStatus, paidDate?: string) =>
     api.post<PurchaseInvoice>(`/purchase-invoices/${id}/transition`, {
       target,
-      ...(target === 'paid' ? { paid_date: paidDate || localIsoDate() } : {}),
+      ...(target === 'paid' ? { paid_date: paidDate || appIsoDate() } : {}),
     }).then(r => r.data),
 
   dismissExtractionWarning: (id: number) =>

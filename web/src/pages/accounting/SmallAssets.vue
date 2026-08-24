@@ -22,7 +22,7 @@ import { formatDate, formatMoney } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm, btnIconSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate, appYear } from '@/utils/date'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -103,7 +103,7 @@ const editingId = ref<number | null>(null)
 const editingCard = ref<SmallAsset | null>(null)
 const form = reactive<SmallAssetPayload & { quantity: number; unit_price: number }>({
   name: '',
-  acquisition_date: localIsoDate(),
+  acquisition_date: appIsoDate(),
   price: 0,
   quantity: 1,
   unit_price: 0,
@@ -118,7 +118,7 @@ const form = reactive<SmallAssetPayload & { quantity: number; unit_price: number
 
 function resetForm() {
   form.name = ''
-  form.acquisition_date = localIsoDate()
+  form.acquisition_date = appIsoDate()
   form.price = 0
   form.quantity = 1
   form.unit_price = 0
@@ -211,11 +211,11 @@ async function removeCard(card: SmallAsset) {
 const showDispose = ref(false)
 const disposing = ref(false)
 const disposeTarget = ref<SmallAsset | null>(null)
-const disposeForm = reactive({ disposed_at: localIsoDate(), disposal_reason: '' })
+const disposeForm = reactive({ disposed_at: appIsoDate(), disposal_reason: '' })
 
 function openDispose(card: SmallAsset) {
   disposeTarget.value = card
-  disposeForm.disposed_at = localIsoDate()
+  disposeForm.disposed_at = appIsoDate()
   disposeForm.disposal_reason = ''
   showDispose.value = true
 }
@@ -252,7 +252,7 @@ async function restoreCard(card: SmallAsset) {
 const showSell = ref(false)
 const selling = ref(false)
 const sellTarget = ref<SmallAsset | null>(null)
-const sellForm = reactive({ sale_invoice_id: null as number | null, sold_at: localIsoDate(), sale_price: null as number | null })
+const sellForm = reactive({ sale_invoice_id: null as number | null, sold_at: appIsoDate(), sale_price: null as number | null })
 const invoiceQuery = ref('')
 const invoiceResults = ref<InvoiceListItem[]>([])
 const invoiceSearching = ref(false)
@@ -261,7 +261,7 @@ const selectedInvoiceLabel = ref('')
 function openSell(card: SmallAsset) {
   sellTarget.value = card
   sellForm.sale_invoice_id = null
-  sellForm.sold_at = localIsoDate()
+  sellForm.sold_at = appIsoDate()
   sellForm.sale_price = card.price
   invoiceQuery.value = ''
   invoiceResults.value = []
@@ -314,9 +314,9 @@ async function runSell() {
 const showReports = ref(false)
 const exporting = ref(false)
 const reportForm = reactive({
-  as_of: localIsoDate(),
-  from: `${new Date().getFullYear()}-01-01`,
-  to: `${new Date().getFullYear()}-12-31`,
+  as_of: appIsoDate(),
+  from: `${appYear()}-01-01`,
+  to: `${appYear()}-12-31`,
 })
 
 type ReportKey = 'inventory' | 'movements' | 'expense-breakdown'

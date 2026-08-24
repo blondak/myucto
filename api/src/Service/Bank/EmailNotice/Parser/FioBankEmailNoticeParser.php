@@ -145,7 +145,7 @@ final class FioBankEmailNoticeParser extends AbstractBankEmailNoticeParser
             variableSymbol: $this->normalizeSymbol((string) $variableSymbol),
             amount: $this->applyDirection($this->parseAmount((string) $amountCurrency['amount']), (string) $header['direction']),
             currency: $currency !== '' ? $this->normalizeCurrency($currency) : 'CZK',
-            postedAt: $message->date->format('Y-m-d'),
+            postedAt: $message->dateInAppTimezone()->format('Y-m-d'),
             recipientAccount: $recipientAccount . '/' . ($recipientBank ?? '2010'),
             counterpartyAccount: $cpAccount,
             counterpartyBank: $cpBank,
@@ -175,7 +175,7 @@ final class FioBankEmailNoticeParser extends AbstractBankEmailNoticeParser
         if ($date !== '') {
             $postedAt = $this->parseDate($date);
         } elseif ($message->date instanceof \DateTimeImmutable) {
-            $postedAt = $message->date->format('Y-m-d');
+            $postedAt = $message->dateInAppTimezone()->format('Y-m-d');
         } else {
             throw new \RuntimeException('Fio banka parser nenašel datum e-mailu.');
         }

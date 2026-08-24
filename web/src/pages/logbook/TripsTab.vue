@@ -11,7 +11,7 @@ import { useAuthStore } from '@/stores/auth'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t, locale } = useI18n()
 const toast = useToast()
@@ -90,7 +90,7 @@ watch([yearFilter, monthFilter, filterCar], () => { reload() })
 const open = ref(false)
 const saving = ref(false)
 const draft = reactive<TripPayload & { id: number }>({
-  id: 0, car_id: 0, trip_date: localIsoDate(), time_start: '', time_end: '',
+  id: 0, car_id: 0, trip_date: appIsoDate(), time_start: '', time_end: '',
   odometer_start: null, odometer_end: null, distance_km: null, category_id: null,
   purpose: '', origin: '', destination: '', note: '',
 })
@@ -179,7 +179,7 @@ watch(() => props.resetToken, () => { resetFilters() })
 function newTrip() {
   const defCar = cars.value.find(c => c.is_default) ?? cars.value[0]
   Object.assign(draft, {
-    id: 0, car_id: defCar?.id ?? 0, trip_date: localIsoDate(),
+    id: 0, car_id: defCar?.id ?? 0, trip_date: appIsoDate(),
     time_start: '', time_end: '', odometer_start: defCar?.last_odometer ?? null, odometer_end: null, distance_km: null,
     category_id: (categories.value.find(c => c.is_default) ?? categories.value[0])?.id ?? null, purpose: '', origin: '', destination: '', note: '',
   })

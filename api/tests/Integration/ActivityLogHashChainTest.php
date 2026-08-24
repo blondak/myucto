@@ -210,6 +210,41 @@ final class ActivityLogHashChainTest extends TestCase
     }
 
     /**
+     * Tolerance historického renderu má hranici.
+     *
+     * Články zapečetěné starým kódem se ověřují i podle lokálního renderu
+     * `created_at`. Kdyby ta výjimka platila napořád, prošel by ověřením i posun
+     * `created_at` přesně o offset zóny — obě podoby popisují týž okamžik. Watermark
+     * `activity_log_chain_head.utc_created_at_from_id` (migrace 1528) proto od svého
+     * id výš uznává jediný, kanonický hash.
+     */
+    public function testShiftingCreatedAtOfNewRecordIsDetected(): void
+    {
+        if (!$this->db->hasColumn('activity_log_chain_head', 'utc_created_at_from_id')) {
+            $this->markTestSkipped('Migrace 1528 neproběhla.');
+        }
+
+        $id = $this->write('test.watermark');
+
+        // Posun ZPĚT přesně o offset aplikační zóny. Směr je podstatný: hash byl
+        // spočten nad UTC hodnotou U, a historický kandidát se počítá jako
+        // local(načtená hodnota). Po posunu na U−offset dá local(U−offset) zase U,
+        // takže bez watermarku by falzifikát prošel jako neporušený. Posun dopředu
+        // se pozná i bez něj — proto by test s opačným znaménkem nedokazoval nic.
+        $offsetSeconds = (new \DateTimeZone(date_default_timezone_get()))
+            ->getOffset(new \DateTimeImmutable());
+        self::assertGreaterThan(0, $offsetSeconds, 'Test dává smysl jen v zóně s nenulovým offsetem.');
+
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE activity_log SET created_at = created_at - INTERVAL ? SECOND WHERE id = ?')
+            ->execute([$offsetSeconds, $id]);
+
+        $result = $this->chain->verify($this->from);
+        self::assertFalse($result['ok'], 'Posun created_at u nového článku musí být poznat.');
+        self::assertContains($id, array_column($result['broken'], 'id'));
+    }
+
+    /**
      * Ověření nesmí záviset na zóně spojení.
      *
      * `created_at` je TIMESTAMP, takže ho MariaDB renderuje podle zóny session. Dokud
@@ -226,15 +261,20 @@ final class ActivityLogHashChainTest extends TestCase
         $pdo = $this->db->pdo();
         $original = (string) $pdo->query('SELECT @@session.time_zone')->fetchColumn();
 
-        foreach (["+00:00", "+05:45", "-08:00"] as $zone) {
-            $pdo->exec("SET time_zone = '{$zone}'");
-            self::assertTrue(
-                $this->chain->verify($this->from)['ok'],
-                "Řetěz musí projít i v session zóně {$zone}.",
-            );
+        // PDO se mezi testy SDÍLÍ a resetSharedTestSessions() zónu nevrací. Bez
+        // `finally` by selhaná asserce nechala celý proces běžet na -08:00 a shodila
+        // by datumové testy úplně jinde.
+        try {
+            foreach (["+00:00", "+05:45", "-08:00"] as $zone) {
+                $pdo->exec("SET time_zone = '{$zone}'");
+                self::assertTrue(
+                    $this->chain->verify($this->from)['ok'],
+                    "Řetěz musí projít i v session zóně {$zone}.",
+                );
+            }
+        } finally {
+            $pdo->exec("SET time_zone = '{$original}'");
         }
-
-        $pdo->exec("SET time_zone = '{$original}'");
     }
 
     /** @return array<string,mixed> */

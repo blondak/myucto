@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { publicInvoiceApi, type PublicInvoiceData, type PublicInvoiceItem, type PublicInvoiceParty } from '@/api/publicInvoice'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const route = useRoute()
 const token = computed(() => String(route.params.token || ''))
@@ -43,7 +43,7 @@ const remaining = computed(() => {
 })
 const isOverdue = computed(() => {
   if (!inv.value || isPaid.value || isCancelled.value || remaining.value <= 0) return false
-  return inv.value.due_date < localIsoDate()
+  return inv.value.due_date < appIsoDate()
 })
 
 const statusBadge = computed(() => {

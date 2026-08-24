@@ -13,6 +13,7 @@ storage/
 api/vendor/
 api/vendor.prod/
 api/.phpunit.cache/
+node_modules/
 web/node_modules/
 MCP/node_modules/
 MCP/dist/

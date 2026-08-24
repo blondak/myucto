@@ -18,7 +18,7 @@ import VendorPicker from '@/components/purchase/VendorPicker.vue'
 import ExchangeRateInput from '@/components/purchase/ExchangeRateInput.vue'
 import PurchaseOrderReceiptModal from '@/components/stock/PurchaseOrderReceiptModal.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -44,7 +44,7 @@ const units = ref<Unit[]>([])
 const form = reactive({
   vendor_id: null as number | null,
   warehouse_id: null as number | null,
-  order_date: localIsoDate(),
+  order_date: appIsoDate(),
   expected_date: '' as string,
   currency_id: null as number | null,
   exchange_rate: '' as string,

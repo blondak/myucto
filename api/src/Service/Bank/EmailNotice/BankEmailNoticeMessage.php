@@ -27,6 +27,22 @@ final class BankEmailNoticeMessage
         public readonly string $forwardedFrom = '',
     ) {}
 
+    /**
+     * Datum zprávy převedené do zóny aplikace — pro odvození kalendářního DNE.
+     *
+     * Hlavička `Date:` nese offset odesílatele; Fio posílá aviza v UTC. Bez převodu
+     * se `format('Y-m-d')` ptá na den v CIZÍ zóně, takže platba přijatá ve 23:30
+     * dostala datum zaúčtování následujícího dne.
+     *
+     * Do {@see self::fallbackHash()} tahle podoba NEVSTUPUJE — ten musí zůstat
+     * bajtově stejný jako před zavedením převodu, jinak by se už zpracovaná avíza
+     * po nasazení naimportovala znovu.
+     */
+    public function dateInAppTimezone(): ?\DateTimeImmutable
+    {
+        return $this->date?->setTimezone(new \DateTimeZone(date_default_timezone_get()));
+    }
+
     public function fallbackHash(): string
     {
         $date = $this->date?->format('c') ?? '';

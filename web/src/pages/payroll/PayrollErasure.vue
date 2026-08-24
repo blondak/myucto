@@ -37,7 +37,7 @@ import Modal from '@/components/ui/Modal.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -58,7 +58,7 @@ const detailLoading = ref(false)
 const detailError = ref('')
 
 const busy = ref(false)
-const asOf = ref(localIsoDate())
+const asOf = ref(appIsoDate())
 
 const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-warning-100 text-warning-700',

@@ -9,7 +9,7 @@ import { settingsApi } from '@/api/settings'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -216,7 +216,7 @@ async function loadPreview() {
     preview.value = await priceListApi.resolve(itemId.value, {
       client_id: overrideClientId.value ?? undefined,
       currency_id: currency.id,
-      rate_date: localIsoDate(),
+      rate_date: appIsoDate(),
       prices_include_vat: form.value.prices_include_vat,
     })
   } catch (e) {

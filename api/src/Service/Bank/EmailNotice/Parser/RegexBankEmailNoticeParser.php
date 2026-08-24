@@ -107,7 +107,7 @@ final class RegexBankEmailNoticeParser extends AbstractBankEmailNoticeParser
         // Některé banky (např. Česká spořitelna) datum platby v těle avíza neuvádějí —
         // jako fallback použij datum doručení e-mailu, ať povinné pole nechybí.
         if (trim((string) ($data['posted_at'] ?? '')) === '' && $message->date instanceof \DateTimeImmutable) {
-            $data['posted_at'] = $message->date->format('d.m.Y H:i');
+            $data['posted_at'] = $message->dateInAppTimezone()->format('d.m.Y H:i');
         }
 
         // #110: šablona ČS „Odešla platba" nemusí obsahovat řádek „Číslo účtu:" —

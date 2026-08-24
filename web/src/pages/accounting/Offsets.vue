@@ -12,7 +12,7 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -24,7 +24,7 @@ const loading = ref(false)
 const building = ref(false)
 const busy = ref(false)
 
-const todayStr = localIsoDate()
+const todayStr = appIsoDate()
 const form = reactive({
   partner_id: '' as number | '',
   agreement_date: todayStr,

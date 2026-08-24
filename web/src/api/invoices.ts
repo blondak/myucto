@@ -1,6 +1,6 @@
 import { api } from './client'
 import type { DocumentLock } from './locks'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 export type InvoiceType = 'invoice' | 'proforma' | 'credit_note' | 'cancellation' | 'tax_document' | 'penalty' | 'payment_calendar'
 
@@ -760,7 +760,7 @@ export const invoicesApi = {
   issue:    (id: number) => api.post<Invoice>(`/invoices/${id}/issue`).then(r => r.data),
   markPaid: (id: number, paidAt?: string, opts?: { sendThanks?: boolean; thanksTrigger?: 'manual' | 'bulk' }) =>
     api.post<Invoice>(`/invoices/${id}/mark-paid`, {
-      paid_at: paidAt || localIsoDate(),
+      paid_at: paidAt || appIsoDate(),
       ...(opts?.sendThanks ? { send_payment_thanks: true, thanks_trigger: opts.thanksTrigger || 'manual' } : {}),
     }).then(r => r.data),
   unmarkPaid: (id: number) =>

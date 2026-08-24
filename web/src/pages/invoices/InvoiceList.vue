@@ -33,7 +33,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
 import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t, tm, rt } = useI18n()
 const toast = useToast()
@@ -399,7 +399,7 @@ async function bulkExportPdf() {
     const response = await invoicesApi.exportSelectedPdf(ids, bulkPdfSign.value)
     const disposition = response.headers['content-disposition'] || ''
     const match = disposition.match(/filename="?([^";]+)"?/)
-    const filename = match?.[1] || `myucto-vybrane-faktury-${localIsoDate()}.pdf`
+    const filename = match?.[1] || `myucto-vybrane-faktury-${appIsoDate()}.pdf`
     const url = URL.createObjectURL(response.data)
     const link = document.createElement('a')
     link.href = url
@@ -658,7 +658,7 @@ async function bulkMarkPaid() {
   if (!confirm(t('invoice.bulk_mark_paid_confirm', { n: list.length }))) return
   // Volitelně i poděkování za úhradu (issue #57) — jen pokud má dodavatel funkci zapnutou.
   const sendThanks = thanksEnabled.value && confirm(t('invoice.bulk_send_thanks_confirm', { n: list.length }))
-  const today = localIsoDate()
+  const today = appIsoDate()
   bulkBusy.value = true
   let okCount = 0
   let thanksSent = 0

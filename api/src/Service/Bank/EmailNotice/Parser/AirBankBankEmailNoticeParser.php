@@ -108,7 +108,7 @@ final class AirBankBankEmailNoticeParser extends AbstractBankEmailNoticeParser
             if (!$message->date instanceof \DateTimeImmutable) {
                 throw new \RuntimeException($this->parserLabel() . ' parser nenašel datum.');
             }
-            $postedAt = $message->date->format('d.m.Y');
+            $postedAt = $message->dateInAppTimezone()->format('d.m.Y');
         }
 
         $variableSymbol = $this->optional($folded, '/Variabilni\s+symbol:\s*(?<value>[0-9]+)/iu');

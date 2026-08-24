@@ -13,7 +13,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -168,7 +168,7 @@ const runNowMode = ref<'issue' | 'draft'>('issue')
 const isPeriodDraft = computed(() => runNowMode.value === 'draft' && tpl.value?.draft_open_mode === 'period_start')
 
 function todayIso(): string {
-  return localIsoDate()
+  return appIsoDate()
 }
 
 function openRunNow(mode: 'issue' | 'draft' = 'issue') {

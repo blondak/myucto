@@ -30,6 +30,13 @@ declare(strict_types=1);
 
 require __DIR__ . '/../vendor/autoload.php';
 
+// Zóna se musí nastavit DŘÍV, než se sáhne na date() při výchozích hodnotách
+// argumentů — Config::load() ji nastavuje sám, ale ten se tu volá až později.
+// Bez toho by na instalaci s prázdným `date.timezone` (spravovaný hosting = UTC)
+// mezi půlnocí a druhou hodinou 1. ledna platil ještě starý rok a skript by nový
+// rok odmítl jako mimo rozsah.
+\MyInvoice\Infrastructure\Config\Config::load(\MyInvoice\Bootstrap::rootDir());
+
 function argValue(array $argv, string $key): ?string
 {
     foreach ($argv as $arg) {

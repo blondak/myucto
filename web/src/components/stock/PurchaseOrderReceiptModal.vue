@@ -6,7 +6,7 @@ import { purchaseOrdersApi, type PurchaseOrderReceiptProposal } from '@/api/purc
 import { stockApi, type Warehouse } from '@/api/stock'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 /**
  * Příjem na sklad z objednávky dodavateli (Epic SKLAD, fáze 4).
@@ -29,7 +29,7 @@ const error = ref('')
 const proposal = ref<PurchaseOrderReceiptProposal | null>(null)
 const warehouses = ref<Warehouse[]>([])
 const warehouseId = ref<number | null>(null)
-const docDate = ref(localIsoDate())
+const docDate = ref(appIsoDate())
 const description = ref('')
 const allowOverDelivery = ref(false)
 

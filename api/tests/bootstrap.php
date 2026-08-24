@@ -135,18 +135,14 @@ require __DIR__ . '/../vendor/autoload.php';
 // Lokální cfg.local.php může zapínat veřejný demo režim. Testy ale ověřují běžné
 // mutační chování aplikace, proto jej pro celý testovací proces explicitně vypnou.
 // --- Časová zóna procesu ---
-// Aplikace ji nastavuje až v Bootstrap::buildApp() z `app.timezone`. Testy ale běžně
-// sahají do DB i mimo něj (`new Connection($config)` bez buildApp), takže do té doby
-// platí zóna z php.ini — na CI runneru UTC, lokálně obvykle Europe/Prague.
+// Aplikace si ji nastavuje sama v Config::load() z `app.timezone`. Tady se nastavuje
+// znovu proto, že testy sahají na `date()` i v místech, kam se žádná konfigurace
+// nenačítá (data fixtur, pomocné asserty), a php.ini na CI runneru žádnou zónu nemá.
 //
-// Rozdíl není kosmetický: Connection pinuje session přes `SET time_zone = date('P')`
-// a PDO se mezi testy SDÍLÍ. Kdo spojení založí (nebo mu zónu vrátí, viz
-// SessionSecurityTest) v okamžiku, kdy PHP jede na UTC, nastaví offset +00:00 pro
-// celý zbytek běhu — `CURDATE()` pak mezi půlnocí a 2:00 pražského času ukazuje
-// o den zpět proti PHP a rozejdou se všechny dotazy porovnávající data (splatné
-// šablony, denní zámek obnovy licence, platnost OTP kódů).
-//
-// Sjednotíme to hned na začátku, ať proces jede v téže zóně jako aplikace.
+// Rozdíl není kosmetický: Connection z ní odvozuje zónu session a PDO se mezi testy
+// SDÍLÍ, takže by `CURDATE()` mezi půlnocí a 2:00 pražského času ukazovalo o den zpět
+// proti PHP a rozešly by se všechny dotazy porovnávající data (splatné šablony, denní
+// zámek obnovy licence, platnost OTP kódů).
 $__tzCfgPath = \MyInvoice\Bootstrap::rootDir() . DIRECTORY_SEPARATOR . 'cfg.php';
 $__tzCfg = is_file($__tzCfgPath) ? require $__tzCfgPath : [];
 date_default_timezone_set(

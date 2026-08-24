@@ -199,13 +199,15 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
     }
 
     /**
-     * Datum zprávy převedené do zóny aplikace.
+     * Datum zprávy TAK, JAK PŘIŠLO v hlavičce `Date:`, včetně offsetu odesílatele.
      *
-     * Hlavička `Date:` nese vlastní offset odesílatele — Fio posílá aviza v UTC. Bez
-     * převodu se pak `format('Y-m-d')` v parserech ptá na den v CIZÍ zóně, takže
-     * platba přijatá ve 23:30 dostala datum zaúčtování následujícího dne (a v cronu,
-     * který běžel v UTC, se táž hodnota rozcházela s tím, co ukazoval web).
-     * Převod je tady, u zdroje, aby ho nemusel opakovat každý parser zvlášť.
+     * ⚠️ Zóna se tu ZÁMĚRNĚ nepřevádí: {@see BankEmailNoticeMessage::fallbackHash()}
+     * hashuje `format('c')` a podle toho hashe se poznávají už zpracovaná avíza bez
+     * `Message-ID`. Převod zóny by změnil offset v renderu, tím i hash — a první běh
+     * po nasazení by všechna taková avíza naimportoval a spároval znovu.
+     *
+     * Kalendářní den se z toho odvozuje až v parserech přes
+     * {@see BankEmailNoticeMessage::dateInAppTimezone()}.
      */
     private function messageDate(object $message): ?\DateTimeImmutable
     {
@@ -214,18 +216,14 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
             if (is_object($date) && method_exists($date, 'toDate')) {
                 $dt = $date->toDate();
                 if ($dt instanceof \DateTimeInterface) {
-                    return self::inAppTimezone(\DateTimeImmutable::createFromInterface($dt));
+                    return \DateTimeImmutable::createFromInterface($dt);
                 }
             }
             $text = trim((string) $date);
-            return $text !== '' ? self::inAppTimezone(new \DateTimeImmutable($text)) : null;
+            return $text !== '' ? new \DateTimeImmutable($text) : null;
         } catch (\Throwable) {
             return null;
         }
     }
 
-    private static function inAppTimezone(\DateTimeImmutable $date): \DateTimeImmutable
-    {
-        return $date->setTimezone(new \DateTimeZone(date_default_timezone_get()));
-    }
 }

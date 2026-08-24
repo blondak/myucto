@@ -27,7 +27,7 @@ import PostingBadge from '@/components/ui/PostingBadge.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
 import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t, te, locale } = useI18n()
 const toast = useToast()
@@ -251,7 +251,7 @@ const remainingToPay = computed(() => {
 // Modal částečné úhrady
 const partialOpen = ref(false)
 const partialAmount = ref<string>('')
-const partialDate = ref<string>(localIsoDate())
+const partialDate = ref<string>(appIsoDate())
 const partialVs = ref('')
 const partialRef = ref('')
 const partialNote = ref('')
@@ -287,7 +287,7 @@ const canPartialPayment = computed(() =>
 
 function openPartialPayment() {
   partialAmount.value = ''
-  partialDate.value = localIsoDate()
+  partialDate.value = appIsoDate()
   partialVs.value = ''
   partialRef.value = ''
   partialNote.value = ''
@@ -733,7 +733,7 @@ async function issue() {
   }
 }
 
-const paidAtInput = ref<string>(localIsoDate())
+const paidAtInput = ref<string>(appIsoDate())
 const markPaidOpen = ref(false)
 
 useHotkey('escape', () => {
@@ -751,7 +751,7 @@ const sendThanks = ref(false)
 const thanksEnabled = computed(() => supplierStore.currentSupplier?.payment_thanks_enabled ?? false)
 const thanksHasRecipient = computed(() => !!invoice.value?.client_main_email)
 function openMarkPaid() {
-  paidAtInput.value = localIsoDate()
+  paidAtInput.value = appIsoDate()
   sendThanks.value = thanksEnabled.value && thanksHasRecipient.value
     && (supplierStore.currentSupplier?.payment_thanks_default_checked ?? false)
   markPaidOpen.value = true

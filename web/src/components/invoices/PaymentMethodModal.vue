@@ -19,7 +19,7 @@ import { cashApi, type CashRegister } from '@/api/cash'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatMoney } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 type Method = 'plain' | 'cash' | 'settlement'
 
@@ -46,7 +46,7 @@ const { t } = useI18n()
 const toast = useToast()
 
 const method = ref<Method>('plain')
-const settledOn = ref(localIsoDate())
+const settledOn = ref(appIsoDate())
 const amount = ref(props.amount)
 const note = ref('')
 const sendThanks = ref(!!props.thanks?.enabled && !!props.thanks?.hasRecipient && !!props.thanks?.defaultChecked)

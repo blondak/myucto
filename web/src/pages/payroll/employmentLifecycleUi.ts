@@ -1,4 +1,5 @@
 import type { PayrollEmploymentStatus } from '@/api/payroll'
+import { appIsoDate } from '@/utils/date'
 
 export interface EmploymentTransitionPresentation {
   target: PayrollEmploymentStatus
@@ -204,9 +205,13 @@ export function employmentDiffFields(
   return hasStatusHeader ? keys.filter(key => key !== 'status') : keys
 }
 
+/**
+ * „Dnešek" pro mzdové události (nástup, výstup, změna údajů).
+ *
+ * Bere se v účetní zóně, ne v zóně prohlížeče — datum nástupu je právní
+ * skutečnost v českém kalendáři a nesmí se lišit podle toho, odkud mzdovou
+ * účetní zrovna klika. Viz {@see appIsoDate}.
+ */
 export function todayIso(now = new Date()): string {
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+  return appIsoDate(now)
 }

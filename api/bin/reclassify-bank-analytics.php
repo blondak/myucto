@@ -45,6 +45,12 @@ declare(strict_types=1);
 
 require __DIR__ . '/../vendor/autoload.php';
 
+// Zóna se musí nastavit DŘÍV, než se sáhne na date() při výchozí hodnotě `--to`
+// — Config::load() ji nastavuje sám, ale kontejner se tu staví až po validaci
+// argumentů. Bez toho by na instalaci s prázdným `date.timezone` (spravovaný
+// hosting = UTC) noční běh tiše vynechal dnešní zápisy.
+\MyInvoice\Infrastructure\Config\Config::load(\MyInvoice\Bootstrap::rootDir());
+
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\SupplierBankAccountRepository;

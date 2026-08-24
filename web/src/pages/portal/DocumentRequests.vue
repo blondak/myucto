@@ -8,7 +8,7 @@ import { useAuthStore } from '@/stores/auth'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { btnFilled } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -68,7 +68,7 @@ function statusBadge(s: string): string {
 }
 
 function isOverdue(item: DocumentRequest): boolean {
-  return item.status === 'requested' && !!item.deadline && item.deadline < localIsoDate()
+  return item.status === 'requested' && !!item.deadline && item.deadline < appIsoDate()
 }
 </script>
 

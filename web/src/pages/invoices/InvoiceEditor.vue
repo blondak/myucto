@@ -37,7 +37,7 @@ import { smallAssetsApi, type SmallAsset } from '@/api/smallAssets'
 import { assetsApi, type AssetListItem } from '@/api/assets'
 import { priceListApi, type PriceListItem } from '@/api/priceList'
 import { cashApi, type CashRegister } from '@/api/cash'
-import { localIsoDate, addDaysIso } from '@/utils/date'
+import { appIsoDate, addDaysIso } from '@/utils/date'
 
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
@@ -515,7 +515,7 @@ const remindersAvailable = computed(() =>
 )
 
 function today(): string {
-  return localIsoDate()
+  return appIsoDate()
 }
 
 function addDays(date: string, days: number): string {

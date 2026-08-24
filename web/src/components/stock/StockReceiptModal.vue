@@ -6,7 +6,7 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const props = defineProps<{ purchaseInvoiceId: number }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'created'): void }>()
@@ -22,7 +22,7 @@ const proposal = ref<StockReceiptProposal | null>(null)
 const warehouses = ref<Warehouse[]>([])
 
 const warehouseId = ref<number | null>(null)
-const docDate = ref(localIsoDate())
+const docDate = ref(appIsoDate())
 const includeLandedCosts = ref(false)
 
 interface LineState {

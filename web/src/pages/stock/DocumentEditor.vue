@@ -12,7 +12,7 @@ import { formatMoney } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -52,7 +52,7 @@ const form = reactive({
   doc_type: 'receipt' as StockDocType,
   warehouse_id: null as number | null,
   warehouse_to_id: null as number | null,
-  doc_date: localIsoDate(),
+  doc_date: appIsoDate(),
   description: '',
   partner_name: '',
 })

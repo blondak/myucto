@@ -19,7 +19,7 @@ import { usePaneDom } from '@/composables/usePaneDom'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t, tm, rt } = useI18n()
 const toast = useToast()
@@ -208,7 +208,7 @@ const form = ref<{
 })
 
 function today(): string {
-  return localIsoDate()
+  return appIsoDate()
 }
 
 function dayFromDate(date: string): number | null {

@@ -154,7 +154,7 @@ final class BankEmailNoticeScanner
             'imap_uid' => $message->uid,
             'message_id' => $messageId,
             'fallback_hash' => $hash,
-            'message_date' => $message->date?->format('Y-m-d H:i:s'),
+            'message_date' => $message->dateInAppTimezone()?->format('Y-m-d H:i:s'),
             'sender' => $message->sender,
             'subject' => $message->subject,
         ];

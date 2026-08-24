@@ -1,15 +1,31 @@
 import { describe, expect, it } from 'vitest'
-import { addDaysIso, addMonthsIso, localIsoDate } from '../date'
+import { addDaysIso, addMonthsIso, appIsoDate, appYear } from '../date'
 
-describe('localIsoDate', () => {
-  it('vrací lokální kalendářní datum, ne UTC', () => {
-    // Půlnoc + 40 minut místního času. `toISOString()` by v Praze vrátil předchozí den.
-    const justAfterMidnight = new Date(2026, 3, 1, 0, 40, 0)
-    expect(localIsoDate(justAfterMidnight)).toBe('2026-04-01')
+describe('appIsoDate', () => {
+  it('vrací kalendářní datum v účetní zóně, ne v UTC', () => {
+    // 00:30 pražského času (letní čas) = 22:30 UTC předchozího dne.
+    expect(appIsoDate(new Date('2026-04-01T22:30:00Z'))).toBe('2026-04-02')
+  })
+
+  /**
+   * Účetní na dovolené v USA je běžná situace. V 19:00 newyorského času je
+   * v Praze 01:00 NÁSLEDUJÍCÍHO dne — a doklad se vystavuje do českého
+   * kalendáře, ne do toho, který má účetní na hodinkách. Kdyby se datum bralo
+   * z prohlížeče, doklad vystavený poslední den v měsíci by spadl do jiného
+   * zdaňovacího období než ten, který ve stejnou chvíli vystaví kolega v Praze.
+   *
+   * Asserce jsou psané přes okamžik v UTC, takže platí bez ohledu na to,
+   * v jaké zóně běží test.
+   */
+  it('drží český kalendář i pro prohlížeč v jiné zóně', () => {
+    // 31. 3. 2026, 19:00 New York (EDT, UTC-4) = 1. 4. 2026, 01:00 Praha.
+    expect(appIsoDate(new Date('2026-03-31T23:00:00Z'))).toBe('2026-04-01')
+    // 1. 4. 2026, 09:00 Tokio (UTC+9) = 1. 4. 2026, 02:00 Praha.
+    expect(appIsoDate(new Date('2026-04-01T00:00:00Z'))).toBe('2026-04-01')
   })
 
   it('doplňuje nuly', () => {
-    expect(localIsoDate(new Date(2026, 0, 5))).toBe('2026-01-05')
+    expect(appIsoDate(new Date('2026-01-05T12:00:00Z'))).toBe('2026-01-05')
   })
 })
 
@@ -61,5 +77,27 @@ describe('addDaysIso', () => {
 
   it('umí odečítat', () => {
     expect(addDaysIso('2026-03-01', -1)).toBe('2026-02-28')
+  })
+})
+
+describe('appYear', () => {
+  it('bere rok ze stejného kalendáře jako appIsoDate', () => {
+    // 31. 12. 2026, 23:30 UTC = 1. 1. 2027, 00:30 v Praze.
+    expect(appYear(new Date('2026-12-31T23:30:00Z'))).toBe('2027')
+    expect(appIsoDate(new Date('2026-12-31T23:30:00Z'))).toBe('2027-01-01')
+  })
+})
+
+describe('odolnost proti nesmyslnému vstupu', () => {
+  /**
+   * Formulář fakturace přepočítává splatnost při každé změně klienta. S vymazaným
+   * datem vystavení dřív vznikl řetězec 'NaN-NaN-NaN', uložil se do `due_date`
+   * a odešel na API.
+   */
+  it('vrací vstup beze změny místo NaN', () => {
+    expect(addDaysIso('', 14)).toBe('')
+    expect(addDaysIso('2026-13', 14)).toBe('2026-13')
+    expect(addMonthsIso('', 1)).toBe('')
+    expect(addMonthsIso('nesmysl', 1)).toBe('nesmysl')
   })
 })

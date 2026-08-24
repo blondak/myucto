@@ -15,7 +15,7 @@ import { formatDate, formatMoney } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import DocumentLinkPicker from '@/components/accounting/DocumentLinkPicker.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -41,7 +41,7 @@ function emptyLine(side: JournalSide = 'debit'): LineRow {
 }
 
 const form = reactive({
-  entry_date: localIsoDate(),
+  entry_date: appIsoDate(),
   description: '',
   document_no: '',
 })
@@ -351,8 +351,8 @@ const transfer = reactive({
   account_from: '',
   account_to: '',
   amount: null as number | null,
-  date_out: localIsoDate(),
-  date_in: localIsoDate(),
+  date_out: appIsoDate(),
+  date_in: appIsoDate(),
   description: '',
 })
 
@@ -363,8 +363,8 @@ function openTransfer() {
     account_from: '',
     account_to: '',
     amount: null,
-    date_out: localIsoDate(),
-    date_in: localIsoDate(),
+    date_out: appIsoDate(),
+    date_in: appIsoDate(),
     description: '',
   })
   showTransfer.value = true

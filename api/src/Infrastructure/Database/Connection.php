@@ -49,6 +49,15 @@ final class Connection
      */
     private static bool $sharedTouched = false;
 
+    /** MariaDB: Unknown or incorrect time zone — server nemá nahrané tzinfo tabulky. */
+    private const ERR_UNKNOWN_TIME_ZONE = 1298;
+
+    /**
+     * Zná server pojmenované časové zóny (nahrané tzinfo tabulky)? `null` = zatím
+     * nezjištěno. Per proces, ne per spojení — odpověď se během běhu nemění.
+     */
+    private static ?bool $namedTimeZoneSupported = null;
+
     private ?PDO $pdo = null;
     private bool $usesSharedPdo = false;
     private readonly LoggerInterface $logger;
@@ -92,13 +101,26 @@ final class Connection
             $timezone = 'Europe/Prague';
         }
 
-        try {
-            $stmt = $pdo->prepare('SET time_zone = ?');
-            $stmt->execute([$timezone]);
+        // Zda server pojmenované zóny zná, se zjišťuje JEDNOU za proces. Bez toho by
+        // instalace bez tzinfo tabulek platila neúspěšný pokus u každého spojení —
+        // v testech, které jich otevírají stovky, je to znát.
+        if (self::$namedTimeZoneSupported !== false) {
+            try {
+                $pdo->prepare('SET time_zone = ?')->execute([$timezone]);
+                self::$namedTimeZoneSupported = true;
 
-            return;
-        } catch (\Throwable) {
-            // tzinfo tabulky nejsou nahrané — níž se dopočítá offset.
+                return;
+            } catch (\PDOException $e) {
+                // Zapamatovat si „server pojmenované zóny neumí" se smí JEN u chyby,
+                // která to skutečně znamená (MariaDB 1298 — Unknown or incorrect time
+                // zone). Jinak by jediné výpadkové spojení přepnulo celý proces na
+                // offsetový fallback až do konce běhu, a co hůř, skutečná chyba by se
+                // schovala za nepravdivé vysvětlení.
+                if ((int) ($e->errorInfo[1] ?? 0) !== self::ERR_UNKNOWN_TIME_ZONE) {
+                    throw $e;
+                }
+                self::$namedTimeZoneSupported = false;
+            }
         }
 
         try {
@@ -107,8 +129,7 @@ final class Connection
             $offset = date('P');
         }
 
-        $stmt = $pdo->prepare('SET time_zone = ?');
-        $stmt->execute([$offset]);
+        $pdo->prepare('SET time_zone = ?')->execute([$offset]);
     }
 
     public function pdo(): PDO

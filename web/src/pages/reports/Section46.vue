@@ -18,7 +18,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -26,7 +26,7 @@ const toast = useToast()
 
 const LEGAL_GROUNDS: S46LegalGround[] = ['insolvency', 'execution', 'death', 'liquidation', 'small_receivable']
 
-const asOf = ref(localIsoDate())
+const asOf = ref(appIsoDate())
 const candidates = ref<S46Row[]>([])
 const loading = ref(false)
 const error = ref('')
@@ -103,7 +103,7 @@ const saving = ref(false)
 const selected = ref<S46Row | null>(null)
 const form = ref({
   legal_ground: 'insolvency' as S46LegalGround,
-  delivered_on: localIsoDate(),
+  delivered_on: appIsoDate(),
   corrective_doc_number: '',
   note: '',
 })
@@ -112,7 +112,7 @@ function openForm(row: S46Row) {
   selected.value = row
   form.value = {
     legal_ground: row.legal_ground ?? 'insolvency',
-    delivered_on: localIsoDate(),
+    delivered_on: appIsoDate(),
     corrective_doc_number: '',
     note: '',
   }

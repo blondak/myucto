@@ -41,9 +41,17 @@ final class ActivityLogHashChain
      * renderovaly o hodinu jinak a `verify()` je hlásil jako pozměněné — auditní
      * stopa tvrdila, že s ní někdo manipuloval. Do hashe proto vstupuje hodnota
      * převedená do UTC, která je na zóně spojení nezávislá.
+     *
+     * `COALESCE` je pojistka pro session se zónou `SYSTEM`, nad kterou `CONVERT_TZ`
+     * vrací NULL. Bez ní by se do hashe dostala prázdná hodnota — tedy stejný otisk
+     * pro záznamy s různým časem.
      */
     private const CREATED_AT_UTC_SQL =
-        "DATE_FORMAT(CONVERT_TZ(created_at, @@session.time_zone, '+00:00'), '%Y-%m-%d %H:%i:%s') AS created_at";
+        "DATE_FORMAT(COALESCE(CONVERT_TZ(created_at, @@session.time_zone, '+00:00'), created_at), "
+        . "'%Y-%m-%d %H:%i:%s') AS created_at";
+
+    private ?int $watermark = null;
+    private bool $watermarkResolved = false;
 
     public function __construct(private readonly Connection $db) {}
 
@@ -176,7 +184,7 @@ final class ActivityLogHashChain
 
             $data = array_intersect_key($row, array_flip(self::HASHED_COLUMNS));
             $prevOfRow = $row['prev_hash'] !== null ? (string) $row['prev_hash'] : null;
-            if (!in_array((string) $row['hash'], self::hashCandidates($data, $prevOfRow), true)) {
+            if (!in_array((string) $row['hash'], $this->hashCandidates($data, $prevOfRow), true)) {
                 $broken[] = ['id' => $id, 'reason' => 'obsah záznamu neodpovídá jeho hashi (byl změněn)'];
             }
 
@@ -196,21 +204,30 @@ final class ActivityLogHashChain
      * Hashe, které se u JIŽ ZAPEČETĚNÉHO článku uznávají.
      *
      * Články zapečetěné před kanonizací {@see self::CREATED_AT_UTC_SQL} mají v hashi
-     * `created_at` vyrenderovaný v lokální zóně instalace, ne v UTC. Zpětně je
-     * přepočítat nelze (přepsat hash auditní stopy je přesně to, co má řetěz
-     * znemožnit), takže se u nich uznává i tahle historická podoba. Kandidáti jsou
-     * dva a oba se odvozují z téhož okamžiku — není to tolerance „plus mínus pár
-     * hodin", jen dvě známé reprezentace jednoho času.
+     * `created_at` vyrenderovaný v zóně session, ne v UTC. Zpětně je přepočítat nelze
+     * (přepsat hash auditní stopy je přesně to, co má řetěz znemožnit), takže se
+     * u nich uznává i tahle historická podoba.
      *
-     * Cena: u starých článků projde i posun `created_at` o přesně ten offset. Pro
-     * nově pečetěné články kandidát zbyde jediný, takže se to s časem samo vytratí.
+     * ⚠️ Výjimka MUSÍ mít hranici. Obě podoby popisují týž okamžik, takže tam, kde se
+     * uznávají obě, projde ověřením i posun `created_at` přesně o offset zóny — a to
+     * je díra v tom, co má řetěz dokazovat. Hranicí je watermark
+     * `activity_log_chain_head.utc_created_at_from_id` (migrace 1528): pod ním leží
+     * články zapečetěné starým kódem, od něj výš platí jediný, kanonický hash.
+     *
+     * Bez watermarku (instalace bez migrace 1528) se historická podoba uznává všem —
+     * jinak by ověření po nasazení hlásilo celou existující stopu jako pozměněnou.
      *
      * @param array<string,mixed> $row  `created_at` už v UTC
      * @return list<string>
      */
-    private static function hashCandidates(array $row, ?string $prevHash): array
+    private function hashCandidates(array $row, ?string $prevHash): array
     {
         $candidates = [self::hashOf($row, $prevHash)];
+
+        $watermark = $this->utcHashWatermark();
+        if ($watermark !== null && (int) ($row['id'] ?? 0) >= $watermark) {
+            return $candidates;
+        }
 
         $utc = $row['created_at'] ?? null;
         if (is_string($utc) && $utc !== '') {
@@ -227,6 +244,31 @@ final class ActivityLogHashChain
         }
 
         return $candidates;
+    }
+
+    /**
+     * Od kterého `id` platí výhradně kanonický UTC hash.
+     *
+     * `null` = watermark není k dispozici (instalace bez migrace 1528), pak se
+     * historická podoba uznává všem článkům. Čte se jednou za instanci; během
+     * ověření se hodnota měnit nemůže.
+     */
+    private function utcHashWatermark(): ?int
+    {
+        if ($this->watermarkResolved) {
+            return $this->watermark;
+        }
+        $this->watermarkResolved = true;
+
+        if (!$this->db->hasColumn('activity_log_chain_head', 'utc_created_at_from_id')) {
+            return $this->watermark = null;
+        }
+
+        $value = $this->db->pdo()
+            ->query('SELECT utc_created_at_from_id FROM activity_log_chain_head WHERE id = 1')
+            ->fetchColumn();
+
+        return $this->watermark = ($value === false || $value === null) ? null : (int) $value;
     }
 
     /**

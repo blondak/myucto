@@ -24,8 +24,14 @@ describe('employmentLifecycleUi', () => {
     ])
   })
 
-  it('datum pro mutaci skládá v místním kalendářním dni bez UTC posunu', () => {
-    expect(todayIso(new Date(2026, 7, 3, 23, 59))).toBe('2026-08-03')
+  // Asserce je psaná přes okamžik v UTC, ne přes lokální složky: datum se bere
+  // v účetní zóně, takže `new Date(2026, 7, 3, 23, 59)` by na UTC runneru (CI)
+  // znamenalo už 4. 8. pražského času a test by padal jen kvůli zóně stroje.
+  it('datum pro mutaci bere v účetním kalendáři, ne v UTC', () => {
+    // 23:59 pražského času (letní čas) = 21:59 UTC téhož dne.
+    expect(todayIso(new Date('2026-08-03T21:59:00Z'))).toBe('2026-08-03')
+    // 00:30 pražského času = 22:30 UTC předchozího dne — nesmí spadnout na včerejšek.
+    expect(todayIso(new Date('2026-08-03T22:30:00Z'))).toBe('2026-08-04')
   })
 
   describe('employmentDiffValue', () => {

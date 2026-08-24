@@ -22,7 +22,7 @@ import StockReceiptModal from '@/components/stock/StockReceiptModal.vue'
 import { stockApi, type StockReceiptProposal } from '@/api/stock'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import WhyChip from '@/components/automation/WhyChip.vue'
-import { localIsoDate } from '@/utils/date'
+import { appIsoDate } from '@/utils/date'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -273,11 +273,11 @@ function onPdfError(_code: string, message: string) {
   toast.error(message)
 }
 
-const paidAtInput = ref<string>(localIsoDate())
+const paidAtInput = ref<string>(appIsoDate())
 const markPaidOpen = ref(false)
 
 function openMarkPaid() {
-  paidAtInput.value = localIsoDate()
+  paidAtInput.value = appIsoDate()
   markPaidOpen.value = true
 }
 
