@@ -173,7 +173,12 @@ final class MeAction
             $mfaMethods[] = 'totp';
         }
         $assurance = (string) ($session['assurance_level'] ?? 'legacy');
-        $mustSetupMfa = $assurance === 'setup';
+        // ⚠️ Politika, ne jen historie session. `assurance_level` se do session
+        // zapíše při vydání a nikdy se nemění, takže po vypnutí
+        // `auth.require_mfa` by stará setup session pořád hlásila
+        // `must_setup_mfa: true` a frontend by ji držel na `/setup-mfa`.
+        // Viz {@see \MyInvoice\Middleware\RequireMfaMiddleware}, kde platí totéž.
+        $mustSetupMfa = $assurance === 'setup' && $this->mfaPolicy->isRequired();
         $now = $this->clock->now()->setTimezone(new \DateTimeZone('UTC'));
         $userTimeout = ($user['session_lock_after_minutes'] ?? null) !== null
             ? (int) $user['session_lock_after_minutes']

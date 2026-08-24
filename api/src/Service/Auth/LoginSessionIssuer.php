@@ -118,7 +118,9 @@ final class LoginSessionIssuer
             $mfaMethods[] = 'totp';
         }
         $requireTotp = (bool) $this->config->get('auth.require_totp', false);
-        $mustSetupMfa = $authContext->assuranceLevel === 'setup';
+        // ⚠️ Viz {@see \MyInvoice\Middleware\RequireMfaMiddleware} — o vynucení
+        // rozhoduje aktuální politika, ne úroveň zapsaná do session při vydání.
+        $mustSetupMfa = $authContext->assuranceLevel === 'setup' && $this->mfaPolicy->isRequired();
         $userTimeout = ($user['session_lock_after_minutes'] ?? null) !== null
             ? (int) $user['session_lock_after_minutes']
             : null;

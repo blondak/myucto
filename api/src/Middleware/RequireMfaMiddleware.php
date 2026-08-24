@@ -42,6 +42,18 @@ final class RequireMfaMiddleware implements MiddlewareInterface
             '/api/health',
             '/api/version',
             '/api/auth/me',
+            // ⚠️ BEZ TOHOHLE SE SETUP SESSION NIKDY NEDOSTANE K ENROLLMENTU.
+            // `authStore.refresh()` volá `/auth/domain-context` jako PRVNÍ krok,
+            // ve stejném `try` bloku jako `/auth/me` a bez vlastního `catch`.
+            // Když se odsud vrátí 403, celý refresh spadne, `user` zůstane null,
+            // router guard vyhodnotí `!isAuthenticated` a pošle na `/login` —
+            // odkud interceptor (`web/src/api/client.ts`) na tomtéž 403 udělá
+            // tvrdý `location.href = '/setup-mfa'`. Výsledkem je blikající
+            // smyčka `/login ↔ /setup-mfa`, ze které uživatel nemá jak ven.
+            // Endpoint sám je veřejný (`AuthMiddleware::PUBLIC_PATHS`) a vrací
+            // kontext domény, ne business data — držet ho tady zavřený nechrání
+            // nic a rozbíjí jediné, co setup session smí dělat.
+            '/api/auth/domain-context',
             '/api/auth/totp/status',
             '/api/auth/webauthn/credentials',
         ],
@@ -89,6 +101,19 @@ final class RequireMfaMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
+        // ⚠️ POLITIKA SE PTÁ PŘED SETUP VĚTVÍ, ne za ní.
+        //
+        // `assurance_level` se zapisuje do session při jejím VYDÁNÍ a už se
+        // nikdy nemění. Když se tahle větev vyhodnotila dřív než politika,
+        // znamenalo vypnutí `auth.require_mfa` pro už vydané setup session
+        // úplné nic: dál dostávaly 403 `mfa_setup_required`, tedy i po vypnutí
+        // MFA zůstal uživatel zamčený ve smyčce a jediná cesta ven bylo ručně
+        // smazat cookie. Politika je aktuální stav konfigurace, session je
+        // historie — rozhodovat musí ta první.
+        if (!$this->policy->isRequired()) {
+            return $handler->handle($request);
+        }
+
         if ($assurance === 'setup') {
             $request = $request->withAttribute(self::ATTR_MUST_SETUP_MFA, true);
             if (self::isAllowed($method, $path, self::SETUP_PATHS)) {
@@ -104,7 +129,7 @@ final class RequireMfaMiddleware implements MiddlewareInterface
             );
         }
 
-        if (!$this->policy->isRequired() || $assurance === 'strong') {
+        if ($assurance === 'strong') {
             return $handler->handle($request);
         }
 
