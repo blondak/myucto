@@ -43,11 +43,17 @@ final class PasswordSetupLinkIssuer
         $expiresAt = ($now ?? new \DateTimeImmutable())
             ->modify(sprintf('+%d hours', self::SETUP_TTL_HOURS));
 
+        // ⚠️ `purpose = 'setup'` není jen popisek. Podle něj `ResetPasswordAction`
+        // pozná, že smí rovnou vydat sezení (zákazník právě zakládá účet a nemá
+        // se přihlašovat heslem, které si před vteřinou vymyslel). Běžná obnova
+        // hesla zůstává `reset` a sezení nedostane — viz migrace 1525.
         $pdo->prepare(
-            'INSERT INTO password_resets (user_id, token_hash, expires_at, ip) VALUES (?, ?, ?, ?)'
+            'INSERT INTO password_resets (user_id, token_hash, purpose, expires_at, ip)
+             VALUES (?, ?, ?, ?, ?)'
         )->execute([
             $userId,
             hash('sha256', $token),
+            'setup',
             $expiresAt->format('Y-m-d H:i:s'),
             @inet_pton((string) $ip) ?: '',
         ]);

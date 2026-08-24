@@ -4,10 +4,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AppShell from '@/components/layout/AppShell.vue'
 import { authApi } from '@/api/auth'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 
 const token = ref('')
 const password = ref('')
@@ -31,6 +33,20 @@ async function submit() {
   try {
     await authApi.reset(token.value, password.value)
     success.value = true
+
+    // Odkaz z prvního nastavení vrací rovnou sezení (`purpose = 'setup'`, viz
+    // ResetPasswordAction) — pak uživatele pustíme dovnitř bez opisování hesla,
+    // které si právě vymyslel. Rozhoduje stav storu po `refresh()`, ne tvar
+    // odpovědi: guard v routeru čte tentýž stav, a jakýkoli rozjezd těch dvou
+    // podmínek je smyčka `/` ↔ `/login`.
+    //
+    // Běžná obnova hesla sezení nedostane, takže `isAuthenticated` zůstane
+    // false a chování je nezměněné — přesměrování na přihlášení.
+    await auth.refresh()
+    if (auth.isAuthenticated) {
+      router.push(auth.mustSetupMfa || auth.mustSetupTotp ? '/setup-mfa' : '/')
+      return
+    }
     setTimeout(() => router.push('/login'), 2000)
   } catch (e: any) {
     error.value = e?.response?.data?.error?.message || t('errors.generic')

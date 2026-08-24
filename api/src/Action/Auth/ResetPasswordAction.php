@@ -7,7 +7,10 @@ namespace MyInvoice\Action\Auth;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Auth\LoginSessionIssuer;
+use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\PasswordHasher;
+use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -21,6 +24,8 @@ final class ResetPasswordAction
         private readonly SessionManager $sessions,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly LoginSessionIssuer $loginIssuer,
+        private readonly MfaPolicyService $mfaPolicy,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -39,7 +44,7 @@ final class ResetPasswordAction
 
         $tokenHash = hash('sha256', $tokenRaw);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, user_id, expires_at, used_at FROM password_resets WHERE token_hash = ? LIMIT 1'
+            'SELECT id, user_id, purpose, expires_at, used_at FROM password_resets WHERE token_hash = ? LIMIT 1'
         );
         $stmt->execute([$tokenHash]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
@@ -83,6 +88,55 @@ final class ResetPasswordAction
             'sessions_invalidated' => $invalidated,
         ], $ip, $request->getHeaderLine('User-Agent'));
 
-        return Json::ok($response, ['ok' => true]);
+        // ⚠️ Sezení dostane JEN první nastavení hesla, ne obnova.
+        //
+        // U `setup` účet právě vzniká: zákazník otevřel jednorázový odkaz
+        // z uvítacího e-mailu a heslo si vymyslel před vteřinou. Poslat ho na
+        // přihlašovací formulář, aby ho opsal podruhé, je zbytečná překážka na
+        // úplně první obrazovce produktu.
+        //
+        // U `reset` je to jiná situace a záměrně se nic nemění: účet už
+        // existuje a odkaz mohl uniknout. Zůstává tedy `{ok:true}` a přihlášení
+        // heslem, ať uniklý odkaz sám o sobě nikdy nedává živé sezení.
+        // Rozlišuje se sloupcem `purpose` z migrace 1525, který je fail-closed
+        // (výchozí `reset`), takže neznámý historický řádek sezení nedostane.
+        if ((string) $row['purpose'] !== 'setup') {
+            return Json::ok($response, ['ok' => true]);
+        }
+
+        $stmt = $pdo->prepare(
+            'SELECT u.id, u.email, u.name, u.role, u.role_id, u.locale, u.password_hash,
+                    u.is_active, u.totp_secret, u.totp_enabled, u.session_lock_after_minutes,
+                    r.name AS role_name, r.role_type,
+                    r.is_active AS role_active, r.system_key
+               FROM users u
+               JOIN roles r ON r.id = u.role_id
+              WHERE u.id = ? LIMIT 1'
+        );
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        // Neaktivní účet ani rozbitá vazba na roli sezení nedostanou. Heslo je
+        // v tu chvíli už nastavené — což je správně, jen se uživatel musí
+        // přihlásit normální cestou a narazit na standardní hlášku.
+        if (!$user || (int) $user['is_active'] === 0) {
+            return Json::ok($response, ['ok' => true]);
+        }
+
+        // Úroveň sezení se odvozuje stejně jako v `LoginAction`: heslo samo
+        // o sobě dává `basic`, a když instalace MFA vyžaduje, sníží se na
+        // `setup`, aby uživatel nejdřív prošel enrollmentem.
+        $authContext = SessionAuthContext::basic('password');
+        if ($this->mfaPolicy->isRequired()) {
+            $authContext = SessionAuthContext::setup($authContext->authMethod);
+        }
+
+        return $this->loginIssuer->issue(
+            $response,
+            $user,
+            $ip,
+            $request->getHeaderLine('User-Agent'),
+            $authContext,
+        );
     }
 }

@@ -30,6 +30,7 @@ final class PasswordSetupLinkIssuerTest extends TestCase
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id    INTEGER NOT NULL,
                 token_hash TEXT NOT NULL,
+                purpose    TEXT NOT NULL DEFAULT \'reset\',
                 expires_at TEXT NOT NULL,
                 used_at    TEXT NULL,
                 ip         BLOB NOT NULL
@@ -62,6 +63,19 @@ final class PasswordSetupLinkIssuerTest extends TestCase
             PasswordSetupLinkIssuer::SETUP_TTL_HOURS * 60,
             'Onboardingový odkaz má mít vlastní, delší lhůtu než obnova hesla.',
         );
+    }
+
+    /**
+     * Onboardingový odkaz se musí od obnovy hesla poznat i v databázi — podle
+     * toho `ResetPasswordAction` rozhoduje, jestli smí vydat sezení.
+     */
+    public function testOnboardingTokenIsMarkedAsSetup(): void
+    {
+        (new PasswordSetupLinkIssuer())->issue($this->pdo, 42);
+
+        $purpose = $this->pdo->query('SELECT purpose FROM password_resets')->fetchColumn();
+
+        self::assertSame('setup', $purpose);
     }
 
     public function testOnlyTheHashIsStored(): void
