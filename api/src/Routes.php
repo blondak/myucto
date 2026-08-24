@@ -2156,6 +2156,7 @@ final class Routes
         $app->get   ('/api/documents/by-entity/{type:[a-z_]+}/{id:[0-9]+}', [DocumentsAction::class, 'byEntity']);
         $app->get   ('/api/documents',                [DocumentsAction::class, 'list']);
         $app->post  ('/api/documents',                UploadDocumentAction::class);
+        $app->get   ('/api/documents/{id:[0-9]+}/text',       [DocumentsAction::class, 'text']);
         $app->get   ('/api/documents/{id:[0-9]+}',            [DocumentsAction::class, 'get']);
         $app->patch ('/api/documents/{id:[0-9]+}',            [DocumentsAction::class, 'update']);
         $app->post  ('/api/documents/{id:[0-9]+}/move',       [DocumentsAction::class, 'move']);

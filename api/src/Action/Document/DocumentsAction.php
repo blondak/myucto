@@ -119,6 +119,39 @@ final class DocumentsAction
         return Json::ok($response, $doc);
     }
 
+    /** GET /api/documents/{id}/text?offset=&max_chars= */
+    public function text(Request $request, Response $response, array $args): Response
+    {
+        $sid = $this->supplierId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $query = $request->getQueryParams();
+        $offset = max(0, (int) ($query['offset'] ?? 0));
+        $maxChars = max(1000, min(50000, (int) ($query['max_chars'] ?? 20000)));
+        $row = $this->documents->findExtractedText(
+            $id,
+            $sid,
+            $this->viewer($request),
+            $offset,
+            $maxChars,
+        );
+        if ($row === null) {
+            return Json::error($response, 'not_found', 'Dokument nenalezen.', 404);
+        }
+
+        $text = $row['content_text'];
+        $totalChars = $row['total_chars'];
+
+        return Json::ok($response, [
+            'id' => $id,
+            'text_status' => $row['text_status'],
+            'offset' => $offset,
+            'max_chars' => $maxChars,
+            'total_chars' => $totalChars,
+            'has_more' => $text !== null && $offset + mb_strlen($text) < $totalChars,
+            'content' => $text,
+        ]);
+    }
+
     /** PATCH /api/documents/{id} {title?, description?, tags?} */
     public function update(Request $request, Response $response, array $args): Response
     {

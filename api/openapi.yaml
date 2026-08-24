@@ -1674,6 +1674,53 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ProjectStats' }
 
+  /api/v1/projects/profitability:
+    get:
+      tags: [Projects]
+      summary: Výnosy, náklady a marže zakázek
+      description: |
+        Manažerský přehled pouze ke čtení. V podvojném účetnictví vychází
+        ze zaúčtovaného deníku; v daňové evidenci z dokladů. Vrací také počet
+        nezaúčtovaných dokladů, aby nulový výsledek nebyl zaměněn za úplná data.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { name: date_from, in: query, schema: { type: string, format: date } }
+        - { name: date_to, in: query, schema: { type: string, format: date } }
+        - { name: include_archived, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: Přehled ziskovosti zakázek
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [source, currency, items, totals]
+                properties:
+                  source: { type: string, enum: [journal, documents] }
+                  currency: { type: string, example: CZK }
+                  date_from: { type: [string, "null"], format: date }
+                  date_to: { type: [string, "null"], format: date }
+                  items: { type: array, items: { type: object, additionalProperties: true } }
+                  totals: { type: object, additionalProperties: { type: number } }
+
+  /api/v1/projects/{id}/profit:
+    get:
+      tags: [Projects]
+      summary: Výnosy, náklady a marže jedné zakázky
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+        - { name: date_from, in: query, schema: { type: string, format: date } }
+        - { name: date_to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Ziskovost a zdrojové doklady zakázky
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/invoices/{id}/work-report:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -7158,6 +7205,36 @@ paths:
                 properties:
                   results: { type: array, items: { $ref: '#/components/schemas/DocumentLinkCandidate' } }
                   query: { type: string }
+  /api/v1/documents/{id}/text:
+    get:
+      tags: [Documents]
+      summary: Omezený úsek vytěženého textu dokumentu
+      description: |
+        Vrací text získaný OCR nebo extrakcí, nikdy binární obsah souboru.
+        Výstup je stránkovaný po znacích a zachovává tenantový i osobní scope dokumentu.
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: max_chars, in: query, schema: { type: integer, minimum: 1000, maximum: 50000, default: 20000 } }
+      responses:
+        '200':
+          description: Úsek vytěženého textu a informace pro pokračování
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, text_status, offset, max_chars, total_chars, has_more, content]
+                properties:
+                  id: { type: integer }
+                  text_status: { type: string }
+                  offset: { type: integer }
+                  max_chars: { type: integer }
+                  total_chars: { type: integer }
+                  has_more: { type: boolean }
+                  content: { type: [string, "null"] }
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/documents/{id}:
     get:
       tags: [Documents]

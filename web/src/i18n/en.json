@@ -16638,6 +16638,47 @@
         "verify_failed": "Domain verification failed.",
         "activate_failed": "The domain could not be activated."
     },
+    "mcp_server_page": {
+        "subtitle": "Connect an AI assistant to your company's invoicing, projects, documents, logbook, statistics and e-shop.",
+        "capabilities": {
+            "projects": "projects",
+            "documents": "documents",
+            "logbook": "logbook"
+        },
+        "install": {
+            "prepare_title": "Prepare the server.",
+            "prebuilt_intro": "The distribution already includes a ready-to-use build; you only need",
+            "node_requirement": "Node 20 or newer",
+            "node_reason": ", because the bundled server is still JavaScript.",
+            "node_missing": "Don't have Node?",
+            "choose_variant": "Choose a variant:",
+            "bundle": "Prebuilt bundle (recommended)",
+            "source": "Run from source",
+            "bundle_intro": "Use the file included in the installation:",
+            "bundle_description": "There is nothing to build or install. It is a single file with no external dependencies; keep it in the installation or copy it anywhere. In the next step, simply set its full path."
+        },
+        "examples": {
+            "operations": {
+                "title": "Projects, documents and logbook",
+                "create_project": "Create an ACME project with a CZK 200,000 budget and 14-day payment terms.",
+                "profitability": "How profitable have our projects been since the start of the year?",
+                "search_documents": "Find the notice period in our contracts and show me the relevant text.",
+                "link_document": "Link that contract to the Web 2026 project.",
+                "add_trip": "Add today's business trip from Prague to Kolín, 120 km.",
+                "add_fueling": "Record a 40-litre fueling for CZK 1,520."
+            }
+        },
+        "tool_groups": {
+            "projects": "Projects",
+            "documents": "Documents",
+            "logbook": "Logbook"
+        },
+        "troubleshooting": {
+            "restart_prefix": "Restart the assistant application. For the recommended variant, check the path to",
+            "npm_prefix": "The command",
+            "npm_suffix": "is only needed when running the development variant from"
+        }
+    },
     "instance_export": {
         "title": "Full data export",
         "subtitle": "Build one company package: restorable data, documents, VAT records and accounting closing packages.",

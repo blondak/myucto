@@ -1,20 +1,17 @@
 <script setup lang="ts">
 /**
  * MCP server — návod na zprovoznění, příklady dotazů a log volání.
- *
- * Texty jsou tu záměrně česky natvrdo, ne přes `t()`: je to integrační návod pro
- * správce instance (obdoba stránky Backend API v Syntexu), ne provozní obrazovka,
- * kterou vidí koncoví uživatelé. Kdyby se stránka někdy otevírala i anglicky
- * mluvícím zákazníkům, převede se na klíče najednou — míchat obojí by bylo horší.
  */
 import { ref, computed, onMounted } from 'vue'
 import { tokensApi, type ApiToken, type ApiLogEntry } from '@/api/tokens'
 import { useToast } from '@/composables/useToast'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useI18n } from 'vue-i18n'
 
 const toast = useToast()
 const auth = useAuthStore()
+const { t } = useI18n()
 
 // V demu je stránka dostupná jako ukázka — čte se všechno, ale token vydat nelze
 // (mutace zastaví DemoReadOnlyMiddleware). Bez téhle informace by uživatel
@@ -34,8 +31,8 @@ const variant = ref<Variant>('bundle')
 
 const PATHS: Record<Variant, { unix: string; win: string }> = {
   bundle: {
-    unix: '/cesta/k/myucto-mcp.mjs',
-    win: 'C:\\cesta\\k\\myucto-mcp.mjs',
+    unix: '/cesta/k/myucto.cz/MCP/dist/myucto-mcp.mjs',
+    win: 'C:\\cesta\\k\\myucto.cz\\MCP\\dist\\myucto-mcp.mjs',
   },
   source: {
     unix: '/cesta/k/myucto.cz/MCP/src/index.mjs',
@@ -286,7 +283,7 @@ function fmtTime(ts: string): string {
   return ts.replace('T', ' ').slice(0, 19)
 }
 
-const EXAMPLE_GROUPS = [
+const EXAMPLE_GROUPS = computed(() => [
   {
     title: 'Fakturace a pohledávky',
     items: [
@@ -313,6 +310,17 @@ const EXAMPLE_GROUPS = [
       { q: 'Přidej do výkazu 5 metrů kabeláže po 120 Kč.', tool: 'add_work_report_material' },
       { q: 'Smaž poslední řádek z výkazu, zadal jsem ho omylem.', tool: 'remove_work_report_entry' },
       { q: 'Jakou máme hodinovou sazbu na zakázce pro Prazdroj?', tool: 'list_projects' },
+    ],
+  },
+  {
+    title: t('mcp_server_page.examples.operations.title'),
+    items: [
+      { q: t('mcp_server_page.examples.operations.create_project'), tool: 'save_project' },
+      { q: t('mcp_server_page.examples.operations.profitability'), tool: 'project_profitability' },
+      { q: t('mcp_server_page.examples.operations.search_documents'), tool: 'search_documents + get_document' },
+      { q: t('mcp_server_page.examples.operations.link_document'), tool: 'link_document' },
+      { q: t('mcp_server_page.examples.operations.add_trip'), tool: 'list_logbook_trip_categories + save_logbook_trip' },
+      { q: t('mcp_server_page.examples.operations.add_fueling'), tool: 'save_logbook_fueling' },
     ],
   },
   {
@@ -356,9 +364,9 @@ const EXAMPLE_GROUPS = [
       { q: 'Kolik máme uloženo ve skladu k dnešnímu dni?', tool: 'stock_valuation' },
     ],
   },
-]
+])
 
-const TOOL_GROUPS = [
+const TOOL_GROUPS = computed(() => [
   {
     title: 'Fakturace a pohledávky',
     tools: 'list_invoices, list_unpaid_invoices, get_invoice, list_invoice_payments, '
@@ -369,6 +377,23 @@ const TOOL_GROUPS = [
     title: 'Výkazy práce a materiálu',
     tools: 'get_work_report, add_work_report_entry, add_work_report_material, '
       + 'remove_work_report_entry, list_projects',
+  },
+  {
+    title: t('mcp_server_page.tool_groups.projects'),
+    tools: 'list_projects, get_project, project_stats, project_profitability, '
+      + 'save_project, archive_project, delete_project',
+  },
+  {
+    title: t('mcp_server_page.tool_groups.documents'),
+    tools: 'list_documents, search_documents, get_document, list_entity_documents, '
+      + 'update_document, link_document, unlink_document',
+  },
+  {
+    title: t('mcp_server_page.tool_groups.logbook'),
+    tools: 'list_logbook_cars, save_logbook_car, delete_logbook_car, '
+      + 'list_logbook_trip_categories, list_logbook_trips, save_logbook_trip, '
+      + 'delete_logbook_trip, list_logbook_fuelings, save_logbook_fueling, '
+      + 'delete_logbook_fueling, logbook_summary',
   },
   {
     title: 'Daně — jen čtení',
@@ -400,7 +425,7 @@ const TOOL_GROUPS = [
     title: 'Hledání a číselníky',
     tools: 'search, list_vat_rates, list_suppliers, whoami',
   },
-]
+])
 
 onMounted(() => {
   loadTokens()
@@ -413,7 +438,7 @@ onMounted(() => {
     <div class="mb-4">
       <h1 class="text-2xl font-semibold">MCP server</h1>
       <p class="text-sm text-neutral-500 mt-0.5">
-        Napojení AI asistenta na fakturaci, daně, účetnictví, statistiku a e-shop vaší firmy.
+        {{ t('mcp_server_page.subtitle') }}
       </p>
     </div>
 
@@ -429,6 +454,9 @@ onMounted(() => {
         Server pokrývá <strong>fakturaci včetně vystavování</strong>, <strong>správu
         odběratelů s napojením na ARES</strong>, <strong>výkazy práce a materiálu</strong>,
         <strong>přehled zaplacených a nezaplacených dokladů</strong>, <strong>daně</strong>,
+        <strong>{{ t('mcp_server_page.capabilities.projects') }}</strong>,
+        <strong>{{ t('mcp_server_page.capabilities.documents') }}</strong>,
+        <strong>{{ t('mcp_server_page.capabilities.logbook') }}</strong>,
         <strong>účetnictví</strong>, <strong>statistiku</strong> a <strong>e-shop se skladem</strong>.
       </p>
       <p class="mb-2">
@@ -500,9 +528,14 @@ onMounted(() => {
         <li class="flex gap-3">
           <span class="shrink-0 w-7 h-7 rounded-full bg-primary-600 text-white font-bold text-xs flex items-center justify-center">2</span>
           <div class="min-w-0">
-            <strong>Připravte server.</strong> Vyžaduje <strong>Node 20 nebo novější</strong>
-            — i sestavený server je JavaScript, Node tedy potřeba je vždy.
-            Vyberte způsob:
+            <strong>{{ t('mcp_server_page.install.prepare_title') }}</strong>
+            {{ t('mcp_server_page.install.prebuilt_intro') }}
+            <strong>{{ t('mcp_server_page.install.node_requirement') }}</strong>{{ t('mcp_server_page.install.node_reason') }}
+            <div class="mt-1 text-neutral-500">
+              {{ t('mcp_server_page.install.node_missing') }} Windows: <code class="px-1 bg-neutral-100 rounded font-mono">winget install --id OpenJS.NodeJS.LTS --exact</code>
+              · macOS: <code class="px-1 bg-neutral-100 rounded font-mono">brew install node</code>
+            </div>
+            {{ t('mcp_server_page.install.choose_variant') }}
 
             <div class="mt-2 flex flex-wrap gap-1.5">
               <button @click="variant = 'bundle'"
@@ -510,25 +543,22 @@ onMounted(() => {
                 :class="variant === 'bundle'
                   ? 'border-primary-600 bg-primary-600 text-white'
                   : 'border-neutral-300 text-neutral-700 hover:bg-neutral-50'">
-                Jeden soubor (doporučeno)
+                {{ t('mcp_server_page.install.bundle') }}
               </button>
               <button @click="variant = 'source'"
                 class="cursor-pointer px-3 py-1.5 rounded-md border text-sm font-medium whitespace-nowrap"
                 :class="variant === 'source'
                   ? 'border-primary-600 bg-primary-600 text-white'
                   : 'border-neutral-300 text-neutral-700 hover:bg-neutral-50'">
-                Přímo ze zdrojáků
+                {{ t('mcp_server_page.install.source') }}
               </button>
             </div>
 
             <div v-if="variant === 'bundle'" class="mt-2">
-              <p>Sestavte jednosouborovou verzi:</p>
-              <pre class="mt-1 bg-neutral-900 text-neutral-100 rounded-md p-3 overflow-x-auto text-xs font-mono">pwsh -File cmd/build-mcp.ps1      <span class="text-neutral-400"># Windows</span>
-./cmd/build-mcp.sh                <span class="text-neutral-400"># Linux / macOS</span></pre>
+              <p>{{ t('mcp_server_page.install.bundle_intro') }}</p>
+              <pre class="mt-1 bg-neutral-900 text-neutral-100 rounded-md p-3 overflow-x-auto text-xs font-mono">MCP/dist/myucto-mcp.mjs</pre>
               <p class="mt-1 text-neutral-500">
-                Vznikne <code class="px-1 bg-neutral-100 rounded font-mono">MCP/dist/myucto-mcp.mjs</code> — jediný soubor
-                bez závislostí, který můžete zkopírovat kamkoliv (i na jiný počítač).
-                Ve vydaných balíčcích je přiložený už hotový, takže tenhle krok můžete přeskočit.
+                {{ t('mcp_server_page.install.bundle_description') }}
               </p>
             </div>
 
@@ -726,8 +756,10 @@ npm install</pre>
             <tr class="border-t border-neutral-200">
               <td class="px-3 py-2">Asistent nástroje nevidí</td>
               <td class="px-3 py-2">
-                Restartujte aplikaci asistenta. Zkontrolujte cestu k <code>index.mjs</code>
-                a že proběhlo <code>npm install</code>.
+                {{ t('mcp_server_page.troubleshooting.restart_prefix') }}
+                <code>MCP/dist/myucto-mcp.mjs</code>.
+                {{ t('mcp_server_page.troubleshooting.npm_prefix') }} <code>npm install</code>
+                {{ t('mcp_server_page.troubleshooting.npm_suffix') }} <code>MCP/src/index.mjs</code>.
               </td>
             </tr>
           </tbody>

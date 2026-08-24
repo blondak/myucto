@@ -1,8 +1,9 @@
 /**
  * Katalog MCP nástrojů nad veřejným API MyÚčta.
  *
- * ZÁMĚRNÝ ROZSAH: fakturace (vč. vystavování), přehled zaplacených a nezaplacených
- * dokladů, statistika a reporting, daně a účetnictví ke čtení, e-shop se skladem.
+ * ZÁMĚRNÝ ROZSAH: fakturace (vč. vystavování), zakázky, dokumenty, kniha jízd,
+ * přehled zaplacených a nezaplacených dokladů, statistika a reporting, daně
+ * a účetnictví ke čtení, e-shop se skladem.
  *
  * ÚČETNÍ A DAŇOVÁ VRSTVA JE JEDNOSMĚRNÁ — jen čtení, nikdy zápis. Odhad DPH,
  * obratovka, rozvaha, výsledovka i saldo jsou přesně ta čísla, kvůli kterým se
@@ -117,6 +118,121 @@ const nameOf = (row, fallbackId) => {
 const changed = (a, keys) => Object.fromEntries(
   keys.filter((k) => a[k] !== undefined).map((k) => [k, a[k]]),
 );
+
+/** Složí úplný PUT payload: zadané hodnoty mají přednost, ostatní se převezmou. */
+const merged = (current, a, keys) => Object.fromEntries(
+  keys
+    .filter((k) => a[k] !== undefined || current?.[k] !== undefined)
+    .map((k) => [k, a[k] !== undefined ? a[k] : current[k]]),
+);
+
+const PROJECT_FIELDS = [
+  'client_id', 'name', 'status', 'currency_id', 'hourly_rate', 'payment_due_days',
+  'payment_due_unit', 'default_revenue_category_id', 'project_number', 'contract_number',
+  'budget_total', 'budget_yearly', 'budget_monthly', 'requires_work_report_approval',
+  'note', 'billing_emails', 'billing_emails_mode',
+];
+
+const PROJECT_INPUT = {
+  id: int('ID zakázky při úpravě; bez ID se založí nová.'),
+  client_id: int('ID odběratele. U nové zakázky povinné; při úpravě se nemění.'),
+  name: str('Název zakázky.', { maxLength: 190 }),
+  status: str('Stav zakázky.', { enum: ['active', 'paused', 'closed'] }),
+  currency_id: int('ID měny; bez zadání výchozí měna firmy.'),
+  hourly_rate: num('Výchozí hodinová sazba.', { minimum: 0 }),
+  payment_due_days: int('Splatnost 1–365 dní. U nové zakázky povinné.', { minimum: 1, maximum: 365 }),
+  payment_due_unit: str('Jednotka splatnosti.', { enum: ['days', 'month'] }),
+  default_revenue_category_id: int(
+    'Výchozí kategorie tržby. Změna může doplnit kategorii i do dosavadních nezařazených faktur zakázky.',
+  ),
+  project_number: str('Interní číslo zakázky.', { maxLength: 50 }),
+  contract_number: str('Číslo smlouvy.', { maxLength: 50 }),
+  budget_total: num('Celkový rozpočet.', { minimum: 0 }),
+  budget_yearly: num('Roční rozpočet.', { minimum: 0 }),
+  budget_monthly: num('Měsíční rozpočet.', { minimum: 0 }),
+  requires_work_report_approval: bool('Vyžadovat schválení výkazu práce před vystavením.'),
+  note: str('Interní poznámka.'),
+  billing_emails: {
+    type: 'array',
+    description: 'Až tři fakturační e-maily zakázky.',
+    maxItems: 3,
+    items: schema({
+      email: str('E-mailová adresa.'),
+      position: int('Pozice 1–3.', { minimum: 1, maximum: 3 }),
+      label: str('Volitelný popisek, např. účetní.'),
+      usages: {
+        type: 'array',
+        description: 'Použití e-mailu; prázdné pole znamená všechny typy zpráv.',
+        items: { type: 'string', enum: ['documents', 'reminders', 'approvals'] },
+      },
+    }, ['email', 'position']),
+  },
+  billing_emails_mode: str('Kombinace s kontakty odběratele.', { enum: ['auto', 'append', 'replace'] }),
+};
+
+const LOGBOOK_CAR_FIELDS = [
+  'registration', 'name', 'brand', 'model', 'vin', 'fuel_type', 'odometer_start',
+  'odometer_start_date', 'is_default', 'is_archived', 'note',
+];
+const LOGBOOK_CAR_INPUT = {
+  id: int('ID vozidla při úpravě; bez ID se založí nové.'),
+  registration: str('Registrační značka. U nového vozidla povinná.', { maxLength: 20 }),
+  name: str('Vlastní název vozidla.'),
+  brand: str('Značka.'),
+  model: str('Model.'),
+  vin: str('VIN.'),
+  fuel_type: str('Druh paliva.', { enum: ['diesel', 'petrol', 'lpg', 'cng', 'electric', 'hybrid', 'other'] }),
+  odometer_start: int('Počáteční stav tachometru v km.', { minimum: 0 }),
+  odometer_start_date: date('Datum počátečního stavu tachometru.'),
+  is_default: bool('Výchozí vozidlo knihy jízd.'),
+  is_archived: bool('Archivované vozidlo.'),
+  note: str('Poznámka.'),
+};
+
+const LOGBOOK_TRIP_FIELDS = [
+  'car_id', 'trip_date', 'time_start', 'time_end', 'odometer_start', 'odometer_end',
+  'distance_km', 'category_id', 'purpose', 'origin', 'destination', 'note',
+];
+const LOGBOOK_TRIP_INPUT = {
+  id: int('ID jízdy při úpravě; bez ID se založí nová.'),
+  car_id: int('ID vozidla. U nové jízdy povinné.'),
+  trip_date: date('Datum jízdy. U nové jízdy povinné.'),
+  time_start: str('Čas odjezdu, např. 08:30.'),
+  time_end: str('Čas příjezdu, např. 10:15.'),
+  odometer_start: int('Tachometr před jízdou.', { minimum: 0 }),
+  odometer_end: int('Tachometr po jízdě.', { minimum: 0 }),
+  distance_km: num('Ujetá vzdálenost; bez zadání se dopočte z tachometru.', { exclusiveMinimum: 0 }),
+  category_id: int('Kategorie cesty. U nové jízdy povinná — soukromou/služební povahu nikdy neodhaduj.'),
+  purpose: str('Účel cesty.'),
+  origin: str('Místo odjezdu.'),
+  destination: str('Cíl cesty.'),
+  note: str('Poznámka.'),
+};
+
+const LOGBOOK_FUELING_FIELDS = [
+  'car_id', 'fueled_date', 'fueled_time', 'fuel_type', 'quantity', 'unit', 'unit_price',
+  'amount_without_vat', 'amount_vat', 'amount_with_vat', 'currency', 'odometer', 'station',
+  'vendor_id', 'receipt_number', 'note',
+];
+const LOGBOOK_FUELING_INPUT = {
+  id: int('ID tankování při úpravě; bez ID se založí nové.'),
+  car_id: int('ID vozidla.'),
+  fueled_date: date('Datum tankování. U nového záznamu povinné.'),
+  fueled_time: str('Čas tankování.'),
+  fuel_type: str('Druh paliva.'),
+  quantity: num('Množství paliva.', { exclusiveMinimum: 0 }),
+  unit: str('Jednotka, typicky l nebo kWh.'),
+  unit_price: num('Cena za jednotku.', { minimum: 0 }),
+  amount_without_vat: num('Částka bez DPH.', { minimum: 0 }),
+  amount_vat: num('Částka DPH.', { minimum: 0 }),
+  amount_with_vat: num('Celková částka včetně DPH. U nového záznamu povinná.', { exclusiveMinimum: 0 }),
+  currency: str('Kód měny, např. CZK.', { minLength: 3, maxLength: 3 }),
+  odometer: int('Stav tachometru.', { minimum: 0 }),
+  station: str('Čerpací stanice.'),
+  vendor_id: int('ID dodavatele.'),
+  receipt_number: str('Číslo účtenky.'),
+  note: str('Poznámka.'),
+};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Pomocné funkce pro výkazy práce
@@ -856,6 +972,107 @@ export const TOOLS = [
     }, tool),
   },
   {
+    name: 'get_project',
+    title: 'Detail zakázky',
+    description:
+      'Vrátí kartu zakázky včetně obratu po měsících a letech, počtu faktur '
+      + 'a souhrnu nezaplacených dokladů. Použij před úpravou zakázky.',
+    inputSchema: schema({ id: int('ID zakázky.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/projects/${a.id}`, null, tool),
+  },
+  {
+    name: 'project_stats',
+    title: 'Statistiky zakázek',
+    description:
+      'Agregovaný přehled zakázek: nejlepší zakázky letos, loni a za posledních '
+      + '12 měsíců, obraty po letech a rozpad podle stavu.',
+    inputSchema: schema(),
+    write: false,
+    run: (c, _a, tool) => c.get('/projects/stats', null, tool),
+  },
+  {
+    name: 'project_profitability',
+    title: 'Ziskovost zakázek',
+    description:
+      'Výnosy, náklady a ziskovost všech zakázek; s `id` vrátí detail jedné zakázky. '
+      + 'Jde o analytický přehled, nic se nemění.',
+    inputSchema: schema({
+      id: int('ID zakázky; bez ID přehled všech zakázek.'),
+      date_from: date('Začátek období.'),
+      date_to: date('Konec období.'),
+      include_archived: bool('V přehledu zahrnout archivované zakázky.'),
+    }),
+    write: false,
+    run: (c, a, tool) => a.id
+      ? c.get(`/projects/${a.id}/profit`, { date_from: a.date_from, date_to: a.date_to }, tool)
+      : c.get('/projects/profitability', {
+        date_from: a.date_from,
+        date_to: a.date_to,
+        include_archived: a.include_archived ? 1 : undefined,
+      }, tool),
+  },
+  {
+    name: 'save_project',
+    title: 'Založit nebo upravit zakázku',
+    description:
+      'Bez `id` založí novou zakázku; tehdy vyžaduje `client_id`, `name` '
+      + 'a `payment_due_days`. S `id` načte současný stav a změní jen zadaná pole, '
+      + 'aby se ostatní nastavení neztratilo.',
+    inputSchema: schema(PROJECT_INPUT),
+    write: true,
+    run: async (c, a, tool) => {
+      if (!a.id) {
+        const missing = ['client_id', 'name', 'payment_due_days'].filter(
+          (key) => a[key] === undefined || a[key] === '',
+        );
+        if (missing.length > 0) {
+          throw new Error(`Pro novou zakázku chybí: ${missing.join(', ')}.`);
+        }
+        return c.post('/projects', changed(a, PROJECT_FIELDS), tool);
+      }
+
+      const current = await c.get(`/projects/${a.id}`, null, tool);
+      return c.put(`/projects/${a.id}`, merged(current, a, PROJECT_FIELDS), tool);
+    },
+  },
+  {
+    name: 'archive_project',
+    title: 'Archivovat zakázku',
+    description:
+      'Skryje zakázku z běžných seznamů, ale zachová její doklady a historii. '
+      + 'Bez `confirm: true` pouze načte a vypíše zakázku k potvrzení.',
+    inputSchema: schema({ id: int('ID zakázky.'), confirm: CONFIRM }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const project = await confirmed(c, a, tool, {
+        path: `/projects/${a.id}`,
+        action: 'Archivovat se má zakázka',
+        label: (row) => nameOf(row, a.id),
+      });
+      return { archived: project, result: await c.post(`/projects/${a.id}/archive`, {}, tool) };
+    },
+  },
+  {
+    name: 'delete_project',
+    title: 'Smazat nepoužitou zakázku',
+    description:
+      'Nevratně smaže pouze zakázku bez vystavených dokladů; zakázku s historií '
+      + 'API odmítne a má se archivovat. Bez `confirm: true` nic nesmaže.',
+    inputSchema: schema({ id: int('ID zakázky.'), confirm: CONFIRM }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const project = await confirmed(c, a, tool, {
+        path: `/projects/${a.id}`,
+        action: 'Smazat se má zakázka',
+        label: (row) => nameOf(row, a.id),
+      });
+      return { deleted: project, result: await c.del(`/projects/${a.id}`, tool) };
+    },
+  },
+  {
     name: 'get_work_report',
     title: 'Výkaz práce a materiálu',
     description:
@@ -1325,6 +1542,357 @@ export const TOOLS = [
     inputSchema: schema({ id: int('ID přijaté faktury.') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/purchase-invoices/${a.id}`, null, tool),
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Dokumenty — metadata, vytěžený text a vazby (bez binárního upload/download)
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    name: 'list_documents',
+    title: 'Seznam dokumentů',
+    description:
+      'Dokumenty a podsložky ve vybrané složce DMS. Vrací metadata, ne bajty souboru. '
+      + 'Pro hledání uvnitř vytěženého textu použij `search_documents`.',
+    inputSchema: schema({
+      folder_id: int('ID složky; bez zadání kořen.'),
+      doc_type: str('Typ dokumentu.', { enum: ['pdf', 'docx', 'xlsx', 'xml', 'zfo', 'p7s', 'zip', 'image', 'other'] }),
+      tag: str('Filtrovat podle tagu.'),
+      scope: str('Firemní nebo osobní dokumenty.', { enum: ['company', 'user'] }),
+      ...PAGING,
+    }),
+    write: false,
+    run: (c, a, tool) => c.get('/documents', {
+      folder_id: a.folder_id,
+      doc_type: a.doc_type,
+      tag: a.tag,
+      scope: a.scope,
+      page: a.page,
+      per_page: a.per_page,
+    }, tool),
+  },
+  {
+    name: 'search_documents',
+    title: 'Hledat v dokumentech',
+    description:
+      'Fulltextově hledá v názvu, popisu i vytěženém textu dokumentů. '
+      + 'Vrátí bezpečně scoped metadata; obsah vybraného výsledku načti přes `get_document`.',
+    inputSchema: schema({ query: str('Hledaný text, alespoň 2 znaky.', { minLength: 2 }) }, ['query']),
+    write: false,
+    run: (c, a, tool) => c.get('/documents/search', { q: a.query }, tool),
+  },
+  {
+    name: 'get_document',
+    title: 'Detail a text dokumentu',
+    description:
+      'Vrátí metadata, tagy, vazby a přílohy dokumentu. S `include_text: true` přidá '
+      + 'bezpečně omezený úsek vytěženého textu; binární obsah souboru nevrací.',
+    inputSchema: schema({
+      id: int('ID dokumentu.'),
+      include_text: bool('Připojit vytěžený text, pokud je dostupný.'),
+      text_offset: int('Posun ve znacích pro pokračování dlouhého textu.', { minimum: 0 }),
+      text_max_chars: int('Délka úseku 1 000–50 000 znaků, výchozí 20 000.', { minimum: 1000, maximum: 50000 }),
+    }, ['id']),
+    write: false,
+    run: async (c, a, tool) => {
+      const document = await c.get(`/documents/${a.id}`, null, tool);
+      if (!a.include_text) return document;
+      const extractedText = await c.get(`/documents/${a.id}/text`, {
+        offset: a.text_offset,
+        max_chars: a.text_max_chars,
+      }, tool);
+      return { document, extracted_text: extractedText };
+    },
+  },
+  {
+    name: 'list_entity_documents',
+    title: 'Dokumenty připojené k záznamu',
+    description:
+      'Vrátí dokumenty navázané na odběratele, fakturu, přijatou fakturu, zakázku, '
+      + 'účetní zápis nebo bankovní transakci.',
+    inputSchema: schema({
+      entity_type: str('Typ záznamu.', {
+        enum: ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction'],
+      }),
+      entity_id: int('ID záznamu.'),
+    }, ['entity_type', 'entity_id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/documents/by-entity/${a.entity_type}/${a.entity_id}`, null, tool),
+  },
+  {
+    name: 'update_document',
+    title: 'Upravit metadata dokumentu',
+    description:
+      'Změní jen zadaný název, popis nebo kompletní sadu tagů dokumentu. '
+      + 'Samotný soubor ani jeho vytěžený text nemění.',
+    inputSchema: schema({
+      id: int('ID dokumentu.'),
+      title: str('Název dokumentu.'),
+      description: str('Popis dokumentu; prázdný text popis odstraní.'),
+      tags: { type: 'array', items: { type: 'string' }, description: 'Kompletní sada tagů.' },
+    }, ['id']),
+    write: true,
+    run: (c, a, tool) => c.patch(`/documents/${a.id}`, changed(a, ['title', 'description', 'tags']), tool),
+  },
+  {
+    name: 'link_document',
+    title: 'Připojit dokument k záznamu',
+    description:
+      'Přidá vazbu existujícího dokumentu na záznam stejné firmy. '
+      + 'Nevytváří ani nepřepisuje soubor.',
+    inputSchema: schema({
+      id: int('ID dokumentu.'),
+      entity_type: str('Typ záznamu.', {
+        enum: ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction'],
+      }),
+      entity_id: int('ID záznamu.'),
+    }, ['id', 'entity_type', 'entity_id']),
+    write: true,
+    run: (c, a, tool) => c.post(`/documents/${a.id}/links`, {
+      entity_type: a.entity_type,
+      entity_id: a.entity_id,
+    }, tool),
+  },
+  {
+    name: 'unlink_document',
+    title: 'Odpojit dokument od záznamu',
+    description:
+      'Odstraní jen vazbu dokumentu na záznam; dokument ani cílový záznam nemaže. '
+      + 'Bez `confirm: true` vypíše aktuální dokument k potvrzení.',
+    inputSchema: schema({
+      id: int('ID dokumentu.'),
+      entity_type: str('Typ záznamu.', {
+        enum: ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction'],
+      }),
+      entity_id: int('ID záznamu.'),
+      confirm: CONFIRM,
+    }, ['id', 'entity_type', 'entity_id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const document = await confirmed(c, a, tool, {
+        path: `/documents/${a.id}`,
+        action: 'Odpojit se má dokument',
+        label: (row) => `${nameOf(row, a.id)} od ${a.entity_type} #${a.entity_id}`,
+      });
+      return {
+        unlinked: document,
+        result: await c.del(`/documents/${a.id}/links`, tool, {
+          entity_type: a.entity_type,
+          entity_id: a.entity_id,
+        }),
+      };
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Kniha jízd — evidence je zapisovatelná, daňové souhrny zůstávají jen čtecí
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    name: 'list_logbook_cars',
+    title: 'Vozidla knihy jízd',
+    description: 'Seznam vozidel; s `id` vrátí detail jednoho vozidla.',
+    inputSchema: schema({
+      id: int('ID vozidla; bez ID seznam.'),
+      include_archived: bool('Zahrnout archivovaná vozidla.'),
+    }),
+    write: false,
+    run: (c, a, tool) => a.id
+      ? c.get(`/logbook/cars/${a.id}`, null, tool)
+      : c.get('/logbook/cars', { include_archived: a.include_archived ? 1 : undefined }, tool),
+  },
+  {
+    name: 'save_logbook_car',
+    title: 'Založit nebo upravit vozidlo',
+    description:
+      'Bez `id` založí vozidlo a vyžaduje registrační značku. S `id` načte současný '
+      + 'stav a změní jen zadaná pole.',
+    inputSchema: schema(LOGBOOK_CAR_INPUT),
+    write: true,
+    run: async (c, a, tool) => {
+      if (!a.id) {
+        if (!String(a.registration ?? '').trim()) throw new Error('Pro nové vozidlo chybí registration.');
+        return c.post('/logbook/cars', changed(a, LOGBOOK_CAR_FIELDS), tool);
+      }
+      const current = await c.get(`/logbook/cars/${a.id}`, null, tool);
+      return c.put(`/logbook/cars/${a.id}`, merged(current, a, LOGBOOK_CAR_FIELDS), tool);
+    },
+  },
+  {
+    name: 'delete_logbook_car',
+    title: 'Smazat nepoužité vozidlo',
+    description:
+      'Smaže jen vozidlo bez jízd a tankování; používané vozidlo je nutné archivovat '
+      + 'přes `save_logbook_car`. Bez `confirm: true` nic nesmaže.',
+    inputSchema: schema({ id: int('ID vozidla.'), confirm: CONFIRM }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const car = await confirmed(c, a, tool, {
+        path: `/logbook/cars/${a.id}`,
+        action: 'Smazat se má vozidlo',
+        label: (row) => row?.registration ?? nameOf(row, a.id),
+      });
+      return { deleted: car, result: await c.del(`/logbook/cars/${a.id}`, tool) };
+    },
+  },
+  {
+    name: 'list_logbook_trip_categories',
+    title: 'Kategorie cest',
+    description:
+      'Kategorie určují mimo jiné soukromou nebo služební povahu cesty. '
+      + 'Před založením jízdy vždy nech uživatele vybrat kategorii; nikdy ji neodhaduj.',
+    inputSchema: schema({ include_archived: bool('Zahrnout archivované kategorie.') }),
+    write: false,
+    run: (c, a, tool) => c.get('/logbook/trip-categories', {
+      include_archived: a.include_archived ? 1 : undefined,
+    }, tool),
+  },
+  {
+    name: 'list_logbook_trips',
+    title: 'Jízdy',
+    description: 'Seznam jízd s filtry; s `id` vrátí detail jedné jízdy.',
+    inputSchema: schema({
+      id: int('ID jízdy; bez ID seznam.'),
+      car_id: int('Jen vybrané vozidlo.'),
+      category_id: int('Jen vybraná kategorie.'),
+      year: int('Rok.'),
+      month: int('Měsíc 1–12.', { minimum: 1, maximum: 12 }),
+      date_from: date('Jízdy od data.'),
+      date_to: date('Jízdy do data.'),
+      query: str('Fulltext účelu a míst.'),
+      ...PAGING,
+    }),
+    write: false,
+    run: (c, a, tool) => a.id
+      ? c.get(`/logbook/trips/${a.id}`, null, tool)
+      : c.get('/logbook/trips', {
+        car_id: a.car_id,
+        category_id: a.category_id,
+        year: a.year,
+        month: a.month,
+        date_from: a.date_from,
+        date_to: a.date_to,
+        q: a.query,
+        page: a.page,
+        per_page: a.per_page,
+      }, tool),
+  },
+  {
+    name: 'save_logbook_trip',
+    title: 'Přidat nebo upravit jízdu',
+    description:
+      'Bez `id` založí jízdu a vyžaduje vozidlo, datum a výslovně vybranou kategorii. '
+      + 'Soukromou/služební povahu cesty nikdy neodhaduj. S `id` změní jen zadaná pole.',
+    inputSchema: schema(LOGBOOK_TRIP_INPUT),
+    write: true,
+    run: async (c, a, tool) => {
+      if (!a.id) {
+        const missing = ['car_id', 'trip_date', 'category_id'].filter(
+          (key) => a[key] === undefined || a[key] === '',
+        );
+        if (missing.length > 0) throw new Error(`Pro novou jízdu chybí: ${missing.join(', ')}.`);
+        if (a.distance_km === undefined && (a.odometer_start === undefined || a.odometer_end === undefined)) {
+          throw new Error('Zadej distance_km, nebo oba stavy tachometru.');
+        }
+        return c.post('/logbook/trips', changed(a, LOGBOOK_TRIP_FIELDS), tool);
+      }
+      const current = await c.get(`/logbook/trips/${a.id}`, null, tool);
+      return c.put(`/logbook/trips/${a.id}`, merged(current, a, LOGBOOK_TRIP_FIELDS), tool);
+    },
+  },
+  {
+    name: 'delete_logbook_trip',
+    title: 'Smazat jízdu',
+    description: 'Nevratně smaže jízdu. Bez `confirm: true` ji pouze načte k potvrzení.',
+    inputSchema: schema({ id: int('ID jízdy.'), confirm: CONFIRM }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const trip = await confirmed(c, a, tool, {
+        path: `/logbook/trips/${a.id}`,
+        action: 'Smazat se má jízda',
+        label: (row) => `${row?.trip_date ?? '?'}: ${row?.origin ?? '?'} → ${row?.destination ?? '?'}`,
+      });
+      return { deleted: trip, result: await c.del(`/logbook/trips/${a.id}`, tool) };
+    },
+  },
+  {
+    name: 'list_logbook_fuelings',
+    title: 'Tankování',
+    description: 'Seznam tankování s filtry; s `id` vrátí detail jednoho záznamu.',
+    inputSchema: schema({
+      id: int('ID tankování; bez ID seznam.'),
+      car_id: int('Jen vybrané vozidlo.'),
+      vendor_id: int('Jen vybraný dodavatel.'),
+      unassigned: bool('Jen tankování bez přiřazeného vozidla.'),
+      source: str('Zdroj záznamu.', { enum: ['manual', 'invoice', 'axigon', 'axigon_ai', 'import'] }),
+      year: int('Rok.'),
+      month: int('Měsíc 1–12.', { minimum: 1, maximum: 12 }),
+      date_from: date('Tankování od data.'),
+      date_to: date('Tankování do data.'),
+      ...PAGING,
+    }),
+    write: false,
+    run: (c, a, tool) => a.id
+      ? c.get(`/logbook/fuelings/${a.id}`, null, tool)
+      : c.get('/logbook/fuelings', {
+        car_id: a.car_id,
+        vendor_id: a.vendor_id,
+        unassigned: a.unassigned ? 1 : undefined,
+        source: a.source,
+        year: a.year,
+        month: a.month,
+        date_from: a.date_from,
+        date_to: a.date_to,
+        page: a.page,
+        per_page: a.per_page,
+      }, tool),
+  },
+  {
+    name: 'save_logbook_fueling',
+    title: 'Přidat nebo upravit tankování',
+    description:
+      'Bez `id` založí ruční tankování a vyžaduje datum a celkovou částku. '
+      + 'S `id` načte současný záznam a změní jen zadaná pole.',
+    inputSchema: schema(LOGBOOK_FUELING_INPUT),
+    write: true,
+    run: async (c, a, tool) => {
+      if (!a.id) {
+        const missing = ['fueled_date', 'amount_with_vat'].filter(
+          (key) => a[key] === undefined || a[key] === '',
+        );
+        if (missing.length > 0) throw new Error(`Pro nové tankování chybí: ${missing.join(', ')}.`);
+        return c.post('/logbook/fuelings', changed(a, LOGBOOK_FUELING_FIELDS), tool);
+      }
+      const current = await c.get(`/logbook/fuelings/${a.id}`, null, tool);
+      return c.put(`/logbook/fuelings/${a.id}`, merged(current, a, LOGBOOK_FUELING_FIELDS), tool);
+    },
+  },
+  {
+    name: 'delete_logbook_fueling',
+    title: 'Smazat tankování',
+    description: 'Nevratně smaže záznam tankování. Bez `confirm: true` ho pouze načte k potvrzení.',
+    inputSchema: schema({ id: int('ID tankování.'), confirm: CONFIRM }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const fueling = await confirmed(c, a, tool, {
+        path: `/logbook/fuelings/${a.id}`,
+        action: 'Smazat se má tankování',
+        label: (row) => `${row?.fueled_date ?? '?'}: ${row?.amount_with_vat ?? '?'} ${row?.currency ?? ''}`,
+      });
+      return { deleted: fueling, result: await c.del(`/logbook/fuelings/${a.id}`, tool) };
+    },
+  },
+  {
+    name: 'logbook_summary',
+    title: 'Souhrn knihy jízd',
+    description:
+      'Roční souhrn kilometrů, služebních a soukromých jízd, tankování, spotřeby '
+      + 'a návaznosti tachometru. Jde o daňově citlivý přehled pouze ke čtení.',
+    inputSchema: schema({ year: int('Rok; bez zadání aktuální.') }),
+    write: false,
+    run: (c, a, tool) => c.get('/logbook/summary', { year: a.year }, tool),
   },
 
   // ──────────────────────────────────────────────────────────────────────────

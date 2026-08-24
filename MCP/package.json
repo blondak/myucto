@@ -1,7 +1,7 @@
 {
   "name": "myucto-mcp",
   "version": "1.0.0",
-  "description": "MCP server pro MyÚčto.cz — fakturace, e-shop/sklad a statistika nad veřejným REST API",
+  "description": "MCP server pro MyÚčto.cz — fakturace, zakázky, dokumenty, kniha jízd, e-shop/sklad a statistika",
   "license": "MIT",
   "type": "module",
   "main": "src/index.mjs",
@@ -18,7 +18,8 @@
   "scripts": {
     "start": "node src/index.mjs",
     "build": "node build.mjs",
-    "check": "node --check src/index.mjs && node --check src/client.mjs && node --check src/tools.mjs"
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check src/index.mjs && node --check src/client.mjs && node --check src/tools.mjs && node --test test/*.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0"

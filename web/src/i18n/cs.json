@@ -16638,6 +16638,47 @@
         "verify_failed": "Ověření domény selhalo.",
         "activate_failed": "Doménu se nepodařilo aktivovat."
     },
+    "mcp_server_page": {
+        "subtitle": "Napojení AI asistenta na fakturaci, zakázky, dokumenty, knihu jízd, statistiku a e-shop vaší firmy.",
+        "capabilities": {
+            "projects": "zakázky",
+            "documents": "dokumenty",
+            "logbook": "knihu jízd"
+        },
+        "install": {
+            "prepare_title": "Připravte server.",
+            "prebuilt_intro": "V distribuci už je hotový; potřebujete jen",
+            "node_requirement": "Node 20 nebo novější",
+            "node_reason": ", protože i sestavený server je JavaScript.",
+            "node_missing": "Node nemáte?",
+            "choose_variant": "Vyberte způsob:",
+            "bundle": "Hotový build (doporučeno)",
+            "source": "Vývoj ze zdrojáků",
+            "bundle_intro": "Použijte soubor přiložený v instalaci:",
+            "bundle_description": "Nic nemusíte sestavovat ani instalovat. Jde o jediný soubor bez externích závislostí; můžete ho ponechat v instalaci nebo zkopírovat kamkoliv. V dalším kroku jen nastavíte jeho úplnou cestu."
+        },
+        "examples": {
+            "operations": {
+                "title": "Zakázky, dokumenty a kniha jízd",
+                "create_project": "Založ zakázku pro ACME s rozpočtem 200 000 Kč a splatností 14 dní.",
+                "profitability": "Jaká je ziskovost zakázek od začátku roku?",
+                "search_documents": "Najdi ve smlouvách výpovědní lhůtu a ukaž mi příslušný text.",
+                "link_document": "Připoj tu smlouvu k zakázce Web 2026.",
+                "add_trip": "Přidej dnešní služební jízdu Praha–Kolín, 120 km.",
+                "add_fueling": "Zapiš tankování 40 litrů za 1 520 Kč."
+            }
+        },
+        "tool_groups": {
+            "projects": "Zakázky",
+            "documents": "Dokumenty",
+            "logbook": "Kniha jízd"
+        },
+        "troubleshooting": {
+            "restart_prefix": "Restartujte aplikaci asistenta. U doporučené varianty zkontrolujte cestu k",
+            "npm_prefix": "Příkaz",
+            "npm_suffix": "je potřeba jen při spouštění vývojové varianty z"
+        }
+    },
     "instance_export": {
         "title": "Kompletní export dat",
         "subtitle": "Slož si jeden balíček firmy: obnovitelná data, doklady, DPH podklady i účetní uzávěrky.",

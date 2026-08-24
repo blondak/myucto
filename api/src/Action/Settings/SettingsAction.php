@@ -151,12 +151,14 @@ final class SettingsAction
     public function listSuppliers(Request $request, Response $response): Response
     {
         $user    = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        // Globální admin vidí všechny firmy (konzistentně se SupplierAccessResolver,
-        // který adminy z membershipu vyjímá — jinak by si adminovi s membershipem
-        // ořízlo přepínač firem).
-        $allowed = RequestAuthorization::isSuperadmin($request)
-            ? []
-            : $this->userSuppliers->allowedSupplierIds((int) ($user['id'] ?? 0));
+        $boundSupplierId = $this->boundSupplierId($request);
+        // Bound PAT je autoritativní i pro globálního admina. Bez omezení zde by
+        // token vydaný pro jedinou firmu přes switcher vypsal všechny tenanty.
+        $allowed = $boundSupplierId !== null
+            ? [$boundSupplierId]
+            : (RequestAuthorization::isSuperadmin($request)
+                ? []
+                : $this->userSuppliers->allowedSupplierIds((int) ($user['id'] ?? 0)));
         // Epic F6 (H3): client bez membershipu = prázdný seznam (fail-closed),
         // ne fail-open "bez omezení" jako u legacy rolí.
         if (RequestAuthorization::isClientType($request) && $allowed === []) {
@@ -223,9 +225,13 @@ final class SettingsAction
         return $this->respondSupplier($response, $id);
     }
 
-    /** Epic F0: true = uživatel má neprázdné membership a $supplierId v něm není. Globální admin nikdy (vidí vše). */
+    /** Epic F0: true = supplier je mimo bound PAT nebo membership. Nebound globální admin vidí vše. */
     private function membershipDenies(Request $request, int $supplierId): bool
     {
+        $boundSupplierId = $this->boundSupplierId($request);
+        if ($boundSupplierId !== null) {
+            return $supplierId !== $boundSupplierId;
+        }
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         if (RequestAuthorization::isSuperadmin($request)) return false;
         $allowed = $this->userSuppliers->allowedSupplierIds((int) ($user['id'] ?? 0));
@@ -234,6 +240,16 @@ final class SettingsAction
             return true;
         }
         return $allowed !== [] && !in_array($supplierId, $allowed, true);
+    }
+
+    private function boundSupplierId(Request $request): ?int
+    {
+        $apiToken = $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN);
+        if (!is_array($apiToken) || ($apiToken['supplier_id'] ?? null) === null) {
+            return null;
+        }
+        $supplierId = (int) $apiToken['supplier_id'];
+        return $supplierId > 0 ? $supplierId : null;
     }
 
     /** POST /api/suppliers — nový supplier (admin). */

@@ -181,15 +181,16 @@ final class DocumentLockTest extends TestCase
         $sid = $this->mkSupplier('tax_evidence');
         $invoiceId = $this->mkInvoice($sid, 'issued', '2026-06-01', varsymbol: '2026001', totalWithVat: 1000.0);
 
-        [$client, $accountant] = [$this->mkUserWithToken('client', $sid), $this->mkUserWithToken('accountant', $sid)];
+        $client = $this->mkUserWithToken('client', $sid);
+        $accountantSession = $this->mkSessionUser('accountant', $sid);
         $clientUserId = $this->userIds[count($this->userIds) - 2];
 
-        // Client na book endpoint nesmí (není v CLIENT_RULES)
+        // Účetní mutace je přes API token vždy zakázaná; provádí se jen v aplikaci.
         $res = $this->request('POST', "/api/invoices/$invoiceId/book", $client, $sid);
         self::assertSame(403, $res->getStatusCode(), 'client nesmí book endpoint');
 
-        // Účetní zaúčtuje ručně (tax_evidence — žádný journal)
-        $res = $this->request('POST', "/api/invoices/$invoiceId/book", $accountant, $sid);
+        // Účetní zaúčtuje ručně přes webovou session (tax_evidence — žádný journal)
+        $res = $this->sessionRequest('POST', "/api/invoices/$invoiceId/book", $accountantSession, $sid);
         self::assertSame(200, $res->getStatusCode(), 'book: ' . (string) $res->getBody());
         $locked = $this->json($res)['locked'] ?? [];
         self::assertTrue($locked['is_locked'] ?? false);
@@ -197,7 +198,7 @@ final class DocumentLockTest extends TestCase
 
         // Idempotence POST /book
         $bookedAt = $this->db->pdo()->query("SELECT booked_at FROM invoices WHERE id = $invoiceId")->fetchColumn();
-        $res = $this->request('POST', "/api/invoices/$invoiceId/book", $accountant, $sid);
+        $res = $this->sessionRequest('POST', "/api/invoices/$invoiceId/book", $accountantSession, $sid);
         self::assertSame(200, $res->getStatusCode());
         self::assertSame($bookedAt, $this->db->pdo()->query("SELECT booked_at FROM invoices WHERE id = $invoiceId")->fetchColumn());
 
@@ -237,7 +238,7 @@ final class DocumentLockTest extends TestCase
         // Scénář 7: DELETE /book s aktivním posted zápisem → 409 still_posted
         $periodId = $this->mkPeriod($sid, 2026, 'open');
         $entryId = $this->mkPostedEntry($sid, 'invoice', $invoiceId, $periodId, '2026-06-01');
-        $res = $this->request('DELETE', "/api/invoices/$invoiceId/book", $accountant, $sid);
+        $res = $this->sessionRequest('DELETE', "/api/invoices/$invoiceId/book", $accountantSession, $sid);
         self::assertSame(409, $res->getStatusCode());
         self::assertSame('still_posted', $this->errorCode($res));
         $this->db->pdo()->prepare('DELETE FROM journal_entries WHERE id = ?')->execute([$entryId]);
@@ -246,7 +247,7 @@ final class DocumentLockTest extends TestCase
         // resetApp: v produkci (FPM) je DI container per-request; test ho recykluje,
         // takže per-request memoizace DocumentLockService by tu byla stale.
         $this->resetApp();
-        $res = $this->request('DELETE', "/api/invoices/$invoiceId/book", $accountant, $sid);
+        $res = $this->sessionRequest('DELETE', "/api/invoices/$invoiceId/book", $accountantSession, $sid);
         self::assertSame(200, $res->getStatusCode());
         self::assertFalse($this->json($res)['locked']['is_locked'] ?? true);
 

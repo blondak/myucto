@@ -97,6 +97,36 @@ final class DocumentRepository
         return $row !== false ? $this->hydrate($row) : null;
     }
 
+    /** @return array{text_status:string,total_chars:int,content_text:?string}|null */
+    public function findExtractedText(
+        int $id,
+        int $supplierId,
+        DocumentViewerContext $viewer,
+        int $offset,
+        int $maxChars,
+    ): ?array
+    {
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT text_status,
+                    COALESCE(CHAR_LENGTH(content_text), 0) AS total_chars,
+                    SUBSTRING(content_text, ?, ?) AS content_text
+               FROM documents
+              WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL'
+            . $scopeSql
+        );
+        $stmt->execute(array_merge([$offset + 1, $maxChars, $id, $supplierId], $scopeParams));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+        return [
+            'text_status' => (string) $row['text_status'],
+            'total_chars' => (int) $row['total_chars'],
+            'content_text' => $row['content_text'] !== null ? (string) $row['content_text'] : null,
+        ];
+    }
+
     /** Surový řádek (vč. filename/sha) — pro download/preview. */
     public function findRaw(int $id, int $supplierId, DocumentViewerContext $viewer, bool $includeTrashed = false): ?array
     {

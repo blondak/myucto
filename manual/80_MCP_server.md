@@ -32,16 +32,19 @@ Podstatné vlastnosti:
 | Fakturace | čtení, vystavování, odesílání, evidence úhrad, upomínky |
 | Odběratelé | vyhledání, založení a úprava karty, dotažení údajů z ARES |
 | Výkazy práce a materiálu | přidání a odebrání řádků u konceptu faktury, automatická hodinová sazba |
+| Zakázky | **čtení i zápis** — založení, úprava, archivace, rozpočty a ziskovost |
+| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava tagů a vazeb |
+| Kniha jízd | **čtení i zápis** — vozidla, jízdy a tankování; daňový souhrn jen ke čtení |
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
 | Daně | odhad DPH za měsíc i kvartál, kontrolní a souhrnné hlášení, daň z příjmů, daňový kalendář — **jen čtení** |
 | Účetnictví | obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník — **jen čtení** |
 | Statistika | tržby, zisk, trendy, top odběratelé a dodavatelé, cash flow, platební morálka, koncentrace, riziko odchodu |
-| E-shop a sklad | **kompletní správa včetně zápisu** — zboží, obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky a výdejky, inventury (viz [§ 80.8](#808-e-shop-a-sklad)) |
-| Objednávky u dodavatele | **čtení i zápis** — založení, odeslání, potvrzení, uzavření, storno, příjemka z objednávky a hromadné objednání podle návrhu doplnění zásob ([§ 80.8](#808-e-shop-a-sklad)) |
+| E-shop a sklad | **kompletní správa včetně zápisu** — zboží, obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky a výdejky, inventury (viz [§ 80.9](#809-e-shop-a-sklad)) |
+| Objednávky u dodavatele | **čtení i zápis** — založení, odeslání, potvrzení, uzavření, storno, příjemka z objednávky a hromadné objednání podle návrhu doplnění zásob ([§ 80.9](#809-e-shop-a-sklad)) |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
 
-Nástrojů je aktuálně **157**; v režimu jen pro čtení (`MYUCTO_READ_ONLY=1`,
-[§ 80.4](#804-nastaveni)) se jich asistentovi nabídne **93** — zbylých 64 mění
+Nástrojů je aktuálně **181**; v režimu jen pro čtení (`MYUCTO_READ_ONLY=1`,
+[§ 80.4](#804-nastaveni)) se jich asistentovi nabídne **105** — zbylých 76 mění
 data a server je vůbec nezveřejní. Přesný počet vypíše server při startu do
 `stderr` ([§ 80.3](#803-zprovozneni), krok 4).
 
@@ -65,22 +68,24 @@ ho zkopíruj.
 
 ### Krok 2 — příprava serveru
 
-Server je součástí projektu ve složce `MCP/` a vyžaduje **Node 20 nebo novější**.
-Máš dvě možnosti.
+Server vyžaduje **Node 20 nebo novější**. Ve vydané distribuci je už připravený
+hotový build; nic nemusíš sestavovat ani instalovat. Máš dvě možnosti.
 
-**A) Jeden soubor (doporučeno).** Sestav si jednosouborovou verzi:
+Pokud Node nemáš: Windows — `winget install --id OpenJS.NodeJS.LTS --exact`;
+macOS — `brew install node`.
 
-```bash
-pwsh -File cmd/build-mcp.ps1      # Windows
-./cmd/build-mcp.sh                # Linux / macOS
+**A) Hotový build z distribuce (doporučeno).** Použij přiložený soubor:
+
+```text
+MCP/dist/myucto-mcp.mjs
 ```
 
-Vznikne `MCP/dist/myucto-mcp.mjs` — jediný soubor bez externích balíčků, který můžeš
-zkopírovat kamkoliv, třeba na jiný počítač. **Ve vydaných balíčcích je hotový
-už přiložený**, takže tenhle krok obvykle přeskočíš; v artefaktech vydání může
-být ke stažení také samostatný soubor MCP serveru.
+Jde o jediný soubor bez externích balíčků. Můžeš ho nechat v instalaci nebo
+zkopírovat kamkoliv, třeba na jiný počítač. V konfiguraci asistenta pak jen
+nastavíš jeho úplnou cestu. V artefaktech vydání je navíc ke stažení také jako
+samostatný soubor MCP serveru.
 
-**B) Přímo ze zdrojáků.** Hodí se, když si chceš nástroje upravovat:
+**B) Vývoj ze zdrojáků.** Hodí se, když si chceš nástroje upravovat:
 
 ```bash
 cd MCP
@@ -114,12 +119,12 @@ Například pro Claude Code:
 claude mcp add myucto \
   --env MYUCTO_API_URL=https://tvoje-instance.cz/api/v1 \
   --env MYUCTO_API_TOKEN=mi_pat_tvuj_token \
-  -- node /cesta/k/myucto-mcp.mjs
+  -- node /cesta/k/myucto.cz/MCP/dist/myucto-mcp.mjs
 ```
 
-Na stránce v aplikaci se dá přepnout, jestli má konfigurace ukazovat na
-jednosouborový build, nebo na `MCP/src/index.mjs` — cesta se změní ve všech
-ukázkách naráz.
+Na stránce v aplikaci se dá přepnout, jestli má konfigurace ukazovat na hotový
+`MCP/dist/myucto-mcp.mjs`, nebo na vývojový `MCP/src/index.mjs` — cesta se změní
+ve všech ukázkách naráz.
 
 > [!NOTE]
 > **Webový ani desktopový ChatGPT tenhle server připojit neumí** — pracuje jen
@@ -180,6 +185,17 @@ Přebytečná volání čekají ve frontě. Nezávisle na nich platí serverový
 
 Podrobnosti v [§ 80.7](#807-vykazy-prace-a-materialu).
 
+**Zakázky, dokumenty a kniha jízd**
+
+- „Založ zakázku pro ACME s rozpočtem 200 000 Kč a splatností 14 dní.“ *(token čtení a zápis)*
+- „Jaká je ziskovost zakázek od začátku roku a které mají nezaúčtované doklady?“
+- „Najdi ve smlouvách zmínku o výpovědní lhůtě a ukaž text dokumentu.“
+- „Připoj tu smlouvu k zakázce Web 2026.“ *(token čtení a zápis)*
+- „Přidej dnešní služební jízdu Praha–Kolín, 120 km.“ *(asistent si nechá vybrat kategorii; token čtení a zápis)*
+- „Zapiš tankování 40 litrů za 1 520 Kč.“ *(token čtení a zápis)*
+
+Podrobnosti v [§ 80.8](#808-zakazky-dokumenty-a-kniha-jizd).
+
 **Daně**
 
 - „Kolik letos v červenci zaplatíme na DPH?“
@@ -208,7 +224,7 @@ Podrobnosti v [§ 80.7](#807-vykazy-prace-a-materialu).
 - „Zdraž všechno zboží značky Acme o pět procent.“ *(token čtení a zápis)*
 - „Nasklaď 20 kusů kabelu na hlavní sklad za 89 Kč a příjemku zaúčtuj.“ *(token čtení a zápis)*
 
-Celá kapitola: [§ 80.8](#808-e-shop-a-sklad).
+Celá kapitola: [§ 80.9](#809-e-shop-a-sklad).
 
 ## 80.6 Odběratelé a ARES
 
@@ -278,7 +294,43 @@ rozdíl: **sazbu DPH materiálu si asistent nevymýšlí.** Převezme ji z už
 existujícího výkazu, jinak si o ni řekne — špatná sazba by se propsala do
 přiznání k DPH.
 
-## 80.8 E-shop a sklad
+## 80.8 Zakázky, dokumenty a kniha jízd
+
+### Zakázky
+
+Asistent umí zakázku založit, upravit, archivovat i bezpečně smazat, pokud ještě
+nemá doklady. Při úpravě nejdřív načte současný stav a zachová všechna nezadaná
+pole. Změna výchozí kategorie tržby může doplnit tuto kategorii i do dosavadních
+faktur zakázky; proto ji zadávej výslovně.
+
+Přehled ziskovosti je **jen ke čtení**. V podvojném účetnictví vychází z deníku,
+v daňové evidenci z dokladů, a upozorní i na nezaúčtované doklady. Asistent přes
+něj nic nezaúčtuje ani neopraví.
+
+### Dokumenty
+
+MCP umí dokumenty vypsat, hledat v názvu, popisu i vytěženém textu, přečíst
+omezený úsek textu, upravit název, popis a tagy a připojit dokument k odběrateli,
+dokladu nebo zakázce. Dlouhý text se vrací po částech nejvýše 50 000 znaků.
+Platí stejná firemní a osobní oprávnění jako v aplikaci.
+
+Přes tento MCP server se **nenahrávají ani nestahují binární soubory**. PDF,
+obrázek nebo ZIP nahraj v aplikaci; asistent pak pracuje s jeho metadaty a
+vytěženým textem. Odpojení vazby vyžaduje potvrzení, dokument samotný ale nemaže.
+
+### Kniha jízd
+
+Asistent umí spravovat vozidla, přidávat a upravovat jízdy a tankování a číst
+roční souhrn kilometrů a spotřeby. U nové jízdy vyžaduje vozidlo, datum,
+vzdálenost nebo oba stavy tachometru a hlavně **výslovně vybranou kategorii**.
+Soukromou či služební povahu cesty nikdy neodhaduje — pokud kategorii neřekneš,
+nejdřív nabídne číselník a doptá se.
+
+Smazání vozidla, jízdy nebo tankování vyžaduje potvrzení. Používané vozidlo
+nelze smazat; lze ho pouze archivovat. Roční daňový souhrn je dostupný jen ke
+čtení a žádný účetní zápis z MCP nevytváří.
+
+## 80.9 E-shop a sklad
 
 Na rozdíl od účetnictví je e-shopová a skladová agenda **obousměrná** — asistent
 umí katalog nejen číst, ale i zakládat, upravovat a mazat. Důvod je prostý:
@@ -409,7 +461,7 @@ kolik řádků zůstalo nespočítaných (ty se přeskočí).
 - **Stáhnout PDF nebo XLSX** skladového dokladu, inventurního soupisu či sestavy.
   Data sestav asistent přečte, hotový soubor si stáhneš v aplikaci.
 
-## 80.9 Log volání
+## 80.10 Log volání
 
 Stránka **Firma → MCP server** má dole **Log volání** — každé volání tvých API
 tokenů včetně zamítnutých. U volání z MCP serveru je vidět i **název nástroje**,
@@ -418,7 +470,7 @@ takže poznáš, co asistent dělal, ne jen jaké URL zavolal.
 Filtruje se podle tokenu, metody, cesty, zdroje a na samotné chyby. Podrobnosti
 jsou v [§ 78.8](78_API.md#788-log-volani-api).
 
-## 80.10 Bezpečnost
+## 80.11 Bezpečnost
 
 - Token se ukládá jen jako **SHA-256 hash**; plaintext se zobrazí jednou.
 - **Omez token na IP** — uniklý token je pak mimo tvou síť k ničemu.
@@ -431,16 +483,16 @@ jsou v [§ 78.8](78_API.md#788-log-volani-api).
 - Nepoužívaný token **zruš**. Historie volání v logu zůstane.
 - **Mazání a storna se neprovedou napoprvé.** Nástroje, které nejdou vzít zpět,
   vyžadují potvrzení a při prvním zavolání jen vypíšou, čeho by se změna týkala
-  (viz [§ 80.8](#808-e-shop-a-sklad)). Je to pojistka proti tomu, aby asistent
+  (viz [§ 80.9](#809-e-shop-a-sklad)). Je to pojistka proti tomu, aby asistent
   smazal něco, co si domyslel — ne náhrada za `MYUCTO_READ_ONLY=1`, který je
   u nedozorovaného provozu pořád ta správná volba.
 
-## 80.11 Řešení problémů
+## 80.12 Řešení problémů
 
 | Projev | Příčina a náprava |
 |---|---|
 | Server nenaběhne, hlásí chybnou konfiguraci | `MYUCTO_API_URL` musí končit `/api/v1` a token začínat `mi_pat_`. |
-| Asistent hlásí, že **server neodpovídá** | Častou příčinou je nedůvěryhodný HTTPS certifikát — viz [§ 80.12](#8012-vlastni-https-certifikat); současně ověř dostupnost API. |
+| Asistent hlásí, že **server neodpovídá** | Častou příčinou je nedůvěryhodný HTTPS certifikát — viz [§ 80.13](#8013-vlastni-https-certifikat); současně ověř dostupnost API. |
 | `401 invalid_token` | Token je zrušený nebo expirovaný — vygeneruj nový. |
 | `403 token_ip_forbidden` | Token má omezení podle IP a tahle adresa mezi nimi není. |
 | `403 insufficient_scope` | Token má jen rozsah čtení, operace vyžaduje zápis. |
@@ -452,7 +504,7 @@ jsou v [§ 78.8](78_API.md#788-log-volani-api).
 | Asistent nástroje nevidí | Restartuj aplikaci asistenta; u Gemini CLI ověř příkazem `/mcp`. |
 | V logu nejsou žádná volání | Server se nespustil — zkontroluj cestu k `index.mjs` a že proběhlo `npm install`. |
 
-## 80.12 Vlastní HTTPS certifikát
+## 80.13 Vlastní HTTPS certifikát
 
 Instance s certifikátem od firemní nebo vlastní autority (typicky testovací
 prostředí) je zvláštní případ: **Node má vlastní seznam kořenových autorit

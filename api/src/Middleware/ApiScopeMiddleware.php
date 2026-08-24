@@ -133,6 +133,11 @@ final class ApiScopeMiddleware implements MiddlewareInterface
      * @var list<string>
      */
     private const BEARER_READ_ONLY = [
+        // Účetní mutace, které historicky leží mimo /api/accounting. Široký
+        // allowlist faktur a banky je nesmí omylem zpřístupnit read_write PAT.
+        '#^/api/invoices/[0-9]+/book$#',
+        '#^/api/invoices/[0-9]+/rebuild-snapshots$#',
+        '#^/api/bank-transactions/[0-9]+/(post|unpost)$#',
         '#^/api/accounting(/|$)#',
         '#^/api/reports(/|$)#',
         '#^/api/tax(/|$)#',

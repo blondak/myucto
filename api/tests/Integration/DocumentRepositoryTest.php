@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration;
 
+use MyInvoice\Action\Document\DocumentsAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\DocumentFileRepository;
 use MyInvoice\Repository\DocumentFolderRepository;
 use MyInvoice\Repository\DocumentRepository;
@@ -13,6 +15,8 @@ use MyInvoice\Repository\DocumentViewerContext;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Factory\ResponseFactory;
+use Slim\Psr7\Factory\ServerRequestFactory;
 
 /**
  * Integrační test DB vrstvy sekce Dokumenty: insert, fulltext, soft-delete (koš),
@@ -26,6 +30,7 @@ final class DocumentRepositoryTest extends TestCase
     private DocumentRepository $docs;
     private DocumentFileRepository $files;
     private DocumentFolderRepository $folders;
+    private DocumentsAction $action;
     private int $supplierId;
     private DocumentViewerContext $admin;
     /** @var list<int> */
@@ -49,6 +54,7 @@ final class DocumentRepositoryTest extends TestCase
             $this->docs = $c->get(DocumentRepository::class);
             $this->files = $c->get(DocumentFileRepository::class);
             $this->folders = $c->get(DocumentFolderRepository::class);
+            $this->action = $c->get(DocumentsAction::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI unavailable: ' . $e->getMessage());
         }
@@ -112,6 +118,35 @@ final class DocumentRepositoryTest extends TestCase
 
         $byContent = $this->docs->search($this->supplierId, 'KONTROLNIMARKER', $this->admin);
         self::assertContains($id, array_map(static fn($r) => $r['id'], $byContent));
+    }
+
+    public function testExtractedTextEndpointReturnsBoundedChunkAndKeepsSupplierScope(): void
+    {
+        $id = $this->insertDoc('TEXTCHUNKDOC', str_repeat('e', 64));
+        $text = str_repeat('A', 1200) . str_repeat('B', 1200);
+        $this->docs->setText($id, $text, 'extracted');
+
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('GET', "/api/documents/$id/text")
+            ->withQueryParams(['offset' => 1100, 'max_chars' => 1000])
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId);
+        $response = $this->action->text($request, (new ResponseFactory())->createResponse(), ['id' => $id]);
+        $body = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('extracted', $body['text_status']);
+        self::assertSame(2400, $body['total_chars']);
+        self::assertSame(1100, $body['offset']);
+        self::assertSame(1000, mb_strlen($body['content']));
+        self::assertSame(str_repeat('A', 100) . str_repeat('B', 900), $body['content']);
+        self::assertTrue($body['has_more']);
+
+        $foreign = $request->withAttribute(
+            SupplierScopeMiddleware::ATTR_CURRENT_ID,
+            $this->supplierId + 99999,
+        );
+        $response = $this->action->text($foreign, (new ResponseFactory())->createResponse(), ['id' => $id]);
+        self::assertSame(404, $response->getStatusCode());
     }
 
     public function testSoftDeleteRestoreLifecycle(): void

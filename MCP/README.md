@@ -2,7 +2,7 @@
 
 MCP server (Model Context Protocol) nad veřejným REST API MyÚčta. Zpřístupní
 AI klientovi — Claude Code, Claude Desktop, IDE rozšíření — **fakturaci,
-e-shop se skladem a statistiku**.
+zakázky, dokumenty, knihu jízd, e-shop se skladem a statistiku**.
 
 Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 **Nastavení firmy → MCP server**. Tenhle soubor je technická poznámka k repozitáři.
@@ -13,6 +13,9 @@ Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 |---|---|
 | Fakturace | čtení, vystavování, odesílání, evidence úhrad, upomínky |
 | Výkazy práce a materiálu | přidání a odebrání řádků u konceptu faktury, automatická hodinová sazba |
+| Zakázky | čtení i zápis — založení, úprava, archivace, rozpočty a ziskovost |
+| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava tagů a vazeb |
+| Kniha jízd | čtení i zápis — vozidla, jízdy, tankování; daňový souhrn jen ke čtení |
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
 | Daně | **jen čtení** — odhad DPH (měsíc i kvartál), KH, SH, daň z příjmů, kalendář |
 | Účetnictví | **jen čtení** — obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník |
@@ -39,18 +42,26 @@ v hlavičce `src/tools.mjs` — při rozšiřování katalogu ho neobcházej.
 ## Instalace
 
 Dvě varianty; obě vyžadují **Node ≥ 20** (server běží na globálním `fetch`).
+Pokud Node není nainstalovaný: Windows —
+`winget install --id OpenJS.NodeJS.LTS --exact`; macOS — `brew install node`.
 
-### A) Jednosouborový build — doporučeno pro uživatele
+### A) Hotový build z distribuce — doporučeno pro uživatele
+
+Ve vydané distribuci už je `MCP/dist/myucto-mcp.mjs` přiložený. Nic se
+nesestavuje ani neinstaluje; server se spustí přes
+`node MCP/dist/myucto-mcp.mjs`. Soubor lze také zkopírovat kamkoliv.
+
+Buildovací příkazy jsou potřeba jen při práci přímo se zdrojovým repozitářem
+nebo po úpravě MCP serveru:
 
 ```bash
 pwsh -File cmd/build-mcp.ps1      # Windows
 ./cmd/build-mcp.sh                # Linux / macOS
 ```
 
-Vznikne `MCP/dist/myucto-mcp.mjs` — jeden soubor bez závislostí, který lze
-zkopírovat kamkoliv (`node myucto-mcp.mjs`). Odpadá `npm install`
-i `node_modules`, a s nimi typická chyba „nainstaloval jsem to jinam, než
-ukazuje konfigurace asistenta".
+Výsledkem je stejný jednosouborový server bez externích závislostí. Odpadá
+`npm install` i `node_modules`, a s nimi typická chyba „nainstaloval jsem to
+jinam, než ukazuje konfigurace asistenta".
 
 > **Build NEODSTRAŇUJE potřebu Node.** Je to pořád JavaScript, jen bez externích
 > závislostí. Samostatný spustitelný soubor bez Node by znamenal přibalit celý
@@ -74,7 +85,7 @@ node src/index.mjs
 claude mcp add myucto \
   --env MYUCTO_API_URL=https://ucto.firma.cz/api/v1 \
   --env MYUCTO_API_TOKEN=mi_pat_vas_token \
-  -- node /cesta/k/myucto.cz/MCP/src/index.mjs
+  -- node /cesta/k/myucto.cz/MCP/dist/myucto-mcp.mjs
 ```
 
 Token se generuje v aplikaci: **Nastavení firmy → API tokeny → Nový token**.
@@ -107,7 +118,7 @@ systémové autority načte sám (`tls.setDefaultCACertificates`, Node 22.15+)
 a výsledek vypíše na stderr:
 
 ```
-MyÚčto MCP v1.0.0 připojen — 157 nástrojů, API https://…/api/v1; TLS: +134 systémových certifikátů
+MyÚčto MCP v1.0.0 připojen — 181 nástrojů, API https://…/api/v1; TLS: +134 systémových certifikátů
 ```
 
 Zbylé příčiny selhání: neúplný řetěz (chybí mezilehlý certifikát — oprava patří
@@ -137,6 +148,7 @@ prvního — zápis hodin na cizí doklad je horší než doptání se.
 src/index.mjs   vstupní bod — konfigurace, MCP handshake, mapování chyb
 src/client.mjs  HTTP klient — throttling, retry, hlavičky, serializace query
 src/tools.mjs   katalog nástrojů (jediné místo, kam se přidává nový nástroj)
+test/           automatické testy katalogu a bezpečných zápisových vzorů
 ```
 
 Přidání nástroje = jeden záznam v `TOOLS`. `write: true` u čehokoli, co mění data —

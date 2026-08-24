@@ -169,8 +169,8 @@ export class MyUctoClient {
    * Tělo se záměrně neposílá: mazací endpointy API ho nečtou a prázdný
    * `Content-Type: application/json` bez těla některé proxy odmítají.
    */
-  del(path, tool) {
-    return this.request('DELETE', path, { tool });
+  del(path, tool, query) {
+    return this.request('DELETE', path, { query, tool });
   }
 
   async request(method, path, { query, body, tool } = {}) {

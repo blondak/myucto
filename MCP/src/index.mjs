@@ -3,8 +3,9 @@
  * MCP server pro MyÚčto.cz — stdio.
  *
  * Zpřístupní AI klientovi (Claude Code, Claude Desktop, IDE rozšíření) fakturaci,
- * e-shop se skladem a statistiku přes veřejné REST API `/api/v1`. Účetní vrstva
- * je záměrně mimo rozsah — viz komentář v `tools.mjs`.
+ * zakázky, dokumenty, knihu jízd, e-shop se skladem a statistiku přes veřejné
+ * REST API `/api/v1`. Účetní a daňová vrstva je dostupná jen ke čtení — viz
+ * komentář v `tools.mjs`.
  *
  * Konfigurace přes proměnné prostředí:
  *   MYUCTO_API_URL         povinné, např. https://ucto.firma.cz/api/v1
@@ -138,6 +139,7 @@ const FORBIDDEN_HINTS = {
   token_ip_forbidden: 'Token má nastavené omezení na IP adresy a tahle adresa mezi nimi není.',
   insufficient_scope: 'Token má rozsah jen pro čtení; zápis vyžaduje token „čtení a zápis".',
   token_endpoint_forbidden: 'Tenhle endpoint není přes API token dostupný.',
+  token_write_forbidden: 'Účetní a daňová vrstva je přes API token vždy jen ke čtení; krok dokončete v aplikaci.',
   // Modul je volitelný a pro danou firmu vypnutý — s oprávněními to nesouvisí,
   // takže obecná hláška „nemáte práva" by posílala uživatele špatným směrem.
   stock_disabled: 'Skladový a e-shopový modul není pro tuto firmu zapnutý — '

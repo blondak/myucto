@@ -214,6 +214,26 @@ final class SupplierMembershipTest extends TestCase
         self::assertContains($this->supplierB, $ids);
     }
 
+    public function testBoundTokenCanSeeOnlyItsSupplierInListAndDetail(): void
+    {
+        // Bound PAT je tenantová autorita i pro globálního admina: token vydaný
+        // pro firmu A nesmí přes switcher ani detail odhalit firmu B.
+        $adminId = $this->mkUser('admin');
+        $bound = $this->mkBoundToken($adminId, $this->supplierA);
+
+        $res = $this->request('GET', '/api/suppliers', $bound, null);
+        self::assertSame(200, $res->getStatusCode());
+        $ids = array_map(fn ($r) => (int) $r['id'], $this->json($res));
+        self::assertSame([$this->supplierA], $ids);
+
+        $res = $this->request('GET', '/api/suppliers/' . $this->supplierA, $bound, null);
+        self::assertSame(200, $res->getStatusCode());
+
+        $res = $this->request('GET', '/api/suppliers/' . $this->supplierB, $bound, null);
+        self::assertSame(404, $res->getStatusCode());
+        self::assertSame('not_found', $this->json($res)['error']['code'] ?? null);
+    }
+
     public function testReadonlyOverrideBlocksWriteDespiteGlobalAccountant(): void
     {
         // Globální accountant, ale pro firmu A override 'readonly' → POST blokován;
