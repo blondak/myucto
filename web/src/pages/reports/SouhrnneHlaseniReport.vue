@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { reportsApi } from '@/api/reports'
+import { reportsApi, type ShvVariant } from '@/api/reports'
 import { apiErrorMessage } from '@/api/errors'
 import { formatMoney } from '@/composables/useFormat'
 import { useYearOptions } from '@/composables/useYearOptions'
@@ -27,6 +27,12 @@ function setQuarter(q: number) {
   month.value = q * 3
 }
 
+// Typ podání: řádné, nebo následné (§ 102 odst. 6) — opravné řádky se stornem proti
+// naposledy podanému stavu ve VIES.
+const variant = ref<ShvVariant>('radne')
+const dZjist = ref('')
+const isFollowUp = computed(() => variant.value === 'nasledne')
+
 const preview = ref<Awaited<ReturnType<typeof reportsApi.shvPreview>> | null>(null)
 const loading = ref(false)
 const error = ref('')
@@ -35,7 +41,10 @@ async function loadPreview() {
   loading.value = true
   error.value = ''
   try {
-    preview.value = await reportsApi.shvPreview(year.value, month.value, effectivePeriod.value)
+    preview.value = await reportsApi.shvPreview(
+      year.value, month.value, effectivePeriod.value,
+      variant.value, isFollowUp.value ? dZjist.value : undefined,
+    )
   } catch (e) {
     error.value = apiErrorMessage(e)
   } finally {
@@ -45,7 +54,10 @@ async function loadPreview() {
 
 async function downloadXml() {
   try {
-    await downloadApiFile(reportsApi.shvDownloadUrl(year.value, month.value, effectivePeriod.value))
+    await downloadApiFile(reportsApi.shvDownloadUrl(
+      year.value, month.value, effectivePeriod.value,
+      variant.value, isFollowUp.value ? dZjist.value : undefined,
+    ))
     await router.push('/reports/submissions')
   } catch (e) {
     error.value = apiErrorMessage(e)
@@ -77,7 +89,7 @@ function shTypeLabel(code: string): string {
   return label === key ? code : label
 }
 
-watch([year, month, effectivePeriod], loadPreview)
+watch([year, month, effectivePeriod, variant, dZjist], loadPreview)
 onMounted(loadPreview)
 </script>
 
@@ -123,6 +135,21 @@ onMounted(loadPreview)
           {{ t('reports.shv.download_xml') }}
         </button>
       </div>
+    </div>
+
+    <!-- Typ podání (řádné / následné) -->
+    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 mb-4 flex flex-wrap items-center gap-3">
+      <label class="text-sm font-medium text-neutral-700">{{ t('reports.shv.variant.label') }}</label>
+      <select v-model="variant" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+        <option value="radne">{{ t('reports.shv.variant.radne') }}</option>
+        <option value="nasledne">{{ t('reports.shv.variant.nasledne') }}</option>
+      </select>
+      <template v-if="isFollowUp">
+        <label class="text-sm text-neutral-600">{{ t('reports.shv.variant.d_zjist') }}</label>
+        <input type="date" v-model="dZjist"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" />
+      </template>
+      <span class="text-xs text-neutral-500">{{ t('reports.shv.variant.hint') }}</span>
     </div>
 
     <div v-if="loading" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-8 text-center text-neutral-400">{{ t('common.loading') }}…</div>

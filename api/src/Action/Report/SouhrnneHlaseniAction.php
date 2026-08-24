@@ -27,6 +27,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class SouhrnneHlaseniAction
 {
+    /** Povolené typy SH: řádné a následné (§ 102 odst. 6 — oprava už podaného). */
+    private const SHV_VARIANTS = ['radne', 'nasledne'];
+
     public function __construct(
         private readonly SouhrnneHlaseniBuilder $builder,
         private readonly ActivityLogger $logger,
@@ -46,10 +49,14 @@ final class SouhrnneHlaseniAction
         if ($year === null) {
             return Json::error($response, 'validation_failed', 'Neplatný rok/měsíc.', 400);
         }
+        [$variant, $dZjist, $variantErr] = $this->parseVariant($request);
+        if ($variantErr !== null) {
+            return Json::error($response, 'validation_failed', $variantErr, 400);
+        }
         try {
-            $result = $this->builder->build($supplierId, $year, $month, $period);
+            $result = $this->builder->build($supplierId, $year, $month, $period, $variant, $dZjist);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return ReportBuildError::toJson($response, $e);
         }
         return Json::ok($response, ['summary' => $result['summary'], 'warnings' => $result['warnings']]);
     }
@@ -65,8 +72,12 @@ final class SouhrnneHlaseniAction
         if ($year === null) {
             return Json::error($response, 'validation_failed', 'Neplatný rok/měsíc.', 400);
         }
+        [$variant, $dZjist, $variantErr] = $this->parseVariant($request);
+        if ($variantErr !== null) {
+            return Json::error($response, 'validation_failed', $variantErr, 400);
+        }
         try {
-            $result = $this->builder->build($supplierId, $year, $month, $period);
+            $result = $this->builder->build($supplierId, $year, $month, $period, $variant, $dZjist);
             // #238: chybí-li u cizoměnných dokladů kurz, doplň z ČNB (oficiální kurz k DUZP)
             // a přebuildi. Fill JE zápis do účetního stavu → v souladu s B8/HIGH#1 (readonly
             // download nemutuje) ho spustíme jen když má uživatel WRITE — stejná brána jako
@@ -74,7 +85,7 @@ final class SouhrnneHlaseniAction
             if (!empty($result['missing_rates'])) {
                 if (RequestAuthorization::allows($request, 'reports.export', AccessLevel::WRITE)) {
                     $this->rateFiller->fill($supplierId, $result['missing_rates']);
-                    $result = $this->builder->build($supplierId, $year, $month, $period);
+                    $result = $this->builder->build($supplierId, $year, $month, $period, $variant, $dZjist);
                 }
                 if (!empty($result['missing_rates'])) {
                     $labels = \MyInvoice\Service\Report\VatLedgerService::missingExchangeRateLabels($result['missing_rates']);
@@ -84,7 +95,7 @@ final class SouhrnneHlaseniAction
                 }
             }
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return ReportBuildError::toJson($response, $e);
         }
         $userId = (int) ($user['id'] ?? 0);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
@@ -100,12 +111,14 @@ final class SouhrnneHlaseniAction
             // povoluje jen [RN]. Výchozí 'B' archivéru je kód z přiznání k DPH
             // a u tohohle formuláře neexistuje; snapshot by tvrdil jiný druh
             // podání, než jaký nese odeslané XML.
-            'R',
+            (string) ($result['summary']['shvies_forma'] ?? 'R'),
         );
         $periodLabel = $isQuarterly ? sprintf('%04d-Q%d', $year, $quarter) : sprintf('%04d-%02d', $year, $month);
         $this->logger->log('report.dphshv_downloaded', $userId, null, null, [
             'period' => $periodLabel,
             'rows'   => $result['summary']['rows_count'] ?? 0,
+            'variant' => $variant,
+            'shvies_forma' => $result['summary']['shvies_forma'] ?? 'R',
             'submission_id' => $archived['submission_id'],
             'validation_status' => $archived['validation_status'],
         ], $ip, $request->getHeaderLine('User-Agent'));
@@ -113,6 +126,7 @@ final class SouhrnneHlaseniAction
         $filename = TaxSubmissionFilename::forSnapshot([
             'id' => $archived['submission_id'],
             'form_code' => 'dphshv',
+            'form_variant' => $result['summary']['shvies_forma'] ?? 'R',
             'period_year' => $year,
             'period_month' => $isQuarterly ? null : $month,
             'period_quarter' => $quarter,
@@ -122,6 +136,26 @@ final class SouhrnneHlaseniAction
             ->withHeader('Content-Type', 'application/xml; charset=utf-8')
             ->withHeader('Content-Disposition', 'attachment; filename="' . $filename . '"')
             ->withHeader('Cache-Control', 'no-store');
+    }
+
+    /**
+     * Typ podání SH + datum zjištění (jen u následného, pro 15denní lhůtu — do XML nejde,
+     * DPHSHV takový atribut nezná).
+     *
+     * @return array{0:string, 1:?string, 2:?string} [variant, d_zjist, error]
+     */
+    private function parseVariant(Request $request): array
+    {
+        $q = $request->getQueryParams();
+        $variant = (string) ($q['variant'] ?? 'radne');
+        if (!in_array($variant, self::SHV_VARIANTS, true)) {
+            return ['radne', null, 'Neplatný typ souhrnného hlášení.'];
+        }
+        $dZjist = (string) ($q['d_zjist'] ?? '') ?: null;
+        if ($variant !== 'nasledne' && $dZjist !== null) {
+            return [$variant, null, 'Datum zjištění lze uvést jen u následného souhrnného hlášení.'];
+        }
+        return [$variant, $dZjist, null];
     }
 
     /**

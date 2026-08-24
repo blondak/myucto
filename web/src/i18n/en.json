@@ -13315,6 +13315,13 @@
         "shv": {
             "title": "Recapitulative statement (DPHSHV)",
             "subtitle": "Report of EU supplies of goods/services to VAT payers in other member states. Version 06.01. Submitted by VAT payers and identified persons.",
+            "variant": {
+                "label": "Filing type",
+                "radne": "Regular",
+                "nasledne": "Follow-up (§ 102/6 — correcting a filed statement)",
+                "d_zjist": "Date identified",
+                "hint": "A follow-up recapitulative statement corrects rows of an already filed one: changed rows are cancelled and replaced. Due within 15 days of identifying the change."
+            },
             "download_xml": "Download XML",
             "rows_count": "Row count",
             "rows_hint": "Aggregated per VAT_ID + supply type",
@@ -13428,6 +13435,7 @@
             "upload_done": "Files uploaded: {count}.",
             "upload_partial": "Some files could not be uploaded: {count}.",
             "marked_submitted": "The snapshot was manually marked as submitted.",
+            "vat_clearing_skipped": "Filing recorded, but the VAT clearing entry (343) was not posted: {reason}. The tax difference is missing from the ledger — check the period lock and run the clearing again.",
             "artifacts_title": "Files and evidence",
             "open_documents_folder": "Open folder in Documents",
             "test_protocol_heading": "Validation test report",
@@ -13637,7 +13645,6 @@
             "b1_label": "Reverse charge (recipient)",
             "b2_label": "Received domestic supplies over 10 000 CZK",
             "b3_label": "Received domestic supplies up to 10 000 CZK (aggregated)",
-            "note_monthly": "Control statement is submitted ALWAYS monthly, even for quarterly VAT payers (only VAT return can be quarterly).",
             "note_po": "Legal entities must submit control statements ALWAYS monthly (§ 101e(1) of Act 235/2004).",
             "note_fo": "Sole traders (FO) may submit control statements at the same frequency as their VAT return — i.e. quarterly if they are quarterly VAT payers (§ 101e(2)).",
             "variant": {
@@ -13646,6 +13653,9 @@
                 "opravne": "Regular/corrective (§ 101f(1) — before deadline)",
                 "nasledne": "Follow-up (§ 101f(2) — after deadline)",
                 "nasledne_opravne": "Follow-up/corrective",
+                "vyzva_nulove": "Reply to notice — no obligation to file a control statement",
+                "vyzva_potvrzeni": "Reply to notice — confirming the last statement is correct",
+                "vyzva_hint": "A quick reply to a notice is filed WITHOUT sections A/B/C and requires the notice reference number.",
                 "d_zjist": "Date discovered",
                 "c_jed_vyzvy": "Notice ref. no.",
                 "hint": "A follow-up control statement is filed AGAIN with all data for the period (not as a difference). Fill in the date discovered or the tax authority notice reference number."
@@ -14076,6 +14086,8 @@
                 "dodatecne": "Supplementary (§ 141 — after deadline)",
                 "dodatecne_opravne": "Supplementary/corrective",
                 "d_zjist": "Date discovered",
+                "reason": "Reasons for filing",
+                "reason_placeholder": "e.g. A received invoice no. … was booked later",
                 "hint": "A corrective return replaces the regular one before the deadline (full). A supplementary return filed after the deadline reports only the DIFFERENCE against the last known tax.",
                 "need_date": "A supplementary return requires the date the reasons were discovered (§ 141 of the Tax Code). Enter it to compute the difference.",
                 "amendment_title": "Supplementary return — reports only differences against the last known tax",

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\TaxSubmissionRepository;
+use MyInvoice\Service\Accounting\PostingException;
 
 /**
  * Builder XML pro Souhrnné hlášení (DPHSHV1) — EPO portál MFČR.
@@ -49,16 +51,49 @@ final class SouhrnneHlaseniBuilder
         '22' => '3',  // poskytnutí služby do JČS (§9/1)
     ];
 
+    /**
+     * Mapa UI variant → EPO `shvies_forma`. XSD povoluje jen [RN]:
+     *   R = řádné souhrnné hlášení,
+     *   N = NÁSLEDNÉ souhrnné hlášení (§ 102 odst. 6 — do 15 dnů ode dne zjištění změny).
+     *
+     * Následné SH se NEPODÁVÁ jako celý výkaz znovu (to je KH) ani jako rozdíl částek
+     * (to je DPHDP3). Podává se jako OPRAVNÉ ŘÁDKY: řádek, který se má ve VIES zrušit,
+     * jde s `k_storno="A"` a párovací trojicí (k_stat, c_vat, k_pln_eu); nová/opravená
+     * hodnota jde jako běžný řádek. Řádky, které se nezměnily, se NEOPAKUJÍ — VIES by je
+     * započetl podruhé.
+     */
+    private const VARIANT_FORMA = [
+        'radne'    => 'R',
+        'nasledne' => 'N',
+    ];
+
     public function __construct(
         private readonly Connection $db,
         private readonly VatLedgerService $ledger,
+        // Archiv podání — stav, který ve VIES vznikl řádným hlášením a předchozími následnými.
+        private readonly TaxSubmissionRepository $submissions,
     ) {}
 
     /**
+     * @param string $variant 'radne'|'nasledne'
+     * @param ?string $dZjist datum zjištění změny (Y-m-d) — pro následné; do XML nejde
+     *        (DPHSHV ho nezná), slouží k výpočtu 15denní lhůty.
      * @return array{xml: string, summary: array<string,mixed>, warnings: list<string>, missing_rates: list<array<string,mixed>>}
      */
-    public function build(int $supplierId, int $year, int $month, string $period = 'monthly'): array
-    {
+    public function build(
+        int $supplierId,
+        int $year,
+        int $month,
+        string $period = 'monthly',
+        string $variant = 'radne',
+        ?string $dZjist = null,
+    ): array {
+        $forma = self::VARIANT_FORMA[$variant] ?? null;
+        if ($forma === null) {
+            throw new PostingException('shv_variant_invalid', "Neznámý typ souhrnného hlášení: {$variant}.", 422);
+        }
+        $isFollowUp = $forma === 'N';
+        $dZjist = $this->normalizeDate($dZjist);
         if ($period === 'quarterly') {
             $quarter = (int) ceil($month / 3);
             $startMonth = ($quarter - 1) * 3 + 1;
@@ -81,7 +116,7 @@ final class SouhrnneHlaseniBuilder
         $warnings = $this->validateSupplier($supplier);
 
         $missingRates = [];
-        $rows = $this->collectEuSupplies($supplierId, $start, $end, $missingRates);
+        $rows = $this->collectEuSupplies($supplierId, $start, $end, $missingRates, $warnings);
 
         // #238: EU dodávky v cizí měně bez zafixovaného kurzu. NEházíme chybu — vrátíme
         // je v `missing_rates`; akce při stažení je doplní z ČNB, náhled jen varuje.
@@ -94,8 +129,12 @@ final class SouhrnneHlaseniBuilder
         $periodLabel = $period === 'quarterly' && $quarter !== null
             ? "tomto čtvrtletí"
             : "tomto měsíci";
-        if (empty($rows)) {
-            $warnings[] = "V {$periodLabel} nejsou žádné EU dodávky — SH se nepodává.";
+        if (empty($rows) && !$isFollowUp) {
+            // EPO prázdné hlášení odmítá tvrdou chybou („Alespoň jeden řádek … musí být
+            // vyplněn" — ověřeno zkušebním předáním), takže tohle není kosmetika: bez
+            // jediné EU dodávky se SH nepodává vůbec.
+            $warnings[] = "V {$periodLabel} nejsou žádné EU dodávky — souhrnné hlášení se "
+                . 'nepodává. EPO prázdné hlášení odmítne.';
         }
 
         // § 102 odst. 6 ZDPH: kvartální podání SH je přípustné JEN u výhradně
@@ -126,7 +165,7 @@ final class SouhrnneHlaseniBuilder
         // shvies_forma: EPO povoluje pouze [RN] — R = řádné, N = následné (opravné).
         // (Pozn.: dřívější 'B' bylo omylem převzato z KH — DPHSHV žádné 'B' nezná
         //  a EPO ho odmítá „...neodpovídá regulárnímu výrazu [RN]". Issue #238.)
-        $vetaD->setAttribute('shvies_forma', 'R');
+        $vetaD->setAttribute('shvies_forma', $forma);
         $vetaD->setAttribute('dokument', 'SHV');
         $shv->appendChild($vetaD);
 
@@ -142,43 +181,104 @@ final class SouhrnneHlaseniBuilder
         // Pozn.: schéma EPO2 přejmenovalo dřívější VetaA1 → VetaR a atributy:
         //   vatid_pod  → c_vat
         //   kod_plneni → k_pln_eu
-        // VetaS je vyhrazena pro storna (oprava předchozích období) — nepoužíváme.
+        // VetaS NENÍ větou pro storna (jak tu dřív stálo): podle XSD (k_cos, c_vat_puv) je
+        // to věta REŽIMU SKLADU / call-off stock (§ 18). Storno se dělá atributem
+        // `k_storno="A"` na VetaR — viz emise následného hlášení níže.
+        $emitted = [];   // reálně vypsané řádky — podklad pro kontrolu duplicit DIČ×kód plnění
         $totalRows = 0;
         $totalAmount = 0.0;
+        $stornoRows = 0;
+
+        // Emisní kandidáti: u řádného všechny řádky období, u následného jen ROZDÍL proti
+        // stavu, který ve VIES drží řádné hlášení + všechna předchozí následná.
+        $baseline = [];
+        $baselineSubmissionId = null;
+        if ($isFollowUp) {
+            [$baseline, $baselineSubmissionId] = $this->loadFollowUpBaseline($supplierId, $year, $month, $quarter);
+        }
+        $plan = $this->planRows($rows, $baseline, $isFollowUp);
+        if ($isFollowUp && $plan === []) {
+            throw new PostingException(
+                'shv_amendment_no_change',
+                'Následné souhrnné hlášení nemá co opravit — proti naposledy podanému stavu se '
+                    . 'žádný řádek nezměnil. Nejdřív opravte doklady daného období.',
+                422,
+            );
+        }
+
         $rowNum = 0;
-        foreach ($rows as $r) {
+        foreach ($plan as $p) {
             $rowNum++;
             $v = $dom->createElement('VetaR');
-            $v->setAttribute('c_rad', (string) $rowNum);
-            // k_storno se v ŘÁDNÉM hlášení NEvyplňuje — EPO ho odmítá („Pro řádné
-            // souhrnné hlášení nesmí být vyplněn kód storna"). Slouží jen pro storno
-            // řádky v NÁSLEDNÉM hlášení (to zatím negenerujeme). Issue #238.
-            // k_stat = kód státu pro DPH/VIES (Řecko má ISO "GR", ale DPH kód "EL").
-            $v->setAttribute('k_stat', KontrolniHlaseniBuilder::khCountryCode($r['country_iso2']));
+            // c_rad má v XSD u VetaR jen 2 číslice (max 99) — u firmy se 100+ EU
+            // protistranami by hlášení neprošlo validací. Atribut je optional a slouží
+            // jen k uspořádání řádků ve formuláři, takže nad 99 se prostě vynechá.
+            if ($rowNum <= 99) {
+                $v->setAttribute('c_rad', (string) $rowNum);
+            }
+            if ($p['storno']) {
+                // Storno řádek: `k_storno="A"` + párovací trojice, podle které se na FÚ ve VIES
+                // vyhledá shodný řádek řádného (popř. předchozího následného) hlášení a označí
+                // se jako zrušený.
+                //
+                // Hodnota a počet plnění se na storno řádku OPAKUJÍ z rušeného řádku. XSD je
+                // sice vyžaduje jen mimo storno, ale EPO na jejich vynechání upozorňuje:
+                // „Počet plnění musí být u stornovacího řádku vyplněn v případě, že tato
+                // hodnota byla uvedena v původním (stornovaném) řádku." (ověřeno zkušebním
+                // předáním na zkus.mojedane.gov.cz)
+                $v->setAttribute('k_storno', 'A');
+                $stornoRows++;
+            }
+            $v->setAttribute('k_stat', $p['k_stat']);
             // c_vat = DIČ BEZ prefixu země (kód země nese k_stat). Issue #238.
-            $v->setAttribute('c_vat', $r['vat_id']);
-            $v->setAttribute('k_pln_eu', $r['sh_type']);
-            $v->setAttribute('pln_hodnota', $this->formatAmount($r['amount']));
-            $v->setAttribute('pln_pocet', (string) $r['count']);
+            $v->setAttribute('c_vat', $p['vat_id']);
+            $v->setAttribute('k_pln_eu', $p['sh_type']);
+            $v->setAttribute('pln_hodnota', (string) $p['amount']);
+            $v->setAttribute('pln_pocet', (string) $p['count']);
+            if (!$p['storno']) {
+                $totalRows++;
+                $totalAmount += (float) $p['amount'];
+            }
             $shv->appendChild($v);
-            $totalRows++;
-            $totalAmount += $r['amount'];
+            $emitted[] = $p;
+
             // Záporná hodnota plnění: dobropis do JČS převyšuje v období dodávky téže
-            // protistraně. Do ŘÁDNÉHO hlášení taková věta nepatří — opravy se podávají
-            // NÁSLEDNÝM hlášením s kódem storna (to zatím negenerujeme), a EPO řádné
-            // hlášení se zápornou pln_hodnota odmítne. Musí to být vidět před odesláním,
-            // ne až z chybové hlášky portálu (audit VAT klasifikací, L-2).
-            if ($r['amount'] < 0) {
+            // protistraně. Do ŘÁDNÉHO hlášení taková věta nepatří — EPO ho se zápornou
+            // pln_hodnota odmítne a oprava patří do NÁSLEDNÉHO hlášení se storno řádkem.
+            // Musí to být vidět před odesláním, ne až z chybové hlášky portálu.
+            if (!$p['storno'] && $p['amount'] < 0 && !$isFollowUp) {
                 $warnings[] = sprintf(
-                    'Souhrnné hlášení má zápornou hodnotu plnění u protistrany %s %s (%s Kč) — '
+                    'Souhrnné hlášení má zápornou hodnotu plnění u protistrany %s %s (%d Kč) — '
                     . 'dobropis v období převyšuje dodávky. Řádné hlášení zápornou hodnotu '
-                    . 'nepřipouští; opravu je nutné podat následným souhrnným hlášením s kódem '
-                    . 'storna, které aplikace zatím negeneruje.',
-                    KontrolniHlaseniBuilder::khCountryCode($r['country_iso2']),
-                    $r['vat_id'],
-                    $this->formatAmount($r['amount']),
+                    . 'nepřipouští; opravu podejte NÁSLEDNÝM souhrnným hlášením (typ podání '
+                    . '„Následné"), které původní řádek stornuje a nahradí správnou hodnotou.',
+                    $p['k_stat'],
+                    $p['vat_id'],
+                    $p['amount'],
                 );
             }
+        }
+
+        // XSD: „Žádné DIČ nesmí být v hlášení uvedeno více než jednou se stejným kódem
+        // plnění." Textové pravidlo, které schéma neuhlídá — zachytilo by ho až EPO.
+        // Vznikne ze dvou kontaktních karet téže protistrany s různě zapsanou zemí.
+        $seenPairs = [];
+        foreach ($emitted as $p) {
+            if ($p['storno']) {
+                continue;
+            }
+            $pair = $p['k_stat'] . '|' . $p['vat_id'] . '|' . $p['sh_type'];
+            if (isset($seenPairs[$pair])) {
+                $warnings[] = sprintf(
+                    'DIČ %s %s je v hlášení uvedeno dvakrát se stejným kódem plnění (%s) — '
+                    . 'souhrnné hlášení to nepřipouští. Zkontrolujte, zda protistrana nemá '
+                    . 'dvě kontaktní karty s různě zapsanou zemí.',
+                    $p['k_stat'],
+                    $p['vat_id'],
+                    $p['sh_type'],
+                );
+            }
+            $seenPairs[$pair] = true;
         }
 
         // Termín podání: 25. dne měsíce následujícího po konci období
@@ -187,6 +287,20 @@ final class SouhrnneHlaseniBuilder
         if ($deadlineMonth > 12) { $deadlineMonth -= 12; $deadlineYear++; }
         // § 33/4 DŘ: termín padající na víkend/svátek se posouvá na další pracovní den.
         $deadline = CzechWorkingDays::deadline($deadlineYear, $deadlineMonth);
+
+        // Následné SH má vlastní lhůtu: do 15 dnů ode dne zjištění změny (§ 102 odst. 6),
+        // ne 25. den po skončení období — ten je u něj dávno pryč a UI by ho ukazovalo
+        // jako „po termínu".
+        if ($isFollowUp) {
+            if ($dZjist !== null) {
+                $deadline = CzechWorkingDays::shiftToWorkingDay(
+                    (new \DateTimeImmutable($dZjist))->modify('+15 days')
+                )->format('Y-m-d');
+            } else {
+                $warnings[] = 'Následné souhrnné hlášení se podává do 15 dnů ode dne zjištění '
+                    . 'změny (§ 102 odst. 6 ZDPH) — bez data zjištění aplikace lhůtu nespočítá.';
+            }
+        }
 
         return [
             'xml'     => $dom->saveXML() ?: '',
@@ -198,6 +312,12 @@ final class SouhrnneHlaseniBuilder
                 'total_amount'        => round($totalAmount, 2),
                 'rows'                => $rows,
                 'submission_deadline' => $deadline,
+                'variant'             => $variant,
+                'shvies_forma'        => $forma,
+                'is_follow_up'        => $isFollowUp,
+                'd_zjist'             => $dZjist,
+                'storno_rows'         => $stornoRows,
+                'reference_submission_id' => $baselineSubmissionId,
             ],
             'warnings' => $warnings,
             'missing_rates' => $missingRates,
@@ -205,19 +325,203 @@ final class SouhrnneHlaseniBuilder
     }
 
     /**
-     * Sebere EU dodávky (vystavené faktury s VAT kódem 20/22 + EU klient s DIČ).
-     * Agreguje per (country_iso2, vat_id, sh_type).
+     * Co se má reálně emitovat.
      *
-     * @return list<array{country_iso2:string, vat_id:string, sh_type:string,
+     * Řádné (R): všechny řádky období, beze změny.
+     *
+     * Následné (N): OPRAVNÉ řádky proti stavu ve VIES. Pro každý klíč (stát, DIČ, kód plnění):
+     *   - je v základně, ale ne v aktuálních datech  → jen STORNO (řádek se ruší),
+     *   - je v obou a liší se hodnota nebo počet     → STORNO + nový řádek se správnou hodnotou,
+     *   - je jen v aktuálních datech                 → jen nový řádek,
+     *   - je v obou a shoduje se                     → NEEMITUJE SE (VIES by ho započetl dvakrát).
+     *
+     * @param list<array<string,mixed>> $rows
+     * @param array<string,array{amount:int,count:int,k_stat:string,vat_id:string,sh_type:string}> $baseline
+     * @return list<array{storno:bool, k_stat:string, vat_id:string, sh_type:string, amount:int, count:int}>
+     */
+    private function planRows(array $rows, array $baseline, bool $isFollowUp): array
+    {
+        $current = [];
+        foreach ($rows as $r) {
+            $kStat = (string) $r['k_stat'];
+            $key = $kStat . '|' . $r['vat_id'] . '|' . $r['sh_type'];
+            $current[$key] = [
+                'storno'  => false,
+                'k_stat'  => $kStat,
+                'vat_id'  => (string) $r['vat_id'],
+                'sh_type' => (string) $r['sh_type'],
+                'amount'  => (int) $this->formatAmount((float) $r['amount']),
+                'count'   => (int) $r['count'],
+            ];
+        }
+        if (!$isFollowUp) {
+            return array_values($current);
+        }
+
+        $plan = [];
+        foreach ($baseline as $key => $b) {
+            $now = $current[$key] ?? null;
+            if ($now !== null && $now['amount'] === $b['amount'] && $now['count'] === $b['count']) {
+                unset($current[$key]);   // beze změny — neopakovat
+                continue;
+            }
+            // Hodnota a počet se přebírají z RUŠENÉHO řádku, ne z nových dat — storno říká
+            // „tenhle řádek, jak byl podán, zruš".
+            $plan[] = [
+                'storno'  => true,
+                'k_stat'  => $b['k_stat'],
+                'vat_id'  => $b['vat_id'],
+                'sh_type' => $b['sh_type'],
+                'amount'  => $b['amount'],
+                'count'   => $b['count'],
+            ];
+        }
+        foreach ($current as $row) {
+            $plan[] = $row;
+        }
+        return $plan;
+    }
+
+    /**
+     * Stav, který za období drží VIES: řádky posledního podaného ŘÁDNÉHO hlášení, přehrané
+     * všemi následujícími podanými NÁSLEDNÝMI (storno klíč odebere, běžný řádek nastaví).
+     *
+     * Bez podaného řádného hlášení nelze následné sestavit — nemá co stornovat a správce
+     * daně by ho neměl s čím spárovat. Stejná brána jako u dodatečného přiznání k DPH:
+     * základnou smí být jen prokazatelně podaný snapshot.
+     *
+     * @return array{0:array<string,array{amount:int,count:int,k_stat:string,vat_id:string,sh_type:string}>, 1:?int}
+     */
+    private function loadFollowUpBaseline(int $supplierId, int $year, int $month, ?int $quarter): array
+    {
+        $periodMonth = $quarter !== null ? null : $month;
+        $chain = $this->submissions->findFiledChainForPeriod(
+            $supplierId, 'dphshv', $year, $periodMonth, $quarter, ['R', 'N'],
+        );
+        $hasRegular = false;
+        foreach ($chain as $c) {
+            if ((string) ($c['form_variant'] ?? '') === 'R') {
+                $hasRegular = true;
+                break;
+            }
+        }
+        if (!$hasRegular) {
+            throw new PostingException(
+                'shv_no_prior_submission',
+                'Za dané období není evidováno podané řádné souhrnné hlášení — následné hlášení '
+                    . 'opravuje řádky už podaného a bez něj ho nelze sestavit. Pokud jste řádné SH '
+                    . 'podali, označte jeho snapshot v Archivu podání jako podaný.',
+                422,
+            );
+        }
+
+        $state = [];
+        $lastId = null;
+        foreach ($chain as $c) {
+            if (empty($c['xml_content'])) {
+                throw new PostingException(
+                    'shv_baseline_incomplete',
+                    'Archivované souhrnné hlášení nemá uložené XML — stav ve VIES nelze zrekonstruovat.',
+                    422,
+                );
+            }
+            $lastId = (int) $c['id'];
+            if ((string) ($c['form_variant'] ?? '') === 'R') {
+                $state = $this->parseShvRows((string) $c['xml_content'])[0];
+                continue;
+            }
+            [$rows, $stornos] = $this->parseShvRows((string) $c['xml_content']);
+            foreach ($stornos as $key => $_) {
+                unset($state[$key]);
+            }
+            foreach ($rows as $key => $row) {
+                $state[$key] = $row;
+            }
+        }
+        return [$state, $lastId];
+    }
+
+    /**
+     * Rozparsuje DPHSHV XML na [běžné řádky, storno klíče]. Klíč = k_stat|c_vat|k_pln_eu —
+     * přesně ta trojice, podle které se řádek ve VIES páruje.
+     *
+     * @return array{0:array<string,array{amount:int,count:int,k_stat:string,vat_id:string,sh_type:string}>, 1:array<string,true>}
+     */
+    private function parseShvRows(string $xml): array
+    {
+        $rows = [];
+        $stornos = [];
+        $dom = new \DOMDocument();
+        if (!@$dom->loadXML($xml)) {
+            return [$rows, $stornos];
+        }
+        foreach ($dom->getElementsByTagName('VetaR') as $el) {
+            if (!$el instanceof \DOMElement) {
+                continue;
+            }
+            $kStat = $el->getAttribute('k_stat');
+            $vatId = $el->getAttribute('c_vat');
+            $type  = $el->getAttribute('k_pln_eu');
+            if ($kStat === '' || $vatId === '' || $type === '') {
+                continue;
+            }
+            $key = $kStat . '|' . $vatId . '|' . $type;
+            if (strtoupper($el->getAttribute('k_storno')) === 'A') {
+                $stornos[$key] = true;
+                unset($rows[$key]);
+                continue;
+            }
+            $rows[$key] = [
+                'amount'  => (int) $el->getAttribute('pln_hodnota'),
+                'count'   => (int) $el->getAttribute('pln_pocet'),
+                'k_stat'  => $kStat,
+                'vat_id'  => $vatId,
+                'sh_type' => $type,
+            ];
+            unset($stornos[$key]);
+        }
+        return [$rows, $stornos];
+    }
+
+    /** Normalizace vstupního data (Y-m-d) — null pokud prázdné/neplatné. */
+    private function normalizeDate(?string $date): ?string
+    {
+        $date = trim((string) $date);
+        if ($date === '') {
+            return null;
+        }
+        try {
+            return (new \DateTimeImmutable($date))->format('Y-m-d');
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Sebere EU dodávky (vystavené faktury s VAT kódem 20/22 + EU klient s DIČ).
+     * Agreguje per (k_stat, vat_id, sh_type).
+     *
+     * `k_stat` je podle XSD kód státu, který DIČ PŘIDĚLIL — ne země sídla protistrany.
+     * Německá firma registrovaná k DPH v Rakousku (ATU…) proto dostane `AT`, ne `DE`.
+     * Prefix uloženého DIČ má tedy přednost před zemí adresy; při rozporu varujeme,
+     * protože to bývá překlep v kartě kontaktu.
+     *
+     * @return list<array{country_iso2:string, k_stat:string, vat_id:string, sh_type:string,
      *                   amount:float, count:int, counterparty_name:string}>
      */
-    private function collectEuSupplies(int $supplierId, string $start, string $end, array &$missingRates = []): array
-    {
+    private function collectEuSupplies(
+        int $supplierId,
+        string $start,
+        string $end,
+        array &$missingRates = [],
+        array &$warnings = [],
+    ): array {
         // Projekce kanonických řádků (VatLedgerService) — vystavená EU B2B plnění:
         // kód 20/21/22, EU země (≠ CZ) s DIČ. base_czk je už PŘEPOČTENÝ na CZK kurzem
         // faktury (oprava staré chyby — SH dříve sčítalo total_without_vat v cizí měně).
         $result = [];
         $missingSeen = [];
+        $missingVatSeen = [];
         foreach ($this->ledger->rows($supplierId, $start, $end, includeDrafts: false) as $r) {
             if ($r['source'] !== 'sale') continue;
             $code = $r['code'];
@@ -227,11 +531,42 @@ final class SouhrnneHlaseniBuilder
             // c_vat = DIČ BEZ prefixu země (strhne jen prefix odpovídající zemi, ne
             // libovolná 2 písmena — FR má alfanumerickou vnitrostátní část; GR→EL).
             // Používáme sdílenou (a proti VIES ověřenou) normalizaci z KH. Issue #238.
-            $vatId = KontrolniHlaseniBuilder::cleanEuVatId(
-                (string) ($r['counterparty_dic'] ?? ''),
-                (string) $r['country_iso2'],
-            );
-            if ($vatId === '') continue; // bez DIČ nelze podat SH
+            $rawDic = trim((string) ($r['counterparty_dic'] ?? ''));
+            // Stát, který DIČ přidělil: prefix DIČ má přednost před zemí adresy.
+            $addressStat = KontrolniHlaseniBuilder::khCountryCode((string) $r['country_iso2']);
+            $prefix = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $rawDic) ?? '', 0, 2));
+            // Prefix se překládá stejně jako země adresy: Řecko má ISO „GR", ale pro DPH/VIES
+            // se používá „EL" — a to platí i tehdy, když je DIČ v kartě zapsané s GR.
+            $kStat = preg_match('/^[A-Z]{2}$/', $prefix) === 1
+                ? KontrolniHlaseniBuilder::khCountryCode($prefix)
+                : $addressStat;
+            $vatId = KontrolniHlaseniBuilder::cleanEuVatId($rawDic, (string) $r['country_iso2']);
+            if ($vatId === '') {
+                // Dřív se takový řádek tiše vypustil: dodávka zmizela ze souhrnného hlášení,
+                // ale na ř. 20/21 přiznání zůstala — rozdíl, na který nic neupozornilo.
+                $doc = (string) ($r['doc_number'] ?? '') ?: ('#' . (string) $r['invoice_id']);
+                $label = sprintf('%s (%s)', (string) $r['counterparty_name'], $doc);
+                if (!isset($missingVatSeen[$label])) {
+                    $missingVatSeen[$label] = true;
+                    $warnings[] = sprintf(
+                        'EU dodávka bez DIČ protistrany se do souhrnného hlášení nedostane: %s. '
+                        . 'V přiznání k DPH přitom na ř. 20/21 zůstává — doplňte DIČ, nebo plnění '
+                        . 'překlasifikujte.',
+                        $label,
+                    );
+                }
+                continue; // bez DIČ nelze podat SH
+            }
+            if ($kStat !== $addressStat) {
+                $warnings[] = sprintf(
+                    'Protistrana %s má adresu v zemi %s, ale DIČ vydané státem %s — do souhrnného '
+                    . 'hlášení jde %s (kód státu, který DIČ přidělil). Ověřte, že je to správně.',
+                    (string) $r['counterparty_name'],
+                    $addressStat,
+                    $kStat,
+                    $kStat,
+                );
+            }
 
             // Daňová pojistka: EU dodávka v cizí měně bez zafixovaného kurzu by se
             // vykázala s náhradním kurzem 1.0 (EUR jako CZK). Sesbíráme ji do
@@ -253,10 +588,11 @@ final class SouhrnneHlaseniBuilder
             }
 
             $shType = self::VAT_CODE_TO_SH_TYPE[$code];
-            $key = "{$r['country_iso2']}|{$vatId}|{$shType}";
+            $key = "{$kStat}|{$vatId}|{$shType}";
             if (!isset($result[$key])) {
                 $result[$key] = [
                     'country_iso2'      => $r['country_iso2'],
+                    'k_stat'            => $kStat,
                     'vat_id'            => $vatId,
                     'sh_type'           => $shType,
                     'amount'            => 0.0,

@@ -38,7 +38,16 @@ export interface DphCrossCheckFinding {
 /** Typ podání DPHDP3 (C7'): řádné / opravné (§138) / dodatečné (§141) / dodatečné-opravné. */
 export type DphVariant = 'radne' | 'opravne' | 'dodatecne' | 'dodatecne_opravne'
 /** Typ podání KH (C7'): řádné / řádné-opravné / následné (§101f) / následné-opravné. */
-export type KhVariant = 'radne' | 'opravne' | 'nasledne' | 'nasledne_opravne'
+/**
+ * Typ podání KH. `vyzva_*` jsou rychlé odpovědi na výzvu správce daně (§ 101g) — hlášení
+ * bez oddílů A/B/C, vyžadují č.j. výzvy.
+ */
+/** Typ podání souhrnného hlášení: řádné, nebo následné (opravné řádky se stornem). */
+export type ShvVariant = 'radne' | 'nasledne'
+
+export type KhVariant =
+  | 'radne' | 'opravne' | 'nasledne' | 'nasledne_opravne'
+  | 'vyzva_nulove' | 'vyzva_potvrzeni'
 
 export interface PostFilingChangeDoc {
   source: 'sale' | 'purchase' | 'cash'
@@ -186,6 +195,8 @@ export interface KhPreview {
     variant: KhVariant
     khdph_forma: string
     is_follow_up: boolean
+    is_vyzva_odpoved?: boolean
+    vyzva_odp?: string | null
     d_zjist: string | null
     c_jed_vyzvy: string | null
   }
@@ -625,7 +636,7 @@ export const reportsApi = {
 
   dphPreview: (
     year: number, month: number, period?: 'monthly' | 'quarterly',
-    variant: DphVariant = 'radne', dZjist?: string,
+    variant: DphVariant = 'radne', dZjist?: string, reason?: string,
   ) =>
     api.get<DphPriznaniPreview>('/reports/dphdp3/preview', {
       params: {
@@ -633,6 +644,7 @@ export const reportsApi = {
         ...(period ? { period } : {}),
         ...(variant !== 'radne' ? { variant } : {}),
         ...(dZjist ? { d_zjist: dZjist } : {}),
+        ...(reason ? { reason } : {}),
       },
     }).then(r => r.data),
 
@@ -662,7 +674,10 @@ export const reportsApi = {
     }).then(r => r.data),
 
   // Souhrnné hlášení (EU dodání) — plátci i identifikované osoby; lze kvartálně pro služby
-  shvPreview: (year: number, month: number, period?: 'monthly' | 'quarterly') =>
+  shvPreview: (
+    year: number, month: number, period?: 'monthly' | 'quarterly',
+    variant: ShvVariant = 'radne', dZjist?: string,
+  ) =>
     api.get<{
       summary: {
         period: string
@@ -670,6 +685,7 @@ export const reportsApi = {
         total_amount: number
         rows: Array<{
           country_iso2: string
+          k_stat: string
           vat_id: string
           sh_type: '0' | '1' | '2' | '3'
           amount: number
@@ -677,15 +693,34 @@ export const reportsApi = {
           counterparty_name: string
         }>
         submission_deadline: string
+        variant: ShvVariant
+        shvies_forma: string
+        is_follow_up: boolean
+        d_zjist: string | null
+        /** Počet storno řádků následného hlášení — kolik řádků se ve VIES ruší. */
+        storno_rows: number
+        reference_submission_id: number | null
       }
       warnings: string[]
-    }>('/reports/dphshv/preview', { params: { year, month, ...(period ? { period } : {}) } }).then(r => r.data),
+    }>('/reports/dphshv/preview', {
+      params: {
+        year, month,
+        ...(period ? { period } : {}),
+        variant,
+        ...(variant === 'nasledne' && dZjist ? { d_zjist: dZjist } : {}),
+      },
+    }).then(r => r.data),
 
-  shvDownloadUrl: (year: number, month: number, period?: 'monthly' | 'quarterly') => {
+  shvDownloadUrl: (
+    year: number, month: number, period?: 'monthly' | 'quarterly',
+    variant: ShvVariant = 'radne', dZjist?: string,
+  ) => {
     const sid = localStorage.getItem('myinvoice.current_supplier_id')
     const params = new URLSearchParams({ year: String(year), month: String(month) })
     if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
     if (period) params.set('period', period)
+    params.set('variant', variant)
+    if (variant === 'nasledne' && dZjist) params.set('d_zjist', dZjist)
     return `/api/reports/dphshv?${params.toString()}`
   },
 
@@ -916,7 +951,7 @@ export const reportsApi = {
   /** URL na download endpoint — frontend ho otevírá v novém okně */
   dphDownloadUrl: (
     year: number, month: number, period?: 'monthly' | 'quarterly', acknowledgeMismatch?: boolean,
-    variant: DphVariant = 'radne', dZjist?: string,
+    variant: DphVariant = 'radne', dZjist?: string, reason?: string,
   ) => {
     const sid = localStorage.getItem('myinvoice.current_supplier_id')
     const params = new URLSearchParams({ year: String(year), month: String(month) })
@@ -925,6 +960,7 @@ export const reportsApi = {
     if (acknowledgeMismatch) params.set('acknowledge_mismatch', '1')
     if (variant !== 'radne') params.set('variant', variant)
     if (dZjist) params.set('d_zjist', dZjist)
+    if (reason) params.set('reason', reason)
     return `/api/reports/dphdp3?${params.toString()}`
   },
 }
