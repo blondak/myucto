@@ -134,14 +134,69 @@ final class Config
      * Public static, aby ji mohly volat konzumenti, kteří si Config neumí
      * snadno vstříknout (např. `VersionService` má jen `Connection`).
      */
+    /**
+     * Kde leží stateful data instalace (`cfg.local.php`, `storage/`, `log/`).
+     *
+     * Primárně `MYINVOICE_DATA_DIR` — ta má VŽDY přednost, protože je to
+     * vědomé nastavení provozovatele (Docker volume, sdílený hosting).
+     *
+     * ⚠️ Když proměnná chybí, adresář se DOHLEDÁ. Není to kosmetika:
+     * proměnnou má nastavenou webserver a systémový cron, ale NE přihlášení
+     * přes SSH. Cokoliv spuštěného z příkazové řádky proto konfiguraci
+     * nenačetlo a spadlo na výchozí přihlašovací údaje k databázi — přesně
+     * takhle 2026-08-24 selhaly migrace uprostřed aktualizace spravované
+     * instalace (`Access denied for user 'root'`), takže kód byl nasazený
+     * a schéma ne. Dopad je širší než migrace: podle téhle metody se hledá
+     * i stav probíhající aktualizace, takže bez ní hlásí UI něco jiného, než
+     * co se doopravdy děje.
+     *
+     * Dohledání je záměrně úzké — kandidát se přijme jen tehdy, když v něm
+     * `cfg.local.php` SKUTEČNĚ leží. Instalace, která datový adresář nemá
+     * (všechno v kořeni), tak dál dostane null a chová se beze změny.
+     */
     public static function resolveDataDir(): ?string
     {
         $raw = getenv('MYINVOICE_DATA_DIR');
-        if (!is_string($raw) || trim($raw) === '') {
-            return null;
+        if (is_string($raw) && trim($raw) !== '') {
+            $path = rtrim(trim($raw), "/\\");
+            if ($path !== '') {
+                return $path;
+            }
         }
-        $path = rtrim(trim($raw), "/\\");
-        return $path === '' ? null : $path;
+
+        return self::discoverDataDir();
+    }
+
+    /**
+     * Datový adresář vedle kořene aplikace, poznaný podle `cfg.local.php`.
+     *
+     * Spravovaná instalace má aplikaci v `<web>/` a data v `<web>/../private/myucto`
+     * — hosting je drží mimo webroot, aby se konfigurace nedala stáhnout přes HTTP.
+     */
+    private static function discoverDataDir(?string $root = null): ?string
+    {
+        // Kořen se počítá z vlastní cesty, ne přes Bootstrap::rootDir():
+        // Bootstrap si sám načítá Config, takže by to byla závislost tam
+        // a zpátky, a Infrastructure vrstva navíc nemá sahat do kořenového
+        // jmenného prostoru. Tenhle soubor je api/src/Infrastructure/Config/.
+        // Parametr je JEN pro testy — v běhu se předává vždy null.
+        $root ??= dirname(__DIR__, 4);
+        $candidates = [
+            $root . '/../private/myucto',
+            $root . '/../private',
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (!is_file($candidate . '/cfg.local.php')) {
+                continue;
+            }
+            $real = realpath($candidate);
+            if ($real !== false) {
+                return rtrim($real, "/\\");
+            }
+        }
+
+        return null;
     }
 
     /**
