@@ -55,6 +55,9 @@ final class SetupAction
         private readonly PasswordSetupLinkIssuer $passwordSetupLinks,
         // H-02 — ve spravované instalaci drží konfiguraci provozovatel, ne setup.
         private readonly ManagedModeGuard $managed,
+        // Právnická osoba se zakládá rovnou v podvojném účetnictví, a to bez
+        // směrné osnovy nefunguje — viz insertSupplier().
+        private readonly \MyInvoice\Service\Accounting\ChartOfAccountsSeeder $coaSeeder,
     ) {}
 
     /**
@@ -416,12 +419,33 @@ final class SetupAction
         // INSERT currencies (CZK + EUR) pro nový supplier, UPDATE supplier.default_currency_id, FK_CHECKS=1.
         $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
 
+        // ⚠️ Režim účetnictví se ODVOZUJE z právní formy, nedědí se DB default.
+        //
+        // Sloupec `supplier.accounting_mode` má default `tax_evidence` (migrace
+        // 1001) a setup ho dosud nenastavoval vůbec. Jenže daňová evidence je
+        // režim pro fyzické osoby — právnická osoba je ze zákona účetní jednotka
+        // a vede podvojné účetnictví. Firma, která si přes ARES natáhla `pravniForma`
+        // s.r.o., tedy dostala rovnou špatný režim a musela ho hledat v Nastavení.
+        //
+        // Přepnout to zpětně přitom NENÍ zadarmo: doklady vzniklé v daňové
+        // evidenci se zapnutím podvojného účetnictví nedoúčtují a sestavy tiše
+        // nezahrnou minulost (viz text u přepínače). Špatný výchozí stav je proto
+        // dražší, než vypadá — správně se musí trefit hned na začátku.
+        //
+        // `fo` i prázdná hodnota zůstávají na daňové evidenci: u OSVČ je to
+        // správně a u neznámé právní formy je to ta zvratitelnější volba.
+        $taxpayerType = in_array($supplier['taxpayer_type'] ?? null, ['fo', 'po'], true)
+            ? (string) $supplier['taxpayer_type']
+            : null;
+        $accountingMode = $taxpayerType === 'po' ? 'double_entry' : 'tax_evidence';
+
         $stmt = $pdo->prepare(
             'INSERT INTO supplier
             (company_name, display_name, street, city, zip, country_id, ic, dic, is_vat_payer,
-             email, phone, web, commercial_register, taxpayer_type, default_currency_id, default_vat_rate_id,
+             email, phone, web, commercial_register, taxpayer_type, accounting_mode,
+             default_currency_id, default_vat_rate_id,
              default_payment_due_days, default_payment_due_unit, default_hourly_rate)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)'
         );
         $stmt->execute([
             (string) ($supplier['company_name'] ?? ''),
@@ -437,7 +461,8 @@ final class SetupAction
             (string) ($supplier['phone'] ?? '') ?: null,
             (string) ($supplier['web'] ?? '') ?: null,
             (string) ($supplier['commercial_register'] ?? '') ?: null,
-            in_array($supplier['taxpayer_type'] ?? null, ['fo', 'po'], true) ? (string) $supplier['taxpayer_type'] : null,
+            $taxpayerType,
+            $accountingMode,
             $vatRateId,
             (int) ($supplier['default_payment_due_days'] ?? 7),
             in_array($supplier['default_payment_due_unit'] ?? null, ['days', 'month'], true)
@@ -447,6 +472,18 @@ final class SetupAction
         ]);
         $supplierId = (int) $pdo->lastInsertId();
         \MyInvoice\Service\Vat\VatStatusService::seedInitialStatus($pdo, $supplierId, !empty($supplier['is_vat_payer']));
+
+        // ⚠️ Podvojné účetnictví BEZ směrné osnovy je rozbitý stav — `PostingService`
+        // nemá na co mapovat `account_code`. `SettingsAction` proto osnovu seeduje
+        // při každém přepnutí na `double_entry` a totéž musí udělat setup, jinak by
+        // firma vznikla v režimu, který neumí zaúčtovat první doklad.
+        //
+        // Doúčtování minulosti, které přepínač v Nastavení řeší, tady odpadá:
+        // v okamžiku setupu firma žádné doklady nemá, takže není co backfillovat.
+        // Právě proto je tohle nejlevnější místo, kde režim určit.
+        if ($accountingMode === 'double_entry') {
+            $this->coaSeeder->seedForSupplier($supplierId);
+        }
 
         // Seed default currencies (CZK + EUR) pro tohoto supplier
         $bank = isset($supplier['bank_account']) && is_array($supplier['bank_account']) ? $supplier['bank_account'] : null;

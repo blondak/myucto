@@ -100,6 +100,19 @@ async function lookupBank() {
   try {
     const r = await authApi.setupCrpdphLookup(dic)
     bankAccounts.value = r.accounts
+
+    // ⚠️ O plátcovství DPH rozhoduje registr plátců, ne ARES.
+    //
+    // Z ARESu se plátcovství odvozuje z `stavZdrojeDph`, což je odvozený údaj
+    // a umí být prázdný i u firmy, která plátce je. Autoritativní je CRPDPH:
+    // subjekt v něm dohledaný plátcem JE. Neúspěšné dohledání ale plátcovství
+    // NESHAZUJE — výpadek registru nebo chybějící DIČ nesmí uživateli tiše
+    // přepnout firmu na neplátce, což je nastavení, které pak mlčky pokazí
+    // vystavené faktury i přiznání.
+    if (r.found === true) {
+      supplier.value.is_vat_payer = true
+    }
+
     if (r.accounts.length === 0) {
       bankMessage.value = { type: 'error', text: t('supplier.bank_lookup_none') }
     } else {
@@ -165,6 +178,16 @@ async function lookupAres() {
     supplier.value.commercial_register = d.commercial_register || supplier.value.commercial_register
     if (d.taxpayer_type === 'fo' || d.taxpayer_type === 'po') supplier.value.taxpayer_type = d.taxpayer_type
     aresMessage.value = { type: 'success', text: t('supplier.ares_loaded', { name: d.company_name }) }
+
+    // Když z ARESu vypadlo DIČ, dotáhni rovnou i registr plátců — potvrdí
+    // plátcovství a předvyplní zveřejněné bankovní účty. Uživatel to jinak musel
+    // spustit druhým tlačítkem, o kterém při prvním setupu neví, že existuje;
+    // účet pak vyplňoval ručně přesto, že ho stát u jeho DIČ publikuje.
+    // Selhání je tiché záměrně: je to pohodlí navíc, ne podmínka dokončení
+    // setupu, a `lookupBank()` si vlastní chybovou hlášku zobrazí samo.
+    if (/^\d{8,10}$/.test((supplier.value.dic || '').replace(/\D/g, ''))) {
+      await lookupBank()
+    }
   } catch (e: any) {
     aresMessage.value = { type: 'error', text: e?.response?.data?.error?.message || t('supplier.ares_failed') }
   } finally {
