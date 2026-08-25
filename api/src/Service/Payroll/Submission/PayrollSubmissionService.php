@@ -232,11 +232,9 @@ final class PayrollSubmissionService
                         $obligation,
                         $correctedObligation,
                     )
-                    // Způsobilé stavy rozhoduje AGENDA, ne tahle služba: u agend
-                    // s okamžitým protokolem se čeká na rozhodnutí, u agend
-                    // s asynchronním protokolem a pevnou lhůtou stačí doložené
-                    // odeslání. Výchozí sada je přísná, rozšíření jmenovité
-                    // a s důvodem — viz PayrollAgendaCorrectionPolicy. Stavy
+                    // Způsobilé stavy rozhoduje AGENDA, ne tahle služba.
+                    // Výchozí sada je přísná a JMHZ ji zužuje jen na konečně
+                    // přijatý nebo částečně přijatý řádný kořen. Stavy
                     // `draft`…`ready` nejsou způsobilé nikdy: u nich úřad nemá
                     // co rušit a oprava by se vázala na dokument, který nikdy
                     // neopustil aplikaci.
@@ -826,12 +824,9 @@ final class PayrollSubmissionService
                     )
                     || !in_array(
                         $predecessor['status'],
-                        [
-                            'accepted',
-                            'partially_accepted',
-                            'rejected',
-                            'correction_required',
-                        ],
+                        PayrollAgendaCorrectionPolicy::correctableStatuses(
+                            (string) $obligation['agenda_code'],
+                        ),
                         true,
                     )
                 ) {
@@ -839,15 +834,20 @@ final class PayrollSubmissionService
                         'Předchůdce přijaté opravy už není způsobilý k nahrazení.',
                     );
                 }
-                $this->repository->updateSubmissionStatus(
-                    $supplierId,
-                    $predecessor['id'],
-                    $predecessor['row_version'],
-                    'superseded',
-                    null,
-                    null,
-                    $now,
-                );
+                if (PayrollAgendaCorrectionPolicy::supersedesPredecessorOnAcceptance(
+                    (string) $obligation['agenda_code'],
+                    (string) $submission['submission_kind'],
+                )) {
+                    $this->repository->updateSubmissionStatus(
+                        $supplierId,
+                        $predecessor['id'],
+                        $predecessor['row_version'],
+                        'superseded',
+                        null,
+                        null,
+                        $now,
+                    );
+                }
             }
 
             return [

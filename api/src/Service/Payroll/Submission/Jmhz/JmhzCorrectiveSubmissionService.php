@@ -165,8 +165,11 @@ final readonly class JmhzCorrectiveSubmissionService
             $identity->variableSymbol,
             $identity->year,
             $identity->month,
+            $this->deadlines,
+            $this->localDate(),
+            $submissionKind === 'cancellation',
         );
-        $envelope = JmhzSubmissionEnvelope::create(
+        $envelope = JmhzSubmissionEnvelope::createForExistingSubmission(
             $identity->submissionGuid,
             [],
             $this->filledAt(),
@@ -437,6 +440,13 @@ final readonly class JmhzCorrectiveSubmissionService
         return \DateTimeImmutable::createFromInterface($this->clock->now())
             ->setTimezone(new \DateTimeZone('UTC'))
             ->format('Y-m-d\TH:i:s\Z');
+    }
+
+    private function localDate(): string
+    {
+        return \DateTimeImmutable::createFromInterface($this->clock->now())
+            ->setTimezone(new \DateTimeZone('Europe/Prague'))
+            ->format('Y-m-d');
     }
 
     /**

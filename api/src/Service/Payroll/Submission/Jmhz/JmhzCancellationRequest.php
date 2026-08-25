@@ -25,6 +25,7 @@ final readonly class JmhzCancellationRequest
         int $month,
         JmhzDeadlinePolicy $deadlines = new JmhzDeadlinePolicy(),
         ?string $today = null,
+        bool $enforceCancellationWindow = true,
     ): self {
         if (preg_match('/^\d{10}$/D', $variableSymbol) !== 1) {
             throw new JmhzXmlException(
@@ -46,7 +47,7 @@ final readonly class JmhzCancellationRequest
         // Lhůta je kalendářní a čte se českým kalendářem — `gmdate()` by v poslední
         // den lhůty do 02:00 SELČ hlásil ještě předchozí den a naopak.
         $evaluatedOn = $today ?? date('Y-m-d');
-        if (strcmp($evaluatedOn, $window->dueOn) > 0) {
+        if ($enforceCancellationWindow && strcmp($evaluatedOn, $window->dueOn) > 0) {
             throw new JmhzXmlException(
                 'jmhz_cancellation_window_closed',
                 "Lhůta pro storno za období {$month}/{$year} skončila {$window->dueOn};"
