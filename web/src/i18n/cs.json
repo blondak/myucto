@@ -1128,6 +1128,11 @@
             }
         },
         "runs": {
+            "person_picker": {
+                "placeholder": "Vyhledat zaměstnance",
+                "no_results": "Žádný zaměstnanec neodpovídá hledání.",
+                "count": "žádný zaměstnanec | 1 zaměstnanec | {n} zaměstnanci | {n} zaměstnanců"
+            },
             "title": "Mzdové běhy",
             "subtitle": "Uzamknutí vstupů, neměnný výpočet, odborná kontrola a schválení měsíční mzdy jednou účetní.",
             "period": "Mzdové období",

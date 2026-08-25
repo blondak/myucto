@@ -21,6 +21,7 @@ import {
   type PayrollSocialBreakdown,
 } from '@/api/payrollInsurance'
 import { btnOutlineSm } from '@/components/ui/buttonStyles'
+import PayrollPersonPicker from '@/components/payroll/PayrollPersonPicker.vue'
 
 const props = withDefaults(defineProps<{
   revisionId: number | null
@@ -41,6 +42,10 @@ let requestSequence = 0
 const insurancePeople = computed(() => props.people.filter(person => person.statutory !== undefined))
 
 const available = computed(() => props.revisionId !== null && insurancePeople.value.length > 0)
+const personOptions = computed(() => insurancePeople.value.map(person => ({
+  value: person.employee_id,
+  label: personLabel(person),
+})))
 
 const social = computed(() =>
   breakdown.value?.social.available ? breakdown.value.social as PayrollSocialBreakdown : null,
@@ -186,23 +191,11 @@ watch(
       </div>
     </div>
 
-    <nav
-      class="flex gap-1 overflow-x-auto border-b border-neutral-200 px-2 sm:px-4"
-      :aria-label="t('payroll.runs.insurance.people_tabs')"
-    >
-      <button
-        v-for="person in insurancePeople"
-        :key="person.employee_id"
-        type="button"
-        class="whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium transition-colors"
-        :class="selectedEmployeeId === person.employee_id
-          ? 'border-payroll-500 text-payroll-700'
-          : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900'"
-        @click="selectedEmployeeId = person.employee_id"
-      >
-        {{ personLabel(person) }}
-      </button>
-    </nav>
+    <PayrollPersonPicker
+      v-model="selectedEmployeeId"
+      :options="personOptions"
+      :selector-label="t('payroll.runs.insurance.people_tabs')"
+    />
 
     <div v-if="loading" class="space-y-3 p-4 sm:p-5">
       <div v-for="index in 3" :key="index" class="h-16 animate-pulse rounded-lg bg-neutral-100" />

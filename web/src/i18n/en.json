@@ -1128,6 +1128,11 @@
             }
         },
         "runs": {
+            "person_picker": {
+                "placeholder": "Search for an employee",
+                "no_results": "No employee matches the search.",
+                "count": "no employees | 1 employee | {n} employees"
+            },
             "title": "Payroll runs",
             "subtitle": "Input locking, immutable calculation, professional review and monthly payroll approval by one accountant.",
             "period": "Payroll period",
