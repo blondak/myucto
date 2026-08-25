@@ -623,7 +623,11 @@ final class PayrollRunPersistenceTest extends TestCase
                     jmhz_apz_contribution_status = "yes",
                     jmhz_apz_instrument_code = "4",
                     jmhz_functional_benefits_status = "no",
-                    jmhz_temporary_assignment_status = "unverified"
+                    jmhz_temporary_assignment_status = "unverified",
+                    jmhz_orchard_discount_eligible = 0,
+                    jmhz_specific_legal_fact_applies = 0,
+                    jmhz_ozp_employment_support_applies = 0,
+                    jmhz_deep_mining_work_applies = 1
                     , activity_code = "1"
                     , jmhz_relationship_detail_code = "1"
               WHERE supplier_id = ? AND employment_id = ?'
@@ -652,6 +656,14 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('unverified', $term['jmhz_temporary_assignment_status']);
         self::assertSame('1', $term['activity_code']);
         self::assertSame('1', $term['jmhz_relationship_detail_code']);
+        self::assertSame([
+            'source_term_id' => $term['id'],
+            'source_term_row_version' => $term['row_version'],
+            'orchard_discount_eligible' => false,
+            'specific_legal_fact_applies' => false,
+            'ozp_employment_support_applies' => false,
+            'deep_mining_work_applies' => true,
+        ], $snapshot->data['people'][0]['employments'][0]['ordinary_evidence_profile']);
 
         $futureSnapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
             ->build($this->supplierId, '2026-09-01', '2026-10-15');
@@ -1645,6 +1657,57 @@ final class PayrollRunPersistenceTest extends TestCase
                 $event['event_type'] === 'request_correction',
         ))[0];
         self::assertSame('Doplatek syntetické prémie.', $correctionEvent['reason']);
+    }
+
+    public function testCancelledUnapprovedRunReopensFromCurrentInputsAsRegularRevision(): void
+    {
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'lock-before-cancelled-reopen',
+            $this->actors[0],
+        );
+        $calculated = $this->service->calculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $locked->run['row_version'],
+            'calculate-before-cancelled-reopen',
+            $this->actors[0],
+        );
+        $cancelled = $this->service->cancel(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $calculated->run['row_version'],
+            'cancel-before-fresh-reopen',
+            $this->actors[0],
+            'Po uzamčení byly opraveny mzdové vstupy.',
+        );
+        $reopened = $this->service->reopen(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $cancelled->run['row_version'],
+            'fresh-reopen-after-cancel',
+            $this->actors[1],
+            'Zakládám nový snapshot z opravených vstupů.',
+        );
+
+        self::assertSame('reopened', $reopened->run['status']);
+        self::assertSame(2, $reopened->revision['revision_no']);
+        self::assertSame('regular', $reopened->revision['revision_kind']);
+
+        $recalculated = $this->service->calculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $reopened->run['row_version'],
+            'calculate-fresh-reopen',
+            $this->actors[0],
+        );
+        self::assertSame(
+            120_000,
+            $recalculated->revision['result_snapshot']['totals']['source_amount_minor'],
+        );
     }
 
     public function testSnapshotValidationBlocksApprovalWithoutChangingReviewedRun(): void

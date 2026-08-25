@@ -167,6 +167,10 @@ export interface PayrollEmploymentTerms {
   jmhz_apz_instrument_code: string | null
   jmhz_functional_benefits_status: PayrollVerifiedTriState
   jmhz_temporary_assignment_status: PayrollVerifiedTriState
+  jmhz_orchard_discount_eligible?: boolean
+  jmhz_specific_legal_fact_applies?: boolean
+  jmhz_ozp_employment_support_applies?: boolean
+  jmhz_deep_mining_work_applies?: boolean
   cz_isco_code: string | null
   activity_code: string | null
   jmhz_relationship_detail_code: string | null
@@ -241,6 +245,8 @@ export type PayrollEmploymentTermsPayload = Omit<
     | 'social_employer_rate_category_evidence'
     | 'social_part_time_discount_reason' | 'social_part_time_discount_evidence'
     | 'social_part_time_discount_notified_on'
+    | 'jmhz_orchard_discount_eligible' | 'jmhz_specific_legal_fact_applies'
+    | 'jmhz_ozp_employment_support_applies' | 'jmhz_deep_mining_work_applies'
 > & {
   risky_work?: boolean
   social_employer_rate_category?: PayrollSocialEmployerRateCategory
@@ -251,6 +257,10 @@ export type PayrollEmploymentTermsPayload = Omit<
   social_part_time_discount_reason?: PayrollSocialPartTimeDiscountReason
   social_part_time_discount_evidence?: string | null
   social_part_time_discount_notified_on?: string | null
+  jmhz_orchard_discount_eligible?: boolean
+  jmhz_specific_legal_fact_applies?: boolean
+  jmhz_ozp_employment_support_applies?: boolean
+  jmhz_deep_mining_work_applies?: boolean
 }
 
 export interface PayrollEmploymentCreatePayload {
@@ -1875,11 +1885,11 @@ export interface PayrollJmhzPvpojPreview {
 }
 
 export interface PayrollJmhzOrdinaryEvidenceFacts {
-  reportable_wage_deductions_recorded: false
-  employee_social_discount_claimed: false
-  specific_legal_fact_occurred: false
-  ozp_employment_support_claimed: false
-  deep_mining_work_occurred: false
+  reportable_wage_deductions_recorded: boolean
+  employee_social_discount_claimed: boolean
+  specific_legal_fact_occurred: boolean
+  ozp_employment_support_claimed: boolean
+  deep_mining_work_occurred: boolean
 }
 
 /**
@@ -1893,6 +1903,9 @@ export interface PayrollJmhzOrdinaryEvidenceScope {
   employment_id: number
   employee_name: string
   confirmed: boolean
+  resolution: 'confirmed' | 'automatic_on_preparation' | 'attention_required'
+  attention_code: string | null
+  attention_message: string | null
 }
 
 export interface PayrollJmhzOrdinaryEvidenceState {
@@ -1911,6 +1924,7 @@ export interface PayrollJmhzOrdinaryEvidence {
   schema_reference: 'payroll-jmhz-ordinary-evidence.v1'
   source_manifest_sha256: string
   facts: PayrollJmhzOrdinaryEvidenceFacts
+  source_kind: 'explicit_confirmation' | 'derived_from_frozen_payroll_sources'
   confirmed_at: string
   created_at: string
   created: boolean

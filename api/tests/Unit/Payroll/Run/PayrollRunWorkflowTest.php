@@ -213,6 +213,37 @@ final class PayrollRunWorkflowTest extends TestCase
         );
     }
 
+    /** @return iterable<string,array{PayrollRunStatus}> */
+    public static function cancellableUnapprovedStatuses(): iterable
+    {
+        yield 'draft' => [PayrollRunStatus::DRAFT];
+        yield 'inputs locked' => [PayrollRunStatus::INPUTS_LOCKED];
+        yield 'calculated' => [PayrollRunStatus::CALCULATED];
+        yield 'reviewed' => [PayrollRunStatus::REVIEWED];
+        yield 'reopened' => [PayrollRunStatus::REOPENED];
+    }
+
+    #[DataProvider('cancellableUnapprovedStatuses')]
+    public function testUnapprovedRunCanBeCancelledAndRecreated(
+        PayrollRunStatus $from,
+    ): void {
+        $cancelled = $this->workflow->transition(
+            $from,
+            PayrollRunCommand::CANCEL,
+            $this->context(reason: 'Vstupy byly opraveny po vytvoření snapshotu.'),
+        );
+
+        self::assertSame(PayrollRunStatus::CANCELLED, $cancelled->to);
+
+        $reopened = $this->workflow->transition(
+            $cancelled->to,
+            PayrollRunCommand::REOPEN,
+            $this->context(reason: 'Zakládám nový snapshot z opravených vstupů.'),
+        );
+
+        self::assertSame(PayrollRunStatus::REOPENED, $reopened->to);
+    }
+
     public function testPostingAndPaymentGatesBlockWithoutEvidence(): void
     {
         foreach ([

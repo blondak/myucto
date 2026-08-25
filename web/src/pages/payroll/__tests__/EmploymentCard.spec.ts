@@ -134,6 +134,10 @@ function employment(): PayrollEmployment {
       jmhz_apz_instrument_code: null,
       jmhz_functional_benefits_status: 'unverified',
       jmhz_temporary_assignment_status: 'unverified',
+      jmhz_orchard_discount_eligible: false,
+      jmhz_specific_legal_fact_applies: false,
+      jmhz_ozp_employment_support_applies: false,
+      jmhz_deep_mining_work_applies: false,
       cz_isco_code: null,
       activity_code: null,
       jmhz_relationship_detail_code: null,
@@ -215,6 +219,27 @@ describe('EmploymentCard', () => {
     expect(notice.text()).toContain(key)
   })
 
+  it('umožní novému zaměstnanci potvrdit nulový počáteční stav bez fiktivních měsíců', () => {
+    const wrapper = mount(EmploymentCard, {
+      props: {
+        employment: { ...employment(), start_date: '2026-08-01' },
+        canWrite: true,
+        payrollStartPeriod: '2026-08-01',
+      },
+      global: {
+        stubs: {
+          PayrollOpeningBalancesPanel: {
+            props: ['includePriorMonths'],
+            template: '<div data-test="opening-panel" :data-prior="String(includePriorMonths)" />',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.find('[data-test="opening-balances-needed"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="opening-panel"]').attributes('data-prior')).toBe('false')
+  })
+
   it('read-only uživateli ukáže historii a checklist, ale žádné mutace', () => {
     const wrapper = mount(EmploymentCard, {
       props: { employment: employment(), canWrite: false },
@@ -262,6 +287,31 @@ describe('EmploymentCard', () => {
     await wrapper.get('[data-test="jmhz-apz-instrument"]').setValue('1')
     await wrapper.get('[data-test="jmhz-apz-status"]').setValue('no')
     expect(wrapper.find('[data-test="jmhz-apz-instrument"]').exists()).toBe(false)
+  })
+
+  it('běžný vztah nemá JMHZ výjimku a změnu uloží jen jednou do účinných podmínek', async () => {
+    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+    })
+    const edit = wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )
+    await edit!.trigger('click')
+    await flushPromises()
+
+    const profile = wrapper.get('[data-test="jmhz-ordinary-profile"]')
+    const checks = profile.findAll('input[type="checkbox"]')
+    expect(checks).toHaveLength(4)
+    expect(checks.every(check => !(check.element as HTMLInputElement).checked)).toBe(true)
+
+    await checks[3].setValue(true)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const payload = vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2]
+    expect(payload?.jmhz_deep_mining_work_applies).toBe(true)
+    expect(payload?.jmhz_specific_legal_fact_applies).toBe(false)
   })
 
   /**

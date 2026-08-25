@@ -218,6 +218,7 @@ final readonly class JmhzPreparationSnapshotService
             $ordinaryEvidence = $this->ordinaryEvidence->snapshotsForPreparation(
                 $supplierId,
                 $sourceRevisionId,
+                $createdBy,
             );
             $snapshot = $this->builder->build(
                 $supplierId,

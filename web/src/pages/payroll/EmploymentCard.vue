@@ -59,6 +59,12 @@ const jmhzOptionsFailed = ref(false)
 const municipalityOptions = ref<PayrollJmhzMunicipalityOption[]>([])
 const municipalitiesLoading = ref(false)
 const offices = ref<PayrollOffice[]>([])
+const ordinaryProfileFields = [
+  { key: 'jmhz_orchard_discount_eligible', label: 'orchard_discount_eligible' },
+  { key: 'jmhz_specific_legal_fact_applies', label: 'specific_legal_fact_applies' },
+  { key: 'jmhz_ozp_employment_support_applies', label: 'ozp_employment_support_applies' },
+  { key: 'jmhz_deep_mining_work_applies', label: 'deep_mining_work_applies' },
+] as const
 
 const currentTerms = computed(() => props.employment.terms[0] ?? null)
 
@@ -108,6 +114,10 @@ const advancedTermsPrefilled = computed(() => {
     || terms.jmhz_apz_contribution_status !== 'unverified'
     || terms.jmhz_functional_benefits_status !== 'unverified'
     || terms.jmhz_temporary_assignment_status !== 'unverified'
+    || terms.jmhz_orchard_discount_eligible === true
+    || terms.jmhz_specific_legal_fact_applies === true
+    || terms.jmhz_ozp_employment_support_applies === true
+    || terms.jmhz_deep_mining_work_applies === true
     || terms.cz_isco_code !== null
     || terms.activity_code !== null
     || terms.social_insurance_participation !== 'automatic'
@@ -210,6 +220,12 @@ const startsBeforePayroll = computed(() => {
   const start = props.employment.start_date
   return period != null && start !== null && start.slice(0, 7) < period
 })
+const openingStartPeriod = computed(() => startsBeforePayroll.value
+  ? payrollStartMonth.value
+  : props.employment.start_date?.slice(0, 7) ?? payrollStartMonth.value)
+const showOpeningBalances = computed(() => props.employment.is_primary
+  && payrollStartMonth.value !== null
+  && openingStartPeriod.value !== null)
 /*
  * Jakmile úhrny někdo doplní, nesmí nad nimi dál viset výzva k jejich doplnění —
  * karta by úkolovala tím, co je hotové. Stav hlásí panel, který stavy načítá;
@@ -297,6 +313,11 @@ async function startTermsEdit() {
     jmhz_apz_instrument_code: terms.jmhz_apz_instrument_code,
     jmhz_functional_benefits_status: terms.jmhz_functional_benefits_status,
     jmhz_temporary_assignment_status: terms.jmhz_temporary_assignment_status,
+    jmhz_orchard_discount_eligible: terms.jmhz_orchard_discount_eligible ?? false,
+    jmhz_specific_legal_fact_applies: terms.jmhz_specific_legal_fact_applies ?? false,
+    jmhz_ozp_employment_support_applies:
+      terms.jmhz_ozp_employment_support_applies ?? false,
+    jmhz_deep_mining_work_applies: terms.jmhz_deep_mining_work_applies ?? false,
     cz_isco_code: terms.cz_isco_code,
     activity_code: terms.activity_code,
     jmhz_relationship_detail_code: terms.jmhz_relationship_detail_code,
@@ -599,23 +620,30 @@ const actions = computed<ActionItem[]>(() => [
 
     <template v-if="expanded">
     <div
-      v-if="startsBeforePayroll"
+      v-if="showOpeningBalances"
       class="mt-3 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3 text-xs text-neutral-700"
       data-test="opening-balances-needed"
     >
-      <p class="font-medium text-neutral-900">{{ t('payroll.people.openings.title') }}</p>
+      <p class="font-medium text-neutral-900">
+        {{ t(startsBeforePayroll
+          ? 'payroll.people.openings.title'
+          : 'payroll.people.openings.title_new_hire') }}
+      </p>
       <p class="mt-1">
         {{ openingsFilled
           ? t('payroll.people.openings.done')
-          : t('payroll.people.openings.hint', {
-            start: formatDate(employment.start_date),
-            period: payrollStartLabel,
-          }) }}
+          : (startsBeforePayroll
+            ? t('payroll.people.openings.hint', {
+              start: formatDate(employment.start_date),
+              period: payrollStartLabel,
+            })
+            : t('payroll.people.openings.hint_new_hire')) }}
       </p>
       <PayrollOpeningBalancesPanel
         class="mt-3"
         :person-id="employment.employee_id"
-        :start-period="payrollStartMonth!"
+        :start-period="openingStartPeriod!"
+        :include-prior-months="startsBeforePayroll"
         :can-write="canWrite"
         @loaded="openingsFilled = $event"
       />
@@ -754,6 +782,15 @@ const actions = computed<ActionItem[]>(() => [
           <label class="text-xs text-neutral-600">{{ t('payroll.people.jmhz_evidence.temporary_assignment') }}<select v-model="termsForm.jmhz_temporary_assignment_status" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="state in ['unverified','no','yes']" :key="state" :value="state">{{ t(`payroll.people.jmhz_evidence.state.${state}`) }}</option></select></label>
           <p v-if="jmhzOptionsFailed" class="text-xs text-danger-700 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_evidence.options_failed') }}</p>
           <p v-if="termsForm.jmhz_temporary_assignment_status === 'yes'" class="text-xs text-warning-700 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_evidence.temporary_assignment_blocker') }}</p>
+        </fieldset>
+        <fieldset data-test="jmhz-ordinary-profile" class="grid grid-cols-1 gap-3 rounded-md border border-warning-500/30 bg-warning-50 p-3 sm:col-span-2 lg:col-span-4">
+          <legend class="px-1 text-xs font-semibold text-warning-800">{{ t('payroll.people.jmhz_ordinary_profile.title') }}</legend>
+          <p class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_ordinary_profile.hint') }}</p>
+          <label v-for="field in ordinaryProfileFields" :key="field.key" class="flex items-start gap-2 text-sm text-neutral-700">
+            <input v-model="termsForm[field.key]" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-warning-600 focus:ring-warning-500">
+            <span>{{ t(`payroll.people.jmhz_ordinary_profile.${field.label}`) }}</span>
+          </label>
+          <p class="text-xs text-neutral-500 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_ordinary_profile.monthly_hint') }}</p>
         </fieldset>
         <div class="text-xs text-neutral-600">
           <label class="block">{{ t('payroll.people.cz_isco_code') }}</label>

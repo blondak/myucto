@@ -248,7 +248,10 @@ final class PayrollRunSnapshotBuilder
                     'draft_inputs_present',
                     'employment',
                     $employmentId,
-                    'Pracovní vztah obsahuje neschválené mzdové vstupy.',
+                    sprintf(
+                        '%s: pracovní vztah obsahuje neschválené mzdové vstupy.',
+                        (string) $row['full_name'],
+                    ),
                     '/payroll/components',
                 );
             }
@@ -266,7 +269,10 @@ final class PayrollRunSnapshotBuilder
                     'employment_without_inputs',
                     'employment',
                     $employmentId,
-                    'Pracovní vztah nemá v období žádnou schválenou mzdovou složku.',
+                    sprintf(
+                        '%s: pracovní vztah nemá v období žádnou schválenou mzdovou složku.',
+                        (string) $row['full_name'],
+                    ),
                     '/payroll/components',
                     true,
                 );
@@ -339,6 +345,14 @@ final class PayrollRunSnapshotBuilder
                         (string) $row['jmhz_functional_benefits_status'],
                     'jmhz_temporary_assignment_status' =>
                         (string) $row['jmhz_temporary_assignment_status'],
+                    'jmhz_orchard_discount_eligible' =>
+                        (bool) $row['jmhz_orchard_discount_eligible'],
+                    'jmhz_specific_legal_fact_applies' =>
+                        (bool) $row['jmhz_specific_legal_fact_applies'],
+                    'jmhz_ozp_employment_support_applies' =>
+                        (bool) $row['jmhz_ozp_employment_support_applies'],
+                    'jmhz_deep_mining_work_applies' =>
+                        (bool) $row['jmhz_deep_mining_work_applies'],
                     'social_insurance_participation' =>
                         (string) $row['social_insurance_participation'],
                     'health_insurance_participation' =>
@@ -392,6 +406,20 @@ final class PayrollRunSnapshotBuilder
                         : (bool) $row['term_is_primary'],
                 ],
                 'term' => $termSnapshot,
+                'ordinary_evidence_profile' => $row['term_id'] === null
+                    ? null
+                    : [
+                        'source_term_id' => (int) $row['term_id'],
+                        'source_term_row_version' => (int) $row['term_row_version'],
+                        'orchard_discount_eligible' =>
+                            (bool) $row['jmhz_orchard_discount_eligible'],
+                        'specific_legal_fact_applies' =>
+                            (bool) $row['jmhz_specific_legal_fact_applies'],
+                        'ozp_employment_support_applies' =>
+                            (bool) $row['jmhz_ozp_employment_support_applies'],
+                        'deep_mining_work_applies' =>
+                            (bool) $row['jmhz_deep_mining_work_applies'],
+                    ],
                 'average_earning' => $this->averageEarningSnapshot($row),
                 'time_month' => $timeMonth,
                 'absences' => $absences,
@@ -588,6 +616,10 @@ final class PayrollRunSnapshotBuilder
                     term.jmhz_apz_instrument_code,
                     term.jmhz_functional_benefits_status,
                     term.jmhz_temporary_assignment_status,
+                    term.jmhz_orchard_discount_eligible,
+                    term.jmhz_specific_legal_fact_applies,
+                    term.jmhz_ozp_employment_support_applies,
+                    term.jmhz_deep_mining_work_applies,
                     term.social_insurance_participation,
                     term.health_insurance_participation,
                     term.tax_regime,

@@ -24,10 +24,12 @@ final class PayrollRunWorkflow
             PayrollRunStatus::CALCULATED => [
                 PayrollRunCommand::CALCULATE,
                 PayrollRunCommand::REVIEW,
+                PayrollRunCommand::CANCEL,
             ],
             PayrollRunStatus::REVIEWED => [
                 PayrollRunCommand::CALCULATE,
                 PayrollRunCommand::APPROVE,
+                PayrollRunCommand::CANCEL,
             ],
             PayrollRunStatus::APPROVED => [
                 PayrollRunCommand::POST,
@@ -51,7 +53,9 @@ final class PayrollRunWorkflow
             PayrollRunStatus::CORRECTION_PENDING => [
                 PayrollRunCommand::REOPEN,
             ],
-            PayrollRunStatus::CANCELLED => [],
+            PayrollRunStatus::CANCELLED => [
+                PayrollRunCommand::REOPEN,
+            ],
         };
     }
 
@@ -133,9 +137,14 @@ final class PayrollRunWorkflow
             throw new \DomainException('Tento přechod vyžaduje uvedení důvodu.');
         }
         if ($command === PayrollRunCommand::REOPEN
-            && $from !== PayrollRunStatus::CORRECTION_PENDING
+            && !in_array($from, [
+                PayrollRunStatus::CORRECTION_PENDING,
+                PayrollRunStatus::CANCELLED,
+            ], true)
         ) {
-            throw new \DomainException('Opravu lze otevřít jen z čekajícího opravného stavu.');
+            throw new \DomainException(
+                'Novou revizi lze otevřít jen ze zrušeného nebo opravného běhu.',
+            );
         }
     }
 }

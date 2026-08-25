@@ -73,6 +73,7 @@ final class JmhzOrdinaryEvidenceBuilder
         array $facts,
         int $confirmedBy,
         string $confirmedAt,
+        string $sourceKind = 'explicit_confirmation',
     ): JmhzOrdinaryEvidenceSnapshot {
         if ($targetEmploymentId <= 0) {
             throw new \InvalidArgumentException('Pracovní vztah musí být kladné číslo.');
@@ -83,12 +84,12 @@ final class JmhzOrdinaryEvidenceBuilder
         $runId = $this->positiveInt($revision['run_id'] ?? null, 'revision.run_id');
         $revisionNo = $this->positiveInt($revision['revision_no'] ?? null, 'revision.revision_no');
         if (($revision['status'] ?? null) !== 'approved'
-            || ($revision['revision_kind'] ?? null) !== 'regular'
+            || !in_array($revision['revision_kind'] ?? null, ['regular', 'correction'], true)
             || ($revision['current_revision_no'] ?? null) !== $revisionNo
         ) {
             $this->invalid(
                 'jmhz_ordinary_evidence_revision_not_current_approved',
-                'Potvrzení vyžaduje aktuální schválenou řádnou revizi.',
+                'Měsíční podklady JMHZ vyžadují aktuální schválenou revizi mzdy.',
             );
         }
         $periodStart = $this->date($revision['period_start'] ?? null, 'period_start');
@@ -117,6 +118,7 @@ final class JmhzOrdinaryEvidenceBuilder
             $input,
             $targetEmploymentId,
         );
+        $profileSource = $this->ordinaryProfileSource($employment, $sourceKind);
         $this->assertNoKnownDeductionConflict($person, $result, $employeeId);
         $term = $this->object($employment['term'] ?? null, 'term');
         $selection = JmhzScenario1SelectorResolver::load()->resolve(
@@ -193,13 +195,77 @@ final class JmhzOrdinaryEvidenceBuilder
                 'source_attribute_id' => '10546',
                 'row_sha256' => $in36->rowHash,
             ]],
-            'confirmation' => [
-                'source_kind' => 'explicit_confirmation',
+            'confirmation' => array_filter([
+                'source_kind' => $sourceKind,
+                'source_term_id' => $profileSource['source_term_id'] ?? null,
+                'source_term_row_version' => $profileSource['source_term_row_version'] ?? null,
                 'confirmed_by_user_id' => $confirmedBy,
                 'confirmed_at' => $confirmedAt,
-            ],
+            ], static fn (mixed $value): bool => $value !== null),
         ];
         return new JmhzOrdinaryEvidenceSnapshot($payload);
+    }
+
+    /**
+     * Automatický běžný profil je dovolený jen z údajů zmrazených ve mzdové
+     * revizi. Zapnutá výjimka se nesmí tiše přepsat nulovým měsíčním stavem.
+     *
+     * @param array<string,mixed> $employment
+     * @return array{source_term_id:int,source_term_row_version:int}|array{}
+     */
+    private function ordinaryProfileSource(array $employment, string $sourceKind): array
+    {
+        if (!in_array(
+            $sourceKind,
+            ['explicit_confirmation', 'derived_from_frozen_payroll_sources'],
+            true,
+        )) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_confirmation_invalid',
+                'Zdroj potvrzení právních skutečností není podporován.',
+            );
+        }
+        if ($sourceKind === 'explicit_confirmation') {
+            return [];
+        }
+
+        $profileValue = $employment['ordinary_evidence_profile'] ?? null;
+        if (!is_array($profileValue) || array_is_list($profileValue)) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_profile_missing',
+                'Tato revize vznikla před doplněním podkladů JMHZ. Mzdu znovu přepočítejte a schvalte.',
+            );
+        }
+        $profile = $profileValue;
+        $termId = $this->positiveInt($profile['source_term_id'] ?? null, 'source_term_id');
+        $termVersion = $this->positiveInt(
+            $profile['source_term_row_version'] ?? null,
+            'source_term_row_version',
+        );
+        foreach ([
+            'orchard_discount_eligible',
+            'specific_legal_fact_applies',
+            'ozp_employment_support_applies',
+            'deep_mining_work_applies',
+        ] as $key) {
+            if (!is_bool($profile[$key] ?? null)) {
+                $this->invalid(
+                    'jmhz_ordinary_evidence_profile_incomplete',
+                    'Zmrazené nastavení neobvyklých situací JMHZ není úplné.',
+                );
+            }
+            if ($profile[$key] === true) {
+                $this->invalid(
+                    'jmhz_ordinary_evidence_monthly_exception_required',
+                    'Pracovní vztah má evidovanou neobvyklou situaci. Doplňte její měsíční údaje.',
+                );
+            }
+        }
+
+        return [
+            'source_term_id' => $termId,
+            'source_term_row_version' => $termVersion,
+        ];
     }
 
     /**

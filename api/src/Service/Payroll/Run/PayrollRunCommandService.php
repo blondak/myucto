@@ -472,6 +472,8 @@ final class PayrollRunCommandService
                 throw new PayrollRunConflictException($currentVersion);
             }
             $from = PayrollRunStatus::from((string) $run['status']);
+            $reopenAsCorrection = $command === PayrollRunCommand::REOPEN
+                && $from === PayrollRunStatus::CORRECTION_PENDING;
             $revision = $this->runs->currentRevision($supplierId, $runId);
             $snapshot = null;
             if (in_array($command, [
@@ -484,7 +486,7 @@ final class PayrollRunCommandService
                     (string) $run['payment_date'],
                     $run['office_id'] === null ? null : (int) $run['office_id'],
                 );
-                if ($command === PayrollRunCommand::REOPEN) {
+                if ($reopenAsCorrection) {
                     $snapshot = $this->calculationPipeline
                         ->prepareCorrectionSnapshot(
                             $supplierId,
@@ -567,7 +569,7 @@ final class PayrollRunCommandService
                     $runId,
                     $revisionNo,
                     $previousRevisionId,
-                    $command === PayrollRunCommand::REOPEN ? 'correction' : 'regular',
+                    $reopenAsCorrection ? 'correction' : 'regular',
                     $snapshot,
                     $keyHashBinary,
                 );

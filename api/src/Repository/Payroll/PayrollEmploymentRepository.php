@@ -737,6 +737,10 @@ final class PayrollEmploymentRepository
                     terms.jmhz_apz_instrument_code,
                     terms.jmhz_functional_benefits_status,
                     terms.jmhz_temporary_assignment_status,
+                    terms.jmhz_orchard_discount_eligible,
+                    terms.jmhz_specific_legal_fact_applies,
+                    terms.jmhz_ozp_employment_support_applies,
+                    terms.jmhz_deep_mining_work_applies,
                     terms.cz_isco_code, terms.activity_code,
                     terms.jmhz_relationship_detail_code,
                     terms.social_insurance_participation,
@@ -837,6 +841,10 @@ final class PayrollEmploymentRepository
                  jmhz_apz_contribution_status, jmhz_apz_instrument_code,
                  jmhz_functional_benefits_status,
                  jmhz_temporary_assignment_status,
+                 jmhz_orchard_discount_eligible,
+                 jmhz_specific_legal_fact_applies,
+                 jmhz_ozp_employment_support_applies,
+                 jmhz_deep_mining_work_applies,
                  social_insurance_participation, health_insurance_participation,
                  tax_regime, other_withholding_eligibility,
                  foreign_legislation_country_code,
@@ -846,7 +854,7 @@ final class PayrollEmploymentRepository
                  social_part_time_discount_notified_on,
                  tax_declaration_signed,
                  is_primary, change_reason, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $employmentId,
@@ -871,6 +879,10 @@ final class PayrollEmploymentRepository
             $data['jmhz_apz_instrument_code'],
             $data['jmhz_functional_benefits_status'],
             $data['jmhz_temporary_assignment_status'],
+            (int) $data['jmhz_orchard_discount_eligible'],
+            (int) $data['jmhz_specific_legal_fact_applies'],
+            (int) $data['jmhz_ozp_employment_support_applies'],
+            (int) $data['jmhz_deep_mining_work_applies'],
             $data['social_insurance_participation'],
             $data['health_insurance_participation'],
             $data['tax_regime'],
@@ -1278,7 +1290,16 @@ final class PayrollEmploymentRepository
             'workload_basis_points',
             'row_version',
         ];
-        $bools = ['is_primary', 'is_legacy_projection', 'risky_work', 'tax_declaration_signed'];
+        $bools = [
+            'is_primary',
+            'is_legacy_projection',
+            'risky_work',
+            'tax_declaration_signed',
+            'jmhz_orchard_discount_eligible',
+            'jmhz_specific_legal_fact_applies',
+            'jmhz_ozp_employment_support_applies',
+            'jmhz_deep_mining_work_applies',
+        ];
         foreach ($ints as $key) {
             if (array_key_exists($key, $row) && $row[$key] !== null) {
                 $row[$key] = (int) $row[$key];

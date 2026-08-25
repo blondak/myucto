@@ -31,6 +31,96 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
         self::assertSame(101, $snapshot->payload['scope']['employment_id']);
     }
 
+    public function testBuildsOrdinaryEvidenceFromFrozenDefaultProfileWithoutMonthlyConfirmation(): void
+    {
+        $source = $this->sourceWithOrdinaryProfile();
+
+        $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(
+            7,
+            $source,
+            101,
+            $this->facts(),
+            12,
+            '2026-08-13T12:00:00.000000Z',
+            'derived_from_frozen_payroll_sources',
+        );
+
+        self::assertSame(
+            'derived_from_frozen_payroll_sources',
+            $snapshot->payload['confirmation']['source_kind'],
+        );
+        self::assertSame(81, $snapshot->payload['confirmation']['source_term_id']);
+        self::assertSame(3, $snapshot->payload['confirmation']['source_term_row_version']);
+    }
+
+    public function testCurrentApprovedCorrectionCanFreezeOrdinaryEvidence(): void
+    {
+        $source = $this->sourceWithOrdinaryProfile();
+        $source['revision']['revision_no'] = 2;
+        $source['revision']['current_revision_no'] = 2;
+        $source['revision']['revision_kind'] = 'correction';
+
+        $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(
+            7,
+            $source,
+            101,
+            $this->facts(),
+            12,
+            '2026-08-13T12:00:00.000000Z',
+            'derived_from_frozen_payroll_sources',
+        );
+
+        self::assertSame(2, $snapshot->payload['scope']['revision_no']);
+        self::assertSame(101, $snapshot->payload['scope']['employment_id']);
+    }
+
+    public function testDerivedDefaultNamesLegacyRevisionWithoutOrdinaryProfile(): void
+    {
+        try {
+            (new JmhzOrdinaryEvidenceBuilder())->build(
+                7,
+                $this->source(),
+                101,
+                $this->facts(),
+                12,
+                '2026-08-13T12:00:00.000000Z',
+                'derived_from_frozen_payroll_sources',
+            );
+            self::fail('Stará revize bez zmrazeného profilu musí vyžádat nový přepočet.');
+        } catch (JmhzOrdinaryEvidenceException $exception) {
+            self::assertSame(
+                'jmhz_ordinary_evidence_profile_missing',
+                $exception->validationCode,
+            );
+            self::assertStringContainsString('znovu přepočítejte', $exception->getMessage());
+        }
+    }
+
+    public function testDerivedDefaultRefusesEmploymentMarkedAsDeepMiningException(): void
+    {
+        $source = $this->sourceWithOrdinaryProfile([
+            'deep_mining_work_applies' => true,
+        ]);
+
+        try {
+            (new JmhzOrdinaryEvidenceBuilder())->build(
+                7,
+                $source,
+                101,
+                $this->facts(),
+                12,
+                '2026-08-13T12:00:00.000000Z',
+                'derived_from_frozen_payroll_sources',
+            );
+            self::fail('Výjimečný vztah nesmí dostat automatické nulové potvrzení.');
+        } catch (JmhzOrdinaryEvidenceException $exception) {
+            self::assertSame(
+                'jmhz_ordinary_evidence_monthly_exception_required',
+                $exception->validationCode,
+            );
+        }
+    }
+
     public function testMissingEnforcementEvidenceIsRejectedFailClosed(): void
     {
         $source = $this->source();
@@ -219,6 +309,32 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
             'result_snapshot_hash' => hash('sha256', $resultJson),
             'ruleset_manifest_hash' => str_repeat('a', 64),
         ]];
+    }
+
+    /**
+     * @param array<string,bool> $overrides
+     * @return array{revision:array<string,mixed>}
+     */
+    private function sourceWithOrdinaryProfile(array $overrides = []): array
+    {
+        $source = $this->source();
+        $input = json_decode(
+            $source['revision']['input_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($input);
+        $profile = array_replace([
+            'source_term_id' => 81,
+            'source_term_row_version' => 3,
+            'orchard_discount_eligible' => false,
+            'specific_legal_fact_applies' => false,
+            'ozp_employment_support_applies' => false,
+            'deep_mining_work_applies' => false,
+        ], $overrides);
+        $input['people'][0]['employments'][0]['ordinary_evidence_profile'] = $profile;
+        $this->replaceInput($source, $input);
+        return $source;
     }
 
     /** @param array<string,mixed> $source @param array<string,mixed> $input */
