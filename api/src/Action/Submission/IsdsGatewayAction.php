@@ -331,10 +331,15 @@ final class IsdsGatewayAction
                 404,
             );
         }
-        if (!str_starts_with(strtoupper((string) $row['agenda_code']), 'JMHZ')) {
+        $agendaCode = strtoupper(trim((string) $row['agenda_code']));
+        $artifactKind = trim((string) $row['artifact_kind']);
+        $allowedAgenda = str_starts_with($agendaCode, 'JMHZ')
+            || $agendaCode === 'PPZ'
+            || str_starts_with($agendaCode, 'PPZ_');
+        if (!$allowedAgenda || $artifactKind !== 'payroll_submission') {
             throw new SubmissionChannelException(
                 'payroll_gateway_outbox_forbidden',
-                'Mzdové oprávnění smí přes ISDS odeslat pouze podání JMHZ.',
+                'Mzdové oprávnění smí přes ISDS odeslat pouze připravené podání JMHZ nebo PPZ.',
                 403,
             );
         }

@@ -34,6 +34,50 @@ final class DirectIsdsInboxTransportTest extends TestCase
         self::assertSame('Finanční úřad', $rows[0]['sender_name']);
     }
 
+    public function testReceivedMessagesArePagedAndDeduplicatedPastFirstFifty(): void
+    {
+        $offsets = [];
+        $transport = new DirectIsdsInboxTransport(
+            static function (string $url, string $body) use (&$offsets): array {
+                preg_match('/<isds:dmOffset>(\d+)<\/isds:dmOffset>/', $body, $match);
+                $offset = (int) ($match[1] ?? 0);
+                $offsets[] = $offset;
+                $ids = $offset === 1
+                    ? range(100000001, 100000050)
+                    : [100000050, ...range(100000051, 100000075)];
+                return ['status' => 200, 'body' => self::listResponse($ids)];
+            },
+        );
+
+        $rows = $transport->listReceived($this->passwordContext());
+
+        self::assertSame([1, 51], $offsets);
+        self::assertCount(75, $rows);
+        self::assertSame('100000001', $rows[0]['message_id']);
+        self::assertSame('100000075', $rows[74]['message_id']);
+    }
+
+    public function testFullTenthPageFailsClosedInsteadOfClaimingInboxIsComplete(): void
+    {
+        $calls = 0;
+        $transport = new DirectIsdsInboxTransport(
+            static function (string $url, string $body) use (&$calls): array {
+                $calls++;
+                preg_match('/<isds:dmOffset>(\d+)<\/isds:dmOffset>/', $body, $match);
+                $offset = (int) ($match[1] ?? 1);
+                return ['status' => 200, 'body' => self::listResponse(range(100000000 + $offset, 100000000 + $offset + 49))];
+            },
+        );
+
+        try {
+            $transport->listReceived($this->passwordContext());
+            self::fail('Plný bezpečnostní limit nesmí být vydáván za kompletní seznam.');
+        } catch (\MyInvoice\Service\Submission\Channel\SubmissionChannelException $e) {
+            self::assertSame('isds_inbox_list_limit_reached', $e->errorCode);
+        }
+        self::assertSame(10, $calls);
+    }
+
     public function testSignedMessageIsDecodedAsZfoBytes(): void
     {
         $zfo = "synthetic-zfo\0bytes";
@@ -58,17 +102,21 @@ final class DirectIsdsInboxTransportTest extends TestCase
         );
     }
 
-    private static function listResponse(): string
+    /** @param list<int|string> $messageIds */
+    private static function listResponse(array $messageIds = [123456789]): string
     {
-        return <<<'XML'
-<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:isds="http://isds.czechpoint.cz/v20">
-  <soap:Body><isds:GetListOfReceivedMessagesResponse>
-    <isds:dmRecord><isds:dmID>123456789</isds:dmID><isds:dbIDSender>abcdefg</isds:dbIDSender><isds:dmSender>Finanční úřad</isds:dmSender><isds:dmAnnotation>Syntetická zpráva</isds:dmAnnotation><isds:dmDeliveryTime>2026-08-25T12:00:00+02:00</isds:dmDeliveryTime></isds:dmRecord>
-    <isds:dmStatus><isds:dmStatusCode>0000</isds:dmStatusCode><isds:dmStatusMessage>OK</isds:dmStatusMessage></isds:dmStatus>
-  </isds:GetListOfReceivedMessagesResponse></soap:Body>
-</soap:Envelope>
-XML;
+        $records = '';
+        foreach ($messageIds as $messageId) {
+            $records .= '<isds:dmRecord><isds:dmID>' . $messageId . '</isds:dmID>'
+                . '<isds:dbIDSender>abcdefg</isds:dbIDSender><isds:dmSender>Finanční úřad</isds:dmSender>'
+                . '<isds:dmAnnotation>Syntetická zpráva</isds:dmAnnotation>'
+                . '<isds:dmDeliveryTime>2026-08-25T12:00:00+02:00</isds:dmDeliveryTime></isds:dmRecord>';
+        }
+        return '<?xml version="1.0" encoding="UTF-8"?>'
+            . '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:isds="http://isds.czechpoint.cz/v20">'
+            . '<soap:Body><isds:GetListOfReceivedMessagesResponse>' . $records
+            . '<isds:dmStatus><isds:dmStatusCode>0000</isds:dmStatusCode><isds:dmStatusMessage>OK</isds:dmStatusMessage></isds:dmStatus>'
+            . '</isds:GetListOfReceivedMessagesResponse></soap:Body></soap:Envelope>';
     }
 
     private static function downloadResponse(string $bytes): string

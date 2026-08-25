@@ -672,6 +672,9 @@ final class Bootstrap
             \MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationSource::class => fn (ContainerInterface $c)
                 => $c->get(\MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService::class),
 
+            \MyInvoice\Service\Submission\Channel\Isds\IsdsAuthFlowStore::class => fn (ContainerInterface $c)
+                => $c->get(\MyInvoice\Repository\Submission\IsdsAuthFlowRepository::class),
+
             // Odesílací brána ISDS (`SetConcept`). Vědomě NENÍ implementací
             // `IsdsTransport` výš: brána umí JEN odesílat, a to s člověkem
             // uprostřed (dvě přesměrování prohlížeče), kdežto `IsdsTransport`

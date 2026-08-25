@@ -14,10 +14,12 @@ use MyInvoice\Service\Submission\Channel\ChannelCredentials;
 use MyInvoice\Service\Submission\Channel\Isds\DirectIsdsInboxTransport;
 use MyInvoice\Service\Submission\Channel\Isds\IsdsChannel;
 use MyInvoice\Service\Submission\Channel\Isds\MobileKeyIsdsAuthenticator;
+use MyInvoice\Service\Submission\Channel\Isds\SmsIsdsAuthenticator;
 use MyInvoice\Service\Submission\Channel\SensitiveValue;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionCredentialService;
 use MyInvoice\Service\Submission\SubmissionInboxService;
+use MyInvoice\Service\Submission\IsdsMobileCredentialService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -35,6 +37,8 @@ final class SubmissionInboxAction
         private readonly SubmissionCredentialService $credentials,
         private readonly DirectIsdsInboxTransport $directTransport,
         private readonly MobileKeyIsdsAuthenticator $mobileKey,
+        private readonly SmsIsdsAuthenticator $sms,
+        private readonly IsdsMobileCredentialService $mobileCredentials,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -75,7 +79,7 @@ final class SubmissionInboxAction
                 'isds',
                 new IsdsChannel($this->directTransport),
                 null,
-                50,
+                500,
                 $this->userId($request),
             );
         } catch (SubmissionChannelException $e) {
@@ -125,7 +129,7 @@ final class SubmissionInboxAction
                 'isds',
                 new IsdsChannel($this->directTransport),
                 null,
-                50,
+                500,
                 $this->userId($request),
             );
         } catch (SubmissionChannelException $e) {
@@ -146,13 +150,23 @@ final class SubmissionInboxAction
             return $error;
         }
         try {
-            $result = $this->mobileKey->start(
-                SupplierGuard::currentId($request),
-                $this->userId($request),
-                (string) ($body['environment'] ?? 'production'),
-                (string) ($body['username'] ?? ''),
-                (string) ($body['communication_code'] ?? ''),
-            );
+            $supplierId = SupplierGuard::currentId($request);
+            $userId = $this->userId($request);
+            $environment = (string) ($body['environment'] ?? 'production');
+            $result = ($body['use_saved_credentials'] ?? false) === true
+                ? $this->mobileKey->startWithCredentials(
+                    $supplierId,
+                    $userId,
+                    $environment,
+                    $this->mobileCredentials->unlock($supplierId, $userId, $environment),
+                )
+                : $this->mobileKey->start(
+                    $supplierId,
+                    $userId,
+                    $environment,
+                    (string) ($body['username'] ?? ''),
+                    (string) ($body['communication_code'] ?? ''),
+                );
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
@@ -177,6 +191,7 @@ final class SubmissionInboxAction
                 $flowToken,
                 SupplierGuard::currentId($request),
                 $this->userId($request),
+                (string) ($body['environment'] ?? 'production'),
             );
             $context = $result['context'];
             if ($context === null) {
@@ -192,7 +207,7 @@ final class SubmissionInboxAction
                     'isds',
                     new IsdsChannel($this->directTransport),
                     null,
-                    50,
+                    500,
                     $this->userId($request),
                 );
             } finally {
@@ -210,6 +225,67 @@ final class SubmissionInboxAction
             'description' => $result['description'],
             'result' => $pollResult,
         ]);
+    }
+
+    /** Ověří jméno a heslo a uloží je šifrovaně jen do krátkého jednorázového SMS flow. */
+    public function smsStart(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        if (($error = $this->acknowledgementError($body, $response)) !== null) {
+            return $error;
+        }
+        try {
+            $result = $this->sms->start(
+                SupplierGuard::currentId($request),
+                $this->userId($request),
+                (string) ($body['environment'] ?? 'production'),
+                (string) ($body['username'] ?? ''),
+                (string) ($body['password'] ?? ''),
+            );
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        return Json::ok($response, $result);
+    }
+
+    /** Ověří SMS kód, provede právě jedno načtení a relaci ISDS ukončí. */
+    public function smsComplete(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $flowToken = (string) ($body['flow_token'] ?? '');
+        if ($flowToken === '' || strlen($flowToken) > 8192) {
+            return Json::error($response, 'isds_sms_flow_invalid', 'Přihlášení pomocí SMS není platné. Vyžádejte nový kód.', 400);
+        }
+        try {
+            $context = $this->sms->complete(
+                $flowToken,
+                (string) ($body['sms_code'] ?? ''),
+                SupplierGuard::currentId($request),
+                $this->userId($request),
+                (string) ($body['environment'] ?? 'production'),
+            );
+            try {
+                $result = $this->inbox->pollWithChannel(
+                    $context,
+                    'isds',
+                    new IsdsChannel($this->directTransport),
+                    null,
+                    500,
+                    $this->userId($request),
+                );
+            } finally {
+                $this->sms->logout($context);
+            }
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        return $this->pollResult($response, $result);
     }
 
     /** @param array{fetched:int,stored:int,skipped:int,failed:int,unclassified:int,error:?string} $result */

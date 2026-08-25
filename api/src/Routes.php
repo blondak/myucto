@@ -1994,6 +1994,9 @@ final class Routes
         // přehledy ZP…). Systémový certifikát je vždy nastavení aktuální firmy.
         $app->get    ('/api/settings/databox',             [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'list']);
         $app->post   ('/api/settings/databox',             [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'save']);
+        $app->get    ('/api/settings/databox/mobile-key',  [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'mobileKeyProfile']);
+        $app->post   ('/api/settings/databox/mobile-key',  [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'saveMobileKeyProfile']);
+        $app->delete ('/api/settings/databox/mobile-key/{environment:production|test}', [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'deleteMobileKeyProfile']);
         $app->delete ('/api/settings/databox/{environment:production|test}', [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'delete']);
         // Registrace odesílací brány je věc PROVOZOVATELE, ne zákazníka:
         // certifikát je jeden pro celou službu a zákazník k odeslání přes bránu
@@ -2038,6 +2041,8 @@ final class Routes
         $app->post   ('/api/submissions/inbox/poll/password', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'pollWithPassword']);
         $app->post   ('/api/submissions/inbox/mobile-key/start', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'mobileKeyStart']);
         $app->post   ('/api/submissions/inbox/mobile-key/status', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'mobileKeyStatus']);
+        $app->post   ('/api/submissions/inbox/sms/start', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'smsStart']);
+        $app->post   ('/api/submissions/inbox/sms/complete', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'smsComplete']);
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/classify', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'reclassify']);
         // Doručení a jeho následky. `delivery/refresh` nesahá na síť — jen znovu
         // posoudí už stažené zprávy, protože běžící lhůta fikce (§ 17 odst. 4

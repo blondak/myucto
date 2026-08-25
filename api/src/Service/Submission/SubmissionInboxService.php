@@ -169,9 +169,6 @@ final readonly class SubmissionInboxService
             return $result;
         }
 
-        // Úspěch se zapisuje i při nula zprávách — právě tenhle záznam odlišuje
-        // „schránka je prázdná" od „na schránku se nedovoláme".
-        $this->inbox->recordPollSuccess($supplierId, $channelCode, $environment, $listing->count());
         $result['fetched'] = $listing->count();
 
         $boxKinds = $this->recipientBoxKinds($supplierId);
@@ -204,6 +201,21 @@ final readonly class SubmissionInboxService
                     'error' => $e->getMessage(),
                 ]);
             }
+        }
+
+        if ($result['failed'] > 0) {
+            $result['error'] = 'isds_inbox_message_ingest_failed';
+            $this->inbox->recordPollFailure(
+                $supplierId,
+                $channelCode,
+                $environment,
+                $result['error'],
+                'Některé zprávy se nepodařilo stáhnout nebo uložit (' . $result['failed'] . ' z ' . $result['fetched'] . ').',
+            );
+        } else {
+            // Úspěch se zapisuje i při nula zprávách — právě tenhle záznam odlišuje
+            // „schránka je prázdná" od „na schránku se nedovoláme".
+            $this->inbox->recordPollSuccess($supplierId, $channelCode, $environment, $listing->count());
         }
 
         return $result;

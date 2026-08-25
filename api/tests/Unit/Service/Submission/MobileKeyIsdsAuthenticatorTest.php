@@ -6,8 +6,11 @@ namespace MyInvoice\Tests\Unit\Service\Submission;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Submission\Channel\ChannelCredentials;
 use MyInvoice\Service\Submission\Channel\Isds\MobileKeyIsdsAuthenticator;
+use MyInvoice\Service\Submission\Channel\SensitiveValue;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
+use MyInvoice\Tests\Support\InMemoryIsdsAuthFlowStore;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 
@@ -33,13 +36,13 @@ final class MobileKeyIsdsAuthenticatorTest extends TestCase
                     : ['S-COOKIE' => 'state-cookie-123'],
             ];
         };
-        $authenticator = new MobileKeyIsdsAuthenticator($this->crypto(), $http);
+        $authenticator = new MobileKeyIsdsAuthenticator($this->crypto(), new InMemoryIsdsAuthFlowStore(), $http);
 
         $start = $authenticator->start(7, 11, 'test', 'synthetic-user', 'synthetic-app-password');
-        self::assertStringStartsWith('enc:v2:', $start['flow_token']);
+        self::assertMatchesRegularExpression('/^[A-Za-z0-9_-]{43}$/', $start['flow_token']);
         self::assertStringNotContainsString('synthetic-app-password', $start['flow_token']);
 
-        $completed = $authenticator->continue($start['flow_token'], 7, 11);
+        $completed = $authenticator->continue($start['flow_token'], 7, 11, 'test');
         self::assertSame(2, $completed['state']);
         self::assertNotNull($completed['context']);
         self::assertSame('mobile_key', $completed['context']->credentials->authMode);
@@ -54,6 +57,7 @@ final class MobileKeyIsdsAuthenticatorTest extends TestCase
         $calls = 0;
         $authenticator = new MobileKeyIsdsAuthenticator(
             $this->crypto(),
+            new InMemoryIsdsAuthFlowStore(),
             static function () use (&$calls): array {
                 $calls++;
                 return ['status' => 302, 'body' => '', 'cookies' => ['S-COOKIE' => 'state-cookie-123']];
@@ -62,13 +66,13 @@ final class MobileKeyIsdsAuthenticatorTest extends TestCase
         $start = $authenticator->start(7, 11, 'test', 'synthetic-user', 'synthetic-app-password');
 
         try {
-            $authenticator->continue($start['flow_token'], 8, 11);
+            $authenticator->continue($start['flow_token'], 8, 11, 'test');
             self::fail('Tok jiné firmy nesmí pokračovat.');
         } catch (SubmissionChannelException $e) {
             self::assertSame('isds_mobile_flow_expired', $e->errorCode);
         }
         try {
-            $authenticator->continue($start['flow_token'], 7, 12);
+            $authenticator->continue($start['flow_token'], 7, 12, 'test');
             self::fail('Tok jiného uživatele nesmí pokračovat.');
         } catch (SubmissionChannelException $e) {
             self::assertSame('isds_mobile_flow_expired', $e->errorCode);
@@ -81,6 +85,7 @@ final class MobileKeyIsdsAuthenticatorTest extends TestCase
         $operations = [];
         $authenticator = new MobileKeyIsdsAuthenticator(
             $this->crypto(),
+            new InMemoryIsdsAuthFlowStore(),
             static function (string $operation) use (&$operations): array {
                 $operations[] = $operation;
                 return $operation === 'status'
@@ -90,11 +95,53 @@ final class MobileKeyIsdsAuthenticatorTest extends TestCase
         );
         $start = $authenticator->start(7, 11, 'test', 'synthetic-user', 'synthetic-app-password');
 
-        $pending = $authenticator->continue($start['flow_token'], 7, 11);
+        $pending = $authenticator->continue($start['flow_token'], 7, 11, 'test');
 
         self::assertSame(1, $pending['state']);
         self::assertNull($pending['context']);
         self::assertSame(['login', 'status'], $operations);
+    }
+
+    public function testCanStartFromDeferredEncryptedCredentials(): void
+    {
+        $authenticator = new MobileKeyIsdsAuthenticator(
+            $this->crypto(),
+            new InMemoryIsdsAuthFlowStore(),
+            static fn (): array => ['status' => 302, 'body' => '', 'cookies' => ['S-COOKIE' => 'state-cookie-123']],
+        );
+        $credentials = new ChannelCredentials(
+            boxId: '',
+            authMode: 'mobile_key',
+            username: SensitiveValue::fromProducer(static fn (): string => 'saved-user'),
+            password: SensitiveValue::fromProducer(static fn (): string => 'saved-code'),
+        );
+
+        $start = $authenticator->startWithCredentials(7, 11, 'test', $credentials);
+
+        self::assertSame(1, $start['state']);
+        self::assertMatchesRegularExpression('/^[A-Za-z0-9_-]{43}$/', $start['flow_token']);
+        self::assertStringNotContainsString('saved-code', $start['flow_token']);
+    }
+
+    public function testApprovedFlowCannotBeReplayed(): void
+    {
+        $authenticator = new MobileKeyIsdsAuthenticator(
+            $this->crypto(),
+            new InMemoryIsdsAuthFlowStore(),
+            static function (string $operation, string $url, array $options): array {
+                if ($operation === 'status') {
+                    return ['status' => 200, 'body' => '{"status":2}', 'cookies' => []];
+                }
+                return ['status' => 302, 'body' => '', 'cookies' => isset($options['cookie'])
+                    ? ['IPCZ-X-COOKIE' => 'session-cookie-123']
+                    : ['S-COOKIE' => 'state-cookie-123']];
+            },
+        );
+        $start = $authenticator->start(7, 11, 'test', 'synthetic-user', 'synthetic-app-password');
+        self::assertNotNull($authenticator->continue($start['flow_token'], 7, 11, 'test')['context']);
+
+        $this->expectException(SubmissionChannelException::class);
+        $authenticator->continue($start['flow_token'], 7, 11, 'test');
     }
 
     private function crypto(): SecretEncryption

@@ -11,7 +11,7 @@ use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
  * Přímé čtení ISDS pro ručně vyžádané načtení inboxu.
  *
  * Podporuje systémový certifikát firmy, jednorázové jméno a heslo a krátkou
- * relaci Mobilního klíče. Odchozí zprávy záměrně neposílá: ty vede SetConcept,
+ * relaci Mobilního klíče nebo SMS. Odchozí zprávy záměrně neposílá: ty vede SetConcept,
  * kde konečný souhlas proběhne přímo v ISDS.
  */
 final class DirectIsdsInboxTransport implements IsdsTransport
@@ -23,6 +23,8 @@ final class DirectIsdsInboxTransport implements IsdsTransport
     private const TIMEOUT = 120;
     private const MAX_LIST_RESPONSE_BYTES = 4 * 1024 * 1024;
     private const MAX_MESSAGE_RESPONSE_BYTES = 40 * 1024 * 1024;
+    private const LIST_PAGE_SIZE = 50;
+    private const MAX_LIST_PAGES = 10;
     private const USER_AGENT = 'MyUcto-ISDS-Inbox/1.0';
 
     /** @param null|callable(string,string,ChannelContext):array{status:int,body:string} $httpDouble */
@@ -57,7 +59,40 @@ final class DirectIsdsInboxTransport implements IsdsTransport
     {
         $from = new \DateTimeImmutable('-90 days');
         $to = new \DateTimeImmutable('+1 day');
-        $body = $this->envelope(static function (\XMLWriter $writer) use ($from, $to): void {
+        $result = [];
+        $seen = [];
+
+        for ($page = 0; $page < self::MAX_LIST_PAGES; $page++) {
+            $offset = ($page * self::LIST_PAGE_SIZE) + 1;
+            $records = $this->listReceivedPage($context, $from, $to, $offset);
+            foreach ($records as $record) {
+                $messageId = (string) $record['message_id'];
+                if (isset($seen[$messageId])) {
+                    continue;
+                }
+                $seen[$messageId] = true;
+                $result[] = $record;
+            }
+            if (count($records) < self::LIST_PAGE_SIZE) {
+                return $result;
+            }
+        }
+
+        throw new SubmissionChannelException(
+            'isds_inbox_list_limit_reached',
+            'Datová schránka vrátila více než 500 zpráv za posledních 90 dnů. Načtení bylo bezpečně zastaveno, aby se neprezentovalo jako úplné.',
+            409,
+        );
+    }
+
+    /** @return list<array<string,?string>> */
+    private function listReceivedPage(
+        ChannelContext $context,
+        \DateTimeImmutable $from,
+        \DateTimeImmutable $to,
+        int $offset,
+    ): array {
+        $body = $this->envelope(static function (\XMLWriter $writer) use ($from, $to, $offset): void {
             $writer->startElementNS('isds', 'GetListOfReceivedMessages', self::NS_ISDS);
             $writer->writeElementNS('isds', 'dmFromTime', null, $from->format(DATE_ATOM));
             $writer->writeElementNS('isds', 'dmToTime', null, $to->format(DATE_ATOM));
@@ -65,8 +100,8 @@ final class DirectIsdsInboxTransport implements IsdsTransport
             $writer->writeAttributeNS('xsi', 'nil', self::NS_XSI, 'true');
             $writer->endElement();
             $writer->writeElementNS('isds', 'dmStatusFilter', null, '-1');
-            $writer->writeElementNS('isds', 'dmOffset', null, '1');
-            $writer->writeElementNS('isds', 'dmLimit', null, '50');
+            $writer->writeElementNS('isds', 'dmOffset', null, (string) $offset);
+            $writer->writeElementNS('isds', 'dmLimit', null, (string) self::LIST_PAGE_SIZE);
             $writer->endElement();
         });
 
@@ -82,8 +117,12 @@ final class DirectIsdsInboxTransport implements IsdsTransport
             if (!$record instanceof \DOMElement) {
                 continue;
             }
+            $messageId = $this->childValue($xpath, $record, 'dmID') ?? '';
+            if (preg_match('/^[0-9]{1,30}$/', $messageId) !== 1) {
+                throw new SubmissionChannelException('isds_inbox_list_malformed', 'Seznam zpráv obsahuje neplatné ID datové zprávy.', 502);
+            }
             $result[] = [
-                'message_id' => $this->childValue($xpath, $record, 'dmID') ?? '',
+                'message_id' => $messageId,
                 'sender_box_id' => $this->childValue($xpath, $record, 'dbIDSender'),
                 'sender_name' => $this->childValue($xpath, $record, 'dmSender'),
                 'subject' => $this->childValue($xpath, $record, 'dmAnnotation'),
@@ -150,7 +189,8 @@ final class DirectIsdsInboxTransport implements IsdsTransport
             throw new SubmissionChannelException('isds_curl_required', 'Pro připojení k datové schránce chybí rozšíření PHP cURL.', 503);
         }
 
-        $certificatePaths = ['', ''];
+        $clientCertificate = null;
+        $handle = null;
         try {
             $handle = curl_init($url);
             if ($handle === false) {
@@ -188,18 +228,21 @@ final class DirectIsdsInboxTransport implements IsdsTransport
 
             $credentials = $context->credentials;
             if ($credentials->authMode === 'certificate') {
-                $certificatePaths = $this->materializeCertificate($context);
-                $options[CURLOPT_SSLCERT] = $certificatePaths[0];
-                $options[CURLOPT_SSLCERTTYPE] = 'PEM';
-                $options[CURLOPT_SSLKEY] = $certificatePaths[1];
-                $options[CURLOPT_SSLKEYTYPE] = 'PEM';
+                try {
+                    $clientCertificate = IsdsClientCertificate::fromBase64(
+                        $credentials->certificate?->reveal() ?? '',
+                        $credentials->certificatePassphrase?->reveal() ?? '',
+                    );
+                } catch (\UnexpectedValueException) {
+                    throw new SubmissionChannelException('isds_certificate_unreadable', 'Systémový certifikát firmy se nepodařilo otevřít.', 500);
+                }
             } elseif ($credentials->authMode === 'password') {
                 if ($credentials->username === null || $credentials->password === null) {
                     throw new SubmissionChannelException('isds_credentials_missing', 'Chybí jednorázové přihlášení k datové schránce.', 400);
                 }
                 $options[CURLOPT_HTTPAUTH] = CURLAUTH_BASIC;
                 $options[CURLOPT_USERPWD] = $credentials->username->reveal() . ':' . $credentials->password->reveal();
-            } elseif ($credentials->authMode === 'mobile_key') {
+            } elseif (in_array($credentials->authMode, ['mobile_key', 'sms'], true)) {
                 if ($credentials->sessionCookie === null) {
                     throw new SubmissionChannelException('isds_mobile_cookie_missing', 'Přihlášení Mobilním klíčem není dokončené.', 409);
                 }
@@ -210,10 +253,10 @@ final class DirectIsdsInboxTransport implements IsdsTransport
             }
 
             curl_setopt_array($handle, $options);
+            $clientCertificate?->applyTo($handle);
             $ok = curl_exec($handle);
             $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
             $error = curl_error($handle);
-            curl_close($handle);
             if ($tooLarge) {
                 throw new SubmissionChannelException('isds_response_too_large', 'Datová schránka vrátila příliš velkou odpověď.', 502);
             }
@@ -228,11 +271,10 @@ final class DirectIsdsInboxTransport implements IsdsTransport
             }
             return $this->parse(['status' => $status, 'body' => $responseBody], $limit);
         } finally {
-            foreach ($certificatePaths as $path) {
-                if ($path !== '' && is_file($path)) {
-                    @unlink($path);
-                }
+            if ($handle instanceof \CurlHandle) {
+                unset($handle);
             }
+            $clientCertificate?->clear();
         }
     }
 
@@ -242,35 +284,9 @@ final class DirectIsdsInboxTransport implements IsdsTransport
         return match ($context->credentials->authMode) {
             'certificate' => 'https://ws1c.' . ($test ? 'datovka-test.gov.cz' : 'datovka.gov.cz') . '/cert',
             'password' => 'https://ws1.' . ($test ? 'datovka-test.gov.cz' : 'datovka.gov.cz'),
-            'mobile_key' => 'https://www.' . ($test ? 'datovka-test.gov.cz' : 'datovka.gov.cz') . '/apps',
+            'mobile_key', 'sms' => 'https://www.' . ($test ? 'datovka-test.gov.cz' : 'datovka.gov.cz') . '/apps',
             default => throw new SubmissionChannelException('isds_auth_mode_invalid', 'Nepodporovaný způsob přihlášení k datové schránce.', 400),
         };
-    }
-
-    /** @return array{0:string,1:string} */
-    private function materializeCertificate(ChannelContext $context): array
-    {
-        $secret = $context->credentials->certificate?->reveal() ?? '';
-        $raw = base64_decode($secret, true);
-        $bundle = [];
-        if ($raw === false || $raw === '' || !@openssl_pkcs12_read($raw, $bundle, $context->credentials->certificatePassphrase?->reveal() ?? '')) {
-            throw new SubmissionChannelException('isds_certificate_unreadable', 'Systémový certifikát firmy se nepodařilo otevřít.', 500);
-        }
-        $base = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'isdsin-' . bin2hex(random_bytes(12));
-        $certificatePath = $base . '.crt';
-        $keyPath = $base . '.key';
-        $chain = (string) ($bundle['cert'] ?? '');
-        foreach ((array) ($bundle['extracerts'] ?? []) as $extra) {
-            $chain .= (string) $extra;
-        }
-        if (file_put_contents($certificatePath, $chain) === false || file_put_contents($keyPath, (string) ($bundle['pkey'] ?? '')) === false) {
-            @unlink($certificatePath);
-            @unlink($keyPath);
-            throw new SubmissionChannelException('isds_certificate_unusable', 'Systémový certifikát firmy nelze připravit k použití.', 500);
-        }
-        @chmod($certificatePath, 0600);
-        @chmod($keyPath, 0600);
-        return [$certificatePath, $keyPath];
     }
 
     /** @param array{status:int,body:string} $response */

@@ -233,6 +233,48 @@ final class SubmissionInboxServiceTest extends TestCase
         self::assertSame(0, $state['consecutive_failures']);
     }
 
+    public function testPartialMessageDownloadFailureIsVisibleAndDoesNotRecordPollSuccess(): void
+    {
+        $this->enablePolling();
+        $this->transport->inboxMessages = [
+            [
+                'message_id' => 'DM-FAIL',
+                'sender_box_id' => 'qqqqqqq',
+                'sender_name' => 'Syntetický odesílatel',
+                'subject' => 'Rozbitá zpráva',
+                'sender_ident' => null,
+                'delivered_at' => '2026-08-15 08:00:00',
+                'accepted_at' => null,
+            ],
+            [
+                'message_id' => 'DM-OK',
+                'sender_box_id' => 'qqqqqqq',
+                'sender_name' => 'Syntetický odesílatel',
+                'subject' => 'Platná zpráva',
+                'sender_ident' => null,
+                'delivered_at' => '2026-08-15 08:01:00',
+                'accepted_at' => null,
+            ],
+        ];
+        $this->transport->downloadFailures['DM-FAIL'] = new SubmissionChannelException(
+            'isds_message_download_failed',
+            'Syntetické selhání stažení.',
+            502,
+        );
+        $this->transport->downloads['DM-OK'] = $this->syntheticZfo();
+
+        $result = $this->pollInteractively();
+
+        self::assertSame(2, $result['fetched']);
+        self::assertSame(1, $result['stored']);
+        self::assertSame(1, $result['failed']);
+        self::assertSame('isds_inbox_message_ingest_failed', $result['error']);
+        $state = $this->service->pollState($this->supplierId, 'isds', 'test');
+        self::assertNotNull($state);
+        self::assertNull($state['last_ok_at']);
+        self::assertSame(1, $state['consecutive_failures']);
+    }
+
     /** Neznámá zpráva skončí v „nezařazeno" a NIKDY se neváže na podání. */
     public function testUnrecognisedMessageLandsInUnclassifiedWithoutGuessing(): void
     {

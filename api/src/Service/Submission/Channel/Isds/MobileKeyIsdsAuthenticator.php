@@ -15,6 +15,7 @@ final class MobileKeyIsdsAuthenticator
 {
     private const TOKEN_CONTEXT = 'isds:mobile-key-flow:v1';
     private const FLOW_TTL = 240;
+    private const MAX_ATTEMPTS = 150;
     private const CONNECT_TIMEOUT = 10;
     private const TIMEOUT = 30;
     private const USER_AGENT = 'MyUcto-ISDS-MobileKey/1.0';
@@ -22,6 +23,7 @@ final class MobileKeyIsdsAuthenticator
     /** @param null|callable(string,string,array<string,mixed>):array{status:int,body:string,cookies:array<string,string>} $httpDouble */
     public function __construct(
         private readonly SecretEncryption $crypto,
+        private readonly IsdsAuthFlowStore $flows,
         private $httpDouble = null,
     ) {}
 
@@ -33,8 +35,41 @@ final class MobileKeyIsdsAuthenticator
         string $username,
         string $communicationCode,
     ): array {
+        return $this->startWithCredentials(
+            $supplierId,
+            $userId,
+            $environment,
+            new ChannelCredentials(
+                boxId: '',
+                authMode: 'mobile_key',
+                username: SensitiveValue::fromProducer(static fn (): string => $username),
+                password: SensitiveValue::fromProducer(static fn (): string => $communicationCode),
+            ),
+        );
+    }
+
+    /** @return array{flow_token:string,state:int,description:string,expires_at:string} */
+    public function startWithCredentials(
+        int $supplierId,
+        int $userId,
+        string $environment,
+        ChannelCredentials $credentials,
+    ): array {
         $this->assertEncryptionReady();
         $this->assertEnvironment($environment);
+        if ($credentials->authMode !== 'mobile_key' || $credentials->username === null || $credentials->password === null) {
+            throw new SubmissionChannelException('isds_mobile_credentials_missing', 'Chybí přihlášení pro Mobilní klíč.', 400);
+        }
+        try {
+            $username = $credentials->username->reveal();
+            $communicationCode = $credentials->password->reveal();
+        } catch (\RuntimeException) {
+            throw new SubmissionChannelException(
+                'isds_mobile_credential_decryption_failed',
+                'Uložené přihlášení Mobilním klíčem nelze rozšifrovat. Uložte ho znovu.',
+                500,
+            );
+        }
         $username = trim($username);
         if ($username === '' || strlen($username) > 128 || preg_match('/[\x00-\x20:\x7f]/', $username) === 1) {
             throw new SubmissionChannelException('isds_mobile_username_invalid', 'Vyplňte platné uživatelské jméno k datové schránce.', 400);
@@ -54,18 +89,24 @@ final class MobileKeyIsdsAuthenticator
 
         $expires = time() + self::FLOW_TTL;
         $payload = json_encode([
-            'supplier_id' => $supplierId,
-            'user_id' => $userId,
-            'environment' => $environment,
             'username' => $username,
             'communication_code' => $communicationCode,
             's_cookie' => $this->safeCookie($sCookie),
-            'expires_at' => $expires,
-            'nonce' => bin2hex(random_bytes(16)),
         ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        $flowToken = $this->newFlowToken();
+        $this->flows->create(
+            hash('sha256', $flowToken),
+            $supplierId,
+            $userId,
+            $environment,
+            'mobile_key',
+            $this->crypto->encryptFor($payload, $this->flowContext($supplierId, $userId, $environment)),
+            self::FLOW_TTL,
+            self::MAX_ATTEMPTS,
+        );
 
         return [
-            'flow_token' => $this->crypto->encryptFor($payload, self::TOKEN_CONTEXT),
+            'flow_token' => $flowToken,
             'state' => 1,
             'description' => 'Požadavek byl předán ISDS. Potvrďte přihlášení v aplikaci Mobilní klíč.',
             'expires_at' => date(DATE_ATOM, $expires),
@@ -75,40 +116,53 @@ final class MobileKeyIsdsAuthenticator
     /**
      * @return array{state:int,description:string,context:?ChannelContext}
      */
-    public function continue(string $flowToken, int $supplierId, int $userId): array
+    public function continue(string $flowToken, int $supplierId, int $userId, string $environment): array
     {
-        $state = $this->decodeFlow($flowToken, $supplierId, $userId);
-        $response = $this->request(
-            'status',
-            'GET',
-            $this->host($state['environment']) . '/as/mepWsStateUpdate2',
-            ['cookie' => 'S-COOKIE=' . $this->safeCookie($state['s_cookie'])],
-        );
+        $this->assertEnvironment($environment);
+        $flow = $this->claimFlow($flowToken, $supplierId, $userId, $environment);
+        $state = $flow['state'];
+        try {
+            $response = $this->request(
+                'status',
+                'GET',
+                $this->host($environment) . '/as/mepWsStateUpdate2',
+                ['cookie' => 'S-COOKIE=' . $this->safeCookie($state['s_cookie'])],
+            );
+        } catch (\Throwable $e) {
+            $this->flows->release($flow['id']);
+            throw $e;
+        }
         if ($response['status'] < 200 || $response['status'] >= 300) {
+            $this->flows->release($flow['id']);
             throw new SubmissionChannelException('isds_mobile_status_failed', 'Stav přihlášení Mobilním klíčem se nepodařilo ověřit.', 502);
         }
         try {
             $statusBody = json_decode($response['body'], true, 16, JSON_THROW_ON_ERROR);
         } catch (\JsonException) {
+            $this->flows->release($flow['id']);
             throw new SubmissionChannelException('isds_mobile_status_malformed', 'ISDS vrátil nečitelný stav Mobilního klíče.', 502);
         }
         $status = (int) ($statusBody['status'] ?? -1);
         $description = trim((string) ($statusBody['description'] ?? ''));
         if ($status === 2) {
-            $login = $this->loginRequest(
-                $state['environment'],
-                $state['username'],
-                $state['communication_code'],
-                $state['s_cookie'],
-            );
+            try {
+                $login = $this->loginRequest($environment, $state['username'], $state['communication_code'], $state['s_cookie']);
+            } catch (\Throwable $e) {
+                $this->flows->release($flow['id']);
+                throw $e;
+            }
             $sessionCookie = $login['cookies']['IPCZ-X-COOKIE'] ?? '';
             if ($login['status'] !== 302 || $sessionCookie === '') {
+                $this->flows->release($flow['id']);
                 throw new SubmissionChannelException('isds_mobile_session_failed', 'ISDS potvrdil Mobilní klíč, ale nevydal přístupovou relaci.', 502);
             }
             $cookie = $this->safeCookie($sessionCookie);
+            if (!$this->flows->consume($flow['id'])) {
+                throw new SubmissionChannelException('isds_mobile_flow_invalid', 'Přihlášení Mobilním klíčem už bylo použito. Spusťte ho znovu.', 409);
+            }
             $context = new ChannelContext(
                 $supplierId,
-                $state['environment'],
+                $environment,
                 new ChannelCredentials(
                     boxId: '',
                     authMode: 'mobile_key',
@@ -118,14 +172,18 @@ final class MobileKeyIsdsAuthenticator
             return ['state' => 2, 'description' => $description !== '' ? $description : 'Přihlášení potvrzeno.', 'context' => $context];
         }
         if ($status === 3) {
+            $this->flows->consume($flow['id']);
             throw new SubmissionChannelException('isds_mobile_rejected', 'Přihlášení bylo zamítnuto nebo vypršel čas pro potvrzení.', 409);
         }
         if ($status === 19) {
+            $this->flows->consume($flow['id']);
             throw new SubmissionChannelException('isds_mobile_push_failed', 'ISDS nedokázal odeslat upozornění do Mobilního klíče. Spusťte přihlášení znovu.', 502);
         }
         if (!in_array($status, [1, 11, 12, 13], true)) {
+            $this->flows->consume($flow['id']);
             throw new SubmissionChannelException('isds_mobile_flow_unknown', 'ISDS přihlašovací požadavek nezná.', 409);
         }
+        $this->flows->release($flow['id']);
         return [
             'state' => $status,
             'description' => $description !== '' ? $description : 'Čeká se na potvrzení v Mobilním klíči.',
@@ -153,34 +211,48 @@ final class MobileKeyIsdsAuthenticator
         }
     }
 
-    /** @return array{supplier_id:int,user_id:int,environment:string,username:string,communication_code:string,s_cookie:string,expires_at:int,nonce:string} */
-    private function decodeFlow(string $token, int $supplierId, int $userId): array
+    /** @return array{id:int,state:array{username:string,communication_code:string,s_cookie:string}} */
+    private function claimFlow(string $token, int $supplierId, int $userId, string $environment): array
     {
-        try {
-            $payload = $this->crypto->decryptFor($token, self::TOKEN_CONTEXT);
-            $state = json_decode($payload, true, 16, JSON_THROW_ON_ERROR);
-        } catch (\Throwable) {
+        if (preg_match('/^[A-Za-z0-9_-]{43}$/', $token) !== 1) {
             throw new SubmissionChannelException('isds_mobile_flow_invalid', 'Přihlášení Mobilním klíčem není platné. Spusťte ho znovu.', 409);
         }
-        if (!is_array($state)
-            || (int) ($state['supplier_id'] ?? 0) !== $supplierId
-            || (int) ($state['user_id'] ?? 0) !== $userId
-            || (int) ($state['expires_at'] ?? 0) < time()
-        ) {
-            throw new SubmissionChannelException('isds_mobile_flow_expired', 'Přihlášení Mobilním klíčem vypršelo. Spusťte ho znovu.', 409);
+        $flow = $this->flows->claim(hash('sha256', $token), $supplierId, $userId, $environment, 'mobile_key');
+        if ($flow === null) {
+            throw new SubmissionChannelException('isds_mobile_flow_expired', 'Přihlášení Mobilním klíčem vypršelo, bylo použito nebo překročilo počet pokusů. Spusťte ho znovu.', 409);
         }
-        $environment = (string) ($state['environment'] ?? '');
-        $this->assertEnvironment($environment);
+        try {
+            $payload = $this->crypto->decryptFor(
+                $flow['payload_ciphertext'],
+                $this->flowContext($supplierId, $userId, $environment),
+            );
+            $state = json_decode($payload, true, 16, JSON_THROW_ON_ERROR);
+        } catch (\Throwable) {
+            $this->flows->consume($flow['id']);
+            throw new SubmissionChannelException('isds_mobile_flow_invalid', 'Přihlášení Mobilním klíčem není platné. Spusťte ho znovu.', 409);
+        }
+        if (!is_array($state)) {
+            $this->flows->consume($flow['id']);
+            throw new SubmissionChannelException('isds_mobile_flow_invalid', 'Přihlášení Mobilním klíčem není platné. Spusťte ho znovu.', 409);
+        }
         return [
-            'supplier_id' => $supplierId,
-            'user_id' => $userId,
-            'environment' => $environment,
-            'username' => (string) ($state['username'] ?? ''),
-            'communication_code' => (string) ($state['communication_code'] ?? ''),
-            's_cookie' => (string) ($state['s_cookie'] ?? ''),
-            'expires_at' => (int) $state['expires_at'],
-            'nonce' => (string) ($state['nonce'] ?? ''),
+            'id' => $flow['id'],
+            'state' => [
+                'username' => (string) ($state['username'] ?? ''),
+                'communication_code' => (string) ($state['communication_code'] ?? ''),
+                's_cookie' => (string) ($state['s_cookie'] ?? ''),
+            ],
         ];
+    }
+
+    private function newFlowToken(): string
+    {
+        return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+    }
+
+    private function flowContext(int $supplierId, int $userId, string $environment): string
+    {
+        return self::TOKEN_CONTEXT . ":supplier:{$supplierId}:user:{$userId}:environment:{$environment}";
     }
 
     /** @return array{status:int,body:string,cookies:array<string,string>} */
