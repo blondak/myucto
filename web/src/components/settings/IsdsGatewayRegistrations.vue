@@ -16,8 +16,9 @@
  *    překlep v `atsId` nemůže poslat uživatele na cizí bránu. Zapnutí je
  *    samostatný, potvrzený krok.
  * 3. **Návratová adresa je frontendová.** Do Portálu datových schránek patří
- *    adresa téhle stránky (`/admin/databox`), ne endpoint API — vrací se na ni
- *    prohlížeč uživatele. Ukazujeme ji přesně, aby ji nikdo nemusel hádat.
+ *    autentizovaná callback stránka (`/isds-gateway/callback`), ne endpoint API.
+ *    Není svázaná s právem na správu této globální registrace, takže se z ní
+ *    bezpečně vrátí i mzdová role.
  */
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -51,10 +52,10 @@ const defaultHosts = ref<Record<Environment, IsdsGatewayHosts>>({
 })
 
 /**
- * Přesná hodnota do Portálu datových schránek. Je to adresa TÉHLE stránky —
- * návrat z ISDS obsluhuje frontend, ne API.
+ * Přesná hodnota do Portálu datových schránek. Návrat obsluhuje autentizovaná
+ * frontendová callback stránka; oprávnění a vlastnictví relace ověří API.
  */
-const returnUrl = computed(() => `${window.location.origin}/admin/databox`)
+const returnUrl = computed(() => `${window.location.origin}/isds-gateway/callback`)
 
 const form = ref({
   environment: 'test' as Environment,
@@ -250,18 +251,18 @@ onMounted(load)
 
 <template>
   <div class="space-y-4">
-    <div class="rounded-lg border border-neutral-200 bg-white p-4 text-sm dark:border-neutral-700 dark:bg-neutral-900">
+    <div class="rounded-lg border border-neutral-200 bg-surface p-4 text-sm">
       <h2 class="mb-1 font-medium">{{ t('databox.gateway.registrations.title') }}</h2>
-      <p class="text-neutral-500 dark:text-neutral-400">{{ t('databox.gateway.registrations.intro') }}</p>
-      <p class="mt-2 text-neutral-500 dark:text-neutral-400">{{ t('databox.gateway.registrations.operatorOnly') }}</p>
+      <p class="text-neutral-500">{{ t('databox.gateway.registrations.intro') }}</p>
+      <p class="mt-2 text-neutral-500">{{ t('databox.gateway.registrations.operatorOnly') }}</p>
     </div>
 
     <!-- Přesná hodnota do Portálu datových schránek. Nikdo ji nemá hádat. -->
-    <div class="rounded-lg border border-primary-200 bg-primary-50 p-4 text-sm dark:border-primary-800 dark:bg-primary-900/20">
+    <div class="rounded-lg border border-primary-500/40 bg-primary-50 p-4 text-sm">
       <h3 class="font-medium">{{ t('databox.gateway.registrations.returnUrlTitle') }}</h3>
-      <p class="mt-1 text-neutral-600 dark:text-neutral-300">{{ t('databox.gateway.registrations.returnUrlHint') }}</p>
+      <p class="mt-1 text-neutral-600">{{ t('databox.gateway.registrations.returnUrlHint') }}</p>
       <div class="mt-2 flex flex-wrap items-center gap-2">
-        <code class="rounded bg-white px-2 py-1 dark:bg-neutral-900">{{ returnUrl }}</code>
+        <code class="rounded bg-surface px-2 py-1">{{ returnUrl }}</code>
         <button type="button" :class="btnOutlineSm('neutral')" @click="copyReturnUrl">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.copy" />
@@ -280,25 +281,25 @@ onMounted(load)
     <div
       v-for="row in items"
       :key="row.id"
-      class="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-700 dark:bg-neutral-900"
+      class="rounded-lg border border-neutral-200 bg-surface p-4"
     >
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="font-medium">{{ row.label }}</div>
-          <div class="text-sm text-neutral-500 dark:text-neutral-400">
+          <div class="text-sm text-neutral-500">
             {{ t(`databox.env.${row.environment}`) }} ·
             {{ t('databox.gateway.registrations.atsId') }}: <code>{{ row.ats_id }}</code>
           </div>
-          <div class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+          <div class="mt-1 text-xs text-neutral-500">
             <code>{{ row.portal_host }}</code> · <code>{{ row.service_host }}</code> ·
             {{ t('databox.gateway.registrations.ttl') }}: {{ row.concept_ttl_seconds }} s
           </div>
-          <div class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+          <div class="mt-1 text-xs text-neutral-500">
             {{ t('databox.gateway.registrations.returnUrl') }}: <code>{{ row.return_url }}</code>
           </div>
           <!-- O certifikátu jen otisk a platnost. Nic víc o něm vědět nejde
                a nemá — klíč ani heslo API nevrací. -->
-          <div class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+          <div class="mt-1 text-xs text-neutral-500">
             {{ t('databox.gateway.registrations.fingerprint') }}:
             <code>{{ shortFingerprint(row.certificate_fingerprint) }}</code>
             <span v-if="row.certificate_valid_to">
@@ -312,13 +313,13 @@ onMounted(load)
             class="rounded-full px-2 py-0.5 text-xs font-medium"
             :class="row.is_active
               ? 'bg-success-50 text-success-700 dark:bg-success-900/30 dark:text-success-200'
-              : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'"
+              : 'bg-neutral-100 text-neutral-600'"
           >
             {{ row.is_active
               ? t('databox.gateway.registrations.active')
               : t('databox.gateway.registrations.inactive') }}
           </span>
-          <span class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+          <span class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600">
             {{ t(`databox.gateway.registrations.policies.${row.user_login_policy}`) }}
           </span>
         </div>
@@ -331,7 +332,7 @@ onMounted(load)
       -->
       <p
         v-if="row.user_login_policy === 'unknown'"
-        class="mt-3 rounded-md bg-neutral-50 p-2 text-sm text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
+        class="mt-3 rounded-md bg-neutral-50 p-2 text-sm text-neutral-600"
       >
         {{ t('databox.gateway.registrations.policyUnknownHint') }}
       </p>
@@ -399,9 +400,9 @@ onMounted(load)
 
     <!-- ─────────────── Formulář registrace ─────────────── -->
     <template v-if="formOpen">
-      <div class="rounded-lg border border-neutral-200 bg-white p-4 dark:border-neutral-700 dark:bg-neutral-900">
+      <div class="rounded-lg border border-neutral-200 bg-surface p-4">
         <h3 class="mb-1 font-medium">{{ t('databox.gateway.registrations.formTitle') }}</h3>
-        <p class="mb-4 text-sm text-neutral-500 dark:text-neutral-400">
+        <p class="mb-4 text-sm text-neutral-500">
           {{ t('databox.gateway.registrations.formHint') }}
         </p>
 
@@ -420,7 +421,7 @@ onMounted(load)
           <label class="block">
             <span class="text-sm font-medium">{{ t('databox.gateway.registrations.atsId') }}</span>
             <input v-model="form.ats_id" type="text" maxlength="64" class="form-input mt-1 w-full" data-test="gw-ats-id" />
-            <span class="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+            <span class="mt-1 block text-xs text-neutral-500">
               {{ t('databox.gateway.registrations.atsIdHint') }}
             </span>
           </label>
@@ -434,21 +435,21 @@ onMounted(load)
               class="form-input mt-1 w-full"
               data-test="gw-ttl"
             />
-            <span class="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+            <span class="mt-1 block text-xs text-neutral-500">
               {{ t('databox.gateway.registrations.ttlHint') }}
             </span>
           </label>
           <label class="block sm:col-span-2">
             <span class="text-sm font-medium">{{ t('databox.gateway.registrations.returnUrl') }}</span>
             <input v-model="form.return_url" type="url" class="form-input mt-1 w-full" />
-            <span class="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+            <span class="mt-1 block text-xs text-neutral-500">
               {{ t('databox.gateway.registrations.returnUrlField') }}
             </span>
           </label>
           <label class="block sm:col-span-2">
             <span class="text-sm font-medium">{{ t('databox.gateway.registrations.errorUrl') }}</span>
             <input v-model="form.error_url" type="url" class="form-input mt-1 w-full" />
-            <span class="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+            <span class="mt-1 block text-xs text-neutral-500">
               {{ t('databox.gateway.registrations.errorUrlHint') }}
             </span>
           </label>
@@ -467,7 +468,7 @@ onMounted(load)
                 {{ t(`databox.gateway.registrations.policies.${policy}`) }}
               </option>
             </select>
-            <span class="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+            <span class="mt-1 block text-xs text-neutral-500">
               {{ t('databox.gateway.registrations.policyHint') }}
             </span>
           </label>
@@ -481,7 +482,7 @@ onMounted(load)
               data-test="gw-certificate"
               @change="certificate = ($event.target as HTMLInputElement).files?.[0] ?? null"
             />
-            <span class="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+            <span class="mt-1 block text-xs text-neutral-500">
               {{ t('databox.gateway.registrations.certificateHint') }}
             </span>
           </label>
@@ -495,7 +496,7 @@ onMounted(load)
               class="form-input mt-1 w-full"
               data-test="gw-password"
             />
-            <span class="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+            <span class="mt-1 block text-xs text-neutral-500">
               {{ t('databox.gateway.registrations.certificatePasswordHint') }}
             </span>
           </label>
@@ -507,7 +508,7 @@ onMounted(load)
       </div>
 
       <!-- Jedno společné Uložit pro celou sekci -->
-      <div class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-white/95 py-3 dark:border-neutral-700 dark:bg-neutral-900/95">
+      <div class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-neutral-200 bg-surface/95 py-3">
         <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="closeForm">
           {{ t('common.cancel') }}
         </button>

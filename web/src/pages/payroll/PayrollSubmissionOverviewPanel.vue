@@ -18,6 +18,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollJmhzOrdinaryEvidencePanel from './PayrollJmhzOrdinaryEvidencePanel.vue'
 import PayrollJmhzXmlDryRunPanel from './PayrollJmhzXmlDryRunPanel.vue'
+import PayrollJmhzDispatchPanel from './PayrollJmhzDispatchPanel.vue'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate } from '@/composables/useFormat'
@@ -415,8 +416,15 @@ onMounted(load)
             <h2 class="text-lg font-semibold text-neutral-900">
               {{ t(`payroll.submissions.${mode}_title`) }}
             </h2>
-            <span class="rounded-full bg-warning-50 px-2.5 py-1 text-xs font-medium text-warning-700">
-              {{ t('payroll.submissions.overview.transport_unavailable') }}
+            <span
+              class="rounded-full px-2.5 py-1 text-xs font-medium"
+              :class="mode === 'jmhz'
+                ? 'bg-primary-50 text-primary-700'
+                : 'bg-warning-50 text-warning-700'"
+            >
+              {{ mode === 'jmhz'
+                ? t('payroll.submissions.overview.transport_available')
+                : t('payroll.submissions.overview.transport_unavailable') }}
             </span>
           </div>
           <p class="mt-2 text-sm text-neutral-600">
@@ -915,6 +923,14 @@ onMounted(load)
       <PayrollJmhzXmlDryRunPanel
         v-if="mode === 'jmhz'"
         :runs="jmhzApprovedRuns"
+      />
+
+      <PayrollJmhzDispatchPanel
+        v-if="mode === 'jmhz'"
+        :environment="environment"
+        :previews="jmhzPreviews"
+        :obligations="items"
+        @refresh="load"
       />
 
       <section

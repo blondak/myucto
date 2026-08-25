@@ -42,6 +42,9 @@ vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: unknown) => String(e) }))
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
 }))
+vi.mock('@/stores/supplier', () => ({
+  useSupplierStore: () => ({ currentSupplier: { company_name: 'Testovací firma' } }),
+}))
 
 import DataBox from '../DataBox.vue'
 

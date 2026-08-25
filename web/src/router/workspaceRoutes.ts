@@ -256,6 +256,8 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'admin/tax-constants',    name: 'admin-tax-constants', component: () => import('@/pages/admin/TaxConstants.vue'), meta: {  } },
       { path: 'admin/electronic-signatures', name: 'admin-electronic-signatures', component: () => import('@/pages/admin/ElectronicSignatures.vue'), meta: {  } },
       { path: 'admin/databox', name: 'admin-databox', component: () => import('@/pages/admin/DataBox.vue'), meta: {  } },
+      { path: 'admin/isds-gateway', name: 'admin-isds-gateway', component: () => import('@/pages/admin/IsdsGatewaySettings.vue'), meta: {  } },
+      { path: 'isds-gateway/callback', name: 'isds-gateway-callback', component: () => import('@/pages/IsdsGatewayCallback.vue'), meta: { requiresSupplier: true } },
       // Globální katalog šablon bankovních pravidel — systémová (ne per-firma) agenda,
       // proto vlastní routa pod Systém místo záložky v per-firma /templates.
       { path: 'admin/bank-rule-templates', name: 'admin-bank-rule-templates', component: () => import('@/pages/admin/BankRuleTemplates.vue'), meta: {  } },

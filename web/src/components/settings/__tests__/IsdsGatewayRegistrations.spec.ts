@@ -12,7 +12,7 @@ import type { IsdsGatewayRegistration } from '@/api/dataBox'
  *      krok a potvrzuje se dialogem, ne `confirm()`,
  *   3. `login_policy = unknown` je legitimní stav, ne porucha: obrazovka na něm
  *      nespadne a řekne nahlas, že to zatím není ověřené,
- *   4. návratová adresa je frontendová (`/admin/databox`), ne endpoint API.
+ *   4. návratová adresa je autentizovaný frontend callback, ne endpoint API.
  */
 
 const m = vi.hoisted(() => ({
@@ -53,7 +53,7 @@ function registration(overrides: Partial<IsdsGatewayRegistration> = {}): IsdsGat
     environment: 'test',
     ats_id: 'ATS-1',
     label: 'MyÚčto brána',
-    return_url: 'https://dev.example.test/admin/databox',
+    return_url: 'https://dev.example.test/isds-gateway/callback',
     error_url: null,
     concept_ttl_seconds: 900,
     portal_host: 'datovka-test.gov.cz',
@@ -97,7 +97,7 @@ describe('registrace odesílací brány — založení', () => {
   it('ukáže přesnou návratovou adresu na frontend, ne na API', async () => {
     const wrapper = await mountSection()
 
-    const expected = `${window.location.origin}/admin/databox`
+    const expected = `${window.location.origin}/isds-gateway/callback`
     expect(wrapper.text()).toContain(expected)
     expect(wrapper.text()).not.toContain('/api/submissions/gateway/callback')
   })
@@ -122,7 +122,7 @@ describe('registrace odesílací brány — založení', () => {
       environment: 'test',
       ats_id: 'ATS-42',
       label: 'Provozní brána',
-      return_url: `${window.location.origin}/admin/databox`,
+      return_url: `${window.location.origin}/isds-gateway/callback`,
       concept_ttl_seconds: 600,
       portal_host: 'datovka-test.gov.cz',
       service_host: 'cert.datovka-test.gov.cz',

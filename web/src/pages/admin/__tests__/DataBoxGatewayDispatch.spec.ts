@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import type { DataBoxCredential, IsdsGatewayRegistration, OutboxSubmission } from '@/api/dataBox'
+import type { DataBoxCredential, OutboxSubmission } from '@/api/dataBox'
 
 /**
- * Odesílací brána ISDS na obrazovce Systém → Datová schránka.
+ * Odesílací brána ISDS na obrazovce Firma → Datová schránka.
  *
  * Co tenhle test hlídá — samé věci, které je u podání drahé zkazit:
  *   1. tlačítko se nabízí JEN když je brána zaregistrovaná a zapnutá; když
@@ -21,9 +21,10 @@ const m = vi.hoisted(() => ({
   inbox: vi.fn(),
   unmatchedReceipts: vi.fn(),
   defectNotices: vi.fn(),
-  gatewayRegistrations: vi.fn(),
+  gatewayCapabilities: vi.fn(),
   gatewayStart: vi.fn(),
   gatewayComplete: vi.fn(),
+  gatewayCompletePayroll: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   toastInfo: vi.fn(),
@@ -37,9 +38,10 @@ vi.mock('@/api/dataBox', () => ({
     inbox: m.inbox,
     unmatchedReceipts: m.unmatchedReceipts,
     defectNotices: m.defectNotices,
-    gatewayRegistrations: m.gatewayRegistrations,
+    gatewayCapabilities: m.gatewayCapabilities,
     gatewayStart: m.gatewayStart,
     gatewayComplete: m.gatewayComplete,
+    gatewayCompletePayroll: m.gatewayCompletePayroll,
   },
 }))
 
@@ -47,6 +49,9 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: unknown) => String(e) }))
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError, info: m.toastInfo }),
+}))
+vi.mock('@/stores/supplier', () => ({
+  useSupplierStore: () => ({ currentSupplier: { company_name: 'Testovací firma' } }),
 }))
 
 import DataBox from '../DataBox.vue'
@@ -65,22 +70,6 @@ const credential: DataBoxCredential = {
   inbox_polling_enabled: false,
   inbox_polling_enabled_at: null,
   inbox_polling_enabled_by: null,
-}
-
-const registration: IsdsGatewayRegistration = {
-  id: 1,
-  environment: 'production',
-  ats_id: 'ATS-1',
-  label: 'MyÚčto',
-  return_url: 'https://dev.myucto.cz/admin/databox',
-  error_url: null,
-  concept_ttl_seconds: 900,
-  portal_host: 'datovka.gov.cz',
-  service_host: 'cert.datovka.gov.cz',
-  user_login_policy: 'unknown',
-  certificate_fingerprint: 'ab'.repeat(32),
-  certificate_valid_to: '2030-01-01 00:00:00',
-  is_active: true,
 }
 
 function submission(overrides: Partial<OutboxSubmission> = {}): OutboxSubmission {
@@ -127,7 +116,7 @@ beforeEach(() => {
   m.inbox.mockResolvedValue({ items: [], state: null })
   m.unmatchedReceipts.mockResolvedValue([])
   m.defectNotices.mockResolvedValue({ items: [], supported: true, notice: null })
-  m.gatewayRegistrations.mockResolvedValue([registration])
+  m.gatewayCapabilities.mockResolvedValue([{ environment: 'production', available: true }])
 
   assign = vi.fn()
   replaceState = vi.fn()
@@ -167,7 +156,7 @@ describe('odesílací brána na obrazovce datové schránky', () => {
   })
 
   it('nenabídne ji, když je registrace vypnutá', async () => {
-    m.gatewayRegistrations.mockResolvedValue([{ ...registration, is_active: false }])
+    m.gatewayCapabilities.mockResolvedValue([{ environment: 'production', available: false }])
 
     const wrapper = await mountPage()
 
@@ -181,7 +170,7 @@ describe('odesílací brána na obrazovce datové schránky', () => {
    * Nabízet tlačítko, které skončí překážkou, by uživatele poslalo do zdi.
    */
   it('nenabídne ji, když o registracích nic nevíme', async () => {
-    m.gatewayRegistrations.mockRejectedValue(new Error('403'))
+    m.gatewayCapabilities.mockRejectedValue(new Error('403'))
 
     const wrapper = await mountPage()
 
@@ -190,15 +179,15 @@ describe('odesílací brána na obrazovce datové schránky', () => {
   })
 
   it('registrace z jiného prostředí se nepočítá', async () => {
-    m.gatewayRegistrations.mockResolvedValue([{ ...registration, environment: 'test' as const }])
+    m.gatewayCapabilities.mockResolvedValue([{ environment: 'test', available: true }])
 
     const wrapper = await mountPage()
 
     expect(wrapper.text()).not.toContain('databox.gateway.prepare')
   })
 
-  /** Tlačítko NEODESÍLÁ. Jen pošle prohlížeč do perimetru ISDS. */
-  it('zahájení jen přesměruje do datové schránky', async () => {
+  /** Instrukce a hranice přihlašovacích údajů musí být vidět před odchodem. */
+  it('ukáže přihlašovací instrukci a přesměruje až po potvrzení', async () => {
     m.gatewayStart.mockResolvedValue({
       session_id: 1,
       app_token: '123456789012345678',
@@ -215,6 +204,17 @@ describe('odesílací brána na obrazovce datové schránky', () => {
     await flushPromises()
 
     expect(m.gatewayStart).toHaveBeenCalledWith(10)
+    expect(assign).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="gateway-preflight"]').text()).toContain(
+      'Přihlásíte se přímo v ISDS.',
+    )
+    expect(wrapper.text()).toContain('databox.gateway.credentialsStayInIsds')
+    expect(wrapper.text()).toContain('databox.gateway.methodsByIsds')
+
+    const continueButton = wrapper.findAll('button').find(b =>
+      b.text().includes('databox.gateway.continueToIsds'),
+    )
+    await continueButton!.trigger('click')
     expect(assign).toHaveBeenCalledWith(expect.stringContaining('/as/login'))
   })
 })
@@ -287,5 +287,25 @@ describe('návrat z datové schránky', () => {
 
     expect(wrapper.text()).toContain('databox.gateway.state.rejected')
     expect(m.toastError).not.toHaveBeenCalled()
+  })
+
+  it('mzdovou relaci dokončí přes payroll oprávnění, když obecná cesta vrátí 403', async () => {
+    const forbidden = Object.assign(new Error('Forbidden'), {
+      isAxiosError: true,
+      response: { status: 403 },
+    })
+    m.gatewayComplete.mockRejectedValue(forbidden)
+    m.gatewayCompletePayroll.mockResolvedValue({
+      state: 'approved',
+      outbox_id: 10,
+      redirect_url: null,
+      external_message_id: 'DM-JMHZ-1',
+      message: 'Mzdové podání odešlo.',
+    })
+
+    const wrapper = await mountPage()
+
+    expect(m.gatewayCompletePayroll).toHaveBeenCalledWith('123456789012345678', 'S-1')
+    expect(wrapper.text()).toContain('DM-JMHZ-1')
   })
 })

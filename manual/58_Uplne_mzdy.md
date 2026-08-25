@@ -18,8 +18,9 @@ nemění dosavadní Mzdovou rekapitulaci.
 > **Do ostrého spuštění ale výsledek, odvody, dokumenty i podání vždy ověř proti
 > jinému důvěryhodnému zdroji** a nepoužívej modul jako jediný podklad pro
 > výplatu nebo zákonné podání. Neúplný či nepodporovaný scénář systém zastaví
-> v ruční kontrole a **zákonná podání se zatím jen připravují a stahují, aplikace
-> je neodesílá** ([§ 58.16](#5816-podani-a-hlaseni)). Pro zaúčtování zůstává
+> v ruční kontrole. **Běžné měsíční JMHZ lze po kontrolním nácviku odeslat přes
+> ISDS nebo VREP; ostatní nepodporované agendy se dál pouze připravují a stahují**
+> ([§ 58.16](#5816-podani-a-hlaseni)). Pro zaúčtování zůstává
 > k dispozici [Mzdová rekapitulace](57_Mzdy.md).
 
 ## 58.1 Zapnutí pro firmu
@@ -1196,9 +1197,9 @@ a opravné scénáře nejsou bez odpovídajícího oficiálního XSD dostupné.
 Záložky **JMHZ** a **Zdravotní pojišťovny** zobrazují za vybraný měsíc skutečný
 přehled evidovaných povinností, termínů, kanálů a posledních stavů podání.
 Produkční a testovací prostředí zůstávají oddělená. Přehled je pouze
-kontrolní — bez implementovaného důvěryhodného transportu a parseru protokolu
-nenabízí falešné tlačítko odeslání ani nepovyšuje lokální stav na přijaté
-podání.
+kontrolní; samotný řádek povinnosti ani stažení náhledu nikdy neznamená, že bylo
+podání odesláno nebo přijato. Běžné měsíční JMHZ má navíc řízené odeslání přes
+ISDS nebo VREP a stav **Přijato** získá teprve z ověřeného protokolu ČSSZ.
 
 Záložka **JMHZ** ukazuje všechny povinnosti vůči ČSSZ, tedy vedle měsíčního
 hlášení i registrace zaměstnance a zaměstnavatele, evidenční list důchodového
@@ -1257,6 +1258,30 @@ připravené k odeslání. Prostřední stav je varovný, ne zelený. Část kon
 rozhoduje až ČSSZ proti svému registru — ty se nikdy nevykazují jako splněné,
 jen se počítají zvlášť. Panel zároveň ukazuje lhůtu pro podání za vykazované
 období, včetně posunu na nejbližší pracovní den.
+
+Panel **Zmrazení a odeslání JMHZ** navazuje až na schválenou revizi, úplné
+právní evidence a úspěšné kontroly. Pro každou registraci u OSSZ pracuje se
+samostatnou povinností a variabilním symbolem. Před odesláním neměnně uloží
+přesné XML a jeho otisk; další kliknutí proto nevytvoří jiné podání pod stejnou
+identitou. Ostré podání je zablokované do začátku zákonné lhůty, testovací
+prostředí lze použít k nácviku.
+
+- **Odeslat přes ISDS** připraví datovou zprávu pro doloženou schránku ČSSZ.
+  Je-li aktivní odesílací brána, MyÚčto před přesměrováním vysvětlí přihlášení
+  a pošle uživatele přímo do ISDS. Přihlašovací údaje aplikace nevidí ani
+  neukládá a zpráva odejde až po schválení konceptu uživatelem v ISDS.
+  Konkrétní nabídku metod určuje ISDS a nastavení účtu; může zahrnovat jméno
+  a heslo, heslo aplikace s bezpečnostním klíčem eGovernmentu nebo Mobilní klíč
+  eGovernmentu. Není-li brána aktivní, připravená zpráva zůstane v odchozí
+  frontě pro ruční odeslání a doplnění ID zprávy a doručenky.
+- **Odeslat přes VREP** předá stejné zmrazené podání bráně ČSSZ. Výsledek,
+  protokol a případné chyby se sledují na záložce **Stav odeslání**. Převzetí
+  transportem ještě není přijetí podání.
+
+Odpovědi ani doručenky z datové schránky se nikdy nestahují automaticky.
+Načtení příchozích zpráv vyvolá uživatel samostatným tlačítkem v
+**Firma → Datová schránka** a před síťovým voláním potvrdí upozornění, že
+vyzvednutí může založit doručení a spustit zákonné lhůty.
 
 Pro běžný profil JMHZ se u každé schválené revize samostatně potvrzuje pět
 právních skutečností: evidované srážky ze mzdy, slevu zaměstnance pro sezónní

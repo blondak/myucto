@@ -49,6 +49,9 @@ vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: unknown) => String(e) }))
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
 }))
+vi.mock('@/stores/supplier', () => ({
+  useSupplierStore: () => ({ currentSupplier: { company_name: 'Testovací firma' } }),
+}))
 
 import DataBox from '../DataBox.vue'
 
@@ -63,9 +66,9 @@ const credential: DataBoxCredential = {
   certificate_fingerprint: null,
   certificate_valid_to: null,
   last_verified_at: null,
-  inbox_polling_enabled: true,
-  inbox_polling_enabled_at: '2026-03-01 08:00:00',
-  inbox_polling_enabled_by: 1,
+  inbox_polling_enabled: false,
+  inbox_polling_enabled_at: null,
+  inbox_polling_enabled_by: null,
 }
 
 function message(overrides: Partial<InboxMessage> = {}): InboxMessage {

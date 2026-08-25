@@ -48,6 +48,21 @@ final readonly class IsdsGatewayRegistrationService implements IsdsGatewayRegist
         'test' => ['portal' => 'datovka-test.gov.cz', 'service' => 'cert.datovka-test.gov.cz'],
     ];
 
+    /**
+     * Povolené dvojice z oficiálních specifikací. Hostitelé nejsou obecná
+     * konfigurace: na service host posíláme klientský certifikát a jednorázové
+     * přihlašovací údaje, proto libovolný hostname znamená credential relay.
+     */
+    private const ALLOWED_HOST_PAIRS = [
+        'production' => [
+            ['portal' => 'datovka.gov.cz', 'service' => 'cert.datovka.gov.cz'],
+            ['portal' => 'mojedatovaschranka.cz', 'service' => 'cert.mojedatovaschranka.cz'],
+        ],
+        'test' => [
+            ['portal' => 'datovka-test.gov.cz', 'service' => 'cert.datovka-test.gov.cz'],
+        ],
+    ];
+
     public function __construct(
         private IsdsGatewayRegistrationRepository $repository,
         private SecretEncryption $crypto,
@@ -130,6 +145,7 @@ final readonly class IsdsGatewayRegistrationService implements IsdsGatewayRegist
 
         $portalHost = $this->normalizeHost($portalHost ?? self::DEFAULT_HOSTS[$environment]['portal']);
         $serviceHost = $this->normalizeHost($serviceHost ?? self::DEFAULT_HOSTS[$environment]['service']);
+        $this->assertOfficialHosts($environment, $portalHost, $serviceHost);
 
         if ($certificateBytes === '') {
             throw new SubmissionChannelException(
@@ -236,6 +252,17 @@ final readonly class IsdsGatewayRegistrationService implements IsdsGatewayRegist
                 503,
             );
         }
+        $portalHost = (string) $row['portal_host'];
+        $serviceHost = (string) $row['service_host'];
+        $this->assertOfficialHosts($environment, $portalHost, $serviceHost);
+        $validTo = $row['certificate_valid_to'];
+        if (is_string($validTo) && $validTo !== '' && strtotime($validTo) < time()) {
+            throw new SubmissionChannelException(
+                'gateway_certificate_expired',
+                'Certifikátu odesílací brány vypršela platnost ' . $validTo . '. Nahrajte nový.',
+                503,
+            );
+        }
 
         try {
             $certificate = $this->reveal($row['certificate_ciphertext'] ?? null, self::CONTEXT_CERTIFICATE);
@@ -266,8 +293,8 @@ final readonly class IsdsGatewayRegistrationService implements IsdsGatewayRegist
             returnUrl: (string) $row['return_url'],
             errorUrl: $row['error_url'] !== null ? (string) $row['error_url'] : null,
             conceptTtlSeconds: (int) $row['concept_ttl_seconds'],
-            portalHost: (string) $row['portal_host'],
-            serviceHost: (string) $row['service_host'],
+            portalHost: $portalHost,
+            serviceHost: $serviceHost,
             loginPolicy: IsdsGatewayLoginPolicy::fromDatabase(
                 isset($row['user_login_policy']) ? (string) $row['user_login_policy'] : null,
             ),
@@ -287,7 +314,9 @@ final readonly class IsdsGatewayRegistrationService implements IsdsGatewayRegist
     {
         $row = $this->repository->findPublic($environment);
 
-        return $row !== null && $row['is_active'] === true;
+        return $row !== null
+            && $row['is_active'] === true
+            && $this->publicRowIsUsable($environment, $row);
     }
 
     /**
@@ -313,7 +342,25 @@ final readonly class IsdsGatewayRegistrationService implements IsdsGatewayRegist
         return $row !== null
             && $row['is_active'] === true
             && is_string($row['certificate_fingerprint'] ?? null)
-            && $row['certificate_fingerprint'] !== '';
+            && $row['certificate_fingerprint'] !== ''
+            && $this->publicRowIsUsable($environment, $row);
+    }
+
+    /** Čistá kontrola pro capability UI a bezpečnostní regresní testy. */
+    public static function isOfficialHostPair(
+        string $environment,
+        string $portalHost,
+        string $serviceHost,
+    ): bool {
+        foreach (self::ALLOWED_HOST_PAIRS[$environment] ?? [] as $pair) {
+            if (hash_equals($pair['portal'], $portalHost)
+                && hash_equals($pair['service'], $serviceHost)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // ───────────────────────── interní ─────────────────────────
@@ -383,6 +430,37 @@ final readonly class IsdsGatewayRegistrationService implements IsdsGatewayRegist
         }
 
         return $host;
+    }
+
+    private function assertOfficialHosts(
+        string $environment,
+        string $portalHost,
+        string $serviceHost,
+    ): void {
+        if (self::isOfficialHostPair($environment, $portalHost, $serviceHost)) return;
+
+        throw new SubmissionChannelException(
+            'untrusted_isds_host',
+            'Odesílací brána smí komunikovat jen s oficiální dvojicí hostitelů ISDS pro zvolené prostředí.',
+            400,
+        );
+    }
+
+    /** @param array<string,mixed> $row */
+    private function publicRowIsUsable(string $environment, array $row): bool
+    {
+        try {
+            $this->assertOfficialHosts(
+                $environment,
+                (string) ($row['portal_host'] ?? ''),
+                (string) ($row['service_host'] ?? ''),
+            );
+        } catch (SubmissionChannelException) {
+            return false;
+        }
+        $validTo = $row['certificate_valid_to'] ?? null;
+
+        return !is_string($validTo) || $validTo === '' || strtotime($validTo) >= time();
     }
 
     private function assertEncryptionReady(): void

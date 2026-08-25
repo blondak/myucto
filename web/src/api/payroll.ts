@@ -1937,6 +1937,52 @@ export interface PayrollJmhzPreparation {
   created: boolean
 }
 
+export interface PayrollJmhzFrozenSubmission {
+  submission_id: number
+  part_id: number
+  artifact_id: number
+  status: string
+  row_version: number
+  environment: PayrollJmhzTransportEnvironment
+  source_snapshot_hash: string
+  artifact_sha256: string
+  created: boolean
+  submission_guid: string
+  variable_symbol: string
+}
+
+export interface PayrollJmhzIsdsRecipient {
+  environment: PayrollJmhzTransportEnvironment
+  box_id: string
+  name: string
+  note: string
+}
+
+export interface PayrollJmhzIsdsEnqueueResult {
+  outbox_id: number
+  created: boolean
+  environment: PayrollJmhzTransportEnvironment
+  recipient: PayrollJmhzIsdsRecipient
+  subject: string
+  sender_ident: string
+  attachment: {
+    filename: string
+    mime: string
+    sha256: string
+    bytes: number
+  }
+  transport: {
+    automatic: boolean
+    channel: 'gateway' | 'manual_upload'
+    reason: string | null
+  }
+  response_hint: {
+    subject_prefix: string
+    attachment_prefix: string
+    note: string
+  }
+}
+
 export interface PayrollJmhzXmlDryRunBlocker {
   code: string
   entity_type: string
@@ -3773,6 +3819,19 @@ export const payrollApi = {
         : { environment, office: officeId },
     },
   ).then(response => response.data),
+  freezeJmhzSubmission: (
+    preparationId: number,
+    obligationId: number,
+    environment: PayrollJmhzTransportEnvironment,
+    officeId?: number | null,
+  ) => api.post<PayrollJmhzFrozenSubmission>(
+    `/payroll/submissions/jmhz-freeze/${preparationId}`,
+    {
+      environment,
+      obligation_id: obligationId,
+      ...(officeId == null ? {} : { office: officeId }),
+    },
+  ).then(response => response.data),
   previewEmploymentRegistration: (
     employmentId: number,
     environment: 'test' | 'production' = 'test',
@@ -4447,6 +4506,23 @@ export const payrollApi = {
     api.get<PayrollJmhzTransportHistory>('/payroll/submissions/jmhz-transport', {
       params: { environment, ...pageParams(page) },
     }).then(response => response.data),
+  sendJmhzTransport: (
+    submissionId: number,
+    variableSymbol: string,
+    environment: PayrollJmhzTransportEnvironment,
+    idempotencyKey: string,
+  ) => api.post<PayrollJmhzTransportPoll>(
+    `/payroll/submissions/${submissionId}/jmhz-transport`,
+    { environment, variable_symbol: variableSymbol },
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ).then(response => response.data),
+  enqueueJmhzIsds: (
+    submissionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.post<PayrollJmhzIsdsEnqueueResult>(
+    `/payroll/submissions/${submissionId}/jmhz-isds`,
+    { environment },
+  ).then(response => response.data),
   /**
    * Dotaz na výsledek. Variabilní symbol zaměstnavatele je povinný — brána VREP
    * si jím ověřuje, že se ptá ten, kdo podával.

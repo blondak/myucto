@@ -927,3 +927,42 @@ stavu čekání. Aktivní doménu nejdřív deaktivuj. Deaktivace se projeví ok
 pokud nezůstane jiný aktivní alias daného účelu, nové odkazy použijí výchozí
 `app.url`. Provozní nastavení proxy, certifikátů a Turnstile popisuje
 [§ 3.8 HTTPS / TLS terminace](03_Instalace_Docker.md#38-https-tls-terminace).
+
+## 73.17 Datová schránka
+
+**Cesta: `Firma → Datová schránka`.** Stránka vždy pracuje s právě zvolenou
+firmou a sdružuje její systémový certifikát,
+odchozí frontu podání, ručně načítanou příchozí schránku, doručenky a výzvy
+k odstranění vad. Stav dopravy (**připraveno, odesláno, doručeno**) se vždy
+zobrazuje odděleně od výsledku zpracování (**přijato, odmítnuto, neznámé**).
+Doručenka datové zprávy sama neprokazuje přijetí podání úřadem.
+
+Na kartě **Přístup** jsou oddělené dvě cesty. Doporučené interaktivní odeslání
+přes odesílací bránu připraví zprávu jako koncept přímo v ISDS. Před odchodem MyÚčto
+zobrazí instrukci k přihlášení; přihlašovací údaje se zadávají pouze na stránce
+ISDS, MyÚčto je nevidí ani neukládá. Metodu vybírá ISDS podle konkrétního účtu —
+zahrnuje jméno a heslo, Mobilní klíč eGovernmentu (PIN nebo heslo aplikace a
+potvrzení v klíči), Identitu občana, SMS, uživatelský certifikát nebo bezpečnostní
+kód podle nastavení účtu. Zpráva se neodešle pouhým přesměrováním:
+uživatel musí připravený koncept v ISDS vědomě schválit.
+
+Druhou cestou je **systémový certifikát firmy** pro přímé serverové operace,
+zejména pro ruční načtení příchozích zpráv. Je uložený šifrovaně a patří pouze
+aktuální firmě; po přepnutí firmy se používá její vlastní nastavení. Přihlašovací
+jméno a heslo se do MyÚčta neukládá. Provozní řád ISDS pro aplikace třetích stran
+doporučuje právě systémový certifikát.
+
+Globální registraci odesílací brány v **Systém → Odesílací brána ISDS** a její
+komerční certifikát spravuje pouze
+provozní superadmin. Mzdová účetní ani správce firmy tyto tajné údaje nevidí;
+pro odeslání dostanou jen bezpečnou informaci, zda je brána pro zvolené
+prostředí dostupná. Jako návratovou adresu registrace použij hodnotu zobrazenou
+v aplikaci; směřuje na autentizovanou stránku `/isds-gateway/callback`, aby se
+z ISDS mohla bezpečně vrátit i mzdová role bez práva spravovat globální
+certifikát brány.
+
+Příchozí schránka se **nevybírá automaticky ani plánovanou úlohou**. Nové zprávy
+se načtou jen po kliknutí uživatele na **Načíst nové zprávy** a potvrzení
+upozornění. Je to záměrná pojistka: vyzvednutí zprávy může být právně rozhodným
+doručením a spustit navazující lhůty. Automatické stahování nelze v nastavení
+zapnout.

@@ -247,18 +247,7 @@ final class SubmissionOutboxInvariantsTest extends TestCase
         self::assertSame('9tsaf6s', $byCode['cssz_epodani_test'] ?? null);
     }
 
-    /** Souhlas s vybíráním schránky musí nést, kdo a kdy ho dal (§ 17 odst. 3). */
-    public function testInboxPollingCannotBeEnabledWithoutRecordingConsent(): void
-    {
-        $this->insertCredential();
-
-        $this->expectException(PDOException::class);
-        $this->db->pdo()->prepare(
-            'UPDATE submission_channel_credentials SET inbox_polling_enabled = 1 WHERE supplier_id = ?'
-        )->execute([$this->supplierId]);
-    }
-
-    /** Vybírání schránky je ve výchozím stavu vypnuté. */
+    /** Historický příznak zůstává vypnutý; produkt automatický režim nenabízí. */
     public function testInboxPollingIsDisabledByDefault(): void
     {
         $this->insertCredential();

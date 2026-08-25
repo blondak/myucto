@@ -149,6 +149,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
 const superadminRouteNames = new Set([
   'activity-log', 'sent-emails', 'cron-jobs', 'admin-users', 'admin-roles', 'admin-suppliers',
   'admin-codebooks', 'admin-tax-constants', 'admin-bank-rule-templates', 'admin-email-templates', 'admin-emails', 'admin-approvals', 'admin-update',
+  'admin-isds-gateway',
   'admin-price-list', 'admin-price-list-new', 'admin-price-list-edit',
   'activation-license', 'activation-terms', 'activation-purchase',
   'admin-diagnostics', 'admin-support',
@@ -166,7 +167,7 @@ const superadminRouteNames = new Set([
 // home → setup-mfa → home (#5). Deny-by-default to neoslabuje — routa je pořád za
 // `requiresAuth` a `mfaSetupOnly` je sama gate: koho MFA nečeká, toho guard níž
 // pošle z té stránky pryč.
-const selfServiceRouteNames = new Set(['profile-password', 'setup-totp'])
+const selfServiceRouteNames = new Set(['profile-password', 'setup-totp', 'isds-gateway-callback'])
 const demoCreateRouteNames = new Set(['invoice-new', 'purchase-invoice-new', 'client-new', 'accounting-journal-new'])
 const demoReadOnlyRouteNames = new Set(['admin-settings', 'admin-branding', 'admin-codebooks', 'admin-tax-constants'])
 const commercialOnlyRouteNames = new Set([

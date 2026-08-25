@@ -20,6 +20,7 @@ const m = vi.hoisted(() => ({
   recipients: vi.fn(),
   outbox: vi.fn(),
   inbox: vi.fn(),
+  pollInbox: vi.fn(),
   unmatchedReceipts: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock('@/api/dataBox', () => ({
     recipients: m.recipients,
     outbox: m.outbox,
     inbox: m.inbox,
+    pollInbox: m.pollInbox,
     unmatchedReceipts: m.unmatchedReceipts,
   },
 }))
@@ -39,6 +41,9 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: unknown) => String(e) }))
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
+}))
+vi.mock('@/stores/supplier', () => ({
+  useSupplierStore: () => ({ currentSupplier: { company_name: 'Testovací firma' } }),
 }))
 
 import DataBox from '../DataBox.vue'
@@ -104,6 +109,7 @@ async function mountWith(rows: OutboxSubmission[]) {
   m.recipients.mockResolvedValue([])
   m.outbox.mockResolvedValue(rows)
   m.inbox.mockResolvedValue({ items: [], state: null })
+  m.pollInbox.mockResolvedValue({ fetched: 0, stored: 0, skipped: 0, failed: 0, unclassified: 0 })
   m.unmatchedReceipts.mockResolvedValue([])
 
   const wrapper = mount(DataBox, {
@@ -168,12 +174,21 @@ describe('DataBox — doručeno vs. zpracováno', () => {
     expect(text).not.toContain('databox.outbox.confirmSend')
   })
 
-  it('vybírání schránky je ve výchozím stavu vypnuté a ruční vyzvednutí je zablokované', async () => {
+  it('schránku vyzvedne jen po výslovné akci a potvrzení uživatele', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
     const wrapper = await mountWith([])
     await wrapper.findAll('nav button')[2].trigger('click')
 
-    expect(wrapper.text()).toContain('databox.inbox.pollingOff')
+    expect(wrapper.text()).toContain('databox.inbox.manualOnly')
     const pollButton = wrapper.findAll('button').find(b => b.text().includes('databox.inbox.poll'))
-    expect(pollButton?.attributes('disabled')).toBeDefined()
+    expect(pollButton?.attributes('disabled')).toBeUndefined()
+
+    await pollButton?.trigger('click')
+    expect(m.pollInbox).not.toHaveBeenCalled()
+
+    await pollButton?.trigger('click')
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(m.pollInbox).toHaveBeenCalledWith('production')
   })
 })

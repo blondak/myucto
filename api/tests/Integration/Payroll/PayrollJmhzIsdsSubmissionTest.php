@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Action\Submission\IsdsGatewayAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
+use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsSubmissionService;
@@ -19,6 +24,8 @@ use MyInvoice\Service\Submission\SubmissionOutboxService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Factory\ResponseFactory;
+use Slim\Psr7\Factory\ServerRequestFactory;
 use Symfony\Component\Clock\MockClock;
 
 /**
@@ -41,6 +48,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
     private PayrollObligationService $obligations;
     private PayrollSubmissionService $submissions;
     private JmhzIsdsSubmissionService $isds;
+    private IsdsGatewayAction $gatewayAction;
     private int $supplierId;
 
     protected function setUp(): void
@@ -77,6 +85,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
             new SubmissionRecipientRepository($connection),
             $outbox,
         );
+        $this->gatewayAction = $container->get(IsdsGatewayAction::class);
     }
 
     protected function tearDown(): void
@@ -174,6 +183,46 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
 
         $this->expectException(SubmissionChannelException::class);
         $this->isds->enqueue($this->supplierId, 'test', $submissionId, null);
+    }
+
+    public function testPayrollGatewayPermissionCannotSendANonJmhzOutbox(): void
+    {
+        $queued = (new SubmissionOutboxRepository($this->db))->enqueue([
+            'supplier_id' => $this->supplierId,
+            'environment' => 'test',
+            'channel' => 'isds',
+            'agenda_code' => 'DPH',
+            'recipient_id' => null,
+            'recipient_box_id' => '9tsaf6s',
+            'subject' => 'Syntetické nemzdové podání',
+            'artifact_kind' => 'tax_submission',
+            'artifact_id' => 1,
+            'artifact_filename' => 'synthetic.xml',
+            'artifact_sha256' => str_repeat('e', 64),
+            'correlation_reference' => 'TEST-DPH-GATEWAY-01',
+            'created_by' => null,
+        ], 'test-dph-gateway-guard');
+        $outboxId = (int) $queued['row']['id'];
+
+        $role = new EffectiveRole(2, 'Mzdová účetní', 'staff', true, [
+            'payroll.submissions' => 2,
+        ]);
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('POST', '/api/payroll/submissions/isds-gateway/outbox/' . $outboxId)
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 777, 'role' => 'accountant'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
+            ->withAttribute('auth.effective_role', $role);
+
+        $response = $this->gatewayAction->payrollStart(
+            $request,
+            (new ResponseFactory())->createResponse(),
+            ['id' => (string) $outboxId],
+        );
+        $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('payroll_gateway_outbox_forbidden', $body['error']['code'] ?? null);
     }
 
     // ───────────────────────── příprava ─────────────────────────
