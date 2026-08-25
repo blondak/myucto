@@ -4227,6 +4227,14 @@
                 }
             }
         },
+        "person_search": {
+            "placeholder": "Search employees…",
+            "no_results": "No employee matches the search.",
+            "loading": "Searching employees…",
+            "truncated": "Only some matches are shown — narrow your search.",
+            "load_failed": "Employees could not be loaded. Try the search again.",
+            "clear": "Clear employee selection"
+        },
         "employee_cards": {
             "title": "Employees",
             "subtitle": "Who is on the payroll for period {period} and how much they are due.",
@@ -4388,6 +4396,7 @@
             "add_claim": "Add claim",
             "employee": "Employee",
             "select_employee": "Select an employee",
+            "all_employees": "All employees",
             "case_kind": "Legal basis",
             "effective_from": "Effective from",
             "status_label": "Status",
@@ -4536,7 +4545,7 @@
                 "amount": "Enter a non-negative amount with no more than two decimal places."
             },
             "load_failed_hint": "Enforcements and insolvencies did not load. An empty list right now does not mean there are none — please try again.",
-            "support_failed": "Employees and recipient accounts could not be loaded, so the selection below stayed empty. This is not a configuration problem — try loading again.",
+            "support_failed": "Recipient accounts could not be loaded, so their selection stayed empty. This is not a configuration problem — try loading again.",
             "transition_blocked_document": "Pick the document the transition rests on. Without it the case would lack any trace of where the change came from.",
             "transition_blocked_reason": "Write a reason. For this step it is stored in the case history, so it cannot be skipped."
         },

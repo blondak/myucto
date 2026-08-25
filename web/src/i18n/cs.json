@@ -4227,6 +4227,14 @@
                 }
             }
         },
+        "person_search": {
+            "placeholder": "Hledat zaměstnance…",
+            "no_results": "Žádný zaměstnanec neodpovídá hledání.",
+            "loading": "Hledám zaměstnance…",
+            "truncated": "Zobrazena je jen část shod — upřesněte hledání.",
+            "load_failed": "Zaměstnance se nepodařilo načíst. Zkuste hledání znovu.",
+            "clear": "Zrušit výběr zaměstnance"
+        },
         "employee_cards": {
             "title": "Zaměstnanci",
             "subtitle": "Kdo je na výplatní listině za období {period} a kolik má dostat.",
@@ -4388,6 +4396,7 @@
             "add_claim": "Přidat pohledávku",
             "employee": "Zaměstnanec",
             "select_employee": "Vyberte zaměstnance",
+            "all_employees": "Všichni zaměstnanci",
             "case_kind": "Právní titul",
             "effective_from": "Účinné od",
             "status_label": "Stav",
@@ -4536,7 +4545,7 @@
                 "amount": "Částku zadejte jako nezáporné číslo nejvýše se dvěma desetinnými místy."
             },
             "load_failed_hint": "Exekuce a insolvence se nenačetly. Prázdný seznam teď neznamená, že žádné nejsou — zkuste to prosím znovu.",
-            "support_failed": "Zaměstnance ani účty příjemců se nepodařilo načíst, takže výběr níže zůstal prázdný. Není to nastavením — zkuste načtení zopakovat.",
+            "support_failed": "Účty příjemců se nepodařilo načíst, takže jejich výběr zůstal prázdný. Není to nastavením — zkuste načtení zopakovat.",
             "transition_blocked_document": "Vyberte doklad, o který se přechod opírá. Bez něj by v případu chyběla stopa, odkud změna vzešla.",
             "transition_blocked_reason": "Napište důvod. U tohoto kroku se ukládá do historie případu, takže ho nelze vynechat."
         },

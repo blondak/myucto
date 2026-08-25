@@ -7,7 +7,6 @@ import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 import {
   payrollApi,
   type PayrollInstitutionAccount,
-  type PayrollPersonOption,
 } from '@/api/payroll'
 import {
   payrollEnforcementApi,
@@ -29,6 +28,7 @@ import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, 
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
@@ -49,9 +49,9 @@ const loading = ref(true)
  */
 const loadFailed = ref(false)
 /*
- * Lidé a účty příjemců jsou doplňky formuláře, ne podmínka výpisu — proto se
- * načítají „měkce". Když ale selžou, zůstane prázdný výběr příjemce a uživatel
- * nemá jak zjistit, že za tím není konfigurace, ale výpadek.
+ * Účty příjemců jsou doplněk formuláře, ne podmínka výpisu — proto se načítají
+ * „měkce". Když ale selžou, zůstane prázdný výběr příjemce a uživatel nemá jak
+ * zjistit, že za tím není konfigurace, ale výpadek.
  */
 const supportFailed = ref(false)
 const saving = ref(false)
@@ -68,7 +68,6 @@ const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
  */
 const employeeFilter = ref<number | null>(payrollQueryId(useRoute().query, 'person'))
 const statusFilter = ref<EnforcementCaseStatus | ''>('')
-const people = ref<PayrollPersonOption[]>([])
 const detail = ref<EnforcementCaseDetail | null>(null)
 const expandedId = ref<number | null>(null)
 const showCreate = ref(false)
@@ -291,14 +290,6 @@ async function load() {
     })
     cases.value = page.cases
     total.value = page.total
-    if (canReadPeople.value) {
-      try {
-        people.value = await payrollApi.peopleOptions()
-      } catch {
-        people.value = []
-        supportFailed.value = true
-      }
-    }
     if (canReadPayrollSettings.value) {
       try {
         recipientAccounts.value = await payrollApi.institutionAccounts()
@@ -727,10 +718,14 @@ onMounted(load)
 
     <form v-if="showCreate" class="grid grid-cols-1 gap-4 rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="createCase">
       <label class="text-xs font-medium text-neutral-600">{{ t('payroll.enforcement.employee') }}
-        <select v-model="newCase.employee_id" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
-          <option :value="null" disabled>{{ t('payroll.enforcement.select_employee') }}</option>
-          <option v-for="person in people" :key="person.id" :value="person.id">{{ person.full_name }}</option>
-        </select>
+        <PayrollPersonSearchSelect
+          v-model="newCase.employee_id"
+          class="mt-1"
+          :label="t('payroll.enforcement.employee')"
+          :placeholder="t('payroll.enforcement.select_employee')"
+          :clearable="false"
+          required
+        />
       </label>
       <label class="text-xs font-medium text-neutral-600">{{ t('payroll.enforcement.case_kind') }}
         <select v-model="newCase.case_kind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
@@ -754,10 +749,13 @@ onMounted(load)
     <div class="flex flex-wrap items-end gap-3">
       <label v-if="canReadPeople" class="text-xs font-medium text-neutral-600">
         {{ t('payroll.enforcement.employee') }}
-        <select v-model="employeeFilter" data-test="enforcement-employee-filter" class="mt-1 block w-full min-w-48 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
-          <option :value="null">{{ t('common.all') }}</option>
-          <option v-for="person in people" :key="person.id" :value="person.id">{{ person.full_name }}</option>
-        </select>
+        <PayrollPersonSearchSelect
+          v-model="employeeFilter"
+          data-test="enforcement-employee-filter"
+          class="mt-1 min-w-64"
+          :label="t('payroll.enforcement.employee')"
+          :placeholder="t('payroll.enforcement.all_employees')"
+        />
       </label>
       <label class="text-xs font-medium text-neutral-600">
         {{ t('payroll.enforcement.status_label') }}

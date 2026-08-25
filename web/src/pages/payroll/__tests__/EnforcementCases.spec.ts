@@ -15,7 +15,8 @@ const m = vi.hoisted(() => ({
   detail: vi.fn(),
   monthEvidence: vi.fn(),
   dependants: vi.fn(),
-  peopleOptions: vi.fn(),
+  peoplePage: vi.fn(),
+  person: vi.fn(),
   institutionAccounts: vi.fn(),
   deleteCase: vi.fn(),
   canRead: vi.fn(),
@@ -51,7 +52,8 @@ vi.mock('@/api/payrollEnforcement', () => ({
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
-    peopleOptions: m.peopleOptions,
+    peoplePage: m.peoplePage,
+    person: m.person,
     institutionAccounts: m.institutionAccounts,
   },
 }))
@@ -86,6 +88,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 })
 
 import EnforcementCases from '@/pages/payroll/EnforcementCases.vue'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 
 function summary(overrides: Partial<EnforcementCaseSummary> = {}): EnforcementCaseSummary {
   return {
@@ -181,11 +184,13 @@ async function expandFirstCase(wrapper: ReturnType<typeof mountPage>) {
 describe('EnforcementCases', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.routeQuery = {}
     m.canRead.mockReturnValue(true)
     m.canWrite.mockReturnValue(true)
     m.casesPage.mockResolvedValue(page([summary()]))
     m.detail.mockImplementation(async () => detailOf(summary()))
-    m.peopleOptions.mockResolvedValue([{ id: 3, full_name: 'Syntetický Povinný' }])
+    m.peoplePage.mockResolvedValue({ items: [], total: 0, limit: 25, offset: 0 })
+    m.person.mockResolvedValue({ id: 3, full_name: 'Syntetický Povinný' })
     m.institutionAccounts.mockResolvedValue([])
     m.deleteCase.mockResolvedValue({ deleted: true, id: 11 })
     m.monthEvidence.mockResolvedValue(monthEvidenceOf())
@@ -243,6 +248,36 @@ describe('EnforcementCases', () => {
 
     expect(m.casesPage).toHaveBeenCalledTimes(1)
     expect(m.casesPage.mock.calls[0][0]).toEqual({ limit: 20, offset: 0 })
+    wrapper.unmount()
+  })
+
+  it('použije hledací výběr pro filtr i nový případ místo úplného seznamu osob', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.findAllComponents(PayrollPersonSearchSelect)).toHaveLength(1)
+    const filterInput = wrapper.get('[data-test="enforcement-employee-filter"] input')
+    expect((filterInput.element as HTMLInputElement).value).toBe('')
+    expect(filterInput.attributes('placeholder')).toBe('payroll.enforcement.all_employees')
+    await wrapper.get('button[aria-expanded="false"]').trigger('click')
+    expect(wrapper.findAllComponents(PayrollPersonSearchSelect)).toHaveLength(2)
+    expect(wrapper.find('select[data-test="enforcement-employee-filter"]').exists()).toBe(false)
+    const requiredPicker = wrapper.findAllComponents(PayrollPersonSearchSelect)[0]
+    expect(requiredPicker.get('input').attributes('required')).toBeDefined()
+    expect(requiredPicker.get('input').attributes('aria-required')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('zachová deep-link osoby ve filtru i mimo první stránku našeptávače', async () => {
+    m.routeQuery = { person: '87' }
+    m.person.mockResolvedValue({ id: 87, full_name: 'Povinný z odkazu' })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.casesPage).toHaveBeenCalledWith({ employee_id: 87, limit: 20, offset: 0 })
+    expect(m.person).toHaveBeenCalledWith(87)
+    expect((wrapper.get('[data-test="enforcement-employee-filter"] input').element as HTMLInputElement).value)
+      .toBe('Povinný z odkazu')
     wrapper.unmount()
   })
 
@@ -335,19 +370,19 @@ describe('EnforcementCases', () => {
     wrapper.unmount()
   })
 
-  // Lidé jsou doplněk formuláře, ne podmínka výpisu — jejich výpadek nesmí
-  // potopit stránkovaný seznam, jen se o něm musí vědět.
-  it('keeps the paged list when only the people lookup fails', async () => {
-    m.peopleOptions.mockRejectedValue(new Error('network'))
+  // Hledání lidí se načítá až při otevření našeptávače; jeho výpadek nesmí
+  // potopit stránkovaný seznam případů.
+  it('keeps the paged list when only the people search fails', async () => {
+    m.peoplePage.mockRejectedValue(new Error('network'))
 
     const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="enforcement-employee-filter"] input').trigger('focus')
     await flushPromises()
 
     expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Syntetický Povinný')
-
-    await wrapper.get('[aria-expanded]').trigger('click')
-    expect(wrapper.find('[data-test="support-failed"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="enforcement-employee-filter"] [role="alert"]').exists()).toBe(true)
     wrapper.unmount()
   })
 
